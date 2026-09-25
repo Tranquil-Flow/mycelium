@@ -80,6 +80,8 @@ class _Session:
     committed_token_ids: list[int | None] = field(default_factory=list)
     terminal_event: StreamEvent | None = None
     terminal_count: int = 0
+    blocked_identity: tuple[str, int, str, str] | None = None
+    terminal_provenance: tuple[str, int, str, str] | None = None
     maximum_buffered: int = 0
     active_subscription: bool = False
     cancellation_started: bool = False
@@ -153,6 +155,17 @@ class _GatewayEmission:
             token_text,
             token_id=token_id,
         )
+
+    def bind_terminal_blocked_identity(self, identity: object) -> None:
+        """Private, bounded snapshot from this run before backend release."""
+        if (not isinstance(identity, tuple) or len(identity) != 4
+                or identity[0] != self._session.request_id
+                or type(identity[1]) is not int or identity[1] < 1
+                or not all(isinstance(item, str) and item for item in identity[2:])):
+            return
+        with self._session.condition:
+            if self._session.terminal_event is None and self._session.blocked_identity is None:
+                self._session.blocked_identity = identity
 
     def freeze_replay_checkpoint(
         self,
@@ -593,6 +606,12 @@ class RequestGatewayService:
         with session.condition:
             return session.terminal_count
 
+    def cleanup_notice_provenance(self, request_id: str) -> tuple[str, int, str, str] | None:
+        """Gateway publication receipt, not part of public StreamEvent v1/v2."""
+        session = self._get_session(request_id)
+        with session.condition:
+            return session.terminal_provenance
+
     def freeze_replay_checkpoint(
         self,
         request_id: str,
@@ -992,6 +1011,9 @@ class RequestGatewayService:
             self._append_event_locked(session, event)
             session.terminal_event = event
             session.terminal_count += 1
+            if kind == "failed" and code == "request_cleanup_unproven":
+                session.terminal_provenance = session.blocked_identity
+            session.blocked_identity = None
             self._metrics.increment(
                 {
                     "completed": "requests_completed_total",

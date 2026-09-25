@@ -847,6 +847,20 @@ class LiveRouterPort:
                 return "TERMINAL_BLOCKED"
             return "DECODING"
 
+    def terminal_blocked_identity(self, request_id: str) -> tuple[str, int, str, str] | None:
+        """Snapshot blocked state and its command together, never a later attempt."""
+        with self._lock:
+            pending = self._pending.get(request_id)
+            if (pending is None or pending.terminal_blocked_reason is None
+                    or pending.terminal_status is not None or pending.recovery_required
+                    or pending.cursor < len(pending.tokens)):
+                return None
+            identity = pending.command_identity
+            if identity is None or identity.request_id != request_id:
+                return None
+            return (identity.request_id, identity.request_attempt,
+                    identity.path_digest, identity.command_id)
+
     def _a6_test_only_source_failure_observed(self, binding: dict[str, Any]) -> bool:
         """Read the source recovery transition, not a successor's current status."""
         request_id = binding.get("request_id")
@@ -1680,6 +1694,7 @@ class LiveRouterPort:
         """Publish physical cleanup at the route proof boundary."""
 
         should_release = False
+        late_finalized = False
         with self._changed:
             if expected_identity is not None:
                 current = pending.command_identity
@@ -1691,11 +1706,50 @@ class LiveRouterPort:
                 ):
                     # An old callback cannot replace the successor receipt.
                     return
-            # Retain the exact receipt with command ownership before any
-            # terminal publication.  The route may release its request-scoped
-            # copy as soon as the gateway observes this callback; a racing
-            # worker must not then fall back to a missing route lookup.
-            pending.cleanup_receipt = dict(receipt)
+            # A route-owner proof can arrive after the worker blocked on a
+            # missing receipt and the gateway already published failure-to-prove.
+            # Only the still-owned, exact current attempt may finish retained
+            # reservations. This is a NEW command terminal CAS (not a v2 zero-
+            # CAS observation); the gateway's earlier notice is never rewritten.
+            coordinator = self._coordinator
+            request = pending.request
+            request_id = None if request is None else request.request_id
+            if (
+                expected_identity is not None
+                and coordinator is not None
+                and request_id is not None
+                and self._pending.get(request_id) is pending
+                and pending.terminal_blocked_reason is not None
+                and pending.terminal_status is None
+                and not pending.recovery_required
+                and not pending.cancellation_linearized
+            ):
+                if (
+                    pending.route_identity is None
+                    or coordinator.route_identity(request_id) != pending.route_identity
+                    or coordinator.phase(request_id) != "cleanup"
+                    or coordinator.terminal_state(request_id) is not None
+                ):
+                    raise RuntimeError("command_cleanup_authority_changed")
+                # Validate and commit against the actual route receipt before
+                # touching the coordinator. A foreign or incomplete receipt
+                # cannot release a reservation or poison the retained proof.
+                self._record_command_terminal(pending, "FAILED", cleanup_receipt=receipt)
+                coordinator.complete(request_id, state="failed")
+                pending.cleanup_receipt = dict(receipt)
+                pending.terminal_blocked_reason = None
+                pending.terminal_status = "FAILED"
+                late_finalized = True
+                should_release = pending.release_requested
+                if should_release:
+                    self._pending.pop(request_id, None)
+                    self._sinks.pop(request_id, None)
+                self._changed.notify_all()
+            else:
+                # Retain the exact receipt with command ownership before any
+                # terminal publication. A racing worker must not fall back to
+                # a route lookup after its request-scoped copy is released.
+                pending.cleanup_receipt = dict(receipt)
             if pending.cancellation_linearized:
                 self._record_command_terminal(
                     pending,
@@ -1738,7 +1792,7 @@ class LiveRouterPort:
                         self._sinks.pop(request_id, None)
                         should_release = True
                     self._changed.notify_all()
-            else:
+            elif not late_finalized:
                 self._record_command_cleanup(pending, receipt=receipt)
         if should_release:
             self._release_route_request(pending)

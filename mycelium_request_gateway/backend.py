@@ -308,6 +308,7 @@ class RouterSessionBackend:
                 if status == "FAILED":
                     return "failed"
                 if status == "TERMINAL_BLOCKED":
+                    self._capture_terminal_blocked(request_id, emit_token)
                     return "terminal_blocked"
                 if status == "RECOVERY_REQUIRED":
                     if recovery_attempts >= 2:
@@ -336,6 +337,7 @@ class RouterSessionBackend:
                         if recovery_status == "CANCELLED":
                             return "cancelled"
                         if recovery_status == "TERMINAL_BLOCKED":
+                            self._capture_terminal_blocked(request_id, emit_token)
                             return "terminal_blocked"
                         return "failed"
                     recovery_attempts += 1
@@ -353,6 +355,19 @@ class RouterSessionBackend:
             if admitted:
                 self._cancel_once(request_id)
             raise
+
+    def _capture_terminal_blocked(self, request_id: str, emit_token: TokenEmitter) -> None:
+        """Snapshot the outcome before release; no later attempt lookup."""
+        try:
+            source = getattr(self._router, "terminal_blocked_identity", None)
+            bind = getattr(emit_token, "bind_terminal_blocked_identity", None)
+            if callable(source) and callable(bind):
+                identity = source(request_id)
+                if identity is not None:
+                    bind(identity)
+        except Exception:
+            # A diagnostic must not obstruct the user's failure notice.
+            pass
 
     def _require_current_deployment(
         self,
