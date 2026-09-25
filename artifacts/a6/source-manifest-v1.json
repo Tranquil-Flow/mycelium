@@ -48,7 +48,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:21fc9a54b427ba2eafd2417ec810739f25ff5f0d5a91fa15a8f8f2588acbc3ef",
+      "sha256": "sha256:b6e164362e5fd051646ed2f58ffb196e3213e589d7ebfd70ae9b1053103c0130",
       "size_bytes": 70323
     },
     {
@@ -218,8 +218,8 @@
     },
     {
       "path": "mycelium_live/supervisor.py",
-      "sha256": "sha256:41b15464a945055ff971872caaaf1a4e15529e16edd0164602fe96e88f29c6d8",
-      "size_bytes": 146476
+      "sha256": "sha256:45dec72b52880057d08f759eacb8f526d62998023d06acc711ebd948f1a7d816",
+      "size_bytes": 147488
     },
     {
       "path": "mycelium_m16_runtime.py",
@@ -953,8 +953,8 @@
     },
     {
       "path": "tests/live/test_supervisor.py",
-      "sha256": "sha256:dc5067d3f784c3f09499b30de9fe7325e2568298c4b20ff43233554644ca43df",
-      "size_bytes": 60941
+      "sha256": "sha256:9fcb6a8c73a871650c811edd51981f2e7b2fcbf6c8545c16c4f56539ba401235",
+      "size_bytes": 64262
     },
     {
       "path": "tests/node_agent/test_launch_shape_private_ancestry.py",
@@ -1363,5 +1363,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:bfb9db779a891605e22cb87ee89fedbbacb13a09c162520086d15b97ac7cdb75"
+  "source_digest": "sha256:7e0865100a0875a7334a8064b3c31a9a73d3567e367a499ff6fee78f136882d5"
 }

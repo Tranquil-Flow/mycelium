@@ -292,6 +292,94 @@ def test_build_live_stack_wires_private_a6_checkpoint_store(
     assert checkpoint_root == state_root / "private" / "a6-replay-checkpoints"
     assert checkpoint_root.is_dir()
     assert checkpoint_root.stat().st_mode & 0o077 == 0
+    assert state_root.stat().st_mode & 0o077 == 0
+    assert (state_root / "private").stat().st_mode & 0o077 == 0
+
+
+def test_fresh_product_root_is_private_at_creation(
+    tmp_path, live_graph, deployment_dir, monkeypatch
+) -> None:
+    route = FakeLiveRoute(scripted_tokens=(4599,))
+    route.open()
+    root = tmp_path / "product-state"
+    managed = {root, root / "private", root / "private" / "a6-replay-checkpoints"}
+    observed: dict[Path, int] = {}
+    real_mkdir = os.mkdir
+
+    def checked_mkdir(path, mode=0o777, *args, **kwargs):
+        result = real_mkdir(path, mode, *args, **kwargs)
+        if Path(path) in managed:
+            observed[Path(path)] = Path(path).lstat().st_mode & 0o777
+        return result
+
+    monkeypatch.setattr(os, "mkdir", checked_mkdir)
+    old_umask = os.umask(0o022)
+    try:
+        build_live_stack(
+            route=route, deployment_dir=deployment_dir, execution_graph=live_graph,
+            bearer_token="test-token", product_state_root=root,
+        )
+    finally:
+        os.umask(old_umask)
+    assert observed == {path: 0o700 for path in managed}
+
+
+def test_existing_private_product_root_is_reused(
+    tmp_path, live_graph, deployment_dir
+) -> None:
+    route = FakeLiveRoute(scripted_tokens=(4599,))
+    route.open()
+    root = tmp_path / "product-state"
+    root.mkdir(mode=0o700)
+    private = root / "private"
+    private.mkdir(mode=0o700)
+    checkpoint = private / "a6-replay-checkpoints"
+    checkpoint.mkdir(mode=0o700)
+    sentinel = checkpoint / "untouched"
+    sentinel.write_text("keep")
+    stack = build_live_stack(
+        route=route, deployment_dir=deployment_dir, execution_graph=live_graph,
+        bearer_token="test-token", product_state_root=root,
+    )
+    assert stack.app._request_gateway_app._service._replay_checkpoint_root == checkpoint
+    assert sentinel.read_text() == "keep"
+
+
+@pytest.mark.parametrize("component", ("root", "private", "checkpoint"))
+@pytest.mark.parametrize("bad", ("insecure", "symlink"))
+def test_existing_insecure_or_linked_product_path_is_refused_without_repair(
+    tmp_path, live_graph, deployment_dir, component, bad
+) -> None:
+    from mycelium_product_spine import ProductEvidenceStateError
+
+    route = FakeLiveRoute(scripted_tokens=(4599,))
+    route.open()
+    root = tmp_path / "product-state"
+    private = root / "private"
+    checkpoint = private / "a6-replay-checkpoints"
+    target = {"root": root, "private": private, "checkpoint": checkpoint}[component]
+    if component != "root":
+        root.mkdir(mode=0o700)
+    if component == "checkpoint":
+        private.mkdir(mode=0o700)
+    if bad == "symlink":
+        alternate = tmp_path / "alternate"
+        alternate.mkdir(mode=0o700)
+        target.symlink_to(alternate, target_is_directory=True)
+    else:
+        target.mkdir(mode=0o700)
+        target.chmod(0o755)
+    with pytest.raises(ProductEvidenceStateError, match="product_evidence_state_root_invalid"):
+        build_live_stack(
+            route=route, deployment_dir=deployment_dir, execution_graph=live_graph,
+            bearer_token="test-token", product_state_root=root,
+        )
+    if bad == "insecure":
+        assert target.stat().st_mode & 0o777 == 0o755
+    else:
+        assert target.is_symlink()
+    if component != "checkpoint":
+        assert not checkpoint.exists()
 
 
 def test_artifact_acquisition_endpoint_projects_durable_provisioner_ledger(

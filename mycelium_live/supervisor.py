@@ -25,7 +25,9 @@ from mycelium_a6_m16 import M16RecoveryAuthority
 from mycelium_a6_recovery import ReplayCheckpoint
 from mycelium_evidence import EvidenceProjectionRegistry, sealed_evidence_projection
 from mycelium_governance import governance_readiness
-from mycelium_product_spine import ProductEvidenceApplication, ProductProjector
+from mycelium_product_spine import (
+    ProductEvidenceApplication, ProductEvidenceStateError, ProductProjector,
+)
 from mycelium_layer_planner.public_projection import validate_m13_placement_projection
 from mycelium_layer_planner.workload_intelligence import validate_m15_plan_comparison
 from mycelium_topology_evidence import validate_m14_topology_projection
@@ -1075,6 +1077,7 @@ def build_live_stack(
             state_root=product_state_root,
         )
 
+    checkpoint_root = _prepare_product_checkpoint_root(product_state_root)
     app = build_loopback_product_stack(
         qualification_source=health,
         router=router,
@@ -1096,11 +1099,7 @@ def build_live_stack(
         public_origin=public_origin,
         trusted_https_proxy=trusted_https_proxy,
         trusted_proxy_capability=trusted_proxy_capability,
-        replay_checkpoint_root=(
-            None
-            if product_state_root is None
-            else Path(product_state_root) / "private" / "a6-replay-checkpoints"
-        ),
+        replay_checkpoint_root=checkpoint_root,
     )
     return LiveStack(app=app, health=health, route=route, router=router)
 
@@ -1117,6 +1116,7 @@ def build_registry_stack(
 ) -> LiveStack:
     """Compose the product stack around multiple already-qualified routes."""
 
+    checkpoint_root = _prepare_product_checkpoint_root(product_state_root)
     app = build_loopback_product_stack(
         qualification_source=registry,
         router=registry,
@@ -1132,13 +1132,38 @@ def build_registry_stack(
         public_origin=public_origin,
         trusted_https_proxy=trusted_https_proxy,
         trusted_proxy_capability=trusted_proxy_capability,
-        replay_checkpoint_root=(
-            None
-            if product_state_root is None
-            else Path(product_state_root) / "private" / "a6-replay-checkpoints"
-        ),
+        replay_checkpoint_root=checkpoint_root,
     )
     return LiveStack(app=app, health=registry, route=registry)
+
+
+def _prepare_product_checkpoint_root(state_root: Path | None) -> Path | None:
+    """Prepare fresh managed directories before the checkpoint gateway.
+
+    Existing operator directories are validated, never repaired or chmodded.
+    """
+    if state_root is None:
+        return None
+    root = Path(state_root)
+    checkpoint = root / "private" / "a6-replay-checkpoints"
+    for path in (root, root / "private", checkpoint):
+        try:
+            path.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise ProductEvidenceStateError("product_evidence_state_root_invalid") from exc
+        try:
+            metadata = path.lstat()
+        except OSError as exc:
+            raise ProductEvidenceStateError("product_evidence_state_root_invalid") from exc
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+        ):
+            raise ProductEvidenceStateError("product_evidence_state_root_invalid")
+    return checkpoint
 
 
 def _product_application(
