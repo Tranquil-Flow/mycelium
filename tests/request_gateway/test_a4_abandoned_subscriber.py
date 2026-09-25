@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
+import mycelium_request_gateway.service as gateway_service
 from mycelium_request_gateway.contracts import InferenceSubmission, qualification_binding
 from mycelium_request_gateway.service import RequestGatewayService
 from test_core import MutableQualificationSource, _synthetic_qualification
@@ -16,6 +18,27 @@ def _submission(qualification, *, tokens: int = 2) -> InferenceSubmission:
         max_new_tokens=tokens,
         qualification=qualification_binding(qualification),
     )
+
+
+def _hold_session_eviction_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Bind session creation and capacity eviction to one held timeline.
+
+    The injected service clock does not cover either site: ``_Session``
+    captured real monotonic as its dataclass default factory, whereas
+    ``_make_session_room_locked`` calls the service module's ``time``.
+    Override those construction/lookup seams, not process-global time.
+    """
+    now = [time.monotonic()]
+    original_session = gateway_service._Session
+
+    def create_session(**kwargs):
+        return original_session(**kwargs, created_at=now[0])
+
+    monkeypatch.setattr(gateway_service, "_Session", create_session)
+    monkeypatch.setattr(
+        gateway_service, "time", SimpleNamespace(monotonic=lambda: now[0])
+    )
+    return now
 
 
 class _EmitterBackend:
@@ -196,35 +219,16 @@ def test_dropped_events_never_advance_committed_watermark() -> None:
         service.close()
 
 
-def test_fresh_request_inside_subscribe_window_is_not_cancelled() -> None:
-    """A fresh request inside the submit-then-subscribe window must not be
-    cancelled by its own kind under capacity pressure (spec A4 §5).
+def test_fresh_request_inside_subscribe_window_is_not_cancelled(monkeypatch) -> None:
+    """A never-subscribed, nonterminal session is protected only inside grace.
 
-    Setup:
-      - resident session A: admitted, its SSE subscriber never attached,
-        its backend never reached terminal — exactly the shape of a
-        browser mid-handshake. State: ``active_subscription=False``,
-        ``terminal_event=None``.
-      - fresh session B: submitted moments later, while A is still in the
-        subscribe window. By the time B's submit reaches
-        ``_make_session_room_locked`` the table is at capacity and A
-        looks eligible for eviction.
-
-    Expected (with minimum-age grace enabled):
-      - A is OLDER than the grace; B is YOUNGER. The grace protects B
-        even though A matches the stuck condition.
-      - B's submit raises ``gateway_capacity_exhausted`` — the gate
-        rejects a second request rather than cancelling B (or A) while
-        A's subscribe is still in flight.
-      - A remains in ``_sessions`` (the eviction path was bounded, not
-        lossy).
-      - Once A's grace elapses with no subscribe, a subsequent submit is
-        admitted by evicting A normally — see the
-        ``eviction_age_grace_constant`` reflection below for the bound.
+    A second submit must be refused without evicting A; advancing the same
+    clock beyond grace must then admit a replacement by evicting A (A4 §5).
     """
     qualification = _synthetic_qualification()
     backend = _EmitterBackend()
-    request_id_source = iter(["stuck-a", "fresh-b"])
+    now = _hold_session_eviction_clock(monkeypatch)
+    request_id_source = iter(["stuck-a", "after-grace"])
     service = RequestGatewayService(
         qualification_source=MutableQualificationSource(qualification),
         backend=backend,
@@ -233,17 +237,19 @@ def test_fresh_request_inside_subscribe_window_is_not_cancelled() -> None:
         max_sessions=1,
     )
     try:
-        # A: admitted but never subscribed.
         stuck_id = service.submit(
             _submission(qualification, tokens=backend._token_count),
             owner_token="a" * 32,
         )
-        # Deliberately NO service.subscribe(stuck_id) — the browser mid-
-        # handshake is byte-identical to this state.
-        # Drive the producer a little so A is clearly stuck, not idle.
-        time.sleep(0.02)
-        # B: a second submit inside the grace window. This must NOT be
-        # cancelled. With the grace, B is rejected instead.
+        # Deliberately NO subscribe: prove the actual state before admission.
+        session = service._sessions[stuck_id]
+        with session.condition:
+            assert session.created_at == now[0]
+            assert not session.active_subscription
+            assert not session.ever_subscribed
+            assert session.terminal_event is None
+        grace = RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS
+        assert 0 <= now[0] - session.created_at < grace
         with pytest.raises(Exception) as exc_info:
             service.submit(
                 _submission(qualification, tokens=2), owner_token="b" * 32
@@ -259,31 +265,29 @@ def test_fresh_request_inside_subscribe_window_is_not_cancelled() -> None:
             "window — the eviction path must respect the minimum-age "
             "guard"
         )
-        # The grace is a bounded product constant, not a hidden timer:
-        # verify the documented bound is exposed and positive.
-        assert (
-            RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS > 0
-        )
-        assert (
-            RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS <= 0.5
-        ), (
+        assert RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS > 0
+        assert RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS <= 0.5, (
             "grace must be bounded so a truly stuck session cannot pin "
             "capacity forever"
         )
+        # Negative control: the real eviction path must fire after crossing
+        # this guard. A static held clock cannot conceal a broken backstop.
+        now[0] = session.created_at + grace + 0.001
+        assert now[0] - session.created_at > grace
+        replacement_id = service.submit(
+            _submission(qualification, tokens=2), owner_token="b" * 32
+        )
+        assert replacement_id == "after-grace"
+        assert stuck_id not in service._sessions
     finally:
         service.close()
 
 
-def test_stuck_session_evicted_after_grace_elapses() -> None:
-    """Symmetric companion: once the grace elapses with no subscribe, a
-    genuinely stuck session is evicted normally on the next submit.
-
-    This guard exists so the grace cannot be used to wedge capacity
-    permanently — the preceding test ensures the race is closed; this
-    one ensures the wedge is not widened by the close.
-    """
+def test_stuck_session_evicted_after_grace_elapses(monkeypatch) -> None:
+    """Never-subscribed nonterminal sessions are reclaimable after grace."""
     qualification = _synthetic_qualification()
     backend = _EmitterBackend()
+    now = _hold_session_eviction_clock(monkeypatch)
     request_id_source = iter(["aged-stuck", "replacement"])
     service = RequestGatewayService(
         qualification_source=MutableQualificationSource(qualification),
@@ -297,9 +301,16 @@ def test_stuck_session_evicted_after_grace_elapses() -> None:
             _submission(qualification, tokens=backend._token_count),
             owner_token="a" * 32,
         )
-        # Sleep just past the grace, then submit the replacement.
-        time.sleep(
-            RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS + 0.1
+        session = service._sessions[stuck_id]
+        with session.condition:
+            assert session.created_at == now[0]
+            assert not session.active_subscription
+            assert not session.ever_subscribed
+            assert session.terminal_event is None
+        now[0] = (
+            session.created_at
+            + RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS
+            + 0.001
         )
         replacement_id = service.submit(
             _submission(qualification, tokens=2), owner_token="b" * 32
@@ -313,20 +324,15 @@ def test_stuck_session_evicted_after_grace_elapses() -> None:
         service.close()
 
 
-def test_ever_subscribed_then_vanished_is_evicted_immediately() -> None:
-    """An attached-then-vanished consumer is observably abandoned (spec A4 §5).
+def test_ever_subscribed_then_vanished_is_evicted_immediately(monkeypatch) -> None:
+    """An attached-then-vanished consumer is observably abandoned (A4 §5).
 
-    When a session's subscriber has attached and then detached, the slot is
-    demonstrably orphaned; no further acks can ever arrive. The eviction
-    path must reclaim that slot without waiting for any grace period,
-    because ``ever_subscribed`` is a stronger signal than a timer.
-
-    The companion case — a session that has never subscribed — is protected
-    by the backstop grace in
-    ``test_fresh_request_inside_subscribe_window_is_not_cancelled``.
+    The held clock is still inside grace when the replacement arrives: the
+    ever-subscribed path must reclaim it without relying on elapsed time.
     """
     qualification = _synthetic_qualification()
     backend = _EmitterBackend()
+    now = _hold_session_eviction_clock(monkeypatch)
     request_id_source = iter(["stuck-then-vanished", "fresh-replacement"])
     service = RequestGatewayService(
         qualification_source=MutableQualificationSource(qualification),
@@ -340,10 +346,6 @@ def test_ever_subscribed_then_vanished_is_evicted_immediately() -> None:
             _submission(qualification, tokens=backend._token_count),
             owner_token="a" * 32,
         )
-        # Attach a subscriber, ack one event, then close. The session is
-        # now observably ``ever_subscribed=True`` and ``active_subscription
-        # =False``: a definitive abandoned slot, not a never-subscribed
-        # pending request.
         sub = service.subscribe(
             stuck_id, last_event_id=None, owner_token="a" * 32
         )
@@ -351,22 +353,19 @@ def test_ever_subscribed_then_vanished_is_evicted_immediately() -> None:
         first = sub.next_event(timeout=1.0)
         assert first is not None
         sub.ack(first.sequence)
-        sub.close()  # detached after attaching
+        sub.close()
 
-        # Even with a backstop grace, the ever-subscribed case evicts
-        # immediately. We do not sleep any grace at all here.
-        t0 = time.monotonic()
+        session = service._sessions[stuck_id]
+        with session.condition:
+            assert session.created_at == now[0]
+            assert session.ever_subscribed
+            assert not session.active_subscription
+            assert session.terminal_event is None
+        assert now[0] - session.created_at < RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS
         replacement_id = service.submit(
             _submission(qualification, tokens=2), owner_token="b" * 32
         )
-        elapsed = time.monotonic() - t0
         assert replacement_id == "fresh-replacement"
-        # No grace waited: the new submit returns well under the
-        # backstop's worth of wall clock.
-        assert elapsed < RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS, (
-            f"eviction waited {elapsed:.3f}s but ever_subscribed should "
-            "evict immediately without grace"
-        )
         assert stuck_id not in service._sessions
     finally:
         service.close()

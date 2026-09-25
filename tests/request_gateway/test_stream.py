@@ -143,6 +143,29 @@ def _drain(subscription, *, timeout: float = 2.0):
     return events
 
 
+class _ManualClock:
+    def __init__(self) -> None:
+        self.value = 0.0
+
+    def __call__(self) -> float:
+        return self.value
+
+    def advance(self, seconds: float) -> None:
+        self.value += seconds
+
+
+def _wait_for_backend_emits(
+    backend: _EmitterBackend,
+    minimum: int,
+    *,
+    timeout: float = 1.0,
+) -> None:
+    deadline = time.monotonic() + timeout
+    while backend.emit_count < minimum and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert backend.emit_count >= minimum
+
+
 def test_token_events_are_deterministic_and_terminal_is_exactly_once():
     qualification = _synthetic_qualification()
     source = MutableQualificationSource(qualification)
@@ -357,19 +380,22 @@ def test_no_consumer_overflow_drops_oldest_and_fails_closed_on_late_replay():
 def test_live_consumer_backpressure_pauses_and_resumes_without_dropping():
     qualification = _synthetic_qualification()
     backend = _EmitterBackend(token_count=5)
+    clock = _ManualClock()
     service = RequestGatewayService(
         qualification_source=MutableQualificationSource(qualification),
         backend=backend,
         request_id_source=lambda: "pressure-live",
         max_buffered_events=3,
+        clock=clock,
     )
     try:
         request_id = service.submit(_submission(qualification, max_new_tokens=5))
         subscription = service.subscribe(request_id, last_event_id=None)
         backend.start.set()
-        deadline = time.monotonic() + 1
-        while backend.emit_count < 1 and time.monotonic() < deadline:
-            time.sleep(0.005)
+        _wait_for_backend_emits(backend, 1)
+        # Keep the gateway clock inside the silent-subscriber budget so this
+        # assertion targets actual live-consumer backpressure, not scheduler
+        # time that elapsed between subscribe() and the first backend token.
         time.sleep(0.2)  # let the producer reach the bounded ceiling
         assert backend.emit_count < 5, "producer must pause for a live consumer"
         # Acknowledgements resume the producer; a live consumer never loses
@@ -378,6 +404,39 @@ def test_live_consumer_backpressure_pauses_and_resumes_without_dropping():
         assert [event.kind for event in events].count("token") == 5
         assert events[-1].kind == "completed"
         assert service.maximum_observed_buffered_events(request_id) <= 3
+    finally:
+        service.close()
+
+
+def test_silent_attached_consumer_crossing_stall_budget_reclaims_slot():
+    qualification = _synthetic_qualification()
+    backend = _EmitterBackend(token_count=5)
+    clock = _ManualClock()
+    service = RequestGatewayService(
+        qualification_source=MutableQualificationSource(qualification),
+        backend=backend,
+        request_id_source=lambda: "pressure-silent-stall",
+        max_buffered_events=3,
+        clock=clock,
+    )
+    try:
+        request_id = service.submit(_submission(qualification, max_new_tokens=5))
+        service.subscribe(request_id, last_event_id=None)
+        backend.start.set()
+        _wait_for_backend_emits(backend, 1)
+        clock.advance(
+            RequestGatewayService.SESSION_SILENT_SUBSCRIBER_STALL_SECONDS + 0.001
+        )
+        with service._sessions[request_id].condition:
+            service._sessions[request_id].condition.notify_all()
+        _wait_for_backend_emits(backend, 5)
+
+        assert backend.emit_count == 5
+        assert service.terminal_event_count(request_id) == 1
+        assert service.maximum_observed_buffered_events(request_id) <= 3
+        with pytest.raises(AdmissionError) as expired:
+            service.subscribe(request_id, last_event_id=None)
+        assert expired.value.code == "resume_cursor_expired"
     finally:
         service.close()
 
