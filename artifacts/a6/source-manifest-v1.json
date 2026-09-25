@@ -127,9 +127,19 @@
       "size_bytes": 36411
     },
     {
+      "path": "mycelium_a6_fault_control.py",
+      "sha256": "sha256:bac413493f4b56bd2455e9c5a91831accc5bc751e020c689810a55e652e50177",
+      "size_bytes": 18555
+    },
+    {
       "path": "mycelium_a6_gateway.py",
       "sha256": "sha256:da3ee50aeb3bd8419a9f28f7108203b1017f8f6383b445d3a0a8231731d6a3d5",
       "size_bytes": 8779
+    },
+    {
+      "path": "mycelium_a6_http_fault_control.py",
+      "sha256": "sha256:9d0e7ef454c4907ac4cad13461b156cf8ecfa802e3e77b98bb3afcdb6f087a9e",
+      "size_bytes": 8078
     },
     {
       "path": "mycelium_a6_m16.py",
@@ -817,6 +827,16 @@
       "size_bytes": 1112
     },
     {
+      "path": "tests/live/test_a6_fault_control.py",
+      "sha256": "sha256:8b58bd0ffdcafdaf3901679396817eba56665036e759322dbe08e581194d2c15",
+      "size_bytes": 8619
+    },
+    {
+      "path": "tests/live/test_a6_http_fault_control.py",
+      "sha256": "sha256:438bfa2a0f09fc3783ea3c3c89a69122581848d7b2fa61fe81f172ccd15a0f83",
+      "size_bytes": 8430
+    },
+    {
       "path": "tests/live/test_a6_integration_boundaries.py",
       "sha256": "sha256:e0d7ea16d2301f152d28cc5354999b0fa0b147dd28c1b4d05790f0b530f535e2",
       "size_bytes": 3557
@@ -1193,5 +1213,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:7ee33355ce8614d314038c21613863ee25de22524ce5195b8e899770ef41ccf3"
+  "source_digest": "sha256:5372548520f70b0c046f7ac9e8745e8ff65b4b1ae67920b8fa79b01745c884bf"
 }
