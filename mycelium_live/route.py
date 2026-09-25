@@ -13,6 +13,7 @@ import sqlite3
 import stat
 import threading
 import time
+from types import MappingProxyType
 from typing import Any, Callable, Mapping, Protocol, Sequence
 from urllib.parse import quote
 
@@ -1111,6 +1112,53 @@ def _refresh_membership_snapshot(
     }
 
 
+_TEST_FAULT_IDENTITY_FIELDS = (
+    "deployment_id", "deployment_epoch", "qualification_digest", "request_id",
+    "request_attempt", "path_id", "path_attempt", "path_digest",
+    "topology_generation", "command_id", "publisher_generation",
+    "cancellation_generation",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _TestOnlyTransportFault:
+    """Private, exact one-command fault input; never derived from HTTP or a global flag.
+
+    The caller must explicitly inject this into a route constructor. The route
+    only consumes it on its assigned, bound inference source command. A local
+    fixture is not evidence of physical failure or gateway admission.
+    """
+
+    identity: Mapping[str, Any]
+    source_node_id: str
+    command: str
+    deadline_monotonic_ms: int
+    transport_command_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.identity, Mapping)
+            or set(self.identity) != set(_TEST_FAULT_IDENTITY_FIELDS)
+            or any(type(self.identity[field]) is not int or self.identity[field] < 0
+                   for field in ("deployment_epoch", "request_attempt", "path_attempt",
+                                 "topology_generation", "publisher_generation",
+                                 "cancellation_generation"))
+            or any(not isinstance(self.identity[field], str) or not self.identity[field]
+                   for field in ("deployment_id", "qualification_digest", "request_id",
+                                 "path_id", "path_digest", "command_id"))
+            or self.identity["cancellation_generation"] != 0
+            or not isinstance(self.source_node_id, str) or not self.source_node_id
+            or self.command not in ("infer_start", "infer_decode")
+            or type(self.deadline_monotonic_ms) is not int
+            or self.deadline_monotonic_ms < 1
+            or self.deadline_monotonic_ms > int(time.monotonic() * 1_000) + 60_000
+            or (self.transport_command_id is not None and
+                (not isinstance(self.transport_command_id, str) or not self.transport_command_id))
+        ):
+            raise ValueError("invalid_test_transport_fault")
+        object.__setattr__(self, "identity", MappingProxyType(dict(self.identity)))
+
+
 class PhysicalLiveRoute:
     """Persistent multi-host route composed from the physical node protocol."""
 
@@ -1126,9 +1174,14 @@ class PhysicalLiveRoute:
         seed_authority: LiveSeedAuthority | None = None,
         membership_snapshot: Mapping[str, Any] | None = None,
         force_relay: bool = False,
+        _test_only_transport_fault: _TestOnlyTransportFault | None = None,
     ) -> None:
         if not isinstance(force_relay, bool):
             raise ValueError("force_relay must be a boolean")
+        if _test_only_transport_fault is not None and not isinstance(
+            _test_only_transport_fault, _TestOnlyTransportFault
+        ):
+            raise ValueError("invalid_test_transport_fault")
         self._controller = controller
         self._peers = {peer.node_id: peer for peer in controller.peers}
         self._endpoints = {
@@ -1180,6 +1233,8 @@ class PhysicalLiveRoute:
         self._lock = threading.RLock()
         self._request_locks: dict[str, threading.RLock] = {}
         self._active_route_requests: dict[str, dict[str, Any]] = {}
+        self._test_only_transport_fault = _test_only_transport_fault
+        self._test_only_transport_fault_consumed = False
         self._pending_publisher_generations: dict[
             str, tuple[int, int, dict[str, Any]]
         ] = {}
@@ -1456,6 +1511,62 @@ class PhysicalLiveRoute:
             inflight[node_id] = command_id
         try:
             try:
+                with self._lock:
+                    active = self._active_route_requests.get(request_id)
+                    fault = getattr(self, "_test_only_transport_fault", None)
+                    qualification_matches = False
+                    if fault is not None and active is not None:
+                        qualification = self._deployment_qualification
+                        if qualification is not None and getattr(qualification, "route_ready", False) is True:
+                            from mycelium_request_gateway.contracts import qualification_digest
+
+                            try:
+                                qualification_matches = (
+                                    qualification_digest(qualification)
+                                    == active.get("qualification_digest")
+                                )
+                            except (TypeError, ValueError, KeyError, AttributeError):
+                                # A malformed or revoked authority cannot make
+                                # a test fault eligible or mask the real send.
+                                pass
+                    if (
+                        fault is not None
+                        and not self._test_only_transport_fault_consumed
+                        and qualification_matches
+                        and active is not None
+                        and not self._closed
+                        and active.get("terminal") is False
+                        and active.get("control_bound") is True
+                        and active.get("cancellation_requested") is False
+                        and active.get("cancellation_generation") == 0
+                        and request_id not in self._request_cleanup_receipts
+                        and active.get("entry_node_id") == node_id == fault.source_node_id
+                        and node_id in active.get("participating_node_ids", ())
+                        and command == fault.command
+                        and (fault.transport_command_id is None or
+                             command_id == fault.transport_command_id)
+                        and active.get("inflight_commands", {}).get(node_id) == command_id
+                        and int(time.monotonic() * 1_000) < min(
+                            fault.deadline_monotonic_ms,
+                            active.get("absolute_deadline_ms", 0),
+                        )
+                        and fault.identity["request_id"] == request_id
+                        and all(active.get(field) == fault.identity[field]
+                                for field in _TEST_FAULT_IDENTITY_FIELDS
+                                if field != "request_id")
+                        and (payload.get("request_id") == request_id or
+                             (command == "infer_start" and
+                              isinstance(payload.get("request"), Mapping) and
+                              payload["request"].get("request_id") == request_id))
+                        and isinstance(payload.get("control"), Mapping)
+                        and all(payload["control"].get(field) == active[field]
+                                for field in _TEST_FAULT_IDENTITY_FIELDS
+                                if field != "request_id")
+                    ):
+                        # Linearize once before the real session.send. Do not
+                        # intercept its return/error, or write A4 state here.
+                        self._test_only_transport_fault_consumed = True
+                        raise RuntimeError("transport_not_running")
                 return self._sessions[node_id].send(
                     command_id=command_id,
                     command=command,
