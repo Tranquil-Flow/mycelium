@@ -177,6 +177,7 @@ export function AppShell({
               key={item.id}
               href={productRouteHref(item.id)}
               className="nav-button"
+              aria-label={item.label}
               aria-current={activeView === item.id ? 'page' : undefined}
               onClick={() => onViewChange(item.id)}
             >

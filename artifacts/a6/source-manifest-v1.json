@@ -48,7 +48,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:c09e0b7729cb36e2840c5c0ea692352b3f3d1da143ffe363dd21b11e84700c2b",
+      "sha256": "sha256:21fc9a54b427ba2eafd2417ec810739f25ff5f0d5a91fa15a8f8f2588acbc3ef",
       "size_bytes": 70323
     },
     {
@@ -843,8 +843,8 @@
     },
     {
       "path": "tests/governance/test_governance_gate_negative_copies.py",
-      "sha256": "sha256:aa07b06cf1d40937b1bbf7c22f2aee573c0875ff86f9e6156e8f9d13c6b24676",
-      "size_bytes": 8258
+      "sha256": "sha256:a0b60dfa589bbb1cef610e9452f335e5bebdf1f0bf35e8a9fd9fd0aae852c7a3",
+      "size_bytes": 9736
     },
     {
       "path": "tests/l3/conftest.py",
@@ -1092,6 +1092,11 @@
       "size_bytes": 2227
     },
     {
+      "path": "ui/web/scripts/a0-governance-browser-closeout.mjs",
+      "sha256": "sha256:4e263524a4221ea48abd4456378071810aa02ff1b9d70c5c577e93bca7758889",
+      "size_bytes": 19462
+    },
+    {
       "path": "ui/web/scripts/a1-evidence-browser-closeout.mjs",
       "sha256": "sha256:01f9c85ff4dbe4fb7ec1e3063c64397264fd74fe9d641930659893da3bfc81e9",
       "size_bytes": 13953
@@ -1140,6 +1145,16 @@
       "path": "ui/web/src/app/contracts.ts",
       "sha256": "sha256:e285820bf9bd1f2bb3d16e011e70336a016db83fc371fd36af10f82eb9f5b093",
       "size_bytes": 36454
+    },
+    {
+      "path": "ui/web/src/components/AppShell.test.tsx",
+      "sha256": "sha256:ea49249852255b7664398e95dd82630a53ebf8ca82f6f14119e8fbfaa7286d5a",
+      "size_bytes": 1987
+    },
+    {
+      "path": "ui/web/src/components/AppShell.tsx",
+      "sha256": "sha256:ae5dd5fde0bd0ce6c2cd9fe69c937974f456571731ca73ad1b6acba52ab745d5",
+      "size_bytes": 8646
     },
     {
       "path": "ui/web/src/features/consumer/ConsumerDemoPage.demo.test.tsx",
@@ -1232,6 +1247,16 @@
       "size_bytes": 8911
     },
     {
+      "path": "ui/web/src/features/governance/GovernanceReadinessSource.test.tsx",
+      "sha256": "sha256:b166ad04e8c09377a446708899d2ae14d3c4ceeddc58a09457e65009395f5c7f",
+      "size_bytes": 2357
+    },
+    {
+      "path": "ui/web/src/features/governance/GovernanceReadinessSource.tsx",
+      "sha256": "sha256:9782c6bfcd85ae4c88fd73a51a834ea70e0a2834f78bccb35fb5a0e4588396f8",
+      "size_bytes": 2688
+    },
+    {
       "path": "ui/web/src/features/inference/requestClient.compat.test.ts",
       "sha256": "sha256:c9baf4b0031b17ac18322816c6a8e77d3860d4bc9f9e416e10005e7b995856fb",
       "size_bytes": 4008
@@ -1250,6 +1275,16 @@
       "path": "ui/web/src/features/inference/useInferenceSession.ts",
       "sha256": "sha256:13b54b139e256050092b28fba2103296a9959c8bf110cd9ebd0054ac2ea5385d",
       "size_bytes": 28243
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/LiveRouteWorkspace.test.tsx",
+      "sha256": "sha256:6d971df11d9351e9f3bebb68a56fad3040f13e5af0d4dcdbd29a5f2fef6723c5",
+      "size_bytes": 4740
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/LiveRouteWorkspace.tsx",
+      "sha256": "sha256:8e56f49db5edffc729c5f25be1c835a373a76d985752fa011b2ac57921d517b5",
+      "size_bytes": 17017
     },
     {
       "path": "ui/web/src/features/productEvidence/contracts.ts",
@@ -1318,5 +1353,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:a7a75fffecb8836cc06bf8216959eb0194b9ba93e1444c532f3dc3b2d79c6fe5"
+  "source_digest": "sha256:099e677f2b7d109a11d4a2edd1fc7c8e0069f9d6a9d42623816c09744c032a15"
 }

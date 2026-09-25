@@ -86,6 +86,42 @@ def test_unmodified_git_backed_copy_passes_aggregate(tmp_path: Path) -> None:
     _assert_positive(_copy(tmp_path / "positive"))
 
 
+@pytest.mark.parametrize(
+    ("mutation", "finding"),
+    [
+        ("unknown_ledger_field", "ledger_shape_invalid"),
+        ("invalid_state", "capability_entry_invalid"),
+        ("duplicate_milestone", "milestone_entry_invalid"),
+        ("absent_governing_plan", "governing_plan_unavailable"),
+    ],
+)
+def test_single_ledger_rejection_has_healthy_copy_and_nonzero_gate(
+    tmp_path: Path, mutation: str, finding: str
+) -> None:
+    root = _copy(tmp_path / mutation)
+    _assert_positive(root)
+    path = root / LEDGER_PATH
+    ledger = json.loads(path.read_bytes())
+    if mutation == "unknown_ledger_field":
+        ledger["unexpected"] = True
+    elif mutation == "invalid_state":
+        ledger["capabilities"][0]["state"] = "invented_state"
+    elif mutation == "duplicate_milestone":
+        ledger["milestones"].append(json.loads(json.dumps(ledger["milestones"][0])))
+    else:
+        ledger["governing_plan"] = "docs/superpowers/plans/absent.md"
+    path.write_text(json.dumps(ledger, sort_keys=True) + "\n", encoding="utf-8")
+
+    findings = audit_governance(root)["findings"]
+    assert finding in findings
+    expected = cast(dict[str, Any], run(root))
+    assert expected["ok"] is False
+    assert expected["release_ready"] is False
+    assert {name for name, result in expected["children"].items() if not result["ok"]} == {"governance"}
+    assert expected["children"]["governance"]["finding_count"] == len(findings)
+    assert _cli(root) == (1, expected)
+
+
 def test_registration_owner_source_drift_fails_aggregate(tmp_path: Path) -> None:
     root = _copy(tmp_path / "source_drift")
     _assert_positive(root)

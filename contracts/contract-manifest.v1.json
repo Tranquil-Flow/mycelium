@@ -580,8 +580,8 @@
         },
         {
           "path": "ui/web/src/features/governance/GovernanceReadinessSource.tsx",
-          "sha256": "1992b904f0c503c5876feb0391f54d1eaa1ca35989961d2b236135be6a331741",
-          "size_bytes": 2571
+          "sha256": "9782c6bfcd85ae4c88fd73a51a834ea70e0a2834f78bccb35fb5a0e4588396f8",
+          "size_bytes": 2688
         }
       ],
       "protocol": "mycelium.governance_readiness.v1"

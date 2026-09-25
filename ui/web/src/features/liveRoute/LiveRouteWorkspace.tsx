@@ -162,6 +162,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
         <h1>{view === 'readiness' ? 'Readiness' : view === 'network' ? 'Network' : view === 'incidents' ? 'Incidents' : 'Plans'}</h1>
         <p role={error === null ? 'status' : 'alert'}>{error ?? 'Loading physical route evidence…'}</p>
         <button type="button" onClick={() => void refresh()}>Refresh</button>
+        {view === 'readiness' ? <GovernanceReadinessSource /> : null}
       </section>
     );
   }

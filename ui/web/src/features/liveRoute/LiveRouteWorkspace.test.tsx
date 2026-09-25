@@ -9,6 +9,25 @@ const client = { load: async () => liveRouteStatusFixture() };
 const workloadClient = { load: async () => decodeM15PlanComparison(structuredClone(m15Fixture)) };
 
 describe('LiveRouteWorkspace', () => {
+  it('keeps independent source governance visible while physical route evidence loads or fails', async () => {
+    let rejectRoute!: (reason: Error) => void;
+    const pending = new Promise<never>((_, reject) => { rejectRoute = reject; });
+    render(<LiveRouteWorkspace view="readiness" qualification={null} freshness="stale" client={{ load: () => pending }} />);
+    expect(screen.getByRole('heading', { name: 'Readiness' })).toBeInTheDocument();
+    expect(screen.getByText('Loading physical route evidence…')).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { name: 'Build governance' })).toHaveLength(1);
+    expect(screen.getByText('Not release-ready.', { exact: false })).toBeInTheDocument();
+    rejectRoute(new Error('route_status_unavailable'));
+    expect(await screen.findByText('route_status_unavailable')).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { name: 'Build governance' })).toHaveLength(1);
+  });
+
+  it('mounts governance exactly once on a successful Readiness route', async () => {
+    render(<LiveRouteWorkspace view="readiness" qualification={null} freshness="stale" client={client} />);
+    expect(await screen.findByText('Physical qualification')).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { name: 'Build governance' })).toHaveLength(1);
+  });
+
   it('renders the ordered physical graph and per-peer counter delta', async () => {
     render(
       <LiveRouteWorkspace
