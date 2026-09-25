@@ -360,8 +360,8 @@
         },
         {
           "path": "ui/web/scripts/a6-product-browser-e2e.mjs",
-          "sha256": "776e0e20cbc9644020830228eea91589790628d994b8348f2d60886d2b1bc241",
-          "size_bytes": 18145
+          "sha256": "be9bc57a4a4683781be36f0681c6adcead5b8526c1b7a26733fb8046efdaf254",
+          "size_bytes": 21978
         }
       ],
       "protocol": "mycelium.full_context_recovery_gate.v1"

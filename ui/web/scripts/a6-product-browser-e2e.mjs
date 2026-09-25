@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import { rename, stat, unlink, writeFile } from 'node:fs/promises';
+import http from 'node:http';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const EXACT_FLEET_GRANT = 'FLEET GRANTED TO A6';
+const validatedControls = new WeakSet();
 const ENGINES = Object.freeze(['chromium', 'firefox', 'webkit']);
 const WORKSPACES = Object.freeze([
   'lab', 'network', 'plans', 'incidents',
@@ -143,19 +145,91 @@ export async function atomicPrivateWrite(target, value) {
 
 function exactLoopbackOrigin(raw) {
   const value = String(raw ?? '').replace(/\/$/, '');
-  if (!/^https?:\/\/127\.0\.0\.1:\d+$/.test(value)) fail('loopback_product_origin_required');
+  if (!/^https?:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(value)
+    || Number(new URL(value).port) > 65535
+    || new URL(value).origin !== value) fail('loopback_product_origin_required');
   return value;
 }
 
-function faultUrl(raw, origin, name) {
-  let parsed;
-  try {
-    parsed = new URL(String(raw ?? ''));
-  } catch {
-    fail(`${name}_fault_url_required`);
+// Read the frozen gate's actual inventory; do not maintain a second, drifting list.
+function frozenFaultCases() {
+  const source = readFileSync(fileURLToPath(
+    new URL('../../../scripts/run_a6_recovery_gate.py', import.meta.url),
+  ), 'utf8');
+  const match = /^REQUIRED_CASES = \(\n((?:    "[a-z0-9_]+",\n)+)\)/m.exec(source);
+  if (!match) fail('fault_case_inventory_unreadable');
+  const cases = match[1].trim().split('\n').map((line) => JSON.parse(line.trim().slice(0, -1)));
+  if (cases.length !== 16 || new Set(cases).size !== cases.length) fail('fault_case_inventory_invalid');
+  return new Set(cases);
+}
+
+function localControlUrl(raw, productOrigin) {
+  // The raw spelling is checked BEFORE URL normalization: no aliases, userinfo,
+  // fragments, query forwarding, dot segments, escapes, or default-port elision.
+  const match = typeof raw === 'string'
+    ? /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})(\/[a-zA-Z0-9_/-]+)$/.exec(raw)
+    : null;
+  if (!match) fail('local_fault_url_invalid');
+  const port = Number(match[1]);
+  if (port > 65535) fail('local_fault_url_invalid');
+  const url = new URL(raw);
+  if (url.origin === productOrigin || url.pathname !== match[2] || url.href !== raw) {
+    fail('local_fault_url_invalid');
   }
-  if (parsed.origin !== origin || !parsed.pathname.startsWith('/')) fail(`${name}_fault_url_invalid`);
-  return parsed.href;
+  return Object.freeze({ port, path: match[2], origin: url.origin });
+}
+
+export function validateFaultControl({ grant, productOrigin, positiveUrl, negativeUrl,
+  positiveCaseId, negativeCaseId }) {
+  if (grant !== EXACT_FLEET_GRANT) fail('explicit_fleet_grant_required');
+  const origin = exactLoopbackOrigin(productOrigin);
+  const cases = frozenFaultCases();
+  if (!cases.has(positiveCaseId) || !cases.has(negativeCaseId)
+    || positiveCaseId === negativeCaseId) fail('fault_case_id_invalid');
+  const positive = localControlUrl(positiveUrl, origin);
+  const negative = localControlUrl(negativeUrl, origin);
+  if (positive.origin !== negative.origin) fail('fault_control_origin_mismatch');
+  const positiveControl = Object.freeze({ ...positive, caseId: positiveCaseId });
+  const negativeControl = Object.freeze({ ...negative, caseId: negativeCaseId });
+  validatedControls.add(positiveControl);
+  validatedControls.add(negativeControl);
+  return Object.freeze({ positive: positiveControl, negative: negativeControl });
+}
+
+// Native HTTP is deliberately direct: no page/request-context state, proxy,
+// ambient cookies/auth, redirect handling, DNS lookup, or forwarded headers.
+export async function sendControlledFault(control, usedCases, requestFactory = http.request) {
+  if (!validatedControls.has(control) || !(usedCases instanceof Set)) fail('fault_control_unvalidated');
+  if (usedCases.has(control.caseId)) fail('fault_case_already_used');
+  usedCases.add(control.caseId); // consume before contact, including transport failures
+  const body = JSON.stringify({ action: 'execute_controlled_source_failure', case_id: control.caseId });
+  return new Promise((resolve, reject) => {
+    const rejectSafe = (code) => reject(new Error(code));
+    try {
+      const request = requestFactory({
+        hostname: '127.0.0.1', port: control.port, path: control.path,
+        method: 'POST', agent: false,
+        headers: {
+          accept: 'application/json', 'content-type': 'application/json',
+          'content-length': Buffer.byteLength(body),
+          'x-mycelium-a6-fleet-grant': EXACT_FLEET_GRANT,
+        },
+      }, (response) => {
+        response.on('error', () => rejectSafe('controlled_fault_transport_failed'));
+        response.on('end', () => {
+          if (response.statusCode >= 200 && response.statusCode < 300) resolve();
+          else rejectSafe(`controlled_fault_rejected_${Number.isInteger(response.statusCode)
+            ? response.statusCode : 'invalid_status'}`);
+        });
+        response.resume();
+      });
+      request.on('error', () => rejectSafe('controlled_fault_transport_failed'));
+      request.setTimeout(10_000, () => request.destroy(new Error('controlled_fault_timeout')));
+      request.end(body);
+    } catch {
+      rejectSafe('controlled_fault_transport_failed');
+    }
+  });
 }
 
 function observePage(page, engine, origin, failures) {
@@ -217,13 +291,6 @@ async function waitForObservation(page, predicate, timeout = 300_000) {
   fail('recovery_transition_timeout');
 }
 
-async function triggerFault(page, url) {
-  const response = await page.request.post(url, {
-    headers: { accept: 'application/json', 'content-type': 'application/json' },
-    data: { action: 'execute_controlled_source_failure' },
-  });
-  if (!response.ok()) fail(`controlled_fault_rejected_${response.status()}`);
-}
 
 async function startRequest(page, privateCanaries, maximumNewTokens) {
   await page.goto(`${page.url().split('/#')[0]}/#inference`, { waitUntil: 'domcontentloaded' });
@@ -282,12 +349,12 @@ export async function verifyInferenceOutcome(page, scenario) {
   if (!/Failed/i.test(statusText)) fail('negative_ui_terminal_missing');
 }
 
-async function runScenario(page, scenario, faultControl, maximumNewTokens) {
+async function runScenario(page, scenario, faultControl, usedCases, maximumNewTokens) {
   const promptCanary = `A6-BROWSER-PRIVATE-PROMPT-${scenario}-${Date.now()}`;
   const outputCanary = `A6-BROWSER-PRIVATE-OUTPUT-${scenario}-${Date.now()}`;
   const privateCanaries = [promptCanary, outputCanary];
   const started = await startRequest(page, privateCanaries, maximumNewTokens);
-  await triggerFault(page, faultControl);
+  await sendControlledFault(faultControl, usedCases);
   const failed = await waitForObservation(
     page,
     (observation) => observation.recovering_count > 0
@@ -365,12 +432,13 @@ async function runScenario(page, scenario, faultControl, maximumNewTokens) {
   };
 }
 
-async function runLive({ origin, outputPath, positiveFaultUrl, negativeFaultUrl, maximumNewTokens }) {
+async function runLive({ origin, outputPath, faultControl, maximumNewTokens }) {
   const playwright = await import('@playwright/test');
   const failures = [];
   const browsers = [];
   const engineResults = [];
   const canaries = [];
+  const usedCases = new Set();
   try {
     for (const name of ENGINES) {
       const browser = await playwright[name].launch({ headless: true });
@@ -379,8 +447,8 @@ async function runLive({ origin, outputPath, positiveFaultUrl, negativeFaultUrl,
       const page = await context.newPage();
       observePage(page, name, origin, failures);
       await page.goto(`${origin}/#inference`, { waitUntil: 'domcontentloaded' });
-      const positive = await runScenario(page, 'positive', positiveFaultUrl, maximumNewTokens);
-      const negative = await runScenario(page, 'negative', negativeFaultUrl, maximumNewTokens);
+      const positive = await runScenario(page, 'positive', faultControl.positive, usedCases, maximumNewTokens);
+      const negative = await runScenario(page, 'negative', faultControl.negative, usedCases, maximumNewTokens);
       canaries.push(...positive.private_canaries, ...negative.private_canaries);
       delete positive.private_canaries;
       delete negative.private_canaries;
@@ -454,17 +522,18 @@ async function main() {
   if (!Number.isSafeInteger(maximumNewTokens) || maximumNewTokens < 8 || maximumNewTokens > 128) {
     fail('browser_token_bound_invalid');
   }
-  const positiveFaultUrl = faultUrl(
-    process.env.MYCELIUM_A6_POSITIVE_FAULT_URL, origin, 'positive',
-  );
-  const negativeFaultUrl = faultUrl(
-    process.env.MYCELIUM_A6_NEGATIVE_FAULT_URL, origin, 'negative',
-  );
+  const faultControl = validateFaultControl({
+    grant: process.env.MYCELIUM_A6_FLEET_GRANT,
+    productOrigin: origin,
+    positiveUrl: process.env.MYCELIUM_A6_POSITIVE_FAULT_URL,
+    negativeUrl: process.env.MYCELIUM_A6_NEGATIVE_FAULT_URL,
+    positiveCaseId: process.env.MYCELIUM_A6_POSITIVE_CASE_ID,
+    negativeCaseId: process.env.MYCELIUM_A6_NEGATIVE_CASE_ID,
+  });
   await runLive({
     origin,
     outputPath: path.resolve(outputPath),
-    positiveFaultUrl,
-    negativeFaultUrl,
+    faultControl,
     maximumNewTokens,
   });
 }

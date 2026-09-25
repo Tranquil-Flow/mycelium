@@ -1,19 +1,23 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import test from 'node:test';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import {
+import * as faultHarness from './a6-product-browser-e2e.mjs';
+const {
   assertPrivacyClean,
   atomicPrivateWrite,
   exerciseReconnect,
   expectedWorkspaceFields,
   validateRecoveryHistory,
+  validateFaultControl,
+  sendControlledFault,
   verifyInferenceOutcome,
-} from './a6-product-browser-e2e.mjs';
+} = faultHarness;
 
 const scriptPath = fileURLToPath(new URL('./a6-product-browser-e2e.mjs', import.meta.url));
 const packagePath = fileURLToPath(new URL('../package.json', import.meta.url));
@@ -81,6 +85,107 @@ test('live mode fails closed before contacting a serve without the exact fleet g
   assert.equal(result.status, 1);
   assert.match(result.stderr, /explicit_fleet_grant_required/);
   assert.doesNotMatch(result.stderr, /fetch|ECONNREFUSED/i);
+});
+
+const faultConfig = {
+  grant: 'FLEET GRANTED TO A6',
+  productOrigin: 'http://127.0.0.1:8787',
+  positiveUrl: 'http://127.0.0.1:8788/fault',
+  negativeUrl: 'http://127.0.0.1:8788/fault',
+  positiveCaseId: 'ordinary_browser_source_failure_recovery',
+  negativeCaseId: 'no_successor',
+};
+
+test('fault control requires exact separate IPv4 loopback origin and two frozen distinct cases', () => {
+  const validated = validateFaultControl(faultConfig);
+  assert.equal(validated.positive.caseId, faultConfig.positiveCaseId);
+  assert.equal(validated.negative.caseId, faultConfig.negativeCaseId);
+  for (const change of [
+    { grant: undefined }, { grant: 'wrong' },
+    { positiveCaseId: undefined }, { positiveCaseId: 'not_frozen' },
+    { negativeCaseId: faultConfig.positiveCaseId },
+    { positiveUrl: 'http://127.0.0.1:8787/fault' },
+    { positiveUrl: 'http://localhost:8788/fault' },
+    { positiveUrl: 'http://127.0.0.2:8788/fault' },
+    { positiveUrl: 'http://[::1]:8788/fault' },
+    { positiveUrl: 'https://127.0.0.1:8788/fault' },
+    { positiveUrl: 'http://127.0.0.1:8788@evil.test/fault' },
+    { positiveUrl: 'http://127.0.0.1:8788/fault?forward=https://evil.test' },
+    { positiveUrl: 'http://127.0.0.1:8788/fault#fragment' },
+    { positiveUrl: 'http://127.0.0.1:0/fault' },
+    { positiveUrl: 'http://127.0.0.1:65536/fault' },
+    { negativeUrl: 'http://127.0.0.1:8789/fault' },
+  ]) {
+    assert.throws(() => validateFaultControl({ ...faultConfig, ...change }));
+  }
+});
+
+test('granted CLI refuses incomplete or remote control before browser launch or receiver contact', () => {
+  const env = {
+    MYCELIUM_A6_FLEET_GRANT: faultConfig.grant,
+    MYCELIUM_A6_PRODUCT_ORIGIN: faultConfig.productOrigin,
+    MYCELIUM_A6_BROWSER_EVIDENCE: '/tmp/forbidden-a6-browser-evidence.json',
+    MYCELIUM_A6_POSITIVE_FAULT_URL: faultConfig.positiveUrl,
+    MYCELIUM_A6_NEGATIVE_FAULT_URL: faultConfig.negativeUrl,
+    MYCELIUM_A6_POSITIVE_CASE_ID: faultConfig.positiveCaseId,
+    MYCELIUM_A6_NEGATIVE_CASE_ID: faultConfig.negativeCaseId,
+  };
+  for (const change of [
+    { MYCELIUM_A6_NEGATIVE_CASE_ID: '' },
+    { MYCELIUM_A6_NEGATIVE_CASE_ID: faultConfig.positiveCaseId },
+    { MYCELIUM_A6_POSITIVE_FAULT_URL: 'http://evil.test/fault' },
+    { MYCELIUM_A6_POSITIVE_FAULT_URL: 'http://127.0.0.1:8787/fault' },
+  ]) {
+    const result = run([], { ...env, ...change });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /fault_case_id_invalid|local_fault_url_invalid/);
+    assert.doesNotMatch(result.stderr, /FLEET GRANTED|browserType|ECONNREFUSED/);
+  }
+});
+
+test('isolated direct control request delivers only bounded action, case and grant; redirects and errors disclose nothing', async () => {
+  const controls = validateFaultControl(faultConfig);
+  const control = controls.positive;
+  const used = new Set();
+  const requests = [];
+  const receiver = (options, onResponse) => {
+    const req = new EventEmitter();
+    req.end = (body) => {
+      requests.push({ options, body: JSON.parse(body) });
+      queueMicrotask(() => {
+        const res = new EventEmitter();
+        res.statusCode = requests.length === 1 ? 200 : 302;
+        res.resume = () => queueMicrotask(() => res.emit('end'));
+        onResponse(res);
+      });
+    };
+    req.setTimeout = () => req;
+    req.destroy = () => req;
+    return req;
+  };
+  await sendControlledFault(control, used, receiver);
+  assert.equal(requests.length, 1);
+  assert.deepEqual(requests[0].body, {
+    action: 'execute_controlled_source_failure', case_id: faultConfig.positiveCaseId,
+  });
+  assert.equal(requests[0].options.hostname, '127.0.0.1');
+  assert.equal(requests[0].options.port, 8788);
+  assert.equal(requests[0].options.path, '/fault');
+  assert.equal(requests[0].options.agent, false);
+  assert.equal(requests[0].options.headers['x-mycelium-a6-fleet-grant'] === faultConfig.grant, true);
+  assert.equal(requests[0].options.headers.authorization, undefined);
+  assert.equal(requests[0].options.headers.cookie, undefined);
+  assert.equal(requests[0].options.headers.host, undefined);
+  assert.equal(requests[0].options.headers['x-forwarded-for'], undefined);
+  assert.equal(requests[0].options.headers['proxy-authorization'], undefined);
+  assert.doesNotMatch(JSON.stringify(requests[0].body), /FLEET GRANTED/);
+  await assert.rejects(sendControlledFault(control, used, receiver), /fault_case_already_used/);
+  assert.equal(requests.length, 1); // repeated case rejected before contact
+  await assert.rejects(sendControlledFault(controls.negative, used, receiver), /controlled_fault_rejected_302/);
+  assert.equal(requests.length, 2); // redirect is refused, not followed
+  assert.doesNotMatch(JSON.stringify({ ...requests[0].options, headers: {} }), /FLEET GRANTED/);
+  await assert.rejects(sendControlledFault({ ...control, port: 9999 }, new Set(), receiver), /fault_control_unvalidated/);
+  assert.equal(requests.length, 2); // forged endpoint cannot contact receiver
 });
 
 test('browser outcome proof requires completed UI stream or truthful failed UI', async () => {
@@ -173,6 +278,7 @@ test('fixture history validator rejects stale aggregate cursors and impossible t
 
 test('browser harness observes only the shared privacy-reduced product snapshot', () => {
   const source = readFileSync(scriptPath, 'utf8');
+  assert.doesNotMatch(source, /page\.request\.post\(/); // control must never use browser/session transport
   assert.doesNotMatch(source, /fetch\(['"]\/api\/v1\/recovery\/status/);
   assert.match(source, /fetch\(['"]\/api\/v1\/product\/snapshot/);
   assert.doesNotMatch(source, /request\.(request_id|path_id)/);
