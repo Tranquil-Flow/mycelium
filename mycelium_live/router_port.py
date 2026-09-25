@@ -181,6 +181,7 @@ class _Pending:
     execution_started: bool = False
     recovery_required: bool = False
     recovery_phase: str = "active"
+    source_failure_identity: dict[str, Any] | None = None
     recovery_attempts: int = 0
     recovery_failure_reason: str | None = None
     recovery_excluded_placements: set[str] = field(default_factory=set)
@@ -704,6 +705,18 @@ class LiveRouterPort:
                     self._changed.notify_all()
                 return
             with self._changed:
+                # This is the source command whose actual route incident made
+                # recovery necessary. Keep it after the gateway consumes the
+                # transient RECOVERY_REQUIRED state and replaces the command.
+                if pending.command_identity is not None:
+                    pending.source_failure_identity = {
+                        field: getattr(pending.command_identity, field) for field in (
+                            "deployment_id", "deployment_epoch", "qualification_digest",
+                            "request_id", "request_attempt", "path_id", "path_attempt",
+                            "path_digest", "topology_generation", "command_id",
+                            "publisher_generation", "cancellation_generation",
+                        )
+                    }
                 pending.recovery_required = True
                 pending.recovery_phase = "failure_observed"
                 pending.execution_started = False
@@ -833,6 +846,59 @@ class LiveRouterPort:
             ):
                 return "TERMINAL_BLOCKED"
             return "DECODING"
+
+    def _a6_test_only_source_failure_observed(self, binding: dict[str, Any]) -> bool:
+        """Read the source recovery transition, not a successor's current status."""
+        request_id = binding.get("request_id")
+        if not isinstance(request_id, str):
+            return False
+        with self._lock:
+            pending = self._pending.get(request_id)
+            return bool(
+                pending is not None and pending.source_failure_identity is not None
+                and pending.source_failure_identity == {
+                    field: binding.get(field) for field in pending.source_failure_identity
+                }
+            )
+
+    def _a6_test_only_source_fault_binding(self, request_id: str) -> dict[str, Any] | None:
+        """Detached admitted-command snapshot; no public fault or route mutation.
+
+        Route revalidates the exact identity under its lock when installing and
+        again when consuming the constructor-injected test-only capability.
+        """
+        with self._changed:
+            pending = self._pending.get(request_id)
+            coordinator = self._coordinator
+            if (
+                self._closed or pending is None or coordinator is None
+                or pending.request is None or pending.request.request_id != request_id
+                or pending.command_identity is None or pending.route_identity is None
+                or pending.path_manifest is None or pending.placement_ids is None
+                or not pending.execution_started or pending.terminal_status is not None
+                or pending.terminal_blocked_reason is not None or pending.recovery_required
+                or pending.cancellation_linearized or pending.cancellation_requested.is_set()
+                or request_id not in self._recovery_current_request_ids
+                or not coordinator.authorizes_route_identity(request_id, pending.route_identity)
+            ):
+                return None
+            command = pending.command_identity
+            if int(time.monotonic() * 1000) >= command.absolute_deadline_ms:
+                return None
+            identity = {field: getattr(command, field) for field in (
+                "deployment_id", "deployment_epoch", "qualification_digest",
+                "request_id", "request_attempt", "path_id", "path_attempt",
+                "path_digest", "topology_generation", "command_id",
+                "publisher_generation", "cancellation_generation",
+            )}
+            return {
+                **identity, "absolute_deadline_ms": command.absolute_deadline_ms,
+                "path_manifest_digest": pending.route_identity["path_manifest_digest"],
+                "source_attempt": pending.route_identity["request_attempt"],
+                "source_node_id": next((placement.node_id for stage in self._graph.stages
+                                        for placement in stage.placements
+                                        if placement.placement_id == pending.placement_ids[0]), None),
+            }
 
     def request_error_code(self, request_id: str) -> str | None:
         """Return one bounded terminal failure code without private diagnostics."""

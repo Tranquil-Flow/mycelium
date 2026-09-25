@@ -1158,6 +1158,16 @@ class _TestOnlyTransportFault:
             raise ValueError("invalid_test_transport_fault")
         object.__setattr__(self, "identity", MappingProxyType(dict(self.identity)))
 
+class _TestOnlyTransportFaultSlot:
+    """Constructor-only opt-in; populated solely while the route lock is held.
+
+    Never passed through an HTTP constructor or production operator plan.
+    """
+
+    def __init__(self) -> None:
+        self.fault: _TestOnlyTransportFault | None = None
+        self.disabled = False
+
 
 class PhysicalLiveRoute:
     """Persistent multi-host route composed from the physical node protocol."""
@@ -1174,12 +1184,12 @@ class PhysicalLiveRoute:
         seed_authority: LiveSeedAuthority | None = None,
         membership_snapshot: Mapping[str, Any] | None = None,
         force_relay: bool = False,
-        _test_only_transport_fault: _TestOnlyTransportFault | None = None,
+        _test_only_transport_fault: _TestOnlyTransportFault | _TestOnlyTransportFaultSlot | None = None,
     ) -> None:
         if not isinstance(force_relay, bool):
             raise ValueError("force_relay must be a boolean")
         if _test_only_transport_fault is not None and not isinstance(
-            _test_only_transport_fault, _TestOnlyTransportFault
+            _test_only_transport_fault, (_TestOnlyTransportFault, _TestOnlyTransportFaultSlot)
         ):
             raise ValueError("invalid_test_transport_fault")
         self._controller = controller
@@ -1344,6 +1354,32 @@ class PhysicalLiveRoute:
             return tuple(
                 json.loads(json.dumps(item)) for item in self._scoped_runtime_incidents
             )
+
+    def _install_test_only_transport_fault(self, fault: _TestOnlyTransportFault) -> bool:
+        """Fail closed under the route lock; the command rechecks at consumption."""
+        with self._lock:
+            slot = self._test_only_transport_fault
+            active = self._active_route_requests.get(fault.identity["request_id"])
+            if (
+                not isinstance(slot, _TestOnlyTransportFaultSlot)
+                or not isinstance(fault, _TestOnlyTransportFault)
+                or slot.fault is not None or slot.disabled
+                or self._test_only_transport_fault_consumed
+                or self._closed or not self._open
+                or active is None or active.get("terminal") is not False
+                or active.get("control_bound") is not True
+                or active.get("cancellation_requested") is not False
+                or active.get("entry_node_id") != fault.source_node_id
+                or active.get("cancellation_generation") != 0
+                or fault.identity["request_id"] in self._request_cleanup_receipts
+                or int(time.monotonic() * 1000) >= min(
+                    fault.deadline_monotonic_ms, active.get("absolute_deadline_ms", 0))
+                or any(active.get(field) != fault.identity[field]
+                       for field in _TEST_FAULT_IDENTITY_FIELDS if field != "request_id")
+            ):
+                return False
+            slot.fault = fault
+            return True
 
     def _record_active_runtime_failure(
         self,
@@ -1513,7 +1549,10 @@ class PhysicalLiveRoute:
             try:
                 with self._lock:
                     active = self._active_route_requests.get(request_id)
-                    fault = getattr(self, "_test_only_transport_fault", None)
+                    configured = getattr(self, "_test_only_transport_fault", None)
+                    fault = (None if configured.disabled else configured.fault) if isinstance(
+                        configured, _TestOnlyTransportFaultSlot
+                    ) else configured
                     qualification_matches = False
                     if fault is not None and active is not None:
                         qualification = self._deployment_qualification

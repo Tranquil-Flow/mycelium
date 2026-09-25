@@ -48,7 +48,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:63278b0c096b44821f9792f703d78122e3ac2f85312c4609499b3d60df56ebd3",
+      "sha256": "sha256:c09e0b7729cb36e2840c5c0ea692352b3f3d1da143ffe363dd21b11e84700c2b",
       "size_bytes": 70323
     },
     {
@@ -147,6 +147,11 @@
       "size_bytes": 8078
     },
     {
+      "path": "mycelium_a6_live_fault_seams.py",
+      "sha256": "sha256:4a0163f23393f360246b956d6ccbd01792505254f01e71074eef6262a83054c0",
+      "size_bytes": 6466
+    },
+    {
       "path": "mycelium_a6_m16.py",
       "sha256": "sha256:e112dceb7aefffa43a127d9b192adc038de186a9f349d0d6f9881de40c63eac1",
       "size_bytes": 11370
@@ -203,13 +208,13 @@
     },
     {
       "path": "mycelium_live/route.py",
-      "sha256": "sha256:d67d6dd6c3e5f09f5364b1ab3d7b6ad64cd51aea52478c1eea2f56c20f93b170",
-      "size_bytes": 271308
+      "sha256": "sha256:5a4e1ba9e29fe8ad0a82220c5685a377f84c6104a9834bc183fbe21c444bf008",
+      "size_bytes": 273358
     },
     {
       "path": "mycelium_live/router_port.py",
-      "sha256": "sha256:a679c1d2b995d7884ffb3c9f79d676178f7b0936906d65e1a635ba8114b681c6",
-      "size_bytes": 93029
+      "sha256": "sha256:97e0d81282483114247ef4dc44bf26022b0aa263b674d7e155e7e1e237958895",
+      "size_bytes": 96929
     },
     {
       "path": "mycelium_live/supervisor.py",
@@ -887,6 +892,11 @@
       "size_bytes": 3557
     },
     {
+      "path": "tests/live/test_a6_live_fault_seams.py",
+      "sha256": "sha256:38919d65d30f2e973ef62a18ac19141c3cc83ae68a3a514a3e95d3054be321df",
+      "size_bytes": 13596
+    },
+    {
       "path": "tests/live/test_a6_live_router_recovery.py",
       "sha256": "sha256:31ae9fd2f73f409a23a2e188c02438b9cb65ceef05c4bae949d92eb7f9e83dce",
       "size_bytes": 38670
@@ -1308,5 +1318,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:c17e930c814453ca3993edc44403ae676b83fa9dd2cd2aadf586de9854fa28e2"
+  "source_digest": "sha256:a7a75fffecb8836cc06bf8216959eb0194b9ba93e1444c532f3dc3b2d79c6fe5"
 }
