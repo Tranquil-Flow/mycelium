@@ -52,6 +52,11 @@
       "size_bytes": 70321
     },
     {
+      "path": "contracts/governance-boundary-protocols.v1.json",
+      "sha256": "sha256:2eca935918c87ecbaf4cce5faecbae656cb5832ba845891e520089cf90916f1f",
+      "size_bytes": 1914
+    },
+    {
       "path": "docs/handover/A6_SESSION5B_CANDIDATE_2026-09-07.md",
       "sha256": "sha256:320d01ce4fdc2835785b9ce1888601f50843d0dda4898221f13b2c71b3c5f4d3",
       "size_bytes": 4493
@@ -462,6 +467,11 @@
       "size_bytes": 90573
     },
     {
+      "path": "scripts/governance_audit.py",
+      "sha256": "sha256:4502eae5ce1dc726e5c4df721fe3d6a32c7546bf288dd27cd3fb0c64e1c1fa05",
+      "size_bytes": 17156
+    },
+    {
       "path": "scripts/quiet_host_guard.py",
       "sha256": "sha256:c44821001841d4ac044696de15184d7fac0f628fb9628f691e73c96f04e88a27",
       "size_bytes": 36438
@@ -777,9 +787,14 @@
       "size_bytes": 2633
     },
     {
+      "path": "tests/governance/test_governance_audit.py",
+      "sha256": "sha256:5be6924838c83420210a105c5cef7dfbc03adb51760f74b0e0ecf584dae4a791",
+      "size_bytes": 4948
+    },
+    {
       "path": "tests/governance/test_governance_gate_negative_copies.py",
-      "sha256": "sha256:2a805c635373b30e230a8517f7e8ebdf0a63cfccc801a3fa83b9ec223b7cb9d0",
-      "size_bytes": 5320
+      "sha256": "sha256:aa07b06cf1d40937b1bbf7c22f2aee573c0875ff86f9e6156e8f9d13c6b24676",
+      "size_bytes": 8258
     },
     {
       "path": "tests/l3/conftest.py",
@@ -1168,5 +1183,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:f3e42ae52294b41e7511fa391c0db7a2f2932e10e04e7280a76ab5528d825b94"
+  "source_digest": "sha256:bf0dffdc70bc36c875471bc2657e1e50c19e874672791cd09c6efa9e9cb13a4c"
 }

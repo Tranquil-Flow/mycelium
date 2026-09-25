@@ -11,10 +11,17 @@ import sys
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
+if __package__:
+    from .contract_registry import CONTRACT_SPECS
+else:
+    from contract_registry import CONTRACT_SPECS
+
 
 PROTOCOL = "mycelium.governance_audit.v1"
 LEDGER_PROTOCOL = "mycelium.governance_ledger.v1"
 LEDGER_PATH = "contracts/governance-ledger.v1.json"
+REGISTRATION_PATH = "contracts/governance-boundary-protocols.v1.json"
+REGISTRATION_PROTOCOL = "mycelium.governance_boundary_protocol_registration.v1"
 _STATE_ORDER = (
     "absent",
     "design_only",
@@ -174,6 +181,49 @@ def _implemented_action_endpoints(root: Path, client: str) -> set[str]:
     return implemented
 
 
+def _boundary_protocols(root: Path, findings: list[str]) -> dict[str, set[str]]:
+    """Combine fixture owners with separately registered source-backed boundaries.
+
+    The ledger is never a registration source. All extra registrations are
+    validated even if unused, so source drift cannot be masked by ledger edits.
+    """
+    registered = {spec.protocol: {"action", "read_only"} for spec in CONTRACT_SPECS}
+    try:
+        document = _load(root, REGISTRATION_PATH)
+        if set(document) != {"protocol", "registrations"} or document["protocol"] != REGISTRATION_PROTOCOL:
+            raise ValueError("registration_shape")
+        rows = document["registrations"]
+        if not isinstance(rows, list) or not rows:
+            raise ValueError("registration_rows")
+    except (OSError, ValueError, json.JSONDecodeError):
+        findings.append("boundary_protocol_registration_unavailable")
+        return registered
+
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {"name", "kind", "owner_source"}:
+            findings.append("boundary_protocol_registration_invalid")
+            continue
+        name, kind, source = row["name"], row["kind"], row["owner_source"]
+        if not isinstance(name, str) or not name.startswith("mycelium."):
+            findings.append("boundary_protocol_registration_invalid")
+            continue
+        if name in registered or kind not in {"action", "read_only"}:
+            findings.append(f"boundary_protocol_registration_invalid:{name}")
+            continue
+        try:
+            path = _canonical_path(source)
+            if not path.endswith((".py", ".ts", ".tsx")) or path.startswith(("contracts/", "tests/", "docs/")):
+                raise ValueError("not_a_producer_or_consumer")
+            content = _read(root, path).decode("utf-8")
+            if f'"{name}"' not in content and f"'{name}'" not in content:
+                raise ValueError("protocol_not_in_source")
+        except (OSError, ValueError, UnicodeError):
+            findings.append(f"boundary_protocol_registration_source_invalid:{name}")
+            continue
+        registered[name] = {kind}
+    return registered
+
+
 def audit(repo_root: str | Path) -> dict[str, Any]:
     findings: list[str] = []
     try:
@@ -274,6 +324,7 @@ def audit(repo_root: str | Path) -> dict[str, Any]:
             findings.append("contract_manifest_unavailable")
 
     actions_value = ledger.get("authorized_product_actions")
+    registered = _boundary_protocols(root, findings)
     action_clients: set[str] = set()
     pinned_protocols: set[str] = set()
     if not isinstance(actions_value, list):
@@ -320,6 +371,9 @@ def audit(repo_root: str | Path) -> dict[str, Any]:
         ):
             findings.append("product_action_authority_invalid")
             continue
+        for protocol in protocols:
+            if "action" not in registered.get(protocol, set()):
+                findings.append(f"boundary_protocol_unregistered:{protocol}")
         try:
             implemented_endpoints = _implemented_action_endpoints(root, client)
         except (OSError, UnicodeError, ValueError):
@@ -343,6 +397,9 @@ def audit(repo_root: str | Path) -> dict[str, Any]:
         findings.append("read_only_boundary_protocols_invalid")
     else:
         pinned_protocols.update(read_only_protocols)
+        for protocol in read_only_protocols:
+            if "read_only" not in registered.get(protocol, set()):
+                findings.append(f"boundary_protocol_unregistered:{protocol}")
     if not pinned_protocols:
         findings.append("boundary_protocols_unpinned")
 

@@ -16,7 +16,7 @@ import pytest
 
 from scripts.claim_boundary_audit import audit_repository
 from scripts.contract_audit import audit as audit_contracts
-from scripts.governance_audit import LEDGER_PATH, audit as audit_governance
+from scripts.governance_audit import LEDGER_PATH, REGISTRATION_PATH, audit as audit_governance
 from scripts.governance_gate import PROTOCOL, run
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,8 +32,11 @@ def _git(root: Path, *args: str) -> None:
 def _copy(root: Path) -> Path:
     """Copy real audit inputs, with an independent index for the source scan."""
     ledger = json.loads((ROOT / LEDGER_PATH).read_bytes())
+    registrations = json.loads((ROOT / REGISTRATION_PATH).read_bytes())
     paths = {
         LEDGER_PATH,
+        REGISTRATION_PATH,
+        *(item["owner_source"] for item in registrations["registrations"]),
         MANIFEST,
         ledger["governing_plan"],
         ledger["architecture_ledger"],
@@ -83,11 +86,48 @@ def test_unmodified_git_backed_copy_passes_aggregate(tmp_path: Path) -> None:
     _assert_positive(_copy(tmp_path / "positive"))
 
 
+def test_registration_owner_source_drift_fails_aggregate(tmp_path: Path) -> None:
+    root = _copy(tmp_path / "source_drift")
+    _assert_positive(root)
+    path = root / REGISTRATION_PATH
+    registration = json.loads(path.read_bytes())
+    name = "mycelium.interactive_runtime.v1"
+    entry = next(item for item in registration["registrations"] if item["name"] == name)
+    source = root / entry["owner_source"]
+    source.write_text(source.read_text("utf-8").replace(f'"{name}"', '"mycelium.drifted.v1"'), encoding="utf-8")
+    assert f"boundary_protocol_registration_source_invalid:{name}" in audit_governance(root)["findings"]
+    assert run(root)["ok"] is False
+    assert _cli(root)[0] == 1
+
+
+def test_fabricated_registration_cannot_claim_ledger_as_source(tmp_path: Path) -> None:
+    root = _copy(tmp_path / "fabricated")
+    _assert_positive(root)
+    path = root / REGISTRATION_PATH
+    registration = json.loads(path.read_bytes())
+    name = "mycelium.fabricated.v1"
+    registration["registrations"].append(
+        {"name": name, "kind": "read_only", "owner_source": LEDGER_PATH}
+    )
+    path.write_text(json.dumps(registration, sort_keys=True) + "\n", encoding="utf-8")
+    ledger_path = root / LEDGER_PATH
+    ledger = json.loads(ledger_path.read_bytes())
+    ledger["read_only_boundary_protocols"].append(name)
+    ledger_path.write_text(json.dumps(ledger, sort_keys=True) + "\n", encoding="utf-8")
+    findings = audit_governance(root)["findings"]
+    assert f"boundary_protocol_registration_source_invalid:{name}" in findings
+    assert f"boundary_protocol_unregistered:{name}" in findings
+    assert run(root)["ok"] is False
+    assert _cli(root)[0] == 1
+
+
 @pytest.mark.parametrize(
     ("mutation", "child", "finding"),
     [
         ("unlisted_post", "claim_boundary", "observatory_ui_write_surface"),
         ("unregistered_protocol", "contracts", "manifest: contract registry mismatch"),
+        ("unknown_ledger_protocol", "governance", "boundary_protocol_unregistered:mycelium.unknown_boundary.v1"),
+        ("unknown_action_protocol", "governance", "boundary_protocol_unregistered:mycelium.unknown_action.v1"),
         ("promoted_milestone", "governance", "milestone_promotion_unsupported:M18:4.8"),
     ],
 )
@@ -111,6 +151,18 @@ def test_negative_copies_refuse_exactly_one_child(
         manifest["contracts"][0]["protocol"] = "mycelium.unregistered_boundary.v1"
         path.write_text(json.dumps(manifest, sort_keys=True) + "\n", encoding="utf-8")
         assert finding in audit_contracts(path)["drift"]
+    elif mutation == "unknown_ledger_protocol":
+        path = root / LEDGER_PATH
+        ledger = json.loads(path.read_bytes())
+        ledger["read_only_boundary_protocols"][0] = "mycelium.unknown_boundary.v1"
+        path.write_text(json.dumps(ledger, sort_keys=True) + "\n", encoding="utf-8")
+        assert audit_contracts(root / MANIFEST)["ok"] is True
+    elif mutation == "unknown_action_protocol":
+        path = root / LEDGER_PATH
+        ledger = json.loads(path.read_bytes())
+        ledger["authorized_product_actions"][0]["protocols"].append("mycelium.unknown_action.v1")
+        path.write_text(json.dumps(ledger, sort_keys=True) + "\n", encoding="utf-8")
+        assert audit_contracts(root / MANIFEST)["ok"] is True
     else:
         path = root / LEDGER_PATH
         ledger = json.loads(path.read_bytes())
@@ -123,6 +175,8 @@ def test_negative_copies_refuse_exactly_one_child(
     assert expected == run(root)  # Deterministic summary on unchanged bytes.
     assert expected["protocol"] == PROTOCOL
     assert expected["ok"] is False
+    if mutation == "unknown_ledger_protocol":
+        assert finding in audit_governance(root)["findings"]
     assert expected["release_ready"] is False
     assert {name for name, result in expected["children"].items() if not result["ok"]} == {child}
     assert expected["children"][child]["finding_count"] > 0

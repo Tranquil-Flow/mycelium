@@ -4,7 +4,7 @@ import copy
 import json
 from pathlib import Path
 
-from scripts.governance_audit import LEDGER_PATH, PROTOCOL, audit
+from scripts.governance_audit import LEDGER_PATH, REGISTRATION_PATH, PROTOCOL, audit
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -13,8 +13,11 @@ ROOT = Path(__file__).resolve().parents[2]
 def _isolated(tmp_path: Path) -> tuple[Path, dict]:
     root = tmp_path / "repo"
     ledger = json.loads((ROOT / LEDGER_PATH).read_text("utf-8"))
+    registrations = json.loads((ROOT / REGISTRATION_PATH).read_text("utf-8"))
     paths = {
         LEDGER_PATH,
+        REGISTRATION_PATH,
+        *(item["owner_source"] for item in registrations["registrations"]),
         ledger["governing_plan"],
         ledger["architecture_ledger"],
         ledger["contract_manifest"]["path"],
