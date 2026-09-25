@@ -596,8 +596,11 @@ def validate_stream_event(document: Mapping[str, Any], expected_id: str) -> tupl
     common = {"protocol", "request_id", "sequence", "type", "publisher_generation"}
     event_type = document.get("type")
     expected = set(common)
+    protocol = document.get("protocol")
     if event_type == "token":
         expected.update({"token_index", "text"})
+        if protocol == REQUEST_EVENT_PROTOCOL_V2 and "token_id" in document:
+            expected.add("token_id")
     elif event_type == "failed":
         expected.add("code")
     elif event_type == "lifecycle":
@@ -621,6 +624,7 @@ def validate_stream_event(document: Mapping[str, Any], expected_id: str) -> tupl
             or not isinstance(text, str)
             or len(text) > 65_536
             or len(text.encode("utf-8")) > 262_144
+            or ("token_id" in document and not safe_integer(document["token_id"]))
         ):
             raise GatewayValidationError("invalid_upstream_event")
     elif event_type == "failed" and not safe_code(document["code"]):

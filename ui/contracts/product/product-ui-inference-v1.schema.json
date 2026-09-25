@@ -171,6 +171,12 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["protocol", "request_id", "sequence", "publisher_generation", "type", "token_index", "text"],
+      "allOf": [
+        {
+          "if": { "properties": { "token_id": {} }, "required": ["token_id"] },
+          "then": { "properties": { "protocol": { "const": "mycelium.request_event.v2" } } }
+        }
+      ],
       "properties": {
         "protocol": { "enum": ["mycelium.request_event.v1", "mycelium.request_event.v2"] },
         "request_id": { "$ref": "#/$defs/request_id" },
@@ -178,6 +184,7 @@
         "publisher_generation": { "$ref": "#/$defs/safe_positive_integer" },
         "type": { "const": "token" },
         "token_index": { "$ref": "#/$defs/safe_nonnegative_integer" },
+        "token_id": { "$ref": "#/$defs/safe_nonnegative_integer" },
         "text": { "type": "string", "maxLength": 65536, "maxUtf8Bytes": 262144 }
       }
     },

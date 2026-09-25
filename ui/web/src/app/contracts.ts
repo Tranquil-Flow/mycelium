@@ -276,6 +276,7 @@ export type InferenceEvent =
       readonly type: 'token';
       readonly token_index: number;
       readonly text: string;
+      readonly token_id?: number;
     })
   | (InferenceEventBase & { readonly type: 'failed'; readonly code: string })
   | (InferenceEventBase & {
@@ -688,9 +689,23 @@ export function decodeInferenceEvent(value: unknown): InferenceEvent {
     ['accepted', 'token', 'completed', 'cancelled', 'failed', 'lifecycle'] as const,
     'inference_event.type',
   );
+  const protocolCandidate = readOwn(baseCandidate, 'protocol', 'inference_event.protocol');
+  const tokenHasId =
+    type === 'token' &&
+    protocolCandidate === PRODUCT_INFERENCE_EVENT_PROTOCOL_V2 &&
+    Object.prototype.hasOwnProperty.call(baseCandidate, 'token_id');
   const expected =
     type === 'token'
-      ? ['protocol', 'request_id', 'sequence', 'publisher_generation', 'type', 'token_index', 'text']
+      ? [
+          'protocol',
+          'request_id',
+          'sequence',
+          'publisher_generation',
+          'type',
+          'token_index',
+          'text',
+          ...(tokenHasId ? ['token_id'] : []),
+        ]
       : type === 'failed'
         ? ['protocol', 'request_id', 'sequence', 'publisher_generation', 'type', 'code']
         : type === 'lifecycle'
@@ -729,6 +744,9 @@ export function decodeInferenceEvent(value: unknown): InferenceEvent {
     ) {
       return fail('inference_event.text', 'text too large');
     }
+    const tokenId = Object.prototype.hasOwnProperty.call(candidate, 'token_id')
+      ? safeInteger(readOwn(candidate, 'token_id', 'inference_event.token_id'), 'inference_event.token_id')
+      : undefined;
     return Object.freeze({
       ...base,
       type,
@@ -737,6 +755,7 @@ export function decodeInferenceEvent(value: unknown): InferenceEvent {
         'inference_event.token_index',
       ),
       text: textValue,
+      ...(tokenId === undefined ? {} : { token_id: tokenId }),
     });
   }
   if (type === 'failed') {

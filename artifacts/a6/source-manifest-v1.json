@@ -48,7 +48,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:2e0b6b8728bf38bc87f760db9d466d847f87dc336f16979a30b8483c40a6aec3",
+      "sha256": "sha256:5e79fe3d9da5695657ce4246478e7bd00683fa0e66dcc4013676851e9cf5c574",
       "size_bytes": 70323
     },
     {
@@ -458,8 +458,8 @@
     },
     {
       "path": "mycelium_ui_gateway/validation.py",
-      "sha256": "sha256:84c114e373f8d4afe960300c248423ba6ec454938e120c1ecf3305294f12fcfa",
-      "size_bytes": 31161
+      "sha256": "sha256:31b2d1f5e09583782f08b9581021309e095e5fc00b014bb988d0a8c82b8b74b0",
+      "size_bytes": 31398
     },
     {
       "path": "physical_inference_qualification.py",
@@ -1127,9 +1127,19 @@
       "size_bytes": 13011
     },
     {
+      "path": "tests/ui_gateway/test_v2_token_event_contract.py",
+      "sha256": "sha256:9a6e6a4a1dcfdc961914e735d87af43b6496fe3e3d11521e6e6c56ead709feac",
+      "size_bytes": 5186
+    },
+    {
       "path": "ui/contracts/product/product-ui-bootstrap-v1.schema.json",
       "sha256": "sha256:a2a81d2fb5b120c5ab7585d9dd9ca5f7353441c15f13b9cc6b6970d3192ca752",
       "size_bytes": 2446
+    },
+    {
+      "path": "ui/contracts/product/product-ui-inference-v1.schema.json",
+      "sha256": "sha256:aaca51338379df86c4d713bdf5044c2373031f2c65e17ee4302fe3eccde85a2a",
+      "size_bytes": 8563
     },
     {
       "path": "ui/web/package.json",
@@ -1167,6 +1177,11 @@
       "size_bytes": 6071
     },
     {
+      "path": "ui/web/src/App.test.tsx",
+      "sha256": "sha256:88d1d0ac82327facac6db9cc40306238157465bf126fd7e64964bd9e2e5857dc",
+      "size_bytes": 10876
+    },
+    {
       "path": "ui/web/src/App.tsx",
       "sha256": "sha256:1d19b7ff077d1aa4d0f2ac481f46760d40696deaafdf5ea337b0c0159b3e7f99",
       "size_bytes": 21770
@@ -1183,13 +1198,18 @@
     },
     {
       "path": "ui/web/src/app/contracts.test.ts",
-      "sha256": "sha256:9499ce86e36d9765872bc5874c23a9f9c5b906ed75f498c991bb0eff4104d6df",
-      "size_bytes": 14570
+      "sha256": "sha256:66018f6429051296a5c37017938214abf07869918a564244bb170bcc6ebed340",
+      "size_bytes": 15974
     },
     {
       "path": "ui/web/src/app/contracts.ts",
-      "sha256": "sha256:e285820bf9bd1f2bb3d16e011e70336a016db83fc371fd36af10f82eb9f5b093",
-      "size_bytes": 36454
+      "sha256": "sha256:d65123a27ed17d3607f08108495d1c5d81d49a5fffefe9fab386544f3edf7642",
+      "size_bytes": 37157
+    },
+    {
+      "path": "ui/web/src/app/v2-token-event-with-id.fixture.json",
+      "sha256": "sha256:4175df31e987579d62381880682b9adeb3793c3a64375d40f3dd0f981e6d0cf7",
+      "size_bytes": 205
     },
     {
       "path": "ui/web/src/components/AppShell.test.tsx",
@@ -1398,5 +1418,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:93d36de137341b516e3e607d503e4d10a7d2ac099974b3ce0e1e5dbde2ffd51b"
+  "source_digest": "sha256:f811a35c20c79f1dbfbc7c53aba9af7714dc6be32dc7d49077b4e6fdcb0028e1"
 }

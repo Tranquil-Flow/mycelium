@@ -5,6 +5,7 @@ import inferenceSchema from '../../../contracts/product/product-ui-inference-v1.
 import observatorySchema from '../../../contracts/product/product-ui-observatory-v1.schema.json';
 import swarmSchema from '../../../contracts/product/product-ui-swarm-v1.schema.json';
 import canonicalBootstrap from '../../../../contracts/compatibility-fixtures/product-ui-bootstrap-v1.json';
+import producerV2TokenWithId from './v2-token-event-with-id.fixture.json';
 import {
   MAX_PROMPT_UTF8_BYTES,
   QUALIFICATION_MAX_AGE_MS,
@@ -325,10 +326,41 @@ describe('frozen product UI wire contracts', () => {
     };
     expect(validateEvent(astralBoundary)).toBe(true);
     expect(decodeInferenceEvent(astralBoundary).type).toBe('token');
+
+    expect(validateEvent(producerV2TokenWithId)).toBe(true);
+    const decodedProducerToken = decodeInferenceEvent(producerV2TokenWithId);
+    expect(decodedProducerToken).toMatchObject({
+      protocol: 'mycelium.request_event.v2',
+      type: 'token',
+      text: 'Hallo',
+      token_index: 0,
+      token_id: 9707,
+    });
+    if (decodedProducerToken.type !== 'token') throw new Error('producer fixture was not token');
+    expect(decodedProducerToken.token_id).toBe(9707);
+    const producerTokenWithoutId: Record<string, unknown> = { ...producerV2TokenWithId };
+    delete producerTokenWithoutId.token_id;
+    expect(validateEvent(producerTokenWithoutId)).toBe(true);
+    expect(decodeInferenceEvent(producerTokenWithoutId)).not.toHaveProperty('token_id');
+
+    const lifecycleEvent = {
+      protocol: 'mycelium.request_event.v2',
+      request_id: requestId,
+      sequence: 3,
+      publisher_generation: 1,
+      type: 'lifecycle',
+      phase: 'prefill',
+    };
     for (const invalid of [
       { ...tokenEvent, token_index: undefined },
       { ...tokenEvent, text: undefined },
       { ...tokenEvent, type: 'accepted', text: 'leak' },
+      { ...producerV2TokenWithId, protocol: 'mycelium.request_event.v1' },
+      { ...producerV2TokenWithId, token_id: true },
+      { ...producerV2TokenWithId, token_id: -1 },
+      { ...producerV2TokenWithId, token_id: Number.MAX_SAFE_INTEGER + 1 },
+      { ...producerV2TokenWithId, unexpected: 'field' },
+      { ...lifecycleEvent, token_id: 9707 },
       {
         protocol: 'mycelium.request_event.v1',
         request_id: requestId,

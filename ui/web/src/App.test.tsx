@@ -110,7 +110,7 @@ describe('Network Observatory', () => {
 
   it('keeps artifact readiness separate from route readiness and from simulator scope', () => {
     render(<App />);
-    fireEvent.click(screen.getByRole('link', { name: /evidence/i }));
+    fireEvent.click(screen.getByRole('link', { name: /^readiness$/i }));
 
     expect(screen.getByRole('heading', { name: /proof matrix/i })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /independent provisioning capture/i })).toBeInTheDocument();
