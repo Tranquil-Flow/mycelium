@@ -19,9 +19,9 @@ rewrite blocker B1 named:
 * the recorded cutover gate: after cutover every v1 write fails with
   ``membership_contract_upgrade_required``.
 
-The executor that persists these decisions (journal, checkpoint/restart,
-atomic commit, node/seed write paths, migration-reader removal) is *not*
-implemented here; its seams raise ``MigrationUnavailable``.
+The local private filesystem executor is available only with an explicit typed
+storage/request pair and verified signed profiles. Node/seed write paths and
+migration-reader removal remain unavailable; no live cutover is implied.
 """
 
 from __future__ import annotations
@@ -552,10 +552,16 @@ class PlatformNeutralMigrationError(ValueError):
         super().__init__(code)
 
 
-def execute_identity_preserving_migration(*args: Any, **kwargs: Any) -> Any:
-    """Executor seam: not implemented in this lane (see harness-plan.md)."""
+def execute_identity_preserving_migration(*, storage: Any = None, request: Any = None, now: float | None = None, stop_after: str | None = None, **untrusted: Any) -> str:
+    """Run only the local transaction with a typed adapter and signed inputs.
 
-    raise MigrationUnavailable("migration_executor_not_implemented")
+    Raw declared_members/record/booleans are not migration authority.
+    """
+    from .migration_executor import FileMembershipState, MigrationExecutor, MigrationRequest
+
+    if untrusted or not isinstance(storage, FileMembershipState) or not isinstance(request, MigrationRequest) or now is None:
+        raise MigrationUnavailable("migration_executor_not_implemented")
+    return MigrationExecutor(storage).execute(request, now=now, stop_after=stop_after)
 
 
 def restart_from_checkpoint(*args: Any, **kwargs: Any) -> Any:

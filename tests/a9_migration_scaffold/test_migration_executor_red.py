@@ -1,17 +1,10 @@
-"""Weak-RED tests: the migration executor behaviour this lane does not implement.
+"""Legacy weak-RED placeholders, deselected by default.
 
-Every failure below is raised by this lane's own boundary functions
-(``MigrationUnavailable``) rather than by a demonstrated gap in the base tip.
-It is recorded so the lane's incompleteness is machine-visible and so these
-tests can be driven to GREEN only by landing the real executor: the private
-canonical journal, restart at each checkpoint, atomic commit, exact and changed
-retry, duplicate-identity rejection, concurrent resume, rollback before commit,
-node/seed write-path integration, and removal of the migration-only reader.
-
-Do not cite a failure in this file as product evidence; cite
-``tests/a9_acceptance/test_identity_preserving_migration.py`` for the
-deterministic decisions that are implemented, and ``harness-plan.md`` for what
-remains.
+Raw declared_members/record calls here cannot satisfy the real migration
+contract. The typed, signed, fsynced local executor is tested with actual
+filesystem transactions in tests/a9_acceptance/test_migration_executor.py.
+These placeholders do not prove node/seed integration, reader removal or a
+live cutover; keep them deselected until those later owned seams are delivered.
 """
 
 from __future__ import annotations
