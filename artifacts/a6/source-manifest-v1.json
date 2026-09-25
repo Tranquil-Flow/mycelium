@@ -127,6 +127,11 @@
       "size_bytes": 36411
     },
     {
+      "path": "mycelium_a6_direct_socket.py",
+      "sha256": "sha256:0aa41535306ffbb9f6380b7cfd057fe72b2351c5a58951f09e6aa96456e4083e",
+      "size_bytes": 7728
+    },
+    {
       "path": "mycelium_a6_fault_control.py",
       "sha256": "sha256:bac413493f4b56bd2455e9c5a91831accc5bc751e020c689810a55e652e50177",
       "size_bytes": 18555
@@ -832,6 +837,11 @@
       "size_bytes": 1112
     },
     {
+      "path": "tests/live/test_a6_direct_socket.py",
+      "sha256": "sha256:7ecabdfa3d9933fb7b892961ca9172d32e367c1c201f012f0b0f7d65f8bc9a17",
+      "size_bytes": 5154
+    },
+    {
       "path": "tests/live/test_a6_fault_control.py",
       "sha256": "sha256:8b58bd0ffdcafdaf3901679396817eba56665036e759322dbe08e581194d2c15",
       "size_bytes": 8619
@@ -1223,5 +1233,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:d2f25b78db0077fc4de20aa146d5b4193e883d58374fc29ba985ae184513f122"
+  "source_digest": "sha256:f8b42faa4c0a988eae6079e5006f81cbc3e4473c17e012247752b90a325d8931"
 }
