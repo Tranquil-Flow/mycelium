@@ -3169,12 +3169,17 @@ class PhysicalLiveRoute:
         # from this scheduling point without extending mutation authority.
         final_deadline = now + _CLEANUP_RECONCILIATION_HORIZON_SECONDS
         with self._lock:
+            stop = getattr(self, "_cleanup_reconciliation_stop", None)
+            if not isinstance(stop, threading.Event):
+                stop = threading.Event()
+                self._cleanup_reconciliation_stop = stop
             active = self._active_route_requests.get(request_id)
             if (
                 active is None
                 or active.get("terminal") is True
                 or active.get("cleanup_receipt_published") is True
                 or getattr(self, "_closed", False)
+                or stop.is_set()
             ):
                 return
             futures = getattr(self, "_cleanup_reconciliation_futures", None)
@@ -3184,10 +3189,6 @@ class PhysicalLiveRoute:
             prior = futures.get(request_id)
             if prior is not None and not prior.done():
                 return
-            stop = getattr(self, "_cleanup_reconciliation_stop", None)
-            if not isinstance(stop, threading.Event):
-                stop = threading.Event()
-                self._cleanup_reconciliation_stop = stop
             self._submit_cleanup_reconciliation_locked(
                 request_id=request_id,
                 cleanup_subject=frozen_subject,
@@ -3205,6 +3206,7 @@ class PhysicalLiveRoute:
         final_deadline_monotonic_s: float,
         stop: threading.Event,
         last_error: str = "route_cancellation_cleanup_unproven",
+        retry_not_before_monotonic_s: float | None = None,
     ) -> None:
         """Submit one fair proof slice while ``self._lock`` is held."""
 
@@ -3223,6 +3225,7 @@ class PhysicalLiveRoute:
             final_deadline_monotonic_s=final_deadline_monotonic_s,
             stop=stop,
             last_error=last_error,
+            retry_not_before_monotonic_s=retry_not_before_monotonic_s,
         )
         self._cleanup_reconciliation_futures[request_id] = future
 
@@ -3245,7 +3248,17 @@ class PhysicalLiveRoute:
         final_deadline_monotonic_s: float,
         stop: threading.Event,
         last_error: str = "route_cancellation_cleanup_unproven",
+        retry_not_before_monotonic_s: float | None = None,
     ) -> None:
+        if stop.is_set():
+            return
+        # Queue the retry before waiting: a ready sibling already in the
+        # bounded executor must run before this owner's next poll interval.
+        if retry_not_before_monotonic_s is not None:
+            stop.wait(max(0.0, min(
+                retry_not_before_monotonic_s,
+                final_deadline_monotonic_s,
+            ) - time.monotonic()))
         if stop.is_set():
             return
         with self._lock:
@@ -3254,6 +3267,7 @@ class PhysicalLiveRoute:
                 active is None
                 or active.get("terminal") is True
                 or active.get("cleanup_receipt_published") is True
+                or getattr(self, "_closed", False)
             ):
                 return
         if time.monotonic() < final_deadline_monotonic_s:
@@ -3292,22 +3306,20 @@ class PhysicalLiveRoute:
                         active["cleanup_reconciliation_error"] = last_error
 
         remaining = final_deadline_monotonic_s - time.monotonic()
-        if remaining > 0 and not stop.is_set():
-            stop.wait(min(_CLEANUP_RECEIPT_POLL_SECONDS, remaining))
-        if not stop.is_set() and time.monotonic() < final_deadline_monotonic_s:
+        if not stop.is_set() and remaining > 0:
             with self._lock:
                 active = self._active_route_requests.get(request_id)
                 if (
                     active is None
                     or active.get("terminal") is True
                     or active.get("cleanup_receipt_published") is True
+                    or getattr(self, "_closed", False)
                 ):
                     return
                 try:
-                    # One request gets at most one two-second proof slice before
-                    # moving to the tail.  This preserves the fixed route-wide
-                    # worker bound while preventing four delayed owners from
-                    # starving every sibling until their deadlines expire.
+                    # A failed owner moves to the tail immediately. Its retry
+                    # job waits for the poll cadence only after queued siblings
+                    # have had a chance to run within their own deadlines.
                     self._submit_cleanup_reconciliation_locked(
                         request_id=request_id,
                         cleanup_subject=cleanup_subject,
@@ -3315,6 +3327,10 @@ class PhysicalLiveRoute:
                         final_deadline_monotonic_s=final_deadline_monotonic_s,
                         stop=stop,
                         last_error=last_error,
+                        retry_not_before_monotonic_s=min(
+                            final_deadline_monotonic_s,
+                            time.monotonic() + _CLEANUP_RECEIPT_POLL_SECONDS,
+                        ),
                     )
                 except RuntimeError:
                     if stop.is_set() or getattr(self, "_closed", False):
@@ -3326,7 +3342,12 @@ class PhysicalLiveRoute:
             return
         with self._lock:
             active = self._active_route_requests.get(request_id)
-            if active is None or active.get("cleanup_receipt_published") is True:
+            if (
+                active is None
+                or active.get("terminal") is True
+                or active.get("cleanup_receipt_published") is True
+                or getattr(self, "_closed", False)
+            ):
                 return
             active["cleanup_reconciliation_error"] = (
                 f"cleanup_reconciliation_timeout:{last_error}"[:128]

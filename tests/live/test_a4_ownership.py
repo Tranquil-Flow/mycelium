@@ -557,6 +557,7 @@ def test_cleanup_reconciliation_services_waiting_sibling_within_owner_horizon(
         for request_id in ("queue-owner-a", "queue-owner-b")
     }
     owner_a_entered = threading.Event()
+    owner_a_release = threading.Event()
     published = {
         request_id: threading.Event() for request_id in route._active_route_requests
     }
@@ -574,7 +575,7 @@ def test_cleanup_reconciliation_services_waiting_sibling_within_owner_horizon(
         assert receipt_only is True
         if cleanup_subject["request_id"] == "queue-owner-a":
             owner_a_entered.set()
-            time.sleep(0.05)
+            assert owner_a_release.wait(timeout=1.0)
             raise TimeoutError("owner-a-proof-not-ready")
 
     def seal(*, request_id, cleanup_subject, participating_node_ids):
@@ -595,6 +596,9 @@ def test_cleanup_reconciliation_services_waiting_sibling_within_owner_horizon(
         "_CLEANUP_RECONCILIATION_HORIZON_SECONDS",
         0.2,
     )
+    # A one-poll wait by the failed owner must not consume the ready
+    # sibling's entire independent horizon, even with a single worker.
+    monkeypatch.setattr(route_module, "_CLEANUP_RECEIPT_POLL_SECONDS", 0.2)
     absolute_deadline_ms = int(time.monotonic() * 1_000) + 10_000
 
     try:
@@ -615,14 +619,75 @@ def test_cleanup_reconciliation_services_waiting_sibling_within_owner_horizon(
             },
             participating_node_ids=frozenset({"node-a"}),
         )
+        owner_a_release.set()
         assert published["queue-owner-b"].wait(timeout=1.0)
         assert "queue-owner-b" not in incidents
     finally:
+        owner_a_release.set()
         route._cleanup_reconciliation_stop.set()
         route._cleanup_reconciliation_executor.shutdown(
             wait=True,
             cancel_futures=True,
         )
+
+
+@pytest.mark.parametrize("retirement", ["terminal", "closed", "stopped"])
+def test_cleanup_reconciliation_failed_owner_does_not_retry_after_retirement(
+    monkeypatch: pytest.MonkeyPatch, retirement: str,
+) -> None:
+    route = object.__new__(PhysicalLiveRoute)
+    route._lock = threading.RLock()
+    route._closed = False
+    route._cleanup_reconciliation_stop = threading.Event()
+    route._cleanup_reconciliation_executor = route_module.ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix="cleanup-retired-owner-test",
+    )
+    route._cleanup_reconciliation_futures = {}
+    route._active_route_requests = {
+        "retired-owner": {"terminal": False, "cleanup_receipt_published": False},
+    }
+    attempted = threading.Event()
+    attempts: list[str] = []
+    published: list[str] = []
+    incidents: list[str] = []
+
+    def fail_exact_proof(_nodes, *, deadline_monotonic_s, cleanup_subject, receipt_only):
+        assert deadline_monotonic_s > time.monotonic()
+        assert receipt_only is True
+        attempts.append(cleanup_subject["request_id"])
+        if retirement == "terminal":
+            with route._lock:
+                route._active_route_requests["retired-owner"]["terminal"] = True
+        elif retirement == "closed":
+            route._closed = True
+        else:
+            route._cleanup_reconciliation_stop.set()
+        attempted.set()
+        raise TimeoutError("proof-not-ready")
+
+    route._wait_for_cancellation_cleanup = fail_exact_proof
+    route._seal_and_publish_request_cleanup_receipt = lambda **_kwargs: (
+        published.append("invalid-success")
+    )
+    route._record_scoped_runtime_incident = lambda *, request_id, **_kwargs: (
+        incidents.append(request_id)
+    )
+    monkeypatch.setattr(route_module, "_CLEANUP_RECONCILIATION_HORIZON_SECONDS", 0.2)
+    try:
+        route._schedule_cleanup_reconciliation(
+            request_id="retired-owner",
+            cleanup_subject={"request_id": "retired-owner"},
+            participating_node_ids=frozenset({"node-a"}),
+        )
+        assert attempted.wait(timeout=1.0)
+        route._cleanup_reconciliation_executor.shutdown(wait=True)
+        assert attempts == ["retired-owner"]
+        assert published == []
+        assert incidents == []
+        assert route._active_route_requests["retired-owner"]["cleanup_receipt_published"] is False
+    finally:
+        route._cleanup_reconciliation_stop.set()
+        route._cleanup_reconciliation_executor.shutdown(wait=True, cancel_futures=True)
 
 
 def test_cleanup_reconciliation_horizon_starts_after_data_request_deadline(
