@@ -35,6 +35,23 @@ const freshnessByKind: Readonly<Record<EvidenceSourceKind, ReadonlySet<EvidenceF
   fixture: new Set(['fixture']),
 };
 
+const privateKeys = new Set(['prompt','completion','token_ids','token_text','logits','activations','kv_contents','weights','local_path','endpoint','hostname','ip_address','credential','private_key','invite','bearer_token','secret']);
+const privateValue = /https?:\/\/|(?:^|\s)\/(?:Users|home|private|tmp)\/|\b(?:\d{1,3}\.){3}\d{1,3}\b|\bBearer\s+\S+/i;
+function rejectPrivate(value: unknown): void {
+  if (Array.isArray(value)) { value.forEach(rejectPrivate); return; }
+  if (value !== null && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) {
+      if (privateKeys.has(key.toLowerCase())) throw new TypeError('evidence payload privacy invalid');
+      rejectPrivate(item);
+    }
+  } else if (typeof value === 'string' && privateValue.test(value)) throw new TypeError('evidence payload privacy invalid');
+}
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value !== null && typeof value === 'object') return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+
 function exact(value: unknown, expected: readonly string[], path: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${path} must be an object`);
   const record = value as Record<string, unknown>;
@@ -62,6 +79,9 @@ export function decodeEvidenceProjection(value: unknown): EvidenceProjection {
   if ((immutable && validUntil !== null) || (!immutable && (validUntil === null || validUntil < captured))) throw new TypeError('evidence validity is invalid');
   const payloadProtocol = text(source.payload_protocol, 'payload protocol');
   if (typeof source.payload !== 'object' || source.payload === null || Array.isArray(source.payload) || (source.payload as Record<string, unknown>).protocol !== payloadProtocol) throw new TypeError('evidence payload protocol mismatch');
+  rejectPrivate(text(source.record_id, 'record id'));
+  rejectPrivate(text(source.authority, 'authority'));
+  rejectPrivate(source.payload);
   return Object.freeze({
     protocol: 'mycelium.evidence_projection.v1',
     record_id: text(source.record_id, 'record id'),
@@ -79,10 +99,17 @@ export function decodeEvidenceProjection(value: unknown): EvidenceProjection {
 }
 export function decodeEvidenceHistory(value: unknown): EvidenceHistory {
   const source = exact(value, ['protocol','records'], 'evidence history');
-  if (source.protocol !== 'mycelium.evidence_history.v1' || !Array.isArray(source.records) || source.records.length > 128) throw new TypeError('evidence history is invalid');
+  if (source.protocol !== 'mycelium.evidence_history.v1' || !Array.isArray(source.records)) throw new TypeError('evidence history is invalid');
   const records = source.records.map(decodeEvidenceProjection);
   if (records.some((record) => record.source_kind !== 'sealed_historical' || record.freshness !== 'historical')) throw new TypeError('evidence history contains a non-historical record');
-  return Object.freeze({ protocol: 'mycelium.evidence_history.v1', records: Object.freeze(records) });
+  const distinct = new Map<string, EvidenceProjection>();
+  for (const record of records) {
+    const previous = distinct.get(record.record_id);
+    if (previous !== undefined && canonical(previous) !== canonical(record)) throw new TypeError('evidence history duplicate conflict');
+    distinct.set(record.record_id, record);
+    if (distinct.size > 128) throw new TypeError('evidence history is invalid');
+  }
+  return Object.freeze({ protocol: 'mycelium.evidence_history.v1', records: Object.freeze([...distinct.values()].sort((a, b) => a.observed_at_unix_ms - b.observed_at_unix_ms || a.record_id.localeCompare(b.record_id))) });
 }
 
 export function evidenceIsCurrentLive(evidence: EvidenceProjection, nowUnixMs: number): boolean {

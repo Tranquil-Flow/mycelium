@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 import threading
 import time
 from typing import Any, Callable, Mapping, Sequence
@@ -13,6 +14,8 @@ import uuid
 
 EVIDENCE_PROJECTION_PROTOCOL = "mycelium.evidence_projection.v1"
 EVIDENCE_HISTORY_PROTOCOL = "mycelium.evidence_history.v1"
+MAX_SAFE_INTEGER = 9_007_199_254_740_991  # JSON integers must round-trip through JavaScript.
+MAX_HISTORY_RECORDS = 128
 
 SOURCE_KINDS = frozenset(
     {"live_runtime", "planner_intent", "sealed_historical", "replay", "fixture"}
@@ -54,6 +57,27 @@ _ENVELOPE_FIELDS = frozenset(
 )
 
 
+_PRIVATE_KEYS = frozenset({
+    "prompt", "completion", "token_ids", "token_text", "logits", "activations",
+    "kv_contents", "weights", "local_path", "endpoint", "hostname", "ip_address",
+    "credential", "private_key", "invite", "bearer_token", "secret",
+})
+_PRIVATE_VALUE = re.compile(r"https?://|(?:^|\s)/(?:Users|home|private|tmp)/|\b(?:\d{1,3}\.){3}\d{1,3}\b|\bBearer\s+\S+", re.I)
+
+
+def _reject_private(value: Any) -> None:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if not isinstance(key, str) or key.lower() in _PRIVATE_KEYS:
+                raise ValueError("evidence_payload_privacy_invalid")
+            _reject_private(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _reject_private(item)
+    elif isinstance(value, str) and _PRIVATE_VALUE.search(value):
+        raise ValueError("evidence_payload_privacy_invalid")
+
+
 def _canonical_bytes(value: Mapping[str, Any]) -> bytes:
     return json.dumps(
         value,
@@ -69,13 +93,13 @@ def _digest(value: Mapping[str, Any]) -> str:
 
 
 def _positive_integer(value: object, name: str) -> int:
-    if type(value) is not int or value <= 0:
+    if type(value) is not int or not 0 < value <= MAX_SAFE_INTEGER:
         raise ValueError(f"{name}_invalid")
     return value
 
 
 def _nonnegative_integer(value: object, name: str) -> int:
-    if type(value) is not int or value < 0:
+    if type(value) is not int or not 0 <= value <= MAX_SAFE_INTEGER:
         raise ValueError(f"{name}_invalid")
     return value
 
@@ -95,6 +119,7 @@ def validate_evidence_projection(value: Mapping[str, Any]) -> dict[str, Any]:
     if result["protocol"] != EVIDENCE_PROJECTION_PROTOCOL:
         raise ValueError("evidence_projection_protocol_invalid")
     _text(result["record_id"], "record_id")
+    _reject_private(result["record_id"])
     capability = _text(result["capability"], "capability")
     if capability not in CAPABILITIES:
         raise ValueError("capability_invalid")
@@ -105,6 +130,7 @@ def validate_evidence_projection(value: Mapping[str, Any]) -> dict[str, Any]:
     if freshness not in FRESHNESS_BY_SOURCE_KIND[source_kind]:
         raise ValueError("source_freshness_mismatch")
     _text(result["authority"], "authority")
+    _reject_private(result["authority"])
     _nonnegative_integer(result["generation"], "generation")
     captured = _positive_integer(result["captured_at_unix_ms"], "captured_at_unix_ms")
     observed = _positive_integer(result["observed_at_unix_ms"], "observed_at_unix_ms")
@@ -122,6 +148,7 @@ def validate_evidence_projection(value: Mapping[str, Any]) -> dict[str, Any]:
     payload = result["payload"]
     if not isinstance(payload, dict) or payload.get("protocol") != payload_protocol:
         raise ValueError("payload_protocol_mismatch")
+    _reject_private(payload)
     return result
 
 
@@ -204,6 +231,8 @@ class EvidenceProjectionRegistry:
                 raise ValueError("historical_record_conflict")
             by_id[record_id] = record
             digests[record_id] = digest
+            if len(by_id) > MAX_HISTORY_RECORDS:
+                raise ValueError("evidence_history_invalid")
         self._historical = tuple(
             sorted(
                 by_id.values(),

@@ -12,7 +12,10 @@ const capabilityLabels = {
 } as const;
 
 function sourceLabel(evidence: EvidenceProjection): string {
-  if (evidence.source_kind === 'live_runtime') return evidenceIsCurrentLive(evidence, Date.now()) ? 'Live now' : evidence.freshness === 'degraded' ? 'Live · degraded' : 'Stale';
+  if (evidence.source_kind === 'live_runtime') {
+    if (evidence.valid_until_unix_ms === null || evidence.valid_until_unix_ms < Date.now()) return 'Stale';
+    return evidenceIsCurrentLive(evidence, Date.now()) ? 'Live now' : evidence.freshness === 'degraded' ? 'Live · degraded' : 'Stale';
+  }
   if (evidence.source_kind === 'sealed_historical') return 'Recorded evidence';
   if (evidence.source_kind === 'replay') return 'Replay';
   if (evidence.source_kind === 'fixture') return 'Demo data';

@@ -250,8 +250,8 @@
         },
         {
           "path": "mycelium_evidence.py",
-          "sha256": "1c0b5d8f7b4e7800997b5b1d599a3a0f39283392deff457781265a15fa2b97d9",
-          "size_bytes": 9547
+          "sha256": "d84e3ac69436cfb6db5026d19451bb4ca37f9a2ce0f5665bd5ef5ea4584c3b72",
+          "size_bytes": 10863
         },
         {
           "path": "mycelium_live/supervisor.py",
@@ -260,13 +260,13 @@
         },
         {
           "path": "ui/web/src/features/evidence/evidenceProjection.ts",
-          "sha256": "500eb66fc936d246012f951edb74fb8221d6c226b5aa48635fceb571af6d6b5d",
-          "size_bytes": 7083
+          "sha256": "16128981e833319276be543ba32e1d21bd1409fda5470122e898f7e7fbd4c4ba",
+          "size_bytes": 8911
         },
         {
           "path": "ui/web/src/features/evidence/EvidenceProvenanceSource.tsx",
-          "sha256": "b03c134b78d64b3ce902e248daf1d14ce91243fde7127a6b0c95810323b2b081",
-          "size_bytes": 4592
+          "sha256": "7760bc16e27b98a4a9dad29eb8dff1c4300c3c49753793816daa10e0ff44d4e1",
+          "size_bytes": 4710
         }
       ],
       "protocol": "mycelium.evidence_history.v1"
@@ -285,8 +285,8 @@
         },
         {
           "path": "mycelium_evidence.py",
-          "sha256": "1c0b5d8f7b4e7800997b5b1d599a3a0f39283392deff457781265a15fa2b97d9",
-          "size_bytes": 9547
+          "sha256": "d84e3ac69436cfb6db5026d19451bb4ca37f9a2ce0f5665bd5ef5ea4584c3b72",
+          "size_bytes": 10863
         },
         {
           "path": "mycelium_live/supervisor.py",
@@ -295,13 +295,13 @@
         },
         {
           "path": "ui/web/src/features/evidence/evidenceProjection.ts",
-          "sha256": "500eb66fc936d246012f951edb74fb8221d6c226b5aa48635fceb571af6d6b5d",
-          "size_bytes": 7083
+          "sha256": "16128981e833319276be543ba32e1d21bd1409fda5470122e898f7e7fbd4c4ba",
+          "size_bytes": 8911
         },
         {
           "path": "ui/web/src/features/evidence/EvidenceProvenanceSource.tsx",
-          "sha256": "b03c134b78d64b3ce902e248daf1d14ce91243fde7127a6b0c95810323b2b081",
-          "size_bytes": 4592
+          "sha256": "7760bc16e27b98a4a9dad29eb8dff1c4300c3c49753793816daa10e0ff44d4e1",
+          "size_bytes": 4710
         }
       ],
       "protocol": "mycelium.evidence_projection.v1"

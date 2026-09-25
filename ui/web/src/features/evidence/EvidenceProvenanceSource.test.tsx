@@ -7,6 +7,12 @@ const runtime = decodeEvidenceProjection({ protocol: 'mycelium.evidence_projecti
 const historical = decodeEvidenceProjection({ ...runtime, record_id: 'history-a', capability: 'stage_local_kv', source_kind: 'sealed_historical', authority: 'physical gate', captured_at_unix_ms: 1_000, observed_at_unix_ms: 1_000, valid_until_unix_ms: null, freshness: 'historical' });
 
 describe('EvidenceProvenanceSource', () => {
+  it('labels an expired degraded runtime as stale, not reachable live', async () => {
+    const expired = decodeEvidenceProjection({ ...runtime, freshness: 'degraded', captured_at_unix_ms: 1_000, observed_at_unix_ms: 1_000, valid_until_unix_ms: 1_001 });
+    render(<EvidenceProvenanceSource client={{ loadRuntime: async () => expired, loadHistory: async () => decodeEvidenceHistory({ protocol: 'mycelium.evidence_history.v1', records: [] }) }} />);
+    expect(await screen.findByRole('heading', { name: 'Stale' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Live · degraded' })).not.toBeInTheDocument();
+  });
   it('labels current runtime and sealed records without milestone copy', async () => {
     render(<EvidenceProvenanceSource client={{ loadRuntime: async () => runtime, loadHistory: async () => decodeEvidenceHistory({ protocol: 'mycelium.evidence_history.v1', records: [historical] }) }} />);
     expect(await screen.findByRole('heading', { name: 'Live now' })).toBeInTheDocument();

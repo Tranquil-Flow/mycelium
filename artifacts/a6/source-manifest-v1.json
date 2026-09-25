@@ -48,8 +48,8 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:2d70071804cf370cc0e07c014850820791cf2214dde902be24da153bb758db8d",
-      "size_bytes": 70321
+      "sha256": "sha256:63278b0c096b44821f9792f703d78122e3ac2f85312c4609499b3d60df56ebd3",
+      "size_bytes": 70323
     },
     {
       "path": "contracts/governance-boundary-protocols.v1.json",
@@ -175,6 +175,11 @@
       "path": "mycelium_demo/public_origin_proxy.py",
       "sha256": "sha256:fc4f75ddf78835b7a4dc213a2b4ba2cb3892f93f72d41921dccce72d88f98a7f",
       "size_bytes": 18311
+    },
+    {
+      "path": "mycelium_evidence.py",
+      "sha256": "sha256:d84e3ac69436cfb6db5026d19451bb4ca37f9a2ce0f5665bd5ef5ea4584c3b72",
+      "size_bytes": 10863
     },
     {
       "path": "mycelium_layer_planner/__init__.py",
@@ -807,6 +812,11 @@
       "size_bytes": 14458
     },
     {
+      "path": "tests/evidence/test_evidence_projection.py",
+      "sha256": "sha256:5eb25a74953c44a2a9d192bb07873e8e37abb244d9424a2710c7fbc0befe0d5c",
+      "size_bytes": 7923
+    },
+    {
       "path": "tests/gateway/capture_loopback_sse.py",
       "sha256": "sha256:b3ead5bf554fa9f6cdba2f660af6d2ab70a9d33c88d6b0b882c26b02ab61c455",
       "size_bytes": 5325
@@ -1072,6 +1082,11 @@
       "size_bytes": 2227
     },
     {
+      "path": "ui/web/scripts/a1-evidence-browser-closeout.mjs",
+      "sha256": "sha256:01f9c85ff4dbe4fb7ec1e3063c64397264fd74fe9d641930659893da3bfc81e9",
+      "size_bytes": 13953
+    },
+    {
       "path": "ui/web/scripts/a14-local-browser.mjs",
       "sha256": "sha256:b9f058d013e7ee837a7ccdf6142f1abe760d04d4f2593a36a2d6c7ecab52ac11",
       "size_bytes": 12912
@@ -1088,8 +1103,8 @@
     },
     {
       "path": "ui/web/src/App.consumer.test.tsx",
-      "sha256": "sha256:1448aec471e9b016d4917d01350e07b60e8417168f45fcdfad319e146170a52e",
-      "size_bytes": 5695
+      "sha256": "sha256:81ad95829fbbafcd5ed6f23f01e6c4c4dd0307ca5f4d45a55715d77b3d59e1a8",
+      "size_bytes": 6071
     },
     {
       "path": "ui/web/src/App.tsx",
@@ -1187,6 +1202,26 @@
       "size_bytes": 992
     },
     {
+      "path": "ui/web/src/features/evidence/EvidenceProvenanceSource.test.tsx",
+      "sha256": "sha256:8d6980c94eba31f23da9bee1b91dd0528c5b2ac5bc76277c6e13a5a929953915",
+      "size_bytes": 2508
+    },
+    {
+      "path": "ui/web/src/features/evidence/EvidenceProvenanceSource.tsx",
+      "sha256": "sha256:7760bc16e27b98a4a9dad29eb8dff1c4300c3c49753793816daa10e0ff44d4e1",
+      "size_bytes": 4710
+    },
+    {
+      "path": "ui/web/src/features/evidence/evidenceProjection.test.ts",
+      "sha256": "sha256:b31f303f72c2931336f539ffcf037a2525be64ecc07459d597d27ca0ac03e5b4",
+      "size_bytes": 6303
+    },
+    {
+      "path": "ui/web/src/features/evidence/evidenceProjection.ts",
+      "sha256": "sha256:16128981e833319276be543ba32e1d21bd1409fda5470122e898f7e7fbd4c4ba",
+      "size_bytes": 8911
+    },
+    {
       "path": "ui/web/src/features/inference/requestClient.compat.test.ts",
       "sha256": "sha256:c9baf4b0031b17ac18322816c6a8e77d3860d4bc9f9e416e10005e7b995856fb",
       "size_bytes": 4008
@@ -1273,5 +1308,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:5f255d2b8bdd6671d3b98df3b05fd8f67fa47f02d5447d0af0cf7bcfcbb26e96"
+  "source_digest": "sha256:c17e930c814453ca3993edc44403ae676b83fa9dd2cd2aadf586de9854fa28e2"
 }

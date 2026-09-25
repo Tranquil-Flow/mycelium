@@ -21,10 +21,15 @@ describe('consumer/operator route composition', () => {
     expect(screen.getByRole('button', {name:'Send prompt'})).toBeDisabled();
     expect(screen.queryByRole('complementary', {name:'Full-context replay recovery status'})).not.toBeInTheDocument();
     expect(screen.queryByText(/fixture data · not live/i)).not.toBeInTheDocument();
+    expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls.every(([url]) => String(url) === '/api/v1/bootstrap')).toBe(true);
     fireEvent.click(screen.getByRole('button',{name:'Retry connection'}));
-    await waitFor(() => expect(fetcher.mock.calls.length).toBeGreaterThan(2));
-    expect(fetcher.mock.calls.every(([,init]) => !init?.method || init.method === 'GET')).toBe(true);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('button', {name:'Retry connection'})).toBeVisible();
+    expect(fetcher).toHaveBeenCalledTimes(2); // no automatic resubmit after failure
+    fireEvent.click(screen.getByRole('button',{name:'Retry connection'}));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3));
+    expect(fetcher.mock.calls.every(([url, init]) => String(url) === '/api/v1/bootstrap' && init?.method === 'GET')).toBe(true);
   });
   it('refuses a fixture bootstrap rather than opening the live evidence gate', async () => {
     const fetcher = vi.spyOn(globalThis,'fetch').mockImplementation(async url => {
