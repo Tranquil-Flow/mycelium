@@ -4,6 +4,7 @@ import argparse
 import os
 import shutil
 import subprocess
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -78,6 +79,60 @@ def build_parser() -> argparse.ArgumentParser:
         "--worker-static-root",
         type=Path,
         help="browser-worker static root mounted at /device",
+    )
+
+    demo_stack = commands.add_parser(
+        "demo-stack",
+        help=(
+            "launch the loopback demo product stack together with the "
+            "OpenAI-compatible shim co-listener and the real Observatory gateway"
+        ),
+        description=(
+            "Compose mycelium_demo.product_stack with the real "
+            "mycelium_gateway.asgi observatory application mounted, co-launch the "
+            "mycelium_openai_shim HTTP listener beside it, and serve both on "
+            "loopback. Stub/synthetic qualification only: this is reachability "
+            "and composition evidence, never physical route evidence."
+        ),
+    )
+    demo_stack.add_argument(
+        "--host",
+        choices=("127.0.0.1",),
+        default="127.0.0.1",
+        help="loopback host for both listeners",
+    )
+    demo_stack.add_argument(
+        "--port",
+        type=_serve_port,
+        default=0,
+        help="product stack loopback port (0 = ephemeral)",
+    )
+    demo_stack.add_argument(
+        "--openai-shim-port",
+        type=_serve_port,
+        default=0,
+        help="OpenAI-compatible shim loopback port (0 = ephemeral)",
+    )
+    demo_stack.add_argument(
+        "--state-root",
+        type=Path,
+        default=Path.home() / ".mycelium" / "demo-stack",
+        help="private state root for the observatory publisher",
+    )
+    demo_stack.add_argument(
+        "--request-bearer-token-env",
+        default="MYCELIUM_DEMO_REQUEST_BEARER_TOKEN",
+        metavar="NAME",
+        help=(
+            "name of the environment variable holding the product gateway "
+            "credential; the credential value itself is never accepted as an "
+            "argument and is never printed"
+        ),
+    )
+    demo_stack.add_argument(
+        "--status-only",
+        action="store_true",
+        help="bring both listeners up, print the status document, and shut down",
     )
 
     serve = commands.add_parser(
@@ -290,6 +345,8 @@ def main(
     environ: Mapping[str, str] | None = None,
     fixture_runtime_available=lambda path: path.is_file(),
     device_lab_prepare=prepare_device_lab,
+    demo_stack_bringup=None,
+    demo_stack_inputs_factory=None,
 ) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -367,6 +424,35 @@ def main(
             ]
         )
         return int(live_server_main(live_arguments))
+
+    if args.action == "demo-stack":
+        if demo_stack_inputs_factory is None:
+            from .product_servers import build_stub_demo_stack_inputs as demo_stack_inputs_factory
+        if demo_stack_bringup is None:
+            from .product_servers import bring_up_demo_product_servers as demo_stack_bringup
+
+        stack_environ = os.environ if environ is None else environ
+        inputs = dict(demo_stack_inputs_factory())
+        bearer_override = stack_environ.get(args.request_bearer_token_env)
+        if bearer_override:
+            inputs["request_bearer_token"] = bearer_override
+        servers = demo_stack_bringup(
+            **inputs,
+            state_root=args.state_root,
+            product_host=args.host,
+            product_port=args.port,
+            openai_shim_host=args.host,
+            openai_shim_port=args.openai_shim_port,
+        )
+        with servers:
+            print(canonical_json(dict(servers.status())), flush=True)
+            if not args.status_only:
+                try:
+                    while True:
+                        time.sleep(0.5)
+                except KeyboardInterrupt:
+                    pass
+        return 0
 
     if args.action != "serve":
         raise AssertionError(f"unsupported action: {args.action}")
