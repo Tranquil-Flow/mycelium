@@ -42,6 +42,7 @@ benefit, no promotion, no A11 closure requirement.
 | 04 | `tests/speculation` in a pristine `0fe6037` extract + only the lane's new test files | `--continue-on-collection-errors` | `12 failed, 62 passed, 1 error` — the 62 pre-existing tests stay green; the 12 failures are exactly the reachability suite (`AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'`); the 1 error is the seam suite failing to collect (`... has no attribute 'LIVE_SEAMS'`) |
 | 04 | reachability suite alone in that pristine extract | default markers | `12 failed in 0.32s` — behavioural RED |
 | 05 | `tests/a6_acceptance tests/claims tests/contracts` at lane HEAD | default markers | `112 passed in 9.82s` |
+| 06 | post-commit re-run at the implementation commit `e18a00c5` (only `RESULT.json` + `REPORT.md` land after it) | default markers, plus `-m scaffold_red` for the scaffold suite and `-m unit`/`-m integration` for the ladder markers | `tests/speculation` 110 passed; touched suites 304 passed, 12 deselected, 18 subtests passed; unit 110/110, integration 0; a11 scaffold 4 failed, 92 passed |
 
 Ladder classification of the new modules: both are `unit` (checked with
 `--collect-only -m unit`), i.e. the ladder's conservative content scan finds no

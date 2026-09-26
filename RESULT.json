@@ -1,0 +1,181 @@
+{
+  "protocol": "mycelium.lane_result.v1",
+  "lane": "wave2-a11-seams",
+  "task": "implement the three refusing live seams in mycelium_speculative_decode_execution.py as deterministic in-process behaviour, wire a minimal router decode seam (keeping mycelium_speculative_decode as fallback), add a RED->GREEN reachability test, sole-author commit",
+  "branch": "fix/wave2-a11-seams-20260926",
+  "worktree": "/Users/evinova-self/Documents/playground/mycelium-wave2-a11-seams-20260926",
+  "base_commit": "0fe60377430e6609715e79b87aeb6706c85cdebe",
+  "implementation_commit": "e18a00c5016367066262aabadbdc261442416c74",
+  "implementation_tree_sha": "24fbf70281af1a9490b96840f91ddec1fb400086",
+  "evidence_commit": "SELF (the branch tip after this file landed; see REPORT.md)",
+  "author": "Tranquil-Flow <tranquil_flow@protonmail.com>",
+  "trailers": "none",
+  "pushed": false,
+  "integration_branch": "integration/core-pilot",
+  "integration_tip_before": "0fe60377430e6609715e79b87aeb6706c85cdebe",
+  "integration_tip_now": "43bea828e451ca117d97191302b3a6fe6f1e2fe4",
+  "integration_tip_overlap": "none: git diff --stat 0fe6037..43bea82 -- mycelium_speculative_decode_execution.py mycelium_router/decoding.py tests/speculation/ is empty (43bea82 is a test-only L2 repair: test_m22_service_runner.py, tests/a13_macos/test_work_http_parent.py, mutation-corpus test)",
+  "files": [
+    {
+      "path": "mycelium_speculative_decode_execution.py",
+      "change": "modified",
+      "lines": 2611,
+      "sha256": "d9c6a6f506baa154a06d74bad4dc602a257beba1c052a0613641a28f38f0424c"
+    },
+    {
+      "path": "mycelium_router/decoding.py",
+      "change": "modified",
+      "lines": 338,
+      "sha256": "1c7273f000d26d4a3c017fc13902499216f1ea6fdec360870efccf3a996826b4"
+    },
+    {
+      "path": "tests/speculation/a11_seam_fixtures.py",
+      "change": "added",
+      "lines": 106,
+      "sha256": "4216f84bf5431580326798d848d1f80fe3a8c91773e72d3ba5219bbf080828a7"
+    },
+    {
+      "path": "tests/speculation/test_a11_live_seams_in_process.py",
+      "change": "added",
+      "lines": 473,
+      "tests": 35,
+      "sha256": "94f08f9fbe5d0b13d63dec42e9445769e38d86f5f8ce5ab7dbedd5a690a199c4"
+    },
+    {
+      "path": "tests/speculation/test_a11_router_decode_reachability.py",
+      "change": "added",
+      "lines": 216,
+      "tests": 12,
+      "sha256": "4350faf51b8980e402a7506bef53de5eeba53d9749538d5ad50f1fe7c10677a7"
+    },
+    {
+      "path": "evidence/BUILD.md",
+      "change": "added",
+      "sha256": "3d8eb1c6a2758f2adc19ab90fc954ce86c735f91636c1301a11782c7d29d2b66"
+    },
+    {
+      "path": "evidence/receipts/",
+      "change": "added",
+      "files": 6,
+      "note": "raw pytest output, one file per invocation"
+    }
+  ],
+  "forbidden_paths_untouched": [
+    "mycelium_a6_*",
+    "mycelium_a7_kv_successor.py",
+    "mycelium_platform_neutral/",
+    "runtime_loader.py",
+    "mycelium_live/",
+    "mycelium_demo/"
+  ],
+  "seams_implemented": {
+    "run_live_route_benchmark": {
+      "before": "raise SpeculativeDecodeExecutionUnavailable('live_route_benchmark_not_available'); never returned a document",
+      "after": "runs a target-only and a speculative arm per request through run_speculative_cycle over the injected transport/target decision source/cancellation scope; returns protocol mycelium.speculative_decode_execution_benchmark.v1 with measured counters only",
+      "refusals": [
+        "route_benchmark_requires_injected_transport",
+        "route_benchmark_requires_injected_cancellation_scope",
+        "route_benchmark_requires_injected_target_decision_source",
+        "route_benchmark_requires_injected_draft_runtime",
+        "route_benchmark_requires_executed_cycles",
+        "invalid_evidence_class"
+      ]
+    },
+    "execute_physical_qualification": {
+      "before": "raise SpeculativeDecodeExecutionUnavailable('physical_qualification_not_available'); never returned a document",
+      "after": "evaluates a strict positive arm (all admitted positions verified and committed) plus an injected negative arm that must fail parity and commit nothing; reports deterministic_gates_met or gate_not_met; protocol mycelium.speculative_decode_execution_qualification.v1",
+      "refusals": [
+        "physical_qualification_requires_injected_transport",
+        "physical_qualification_requires_injected_cancellation_scope",
+        "physical_qualification_requires_injected_target_decision_source",
+        "physical_qualification_requires_injected_draft_runtime",
+        "physical_qualification_requires_injected_negative_arm"
+      ]
+    },
+    "project_live_workspace_state": {
+      "before": "raise SpeculativeDecodeExecutionUnavailable('live_workspace_projection_not_available'); never returned a document",
+      "after": "projects the frozen eight workspaces (order bound to ui/web/src/app/navigation.ts) from one in-process cycle's counts, positions and digests, with a code-level privacy scan; protocol mycelium.speculative_decode_execution_workspace.v1",
+      "refusals": [
+        "workspace_projection_requires_injected_transport",
+        "workspace_projection_requires_injected_cancellation_scope",
+        "workspace_projection_requires_injected_target_decision_source",
+        "workspace_projection_requires_injected_draft_runtime",
+        "projection_privacy_violation"
+      ]
+    }
+  },
+  "claim_boundaries_after_narrowing": {
+    "physical_draft_target_route_not_available": "require_physical_draft_target_route",
+    "live_route_product_session_not_available": "require_live_route_product_session",
+    "authenticated_network_proposal_transfer_not_available": "require_authenticated_network_proposal_transfer",
+    "browser_workspace_surface_not_available": "require_browser_workspace_surface",
+    "note": "the three previous codes (live_route_benchmark_not_available, physical_qualification_not_available, live_workspace_projection_not_available) were dropped because those seams are implemented; each refused evidence class maps to exactly one boundary, and asking a seam for one raises instead of returning a document"
+  },
+  "router_decode_seam": {
+    "module": "mycelium_router/decoding.py",
+    "function": "resolve_speculative_decode",
+    "authoritative": "mycelium_speculative_decode_execution.run_speculative_cycle",
+    "fallback": "mycelium_speculative_decode.integrate_request_admission",
+    "imports": "lazy (importlib inside the seam) so the decode contract stays dependency-free",
+    "outcomes": [
+      "no bound plan -> dispatched=false, authority=target_only, reason=no_bound_speculative_plan",
+      "plan + injections -> dispatched=true, authority=a11_authoritative_execution, execution_module=mycelium_speculative_decode_execution, execution_stage=deterministic_source, full cycle document",
+      "plan without usable injections -> dispatched=false, authority=wired_helper, execution_module=mycelium_speculative_decode, reason=injected_execution_incomplete/injected_execution_incomplete, fallback_detail=<registered refusal code>"
+    ],
+    "malformed_plan": "propagates (SpeculativeDecodeContractError); not swallowed by the fallback",
+    "narrowness_guard": "no other module under mycelium_router/ mentions mycelium_speculative_decode_execution (asserted in the reachability suite)"
+  },
+  "tests": {
+    "new": 47,
+    "new_reachability": 12,
+    "new_in_process_seams": 35,
+    "tests_speculation_before": "62 passed",
+    "tests_speculation_after": "110 passed",
+    "ladder_marker": "unit for both new modules: `--collect-only -m unit tests/speculation` collects 110/110 and `-m integration` collects none, i.e. every case in this directory executes in process. The pre-existing boundary parametrization in tests/speculation/test_a11_target_authoritative_execution.py grew by exactly one case (4 claim boundaries instead of 3), so that file collects 60 items instead of 59"
+  },
+  "verification": {
+    "runner": "JAIL_CWD=$PWD env -u PYTHONPATH -u PYTHONHOME PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.14 /tmp/lane-jail/jailed.py /opt/homebrew/bin/python3.14 -B -m pytest -q -p no:cacheprovider <paths>",
+    "lock": "/Users/evinova-self/Documents/mycelium-core-program/runs/v2/m1-l2-repair/test-owner.lock (flock, held for every pytest invocation)",
+    "receipts": [
+      {"file": "evidence/receipts/01-baseline-tests-speculation.txt", "scope": "tests/speculation at base (unmodified pilot tree)", "result": "62 passed in 0.24s"},
+      {"file": "evidence/receipts/02-head-tests-speculation.txt", "scope": "tests/speculation at lane HEAD", "result": "110 passed in 0.70s"},
+      {"file": "evidence/receipts/03-head-touched-suites-and-a11-scaffold.txt", "scope": "tests/speculation tests/a11_acceptance tests/a10_acceptance tests/a10_deterministic tests/router tests/a11_scaffold/test_a11_not_implemented_boundaries.py test_router_entry.py test_router_payloads.py test_router_numpy_runtime.py", "result": "304 passed, 12 deselected, 18 subtests passed in 3.99s"},
+      {"file": "evidence/receipts/03-head-touched-suites-and-a11-scaffold.txt", "scope": "tests/a11_scaffold with -m scaffold_red", "result": "4 failed, 92 passed - the four RED-by-design cases exercising mycelium_speculative_decode's own boundaries; identical set at base"},
+      {"file": "evidence/receipts/04-red-at-pristine-base-0fe6037.txt", "scope": "pristine 0fe6037 extract + only the lane's new test files", "result": "[1] reachability suite alone: 12 failed in 0.32s (AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'); [2] seam suite alone: collection ERROR (no attribute 'LIVE_SEAMS'); [3] tests/speculation: 12 failed, 62 passed, 1 error; [4] a11 scaffold: 4 failed, 92 passed"},
+      {"file": "evidence/receipts/05-head-a6-claims-contracts.txt", "scope": "tests/a6_acceptance tests/claims tests/contracts at lane HEAD", "result": "112 passed in 9.82s"},
+      {"file": "evidence/receipts/06-post-commit-rerun.txt", "scope": "re-run at implementation commit e18a00c5", "result": "tests/speculation 110 passed; touched suites 304 passed, 12 deselected, 18 subtests passed; unit marker 110/110 with 0 integration; a11 scaffold (scaffold_red) 4 failed, 92 passed"}
+    ]
+  },
+  "red_green": {
+    "test": "tests/speculation/test_a11_router_decode_reachability.py::test_the_router_decode_path_dispatches_to_the_a11_execution",
+    "red_at": "0fe6037 (pristine extract): AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode' (12/12 cases in that file fail)",
+    "green_at": "e18a00c5: dispatched=true, execution_module=mycelium_speculative_decode_execution, execution_stage=deterministic_source, the injected target source records exactly one bounded A10 call, the committed watermark advances by the admitted width",
+    "green_proves": "the router decode module really invokes the A11 execution in process",
+    "green_does_not_prove": "any live route, authenticated network transfer, browser surface, physical qualification, benefit or promotion"
+  },
+  "honest_boundary": {
+    "evidence_class": "deterministic_in_process",
+    "physical_claim": false,
+    "qualification_claim": false,
+    "promotion_authorized": false,
+    "browser_rendered": false,
+    "live_product_session": false,
+    "authenticated_network_transport": false,
+    "closure_requirement_earned": false,
+    "claim_boundary_string_pinned_by": "tests/speculation/test_a11_live_seams_in_process.py::test_the_module_states_the_new_boundary_truth",
+    "not_proven": [
+      "no physical draft/target route, no hardware touched (hardware_touched=false on every emitted document)",
+      "no authenticated network proposal transfer (the transport is an in-process stand-in that reports authenticated_network_transport=false)",
+      "no live-route paired benchmark (the comparison publishes counters, never latency, throughput or benefit)",
+      "no browser and no eight-workspace product surface (the projection names the frozen workspaces but renders nothing)",
+      "no qualification, no capability advertisement, no benefit, no promotion",
+      "no A11 closure requirement is earned or claimed",
+      "the router decode seam is reachable from the router decode module, but this repo's live request path does not yet bind an A11 plan, so a live product request does not exercise the authoritative dispatch end to end"
+    ]
+  },
+  "owner_work": [
+    "A6 source-manifest regeneration at landing (three files added under tests/speculation/, two source files modified); mycelium_a6_* was not touched",
+    "the A11 implementation contract still describes the scaffold stage for these three seams and is a frozen doc (not edited)",
+    "the three implemented seams keep their scaffold function names; a rename to capability names is a documentation decision for the owner"
+  ]
+}
