@@ -167,6 +167,41 @@
       "size_bytes": 55625
     },
     {
+      "path": "mycelium_a13_windows/__init__.py",
+      "sha256": "sha256:054313fc99e43558aa95746a603daedec2547150e715c856d966eaaa03260c9d",
+      "size_bytes": 1844
+    },
+    {
+      "path": "mycelium_a13_windows/install_source.py",
+      "sha256": "sha256:1aae27056d109e77b3a48d546154a7bbf73fb3f113f5a285727e015b5dc79b51",
+      "size_bytes": 11643
+    },
+    {
+      "path": "mycelium_a13_windows/onboarding.py",
+      "sha256": "sha256:13bb46da871be34322d3903e1e16a80dfa900c4accb79003632388c12c3ad64d",
+      "size_bytes": 25323
+    },
+    {
+      "path": "mycelium_a13_windows/package_manifest.py",
+      "sha256": "sha256:a9eb6a0cfb216120dc642514a13bea644a79b8b2859a18497cc6ec9179d913e6",
+      "size_bytes": 14895
+    },
+    {
+      "path": "mycelium_a13_windows/platform_admission.py",
+      "sha256": "sha256:f1ef2fea0524afe4bd12ef4dcd8d2b61ae695ec50ee10a689a07785296547766",
+      "size_bytes": 9523
+    },
+    {
+      "path": "mycelium_a13_windows/progress.py",
+      "sha256": "sha256:10bb6ca0681eab9414649d76192a5565d7cd86f9a8577eff637e73aac05fdbb9",
+      "size_bytes": 1242
+    },
+    {
+      "path": "mycelium_a13_windows/service_lifecycle.py",
+      "sha256": "sha256:06155e6e5266109c69771f66925e1e63dcace55a9a8b37889ccc7f2cc9b5ea9f",
+      "size_bytes": 12418
+    },
+    {
       "path": "mycelium_a15_run_intake.py",
       "sha256": "sha256:57012dd21202ca904734b6801845e2cec7049ed08ca0b2f29482130013935d73",
       "size_bytes": 39074
@@ -297,6 +332,16 @@
       "size_bytes": 25857
     },
     {
+      "path": "mycelium_mobile/android_adb_bridge.py",
+      "sha256": "sha256:48c6c5eb234e87da0adf4927b3a73cc3534619a055db562a1b359d3a90171ba7",
+      "size_bytes": 14890
+    },
+    {
+      "path": "mycelium_mobile/android_onboarding.py",
+      "sha256": "sha256:372ec1e5498acee2ca515f505ac1a55ff1ce796922f502f84c92a76cb0efa5e1",
+      "size_bytes": 27223
+    },
+    {
       "path": "mycelium_node/process.py",
       "sha256": "sha256:262915057e3095df097f0b4616dc1b77007daf772cb828d0219f7da17755e3fa",
       "size_bytes": 95801
@@ -398,8 +443,8 @@
     },
     {
       "path": "mycelium_platform_neutral/primitives.py",
-      "sha256": "sha256:642fa451da6710b1441bd63190b6163d7d1cba7616a2b70c6195cc72bd8040df",
-      "size_bytes": 9391
+      "sha256": "sha256:a0a13c28620968a884b586db147a5cf5a2811f294da712f0adf2e10e7866d886",
+      "size_bytes": 9840
     },
     {
       "path": "mycelium_platform_neutral/runtime_efficiency.py",
@@ -410,6 +455,11 @@
       "path": "mycelium_platform_neutral/stage_performance.py",
       "sha256": "sha256:48e99a6e896eea757bcf3ff35b2a480b803fc4018b9b21cba09409384e21def5",
       "size_bytes": 12894
+    },
+    {
+      "path": "mycelium_platform_neutral/windows_provider.py",
+      "sha256": "sha256:fa16c397aaccdd6f3a33e20da10156531ca6e87bd824f66a73004eac20a3a691",
+      "size_bytes": 22118
     },
     {
       "path": "mycelium_product_spine/app.py",
@@ -782,6 +832,36 @@
       "size_bytes": 7757
     },
     {
+      "path": "tests/a13_acceptance/test_a13_windows_install_source.py",
+      "sha256": "sha256:1247e19c50782aa7b56844e34d028861512fa4e661c5d6102592a4a9af10a64c",
+      "size_bytes": 8332
+    },
+    {
+      "path": "tests/a13_acceptance/test_a13_windows_onboarding_invitation.py",
+      "sha256": "sha256:bfc2360f45fe064de3add34d4d394c68b7a5a3eb83adce56831d39347ffd0761",
+      "size_bytes": 11361
+    },
+    {
+      "path": "tests/a13_acceptance/test_a13_windows_onboarding_progress.py",
+      "sha256": "sha256:e1c44f6595ab41d550e49887284bd67a41840e7e3a6f9851c77fd5695ed79532",
+      "size_bytes": 6046
+    },
+    {
+      "path": "tests/a13_acceptance/test_a13_windows_package_manifest.py",
+      "sha256": "sha256:4a134bb1cc0a456e9e04bc32a0ed60602e68eeb15ce8011d6626e63e9409e3a7",
+      "size_bytes": 9751
+    },
+    {
+      "path": "tests/a13_acceptance/test_a13_windows_platform_admission.py",
+      "sha256": "sha256:30aa0145edad5fa7ad4eef4c30baf0d2cd2c37c7d79b806ec45a94259d7f90fb",
+      "size_bytes": 8265
+    },
+    {
+      "path": "tests/a13_acceptance/test_a13_windows_service_lifecycle.py",
+      "sha256": "sha256:54379a250890a41d5d01b6c71c6138a21a67078238eed379dbe4be1ed0506631",
+      "size_bytes": 7270
+    },
+    {
       "path": "tests/a13_macos/test_app_acquisition.py",
       "sha256": "sha256:aa8977891c6c7f37109a605e240e828c572b32277941ef836e3ba37a64f6ce3e",
       "size_bytes": 5345
@@ -982,6 +1062,11 @@
       "size_bytes": 11773
     },
     {
+      "path": "tests/a9_acceptance/test_windows_native_provider_adapter.py",
+      "sha256": "sha256:bdf99f3b36e6f4cc17ed1709899aef8ad303f8ae78d64faccc277f34eb56bde3",
+      "size_bytes": 14526
+    },
+    {
       "path": "tests/a9_migration_scaffold/__init__.py",
       "sha256": "sha256:6bb80af0c0a9f90f032529bac995e07b69190b48d1709adccaf20b6168a18123",
       "size_bytes": 78
@@ -1160,6 +1245,16 @@
       "path": "tests/live/test_supervisor.py",
       "sha256": "sha256:9fcb6a8c73a871650c811edd51981f2e7b2fcbf6c8545c16c4f56539ba401235",
       "size_bytes": 64262
+    },
+    {
+      "path": "tests/mobile/test_a12_android_adb_bridge.py",
+      "sha256": "sha256:0b825150f219500ddf511972a75f44549b2312288689265ccc43b98330a510da",
+      "size_bytes": 8770
+    },
+    {
+      "path": "tests/mobile/test_a12_android_onboarding.py",
+      "sha256": "sha256:5c65774e99a1a98f10c49b357bffcef41b5150da64a45c7a0bb4d2be2a48316f",
+      "size_bytes": 13721
     },
     {
       "path": "tests/node_agent/test_launch_shape_private_ancestry.py",
@@ -1613,5 +1708,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:672e09c6f4ef994b1d2a1722684637f5c9475544a3c7e93f481f49f6881a4e6e"
+  "source_digest": "sha256:5e284194eb4de7aa6f5760ffa969938855d1088f5c9600e412445279b4e27ae4"
 }
