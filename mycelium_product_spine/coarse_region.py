@@ -103,6 +103,26 @@ def validate_coarse_region_evidence(record):
     return json.loads(json.dumps(record, sort_keys=True, separators=(',', ':'), allow_nan=False))
 
 
+def compatibility_fixtures():
+    """A synthetic, unverified unknown claim; never evidence of a peer's location."""
+    record = dict(
+        protocol=EVIDENCE_PROTOCOL,
+        subject_ref='sha256:' + 'a' * 64,
+        subject_kind='member',
+        source_kind='owner_declared',
+        region=UNKNOWN,
+        distance_class=None,
+        vocabulary_version=PROTOCOL,
+        model_version=None,
+        uncertainty='declared_unverified',
+        issued_at_unix_ms=0,
+        expires_at_unix_ms=0,
+        authority_digest='sha256:' + 'b' * 64,
+    )
+    record['digest'] = digest(record)
+    return {'coarse-region-evidence-v1.json': validate_coarse_region_evidence(record)}
+
+
 def project_coarse_regions(nodes: Sequence[Mapping[str, Any]], evidence: Sequence[Mapping[str, Any]], *, now_unix_ms: int, authorized_authorities: Sequence[str]) -> list[dict[str, Any]]:
     """Pure, deterministic per-node reduction with the frozen precedence.
 

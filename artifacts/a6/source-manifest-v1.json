@@ -7,6 +7,11 @@
       "size_bytes": 12576
     },
     {
+      "path": "contracts/compatibility-fixtures/coarse-region-evidence-v1.json",
+      "sha256": "sha256:0d78445c2d3a31d706ebfa19d230be99f6bf1cc28574ee05a5a483a243685185",
+      "size_bytes": 614
+    },
+    {
       "path": "contracts/compatibility-fixtures/full-context-recovery-gate-v1.json",
       "sha256": "sha256:8894f8a40c072bc7c21446477335eb4ccc0ad1472438e27a8c21a6c69c0a4d9e",
       "size_bytes": 418
@@ -48,8 +53,8 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:3dd1ddbe5e852324e483a0c09ef206209341eda8256a67444b56b74d3d2e7dfb",
-      "size_bytes": 70323
+      "sha256": "sha256:af4d20524688e20fdbe78d14133a3503ac5260a3c44718a699276aa1b6df6ce7",
+      "size_bytes": 71053
     },
     {
       "path": "contracts/governance-boundary-protocols.v1.json",
@@ -413,8 +418,8 @@
     },
     {
       "path": "mycelium_product_spine/coarse_region.py",
-      "sha256": "sha256:6cf9a9d27b7f84346c92500b38c63224e25cc7615c8df0ace8771965c01df238",
-      "size_bytes": 7505
+      "sha256": "sha256:4973bf515df1e93087f0aa2281d403ded6bd16f2d21afd4783487b269cd8b3f2",
+      "size_bytes": 8187
     },
     {
       "path": "mycelium_product_spine/contracts.py",
@@ -583,8 +588,8 @@
     },
     {
       "path": "scripts/contract_registry.py",
-      "sha256": "sha256:f6adfcda2d718526b9f8b4c2babb037cd3f177b91df72e377ab870b9ef0fbad5",
-      "size_bytes": 21544
+      "sha256": "sha256:5aa88b3da484bead9765e6786db137f5ce6a8f05a48b2d927650c823b500b2ac",
+      "size_bytes": 21760
     },
     {
       "path": "scripts/experimental_candidate_isolation.py",
@@ -598,8 +603,8 @@
     },
     {
       "path": "scripts/generate_contract_fixtures.py",
-      "sha256": "sha256:2e1f3d891d911c2c8ea3d5847f17d0adf5a8524deb3ab28c89fd8bb40ccf8ccd",
-      "size_bytes": 90573
+      "sha256": "sha256:a690fb70d12052f5c002d509f1647a09fcdce63520c2f92082878d5b16ae661d",
+      "size_bytes": 90707
     },
     {
       "path": "scripts/governance_audit.py",
@@ -987,6 +992,11 @@
       "size_bytes": 5039
     },
     {
+      "path": "tests/contracts/test_a14b_registration.py",
+      "sha256": "sha256:b800277b2217f370fe36a8e3345f795d236809fb6adae9af9912151dbc1b0671",
+      "size_bytes": 1949
+    },
+    {
       "path": "tests/contracts/test_a6_intent_bounds.py",
       "sha256": "sha256:6aee2cbb5d6ddfe3e0130a6cacfc7fdb57bd433596ca5a434cc6090bc864250e",
       "size_bytes": 1707
@@ -998,8 +1008,8 @@
     },
     {
       "path": "tests/contracts/test_contract_fixtures.py",
-      "sha256": "sha256:29ebcf240e678d76eddf7d0fd263c175793cf595abb263322db79c4f83aca716",
-      "size_bytes": 34457
+      "sha256": "sha256:d64a744d53c1a05b05a91fd0817e8651e7762c96d9eba62f0ecd34b10705cced",
+      "size_bytes": 34533
     },
     {
       "path": "tests/demo/test_product_physical_composition.py",
@@ -1552,6 +1562,11 @@
       "size_bytes": 12068
     },
     {
+      "path": "ui/web/src/features/routeExplorer/contracts.test.ts",
+      "sha256": "sha256:a05439c9ca1301ac8a3919b8c1ff4688c3b1a4832595c989fa3f3f187045f666",
+      "size_bytes": 2552
+    },
+    {
       "path": "ui/web/src/features/routeExplorer/contracts.ts",
       "sha256": "sha256:31db22f213400ab79545439236947642da0dfd404a315ac6141d7e6b77d7dbbb",
       "size_bytes": 11591
@@ -1588,5 +1603,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:acd3ea828d89947bcffa4ffc9041e9b77aa9b5276746140eec23067a745d10f1"
+  "source_digest": "sha256:7860feabaf43fbe739882d8c7e0bb9671210b4daff153c6b038b007ed1f73d97"
 }

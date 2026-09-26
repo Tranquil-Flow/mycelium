@@ -103,6 +103,26 @@
     },
     {
       "fixture": {
+        "path": "contracts/compatibility-fixtures/coarse-region-evidence-v1.json",
+        "sha256": "0d78445c2d3a31d706ebfa19d230be99f6bf1cc28574ee05a5a483a243685185",
+        "size_bytes": 614
+      },
+      "owner_sources": [
+        {
+          "path": "mycelium_product_spine/coarse_region.py",
+          "sha256": "4973bf515df1e93087f0aa2281d403ded6bd16f2d21afd4783487b269cd8b3f2",
+          "size_bytes": 8187
+        },
+        {
+          "path": "ui/web/src/features/routeExplorer/contracts.ts",
+          "sha256": "31db22f213400ab79545439236947642da0dfd404a315ac6141d7e6b77d7dbbb",
+          "size_bytes": 11591
+        }
+      ],
+      "protocol": "mycelium.coarse_region_evidence.v1"
+    },
+    {
+      "fixture": {
         "path": "contracts/compatibility-fixtures/concurrent-request-runtime-v1.json",
         "sha256": "ddc31e07ca33c8ce5ef9d188b705e9d6811e018999eb29035b8c7f401c97cbc4",
         "size_bytes": 1370

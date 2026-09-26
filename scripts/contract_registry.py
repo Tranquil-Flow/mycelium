@@ -14,6 +14,11 @@ class ContractSpec:
 
 CONTRACT_SPECS = (
     ContractSpec(
+        "coarse-region-evidence-v1.json",
+        "mycelium.coarse_region_evidence.v1",
+        ("mycelium_product_spine/coarse_region.py", "ui/web/src/features/routeExplorer/contracts.ts"),
+    ),
+    ContractSpec(
         "route-explorer-v1.json",
         "mycelium.route_explorer.v1",
         ("mycelium_product_spine/route_explorer.py",),

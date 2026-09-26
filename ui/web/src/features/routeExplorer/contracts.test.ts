@@ -1,7 +1,21 @@
 import {describe,it,expect} from 'vitest';
 import fixture from '../../test/a14Conformance.json';
+import evidenceFixture from '../../../../../contracts/compatibility-fixtures/coarse-region-evidence-v1.json';
 import {decodeProductSnapshot} from '../productEvidence/contracts';
-import {effectiveFreshness} from './contracts';
+import {decodeCoarseRegionEvidence, effectiveFreshness, regionCodes} from './contracts';
+describe('registered coarse-region evidence Python/TypeScript parity',()=>{
+ it('decodes the generated Python evidence record with frozen vocabulary',()=>{
+  expect(decodeCoarseRegionEvidence([evidenceFixture])[0]).toEqual(evidenceFixture);
+  expect(regionCodes).toEqual(['africa','americas_north','americas_south','asia','europe','oceania','polar','unknown']);
+  expect(evidenceFixture.region).toBe('unknown');
+ });
+ for(const change of [
+  {hostname:'private.example'}, {region:'us-east-1'}, {subject_ref:'192.0.2.1'},
+  {source_kind:'latency_distance_class'}, {issued_at_unix_ms:true}, {expires_at_unix_ms:-1},
+ ]) it(`rejects invalid evidence ${Object.keys(change)[0]}`,()=>{
+  expect(()=>decodeCoarseRegionEvidence([{...evidenceFixture,...change}])).toThrow();
+ });
+});
 describe('Python producer to browser decoder',()=>{
  it('accepts production-emitted conformance with no namespace or traffic inference',()=>{
   const s=decodeProductSnapshot(fixture);
