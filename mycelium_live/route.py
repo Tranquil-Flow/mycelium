@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from concurrent.futures import as_completed, ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
 import json
@@ -14,7 +15,7 @@ import stat
 import threading
 import time
 from types import MappingProxyType
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Iterator, Mapping, Protocol, Sequence
 from urllib.parse import quote
 
 import mycelium_deadlines
@@ -46,6 +47,16 @@ from mycelium_seed.state import SeedStateError, SqliteSeedState
 from mycelium_seed.operator import SeedOperatorError, revoke_seed_member
 from mycelium_qualification.signing import Ed25519EvidenceSigner
 from mycelium_router.contracts import ExecutionGraph
+from mycelium_router.instrument import (
+    HopRecorder,
+    HopSample,
+    MEASURED_RTT_SOURCE_LIVE_SESSION_ROUND_TRIP,
+)
+from mycelium_router.rtt_measurement import (
+    LOCAL_HOST_KEY,
+    SOURCE_LIVE_SESSION_ROUND_TRIP,
+    MeasuredRttTable,
+)
 from mycelium_router.serialization import execution_graph_to_dict
 from mycelium_topology_evidence import validate_transport_path_observation
 from physical_inference_node import execution_graph_from_document
@@ -1229,6 +1240,14 @@ class PhysicalLiveRoute:
         self._incidents: deque[dict[str, Any]] = deque(maxlen=64)
         self._incident_sequence = 0
         self._stop_token_ids: frozenset[int] = frozenset()
+        # Live measurement state.  ``_hop_recorder`` is disabled unless
+        # MYCELIUM_ROUTER_INSTRUMENT (plus MYCELIUM_ROUTER_INSTRUMENT_SINK) is
+        # set, so a real run opts in from the environment and emits hop traces
+        # with no test-side wrapping.  ``_measured_rtt`` is where every round
+        # trip this route performs is filed, for the route cost model to use.
+        self._hop_recorder = HopRecorder.from_environment()
+        self._measured_rtt = MeasuredRttTable()
+        self._active_hop_traces: dict[str, Any] = {}
         self._placement_projection: dict[str, Any] | None = None
         self._topology_projection: dict[str, Any] | None = None
         self._workload_comparison: dict[str, Any] | None = None
@@ -1606,11 +1625,25 @@ class PhysicalLiveRoute:
                         # intercept its return/error, or write A4 state here.
                         self._test_only_transport_fault_consumed = True
                         raise RuntimeError("transport_not_running")
-                return self._sessions[node_id].send(
+                # TRUE live-boundary spans: stamp immediately before the command
+                # write and immediately after the correlated response arrives.  A
+                # failed or timed-out send is not a latency sample, so nothing is
+                # filed on the error path — the span is only recorded when the
+                # round trip actually completed.
+                send_started_at = time.monotonic()
+                response = self._sessions[node_id].send(
                     command_id=command_id,
                     command=command,
                     payload=payload,
                 )
+                self._record_measured_round_trip(
+                    node_id,
+                    started_at=send_started_at,
+                    finished_at=time.monotonic(),
+                    stage_id=command,
+                    request_id=request_id,
+                )
+                return response
             except BaseException as error:
                 reason = str(getattr(error, "code", str(error) or type(error).__name__))
                 self._record_response_reader_failure_once(
@@ -1640,6 +1673,89 @@ class PhysicalLiveRoute:
                 locks = {}
                 self._request_locks = locks
             return locks.setdefault(request_id, threading.RLock())
+
+    # -- live measurement -------------------------------------------------
+
+    @contextmanager
+    def _instrumented_request(self, request_id: str) -> Iterator[None]:
+        """Hold the request execution lock and open one hop trace for it.
+
+        Identical locking semantics to ``_request_execution_lock`` alone: the
+        same request-scoped RLock is acquired for the whole ``with`` body and
+        released on the way out, exceptions included.  The only addition is an
+        open ``trace_request`` for the live request, which is what makes a real
+        run emit hop traces without any test wrapping the router.
+        """
+
+        lock = self._request_execution_lock(request_id)
+        lock.acquire()
+        recorder = getattr(self, "_hop_recorder", None)
+        trace_context = None
+        trace = None
+        if recorder is not None and recorder.enabled:
+            trace_context = recorder.trace_request(request_id)
+            trace = trace_context.__enter__()
+            active = getattr(self, "_active_hop_traces", None)
+            if isinstance(active, dict):
+                active[request_id] = trace
+        try:
+            yield
+        finally:
+            active = getattr(self, "_active_hop_traces", None)
+            if isinstance(active, dict):
+                active.pop(request_id, None)
+            if trace_context is not None:
+                trace_context.__exit__(None, None, None)
+            lock.release()
+
+    def _record_measured_round_trip(
+        self,
+        node_id: str,
+        *,
+        started_at: float,
+        finished_at: float,
+        stage_id: str,
+        request_id: str | None = None,
+    ) -> None:
+        """File one round trip this route really performed, and emit its hop.
+
+        ``started_at`` is read immediately before the command write and
+        ``finished_at`` immediately after the correlated response arrived, so
+        the difference is a measured round trip at the session boundary — not a
+        pure network span, which is why it is filed under
+        ``SOURCE_LIVE_SESSION_ROUND_TRIP`` rather than the socket source.
+
+        The sample is filed under ``LOCAL_HOST_KEY`` because this process is the
+        local host and the route's closed contract does not name its own stage
+        node.  A caller that knows the local node id can map it with
+        ``MeasuredRttTable(local_source_alias=...)`` instead of guessing.
+        """
+
+        elapsed_ms = (finished_at - started_at) * 1000.0
+        if elapsed_ms < 0:
+            return
+        table = getattr(self, "_measured_rtt", None)
+        if table is not None:
+            table.record_round_trip_ms(
+                LOCAL_HOST_KEY,
+                node_id,
+                elapsed_ms,
+                measurement_source=SOURCE_LIVE_SESSION_ROUND_TRIP,
+            )
+        recorder = getattr(self, "_hop_recorder", None)
+        if recorder is not None and recorder.enabled:
+            recorder.record_hop(
+                HopSample(
+                    request_id=request_id or f"{stage_id}:{node_id}",
+                    stage_id=stage_id,
+                    node_id=node_id,
+                    socket_write_at=started_at,
+                    socket_read_end_at=finished_at,
+                    measured_rtt_source=(
+                        MEASURED_RTT_SOURCE_LIVE_SESSION_ROUND_TRIP
+                    ),
+                )
+            )
 
     @property
     def execution_graph(self) -> ExecutionGraph:
@@ -2437,6 +2553,11 @@ class PhysicalLiveRoute:
         """
 
         try:
+            # This probe is the route's continuous RTT sampler: it runs on every
+            # keepalive window for every peer whose keepalive is due, so idle
+            # links are re-measured without waiting for user traffic.  Before
+            # this, the duration was discarded and no RTT sample was ever filed.
+            probe_started_at = time.monotonic()
             response = self._send_before(
                 node_id,
                 command_id=self._command_id(node_id, "keepalive"),
@@ -2445,6 +2566,12 @@ class PhysicalLiveRoute:
                 deadline_monotonic_s=(
                     time.monotonic() + _IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS
                 ),
+            )
+            self._record_measured_round_trip(
+                node_id,
+                started_at=probe_started_at,
+                finished_at=time.monotonic(),
+                stage_id="keepalive",
             )
             observation = self._verify_observation(
                 node_id,
@@ -3976,7 +4103,9 @@ class PhysicalLiveRoute:
     ) -> InferenceResult:
         # This lock is request-scoped. No route-global mutex spans physical
         # prefill, decode, cancellation, cleanup, or browser streaming.
-        with self._request_execution_lock(request_id):
+        # The context manager also opens this request's hop trace, so a live run
+        # emits hop telemetry with no external wrapping (see _instrumented_request).
+        with self._instrumented_request(request_id):
             if (
                 getattr(self, "_closed", False)
                 or not getattr(self, "_open", True)
