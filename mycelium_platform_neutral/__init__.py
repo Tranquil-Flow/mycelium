@@ -25,9 +25,25 @@ protocol                          module
     :mod:`mycelium_platform_neutral.runtime_efficiency`
 ===============================  =========================================
 
+Beside the nine contracts sits the *source* tranche for the runtime-efficiency
+gap (spec §3.4), which is deliberately not a contract and claims nothing:
+
+* :mod:`mycelium_platform_neutral.int8_execution` — bounded persistent int8
+  weight execution with a monotonic materialization ledger plus a negative
+  control for the rejected per-linear whole-weight cast.
+* :mod:`mycelium_platform_neutral.activation_transport` — the reduced-precision
+  (float16/bfloat16) activation frame codec: validation, measured byte
+  reduction, the seven-class rejection battery, replay/cancellation fences.
+* :mod:`mycelium_platform_neutral.efficiency_benchmark` — the honest local
+  microbenchmark harness; it evaluates no frozen A9 threshold.  It is
+  deliberately NOT imported here: it is a runnable harness
+  (``python -m mycelium_platform_neutral.efficiency_benchmark``), not part of
+  the package's authoring surface.
+
 These are authoring modules: strict, deterministic validation and derivation
 only.  Nothing here is qualified, eligible, placed, or ready — those remain
-separate authorities (spec §2), and no physical round has been executed.
+separate authorities (spec §2), and no physical round has been executed.  The
+accelerated Windows x86_64 device blocker stays open and is raised explicitly.
 """
 
 from __future__ import annotations
@@ -35,9 +51,11 @@ from __future__ import annotations
 from . import (
     acceleration_profile,
     activation_codec,
+    activation_transport,
     capability_report,
     class_qualification,
     eligibility,
+    int8_execution,
     migration,
     peer_profile,
     primitives,
@@ -72,9 +90,11 @@ __all__ = [
     "PlatformNeutralContractError",
     "acceleration_profile",
     "activation_codec",
+    "activation_transport",
     "capability_report",
     "class_qualification",
     "eligibility",
+    "int8_execution",
     "migration",
     "peer_profile",
     "primitives",
