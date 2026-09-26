@@ -60,6 +60,42 @@ _SHA256_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _SAFE_ARTIFACT_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 _MAX_SAFETENSORS_HEADER_BYTES = 100 * 1024 * 1024
+
+# ---------------------------------------------------------------------------
+# int8 execution kernel selection for the runtime path
+#
+# The runtime's ``int8-weight-only`` quantization is implemented by exactly one
+# kernel per load.  ``weight-quantization`` is the qualified row-wise
+# representation path (``weight_quantization.Int8RowwiseWeight``, dequantized
+# inside ``numpy_runtime``) and remains the default, so the qualified path's
+# numerics and load-proof bytes are unchanged.  ``platform-neutral-int8``
+# additionally dispatches the A9 platform-neutral persistent int8 kernel
+# (``mycelium_platform_neutral.int8_execution``) over the loaded weights and
+# drives the reduced-precision activation frame codec
+# (``mycelium_platform_neutral.activation_transport``) on the probe activation.
+#
+# The A9 selection makes that source tranche *reachable* from a real runtime
+# load.  It claims nothing more: no physical round has been executed, nothing
+# is qualified, eligible, placed or ready, and the accelerated Windows x86_64
+# device blocker stays open (``int8_execution.ACCEPTANCE_COVERAGE`` travels
+# with the emitted report so the boundary is machine-readable).
+# ---------------------------------------------------------------------------
+QUALIFIED_INT8_EXECUTION = "weight-quantization"
+PLATFORM_NEUTRAL_INT8_EXECUTION = "platform-neutral-int8"
+SUPPORTED_INT8_EXECUTIONS = frozenset(
+    {QUALIFIED_INT8_EXECUTION, PLATFORM_NEUTRAL_INT8_EXECUTION}
+)
+DEFAULT_INT8_EXECUTION = QUALIFIED_INT8_EXECUTION
+#: Reduced-precision activation frame dtypes the A9 codec can transport.
+SUPPORTED_ACTIVATION_FRAME_DTYPES = frozenset({"float16", "bfloat16"})
+DEFAULT_ACTIVATION_FRAME_DTYPE = "float16"
+#: Load-proof key carrying the A9 execution report.  Emitted only when the
+#: platform-neutral selection is active, so every other load proof keeps its
+#: exact field set.
+A9_INT8_EXECUTION_PROOF_KEY = "a9_int8_execution"
+A9_INT8_RUNTIME_EXECUTION_PROTOCOL = "mycelium.a9_int8_runtime_execution.v1"
+#: Sequence positions of the deterministic probe activation the A9 kernel decodes.
+A9_PROBE_ACTIVATION_ROWS = 3
 _SAFE_DTYPE_BYTES = {
     "BOOL": 1,
     "U8": 1,
@@ -1885,19 +1921,353 @@ def _run_numpy_probe(
     return _execute_loaded_numpy_stage(stage, hidden_states=hidden)
 
 
+def _a9_int8_kernel_module() -> Any:
+    """The A9 platform-neutral int8 kernel module, imported lazily.
+
+    Lazy for the same reason the MLX backend is: ``runtime_loader`` must import
+    and serve every other runtime path even when the A9 source tranche cannot be
+    imported.
+    """
+
+    try:
+        return importlib.import_module("mycelium_platform_neutral.int8_execution")
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise _fail(
+            "a9_platform_neutral_unavailable: "
+            "mycelium_platform_neutral.int8_execution is not importable"
+        ) from exc
+
+
+def _a9_activation_transport_module() -> Any:
+    """The A9 reduced-precision activation frame codec module, imported lazily."""
+
+    try:
+        return importlib.import_module(
+            "mycelium_platform_neutral.activation_transport"
+        )
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise _fail(
+            "a9_platform_neutral_unavailable: "
+            "mycelium_platform_neutral.activation_transport is not importable"
+        ) from exc
+
+
+def resolve_int8_execution(
+    selection: Any = DEFAULT_INT8_EXECUTION,
+    *,
+    activation_frame_dtype: Any = DEFAULT_ACTIVATION_FRAME_DTYPE,
+) -> tuple[str, str]:
+    """Validate one runtime int8 execution selection, fail-closed.
+
+    Returns ``(selection, activation_frame_dtype)``.  An unregistered selection,
+    an unsupported frame dtype, or a frame dtype requested while the qualified
+    default kernel is selected is refused rather than defaulted: the qualified
+    ``weight-quantization`` path is never silently replaced.
+    """
+
+    if not isinstance(selection, str) or selection not in SUPPORTED_INT8_EXECUTIONS:
+        raise _fail(
+            "unknown_int8_execution: int8 execution selection must be "
+            f"{QUALIFIED_INT8_EXECUTION!r} or {PLATFORM_NEUTRAL_INT8_EXECUTION!r}"
+        )
+    if (
+        not isinstance(activation_frame_dtype, str)
+        or activation_frame_dtype not in SUPPORTED_ACTIVATION_FRAME_DTYPES
+    ):
+        raise _fail(
+            "unknown_activation_frame_dtype: activation frame dtype must be "
+            "float16 or bfloat16"
+        )
+    if (
+        selection == QUALIFIED_INT8_EXECUTION
+        and activation_frame_dtype != DEFAULT_ACTIVATION_FRAME_DTYPE
+    ):
+        raise _fail(
+            "activation_frame_dtype requires the "
+            f"{PLATFORM_NEUTRAL_INT8_EXECUTION} int8 execution selection"
+        )
+    return selection, activation_frame_dtype
+
+
+def _a9_probe_activation(
+    width: int, *, rows: int = A9_PROBE_ACTIVATION_ROWS
+) -> np.ndarray:
+    """Deterministic finite probe activation with ``width`` features.
+
+    The same sin/quadratic ramp family the NumPy probe uses, so the A9 decode
+    runs on the loader's deterministic probe activation and not on a
+    model-generated one.  The emitted report names that source instead of
+    implying a real activation.
+    """
+
+    if not isinstance(width, int) or isinstance(width, bool) or width <= 0:
+        raise _fail("a9_activation_width_invalid: probe width must be positive")
+    positions = np.arange(1, rows + 1, dtype=np.float32).reshape(rows, 1)
+    channels = np.arange(1, width + 1, dtype=np.float32).reshape(1, width)
+    return (
+        np.sin(positions * channels)
+        + positions * np.square(channels) / max(width * width, 1)
+    ).astype(np.float32)
+
+
+def _a9_workspace_bytes(
+    *,
+    out_features: int,
+    in_features: int,
+    accumulator_bytes: int,
+    budget: int,
+) -> int:
+    """Bounded transient budget that keeps one decode off the whole weight.
+
+    Capped by the declared ``budget``; for a packed weight smaller than the
+    budget the budget is halved so a decode still converts the weight in bounded
+    slabs rather than in one whole-matrix slab.  ``Int8LinearKernel`` reports
+    either outcome in its ledger and :meth:`assert_warm_decode` refuses the warm
+    claim when the whole matrix was materialized.
+    """
+
+    per_row_bytes = max(in_features * accumulator_bytes, 1)
+    total_bytes = per_row_bytes * out_features
+    if out_features <= 1:
+        return max(per_row_bytes, min(budget, total_bytes))
+    return max(per_row_bytes, min(budget, total_bytes // 2))
+
+
+def _a9_platform_neutral_execution_report(
+    *,
+    tensors: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+    activation_frame_dtype: str,
+) -> dict[str, Any]:
+    """Dispatch one loaded stage to the A9 int8 kernel and activation codec.
+
+    This is the platform-neutral dispatch target: the loaded row-wise int8
+    weights and the runtime identity are handed to the A9 persistent int8 kernel
+    (bounded slab execution, monotonic materialization ledger, integer reference
+    parity) and the probe activation is carried across the reduced-precision
+    activation frame codec.  Every refusal the A9 modules raise is converted into
+    a fail-closed ``RuntimeLoadError`` instead of being reported as success, and
+    the returned report keeps the honest boundary: reachable, not qualified.
+    """
+
+    kernel_module = _a9_int8_kernel_module()
+    codec_module = _a9_activation_transport_module()
+    quantized = {
+        key: tensor
+        for key, tensor in sorted(tensors.items())
+        if isinstance(tensor, Int8RowwiseWeight)
+    }
+    if not quantized:
+        raise _fail(
+            "platform_neutral_int8_requires_quantized_weights: the A9 int8 kernel "
+            "executes the runtime's int8-weight-only row-wise weights"
+        )
+
+    kernel_rows: list[dict[str, Any]] = []
+    budgets: set[int] = set()
+    decode_calls = 0
+    for key, tensor in quantized.items():
+        values = np.ascontiguousarray(tensor.values, dtype=np.int8)
+        scales = np.ascontiguousarray(tensor.scales, dtype=np.float32)
+        out_features, in_features = int(values.shape[0]), int(values.shape[1])
+        workspace_bytes = _a9_workspace_bytes(
+            out_features=out_features,
+            in_features=in_features,
+            accumulator_bytes=int(kernel_module.ACCUMULATOR_BYTES),
+            budget=int(kernel_module.DEFAULT_WORKSPACE_BYTES),
+        )
+        activations = _a9_probe_activation(in_features)
+        try:
+            kernel = kernel_module.Int8LinearKernel(
+                values,
+                scales,
+                workspace_bytes=workspace_bytes,
+                boundary="load",
+            )
+            kernel.warmup(activations)
+            decoded = kernel.linear(activations)
+            kernel.assert_warm_decode()
+        except kernel_module.Int8KernelUnavailable as refusal:
+            raise _fail(
+                f"a9_int8_kernel_refused:{refusal.code}:{key}"
+            ) from refusal
+        reference = kernel_module.quantized_reference_linear(
+            activations, values, scales
+        )
+        if not np.array_equal(decoded, reference):
+            raise _fail(f"a9_int8_kernel_reference_mismatch: {key}")
+        ledger = kernel.ledger()
+        budgets.add(workspace_bytes)
+        decode_calls += int(ledger.decode_calls)
+        kernel_rows.append(
+            {
+                "tensor_key": key,
+                "out_features": out_features,
+                "in_features": in_features,
+                "packed_state_bytes": int(kernel.packed_state_bytes),
+                "packed_state_is_stable": bool(kernel.packed_state_is_stable()),
+                "workspace_bytes": int(workspace_bytes),
+                "slab_rows": int(kernel.slab_rows),
+                "warm_decode_proven": True,
+                "integer_reference_parity": True,
+                "output_digest": _digest_array(decoded),
+                "ledger": {
+                    "full_weight_materializations": int(
+                        ledger.full_weight_materializations
+                    ),
+                    "bounded_slab_conversions": int(
+                        ledger.bounded_slab_conversions
+                    ),
+                    "peak_weight_workspace_bytes": int(
+                        ledger.peak_weight_workspace_bytes
+                    ),
+                    "peak_activation_workspace_bytes": int(
+                        ledger.peak_activation_workspace_bytes
+                    ),
+                    "decode_calls": int(ledger.decode_calls),
+                    "warmup_complete": bool(ledger.warmup_complete),
+                },
+            }
+        )
+
+    hidden = int(runtime["model_config"]["n_embd"])
+    frame_values = _a9_probe_activation(hidden).reshape(
+        1, A9_PROBE_ACTIVATION_ROWS, hidden
+    )
+    codec = codec_module.ActivationFrameCodec(
+        dtype=activation_frame_dtype, generation=1
+    )
+    try:
+        frame = codec.encode(frame_values, frame_id="a9-runtime-probe-activation")
+        decoded_frame = codec.decode(
+            frame,
+            expect_shape=frame_values.shape,
+            expect_dtype=activation_frame_dtype,
+        )
+    except codec_module.ActivationFrameRejected as refusal:
+        raise _fail(f"a9_activation_frame_refused:{refusal.code}") from refusal
+    if activation_frame_dtype == "float16":
+        reduced = (
+            np.ascontiguousarray(frame_values).astype("float16").astype(np.float32)
+        )
+    else:
+        reduced = codec_module.decode_bfloat16(
+            codec_module.encode_bfloat16(frame_values)
+        ).reshape(frame_values.shape)
+    reduced_precision_parity = bool(np.array_equal(decoded_frame, reduced))
+    if not reduced_precision_parity:
+        raise _fail(
+            "a9_activation_frame_parity_failed: the decoded frame is not the "
+            "reduced-precision cast of the encoded activation"
+        )
+    reduction = codec.byte_reduction()
+    byte_reduction_ratio = float(codec.byte_reduction_ratio())
+    projection = codec.projection()
+    projection_is_privacy_reduced = bool(
+        codec_module.frame_projection_is_privacy_reduced(projection)
+    )
+    codec.cleanup()
+    scope_cleaned = bool(
+        codec.outstanding_frames == 0 and codec.pending_scratch_bytes() == 0
+    )
+    if not scope_cleaned:
+        raise _fail(
+            "a9_activation_frame_scope_not_cleaned: the request scope retained frames"
+        )
+
+    host_report = dict(kernel_module.reference_host_report(sorted(budgets)))
+    return {
+        "protocol": A9_INT8_RUNTIME_EXECUTION_PROTOCOL,
+        "selection": PLATFORM_NEUTRAL_INT8_EXECUTION,
+        "activation_frame_dtype": activation_frame_dtype,
+        "reachable": True,
+        "qualified": False,
+        "physical_round_executed": False,
+        "boundary": "reachable_not_qualified",
+        "boundary_note": (
+            "A9 platform-neutral int8 weight execution and reduced-precision "
+            "activation transport are reachable from runtime_loader's runtime path "
+            "on this host: the loaded row-wise int8 weights are executed by the A9 "
+            "kernel (bounded slabs, monotonic materialization ledger, integer "
+            "reference parity) and the probe activation crosses the reduced-precision "
+            "frame codec. Nothing here is qualified, eligible, placed or ready, no "
+            "physical round has been executed, and the accelerated Windows x86_64 "
+            "device blocker stays open."
+        ),
+        "kernel_host": {
+            **host_report,
+            "kernel_host_backend": str(kernel_module.KERNEL_HOST_BACKEND),
+            "workspace_budget_bytes": sorted(budgets),
+        },
+        "kernels_executed": len(kernel_rows),
+        "decode_calls": decode_calls,
+        "activation_source": "loader_deterministic_probe_ramp",
+        "activation_rows": A9_PROBE_ACTIVATION_ROWS,
+        "kernels": kernel_rows,
+        "activation_transport": {
+            "dtype": activation_frame_dtype,
+            "generation": int(codec.generation),
+            "frames_encoded": int(projection["frames_encoded"]),
+            "frames_decoded": int(projection["frames_decoded"]),
+            "frames_rejected": int(projection["frames_rejected"]),
+            "bytes_before": int(reduction["bytes_before"]),
+            "bytes_after": int(reduction["bytes_after"]),
+            "byte_reduction_ratio": byte_reduction_ratio,
+            "counter_digest": str(reduction["counter_digest"]),
+            "frame_bytes": len(frame),
+            "frame_digest": "sha256:" + hashlib.sha256(frame).hexdigest(),
+            "reduced_precision_parity": reduced_precision_parity,
+            "projection": projection,
+            "projection_is_privacy_reduced": projection_is_privacy_reduced,
+            "request_scope_cleaned": scope_cleaned,
+            "outstanding_frames_after_cleanup": int(codec.outstanding_frames),
+            "pending_scratch_bytes_after_cleanup": int(codec.pending_scratch_bytes()),
+            "rejection_battery": (
+                "not_run_on_the_runtime_path: the seven-class rejection battery stays "
+                "with the codec acceptance suite (tests/a9_acceptance/"
+                "test_reduced_precision_activation_transport.py)"
+            ),
+        },
+        "acceptance_coverage": {
+            "int8_execution": dict(kernel_module.ACCEPTANCE_COVERAGE),
+            "activation_transport": dict(codec_module.ACCEPTANCE_COVERAGE),
+        },
+    }
+
+
 def load_assignment_stage(
     assignment: dict[str, Any],
     artifact_report: dict[str, Any],
     *,
     load_generation: int,
+    int8_execution: str = DEFAULT_INT8_EXECUTION,
+    activation_frame_dtype: str = DEFAULT_ACTIVATION_FRAME_DTYPE,
 ) -> LoadedStage:
     """Load and probe one exact assignment from already verified local artifacts.
 
     This path has no network fallback. It emits local stage-load evidence only and
     deliberately keeps ``route_ready`` false pending a separate route challenge.
+
+    ``int8_execution`` selects which kernel implements the runtime's declared
+    ``int8-weight-only`` quantization:
+
+    * ``"weight-quantization"`` (default) is the qualified row-wise int8
+      representation path; its tensors, numerics and load-proof field set are
+      exactly as before.
+    * ``"platform-neutral-int8"`` additionally dispatches the A9
+      platform-neutral persistent int8 kernel and the reduced-precision
+      activation frame codec for a runtime that declares ``int8-weight-only``
+      quantization (``activation_frame_dtype`` selects ``float16`` or
+      ``bfloat16``).  The measured A9 result is emitted under the
+      ``a9_int8_execution`` load-proof key.  This makes A9 *reachable*; it claims
+      nothing qualified, and no physical round is executed.
     """
     try:
         from stage_pack import canonicalize_stage_pack_assignment
+
+        selection, frame_dtype = resolve_int8_execution(
+            int8_execution, activation_frame_dtype=activation_frame_dtype
+        )
 
         try:
             assignment = canonicalize_stage_pack_assignment(assignment)
@@ -1925,6 +2295,12 @@ def load_assignment_stage(
             runtime["architecture"] in {"qwen2", "qwen3"}
             and runtime["quantization"] == "int8-weight-only"
         )
+        if selection == PLATFORM_NEUTRAL_INT8_EXECUTION and not quantize_during_load:
+            raise _fail(
+                "platform_neutral_int8_requires_int8_weight_only: the A9 int8 "
+                "kernel executes a runtime that declares int8-weight-only "
+                "quantization"
+            )
         tensors = _load_exact_tensors(
             assignment,
             artifact_report,
@@ -1967,6 +2343,15 @@ def load_assignment_stage(
                 )
             if not finite:
                 raise _fail(f"loaded tensor contains non-finite values: {key}")
+        a9_int8_execution = (
+            _a9_platform_neutral_execution_report(
+                tensors=tensors,
+                runtime=runtime,
+                activation_frame_dtype=frame_dtype,
+            )
+            if selection == PLATFORM_NEUTRAL_INT8_EXECUTION
+            else None
+        )
         loaded_tensor_digest = (
             _digest_arrays(tensors)
             if runtime["backend"] == _MLX_RUNTIME_BACKEND
@@ -2029,6 +2414,8 @@ def load_assignment_stage(
         if stage_pack_binding is not None:
             proof["stage_pack_digest"] = stage_pack_binding[0]
             proof["stage_pack_verification_digest"] = stage_pack_binding[1]
+        if a9_int8_execution is not None:
+            proof[A9_INT8_EXECUTION_PROOF_KEY] = a9_int8_execution
         frozen_proof = _deep_freeze(proof)
         frozen_aliases = _deep_freeze(copy.deepcopy(aliases))
         authenticated_aliases = _deep_freeze(copy.deepcopy(aliases))
