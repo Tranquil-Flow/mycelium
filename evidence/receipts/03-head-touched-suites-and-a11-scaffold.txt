@@ -1,0 +1,115 @@
+### touched suites (default markers)
+........................................................................ [ 23%]
+........................................................................ [ 47%]
+........................................................................ [ 71%]
+........................................................................................                                       [100%]
+304 passed, 12 deselected, 18 subtests passed in 3.99s
+EXIT=0
+
+### a11 scaffold suite (scaffold_red opt-in)
+...............................................F.FFF.................... [ 75%]
+........................                                                 [100%]
+=================================== FAILURES ===================================
+________ test_proposal_transfer_moves_only_the_minimum_private_envelope ________
+
+    def test_proposal_transfer_moves_only_the_minimum_private_envelope() -> None:
+>       envelope = speculative_decode.transfer_proposal_envelope(plan=_plan(), proposal_tokens=[1, 2, 3, 4])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/a11_scaffold/test_a11_unimplemented_execution_red.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+mycelium_speculative_decode.py:2215: in transfer_proposal_envelope
+    _unavailable("private_proposal_transfer_not_implemented", **context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+code = 'private_proposal_transfer_not_implemented'
+context = {'plan': {'benchmark_threshold': {'confidence': 0.95, 'improvement_fraction': 0.1, 'maximum_ttft_regression_fraction':...': 5.0, 'remaining_request_deadline_ms': 500.0, 'source': 'measured_warm', ...}, ...}, 'proposal_tokens': [1, 2, 3, 4]}
+detail = 'A11 scaffold stage: this execution seam is not implemented and never silently succeeds (plan, proposal_tokens)'
+
+    def _unavailable(code: str, **context: Any) -> None:
+        detail = _BOUNDARY_NOTE
+        if context:
+            detail = f"{detail} ({', '.join(sorted(context))})"
+>       raise SpeculativeDecodeUnavailable(code, detail)
+E       mycelium_speculative_decode.SpeculativeDecodeUnavailable: private_proposal_transfer_not_implemented: A11 scaffold stage: this execution seam is not implemented and never silently succeeds (plan, proposal_tokens)
+
+mycelium_speculative_decode.py:2209: SpeculativeDecodeUnavailable
+_______ test_paired_product_benchmark_executes_six_windows_on_one_route ________
+
+    def test_paired_product_benchmark_executes_six_windows_on_one_route() -> None:
+>       benchmark = speculative_decode.run_paired_product_benchmark(plan=_plan(), route_digest="sha256:" + "0" * 64)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/a11_scaffold/test_a11_unimplemented_execution_red.py:63: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+mycelium_speculative_decode.py:2221: in run_paired_product_benchmark
+    _unavailable("live_route_benchmark_not_implemented", **context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+code = 'live_route_benchmark_not_implemented'
+context = {'plan': {'benchmark_threshold': {'confidence': 0.95, 'improvement_fraction': 0.1, 'maximum_ttft_regression_fraction':...'measured_warm', ...}, ...}, 'route_digest': 'sha256:0000000000000000000000000000000000000000000000000000000000000000'}
+detail = 'A11 scaffold stage: this execution seam is not implemented and never silently succeeds (plan, route_digest)'
+
+    def _unavailable(code: str, **context: Any) -> None:
+        detail = _BOUNDARY_NOTE
+        if context:
+            detail = f"{detail} ({', '.join(sorted(context))})"
+>       raise SpeculativeDecodeUnavailable(code, detail)
+E       mycelium_speculative_decode.SpeculativeDecodeUnavailable: live_route_benchmark_not_implemented: A11 scaffold stage: this execution seam is not implemented and never silently succeeds (plan, route_digest)
+
+mycelium_speculative_decode.py:2209: SpeculativeDecodeUnavailable
+________ test_qualification_bundle_executes_browser_and_negative_gates _________
+
+    def test_qualification_bundle_executes_browser_and_negative_gates() -> None:
+>       qualification = speculative_decode.execute_qualification_bundle(plan=_plan(), benchmark_digest="sha256:" + "0" * 64)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/a11_scaffold/test_a11_unimplemented_execution_red.py:68: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+mycelium_speculative_decode.py:2227: in execute_qualification_bundle
+    _unavailable("physical_qualification_not_implemented", **context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+code = 'physical_qualification_not_implemented'
+context = {'benchmark_digest': 'sha256:0000000000000000000000000000000000000000000000000000000000000000', 'plan': {'benchmark_th..._ms': 100.0, 'minimum_deadline_ms': 5.0, 'remaining_request_deadline_ms': 500.0, 'source': 'measured_warm', ...}, ...}}
+detail = 'A11 scaffold stage: this execution seam is not implemented and never silently succeeds (benchmark_digest, plan)'
+
+    def _unavailable(code: str, **context: Any) -> None:
+        detail = _BOUNDARY_NOTE
+        if context:
+            detail = f"{detail} ({', '.join(sorted(context))})"
+>       raise SpeculativeDecodeUnavailable(code, detail)
+E       mycelium_speculative_decode.SpeculativeDecodeUnavailable: physical_qualification_not_implemented: A11 scaffold stage: this execution seam is not implemented and never silently succeeds (benchmark_digest, plan)
+
+mycelium_speculative_decode.py:2209: SpeculativeDecodeUnavailable
+_ test_workspace_projection_reconstructs_public_state_without_private_material _
+
+    def test_workspace_projection_reconstructs_public_state_without_private_material() -> None:
+>       projection = speculative_decode.project_workspace_state(plan=_plan(), workspace="inference")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/a11_scaffold/test_a11_unimplemented_execution_red.py:83: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+mycelium_speculative_decode.py:2233: in project_workspace_state
+    _unavailable("product_projection_not_implemented", **context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+code = 'product_projection_not_implemented'
+context = {'plan': {'benchmark_threshold': {'confidence': 0.95, 'improvement_fraction': 0.1, 'maximum_ttft_regression_fraction':...line_ms': 5.0, 'remaining_request_deadline_ms': 500.0, 'source': 'measured_warm', ...}, ...}, 'workspace': 'inference'}
+detail = 'A11 scaffold stage: this execution seam is not implemented and never silently succeeds (plan, workspace)'
+
+    def _unavailable(code: str, **context: Any) -> None:
+        detail = _BOUNDARY_NOTE
+        if context:
+            detail = f"{detail} ({', '.join(sorted(context))})"
+>       raise SpeculativeDecodeUnavailable(code, detail)
+E       mycelium_speculative_decode.SpeculativeDecodeUnavailable: product_projection_not_implemented: A11 scaffold stage: this execution seam is not implemented and never silently succeeds (plan, workspace)
+
+mycelium_speculative_decode.py:2209: SpeculativeDecodeUnavailable
+=========================== short test summary info ============================
+FAILED tests/a11_scaffold/test_a11_unimplemented_execution_red.py::test_proposal_transfer_moves_only_the_minimum_private_envelope
+FAILED tests/a11_scaffold/test_a11_unimplemented_execution_red.py::test_paired_product_benchmark_executes_six_windows_on_one_route
+FAILED tests/a11_scaffold/test_a11_unimplemented_execution_red.py::test_qualification_bundle_executes_browser_and_negative_gates
+FAILED tests/a11_scaffold/test_a11_unimplemented_execution_red.py::test_workspace_projection_reconstructs_public_state_without_private_material
+4 failed, 92 passed in 0.78s
+EXIT=1

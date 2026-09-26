@@ -1,0 +1,596 @@
+### PRISTINE BASE 0fe6037 + the lane's new test files (RED receipt)
+base tree: /tmp/a11-seams-base-0fe6037
+
+--- [1] the reachability test alone (behavioural RED: the router decode seam does not exist)
+FFFFFFFFFFFF                                                             [100%]
+=================================== FAILURES ===================================
+_________ test_the_router_decode_path_dispatches_to_the_a11_execution __________
+
+    def test_the_router_decode_path_dispatches_to_the_a11_execution() -> None:
+>       source, record = dispatch()
+                         ^^^^^^^^^^
+
+tests/speculation/test_a11_router_decode_reachability.py:58: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+overrides = {}, source = None
+arguments = {'cancellation': <mycelium_speculative_decode_execution.CancellationScope object at 0x10a9082f0>, 'cycle_ref': 'decode... 100.0, 'minimum_deadline_ms': 5.0, 'remaining_request_deadline_ms': 500.0, 'source': 'measured_warm', ...}, ...}, ...}
+
+    def dispatch(**overrides):
+        """Drive the router decode seam with a bound plan and full in-process injections."""
+    
+        source = overrides.pop("source", None)
+        arguments = {
+            "plan": admissible_plan(),
+            "request_id": "req-decode-1",
+            "cycle_ref": "decode-cycle-1",
+            "width": WIDTH,
+            "transport": sx.ProposalTransport(),
+            "cancellation": sx.CancellationScope(),
+            "draft_tokens": CANDIDATES,
+        }
+        arguments["target"] = matching_target() if source is None else source
+        arguments.update(overrides)
+>       return arguments["target"], decoding.resolve_speculative_decode(**arguments)
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:49: AttributeError
+____________ test_the_dispatched_cycle_is_the_real_a10_wired_cycle _____________
+
+    def test_the_dispatched_cycle_is_the_real_a10_wired_cycle() -> None:
+>       _source, record = dispatch()
+                          ^^^^^^^^^^
+
+tests/speculation/test_a11_router_decode_reachability.py:82: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+overrides = {}, source = None
+arguments = {'cancellation': <mycelium_speculative_decode_execution.CancellationScope object at 0x10a932350>, 'cycle_ref': 'decode... 100.0, 'minimum_deadline_ms': 5.0, 'remaining_request_deadline_ms': 500.0, 'source': 'measured_warm', ...}, ...}, ...}
+
+    def dispatch(**overrides):
+        """Drive the router decode seam with a bound plan and full in-process injections."""
+    
+        source = overrides.pop("source", None)
+        arguments = {
+            "plan": admissible_plan(),
+            "request_id": "req-decode-1",
+            "cycle_ref": "decode-cycle-1",
+            "width": WIDTH,
+            "transport": sx.ProposalTransport(),
+            "cancellation": sx.CancellationScope(),
+            "draft_tokens": CANDIDATES,
+        }
+        arguments["target"] = matching_target() if source is None else source
+        arguments.update(overrides)
+>       return arguments["target"], decoding.resolve_speculative_decode(**arguments)
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:49: AttributeError
+_ test_the_router_decode_seam_names_the_authoritative_module_it_dispatches_to __
+
+    def test_the_router_decode_seam_names_the_authoritative_module_it_dispatches_to() -> None:
+        """The dispatch target is a real module the record names, not a string in prose."""
+    
+        import importlib
+    
+>       module = importlib.import_module(decoding.AUTHORITATIVE_EXECUTION_MODULE)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'AUTHORITATIVE_EXECUTION_MODULE'
+
+tests/speculation/test_a11_router_decode_reachability.py:104: AttributeError
+_ test_the_wired_helper_remains_the_fallback_when_the_execution_cannot_be_driven _
+
+    def test_the_wired_helper_remains_the_fallback_when_the_execution_cannot_be_driven() -> None:
+>       record = decoding.resolve_speculative_decode(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            plan=admissible_plan(), request_id="req-decode-2", width=WIDTH
+        )
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:115: AttributeError
+_____ test_a_malformed_injection_falls_back_instead_of_fabricating_a_cycle _____
+
+    def test_a_malformed_injection_falls_back_instead_of_fabricating_a_cycle() -> None:
+        source = matching_target()
+>       record = decoding.resolve_speculative_decode(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            plan=admissible_plan(),
+            request_id="req-decode-3",
+            width=WIDTH,
+            transport="not-a-transport",
+            target=source,
+            cancellation=sx.CancellationScope(),
+            draft_tokens=CANDIDATES,
+        )
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:136: AttributeError
+_____________ test_a_decode_with_no_bound_plan_dispatches_nothing ______________
+
+    def test_a_decode_with_no_bound_plan_dispatches_nothing() -> None:
+>       record = decoding.resolve_speculative_decode(plan=None, request_id="req-decode-4")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:155: AttributeError
+_ test_the_reasons_the_seam_actually_reports_are_registered[no_bound_speculative_plan] _
+
+reason = 'no_bound_speculative_plan'
+
+    @pytest.mark.parametrize("reason", ["no_bound_speculative_plan", "injected_execution_incomplete"])
+    def test_the_reasons_the_seam_actually_reports_are_registered(reason: str) -> None:
+>       assert reason in decoding.SEAM_DISPATCH_REASONS
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'SEAM_DISPATCH_REASONS'
+
+tests/speculation/test_a11_router_decode_reachability.py:167: AttributeError
+_ test_the_reasons_the_seam_actually_reports_are_registered[injected_execution_incomplete] _
+
+reason = 'injected_execution_incomplete'
+
+    @pytest.mark.parametrize("reason", ["no_bound_speculative_plan", "injected_execution_incomplete"])
+    def test_the_reasons_the_seam_actually_reports_are_registered(reason: str) -> None:
+>       assert reason in decoding.SEAM_DISPATCH_REASONS
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'SEAM_DISPATCH_REASONS'
+
+tests/speculation/test_a11_router_decode_reachability.py:167: AttributeError
+____________ test_a_malformed_plan_is_not_swallowed_by_the_fallback ____________
+
+    def test_a_malformed_plan_is_not_swallowed_by_the_fallback() -> None:
+        """A plan that violates the closed contract raises; it is not a decode outage."""
+    
+        with pytest.raises(sd.SpeculativeDecodeContractError):
+>           decoding.resolve_speculative_decode(plan={"protocol": "nope"}, request_id="req-decode-5", width=WIDTH)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:174: AttributeError
+___________ test_the_seam_never_claims_physical_or_product_evidence ____________
+
+    def test_the_seam_never_claims_physical_or_product_evidence() -> None:
+>       _source, record = dispatch()
+                          ^^^^^^^^^^
+
+tests/speculation/test_a11_router_decode_reachability.py:183: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+overrides = {}, source = None
+arguments = {'cancellation': <mycelium_speculative_decode_execution.CancellationScope object at 0x10a933d90>, 'cycle_ref': 'decode... 100.0, 'minimum_deadline_ms': 5.0, 'remaining_request_deadline_ms': 500.0, 'source': 'measured_warm', ...}, ...}, ...}
+
+    def dispatch(**overrides):
+        """Drive the router decode seam with a bound plan and full in-process injections."""
+    
+        source = overrides.pop("source", None)
+        arguments = {
+            "plan": admissible_plan(),
+            "request_id": "req-decode-1",
+            "cycle_ref": "decode-cycle-1",
+            "width": WIDTH,
+            "transport": sx.ProposalTransport(),
+            "cancellation": sx.CancellationScope(),
+            "draft_tokens": CANDIDATES,
+        }
+        arguments["target"] = matching_target() if source is None else source
+        arguments.update(overrides)
+>       return arguments["target"], decoding.resolve_speculative_decode(**arguments)
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:49: AttributeError
+_ test_the_router_decode_module_is_the_only_router_module_that_reaches_the_execution _
+
+    def test_the_router_decode_module_is_the_only_router_module_that_reaches_the_execution() -> None:
+        """One narrow seam: no second router module may import the A11 execution."""
+    
+        root = Path(__file__).resolve().parents[2]
+        importers = sorted(
+            path.name
+            for path in (root / "mycelium_router").glob("*.py")
+            if "mycelium_speculative_decode_execution" in path.read_text(encoding="utf-8", errors="replace")
+        )
+>       assert importers == ["decoding.py"], importers
+E       AssertionError: []
+E       assert [] == ['decoding.py']
+E         
+E         Right contains one more item: 'decoding.py'
+E         Use -v to get more diff
+
+tests/speculation/test_a11_router_decode_reachability.py:202: AssertionError
+______ test_the_seam_sits_on_the_router_module_the_route_builders_import _______
+
+    def test_the_seam_sits_on_the_router_module_the_route_builders_import() -> None:
+        """The seam lives on the module the shipped route/decode scripts import."""
+    
+        root = Path(__file__).resolve().parents[2]
+        importers = sorted(
+            str(path.relative_to(root))
+            for path in (root / "scripts").glob("*.py")
+            if "from mycelium_router.decoding import" in path.read_text(encoding="utf-8", errors="replace")
+        )
+        assert importers, "no script imports the router decode contract"
+        assert decoding.quantized_greedy_token_id is not None
+>       assert decoding.resolve_speculative_decode is not None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:216: AttributeError
+=========================== short test summary info ============================
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_router_decode_path_dispatches_to_the_a11_execution
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_dispatched_cycle_is_the_real_a10_wired_cycle
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_router_decode_seam_names_the_authoritative_module_it_dispatches_to
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_wired_helper_remains_the_fallback_when_the_execution_cannot_be_driven
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_a_malformed_injection_falls_back_instead_of_fabricating_a_cycle
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_a_decode_with_no_bound_plan_dispatches_nothing
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_reasons_the_seam_actually_reports_are_registered[no_bound_speculative_plan]
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_reasons_the_seam_actually_reports_are_registered[injected_execution_incomplete]
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_a_malformed_plan_is_not_swallowed_by_the_fallback
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_seam_never_claims_physical_or_product_evidence
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_router_decode_module_is_the_only_router_module_that_reaches_the_execution
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_seam_sits_on_the_router_module_the_route_builders_import
+12 failed in 0.32s
+EXIT=1
+
+--- [2] the in-process seam suite alone (collection RED: the seam registry does not exist)
+
+==================================== ERRORS ====================================
+_____ ERROR collecting tests/speculation/test_a11_live_seams_in_process.py _____
+tests/speculation/test_a11_live_seams_in_process.py:44: in <module>
+    SEAMS = {key: getattr(sx, name) for key, name in sx.LIVE_SEAMS.items()}
+                                                     ^^^^^^^^^^^^^
+E   AttributeError: module 'mycelium_speculative_decode_execution' has no attribute 'LIVE_SEAMS'
+=========================== short test summary info ============================
+ERROR tests/speculation/test_a11_live_seams_in_process.py - AttributeError: m...
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.36s
+EXIT=2
+
+--- [3] tests/speculation as a whole at base, continuing past the collection error
+FFFFFFFFFFFF............................................................ [ 97%]
+..                                                                       [100%]
+==================================== ERRORS ====================================
+_____ ERROR collecting tests/speculation/test_a11_live_seams_in_process.py _____
+tests/speculation/test_a11_live_seams_in_process.py:44: in <module>
+    SEAMS = {key: getattr(sx, name) for key, name in sx.LIVE_SEAMS.items()}
+                                                     ^^^^^^^^^^^^^
+E   AttributeError: module 'mycelium_speculative_decode_execution' has no attribute 'LIVE_SEAMS'
+=================================== FAILURES ===================================
+_________ test_the_router_decode_path_dispatches_to_the_a11_execution __________
+
+    def test_the_router_decode_path_dispatches_to_the_a11_execution() -> None:
+>       source, record = dispatch()
+                         ^^^^^^^^^^
+
+tests/speculation/test_a11_router_decode_reachability.py:58: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+overrides = {}, source = None
+arguments = {'cancellation': <mycelium_speculative_decode_execution.CancellationScope object at 0x10ca4be00>, 'cycle_ref': 'decode... 100.0, 'minimum_deadline_ms': 5.0, 'remaining_request_deadline_ms': 500.0, 'source': 'measured_warm', ...}, ...}, ...}
+
+    def dispatch(**overrides):
+        """Drive the router decode seam with a bound plan and full in-process injections."""
+    
+        source = overrides.pop("source", None)
+        arguments = {
+            "plan": admissible_plan(),
+            "request_id": "req-decode-1",
+            "cycle_ref": "decode-cycle-1",
+            "width": WIDTH,
+            "transport": sx.ProposalTransport(),
+            "cancellation": sx.CancellationScope(),
+            "draft_tokens": CANDIDATES,
+        }
+        arguments["target"] = matching_target() if source is None else source
+        arguments.update(overrides)
+>       return arguments["target"], decoding.resolve_speculative_decode(**arguments)
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:49: AttributeError
+____________ test_the_dispatched_cycle_is_the_real_a10_wired_cycle _____________
+
+    def test_the_dispatched_cycle_is_the_real_a10_wired_cycle() -> None:
+>       _source, record = dispatch()
+                          ^^^^^^^^^^
+
+tests/speculation/test_a11_router_decode_reachability.py:82: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+overrides = {}, source = None
+arguments = {'cancellation': <mycelium_speculative_decode_execution.CancellationScope object at 0x10cc33c50>, 'cycle_ref': 'decode... 100.0, 'minimum_deadline_ms': 5.0, 'remaining_request_deadline_ms': 500.0, 'source': 'measured_warm', ...}, ...}, ...}
+
+    def dispatch(**overrides):
+        """Drive the router decode seam with a bound plan and full in-process injections."""
+    
+        source = overrides.pop("source", None)
+        arguments = {
+            "plan": admissible_plan(),
+            "request_id": "req-decode-1",
+            "cycle_ref": "decode-cycle-1",
+            "width": WIDTH,
+            "transport": sx.ProposalTransport(),
+            "cancellation": sx.CancellationScope(),
+            "draft_tokens": CANDIDATES,
+        }
+        arguments["target"] = matching_target() if source is None else source
+        arguments.update(overrides)
+>       return arguments["target"], decoding.resolve_speculative_decode(**arguments)
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:49: AttributeError
+_ test_the_router_decode_seam_names_the_authoritative_module_it_dispatches_to __
+
+    def test_the_router_decode_seam_names_the_authoritative_module_it_dispatches_to() -> None:
+        """The dispatch target is a real module the record names, not a string in prose."""
+    
+        import importlib
+    
+>       module = importlib.import_module(decoding.AUTHORITATIVE_EXECUTION_MODULE)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'AUTHORITATIVE_EXECUTION_MODULE'
+
+tests/speculation/test_a11_router_decode_reachability.py:104: AttributeError
+_ test_the_wired_helper_remains_the_fallback_when_the_execution_cannot_be_driven _
+
+    def test_the_wired_helper_remains_the_fallback_when_the_execution_cannot_be_driven() -> None:
+>       record = decoding.resolve_speculative_decode(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            plan=admissible_plan(), request_id="req-decode-2", width=WIDTH
+        )
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:115: AttributeError
+_____ test_a_malformed_injection_falls_back_instead_of_fabricating_a_cycle _____
+
+    def test_a_malformed_injection_falls_back_instead_of_fabricating_a_cycle() -> None:
+        source = matching_target()
+>       record = decoding.resolve_speculative_decode(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            plan=admissible_plan(),
+            request_id="req-decode-3",
+            width=WIDTH,
+            transport="not-a-transport",
+            target=source,
+            cancellation=sx.CancellationScope(),
+            draft_tokens=CANDIDATES,
+        )
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:136: AttributeError
+_____________ test_a_decode_with_no_bound_plan_dispatches_nothing ______________
+
+    def test_a_decode_with_no_bound_plan_dispatches_nothing() -> None:
+>       record = decoding.resolve_speculative_decode(plan=None, request_id="req-decode-4")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:155: AttributeError
+_ test_the_reasons_the_seam_actually_reports_are_registered[no_bound_speculative_plan] _
+
+reason = 'no_bound_speculative_plan'
+
+    @pytest.mark.parametrize("reason", ["no_bound_speculative_plan", "injected_execution_incomplete"])
+    def test_the_reasons_the_seam_actually_reports_are_registered(reason: str) -> None:
+>       assert reason in decoding.SEAM_DISPATCH_REASONS
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'SEAM_DISPATCH_REASONS'
+
+tests/speculation/test_a11_router_decode_reachability.py:167: AttributeError
+_ test_the_reasons_the_seam_actually_reports_are_registered[injected_execution_incomplete] _
+
+reason = 'injected_execution_incomplete'
+
+    @pytest.mark.parametrize("reason", ["no_bound_speculative_plan", "injected_execution_incomplete"])
+    def test_the_reasons_the_seam_actually_reports_are_registered(reason: str) -> None:
+>       assert reason in decoding.SEAM_DISPATCH_REASONS
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'SEAM_DISPATCH_REASONS'
+
+tests/speculation/test_a11_router_decode_reachability.py:167: AttributeError
+____________ test_a_malformed_plan_is_not_swallowed_by_the_fallback ____________
+
+    def test_a_malformed_plan_is_not_swallowed_by_the_fallback() -> None:
+        """A plan that violates the closed contract raises; it is not a decode outage."""
+    
+        with pytest.raises(sd.SpeculativeDecodeContractError):
+>           decoding.resolve_speculative_decode(plan={"protocol": "nope"}, request_id="req-decode-5", width=WIDTH)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:174: AttributeError
+___________ test_the_seam_never_claims_physical_or_product_evidence ____________
+
+    def test_the_seam_never_claims_physical_or_product_evidence() -> None:
+>       _source, record = dispatch()
+                          ^^^^^^^^^^
+
+tests/speculation/test_a11_router_decode_reachability.py:183: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+overrides = {}, source = None
+arguments = {'cancellation': <mycelium_speculative_decode_execution.CancellationScope object at 0x10ce111d0>, 'cycle_ref': 'decode... 100.0, 'minimum_deadline_ms': 5.0, 'remaining_request_deadline_ms': 500.0, 'source': 'measured_warm', ...}, ...}, ...}
+
+    def dispatch(**overrides):
+        """Drive the router decode seam with a bound plan and full in-process injections."""
+    
+        source = overrides.pop("source", None)
+        arguments = {
+            "plan": admissible_plan(),
+            "request_id": "req-decode-1",
+            "cycle_ref": "decode-cycle-1",
+            "width": WIDTH,
+            "transport": sx.ProposalTransport(),
+            "cancellation": sx.CancellationScope(),
+            "draft_tokens": CANDIDATES,
+        }
+        arguments["target"] = matching_target() if source is None else source
+        arguments.update(overrides)
+>       return arguments["target"], decoding.resolve_speculative_decode(**arguments)
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:49: AttributeError
+_ test_the_router_decode_module_is_the_only_router_module_that_reaches_the_execution _
+
+    def test_the_router_decode_module_is_the_only_router_module_that_reaches_the_execution() -> None:
+        """One narrow seam: no second router module may import the A11 execution."""
+    
+        root = Path(__file__).resolve().parents[2]
+        importers = sorted(
+            path.name
+            for path in (root / "mycelium_router").glob("*.py")
+            if "mycelium_speculative_decode_execution" in path.read_text(encoding="utf-8", errors="replace")
+        )
+>       assert importers == ["decoding.py"], importers
+E       AssertionError: []
+E       assert [] == ['decoding.py']
+E         
+E         Right contains one more item: 'decoding.py'
+E         Use -v to get more diff
+
+tests/speculation/test_a11_router_decode_reachability.py:202: AssertionError
+______ test_the_seam_sits_on_the_router_module_the_route_builders_import _______
+
+    def test_the_seam_sits_on_the_router_module_the_route_builders_import() -> None:
+        """The seam lives on the module the shipped route/decode scripts import."""
+    
+        root = Path(__file__).resolve().parents[2]
+        importers = sorted(
+            str(path.relative_to(root))
+            for path in (root / "scripts").glob("*.py")
+            if "from mycelium_router.decoding import" in path.read_text(encoding="utf-8", errors="replace")
+        )
+        assert importers, "no script imports the router decode contract"
+        assert decoding.quantized_greedy_token_id is not None
+>       assert decoding.resolve_speculative_decode is not None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'mycelium_router.decoding' has no attribute 'resolve_speculative_decode'
+
+tests/speculation/test_a11_router_decode_reachability.py:216: AttributeError
+=========================== short test summary info ============================
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_router_decode_path_dispatches_to_the_a11_execution
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_dispatched_cycle_is_the_real_a10_wired_cycle
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_router_decode_seam_names_the_authoritative_module_it_dispatches_to
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_wired_helper_remains_the_fallback_when_the_execution_cannot_be_driven
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_a_malformed_injection_falls_back_instead_of_fabricating_a_cycle
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_a_decode_with_no_bound_plan_dispatches_nothing
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_reasons_the_seam_actually_reports_are_registered[no_bound_speculative_plan]
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_reasons_the_seam_actually_reports_are_registered[injected_execution_incomplete]
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_a_malformed_plan_is_not_swallowed_by_the_fallback
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_seam_never_claims_physical_or_product_evidence
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_router_decode_module_is_the_only_router_module_that_reaches_the_execution
+FAILED tests/speculation/test_a11_router_decode_reachability.py::test_the_seam_sits_on_the_router_module_the_route_builders_import
+ERROR tests/speculation/test_a11_live_seams_in_process.py - AttributeError: m...
+12 failed, 62 passed, 1 error in 0.71s
+EXIT=1
+
+--- [4] the a11 scaffold red file at base (the pre-existing RED remainder, unchanged)
+...............................................F.FFF.................... [ 75%]
+........................                                                 [100%]
+=================================== FAILURES ===================================
+________ test_proposal_transfer_moves_only_the_minimum_private_envelope ________
+
+    def test_proposal_transfer_moves_only_the_minimum_private_envelope() -> None:
+>       envelope = speculative_decode.transfer_proposal_envelope(plan=_plan(), proposal_tokens=[1, 2, 3, 4])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/a11_scaffold/test_a11_unimplemented_execution_red.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+mycelium_speculative_decode.py:2215: in transfer_proposal_envelope
+    _unavailable("private_proposal_transfer_not_implemented", **context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+code = 'private_proposal_transfer_not_implemented'
+context = {'plan': {'benchmark_threshold': {'confidence': 0.95, 'improvement_fraction': 0.1, 'maximum_ttft_regression_fraction':...': 5.0, 'remaining_request_deadline_ms': 500.0, 'source': 'measured_warm', ...}, ...}, 'proposal_tokens': [1, 2, 3, 4]}
+detail = 'A11 scaffold stage: this execution seam is not implemented and never silently succeeds (plan, proposal_tokens)'
+
+    def _unavailable(code: str, **context: Any) -> None:
+        detail = _BOUNDARY_NOTE
+        if context:
+            detail = f"{detail} ({', '.join(sorted(context))})"
+>       raise SpeculativeDecodeUnavailable(code, detail)
+E       mycelium_speculative_decode.SpeculativeDecodeUnavailable: private_proposal_transfer_not_implemented: A11 scaffold stage: this execution seam is not implemented and never silently succeeds (plan, proposal_tokens)
+
+mycelium_speculative_decode.py:2209: SpeculativeDecodeUnavailable
+_______ test_paired_product_benchmark_executes_six_windows_on_one_route ________
+
+    def test_paired_product_benchmark_executes_six_windows_on_one_route() -> None:
+>       benchmark = speculative_decode.run_paired_product_benchmark(plan=_plan(), route_digest="sha256:" + "0" * 64)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/a11_scaffold/test_a11_unimplemented_execution_red.py:63: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+mycelium_speculative_decode.py:2221: in run_paired_product_benchmark
+    _unavailable("live_route_benchmark_not_implemented", **context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+code = 'live_route_benchmark_not_implemented'
+context = {'plan': {'benchmark_threshold': {'confidence': 0.95, 'improvement_fraction': 0.1, 'maximum_ttft_regression_fraction':...'measured_warm', ...}, ...}, 'route_digest': 'sha256:0000000000000000000000000000000000000000000000000000000000000000'}
+detail = 'A11 scaffold stage: this execution seam is not implemented and never silently succeeds (plan, route_digest)'
+
+    def _unavailable(code: str, **context: Any) -> None:
+        detail = _BOUNDARY_NOTE
+        if context:
+            detail = f"{detail} ({', '.join(sorted(context))})"
+>       raise SpeculativeDecodeUnavailable(code, detail)
+E       mycelium_speculative_decode.SpeculativeDecodeUnavailable: live_route_benchmark_not_implemented: A11 scaffold stage: this execution seam is not implemented and never silently succeeds (plan, route_digest)
+
+mycelium_speculative_decode.py:2209: SpeculativeDecodeUnavailable
+________ test_qualification_bundle_executes_browser_and_negative_gates _________
+
+    def test_qualification_bundle_executes_browser_and_negative_gates() -> None:
+>       qualification = speculative_decode.execute_qualification_bundle(plan=_plan(), benchmark_digest="sha256:" + "0" * 64)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/a11_scaffold/test_a11_unimplemented_execution_red.py:68: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+mycelium_speculative_decode.py:2227: in execute_qualification_bundle
+    _unavailable("physical_qualification_not_implemented", **context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+code = 'physical_qualification_not_implemented'
+context = {'benchmark_digest': 'sha256:0000000000000000000000000000000000000000000000000000000000000000', 'plan': {'benchmark_th..._ms': 100.0, 'minimum_deadline_ms': 5.0, 'remaining_request_deadline_ms': 500.0, 'source': 'measured_warm', ...}, ...}}
+detail = 'A11 scaffold stage: this execution seam is not implemented and never silently succeeds (benchmark_digest, plan)'
+
+    def _unavailable(code: str, **context: Any) -> None:
+        detail = _BOUNDARY_NOTE
+        if context:
+            detail = f"{detail} ({', '.join(sorted(context))})"
+>       raise SpeculativeDecodeUnavailable(code, detail)
+E       mycelium_speculative_decode.SpeculativeDecodeUnavailable: physical_qualification_not_implemented: A11 scaffold stage: this execution seam is not implemented and never silently succeeds (benchmark_digest, plan)
+
+mycelium_speculative_decode.py:2209: SpeculativeDecodeUnavailable
+_ test_workspace_projection_reconstructs_public_state_without_private_material _
+
+    def test_workspace_projection_reconstructs_public_state_without_private_material() -> None:
+>       projection = speculative_decode.project_workspace_state(plan=_plan(), workspace="inference")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/a11_scaffold/test_a11_unimplemented_execution_red.py:83: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+mycelium_speculative_decode.py:2233: in project_workspace_state
+    _unavailable("product_projection_not_implemented", **context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+code = 'product_projection_not_implemented'
+context = {'plan': {'benchmark_threshold': {'confidence': 0.95, 'improvement_fraction': 0.1, 'maximum_ttft_regression_fraction':...line_ms': 5.0, 'remaining_request_deadline_ms': 500.0, 'source': 'measured_warm', ...}, ...}, 'workspace': 'inference'}
+detail = 'A11 scaffold stage: this execution seam is not implemented and never silently succeeds (plan, workspace)'
+
+    def _unavailable(code: str, **context: Any) -> None:
+        detail = _BOUNDARY_NOTE
+        if context:
+            detail = f"{detail} ({', '.join(sorted(context))})"
+>       raise SpeculativeDecodeUnavailable(code, detail)
+E       mycelium_speculative_decode.SpeculativeDecodeUnavailable: product_projection_not_implemented: A11 scaffold stage: this execution seam is not implemented and never silently succeeds (plan, workspace)
+
+mycelium_speculative_decode.py:2209: SpeculativeDecodeUnavailable
+=========================== short test summary info ============================
+FAILED tests/a11_scaffold/test_a11_unimplemented_execution_red.py::test_proposal_transfer_moves_only_the_minimum_private_envelope
+FAILED tests/a11_scaffold/test_a11_unimplemented_execution_red.py::test_paired_product_benchmark_executes_six_windows_on_one_route
+FAILED tests/a11_scaffold/test_a11_unimplemented_execution_red.py::test_qualification_bundle_executes_browser_and_negative_gates
+FAILED tests/a11_scaffold/test_a11_unimplemented_execution_red.py::test_workspace_projection_reconstructs_public_state_without_private_material
+4 failed, 92 passed in 0.51s
+EXIT=1

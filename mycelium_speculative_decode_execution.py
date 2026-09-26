@@ -29,8 +29,21 @@ decision source, an in-process transport and an injected cancellation scope.  It
 **not** physical evidence: no physical draft/target route, no authenticated network
 proposal transfer, no live-route paired benchmark, no browser or eight-workspace
 product surface, no qualification, no benefit claim, and no A11 closure requirement
-is earned here.  The three live/physical seams below still refuse with a coded
-exception and never return a document.
+is earned here.
+
+The three seams that used to refuse as scaffold boundaries
+(``run_live_route_benchmark``, ``execute_physical_qualification``,
+``project_live_workspace_state``) are implemented as deterministic in-process
+behaviour.  Each one runs real :func:`run_speculative_cycle` work over the **injected**
+transport, the **injected** target decision source and the **injected** cancellation
+scope, and returns a document stamped
+``evidence_class="deterministic_in_process"`` in which every physical, qualification,
+promotion and product-surface flag is false.  Each one refuses with a closed contract
+code when an injection is missing -- a seam never invents its own transport, target
+authority or draft proposal -- and with a closed ``SpeculativeDecodeExecutionUnavailable``
+claim boundary when a caller asks for a physical, live-route, authenticated-network or
+browser evidence class.  ``EXECUTION_BOUNDARIES`` therefore names exactly the evidence
+classes that remain unavailable, and no seam can return a document that reads as one.
 
 Reused, not rebuilt: the closed plan/runtime contracts, the adaptive-deadline
 arithmetic, the circuit-breaker policy and the deterministic parity oracle all come
@@ -46,7 +59,7 @@ import hashlib
 import json
 import math
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
+from typing import Any, Mapping, NoReturn, Protocol, Sequence, runtime_checkable
 
 import mycelium_speculative_decode as sd
 from mycelium_router.a10_target_verification import (
@@ -77,9 +90,13 @@ CLAIM_BOUNDARY = (
     "verifier port: private bounded proposal envelope over an in-process transport, "
     "target-authoritative commit/correction/rollback arbitration, separate target/draft "
     "KV ownership, cancellation checkpoints and a privacy-reduced runtime projection. "
+    "The three former scaffold seams (route benchmark, qualification gates, workspace "
+    "projection) run as deterministic in-process behaviour over injected dependencies "
+    "and publish counters and digests only. "
     "No physical draft/target route, no authenticated network proposal transfer, no "
     "live-route benchmark, no browser or eight-workspace product surface, no "
-    "qualification and no benefit claim; A11 closure requirements are untouched."
+    "qualification, no benefit claim and no promotion authorization; A11 closure "
+    "requirements are untouched."
 )
 
 PROPOSAL_BYTES_PER_TOKEN = 4
@@ -97,12 +114,119 @@ CANCELLATION_CHECKPOINTS = (
     "before_output",
 )
 
-#: The seams that still require physical hardware, a live route or a browser session.
-EXECUTION_BOUNDARIES = {
-    "live_route_benchmark_not_available": "run_live_route_benchmark",
-    "physical_qualification_not_available": "execute_physical_qualification",
-    "live_workspace_projection_not_available": "project_live_workspace_state",
+#: The evidence classes no source lane can earn.  Each maps to the claim boundary that
+#: refuses it, and the union of those boundaries is exactly ``EXECUTION_BOUNDARIES``:
+#: a seam asked for one of these refuses instead of returning a document, so a
+#: deterministic in-process run can never be published as physical, live-route,
+#: authenticated-network or browser evidence.
+REFUSED_EVIDENCE_CLASSES = {
+    "physical": "physical_draft_target_route_not_available",
+    "live_route": "live_route_product_session_not_available",
+    "authenticated_network": "authenticated_network_proposal_transfer_not_available",
+    "browser": "browser_workspace_surface_not_available",
 }
+
+#: The evidence class every implemented seam publishes, and the only one it accepts.
+EMITTED_EVIDENCE_CLASS = "deterministic_in_process"
+
+#: The claim boundaries that remain: physical hardware, a live product route, the
+#: authenticated private network path and the browser product surface.  Each is a real
+#: callable that raises ``SpeculativeDecodeExecutionUnavailable`` with its own code and
+#: never returns a document.
+EXECUTION_BOUNDARIES = {
+    "physical_draft_target_route_not_available": "require_physical_draft_target_route",
+    "live_route_product_session_not_available": "require_live_route_product_session",
+    "authenticated_network_proposal_transfer_not_available": (
+        "require_authenticated_network_proposal_transfer"
+    ),
+    "browser_workspace_surface_not_available": "require_browser_workspace_surface",
+}
+
+#: The three former scaffold seams, now implemented as deterministic in-process
+#: behaviour over injected dependencies.  The keys are the semantic seam names; the
+#: values are the frozen scaffold function names that stay the public surface.
+LIVE_SEAMS = {
+    "route_benchmark": "run_live_route_benchmark",
+    "physical_qualification": "execute_physical_qualification",
+    "workspace_projection": "project_live_workspace_state",
+}
+
+#: The closed set of refusals the implemented seams may raise.  Missing injections are
+#: *contract* violations (``SpeculativeDecodeExecutionError``): the seam is implemented,
+#: the caller did not supply the in-process execution it must run over.  None of these
+#: is a capability boundary, and none may be raised as one.
+#:
+#: ``router_decode`` is the injection key the router decode seam
+#: (``mycelium_router.decoding.resolve_speculative_decode``) uses: it is a real consumer
+#: of the same injection contract, so its refusals are registered here too.
+_ROUTER_DECODE_SEAM_KEY = "router_decode"
+_SEAM_INJECTIONS = (
+    "requires_injected_transport",
+    "requires_injected_cancellation_scope",
+    "requires_injected_target_decision_source",
+    "requires_injected_draft_runtime",
+)
+SEAM_REFUSALS = frozenset(
+    [
+        f"{key}_{suffix}"
+        for key in tuple(sorted(LIVE_SEAMS)) + (_ROUTER_DECODE_SEAM_KEY,)
+        for suffix in _SEAM_INJECTIONS
+    ]
+    + [
+        "route_benchmark_requires_executed_cycles",
+        "physical_qualification_requires_injected_negative_arm",
+        "injection_type_mismatch",
+        "invalid_evidence_class",
+        "invalid_request_id",
+        "projection_privacy_violation",
+    ]
+)
+
+#: The injection key the router decode seam uses.  Exported so the router module and
+#: this module cannot drift on the string.
+ROUTER_DECODE_SEAM_KEY = _ROUTER_DECODE_SEAM_KEY
+
+#: The injection refusals a *router decode seam* caller may be handed back (rather than
+#: raising), because the router decode path always has the target-only fallback.
+INJECTION_REFUSALS = frozenset(
+    f"{_ROUTER_DECODE_SEAM_KEY}_{suffix}" for suffix in _SEAM_INJECTIONS
+) | {"injection_type_mismatch"}
+
+#: The frozen eight product workspaces, in the order ``ui/web/src/app/navigation.ts``
+#: publishes them (bound by a test that reads that file, so the projection cannot drift
+#: from the product surface it claims to name).
+PRODUCT_WORKSPACES = (
+    "inference",
+    "lab",
+    "network",
+    "nodes",
+    "plans",
+    "readiness",
+    "incidents",
+    "settings",
+)
+
+BENCHMARK_EXECUTION_PROTOCOL = "mycelium.speculative_decode_execution_benchmark.v1"
+QUALIFICATION_EXECUTION_PROTOCOL = "mycelium.speculative_decode_execution_qualification.v1"
+WORKSPACE_PROJECTION_PROTOCOL = "mycelium.speculative_decode_execution_workspace.v1"
+
+#: Key names that must never appear in a seam projection: the deterministic seams
+#: publish counts, positions and digests only.
+_FORBIDDEN_PROJECTION_KEYS = frozenset(
+    {
+        "prompt",
+        "prompt_token_ids",
+        "tokens",
+        "token_ids",
+        "candidate_token_ids",
+        "logits",
+        "activation",
+        "activation_bytes_payload",
+        "kv_bytes",
+        "credential",
+        "secret",
+    }
+)
 
 #: Execution-level abstain/fallback reasons.  These are *not* the frozen public
 #: runtime vocabulary (``sd._FALLBACK_REASONS``); they explain, at execution level,
@@ -1735,64 +1859,752 @@ def _cancelled(
 
 
 # ---------------------------------------------------------------------------
-# Honest not-available boundaries: hardware, live route, browser
+# Honest claim boundaries: physical hardware, live route, private network, browser
 # ---------------------------------------------------------------------------
 
 _UNAVAILABLE_NOTE = (
-    "A11 source tranche: this seam needs physical hardware, a live product route or a "
-    "browser session and never silently succeeds"
+    "A11 source tranche: this evidence class needs physical hardware, a live product "
+    "route, the authenticated private network path or a browser session; no seam "
+    "returns a document for it and none silently succeeds"
 )
 
 
-def _unavailable(code: str, **context: Any) -> None:
+def _unavailable(code: str, **context: Any) -> NoReturn:
     detail = _UNAVAILABLE_NOTE
     if context:
         detail = f"{detail} ({', '.join(sorted(context))})"
     raise SpeculativeDecodeExecutionUnavailable(code, detail)
 
 
-def run_live_route_benchmark(**context: Any) -> dict[str, Any]:
-    """Boundary: the ordinary same-route paired product benchmark requires a live route."""
+def _refuse(code: str, detail: str | None = None) -> NoReturn:
+    """Raise a registered seam refusal.  An unregistered code is itself a bug."""
 
-    _unavailable("live_route_benchmark_not_available", **context)
-
-
-def execute_physical_qualification(**context: Any) -> dict[str, Any]:
-    """Boundary: physical positive/negative gates require a qualified draft/target pair."""
-
-    _unavailable("physical_qualification_not_available", **context)
+    if code not in SEAM_REFUSALS:  # pragma: no cover - a programming error, not a path
+        raise SpeculativeDecodeExecutionError(
+            "injection_type_mismatch", f"unregistered_seam_refusal:{code}"
+        )
+    raise SpeculativeDecodeExecutionError(code, detail)
 
 
-def project_live_workspace_state(**context: Any) -> dict[str, Any]:
-    """Boundary: the eight live browser workspaces require the product path."""
+def require_physical_draft_target_route(**context: Any) -> NoReturn:
+    """Boundary: physical draft/target-route evidence needs qualified hardware."""
 
-    _unavailable("live_workspace_projection_not_available", **context)
+    _unavailable("physical_draft_target_route_not_available", **context)
+
+
+def require_live_route_product_session(**context: Any) -> NoReturn:
+    """Boundary: the ordinary same-route paired product session needs a live route."""
+
+    _unavailable("live_route_product_session_not_available", **context)
+
+
+def require_authenticated_network_proposal_transfer(**context: Any) -> NoReturn:
+    """Boundary: an authenticated network proposal transfer needs the private path."""
+
+    _unavailable("authenticated_network_proposal_transfer_not_available", **context)
+
+
+def require_browser_workspace_surface(**context: Any) -> NoReturn:
+    """Boundary: the eight live browser workspaces need the product surface."""
+
+    _unavailable("browser_workspace_surface_not_available", **context)
+
+
+# ---------------------------------------------------------------------------
+# The implemented seams: deterministic in-process comparison, gates, projection
+# ---------------------------------------------------------------------------
+
+
+def _evidence_class(evidence_class: Any, *, seam: str) -> str:
+    """Return the single supported evidence class, or refuse the requested one."""
+
+    if evidence_class == EMITTED_EVIDENCE_CLASS:
+        return EMITTED_EVIDENCE_CLASS
+    if isinstance(evidence_class, str) and evidence_class in REFUSED_EVIDENCE_CLASSES:
+        _unavailable(REFUSED_EVIDENCE_CLASSES[evidence_class], seam=seam, requested=evidence_class)
+    _refuse("invalid_evidence_class", f"{seam}:{evidence_class!r}")
+
+
+@dataclass(frozen=True)
+class InProcessExecution:
+    """The injected dependencies one implemented seam runs over.
+
+    ``transport``, ``target`` and ``cancellation`` are the three injections the A11
+    cycle requires.  ``draft`` is the *separate* draft authority: it is never derived
+    from the target, because a seam that invented its own proposal could "verify" a
+    proposal no draft ever made.
+    """
+
+    transport: ProposalTransport
+    target: A10TargetKvRuntime
+    cancellation: CancellationScope
+    draft: Any
+    ledger: Any = None
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "transport": self.transport.snapshot(),
+            "target": self.target.snapshot(),
+            "draft": self.draft.snapshot(),
+        }
+
+
+def injected_in_process_execution(
+    *,
+    transport: Any = None,
+    decision_source: Any = None,
+    cancellation: Any = None,
+    draft: Any = None,
+    draft_tokens: Any = None,
+    ledger: Any = None,
+    seam: str = "seam",
+    target_kv_ref: str = "target-kv-1",
+    target_runtime_incarnation: str = "sha256:" + "3" * 64,
+    draft_incarnation: str = "sha256:" + "6" * 64,
+    draft_kv_ref: str = "draft-kv-1",
+    draft_timing_ms: tuple[float, float] = (1.0, 2.0),
+) -> InProcessExecution:
+    """Build the in-process execution the seams run over, or refuse by code.
+
+    ``decision_source`` is either an object exposing ``evaluate_bounded_positions``
+    (wrapped in this module's :class:`A10TargetKvRuntime`) or an already-built
+    ``A10TargetKvRuntime``.  ``draft`` is a ``DraftRuntimePort``; ``draft_tokens`` is
+    a ``(position, width) -> tokens`` callable or a plain token sequence used as the
+    deterministic proposal.
+    """
+
+    if transport is None:
+        _refuse(f"{seam}_requires_injected_transport")
+    if not isinstance(transport, ProposalTransport):
+        _refuse("injection_type_mismatch", "transport")
+    if cancellation is None:
+        _refuse(f"{seam}_requires_injected_cancellation_scope")
+    if not isinstance(cancellation, CancellationScope):
+        _refuse("injection_type_mismatch", "cancellation")
+    if decision_source is None:
+        _refuse(f"{seam}_requires_injected_target_decision_source")
+    if isinstance(decision_source, A10TargetKvRuntime):
+        target = decision_source
+    elif callable(getattr(decision_source, "evaluate_bounded_positions", None)):
+        target = A10TargetKvRuntime(
+            decision_source,
+            target_kv_ref=_text(target_kv_ref, "invalid_target_kv_ref"),
+            target_runtime_incarnation=target_runtime_incarnation,
+        )
+    else:
+        _refuse("injection_type_mismatch", "target_decision_source")
+    if draft is None:
+        if draft_tokens is None:
+            _refuse(f"{seam}_requires_injected_draft_runtime")
+        if callable(draft_tokens):
+            propose = draft_tokens
+        elif isinstance(draft_tokens, Sequence) and not isinstance(draft_tokens, (str, bytes)):
+            fixed = _token_sequence(draft_tokens, "invalid_draft_proposal")
+            propose = lambda _position, _width, _tokens=fixed: _tokens
+        else:
+            _refuse("injection_type_mismatch", "draft_tokens")
+        draft = DeterministicDraftRuntime(
+            propose,
+            incarnation=draft_incarnation,
+            kv_ref=draft_kv_ref,
+            timing_ms=draft_timing_ms,
+        )
+    return InProcessExecution(
+        transport=transport, target=target, cancellation=cancellation, draft=draft, ledger=ledger
+    )
+
+
+def _seam_width(document: Mapping[str, Any], width: Any) -> int:
+    maximum = min(
+        int(document["proposal_bounds"]["maximum_width"]),
+        int(document["verifier"]["qualified_width"]),
+    )
+    if width is None:
+        return maximum
+    admitted = _position(width, "proposal_width_out_of_bounds")
+    if admitted < 1 or admitted > maximum:
+        raise SpeculativeDecodeExecutionError("proposal_width_out_of_bounds", f"width={admitted}")
+    return admitted
+
+
+def _request_ids(request_ids: Any) -> tuple[str, ...]:
+    if isinstance(request_ids, (str, bytes)) or not isinstance(request_ids, Sequence) or not len(request_ids):
+        _refuse("invalid_request_id", repr(request_ids)[:64])
+    return tuple(_text(item, "invalid_request_id") for item in request_ids)
+
+
+def _run_seam_cycle(
+    *,
+    execution: InProcessExecution,
+    document: Mapping[str, Any],
+    request_id: str,
+    cycle_ref: str,
+    width: int,
+    preference: str,
+    window: list[dict[str, Any]],
+    deadline_ms: float | None,
+    target_only_ms: float | None,
+) -> tuple[CycleExecution, dict[str, Any]]:
+    """Run one real cycle and return it with the pre-cycle counters."""
+
+    before = execution.snapshot()
+    cycle = run_speculative_cycle(
+        plan=document,
+        request_id=request_id,
+        cycle_ref=cycle_ref,
+        attempt=1,
+        width=width,
+        target=execution.target,
+        draft=execution.draft,
+        transport=execution.transport,
+        cancellation=execution.cancellation,
+        preference=preference,
+        ledger=execution.ledger,
+        deadline_ms=deadline_ms,
+        target_only_ms=target_only_ms,
+        window=window,
+    )
+    return cycle, before
+
+
+def _arm_record(
+    cycle: CycleExecution,
+    *,
+    arm: str,
+    before: Mapping[str, Any],
+) -> dict[str, Any]:
+    """One arm's record: measured counters and positions only, never a token."""
+
+    request = cycle.runtime_request
+    target_before = before["target"]
+    draft_before = before["draft"]
+    transport_before = before["transport"]
+    return {
+        "arm": arm,
+        "request_id": cycle.request_id,
+        "cycle_ref": cycle.cycle_ref,
+        "mode": cycle.mode,
+        "admitted_mode": cycle.admission["mode"],
+        "proposal_width": cycle.proposal_width,
+        "verification_calls": int(cycle.target_kv["bounded_invocations"])
+        - int(target_before["bounded_invocations"]),
+        "target_commits": int(cycle.target_kv["commits"]) - int(target_before["commits"]),
+        "target_watermark_position": int(cycle.target_kv["position"]),
+        "draft_proposals": int(cycle.draft_kv["proposals"]) - int(draft_before["proposals"]),
+        "proposal_bytes": _transport_bytes(cycle),
+        "proposed_positions": int(request["proposed_count"]),
+        "verified_positions": int(request["verified_count"]),
+        "accepted_positions": int(request["accepted_count"]),
+        "rejected_positions": int(request["rejected_count"]),
+        "corrected_positions": int(request["target_corrected_count"]),
+        "rollback_positions": int(request["rollback_count"]),
+        "committed_positions": int(request["committed_count"]),
+        "deadline_outcome": request["deadline_outcome"],
+        "fallback_reason": request["fallback_reason"],
+        "terminal_state": request["terminal_state"],
+        "parity": None if cycle.parity is None else cycle.parity["parity"],
+        "failure_reason": None if cycle.failure is None else cycle.failure["failure_reason"],
+        "released_tokens": int(cycle.output["released_tokens"]),
+        "rolled_back_positions": int(cycle.target_kv["rolled_back_positions"]),
+        "open_transactions": int(cycle.target_kv["open_transactions"]),
+    }
+
+
+def _transport_bytes(cycle: CycleExecution) -> int:
+    """Bytes this cycle moved, read from the envelope it actually transferred.
+
+    A cycle that never built an envelope moved nothing, and reports zero.
+    """
+
+    envelope = cycle.envelope
+    if envelope is None:
+        return 0
+    return int(envelope["byte_count"])
+
+
+# ---------------------------------------------------------------------------
+# Seam 1: the paired target-only / speculative comparison, in process
+# ---------------------------------------------------------------------------
+
+
+def run_live_route_benchmark(
+    *,
+    plan: Mapping[str, Any],
+    target: Any = None,
+    transport: Any = None,
+    cancellation: Any = None,
+    draft: Any = None,
+    draft_tokens: Any = None,
+    request_ids: Sequence[str] = ("req-1",),
+    width: int | None = None,
+    deadline_ms: float | None = None,
+    target_only_ms: float | None = None,
+    claim_window: list[dict[str, Any]] | None = None,
+    evidence_class: Any = EMITTED_EVIDENCE_CLASS,
+) -> dict[str, Any]:
+    """The paired target-only / speculative comparison, run **in process**.
+
+    There is no live route here despite the scaffold name.  Both arms drive the real
+    :func:`run_speculative_cycle` over the *injected* transport, target decision source
+    and cancellation scope, and the document publishes a deterministic counter
+    comparison (``verification_calls``, ``committed_positions``, ``proposal_bytes``) --
+    never a latency, throughput or benefit measurement.  A caller that asks for
+    ``evidence_class="live_route"`` is refused by the claim boundary, and a run in which
+    the speculative arm never reached the verifier refuses rather than publishing an
+    empty comparison.
+    """
+
+    seam = "route_benchmark"
+    _evidence_class(evidence_class, seam=seam)
+    document = sd.validate_speculative_decode_plan(plan)
+    execution = injected_in_process_execution(
+        transport=transport,
+        decision_source=target,
+        cancellation=cancellation,
+        draft=draft,
+        draft_tokens=draft_tokens,
+        seam=seam,
+    )
+    admitted_width = _seam_width(document, width)
+    requests = _request_ids(request_ids)
+    window = [] if claim_window is None else claim_window
+
+    pairs: list[dict[str, Any]] = []
+    for request in requests:
+        arms = []
+        for arm, preference in (
+            ("target_only", "target_only_requested"),
+            ("speculative", "speculative_requested"),
+        ):
+            cycle, before = _run_seam_cycle(
+                execution=execution,
+                document=document,
+                request_id=request,
+                cycle_ref=f"{request}-{arm}",
+                width=admitted_width,
+                preference=preference,
+                window=window,
+                deadline_ms=deadline_ms,
+                target_only_ms=target_only_ms,
+            )
+            arms.append(_arm_record(cycle, arm=arm, before=before))
+        pairs.append({"request_id": request, "arms": arms})
+
+    totals = {
+        "requests": len(pairs),
+        "target_only_verification_calls": sum(
+            pair["arms"][0]["verification_calls"] for pair in pairs
+        ),
+        "speculative_verification_calls": sum(
+            pair["arms"][1]["verification_calls"] for pair in pairs
+        ),
+        "target_only_committed_positions": sum(
+            pair["arms"][0]["committed_positions"] for pair in pairs
+        ),
+        "speculative_committed_positions": sum(
+            pair["arms"][1]["committed_positions"] for pair in pairs
+        ),
+        "speculative_rejected_positions": sum(
+            pair["arms"][1]["rejected_positions"] for pair in pairs
+        ),
+        "speculative_corrected_positions": sum(
+            pair["arms"][1]["corrected_positions"] for pair in pairs
+        ),
+        "draft_proposals": sum(pair["arms"][1]["draft_proposals"] for pair in pairs),
+        "proposal_bytes": sum(pair["arms"][1]["proposal_bytes"] for pair in pairs),
+    }
+    if totals["speculative_verification_calls"] < len(pairs):
+        # No verified speculative cycle ran: refuse instead of publishing zeros that a
+        # reader could mistake for a measured comparison.
+        _refuse(
+            "route_benchmark_requires_executed_cycles",
+            f"requests={len(pairs)} speculative_verifier_calls={totals['speculative_verification_calls']}",
+        )
+
+    return {
+        "protocol": BENCHMARK_EXECUTION_PROTOCOL,
+        "seam": seam,
+        "evidence_class": EMITTED_EVIDENCE_CLASS,
+        "plan_digest": document["plan_digest"],
+        "paired_arms": ["target_only", "speculative"],
+        "proposal_width": admitted_width,
+        "requests": pairs,
+        "totals": totals,
+        "deterministic_step_comparison": {
+            "target_only_verification_calls": totals["target_only_verification_calls"],
+            "speculative_verification_calls": totals["speculative_verification_calls"],
+            "speculative_committed_positions": totals["speculative_committed_positions"],
+            "modelled_target_only_steps_for_the_same_positions": totals[
+                "speculative_committed_positions"
+            ],
+            "note": (
+                "counters only: this is not a latency, throughput or benefit measurement"
+            ),
+        },
+        "wall_clock_latency_measured": False,
+        "material_benefit_claim": False,
+        "qualification_claim": False,
+        "promotion_authorized": False,
+        "enabled_decision": False,
+        "live_product_session": False,
+        "claim_boundary": CLAIM_BOUNDARY,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Seam 2: the positive/negative deterministic gates, in process
+# ---------------------------------------------------------------------------
+
+
+def execute_physical_qualification(
+    *,
+    plan: Mapping[str, Any],
+    target: Any = None,
+    transport: Any = None,
+    cancellation: Any = None,
+    draft: Any = None,
+    draft_tokens: Any = None,
+    negative_target: Any = None,
+    negative_draft_tokens: Any = None,
+    width: int | None = None,
+    deadline_ms: float | None = None,
+    claim_window: list[dict[str, Any]] | None = None,
+    evidence_class: Any = EMITTED_EVIDENCE_CLASS,
+) -> dict[str, Any]:
+    """The positive and negative gates, evaluated **in process**.
+
+    No physical hardware, no browser and no qualification are involved.  The positive
+    arm must really commit a verified target-authoritative prefix (release > 0); the
+    negative arm must be an *injected* second decision source that really fails parity
+    and commits nothing.  Both arms are required: a gate with no negative arm would be
+    unable to fail, so a missing ``negative_target`` refuses.  The verdict is reported,
+    never asserted as qualification.
+    """
+
+    seam = "physical_qualification"
+    _evidence_class(evidence_class, seam=seam)
+    document = sd.validate_speculative_decode_plan(plan)
+    if negative_target is None:
+        _refuse("physical_qualification_requires_injected_negative_arm", "negative_target")
+    admitted_width = _seam_width(document, width)
+    window = [] if claim_window is None else claim_window
+
+    positive = injected_in_process_execution(
+        transport=transport,
+        decision_source=target,
+        cancellation=cancellation,
+        draft=draft,
+        draft_tokens=draft_tokens,
+        seam=seam,
+    )
+    negative = injected_in_process_execution(
+        transport=transport,
+        decision_source=negative_target,
+        cancellation=cancellation,
+        draft=draft,
+        draft_tokens=draft_tokens if negative_draft_tokens is None else negative_draft_tokens,
+        seam=seam,
+    )
+
+    positive_cycle, positive_before = _run_seam_cycle(
+        execution=positive,
+        document=document,
+        request_id="qualification-positive",
+        cycle_ref="qualification-positive",
+        width=admitted_width,
+        preference="speculative_requested",
+        window=window,
+        deadline_ms=deadline_ms,
+        target_only_ms=None,
+    )
+    negative_cycle, negative_before = _run_seam_cycle(
+        execution=negative,
+        document=document,
+        request_id="qualification-negative",
+        cycle_ref="qualification-negative",
+        width=admitted_width,
+        preference="speculative_requested",
+        window=[],
+        deadline_ms=deadline_ms,
+        target_only_ms=None,
+    )
+
+    positive_met = bool(
+        positive_cycle.mode == "speculative"
+        and positive_cycle.commit is not None
+        and positive_cycle.commit["advanced"]
+        # The strict positive: every admitted position was verified and committed, so
+        # the gate cannot be met by a target correction alone (acceptance zero).
+        and int(positive_cycle.runtime_request["accepted_count"]) == admitted_width
+        and int(positive_cycle.runtime_request["committed_count"]) == admitted_width
+        and int(positive_cycle.output["released_tokens"]) == admitted_width
+        and positive_cycle.parity is not None
+        and positive_cycle.parity["parity"] == "matched"
+    )
+    negative_met = bool(
+        negative_cycle.mode == "speculative"
+        and negative_cycle.failure is not None
+        and negative_cycle.failure["failure_reason"]
+        in {"parity_failed", "a10_verification_refused"}
+        and int(negative_cycle.runtime_request["committed_count"]) == 0
+        and int(negative_cycle.output["released_tokens"]) == 0
+        and int(negative_cycle.runtime_request["rollback_count"]) > 0
+        and int(negative_cycle.target_kv["position"]) == int(negative_before["target"]["position"])
+    )
+    unmet = [
+        name
+        for name, met in (("positive", positive_met), ("negative", negative_met))
+        if not met
+    ]
+
+    return {
+        "protocol": QUALIFICATION_EXECUTION_PROTOCOL,
+        "seam": seam,
+        "evidence_class": EMITTED_EVIDENCE_CLASS,
+        "plan_digest": document["plan_digest"],
+        "proposal_width": admitted_width,
+        "result": "deterministic_gates_met" if not unmet else "gate_not_met",
+        "positive_gate": positive_met,
+        "negative_gate": negative_met,
+        "unmet": unmet,
+        "arms": {
+            "positive": _arm_record(positive_cycle, arm="positive", before=positive_before),
+            "negative": _arm_record(negative_cycle, arm="negative", before=negative_before),
+        },
+        "blocked_on": sorted(EXECUTION_BOUNDARIES),
+        "hardware_touched": False,
+        "browser_touched": False,
+        "physical_claim": False,
+        "qualification_claim": False,
+        "promotion_authorized": False,
+        "claim_boundary": CLAIM_BOUNDARY,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Seam 3: the eight-workspace projection, built from an in-process cycle
+# ---------------------------------------------------------------------------
+
+
+def _projection_privacy_scan(value: Any, *, path: str = "") -> None:
+    """Refuse any projection that carries private material or a forbidden key."""
+
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if str(key) in _FORBIDDEN_PROJECTION_KEYS:
+                _refuse("projection_privacy_violation", f"{path}.{key}")
+            _projection_privacy_scan(item, path=f"{path}.{key}")
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        for index, item in enumerate(value):
+            _projection_privacy_scan(item, path=f"{path}[{index}]")
+
+
+def project_live_workspace_state(
+    *,
+    plan: Mapping[str, Any],
+    target: Any = None,
+    transport: Any = None,
+    cancellation: Any = None,
+    draft: Any = None,
+    draft_tokens: Any = None,
+    width: int | None = None,
+    deadline_ms: float | None = None,
+    claim_window: list[dict[str, Any]] | None = None,
+    evidence_class: Any = EMITTED_EVIDENCE_CLASS,
+) -> dict[str, Any]:
+    """Project the eight product workspaces from one **in-process** cycle.
+
+    No browser is opened and no product surface is driven: the projection is built from
+    the frozen runtime record and the cycle's own counters, positions and digests, in
+    the order ``ui/web/src/app/navigation.ts`` publishes (a test binds the two).  Every
+    workspace therefore reports what the deterministic execution actually produced, with
+    ``live_route``, ``browser_rendered`` and ``product_surface_claim`` all false.
+    """
+
+    seam = "workspace_projection"
+    _evidence_class(evidence_class, seam=seam)
+    document = sd.validate_speculative_decode_plan(plan)
+    execution = injected_in_process_execution(
+        transport=transport,
+        decision_source=target,
+        cancellation=cancellation,
+        draft=draft,
+        draft_tokens=draft_tokens,
+        seam=seam,
+    )
+    admitted_width = _seam_width(document, width)
+    window = [] if claim_window is None else claim_window
+    cycle, before = _run_seam_cycle(
+        execution=execution,
+        document=document,
+        request_id="workspace-projection",
+        cycle_ref="workspace-projection",
+        width=admitted_width,
+        preference="speculative_requested",
+        window=window,
+        deadline_ms=deadline_ms,
+        target_only_ms=None,
+    )
+
+    arm = _arm_record(cycle, arm="projection", before=before)
+    commit = cycle.commit or {}
+    request = cycle.runtime_request
+    admitted_mode = cycle.admission["mode"]
+    workspaces = {
+        "inference": {
+            "admitted_mode": admitted_mode,
+            "mode": cycle.mode,
+            "proposal_width": cycle.proposal_width,
+            "proposed_positions": arm["proposed_positions"],
+            "verified_positions": arm["verified_positions"],
+            "accepted_positions": arm["accepted_positions"],
+            "rejected_positions": arm["rejected_positions"],
+            "rollback_positions": arm["rollback_positions"],
+            "committed_positions": arm["committed_positions"],
+            "deadline_outcome": request["deadline_outcome"],
+            "fallback_reason": request["fallback_reason"],
+            "terminal_state": request["terminal_state"],
+            "cancelled": bool(request["cancelled"]),
+        },
+        "lab": {
+            "draft_role_qualified": False,
+            "synthetic_workers_qualify": False,
+            "maximum_proposal_width": int(document["proposal_bounds"]["maximum_width"]),
+            "qualified_verifier_width": int(document["verifier"]["qualified_width"]),
+            "verifier_status": document["verifier"]["status"],
+            "lower_precision_qualified": False,
+            "platform": "unknown",
+        },
+        "network": {
+            "proposal_transfer": execution.transport.snapshot()["transport"],
+            "proposal_bytes": arm["proposal_bytes"],
+            "authenticated_network_transport": False,
+            "direct_or_relay_path": "unknown",
+            "target_verification_spans": arm["verification_calls"],
+        },
+        "nodes": {
+            "target_kv_ref": cycle.target_kv["kv_ref"],
+            "draft_kv_ref": cycle.draft_kv["kv_ref"],
+            "target_runtime_incarnation": cycle.target_kv["target_runtime_incarnation"],
+            "draft_runtime_incarnation": cycle.draft_kv["draft_runtime_incarnation"],
+            "target_owns_target_state": True,
+            "draft_wrote_target_state": bool(cycle.draft_kv["wrote_target_state"]),
+            "kv_owner_separate": bool(
+                cycle.target_kv["kv_ref"] != cycle.draft_kv["kv_ref"]
+                and not cycle.target_kv["aliased_with_draft"]
+            ),
+            "open_transactions": arm["open_transactions"],
+            "cleanup": cycle.target_kv["cleanup"],
+        },
+        "plans": {
+            "plan_digest": document["plan_digest"],
+            "generation_policy": document["compatibility"]["generation_policy"],
+            "proposal_width": admitted_width,
+            "material_gain_threshold": document["decision"]["material_gain_threshold"],
+            "decision_state": document["decision"]["state"],
+            "target_only_fallback": bool(document["decision"]["target_only_fallback"]),
+        },
+        "readiness": {
+            "parity": arm["parity"],
+            "rollback_verified": bool(arm["rollback_positions"] == arm["rejected_positions"]),
+            "cleanup_complete": bool(request["cleanup_complete"]),
+            "circuit_breaker_state": request["circuit_breaker_state"],
+            "closure_requirement_earned": False,
+            "physical_qualification_claim": False,
+            "promotion_authorized": False,
+        },
+        "incidents": {
+            "failure_reason": arm["failure_reason"],
+            "fallback_reason": request["fallback_reason"],
+            "cancelled": bool(request["cancelled"]),
+            "circuit_breaker_state": request["circuit_breaker_state"],
+            "target_lost": bool(cycle.target_kv["target_lost"]),
+            "terminal_state": request["terminal_state"],
+        },
+        "settings": {
+            "target_only_default": True,
+            "acceleration_off_by_default": True,
+            "applies_to": "future_requests_only",
+            "bounded_width": admitted_width,
+            "maximum_deadline_ms": float(sd.DEADLINE_MAXIMUM_MS),
+        },
+    }
+    if set(workspaces) != set(PRODUCT_WORKSPACES):
+        _refuse("projection_privacy_violation", "workspace_set")
+    _projection_privacy_scan(workspaces)
+
+    projection = {
+        "protocol": WORKSPACE_PROJECTION_PROTOCOL,
+        "seam": seam,
+        "evidence_class": EMITTED_EVIDENCE_CLASS,
+        "plan_digest": document["plan_digest"],
+        "generation": int(commit.get("ledger_generation", 0)),
+        "workspaces": workspaces,
+        "workspace_order": list(PRODUCT_WORKSPACES),
+        "runtime": cycle.runtime_document,
+        "cycle": {
+            "request_id": cycle.request_id,
+            "cycle_ref": cycle.cycle_ref,
+            "mode": cycle.mode,
+            "commit_advanced": bool(commit.get("advanced", False)),
+            "target_watermark_position": int(cycle.target_kv["position"]),
+            "released_tokens": int(cycle.output["released_tokens"]),
+            "a10_transaction_mode": None
+            if cycle.a10_request is None
+            else cycle.a10_request["transaction_mode"],
+            "a10_verified_positions": None if cycle.a10_outcome is None else int(cycle.a10_outcome["verified_count"]),
+        },
+        "live_product_session": False,
+        "browser_rendered": False,
+        "product_surface_claim": False,
+        "qualification_claim": False,
+        "promotion_authorized": False,
+        "claim_boundary": CLAIM_BOUNDARY,
+    }
+    _projection_privacy_scan(projection)
+    return projection
 
 
 __all__ = [
     "A10_WIRING",
     "ABSTAIN_REASONS",
     "A10TargetKvRuntime",
+    "BENCHMARK_EXECUTION_PROTOCOL",
     "CANCELLATION_CHECKPOINTS",
     "CLAIM_BOUNDARY",
     "CycleExecution",
     "DeterministicDraftRuntime",
     "DraftProposal",
     "DraftRuntimePort",
+    "EMITTED_EVIDENCE_CLASS",
     "EXECUTION_BOUNDARIES",
     "EXECUTION_STAGE",
     "FAILURE_FALLBACK_REASONS",
+    "INJECTION_REFUSALS",
+    "InProcessExecution",
+    "LIVE_SEAMS",
+    "PRODUCT_WORKSPACES",
     "PROPOSAL_BYTES_PER_TOKEN",
     "PROTOCOL",
     "ProposalEnvelope",
     "ProposalTransport",
+    "QUALIFICATION_EXECUTION_PROTOCOL",
+    "ROUTER_DECODE_SEAM_KEY",
     "CancellationScope",
+    "REFUSED_EVIDENCE_CLASSES",
+    "SEAM_REFUSALS",
     "SpeculativeDecodeExecutionError",
     "SpeculativeDecodeExecutionUnavailable",
+    "WORKSPACE_PROJECTION_PROTOCOL",
     "build_proposal_envelope",
     "build_runtime_document",
     "execute_physical_qualification",
+    "injected_in_process_execution",
     "project_live_workspace_state",
+    "require_authenticated_network_proposal_transfer",
+    "require_browser_workspace_surface",
+    "require_live_route_product_session",
+    "require_physical_draft_target_route",
     "run_live_route_benchmark",
     "run_speculative_cycle",
     "runtime_binding_from_plan",
