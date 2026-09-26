@@ -802,6 +802,11 @@
       "size_bytes": 4983
     },
     {
+      "path": "test_router_iroh_integration.py",
+      "sha256": "sha256:4648bbe1d9d84c23f151b6faf4f6ce212602d0c5224770913e39c0e3210a1fb9",
+      "size_bytes": 13359
+    },
+    {
       "path": "test_router_iroh_transport.py",
       "sha256": "sha256:2349f239bd5bd8c4c9dd9624f6aef92fcf6b458d455a1551e04083d0385812f4",
       "size_bytes": 103923
@@ -1893,5 +1898,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:b0ae3c4fc9646bf327fc9371eeda6f714531918d545cc66d31b3d138a52a0eb8"
+  "source_digest": "sha256:1dcbbc108d1781448abf87db0a464d8432d03c56e6149789b778185732acfb56"
 }
