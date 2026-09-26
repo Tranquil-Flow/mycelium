@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 
 import pytest
 
@@ -347,6 +348,13 @@ def test_real_routers_run_prefill_and_decode_through_two_sidecars(local_sidecars
         assert second.evidence().remote_frames_sent >= 1
 
         assert router_a.decode_one_distributed(request_id) is True
+        # decode_one_distributed dispatches the decode hop to the remote sidecar and
+        # returns; the token arrives asynchronously on the transport receive thread.
+        # Under -n8 self-load that round-trip can outlive the immediate assert, so
+        # wait (bounded) for the sink token rather than race it.
+        _deadline = time.monotonic() + 10.0
+        while not sink.token_indexes and time.monotonic() < _deadline:
+            time.sleep(0.01)
         assert sink.token_indexes == [0]
         assert sink.token_ids == [101]
         decode_items = [
