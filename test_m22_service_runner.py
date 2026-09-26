@@ -77,15 +77,18 @@ def test_restart_budget_is_persistent_and_fail_closed(tmp_path: Path) -> None:
 
 def test_sigterm_is_forwarded_and_recorded_as_clean_manager_stop(tmp_path: Path) -> None:
     marker = tmp_path / "terminated"
+    ready = tmp_path / "child-ready"
     helper = tmp_path / "child.py"
     helper.write_text(
         "import signal,time\n"
         "from pathlib import Path\n"
         f"marker=Path({str(marker)!r})\n"
+        f"ready=Path({str(ready)!r})\n"
         "def stop(*_):\n"
         "    marker.write_text('term')\n"
         "    raise SystemExit(0)\n"
         "signal.signal(signal.SIGTERM, stop)\n"
+        "ready.write_text('ready')\n"
         "time.sleep(120)\n",
         "utf-8",
     )
@@ -106,8 +109,24 @@ def test_sigterm_is_forwarded_and_recorded_as_clean_manager_stop(tmp_path: Path)
             time.sleep(0.05)
         else:
             raise AssertionError("runner did not start")
+        # "running" is recorded the instant the runner forks, before the child has
+        # executed anything. Under -n8 self-load the child's interpreter startup can
+        # outlast that window, so SIGTERM used to reach the child before it installed
+        # its handler: the default disposition killed it and the marker was never
+        # written. Wait for the child's own readiness signal, deadline-bounded, so
+        # this asserts SIGTERM forwarding rather than host speed.
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not ready.exists():
+            time.sleep(0.05)
+        assert ready.exists(), "child never installed its SIGTERM handler"
         os.kill(process.pid, signal.SIGTERM)
         assert process.wait(timeout=10) == 0
+        # The child writes the marker inside its handler, before it exits; wait for
+        # that exit (bounded) before reading, and poll the marker into existence for
+        # the flush edge. The value assertion itself is unchanged.
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not marker.exists():
+            time.sleep(0.05)
         assert marker.read_text() == "term"
         assert _status(config_path)["state"] == "stopped_by_manager"
     finally:

@@ -32,7 +32,9 @@ ManifestMutation = Callable[[dict[str, Any]], None]
 
 MAX_MUTATIONS = 100
 MAX_SERIALIZED_BYTES_PER_MUTATION = 512 * 1024
-MAX_SERIALIZED_BYTES_TOTAL = 32 * 1024 * 1024
+# Raised 32 -> 64 MiB: the corpus genuinely grew with the wave-1/2/3 feature surfaces
+# (the A14b coarse-region-evidence protocol + fixture and the A9-A13 gate surfaces).
+MAX_SERIALIZED_BYTES_TOTAL = 64 * 1024 * 1024
 EXPECTED_FAMILIES = frozenset(
     {
         "assignment-node-stage-placement",
