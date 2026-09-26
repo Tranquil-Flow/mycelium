@@ -48,6 +48,12 @@ RUNTIME_BACKEND_STAGES = MappingProxyType(
         "numpy": "implemented",
         "llama_http": "implemented",
         "openrouter_http": "implemented",
+        # The A9 native accelerated Windows x86_64 provider (source tranche in
+        # ``mycelium_platform_neutral/windows_provider.py``).  Registration is a
+        # declared runtime identity, never qualification: the physical Windows
+        # device blocker ``windows_x86_64_provider_not_physically_qualified``
+        # stays open, and an adapter or registry entry is not execution evidence.
+        "windows_native_provider": "implemented",
         "unknown": "unknown",
     }
 )
