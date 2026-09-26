@@ -339,9 +339,21 @@ def test_incompatible_members_are_never_offered_to_one_batch():
    assert second.candidate_member_refs == ("member:b",)
 
 
-def test_physical_positive_boundaries_still_refuse():
-   """This lane implements the deterministic half; the physical positives stay RED."""
+def test_execution_boundaries_are_implemented_and_qualification_still_refuses():
+   """The deterministic execution entry points are implemented; qualification refuses.
+
+   The physical positives still stay RED: this lane supplies the runtime-owned
+   execution, overlap and verification semantics in-process, and claims no physical
+   route, no benchmark and no qualification.
+   """
 
    codes = dict(scaffold.scaffold_status().boundaries)
-   assert codes["execute_observed_batch"] == "runtime_batch_execution_absent"
-   assert codes["observe_pipeline_overlap"] == "pipeline_overlap_observation_absent"
+   for implemented in (
+      "execute_observed_batch",
+      "observe_pipeline_overlap",
+      "verify_candidate_positions",
+      "sequential_parity_reference",
+   ):
+      assert implemented not in codes, f"{implemented} is implemented, not a refusal"
+   assert codes["qualify_runtime_batch"] == "runtime_batch_qualification_absent"
+   assert codes["qualify_target_verifier"] == "target_verification_qualification_absent"

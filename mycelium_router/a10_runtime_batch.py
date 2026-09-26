@@ -47,9 +47,10 @@ SPECIFICATION = (
    "2026-08-18-mycelium-a10-runtime-batching-overlap-target-verification.md"
 )
 CLAIM_BOUNDARY = (
-   "scaffold only: no runtime batch, continuous-arrival, overlap, verifier, "
-   "benchmark, product, browser, physical or qualification claim; no closure "
-   "requirement earned; refusals are explicit and coded"
+   "deterministic slices only: runtime batch execution and the uncertainty-aware "
+   "overlap verdict are implemented and unit-tested in-process; no physical overlap, "
+   "continuous-arrival, benchmark, product, browser or qualification claim; no closure "
+   "requirement earned; the remaining refusal is explicit and coded"
 )
 DECLARED_CONTRACT_PROTOCOLS = (
    "mycelium.runtime_batch_policy.v1",
@@ -428,33 +429,44 @@ class QualificationRequest:
 
 
 def execute_observed_batch(
-   port: RuntimeBatchPort,
+   port: object,
    proposal: RuntimeBatchProposal,
-) -> NoReturn:
+) -> object:
    """Execute one real backend batch and return the runtime's observation.
 
-   NOT IMPLEMENTED.  The real operation must perform exactly one backend invocation
-   for the members it accepts, scatter one isolated result per member, and return a
-   ``RuntimeBatchObservation`` whose membership it owns.
+   IMPLEMENTED (deterministic slice S1).  Exactly one backend invocation is made for
+   the members the runtime accepts, one isolated result is scattered per member, and the
+   returned record carries a ``RuntimeBatchObservation`` whose membership the runtime
+   owns.  A split, a sequential loop and a member-concurrent dispatch report honestly
+   and never claim a runtime batch.  The mechanics live in
+   ``mycelium_router.a10_runtime_execution``; this entry point stays the machine source
+   named by the implementation contract.
    """
 
-   if not isinstance(proposal, RuntimeBatchProposal):
-      _reject("invalid_runtime_batch_proposal_argument")
-   _require_batch_port(port)
-   raise A10NotImplementedError("runtime_batch_execution_absent")
+   from mycelium_router.a10_runtime_execution import (
+      execute_observed_batch as _execute,
+   )
+
+   return _execute(port, proposal)
 
 
-def observe_pipeline_overlap(trace: PipelineOverlapTrace) -> NoReturn:
+def observe_pipeline_overlap(trace: object) -> object:
    """Return the overlap verdict for a validated trace.
 
-   NOT IMPLEMENTED.  The real operation must decide ``observed`` only when two
-   physical stage-compute intervals for different microbatches intersect for a
-   positive duration after clock uncertainty.
+   IMPLEMENTED (deterministic slice S2).  The verdict is ``observed`` only when two
+   physical stage-compute intervals for different microbatches intersect for a positive
+   duration after clock uncertainty, on a trace that carries the causal, activation,
+   stage and final-loopback binding of specification section 6.  The declared
+   ``PipelineOverlapTrace`` record cannot carry that binding, so it is refused with
+   ``incomplete_overlap_trace`` rather than being mistaken for a trace that shows no
+   overlap.  The mechanics live in ``mycelium_router.a10_runtime_execution``.
    """
 
-   if not isinstance(trace, PipelineOverlapTrace):
-      _reject("invalid_pipeline_overlap_trace_argument")
-   raise A10NotImplementedError("pipeline_overlap_observation_absent")
+   from mycelium_router.a10_runtime_execution import (
+      observe_pipeline_overlap as _observe,
+   )
+
+   return _observe(trace)
 
 
 def qualify_runtime_batch(request: QualificationRequest) -> NoReturn:
@@ -470,8 +482,6 @@ def qualify_runtime_batch(request: QualificationRequest) -> NoReturn:
 
 
 BOUNDARIES: tuple[tuple[str, str], ...] = (
-   ("execute_observed_batch", "runtime_batch_execution_absent"),
-   ("observe_pipeline_overlap", "pipeline_overlap_observation_absent"),
    ("qualify_runtime_batch", "runtime_batch_qualification_absent"),
 )
 

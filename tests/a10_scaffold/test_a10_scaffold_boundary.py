@@ -1,20 +1,25 @@
-"""A10 scaffold boundary suite.
+"""A10 machine-source boundary suite.
 
-GREEN with the scaffold; collection error without it (the module is new).  It is NOT
+GREEN with the scaffold; collection error without it (the modules are new).  It is NOT
 evidence that any A10 behaviour works.  It asserts exactly three things:
 
-1. the scaffold reports itself as ``design_only`` and claims none of the thirteen
-   closure requirements of ``scripts/mycelium_completion_audit.py``;
-2. every declared entry point refuses with an explicit coded exception and never
-   returns a value -- the honest not-implemented boundary;
+1. the gate reports itself as ``design_only`` and claims none of the thirteen closure
+   requirements of ``scripts/mycelium_completion_audit.py``;
+2. the entry points that are still absent refuse with an explicit coded exception and
+   never return a value -- the honest not-implemented boundary.  The four deterministic
+   execution entry points (``execute_observed_batch``, ``observe_pipeline_overlap``,
+   ``verify_candidate_positions``, ``sequential_parity_reference``) are implemented in
+   ``mycelium_router.a10_runtime_execution`` and ``mycelium_router.a10_verifier_execution``
+   and are therefore no longer listed as boundaries; their behaviour is covered by
+   ``tests/a10_deterministic/test_runtime_batch_execution.py`` and
+   ``tests/a10_deterministic/test_target_verification_execution.py``;
 3. shape validation is real, coded, and distinguishable from the refusal, and an
    unsupported generation policy is rejected at admission rather than silently
    coerced to greedy.
 
-Cross-artifact freshness is asserted, not assumed: the scaffold's declared contract
-protocols must equal the six protocols named by the A10 specification, its inventory
-constants must equal the frozen ``tests/a10_acceptance/scenarios.v1.json`` values, and
-its recorded inventory digest must equal the real file digest.
+Cross-artifact freshness is asserted, not assumed: the declared contract protocols must
+equal the six protocols named by the A10 specification, and the inventory constants must
+equal the frozen ``tests/a10_acceptance/scenarios.v1.json`` values.
 """
 
 from __future__ import annotations
@@ -159,8 +164,6 @@ def _trace(**overrides):
 
 
 BOUNDARY_CALLS = {
-   "execute_observed_batch": lambda: rrb.execute_observed_batch(StubPort(), _proposal()),
-   "observe_pipeline_overlap": lambda: rrb.observe_pipeline_overlap(_trace()),
    "qualify_runtime_batch": lambda: rrb.qualify_runtime_batch(
       rrb.QualificationRequest(
          owner_private_root="private:root",
@@ -169,12 +172,6 @@ BOUNDARY_CALLS = {
          baseline_windows=3,
          candidate_windows=3,
       )
-   ),
-   "verify_candidate_positions": lambda: atv.verify_candidate_positions(
-      StubPort(), _verification_request()
-   ),
-   "sequential_parity_reference": lambda: atv.sequential_parity_reference(
-      StubPort(), _verification_request()
    ),
    "qualify_target_verifier": lambda: atv.qualify_target_verifier(
       atv.TargetVerificationQualificationRequest(
@@ -281,14 +278,17 @@ def test_every_boundary_refuses_with_its_coded_exception(name, code):
    assert raised.value.code == f"not_implemented:{code}"
 
 
-def test_refusal_is_distinguishable_from_validation():
-   with pytest.raises(rrb.A10NotImplementedError):
-      rrb.execute_observed_batch(StubPort(), _proposal())
-
+def test_a_coded_contract_refusal_is_distinguishable_from_the_boundary():
    with pytest.raises(rrb.A10ContractError) as invalid:
-      rrb.execute_observed_batch(StubPort(), object())
+      rrb.execute_observed_batch(object(), object())
    assert not isinstance(invalid.value, rrb.A10NotImplementedError)
    assert invalid.value.code == "invalid_runtime_batch_proposal_argument"
+
+   # A port that cannot dispatch is rejected before any member is offered.
+   with pytest.raises(rrb.A10ContractError) as port_rejected:
+      rrb.execute_observed_batch(StubPort(), _proposal())
+   assert not isinstance(port_rejected.value, rrb.A10NotImplementedError)
+   assert port_rejected.value.code == "invalid_runtime_batch_port"
 
 
 def test_a_port_that_cannot_execute_is_rejected_before_the_refusal():
@@ -357,11 +357,13 @@ def test_unsupported_generation_policy_is_never_coerced_to_greedy():
    assert raised.value.code == "unsupported_generation_policy"
    assert atv.QUALIFIED_GENERATION_POLICIES == frozenset({"deterministic_greedy"})
 
-   # The qualified policy is admitted at shape level; the operation itself still
-   # refuses, so admission is never mistaken for execution.
+   # The qualified policy is admitted at shape level, but a port that cannot open a
+   # target-KV transaction is still refused before any candidate is evaluated, so
+   # admission is never mistaken for execution.
    request = _verification_request(generation_policy="deterministic_greedy")
-   with pytest.raises(rrb.A10NotImplementedError):
+   with pytest.raises(rrb.A10ContractError) as refused:
       atv.verify_candidate_positions(StubPort(), request)
+   assert refused.value.code == "invalid_target_verification_port"
 
 
 @pytest.mark.parametrize(

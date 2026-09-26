@@ -35,8 +35,10 @@ from mycelium_router.a10_runtime_batch import (
 CAPABILITY_PROTOCOL = "mycelium.target_verification_capability.v1"
 RUNTIME_PROTOCOL = "mycelium.target_verification_runtime.v1"
 CLAIM_BOUNDARY = (
-   "scaffold only: no verifier operation, no target-KV transaction, no sequential "
-   "parity oracle, no capability advertisement and no qualification claim"
+   "deterministic slices only: the bounded one-call verification transaction and the "
+   "sequential parity oracle are implemented and unit-tested in-process; no physical "
+   "verifier qualification, no capability advertisement and no closure requirement "
+   "earned; the remaining refusal is explicit and coded"
 )
 
 # Sourced from the frozen acceptance inventory (target_verifier_requirements).
@@ -285,38 +287,44 @@ class TargetVerificationQualificationRequest:
 
 
 def verify_candidate_positions(
-   port: TargetVerificationPort,
+   port: object,
    request: TargetVerificationRequest,
-) -> NoReturn:
+) -> object:
    """Evaluate bounded candidate positions in one real target backend call.
 
-   NOT IMPLEMENTED.  The real operation must create a target-owned KV transaction
-   from the exact committed prefix, evaluate every bounded position causally in one
-   backend call, and then roll back, commit the verified prefix, or commit the
-   verified prefix plus one target-authoritative correction.
+   IMPLEMENTED (deterministic slice S3).  A target-owned KV transaction is created from
+   the exact committed prefix, every bounded position is evaluated causally in one
+   backend call, and the transaction then rolls back, commits the verified prefix, or
+   commits the verified prefix plus one target-authoritative correction.  The
+   transaction is never left open.  The mechanics live in
+   ``mycelium_router.a10_verifier_execution``; this entry point stays the machine
+   source named by the implementation contract.
    """
 
-   if not isinstance(request, TargetVerificationRequest):
-      _reject("invalid_target_verification_request_argument")
-   _require_verification_port(port)
-   raise A10NotImplementedError("target_verification_operation_absent")
+   from mycelium_router.a10_verifier_execution import (
+      verify_candidate_positions as _verify,
+   )
+
+   return _verify(port, request)
 
 
 def sequential_parity_reference(
-   port: TargetVerificationPort,
+   port: object,
    request: TargetVerificationRequest,
-) -> NoReturn:
+) -> object:
    """Produce the sequential target-authority oracle for the same prefix.
 
-   NOT IMPLEMENTED.  The real oracle executes the target sequentially on the same
-   prefix and compares per-position decisions and the final committed KV position;
-   raw logits, tensors and KV bytes never leave the private path.
+   IMPLEMENTED (deterministic slice S3).  The oracle replays the target one position at
+   a time from the identical committed prefix and compares per-position target decisions
+   and the final committed prefix position and digest; raw logits, tensors, KV bytes and
+   candidate token IDs never leave the private path.
    """
 
-   if not isinstance(request, TargetVerificationRequest):
-      _reject("invalid_target_verification_request_argument")
-   _require_verification_port(port)
-   raise A10NotImplementedError("sequential_target_parity_reference_absent")
+   from mycelium_router.a10_verifier_execution import (
+      sequential_parity_reference as _parity,
+   )
+
+   return _parity(port, request)
 
 
 def qualify_target_verifier(
@@ -334,8 +342,6 @@ def qualify_target_verifier(
 
 
 BOUNDARIES: tuple[tuple[str, str], ...] = (
-   ("verify_candidate_positions", "target_verification_operation_absent"),
-   ("sequential_parity_reference", "sequential_target_parity_reference_absent"),
    ("qualify_target_verifier", "target_verification_qualification_absent"),
 )
 

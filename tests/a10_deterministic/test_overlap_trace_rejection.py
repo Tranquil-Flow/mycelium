@@ -381,10 +381,24 @@ def test_uncertainty_subtraction_boundary_is_exact():
    assert positive.intersection_seconds == pytest.approx(0.5)
 
 
-def test_physical_overlap_boundary_still_refuses():
-   """Deterministic arithmetic is not physical overlap evidence."""
+def test_the_overlap_entry_point_produces_the_verdict_for_a_full_trace():
+   """Deterministic arithmetic over a bound trace is the overlap verdict."""
 
-   with pytest.raises(scaffold.A10NotImplementedError) as raised:
+   verdict = scaffold.observe_pipeline_overlap(
+      _trace(chains=(_chain(), _chain("microbatch:two", "request:two")))
+   )
+   assert verdict.observed is True
+   assert verdict.reason == "observed_stage_compute_intersection"
+
+
+def test_an_overlap_record_without_causal_binding_is_refused():
+   """The interval-only record cannot carry the section 6 causal evidence.
+
+   It is refused with a coded contract error -- never mistaken for a trace that merely
+   shows no overlap, and never promoted to a physical overlap claim.
+   """
+
+   with pytest.raises(scaffold.A10ContractError) as raised:
       scaffold.observe_pipeline_overlap(
          scaffold.PipelineOverlapTrace(
             trace_ref="trace:one",
@@ -403,4 +417,4 @@ def test_physical_overlap_boundary_still_refuses():
             causal_edges=(),
          )
       )
-   assert raised.value.code == "not_implemented:pipeline_overlap_observation_absent"
+   assert raised.value.code == "incomplete_overlap_trace"
