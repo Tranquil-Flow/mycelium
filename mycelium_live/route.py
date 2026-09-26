@@ -572,6 +572,126 @@ def _public_transport_health(
     }
 
 
+# The per-peer counter fields of the public route status.  They are projected
+# from a single signed observation, never assembled from fields sampled at
+# different instants.
+_PEER_COUNTER_FIELDS = (
+    "frames_sent",
+    "frames_received",
+    "applied_operation_count",
+    "prefill_operation_count",
+    "decode_operation_count",
+)
+
+_PEER_OPERATION_TRIPLE = (
+    "applied_operation_count",
+    "prefill_operation_count",
+    "decode_operation_count",
+)
+
+
+def _observation_counter_material(
+    observation: Mapping[str, Any] | object,
+) -> dict[str, int] | None:
+    """Read the counters carried by *one* signed observation, or None.
+
+    The operation triple is reported only when this observation's own runtime
+    block carries all three counters.  A partial view -- the lean health probe
+    reports a lock-free ``applied`` counter and transport only, and a snapshot
+    taken while a stage operation owns runtime state carries no counter block
+    at all -- cannot substantiate the triple, and completing it from another
+    observation is exactly the mixed provenance this projection exists to
+    prevent.
+    """
+
+    details = (
+        observation.get("details", {}) if isinstance(observation, Mapping) else {}
+    )
+    if not isinstance(details, Mapping):
+        return None
+    transport = details.get("transport", {})
+    if not isinstance(transport, Mapping):
+        transport = {}
+    transport_counters = details.get("transport_counters", {})
+    if not isinstance(transport_counters, Mapping):
+        transport_counters = {}
+    runtime = details.get("runtime", {})
+    if not isinstance(runtime, Mapping):
+        runtime = {}
+    if not transport and not transport_counters and not runtime:
+        return None
+    material = {
+        "frames_sent": int(
+            transport.get(
+                "remote_frames_sent",
+                transport_counters.get("remote_frames_sent", 0),
+            )
+        ),
+        "frames_received": int(
+            transport.get(
+                "remote_frames_received",
+                transport_counters.get("remote_frames_received", 0),
+            )
+        ),
+    }
+    triple: dict[str, int] = {}
+    for field in _PEER_OPERATION_TRIPLE:
+        value = runtime.get(field)
+        if type(value) is not int or value < 0:
+            break
+        triple[field] = value
+    if len(triple) == len(_PEER_OPERATION_TRIPLE):
+        material.update(triple)
+    return material
+
+
+def _peer_counter_projection(
+    observation: Mapping[str, Any] | object,
+    health_observation: Mapping[str, Any] | object,
+) -> dict[str, int]:
+    """Project one peer's counters from exactly ONE signed observation.
+
+    Every executed operation does ``self._applied_operation_count += 1`` and
+    increments exactly one of ``_prefill_operation_count`` /
+    ``_decode_operation_count`` inside the same locked execution
+    (``mycelium_router.mlx_runtime`` and its numpy twin), so one observed
+    runtime block always satisfies ``applied == prefill + decode``.
+
+    The publication used to mix provenances for that same triple: a per-field
+    high-water ``max()`` across the full snapshot and the lean health probe
+    supplied ``applied``, while ``prefill``/``decode`` came from the snapshot's
+    runtime block alone.  A health probe sampling a later instant than the
+    snapshot therefore emitted one instant's ``applied`` beside another
+    instant's phases (live: ``applied 37`` beside ``prefill 9 + decode 3``),
+    and the M23 ``one_token_decode`` gate correctly refused the record even
+    though every runtime counter was healthy.
+
+    If an atomic high-water is wanted, it has to be atomic: the whole
+    observation carrying the greatest ``applied`` is published, its own
+    ``prefill``/``decode`` and frames included.  A peer with no observation
+    carrying the triple reports zeros rather than a blend of two.
+    """
+
+    material = [
+        item
+        for item in (
+            _observation_counter_material(observation),
+            _observation_counter_material(health_observation),
+        )
+        if item is not None
+    ]
+    complete = [item for item in material if "applied_operation_count" in item]
+    if complete:
+        # ``max`` keeps the first maximal item, so the snapshot observation
+        # wins a tie with the health probe and the choice is deterministic.
+        chosen = max(complete, key=lambda item: item["applied_operation_count"])
+    elif material:
+        chosen = material[0]
+    else:
+        chosen = {}
+    return {field: int(chosen.get(field, 0)) for field in _PEER_COUNTER_FIELDS}
+
+
 @dataclass(frozen=True, slots=True)
 class RouteIdentity:
     deployment_id: str
@@ -5513,7 +5633,6 @@ class PhysicalLiveRoute:
         self._handle_lost_peer_processes()
         self._sync_replica_loss_from_liveness()
         with self._lock:
-            peer_counters = self._peer_counters()
             stages: list[dict[str, Any]] = []
             placements_by_node: dict[str, list[dict[str, Any]]] = {
                 node_id: [] for node_id in self._peers
@@ -5584,7 +5703,7 @@ class PhysicalLiveRoute:
                                 )
                             )
                         },
-                        **peer_counters[node_id],
+                        **_peer_counter_projection(observation, health_observation),
                         "decode_mode": mode if isinstance(mode, str) else None,
                         "architecture": (
                             architecture if isinstance(architecture, str) else None
@@ -5600,14 +5719,8 @@ class PhysicalLiveRoute:
                         ),
                         "active_kv_bytes": int(runtime.get("active_kv_bytes", 0)),
                         "peak_kv_bytes": int(runtime.get("peak_kv_bytes", 0)),
-                        "prefill_operation_count": int(
-                            runtime.get("prefill_operation_count", 0)
-                        ),
                         "prefill_input_token_count": int(
                             runtime.get("prefill_input_token_count", 0)
-                        ),
-                        "decode_operation_count": int(
-                            runtime.get("decode_operation_count", 0)
                         ),
                         "decode_input_token_count": int(
                             runtime.get("decode_input_token_count", 0)
