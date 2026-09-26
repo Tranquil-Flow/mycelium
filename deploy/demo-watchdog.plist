@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  TEMPLATE — do not install as-is.
+
+  org.mycelium.demo-watchdog: the always-on, self-healing owner of the
+  mycelium.now demo.  KeepAlive restarts the watchdog if it ever exits; the
+  watchdog itself never exits on a bad probe and never takes the stage down.
+
+  Install (owner only, on device return):
+    1. render every __PLACEHOLDER__ below with real values;
+    2. verify the recovery command paths in mycelium_demo_watchdog/commands.py
+       still resolve, and pass the source-commit flag for the deployed candidate;
+    3. cp to ~/Library/LaunchAgents/ and load it in an owner shell.
+
+  Not loaded by the wave-3 watchdog leaf.
+-->
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>__MYCELIUM_HOME__</string>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>MYCELIUM_WATCHDOG_STATE_DIR</key>
+		<string>__MYCELIUM_STATE_DIR__</string>
+	</dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>org.mycelium.demo-watchdog</string>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/bin/env</string>
+		<string>-u</string>
+		<string>GIT_DIR</string>
+		<string>-u</string>
+		<string>GIT_WORK_TREE</string>
+		<string>-u</string>
+		<string>GIT_COMMON_DIR</string>
+		<string>-u</string>
+		<string>GIT_OBJECT_DIRECTORY</string>
+		<string>-u</string>
+		<string>GIT_ALTERNATE_OBJECT_DIRECTORIES</string>
+		<string>-u</string>
+		<string>PYTHONPATH</string>
+		<string>-u</string>
+		<string>PYTHONHOME</string>
+		<string>-u</string>
+		<string>VIRTUAL_ENV</string>
+		<string>PYTHONDONTWRITEBYTECODE=1</string>
+		<string>GIT_OPTIONAL_LOCKS=0</string>
+		<string>__MYCELIUM_PYTHON__</string>
+		<string>-B</string>
+		<string>-m</string>
+		<string>mycelium_demo_watchdog</string>
+		<string>--arm</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>__MYCELIUM_LOG_DIR__/demo-watchdog.err.log</string>
+	<key>StandardOutPath</key>
+	<string>__MYCELIUM_LOG_DIR__/demo-watchdog.log</string>
+	<key>ThrottleInterval</key>
+	<integer>30</integer>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>WorkingDirectory</key>
+	<string>__MYCELIUM_REPO_ROOT__</string>
+</dict>
+</plist>
