@@ -144,3 +144,122 @@ def collect_local_authorities(controller: Any, service: Any, request_id: str,
     except (AttributeError, KeyError, TypeError) as exc:
         raise ValueError("gateway_authority_unavailable") from exc
     return {"command_authority": command, "gateway_authority": gateway}
+
+
+# ---------------------------------------------------------------------------
+# case15 count-layer truth
+#
+# Frozen v1 `cleanup_authority_failure` requires a zero count; the owner
+# approved a v2 case requiring *zero command terminal CAS* together with
+# *complete cleanup and zero stale reservations*.  Those two clauses were never
+# measured on one path.  The reconciliation below records what the three real
+# authorities actually measured.  It never supplies a release authority, never
+# turns an unavailable measurement into zero, and never reports the blocked
+# clause as satisfied.
+# ---------------------------------------------------------------------------
+
+COUNT_LAYER_PROTOCOL = "mycelium.a6_cleanup_count_layer_truth.v1"
+LAYER_BLOCKED_UNPROVEN_CLEANUP = "blocked_unproven_cleanup_retains_reservations"
+LAYER_PROVEN_LATE_CLEANUP = "proven_late_cleanup_commits_terminal_cas"
+BLOCKED_CLAUSE_CLEANUP_COMPLETENESS = "process_cleanup_complete_and_zero_stale_reservations"
+BLOCKED_CLAUSE_ZERO_COMMAND_CAS = "zero_command_terminal_cas"
+CLEANUP_FIELDS = {"request_id", "request_attempt", "stale_reservation_count",
+                  "process_cleanup_complete"}
+OPEN_OWNER_DECISION = (
+    "CASE-SCOPED OWNER DECISION REQUIRED (cleanup_authority_failure only): the authorized v2 "
+    "clause 'process_cleanup_complete=true with stale_reservation_count=0' cannot be measured on "
+    "any real path together with 'terminal_cas_count=0'. A blocked cleanup that commits zero "
+    "command terminal CAS truthfully retains its request-scoped reservations, and any later real "
+    "delayed proof releases them only by committing a terminal CAS on the registered current "
+    "request/attempt. Either (a) narrow the v2 observation to the retained-reservation truth of an "
+    "unproven cleanup (replace 'zero stale reservations' with an explicitly bounded, "
+    "request/attempt-bound retained-reservation count), or (b) explicitly authorize a product "
+    "change that releases request-scoped reservations on the cleanup-authority-failure terminal "
+    "while still committing no command terminal CAS. Until the owner records (a) or (b) this "
+    "clause stays BLOCKED: no v2 envelope, gate record, or physical claim may be emitted from it."
+)
+
+
+def reconcile_count_layers(*, command_authority: Mapping[str, Any],
+                           gateway_authority: Mapping[str, Any],
+                           cleanup_authority: Mapping[str, Any]) -> dict[str, Any]:
+    """Reconcile the three measured count layers for `cleanup_authority_failure`.
+
+    CommandController terminal CAS, the RequestGateway failure notice, and the
+    coordinator's retained request reservations are independent authorities.
+    The result states which measured state the request is in and whether the v2
+    envelope may be emitted at all.  The frozen v1 predicate is not reinterpreted
+    here and stays failed/unqualified.
+    """
+    command = _exact(command_authority, COMMAND_FIELDS)
+    gateway = _exact(gateway_authority, GATEWAY_FIELDS)
+    cleanup = _exact(cleanup_authority, CLEANUP_FIELDS)
+    if not (isinstance(command["request_id"], str) and command["request_id"]
+            and _int(command["request_attempt"], 1)):
+        raise ValueError("cleanup_v2_count_layer_binding_mismatch")
+    if any(authority["request_id"] != command["request_id"]
+           or authority["request_attempt"] != command["request_attempt"]
+           for authority in (gateway, cleanup)):
+        raise ValueError("cleanup_v2_count_layer_binding_mismatch")
+    if (not _int(command["registered_command_count"], 1)
+            or not _int(command["terminal_cas_count"], 0)):
+        raise ValueError("cleanup_v2_count_layer_command_terminal_invalid")
+    if (not _int(gateway["terminal_event_count"], 0)
+            or gateway["terminal_event_count"] != 1
+            or gateway["terminal_kind"] != "failed"
+            or gateway["terminal_code"] != "request_cleanup_unproven"):
+        raise ValueError("cleanup_v2_count_layer_gateway_notice_invalid")
+    if (not _int(cleanup["stale_reservation_count"], 0)
+            or cleanup["process_cleanup_complete"] not in (True, False)):
+        raise ValueError("cleanup_v2_count_layer_cleanup_authority_invalid")
+    cas = command["terminal_cas_count"]
+    stale = cleanup["stale_reservation_count"]
+    complete = cleanup["process_cleanup_complete"]
+    if cas == 0:
+        if complete is True and stale == 0:
+            # The co-required v2 clauses. Releasing a reservation is the committed
+            # command terminal, so a zero-CAS complete cleanup is not an observable
+            # product state and must never be reported as a satisfiable envelope.
+            raise ValueError("cleanup_v2_count_layer_conflict_requires_owner_decision")
+        if complete is True or stale == 0:
+            raise ValueError("cleanup_v2_count_layer_inconsistent")
+        state, clause = LAYER_BLOCKED_UNPROVEN_CLEANUP, BLOCKED_CLAUSE_CLEANUP_COMPLETENESS
+    else:
+        if complete is not True or stale != 0:
+            raise ValueError("cleanup_v2_count_layer_inconsistent")
+        state, clause = LAYER_PROVEN_LATE_CLEANUP, BLOCKED_CLAUSE_ZERO_COMMAND_CAS
+    return {
+        "protocol": COUNT_LAYER_PROTOCOL,
+        "request_id": command["request_id"],
+        "request_attempt": command["request_attempt"],
+        "layer_state": state,
+        "command_terminal_cas_count": cas,
+        "gateway_failure_notice_count": gateway["terminal_event_count"],
+        "gateway_failure_code": gateway["terminal_code"],
+        "stale_reservation_count": stale,
+        "process_cleanup_complete": complete,
+        "v2_envelope_authorized": False,
+        "blocked_clause": clause,
+        "open_owner_decision": OPEN_OWNER_DECISION,
+        "v1_gate_record": "failed_unqualified_unchanged",
+        "product_notice_preserved": True,
+        "physical_qualification": False,
+        "qualification_claim": False,
+    }
+
+
+__all__ = [
+    "AUTHORITY",
+    "BLOCKED_CLAUSE_CLEANUP_COMPLETENESS",
+    "BLOCKED_CLAUSE_ZERO_COMMAND_CAS",
+    "CASE",
+    "CLEANUP_FIELDS",
+    "COUNT_LAYER_PROTOCOL",
+    "LAYER_BLOCKED_UNPROVEN_CLEANUP",
+    "LAYER_PROVEN_LATE_CLEANUP",
+    "OPEN_OWNER_DECISION",
+    "PROTOCOL",
+    "collect_local_authorities",
+    "reconcile_count_layers",
+    "validate_observation",
+]

@@ -105,7 +105,13 @@ class A6LocalFaultReceiver:
         self._clock_ms = clock_ms
         self._timeout = body_timeout_seconds
         self._executed: set[str] = set()
+        self._execution_order: list[str] = []
         self._lock = asyncio.Lock()
+
+    @property
+    def executed_case_ids(self) -> tuple[str, ...]:
+        """Receiver-local successful execution order; never physical authority."""
+        return tuple(self._execution_order)
 
     async def __call__(self, scope, receive, send) -> None:
         status = 403
@@ -170,6 +176,7 @@ class A6LocalFaultReceiver:
                     mechanism.execute(EXECUTE_SOURCE_FAILURE_ACTION, case_id=case_id)
                 except FaultRejected:
                     raise _Refused(403) from None
+                self._execution_order.append(case_id)
             status = 200
         except _Refused as error:
             status = error.status

@@ -48,7 +48,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:5e79fe3d9da5695657ce4246478e7bd00683fa0e66dcc4013676851e9cf5c574",
+      "sha256": "sha256:3dd1ddbe5e852324e483a0c09ef206209341eda8256a67444b56b74d3d2e7dfb",
       "size_bytes": 70323
     },
     {
@@ -132,14 +132,19 @@
       "size_bytes": 36411
     },
     {
+      "path": "mycelium_a6_browser_lifecycle.py",
+      "sha256": "sha256:be9c678622a3fbb14da406948b01f044762bcc0ac9a772bdb665982fb2ee1324",
+      "size_bytes": 5443
+    },
+    {
       "path": "mycelium_a6_cleanup_observation_v2.py",
-      "sha256": "sha256:9135406720eef68e270377b420fb626f033f6d006627bcd4c4b1d905cf742eb9",
-      "size_bytes": 8850
+      "sha256": "sha256:302da2ef80b651eed77cbbe3837ff171646193b0481b0fcf31e58af3ff7d836e",
+      "size_bytes": 15177
     },
     {
       "path": "mycelium_a6_direct_socket.py",
-      "sha256": "sha256:0aa41535306ffbb9f6380b7cfd057fe72b2351c5a58951f09e6aa96456e4083e",
-      "size_bytes": 7728
+      "sha256": "sha256:d220a6d03469a3e755a56900fdf4f0a0b46a0e268c2e119863862f537c96d0b2",
+      "size_bytes": 9851
     },
     {
       "path": "mycelium_a6_fault_control.py",
@@ -153,8 +158,8 @@
     },
     {
       "path": "mycelium_a6_http_fault_control.py",
-      "sha256": "sha256:9d0e7ef454c4907ac4cad13461b156cf8ecfa802e3e77b98bb3afcdb6f087a9e",
-      "size_bytes": 8078
+      "sha256": "sha256:804d7b262095b2a541f97eda80014002cdaf602b680dc82c27526a5e6c511fb5",
+      "size_bytes": 8372
     },
     {
       "path": "mycelium_a6_live_fault_seams.py",
@@ -165,6 +170,11 @@
       "path": "mycelium_a6_m16.py",
       "sha256": "sha256:e112dceb7aefffa43a127d9b192adc038de186a9f349d0d6f9881de40c63eac1",
       "size_bytes": 11370
+    },
+    {
+      "path": "mycelium_a6_measured_fault_endpoint.py",
+      "sha256": "sha256:a1b4adddaa820a3e8dd0734e51cbcc823e83ad6a3cc1320e04d1fa845ed19165",
+      "size_bytes": 12555
     },
     {
       "path": "mycelium_a6_recovery.py",
@@ -767,9 +777,29 @@
       "size_bytes": 37903
     },
     {
+      "path": "tests/a6_acceptance/a6_measured_stack.py",
+      "sha256": "sha256:3281e6e7a8aeedc581da57c6d2a98eb6aa4653c0e0d4c9f14e5763fbdcd88bc2",
+      "size_bytes": 6227
+    },
+    {
+      "path": "tests/a6_acceptance/test_browser_lifecycle.py",
+      "sha256": "sha256:fce91a321e0cb23c3803f4ac48d69a0f49f1362025dc927ec596118d53cf0d30",
+      "size_bytes": 6858
+    },
+    {
+      "path": "tests/a6_acceptance/test_cleanup_count_layers.py",
+      "sha256": "sha256:5182e0d86086c931efbdb84fdce172362108d06491263097db36a8c2cae4318c",
+      "size_bytes": 9850
+    },
+    {
       "path": "tests/a6_acceptance/test_cleanup_observation_v2.py",
       "sha256": "sha256:608bddb2c2efaa437b1ca12469e4aac365dfa9c68771faa01a893bb0db461ed9",
       "size_bytes": 6186
+    },
+    {
+      "path": "tests/a6_acceptance/test_measured_fault_endpoint.py",
+      "sha256": "sha256:4d51819e1ea552ba651b84f20b29a0bedb483d3344544b65caff6f5b03575691",
+      "size_bytes": 9662
     },
     {
       "path": "tests/a7_acceptance/conftest.py",
@@ -1143,8 +1173,8 @@
     },
     {
       "path": "ui/web/package.json",
-      "sha256": "sha256:d4025d5ecd97150dd6d4b33a0d0024c85b20871a0dc4df25d452c8e636446145",
-      "size_bytes": 2227
+      "sha256": "sha256:9bea13c9e0d525addaa27794587d70b46b666f65d46c7ea08836f0ac32410dc0",
+      "size_bytes": 2315
     },
     {
       "path": "ui/web/scripts/a0-governance-browser-closeout.mjs",
@@ -1163,13 +1193,23 @@
     },
     {
       "path": "ui/web/scripts/a6-product-browser-e2e.mjs",
-      "sha256": "sha256:170a29d951a640df076a1fe266dc78695ff61bfe74a628046a23873c89dd4a80",
-      "size_bytes": 22463
+      "sha256": "sha256:a1e92a746304f6f63ff70d17b506439eb40ec8c55d1b32042bd686b936137ad8",
+      "size_bytes": 22863
     },
     {
       "path": "ui/web/scripts/a6-product-browser-e2e.test.mjs",
       "sha256": "sha256:88739cbce253c233dc8b5ef44c2e26f7ed0908f3c7b2123a4ffa1ff0d95cc8b9",
       "size_bytes": 16731
+    },
+    {
+      "path": "ui/web/scripts/a6-product-browser-matrix.mjs",
+      "sha256": "sha256:7389a3ea26afcdd015b24cc7ce7c51720c42ecbc7ffcc38c494ac6921b156077",
+      "size_bytes": 9982
+    },
+    {
+      "path": "ui/web/scripts/a6-product-browser-matrix.test.mjs",
+      "sha256": "sha256:27b1c5d557a99c3d492d30362ac78183c33ddd0e2c9329dbbc603157bf8347b8",
+      "size_bytes": 5387
     },
     {
       "path": "ui/web/src/App.consumer.test.tsx",
@@ -1418,5 +1458,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:f811a35c20c79f1dbfbc7c53aba9af7714dc6be32dc7d49077b4e6fdcb0028e1"
+  "source_digest": "sha256:7d0e2f25a4cbfb44c58f25a357509dc0ec29d6681bcebe6ea23c5a77a7010e2b"
 }

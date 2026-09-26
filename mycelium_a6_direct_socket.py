@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 import socket
 import time
 from socketserver import BaseRequestHandler, TCPServer
@@ -164,16 +165,25 @@ class A6DirectSocketServer:
         self._receiver = receiver
         self._server: _Server | None = None
         self._thread: Thread | None = None
+        self._lifetime_id: str | None = None
 
     def __enter__(self) -> A6DirectSocketServer:
         if self._server is not None:
             raise RuntimeError("listener_already_started")
         server = _Server(("127.0.0.1", 0), _Handler)
+        self._lifetime_id = secrets.token_hex(32)
         server.receiver = self._receiver
         self._server = server
         self._thread = Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         self._thread.start()
         return self
+
+    @property
+    def lifetime_id(self) -> str:
+        """One receiver lifetime per construction; two engines never share one."""
+        if self._lifetime_id is None:
+            raise RuntimeError("listener_not_started")
+        return self._lifetime_id
 
     @property
     def host(self) -> str:
@@ -195,3 +205,47 @@ class A6DirectSocketServer:
             self._thread.join(timeout=3)
             self._server = None
             self._thread = None
+
+
+def _fixture_worker() -> None:
+    """Local transport-only witness for the three-engine lifecycle matrix.
+
+    The seams below echo the injection point's declared pre-failure state: this
+    is a *fixture* receiver and every consumer must report ``fixture`` mode with
+    ``live_evidence=false``.  It never produces an A6 product or physical claim.
+    """
+    from mycelium_a6_fault_control import INJECTION_POINTS
+
+    cases = ("ordinary_browser_source_failure_recovery", "no_successor")
+
+    class FixtureSeam:
+        def __init__(self, case_id: str):
+            self.point = INJECTION_POINTS[case_id]
+            self.seam_id = self.point.seam_id
+
+        def arm(self, *, case_id: str) -> dict:
+            return dict(self.point.required_pre_state)
+
+        def apply(self, *, case_id: str) -> dict:
+            return dict(self.point.expected_pre_recovery_state)
+
+    seams = [FixtureSeam(case) for case in cases]
+    receiver = A6LocalFaultReceiver(
+        seams={seam.seam_id: seam for seam in seams}, clock_ms=lambda: 1000,
+        path="/a6/controlled-fault", test_only=True,
+    )
+    with A6DirectSocketServer(receiver=receiver, bind_host="127.0.0.1",
+                              port=0, test_only=True) as server:
+        lifetime_id = server.lifetime_id
+        print(json.dumps({"lifetime_id": lifetime_id, "port": server.port}), flush=True)
+        if input() != "close":
+            raise ValueError("fixture_close_required")
+    print(json.dumps({"lifetime_id": lifetime_id,
+                      "case_ids": receiver.executed_case_ids, "torn_down": True}), flush=True)
+
+
+if __name__ == "__main__":
+    import sys
+    if sys.argv[1:] != ["--fixture-worker"]:
+        raise SystemExit("fixture_worker_only")
+    _fixture_worker()

@@ -217,7 +217,7 @@ export async function sendControlledFault(control, usedCases, requestFactory = h
       }, (response) => {
         response.on('error', () => rejectSafe('controlled_fault_transport_failed'));
         response.on('end', () => {
-          if (response.statusCode >= 200 && response.statusCode < 300) resolve();
+          if (response.statusCode === 200) resolve(200);
           else rejectSafe(`controlled_fault_rejected_${Number.isInteger(response.statusCode)
             ? response.statusCode : 'invalid_status'}`);
         });
@@ -432,7 +432,7 @@ async function runScenario(page, scenario, faultControl, usedCases, maximumNewTo
   };
 }
 
-export function singleEngineReceipt(engine, positive, negative) {
+export function singleEngineReceipt(engine, positive, negative, caseIds = []) {
   if (!ENGINES.includes(engine)) fail('browser_engine_selection_required');
   return {
     protocol: 'mycelium.a6_product_browser_observation.v1',
@@ -446,6 +446,8 @@ export function singleEngineReceipt(engine, positive, negative) {
     fleet_grant_verified: true,
     passed: true,
     engine,
+    case_ids: caseIds,
+    scenario_passes: Object.fromEntries(REQUIRED_SCENARIOS.map((scenario) => [scenario, true])),
     engines: [{ engine, positive, negative }],
     workspaces: [...WORKSPACES],
     required_scenarios: [...REQUIRED_SCENARIOS],
@@ -459,7 +461,12 @@ export function singleEngineReceipt(engine, positive, negative) {
   };
 }
 
-async function runLive({ engine, origin, outputPath, faultControl, maximumNewTokens }) {
+export async function runSingleEngine({ engine, origin, outputPath, faultControl, maximumNewTokens }) {
+  if (!ENGINES.includes(engine)) fail('browser_engine_selection_required');
+  exactLoopbackOrigin(origin);
+  if (!validatedControls.has(faultControl?.positive) || !validatedControls.has(faultControl?.negative)) {
+    fail('fault_control_unvalidated');
+  }
   const playwright = await import('@playwright/test');
   const failures = [];
   const usedCases = new Set();
@@ -491,9 +498,10 @@ async function runLive({ engine, origin, outputPath, faultControl, maximumNewTok
 
     // Console/page errors can contain private prompt/output; never echo their payload.
     if (failures.length > 0) fail('browser_failures_observed');
-    const report = singleEngineReceipt(engine, positive, negative);
-    await atomicPrivateWrite(outputPath, jsonLine(report));
-    process.stdout.write(jsonLine(report));
+    const report = singleEngineReceipt(engine, positive, negative,
+      [faultControl.positive.caseId, faultControl.negative.caseId]);
+    if (outputPath) await atomicPrivateWrite(outputPath, jsonLine(report));
+    return report;
   } finally {
     await browser.close().catch(() => undefined);
   }
@@ -534,18 +542,10 @@ async function main() {
     positiveCaseId: process.env.MYCELIUM_A6_POSITIVE_CASE_ID,
     negativeCaseId: process.env.MYCELIUM_A6_NEGATIVE_CASE_ID,
   });
-  try {
-    await runLive({
-      engine,
-      origin,
-      outputPath: path.resolve(outputPath),
-      faultControl,
-      maximumNewTokens,
-    });
-  } catch {
-    // Browser/transport exception messages may include private typed content.
-    fail('a6_browser_live_failed');
-  }
+  // No standalone CLI can attest to a receiver it did not construct and tear down.
+  // Matrix.runLiveMatrix supplies the receiver-owned runtime instead.
+  void faultControl; void maximumNewTokens;
+  fail('receiver_runtime_factory_required');
 }
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
