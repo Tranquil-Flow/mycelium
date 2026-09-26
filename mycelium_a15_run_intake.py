@@ -386,6 +386,42 @@ def _is_contained(real: Path, real_root: Path) -> bool:
     return real == real_root or real_root in real.parents
 
 
+def _relocate_sealed_reference(
+    reference: Path, evidence_roots: list[Path]
+) -> tuple[Path | None, str | None]:
+    """Re-root an absolute sealed-evidence reference onto a declared evidence root.
+
+    A retained corpus is routinely relocated out of the owner-private absolute prefix the
+    sealed record was written against, so the literal path can be absent while the exact
+    bytes remain available under a declared evidence root (the staged corpus records the
+    move as ``evidence_root_origin``). The declared roots are authoritative relocation
+    targets: the reference is walked from its longest suffix towards its shortest, and
+    the first suffix naming a regular file that is contained -- on the resolved real
+    path -- in a declared root is the resolution.
+
+    The walk is bounded by the reference's own component count and the declared-root
+    count. It can never name a file outside a declared root, and the caller still
+    requires the observed bytes to equal the declared digest, so an incorrect relocation
+    surfaces as a digest finding rather than as a pass.
+    """
+    if not evidence_roots:
+        return None, None
+    parts = reference.parts
+    for root in evidence_roots:
+        real_root = _real_path(root)
+        for start in range(1, len(parts)):
+            candidate = Path(*parts[start:])
+            if not candidate.parts:
+                continue
+            resolved = root / candidate
+            if not resolved.is_file():
+                continue
+            if not _is_contained(_real_path(resolved), real_root):
+                continue
+            return resolved, str(root)
+    return None, None
+
+
 def _resolve_relative(path_text: str, root: Path) -> Path | None:
     """Resolve a declared relative path under ``root``, refusing anything that leaves it.
 
@@ -591,14 +627,29 @@ def _intake_completion_record(
 
         candidate = Path(reference)
         resolved: Path | None = None
+        resolved_via: str | None = None
         if candidate.is_absolute():
             # Containment is decided on the resolved real path: a symlinked component
             # must not smuggle an absolute reference back outside a declared root.
             real_candidate = _real_path(candidate)
-            if not any(_is_contained(real_candidate, _real_path(root)) for root in evidence_roots):
-                local.add(F_REF_ESCAPE)
-                continue
-            resolved = candidate if candidate.is_file() else None
+            contained = any(
+                _is_contained(real_candidate, _real_path(root)) for root in evidence_roots
+            )
+            if contained and candidate.is_file():
+                resolved = candidate
+                resolved_via = "literal"
+            else:
+                # The literal owner-private path is either absent or outside every
+                # declared root -- and bytes outside the declared roots are never read.
+                # A declared evidence root is an authoritative relocation target for the
+                # retained corpus, so re-root the reference by its longest contained
+                # suffix. The bytes must still match the declared digest below.
+                resolved, relocated_root = _relocate_sealed_reference(candidate, evidence_roots)
+                if resolved is not None:
+                    resolved_via = f"relocated:{relocated_root}"
+                elif not contained:
+                    local.add(F_REF_ESCAPE)
+                    continue
         else:
             repo_candidate = repo_root / candidate
             if repo_candidate.is_file() and _is_contained(
@@ -620,7 +671,14 @@ def _intake_completion_record(
             continue
 
         observed = sha256_file(resolved)
-        result["resolved"].append({"artifact": reference, "observed_digest": observed})
+        result["resolved"].append(
+            {
+                "artifact": reference,
+                "declared_digest": declared,
+                "observed_digest": observed,
+                "resolved_via": resolved_via or "evidence_root",
+            }
+        )
         if declared is not None and observed == declared:
             result["sealed_digest_matched"] += 1
         else:

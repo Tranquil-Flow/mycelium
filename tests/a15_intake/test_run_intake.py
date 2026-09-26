@@ -215,6 +215,216 @@ def codes(report: dict) -> set[str]:
 
 
 # --------------------------------------------------------------------------- #
+# relocated retained corpus — an ABSOLUTE sealed-evidence reference whose literal
+# owner-private prefix is not materialised on this host
+#
+# `docs/handover/a5-completion-record.v1.json` (digest-pinned, never editable)
+# carries eight `sealed_evidence[].artifact` references under the absolute
+# owner-private prefix `/Users/evinova-self/mycelium-physical-run/…`. A staged
+# corpus relocates exactly those bytes under a declared evidence root and records
+# the move in its manifest (`evidence_root_origin`). Before this slice the resolver
+# consulted `evidence_roots` for an absolute reference ONLY for containment
+# (`:598`), never as a relocation target, so a relocated corpus could not be
+# ingested at all and no supported env setting expressed the remap.
+#
+# These cases prove the remap is declarative, root-bounded and still
+# digest-verified. They are fully synthetic (scratch repo + scratch evidence root),
+# so they hold on any host and need no retained bytes.
+# --------------------------------------------------------------------------- #
+
+# The retained record's real owner-private prefix is
+# `/Users/evinova-self/mycelium-physical-run`. These cases must NOT depend on whether
+# that prefix happens to be materialised on the running host, so the synthetic origin
+# is an absent absolute path under the scratch directory.
+SEALED_TAIL = "a5-multistage-20260822/final-v190-r33/a5-product-positive.json"
+SEALED_PROTOCOL = "mycelium.a5_product_positive_observation.v1"
+
+
+def synthetic_origin(tmp_path: Path) -> Path:
+    """An absolute owner-private origin that is never created (guaranteed absent)."""
+    return tmp_path / "owner-private-origin"
+
+
+def synthetic_relocation(tmp_path: Path) -> tuple[dict, Path, Path, Path]:
+    """A declaration whose A5 record carries an ABSOLUTE sealed-evidence reference.
+
+    The literal reference is deliberately absent (its owner-private origin prefix is
+    never materialised); the exact bytes live under a declared evidence root at the
+    matching path tail. That is precisely the relocated-corpus shape.
+    """
+    repo = tmp_path / "repo"
+    (repo / "docs").mkdir(parents=True)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    evidence_root = tmp_path / "evidence-root"
+    (evidence_root / Path(SEALED_TAIL).parent).mkdir(parents=True)
+    origin = synthetic_origin(tmp_path)
+    assert not origin.exists()  # the premise of the relocation cases
+
+    payload = b'{"protocol": "mycelium.a5_product_positive_observation.v1", "result": "passed"}'
+    (evidence_root / SEALED_TAIL).write_bytes(payload)
+    sealed_digest = "sha256:" + hashlib.sha256(payload).hexdigest()
+
+    record = {
+        "protocol": "mycelium.gate_completion_record.v1",
+        "gate_id": "A5",
+        "sealed_evidence": [
+            {
+                "name": "physical_positive",
+                "artifact": f"{origin}/{SEALED_TAIL}",
+                "artifact_digest": sealed_digest,
+                "protocol": SEALED_PROTOCOL,
+                "result": "passed",
+            }
+        ],
+    }
+    (repo / "docs" / "a5-record.json").write_text(json.dumps(record), encoding="utf-8")
+
+    gate = run_dir / "readiness-gate.json"
+    gate.write_bytes(b'{"protocol": "mycelium.pilot_readiness_gate.v1", "verdict": "GO"}')
+    declaration = {
+        "protocol": PROTOCOL,
+        "claim_boundary": CLAIM_BOUNDARY,
+        "run_dir": str(run_dir),
+        "evidence_roots": [str(evidence_root)],
+        "repo_root": str(repo),
+        "source": {"commit": "a" * 40, "branch": "synthetic"},
+        "artifacts": [
+            {
+                "artifact_id": "readiness_gate",
+                "path": "readiness-gate.json",
+                "declared_digest": "sha256:" + hashlib.sha256(gate.read_bytes()).hexdigest(),
+                "protocol": "mycelium.pilot_readiness_gate.v1",
+                "provenance": "live",
+                "required": True,
+                "fresh_until": None,
+            }
+        ],
+        "completion_records": [{"gate_id": "A5", "path": "docs/a5-record.json"}],
+        "checklist": {"path": "docs/absent-checklist.json", "declared_digest": None},
+    }
+    return declaration, repo, origin, evidence_root
+
+
+def rewrite_record(repo: Path, record: dict) -> None:
+    (repo / "docs" / "a5-record.json").write_text(json.dumps(record), encoding="utf-8")
+
+
+def sole_sealed(report: dict) -> dict:
+    assert len(report["sealed_evidence_results"]) == 1
+    return report["sealed_evidence_results"][0]
+
+
+def test_absolute_sealed_reference_relocates_under_declared_evidence_root(tmp_path: Path):
+    """The declared evidence root is an authoritative relocation target."""
+    declaration, repo, origin, root = synthetic_relocation(tmp_path)
+    report = intake_run(declaration, now=NOW, repo_root=str(repo))
+
+    item = sole_sealed(report)
+    assert item["sealed_evidence_count"] == 1
+    assert item["sealed_digest_matched"] == 1
+    assert item["sealed_digest_mismatched"] == 0
+    assert "artifact_reference_escapes_evidence_roots" not in codes(report)
+    assert "sealed_evidence_missing" not in codes(report)
+    entry = item["resolved"][0]
+    assert entry["artifact"] == f"{origin}/{SEALED_TAIL}"
+    assert entry["observed_digest"] == entry["declared_digest"]
+    assert entry["resolved_via"] == f"relocated:{root}"
+
+
+def test_literal_reference_outside_the_declared_root_is_never_read(tmp_path: Path):
+    """A materialised but out-of-root literal never shadows the declared root's copy.
+
+    This is the exact shape of a host where the owner-private origin *is* materialised
+    but the operator declared a different (relocated) evidence root: the out-of-root
+    bytes must not be read, and the declared root's copy is what gets verified.
+    """
+    declaration, repo, origin, root = synthetic_relocation(tmp_path)
+    literal = origin / SEALED_TAIL
+    literal.parent.mkdir(parents=True)
+    literal.write_bytes(b'{"literal": "outside every declared root"}')
+    report = intake_run(declaration, now=NOW, repo_root=str(repo))
+
+    item = sole_sealed(report)
+    assert item["sealed_digest_matched"] == 1
+    assert item["sealed_digest_mismatched"] == 0
+    assert item["resolved"][0]["resolved_via"] == f"relocated:{root}"
+    assert item["resolved"][0]["observed_digest"] != (
+        "sha256:" + hashlib.sha256(literal.read_bytes()).hexdigest()
+    )
+
+
+def test_absolute_sealed_reference_without_a_declared_root_still_escapes(tmp_path: Path):
+    """Control: no declared root means no relocation target, so the escape stands."""
+    declaration, repo, origin, root = synthetic_relocation(tmp_path)
+    declaration["evidence_roots"] = []
+    report = intake_run(declaration, now=NOW, repo_root=str(repo))
+
+    item = sole_sealed(report)
+    assert "artifact_reference_escapes_evidence_roots" in codes(report)
+    assert item["sealed_digest_matched"] == 0
+    assert item["resolved"] == []
+
+
+def test_relocation_cannot_read_outside_the_declared_root(tmp_path: Path):
+    """A reference that exists outside every declared root is never read."""
+    declaration, repo, origin, root = synthetic_relocation(tmp_path)
+    outside = tmp_path / "outside" / "secret" / "hidden.json"
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(b'{"result": "passed"}')
+    rewrite_record(
+        repo,
+        {
+            "protocol": "mycelium.gate_completion_record.v1",
+            "gate_id": "A5",
+            "sealed_evidence": [
+                {
+                    "name": "hidden",
+                    "artifact": str(outside),
+                    "artifact_digest": "sha256:" + hashlib.sha256(outside.read_bytes()).hexdigest(),
+                    "protocol": SEALED_PROTOCOL,
+                    "result": "passed",
+                }
+            ],
+        },
+    )
+    report = intake_run(declaration, now=NOW, repo_root=str(repo))
+
+    item = sole_sealed(report)
+    assert item["findings"] == ["artifact_reference_escapes_evidence_roots"]
+    assert item["sealed_digest_matched"] == 0
+    assert item["resolved"] == []
+
+
+def test_relocation_still_requires_the_declared_digest(tmp_path: Path):
+    """A relocated reference is verified exactly like a literal one: bytes must match."""
+    declaration, repo, origin, root = synthetic_relocation(tmp_path)
+    (tmp_path / "evidence-root" / SEALED_TAIL).write_bytes(
+        b'{"protocol": "mycelium.a5_product_positive_observation.v1", "result": "passed", "tampered": true}'
+    )
+    report = intake_run(declaration, now=NOW, repo_root=str(repo))
+
+    item = sole_sealed(report)
+    assert item["sealed_digest_matched"] == 0
+    assert item["sealed_digest_mismatched"] == 1
+    assert "sealed_evidence_digest_mismatch" in codes(report)
+    assert item["resolved"][0]["resolved_via"].startswith("relocated:")
+
+
+def test_relocation_prefers_the_longest_contained_suffix(tmp_path: Path):
+    """A tail that also exists under a shorter suffix resolves to the longest match."""
+    declaration, repo, origin, root = synthetic_relocation(tmp_path)
+    # A decoy at the SHORTEST possible suffix with different bytes: if the walk went
+    # shortest-first this would win and the digest would not verify.
+    (root / Path(SEALED_TAIL).name).write_bytes(b'{"wrong": true}')
+    report = intake_run(declaration, now=NOW, repo_root=str(repo))
+
+    item = sole_sealed(report)
+    assert item["sealed_digest_matched"] == 1
+    assert item["resolved"][0]["resolved_via"] == f"relocated:{root}"
+
+
+# --------------------------------------------------------------------------- #
 # declaration shape and fail-closed refusal
 # --------------------------------------------------------------------------- #
 
