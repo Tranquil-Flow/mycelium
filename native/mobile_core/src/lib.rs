@@ -13,3 +13,5 @@ pub mod runtime;
 pub mod wire;
 pub mod membership;
 pub mod evidence;
+#[cfg(feature = "net")]
+pub mod transport;

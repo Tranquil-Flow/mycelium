@@ -16,6 +16,7 @@ default = []
 # Networking: seed HTTP client, embedded iroh endpoint and the node supervisor.
 # Everything outside this feature stays wasm32-compatible for the browser page.
 net = ["dep:tokio", "dep:iroh", "dep:reqwest"]
+# In-process transport tests need tokio test macros.
 
 [dependencies]
 base64 = "0.22"
@@ -35,6 +36,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde_json = { version = "1", features = ["float_roundtrip", "arbitrary_precision"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
