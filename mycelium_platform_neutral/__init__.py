@@ -40,6 +40,20 @@ gap (spec §3.4), which is deliberately not a contract and claims nothing:
   (``python -m mycelium_platform_neutral.efficiency_benchmark``), not part of
   the package's authoring surface.
 
+The two runtime-efficiency modules are additionally *reachable* from the runtime
+path.  :func:`runtime_loader.load_assignment_stage` takes an explicit,
+fail-closed ``int8_execution="platform-neutral-int8"`` selection (with an
+``activation_frame_dtype`` of ``float16`` or ``bfloat16``) that dispatches
+:mod:`mycelium_platform_neutral.int8_execution` over the row-wise int8 weights a
+real load just materialized and drives
+:mod:`mycelium_platform_neutral.activation_transport` over the loader's
+deterministic probe activation; a requested selection whose module is not
+importable is refused (``a9_platform_neutral_unavailable``) instead of being
+downgraded.  Reachability is not qualification: that selection is not the
+default, the qualified ``weight-quantization`` kernel remains the default for
+every caller that does not request the A9 selection, and the measured result is
+reported under the ``reachable_not_qualified`` boundary.
+
 These are authoring modules: strict, deterministic validation and derivation
 only.  Nothing here is qualified, eligible, placed, or ready — those remain
 separate authorities (spec §2), and no physical round has been executed.  The
