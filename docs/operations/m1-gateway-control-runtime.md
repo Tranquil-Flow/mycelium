@@ -139,15 +139,43 @@ served by the new generation (see the transcript: `generation` 1 → 2).
    `/api/v1/...` pair returned by §1 instead. In production this does not arise:
    the thing behind the proxy is `mycelium_ui_gateway`'s product application,
    which serves and advertises `/api/v1/...` natively (`mycelium_ui_gateway/app.py:63,743-744`).
-2. **`HTTPGatewayClient` cannot stream an owner-locked session.** `service.py`
-   locks each session to the token minted by `session_token_source`, `asgi.py`
-   requires that token on `/events`, and `client.py::HTTPGatewayClient._headers`
-   (`mycelium_request_gateway/client.py:296-300`) sends only `Authorization`.
-   A public/browser client is unaffected (the 202 body carries `session_token`);
-   the CLI client needs an `X-Mycelium-Session` header to use the locked pair.
-   This is asserted as a finding in
-   `tests/gateway/test_gateway_control_runtime.py::test_repo_http_client_cannot_stream_an_owner_locked_session`.
-3. **Cosmetic**: the proxy forwards the upstream `Server`/`Date` headers in
+2. **`HTTPGatewayClient` and owner-locked sessions — repaired 2026-09-27.** `service.py`
+   locks each session to the token minted by `session_token_source`
+   (`_require_session_owner`, called by `subscribe()` and `cancel()`), and
+   `asgi.py` requires that token on `/events` and on `DELETE
+   /v1/inference/{request_id}` -- `_session_token` reads exactly the
+   `x-mycelium-session` header. `client.py::HTTPGatewayClient` now captures
+   `session_token` from the 202 acceptance document and echoes it as
+   `X-Mycelium-Session` on both follow-up requests, the same owner token
+   `mycelium_ui_gateway` forwards (`mycelium_ui_gateway/app.py:489-490`); the
+   client also parses the gateway's own SSE id dialect,
+   `id: {publisher_generation}:{sequence}` (`asgi.py:146-152`), which it
+   previously read as a bare sequence. The gateway's scoping is unchanged: a
+   subscriber that does not present the session's owner token is still refused
+   with 409 `session_owner_mismatch` before a single event is streamed.
+   Guarded by
+   `tests/gateway/test_gateway_control_runtime.py::test_repo_http_client_streams_an_owner_locked_session`
+   (RED whenever the header stops being sent, or when the id dialect regresses)
+   and
+   `...::test_owner_locked_session_still_rejects_a_stream_that_omits_the_session_token`
+   (the gateway-side half, RED if the owner check is ever relaxed). The
+   pre-repair behaviour was recorded here as a finding and asserted by
+   `test_repo_http_client_cannot_stream_an_owner_locked_session`; that test
+   asserted the *defect*, not a contract, and was replaced by the two above.
+3. **`HTTPGatewayClient` resume cursor shape (open).** `cli.py` resumes a
+   dropped stream by passing an integer `last_event_id`, and the client writes
+   it straight into `Last-Event-ID` (`mycelium_request_gateway/client.py::events`).
+   The gateway parses that header as `{publisher_generation}:{sequence}`
+   (`asgi.py::_last_event_id`; it rejects any single-part value and any
+   `generation < 1`), so a resumed stream is refused with 409
+   `invalid_last_event_id`. Measured on the stub runtime, same request and same
+   owner token, only the cursor shape changing: `Last-Event-ID: 0` -> HTTP 409
+   `{"error": "invalid_last_event_id"}`, `Last-Event-ID: <generation>:0` -> HTTP
+   200 `text/event-stream` resuming at the next event. Fixing it needs a
+   cursor-shape decision (the public `GatewayClient.events(last_event_id: int)`
+   signature cannot express the generation), so it is recorded, not silently
+   worked around.
+4. **Cosmetic**: the proxy forwards the upstream `Server`/`Date` headers in
    addition to its own, so a proxied response carries them twice.
 
 ## 7. Verification

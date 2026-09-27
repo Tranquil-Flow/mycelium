@@ -327,17 +327,23 @@ def test_gateway_upstream_session_api_requires_authentication_and_streams_tokens
         assert texts == ["alpha ", "beta "]
 
 
-def test_repo_http_client_cannot_stream_an_owner_locked_session() -> None:
-    """Landed-seam finding: the client never sends the session-owner header.
+def test_repo_http_client_streams_an_owner_locked_session() -> None:
+    """The CLI client can now use a locked submit->stream pair end to end.
 
     ``mycelium_request_gateway.service`` locks each session to the token its
-    ``session_token_source`` minted, ``asgi.py`` requires that token on the
-    ``/events`` subscription, and
-    ``mycelium_request_gateway/client.py::HTTPGatewayClient._headers`` sends only
-    ``Authorization``.  The locked pair therefore cannot be used together
-    without either teaching the client ``X-Mycelium-Session`` or giving the
-    composition a session-token source the client can echo.  A browser/public
-    client is unaffected: the 202 body carries ``session_token``.
+    ``session_token_source`` minted (``_require_session_owner``, reached from both
+    ``subscribe()`` and ``cancel()``), and ``asgi.py`` requires that token on the
+    ``/events`` subscription and on ``DELETE /v1/inference/{request_id}`` --
+    ``_session_token`` reads exactly the ``x-mycelium-session`` header.
+    ``HTTPGatewayClient`` captures the ``session_token`` the 202 acceptance document
+    carries and echoes it as ``X-Mycelium-Session`` on both follow-up requests,
+    mirroring ``mycelium_ui_gateway/app.py``.
+
+    The ``stranger`` arm is the negative control, and the reason this test is RED
+    whenever the client stops sending the header: the same request streamed (and
+    cancelled) by a client that never saw the acceptance document is refused with
+    HTTP 409 ``session_owner_mismatch`` -- the exact response the unrepaired client
+    produced.
     """
 
     from mycelium_request_gateway.client import GatewayClientError, HTTPGatewayClient
@@ -354,8 +360,66 @@ def test_repo_http_client_cannot_stream_an_owner_locked_session() -> None:
                 qualification=client.current_qualification(),
             )
         )
+        kinds: list[str] = []
+        texts: list[str] = []
+        for event in client.events(request_id):
+            kinds.append(event.kind)
+            if event.kind == "token":
+                assert event.text is not None
+                texts.append(event.text)
+            if event.kind == "completed":
+                break
+        assert kinds == ["accepted", "token", "token", "completed"]
+        assert texts == ["alpha ", "beta "]
+        # The owner's DELETE is admitted (the session is already terminal, so
+        # nothing is actually cancelled); the token-less client is refused.
+        assert client.cancel(request_id) is False
+
+        stranger = HTTPGatewayClient(
+            base_url=runtime.gateway_base_url,
+            bearer_token=DIAGNOSTIC_TOKEN,
+        )
+        with pytest.raises(GatewayClientError) as refused:
+            list(stranger.events(request_id))
+        assert refused.value.code == "session_owner_mismatch"
+        with pytest.raises(GatewayClientError) as refused_cancel:
+            stranger.cancel(request_id)
+        assert refused_cancel.value.code == "session_owner_mismatch"
+
+
+def test_owner_locked_session_still_rejects_a_stream_that_omits_the_session_token() -> None:
+    """Gateway-side half of the former section 6 finding: owner scoping is not relaxed.
+
+    The finding recorded here before the repair -- ``HTTPGatewayClient._headers``
+    sending only ``Authorization`` -- was a defect report, not a contract, and the
+    client now echoes the owner token.  What stays pinned is the property the repair
+    must not touch: a subscriber that does not present the token minted for the
+    session is refused before a single event is streamed.  It is asserted through the
+    real client (a second instance that never saw the acceptance document), so it goes
+    RED if the gateway stops enforcing the owner digest -- or if the client were ever
+    "fixed" by inventing or skipping a token instead of echoing the one it was given.
+    """
+
+    from mycelium_request_gateway.client import GatewayClientError, HTTPGatewayClient
+
+    with _runtime() as runtime:
+        submitter = HTTPGatewayClient(
+            base_url=runtime.gateway_base_url,
+            bearer_token=DIAGNOSTIC_TOKEN,
+        )
+        request_id = submitter.submit(
+            InferenceSubmission(
+                prompt=PROMPT,
+                max_new_tokens=2,
+                qualification=submitter.current_qualification(),
+            )
+        )
+        stranger = HTTPGatewayClient(
+            base_url=runtime.gateway_base_url,
+            bearer_token=DIAGNOSTIC_TOKEN,
+        )
         with pytest.raises(GatewayClientError) as caught:
-            list(client.events(request_id))
+            list(stranger.events(request_id))
         assert caught.value.code == "session_owner_mismatch"
 
 

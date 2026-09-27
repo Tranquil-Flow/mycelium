@@ -25,6 +25,34 @@ class GatewayClientError(RuntimeError):
         super().__init__(self.code)
 
 
+_MAX_SESSION_TOKEN_CHARACTERS = 256
+
+
+def _accepted_session_token(document: Mapping[str, Any]) -> str | None:
+    """The owner token the 202 acceptance document advertised, or ``None``.
+
+    ``service.submit`` mints the owner token and digest-locks the session to it,
+    and ``asgi`` then requires it back on ``/events`` and on the ``DELETE``
+    (``_session_token`` reads exactly the ``x-mycelium-session`` header).  The
+    client echoes what it was handed and nothing else: a document without a
+    token describes a session that is not owner-locked, while a token that could
+    not be placed in a header is an invalid acceptance document, not a value to
+    launder into the next request.
+    """
+
+    token = document.get("session_token")
+    if token is None:
+        return None
+    if (
+        not isinstance(token, str)
+        or not token
+        or len(token) > _MAX_SESSION_TOKEN_CHARACTERS
+        or any(ord(character) < 0x21 or ord(character) > 0x7E for character in token)
+    ):
+        raise GatewayClientError("invalid_submission_response")
+    return token
+
+
 class _NoRedirectHandler(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -98,7 +126,13 @@ class ServiceGatewayClient:
 
 
 class HTTPGatewayClient:
-    """Stdlib HTTP/SSE client used by the command-line entry point."""
+    """Stdlib HTTP/SSE client used by the command-line entry point.
+
+    The gateway digest-locks each session to the owner token minted on submit, so
+    this client keeps the token the 202 acceptance document advertised and
+    presents it as ``X-Mycelium-Session`` on the follow-up ``/events`` and
+    ``DELETE`` requests -- the same header ``mycelium_ui_gateway`` forwards.
+    """
 
     def __init__(self, *, base_url: str, bearer_token: str, timeout: float = 30.0) -> None:
         parsed = urlparse(base_url)
@@ -128,6 +162,8 @@ class HTTPGatewayClient:
         self._token = bearer_token
         self._timeout = float(timeout)
         self._opener = build_opener(_NoRedirectHandler())
+        # Owner token per accepted request, captured from the 202 document.
+        self._session_tokens: dict[str, str] = {}
 
     def current_qualification(self) -> QualificationBinding:
         document = self._json_request("GET", "/v1/qualification/current")
@@ -146,8 +182,13 @@ class HTTPGatewayClient:
             body=submission.to_dict(),
         )
         request_id = document.get("request_id")
-        if not is_valid_request_id(request_id):
+        if not isinstance(request_id, str) or not is_valid_request_id(request_id):
             raise GatewayClientError("invalid_submission_response")
+        session_token = _accepted_session_token(document)
+        if session_token is None:
+            self._session_tokens.pop(request_id, None)
+        else:
+            self._session_tokens[request_id] = session_token
         return request_id
 
     def events(
@@ -158,7 +199,7 @@ class HTTPGatewayClient:
     ) -> Iterator[StreamEvent]:
         if not is_valid_request_id(request_id):
             raise GatewayClientError("invalid_request_id")
-        headers = self._headers()
+        headers = self._headers(session_token=self._session_tokens.get(request_id))
         headers["Accept"] = "text/event-stream"
         if last_event_id is not None:
             if (
@@ -231,7 +272,11 @@ class HTTPGatewayClient:
     def cancel(self, request_id: str) -> bool:
         if not is_valid_request_id(request_id):
             raise GatewayClientError("invalid_request_id")
-        document = self._json_request("DELETE", f"/v1/inference/{request_id}")
+        document = self._json_request(
+            "DELETE",
+            f"/v1/inference/{request_id}",
+            session_token=self._session_tokens.get(request_id),
+        )
         return document.get("status") == "cancelling"
 
     def _json_request(
@@ -240,9 +285,10 @@ class HTTPGatewayClient:
         path: str,
         *,
         body: Mapping[str, Any] | None = None,
+        session_token: str | None = None,
     ) -> dict[str, Any]:
         payload = None
-        headers = self._headers()
+        headers = self._headers(session_token=session_token)
         if body is not None:
             payload = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -276,10 +322,24 @@ class HTTPGatewayClient:
         event_id: str | None,
         event_type: str | None,
     ) -> StreamEvent:
-        if event_id is None or event_type is None or not event_id.isdigit():
+        if event_id is None or event_type is None:
             raise GatewayClientError("invalid_event_stream")
+        # The gateway's own dialect is ``id: {publisher_generation}:{sequence}``:
+        # ``asgi._sse_bytes`` writes it and ``asgi._last_event_id`` reads it back
+        # in exactly that shape (``mycelium_ui_gateway``'s browser-facing product
+        # cursor is a bare decimal, but this client speaks the gateway's ``/v1``
+        # surface).  Accepting a bare sequence here would also drop the
+        # generation the resume cursor needs.
+        parts = event_id.split(":")
+        if len(parts) != 2 or any(not part.isdigit() for part in parts):
+            raise GatewayClientError("invalid_event_stream")
+        generation, sequence = (int(part) for part in parts)
         event = cls._parse_event_data("\n".join(data_lines))
-        if event_id != str(event.sequence) or event_type != event.kind:
+        if (
+            generation != event.publisher_generation
+            or sequence != event.sequence
+            or event_type != event.kind
+        ):
             raise GatewayClientError("invalid_event_stream")
         return event
 
@@ -293,11 +353,14 @@ class HTTPGatewayClient:
         except (json.JSONDecodeError, ValueError, AdmissionError, TypeError):
             raise GatewayClientError("invalid_event_stream") from None
 
-    def _headers(self) -> dict[str, str]:
-        return {
+    def _headers(self, *, session_token: str | None = None) -> dict[str, str]:
+        headers = {
             "Authorization": f"Bearer {self._token}",
             "Cache-Control": "no-store",
         }
+        if session_token is not None:
+            headers["X-Mycelium-Session"] = session_token
+        return headers
 
     def _url(self, path: str) -> str:
         return f"{self._base_url}{path}"
