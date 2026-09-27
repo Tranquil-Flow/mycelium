@@ -36,6 +36,24 @@ def test_native_classes_decompose_without_guessing() -> None:
     }
 
 
+def test_linux_native_class_decomposes_without_guessing_a_runtime() -> None:
+    """The A13 Linux product class never inherits the numpy stage runtime."""
+
+    linux = migration.decompose_legacy_peer_class("linux_native_iroh")
+    assert linux.to_mapping() == {
+        "peer_class": "linux_native_iroh",
+        "identity_kind": "native_peer",
+        "platform_family": "linux",
+        "architecture": "unknown",
+        "transports": ["iroh"],
+        "runtimes": [],
+        "declared_ineligible": True,
+    }
+    assert migration.decompose_legacy_peer_class("linux_numpy_iroh").runtimes == (
+        "numpy",
+    )
+
+
 def test_decomposition_covers_every_shipped_class_exactly() -> None:
     assert set(migration.LEGACY_PEER_CLASS_DECOMPOSITION) == set(PEER_CLASSES)
 

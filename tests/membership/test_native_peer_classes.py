@@ -79,7 +79,8 @@ def test_windows_native_iroh_is_ineligible_with_a_named_refusal() -> None:
         == "windows_member_runtime_absent"
     )
     assert PEER_CLASS_ACTIVATION_REFUSALS == {
-        "windows_native_iroh": "windows_member_runtime_absent"
+        "windows_native_iroh": "windows_member_runtime_absent",
+        "linux_native_iroh": "linux_native_member_runtime_unbound",
     }
 
 

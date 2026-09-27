@@ -10,10 +10,13 @@ the SAME wire protocols the committed macOS slice froze:
     mycelium.encrypted_invitation_handoff.v1
 
 so the request and handoff field sets are identical to the macOS slice's.  The
-peer class differs (``linux_native_iroh``); the frozen macOS owner module refuses
-any peer class but its own, so owner-side approval of a Linux pairing request is
-a cross-lane change.  That gap is left visible (and is pinned by a test) rather
-than worked around by editing macOS code or weakening the peer-class check.
+peer class differs (``linux_native_iroh``).  The macOS owner module's closed
+peer-class allow-set now names ``linux_native_iroh`` explicitly, so owner-side
+approval of a Linux pairing request is served by that module, and the
+membership registry declares the class so a seed admits its join.  The class is
+joinable but activation-refused (``linux_native_member_runtime_unbound``) until
+the Linux product package is bound to a member stage runtime; this module never
+widens either check on its own side.
 
 This module never writes a private key, never copies identity material into a
 record or a return value, never stores plaintext handoff state, and never claims

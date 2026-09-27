@@ -86,6 +86,17 @@ _PEER_RUNTIME_CAPABILITIES = {
         "transport": "iroh",
         "activation_protocol": None,
     },
+    # The A13 Linux product onboarding's class.  It is joinable, but the Linux
+    # product package binds no member stage runtime (its service argv is caller
+    # supplied and ``mycelium_node`` does not accept this class), so it is not
+    # the ``linux_numpy_iroh`` runtime by construction and stays declared
+    # activation-ineligible, with no runtime guessed from the label, until that
+    # binding exists.
+    "linux_native_iroh": {
+        "runtime_backend": "tbd",
+        "transport": "iroh",
+        "activation_protocol": None,
+    },
 }
 PEER_CLASSES = frozenset(_PEER_RUNTIME_CAPABILITIES)
 #: Closed allow-set of peer classes that may receive activation work.
@@ -96,6 +107,7 @@ _ACTIVATION_ELIGIBLE_PEER_CLASSES = frozenset(
 #: membership but may not receive activation work yet.
 PEER_CLASS_ACTIVATION_REFUSALS = {
     "windows_native_iroh": "windows_member_runtime_absent",
+    "linux_native_iroh": "linux_native_member_runtime_unbound",
 }
 
 _COMMON_FIELDS = frozenset(

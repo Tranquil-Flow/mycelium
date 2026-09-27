@@ -36,6 +36,16 @@ CAPABILITIES = {
         "transport": "iroh",
         "activation_protocol": None,
     },
+    "linux_native_iroh": {
+        "runtime_backend": "tbd",
+        "transport": "iroh",
+        "activation_protocol": None,
+    },
+    "linux_numpy_iroh": {
+        "runtime_backend": "numpy",
+        "transport": "iroh",
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
+    },
     "browser_http": {
         "runtime_backend": "browser",
         "transport": "http",
@@ -142,6 +152,34 @@ def test_windows_member_is_refused_with_the_named_reason(swarm) -> None:
         refused_peer.value.code
         == "seed_peer_activation_ineligible:windows_member_runtime_absent"
     )
+
+
+def test_linux_native_member_joins_but_is_refused_with_the_named_reason(swarm) -> None:
+    """The A13 Linux product class is admitted to membership, never to activation."""
+
+    coordinator, ids = swarm
+    assert coordinator.member(ids["linux_native_iroh"])["activation_eligible"] is False
+    with pytest.raises(SeedCoordinatorError) as refused:
+        _offer(coordinator, ids["linux_native_iroh"], [], "linux-native")
+    assert (
+        refused.value.code
+        == "seed_member_activation_ineligible:linux_native_member_runtime_unbound"
+    )
+    with pytest.raises(SeedCoordinatorError) as refused_peer:
+        _offer(coordinator, ids["mac_mlx_iroh"], [ids["linux_native_iroh"]], "mac-linux")
+    assert (
+        refused_peer.value.code
+        == "seed_peer_activation_ineligible:linux_native_member_runtime_unbound"
+    )
+
+
+def test_linux_numpy_member_still_receives_offers(swarm) -> None:
+    """Negative control: the Linux stage-runtime class keeps its activation path."""
+
+    coordinator, ids = swarm
+    assert coordinator.member(ids["linux_numpy_iroh"])["activation_eligible"] is True
+    offer = _offer(coordinator, ids["linux_numpy_iroh"], [ids["mac_mlx_iroh"]], "numpy")
+    assert offer["message"]["recipient_node_id"] == ids["linux_numpy_iroh"]
 
 
 def test_unnamed_ineligible_class_keeps_the_unchanged_code(swarm) -> None:

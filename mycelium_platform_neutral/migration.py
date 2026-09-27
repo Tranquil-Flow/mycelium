@@ -174,6 +174,16 @@ LEGACY_PEER_CLASS_DECOMPOSITION = {
         "runtimes": [],
         "declared_ineligible": True,
     },
+    # The A13 Linux product class declares no bound runtime yet, so none is
+    # guessed (in particular not ``linux_numpy_iroh``'s numpy runtime).
+    "linux_native_iroh": {
+        "identity_kind": "native_peer",
+        "platform_family": "linux",
+        "architecture": "unknown",
+        "transports": ["iroh"],
+        "runtimes": [],
+        "declared_ineligible": True,
+    },
 }
 
 CONTINUITY_STATES = frozenset({"preserved", "fresh_reenrollment_required", "rejected"})
