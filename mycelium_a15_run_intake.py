@@ -36,6 +36,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from mycelium_replica_contracts import (
+    BENCHMARK_ACCEPTANCE_V2_PROTOCOL,
+    REPLICA_BENCHMARK_V2_PROTOCOL,
+    validate_replica_benchmark_v2,
+)
+
 PROTOCOL = "mycelium.a15_run_intake.v1"
 REPORT_PROTOCOL = "mycelium.a15_run_intake_report.v1"
 
@@ -70,6 +76,7 @@ ALLOWED_ARTIFACT_PROTOCOLS = frozenset(
         "mycelium.a5_product_positive_observation.v1",
         "mycelium.a5_product_browser_observation.v1",
         "mycelium.a5_benchmark_evidence.v1",
+        "mycelium.a5_benchmark_evidence.v2",
         "mycelium.a5_concurrent_cancellation_repeat.v1",
         "mycelium.a5_negative_illegal_observation.v1",
         "mycelium.a5_replica_loss_negative_observation.v1",
@@ -78,6 +85,17 @@ ALLOWED_ARTIFACT_PROTOCOLS = frozenset(
         "mycelium.executed_result_graph.v1",
         "mycelium.executed_release_decision.v1",
     }
+)
+
+# The A5 benchmark evidence envelope v2 is admitted only as the envelope of the
+# pre-registered calibrated-load protocol v2 (owner rulings of 2026-09-27): its
+# bytes must bind exactly this protocol digest at every level and carry a valid
+# mycelium.replica_benchmark.v2 record. v1 stays admitted for historical r33
+# evidence, unchanged. A tests/ pin keeps this digest equal to the registered
+# tests/a5_acceptance/benchmark_protocol.v2.json.
+A5_BENCHMARK_EVIDENCE_V2_PROTOCOL = "mycelium.a5_benchmark_evidence.v2"
+A5_BENCHMARK_PROTOCOL_V2_DIGEST = (
+    "sha256:d7863cdf7f7072cf6b7e8fc243fbe775b8a90b64fbf9a31b49650f93818740e8"
 )
 
 ALLOWED_PROVENANCE = frozenset({"source", "live", "replay", "fixture", "historical"})
@@ -206,6 +224,7 @@ F_DIGEST_UNDECLARED = "artifact_digest_undeclared"
 F_PROTO_ABSENT = "artifact_protocol_undeclared"
 F_PROTO_UNKNOWN = "artifact_protocol_not_allowlisted"
 F_PROTO_MISMATCH = "artifact_protocol_mismatch"
+F_A5_V2_UNBOUND = "a5_benchmark_evidence_v2_not_bound_to_registered_protocol"
 F_PROVENANCE_INVALID = "provenance_class_invalid"
 F_PROVENANCE_SUBSTITUTION = "provenance_substitution"
 F_COMMIT_INVALID = "source_commit_invalid"
@@ -512,6 +531,7 @@ def _intake_artifact(
         findings.add(F_DIGEST_MISMATCH)
         entry["finding"] = F_DIGEST_MISMATCH
 
+    payload: Any = None
     if resolved.suffix == ".json":
         try:
             payload = _load_json(resolved)
@@ -519,6 +539,7 @@ def _intake_artifact(
                 observed = payload.get("protocol")
                 entry["observed_protocol"] = observed if isinstance(observed, str) else None
         except (OSError, ValueError):
+            payload = None
             entry["observed_protocol"] = None
 
     declared_protocol = artifact["protocol"]
@@ -528,6 +549,12 @@ def _intake_artifact(
         findings.add(F_PROTO_UNKNOWN)
     elif entry["observed_protocol"] is not None and entry["observed_protocol"] != declared_protocol:
         findings.add(F_PROTO_MISMATCH)
+    if (
+        declared_protocol == A5_BENCHMARK_EVIDENCE_V2_PROTOCOL
+        or entry["observed_protocol"] == A5_BENCHMARK_EVIDENCE_V2_PROTOCOL
+    ) and not _a5_benchmark_evidence_v2_bound(payload):
+        findings.add(F_A5_V2_UNBOUND)
+        entry["finding"] = F_A5_V2_UNBOUND
 
     if artifact["provenance"] not in ALLOWED_PROVENANCE:
         findings.add(F_PROVENANCE_INVALID)
@@ -551,6 +578,39 @@ def _intake_artifact(
         and entry["observed_digest"] is not None
     )
     return entry
+
+
+def _a5_benchmark_evidence_v2_bound(payload: Any) -> bool:
+    """The v2 envelope binds the registered v2 protocol at every level.
+
+    The envelope, its run fixture and its replica_benchmark.v2 record must each
+    name the pre-registered protocol digest, and the record must pass the v2
+    contract validator. Anything else (unreadable bytes, another digest, a
+    missing or invalid record) is not admitted as v2 benchmark evidence.
+    """
+
+    if not isinstance(payload, Mapping):
+        return False
+    run_fixture = payload.get("run_fixture")
+    record = payload.get("replica_benchmark")
+    if (
+        payload.get("protocol") != A5_BENCHMARK_EVIDENCE_V2_PROTOCOL
+        or payload.get("benchmark_protocol") != BENCHMARK_ACCEPTANCE_V2_PROTOCOL
+        or payload.get("benchmark_protocol_digest") != A5_BENCHMARK_PROTOCOL_V2_DIGEST
+        or payload.get("qualification_claim") is not False
+        or payload.get("promotion_authorized") is not False
+        or not isinstance(run_fixture, Mapping)
+        or run_fixture.get("benchmark_protocol_digest") != A5_BENCHMARK_PROTOCOL_V2_DIGEST
+        or not isinstance(record, Mapping)
+        or record.get("protocol") != REPLICA_BENCHMARK_V2_PROTOCOL
+        or record.get("benchmark_protocol_digest") != A5_BENCHMARK_PROTOCOL_V2_DIGEST
+    ):
+        return False
+    try:
+        validate_replica_benchmark_v2(record)
+    except (ValueError, TypeError):
+        return False
+    return True
 
 
 def _apply_expiry(
@@ -988,6 +1048,8 @@ def findings_of(report: Mapping[str, Any]) -> list[str]:
 
 
 __all__ = [
+    "A5_BENCHMARK_EVIDENCE_V2_PROTOCOL",
+    "A5_BENCHMARK_PROTOCOL_V2_DIGEST",
     "ALLOWED_ARTIFACT_PROTOCOLS",
     "ALLOWED_PROVENANCE",
     "CLAIM_BOUNDARY",
