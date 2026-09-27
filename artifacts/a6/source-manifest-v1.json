@@ -7,6 +7,581 @@
       "size_bytes": 1895
     },
     {
+      "path": "apps/node-app/.npmrc",
+      "sha256": "sha256:a093bb2fed59d699b7f9a62a5203cc196054c624e9c39c6d908c9e7db5dd2464",
+      "size_bytes": 22
+    },
+    {
+      "path": "apps/node-app/index.html",
+      "sha256": "sha256:bf425d2bb5a2bdb4615a923e681b352f77ed14b407e74e530fe2f8363ebd7c53",
+      "size_bytes": 320
+    },
+    {
+      "path": "apps/node-app/package-lock.json",
+      "sha256": "sha256:af5777bf0db5a3848cbdde82a9fbf1e30bcaaff1921049f71fb3afea3902a3b8",
+      "size_bytes": 92190
+    },
+    {
+      "path": "apps/node-app/package.json",
+      "sha256": "sha256:6bde288cf9cb0442f227568b8597bc3a5f733d4216864f9ead2bc8be19664672",
+      "size_bytes": 1065
+    },
+    {
+      "path": "apps/node-app/scripts/sign-release.sh",
+      "sha256": "sha256:fd50f03e1c9fec866815b66e32a4babee18662e47ca126de7e5b10d4d15d6bbc",
+      "size_bytes": 1753
+    },
+    {
+      "path": "apps/node-app/src-tauri/.gitignore",
+      "sha256": "sha256:646a917f23a3d76736252fac394b218e99c3f2d7f5c4dad9e334563452574cde",
+      "size_bytes": 86
+    },
+    {
+      "path": "apps/node-app/src-tauri/Cargo.lock",
+      "sha256": "sha256:45184bf84a3baac1df595950abb938211de313fd4ddb2276f27f7304b1eef87b",
+      "size_bytes": 165700
+    },
+    {
+      "path": "apps/node-app/src-tauri/Cargo.toml",
+      "sha256": "sha256:cacd702d12264d65be32ad3497fda4e304e6f120ae3617d305d3e03cd7141382",
+      "size_bytes": 1065
+    },
+    {
+      "path": "apps/node-app/src-tauri/build.rs",
+      "sha256": "sha256:487059eaf8a947b80f20a9aacac038a5047b2ad69d2401b827376c67d6fe847f",
+      "size_bytes": 39
+    },
+    {
+      "path": "apps/node-app/src-tauri/capabilities/default.json",
+      "sha256": "sha256:da1f2acc66ffd3d09b36ff2dc9c76b1a4b6892c3f839b26fd1bc200c0f341001",
+      "size_bytes": 232
+    },
+    {
+      "path": "apps/node-app/src-tauri/capabilities/mobile.json",
+      "sha256": "sha256:ea39645e07476d97335c750e45c08230464ef00e4c2ab8ab1c1327305b3e0442",
+      "size_bytes": 171
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/.editorconfig",
+      "sha256": "sha256:d22b394a5a140050065207d160273570edb04200480160e0951df3291dd7848f",
+      "size_bytes": 230
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/.gitignore",
+      "sha256": "sha256:2d8a4dfb08ea1403e6eab97bc216158328c01ace4027f0dd3b65b2a088994270",
+      "size_bytes": 290
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/.gitignore",
+      "sha256": "sha256:174bfc72691cfd2146e10c4dc930940ae29af4f9c79b7f3f7d1fe87b32689491",
+      "size_bytes": 143
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/build.gradle.kts",
+      "sha256": "sha256:50bdc28dd999ac5f524a4b0ac4e08d59bbbcfe60973fc017c251b89372527529",
+      "size_bytes": 2493
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/proguard-rules.pro",
+      "sha256": "sha256:56fd960cf225f6ca40f982b13a5dbb0d8bc3dfde13ff76422825c6070d0a1890",
+      "size_bytes": 750
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/AndroidManifest.xml",
+      "sha256": "sha256:e7b7133140669b9856eda619e2fc46dc708c0430d1fba1fd27ba4e918022e62c",
+      "size_bytes": 3246
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/java/now/mycelium/node/MainActivity.kt",
+      "sha256": "sha256:079fea058db168be064eec60b0756a2c1c4046193f9bffdd96c4bb91e7a27835",
+      "size_bytes": 257
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/java/now/mycelium/node/NodeForegroundService.kt",
+      "sha256": "sha256:59961392dd5907400f829794ce81be1844191ac8490dfc7a743461b1fa577a9a",
+      "size_bytes": 3817
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/java/now/mycelium/node/NodeServicePlugin.kt",
+      "sha256": "sha256:6bd12efaff87c6b725a0706c180ae31f1f8511f2492cdd7f0456eeadc0a7742f",
+      "size_bytes": 1841
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml",
+      "sha256": "sha256:01d1a6a6c1234eb7fe270d097eb283d72b9c95ae5118886f1b6573aad280f1f7",
+      "size_bytes": 1702
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/drawable/ic_launcher_background.xml",
+      "sha256": "sha256:ed423c73a6f40a4d2909f0901e60527b3a807cd59e1b5593bcaae1808b1c6321",
+      "size_bytes": 5606
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/layout/activity_main.xml",
+      "sha256": "sha256:68466a0a3006f183eb3af4e978d52f50a68087a1aac0880bd16eef3760153bcb",
+      "size_bytes": 780
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/mipmap-hdpi/ic_launcher.png",
+      "sha256": "sha256:320e552422179b81dae014ee6cc00561bd6e7455767b28f5518b8862a8c7987c",
+      "size_bytes": 3524
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png",
+      "sha256": "sha256:7a9ae0632bfe5b28a1e6e9a7b38982fef62be07c95de46c26bd4f901ac6b9753",
+      "size_bytes": 14102
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png",
+      "sha256": "sha256:320e552422179b81dae014ee6cc00561bd6e7455767b28f5518b8862a8c7987c",
+      "size_bytes": 3524
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/mipmap-mdpi/ic_launcher.png",
+      "sha256": "sha256:75322a261ba38a23a25647af0d1298f204f3b3fafd317b8122a1b9a1f38284ff",
+      "size_bytes": 3377
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png",
+      "sha256": "sha256:2425d59d27578f75ca97d31d9ae8385898badce3d6a1774bfc2f0fd191dc12c7",
+      "size_bytes": 9081
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png",
+      "sha256": "sha256:75322a261ba38a23a25647af0d1298f204f3b3fafd317b8122a1b9a1f38284ff",
+      "size_bytes": 3377
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/mipmap-xhdpi/ic_launcher.png",
+      "sha256": "sha256:44e5c3dc1dfb392f65e3dbcc9b986d30f10dd95b57e306657e56281b572fa684",
+      "size_bytes": 7971
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png",
+      "sha256": "sha256:b1d19b8b78d0ed6903dd35b7640afba29b4cf02f3780e0d1cd46d9ebcbc93695",
+      "size_bytes": 18900
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png",
+      "sha256": "sha256:44e5c3dc1dfb392f65e3dbcc9b986d30f10dd95b57e306657e56281b572fa684",
+      "size_bytes": 7971
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png",
+      "sha256": "sha256:0b250fc4451dfd1e5a41128234d93225726a2984448b0b966af25677b167d8de",
+      "size_bytes": 12392
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png",
+      "sha256": "sha256:ab9397c9827aef4b3a1f1f917fc722d54abcf26488880c8bf9c724d1e59ab905",
+      "size_bytes": 29506
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png",
+      "sha256": "sha256:0b250fc4451dfd1e5a41128234d93225726a2984448b0b966af25677b167d8de",
+      "size_bytes": 12392
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+      "sha256": "sha256:dae1ff05b101efea50e4b622fe6a3af8ba8f761162fa7c4fd864adc7cb39eeac",
+      "size_bytes": 16751
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png",
+      "sha256": "sha256:27cf0cdbc78bec8b9a14eaedb084c541a3c191fe5db89766e831fbfd21ce955d",
+      "size_bytes": 40510
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png",
+      "sha256": "sha256:dae1ff05b101efea50e4b622fe6a3af8ba8f761162fa7c4fd864adc7cb39eeac",
+      "size_bytes": 16751
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/values-night/themes.xml",
+      "sha256": "sha256:20b403e718eaef719f767ba323bb78f5eb2d017bc119302bb0534c79069f7f79",
+      "size_bytes": 255
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/values/colors.xml",
+      "sha256": "sha256:b5626527d503417f0d8e5b1e08f338de7b31173bf0e122815f03e64932adbd88",
+      "size_bytes": 378
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/values/strings.xml",
+      "sha256": "sha256:4ab58c946e1ca0b63100bb9a437dcaa3646a48a9113b3cf434696500f793405d",
+      "size_bytes": 141
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/values/themes.xml",
+      "sha256": "sha256:20b403e718eaef719f767ba323bb78f5eb2d017bc119302bb0534c79069f7f79",
+      "size_bytes": 255
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/xml/file_paths.xml",
+      "sha256": "sha256:cdb4effab9f579e06f0f49d5fde4b3909fc5f03e978c9ba9ce34cf5b9f4b6902",
+      "size_bytes": 210
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/build.gradle.kts",
+      "sha256": "sha256:4e3485f074acc6d6287c2209babcbfef55a387aa697571b9159f03d0fba04334",
+      "size_bytes": 376
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/buildSrc/build.gradle.kts",
+      "sha256": "sha256:9b22e776e4a09b933785f130924d65ae24d80e57ec2da494737fe779761e5aeb",
+      "size_bytes": 344
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/buildSrc/src/main/java/now/mycelium/node/kotlin/BuildTask.kt",
+      "sha256": "sha256:a1cf46b967aadf941f6673162743190c411eff0c6aeac7c975f2c46ab0a8686d",
+      "size_bytes": 2381
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/buildSrc/src/main/java/now/mycelium/node/kotlin/RustPlugin.kt",
+      "sha256": "sha256:ba97577f2cf2b123eddd332662844d2b93a2ee589be65f3843bc7de4ea5b7ba7",
+      "size_bytes": 3388
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/gradle.properties",
+      "sha256": "sha256:02a22057efb36491da460e4ecee89db4961b14c2aa48db9a33108748418a480d",
+      "size_bytes": 1241
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.jar",
+      "sha256": "sha256:497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7",
+      "size_bytes": 48462
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties",
+      "sha256": "sha256:b347084df5a6747528d85c39c1ec723ac38110c91a4a6a950e4483509f209945",
+      "size_bytes": 232
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/gradlew",
+      "sha256": "sha256:a5a5c199ba02189ae8c46a334223371a20599d9c298ef65e7540ede4a3f72d59",
+      "size_bytes": 8656
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/gradlew.bat",
+      "sha256": "sha256:59328c7a17f673b1a63040bfb380a0c749e5d6df3406f7f18641060314cd9aa1",
+      "size_bytes": 2766
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/android/settings.gradle",
+      "sha256": "sha256:99856053f245337d20d308dbeaf9cd7250ad0c186ebbb6866ab46a6e7005ee19",
+      "size_bytes": 52
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/.gitignore",
+      "sha256": "sha256:1a4731b1f60d322a12847831d5c34ba36b00a54f1b0b8df9d7137e10550b085f",
+      "size_bytes": 30
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-20x20@1x.png",
+      "sha256": "sha256:6f69e2a2abbb31ef7747c689dea8846c3c7bc3d8376820c82d602130296e7f0d",
+      "size_bytes": 1036
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-20x20@2x-1.png",
+      "sha256": "sha256:b3bd925890f7576fed830544e9f78549bc6008f68bdb42c5c2ee885c5d3590ba",
+      "size_bytes": 2216
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-20x20@2x.png",
+      "sha256": "sha256:b3bd925890f7576fed830544e9f78549bc6008f68bdb42c5c2ee885c5d3590ba",
+      "size_bytes": 2216
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-20x20@3x.png",
+      "sha256": "sha256:da9a76eee16ce88b848bfeb25048831d23d2b301067d16a9d9dc3672a53b4b90",
+      "size_bytes": 3512
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-29x29@1x.png",
+      "sha256": "sha256:0a624f08d05e65fe7af794f87648ab9d5bc29e943859690ce590e51b6aff59e5",
+      "size_bytes": 1568
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-29x29@2x-1.png",
+      "sha256": "sha256:ae99de26704f7e00dc0c99d679d41d3478f911c009f3fe54e95c0fbbe53945f3",
+      "size_bytes": 3394
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-29x29@2x.png",
+      "sha256": "sha256:ae99de26704f7e00dc0c99d679d41d3478f911c009f3fe54e95c0fbbe53945f3",
+      "size_bytes": 3394
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-29x29@3x.png",
+      "sha256": "sha256:5a383a6c895c30a97194793bcb4b56cf5c4b8be3f8c6d0df30ee2e6aa8ad318f",
+      "size_bytes": 5228
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-40x40@1x.png",
+      "sha256": "sha256:b3bd925890f7576fed830544e9f78549bc6008f68bdb42c5c2ee885c5d3590ba",
+      "size_bytes": 2216
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-40x40@2x-1.png",
+      "sha256": "sha256:fb7f2504609276695c0935d3a341e55332d7a41a81865cb43e7644d8645621e3",
+      "size_bytes": 4794
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-40x40@2x.png",
+      "sha256": "sha256:fb7f2504609276695c0935d3a341e55332d7a41a81865cb43e7644d8645621e3",
+      "size_bytes": 4794
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-40x40@3x.png",
+      "sha256": "sha256:74af92c6437a607d4145b3350427e0718bc2990eecf43496fe783b9e4630a969",
+      "size_bytes": 7288
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png",
+      "sha256": "sha256:00badc78c2ecb7460bbe02aeeca1e8848724ee133391bb3025df561007187eaf",
+      "size_bytes": 121323
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-60x60@2x.png",
+      "sha256": "sha256:74af92c6437a607d4145b3350427e0718bc2990eecf43496fe783b9e4630a969",
+      "size_bytes": 7288
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-60x60@3x.png",
+      "sha256": "sha256:41cae5ed106f23641a7c1a0727104579b1d79701155a4500d9d0083bc771064a",
+      "size_bytes": 11091
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-76x76@1x.png",
+      "sha256": "sha256:307bf14ce2591bf666c35d1d5a69a78ca06abf3d4094594c68fd9cbb4f7f52ca",
+      "size_bytes": 4515
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-76x76@2x.png",
+      "sha256": "sha256:f57261cf6b864619b1fb007d93f9fdbb43d31cddd5a452826ff2aa194f823037",
+      "size_bytes": 9257
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/AppIcon-83.5x83.5@2x.png",
+      "sha256": "sha256:c1f76a0113c3196a5a11d1923d6be353d6521b228e82456504de1d3da25c301b",
+      "size_bytes": 10219
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset/Contents.json",
+      "sha256": "sha256:74b5f59cb4e1093a02b9b71eece40e91f3d34ac82ca7d19a95c9cf581e323571",
+      "size_bytes": 2372
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Assets.xcassets/Contents.json",
+      "sha256": "sha256:972ec1fd42325872438eb085ac29e94f51c10788ec18ec5549439950866c541d",
+      "size_bytes": 62
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/ExportOptions.plist",
+      "sha256": "sha256:f4b26407cbe7c3659a9e893910fbea2c0b654fb681e0af83fce9a50877ad88ac",
+      "size_bytes": 241
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/LaunchScreen.storyboard",
+      "sha256": "sha256:e2bbf975eda3a747e21502a0322266117ae7dca72b9a8af483ba49c5f33f5fd9",
+      "size_bytes": 1845
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Podfile",
+      "sha256": "sha256:92a0878b1cfa68d75cafe86cec7192cbe4e028f1fa9da60e9dcda8bf87a99796",
+      "size_bytes": 621
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Sources/mycelium-node-app/bindings/bindings.h",
+      "sha256": "sha256:404073e314d3bb5e320e0f712e6d057c8432c9a12ffcc528cda2a734ee8fe7ac",
+      "size_bytes": 82
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/Sources/mycelium-node-app/main.mm",
+      "sha256": "sha256:f68a6372ef25f1ed1c1b2dfaa6f969904e235eb81a6d0afddf6501ca18066d19",
+      "size_bytes": 100
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/mycelium-node-app.xcodeproj/project.pbxproj",
+      "sha256": "sha256:036a48b86e858d22d041da9b75b9faae2a816c9152e5c8bfa53d840d3593fae7",
+      "size_bytes": 21392
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/mycelium-node-app.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+      "sha256": "sha256:7f3b00b5c3fdb45242d7b87e1e5c4e25d1fa8129a16c94295ecc4e8ea2235c5f",
+      "size_bytes": 135
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/mycelium-node-app.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings",
+      "sha256": "sha256:041a807cc7b18ebb8e74da4ef61bf2ff3a958bc75b63777e4b83f5b48a34c94c",
+      "size_bytes": 304
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/mycelium-node-app.xcodeproj/xcshareddata/xcschemes/mycelium-node-app_iOS.xcscheme",
+      "sha256": "sha256:b629ecc9b6fa53e2c505c956211e6aeabfb538bc8140f39a9e9e3e4675b26627",
+      "size_bytes": 4703
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/mycelium-node-app_iOS/Info.plist",
+      "sha256": "sha256:d67ff3705dd0cf0c94a95261085dff372b2bc23cf67e495bccd64f77488f0f86",
+      "size_bytes": 1744
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/mycelium-node-app_iOS/mycelium-node-app_iOS.entitlements",
+      "sha256": "sha256:97704a8960b4facceef54397a08fb5d0a456247c3627359215aa2a27df22656c",
+      "size_bytes": 181
+    },
+    {
+      "path": "apps/node-app/src-tauri/gen/apple/project.yml",
+      "sha256": "sha256:44dbb07eeda7769b1dee165708b47645a4bc45304945822d1460b55f32e5b3a4",
+      "size_bytes": 3772
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/128x128.png",
+      "sha256": "sha256:eeebf55d8ffe07348786b9057af253e3ca08c56b6a8f8893826381430e3c0b7b",
+      "size_bytes": 11059
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/128x128@2x.png",
+      "sha256": "sha256:2998b41d0c9278b08e8b3874e094920034fe983a46053c9d62764225f58ab7b0",
+      "size_bytes": 23137
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/32x32.png",
+      "sha256": "sha256:aaa96d0c53b756b77c7f46aeb72290f42256c786c69be68f6bcdeb9c7492a48e",
+      "size_bytes": 2225
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/Square107x107Logo.png",
+      "sha256": "sha256:33446a858d982a529554e562114673f8b15620588137cf0bf6c56a7441c78cd7",
+      "size_bytes": 9202
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/Square142x142Logo.png",
+      "sha256": "sha256:633d6dba504faa844b309e01272386e4523cddd4a3639c77c0eb5d2ce3eac752",
+      "size_bytes": 12530
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/Square150x150Logo.png",
+      "sha256": "sha256:d90061ad71e6f5882b759d80cf58cc16aa5021fa29ba4b2614adea982a4d7ee5",
+      "size_bytes": 13032
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/Square284x284Logo.png",
+      "sha256": "sha256:5feaa4f18f404843551756dd2791d7654ef471b6b007767ae40f60c7aebcad5b",
+      "size_bytes": 25943
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/Square30x30Logo.png",
+      "sha256": "sha256:68bc1b585f5685e0922f14b1ca7eb2d618213c684c89e759c6a5eb8578c3fe8d",
+      "size_bytes": 2078
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/Square310x310Logo.png",
+      "sha256": "sha256:5df8d779ab57c63ee06ed237b94c3c0954711e88117dccfa72b2aec5d83b0d80",
+      "size_bytes": 28507
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/Square44x44Logo.png",
+      "sha256": "sha256:c46208286b1ea1b4841b714972f3cb0a8abc6d3bfa71a29238f7b4d62f511f89",
+      "size_bytes": 3419
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/Square71x71Logo.png",
+      "sha256": "sha256:cb0ea93cbd13509d32c6bc06da71687e73d673d166fde91b23061771abe16b86",
+      "size_bytes": 6027
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/Square89x89Logo.png",
+      "sha256": "sha256:2208da1d741a20e902a59d7c39a5e58af74ec823db13113bf8ac6f555fa25bca",
+      "size_bytes": 7551
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/StoreLogo.png",
+      "sha256": "sha256:9f84d0ce09df51bac0a4855042b3e49b190cc2b9761cd5eab61ebec5cd343820",
+      "size_bytes": 3971
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/icon.icns",
+      "sha256": "sha256:1535d355994f8ee82da91384d2a29e04d5b4440f3e6051b5c8b06e7a62283693",
+      "size_bytes": 277003
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/icon.ico",
+      "sha256": "sha256:e38ca88e1d5490f3dcbc3c3fa525f7fcb7b80fff3cb2f3a4eb1b2d018c0915c1",
+      "size_bytes": 37710
+    },
+    {
+      "path": "apps/node-app/src-tauri/icons/icon.png",
+      "sha256": "sha256:6413bfe9d546e5225fc9256a0ecec48df3a1272ea4bdc91c15b8e000222a95d3",
+      "size_bytes": 49979
+    },
+    {
+      "path": "apps/node-app/src-tauri/src/lib.rs",
+      "sha256": "sha256:5a47131cb63cc7d3da0b268d7add877a66fc614ad4ea25bab2a646d2afe5dd1d",
+      "size_bytes": 7437
+    },
+    {
+      "path": "apps/node-app/src-tauri/src/main.rs",
+      "sha256": "sha256:c3b56f7b762e758f74cbcd58be4f68b258e74e165e76d730249186fbfe630e29",
+      "size_bytes": 193
+    },
+    {
+      "path": "apps/node-app/src-tauri/src/node_service.rs",
+      "sha256": "sha256:df447e63ff12f3d8385991dc1b36bd4ab0f6ef11ebcf69de5e05545296a19ea6",
+      "size_bytes": 3673
+    },
+    {
+      "path": "apps/node-app/src-tauri/tauri.conf.json",
+      "sha256": "sha256:1d6d233ecef1eb07cdc315942c431e624c5083bb56729e0266386cc8075277dd",
+      "size_bytes": 1178
+    },
+    {
+      "path": "apps/node-app/src/App.test.tsx",
+      "sha256": "sha256:5d1cccf5996c18bc883ad8cc6dc6b46e35e0cac716f6e9ae807ebeed91cdef52",
+      "size_bytes": 5055
+    },
+    {
+      "path": "apps/node-app/src/App.tsx",
+      "sha256": "sha256:372ed8cd92314c7324ad154b02ada88c19f3b25ef032c83fe68d4c811ac2d9a6",
+      "size_bytes": 7359
+    },
+    {
+      "path": "apps/node-app/src/api.ts",
+      "sha256": "sha256:9aaf6def00c76b89a6c5047a8d732d024c806f8bb182a048ee252de7acecf702",
+      "size_bytes": 2429
+    },
+    {
+      "path": "apps/node-app/src/main.tsx",
+      "sha256": "sha256:f6406e11478ea3e58ba521df287d48f47bc2479ee126354cfba677d38ad29882",
+      "size_bytes": 236
+    },
+    {
+      "path": "apps/node-app/src/setupTests.ts",
+      "sha256": "sha256:91a3c8962a0edcb956206a501d943fe99e1c78c6d4d8b5c9a948a3362c75978c",
+      "size_bytes": 43
+    },
+    {
+      "path": "apps/node-app/src/styles.css",
+      "sha256": "sha256:036b8d2232efde48793be6ca54a84a16e91ccafecf7c8732ea72b7e083b78698",
+      "size_bytes": 1810
+    },
+    {
+      "path": "apps/node-app/src/vite-env.d.ts",
+      "sha256": "sha256:65996936fbb042915f7b74a200fcdde7e410f32a669b1ab9597cfaa4b0faddb5",
+      "size_bytes": 38
+    },
+    {
+      "path": "apps/node-app/tsconfig.json",
+      "sha256": "sha256:89cd68ef1103cfc801fd8be1fa268fb41a2205efb8b12c36c0d15577058d8a39",
+      "size_bytes": 497
+    },
+    {
+      "path": "apps/node-app/vite.config.ts",
+      "sha256": "sha256:d4597e0b6442f19e7a716d4c3cd094b17f857470a3ae6015c7818c0481f3ded5",
+      "size_bytes": 639
+    },
+    {
       "path": "artifacts/a5-replica-pair-probe/README.md",
       "sha256": "sha256:2c08ddb884da88792f5c9c5e3f143e2b85c366a059fbb74f39f6a2333e588ae7",
       "size_bytes": 2944
@@ -77,9 +652,14 @@
       "size_bytes": 1006
     },
     {
+      "path": "contracts/compatibility-fixtures/replica-benchmark-v2.json",
+      "sha256": "sha256:502bd9b19873dbb9dec842b489814aa7c18e780f7dd8884b1581a726feee9bef",
+      "size_bytes": 2779
+    },
+    {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:d57b1855928d0722e125b0eb9467065343505890a3cbd2e17377113abf1723b4",
-      "size_bytes": 71053
+      "sha256": "sha256:7bedf8b7f667354c18a2077eddcc1ab065ec1dff3ce31422e07ef7472c0eda38",
+      "size_bytes": 71558
     },
     {
       "path": "contracts/governance-boundary-protocols.v1.json",
@@ -127,6 +707,11 @@
       "size_bytes": 5418
     },
     {
+      "path": "docs/superpowers/notes/2026-08-20-mycelium-a5-replica-contract-shapes.md",
+      "sha256": "sha256:988bd001af9cd983ecd120a54189bd3379c21f9ff9b351beb8a09c0d774dc71e",
+      "size_bytes": 13357
+    },
+    {
       "path": "docs/superpowers/specs/2026-08-18-mycelium-a12-generic-mobile-activation.md",
       "sha256": "sha256:d1c8fbbe2852966522528f55c7e73e6a8054d96f69ef8aab00827cffe2c81197",
       "size_bytes": 26215
@@ -145,6 +730,11 @@
       "path": "docs/superpowers/specs/2026-09-25-mycelium-a6-cleanup-authority-v2.md",
       "sha256": "sha256:2a2fbb540d1e1639f7409eb769a94362004c07707ceffcdacb09874c7ea3a3d8",
       "size_bytes": 2531
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-27-mycelium-node-app-architecture.md",
+      "sha256": "sha256:6f060323ad7c3cbc6007ade5e746533a573b93eb9abae237405fce1503ccaec5",
+      "size_bytes": 17092
     },
     {
       "path": "evidence/BUILD.md",
@@ -188,8 +778,8 @@
     },
     {
       "path": "mycelium_a13_linux/onboarding.py",
-      "sha256": "sha256:3c7d82785ff8c8e5f90ea8b2ad402f72710a07770c56426b8a74d5cf56932124",
-      "size_bytes": 23944
+      "sha256": "sha256:d587ee3e9f40bbc7053d54091533df1b4ce8a2ebc6b5d798bfa2caa5fbca94d8",
+      "size_bytes": 24128
     },
     {
       "path": "mycelium_a13_linux/package_manifest.py",
@@ -228,8 +818,8 @@
     },
     {
       "path": "mycelium_a13_macos/pairing.py",
-      "sha256": "sha256:327c6a651d6e898591854675c62466b08e276a06130ba85f81d6d45d4adbf343",
-      "size_bytes": 16377
+      "sha256": "sha256:c85787f7481b2ff6c38e2df0a74b343de539505c54d3aa67c79e659e4580bf09",
+      "size_bytes": 16419
     },
     {
       "path": "mycelium_a13_macos/worker.py",
@@ -273,8 +863,8 @@
     },
     {
       "path": "mycelium_a15_run_intake.py",
-      "sha256": "sha256:57012dd21202ca904734b6801845e2cec7049ed08ca0b2f29482130013935d73",
-      "size_bytes": 39074
+      "sha256": "sha256:2ee424c5996958d6dfaf0e13fdfc597596a54b1403892ab4f5e18379b78ce0c5",
+      "size_bytes": 41855
     },
     {
       "path": "mycelium_a6_browser_lifecycle.py",
@@ -468,8 +1058,8 @@
     },
     {
       "path": "mycelium_membership/contracts.py",
-      "sha256": "sha256:6b0a90e956d5a2d2712a463cfd07888bc2690dd4596531837739d9ea4731d0b6",
-      "size_bytes": 29744
+      "sha256": "sha256:4d90b172c247f416ac438757941b9cb88547c88698119817f054e69739706abf",
+      "size_bytes": 30356
     },
     {
       "path": "mycelium_mobile/a12_activation.py",
@@ -583,8 +1173,8 @@
     },
     {
       "path": "mycelium_platform_neutral/migration.py",
-      "sha256": "sha256:e6f4d21961c23960e8bc468c135fc2701a482fedce886c393c3556c5d0a6526b",
-      "size_bytes": 22444
+      "sha256": "sha256:cf0de8ec38a06689235c8f26367d1747b37fd53e0f56af020d0b774c07188c36",
+      "size_bytes": 22830
     },
     {
       "path": "mycelium_platform_neutral/migration_executor.py",
@@ -645,6 +1235,11 @@
       "path": "mycelium_qualification/replica_track_backend.py",
       "sha256": "sha256:2f5f66b7231b754d81b391f4db717a73bb0e44d4b81c75f53c9da405438aacae",
       "size_bytes": 23517
+    },
+    {
+      "path": "mycelium_replica_contracts.py",
+      "sha256": "sha256:cec659b0a76a328e8a24f8889e42dbf19b203cd5c9abe3cd6cb3230d003e7cf1",
+      "size_bytes": 40437
     },
     {
       "path": "mycelium_request_gateway/asgi.py",
@@ -812,6 +1407,126 @@
       "size_bytes": 31398
     },
     {
+      "path": "native/mobile_core/Cargo.lock",
+      "sha256": "sha256:39548b4ca01c9302312c3b1bce2a6fd7ef6de4d13e707a932603d1a1ff135f4c",
+      "size_bytes": 104682
+    },
+    {
+      "path": "native/mobile_core/Cargo.toml",
+      "sha256": "sha256:b5a9dd505b6ab47ca2017a2fc2982f0f8afb9c8d8c55519d3446e9058ff5a558",
+      "size_bytes": 1502
+    },
+    {
+      "path": "native/mobile_core/examples/node_cli.rs",
+      "sha256": "sha256:1727be4e2fc38f7ff6d8a617a390fd3e81efa3260160ce89320413d3a17a3d00",
+      "size_bytes": 1455
+    },
+    {
+      "path": "native/mobile_core/examples/route_peer.rs",
+      "sha256": "sha256:b980de82a9de70368837857e4e4c20cb5db21020d3142eddb15e98b25880282a",
+      "size_bytes": 3170
+    },
+    {
+      "path": "native/mobile_core/src/canonical.rs",
+      "sha256": "sha256:41a615316684ce68af79a5d9e56147fcc1605787d71fe8f6f52cc436164870bd",
+      "size_bytes": 6789
+    },
+    {
+      "path": "native/mobile_core/src/evidence.rs",
+      "sha256": "sha256:184ff11621cb63822b197be8dc63225b1a183e554b132177ac1405ca4e88792c",
+      "size_bytes": 7553
+    },
+    {
+      "path": "native/mobile_core/src/identity.rs",
+      "sha256": "sha256:a9f69b0949ece130c5875effc2b6cb03823692199e1f72fee8e714b928f7eff0",
+      "size_bytes": 6127
+    },
+    {
+      "path": "native/mobile_core/src/lib.rs",
+      "sha256": "sha256:e41fc21fe5cb134dd989af83133a1538dd0332abd4a47c92d8e1c2a402221464",
+      "size_bytes": 591
+    },
+    {
+      "path": "native/mobile_core/src/membership.rs",
+      "sha256": "sha256:b5822eca2507be086d2e7bdb2a10998eb6baad54c39189bd124a2da76c88e8af",
+      "size_bytes": 8709
+    },
+    {
+      "path": "native/mobile_core/src/node.rs",
+      "sha256": "sha256:c3c556199087e28db55a0934de8a3524de304e46e2accb8b0e328c4995461a58",
+      "size_bytes": 22660
+    },
+    {
+      "path": "native/mobile_core/src/onboarding.rs",
+      "sha256": "sha256:3cd6dc347702df9d60946b454edca7363b9a01261b8c94fe8518032b1b5124b7",
+      "size_bytes": 19032
+    },
+    {
+      "path": "native/mobile_core/src/runtime.rs",
+      "sha256": "sha256:c45c00f8a52fc7115b566c662e63737d6716ac1f4ae02eef5f239b9f299770ba",
+      "size_bytes": 15076
+    },
+    {
+      "path": "native/mobile_core/src/transport.rs",
+      "sha256": "sha256:23cc67b1c5d167517dee442b0847646d17d87532bc2c00bb7fd68572e3072e4a",
+      "size_bytes": 9010
+    },
+    {
+      "path": "native/mobile_core/src/wire.rs",
+      "sha256": "sha256:8f72ff68c3181ba3109f0292df719a377b55d26d5e2df493f38bd4037e6caa76",
+      "size_bytes": 10455
+    },
+    {
+      "path": "native/mobile_core/tests/fixtures/generate_fixtures.py",
+      "sha256": "sha256:dfd819dced1362651739aa256a01b517877183c7998babb115d971771a98fc11",
+      "size_bytes": 7759
+    },
+    {
+      "path": "native/mobile_core/tests/fixtures/gpt2_stage.json",
+      "sha256": "sha256:d91aa2cd0ad3b14f4d0dfd32c0d2f32464ab9e48e55dec7213d8579646d50361",
+      "size_bytes": 22347
+    },
+    {
+      "path": "native/mobile_core/tests/fixtures/join_envelope.json",
+      "sha256": "sha256:40557d1ea18dc88d2973e63188dfde7de7864b27d3c868ac3c40d687cf561e81",
+      "size_bytes": 1549
+    },
+    {
+      "path": "native/mobile_core/tests/fixtures/onboarding.json",
+      "sha256": "sha256:a973e4c792c37313b880ae3e17ff1d26e6b3c0be768527bb4f81bbf4ac7bd039",
+      "size_bytes": 6535
+    },
+    {
+      "path": "native/mobile_core/tests/fixtures/signature.json",
+      "sha256": "sha256:9b6a9cc9491674575457d3d26396fe2468cb7d71b95e3d347f2007b6d951b902",
+      "size_bytes": 1524
+    },
+    {
+      "path": "native/mobile_core/tests/node_core.rs",
+      "sha256": "sha256:cb1fcf5c77b03f1fc768e335f58bf0d00936c238a1c0f7d342d4301056bceab4",
+      "size_bytes": 1466
+    },
+    {
+      "path": "native/mobile_core/tests/python_interop.rs",
+      "sha256": "sha256:342fd73811c70b48d495dbf7d58912291773fe5b48d82d019bb9c42df5077e62",
+      "size_bytes": 8164
+    },
+    {
+      "path": "native/mobile_core/tests/stage_parity.rs",
+      "sha256": "sha256:31acc9610f67cf709307793337d31f673b8cc3f5d3b5ba6ac388c72de25c4062",
+      "size_bytes": 2481
+    },
+    {
+      "path": "native/mobile_core/tests/transport_local.rs",
+      "sha256": "sha256:3883da51c7329912fba6da4c50f05265ee158cc92b7e1cb32091b0a2beb09bfb",
+      "size_bytes": 1819
+    },
+    {
+      "path": "native/mobile_core/tests/wire_golden.rs",
+      "sha256": "sha256:b492626c4dd1f00d56a771e9312e21230b903f20249bf39c0b624f98da099f09",
+      "size_bytes": 3028
+    },
+    {
       "path": "physical_inference_qualification.py",
       "sha256": "sha256:fc3c561d559995cd716f4165c7697e3e581793eec7dddf6108700e365d190310",
       "size_bytes": 129943
@@ -868,8 +1583,8 @@
     },
     {
       "path": "scripts/contract_registry.py",
-      "sha256": "sha256:5aa88b3da484bead9765e6786db137f5ce6a8f05a48b2d927650c823b500b2ac",
-      "size_bytes": 21760
+      "sha256": "sha256:86c6f176e43a395397dfd33e8b550f98fdc6f07cb0775f9b980ba9774b63641f",
+      "size_bytes": 21907
     },
     {
       "path": "scripts/experimental_candidate_isolation.py",
@@ -913,8 +1628,8 @@
     },
     {
       "path": "scripts/run_a5_benchmark_gate.py",
-      "sha256": "sha256:559e33b6ff2568db68254a27ac28cb9f5da3d02e5bc23754185268b43d41ef9e",
-      "size_bytes": 49063
+      "sha256": "sha256:9fa82a0d01293434877222c578075e33b3cecc697aaeb827a074d9b09bde4c97",
+      "size_bytes": 54334
     },
     {
       "path": "scripts/run_a6_recovery_case.py",
@@ -1123,8 +1838,8 @@
     },
     {
       "path": "tests/a13_acceptance/test_a13_linux_onboarding_invitation.py",
-      "sha256": "sha256:847971a9df63062ca41d890fe2614a149470bbec155e807133798f484f076d3e",
-      "size_bytes": 14925
+      "sha256": "sha256:ca303411a381b817db0eff1c266519ab19e20f6a38bb332a645cfd39d320bae1",
+      "size_bytes": 17075
     },
     {
       "path": "tests/a13_acceptance/test_a13_linux_onboarding_progress.py",
@@ -1292,6 +2007,11 @@
       "size_bytes": 85
     },
     {
+      "path": "tests/a15_intake/test_a5_benchmark_evidence_v2_intake.py",
+      "sha256": "sha256:a2953ae007ff68bc6ff63bc430ecbc8bfea912ba8b424dd9134ca50b610a91bf",
+      "size_bytes": 5940
+    },
+    {
       "path": "tests/a15_intake/test_cli_exit_codes.py",
       "sha256": "sha256:cb9c552fb61ca63f5d2beee06e726470caee801c79eb1ae0ca8a2bbe7c6a66ce",
       "size_bytes": 6187
@@ -1312,14 +2032,29 @@
       "size_bytes": 34249
     },
     {
+      "path": "tests/a5_acceptance/test_benchmark_gate_evidence_v2.py",
+      "sha256": "sha256:74c3298a683dd0a3ab39102747638a933cbf720fbbc96021e46fb6473b22b3dc",
+      "size_bytes": 5270
+    },
+    {
       "path": "tests/a5_acceptance/test_materiality_protocol_v2.py",
-      "sha256": "sha256:736abf12ec01fa596a1ac515236a3810a43de6c16ed477d559407855f640cbc1",
-      "size_bytes": 36718
+      "sha256": "sha256:7e3f1f9b723418edeefef0842a5dd5d6281784a9ac583fbb673597008e2bbd57",
+      "size_bytes": 36771
     },
     {
       "path": "tests/a5_acceptance/test_product_benchmark_gate.py",
       "sha256": "sha256:237e53f35ca8cfcd66561bb04ac58d89c3343da0091c3e8228fdcf27f9b48451",
       "size_bytes": 24717
+    },
+    {
+      "path": "tests/a5_acceptance/test_replica_benchmark_v2_contract.py",
+      "sha256": "sha256:89546e94ed9e6c7136121cc7e7ce00a06400e9047354629e967967cea9f7c281",
+      "size_bytes": 12558
+    },
+    {
+      "path": "tests/a5_acceptance/test_replica_contracts.py",
+      "sha256": "sha256:e32c48553082d3dbe1dbc4667eca2a94667a9bf47a4a761d20b178e7ac34de20",
+      "size_bytes": 19980
     },
     {
       "path": "tests/a5_acceptance/test_replica_dispatch.py",
@@ -1418,8 +2153,8 @@
     },
     {
       "path": "tests/a9_acceptance/test_native_peer_class_decomposition.py",
-      "sha256": "sha256:7b129333996f448ea4378cd92addae2a950c38c7d4e31b97cdefabb4f8f2cccf",
-      "size_bytes": 2169
+      "sha256": "sha256:71045dc3c94116b37aa0a8389d1a0c3789bff330c377b3a7b1c619d924749a9d",
+      "size_bytes": 2792
     },
     {
       "path": "tests/a9_acceptance/test_platform_neutral_contracts.py",
@@ -1468,8 +2203,8 @@
     },
     {
       "path": "tests/contracts/test_contract_fixtures.py",
-      "sha256": "sha256:d64a744d53c1a05b05a91fd0817e8651e7762c96d9eba62f0ecd34b10705cced",
-      "size_bytes": 34533
+      "sha256": "sha256:8cb5258b44115d1e93a1b6a6ea055a7e78d7a2305406aa984b6cff4e02541146",
+      "size_bytes": 34599
     },
     {
       "path": "tests/demo/test_product_physical_composition.py",
@@ -1677,9 +2412,14 @@
       "size_bytes": 64462
     },
     {
+      "path": "tests/membership/test_linux_native_peer_class.py",
+      "sha256": "sha256:37a37e7f7ea03aaefa7d6bea53731a03bd7bf60e3e50d565df8a19305f9102cc",
+      "size_bytes": 4091
+    },
+    {
       "path": "tests/membership/test_native_peer_classes.py",
-      "sha256": "sha256:56ba67479b01343067877baf58cdb4e8c33c04c7e7e9ca7462064913f34dcdac",
-      "size_bytes": 5246
+      "sha256": "sha256:288f8436168c0f4ec658236ba17481aa27c4775dc501b8b75871870f4bd6f372",
+      "size_bytes": 5315
     },
     {
       "path": "tests/mobile/test_a12_android_adb_bridge.py",
@@ -1828,8 +2568,8 @@
     },
     {
       "path": "tests/seed_coordinator/test_native_peer_class_activation.py",
-      "sha256": "sha256:46f6014f674a1b255e84b5a6c598f482abbaa5414b412ac40354b8218bb9b801",
-      "size_bytes": 5943
+      "sha256": "sha256:bb4480cc05a7a52147e0a572a0d799349df7933914d4b7d105e40fad91ec095d",
+      "size_bytes": 7506
     },
     {
       "path": "tests/speculation/a11_seam_fixtures.py",
@@ -2188,5 +2928,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:c0282e8a1c75250135216227d1a8cd2a2f7fb7f04292c351bc843347ae28c97c"
+  "source_digest": "sha256:3890f4ccd659bc5b60d22b78f7180abb16d74bbefa3cf682d5db00c29f92e6ca"
 }
