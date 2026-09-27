@@ -19,6 +19,16 @@ fn main() {
         println!("{label} {}", serde_json::to_string(&core.status()).unwrap());
     };
     show("opened", &core);
+    if args[2] == "resume" {
+        match core.resume() {
+            Ok(_) => show("resumed", &core),
+            Err(e) => println!("resume_error {e}"),
+        }
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        show("final", &core);
+        core.shutdown();
+        return;
+    }
     match core.pair_with_channel_qr(&args[2], "host-cli-1") {
         Ok(_) => show("paired", &core),
         Err(e) => println!("pair_error {e}"),

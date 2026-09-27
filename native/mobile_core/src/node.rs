@@ -268,12 +268,27 @@ impl NodeCore {
         let acceptance = membership::verify_seed_envelope(&reply, &pinned, membership::JOIN_ACCEPTANCE_PROTOCOL)
             .map_err(|e| self.fail(nerr(e.0)))?;
         let generation = acceptance["membership_generation"].as_u64().unwrap_or(0);
+        self.enter_membership(cfg, generation, seed_url, pinned, acceptance["lease_expires_at"].as_f64())?;
+        Ok(self.status())
+    }
+
+    /// Record the durable membership and keep it alive.
+    fn enter_membership(
+        &self,
+        cfg: MemberConfig,
+        generation: u64,
+        seed_url: String,
+        pinned: Value,
+        lease_expires_at: Option<f64>,
+    ) -> Result<(), NodeError> {
+        let record = json!({"cfg": cfg, "generation": generation, "seed_url": seed_url, "seed_key": pinned});
+        write_private(&self.data_dir.join("membership.json"), &serde_json::to_vec(&record).unwrap())?;
         {
             let mut s = self.shared.lock().unwrap();
             s.status.phase = "joined".into();
             s.status.swarm_id = Some(cfg.swarm_id.clone());
             s.status.member_generation = Some(generation);
-            s.status.lease_expires_at = acceptance["lease_expires_at"].as_f64();
+            s.status.lease_expires_at = lease_expires_at;
             s.status.last_error = None;
         }
         self.rt.spawn(heartbeat_loop(
@@ -285,7 +300,54 @@ impl NodeCore {
             self.http.clone(),
             self.shared.clone(),
         ));
+        Ok(())
+    }
+
+    /// After a restart: resume the enrolled member with a fresh incarnation
+    /// (no invite is consumed). Old KV/request state is gone with the process.
+    pub fn resume(&self) -> Result<NodeStatus, NodeError> {
+        let raw = std::fs::read(self.data_dir.join("membership.json")).map_err(|_| nerr("not_enrolled"))?;
+        let record: Value = serde_json::from_slice(&raw).map_err(|_| nerr("membership_store_corrupt"))?;
+        let mut cfg: MemberConfig =
+            serde_json::from_value(record["cfg"].clone()).map_err(|_| nerr("membership_store_corrupt"))?;
+        let previous = std::mem::replace(&mut cfg.incarnation, self.incarnation.clone());
+        let generation = record["generation"].as_u64().unwrap_or(0);
+        let seed_url = record["seed_url"].as_str().unwrap_or_default().to_owned();
+        let pinned = record["seed_key"].clone();
+        let env = membership::resume_request(
+            &cfg,
+            &self.identity,
+            &format!("resume-{}", &self.incarnation[4..]),
+            &previous,
+            generation,
+            &self.transport.advertised_addrs(),
+            now_s(),
+        )
+        .map_err(|e| self.fail(nerr(e.0)))?;
+        let http = self.http.clone();
+        let body = json!({"protocol": membership::SEED_RESUME_HTTP_PROTOCOL, "resume_envelope": env});
+        let url = format!("{seed_url}/seed/resume");
+        let (code, reply): (u16, Value) = self
+            .rt
+            .block_on(async move {
+                let resp = http.post(url).json(&body).send().await?;
+                let code = resp.status().as_u16();
+                Ok::<_, reqwest::Error>((code, resp.json::<Value>().await.unwrap_or(Value::Null)))
+            })
+            .map_err(|e| self.fail(nerr(format!("seed_unreachable:{}", e.without_url()))))?;
+        if code != 200 {
+            let c = reply["error"]["code"].as_str().unwrap_or("seed_resume_refused");
+            return Err(self.fail(nerr(format!("seed_resume_refused:{c}"))));
+        }
+        let acceptance = membership::verify_seed_envelope(&reply, &pinned, membership::RESUME_ACCEPTANCE_PROTOCOL)
+            .map_err(|e| self.fail(nerr(e.0)))?;
+        let generation = acceptance["membership_generation"].as_u64().unwrap_or(0);
+        self.enter_membership(cfg, generation, seed_url, pinned, acceptance["lease_expires_at"].as_f64())?;
         Ok(self.status())
+    }
+
+    pub fn is_enrolled(&self) -> bool {
+        self.data_dir.join("membership.json").exists()
     }
 
     /// Load one assignment-local stage pack (digest-verified by the runtime).

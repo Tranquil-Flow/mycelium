@@ -10,6 +10,9 @@ use crate::identity::{self, Identity};
 pub const SIGNED_MESSAGE_PROTOCOL: &str = "mycelium.membership.signed_message.v1";
 pub const JOIN_REQUEST_PROTOCOL: &str = "mycelium.membership.join_request.v1";
 pub const JOIN_ACCEPTANCE_PROTOCOL: &str = "mycelium.membership.join_acceptance.v1";
+pub const RESUME_REQUEST_PROTOCOL: &str = "mycelium.membership.resume_request.v1";
+pub const RESUME_ACCEPTANCE_PROTOCOL: &str = "mycelium.membership.resume_acceptance.v1";
+pub const SEED_RESUME_HTTP_PROTOCOL: &str = "mycelium.seed.resume_http.v1";
 pub const HEARTBEAT_PROTOCOL: &str = "mycelium.membership.heartbeat.v1";
 pub const LEASE_RENEWAL_PROTOCOL: &str = "mycelium.membership.lease_renewal.v1";
 pub const CAPABILITY_REPORT_PROTOCOL: &str = "mycelium.membership.capability_report.v1";
@@ -24,7 +27,7 @@ pub const MAX_MESSAGE_TTL_SECONDS: f64 = 3600.0;
 pub struct MembershipError(pub &'static str);
 
 /// Who this member says it is, fixed for one incarnation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MemberConfig {
     pub swarm_id: String,
     pub node_id: String,
@@ -77,6 +80,36 @@ pub fn join_request(
     }
     let mut m = common(cfg, identity, JOIN_REQUEST_PROTOCOL, message_id, 0, now);
     m["invite_nonce"] = json!(invite_nonce);
+    m["software_version"] = json!(cfg.software_version);
+    m["peer_class"] = json!(cfg.peer_class);
+    m["runtime_capability"] = cfg.runtime_capability.clone();
+    m["endpoint_addr"] = json!({"id": identity.endpoint_id(), "addrs": endpoint_addrs});
+    envelope(identity, m)
+}
+
+/// Resume an enrolled durable member after a process restart: a fresh
+/// incarnation, the previous incarnation and the last membership generation.
+#[allow(clippy::too_many_arguments)]
+pub fn resume_request(
+    cfg: &MemberConfig,
+    identity: &Identity,
+    message_id: &str,
+    previous_incarnation: &str,
+    generation: u64,
+    endpoint_addrs: &[String],
+    now: f64,
+) -> Result<Value, MembershipError> {
+    if previous_incarnation == cfg.incarnation {
+        return Err(MembershipError("membership_resume_incarnation_invalid"));
+    }
+    if generation < 1 {
+        return Err(MembershipError("membership_generation_invalid"));
+    }
+    if endpoint_addrs.is_empty() || endpoint_addrs.len() > 16 {
+        return Err(MembershipError("membership_endpoint_addr_invalid"));
+    }
+    let mut m = common(cfg, identity, RESUME_REQUEST_PROTOCOL, message_id, generation, now);
+    m["previous_incarnation"] = json!(previous_incarnation);
     m["software_version"] = json!(cfg.software_version);
     m["peer_class"] = json!(cfg.peer_class);
     m["runtime_capability"] = cfg.runtime_capability.clone();

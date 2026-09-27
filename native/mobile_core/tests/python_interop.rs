@@ -172,3 +172,28 @@ fn join_request_builder_reproduces_the_python_signed_envelope() {
     .unwrap();
     assert_eq!(env, f);
 }
+
+#[test]
+fn resume_request_requires_a_fresh_incarnation_and_signs_with_the_member_key() {
+    use mycelium_mobile_core::membership::{self, MemberConfig};
+    let sig = fixture("signature.json");
+    let id = identity::Identity::from_secret("device-endpoint-1", &seed(sig["seed_hex"].as_str().unwrap())).unwrap();
+    let cfg = MemberConfig {
+        swarm_id: "swarm-a".into(),
+        node_id: "node-a".into(),
+        seed_node_id: "seed-node".into(),
+        incarnation: "inc-new".into(),
+        software_version: "v".into(),
+        peer_class: "android_native_iroh".into(),
+        runtime_capability: serde_json::json!({"runtime_backend": "mobile-rust-reference", "transport": "iroh", "activation_protocol": "mycelium.router_wire.v1"}),
+        ttl_seconds: 60.0,
+    };
+    let addrs = ["ip:127.0.0.1:1".to_owned()];
+    let env = membership::resume_request(&cfg, &id, "m1", "inc-old", 3, &addrs, 10.0).unwrap();
+    assert_eq!(env["message"]["protocol"], membership::RESUME_REQUEST_PROTOCOL);
+    assert_eq!(env["message"]["generation"], 3);
+    assert_eq!(env["message"]["previous_incarnation"], "inc-old");
+    identity::verify(&env["message"], &env["signature"], &env["verification_key"]).unwrap();
+    assert_eq!(membership::resume_request(&cfg, &id, "m1", "inc-new", 3, &addrs, 10.0).unwrap_err().0, "membership_resume_incarnation_invalid");
+    assert_eq!(membership::resume_request(&cfg, &id, "m1", "inc-old", 0, &addrs, 10.0).unwrap_err().0, "membership_generation_invalid");
+}

@@ -110,6 +110,13 @@ fn start_core(app: &AppHandle) {
                 load_dev_route(core, &dir.join("node").join("dev-route.json"));
             }
             let _ = CORE.set(opened);
+            // A restarted, already enrolled member resumes without a new invite
+            // (after the core is visible to the UI, so the UI never waits on it).
+            if let Ok(c) = core()
+                && c.is_enrolled()
+            {
+                let _ = c.resume();
+            }
             #[cfg(debug_assertions)]
             let dev_dir = handle.path().app_data_dir().ok().map(|d| d.join("node"));
             #[cfg(debug_assertions)]
