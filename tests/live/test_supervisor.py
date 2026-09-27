@@ -516,6 +516,9 @@ def test_observatory_projection_is_browser_safe(
                 "type": "http",
                 "method": "GET",
                 "path": "/v1/observatory/snapshot",
+                # The live gateway denies by default: read the way the product
+                # gateway's in-process upstream client does (loopback peer).
+                "client": ("127.0.0.1", 0),
             },
             receive,
             send,

@@ -63,7 +63,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:02519b2a261bbd582e49c35c36394942df3fb7e923269a2f9ef4e04e60d3073e",
+      "sha256": "sha256:91bbc70bba89f7e8c085e3be31946197914127722b2ce289cb28cbdba8533ce6",
       "size_bytes": 71053
     },
     {
@@ -392,6 +392,16 @@
       "size_bytes": 10863
     },
     {
+      "path": "mycelium_gateway/live_projection.py",
+      "sha256": "sha256:caf4f861a0ec5b8c6e2f04899f5cc689aa8c3dd90376a5c3c9076863144b196b",
+      "size_bytes": 6375
+    },
+    {
+      "path": "mycelium_gateway/observatory.py",
+      "sha256": "sha256:442f11dbd8612afaf7b853a21bca5d5b09ce441440ad6f0ba9dd6666a649672e",
+      "size_bytes": 29756
+    },
+    {
       "path": "mycelium_layer_planner/__init__.py",
       "sha256": "sha256:950a5bbe3c08e270841272122c069e696b4e7823414e690a57e99be5df5bdfbf",
       "size_bytes": 701
@@ -423,8 +433,8 @@
     },
     {
       "path": "mycelium_live/supervisor.py",
-      "sha256": "sha256:45dec72b52880057d08f759eacb8f526d62998023d06acc711ebd948f1a7d816",
-      "size_bytes": 147488
+      "sha256": "sha256:edd50d48c403a636cc9736641ef412802b2a2264e1a1a2e0788c20cd179cbf2d",
+      "size_bytes": 153975
     },
     {
       "path": "mycelium_m16_runtime.py",
@@ -1457,6 +1467,11 @@
       "size_bytes": 8571
     },
     {
+      "path": "tests/live/test_live_servers_reachability.py",
+      "sha256": "sha256:b8f6f4e714db1eda9777e618ca26867569677686f4ceb66cc67a50d6b3bb98f3",
+      "size_bytes": 13250
+    },
+    {
       "path": "tests/live/test_peer_counter_projection_single_observation.py",
       "sha256": "sha256:259291016ea8b0061aa6c0ebc95f491edf4dae4aa3ac023a7fbd235396265082",
       "size_bytes": 9384
@@ -1468,8 +1483,8 @@
     },
     {
       "path": "tests/live/test_supervisor.py",
-      "sha256": "sha256:9fcb6a8c73a871650c811edd51981f2e7b2fcbf6c8545c16c4f56539ba401235",
-      "size_bytes": 64262
+      "sha256": "sha256:ed8602a976242d9d11d374ef69bf4ae92573fceb60418ab07d872b2a310f0924",
+      "size_bytes": 64462
     },
     {
       "path": "tests/mobile/test_a12_android_adb_bridge.py",
@@ -1963,5 +1978,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:f6db385654f9f6a7b993f0ccb663649e2f840b8281a43ca2e7f2d798084a87c3"
+  "source_digest": "sha256:32f03875e123cf5f8eac593eec96b8e5ff49f7e01054f92e0336695ce1ae2b91"
 }

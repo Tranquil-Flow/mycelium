@@ -14,6 +14,7 @@ from pathlib import Path
 import secrets
 import signal
 import stat
+import tempfile
 import threading
 import time
 from typing import Any, Callable, Mapping, Sequence
@@ -140,14 +141,33 @@ class LiveObservatoryApplication:
         self._lock = threading.Lock()
         # Survive backend restarts without replaying a generation below the
         # browser's fail-closed high-water mark.
-        self._generation = int(time.time() * 1_000)
+        self._opened_at_unix_ms = int(time.time() * 1_000)
+        self._generation = self._opened_at_unix_ms
 
-    def _envelope(self) -> dict[str, Any]:
-        with self._lock:
-            self._generation += 1
-            generation = self._generation
+    def generation_floor(self) -> int:
+        """The wall-clock generation floor the durable publisher must not go below."""
+
+        return max(self._generation, int(time.time() * 1_000))
+
+    def projection_bundle(self) -> dict[str, Any]:
+        """One deterministic live bundle for the durable gateway publisher.
+
+        The durable publisher owns generations, so this bundle stays stable
+        while the qualification is unchanged: a gateway read republishes only
+        on a real change, never once per read.
+        """
+
         qualification = self._health.current()
-        observed_at = int(time.time() * 1_000)
+        observed_at = self._opened_at_unix_ms
+        if qualification is not None:
+            observed_at = max(observed_at, int(qualification.issued_at_unix_ms))
+        return self._bundle(
+            source_cursor=observed_at, observed_at_unix_ms=observed_at
+        )
+
+    def _bundle(self, *, source_cursor: int, observed_at_unix_ms: int) -> dict[str, Any]:
+        qualification = self._health.current()
+        observed_at = observed_at_unix_ms
         projection = None
         if qualification is not None:
             public = safe_qualification_projection(qualification)
@@ -159,26 +179,35 @@ class LiveObservatoryApplication:
             }
         route_ready = projection is not None and projection["route_ready"] is True
         return {
+            "snapshot": {
+                "protocol": "mycelium.observatory.request_projection.v1",
+                "source_cursor": source_cursor,
+                "observed_at_unix_ms": observed_at,
+                "qualification": projection,
+                "sessions": [],
+            },
+            "incidents": [],
+            "provisioning": {
+                "protocol": "mycelium.observatory.event_adapter_status.v1",
+                "route_ready": route_ready,
+                "source_cursor": source_cursor,
+                "buffered_sessions": 0,
+                "quarantine_capacity": 256,
+                "dropped_quarantine_count": 0,
+            },
+        }
+
+    def _envelope(self) -> dict[str, Any]:
+        with self._lock:
+            self._generation += 1
+            generation = self._generation
+        return {
             "protocol": "mycelium.observatory_stream.v1",
             "generation": generation,
-            "bundle": {
-                "snapshot": {
-                    "protocol": "mycelium.observatory.request_projection.v1",
-                    "source_cursor": generation,
-                    "observed_at_unix_ms": observed_at,
-                    "qualification": projection,
-                    "sessions": [],
-                },
-                "incidents": [],
-                "provisioning": {
-                    "protocol": "mycelium.observatory.event_adapter_status.v1",
-                    "route_ready": route_ready,
-                    "source_cursor": generation,
-                    "buffered_sessions": 0,
-                    "quarantine_capacity": 256,
-                    "dropped_quarantine_count": 0,
-                },
-            },
+            "bundle": self._bundle(
+                source_cursor=generation,
+                observed_at_unix_ms=int(time.time() * 1_000),
+            ),
         }
 
     async def __call__(self, scope: Mapping[str, Any], receive, send) -> None:
@@ -323,6 +352,7 @@ class LiveStack:
     health: Any
     route: LiveRoute
     router: LiveRouterPort | None = None
+    observatory: Any | None = None
 
 
 COLD_ROUTE_RESTART_ERROR_CODE = "cold_route_restart_in_progress"
@@ -995,6 +1025,142 @@ def _load_trusted_proxy_capability(path: Path) -> bytes:
             os.close(descriptor)
 
 
+# --------------------------------------------------------------------------- #
+# Live product servers: the real Observatory gateway and the OpenAI shim
+# --------------------------------------------------------------------------- #
+LIVE_OPENAI_SHIM_DEFAULT_MODEL_ID = "mycelium-live-route"
+LIVE_OPENAI_SHIM_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+OBSERVATORY_STATE_DIRNAME = "observatory"
+OBSERVATORY_STATE_FILENAME = "coherent-snapshot.json"
+
+
+def _observatory_state_path(product_state_root: Path | None) -> Path:
+    """Durable Observatory state lives under the operator's own product state root."""
+
+    if product_state_root is None:
+        # No private product state root was configured: keep the state in a
+        # per-process private directory instead of a shared, guessable path.
+        base = Path(tempfile.mkdtemp(prefix="mycelium-observatory-"))
+    else:
+        base = Path(product_state_root)
+    return base / OBSERVATORY_STATE_DIRNAME / OBSERVATORY_STATE_FILENAME
+
+
+def _load_live_observatory_gateway(*, health: Any, state_path: Path) -> Any:
+    """Build the real Observatory gateway, or fail loudly with the import error.
+
+    The patchable seam is deliberate: ``tests/live/test_live_servers_reachability.py``
+    proves the live composition is RED (fails closed) when the gateway module
+    cannot be imported from it.
+    """
+
+    from mycelium_gateway.live_projection import (
+        build_live_projection_gateway,
+        loopback_upstream_read_policy,
+    )
+
+    projection = LiveObservatoryApplication(health)
+    return build_live_projection_gateway(
+        state_path=state_path,
+        projection_source=projection.projection_bundle,
+        generation_floor=projection.generation_floor,
+        read_policy=loopback_upstream_read_policy(),
+    )
+
+
+def _build_live_observatory_gateway(
+    *, health: Any, product_state_root: Path | None
+) -> Any:
+    return _load_live_observatory_gateway(
+        health=health, state_path=_observatory_state_path(product_state_root)
+    )
+
+
+def _load_live_openai_shim_serve_in_thread() -> Any:
+    """Return ``mycelium_openai_shim.server.serve_in_thread`` or raise."""
+
+    from mycelium_openai_shim.server import serve_in_thread
+
+    return serve_in_thread
+
+
+class LiveOpenAIShim:
+    """The OpenAI-compatible shim co-listener launched beside the live server."""
+
+    def __init__(
+        self, *, server: Any, thread: threading.Thread, model_id: str
+    ) -> None:
+        self.server = server
+        self.thread = thread
+        self.model_id = model_id
+
+    @property
+    def port(self) -> int:
+        return int(self.server.server_address[1])
+
+    @property
+    def base_url(self) -> str:
+        return f"http://127.0.0.1:{self.port}"
+
+    def status(self) -> Mapping[str, Any]:
+        return {
+            "base_url": self.base_url,
+            "model_id": self.model_id,
+            "endpoints": (
+                f"GET {self.base_url}/v1/models",
+                f"POST {self.base_url}/v1/chat/completions",
+            ),
+        }
+
+    def close(self) -> None:
+        try:
+            self.server.shutdown()
+        except BaseException:  # pragma: no cover - shutdown is best effort
+            pass
+        stop = getattr(self.server, "stop", None)
+        if callable(stop):
+            stop(self.thread)
+            return
+        self.server.server_close()
+        if self.thread.is_alive():
+            self.thread.join(timeout=5.0)
+
+
+def start_live_openai_shim(
+    *,
+    route: LiveRoute,
+    host: str = "127.0.0.1",
+    port: int = 0,
+    model_id: str | None = None,
+) -> LiveOpenAIShim:
+    """Launch the OpenAI-compatible shim on loopback beside the live route.
+
+    The shim is a real HTTP listener driving ``route.infer``; an unimportable
+    ``mycelium_openai_shim`` fails live bring-up loudly instead of silently
+    serving without the OpenAI-compatible surface.
+    """
+
+    if host not in LIVE_OPENAI_SHIM_HOSTS:
+        raise ValueError("live_openai_shim_requires_loopback")
+    if isinstance(port, bool) or not isinstance(port, int) or not 0 <= port <= 65_535:
+        raise ValueError("live_openai_shim_port_invalid")
+    serve_in_thread = _load_live_openai_shim_serve_in_thread()
+    from mycelium_openai_shim.translator import default_detokenizer, default_tokenizer
+
+    resolved_model_id = str(
+        model_id or getattr(route, "model_id", None) or LIVE_OPENAI_SHIM_DEFAULT_MODEL_ID
+    )
+    server, thread = serve_in_thread(
+        live_route=route,
+        host=host,
+        port=port,
+        tokenizer=default_tokenizer(),
+        detokenizer=default_detokenizer(),
+        model_id=resolved_model_id,
+    )
+    return LiveOpenAIShim(server=server, thread=thread, model_id=resolved_model_id)
+
+
 def build_live_stack(
     *,
     route: LiveRoute,
@@ -1078,11 +1244,14 @@ def build_live_stack(
         )
 
     checkpoint_root = _prepare_product_checkpoint_root(product_state_root)
+    observatory = _build_live_observatory_gateway(
+        health=health, product_state_root=product_state_root
+    )
     app = build_loopback_product_stack(
         qualification_source=health,
         router=router,
         codec=codec,
-        observatory_app=LiveObservatoryApplication(health),
+        observatory_app=observatory.app,
         product_app_factory=product_app_factory,
         swarm_coordinator=LiveSwarmCoordinator(route, health, seed_url=seed_url),
         request_bearer_token=bearer_token,
@@ -1101,7 +1270,13 @@ def build_live_stack(
         trusted_proxy_capability=trusted_proxy_capability,
         replay_checkpoint_root=checkpoint_root,
     )
-    return LiveStack(app=app, health=health, route=route, router=router)
+    return LiveStack(
+        app=app,
+        health=health,
+        route=route,
+        router=router,
+        observatory=observatory,
+    )
 
 
 def build_registry_stack(
@@ -1117,11 +1292,14 @@ def build_registry_stack(
     """Compose the product stack around multiple already-qualified routes."""
 
     checkpoint_root = _prepare_product_checkpoint_root(product_state_root)
+    observatory = _build_live_observatory_gateway(
+        health=registry, product_state_root=product_state_root
+    )
     app = build_loopback_product_stack(
         qualification_source=registry,
         router=registry,
         codec=registry,
-        observatory_app=LiveObservatoryApplication(registry),
+        observatory_app=observatory.app,
         product_app=_optional_product_application(
             registry,
             registry,
@@ -1134,7 +1312,9 @@ def build_registry_stack(
         trusted_proxy_capability=trusted_proxy_capability,
         replay_checkpoint_root=checkpoint_root,
     )
-    return LiveStack(app=app, health=registry, route=registry)
+    return LiveStack(
+        app=app, health=registry, route=registry, observatory=observatory
+    )
 
 
 def _prepare_product_checkpoint_root(state_root: Path | None) -> Path | None:
@@ -3297,6 +3477,7 @@ def run_physical_server(
     )
     stack: LiveStack | None = None
     server: LiveHTTPServer | None = None
+    openai_shim: LiveOpenAIShim | None = None
     startup_complete = False
     capacity_refresh: ModelCapacityRefresh | None = None
     artifact_acquisition_store: ArtifactAcquisitionStore | None = None
@@ -3376,6 +3557,10 @@ def run_physical_server(
                 + _explicit_historical_evidence(historical_evidence_files),
             ),
         )
+        openai_shim = start_live_openai_shim(
+            route=route,
+            model_id=getattr(deployment, "model_id", None),
+        )
         startup_complete = True
 
         stop = threading.Event()
@@ -3396,6 +3581,7 @@ def run_physical_server(
                     "route_ready": qualification.route_ready,
                     "simulated": False,
                     "startup_counters": _counter_document(route.counters()),
+                    "openai_shim": openai_shim.status(),
                 }
             ).decode("utf-8"),
             flush=True,
@@ -3408,6 +3594,8 @@ def run_physical_server(
                 signal.signal(signum, handler)
         return 0
     finally:
+        if openai_shim is not None:
+            openai_shim.close()
         if capacity_refresh is not None:
             capacity_refresh.close()
         if stack is not None:
