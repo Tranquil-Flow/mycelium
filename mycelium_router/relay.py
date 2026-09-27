@@ -6,6 +6,7 @@ import hashlib
 from threading import Lock, RLock
 from typing import Iterator
 
+from mycelium_router import a10_batch_producer
 from mycelium_router.batching import PhaseAwareBatchController
 from mycelium_router.contracts import (
    BatchExecutionObservation,
@@ -373,6 +374,15 @@ class RelayEngine:
          return self._runtime_unavailable()
 
    def _execute_runtime_batch(self, batch) -> tuple[RuntimeResult, ...]:
+      # A10: a relay-formed batch of >=2 compatible members may already be
+      # servable as one real backend invocation. ``attempt_runtime_batch`` is
+      # fail-closed by construction (mycelium_router/a10_batch_producer.py):
+      # it returns ``None`` whenever the batch is ineligible or the port
+      # lacks the A10 surface, in which case behaviour below is
+      # byte-for-byte identical to before this existed.
+      upgraded = a10_batch_producer.attempt_runtime_batch(self.runtime, batch)
+      if upgraded is not None:
+         return upgraded
       try:
          return tuple(self.runtime.execute_batch(batch))
       except Exception:
