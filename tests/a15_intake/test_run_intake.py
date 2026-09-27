@@ -59,11 +59,30 @@ EVIDENCE_ROOTS = tuple(
 REQUIRE_REAL = os.environ.get("MYCELIUM_A15_REQUIRE_REAL", "1") == "1"
 
 # Pinned digests of the exact retained bytes this slice is exercised over.
+#
+# `CHECKLIST_DIGEST` is a moving pin: the checklist is a living handover document,
+# so every content change to it must refresh this pin in the same change. Refreshing
+# the pin is never on its own the fix: the refresh must be backed by re-verifying
+# that every binding still resolves and matches (this test asserts that), and it must
+# never be accompanied by relaxing the digest check itself. Recorded refresh history:
+#   b90edaf 9aa26146…  (still the pin carried by scripts/a15_run_intake.py)
+#   ee7e0ef b844dccd…
+#   d5ddfff 786e7f93…
+#   29b5f74 f9be9138…
+#   6f1c9d4 f692c14f…  A12 narrowed the initial-build claim to one device family and
+#                       re-pinned the A12:specification binding (bd825c5e… ->
+#                       d1c8fbbe…) inside the checklist, but did NOT refresh THIS pin,
+#                       which is what broke this test on the candidate tree.
+#   lane C  4964e739…  this repair: corrected the A12 blocker prose, which still
+#                       claimed "two Android families" as an active requirement after
+#                       the 2026-09-27 owner ruling narrowed (not deleted) the claim to
+#                       one family-bound Android family, and bumped the checklist's
+#                       own `updated_on`.
 READINESS_GATE_DIGEST = "sha256:a9983be6aeed2c8c99f214aa034e6f201759156e0a41546d06996abbf4af95d5"
 PACKAGE_DIGEST = "sha256:79adcfaf9355ff140873b571d121f137681eed56ed070c1e5ecfe098417ca22c"
 GATE_EXECUTION_DIGEST = "sha256:d9e3b6fcd302ba9428556801a2469dfb645b5823bf41e73980c7cd8a28ed3d0a"
 HYPOTHESIS_DIGEST = "sha256:2a76aa59a83c0c6a0a5d1ce5a438a52987af80a00534fd9bb215f1418bba5bff"
-CHECKLIST_DIGEST = "sha256:f9be913827f8d67412587db93eccc87689bddc656a255a130eeedc4c7b3ad8d5"  # refreshed to current checklist bytes (post A9 spec row + evidence-shape normalization)
+CHECKLIST_DIGEST = "sha256:4964e7396e5be35609df52ddb685bc01a413c53d24293dfa326d103c1d77244c"  # A12 family-bound narrowing + A12 blocker prose correction
 A3_RECORD_DIGEST = "sha256:462d7232ab006ba7bbde12f578d948e766f45b9a60b10f79764935c05e65333d"
 A4_RECORD_DIGEST = "sha256:1423354a43a4d85680a7c9a319649709d9c42c2f8a8856311deafb52785a28bd"
 A5_RECORD_DIGEST = "sha256:9aa287d2c7e35a1db36c01e4f2326891747b497d77b43285e8b3fbc2a2ea1628"

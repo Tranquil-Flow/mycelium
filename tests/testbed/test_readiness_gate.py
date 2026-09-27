@@ -634,6 +634,105 @@ def test_check_a_fails_when_a_canonical_command_fails(tmp_path: Path) -> None:
     assert failing[0].tail()
 
 
+def test_check_a_scopes_discovery_to_host_executable_jobs(tmp_path: Path) -> None:
+    """A job on another OS family is not a canonical command for this host.
+
+    ``.github/workflows/governance.yml`` grew a ``windows-latest`` portability
+    job whose ``run:`` steps cannot execute here.  Discovery has to scope itself
+    to the jobs this host can run *and* record the non-host job: neither leaking
+    its steps into the canonical set (the regression) nor dropping the coverage
+    decision in silence.
+    """
+
+    repo = tmp_path / "repo"
+    (repo / ".github" / "workflows").mkdir(parents=True)
+    (repo / ".github" / "workflows" / "governance.yml").write_text(
+        "name: Governance gates\n"
+        "on: [push]\n"
+        "jobs:\n"
+        "  posix:\n"
+        "    runs-on: macos-15\n"
+        "    steps:\n"
+        "      - name: install\n"
+        "        run: python -m pip install --requirement tests/governance-requirements.txt\n"
+        "      - name: host suites\n"
+        "        run: python -m pytest -q tests/governance\n"
+        "  windows-portability:\n"
+        "    runs-on: windows-latest\n"
+        "    steps:\n"
+        "      - name: install\n"
+        "        run: python -m pip install --requirement tests/governance-requirements.txt\n"
+        "      - name: non-POSIX suites\n"
+        "        run: python -m pytest -q tests/a13_acceptance\n",
+        "utf-8",
+    )
+    runner = StubRunner([Rule(contains="pytest", stdout="7 passed in 1.0s")])
+    ctx = context(tmp_path, repo_root=repo, runner=runner)
+
+    discovered = gate.discover_canonical_commands(ctx)
+    runnable = [item for item in discovered if item.kind == "run"]
+    pytest_steps = [item for item in runnable if any("pytest" in token for token in item.argv)]
+
+    assert len(pytest_steps) == 1, discovered
+    assert "tests/governance" in pytest_steps[0].argv
+    assert not any("tests/a13_acceptance" in " ".join(item.argv) for item in discovered), discovered
+    # an empty argv is never a runnable canonical command
+    assert all(item.argv for item in runnable), discovered
+    assert any(
+        item.kind == "excluded" and "windows-latest" in str(item.note) for item in discovered
+    ), discovered
+
+    result = gate.check_canonical_suites_and_audits(ctx)
+
+    pytest_calls = [call for call in runner.calls if any("pytest" in token for token in call)]
+    assert len(pytest_calls) == 1, runner.calls
+    assert all("a13_acceptance" not in " ".join(item.command) for item in result.commands)
+    assert "windows-latest" in str(result.detail["excluded_non_host_jobs"]), result.detail
+
+
+def test_check_a_is_never_green_when_the_only_pytest_step_is_non_host(tmp_path: Path) -> None:
+    """Excluding a non-host job must not manufacture a green.
+
+    If the only canonical pytest step belongs to a job this host cannot execute,
+    check ``a`` has verified nothing: it stays ``SKIPPED`` with the named reason,
+    which is a ``NO-GO``.
+    """
+
+    repo = tmp_path / "repo"
+    (repo / ".github" / "workflows").mkdir(parents=True)
+    (repo / ".github" / "workflows" / "governance.yml").write_text(
+        "on: [push]\n"
+        "jobs:\n"
+        "  windows-portability:\n"
+        "    runs-on: windows-latest\n"
+        "    steps:\n"
+        "      - name: non-POSIX suites\n"
+        "        run: python -m pytest -q tests/a13_acceptance\n",
+        "utf-8",
+    )
+    ctx = context(tmp_path, repo_root=repo)
+
+    result = gate.check_canonical_suites_and_audits(ctx)
+
+    assert result.status == gate.SKIPPED
+    assert any("canonical_pytest_step_not_discoverable" in reason for reason in result.reasons)
+    assert result.commands == ()
+
+
+def test_discovery_records_an_empty_argv_only_when_it_is_not_runnable(tmp_path: Path) -> None:
+    """The real workflow: every ``run`` record carries a real argv."""
+
+    discovered = gate.discover_canonical_commands(context(tmp_path))
+    runnable = [item for item in discovered if item.kind == "run"]
+
+    assert runnable, discovered
+    assert all(item.argv for item in runnable), discovered
+    assert {item.kind for item in discovered} <= {"run", "prereq", "skip", "excluded"}, discovered
+    for item in discovered:
+        if not item.argv:
+            assert item.kind in {"prereq", "skip", "excluded"}, item
+
+
 # --------------------------------------------------------------------------- #
 # check b: budget invariants
 # --------------------------------------------------------------------------- #

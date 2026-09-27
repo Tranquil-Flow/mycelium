@@ -10,12 +10,15 @@ on ``GO``.
 The six checks (PLAN 5.2 item 5, in order):
 
 ``a`` canonical suites + audits green
-    The commands are *discovered*, never guessed: the ``run:`` steps of
-    ``.github/workflows/governance.yml`` plus the audit scripts this packet
-    names (``governance_gate``, ``contract_audit``, ``claim_boundary_audit``,
-    ``mycelium_completion_audit``) and the declared ``ui/web/package.json``
-    scripts.  A command that cannot be discovered is reported
-    ``SKIPPED-with-reason``, which is a ``NO-GO`` and never an invention.
+    The commands are *discovered*, never guessed: the ``run:`` steps of the
+    *host-executable* jobs of ``.github/workflows/governance.yml`` (a job whose
+    ``runs-on`` names another OS family, e.g. ``windows-latest``, is recorded as
+    excluded - its steps are not commands this host can execute) plus the audit
+    scripts this packet names (``governance_gate``, ``contract_audit``,
+    ``claim_boundary_audit``, ``mycelium_completion_audit``) and the declared
+    ``ui/web/package.json`` scripts.  A command that cannot be discovered is
+    reported ``SKIPPED-with-reason``, which is a ``NO-GO`` and never an
+    invention.
 ``b`` budget invariants green
     ``mycelium_deadlines.check_composition()`` - which today reports the
     deliberately pinned round-50 violation.  The gate surfaces that violation
@@ -87,6 +90,18 @@ SOAK_MODULE = "mycelium_testbed.soak"
 EMULATION_GLOB = "tests/testbed/test_emulation*.py"
 PACKAGE_BUILDER = Path("scripts/package_m22_service.py")
 PACKAGE_CONFIG_GLOB = "release/service-configs/*.json"
+
+#: ``runs-on`` families whose steps this host cannot execute.  Every argv the
+#: gate builds is a *host* argv (``ctx.python`` is a path on this host) and is
+#: executed here, so a step owned by a job on another OS family is not a
+#: canonical command for this host: it is recorded as excluded instead of being
+#: executed, or - worse - silently counted as coverage.  ``windows`` matches
+#: ``windows-latest`` / ``windows-2022`` / ``Windows``; the POSIX families
+#: (``macos-*``, ``ubuntu-*``, ``linux``) run the workflow's steps verbatim,
+#: which is why such jobs stay discoverable.  A runner the gate cannot classify
+#: (``${{ matrix.os }}``, or a job with no ``runs-on`` at all) is not proof of
+#: non-executability, so it stays discoverable too.
+NON_HOST_RUNNER_MARKERS = ("windows",)
 
 #: SHA-256 of the `git archive HEAD` tar stream: the exact committed bytes the
 #: package (check e) is built from.
@@ -353,18 +368,173 @@ def aggregate(statuses: Sequence[str]) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def _workflow_steps(path: Path) -> tuple[list[str], str | None]:
+def _yaml_scalar(raw: str) -> str:
+    """A YAML plain scalar: surrounding whitespace and one layer of quotes off."""
+
+    return raw.strip().strip("\"'")
+
+
+def _runner_values(value: str) -> list[str]:
+    """Split a ``runs-on`` value into its runner labels (flow list or scalar)."""
+
+    items = value[1:-1].split(",") if value.startswith("[") and value.endswith("]") else [value]
+    return [item for item in (_yaml_scalar(part) for part in items) if item]
+
+
+def _runner_is_host_executable(runners: Sequence[str]) -> bool:
+    """``False`` only when a runner *proves* a different OS family from this host.
+
+    The gate executes on a POSIX host and builds *host* argv, so a step written
+    for a Windows job is not a canonical command here - which is precisely why
+    such a job exists.  A runner the gate cannot classify (``${{ matrix.os }}``,
+    or a job that declares no ``runs-on`` at all) is not proof of
+    non-executability: non-executability has to be *proved* before a canonical
+    command is taken out of the discovered set.
+    """
+
+    return not any(
+        marker in runner.lower() for runner in runners for marker in NON_HOST_RUNNER_MARKERS
+    )
+
+
+def _step_command(raw: str) -> str:
+    """The command of one ``run:`` value; a block scalar has no single argv."""
+
+    value = _yaml_scalar(raw)
+    return "" if value in {"|", ">", "|-", ">-", "|+", ">+"} else value
+
+
+@dataclass(frozen=True)
+class WorkflowStep:
+    """One ``run:`` step, with the job that owns it."""
+
+    job: str
+    name: str | None
+    command: str
+
+
+@dataclass(frozen=True)
+class WorkflowJob:
+    """One CI job: its ``runs-on`` runner label(s) and its ``run:`` steps."""
+
+    name: str
+    runners: tuple[str, ...]
+    steps: tuple[WorkflowStep, ...]
+
+    @property
+    def host_executable(self) -> bool:
+        """Whether this host can execute the job's steps (see ``NON_HOST_RUNNER_MARKERS``)."""
+
+        return _runner_is_host_executable(self.runners)
+
+
+def _workflow_jobs(path: Path) -> tuple[list[WorkflowJob], str | None]:
+    """Group the workflow's ``run:`` steps under the job (and ``runs-on``) that owns them.
+
+    A deliberately small, stdlib-only reader - discovery needs exactly three
+    things from the workflow (job names, ``runs-on`` values, ``run:`` commands)
+    and the file is hand-maintained, so pulling in a YAML dependency to read it
+    would be a dependency the gate does not need.  Indentation alone establishes
+    ownership, so a step can never be attributed to the wrong job; a job on a
+    runner this host cannot execute is returned *as a job*, so discovery can
+    exclude it by decision instead of leaking its steps into the canonical set.
+    """
+
     if not path.is_file():
         return [], f"workflow_not_found:{path}"
-    steps: list[str] = []
-    for line in path.read_text("utf-8").splitlines():
-        match = re.match(r"\s*(?:-\s*)?run:\s*(?P<command>.+?)\s*$", line)
-        if match is None:
+
+    order: list[str] = []
+    runners: dict[str, list[str]] = {}
+    steps: dict[str, list[WorkflowStep]] = {}
+    jobs_indent: int | None = None
+    job_name: str | None = None
+    job_indent = -1
+    step_name: str | None = None
+    block_runs_on: list[str] | None = None
+    block_indent = -1
+
+    def close_block_runs_on() -> None:
+        """Attach a ``runs-on:`` block sequence to the job that declared it."""
+
+        nonlocal block_runs_on
+        if block_runs_on is not None and job_name is not None:
+            runners[job_name].extend(block_runs_on)
+        block_runs_on = None
+
+    for raw in path.read_text("utf-8").splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
             continue
-        command = match.group("command").strip().strip("\"'")
-        if command:
-            steps.append(command)
-    return steps, None
+        indent = len(raw) - len(raw.lstrip(" \t"))
+
+        if jobs_indent is None:
+            if re.match(r"^jobs:\s*(?:#.*)?$", stripped):
+                jobs_indent = indent
+            continue
+
+        if indent <= jobs_indent:
+            # A key at or above ``jobs:``: the jobs mapping is finished (or a
+            # new one starts), and no later line belongs to the old job.
+            close_block_runs_on()
+            job_name = None
+            job_indent = -1
+            step_name = None
+            jobs_indent = indent if re.match(r"^jobs:\s*(?:#.*)?$", stripped) else None
+            continue
+
+        if job_name is None or indent <= job_indent:
+            header = re.match(r"^(?P<name>[A-Za-z0-9_.\-]+):\s*(?:#.*)?$", stripped)
+            if header is None:
+                continue
+            close_block_runs_on()
+            declared_name = header.group("name")
+            job_name = declared_name
+            job_indent = indent
+            step_name = None
+            if declared_name not in runners:
+                order.append(declared_name)
+                runners[declared_name] = []
+                steps[declared_name] = []
+            continue
+
+        if block_runs_on is not None:
+            item = re.match(r"^-\s*(?P<value>.+?)\s*$", stripped)
+            if item is not None and indent > block_indent:
+                block_runs_on.append(_yaml_scalar(item.group("value")))
+                continue
+            close_block_runs_on()
+
+        declared = re.match(r"^runs-on:\s*(?P<value>.*)$", stripped)
+        if declared is not None:
+            value = _yaml_scalar(declared.group("value"))
+            if value:
+                runners[job_name].extend(_runner_values(value))
+            else:
+                block_runs_on = []
+                block_indent = indent
+            continue
+
+        body = stripped[1:].strip() if stripped.startswith("-") else stripped
+        if stripped.startswith("-"):
+            step_name = None
+        named = re.match(r"^name:\s*(?P<value>.*)$", body)
+        if named is not None:
+            step_name = _yaml_scalar(named.group("value")) or None
+            continue
+        invoked = re.match(r"^run:\s*(?P<value>.*)$", body)
+        if invoked is not None:
+            steps[job_name].append(
+                WorkflowStep(job_name, step_name, _step_command(invoked.group("value")))
+            )
+
+    close_block_runs_on()
+    return (
+        [
+            WorkflowJob(name, tuple(runners[name]), tuple(steps[name]))
+            for name in order
+        ],
+        None,
+    )
 
 
 def _argv_for_step(step: str, python: str, *, note: str | None = None) -> tuple[list[str], str | None]:
@@ -400,7 +570,7 @@ def discover_canonical_commands(ctx: GateContext) -> list[DiscoveredCommand]:
     """
 
     discovered: list[DiscoveredCommand] = []
-    seen: set[tuple[str, ...]] = set()
+    seen: set[tuple[object, ...]] = set()
 
     def add(
         argv: Sequence[str],
@@ -410,37 +580,74 @@ def discover_canonical_commands(ctx: GateContext) -> list[DiscoveredCommand]:
         cwd: Path | None = None,
     ) -> None:
         key = tuple(argv)
-        if kind == "run" and key in seen:
+        if kind == "run" and not key:
+            # An empty argv is not a command: it can never be *run*, so it is
+            # recorded as a named skip - which is a NO-GO the report explains -
+            # instead of being executed as if it were one.
+            kind = "skip"
+            note = f"discovered_command_with_empty_argv:{source}"
+        record = (kind, key, source, note)
+        if kind in {"run", "prereq"} and record in seen:
+            # The same step declared by two host-executable jobs is one
+            # canonical command, recorded once with its exact text.
             return
-        seen.add(key)
+        seen.add(record)
         discovered.append(DiscoveredCommand(key, source, note, kind, cwd))
 
     workflow = ctx.repo_root / WORKFLOW
-    steps, workflow_problem = _workflow_steps(workflow)
+    jobs, workflow_problem = _workflow_jobs(workflow)
     source = WORKFLOW.as_posix()
     if workflow_problem is not None:
         add((), f"{source}#{workflow_problem}", workflow_problem, "skip")
     found_pytest = False
-    for step in steps:
-        if "pip install" in step or "requirements" in step and "install" in step:
-            # An environment prerequisite, not a verification: the gate never
-            # installs dependencies (a network install is a stop condition).
-            # It is recorded, with the exact step, and never silently dropped.
+    for job in jobs:
+        if not job.host_executable:
+            # A job on another OS family: the gate builds a *host* argv and runs
+            # it here, so those steps are not canonical commands for this host.
+            # The exclusion is recorded, never dropped in silence - and it is
+            # not a coverage hole for the host checks, because the job exists to
+            # cover a different platform.
             add(
                 (),
-                f"{source}#dependency-install",
-                f"workflow_dependency_install_not_run:{step}",
-                "prereq",
+                f"{source}#{job.name}",
+                f"job_runner_not_host_executable:{'+'.join(job.runners)}",
+                "excluded",
             )
             continue
-        argv, note = _argv_for_step(step, ctx.python)
-        if not argv:
-            continue
-        if any("pytest" in token for token in argv):
-            found_pytest = True
-        if note is None:
-            note = "workflow step"
-        add(argv, source, note)
+        for step in job.steps:
+            if not step.command:
+                # A ``run:`` the gate cannot turn into one argv (an empty or a
+                # block-scalar command): named, never executed, never dropped.
+                add(
+                    (),
+                    f"{source}#{job.name}",
+                    f"workflow_step_without_a_runnable_command:{step.name or 'unnamed'}",
+                    "skip",
+                )
+                continue
+            if (
+                "pip install" in step.command
+                or "requirements" in step.command
+                and "install" in step.command
+            ):
+                # An environment prerequisite, not a verification: the gate never
+                # installs dependencies (a network install is a stop condition).
+                # It is recorded, with the exact step, and never silently dropped.
+                add(
+                    (),
+                    f"{source}#dependency-install",
+                    f"workflow_dependency_install_not_run:{step.command}",
+                    "prereq",
+                )
+                continue
+            argv, note = _argv_for_step(step.command, ctx.python)
+            if not argv:
+                continue
+            if any("pytest" in token for token in argv):
+                found_pytest = True
+            if note is None:
+                note = "workflow step"
+            add(argv, source, note)
     if not found_pytest:
         add(
             (),
@@ -525,15 +732,28 @@ def check_canonical_suites_and_audits(ctx: GateContext) -> CheckResult:
     reasons: list[str] = []
     skipped: list[str] = []
     prerequisites: list[str] = []
+    excluded_non_host_jobs: list[str] = []
 
     for entry in discover_canonical_commands(ctx):
         if entry.kind == "prereq":
             prerequisites.append(f"{entry.source}:{entry.note}")
             continue
+        if entry.kind == "excluded":
+            # A job on a runner this host cannot execute: recorded as evidence
+            # for the report, and never a green or a failure by itself.
+            excluded_non_host_jobs.append(f"{entry.source}:{entry.note}")
+            continue
         if entry.kind == "skip":
             statuses.append(SKIPPED)
             skipped.append(entry.source)
             reasons.append(f"{entry.source}:{entry.note}")
+            continue
+        if not entry.argv:
+            # An empty argv is never handed to the runner as a command: it is
+            # reported as an undiscoverable step, which is a NO-GO.
+            statuses.append(SKIPPED)
+            skipped.append(entry.source)
+            reasons.append(f"{entry.source}:discovered_command_with_empty_argv")
             continue
         result = ctx.run(entry.argv, discovery_source=entry.source, note=entry.note, cwd=entry.cwd)
         commands.append(result)
@@ -552,6 +772,7 @@ def check_canonical_suites_and_audits(ctx: GateContext) -> CheckResult:
             "discovered_commands": len(commands),
             "skipped_with_reason": skipped,
             "not_executed_prerequisites": prerequisites,
+            "excluded_non_host_jobs": excluded_non_host_jobs,
             "extended": ctx.extended,
         },
     )
@@ -1445,6 +1666,8 @@ def render_report(report: Mapping[str, object]) -> str:
         if isinstance(detail, dict):
             for entry in list(detail.get("not_executed_prerequisites") or [])[:REASON_LINES]:
                 lines.append(f"      not executed (prerequisite): {entry}")
+            for entry in list(detail.get("excluded_non_host_jobs") or [])[:REASON_LINES]:
+                lines.append(f"      not discovered (non-host runner): {entry}")
         for command in check.get("commands") or []:  # type: ignore[union-attr]
             entry = dict(command)
             lines.append(

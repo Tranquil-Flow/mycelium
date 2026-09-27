@@ -1,7 +1,7 @@
 {
  "protocol": "mycelium.completion_checklist.v1",
  "claim_boundary": "progress navigation only; completion requires each gate's executed product, physical, browser, audit, handover, and atomic commit evidence",
- "updated_on": "2026-09-23T15:05:21Z",
+ "updated_on": "2026-09-27T11:55:32Z",
  "primary_gate": "A6",
  "workspace_ids": [
   "inference",
@@ -1508,7 +1508,7 @@
    "state": "design_only",
    "blockers": [
     "dependencies A4 and A9 atomic completion",
-    "two Android families and Apple test device",
+    "one family-bound Android conformance family for the initial build (Google Pixel 8 Pro, husky, SDK 36, Android 16) and an Apple test device; the two-independent-family requirement is deferred, not deleted, and reactivates before any general or cross-vendor Android claim",
     "optional speculative mobile draft role remains ineligible until A11 physical completion"
    ],
    "completed_requirements": [

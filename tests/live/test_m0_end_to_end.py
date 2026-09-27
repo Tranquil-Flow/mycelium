@@ -21,6 +21,7 @@ async def _asgi_request(
     *,
     method: str = "GET",
     document: dict[str, Any] | None = None,
+    session_token: str | None = None,
 ) -> tuple[int, bytes]:
     body = b"" if document is None else json.dumps(document).encode("utf-8")
     incoming: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -37,16 +38,20 @@ async def _asgi_request(
     async def send(message: dict[str, Any]) -> None:
         sent.append(message)
 
+    headers = [
+        (b"authorization", f"Bearer {AUTH_TOKEN}".encode("ascii")),
+        (b"content-type", b"application/json"),
+    ]
+    if session_token is not None:
+        headers.append((b"x-mycelium-session", session_token.encode("ascii")))
+
     await app(
         {
             "type": "http",
             "method": method,
             "path": path,
             "query_string": b"",
-            "headers": [
-                (b"authorization", f"Bearer {AUTH_TOKEN}".encode("ascii")),
-                (b"content-type", b"application/json"),
-            ],
+            "headers": headers,
         },
         receive,
         send,
@@ -117,9 +122,24 @@ def test_prompt_string_streams_decoded_text_through_the_real_gateway(
             )
         )
         assert submission_status == 202
-        stream_path = json.loads(submission_body)["stream_path"]
+        accepted = json.loads(submission_body)
+        stream_path = accepted["stream_path"]
+        session_token = accepted["session_token"]
 
-        stream_status, stream_body = asyncio.run(_asgi_request(app, stream_path))
+        # The gateway locks the session to the token its session-token source
+        # minted and advertises in the 202 body (A4 owner scoping, documented
+        # in docs/operations/m1-gateway-control-runtime.md §6). A subscriber
+        # that does not present that token is refused before a single event is
+        # streamed, so the harness must carry it exactly like the product
+        # client does (mycelium_ui_gateway/app.py forwards the owner token as
+        # X-Mycelium-Session).
+        refused_status, refused_body = asyncio.run(_asgi_request(app, stream_path))
+        assert refused_status == 409
+        assert json.loads(refused_body)["error"] == "session_owner_mismatch"
+
+        stream_status, stream_body = asyncio.run(
+            _asgi_request(app, stream_path, session_token=session_token)
+        )
         events = _sse_documents(stream_body)
         token_text = "".join(
             document["text"] for kind, document in events if kind == "token"
