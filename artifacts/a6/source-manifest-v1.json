@@ -2,6 +2,11 @@
   "base_commit": "3282983100595dfc8a730a06cf0cf5c750219e32",
   "files": [
     {
+      "path": ".github/workflows/governance.yml",
+      "sha256": "sha256:ac131aa6f6c73965bf12d21a75c292ff329926af710d8ddefaf69201800d8d8b",
+      "size_bytes": 1895
+    },
+    {
       "path": "conftest.py",
       "sha256": "sha256:c5703d62c9554813269af27a1d789c79ae0347d23eb06a1a1dd87a6e5baa64f3",
       "size_bytes": 12576
@@ -88,7 +93,7 @@
     },
     {
       "path": "docs/handover/mycelium-completion-checklist.v1.json",
-      "sha256": "sha256:f9be913827f8d67412587db93eccc87689bddc656a255a130eeedc4c7b3ad8d5",
+      "sha256": "sha256:f692c14f7cdf432da7e1dce9817d432786523a851fa4e8aae64dab2b2c794767",
       "size_bytes": 70975
     },
     {
@@ -105,6 +110,11 @@
       "path": "docs/operations/red-by-design-suites.md",
       "sha256": "sha256:ac6751f23c9040f78134647e67f408f85d864aab06652f2bd76748c34ce9960b",
       "size_bytes": 5418
+    },
+    {
+      "path": "docs/superpowers/specs/2026-08-18-mycelium-a12-generic-mobile-activation.md",
+      "sha256": "sha256:d1c8fbbe2852966522528f55c7e73e6a8054d96f69ef8aab00827cffe2c81197",
+      "size_bytes": 26215
     },
     {
       "path": "docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-peer-capability.md",
@@ -423,8 +433,8 @@
     },
     {
       "path": "mycelium_mobile/a12_activation.py",
-      "sha256": "sha256:518f8b47a0f0c4667dedaa8ea1b834d453446f12691b8d6fb99f69f48b4c71aa",
-      "size_bytes": 64256
+      "sha256": "sha256:0d4559a8f5227ca7ae345f2e98ba34fd1f1d9e5707fa514bed18d690bff972ba",
+      "size_bytes": 67246
     },
     {
       "path": "mycelium_mobile/a12_evidence.py",
@@ -433,13 +443,18 @@
     },
     {
       "path": "mycelium_mobile/android_adb_bridge.py",
-      "sha256": "sha256:48c6c5eb234e87da0adf4927b3a73cc3534619a055db562a1b359d3a90171ba7",
-      "size_bytes": 14890
+      "sha256": "sha256:a36842d77af27d7ee4ae8cca244123658b95cb637b9af1fa36a0a4b26f37e103",
+      "size_bytes": 15894
     },
     {
       "path": "mycelium_mobile/android_onboarding.py",
       "sha256": "sha256:372ec1e5498acee2ca515f505ac1a55ff1ce796922f502f84c92a76cb0efa5e1",
       "size_bytes": 27223
+    },
+    {
+      "path": "mycelium_mobile/android_sidecar.py",
+      "sha256": "sha256:7972f0823c48f71da88eda492c123573fe4bfe352828f0eaf904dcce389f7793",
+      "size_bytes": 15962
     },
     {
       "path": "mycelium_node/process.py",
@@ -915,6 +930,21 @@
       "path": "tests/a11_scaffold/test_a11_verifier_transaction.py",
       "sha256": "sha256:b837fa5b188770f2577d6cbdcbef6f2fd3efce34ebe74be73fb3deaf166d1924",
       "size_bytes": 31036
+    },
+    {
+      "path": "tests/a12_acceptance/inventory.v1.json",
+      "sha256": "sha256:42af758fbcdc03b0141fef04d464c1955ecfd681d88c3abf8bfe0207882245dc",
+      "size_bytes": 27704
+    },
+    {
+      "path": "tests/a12_acceptance/test_a12_family_bound_claim.py",
+      "sha256": "sha256:43a5bf30adf970fa4fb395ffc511617f7edf5428bbca0aae9d50adad7929203d",
+      "size_bytes": 4144
+    },
+    {
+      "path": "tests/a12_acceptance/test_a12_inventory.py",
+      "sha256": "sha256:c5f16fe478c4c269e865dce79064353465ed71d11f8d115431ab55468c01a80a",
+      "size_bytes": 18106
     },
     {
       "path": "tests/a12_mobile_deterministic/__init__.py",
@@ -1443,13 +1473,18 @@
     },
     {
       "path": "tests/mobile/test_a12_android_adb_bridge.py",
-      "sha256": "sha256:0b825150f219500ddf511972a75f44549b2312288689265ccc43b98330a510da",
-      "size_bytes": 8770
+      "sha256": "sha256:76415ff756f445cbba51846ddff9e8e51125bc18dd7bfcef38ac7a18cf1cf4ae",
+      "size_bytes": 12253
     },
     {
       "path": "tests/mobile/test_a12_android_onboarding.py",
       "sha256": "sha256:5c65774e99a1a98f10c49b357bffcef41b5150da64a45c7a0bb4d2be2a48316f",
       "size_bytes": 13721
+    },
+    {
+      "path": "tests/mobile/test_android_sidecar.py",
+      "sha256": "sha256:c845a4d91447b17d32c64da64cff1e724b87129b2f6f465ca698778e7405c1f4",
+      "size_bytes": 18001
     },
     {
       "path": "tests/node_agent/test_launch_shape_private_ancestry.py",
@@ -1928,5 +1963,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:15bcf88b414870fdad9563dac519e32b81c990f8908a45ae16b8d132c5759351"
+  "source_digest": "sha256:c13ab17edabd5d51a43bea31af25f504c05b16879d4a2a1b853b6ec897020b3d"
 }
