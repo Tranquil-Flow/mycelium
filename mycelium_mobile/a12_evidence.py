@@ -31,6 +31,7 @@ positive and negative gates of specification section 11 stay RED.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 import time
@@ -52,6 +53,15 @@ ROLE_QUALIFICATION_PROTOCOL = _gate.ROLE_QUALIFICATION_PROTOCOL
 ACTIVATION_QUALIFICATION_PROTOCOL = _gate.ACTIVATION_QUALIFICATION_PROTOCOL
 RUNTIME_OBSERVATION_PROTOCOL = _gate.RUNTIME_OBSERVATION_PROTOCOL
 CAPABILITY_REPORT_PROTOCOL = _gate.CAPABILITY_REPORT_PROTOCOL
+ANDROID_GENERAL_CLAIM_SCOPE = _gate.ANDROID_GENERAL_CLAIM_SCOPE
+ANDROID_FAMILY_BOUND_CLAIM_SCOPE = _gate.ANDROID_FAMILY_BOUND_CLAIM_SCOPE
+ANDROID_CLAIM_SCOPES = _gate.ANDROID_CLAIM_SCOPES
+#: [2026-09-27 OWNER RULING] the only family reference a ``family_bound`` claim
+#: may stand on: the pseudonymous digest of ``INITIAL_BUILD_ANDROID_FAMILY``.
+INITIAL_BUILD_ANDROID_FAMILY_REF = (
+    "sha256:"
+    + hashlib.sha256(_gate.INITIAL_BUILD_ANDROID_FAMILY.encode("utf-8")).hexdigest()
+)
 ROLE_CLASS_QUALIFIER = _gate.RUNG_AUTHORITIES["capability_eligibility"]
 
 sign_member_profile = _gate.sign_member_profile
@@ -141,6 +151,9 @@ ACTIVATION_QUALIFICATION_FIELDS = frozenset(
         "expires_at_unix_ms",
     }
 )
+#: Optional closed field of the activation qualification record.  Absent means
+#: ``general``: an unscoped record is a general claim (two families on Android).
+ACTIVATION_QUALIFICATION_OPTIONAL_FIELDS = frozenset({"claim_scope"})
 
 # Material the privacy-reduced projection must never carry (specification section 5).
 PRIVATE_PROJECTION_KEYS = frozenset(
@@ -556,15 +569,28 @@ def validate_mobile_activation_qualification(
     reference and a general Android claim needs two independent ones; an Apple
     platform never inherits its sibling's qualification; and the privacy-reduced
     projection may not carry private material at any depth.
+
+    [2026-09-27 OWNER RULING] The optional closed ``claim_scope`` field carries
+    the claim being asserted.  Absent or ``general`` keeps the two-family Android
+    requirement.  ``family_bound`` is Android-only and stands on exactly one
+    family reference, ``INITIAL_BUILD_ANDROID_FAMILY_REF``; any other or any
+    additional reference is refused, so no second family (Termux, simulator or
+    another phone) can be relabelled into a family-bound claim.
     """
 
+    fields = ACTIVATION_QUALIFICATION_FIELDS
+    if isinstance(record, Mapping) and "claim_scope" in record:
+        fields = fields | ACTIVATION_QUALIFICATION_OPTIONAL_FIELDS
     validated = _closed(
         record,
-        fields=ACTIVATION_QUALIFICATION_FIELDS,
+        fields=fields,
         code="mobile_activation_qualification_fields_invalid",
     )
     if validated["protocol"] != ACTIVATION_QUALIFICATION_PROTOCOL:
         _reject("mobile_activation_qualification_protocol_invalid")
+    claim_scope = validated.get("claim_scope", ANDROID_GENERAL_CLAIM_SCOPE)
+    if not isinstance(claim_scope, str) or claim_scope not in ANDROID_CLAIM_SCOPES:
+        _reject("mobile_activation_claim_scope_invalid")
     platform = validated["platform_family"]
     if platform not in MOBILE_PLATFORM_FAMILIES:
         _reject("mobile_activation_qualification_platform_invalid")
@@ -617,8 +643,15 @@ def validate_mobile_activation_qualification(
     for reference in references:
         if not isinstance(reference, str) or not _FAMILY_REFERENCE.match(reference):
             _reject("mobile_activation_family_reference_invalid")
+    if claim_scope == ANDROID_FAMILY_BOUND_CLAIM_SCOPE and platform != "android":
+        # The family-bound narrowing is an Android initial-build ruling only.
+        _reject("mobile_activation_claim_scope_invalid")
     if platform == "android":
-        _gate.require_android_family_evidence(references)
+        if claim_scope == ANDROID_FAMILY_BOUND_CLAIM_SCOPE and list(references) != [
+            INITIAL_BUILD_ANDROID_FAMILY_REF
+        ]:
+            _reject("android_family_bound_claim_family_mismatch")
+        _gate.require_android_family_evidence(references, claim_scope=claim_scope)
     else:
         carryover = validated["role_carryover_from"]
         if carryover is not None:
@@ -648,13 +681,18 @@ def validate_mobile_activation_qualification(
 
 __all__ = [
     "ACTIVATION_QUALIFICATION_FIELDS",
+    "ACTIVATION_QUALIFICATION_OPTIONAL_FIELDS",
     "ACTIVATION_QUALIFICATION_PROTOCOL",
+    "ANDROID_CLAIM_SCOPES",
+    "ANDROID_FAMILY_BOUND_CLAIM_SCOPE",
+    "ANDROID_GENERAL_CLAIM_SCOPE",
     "A12ContractError",
     "APPLE_PLATFORM_FAMILIES",
     "CAPABILITY_REPORT_PROTOCOL",
     "CONFORMANCE_SOURCE_KINDS",
     "EVIDENCE_LEVEL_FIELDS",
     "EVIDENCE_LEVEL_PROTOCOL",
+    "INITIAL_BUILD_ANDROID_FAMILY_REF",
     "LEVEL_DECLARED",
     "LEVEL_NATIVE_OBSERVED",
     "LEVEL_REGISTERED_WITH_BLOCKER",
