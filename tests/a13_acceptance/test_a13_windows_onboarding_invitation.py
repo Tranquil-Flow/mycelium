@@ -3,9 +3,11 @@
 The Windows target speaks the exact protocols the committed Mac slice froze and
 the landed Linux slice reuses (``mycelium.pairing_request.v1`` /
 ``mycelium.encrypted_invitation_handoff.v1``).  These tests pin that structural
-overlap and pin the remaining cross-lane gap: the frozen Mac owner module still
-refuses any peer class but its own, so owner-side approval for a Windows target
-is not served by the Mac module yet.
+overlap and pin the (now closed) cross-lane gap: the Mac owner module's
+peer-class allow-set now names ``windows_native_iroh`` explicitly alongside its
+own ``mac_mlx_iroh``, so owner-side approval for a Windows target is served by
+the Mac module, while an unlisted peer class remains refused (negative
+control).
 """
 
 from __future__ import annotations
@@ -133,13 +135,42 @@ def test_request_and_handoff_wire_shapes_match_the_mac_slice_field_for_field() -
         assert forbidden not in rendered
 
 
-def test_the_frozen_mac_owner_module_still_refuses_the_windows_peer_class() -> None:
+def test_the_mac_owner_module_now_admits_the_windows_peer_class() -> None:
+    """Cross-lane gap A1 closed: the owner module's allow-set now names both
+
+    supported peer classes explicitly.  ``new_pairing_request`` (the target-side
+    minting entry point the owner module also exposes) and
+    ``verify_pairing_request`` (the owner-side check on an incoming request)
+    both admit ``windows_native_iroh`` through the same closed allow-set.
+    """
+
+    signer = generate_ed25519_signer(endpoint_id="judge-mac")
+    request, _ = mac_pairing.new_pairing_request(
+        signer=signer,
+        node_id="judge-mac",
+        peer_class=WINDOWS_PEER_CLASS,
+        now=NOW,
+        ttl_seconds=300,
+        nonce=NONCE,
+    )
+    assert request["peer_class"] == WINDOWS_PEER_CLASS
+    verified = mac_pairing.verify_pairing_request(request, now=NOW + 1)
+    assert verified["peer_class"] == WINDOWS_PEER_CLASS
+
+
+def test_the_mac_owner_module_still_refuses_an_unknown_peer_class() -> None:
+    """Negative control: the allow-set stays closed for classes never listed.
+
+    This proves the A1 fix is an explicit allow-set addition, not a relaxed or
+    removed check — an OS/brand string that nobody declared is still refused.
+    """
+
     signer = generate_ed25519_signer(endpoint_id="judge-mac")
     with pytest.raises(mac_pairing.PairingError) as caught:
         mac_pairing.new_pairing_request(
             signer=signer,
             node_id="judge-mac",
-            peer_class=WINDOWS_PEER_CLASS,
+            peer_class="some_future_unlisted_iroh",
             now=NOW,
             ttl_seconds=300,
             nonce=NONCE,

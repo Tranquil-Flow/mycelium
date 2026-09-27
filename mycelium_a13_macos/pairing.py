@@ -31,7 +31,11 @@ from mycelium_qualification.signing import (
 PAIRING_REQUEST_PROTOCOL = "mycelium.pairing_request.v1"
 ENCRYPTED_HANDOFF_PROTOCOL = "mycelium.encrypted_invitation_handoff.v1"
 _HANDOFF_PAYLOAD_PROTOCOL = "mycelium.encrypted_invitation_payload.v1"
-_SUPPORTED_PEER_CLASS = "mac_mlx_iroh"
+#: Closed allow-set of peer classes the owner module admits.  Adding a class
+#: here is a deliberate cross-lane decision (see the pinned test for the
+#: Windows admission); anything not in this set is refused, and there is no
+#: brand/OS sniffing fallback that would admit an unlisted class implicitly.
+_SUPPORTED_PEER_CLASSES = frozenset({"mac_mlx_iroh", "windows_native_iroh"})
 _REQUEST_TTL_MAX = 600
 _MAX_HANDOFF_BYTES = 64 * 1024
 _MAX_QUOTA_BYTES = 1024**4
@@ -155,7 +159,7 @@ def new_pairing_request(
         raise PairingError("pairing_identity_invalid")
     if not isinstance(node_id, str) or _SEGMENT_RE.fullmatch(node_id) is None:
         raise PairingError("pairing_request_invalid")
-    if peer_class != _SUPPORTED_PEER_CLASS:
+    if peer_class not in _SUPPORTED_PEER_CLASSES:
         raise PairingError("pairing_peer_class_unsupported")
     if (
         isinstance(ttl_seconds, bool)
@@ -227,7 +231,7 @@ def verify_pairing_request(
     ):
         raise PairingError("pairing_request_signature_invalid")
     if (
-        value.get("peer_class") != _SUPPORTED_PEER_CLASS
+        value.get("peer_class") not in _SUPPORTED_PEER_CLASSES
         or value.get("invite_protocol") != INVITE_BUNDLE_PROTOCOL
     ):
         raise PairingError("pairing_request_invalid")
