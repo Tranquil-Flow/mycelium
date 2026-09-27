@@ -10,25 +10,40 @@ wire protocols the committed macOS slice froze and the landed Linux slice reuses
     mycelium.encrypted_invitation_handoff.v1
 
 so the request and handoff field sets are identical.  The peer class differs
-(``windows_native_iroh``); the frozen macOS owner module refuses any peer class
-but its own, so owner-side approval of a Windows pairing request is a cross-lane
-change.  That gap is left visible (and is pinned by a test) rather than worked
-around by editing macOS code or weakening the peer-class check.
+(``windows_native_iroh``); the macOS owner module now admits it through an
+explicit, closed peer-class allow-set alongside ``mac_mlx_iroh`` (an unlisted
+class is still refused).
 
 Windows-specific boundaries:
 
 * the durable state root and identity file must be reported by the caller as
-  ``owner_only`` (the Windows ACL summary an installer would read); on a POSIX
-  host the owner uid and mode are checked as well;
+  ``owner_only`` (the Windows ACL summary an installer would read) AND, on an
+  actual (or injected, for testing) win32 host, that observation is
+  independently re-derived from the host via a real ACL reader
+  (``icacls``/win32 security APIs behind an injectable seam) — the caller
+  string alone never satisfies the win32 check, and the check fails CLOSED
+  when the reader cannot verify.  On a POSIX host the owner uid and mode are
+  checked directly instead;
+* the atomic local-join write uses ``os.O_NOFOLLOW`` plus a directory
+  ``fsync`` on POSIX; on win32 (real or injected) it substitutes an explicit
+  pre-open symlink refusal for the missing ``O_NOFOLLOW`` flag and a real
+  ``FlushFileBuffers``-based directory flush behind an injectable seam,
+  failing CLOSED (raising, never silently skipping the durability guarantee)
+  when no real win32 host and no injected flush are available;
 * this module never writes a private key, never copies identity material into a
   record or a return value, never stores plaintext handoff state, and never
   claims serving capability, qualification, or inference eligibility.
+
+Every win32-only code path here is exercised on this host only through the
+injectable seams (``acl_reader`` / ``directory_flush``) plus a monkeypatched
+``sys.platform``; the seams' real bodies (``icacls``, ``ctypes.windll``) are
+unverified on an actual Windows device, same as the rest of the Windows path.
 """
 
 from __future__ import annotations
 
 import base64
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 import hashlib
 import json
 import math
@@ -36,6 +51,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import sys
 from typing import Any
 
 from cryptography.exceptions import InvalidTag
@@ -454,10 +470,112 @@ def _acl_is_owner_only(acl_observation: object) -> bool:
     return acl_observation == OWNER_ONLY_ACL
 
 
+_WIN32_TRUSTED_ACL_PRINCIPALS = frozenset(
+    {"NT AUTHORITY\\SYSTEM", "BUILTIN\\ADMINISTRATORS"}
+)
+
+
+def _win32_current_principal() -> str:
+    """The interactive user's ``DOMAIN\\USER`` principal, as ``icacls`` prints it."""
+
+    domain = os.environ.get("USERDOMAIN")
+    user = os.environ.get("USERNAME")
+    if not domain or not user:
+        raise OnboardingError("onboarding_acl_unverifiable")
+    return f"{domain}\\{user}".upper()
+
+
+def _parse_icacls_owner_only(output: str, *, path: Path) -> str:
+    """Reduce one ``icacls`` listing to an :data:`ACL_OBSERVATIONS` value.
+
+    Fails closed (raises) on anything the parser cannot read unambiguously
+    rather than guessing; only returns ``owner_only`` when every principal
+    granted an ACE is the current user, SYSTEM, or Administrators.
+    """
+
+    header = str(path)
+    principals: set[str] = set()
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line or line.lower().startswith("successfully processed"):
+            continue
+        if line.startswith(header):
+            line = line[len(header) :].strip()
+        if ":" not in line:
+            continue
+        principal = line.split(":", 1)[0].strip()
+        if not principal:
+            raise OnboardingError("onboarding_acl_unverifiable")
+        principals.add(principal.upper())
+    if not principals:
+        raise OnboardingError("onboarding_acl_unverifiable")
+    trusted = _WIN32_TRUSTED_ACL_PRINCIPALS | {_win32_current_principal()}
+    if principals - trusted:
+        return "not_owner_only"
+    return OWNER_ONLY_ACL
+
+
+def _default_win32_acl_reader(path: Path) -> str:
+    """Read the real NTFS ACL summary for ``path`` via ``icacls``.
+
+    Only reachable on an actual win32 host; refuses (fails closed) rather than
+    guessing when the platform tool is unavailable or its output is
+    unparseable.  Never exercised on Windows by this program (see FINDINGS).
+    """
+
+    if sys.platform != "win32":
+        raise OnboardingError("onboarding_acl_unverifiable")
+    import subprocess
+
+    try:
+        completed = subprocess.run(
+            ["icacls", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, ValueError) as exc:
+        raise OnboardingError("onboarding_acl_unverifiable") from exc
+    if completed.returncode != 0 or not completed.stdout.strip():
+        raise OnboardingError("onboarding_acl_unverifiable")
+    return _parse_icacls_owner_only(completed.stdout, path=path)
+
+
+def _observed_win32_acl(path: Path, *, acl_reader: Callable[[Path], str] | None) -> str:
+    """Derive the ACL observation from the host; a bare string never suffices.
+
+    ``acl_reader`` is the injectable seam: tests supply a fake reader so this
+    path is exercisable on macOS, while the real reader (``icacls``-based)
+    only runs when ``sys.platform`` is actually ``"win32"``.
+    """
+
+    reader = acl_reader if acl_reader is not None else _default_win32_acl_reader
+    try:
+        observed = reader(path)
+    except OnboardingError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - external reader boundary
+        raise OnboardingError("onboarding_acl_unverifiable") from exc
+    if not isinstance(observed, str) or observed not in ACL_OBSERVATIONS:
+        raise OnboardingError("onboarding_acl_unverifiable")
+    return observed
+
+
 def _private_directory(
-    path: Path, *, create: bool, acl_observation: object = OWNER_ONLY_ACL
+    path: Path,
+    *,
+    create: bool,
+    acl_observation: object = OWNER_ONLY_ACL,
+    acl_reader: Callable[[Path], str] | None = None,
 ) -> Path:
-    """The durable state root: owner-only ACL required, POSIX mode checked too."""
+    """The durable state root: owner-only ACL required and, on win32, verified.
+
+    A caller-supplied ``owner_only`` declaration is necessary but never
+    sufficient on win32: the observation is independently re-derived from the
+    host (or an injected test reader) and must also come back ``owner_only``.
+    On POSIX the real uid/mode are still checked directly, as before.
+    """
 
     path = Path(path)
     if not _acl_is_owner_only(acl_observation):
@@ -466,14 +584,22 @@ def _private_directory(
         path.mkdir(mode=0o700, parents=True, exist_ok=True)
     if path.is_symlink() or not path.is_dir():
         raise OnboardingError("onboarding_state_root_unsafe")
-    info = path.stat()
-    if os.name == "posix":
+    if sys.platform == "win32":
+        if _observed_win32_acl(path, acl_reader=acl_reader) != OWNER_ONLY_ACL:
+            raise OnboardingError("onboarding_state_root_unsafe")
+    elif os.name == "posix":
+        info = path.stat()
         if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
             raise OnboardingError("onboarding_state_root_unsafe")
     return path
 
 
-def _checked_identity(identity_path: Path, *, acl_observation: object = OWNER_ONLY_ACL) -> Path:
+def _checked_identity(
+    identity_path: Path,
+    *,
+    acl_observation: object = OWNER_ONLY_ACL,
+    acl_reader: Callable[[Path], str] | None = None,
+) -> Path:
     """Stat the durable target identity; never read, copy, or create it."""
 
     path = Path(identity_path)
@@ -481,30 +607,115 @@ def _checked_identity(identity_path: Path, *, acl_observation: object = OWNER_ON
         raise OnboardingError("onboarding_identity_unsafe")
     if path.is_symlink() or not path.exists() or not path.is_file():
         raise OnboardingError("onboarding_identity_missing")
-    info = path.stat()
-    if os.name == "posix" and (
-        info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600
-    ):
-        raise OnboardingError("onboarding_identity_unsafe")
+    if sys.platform == "win32":
+        if _observed_win32_acl(path, acl_reader=acl_reader) != OWNER_ONLY_ACL:
+            raise OnboardingError("onboarding_identity_unsafe")
+    elif os.name == "posix":
+        info = path.stat()
+        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
+            raise OnboardingError("onboarding_identity_unsafe")
     return path
 
 
-def _atomic_write(path: Path, raw: bytes) -> None:
-    temporary = path.with_name("." + path.name + ".joining")
-    descriptor = os.open(
-        temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+def _win32_flush_directory(directory: Path) -> None:
+    """Durably flush directory metadata on NTFS via a backup-semantics handle.
+
+    Only reachable on an actual win32 host; raises rather than silently
+    skipping the guarantee when the platform call is unavailable or fails.
+    Never exercised on Windows by this program (see FINDINGS §3.2/§3.4 A6).
+    """
+
+    if sys.platform != "win32":
+        raise OnboardingError("onboarding_join_durability_unavailable")
+    import ctypes
+
+    generic_write = 0x40000000
+    file_share_read = 0x00000001
+    file_share_write = 0x00000002
+    open_existing = 3
+    file_flag_backup_semantics = 0x02000000
+    invalid_handle_value = (1 << (ctypes.sizeof(ctypes.c_void_p) * 8)) - 1
+
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    handle = kernel32.CreateFileW(
+        str(directory),
+        generic_write,
+        file_share_read | file_share_write,
+        None,
+        open_existing,
+        file_flag_backup_semantics,
+        None,
     )
+    if not handle or handle == invalid_handle_value:
+        raise OnboardingError("onboarding_join_durability_unavailable")
+    try:
+        if not kernel32.FlushFileBuffers(handle):
+            raise OnboardingError("onboarding_join_durability_unavailable")
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _win32_temp_write_is_unsafe(temporary: Path) -> bool:
+    """Best-effort substitute for the missing ``os.O_NOFOLLOW`` flag on win32.
+
+    ``O_EXCL`` already refuses to create over an existing path (symlink or
+    not); this closes the remaining window by refusing outright if the
+    temporary path is already a symlink right before the create attempt.
+    """
+
+    try:
+        return temporary.is_symlink()
+    except OSError:
+        return True
+
+
+def _atomic_write(
+    path: Path,
+    raw: bytes,
+    *,
+    directory_flush: Callable[[Path], None] | None = None,
+) -> None:
+    """Write ``path`` atomically with a platform-appropriate durability seam.
+
+    POSIX keeps the exact original primitives (``O_NOFOLLOW`` plus a
+    directory ``fsync``).  win32 has neither primitive: it substitutes an
+    explicit pre-open symlink refusal for ``O_NOFOLLOW``, and a real
+    ``FlushFileBuffers``-based directory flush (behind the injectable
+    ``directory_flush`` seam, so this is exercisable on macOS) for the
+    directory ``fsync`` — failing CLOSED (raising) rather than silently
+    skipping the durability guarantee when no real win32 host and no
+    injected flush are available.
+    """
+
+    temporary = path.with_name("." + path.name + ".joining")
+    win32 = sys.platform == "win32"
+    if win32:
+        if _win32_temp_write_is_unsafe(temporary):
+            raise OnboardingError("onboarding_join_write_unsafe")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    else:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    descriptor = os.open(temporary, flags, 0o600)
     try:
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(raw)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        if win32:
+            flush = directory_flush if directory_flush is not None else _win32_flush_directory
+            try:
+                flush(path.parent)
+            except OnboardingError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - external flush boundary
+                raise OnboardingError("onboarding_join_durability_unavailable") from exc
+        else:
+            directory = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
     finally:
         try:
             temporary.unlink(missing_ok=True)
@@ -567,14 +778,28 @@ def complete_local_join(
     member_generation: int,
     now: float,
     acl_observation: object = OWNER_ONLY_ACL,
+    acl_reader: Callable[[Path], str] | None = None,
+    directory_flush: Callable[[Path], None] | None = None,
     plaintext_handoff_file: Path | None = None,
 ) -> dict[str, Any]:
-    """Verify, decrypt, check the seed pin, and persist one accepted member."""
+    """Verify, decrypt, check the seed pin, and persist one accepted member.
+
+    ``acl_reader`` and ``directory_flush`` are the win32 injectable seams for
+    gaps A4/A6: on an actual (or, for testing, monkeypatched) win32 host they
+    replace the caller-asserted ACL and the POSIX-only join-write durability
+    primitives with real, independently-verified equivalents, failing CLOSED
+    when no real host and no injected seam are available.
+    """
 
     root = _private_directory(
-        Path(state_root), create=False, acl_observation=acl_observation
+        Path(state_root),
+        create=False,
+        acl_observation=acl_observation,
+        acl_reader=acl_reader,
     )
-    _checked_identity(Path(identity_path), acl_observation=acl_observation)
+    _checked_identity(
+        Path(identity_path), acl_observation=acl_observation, acl_reader=acl_reader
+    )
     if (
         isinstance(member_generation, bool)
         or not isinstance(member_generation, int)
@@ -596,7 +821,10 @@ def complete_local_join(
         raise OnboardingError("onboarding_seed_pin_mismatch")
 
     onboarding = _private_directory(
-        root / "onboarding", create=True, acl_observation=acl_observation
+        root / "onboarding",
+        create=True,
+        acl_observation=acl_observation,
+        acl_reader=acl_reader,
     )
     member_path = onboarding / "member.json"
     ledger_path = onboarding / "consumed-handoffs.json"
@@ -621,12 +849,15 @@ def complete_local_join(
         "eligibility": "member_only",
         "route_ready": False,
     }
-    _atomic_write(member_path, canonical_json_bytes(record))
+    _atomic_write(
+        member_path, canonical_json_bytes(record), directory_flush=directory_flush
+    )
     _atomic_write(
         ledger_path,
         canonical_json_bytes(
             {"protocol": _LEDGER_PROTOCOL, "nonces": sorted([*ledger, nonce])}
         ),
+        directory_flush=directory_flush,
     )
 
     erased = False
