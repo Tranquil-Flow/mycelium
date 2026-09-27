@@ -283,6 +283,14 @@ def test_rate_shopping_after_the_first_qualifying_rate_is_refused() -> None:
     assert result["reasons"] == ["calibration_invalid"]
 
 
+def test_scored_windows_must_run_at_the_calibrated_rate() -> None:
+    run = _run([0.5] * 12)
+    run["windows"][7]["offered_arrival_rate_per_second"] = 4.0
+    result = evaluate_throughput(run)
+    assert result["decision"] == "inconclusive"
+    assert "workload_or_session_changed" in result["reasons"]
+
+
 def test_r33_shaped_gains_never_pass() -> None:
     r33 = [
         0.9576492856350087,
