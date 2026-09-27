@@ -321,6 +321,10 @@ class NodeCommandError(RuntimeError):
         super().__init__(code)
 
 
+# Router request states an ``inference_started`` observation may report.
+_STARTED_REQUEST_STATUSES = frozenset({"DECODING", "COMPLETED", "CANCELLED"})
+
+
 def _require(condition: bool, code: str) -> None:
     if not condition:
         raise NodeCommandError(code)
@@ -3030,6 +3034,11 @@ class PhysicalNodeService:
             # generic symptom.
             _emit_prefill_transport_diagnostic(self.transport)
         _require(status not in {"PREFILL", "LOCKED"}, "prefill_completion_timeout")
+        self._require_started_status(
+            request_id,
+            status,
+            legacy=control_data is None,
+        )
         if getattr(self.runtime, "decode_mode", None) == "stage_local_kv":
             # PrefillChunkCompleted and the first TokenEvent are separately
             # ordered physical frames. The former may transition the entry to
@@ -3065,6 +3074,11 @@ class PhysicalNodeService:
                         "path": None,
                     },
                 )
+            self._require_started_status(
+                request_id,
+                status,
+                legacy=control_data is None,
+            )
             _require(
                 bool(sink.token_ids) or status == "COMPLETED",
                 "prefill_token_timeout",
@@ -3088,6 +3102,30 @@ class PhysicalNodeService:
                 },
             },
         )
+
+    def _require_started_status(
+        self,
+        request_id: str,
+        status: str,
+        *,
+        legacy: bool,
+    ) -> None:
+        """Fail closed when prefill ended the request without a live result.
+
+        ``inference_started`` is a success-shaped, signed observation.  Only a
+        request that is decoding, already completed, or cancelled by its owner
+        may be reported through it.  A terminal ``FAILED`` (or any other
+        status) means the path executed no usable work, so returning it would
+        let a caller mistake an empty output for a completed request.  The
+        legacy qualification path still retires its terminal Router state
+        before the error is raised.
+        """
+
+        if status in _STARTED_REQUEST_STATUSES:
+            return
+        if legacy and status in {"COMPLETED", "FAILED", "CANCELLED"}:
+            self._retire_legacy_terminal_path(request_id)
+        raise NodeCommandError("inference_start_failed")
 
     def _infer_decode(self, payload: dict[str, Any]) -> dict[str, Any]:
         fields = set(payload)
