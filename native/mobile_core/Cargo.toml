@@ -41,3 +41,11 @@ serde_json = { version = "1", features = ["float_roundtrip", "arbitrary_precisio
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
+
+[[example]]
+name = "node_cli"
+required-features = ["net"]
+
+[[example]]
+name = "route_peer"
+required-features = ["net"]
