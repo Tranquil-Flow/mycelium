@@ -3,9 +3,10 @@
 The Linux target speaks the exact wireless-shape protocols the committed Mac
 slice froze (``mycelium.pairing_request.v1`` /
 ``mycelium.encrypted_invitation_handoff.v1``).  These tests assert that overlap
-structurally, and they pin the one remaining cross-lane gap: the frozen Mac
-owner slice still rejects the Linux peer class, so owner-side approval for a
-Linux target is not yet served by the Mac module.
+structurally, and they pin the (now closed) cross-lane gap: the Mac owner
+module's closed peer-class allow-set names ``linux_native_iroh`` explicitly, so
+owner-side approval for a Linux target is served by the Mac module end to end,
+while an unlisted peer class remains refused (negative control).
 """
 
 from __future__ import annotations
@@ -131,20 +132,80 @@ def test_request_and_handoff_wire_shapes_match_the_mac_slice_field_for_field() -
     assert set(case["handoff"]) == set(mac_handoff)
 
 
-def test_mac_owner_slice_currently_rejects_a_linux_peer_class_request() -> None:
-    """The remaining cross-lane requirement, pinned as live behaviour.
+def test_mac_owner_module_now_admits_a_linux_peer_class_request() -> None:
+    """Cross-lane gap closed: the owner module admits the Linux peer class.
 
-    The frozen macOS slice's verifier refuses the Linux peer class through its
-    combined peer-class/invite-protocol check, so the refusal code is
-    ``pairing_request_invalid`` (its ``pairing_peer_class_unsupported`` code is
-    only reachable from ``new_pairing_request``).  Either way the macOS owner
-    cannot mint an invitation for a Linux target today.
+    A request minted by the Linux target verifies through the Mac owner
+    module, the Mac owner approves it, and only the Linux target's recipient
+    key decrypts the resulting handoff back to the bound invitation.  The Mac
+    module's own ``new_pairing_request`` entry point admits the class through
+    the same closed allow-set.
     """
 
     case = _case()
-    with pytest.raises(mac_pairing.PairingError) as caught:
-        mac_pairing.verify_pairing_request(case["request"], now=NOW)
-    assert caught.value.code == "pairing_request_invalid"
+    verified = mac_pairing.verify_pairing_request(case["request"], now=NOW)
+    assert verified["peer_class"] == LINUX_PEER_CLASS
+
+    handoff = mac_pairing.approve_pairing_request(
+        request=case["request"],
+        invite_bundle=case["bundle"],
+        quota=QUOTA,
+        now=NOW,
+    )
+    payload = decrypt_linux_invitation_handoff(
+        request=case["request"],
+        handoff=handoff,
+        recipient_private_key=case["private_key"],
+        now=NOW + 1,
+    )
+    assert payload["peer_class"] == LINUX_PEER_CLASS
+    assert payload["invite_bundle"] == case["bundle"]
+
+    minted, _ = mac_pairing.new_pairing_request(
+        signer=generate_ed25519_signer(endpoint_id="judge-mac"),
+        node_id="judge-mac",
+        peer_class=LINUX_PEER_CLASS,
+        now=NOW,
+        ttl_seconds=300,
+        nonce=NONCE,
+    )
+    assert minted["peer_class"] == LINUX_PEER_CLASS
+
+
+def test_mac_owner_module_still_refuses_an_unlisted_peer_class() -> None:
+    """Negative control: the allow-set stays closed for classes never listed.
+
+    The Linux admission is an explicit allow-set addition, not a relaxed or
+    removed check: a Linux-looking class nobody declared is still refused on
+    both the minting and the verifying path.
+    """
+
+    signer = generate_ed25519_signer(endpoint_id="judge-mac")
+    with pytest.raises(mac_pairing.PairingError) as minted:
+        mac_pairing.new_pairing_request(
+            signer=signer,
+            node_id="judge-mac",
+            peer_class="linux_future_unlisted_iroh",
+            now=NOW,
+            ttl_seconds=300,
+            nonce=NONCE,
+        )
+    assert minted.value.code == "pairing_peer_class_unsupported"
+
+    request, _ = mac_pairing.new_pairing_request(
+        signer=signer,
+        node_id="judge-mac",
+        peer_class="mac_mlx_iroh",
+        now=NOW,
+        ttl_seconds=300,
+        nonce=NONCE,
+    )
+    unsigned = {key: value for key, value in request.items() if key != "signature"}
+    unsigned["peer_class"] = "linux_future_unlisted_iroh"
+    forged = dict(unsigned, signature=signer.sign(unsigned))
+    with pytest.raises(mac_pairing.PairingError) as verified:
+        mac_pairing.verify_pairing_request(forged, now=NOW)
+    assert verified.value.code == "pairing_request_invalid"
 
 
 def test_linux_verifier_rejects_a_mac_peer_class_request() -> None:

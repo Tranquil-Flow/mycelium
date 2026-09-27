@@ -32,10 +32,13 @@ PAIRING_REQUEST_PROTOCOL = "mycelium.pairing_request.v1"
 ENCRYPTED_HANDOFF_PROTOCOL = "mycelium.encrypted_invitation_handoff.v1"
 _HANDOFF_PAYLOAD_PROTOCOL = "mycelium.encrypted_invitation_payload.v1"
 #: Closed allow-set of peer classes the owner module admits.  Adding a class
-#: here is a deliberate cross-lane decision (see the pinned test for the
-#: Windows admission); anything not in this set is refused, and there is no
-#: brand/OS sniffing fallback that would admit an unlisted class implicitly.
-_SUPPORTED_PEER_CLASSES = frozenset({"mac_mlx_iroh", "windows_native_iroh"})
+#: here is a deliberate cross-lane decision (see the pinned tests for the
+#: Windows and Linux admissions); anything not in this set is refused, and
+#: there is no brand/OS sniffing fallback that would admit an unlisted class
+#: implicitly.
+_SUPPORTED_PEER_CLASSES = frozenset(
+    {"mac_mlx_iroh", "windows_native_iroh", "linux_native_iroh"}
+)
 _REQUEST_TTL_MAX = 600
 _MAX_HANDOFF_BYTES = 64 * 1024
 _MAX_QUOTA_BYTES = 1024**4
