@@ -76,7 +76,10 @@ test('product shell navigation stays truthful, local, and inference-disabled', a
     ['Inference', 'inference', /^inference$/i],
   ] as const;
 
+  const routeByHash = new Map(routeChecks.map((entry) => [entry[1], entry]));
+
   for (const [label, hash, heading] of routeChecks) {
+    const otherRoute = routeByHash.get(hash === 'settings' ? 'inference' : 'settings') ?? routeChecks[0];
     await navigation.getByRole('link', { name: new RegExp(`^${label}`) }).click();
     await expect(page).toHaveURL(new RegExp(`#${hash}$`));
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
@@ -85,15 +88,49 @@ test('product shell navigation stays truthful, local, and inference-disabled', a
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
     await page.reload();
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
-    await page.goto(`/#${hash === 'settings' ? 'inference' : 'settings'}`);
+    await page.goto(`/#${otherRoute[1]}`);
     await page.goBack();
     await expect(page).toHaveURL(new RegExp(`#${hash}$`));
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
-    await page.goto(`/#${hash === 'settings' ? 'inference' : 'settings'}`);
-    await page.goto(`/#${hash}`);
+    // Load-based back/forward pair, on the canonical /operator path.
+    //
+    // The two entries are created by real document loads and the canonical path is asserted
+    // before traversing, so this stays a strict check in every engine. Measured on WebKit
+    // (Playwright 1.61.1): a `history.replaceState` that rewrites a session-history entry
+    // (here the legacy `/#<hash>` -> `/operator#<hash>` canonicalisation the shell performs on
+    // load) makes WebKit drop that entry's forward list, so `history.forward()` from it is a
+    // silent no-op - `goBack()` reached `/operator#settings` and `goForward()` stayed on
+    // `/operator#settings`, with no navigation event; the identical sequence over plain,
+    // un-rewritten entries traverses correctly and chromium/firefox keep the entry. Driving
+    // the pair through entries the shell canonicalises on load would therefore assert WebKit's
+    // dropped forward list instead of this router's behaviour. If the shell ever stops holding
+    // the canonical path on a loaded entry, the assertion below goes red.
+    await page.goto(`/operator#${otherRoute[1]}`);
+    await page.goto(`/operator#${hash}`);
+    await expect(page).toHaveURL(new RegExp(`/operator#${hash}$`));
     await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`/operator#${otherRoute[1]}$`));
     await page.goForward();
-    await expect(page).toHaveURL(new RegExp(`#${hash}$`));
+    await expect(page).toHaveURL(new RegExp(`/operator#${hash}$`));
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+    // In-app router back/forward pair: two pushState entries created by the real navigation
+    // links (section -> section -> Back -> Forward). A router that stops pushing history
+    // entries, or stops restoring the hash route on a history traversal, fails here in every
+    // engine.
+    await navigation.getByRole('link', { name: new RegExp(`^${otherRoute[0]}`) }).click();
+    await expect(page).toHaveURL(new RegExp(`/operator#${otherRoute[1]}$`));
+    await expect(
+      page.getByRole('heading', { level: 1, name: otherRoute[2] }),
+    ).toBeVisible();
+    await navigation.getByRole('link', { name: new RegExp(`^${label}`) }).click();
+    await expect(page).toHaveURL(new RegExp(`/operator#${hash}$`));
+    await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`/operator#${otherRoute[1]}$`));
+    await expect(
+      page.getByRole('heading', { level: 1, name: otherRoute[2] }),
+    ).toBeVisible();
+    await page.goForward();
+    await expect(page).toHaveURL(new RegExp(`/operator#${hash}$`));
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
   }
 
