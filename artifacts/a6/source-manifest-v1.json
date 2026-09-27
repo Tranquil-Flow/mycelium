@@ -1413,8 +1413,8 @@
     },
     {
       "path": "native/mobile_core/Cargo.toml",
-      "sha256": "sha256:b5a9dd505b6ab47ca2017a2fc2982f0f8afb9c8d8c55519d3446e9058ff5a558",
-      "size_bytes": 1502
+      "sha256": "sha256:de0b86144bbaad3339140b859e390c62384b9ee976878ee07d6f3f25df1ffe8a",
+      "size_bytes": 1622
     },
     {
       "path": "native/mobile_core/examples/node_cli.rs",
@@ -2928,5 +2928,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:3890f4ccd659bc5b60d22b78f7180abb16d74bbefa3cf682d5db00c29f92e6ca"
+  "source_digest": "sha256:38a01868e74e34c9481be11b1094862a817d83705875d32bb0fa127dc64670b7"
 }
