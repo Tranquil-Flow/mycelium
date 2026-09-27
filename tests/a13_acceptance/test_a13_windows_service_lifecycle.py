@@ -1,8 +1,11 @@
 """A13 Windows least-privilege service lifecycle (source tranche).
 
-The Windows member is a closed *declaration* here: the repository's shared
-service renderer emits launchd and systemd members only, so this tranche refuses
-to fabricate a Windows service member and pins that refusal.
+Gap A3 closed: the repository's shared service renderer
+(``mycelium_service_package``) now emits a Windows SCM descriptor -- the
+service or per-user variant, selected by the declared ``install_mode`` --
+alongside its unchanged launchd+systemd members.  Every other caller of the
+shared renderer (M22, the A13 Linux tranche) still gets exactly its old
+launchd+systemd-only payload set, since the Windows member is opt-in.
 """
 
 from __future__ import annotations
@@ -165,12 +168,60 @@ def test_windows_service_member_reports_bounded_facts_only() -> None:
         assert forbidden not in rendered
 
 
-def test_the_shared_renderer_has_no_windows_member_and_is_refused() -> None:
+def test_the_shared_renderer_now_renders_the_declared_windows_member() -> None:
     member = windows_service_member_from_shared_renderer(_descriptor())
     assert member["renderer"] == "shared_service_package"
-    assert member["windows_member_absent"] is True
-    assert member["declared_members"] == ["launchd", "systemd"]
-    assert member["windows_member_rendered"] is False
+    assert member["windows_member_absent"] is False
+    assert member["declared_members"] == [
+        "launchd",
+        "systemd",
+        "windows_service",
+        "windows_service_per_user",
+    ]
+    assert member["windows_member_rendered"] is True
+    assert member["windows_install_mode"] == "windows_service"
+    assert member["windows_member_name"].endswith("windows-service.xml")
+    assert member["windows_member_name"] in member["rendered_members"]
+    # launchd/systemd stay exactly as before -- the Windows member is additive.
+    assert "org.mycelium.mycelium-win-1-agent.plist" in member["rendered_members"]
+    assert "mycelium-mycelium-win-1-agent.service" in member["rendered_members"]
+
+    # Negative control: install_mode actually drives which artifact is
+    # selected -- the per-user descriptor is a DIFFERENT rendered file with a
+    # different digest, not the same bytes relabeled.
+    per_user = windows_service_member_from_shared_renderer(
+        _descriptor(install_mode="windows_service_per_user")
+    )
+    assert per_user["windows_install_mode"] == "windows_service_per_user"
+    assert per_user["windows_member_name"].endswith("windows-service-per-user.xml")
+    assert per_user["windows_member_name"] != member["windows_member_name"]
+    assert per_user["windows_member_sha256"] != member["windows_member_sha256"]
+
+    # Negative control: a tampered/unknown install_mode can never be rendered
+    # (validated upstream), so the selection is not a hardcoded pass-through.
+    assert _code(
+        lambda: windows_service_member_from_shared_renderer(
+            _descriptor(install_mode="systemd_user")
+        )
+    ) == "windows_service_install_mode_invalid"
+
+
+def test_windows_member_content_is_least_privilege_and_carries_no_secret() -> None:
+    from mycelium_a13_windows.service_lifecycle import _shared_renderer_config
+    from mycelium_service_package import build_service_package
+
+    member = windows_service_member_from_shared_renderer(_descriptor())
+    config = _shared_renderer_config(_descriptor())
+    package = build_service_package(
+        config, package_root=Path("/var/lib/mycelium/packages"), include_windows_member=True
+    )
+    xml = package["_payloads"][member["windows_member_name"]].decode("utf-8")
+    assert "<RestrictedToken>true</RestrictedToken>" in xml
+    assert "<PublicListener>false</PublicListener>" in xml
+    assert "NT SERVICE\\mycelium-mycelium-win-1-agent" in xml
+    assert "mycelium-win-1-agent" in xml
+    for forbidden in ("TOKEN", "SECRET", "PASSWORD", "PRIVATE", "CREDENTIAL"):
+        assert forbidden not in xml.upper().replace("RESTRICTEDTOKEN", "")
 
 
 def test_uninstall_never_claims_a_coordinator_revocation() -> None:

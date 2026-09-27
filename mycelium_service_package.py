@@ -1,5 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Deterministic launchd/systemd packaging for durable Mycelium processes."""
+"""Deterministic launchd/systemd/Windows-SCM packaging for durable Mycelium processes.
+
+The Windows SCM descriptor is opt-in (``include_windows_member=True``): every
+existing caller of :func:`build_service_package`/:func:`write_service_package`
+(the M22 service package and the A13 Linux tranche) gets exactly the same
+launchd+systemd payload set it always has. Only the A13 Windows tranche
+(``mycelium_a13_windows.service_lifecycle``) asks for the Windows member.
+"""
 
 from __future__ import annotations
 
@@ -229,8 +236,74 @@ def _systemd(config: Mapping[str, Any], config_path: Path) -> bytes:
     return "\n".join(lines).encode("utf-8")
 
 
+def _xml_escape(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _windows_service_xml(
+    config: Mapping[str, Any], config_path: Path, *, install_mode: str
+) -> bytes:
+    """Declarative Windows SCM service descriptor -- never calls sc.exe/New-Service.
+
+    ``windows_service`` installs a least-privilege per-service virtual account
+    (``NT SERVICE\\<name>``); ``windows_service_per_user`` runs in the signed-in
+    user's own session with no elevation. Both are ``SERVICE_WIN32_OWN_PROCESS``,
+    carry a ``RestrictedToken``, open no public listener, and the environment is
+    whatever the caller supplied to :func:`validate_service_config` -- already
+    checked there for secret-bearing names.
+    """
+    if install_mode not in ("windows_service", "windows_service_per_user"):
+        raise ServicePackageError("service_windows_install_mode_invalid")
+    service_name = f"mycelium-{config['service_id']}"
+    account = (
+        f"NT SERVICE\\{service_name}"
+        if install_mode == "windows_service"
+        else "interactive_per_user_session"
+    )
+    argv = _runner_argv(config, config_path)
+    environment_lines = "".join(
+        f'    <Environment name="{_xml_escape(key)}">{_xml_escape(value)}</Environment>\n'
+        for key, value in config["environment"].items()
+    )
+    argv_lines = "".join(
+        f"    <Argument>{_xml_escape(item)}</Argument>\n" for item in argv
+    )
+    document = (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<MyceliumWindowsServiceDescriptor version="1">\n'
+        f"  <ServiceName>{_xml_escape(service_name)}</ServiceName>\n"
+        f"  <DisplayName>Mycelium {_xml_escape(config['role'])} ({_xml_escape(config['service_id'])})</DisplayName>\n"
+        f"  <InstallMode>{install_mode}</InstallMode>\n"
+        "  <ServiceType>SERVICE_WIN32_OWN_PROCESS</ServiceType>\n"
+        "  <StartType>SERVICE_DEMAND_START</StartType>\n"
+        f"  <ObjectName>{_xml_escape(account)}</ObjectName>\n"
+        "  <RestrictedToken>true</RestrictedToken>\n"
+        "  <PublicListener>false</PublicListener>\n"
+        "  <Argv>\n" + argv_lines + "  </Argv>\n"
+        f"  <WorkingDirectory>{_xml_escape(config['working_directory'])}</WorkingDirectory>\n"
+        f"  <RestartLimit>{int(config['restart_limit'])}</RestartLimit>\n"
+        f"  <RestartDelaySeconds>{int(config['restart_delay_seconds'])}</RestartDelaySeconds>\n"
+        f"  <StopTimeoutSeconds>{int(config['stop_timeout_seconds'])}</StopTimeoutSeconds>\n"
+        "  <Environment>\n" + environment_lines + "  </Environment>\n"
+        "</MyceliumWindowsServiceDescriptor>\n"
+    )
+    return document.encode("utf-8")
+
+
+#: Windows SCM member names, keyed by the install mode they declare.
+WINDOWS_MEMBER_NAMES: dict[str, str] = {
+    "windows_service": "windows-service.xml",
+    "windows_service_per_user": "windows-service-per-user.xml",
+}
+
+
 def build_service_package(
-    value: Mapping[str, Any], *, package_root: Path
+    value: Mapping[str, Any], *, package_root: Path, include_windows_member: bool = False
 ) -> dict[str, Any]:
     config = validate_service_config(value)
     if not package_root.is_absolute():
@@ -239,6 +312,22 @@ def build_service_package(
     config_raw = canonical_json_bytes(config)
     launchd_raw = _launchd(config, config_path)
     systemd_raw = _systemd(config, config_path)
+    files = {
+        "service-config.json": {"mode": "0600", "sha256": _digest(config_raw), "bytes": len(config_raw)},
+        f"org.mycelium.{config['service_id']}.plist": {"mode": "0600", "sha256": _digest(launchd_raw), "bytes": len(launchd_raw)},
+        f"mycelium-{config['service_id']}.service": {"mode": "0600", "sha256": _digest(systemd_raw), "bytes": len(systemd_raw)},
+    }
+    payloads = {
+        "service-config.json": config_raw,
+        f"org.mycelium.{config['service_id']}.plist": launchd_raw,
+        f"mycelium-{config['service_id']}.service": systemd_raw,
+    }
+    if include_windows_member:
+        for install_mode, suffix in WINDOWS_MEMBER_NAMES.items():
+            name = f"mycelium-{config['service_id']}.{suffix}"
+            raw = _windows_service_xml(config, config_path, install_mode=install_mode)
+            files[name] = {"mode": "0600", "sha256": _digest(raw), "bytes": len(raw)}
+            payloads[name] = raw
     return {
         "protocol": PROTOCOL,
         "package_version": config["package_version"],
@@ -258,23 +347,19 @@ def build_service_package(
             "upgrade": "install_new_version_then_health_check",
             "rollback": "restore_previous_digest_pinned_package",
         },
-        "files": {
-            "service-config.json": {"mode": "0600", "sha256": _digest(config_raw), "bytes": len(config_raw)},
-            f"org.mycelium.{config['service_id']}.plist": {"mode": "0600", "sha256": _digest(launchd_raw), "bytes": len(launchd_raw)},
-            f"mycelium-{config['service_id']}.service": {"mode": "0600", "sha256": _digest(systemd_raw), "bytes": len(systemd_raw)},
-        },
-        "_payloads": {
-            "service-config.json": config_raw,
-            f"org.mycelium.{config['service_id']}.plist": launchd_raw,
-            f"mycelium-{config['service_id']}.service": systemd_raw,
-        },
+        "files": files,
+        "_payloads": payloads,
     }
 
 
-def write_service_package(value: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
+def write_service_package(
+    value: Mapping[str, Any], output_root: Path, *, include_windows_member: bool = False
+) -> dict[str, Any]:
     if not output_root.is_absolute():
         raise ServicePackageError("service_package_root_invalid")
-    package = build_service_package(value, package_root=output_root)
+    package = build_service_package(
+        value, package_root=output_root, include_windows_member=include_windows_member
+    )
     output_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(output_root, 0o700)
     payloads = package.pop("_payloads")

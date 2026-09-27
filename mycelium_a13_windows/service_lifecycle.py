@@ -2,16 +2,19 @@
 """Least-privilege Windows service lifecycle for the A13 installed agent.
 
 The repository's deterministic service renderer (``mycelium_service_package``)
-emits launchd and systemd members only.  This module therefore does *two*
-honest things instead of inventing a Windows unit:
+now emits a Windows SCM descriptor too, opt-in via ``include_windows_member``
+so every other caller (M22, the A13 Linux tranche) keeps its exact
+launchd+systemd-only payload set.  This module does two things:
 
 * it declares and validates the least-privilege **Windows service descriptor**
   the signed installer would register — own-process service, least-privilege or
   virtual service account, restricted token, no public listener, no
   secret-bearing environment name, bounded restart policy;
-* :func:`windows_service_member_from_shared_renderer` proves by calling the shared
-  renderer that no Windows member exists and reports that absence, so a Windows
-  service member can never be claimed from the launchd/systemd renderer.
+* :func:`windows_service_member_from_shared_renderer` renders the declared
+  descriptor's Windows member through the shared renderer (selecting the
+  service or per-user variant per ``install_mode``) and reports the rendered
+  artifact's name and digest -- never a fabrication, since the bytes come from
+  the same deterministic renderer the launchd/systemd members do.
 
 It also carries the fifteen managed lifecycle states of the frozen A13
 acceptance inventory, each with one bounded public outcome, and an uninstall
@@ -26,6 +29,7 @@ import re
 
 from mycelium_service_package import (
     PROTOCOL as SHARED_PACKAGE_PROTOCOL,
+    WINDOWS_MEMBER_NAMES,
     ServicePackageError,
     build_service_package,
 )
@@ -106,7 +110,12 @@ REQUIRED_HARDENING: tuple[str, ...] = (
     "bounded_restart_budget",
     "loopback_health_check",
 )
-_SHARED_RENDERER_MEMBERS: tuple[str, ...] = ("launchd", "systemd")
+_SHARED_RENDERER_MEMBERS: tuple[str, ...] = (
+    "launchd",
+    "systemd",
+    "windows_service",
+    "windows_service_per_user",
+)
 
 _SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _ENV = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
@@ -224,35 +233,41 @@ def _shared_renderer_config(descriptor: Mapping[str, object]) -> dict:
 def windows_service_member_from_shared_renderer(
     descriptor: object, *, package_root: Path | None = None
 ) -> dict:
-    """Prove that the shared renderer emits no Windows member, and report it.
+    """Render the declared Windows member through the shared renderer.
 
-    This is a refusal in report form: the tranche declares a Windows service
-    descriptor but does not claim a rendered Windows service member, because the
-    shared renderer only produces launchd and systemd members.
+    The shared renderer (``mycelium_service_package``) now emits a Windows SCM
+    descriptor -- selecting the ``windows_service`` (per-service virtual
+    account) or ``windows_service_per_user`` (interactive per-user session)
+    payload the descriptor's own ``install_mode`` declares -- alongside its
+    unchanged launchd+systemd members.  The returned facts are bounded to the
+    rendered artifact's name and digest; this never claims installation,
+    registration, or execution on a real Windows host.
     """
 
+    value = validate_least_privilege_windows_service(descriptor)
     config = _shared_renderer_config(descriptor)
     root = Path("/var/lib/mycelium/packages") if package_root is None else Path(package_root)
     try:
-        package = build_service_package(config, package_root=root)
+        package = build_service_package(
+            config, package_root=root, include_windows_member=True
+        )
     except ServicePackageError as error:  # shared renderer refusal, same vocabulary
         raise ServiceLifecycleError(str(error)) from None
-    payloads = [name for name in package["_payloads"]]
-    windows_member = next(
-        (
-            name
-            for name in payloads
-            if name.lower().endswith((".msi", ".exe", ".xml", ".windows"))
-        ),
-        None,
-    )
+    payloads = package["_payloads"]
+    suffix = WINDOWS_MEMBER_NAMES[value["install_mode"]]
+    windows_member = f"mycelium-{config['service_id']}.{suffix}"
+    if windows_member not in payloads:  # pragma: no cover - defensive, renderer is total
+        raise ServiceLifecycleError("windows_service_member_not_rendered")
     return {
         "protocol": PROTOCOL,
         "renderer": "shared_service_package",
         "declared_members": list(_SHARED_RENDERER_MEMBERS),
         "rendered_members": sorted(payloads),
-        "windows_member_absent": windows_member is None,
-        "windows_member_rendered": windows_member is not None,
+        "windows_member_absent": False,
+        "windows_member_rendered": True,
+        "windows_member_name": windows_member,
+        "windows_member_sha256": package["files"][windows_member]["sha256"],
+        "windows_install_mode": value["install_mode"],
         "declared_windows_service_name": config["service_id"],
         "lifecycle": dict(LIFECYCLE_OUTCOMES),
         "identity_or_eligibility_claim": False,
