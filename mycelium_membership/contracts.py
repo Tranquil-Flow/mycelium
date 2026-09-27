@@ -72,8 +72,31 @@ _PEER_RUNTIME_CAPABILITIES = {
         "transport": "https",
         "activation_protocol": None,
     },
+    # [2026-09-27 OWNER RULING] the native Android app is an activation-eligible
+    # peer class; its runtime is the mobile Rust reference over iroh.
+    "android_native_iroh": {
+        "runtime_backend": "mobile-rust-reference",
+        "transport": "iroh",
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
+    },
+    # [2026-09-27 OWNER RULING] Windows is admitted as a joinable, declared
+    # activation-ineligible peer until a Windows member runtime exists.
+    "windows_native_iroh": {
+        "runtime_backend": "tbd",
+        "transport": "iroh",
+        "activation_protocol": None,
+    },
 }
 PEER_CLASSES = frozenset(_PEER_RUNTIME_CAPABILITIES)
+#: Closed allow-set of peer classes that may receive activation work.
+_ACTIVATION_ELIGIBLE_PEER_CLASSES = frozenset(
+    {"mac_mlx_iroh", "linux_numpy_iroh", "android_native_iroh"}
+)
+#: Named, stable refusal reasons for known peer classes that are admitted to
+#: membership but may not receive activation work yet.
+PEER_CLASS_ACTIVATION_REFUSALS = {
+    "windows_native_iroh": "windows_member_runtime_absent",
+}
 
 _COMMON_FIELDS = frozenset(
     {
@@ -318,10 +341,18 @@ def peer_runtime_is_activation_eligible(
 
     validated = validate_peer_runtime_capability(peer_class, runtime_capability)
     return (
-        peer_class in {"mac_mlx_iroh", "linux_numpy_iroh"}
+        peer_class in _ACTIVATION_ELIGIBLE_PEER_CLASSES
         and validated["transport"] == "iroh"
         and validated["activation_protocol"] == ROUTER_ACTIVATION_PROTOCOL
     )
+
+
+def peer_runtime_activation_refusal(peer_class: Any) -> str | None:
+    """Return the named activation refusal for a known peer class, if any."""
+
+    if not isinstance(peer_class, str):
+        return None
+    return PEER_CLASS_ACTIVATION_REFUSALS.get(peer_class)
 
 
 def _validate_common(message: Mapping[str, Any], protocol: str) -> None:

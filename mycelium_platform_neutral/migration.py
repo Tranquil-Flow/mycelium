@@ -154,6 +154,26 @@ LEGACY_PEER_CLASS_DECOMPOSITION = {
         "runtimes": [],
         "declared_ineligible": True,
     },
+    # The v1 activation allow-set admits this class, but the v2 declaration
+    # stays ineligible until class qualification evidence exists (the same
+    # stance as ``linux_numpy_iroh``); its runtime is not a registered v2
+    # backend, so none is guessed.
+    "android_native_iroh": {
+        "identity_kind": "native_peer",
+        "platform_family": "android",
+        "architecture": "unknown",
+        "transports": ["iroh"],
+        "runtimes": [],
+        "declared_ineligible": True,
+    },
+    "windows_native_iroh": {
+        "identity_kind": "native_peer",
+        "platform_family": "windows",
+        "architecture": "unknown",
+        "transports": ["iroh"],
+        "runtimes": [],
+        "declared_ineligible": True,
+    },
 }
 
 CONTINUITY_STATES = frozenset({"preserved", "fresh_reenrollment_required", "rejected"})

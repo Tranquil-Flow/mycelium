@@ -34,6 +34,7 @@ from mycelium_membership import (
     RESUME_REQUEST_PROTOCOL,
     SEED_ROTATION_ACK_PROTOCOL,
     MembershipContractError,
+    peer_runtime_activation_refusal,
     peer_runtime_is_activation_eligible,
     sign_membership_message,
     verify_join_request,
@@ -1313,6 +1314,11 @@ class SeedCoordinator:
                 member.peer_class,
                 member.runtime_capability,
             ):
+                refusal = peer_runtime_activation_refusal(member.peer_class)
+                if refusal is not None:
+                    raise SeedCoordinatorError(
+                        f"seed_member_activation_ineligible:{refusal}"
+                    )
                 raise SeedCoordinatorError("seed_member_activation_ineligible")
             if (
                 isinstance(peer_node_ids, (str, bytes))
@@ -1349,6 +1355,11 @@ class SeedCoordinator:
                     peer.peer_class,
                     peer.runtime_capability,
                 ):
+                    refusal = peer_runtime_activation_refusal(peer.peer_class)
+                    if refusal is not None:
+                        raise SeedCoordinatorError(
+                            f"seed_peer_activation_ineligible:{refusal}"
+                        )
                     raise SeedCoordinatorError("seed_peer_activation_ineligible")
                 peers.append(peer)
             if assignment_id in self._assignments:
