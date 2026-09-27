@@ -79,13 +79,16 @@ fn write_object(out: &mut String, map: &Map<String, Value>, ascii: bool) -> Resu
 }
 
 fn write_number(out: &mut String, n: &Number) -> Result<(), CanonicalError> {
-    if let Some(i) = n.as_i64() {
-        out.push_str(&i.to_string());
-    } else if let Some(u) = n.as_u64() {
-        out.push_str(&u.to_string());
-    } else {
-        let f = n.as_f64().ok_or(CanonicalError::NonFinite)?;
+    // `arbitrary_precision` keeps the literal, so integers of any size survive
+    // exactly as Python ints do; floats are re-rendered with Python's repr.
+    let literal = n.to_string();
+    if literal.contains(['.', 'e', 'E']) {
+        let f: f64 = literal.parse().map_err(|_| CanonicalError::NonFinite)?;
         out.push_str(&python_float_repr(f)?);
+    } else if literal == "-0" {
+        out.push('0');
+    } else {
+        out.push_str(&literal);
     }
     Ok(())
 }

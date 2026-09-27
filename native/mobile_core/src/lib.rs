@@ -10,3 +10,4 @@ pub mod canonical;
 pub mod identity;
 pub mod onboarding;
 pub mod runtime;
+pub mod wire;
