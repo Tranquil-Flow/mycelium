@@ -143,3 +143,32 @@ fn base64_encode(b: &[u8]) -> String {
     use base64::Engine;
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b)
 }
+
+#[test]
+fn join_request_builder_reproduces_the_python_signed_envelope() {
+    use mycelium_mobile_core::membership::{self, MemberConfig};
+    let f = fixture("join_envelope.json");
+    let sig = fixture("signature.json");
+    let id = identity::Identity::from_secret("device-endpoint-1", &seed(sig["seed_hex"].as_str().unwrap())).unwrap();
+    let m = &f["message"];
+    let cfg = MemberConfig {
+        swarm_id: m["swarm_id"].as_str().unwrap().into(),
+        node_id: m["sender_node_id"].as_str().unwrap().into(),
+        seed_node_id: m["recipient_node_id"].as_str().unwrap().into(),
+        incarnation: m["incarnation"].as_str().unwrap().into(),
+        software_version: m["software_version"].as_str().unwrap().into(),
+        peer_class: m["peer_class"].as_str().unwrap().into(),
+        runtime_capability: m["runtime_capability"].clone(),
+        ttl_seconds: 60.0,
+    };
+    let env = membership::join_request(
+        &cfg,
+        &id,
+        m["message_id"].as_str().unwrap(),
+        m["invite_nonce"].as_str().unwrap(),
+        &["127.0.0.1:1".to_owned()],
+        m["issued_at"].as_f64().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(env, f);
+}
