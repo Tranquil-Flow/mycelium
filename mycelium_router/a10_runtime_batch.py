@@ -73,10 +73,11 @@ MEMBERSHIP_AUTHORITY_STAGE_RUNTIME = "stage_runtime"
 MEASURED_PAIRED_WINDOWS = 6
 # Sourced verbatim from the benchmark protocol v2
 # (tests/a10_acceptance/benchmark_protocol.v2.json; owner ruling 2026-09-27,
-# pre-registered amendment after r33 underpowered result): twelve scheduled
-# baseline/candidate pairs, of which at least twelve must be valid.
+# pre-registered amendment after r33 underpowered result, refined the same day
+# before any v2 data existed): exactly sixteen scheduled baseline/candidate
+# pairs, of which at least twelve must be valid; every valid pair is scored.
 BENCHMARK_PROTOCOL = "tests/a10_acceptance/benchmark_protocol.v2.json"
-SCHEDULED_BENCHMARK_PAIRS = 12
+SCHEDULED_BENCHMARK_PAIRS = 16
 MINIMUM_VALID_BENCHMARK_PAIRS = 12
 
 # Scaffold-level sanity ceilings only.  They are NOT qualified bounds: the qualified
@@ -417,27 +418,35 @@ class QualificationRequest:
    acceptance_inventory_digest: str
    baseline_windows: int
    candidate_windows: int
+   valid_pairs: int
 
    def __post_init__(self) -> None:
       _text(self.owner_private_root, code="invalid_qualification_root")
       _digest(self.benchmark_manifest_digest, code="invalid_benchmark_manifest_digest")
       _digest(self.acceptance_inventory_digest, code="invalid_acceptance_inventory_digest")
-      # Benchmark protocol v2: one baseline and one candidate window per
-      # scheduled pair, and never fewer pairs than the pre-registered floor.
+      # Benchmark protocol v2: exactly one baseline and one candidate window
+      # per scheduled pair (the scheduled count is exact), and the valid pairs
+      # among them never fall below the pre-registered floor.
       _bounded_int(
          self.baseline_windows,
          code="invalid_benchmark_window_count",
-         minimum=MINIMUM_VALID_BENCHMARK_PAIRS,
+         minimum=SCHEDULED_BENCHMARK_PAIRS,
          maximum=SCHEDULED_BENCHMARK_PAIRS,
       )
       _bounded_int(
          self.candidate_windows,
          code="invalid_benchmark_window_count",
-         minimum=MINIMUM_VALID_BENCHMARK_PAIRS,
+         minimum=SCHEDULED_BENCHMARK_PAIRS,
          maximum=SCHEDULED_BENCHMARK_PAIRS,
       )
       if self.baseline_windows != self.candidate_windows:
          _reject("invalid_benchmark_window_count")
+      _bounded_int(
+         self.valid_pairs,
+         code="invalid_benchmark_valid_pair_count",
+         minimum=MINIMUM_VALID_BENCHMARK_PAIRS,
+         maximum=SCHEDULED_BENCHMARK_PAIRS,
+      )
 
 
 # ---------------------------------------------------------------------------

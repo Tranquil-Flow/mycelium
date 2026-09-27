@@ -5,7 +5,9 @@ underpowered result) applies to A10 exactly as to A5, so this module scores
 A10 paired windows with the same shared rules as the A5 harness: a recorded
 baseline-only calibration selects the offered rate, a baseline window that
 completes under 90% of offered requests is invalid and excluded with its pair,
-at least 12 valid pairs are required, and the +10% paired-bootstrap lower-bound
+exactly 16 pairs are scheduled of which at least 12 must be valid, every valid
+pair is scored with no selection or trimming (owner refinement of 2026-09-27,
+made before any v2 data existed), and the +10% paired-bootstrap lower-bound
 threshold is unchanged.  Only the throughput-materiality part of the A10
 benchmark is decided here; exact output parity, TTFT/TPOT, reliability and
 cleanup requirements remain separate A10 acceptance conditions.

@@ -2,7 +2,9 @@
 
 Owner ruling 2026-09-27 (pre-registered amendment after r33 underpowered
 result): the A5 calibrated-offered-load rule, the baseline 90% completion
-validity rule, the 12 valid pair floor and the unchanged +10% paired bootstrap
+validity rule, 16 scheduled pairs with a floor of 12 valid pairs, scoring of
+every valid pair with no selection (owner refinement of the same date, made
+before any v2 data existed) and the unchanged +10% paired bootstrap
 lower-bound threshold apply to A10 exactly as to A5.
 """
 
@@ -18,6 +20,7 @@ from mycelium_router import a10_runtime_batch as rrb
 from tests.a5_acceptance.materiality_harness import (
     CALIBRATION_FAILED_REASON,
     INVALID_WINDOW_REASON,
+    SCHEDULE_NOT_REGISTERED_REASON,
     TOO_FEW_VALID_PAIRS_REASON,
     amended_protocol_violations,
     decide_calibrated_pairs,
@@ -80,7 +83,7 @@ def _run(
     candidate_completed: dict[int, int] | None = None,
 ) -> dict:
     protocol = load_protocol()
-    assert len(improvements) == 12
+    assert len(improvements) == 16
     baseline_offered = baseline_offered or {}
     candidate_completed = candidate_completed or {}
     windows = []
@@ -145,17 +148,23 @@ def test_amendment_is_identical_to_the_a5_amendment() -> None:
     a5 = load_a5_protocol_v2()
     for field in ("metric", "confidence", "calibration", "window_validity"):
         assert a10[field] == a5[field], field
-    for field in ("ruling_date", "ruling", "pre_registered", "applies_identically_to"):
+    for field in (
+        "ruling_date",
+        "ruling",
+        "pre_registered",
+        "refinements",
+        "applies_identically_to",
+    ):
         assert a10["amendment"][field] == a5["amendment"][field], field
 
 
-def test_schedule_is_twelve_alternating_pairs() -> None:
+def test_schedule_is_sixteen_alternating_pairs() -> None:
     protocol = load_protocol()
     order = protocol["benchmark_requirements"]["paired_window_order"]
-    assert order == ["baseline_candidate", "candidate_baseline"] * 6
+    assert order == ["baseline_candidate", "candidate_baseline"] * 8
     windows = protocol["measured_windows"]
-    assert protocol["benchmark_requirements"]["measured_windows"] == len(windows) == 24
-    assert [item["index"] for item in windows] == list(range(24))
+    assert protocol["benchmark_requirements"]["measured_windows"] == len(windows) == 32
+    assert [item["index"] for item in windows] == list(range(32))
     for pair_id, pair_order in enumerate(order):
         modes = [item["mode"] for item in windows if item["pair_id"] == pair_id]
         assert "_".join(modes) == pair_order
@@ -164,7 +173,7 @@ def test_schedule_is_twelve_alternating_pairs() -> None:
 def test_runtime_constants_mirror_the_v2_protocol() -> None:
     protocol = load_protocol()
     assert (ROOT / rrb.BENCHMARK_PROTOCOL).resolve() == amendment.PROTOCOL_PATH.resolve()
-    assert rrb.SCHEDULED_BENCHMARK_PAIRS == protocol["confidence"]["scheduled_pairs"] == 12
+    assert rrb.SCHEDULED_BENCHMARK_PAIRS == protocol["confidence"]["scheduled_pairs"] == 16
     assert (
         rrb.MINIMUM_VALID_BENCHMARK_PAIRS
         == protocol["confidence"]["minimum_valid_pairs"]
@@ -173,11 +182,25 @@ def test_runtime_constants_mirror_the_v2_protocol() -> None:
 
 
 @pytest.mark.parametrize(
-    ("baseline", "candidate", "accepted"),
-    [(12, 12, True), (3, 3, False), (11, 11, False), (12, 11, False), (13, 13, False)],
+    ("baseline", "candidate", "valid", "code"),
+    [
+        (16, 16, 12, None),
+        (16, 16, 13, None),
+        (16, 16, 16, None),
+        # scheduled windows are an exact count, not a floor
+        (12, 12, 12, "invalid_benchmark_window_count"),
+        (15, 15, 12, "invalid_benchmark_window_count"),
+        (17, 17, 12, "invalid_benchmark_window_count"),
+        (3, 3, 12, "invalid_benchmark_window_count"),
+        (16, 15, 12, "invalid_benchmark_window_count"),
+        # valid pairs have a floor of twelve and cannot exceed the schedule
+        (16, 16, 11, "invalid_benchmark_valid_pair_count"),
+        (16, 16, 17, "invalid_benchmark_valid_pair_count"),
+        (16, 16, True, "invalid_benchmark_valid_pair_count"),
+    ],
 )
-def test_qualification_request_enforces_the_twelve_pair_floor(
-    baseline: int, candidate: int, accepted: bool
+def test_qualification_request_schedules_sixteen_pairs_with_a_floor_of_twelve_valid(
+    baseline: int, candidate: int, valid: int, code: str | None
 ) -> None:
     values = {
         "owner_private_root": "private:root",
@@ -185,29 +208,33 @@ def test_qualification_request_enforces_the_twelve_pair_floor(
         "acceptance_inventory_digest": DIGEST,
         "baseline_windows": baseline,
         "candidate_windows": candidate,
+        "valid_pairs": valid,
     }
-    if accepted:
-        assert rrb.QualificationRequest(**values).baseline_windows == 12
+    if code is None:
+        request = rrb.QualificationRequest(**values)
+        assert request.baseline_windows == request.candidate_windows == 16
+        assert request.valid_pairs == valid
         return
     with pytest.raises(rrb.A10ContractError) as raised:
         rrb.QualificationRequest(**values)
-    assert raised.value.code == "invalid_benchmark_window_count"
+    assert raised.value.code == code
 
 
-def test_twelve_valid_pairs_at_twelve_percent_are_material() -> None:
-    result = evaluate_throughput(_run([0.12] * 12))
+def test_sixteen_valid_pairs_at_twelve_percent_are_material() -> None:
+    result = evaluate_throughput(_run([0.12] * 16))
     assert result["decision"] == "material"
     assert result["scope"] == "throughput_materiality_only"
-    assert result["valid_pair_count"] == 12
+    assert result["scheduled_pairs"] == 16
+    assert result["valid_pair_count"] == 16
     assert result["calibrated_offered_arrival_rate_per_second"] == RATE
     assert result["qualification_claim"] is False
     assert result["promotion_authorized"] is False
 
 
 def test_threshold_is_unchanged() -> None:
-    assert evaluate_throughput(_run([0.10] * 12))["decision"] == "material"
-    assert evaluate_throughput(_run([0.099] * 12))["decision"] == "not_material"
-    spread = evaluate_throughput(_run([0.0] * 6 + [0.2] * 6))
+    assert evaluate_throughput(_run([0.10] * 16))["decision"] == "material"
+    assert evaluate_throughput(_run([0.099] * 16))["decision"] == "not_material"
+    spread = evaluate_throughput(_run([0.0] * 8 + [0.2] * 8))
     assert spread["decision"] == "inconclusive"
     assert spread["reasons"] == [
         "paired_confidence_lower_bound_below_material_threshold"
@@ -215,7 +242,10 @@ def test_threshold_is_unchanged() -> None:
 
 
 def test_decision_math_matches_the_shared_a5_core() -> None:
-    gains = [0.3, 0.1, 0.2, 0.05, 0.4, 0.15, 0.12, 0.22, 0.18, 0.11, 0.25, 0.14]
+    gains = [
+        0.3, 0.1, 0.2, 0.05, 0.4, 0.15, 0.12, 0.22,
+        0.18, 0.11, 0.25, 0.14, 0.08, 0.31, 0.19, 0.16,
+    ]
     a10 = evaluate_throughput(_run(gains))
     core = decide_calibrated_pairs(
         [
@@ -238,15 +268,15 @@ def test_decision_math_matches_the_shared_a5_core() -> None:
     )
 
 
-def test_invalid_baseline_window_is_excluded_recorded_and_inconclusive() -> None:
+def test_invalid_baseline_window_is_excluded_recorded_and_the_rest_scored() -> None:
     # 60 completed of 67 offered is 89.6%: under the 90% baseline rule.
-    run = _run([0.5] * 12, baseline_offered={4: 67})
+    run = _run([0.5] * 16, baseline_offered={4: 67})
 
     result = evaluate_throughput(run)
 
-    assert result["decision"] == "inconclusive"
-    assert result["reasons"] == [TOO_FEW_VALID_PAIRS_REASON]
-    assert result["valid_pair_count"] == 11
+    assert result["decision"] == "material"
+    assert result["valid_pair_count"] == 15
+    assert 4 not in result["valid_pair_ids"]
     assert result["excluded_windows"] == [
         {
             "pair_id": 4,
@@ -259,13 +289,13 @@ def test_invalid_baseline_window_is_excluded_recorded_and_inconclusive() -> None
 
 
 def test_v1_completed_request_minimum_still_applies_to_every_window() -> None:
-    result = evaluate_throughput(_run([0.5] * 12, candidate_completed={2: 59}))
+    result = evaluate_throughput(_run([0.5] * 16, candidate_completed={2: 59}))
     assert result["decision"] == "inconclusive"
     assert "fewer_than_minimum_completed_requests" in result["reasons"]
 
 
 def test_no_qualifying_calibration_rate_is_inconclusive() -> None:
-    run = _run([0.5] * 12)
+    run = _run([0.5] * 16)
     run["calibration"] = _calibration([10, 20, 30, 40, 50, 55, 59])
     run["windows"] = []
     result = evaluate_throughput(run)
@@ -274,7 +304,7 @@ def test_no_qualifying_calibration_rate_is_inconclusive() -> None:
 
 
 def test_rate_shopping_after_the_first_qualifying_rate_is_refused() -> None:
-    run = _run([0.5] * 12)
+    run = _run([0.5] * 16)
     extra = deepcopy(run["calibration"]["trials"][-1])
     extra.update(ordinal=2, offered_arrival_rate_per_second=1.0)
     run["calibration"]["trials"].append(extra)
@@ -284,7 +314,7 @@ def test_rate_shopping_after_the_first_qualifying_rate_is_refused() -> None:
 
 
 def test_scored_windows_must_run_at_the_calibrated_rate() -> None:
-    run = _run([0.5] * 12)
+    run = _run([0.5] * 16)
     run["windows"][7]["offered_arrival_rate_per_second"] = 4.0
     result = evaluate_throughput(run)
     assert result["decision"] == "inconclusive"
@@ -300,7 +330,7 @@ def test_r33_shaped_gains_never_pass() -> None:
         0.12351752496970225,
         -0.21003389813837736,
     ]
-    result = evaluate_throughput(_run(r33 * 2))
+    result = evaluate_throughput(_run((r33 * 3)[:16]))
     assert result["point_estimate_fraction"] > 0.1
     assert result["decision"] == "inconclusive"
     assert result["paired_95_percent_bootstrap_lower_bound_fraction"] < 0.1
@@ -312,6 +342,8 @@ def test_r33_shaped_gains_never_pass() -> None:
         ("metric", "material_threshold_fraction", 0.05),
         ("benchmark_requirements", "throughput_lower_bound_percent", 5),
         ("confidence", "minimum_valid_pairs", 3),
+        ("confidence", "scheduled_pairs", 12),
+        ("confidence", "pair_selection", "best_12_of_16_valid_pairs"),
         ("window_validity", "minimum_baseline_completion_fraction", 0.5),
     ],
 )
@@ -323,10 +355,65 @@ def test_editing_a_registered_threshold_is_refused(
     path = tmp_path / "benchmark_protocol.v2.json"
     path.write_text(json.dumps(tampered), "utf-8")
     monkeypatch.setattr(amendment, "PROTOCOL_PATH", path)
-    run = _run([0.5] * 12)
+    run = _run([0.5] * 16)
     run["benchmark_protocol_digest"] = protocol_digest(tampered)
 
     result = evaluate_throughput(run)
 
     assert result["decision"] == "inconclusive"
     assert "posthoc_exclusion_or_threshold_change" in result["reasons"]
+
+
+def test_five_invalid_baseline_windows_leave_too_few_pairs() -> None:
+    invalid = {0, 3, 8, 11, 15}
+    result = evaluate_throughput(_run([0.5] * 16, baseline_offered={p: 67 for p in invalid}))
+    assert result["decision"] == "inconclusive"
+    assert result["reasons"] == [TOO_FEW_VALID_PAIRS_REASON]
+    assert result["valid_pair_count"] == 11
+    assert [item["pair_id"] for item in result["excluded_windows"]] == sorted(invalid)
+    assert result["paired_improvements"] == []
+
+
+@pytest.mark.parametrize("valid_count", [12, 13, 14, 15, 16])
+def test_twelve_to_sixteen_valid_pairs_are_scored_on_every_valid_pair(
+    valid_count: int,
+) -> None:
+    gains = [0.2 + 0.01 * pair_id for pair_id in range(16)]
+    invalid = set(range(1, 1 + 3 * (16 - valid_count), 3))
+    result = evaluate_throughput(_run(gains, baseline_offered={p: 67 for p in invalid}))
+    valid_ids = [pair for pair in range(16) if pair not in invalid]
+    assert result["decision"] == "material"
+    assert result["valid_pair_count"] == valid_count
+    assert result["valid_pair_ids"] == valid_ids
+    assert result["valid_pair_count"] + len(result["excluded_windows"]) == 16
+    assert [item["pair_id"] for item in result["excluded_windows"]] == sorted(invalid)
+    assert result["point_estimate_fraction"] == pytest.approx(
+        sum(gains[pair] for pair in valid_ids) / valid_count, abs=1e-6
+    )
+
+
+def test_every_valid_pair_is_scored_never_a_favourable_subset() -> None:
+    # Twelve pairs at +20% and two at -60% are valid; the best twelve would be
+    # material, every valid pair scored is not.
+    gains = [0.2] * 12 + [-0.6, -0.6, 0.9, 0.9]
+    result = evaluate_throughput(_run(gains, baseline_offered={14: 67, 15: 67}))
+    assert result["valid_pair_count"] == 14
+    assert result["paired_improvements"] == pytest.approx([0.2] * 12 + [-0.6, -0.6])
+    assert result["decision"] == "not_material"
+
+
+def test_a_protocol_file_scheduling_other_than_sixteen_pairs_is_refused(
+    monkeypatch, tmp_path: Path
+) -> None:
+    run = _run([0.5] * 16)
+    tampered = load_protocol()
+    del tampered["measured_windows"][24:]
+    path = tmp_path / "benchmark_protocol.v2.json"
+    path.write_text(json.dumps(tampered), "utf-8")
+    monkeypatch.setattr(amendment, "PROTOCOL_PATH", path)
+    run["benchmark_protocol_digest"] = protocol_digest(tampered)
+
+    result = evaluate_throughput(run)
+
+    assert result["decision"] == "inconclusive"
+    assert SCHEDULE_NOT_REGISTERED_REASON in result["reasons"]

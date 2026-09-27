@@ -374,8 +374,9 @@ def test_runtime_batch_qualification_still_refuses_and_earns_nothing():
             owner_private_root="private:root",
             benchmark_manifest_digest="sha256:" + "a" * 64,
             acceptance_inventory_digest="sha256:" + "b" * 64,
-            baseline_windows=12,
-            candidate_windows=12,
+            baseline_windows=16,
+            candidate_windows=16,
+            valid_pairs=12,
          )
       )
    assert raised.value.code == "not_implemented:runtime_batch_qualification_absent"

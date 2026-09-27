@@ -7,6 +7,15 @@
     "ruling_date": "2026-09-27",
     "ruling": "owner ruling: pre-registered amendment after r33 underpowered result",
     "pre_registered": true,
+    "refinements": [
+      {
+        "ruling_date": "2026-09-27",
+        "ruling": "owner ruling: schedule 16 paired windows, require at least 12 valid pairs, score all valid pairs with no selection, trimming or choice of a subset; the +10% paired-bootstrap lower-bound threshold and every bootstrap parameter are unchanged",
+        "made_before_any_v2_benchmark_data": true,
+        "protocol_version_unchanged": 2,
+        "protocol_version_unchanged_reason": "no_v2_benchmark_result_exists"
+      }
+    ],
     "applies_identically_to": [
       "A5",
       "A10"
@@ -32,6 +41,8 @@
       "calibrated_offered_load_selected_by_recorded_baseline_calibration_before_scored_windows",
       "baseline_window_below_minimum_completion_fraction_is_invalid_and_excluded_with_reason",
       "minimum_valid_pairs_raised_from_3_to_12",
+      "scheduled_pairs_16_exact_with_minimum_12_valid_pairs",
+      "every_valid_pair_scored_without_selection_trimming_or_subset_choice",
       "fewer_valid_pairs_than_minimum_is_inconclusive_never_material"
     ],
     "unchanged": [
@@ -56,9 +67,10 @@
     "confidence_level": 0.95,
     "lower_quantile": 0.025,
     "resamples": 10000,
-    "scheduled_pairs": 12,
+    "scheduled_pairs": 16,
     "minimum_valid_pairs": 12,
     "sample": "valid_pairs_only",
+    "pair_selection": "all_valid_pairs_no_selection_or_trimming",
     "seed": 165,
     "statistic": "arithmetic_mean",
     "quantile_method": "nearest_rank_ceiling"
@@ -219,6 +231,46 @@
       "index": 23,
       "pair_id": 11,
       "mode": "baseline"
+    },
+    {
+      "index": 24,
+      "pair_id": 12,
+      "mode": "baseline"
+    },
+    {
+      "index": 25,
+      "pair_id": 12,
+      "mode": "candidate"
+    },
+    {
+      "index": 26,
+      "pair_id": 13,
+      "mode": "candidate"
+    },
+    {
+      "index": 27,
+      "pair_id": 13,
+      "mode": "baseline"
+    },
+    {
+      "index": 28,
+      "pair_id": 14,
+      "mode": "baseline"
+    },
+    {
+      "index": 29,
+      "pair_id": 14,
+      "mode": "candidate"
+    },
+    {
+      "index": 30,
+      "pair_id": 15,
+      "mode": "candidate"
+    },
+    {
+      "index": 31,
+      "pair_id": 15,
+      "mode": "baseline"
     }
   ],
   "benchmark_requirements": {
@@ -234,9 +286,13 @@
       "baseline_candidate",
       "candidate_baseline",
       "baseline_candidate",
+      "candidate_baseline",
+      "baseline_candidate",
+      "candidate_baseline",
+      "baseline_candidate",
       "candidate_baseline"
     ],
-    "measured_windows": 24,
+    "measured_windows": 32,
     "warmup_windows_per_mode": 1,
     "minimum_completed_requests_per_window": 60,
     "minimum_interactive_requests_per_window": 20,

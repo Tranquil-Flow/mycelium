@@ -7,10 +7,14 @@ against the pre-registered protocol v2
 the underpowered r33 result): a recorded baseline-only calibration phase first
 walks the frozen descending rate ladder and selects the highest offered arrival
 rate whose baseline trial completes at least 90% of offered requests; then one
-unscored warmup per mode and 24 measured ABBA x 6 windows (12 pairs) of at least
-60 terminal requests each run at that calibrated rate. A baseline window that
-completes under 90% of its offered requests is invalid, excluded with its pair,
-and recorded in the decision; fewer than 12 valid pairs is inconclusive. The
+unscored warmup per mode and 32 measured ABBA x 8 windows (16 scheduled pairs)
+of at least 60 terminal requests each run at that calibrated rate. A baseline
+window that completes under 90% of its offered requests is invalid, excluded
+with its pair, and recorded in the decision; fewer than 12 valid pairs is
+inconclusive, and every valid pair is scored with no selection or trimming
+(owner refinement of 2026-09-27, made before any v2 data existed). A protocol
+file whose schedule or thresholds depart from the registration is refused
+before any window runs. The
 run fixture is validated by the materiality harness
 (tests/a5_acceptance/materiality_harness.evaluate_benchmark_v2) and sealed with
 the decision into the output file. If no ladder rate qualifies, no scored
@@ -66,6 +70,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from tests.a5_acceptance.materiality_harness import (  # noqa: E402
     RUN_PROTOCOL_V2,
+    amended_protocol_violations,
     baseline_window_is_valid,
     evaluate_benchmark_v2,
     load_protocol_v2,
@@ -868,6 +873,10 @@ def run_benchmark(
     *,
     source_manifest_digest: str,
 ) -> dict[str, Any]:
+    # Refuse a protocol whose schedule or thresholds depart from the
+    # registration before touching the route or running any window.
+    if amended_protocol_violations(PROTOCOL):
+        raise GateError("benchmark_protocol_not_pre_registered")
     replica_documents = _load_replica_documents(replica_paths)
     if not replica_documents:
         raise GateError("replica_qualification_missing")

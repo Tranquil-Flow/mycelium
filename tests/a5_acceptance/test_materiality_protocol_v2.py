@@ -3,9 +3,11 @@
 Owner ruling 2026-09-27 after the r33 underpowered result: a recorded
 baseline-only calibration selects the offered rate before any scored window; a
 baseline window completing under 90% of offered requests is invalid, excluded
-with its pair and recorded; at least 12 valid pairs are required, else the
-decision is inconclusive; the +10% paired-bootstrap lower-bound threshold and
-every other v1 threshold are unchanged.  The r33 result stays on record under
+with its pair and recorded; exactly 16 pairs are scheduled, at least 12 of
+them must be valid, else the decision is inconclusive, and every valid pair is
+scored with no selection or trimming (owner refinement of the same date, made
+before any v2 data existed); the +10% paired-bootstrap lower-bound threshold
+and every other v1 threshold are unchanged.  The r33 result stays on record under
 v1 as inconclusive and is never re-scored as a pass.
 """
 
@@ -24,6 +26,7 @@ from . import materiality_harness as harness
 from .materiality_harness import (
     CALIBRATION_FAILED_REASON,
     INVALID_WINDOW_REASON,
+    SCHEDULE_NOT_REGISTERED_REASON,
     TOO_FEW_VALID_PAIRS_REASON,
     V1_PROTOCOL_DIGEST,
     baseline_window_is_valid,
@@ -127,7 +130,7 @@ def _run_v2(
     """A v2 run fixture calibrated at 1.0 req/s (third ladder rung)."""
 
     protocol = load_protocol_v2()
-    assert len(improvements) == 12
+    assert len(improvements) == 16
     baseline_completed = baseline_completed or {}
     candidate_completed = candidate_completed or {}
     warmups = [
@@ -229,8 +232,9 @@ def test_v2_keeps_every_v1_threshold_and_binding_unchanged() -> None:
     assert v1_confidence.pop("sample_size_pairs") == 6
     v2_confidence = dict(v2["confidence"])
     assert v2_confidence.pop("minimum_valid_pairs") == 12
-    assert v2_confidence.pop("scheduled_pairs") == 12
+    assert v2_confidence.pop("scheduled_pairs") == 16
     assert v2_confidence.pop("sample") == "valid_pairs_only"
+    assert v2_confidence.pop("pair_selection") == harness.PAIR_SELECTION
     assert v2_confidence == v1_confidence
     for field in (
         "identical_binding_fields",
@@ -259,20 +263,23 @@ def test_v2_keeps_every_v1_threshold_and_binding_unchanged() -> None:
     assert harness.BOOTSTRAP_LOWER_QUANTILE == v1["confidence"]["lower_quantile"]
 
 
-def test_v2_schedule_is_abba_six_times_with_twelve_complete_pairs() -> None:
+def test_v2_schedule_is_abba_eight_times_with_sixteen_complete_pairs() -> None:
     protocol = load_protocol_v2()
     schedule = protocol["schedule"]
     windows = schedule["measured_windows"]
-    assert schedule["abba_repetitions"] == 6
-    assert [item["index"] for item in windows] == list(range(24))
+    assert schedule["abba_repetitions"] == 8
+    assert protocol["confidence"]["scheduled_pairs"] == harness.SCHEDULED_PAIRS == 16
+    assert protocol["confidence"]["minimum_valid_pairs"] == 12
+    assert [item["index"] for item in windows] == list(range(32))
     assert [item["mode"] for item in windows] == [
         "baseline",
         "candidate",
         "candidate",
         "baseline",
-    ] * 6
-    assert [item["block"] for item in windows] == [b for b in range(6) for _ in range(4)]
-    for pair_id in range(12):
+    ] * 8
+    assert [item["block"] for item in windows] == [b for b in range(8) for _ in range(4)]
+    assert harness.scheduled_windows_are_registered(windows)
+    for pair_id in range(16):
         modes = sorted(item["mode"] for item in windows if item["pair_id"] == pair_id)
         assert modes == ["baseline", "candidate"]
     calibration = protocol["calibration"]
@@ -291,11 +298,12 @@ def test_v2_schedule_is_abba_six_times_with_twelve_complete_pairs() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_twelve_valid_pairs_at_twelve_percent_are_material() -> None:
-    result = evaluate_benchmark_v2(_run_v2([0.12] * 12))
+def test_sixteen_valid_pairs_at_twelve_percent_are_material() -> None:
+    result = evaluate_benchmark_v2(_run_v2([0.12] * 16))
     assert result["decision"] == "material"
     assert result["reasons"] == []
-    assert result["valid_pair_count"] == 12
+    assert result["scheduled_pairs"] == 16
+    assert result["valid_pair_count"] == 16
     assert result["excluded_windows"] == []
     assert result["calibrated_offered_arrival_rate_per_second"] == RATE
     assert result["point_estimate_fraction"] == pytest.approx(0.12)
@@ -305,11 +313,11 @@ def test_twelve_valid_pairs_at_twelve_percent_are_material() -> None:
 
 
 def test_threshold_is_unchanged_exact_ten_percent_passes_and_below_does_not() -> None:
-    assert evaluate_benchmark_v2(_run_v2([0.10] * 12))["decision"] == "material"
-    below = evaluate_benchmark_v2(_run_v2([0.099] * 12))
+    assert evaluate_benchmark_v2(_run_v2([0.10] * 16))["decision"] == "material"
+    below = evaluate_benchmark_v2(_run_v2([0.099] * 16))
     assert below["decision"] == "not_material"
     assert below["reasons"] == ["point_estimate_below_material_threshold"]
-    spread = evaluate_benchmark_v2(_run_v2([0.0] * 6 + [0.2] * 6))
+    spread = evaluate_benchmark_v2(_run_v2([0.0] * 8 + [0.2] * 8))
     assert spread["point_estimate_fraction"] == pytest.approx(0.10)
     assert spread["paired_95_percent_bootstrap_lower_bound_fraction"] < 0.10
     assert spread["decision"] == "inconclusive"
@@ -323,6 +331,9 @@ def test_threshold_is_unchanged_exact_ten_percent_passes_and_below_does_not() ->
     [
         ("metric", "material_threshold_fraction", 0.05),
         ("confidence", "minimum_valid_pairs", 6),
+        ("confidence", "scheduled_pairs", 12),
+        ("confidence", "scheduled_pairs", 20),
+        ("confidence", "pair_selection", "best_12_of_16_valid_pairs"),
         ("confidence", "lower_quantile", 0.05),
         ("confidence", "resamples", 100),
         ("calibration", "minimum_baseline_completion_fraction", 0.8),
@@ -338,7 +349,7 @@ def test_editing_a_registered_threshold_in_the_protocol_file_is_refused(
     path = tmp_path / "benchmark_protocol.v2.json"
     path.write_text(json.dumps(tampered), "utf-8")
     monkeypatch.setattr(harness, "PROTOCOL_V2_PATH", path)
-    run = _run_v2([0.5] * 12)
+    run = _run_v2([0.5] * 16)
     run["benchmark_protocol_digest"] = protocol_v2_digest(tampered)
 
     result = evaluate_benchmark_v2(run)
@@ -363,14 +374,15 @@ def test_baseline_completion_boundary_is_exactly_ninety_percent(
     assert baseline_window_is_valid(completed, offered) is valid
 
 
-def test_invalid_baseline_window_is_excluded_recorded_and_leaves_too_few_pairs() -> None:
-    run = _run_v2([0.5] * 12, baseline_completed={3: 53})
+def test_invalid_baseline_window_is_excluded_recorded_and_the_rest_scored() -> None:
+    run = _run_v2([0.5] * 16, baseline_completed={3: 53})
 
     result = evaluate_benchmark_v2(run)
 
-    assert result["decision"] == "inconclusive"
-    assert result["reasons"] == [TOO_FEW_VALID_PAIRS_REASON]
-    assert result["valid_pair_count"] == 11
+    assert result["decision"] == "material"
+    assert result["valid_pair_count"] == 15
+    assert 3 not in result["valid_pair_ids"]
+    assert len(result["paired_improvements"]) == 15
     assert result["excluded_windows"] == [
         {
             "pair_id": 3,
@@ -380,23 +392,40 @@ def test_invalid_baseline_window_is_excluded_recorded_and_leaves_too_few_pairs()
             "baseline_offered": 60,
         }
     ]
+
+
+def test_five_invalid_baseline_windows_leave_too_few_pairs() -> None:
+    invalid = {1: 53, 4: 40, 9: 0, 12: 53, 15: 50}
+    run = _run_v2([0.5] * 16, baseline_completed=invalid)
+
+    result = evaluate_benchmark_v2(run)
+
+    assert result["decision"] == "inconclusive"
+    assert result["reasons"] == [TOO_FEW_VALID_PAIRS_REASON]
+    assert result["valid_pair_count"] == 11
+    assert [item["pair_id"] for item in result["excluded_windows"]] == sorted(invalid)
+    assert all(
+        item["reason"] == INVALID_WINDOW_REASON for item in result["excluded_windows"]
+    )
     assert result["point_estimate_fraction"] is None
     assert result["paired_improvements"] == []
 
 
 def test_arrivals_shed_at_the_concurrency_cap_count_as_offered() -> None:
-    run = _run_v2([0.5] * 12, baseline_completed={0: 54})
+    run = _run_v2([0.5] * 16, baseline_completed={0: 54})
     assert evaluate_benchmark_v2(deepcopy(run))["decision"] == "material"
     run["windows"][0]["offered_request_count"] = 61  # 54/61 < 90%
 
     result = evaluate_benchmark_v2(run)
 
-    assert result["decision"] == "inconclusive"
+    assert result["valid_pair_count"] == 15
+    assert 0 not in result["valid_pair_ids"]
+    assert result["excluded_windows"][0]["pair_id"] == 0
     assert result["excluded_windows"][0]["baseline_offered"] == 61
 
 
 def test_offered_count_below_terminal_count_is_refused() -> None:
-    run = _run_v2([0.5] * 12)
+    run = _run_v2([0.5] * 16)
     run["windows"][0]["offered_request_count"] = 59
 
     result = evaluate_benchmark_v2(run)
@@ -409,38 +438,161 @@ def test_low_candidate_completion_does_not_invalidate_a_pair() -> None:
     # The validity rule guards the baseline arm only; candidate cancellations
     # stay in the candidate's own throughput and cannot be excluded away.
     result = evaluate_benchmark_v2(
-        _run_v2([0.5] * 12, candidate_completed={pair: 10 for pair in range(12)})
+        _run_v2([0.5] * 16, candidate_completed={pair: 10 for pair in range(16)})
     )
     assert result["decision"] == "material"
-    assert result["valid_pair_count"] == 12
+    assert result["valid_pair_count"] == 16
 
 
 # ---------------------------------------------------------------------------
-# The 12-pair floor
+# 16 scheduled pairs, a floor of 12 valid, every valid pair scored
 # ---------------------------------------------------------------------------
 
 
 def test_eleven_valid_pairs_are_inconclusive_even_with_a_large_gain() -> None:
     result = decide_calibrated_pairs(
-        _pairs([0.5] * 12, invalid={11}), decision_protocol="test"
+        _pairs([0.5] * 16, invalid={11, 12, 13, 14, 15}), decision_protocol="test"
     )
     assert result["decision"] == "inconclusive"
     assert result["reasons"] == [TOO_FEW_VALID_PAIRS_REASON]
     assert result["valid_pair_count"] == 11
+    assert len(result["excluded_windows"]) == 5
 
 
-def test_twelve_valid_pairs_out_of_more_scheduled_are_scored() -> None:
-    result = decide_calibrated_pairs(
-        _pairs([0.5] * 14, invalid={0, 7}), decision_protocol="test"
+@pytest.mark.parametrize("valid_count", [12, 13, 14, 15, 16])
+def test_twelve_to_sixteen_valid_pairs_are_scored_on_every_valid_pair(
+    valid_count: int,
+) -> None:
+    # Distinct gains so any dropped, duplicated or substituted pair changes
+    # the point estimate.
+    gains = [0.2 + 0.01 * pair_id for pair_id in range(16)]
+    invalid = set(range(0, 2 * (16 - valid_count), 2))
+    result = evaluate_benchmark_v2(
+        _run_v2(gains, baseline_completed={pair: 53 for pair in invalid})
     )
+    valid_ids = [pair for pair in range(16) if pair not in invalid]
     assert result["decision"] == "material"
-    assert result["valid_pair_count"] == 12
-    assert [item["pair_id"] for item in result["excluded_windows"]] == [0, 7]
-    assert len(result["paired_improvements"]) == 12
+    assert result["scheduled_pairs"] == 16
+    assert result["valid_pair_count"] == valid_count
+    assert result["valid_pair_ids"] == valid_ids
+    assert result["paired_improvements"] == pytest.approx([gains[pair] for pair in valid_ids])
+    assert result["point_estimate_fraction"] == pytest.approx(
+        sum(gains[pair] for pair in valid_ids) / valid_count
+    )
+    assert [item["pair_id"] for item in result["excluded_windows"]] == sorted(invalid)
+
+
+@pytest.mark.parametrize("invalid_count", range(0, 17))
+def test_every_scheduled_pair_is_scored_or_recorded_as_excluded(invalid_count: int) -> None:
+    invalid = set(range(16 - invalid_count, 16))
+    result = decide_calibrated_pairs(
+        _pairs([0.5] * 16, invalid=invalid), decision_protocol="test"
+    )
+    excluded = [item["pair_id"] for item in result["excluded_windows"]]
+    assert result["valid_pair_count"] + len(excluded) == 16
+    assert sorted(result["valid_pair_ids"] + excluded) == list(range(16))
+    assert excluded == sorted(invalid)
+    assert all(
+        item["reason"] == INVALID_WINDOW_REASON for item in result["excluded_windows"]
+    )
+    expected = "material" if 16 - invalid_count >= 12 else "inconclusive"
+    assert result["decision"] == expected
+
+
+def test_evaluator_scores_all_valid_pairs_never_a_favourable_subset() -> None:
+    # Fourteen valid pairs: twelve at +20% and two at -60%.  The best twelve
+    # would be material; every valid pair scored is not.
+    gains = [0.2] * 12 + [-0.6, -0.6, 0.9, 0.9]
+    pairs = _pairs(gains, invalid={14, 15})
+    result = decide_calibrated_pairs(pairs, decision_protocol="test")
+    all_valid = [0.2] * 12 + [-0.6, -0.6]
+    assert result["valid_pair_count"] == 14
+    assert result["paired_improvements"] == pytest.approx(all_valid)
+    assert result["point_estimate_fraction"] == pytest.approx(sum(all_valid) / 14)
+    assert result["decision"] == "not_material"
+    assert result["paired_95_percent_bootstrap_lower_bound_fraction"] == (
+        harness._bootstrap_lower_bound(
+            result["paired_improvements"],
+            resamples=harness.BOOTSTRAP_RESAMPLES,
+            seed=harness.BOOTSTRAP_SEED,
+            lower_quantile=harness.BOOTSTRAP_LOWER_QUANTILE,
+        )
+    )
+    best_twelve = decide_calibrated_pairs(
+        _pairs([0.2] * 12 + [0.5] * 4), decision_protocol="test"
+    )
+    assert best_twelve["decision"] == "material"
+    # Input order cannot change which pairs are scored.
+    assert decide_calibrated_pairs(pairs[::-1], decision_protocol="test") == result
+
+
+@pytest.mark.parametrize(
+    "pairs",
+    [
+        _pairs([0.5] * 12),
+        _pairs([0.5] * 6),
+        _pairs([0.5] * 17),
+        _pairs([0.5] * 16)[1:] + [{**_pairs([0.5])[0], "pair_id": 16}],
+        _pairs([0.5] * 15) + [_pairs([0.5])[0]],
+    ],
+    ids=["12", "6", "17", "ids_1_to_16", "duplicate_id"],
+)
+def test_a_schedule_other_than_sixteen_pairs_is_refused(pairs: list[dict]) -> None:
+    result = decide_calibrated_pairs(pairs, decision_protocol="test")
+    assert result["decision"] == "inconclusive"
+    assert result["reasons"] == [SCHEDULE_NOT_REGISTERED_REASON]
+    assert result["paired_improvements"] == []
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda schedule: schedule["measured_windows"].__delitem__(slice(24, 32)),
+        lambda schedule: schedule["measured_windows"].extend(
+            [
+                {"index": 32, "block": 8, "pair_id": 16, "mode": "baseline"},
+                {"index": 33, "block": 8, "pair_id": 16, "mode": "candidate"},
+            ]
+        ),
+        lambda schedule: schedule["measured_windows"][31].update(mode="candidate"),
+    ],
+    ids=["twelve_pairs", "seventeen_pairs", "unpaired_window"],
+)
+def test_a_protocol_file_scheduling_other_than_sixteen_pairs_is_refused(
+    monkeypatch, tmp_path: Path, mutate
+) -> None:
+    run = _run_v2([0.5] * 16)
+    tampered = load_protocol_v2()
+    mutate(tampered["schedule"])
+    path = tmp_path / "benchmark_protocol.v2.json"
+    path.write_text(json.dumps(tampered), "utf-8")
+    monkeypatch.setattr(harness, "PROTOCOL_V2_PATH", path)
+    run["benchmark_protocol_digest"] = protocol_v2_digest(tampered)
+
+    result = evaluate_benchmark_v2(run)
+
+    assert result["decision"] == "inconclusive"
+    assert SCHEDULE_NOT_REGISTERED_REASON in result["reasons"]
+
+
+def test_the_refinement_ruling_is_recorded_and_required() -> None:
+    protocol = load_protocol_v2()
+    refinements = protocol["amendment"]["refinements"]
+    assert refinements == [harness.AMENDMENT_REFINEMENT]
+    assert refinements[0]["ruling_date"] == "2026-09-27"
+    assert refinements[0]["made_before_any_v2_benchmark_data"] is True
+    assert refinements[0]["protocol_version_unchanged"] == protocol["protocol_version"] == 2
+    assert "16 paired windows" in refinements[0]["ruling"]
+    assert "at least 12 valid" in refinements[0]["ruling"]
+    stripped = deepcopy(protocol)
+    del stripped["amendment"]["refinements"]
+    assert "amendment_ruling_missing" in harness.amended_protocol_violations(stripped)
 
 
 def test_six_pairs_the_old_floor_can_never_be_material() -> None:
-    result = decide_calibrated_pairs(_pairs([0.5] * 6), decision_protocol="test")
+    result = decide_calibrated_pairs(
+        _pairs([0.5] * 16, invalid=set(range(6, 16))), decision_protocol="test"
+    )
     assert result["decision"] == "inconclusive"
     assert result["reasons"] == [TOO_FEW_VALID_PAIRS_REASON]
 
@@ -453,7 +605,7 @@ def test_floor_cannot_be_lowered_by_a_caller() -> None:
 
 
 def test_missing_window_is_inconclusive_not_a_smaller_sample() -> None:
-    run = _run_v2([0.5] * 12)
+    run = _run_v2([0.5] * 16)
     run["windows"].pop()
     result = evaluate_benchmark_v2(run)
     assert result["decision"] == "inconclusive"
@@ -500,7 +652,7 @@ def test_calibration_selects_the_first_qualifying_descending_rate() -> None:
     ],
 )
 def test_calibration_that_departs_from_the_registered_procedure_is_refused(mutate) -> None:
-    run = _run_v2([0.5] * 12)
+    run = _run_v2([0.5] * 16)
     mutate(run["calibration"])
 
     result = evaluate_benchmark_v2(run)
@@ -510,7 +662,7 @@ def test_calibration_that_departs_from_the_registered_procedure_is_refused(mutat
 
 
 def test_no_qualifying_rate_is_inconclusive_and_scores_nothing() -> None:
-    run = _run_v2([0.5] * 12)
+    run = _run_v2([0.5] * 16)
     run["calibration"] = _calibration([5, 10, 20, 30, 40, 50, 53])
     run["warmups"] = []
     run["windows"] = []
@@ -523,7 +675,7 @@ def test_no_qualifying_rate_is_inconclusive_and_scores_nothing() -> None:
 
 
 def test_scored_windows_must_run_at_the_calibrated_rate() -> None:
-    run = _run_v2([0.5] * 12)
+    run = _run_v2([0.5] * 16)
     run["windows"][5]["offered_arrival_rate_per_second"] = 4.0
     result = evaluate_benchmark_v2(run)
     assert result["decision"] == "inconclusive"
@@ -599,14 +751,14 @@ def test_r33_v1_evidence_is_not_admissible_as_v2_evidence() -> None:
 
 def test_r33_shaped_windows_under_v2_are_all_invalid_and_inconclusive() -> None:
     v1_run = _r33_v1_run()
-    run = _run_v2([0.0] * 12)
+    run = _run_v2([0.0] * 16)
     # The r33 host at the manifest rate would not calibrate: 12/60 completed.
     run["calibration"] = _calibration([12, 12, 12, 12, 12, 12, 54])
     run["calibration"]["trials"][-1]["outcomes"] = _outcomes(completed=54, cancelled=6)
     run["calibration"]["selected_offered_arrival_rate_per_second"] = 0.0625
     for record in run["warmups"]:
         record["offered_arrival_rate_per_second"] = 0.0625
-    # Tile the six r33 pairs twice onto the 24-window schedule.
+    # Tile the six r33 pairs onto the 32-window schedule.
     for window in run["windows"]:
         source = v1_run["windows"][window["index"] % 12]
         assert source["mode"] == window["mode"]
@@ -619,7 +771,7 @@ def test_r33_shaped_windows_under_v2_are_all_invalid_and_inconclusive() -> None:
     assert result["decision"] == "inconclusive"
     assert result["reasons"] == [TOO_FEW_VALID_PAIRS_REASON]
     assert result["valid_pair_count"] == 0
-    assert len(result["excluded_windows"]) == 12
+    assert len(result["excluded_windows"]) == 16
 
 
 def test_r33_gains_would_stay_inconclusive_even_if_every_window_were_valid() -> None:
@@ -641,7 +793,7 @@ def test_r33_gains_would_stay_inconclusive_even_if_every_window_were_valid() -> 
                 "baseline_rate": 1.0,
                 "candidate_rate": 1.0 + gain,
             }
-            for pair_id, gain in enumerate(gains * 2)
+            for pair_id, gain in enumerate((gains * 3)[:16])
         ],
         decision_protocol="test",
     )
@@ -720,13 +872,13 @@ def test_gate_calibrates_before_scoring_and_binds_the_selected_rate(monkeypatch)
         2.0,
     ]
     assert calibration["selected_offered_arrival_rate_per_second"] == 2.0
-    # two baseline calibration trials, then 2 warmups + 24 windows at 2.0
+    # two baseline calibration trials, then 2 warmups + 32 windows at 2.0
     assert calls[:2] == [("baseline", 4.0), ("baseline", 2.0)]
-    assert len(calls) == 2 + 2 + 24
+    assert len(calls) == 2 + 2 + 32
     assert {rate for _, rate in calls[2:]} == {2.0}
     assert report["observed"]["arrival_rate_per_second"] == 2.0
     assert report["decision"]["decision"] == "material"
-    assert report["decision"]["valid_pair_count"] == 12
+    assert report["decision"]["valid_pair_count"] == 16
     assert report["decision"]["calibrated_offered_arrival_rate_per_second"] == 2.0
     assert evaluate_benchmark_v2(fixture) == report["decision"]
 
@@ -759,3 +911,27 @@ def test_window_driver_counts_arrivals_shed_at_the_cap_as_offered(monkeypatch) -
 
     assert result["request_count"] >= 5
     assert result["offered_request_count"] > result["request_count"]
+
+
+def test_gate_refuses_a_protocol_not_scheduling_sixteen_pairs_before_any_window(
+    monkeypatch,
+) -> None:
+    tampered = load_protocol_v2()
+    tampered["confidence"]["scheduled_pairs"] = 12
+    del tampered["schedule"]["measured_windows"][24:]
+    monkeypatch.setattr(benchmark_gate, "PROTOCOL", tampered)
+    touched: list[str] = []
+    monkeypatch.setattr(
+        benchmark_gate, "_load_replica_documents", lambda paths: touched.append("load")
+    )
+    monkeypatch.setattr(
+        benchmark_gate, "public_json", lambda base_url, path: touched.append(path)
+    )
+
+    with pytest.raises(benchmark_gate.GateError, match="benchmark_protocol_not_pre_registered"):
+        benchmark_gate.run_benchmark(
+            "http://route.invalid",
+            [Path("unused")],
+            source_manifest_digest="sha256:" + "d" * 64,
+        )
+    assert touched == []

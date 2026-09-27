@@ -169,8 +169,9 @@ BOUNDARY_CALLS = {
          owner_private_root="private:root",
          benchmark_manifest_digest=DIGEST,
          acceptance_inventory_digest=DIGEST,
-         baseline_windows=12,
-         candidate_windows=12,
+         baseline_windows=16,
+         candidate_windows=16,
+         valid_pairs=12,
       )
    ),
    "qualify_target_verifier": lambda: atv.qualify_target_verifier(
@@ -480,12 +481,16 @@ def test_duplicate_interval_ref_is_rejected():
 @pytest.mark.parametrize(
    "overrides,code",
    [
-      ({"baseline_windows": 12, "candidate_windows": 12}, None),
-      # v1 three-pair shape is below the benchmark protocol v2 floor
+      ({"baseline_windows": 16, "candidate_windows": 16}, None),
+      ({"valid_pairs": 16}, None),
+      # v1 three-pair shape is not the benchmark protocol v2 schedule
       ({"baseline_windows": 3, "candidate_windows": 3}, "invalid_benchmark_window_count"),
-      ({"baseline_windows": 11, "candidate_windows": 11}, "invalid_benchmark_window_count"),
-      ({"baseline_windows": 12, "candidate_windows": 11}, "invalid_benchmark_window_count"),
-      ({"baseline_windows": 13, "candidate_windows": 13}, "invalid_benchmark_window_count"),
+      # the v2 schedule is exactly sixteen pairs; twelve is only the valid floor
+      ({"baseline_windows": 12, "candidate_windows": 12}, "invalid_benchmark_window_count"),
+      ({"baseline_windows": 16, "candidate_windows": 15}, "invalid_benchmark_window_count"),
+      ({"baseline_windows": 17, "candidate_windows": 17}, "invalid_benchmark_window_count"),
+      ({"valid_pairs": 11}, "invalid_benchmark_valid_pair_count"),
+      ({"valid_pairs": 17}, "invalid_benchmark_valid_pair_count"),
       ({"baseline_windows": 2, "candidate_windows": 3}, "invalid_benchmark_window_count"),
       ({"baseline_windows": 0}, "invalid_benchmark_window_count"),
       ({"benchmark_manifest_digest": "sha256:zz"}, "invalid_benchmark_manifest_digest"),
@@ -497,13 +502,14 @@ def test_qualification_request_rejections_are_coded(overrides, code):
       "owner_private_root": "private:root",
       "benchmark_manifest_digest": DIGEST,
       "acceptance_inventory_digest": DIGEST,
-      "baseline_windows": 12,
-      "candidate_windows": 12,
+      "baseline_windows": 16,
+      "candidate_windows": 16,
+      "valid_pairs": 12,
    }
    values.update(overrides)
    if code is None:
       request = rrb.QualificationRequest(**values)
-      assert request.baseline_windows + request.candidate_windows == 24
+      assert request.baseline_windows + request.candidate_windows == 32
       return
    with pytest.raises(rrb.A10ContractError) as raised:
       rrb.QualificationRequest(**values)

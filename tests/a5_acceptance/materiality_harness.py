@@ -339,13 +339,31 @@ AMENDMENT_RULING_DATE = "2026-09-27"
 AMENDMENT_RULING = (
     "owner ruling: pre-registered amendment after r33 underpowered result"
 )
+# Owner refinement of the same ruling date, made before any v2 benchmark data
+# existed, so the protocol stays version 2: schedule 16 pairs, require at
+# least 12 valid pairs, and score every valid pair with no selection.
+AMENDMENT_REFINEMENT = {
+    "ruling_date": "2026-09-27",
+    "ruling": (
+        "owner ruling: schedule 16 paired windows, require at least 12 valid "
+        "pairs, score all valid pairs with no selection, trimming or choice of "
+        "a subset; the +10% paired-bootstrap lower-bound threshold and every "
+        "bootstrap parameter are unchanged"
+    ),
+    "made_before_any_v2_benchmark_data": True,
+    "protocol_version_unchanged": 2,
+    "protocol_version_unchanged_reason": "no_v2_benchmark_result_exists",
+}
+PAIR_SELECTION = "all_valid_pairs_no_selection_or_trimming"
 # Unchanged by the amendment (identical to v1).
 MATERIAL_THRESHOLD_FRACTION = 0.1
 BOOTSTRAP_CONFIDENCE_LEVEL = 0.95
 BOOTSTRAP_LOWER_QUANTILE = 0.025
 BOOTSTRAP_RESAMPLES = 10_000
 BOOTSTRAP_SEED = 0xA5
-# Introduced by the amendment.
+# Introduced by the amendment.  Scheduled pairs are an exact count; the
+# minimum is a floor on the valid pairs among them.
+SCHEDULED_PAIRS = 16
 MINIMUM_VALID_PAIRS = 12
 MINIMUM_BASELINE_COMPLETION_FRACTION = 0.9
 # The completion rule is evaluated in exact integer arithmetic:
@@ -355,6 +373,7 @@ _COMPLETION_DENOMINATOR = 10
 INVALID_WINDOW_REASON = "baseline_completion_below_minimum_fraction"
 CALIBRATION_FAILED_REASON = "calibration_no_rate_meets_baseline_completion"
 TOO_FEW_VALID_PAIRS_REASON = "fewer_than_minimum_valid_pairs"
+SCHEDULE_NOT_REGISTERED_REASON = "scheduled_pairs_not_pre_registered"
 WARMUP_FIELDS_V2 = WARMUP_FIELDS | {"offered_arrival_rate_per_second"}
 WINDOW_FIELDS_V2 = WINDOW_FIELDS | {
     "offered_request_count",
@@ -415,6 +434,7 @@ def amended_protocol_violations(protocol: Mapping[str, Any]) -> list[str]:
         or amendment.get("ruling_date") != AMENDMENT_RULING_DATE
         or amendment.get("ruling") != AMENDMENT_RULING
         or amendment.get("pre_registered") is not True
+        or amendment.get("refinements") != [AMENDMENT_REFINEMENT]
     ):
         reasons.append("amendment_ruling_missing")
     confidence = protocol.get("confidence")
@@ -431,7 +451,8 @@ def amended_protocol_violations(protocol: Mapping[str, Any]) -> list[str]:
         or confidence.get("quantile_method") != "nearest_rank_ceiling"
         or confidence.get("minimum_valid_pairs") != MINIMUM_VALID_PAIRS
         or type(confidence.get("scheduled_pairs")) is not int
-        or confidence["scheduled_pairs"] < MINIMUM_VALID_PAIRS
+        or confidence["scheduled_pairs"] != SCHEDULED_PAIRS
+        or confidence.get("pair_selection") != PAIR_SELECTION
         or not isinstance(calibration, Mapping)
         or calibration.get("minimum_baseline_completion_fraction")
         != MINIMUM_BASELINE_COMPLETION_FRACTION
@@ -442,7 +463,34 @@ def amended_protocol_violations(protocol: Mapping[str, Any]) -> list[str]:
         or validity.get("fewer_valid_pairs_than_minimum_decision") != "inconclusive"
     ):
         reasons.append("posthoc_exclusion_or_threshold_change")
+    schedule = protocol.get("schedule")
+    windows = (
+        schedule.get("measured_windows")
+        if isinstance(schedule, Mapping)
+        else protocol.get("measured_windows")
+    )
+    if not scheduled_windows_are_registered(windows):
+        reasons.append(SCHEDULE_NOT_REGISTERED_REASON)
     return reasons
+
+
+def scheduled_windows_are_registered(windows: object) -> bool:
+    """True when a window schedule has exactly the registered 16 pairs.
+
+    Every scheduled pair 0..15 has exactly one baseline and one candidate
+    window, and window indexes run 0..31 in order.
+    """
+
+    if not isinstance(windows, list) or len(windows) != 2 * SCHEDULED_PAIRS:
+        return False
+    arms: dict[object, list[object]] = {}
+    for index, window in enumerate(windows):
+        if not isinstance(window, Mapping) or window.get("index") != index:
+            return False
+        arms.setdefault(window.get("pair_id"), []).append(window.get("mode"))
+    return set(arms) == set(range(SCHEDULED_PAIRS)) and all(
+        sorted(modes) == ["baseline", "candidate"] for modes in arms.values()
+    )
 
 
 def validate_calibration(
@@ -514,11 +562,14 @@ def decide_calibrated_pairs(
     """Score paired windows under the amended validity rule.
 
     Each pair carries ``pair_id``, ``baseline_rate``, ``candidate_rate``,
-    ``baseline_completed``, ``baseline_offered`` and ``baseline_index``.  A pair
-    whose baseline arm completed under 90% of offered requests is excluded and
-    recorded with its reason, never silently dropped; fewer valid pairs than the
-    floor is inconclusive and can never be material.  The +10% point and paired
-    bootstrap lower-bound thresholds are the v1 values, unchanged.
+    ``baseline_completed``, ``baseline_offered`` and ``baseline_index``.
+    Exactly the 16 scheduled pairs (ids 0..15) must be supplied; any other
+    schedule is refused as inconclusive.  A pair whose baseline arm completed
+    under 90% of offered requests is excluded and recorded with its reason,
+    never silently dropped; fewer than 12 valid pairs is inconclusive and can
+    never be material.  Every valid pair is scored: no selection, trimming or
+    choice of a subset.  The +10% point and paired bootstrap lower-bound
+    thresholds are the v1 values, unchanged.
     """
 
     if minimum_valid_pairs < MINIMUM_VALID_PAIRS:
@@ -555,14 +606,25 @@ def decide_calibrated_pairs(
             "point_estimate_fraction": point_estimate,
             "paired_95_percent_bootstrap_lower_bound_fraction": lower_bound,
             "paired_improvements": [] if improvements is None else improvements,
+            "scheduled_pairs": SCHEDULED_PAIRS,
             "valid_pair_count": len(valid),
+            "valid_pair_ids": [pair["pair_id"] for pair in valid],
             "minimum_valid_pairs": minimum_valid_pairs,
+            "pair_selection": PAIR_SELECTION,
             "excluded_windows": excluded,
             "material_threshold_fraction": MATERIAL_THRESHOLD_FRACTION,
             "qualification_claim": False,
             "promotion_authorized": False,
         }
 
+    if [pair["pair_id"] for pair in sorted(pairs, key=lambda item: item["pair_id"])] != list(
+        range(SCHEDULED_PAIRS)
+    ):
+        return result("inconclusive", [SCHEDULE_NOT_REGISTERED_REASON])
+    # Every scheduled pair is accounted for: valid and scored, or excluded and
+    # recorded with its reason.
+    if len(valid) + len(excluded) != SCHEDULED_PAIRS:
+        raise RuntimeError("scheduled_pair_accounting_broken")
     if len(valid) < minimum_valid_pairs:
         return result("inconclusive", [TOO_FEW_VALID_PAIRS_REASON])
     if any(
@@ -772,10 +834,13 @@ def evaluate_benchmark_v2(document: object) -> dict[str, Any]:
 
 __all__ = [
     "AMENDMENT_RULING",
+    "AMENDMENT_REFINEMENT",
     "AMENDMENT_RULING_DATE",
     "MATERIAL_THRESHOLD_FRACTION",
     "MINIMUM_BASELINE_COMPLETION_FRACTION",
     "MINIMUM_VALID_PAIRS",
+    "PAIR_SELECTION",
+    "SCHEDULED_PAIRS",
     "amended_protocol_violations",
     "baseline_window_is_valid",
     "decide_calibrated_pairs",
@@ -785,5 +850,6 @@ __all__ = [
     "load_protocol_v2",
     "protocol_digest",
     "protocol_v2_digest",
+    "scheduled_windows_are_registered",
     "validate_calibration",
 ]
