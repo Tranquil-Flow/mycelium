@@ -93,8 +93,8 @@
     },
     {
       "path": "docs/handover/mycelium-completion-checklist.v1.json",
-      "sha256": "sha256:f692c14f7cdf432da7e1dce9817d432786523a851fa4e8aae64dab2b2c794767",
-      "size_bytes": 70975
+      "sha256": "sha256:4964e7396e5be35609df52ddb685bc01a413c53d24293dfa326d103c1d77244c",
+      "size_bytes": 71202
     },
     {
       "path": "docs/operations/a15-executed-artifact-intake.md",
@@ -822,6 +822,11 @@
       "size_bytes": 17156
     },
     {
+      "path": "scripts/pilot_readiness_gate.py",
+      "sha256": "sha256:d8547c2be79b72da5734088f68e390c42ec21a53be243477a67275edc992f988",
+      "size_bytes": 72355
+    },
+    {
       "path": "scripts/quiet_host_guard.py",
       "sha256": "sha256:c44821001841d4ac044696de15184d7fac0f628fb9628f691e73c96f04e88a27",
       "size_bytes": 36438
@@ -1153,8 +1158,8 @@
     },
     {
       "path": "tests/a15_intake/test_run_intake.py",
-      "sha256": "sha256:39e1380b8a2c1a3eed107976c115f61ad418e564a89bac4025e304661df0138f",
-      "size_bytes": 42070
+      "sha256": "sha256:9428b07b91f827730354c97f83c9fc6f43d64fba297c778521ac6d5c3b6fda60",
+      "size_bytes": 43331
     },
     {
       "path": "tests/a5_acceptance/test_replica_dispatch.py",
@@ -1482,6 +1487,11 @@
       "size_bytes": 13250
     },
     {
+      "path": "tests/live/test_m0_end_to_end.py",
+      "sha256": "sha256:570f395324e8c93f4e05fd857cdc25dcd6dc932a6af49fb8c0d6627d35f1c542",
+      "size_bytes": 5603
+    },
+    {
       "path": "tests/live/test_peer_counter_projection_single_observation.py",
       "sha256": "sha256:259291016ea8b0061aa6c0ebc95f491edf4dae4aa3ac023a7fbd235396265082",
       "size_bytes": 9384
@@ -1670,6 +1680,11 @@
       "path": "tests/test_test_ladder.py",
       "sha256": "sha256:472ff8ec90176c231499a497c880858b649f0a2c12d0f5f8d28ac640f0317fdb",
       "size_bytes": 16795
+    },
+    {
+      "path": "tests/testbed/test_readiness_gate.py",
+      "sha256": "sha256:26a493d54f57885147283332de6c18094c45b80bc2d114828cd1803de74c1da4",
+      "size_bytes": 42631
     },
     {
       "path": "tests/ui_gateway/test_inference.py",
@@ -1988,5 +2003,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:0f3a924853893cee8d2d9ca87e28e2411528afa153b4e651945f1851eb139aaa"
+  "source_digest": "sha256:e6653de02162eeae214145e05b4de29037c8b7a53be7908c1395ba02cc296db3"
 }
