@@ -263,8 +263,8 @@
     },
     {
       "path": "mycelium_a6_cleanup_observation_v2.py",
-      "sha256": "sha256:302da2ef80b651eed77cbbe3837ff171646193b0481b0fcf31e58af3ff7d836e",
-      "size_bytes": 15177
+      "sha256": "sha256:5d4efdd57d07b5b782d65af0730a9abd7844712d43cda6fd4829dfc4de37efa5",
+      "size_bytes": 18665
     },
     {
       "path": "mycelium_a6_direct_socket.py",
@@ -1158,8 +1158,8 @@
     },
     {
       "path": "tests/a6_acceptance/test_cleanup_count_layers.py",
-      "sha256": "sha256:5182e0d86086c931efbdb84fdce172362108d06491263097db36a8c2cae4318c",
-      "size_bytes": 9850
+      "sha256": "sha256:b3f603d226c0a30f0b2692e056860865a0f020f82c60da46e77fa6dadaad7437",
+      "size_bytes": 13391
     },
     {
       "path": "tests/a6_acceptance/test_cleanup_observation_v2.py",
@@ -1963,5 +1963,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:c13ab17edabd5d51a43bea31af25f504c05b16879d4a2a1b853b6ec897020b3d"
+  "source_digest": "sha256:f6db385654f9f6a7b993f0ccb663649e2f840b8281a43ca2e7f2d798084a87c3"
 }

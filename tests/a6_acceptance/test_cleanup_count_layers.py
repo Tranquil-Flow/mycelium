@@ -2,11 +2,23 @@
 """Case15 count-layer truth: zero command CAS blocked vs a real delayed proof.
 
 The frozen v1 `cleanup_authority_failure` reader requires a zero count and the
-owner-approved v2 case requires zero command terminal CAS *and* complete cleanup
-with zero stale reservations.  Those two requirements were never measured on the
-same path.  The reconciliation below is measurement only: it never supplies a
-release authority, never zeroes an unavailable count, and never reports the
-blocked clause as satisfied.
+owner-approved v2 case requires complete cleanup with zero stale reservations
+*and* -- per the owner ruling of 2026-09-27, "A6 CASE15 COUNT-LAYER CLAUSE
+AMENDED" (status/decisions.log) -- exactly one terminal CAS for the releasing
+attempt.  The amended clause, quoted:
+
+    FROM:  terminal_cas_count == 0  AND  process_cleanup_complete is True
+           AND  stale_reservation_count == 0
+    TO:    terminal_cas_count == 1  AND  process_cleanup_complete is True
+           AND  stale_reservation_count == 0
+
+Releasing the reservations IS the committed command terminal, so requiring zero
+made the clause unsatisfiable on any real path.  This is a CLAUSE change, not an
+assertion weakened to reach green: the committed command is still required, the
+cardinality is exact, and a cleanup claim with *zero* committed command terminal
+CAS is still refused rather than reported.  The reconciliation below is
+measurement only: it never supplies a release authority, never zeroes an
+unavailable count, and never reports a blocked clause as satisfied.
 """
 from __future__ import annotations
 
@@ -14,7 +26,7 @@ import pytest
 
 from mycelium_a6_cleanup_observation_v2 import (
     BLOCKED_CLAUSE_CLEANUP_COMPLETENESS,
-    BLOCKED_CLAUSE_ZERO_COMMAND_CAS,
+    BLOCKED_CLAUSE_EXACTLY_ONE_COMMAND_TERMINAL_CAS,
     COUNT_LAYER_PROTOCOL,
     LAYER_BLOCKED_UNPROVEN_CLEANUP,
     LAYER_PROVEN_LATE_CLEANUP,
@@ -41,6 +53,8 @@ def authorities(*, attempt=2, registered=1, cas=0, notices=1, stale=2, complete=
 
 
 def test_blocked_zero_cas_retains_reservations_is_truthful_and_clause_stays_blocked():
+    # Row 1 of the ruling's behaviour table: UNCHANGED by the 2026-09-27 clause
+    # amendment.  The retained-reservation state stays blocked and unauthorized.
     command, gateway, cleanup = authorities()
     truth = reconcile_count_layers(command_authority=command, gateway_authority=gateway,
                                    cleanup_authority=cleanup)
@@ -57,19 +71,54 @@ def test_blocked_zero_cas_retains_reservations_is_truthful_and_clause_stays_bloc
     assert truth["physical_qualification"] is False
 
 
-def test_real_delayed_proof_releases_with_cas_and_cannot_retrofit_the_v2_clause():
+def test_real_delayed_proof_releases_with_exactly_one_cas_and_satisfies_the_amended_clause():
+    # Row 2 of the ruling's behaviour table -- the assertion that flips.
+    # OWNER RULING 2026-09-27, "A6 CASE15 COUNT-LAYER CLAUSE AMENDED"
+    # (status/decisions.log).  The v2 clause changed from "zero command terminal
+    # CAS AND complete cleanup with zero stale reservations" to:
+    #
+    #     terminal_cas_count == 1  AND  process_cleanup_complete is True
+    #     AND stale_reservation_count == 0
+    #
+    # This real delayed proof releases the reservations by committing the command
+    # terminal, so it now satisfies the clause: v2_envelope_authorized flips
+    # False -> True *because the clause changed*, not because an assertion was
+    # weakened.  The authority is intact -- the committed CAS is still required
+    # (zero would be refused, see below), the v1 record stays failed/unqualified,
+    # and no physical qualification is claimed.
     command, gateway, cleanup = authorities(cas=1, stale=0, complete=True)
     truth = reconcile_count_layers(command_authority=command, gateway_authority=gateway,
                                    cleanup_authority=cleanup)
     assert truth["layer_state"] == LAYER_PROVEN_LATE_CLEANUP
-    assert truth["v2_envelope_authorized"] is False
-    assert truth["blocked_clause"] == BLOCKED_CLAUSE_ZERO_COMMAND_CAS
+    assert truth["command_terminal_cas_count"] == 1
+    assert truth["v2_envelope_authorized"] is True
+    assert truth["blocked_clause"] is None
     assert truth["open_owner_decision"] == OPEN_OWNER_DECISION
+    assert truth["v1_gate_record"] == "failed_unqualified_unchanged"
+    assert truth["physical_qualification"] is False
+    assert truth["qualification_claim"] is False
+
+
+def test_more_than_one_terminal_cas_for_the_releasing_attempt_is_not_authorized():
+    # The amended cardinality is exact ("exactly one terminal CAS for the
+    # releasing attempt", owner ruling 2026-09-27).  A measured state with more
+    # than one committed terminal CAS is reported as blocked, never authorized.
+    command, gateway, cleanup = authorities(cas=2, stale=0, complete=True)
+    truth = reconcile_count_layers(command_authority=command, gateway_authority=gateway,
+                                   cleanup_authority=cleanup)
+    assert truth["layer_state"] == LAYER_PROVEN_LATE_CLEANUP
+    assert truth["command_terminal_cas_count"] == 2
+    assert truth["v2_envelope_authorized"] is False
+    assert truth["blocked_clause"] == BLOCKED_CLAUSE_EXACTLY_ONE_COMMAND_TERMINAL_CAS
 
 
 def test_claimed_complete_cleanup_with_zero_command_cas_is_refused_not_reported():
-    # The two co-required v2 clauses cannot both be measured on any real path:
-    # releasing the reservations *is* the committed command terminal.
+    # Row 3 of the ruling's behaviour table -- still REFUSED, not reported.
+    # The 2026-09-27 amendment permits EXACTLY ONE terminal CAS for the releasing
+    # attempt, never zero: a claimed complete cleanup with no committed command
+    # terminal behind it is the fabricated-green failure mode the ruling's
+    # rejected alternative would have allowed.  Releasing the reservations *is*
+    # the committed command terminal, so this input is contradictory.
     command, gateway, cleanup = authorities(cas=0, stale=0, complete=True)
     with pytest.raises(ValueError,
                        match="cleanup_v2_count_layer_conflict_requires_owner_decision"):
@@ -189,6 +238,13 @@ def test_measured_product_authorities_reconcile_the_real_delayed_proof(tmp_path)
                                "stale_reservation_count": proven["reservation_count"],
                                "process_cleanup_complete": public["cleanup_complete"]})
         assert truth["layer_state"] == LAYER_PROVEN_LATE_CLEANUP
-        assert truth["v2_envelope_authorized"] is False
+        # Flipped False -> True by the owner ruling of 2026-09-27 (row 2): the
+        # measured release commits exactly one terminal CAS for the releasing
+        # attempt (accepted == [1, 2] above; the source attempt is not the
+        # releasing one), so the amended clause is satisfied on this real path
+        # rather than blocked on the unachievable zero-CAS requirement.
+        assert truth["command_terminal_cas_count"] == 1
+        assert truth["v2_envelope_authorized"] is True
+        assert truth["blocked_clause"] is None
     finally:
         service.close()

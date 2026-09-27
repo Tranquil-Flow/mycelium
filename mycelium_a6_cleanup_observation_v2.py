@@ -150,33 +150,58 @@ def collect_local_authorities(controller: Any, service: Any, request_id: str,
 # case15 count-layer truth
 #
 # Frozen v1 `cleanup_authority_failure` requires a zero count; the owner
-# approved a v2 case requiring *zero command terminal CAS* together with
-# *complete cleanup and zero stale reservations*.  Those two clauses were never
-# measured on one path.  The reconciliation below records what the three real
-# authorities actually measured.  It never supplies a release authority, never
-# turns an unavailable measurement into zero, and never reports the blocked
-# clause as satisfied.
+# approved a v2 case requiring *exactly one terminal CAS for the releasing
+# attempt* together with *complete cleanup and zero stale reservations*.
+#
+# OWNER RULING 2026-09-27 -- "A6 CASE15 COUNT-LAYER CLAUSE AMENDED"
+# (mycelium-core-program/status/decisions.log).  The amended clause, quoted:
+#
+#     FROM:  terminal_cas_count == 0  AND  process_cleanup_complete is True
+#            AND  stale_reservation_count == 0
+#     TO:    terminal_cas_count == 1  AND  process_cleanup_complete is True
+#            AND  stale_reservation_count == 0
+#
+# Releasing the reservations IS the committed command terminal, so the original
+# co-required clauses were mutually exclusive on every real path and the zero
+# cardinality made the clause unsatisfiable -- a specification defect, not a
+# control.  The amendment preserves the authority: a committed command is still
+# required to prove the release; only the cardinality becomes achievable and
+# exact (exactly 1, never 0).  The rejected alternative -- dropping the CAS
+# requirement -- stays refused: a cleanup claim with no committed command
+# terminal behind it is never reported as a satisfiable envelope.
+#
+# The reconciliation below records what the three real authorities actually
+# measured.  It never supplies a release authority, never turns an unavailable
+# measurement into zero, and never reports a blocked clause as satisfied.
 # ---------------------------------------------------------------------------
 
 COUNT_LAYER_PROTOCOL = "mycelium.a6_cleanup_count_layer_truth.v1"
 LAYER_BLOCKED_UNPROVEN_CLEANUP = "blocked_unproven_cleanup_retains_reservations"
 LAYER_PROVEN_LATE_CLEANUP = "proven_late_cleanup_commits_terminal_cas"
 BLOCKED_CLAUSE_CLEANUP_COMPLETENESS = "process_cleanup_complete_and_zero_stale_reservations"
-BLOCKED_CLAUSE_ZERO_COMMAND_CAS = "zero_command_terminal_cas"
+# Amended 2026-09-27 by the owner ruling "A6 CASE15 COUNT-LAYER CLAUSE AMENDED":
+# the cardinality clause is now *exactly one* terminal CAS for the releasing
+# attempt (it authorizes the proven-late-cleanup state) and blocks that state
+# only when the releasing attempt committed more than one terminal CAS.
+BLOCKED_CLAUSE_EXACTLY_ONE_COMMAND_TERMINAL_CAS = "exactly_one_command_terminal_cas_for_the_releasing_attempt"
 CLEANUP_FIELDS = {"request_id", "request_attempt", "stale_reservation_count",
                   "process_cleanup_complete"}
 OPEN_OWNER_DECISION = (
-    "CASE-SCOPED OWNER DECISION REQUIRED (cleanup_authority_failure only): the authorized v2 "
-    "clause 'process_cleanup_complete=true with stale_reservation_count=0' cannot be measured on "
-    "any real path together with 'terminal_cas_count=0'. A blocked cleanup that commits zero "
-    "command terminal CAS truthfully retains its request-scoped reservations, and any later real "
-    "delayed proof releases them only by committing a terminal CAS on the registered current "
-    "request/attempt. Either (a) narrow the v2 observation to the retained-reservation truth of an "
-    "unproven cleanup (replace 'zero stale reservations' with an explicitly bounded, "
-    "request/attempt-bound retained-reservation count), or (b) explicitly authorize a product "
-    "change that releases request-scoped reservations on the cleanup-authority-failure terminal "
-    "while still committing no command terminal CAS. Until the owner records (a) or (b) this "
-    "clause stays BLOCKED: no v2 envelope, gate record, or physical claim may be emitted from it."
+    "OWNER RULING RECORDED 2026-09-27 (status/decisions.log, 'A6 CASE15 COUNT-LAYER CLAUSE "
+    "AMENDED'): the v2 clause is amended FROM 'zero command terminal CAS AND complete cleanup with "
+    "zero stale reservations' TO 'exactly one terminal CAS for the releasing attempt AND complete "
+    "cleanup with zero stale reservations' -- terminal_cas_count == 1 AND process_cleanup_complete "
+    "is True AND stale_reservation_count == 0. Releasing the reservations IS the committed command "
+    "terminal, so the original co-required clauses were mutually exclusive on every real path and "
+    "the zero-CAS cardinality made this clause unsatisfiable (a specification defect, not a "
+    "control). The authority is preserved: a committed command is still required to prove the "
+    "release. The rejected alternative -- dropping the CAS requirement and accepting "
+    "'process_cleanup_complete=true with stale_reservation_count=0' on its own -- stays refused: a "
+    "cleanup claim with terminal_cas_count == 0 has no committed command terminal behind it and is "
+    "never reported as a satisfiable envelope (cleanup_v2_count_layer_conflict_requires_owner_"
+    "decision). The blocked retained-reservation state (blocked_unproven_cleanup_retains_"
+    "reservations) is unchanged by the ruling and stays BLOCKED: no v2 envelope, gate record, or "
+    "physical claim may be emitted from it."
 )
 
 
@@ -190,6 +215,21 @@ def reconcile_count_layers(*, command_authority: Mapping[str, Any],
     The result states which measured state the request is in and whether the v2
     envelope may be emitted at all.  The frozen v1 predicate is not reinterpreted
     here and stays failed/unqualified.
+
+    The v2 acceptance clause was AMENDED by the owner on 2026-09-27 (ruling
+    "A6 CASE15 COUNT-LAYER CLAUSE AMENDED", status/decisions.log), quoted:
+
+        FROM:  terminal_cas_count == 0  AND  process_cleanup_complete is True
+               AND  stale_reservation_count == 0
+        TO:    terminal_cas_count == 1  AND  process_cleanup_complete is True
+               AND  stale_reservation_count == 0
+
+    Releasing the reservations IS the committed command terminal, so a real
+    release implies exactly one terminal CAS and the original zero-CAS
+    requirement was unsatisfiable on every real path.  The amendment keeps the
+    authority -- a committed command is still required to prove the release --
+    and only makes the cardinality achievable and exact.  A declared complete
+    cleanup with zero committed command terminal CAS therefore stays refused.
     """
     command = _exact(command_authority, COMMAND_FIELDS)
     gateway = _exact(gateway_authority, GATEWAY_FIELDS)
@@ -217,17 +257,31 @@ def reconcile_count_layers(*, command_authority: Mapping[str, Any],
     complete = cleanup["process_cleanup_complete"]
     if cas == 0:
         if complete is True and stale == 0:
-            # The co-required v2 clauses. Releasing a reservation is the committed
-            # command terminal, so a zero-CAS complete cleanup is not an observable
-            # product state and must never be reported as a satisfiable envelope.
+            # Still refused after the 2026-09-27 amendment -- it is not weakened to
+            # reach green.  The amended clause permits EXACTLY ONE terminal CAS for
+            # the releasing attempt, never zero: a claimed complete cleanup with no
+            # committed command terminal behind it is not an observable product
+            # state and has no authority to release the reservations.
             raise ValueError("cleanup_v2_count_layer_conflict_requires_owner_decision")
         if complete is True or stale == 0:
             raise ValueError("cleanup_v2_count_layer_inconsistent")
-        state, clause = LAYER_BLOCKED_UNPROVEN_CLEANUP, BLOCKED_CLAUSE_CLEANUP_COMPLETENESS
+        state, clause, authorized = (
+            LAYER_BLOCKED_UNPROVEN_CLEANUP, BLOCKED_CLAUSE_CLEANUP_COMPLETENESS, False)
+    elif cas == 1:
+        if complete is not True or stale != 0:
+            raise ValueError("cleanup_v2_count_layer_inconsistent")
+        # Amended clause satisfied (owner ruling 2026-09-27): exactly one terminal
+        # CAS for the releasing attempt AND complete cleanup with zero stale
+        # reservations.  The committed command terminal is what proved the release,
+        # so nothing here is blocked and no clause is reported as blocked.
+        state, clause, authorized = LAYER_PROVEN_LATE_CLEANUP, None, True
     else:
         if complete is not True or stale != 0:
             raise ValueError("cleanup_v2_count_layer_inconsistent")
-        state, clause = LAYER_PROVEN_LATE_CLEANUP, BLOCKED_CLAUSE_ZERO_COMMAND_CAS
+        # The amended cardinality is exact: more than one terminal CAS for the
+        # releasing attempt is not the authorized clause and stays blocked.
+        state, clause, authorized = (
+            LAYER_PROVEN_LATE_CLEANUP, BLOCKED_CLAUSE_EXACTLY_ONE_COMMAND_TERMINAL_CAS, False)
     return {
         "protocol": COUNT_LAYER_PROTOCOL,
         "request_id": command["request_id"],
@@ -238,7 +292,7 @@ def reconcile_count_layers(*, command_authority: Mapping[str, Any],
         "gateway_failure_code": gateway["terminal_code"],
         "stale_reservation_count": stale,
         "process_cleanup_complete": complete,
-        "v2_envelope_authorized": False,
+        "v2_envelope_authorized": authorized,
         "blocked_clause": clause,
         "open_owner_decision": OPEN_OWNER_DECISION,
         "v1_gate_record": "failed_unqualified_unchanged",
@@ -251,7 +305,7 @@ def reconcile_count_layers(*, command_authority: Mapping[str, Any],
 __all__ = [
     "AUTHORITY",
     "BLOCKED_CLAUSE_CLEANUP_COMPLETENESS",
-    "BLOCKED_CLAUSE_ZERO_COMMAND_CAS",
+    "BLOCKED_CLAUSE_EXACTLY_ONE_COMMAND_TERMINAL_CAS",
     "CASE",
     "CLEANUP_FIELDS",
     "COUNT_LAYER_PROTOCOL",
