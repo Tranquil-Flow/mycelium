@@ -1,0 +1,42 @@
+{
+  "message": {
+    "endpoint_addr": {
+      "addrs": [
+        "127.0.0.1:1"
+      ],
+      "id": "device-endpoint-1"
+    },
+    "expires_at": 1790000060.0,
+    "generation": 0,
+    "incarnation": "inc-fixture-1",
+    "invite_nonce": "pair-fixture-nonce-000000000000000000000001",
+    "issued_at": 1790000000.0,
+    "message_id": "msg-fixture-1",
+    "peer_class": "android_termux_iroh",
+    "protocol": "mycelium.membership.join_request.v1",
+    "recipient_node_id": "seed-node-1",
+    "runtime_capability": {
+      "activation_protocol": "mycelium.router_wire.v1",
+      "runtime_backend": "pixel-stdlib",
+      "transport": "iroh"
+    },
+    "sender_endpoint_id": "device-endpoint-1",
+    "sender_node_id": "node-phone-1",
+    "software_version": "mycelium-node-app/0.1.0",
+    "swarm_id": "swarm-fixture"
+  },
+  "protocol": "mycelium.membership.signed_message.v1",
+  "signature": {
+    "algorithm": "ed25519",
+    "signature": "i4adTu06u75K2Er7TUle4l1OBwqOdUmr7sL1Irt0sX9wxxucrVAkHgLNEQurd17Xdwg/Nt05zjQeY1uVHZmaAw==",
+    "signed_statement_digest": "sha256:5c10ac5ec8db3f2108b3323eeff2dfa2c17e11a87866a81189ab917931e303a7",
+    "signer_endpoint_id": "device-endpoint-1",
+    "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+  },
+  "verification_key": {
+    "algorithm": "ed25519",
+    "encoding": "base64",
+    "verification_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+    "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+  }
+}

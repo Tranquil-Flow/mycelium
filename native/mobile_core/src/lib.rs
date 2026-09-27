@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//! Shared Rust core of the Mycelium node app.
+//!
+//! Pure modules (no I/O, wasm32-compatible): [`canonical`], [`identity`],
+//! [`onboarding`], [`membership`], [`wire`], [`runtime`], [`evidence`].
+//! The `net` feature adds the seed HTTP client, the embedded iroh endpoint and
+//! the node supervisor used by the Android and iOS apps.
+
+pub mod canonical;
+pub mod identity;
+pub mod onboarding;
