@@ -23,6 +23,17 @@ from typing import Any, NoReturn
 
 import mlx.core as mx
 
+from mycelium_router.a10_batch_admission import (
+   BatchExecutionReport,
+   MemberExecution,
+   RuntimeBatchRequest,
+)
+from mycelium_router.a10_runtime_batch import (
+   BACKEND_INVOCATIONS_PER_OBSERVED_BATCH,
+   MEMBERSHIP_AUTHORITY_STAGE_RUNTIME,
+   MINIMUM_PHYSICAL_BATCH_MEMBERS,
+   RuntimeBatchObservation,
+)
 from mycelium_router.contracts import (
    ExecutionGraph,
    HopWorkItem,
@@ -151,6 +162,96 @@ class _KVState:
 class _ReplayResult:
    fingerprint: str
    result: RuntimeResult
+
+
+# ---------------------------------------------------------------------------
+# A10 runtime batching: one real backend invocation over an accepted group
+#
+# The A10 contract makes runtime batching a *backend-invocation* fact: a claimed
+# batch was computed TOGETHER in one invocation, never looped one member at a
+# time.  ``MLXRuntimePort`` dispatches an offered group with a single padded
+# batched forward pass and publishes the runtime-owned observation record
+# ``mycelium.runtime_batch_observation.v1`` for it.  A group this port cannot
+# serve as one invocation is served one member at a time and reported honestly
+# (``dispatch_mode="sequential_dispatch"``, one real invocation per executed
+# member); it never wears a batch label it did not earn.
+#
+# The single-invocation path runs only when every member is in a state the
+# incumbent per-item path would accept, so no incumbent refusal is weakened,
+# bypassed or re-spelled by batching.
+#
+# Claim boundary: deterministic in-process behaviour only.  No physical overlap,
+# benchmark, browser, product or qualification claim is made or implied, and no
+# closure requirement is earned here.
+# ---------------------------------------------------------------------------
+
+#: The frozen observation record this port publishes for an observed group.
+A10_OBSERVATION_PROTOCOL = "mycelium.runtime_batch_observation.v1"
+#: A group computed together in ONE backend invocation.
+RUNTIME_BATCH_DISPATCH_MODE = "runtime_batch"
+#: A group served one member at a time; honest, and never a batch.
+SEQUENTIAL_DISPATCH_MODE = "sequential_dispatch"
+
+
+@dataclass(frozen=True)
+class RuntimeBatchMemberParity:
+   """One member's deterministic parity against its own sequential reference.
+
+   Only equality flags and one bounded scalar deviation are retained.  Payload
+   bytes, logits, activations, KV bytes and token material never enter this
+   record: parity compares decisions, not tensors.
+   """
+
+   member_ref: str
+   decision_equal: bool
+   payload_digest_equal: bool
+   payload_shape_equal: bool
+   maximum_absolute_deviation: float
+
+
+@dataclass(frozen=True)
+class RuntimeBatchParityVerdict:
+   """The sequential-parity oracle verdict for one dispatched group.
+
+   ``all_equal`` is the only claim the oracle makes: every member's decision and
+   payload matched what the incumbent one-member-at-a-time path produced for the
+   same work item.
+   """
+
+   batch_ref: str
+   dispatch_mode: str
+   batched_backend_invocations: int
+   members: tuple[RuntimeBatchMemberParity, ...]
+
+   @property
+   def compared_member_count(self) -> int:
+      return len(self.members)
+
+   @property
+   def all_equal(self) -> bool:
+      return (
+         self.batched_backend_invocations == BACKEND_INVOCATIONS_PER_OBSERVED_BATCH
+         and len(self.members) >= MINIMUM_PHYSICAL_BATCH_MEMBERS
+         and all(
+            member.decision_equal
+            and member.payload_digest_equal
+            and member.payload_shape_equal
+            for member in self.members
+         )
+      )
+
+
+@dataclass
+class _OfferedMember:
+   """One privately offered candidate member of the next dispatched group."""
+
+   member_ref: str
+   item: HopWorkItem
+   stage: Stage
+   placement: Any
+   loaded: LoadedStage
+   runtime: Mapping[str, Any]
+   offered_at: float
 
 
 def _layer_norm(
@@ -520,6 +621,11 @@ class MLXRuntimePort:
       self._resource_index_lock = RLock()
       self._executing_subjects: dict[str, tuple[str, int]] = {}
       self._kv_subjects: dict[str, tuple[str, int]] = {}
+      # A10: privately offered candidate members, and the observations this stage
+      # runtime published for the groups it actually dispatched.
+      self._offered_members: dict[str, _OfferedMember] = {}
+      self._offered_lock = RLock()
+      self._observations: list[RuntimeBatchObservation] = []
 
    @staticmethod
    def _validate_graph_stage_roles(graph: ExecutionGraph) -> None:
@@ -1647,9 +1753,719 @@ class MLXRuntimePort:
       ):
          _reject("decode_requires_single_token")
 
-   def execute_batch(self, batch: RuntimeBatch) -> tuple[RuntimeResult, ...]:
-      """Execute serially in input order; one item cannot poison its siblings."""
+   # -- A10 runtime batch dispatch ------------------------------------------
 
+   @staticmethod
+   def dispatch_mode() -> str:
+      """The A10 dispatch mode this port reports for an offered group."""
+
+      return RUNTIME_BATCH_DISPATCH_MODE
+
+   @staticmethod
+   def _item_starts_kv(item: HopWorkItem) -> bool:
+      """True for a member that begins its own stage-local KV (no continuation)."""
+
+      return item.phase in {"PREFILL", "RECOVERY_PREFILL"} or (
+         item.phase == "PREFILL_CHUNK" and item.token_index == 0
+      )
+
+   @staticmethod
+   def _member_outcome(result: RuntimeResult) -> str:
+      if result.success:
+         return "completed"
+      if (
+         result.failure_scope in {"member_cancelled", "cancelled"}
+         or result.failure_reason.startswith("cancelled")
+      ):
+         return "cancelled"
+      return "failed"
+
+   @staticmethod
+   def _kv_identity(item: HopWorkItem) -> str:
+      """This member's own KV identity -- never a peer's."""
+
+      return f"kv:{item.path_id}:{item.path_attempt}:{item.placement_id}"
+
+   @staticmethod
+   def _incarnation_for(placement: Any, loaded: LoadedStage) -> str:
+      """A deterministic identity for the exact bound stage runtime."""
+
+      generation = loaded.proof.get("load_generation", 0)
+      return f"mlx:{placement.node_id}:{placement.placement_id}:g{generation}"
+
+   def offer_batch_member(self, item: HopWorkItem, *, member_ref: str) -> str:
+      """Offer one item as a candidate member of the next dispatched group.
+
+      Offering is a proposal, never membership: only a dispatch that computes the
+      member attests it.  The item is bound-validated exactly as the per-item path
+      validates it, and stays private until the group is dispatched.
+      """
+
+      if not isinstance(item, HopWorkItem):
+         _reject("invalid_runtime_work_item")
+      if (
+         not isinstance(member_ref, str)
+         or not member_ref
+         or member_ref != member_ref.strip()
+      ):
+         _reject("invalid_batch_member_ref")
+      binding = self._bound.get(item.placement_id)
+      if binding is None:
+         _reject("unbound_runtime_placement")
+      stage, placement, loaded, runtime = binding
+      self._validate_batch_key(item, placement)
+      offered = _OfferedMember(
+         member_ref=member_ref,
+         item=item,
+         stage=stage,
+         placement=placement,
+         loaded=loaded,
+         runtime=runtime,
+         offered_at=self._clock(),
+      )
+      with self._offered_lock:
+         existing = self._offered_members.get(member_ref)
+         if existing is not None:
+            if (
+               existing.item.path_id != item.path_id
+               or existing.item.idempotency_key != item.idempotency_key
+            ):
+               _reject("duplicate_batch_member_ref")
+            return member_ref
+         self._offered_members[member_ref] = offered
+      return member_ref
+
+   def batch_observations(self) -> tuple[RuntimeBatchObservation, ...]:
+      """Every runtime-owned observation this stage published, in dispatch order."""
+
+      with self._offered_lock:
+         return tuple(self._observations)
+
+   def batch_observation(self) -> RuntimeBatchObservation | None:
+      """The latest runtime-owned observation, or ``None`` when none exists.
+
+      Absent evidence is ``None``: never a zeroed or synthesized record.
+      """
+
+      with self._offered_lock:
+         return self._observations[-1] if self._observations else None
+
+   def execution_interval(self) -> tuple[float, float]:
+      """The measured collection/execution interval of the last observed group."""
+
+      latest = self.batch_observation()
+      if latest is None:
+         _reject("missing_execution_interval_report")
+      return (latest.collected_at, latest.executed_at)
+
+   def _fresh_member_ready(self, member: _OfferedMember) -> bool:
+      """True only when the incumbent path would accept this member as a fresh start."""
+
+      item = member.item
+      if not self._item_starts_kv(item):
+         return False
+      if item.position != 0:
+         return False
+      if item.phase == "PREFILL" and item.token_index != -1:
+         return False
+      if item.phase == "RECOVERY_PREFILL" and item.token_index < 0:
+         return False
+      if item.phase == "PREFILL_CHUNK" and item.token_index != 0:
+         return False
+      if item.path_id in self._kv_states:
+         return False
+      if self._released_paths.get(item.path_id) is not None:
+         return False
+      if float(self._clock()) >= float(item.lease_expires_at):
+         return False
+      if (item.path_id, item.idempotency_key) in self._replays:
+         return False
+      return True
+
+   def _state_accepts(self, item: HopWorkItem, state: _KVState) -> bool:
+      """True only when the incumbent continuation path would accept this member."""
+
+      continues_prefill = item.phase == "PREFILL_CHUNK" and item.token_index > 0
+      if item.request_id != state.request_id or item.path_attempt != state.path_attempt:
+         return False
+      if item.placement_id != state.placement_id:
+         return False
+      if item.position != state.next_position:
+         return False
+      if not continues_prefill and item.token_index != state.next_sequence:
+         return False
+      if continues_prefill and item.token_index < 1:
+         return False
+      if float(item.lease_expires_at) != state.lease_expires_at:
+         return False
+      if float(self._clock()) >= state.lease_expires_at:
+         return False
+      if (item.path_id, item.idempotency_key) in self._replays:
+         return False
+      return True
+
+   def _batch_group_refusal(self, members: tuple[_OfferedMember, ...]) -> str | None:
+      """Why this offered group cannot be ONE invocation, or ``None`` when it can.
+
+      Deliberately conservative: the single-invocation path runs only when every
+      member is in a state the incumbent per-item path would accept, so batching
+      never weakens, bypasses or re-spells an incumbent refusal.  Anything this
+      predicate cannot prove is served one member at a time and reported as a
+      split.
+      """
+
+      if len(members) < MINIMUM_PHYSICAL_BATCH_MEMBERS:
+         return "single_member_group"
+      first = members[0]
+      for member in members:
+         item = member.item
+         if member.stage.stage_id != first.stage.stage_id:
+            return "heterogeneous_proposed_group"
+         if member.placement.placement_id != first.placement.placement_id:
+            return "heterogeneous_proposed_group"
+         if item.phase != first.item.phase:
+            return "mixed_member_phases"
+         if item.position != first.item.position:
+            return "mixed_start_positions"
+         if bool(item.emits_token) != bool(first.item.emits_token):
+            return "mixed_member_readout"
+         if item.path_id in self._cancelled_paths:
+            return "member_cancelled_before_launch"
+         if self._item_starts_kv(item) != self._item_starts_kv(first.item):
+            return "mixed_kv_continuation"
+      if self._item_starts_kv(first.item):
+         if any(not self._fresh_member_ready(member) for member in members):
+            return "member_state_not_ready"
+         return None
+      pasts: list[Mapping[int, tuple[mx.array, mx.array]]] = []
+      for member in members:
+         state = self._kv_states.get(member.item.path_id)
+         if state is None or not self._state_accepts(member.item, state):
+            return "member_state_not_ready"
+         pasts.append(state.layers)
+      if any(not layers for layers in pasts):
+         return "member_state_not_ready"
+      layer_sets = {tuple(sorted(layers)) for layers in pasts}
+      widths = {
+         int(next(iter(layers.values()))[0].shape[2]) for layers in pasts
+      }
+      if len(layer_sets) != 1 or len(widths) != 1:
+         return "member_kv_width_mismatch"
+      return None
+
+   def _single_invocation_context(
+      self,
+      members: tuple[_OfferedMember, ...],
+   ) -> tuple[bool, int, dict[int, tuple[mx.array, mx.array]]]:
+      """The shared start position and stacked past for the one invocation."""
+
+      first = members[0].item
+      if self._item_starts_kv(first):
+         return True, int(first.position), {}
+      pasts = [self._kv_states[member.item.path_id].layers for member in members]
+      stacked: dict[int, tuple[mx.array, mx.array]] = {}
+      for layer in pasts[0]:
+         keys = [layers[layer][0] for layers in pasts]
+         values = [layers[layer][1] for layers in pasts]
+         stacked[layer] = (
+            keys[0] if len(keys) == 1 else mx.concatenate(keys, axis=0),
+            values[0] if len(values) == 1 else mx.concatenate(values, axis=0),
+         )
+      return False, int(first.position), stacked
+
+   def _acquire_group_state(self, members: tuple[_OfferedMember, ...]) -> None:
+      """Acquire the one stage-state lock for the whole group, cancellation fenced."""
+
+      while True:
+         with self._execution_admission_lock:
+            with self._cancellation_condition:
+               cancellation_pending = (
+                  self._cancellation_pending > 0
+                  or bool(self._deferred_cancellation_cleanup)
+               )
+            if not cancellation_pending:
+               self._state_lock.acquire()
+               with self._cancellation_condition:
+                  cancellation_pending = (
+                     self._cancellation_pending > 0
+                     or bool(self._deferred_cancellation_cleanup)
+                  )
+                  if not cancellation_pending:
+                     with self._resource_index_lock:
+                        for member in members:
+                           self._executing_subjects[member.item.path_id] = (
+                              member.item.request_id,
+                              member.item.path_attempt,
+                           )
+               if not cancellation_pending:
+                  return
+               self._state_lock.release()
+         with self._cancellation_condition:
+            while (
+               (
+                  self._cancellation_pending > 0
+                  or bool(self._deferred_cancellation_cleanup)
+               )
+               and not any(
+                  member.item.path_id in self._cancelled_paths
+                  for member in members
+               )
+            ):
+               self._cancellation_condition.wait()
+
+   def _checkpoint_group(self, members: tuple[_OfferedMember, ...]) -> None:
+      """Post-launch cancellation fence: a member cancelled after launch is discarded."""
+
+      for member in members:
+         self._checkpoint_path(member.item.path_id)
+
+   def _batched_stage_readout(
+      self,
+      hidden: mx.array,
+      *,
+      stage: Stage,
+      loaded: LoadedStage,
+      runtime: Mapping[str, Any],
+   ) -> mx.array:
+      """Apply the stage's final norm and vocabulary head across the whole batch.
+
+      The shared per-item stage path applies the GPT-2 readout by component role
+      even when ``produce_logits`` is false, so for that architecture the readout
+      is already applied and this method is the identity.  The Qwen2/Qwen3 branch
+      gates the readout on ``produce_logits``, so it is applied here instead --
+      across every position, which for per-position norm and head operations is
+      exactly the arithmetic the per-item path performs on its single last
+      position.
+      """
+
+      if runtime["architecture"] not in {"qwen2", "qwen3"}:
+         return hidden
+      roles = stage.component_roles
+      tensors = loaded.tensors
+      config = runtime["model_config"]
+      if "final_norm" in roles:
+         hidden = _rms_norm(
+            hidden,
+            tensors["model.norm.weight"],
+            float(config["rms_norm_epsilon"]),
+         )
+      if "lm_head" in roles:
+         aliases = loaded.resolved_aliases
+         if not isinstance(aliases, Mapping):
+            _reject("invalid_loaded_stage_aliases")
+         alias = aliases.get("lm_head", {})
+         if not isinstance(alias, Mapping):
+            _reject("invalid_loaded_stage_aliases")
+         head_keys = alias.get("tensor_keys", ["lm_head.weight"])
+         if (
+            not isinstance(head_keys, (list, tuple))
+            or len(head_keys) != 1
+            or not isinstance(head_keys[0], str)
+         ):
+            _reject("invalid_loaded_stage_aliases")
+         hidden = _qwen2_linear(hidden, tensors[head_keys[0]])
+      return hidden
+
+   def _batched_dispatch(
+      self,
+      members: tuple[_OfferedMember, ...],
+   ) -> tuple[tuple[MemberExecution, ...], tuple[tuple[str, str], ...]]:
+      """Compute every accepted member in ONE padded batched backend invocation.
+
+      Members are padded to the widest member.  A pad position is never attended
+      by a real position of its own member (per-member causal mask) and never
+      enters a member's reported result or committed KV (per-member truncation),
+      so padding cannot leak between members or into a result.  The pass is one
+      real backend invocation, and commit is atomic: every member's output and KV
+      is validated before the first state mutation, so a refused pass leaves no
+      member partially committed.
+      """
+
+      self._acquire_group_state(members)
+      try:
+         if self._closed:
+            _reject("runtime_closed")
+         for member in members:
+            if member.item.path_id in self._cancelled_paths:
+               _reject("path_cancelled")
+         self.expire_leases()
+         if self._batch_group_refusal(members) is not None:
+            _reject("batch_group_not_ready")
+         fresh, start_position, past_layers = self._single_invocation_context(members)
+         stage = members[0].stage
+         loaded = members[0].loaded
+         runtime = members[0].runtime
+         emit = members[0].item.phase != "PREFILL_CHUNK" or bool(
+            members[0].item.emits_token
+         )
+         token_rows: list[list[int]] = []
+         hidden_rows: list[mx.array] = []
+         lengths: list[int] = []
+         for member in members:
+            token_ids, hidden_states, sequence = self._decode_input(
+               member.item, stage, runtime
+            )
+            lengths.append(sequence)
+            if token_ids is not None:
+               token_rows.append([int(value) for value in token_ids[0].tolist()])
+            if hidden_states is not None:
+               hidden_rows.append(hidden_states)
+         width = max(lengths)
+         if token_rows:
+            batched_tokens: mx.array | None = mx.array(
+               [row + [0] * (width - len(row)) for row in token_rows],
+               dtype=mx.uint32,
+            )
+            batched_hidden: mx.array | None = None
+         else:
+            padded: list[mx.array] = []
+            for row, length in zip(hidden_rows, lengths):
+               if length < width:
+                  padding = mx.zeros(
+                     (1, width - length, int(row.shape[2])), dtype=row.dtype
+                  )
+                  row = mx.concatenate((row, padding), axis=1)
+               padded.append(row)
+            batched_tokens = None
+            batched_hidden = (
+               padded[0] if len(padded) == 1 else mx.concatenate(padded, axis=0)
+            )
+         output, next_layers = self._execute_stage_with_kv(
+            stage=stage,
+            loaded=loaded,
+            runtime=runtime,
+            token_ids=batched_tokens,
+            hidden_states=batched_hidden,
+            position=start_position,
+            past_layers=past_layers,
+            path_id=members[0].item.path_id,
+            produce_logits=False,
+         )
+         if emit:
+            output = self._batched_stage_readout(
+               output, stage=stage, loaded=loaded, runtime=runtime
+            )
+         mx.eval(output, *(array for pair in next_layers.values() for array in pair))
+         self._checkpoint_group(members)
+         if not bool(mx.all(mx.isfinite(output)).item()):
+            _reject("nonfinite_stage_output")
+         pending: list[
+            tuple[_OfferedMember, int, RuntimeResult, dict[int, tuple[mx.array, mx.array]]]
+         ] = []
+         for index, member in enumerate(members):
+            length = lengths[index]
+            row = output[index : index + 1][:, :length, :]
+            if not bool(mx.all(mx.isfinite(row)).item()):
+               _reject("nonfinite_stage_output")
+            result = self._runtime_result(stage, runtime, row, produce_token=emit)
+            layers: dict[int, tuple[mx.array, mx.array]] = {}
+            for layer, (all_key, all_value) in next_layers.items():
+               key_rows = all_key[index : index + 1]
+               value_rows = all_value[index : index + 1]
+               if int(key_rows.shape[2]) > length:
+                  key_rows = key_rows[:, :, :length, :]
+                  value_rows = value_rows[:, :, :length, :]
+               layers[layer] = (key_rows, value_rows)
+            pending.append((member, length, result, layers))
+         executions: list[MemberExecution] = []
+         outcomes: list[tuple[str, str]] = []
+         for member, length, result, layers in pending:
+            item = member.item
+            if fresh:
+               state = _KVState(
+                  request_id=item.request_id,
+                  path_id=item.path_id,
+                  path_attempt=item.path_attempt,
+                  placement_id=item.placement_id,
+                  assignment_id=member.placement.assignment_id,
+                  manifest_digest=self.graph.manifest_digest,
+                  deployment_epoch=self.graph.deployment_epoch,
+                  lease_expires_at=float(item.lease_expires_at),
+                  next_position=length,
+                  next_sequence=(
+                     item.token_index + 1
+                     if item.phase == "RECOVERY_PREFILL"
+                     else 1
+                  ),
+                  cached_context_tokens=length,
+                  layers=layers,
+               )
+               self._kv_states[item.path_id] = state
+               with self._resource_index_lock:
+                  self._kv_subjects[item.path_id] = (
+                     item.request_id,
+                     item.path_attempt,
+                  )
+            else:
+               state = self._kv_states[item.path_id]
+               state.layers = layers
+               state.next_position += length
+               if not (item.phase == "PREFILL_CHUNK" and item.token_index > 0):
+                  state.next_sequence += 1
+               state.cached_context_tokens += length
+            self._update_kv_watermark()
+            self._applied_operation_count += 1
+            phase_counter = (
+               "decode_operation_count"
+               if item.phase == "DECODE"
+               else "prefill_operation_count"
+            )
+            self._placement_counters[item.placement_id][phase_counter] += 1
+            self._activation_output_bytes += len(result.payload or b"")
+            if item.phase in {"PREFILL", "PREFILL_CHUNK", "RECOVERY_PREFILL"}:
+               self._prefill_operation_count += 1
+               self._prefill_input_token_count += length
+            else:
+               self._decode_operation_count += 1
+               self._decode_input_token_count += length
+            self._remember_result(
+               item, self._operation_fingerprint(item), result
+            )
+            if item.terminal:
+               self._release_state(item.path_id, "normal_completion")
+            executions.append(
+               MemberExecution(
+                  member_ref=member.member_ref,
+                  kv_ref=self._kv_identity(item),
+                  result=result,
+                  committed_prefix=int(state.next_position),
+               )
+            )
+            outcomes.append((member.member_ref, self._member_outcome(result)))
+         return tuple(executions), tuple(outcomes)
+      finally:
+         with self._cancellation_condition:
+            for cancelled_path in tuple(self._deferred_cancellation_cleanup):
+               self._release_state(cancelled_path, "cancellation")
+               self._purge_path_replays(cancelled_path)
+               self._deferred_cancellation_cleanup.discard(cancelled_path)
+            with self._resource_index_lock:
+               for member in members:
+                  self._executing_subjects.pop(member.item.path_id, None)
+            self._cancellation_condition.notify_all()
+            self._state_lock.release()
+
+   def _run_members_individually(
+      self,
+      members: tuple[_OfferedMember, ...],
+   ) -> tuple[tuple[MemberExecution, ...], tuple[tuple[str, str], ...]]:
+      """Serve every member one at a time -- the honest split, never a batch.
+
+      A member refused at admission is still counted as one attempted
+      invocation, which can only overstate the invocation count; the split
+      signature is therefore never understated and a loop can never be reported
+      as a batch.
+      """
+
+      executions: list[MemberExecution] = []
+      outcomes: list[tuple[str, str]] = []
+      for member in members:
+         result = self.execute(member.item)
+         state = self._kv_states.get(member.item.path_id)
+         executions.append(
+            MemberExecution(
+               member_ref=member.member_ref,
+               kv_ref=self._kv_identity(member.item),
+               result=result,
+               committed_prefix=int(state.next_position) if state is not None else 0,
+            )
+         )
+         outcomes.append((member.member_ref, self._member_outcome(result)))
+      return tuple(executions), tuple(outcomes)
+
+   def _publish_observation(
+      self,
+      *,
+      request: RuntimeBatchRequest,
+      stage_id: str,
+      backend_invocations: int,
+      collected_at: float,
+      outcomes: tuple[tuple[str, str], ...],
+   ) -> RuntimeBatchObservation:
+      observation = RuntimeBatchObservation(
+         batch_ref=request.batch_ref,
+         phase=request.phase,
+         stage=stage_id,
+         backend_invocation_id=(
+            f"invocation:{request.batch_ref}:{backend_invocations}"
+         ),
+         backend_invocations=backend_invocations,
+         membership_authority=MEMBERSHIP_AUTHORITY_STAGE_RUNTIME,
+         proposed_member_count=request.proposed_member_count,
+         actual_member_count=len(outcomes),
+         member_outcomes=outcomes,
+         collected_at=collected_at,
+         executed_at=self._clock(),
+         cleanup="released",
+      )
+      with self._offered_lock:
+         self._observations.append(observation)
+      return observation
+
+   def _dispatch_offered_batch(
+      self,
+      request: RuntimeBatchRequest,
+   ) -> BatchExecutionReport:
+      """Resolve one offered group, compute it, and publish what actually happened."""
+
+      if not isinstance(request, RuntimeBatchRequest):
+         _reject("invalid_runtime_batch_request")
+      with self._offered_lock:
+         resolved: list[_OfferedMember] = []
+         for member_ref in request.member_refs:
+            member = self._offered_members.pop(member_ref, None)
+            if member is not None:
+               resolved.append(member)
+      if not resolved:
+         _reject("unoffered_batch_member")
+      accepted = tuple(
+         member
+         for member in resolved
+         if member.item.path_id not in self._cancelled_paths
+      )
+      if not accepted:
+         _reject("path_cancelled")
+      collected_at = min(member.offered_at for member in accepted)
+      # A runtime batch is claimed only when the runtime computed exactly the set
+      # the relay proposed.  Anything short of that is a split, and a split is
+      # reported as a split (resolution 2), never as a batch.
+      complete = (
+         len(resolved) == len(request.member_refs)
+         and len(accepted) == request.proposed_member_count
+      )
+      if complete and self._batch_group_refusal(accepted) is None:
+         executions, outcomes = self._batched_dispatch(accepted)
+         dispatch_mode = RUNTIME_BATCH_DISPATCH_MODE
+         backend_invocations = BACKEND_INVOCATIONS_PER_OBSERVED_BATCH
+      else:
+         executions, outcomes = self._run_members_individually(accepted)
+         dispatch_mode = SEQUENTIAL_DISPATCH_MODE
+         backend_invocations = len(executions)
+      self._publish_observation(
+         request=request,
+         stage_id=accepted[0].stage.stage_id,
+         backend_invocations=backend_invocations,
+         collected_at=collected_at,
+         outcomes=outcomes,
+      )
+      return BatchExecutionReport(
+         dispatch_mode=dispatch_mode,
+         backend_invocations=backend_invocations,
+         membership_authority=MEMBERSHIP_AUTHORITY_STAGE_RUNTIME,
+         incarnation=self._incarnation_for(accepted[0].placement, accepted[0].loaded),
+         executed=executions,
+         arena_open=False,
+      )
+
+   def verify_sequential_parity(
+      self,
+      report: BatchExecutionReport,
+      *,
+      batch_ref: str,
+      members: Mapping[str, HopWorkItem],
+   ) -> RuntimeBatchParityVerdict:
+      """Compare a batched dispatch against the incumbent per-item path, per member.
+
+      The reference authority is the incumbent ``execute`` path on a pristine port
+      built from the same bindings -- not a re-implementation and not this port's
+      own committed state.  Parity is per member: token decision equality, payload
+      shape equality, payload digest equality and the maximum absolute deviation
+      between the two payloads.  Payload bytes, logits, activations and KV
+      material are never retained in the verdict.
+      """
+
+      if not isinstance(report, BatchExecutionReport):
+         _reject("invalid_batch_execution_report")
+      if (
+         report.dispatch_mode != RUNTIME_BATCH_DISPATCH_MODE
+         or report.backend_invocations != BACKEND_INVOCATIONS_PER_OBSERVED_BATCH
+         or len(report.executed) < MINIMUM_PHYSICAL_BATCH_MEMBERS
+      ):
+         _reject("observed_batch_required_for_parity")
+      reference = MLXRuntimePort(
+         self.node_id,
+         self.graph,
+         {placement_id: bound[2] for placement_id, bound in self._bound.items()},
+      )
+      compared: list[RuntimeBatchMemberParity] = []
+      for execution in report.executed:
+         item = members.get(execution.member_ref)
+         if item is None:
+            _reject("parity_reference_member_mismatch")
+         compared.append(
+            self._compare_member_parity(
+               execution.member_ref,
+               execution.result,
+               reference.execute(item),
+            )
+         )
+      return RuntimeBatchParityVerdict(
+         batch_ref=batch_ref,
+         dispatch_mode=report.dispatch_mode,
+         batched_backend_invocations=report.backend_invocations,
+         members=tuple(compared),
+      )
+
+   @staticmethod
+   def _payload_arrays(
+      result: RuntimeResult,
+   ) -> tuple[tuple[int, ...], str, mx.array | None]:
+      """(shape, digest, array) for one result payload -- never published."""
+
+      payload = result.payload
+      if payload is None:
+         return (), "", None
+      if not isinstance(payload, bytes):
+         _reject("invalid_member_result_fails_closed")
+      envelope = decode_activation(payload)
+      raw = mx.array(memoryview(envelope.data), dtype=mx.uint8)
+      array = raw.view(_MLX_DTYPES[envelope.dtype]).reshape(envelope.shape)
+      array = array.astype(mx.float32)
+      return (
+         tuple(int(value) for value in envelope.shape),
+         hashlib.sha256(payload).hexdigest(),
+         array,
+      )
+
+   @classmethod
+   def _compare_member_parity(
+      cls,
+      member_ref: str,
+      batched: RuntimeResult,
+      sequential: RuntimeResult,
+   ) -> RuntimeBatchMemberParity:
+      batched_shape, batched_digest, batched_array = cls._payload_arrays(batched)
+      sequential_shape, sequential_digest, sequential_array = cls._payload_arrays(
+         sequential
+      )
+      deviation = 0.0
+      if batched_array is not None and sequential_array is not None:
+         if batched_shape == sequential_shape:
+            difference = mx.abs(batched_array - sequential_array)
+            deviation = float(mx.max(difference).item())
+      return RuntimeBatchMemberParity(
+         member_ref=member_ref,
+         decision_equal=batched.token_id == sequential.token_id,
+         payload_digest_equal=batched_digest == sequential_digest,
+         payload_shape_equal=batched_shape == sequential_shape,
+         maximum_absolute_deviation=deviation,
+      )
+
+   def execute_batch(self, batch: Any) -> tuple[RuntimeResult, ...] | BatchExecutionReport:
+      """Dispatch an offered group, or run a ``RuntimeBatch`` one item at a time.
+
+      ``RuntimeBatch`` keeps the incumbent ordered, item-isolated behaviour and
+      returns its result tuple; it computes no observed batch and therefore
+      publishes no observation record (missing evidence is absent, never zero and
+      never success).  ``RuntimeBatchRequest`` is the A10 dispatch: it resolves the
+      offered members, computes an eligible group in one padded batched forward
+      pass, and returns this runtime's own ``BatchExecutionReport``.  A group that
+      cannot be served as one invocation is served one member at a time and
+      reported as ``sequential_dispatch``.
+      """
+
+      if isinstance(batch, RuntimeBatchRequest):
+         return self._dispatch_offered_batch(batch)
       if not isinstance(batch, RuntimeBatch):
          raise MLXRuntimeError("invalid_runtime_batch")
       return tuple(self.execute(item) for item in batch.items)
@@ -1658,4 +2474,13 @@ class MLXRuntimePort:
 # Compatibility spelling for callers that prefer conventional CamelCase.
 MlxRuntimePort = MLXRuntimePort
 
-__all__ = ["MLXRuntimeError", "MLXRuntimePort", "MlxRuntimePort"]
+__all__ = [
+   "A10_OBSERVATION_PROTOCOL",
+   "MLXRuntimeError",
+   "MLXRuntimePort",
+   "MlxRuntimePort",
+   "RUNTIME_BATCH_DISPATCH_MODE",
+   "SEQUENTIAL_DISPATCH_MODE",
+   "RuntimeBatchMemberParity",
+   "RuntimeBatchParityVerdict",
+]

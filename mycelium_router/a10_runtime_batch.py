@@ -259,6 +259,11 @@ class RuntimeBatchObservation:
    observations are absent, never zero and never success.
    """
 
+   #: The contract record this dataclass *is* (implementation contract resolution 1,
+   #: on behalf of the stage runtime).  A record name is the contract, so it travels
+   #: with the record instead of living only in a documentation list.
+   PROTOCOL = "mycelium.runtime_batch_observation.v1"
+
    batch_ref: str
    phase: str
    stage: str
