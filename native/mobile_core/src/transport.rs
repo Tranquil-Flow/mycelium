@@ -93,7 +93,7 @@ impl NodeTransport {
     /// Advertised transport addresses (`endpoint_addr.addrs` in the join request).
     pub fn advertised_addrs(&self) -> Vec<String> {
         let addr = self.endpoint.addr();
-        let mut out: Vec<String> = addr.addrs.iter().map(|a| format!("{a:?}")).collect();
+        let mut out: Vec<String> = addr.addrs.iter().map(|a| a.to_string()).collect();
         out.sort();
         out.truncate(16);
         if out.is_empty() {
