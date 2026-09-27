@@ -78,25 +78,31 @@ work reports through events.
 
 ## 5. Onboarding UX and protocol
 
-Two-QR flow over the existing A12/A13 handoff (`mycelium_mobile/android_onboarding.py:79-82, 267-547`):
+One-scan flow over the existing A12/A13 handoff (`mycelium_mobile/android_onboarding.py:79-82, 267-547`):
 
-1. Owner console shows an **invite QR** (A13 desktop/operator surface): the owner's
-   short-lived pairing channel reference. The app scans it (camera permission,
-   requested at scan time only).
+1. The owner console shows an **invite QR**: `mycelium:` + base64url(canonical
+   `{"protocol": "mycelium.pairing_channel.v1", "pairing_url", "expires_at"}`), a
+   short-lived owner pairing channel, not a seed secret. The app accepts it from the
+   camera (barcode-scanner plugin, camera permission requested at scan time only), as
+   a `mycelium:` deep link opened by any QR reader, or pasted.
 2. The app creates its durable Ed25519 identity (first run), an ephemeral X25519
    recipient key, and a signed `mycelium.pairing_request.v1` with `peer_class`
-   `android_native_iroh`, `carrier` `signed_native_application`, TTL <= 600 s. It
-   shows the request as a **device QR** (or posts it to the channel from step 1).
-3. The owner encrypts `mycelium.encrypted_invitation_payload.v1` to the recipient key
-   (ECDH X25519, HKDF-SHA256 with 32-byte salt and info
+   `android_native_iroh`, `carrier` `signed_native_application`, TTL <= 600 s, and
+   posts it to the channel.
+3. The owner verifies the request, mints a seed-signed invite whose nonce is the
+   pairing nonce, encrypts `mycelium.encrypted_invitation_payload.v1` to the recipient
+   key (ECDH X25519, HKDF-SHA256 with a 32-byte salt and info
    `mycelium.a12.pairing.handoff.v1\0 || request_digest`, ChaCha20-Poly1305 with the
    canonical header as AAD) and returns the `encrypted_invitation_handoff.v1`.
 4. The app decrypts, checks `request_digest`, `pairing_nonce == invite nonce`, expiry,
-   and the pinned `seed_key_digest`, then joins the seed with the invite bundle.
+   quota and the pinned `seed_key_digest`, verifies the seed's signed identity
+   statement with the pinned key, joins (`/seed/join`), verifies the signed
+   acceptance, and heartbeats with `route_ready: false`.
 
-The user never sees a seed URL, EndpointID or token. QR payloads are the canonical JSON
-of the request/handoff, base64url-wrapped with a `mycelium:` scheme prefix; a handoff
-above QR capacity is carried by the owner channel instead of a QR.
+The user never sees a seed URL, EndpointID or token. A two-QR fallback (device QR
+shown to the owner) exists for owner consoles without a reachable channel. After a
+restart an enrolled member resumes through `/seed/resume` with a fresh incarnation;
+no invite is consumed.
 
 ## 6. Runtime adapter and the llama.cpp-vs-MLX question
 
@@ -152,6 +158,11 @@ owner-reviewed step (section 11).
   protocol logic. Claimed only to the exact mode physically demonstrated (spec section
   6): screen-off survival was observed while charging; unplugged doze behaviour is a
   separate measurement.
+  Measured on the Pixel (Android 16): with the app merely started behind the
+  keyguard (process state TOP_SLEEPING, no foreground service), netpolicy reports
+  `blocked=APP_BACKGROUND` and every socket except loopback fails, so the iroh
+  endpoint cannot reach its relays. Serving therefore requires the user-started
+  foreground service; there is no background-socket shortcut.
 - **iOS/iPadOS**: `foreground_active_only`. On `scenePhase` leaving active the core
   stops admission, emits a signed drain transition if the OS allows, cancels within the
   grace budget, drops request/KV state, fences the incarnation and reconnects with a
@@ -167,7 +178,7 @@ owner-reviewed step (section 11).
 | Source kind (`:538-553`) | Every metric the collector produces is `native_device_observation`; unavailable APIs report the string `unknown`, never a number |
 | Observation record (`:434-447`, `:723-769`) | `mycelium.mobile_runtime_observation.v1` with exactly the eleven fields; metric names `[a-z][a-z0-9_]{0,63}` |
 | Required gate families (`:255-263`) thermal, power, memory, lifecycle, network, artifact, parity | thermal: Android `PowerManager.getCurrentThermalStatus`/thermal headroom, iOS `ProcessInfo.thermalState`; power: battery level, charging, power-save; memory: `ActivityManager.MemoryInfo`/`os_proc_available_memory`, sustained samples; lifecycle: service/scene transitions and incarnation; network: transport type, iroh path (direct/relay), loss/handoff events; artifact: digest-verified assignment-local promotion; parity: runtime parity digest vs reference fixture |
-| Durable identity (`RUNG_REQUIRES` `:196-203`) | Ed25519 key in app-private storage, wrapped by Android Keystore / iOS Keychain; survives restart; incarnation changes on process start |
+| Durable identity (`RUNG_REQUIRES` `:196-203`) | Ed25519 key in app-private sandboxed storage (0600) today, proven to survive restart; wrapping it with Android Keystore / iOS Keychain is a pending step before qualification; incarnation changes on every process start |
 | Member-signed profile/report (`:994-1120`) | `identity.rs` reproduces `Ed25519EvidenceSigner.sign` byte-for-byte (canonical JSON, statement digest, domain-separated payload), cross-tested against the Python verifier |
 | `route_ready=false` at enrollment (`:687-692`) | Join and heartbeat always send `route_ready:false`; only the seed/planner can later place the member |
 | Family-bound claim (`:556-597`, `:242-250`) | The app reports a pseudonymous `family:<hex>` reference derived from registered capability fields (ABI, SDK, SoC capability class), never a brand/model string; initial claims use `claim_scope=family_bound`; a general claim still needs `MINIMUM_ANDROID_FAMILIES = 2` |
@@ -202,7 +213,8 @@ of section 4 is designed for that. The spike found no reason to switch.
 3. `a12_evidence.py:620-621` calls `require_android_family_evidence` without
    `claim_scope`, so the bundle still demands two families even for the family-bound
    initial claim.
-4. Release signing key custody and the pinned certificate digest.
+4. Release signing key custody (owner-held keystore outside the repository, password
+   in the macOS Keychain) and publication of the pinned certificate digest.
 
 ## 12. Browser path
 
@@ -212,3 +224,21 @@ a no-install page can reuse the same onboarding and envelope code. Transport in 
 browser is Iroh's relay-only browser mode (no UDP hole punching), so latency-sensitive
 stage work stays native; the browser page targets the probe/evidence contributor role
 and inherits the iOS-style foreground-only drain model.
+
+## 13. Build, run and remove (the simple path)
+
+One toolchain set builds both mobile targets from the same sources:
+
+- Android: `cd apps/node-app && npm ci && npx tauri android build --debug --apk --target aarch64`
+  (needs the Android SDK, NDK and `rustup target add aarch64-linux-android`); the
+  release APK is built with `npx tauri android build --apk --target aarch64` and
+  signed by `scripts/sign-release.sh`, which reads the keystore password from the
+  macOS Keychain and prints the signer certificate SHA-256 that A12 evidence pins.
+- iOS: `npx tauri ios build` from the same package (Xcode; signing is an owner step).
+- Core only: `cd native/mobile_core && cargo test --features net`.
+- Remove from a phone: `adb uninstall now.mycelium.node.debug` (debug) or
+  `now.mycelium.node` (release); uninstalling deletes the node identity.
+
+Debug builds contain labelled developer hooks (status mirror, a synthetic
+stage-pack assignment standing in for the A2 artifact client, transport trace) that
+release builds do not compile.
