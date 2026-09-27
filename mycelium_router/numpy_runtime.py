@@ -1113,6 +1113,25 @@ class NumpyRuntimePort:
          elapsed_ms,
       )
 
+   @staticmethod
+   def _is_full_context_replay_chunk(item: HopWorkItem) -> bool:
+      """True only for a prefill chunk that is the complete prompt.
+
+      Complete-context replay retains no stage-local KV, so it can never
+      continue a chunked prefill.  The one chunk it accepts is the first
+      chunk (sequence 0, position 0) that is also the final chunk
+      (``emits_token``): the entire prompt in one operation, which is exactly
+      a replay prefill.  Every other chunk still needs KV continuity.
+      """
+
+      return (
+         type(item.token_index) is int
+         and item.token_index == 0
+         and type(item.position) is int
+         and item.position == 0
+         and item.emits_token is True
+      )
+
    def _execute_complete_context(
       self,
       item: HopWorkItem,
@@ -1124,9 +1143,14 @@ class NumpyRuntimePort:
       sequence: int,
       fingerprint: str,
    ) -> RuntimeResult:
-      if item.phase in {"PREFILL", "RECOVERY_PREFILL"}:
+      if item.phase in {"PREFILL", "PREFILL_CHUNK", "RECOVERY_PREFILL"}:
          if item.phase == "PREFILL" and item.token_index != -1:
             _reject("prefill_sequence_mismatch")
+         if (
+            item.phase == "PREFILL_CHUNK"
+            and not self._is_full_context_replay_chunk(item)
+         ):
+            _reject("prefill_chunk_requires_kv_continuity")
          if item.phase == "RECOVERY_PREFILL" and item.token_index < 0:
             _reject("recovery_prefill_sequence_mismatch")
          if item.position != 0:
@@ -1178,7 +1202,7 @@ class NumpyRuntimePort:
       )
       self._placement_counters[item.placement_id][phase_counter] += 1
       self._activation_output_bytes += len(result.payload or b"")
-      if item.phase in {"PREFILL", "RECOVERY_PREFILL"}:
+      if item.phase in {"PREFILL", "PREFILL_CHUNK", "RECOVERY_PREFILL"}:
          self._prefill_operation_count += 1
          self._prefill_input_token_count += sequence
       else:
@@ -1188,7 +1212,11 @@ class NumpyRuntimePort:
       return result
 
    def _execute_bound(self, item: HopWorkItem) -> RuntimeResult:
-      if item.phase == "PREFILL_CHUNK" and self.decode_mode != "stage_local_kv":
+      if (
+         item.phase == "PREFILL_CHUNK"
+         and self.decode_mode != "stage_local_kv"
+         and not self._is_full_context_replay_chunk(item)
+      ):
          _reject("prefill_chunk_requires_kv_continuity")
       if item.phase not in {
          "PREFILL",

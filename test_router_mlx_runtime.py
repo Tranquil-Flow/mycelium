@@ -1103,3 +1103,81 @@ def test_execute_batch_preserves_order_and_isolates_malformed_item(runtime_case)
 def test_execute_batch_rejects_non_batch_input(runtime_case):
    with pytest.raises(MLXRuntimeError, match="^invalid_runtime_batch"):
       runtime_case.ports[0].execute_batch(object())
+
+
+def _replay_ports(case):
+   return tuple(
+      MLXRuntimePort(
+         assignment["node_id"],
+         case.graph,
+         {case.graph.stages[index].placements[0].placement_id: case.loaded[index]},
+         decode_mode="complete_context_replay",
+      )
+      for index, assignment in enumerate(case.assignments)
+   )
+
+
+def test_replay_accepts_only_a_full_context_prefill_chunk(runtime_case):
+   """Replay keeps no KV: only the whole prompt as one final chunk is accepted.
+
+   The accepted chunk is counted as prefill work (never as a decode), and the
+   first token then comes from a complete-context decode that must equal the
+   reference model's next token.
+   """
+
+   prompt = (1, 2, 3)
+   ports = _replay_ports(runtime_case)
+   rejected = (
+      dict(token_ids=(1, 2), token_index=0, position=0, emits_token=False),
+      dict(token_ids=(3,), token_index=1, position=2, emits_token=True),
+      dict(token_ids=(3,), token_index=0, position=2, emits_token=True),
+   )
+   for number, fields in enumerate(rejected):
+      token_ids = fields.pop("token_ids")
+      _assert_failure(
+         ports[0].execute(
+            _work_item(
+               runtime_case,
+               0,
+               encode_token_ids(token_ids),
+               phase="PREFILL_CHUNK",
+               token_span=len(token_ids),
+               request_id=f"request:replay-reject-{number}",
+               path_id=f"path:replay-reject-{number}",
+               **fields,
+            )
+         ),
+         "prefill_chunk_requires_kv_continuity",
+      )
+   assert ports[0].kv_snapshot()["applied_operation_count"] == 0
+
+   _, chunk_token = _run_two_stage(
+      runtime_case,
+      prompt,
+      phase="PREFILL_CHUNK",
+      path_id="path:replay-full-chunk",
+      token_index=0,
+      position=0,
+      emits_token=True,
+      ports=ports,
+   )
+   _, decoded = _run_two_stage(
+      runtime_case,
+      prompt,
+      phase="DECODE",
+      path_id="path:replay-full-chunk",
+      token_index=0,
+      position=len(prompt) - 1,
+      ports=ports,
+   )
+   _, reference = _reference_token(runtime_case, prompt)
+   assert decoded == reference
+   assert chunk_token == reference
+   for port in ports:
+      snapshot = port.kv_snapshot()
+      assert snapshot["active_state_count"] == 0
+      assert snapshot["prefill_operation_count"] == 1
+      assert snapshot["prefill_input_token_count"] == len(prompt)
+      assert snapshot["decode_operation_count"] == 1
+      assert snapshot["decode_input_token_count"] == len(prompt)
+      assert snapshot["applied_operation_count"] == 2

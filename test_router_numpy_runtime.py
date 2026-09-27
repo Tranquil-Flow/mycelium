@@ -719,27 +719,108 @@ def test_execute_rejects_invalid_payloads(runtime_case):
       _assert_failure(result, reason)
 
 
-def test_execute_rejects_prefill_chunk_phase(runtime_case):
-   payload = encode_token_ids((1, 2, 3))
-   key = _batch_key(runtime_case, 0, "PREFILL", 3)
-   item = HopWorkItem(
+def _prefill_chunk_item(
+   runtime_case,
+   *,
+   token_ids,
+   token_index,
+   position,
+   emits_token,
+   path_id="path:prefill-chunk",
+):
+   return HopWorkItem(
       request_id="request:prefill-chunk",
-      path_id="path:prefill-chunk",
+      path_id=path_id,
       path_attempt=0,
       phase="PREFILL_CHUNK",
-      token_index=-1,
+      token_index=token_index,
       hop_index=0,
       placement_id=runtime_case.graph.stages[0].placements[0].placement_id,
       qos_class="interactive",
       deficit_ratio=0.0,
       enqueued_at=0.0,
-      idempotency_key="request:prefill-chunk:PREFILL_CHUNK:0",
-      payload=payload,
-      batch_key=key,
-      position=0,
+      idempotency_key=f"request:prefill-chunk:PREFILL_CHUNK:{token_index}",
+      payload=encode_token_ids(token_ids),
+      batch_key=_batch_key(runtime_case, 0, "PREFILL_CHUNK", len(token_ids)),
+      position=position,
+      emits_token=emits_token,
    )
-   result = runtime_case.ports[0].execute(item)
-   _assert_failure(result, "prefill_chunk_requires_kv_continuity")
+
+
+def test_execute_rejects_prefill_chunk_phase(runtime_case):
+   """Replay rejects every PREFILL_CHUNK that would need KV continuity.
+
+   Contract: complete-context replay retains no stage-local KV, so it accepts
+   a PREFILL_CHUNK only when that chunk is the entire prompt (sequence 0,
+   position 0, and final, i.e. ``emits_token``).  A chunk that is not first,
+   not at position 0, or not final is rejected with
+   ``prefill_chunk_requires_kv_continuity``.
+   """
+
+   port = _fresh_ports(runtime_case)[0]
+   rejected = (
+      # The original shape: no chunk sequence, not final.
+      dict(token_ids=(1, 2, 3), token_index=-1, position=0, emits_token=False),
+      # First chunk of a longer prompt: not final.
+      dict(token_ids=(1, 2), token_index=0, position=0, emits_token=False),
+      # Genuine mid-sequence continuation chunk (would extend retained KV).
+      dict(token_ids=(3,), token_index=1, position=2, emits_token=True),
+      # Final-looking chunk at a non-zero position.
+      dict(token_ids=(3,), token_index=0, position=2, emits_token=True),
+   )
+   for fields in rejected:
+      _assert_failure(
+         port.execute(_prefill_chunk_item(runtime_case, **fields)),
+         "prefill_chunk_requires_kv_continuity",
+      )
+   snapshot = port.kv_snapshot()
+   assert snapshot["applied_operation_count"] == 0
+   assert snapshot["prefill_operation_count"] == 0
+   assert snapshot["decode_operation_count"] == 0
+
+
+def test_replay_accepts_one_full_context_prefill_chunk_as_prefill(runtime_case):
+   """The whole prompt as one final chunk is a replay prefill, counted as one."""
+
+   prompt = (1, 2, 3)
+   ports = _fresh_ports(runtime_case)
+   reference = ports[0].execute(
+      _work_item(
+         runtime_case,
+         0,
+         encode_token_ids(prompt),
+         phase="PREFILL",
+         token_span=len(prompt),
+         request_id="request:reference-prefill",
+         path_id="path:reference-prefill",
+      )
+   )
+   assert reference.success, reference.failure_reason
+
+   port = _fresh_ports(runtime_case)[0]
+   result = port.execute(
+      _prefill_chunk_item(
+         runtime_case,
+         token_ids=prompt,
+         token_index=0,
+         position=0,
+         emits_token=True,
+      )
+   )
+
+   assert result.success, result.failure_reason
+   assert result.payload == reference.payload
+   snapshot = port.kv_snapshot()
+   assert snapshot["mode"] == "complete_context_replay"
+   assert snapshot["active_state_count"] == 0
+   assert snapshot["applied_operation_count"] == 1
+   assert snapshot["prefill_operation_count"] == 1
+   assert snapshot["prefill_input_token_count"] == len(prompt)
+   assert snapshot["decode_operation_count"] == 0
+   assert snapshot["decode_input_token_count"] == 0
+   (placement,) = snapshot["placement_counters"].values()
+   assert placement["prefill_operation_count"] == 1
+   assert placement["decode_operation_count"] == 0
 
 
 def test_execute_rejects_decode_position_and_span_anomalies(runtime_case):
