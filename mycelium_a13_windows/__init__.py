@@ -14,7 +14,10 @@ Scope of this tranche
   admission, mirroring the landed Linux slice's ``admit_linux_platform``.
 * ``package_manifest`` -- the closed, signed
   ``mycelium.installation_package_manifest.v1`` shape for a signed Windows
-  installer, with Authenticode publisher identity and fail-closed verification.
+  installer, with fail-closed verification and a pinned Ed25519 publisher
+  identity; per owner ruling 2026-09-27 #4 the pilot ``owner_private_media``
+  channel carries no Authenticode identity (an explicit unsigned sentinel
+  instead), while ``signed_update_channel`` still requires one.
 * ``install_source`` -- the normal-user install source (no expert tools) and the
   verify-then-identity install plan for an MSI-class artifact.
 * ``service_lifecycle`` -- the least-privilege Windows service declaration, its

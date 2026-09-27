@@ -16,6 +16,7 @@ import pytest
 from mycelium_a13_linux.package_manifest import (
     PROTOCOL as LINUX_PROTOCOL,
 )
+from mycelium_a13_windows.install_source import AUTHENTICODE_UNSIGNED_SUBJECT
 from mycelium_a13_windows.package_manifest import (
     BINDINGS,
     PROTOCOL,
@@ -270,6 +271,45 @@ def test_expiry_and_downgrade_are_rejected_before_identity_work() -> None:
         "package_rollback_floor_invalid"
     )
     assert _code(lambda: _manifest(rollback_floor="")) == "package_rollback_floor_invalid"
+
+
+def test_owner_private_media_pilot_manifest_carries_the_unsigned_sentinel() -> None:
+    """Owner ruling 2026-09-27 #4: no certificate for owner_private_media.
+
+    The pilot channel's manifest may state "no Authenticode identity" via the
+    explicit sentinel; every other publisher/signature/platform check still
+    applies exactly as it does for a fully-signed manifest.
+    """
+
+    document = _manifest(
+        update_channel="owner_private_media",
+        publisher_identity={
+            "publisher_id": PUBLISHER,
+            "authenticode_subject": AUTHENTICODE_UNSIGNED_SUBJECT,
+            "endpoint_id": PUBLISHER_SIGNER.endpoint_id,
+            "verification_key_record": PUBLISHER_SIGNER.public_key_record(),
+        },
+    )
+    verified = _verify(document, expected_authenticode_subject=AUTHENTICODE_UNSIGNED_SUBJECT)
+    assert verified["authenticode_subject"] == AUTHENTICODE_UNSIGNED_SUBJECT
+    assert verified["verified"] is True
+    assert verified["route_ready"] is False
+
+    # An empty/whitespace-only "subject" is still refused -- the sentinel is the
+    # only accepted way to state absence, not a loophole for blank text.
+    assert (
+        _code(
+            lambda: _manifest(
+                publisher_identity={
+                    "publisher_id": PUBLISHER,
+                    "authenticode_subject": "  ",
+                    "endpoint_id": PUBLISHER_SIGNER.endpoint_id,
+                    "verification_key_record": PUBLISHER_SIGNER.public_key_record(),
+                }
+            )
+        )
+        == "package_publisher_invalid"
+    )
 
 
 def test_verification_never_claims_activation_or_route_readiness() -> None:

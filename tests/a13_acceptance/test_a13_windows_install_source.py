@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from mycelium_a13_windows.install_source import (
+    AUTHENTICODE_UNSIGNED_SUBJECT,
     CHANNELS,
     EXPERT_DEPENDENCIES,
     FIELDS,
@@ -23,7 +24,11 @@ from mycelium_qualification.signing import generate_ed25519_signer
 
 NOW = 2_000_000_000.0
 PUBLISHER = "mycelium-release"
-PUBLISHER_SUBJECT = "CN=Mycelium Release, O=Mycelium"
+# Owner ruling 2026-09-27 #4 (no certificate for owner_private_media): the pilot
+# channel default fixture carries the explicit unsigned sentinel, never a
+# fabricated CN=... subject. See test_signed_update_channel_still_requires_a_
+# real_authenticode_subject below for the channel that IS still signed.
+PUBLISHER_SUBJECT = AUTHENTICODE_UNSIGNED_SUBJECT
 SIGNER = generate_ed25519_signer(endpoint_id="release-signer")
 ARTIFACT_BYTES = b"mycelium-windows-installer-payload"
 
@@ -184,6 +189,60 @@ def test_publisher_subject_and_pin_mismatch_fail_closed() -> None:
     ) == "install_source_publisher_mismatch"
     # The install source pins the publisher label and subject; the pinned key
     # digest is the signed package manifest's job (see package_manifest.py).
+
+
+def test_owner_private_media_requires_the_explicit_unsigned_sentinel() -> None:
+    """Owner ruling 2026-09-27 #4: no certificate for owner_private_media.
+
+    A fabricated CN=... subject on the pilot channel is refused, not merely
+    tolerated -- the absence of Authenticode identity must be stated, never
+    disguised as a real one.
+    """
+    fabricated = _source(
+        publisher_identity={
+            "publisher_id": PUBLISHER,
+            "authenticode_subject": "CN=Mycelium Release, O=Mycelium",
+            "endpoint_id": SIGNER.endpoint_id,
+            "verification_key_record": SIGNER.public_key_record(),
+        }
+    )
+    assert _code(lambda: _verify(fabricated)) == "install_source_publisher_invalid"
+    assert (
+        validate_windows_install_source(_source())["publisher_identity"][
+            "authenticode_subject"
+        ]
+        == AUTHENTICODE_UNSIGNED_SUBJECT
+    )
+
+
+def test_signed_update_channel_still_requires_a_real_authenticode_subject() -> None:
+    """``signed_update_channel`` is unaffected by ruling #4 -- Authenticode stays required."""
+
+    real_subject = "CN=Mycelium Release, O=Mycelium"
+    signed = _source(
+        channel="signed_update_channel",
+        publisher_identity={
+            "publisher_id": PUBLISHER,
+            "authenticode_subject": real_subject,
+            "endpoint_id": SIGNER.endpoint_id,
+            "verification_key_record": SIGNER.public_key_record(),
+        },
+    )
+    validated = validate_windows_install_source(signed)
+    assert validated["publisher_identity"]["authenticode_subject"] == real_subject
+
+    unsigned_on_signed_channel = _source(
+        channel="signed_update_channel",
+        publisher_identity={
+            "publisher_id": PUBLISHER,
+            "authenticode_subject": AUTHENTICODE_UNSIGNED_SUBJECT,
+            "endpoint_id": SIGNER.endpoint_id,
+            "verification_key_record": SIGNER.public_key_record(),
+        },
+    )
+    assert _code(lambda: _verify(unsigned_on_signed_channel)) == (
+        "install_source_publisher_invalid"
+    )
 
 
 def test_downgrade_floor_is_enforced_before_identity_or_membership_work() -> None:

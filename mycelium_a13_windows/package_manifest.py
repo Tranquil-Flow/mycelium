@@ -11,12 +11,17 @@ subject that is not the pinned one, a downgrade below the rollback floor, missin
 lifecycle support, and any embedded invitation/credential/model/peer/topology
 material.
 
-Windows-specific: the publisher identity binds the Authenticode subject as well
-as the pinned Ed25519 verification key, the platform block declares the exact
-Windows version/build, and the service descriptor declares a least-privilege
-Windows service install mode.  Verification returns member-only facts.  It never
-returns ``route_ready``, never grants eligibility, and never claims that a
-package was installed or exercised.
+Windows-specific: the publisher identity binds the pinned Ed25519 verification
+key, and, when the package is signed for the ``signed_update_channel``, an
+Authenticode subject too.  Per owner ruling 2026-09-27 #4 (no certificate for
+owner_private_media), the pilot channel's package instead carries the explicit
+``mycelium_a13_windows.install_source.AUTHENTICODE_UNSIGNED_SUBJECT`` sentinel
+in that field -- a stated absence, never a fabricated ``CN=...`` identity --
+and integrity still comes from the pinned Ed25519 key alone.  The platform
+block declares the exact Windows version/build, and the service descriptor
+declares a least-privilege Windows service install mode.  Verification returns
+member-only facts.  It never returns ``route_ready``, never grants eligibility,
+and never claims that a package was installed or exercised.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from mycelium_qualification.signing import (
     build_ed25519_verifier,
 )
 
+from .install_source import AUTHENTICODE_UNSIGNED_SUBJECT
 from .platform_admission import ADMITTED_ARCHITECTURES, ADMITTED_RELEASES
 
 PROTOCOL = "mycelium.installation_package_manifest.v1"
@@ -207,7 +213,13 @@ def _validate_bindings(document: Mapping[str, Any]) -> None:
         _fail("package_publisher_invalid")
     # The Authenticode subject is a display identity, not a path segment: it is
     # bounded text, and the pinned key digest remains the cryptographic identity.
-    if not _text(publisher["authenticode_subject"]):
+    # Owner ruling 2026-09-27 #4 (no certificate for owner_private_media): the
+    # pilot channel's package instead carries the explicit unsigned sentinel,
+    # never a fabricated CN=... subject -- every other publisher check still
+    # applies unchanged.
+    if publisher["authenticode_subject"] != AUTHENTICODE_UNSIGNED_SUBJECT and not _text(
+        publisher["authenticode_subject"]
+    ):
         _fail("package_publisher_invalid")
     try:
         build_ed25519_verifier([dict(publisher["verification_key_record"])])

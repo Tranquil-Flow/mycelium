@@ -73,6 +73,14 @@ def test_declaration_names_the_windows_target_and_claims_no_execution() -> None:
     assert "installed" not in rendered
 
 
+def test_claim_boundary_states_the_installer_is_authenticode_unsigned() -> None:
+    """Owner ruling 2026-09-27 #4: the claim boundary must say so, not imply it."""
+
+    assert "authenticode-unsigned" in CLAIM_BOUNDARY.lower()
+    assert "owner_private_media" in CLAIM_BOUNDARY
+    assert "ed25519" in CLAIM_BOUNDARY.lower()
+
+
 def test_admitted_windows_platform_returns_member_only_source_facts() -> None:
     admission = _admit()
     assert admission["protocol"] == PROTOCOL

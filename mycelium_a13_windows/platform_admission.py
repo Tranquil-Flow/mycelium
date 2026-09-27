@@ -22,7 +22,12 @@ PROTOCOL = "mycelium.a13_windows_platform_admission.v1"
 
 CLAIM_BOUNDARY = (
     "source-only Windows admission: no installer was built, signed, published, "
-    "deployed, launched or exercised on Windows hardware"
+    "deployed, launched or exercised on Windows hardware; per owner ruling "
+    "2026-09-27 #4 (no certificate for owner_private_media), any installer this "
+    "tranche builds ships through the owner_private_media pilot channel and is "
+    "Authenticode-UNSIGNED (expect an unknown-publisher/SmartScreen warning) -- "
+    "integrity is bound by the pinned Ed25519 verification key, never a "
+    "code-signing certificate"
 )
 
 #: The declared Windows release with the lowest admitted version and build, the

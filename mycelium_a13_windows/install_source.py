@@ -9,6 +9,14 @@ EndpointID, sidecar, shell, or CLI setup anywhere in the plan.
 Verification is a prerequisite of the plan: ``install_plan`` refuses a source
 that has not been verified, so target identity can only be created after the
 package boundary has been checked.
+
+Per owner ruling 2026-09-27 #4 (no certificate for owner_private_media), the
+pilot ``owner_private_media`` channel carries no Authenticode publisher
+identity: ``publisher_identity.authenticode_subject`` must then equal
+``AUTHENTICODE_UNSIGNED_SUBJECT``, an explicit statement of absence rather than
+a fabricated ``CN=...`` subject. Integrity still comes from the pinned Ed25519
+verification key. ``signed_update_channel`` is unaffected and still requires a
+real Authenticode subject.
 """
 
 from __future__ import annotations
@@ -27,6 +35,15 @@ CHANNELS: frozenset[str] = frozenset({"owner_private_media", "signed_update_chan
 INSTALL_MODES: frozenset[str] = frozenset(
     {"windows_service", "windows_service_per_user"}
 )
+
+#: Owner ruling 2026-09-27 #4 (no certificate for owner_private_media): the pilot
+#: channel ships with no Authenticode code-signing identity at all.  A declared
+#: source on that channel must carry this explicit sentinel rather than a
+#: fabricated ``CN=...`` subject, so the absence is a stated fact, never a lie of
+#: omission.  ``signed_update_channel`` still requires a real Authenticode
+#: subject -- a purchased certificate is only reconsidered before any public
+#: Windows distribution.
+AUTHENTICODE_UNSIGNED_SUBJECT = "authenticode-unsigned:owner_private_media"
 
 FIELDS: frozenset[str] = frozenset(
     {
@@ -151,13 +168,19 @@ def validate_windows_install_source(source: object) -> dict:
     ):
         _fail("install_source_publisher_invalid")
     subject = publisher["authenticode_subject"]
-    if (
-        not isinstance(subject, str)
-        or not subject
-        or subject != subject.strip()
-        or len(subject) > 256
-    ):
-        _fail("install_source_publisher_invalid")
+    if value["channel"] == "owner_private_media":
+        # Owner ruling 2026-09-27 #4: no certificate for owner_private_media.
+        if subject != AUTHENTICODE_UNSIGNED_SUBJECT:
+            _fail("install_source_publisher_invalid")
+    else:
+        if (
+            not isinstance(subject, str)
+            or not subject
+            or subject != subject.strip()
+            or len(subject) > 256
+            or subject == AUTHENTICODE_UNSIGNED_SUBJECT
+        ):
+            _fail("install_source_publisher_invalid")
     record = publisher["verification_key_record"]
     if (
         not isinstance(record, Mapping)
@@ -322,6 +345,7 @@ def install_plan(verified: object) -> dict:
 
 
 __all__ = [
+    "AUTHENTICODE_UNSIGNED_SUBJECT",
     "CHANNELS",
     "EXPERT_DEPENDENCIES",
     "FIELDS",
