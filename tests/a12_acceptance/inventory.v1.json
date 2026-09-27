@@ -124,9 +124,14 @@
     "android": {
       "architecture": "generic_registered_native_android",
       "minimum_device_families": 2,
+      "minimum_device_families_applies_to": "general_claim",
       "different_manufacturers_required": true,
       "brand_or_model_specific_branching_allowed": false,
-      "signed_native_application_required": true
+      "signed_native_application_required": true,
+      "initial_build_claim_scope": "family_bound",
+      "initial_build_claim_family": "Google Pixel 8 Pro (husky), SDK 36, Android 16",
+      "two_family_requirement_deferred_until": "before_any_general_or_cross_vendor_android_claim_including_public_or_swarm_scope",
+      "two_family_requirement_deferral_ruling": "owner_ruling_2026-09-27_two_android_family_proof_narrowed_for_initial_build"
     },
     "apple_mobile": {
       "platform_families": ["ios", "ipados"],
@@ -182,7 +187,9 @@
     {
       "decision_id": "two_android_family_proof",
       "required_invariants": [
-        "two_independently_manufactured_android_families_required",
+        "initial_build_claim_is_family_bound_to_one_named_family",
+        "two_independently_manufactured_android_families_required_deferred_until_general_claim",
+        "owner_ruling_2026_09_27_two_android_family_proof_narrowed",
         "both_use_same_signed_native_product_contracts",
         "both_pass_same_claimed_role_gate_matrix",
         "family_diversity_is_owner_private_and_publicly_pseudonymous"

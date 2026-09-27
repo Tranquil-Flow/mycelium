@@ -41,6 +41,14 @@ Android conformance device. General Android activation requires positive evidenc
 two independently manufactured device families using the same product contracts. One
 passing phone cannot establish a generic Android claim.
 
+**[2026-09-27 owner ruling — `two_android_family_proof` NARROWED for the initial
+build, not deleted]** The initial-build A12 claim is **family-bound** to one named
+family (Google Pixel 8 Pro, `husky`, SDK 36, Android 16). The two-independent-family
+runtime-evidence requirement is **deferred**: it reactivates before any general or
+cross-vendor Android claim, including any public or swarm-scope claim. The design
+rule above is unchanged — behaviour stays registry/capability-driven and never brand-
+or model-driven — and one phone still cannot establish a generic Android claim.
+
 iOS and iPadOS share Apple platform foundations where appropriate but retain their exact
 platform family, hardware/runtime evidence, lifecycle behavior, and qualification
 binding. Passing on iPadOS does not silently qualify iOS, and vice versa; the public
@@ -178,8 +186,16 @@ thermal/power, or general Android gates.
 
 Before any Android role is physically qualified:
 
-- test two device families from different manufacturers, with distinct relevant
-  hardware/runtime profiles;
+**Initial build (2026-09-27 owner ruling, `two_android_family_proof` narrowed):** the
+role being qualified is claimed for one family-bound conformance family — Google
+Pixel 8 Pro (`husky`, SDK 36, Android 16) — so the first bullet below is **deferred,
+not deleted**: it reactivates before any general or cross-vendor Android claim,
+including any public or swarm-scope claim. Every other bullet stands as written for
+the bound family.
+
+- [2026-09-27: deferred for the initial build, see above; not deleted] test two device
+  families from different manufacturers, with distinct relevant hardware/runtime
+  profiles;
 - bind Android/API level, ABI, application/runtime/transport build digests, and current
   security-relevant capability versions without exposing hardware identifiers;
 - prove durable identity across ordinary app restart and generation-fenced identity
@@ -295,7 +311,7 @@ reuse the A9 commit as mobile execution, device, qualification, or completion ev
 | --- | --- |
 | `four_rung_authority` | Signed membership, capability eligibility, artifact readiness, and operation qualification remain separately authored and generation-bound. |
 | `generic_platform_architecture` | Registered platform/runtime/transport/operation capabilities drive behavior; Pixel or other brand/model text never does. |
-| `two_android_family_proof` | A general Android role requires two independently manufactured families using the same native product contracts and role gates. |
+| `two_android_family_proof` | **Amended 2026-09-27 (owner ruling):** the initial-build claim is family-bound to one named family (Google Pixel 8 Pro, `husky`, SDK 36, Android 16). A *general* Android role still requires two independently manufactured families using the same native product contracts and role gates; that requirement is deferred, not deleted, and reactivates before any general/cross-vendor Android claim, including any public or swarm-scope claim. `one_phone_generic_android_claim` remains a forbidden shortcut. |
 | `apple_foreground_initial` | Initial iOS/iPadOS inference eligibility is foreground-active-only and exact-platform-bound. |
 | `sustainable_mobile_gates` | Thermal, power, memory, lifecycle, network, artifact, and parity gates remain independent, fresh, sustainable, and fail closed. |
 | `a11_bound_optional_draft` | Mobile draft work is optional and requires the exact physically closed A11 target-authoritative binding; it never grants stage eligibility. |

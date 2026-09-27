@@ -310,12 +310,20 @@ def test_a12_decisions_cover_generic_mobile_native_paths_and_sustainable_gates()
     assert {
         "membership_capability_artifact_and_operation_are_separate",
         "platform_runtime_transport_operation_and_qualification_drive_behavior",
-        "two_independently_manufactured_android_families_required",
+        "initial_build_claim_is_family_bound_to_one_named_family",
+        "two_independently_manufactured_android_families_required_deferred_until_general_claim",
+        "owner_ruling_2026_09_27_two_android_family_proof_narrowed",
         "initial_ios_ipados_inference_is_foreground_active_only",
         "thermal_power_memory_lifecycle_network_artifact_and_parity_are_independent",
         "a11_must_be_physically_closed_for_exact_target_workload",
         "termux_adb_and_ssh_are_development_or_conformance_only",
     } <= invariants
+    # [2026-09-27 OWNER RULING] two_android_family_proof is NARROWED for the
+    # initial build, not deleted (status/decisions.log).  The standing-precondition
+    # spelling is gone from the invariants; the deferral, its named reactivation
+    # trigger and the ruling's date stay named above, and the generic-claim
+    # shortcut below must stay forbidden.
+    assert "two_independently_manufactured_android_families_required" not in invariants
     assert {
         "pixel_specific_product_path",
         "one_phone_generic_android_claim",
@@ -330,15 +338,31 @@ def test_a12_decisions_cover_generic_mobile_native_paths_and_sustainable_gates()
     assert set(inventory["required_gate_families"]) == REQUIRED_GATE_FAMILIES
 
 
-def test_a12_platform_requirements_freeze_two_android_families_and_apple_foreground() -> None:
+def test_a12_platform_requirements_freeze_family_bound_initial_claim_and_apple_foreground() -> None:
+    """[2026-09-27 OWNER RULING] the initial-build Android claim is family-bound.
+
+    ``minimum_device_families`` stays 2 — it does NOT move: two families remain the
+    minimum for a *general* claim.  The two-family runtime obligation is deferred
+    with a named reactivation trigger, and the deferral names the ruling and date.
+    """
+
     requirements = _inventory()["platform_requirements"]
     assert requirements == {
         "android": {
             "architecture": "generic_registered_native_android",
             "minimum_device_families": 2,
+            "minimum_device_families_applies_to": "general_claim",
             "different_manufacturers_required": True,
             "brand_or_model_specific_branching_allowed": False,
             "signed_native_application_required": True,
+            "initial_build_claim_scope": "family_bound",
+            "initial_build_claim_family": "Google Pixel 8 Pro (husky), SDK 36, Android 16",
+            "two_family_requirement_deferred_until": (
+                "before_any_general_or_cross_vendor_android_claim_including_public_or_swarm_scope"
+            ),
+            "two_family_requirement_deferral_ruling": (
+                "owner_ruling_2026-09-27_two_android_family_proof_narrowed_for_initial_build"
+            ),
         },
         "apple_mobile": {
             "platform_families": ["ios", "ipados"],

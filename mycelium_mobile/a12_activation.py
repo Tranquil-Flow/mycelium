@@ -73,12 +73,16 @@ ACCEPTANCE_INVENTORY = "tests/a12_acceptance/inventory.v1.json"
 ACCEPTANCE_SCENARIOS = "tests/a12_acceptance/scenarios.v1.json"
 
 # Frozen-input digests of the exact files this scaffold binds (sha256 of the raw
-# bytes at the acceptance base c573e0f).  The boundary suite recomputes them.
+# bytes of the current frozen inputs).  The boundary suite recomputes them, so they
+# are re-pinned in place whenever an input is amended: both were re-pinned on
+# 2026-09-27 with the owner's ``two_android_family_proof`` narrowing for the initial
+# build (status/decisions.log) — the amendment is a claim narrowing, never a digest
+# chase, and it keeps ``one_phone_generic_android_claim`` forbidden.
 SPECIFICATION_DIGEST = (
-    "sha256:bd825c5e3de166be43b730d647a164e692b978be378a23469e96184e7f6c5df8"
+    "sha256:d1c8fbbe2852966522528f55c7e73e6a8054d96f69ef8aab00827cffe2c81197"
 )
 ACCEPTANCE_INVENTORY_DIGEST = (
-    "sha256:a65834dc0b78fedb949b38342220e453dd6caff6708d1e5c791daac5794c7c16"
+    "sha256:42af758fbcdc03b0141fef04d464c1955ecfd681d88c3abf8bfe0207882245dc"
 )
 ACCEPTANCE_SCENARIOS_DIGEST = (
     "sha256:66d82d9683fc1132051dbd2d8a6fdb6d356a08d6b09cccb7172b25652b2fc9b2"
@@ -222,7 +226,28 @@ MOBILE_ROLES = (
     "qualified_model_stage",
 )
 ANDROID_ARCHITECTURE = "generic_registered_native_android"
+# Minimum pseudonymous device families for a *general* Android claim.  This
+# number does not move under the initial-build narrowing below: any caller that
+# asserts a general or cross-vendor Android role still needs two families.
 MINIMUM_ANDROID_FAMILIES = 2
+# [2026-09-27 OWNER RULING] ``two_android_family_proof`` NARROWED FOR THE INITIAL
+# BUILD, not deleted (status/decisions.log; packet
+# a12-claim-narrowing-single-family-20260927).  The initial-build claim is bound to
+# the single named family below, so the two-independent-family runtime requirement
+# is a DEFERRED obligation with a named reactivation trigger, not a present
+# precondition.  A generic claim made on one family is still refused
+# (``android_general_claim_requires_two_families``) and every brand-rejection guard
+# stays in force: behaviour remains registry/capability-driven and never brand- or
+# model-driven (``brand_or_model_specific_branching_allowed: false``).
+ANDROID_GENERAL_CLAIM_SCOPE = "general"
+ANDROID_FAMILY_BOUND_CLAIM_SCOPE = "family_bound"
+ANDROID_CLAIM_SCOPES = (ANDROID_GENERAL_CLAIM_SCOPE, ANDROID_FAMILY_BOUND_CLAIM_SCOPE)
+#: The one device family the narrowed initial-build claim is bound to.
+INITIAL_BUILD_ANDROID_FAMILY = "Google Pixel 8 Pro (husky), SDK 36, Android 16"
+#: Named reactivation trigger for the deferred two-independent-family obligation.
+TWO_FAMILY_REQUIREMENT_REACTIVATION_TRIGGER = (
+    "before_any_general_or_cross_vendor_android_claim_including_public_or_swarm_scope"
+)
 APPLE_PLATFORM_FAMILIES = ("ios", "ipados")
 MOBILE_PLATFORM_FAMILIES = ("android", *APPLE_PLATFORM_FAMILIES)
 APPLE_INITIAL_ELIGIBILITY = "foreground_active_only"
@@ -528,14 +553,29 @@ def require_native_observation(source_kind: object) -> str:
     _reject("source_kind_invalid")
 
 
-def require_android_family_evidence(family_refs: object) -> tuple[str, ...]:
-    """A general Android claim needs two distinct pseudonymous device families.
+def require_android_family_evidence(
+    family_refs: object, *, claim_scope: object = ANDROID_GENERAL_CLAIM_SCOPE
+) -> tuple[str, ...]:
+    """The Android family arithmetic of the claim being asserted.
 
-    One family is insufficient, a repeated family is not diversity, and the
-    ordinary product contracts must be the same for both (inventory decision
-    ``two_android_family_proof``).
+    A *general* Android claim needs two distinct pseudonymous device families:
+    one family is insufficient (``android_general_claim_requires_two_families``),
+    a repeated family is not diversity, and the ordinary product contracts must be
+    the same for both (inventory decision ``two_android_family_proof``).
+
+    [2026-09-27 OWNER RULING] That decision is NARROWED for the initial build,
+    not deleted (``status/decisions.log``; packet
+    ``a12-claim-narrowing-single-family-20260927``).  The initial-build claim is
+    family-bound to ``INITIAL_BUILD_ANDROID_FAMILY``, so a caller that says so —
+    ``claim_scope=ANDROID_FAMILY_BOUND_CLAIM_SCOPE`` — may stand on one family.
+    The generic branch is untouched: an unqualified (default) caller is treated as
+    a general claim, so one family is still refused, and the deferred obligation
+    reactivates at ``TWO_FAMILY_REQUIREMENT_REACTIVATION_TRIGGER`` before any
+    general or cross-vendor Android claim is made.
     """
 
+    if claim_scope not in ANDROID_CLAIM_SCOPES:
+        _reject("android_claim_scope_invalid")
     if (
         isinstance(family_refs, (str, bytes))
         or not isinstance(family_refs, Sequence)
@@ -549,7 +589,10 @@ def require_android_family_evidence(family_refs: object) -> tuple[str, ...]:
         families.append(reference)
     if len(set(families)) != len(families):
         _reject("android_family_evidence_duplicated")
-    if len(families) < MINIMUM_ANDROID_FAMILIES:
+    if (
+        claim_scope != ANDROID_FAMILY_BOUND_CLAIM_SCOPE
+        and len(families) < MINIMUM_ANDROID_FAMILIES
+    ):
         _reject("android_general_claim_requires_two_families")
     return tuple(families)
 
@@ -1592,6 +1635,9 @@ __all__ = [
     "ACCEPTANCE_SCENARIOS_DIGEST",
     "ACTIVATION_QUALIFICATION_PROTOCOL",
     "ANDROID_ARCHITECTURE",
+    "ANDROID_CLAIM_SCOPES",
+    "ANDROID_FAMILY_BOUND_CLAIM_SCOPE",
+    "ANDROID_GENERAL_CLAIM_SCOPE",
     "APPLE_INITIAL_ELIGIBILITY",
     "APPLE_PLATFORM_FAMILIES",
     "BOUNDARIES",
@@ -1604,6 +1650,7 @@ __all__ = [
     "IMPLEMENTATION_CONTRACT",
     "IMPLEMENTED_BEHAVIOUR",
     "IMPLEMENTED_CLAIM",
+    "INITIAL_BUILD_ANDROID_FAMILY",
     "MINIMUM_ANDROID_FAMILIES",
     "MOBILE_PLATFORM_FAMILIES",
     "MOBILE_ROLES",
@@ -1628,6 +1675,7 @@ __all__ = [
     "SOURCE_KINDS",
     "SPECIFICATION",
     "SPECIFICATION_DIGEST",
+    "TWO_FAMILY_REQUIREMENT_REACTIVATION_TRIGGER",
     "WORKSPACES",
     "author_operation_qualification",
     "bind_speculative_draft_worker",

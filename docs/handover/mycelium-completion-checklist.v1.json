@@ -1519,7 +1519,7 @@
      "protocol": "mycelium.executed_requirement_evidence.v1",
      "requirement": "specification",
      "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a12-generic-mobile-activation.md",
-     "artifact_digest": "sha256:bd825c5e3de166be43b730d647a164e692b978be378a23469e96184e7f6c5df8",
+     "artifact_digest": "sha256:d1c8fbbe2852966522528f55c7e73e6a8054d96f69ef8aab00827cffe2c81197",
      "provenance": "source",
      "subject": "A12:specification",
      "observed_at": "2026-08-18T00:00:00Z",
