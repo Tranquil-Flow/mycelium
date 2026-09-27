@@ -17,7 +17,9 @@ file whose schedule or thresholds depart from the registration is refused
 before any window runs. The
 run fixture is validated by the materiality harness
 (tests/a5_acceptance/materiality_harness.evaluate_benchmark_v2) and sealed with
-the decision into the output file. If no ladder rate qualifies, no scored
+the decision into the output file as a mycelium.a5_benchmark_evidence.v2
+envelope that binds the v2 protocol digest and carries a validated
+mycelium.replica_benchmark.v2 record. If no ladder rate qualifies, no scored
 window runs and the sealed decision is inconclusive.
 
 Mode switching (Evi decision 2026-08-20, no request-path contract change):
@@ -68,6 +70,11 @@ import sys  # noqa: E402
 
 sys.path.insert(0, str(REPO_ROOT))
 
+from mycelium_replica_contracts import (  # noqa: E402
+    BENCHMARK_ACCEPTANCE_V2_PROTOCOL,
+    REPLICA_BENCHMARK_V2_PROTOCOL,
+    validate_replica_benchmark_v2,
+)
 from tests.a5_acceptance.materiality_harness import (  # noqa: E402
     RUN_PROTOCOL_V2,
     amended_protocol_violations,
@@ -80,6 +87,10 @@ from tests.a5_acceptance.materiality_harness import (  # noqa: E402
 )
 
 PROTOCOL = load_protocol_v2()
+# Protocol v2 runs are sealed in the v2 evidence envelope carrying a
+# mycelium.replica_benchmark.v2 record; the v1 envelope stays on record only
+# for historical protocol v1 evidence (r33) and is never emitted here.
+EVIDENCE_PROTOCOL_V2 = "mycelium.a5_benchmark_evidence.v2"
 CALIBRATION = PROTOCOL["calibration"]
 CALIBRATION_RATE_LADDER = CALIBRATION["rate_ladder_per_second"]
 MIN_CALIBRATION_REQUESTS = CALIBRATION["minimum_requests_per_trial"]
@@ -890,6 +901,7 @@ def run_benchmark(
     if not _zero_live_resources(before_runtime):
         raise GateError("route_not_clean_and_alive")
     route_binding_digest = _live_route_binding(before)
+    started_at_unix_ms = int(time.time() * 1000)
     actual_provenance = {
         "software_digest": source_manifest_digest,
         "configuration_digest": route_binding_digest,
@@ -998,13 +1010,15 @@ def run_benchmark(
     }
     decision = evaluate_benchmark_v2(fixture)
     after_status = public_json(base_url, "/__mycelium/live-status")
-    return {
-        "protocol": "mycelium.a5_benchmark_evidence.v1",
-        "qualification_claim": False,
-        "promotion_authorized": False,
-        "decision": decision,
-        "run_fixture": fixture,
-        "observed": {
+    return seal_benchmark_evidence(
+        fixture=fixture,
+        decision=decision,
+        deployment_id=before.get("deployment_id"),
+        route_generation=MANIFEST["route_generation"],
+        provenance=actual_provenance,
+        started_at_unix_ms=started_at_unix_ms,
+        finished_at_unix_ms=int(time.time() * 1000),
+        observed={
             "identical_bindings": fixture_bindings,
             "policy_by_mode": POLICY_BY_MODE,
             "arrival_rng_seed": ARRIVAL_SEED,
@@ -1019,6 +1033,119 @@ def run_benchmark(
                 "replica_loss_placement_ids", []
             ),
         },
+    )
+
+
+def replica_benchmark_v2_record(
+    *,
+    fixture: Mapping[str, Any],
+    decision: Mapping[str, Any],
+    deployment_id: object,
+    route_generation: object,
+    provenance: Mapping[str, str],
+    started_at_unix_ms: int,
+    finished_at_unix_ms: int,
+) -> dict[str, Any]:
+    """Carry a protocol v2 decision into a closed replica_benchmark.v2 record.
+
+    Every field is copied from the harness decision or the recorded run; the
+    contract validator then re-checks the registered rules, so a record the
+    decision does not support is refused instead of sealed.
+    """
+
+    calibration = fixture["calibration"]
+    record = {
+        "protocol": REPLICA_BENCHMARK_V2_PROTOCOL,
+        "benchmark_run_id": "a5-v2-" + _digest(fixture)[len("sha256:") :],
+        "benchmark_protocol": BENCHMARK_ACCEPTANCE_V2_PROTOCOL,
+        "benchmark_protocol_digest": fixture["benchmark_protocol_digest"],
+        "workload_manifest_digest": fixture["workload_manifest_digest"],
+        "deployment_id": deployment_id,
+        "route_generation": route_generation,
+        "started_at_unix_ms": started_at_unix_ms,
+        "finished_at_unix_ms": finished_at_unix_ms,
+        "calibration": {
+            "mode": calibration["mode"],
+            "scored": calibration["scored"],
+            "rate_ladder_per_second": list(calibration["rate_ladder_per_second"]),
+            "trials": [
+                {
+                    "ordinal": trial["ordinal"],
+                    "offered_arrival_rate_per_second": trial[
+                        "offered_arrival_rate_per_second"
+                    ],
+                    "request_count": trial["request_count"],
+                    "offered_request_count": trial["offered_request_count"],
+                    "completed": trial["outcomes"]["completed"],
+                }
+                for trial in calibration["trials"]
+            ],
+            "selected_offered_arrival_rate_per_second": calibration[
+                "selected_offered_arrival_rate_per_second"
+            ],
+        },
+        "scheduled_pairs": decision["scheduled_pairs"],
+        "minimum_valid_pairs": decision["minimum_valid_pairs"],
+        "pair_selection": decision["pair_selection"],
+        "material_threshold_fraction": decision["material_threshold_fraction"],
+        "valid_pair_ids": list(decision["valid_pair_ids"]),
+        "excluded_windows": copy.deepcopy(decision["excluded_windows"]),
+        "paired_improvements": list(decision["paired_improvements"]),
+        "point_estimate_fraction": decision["point_estimate_fraction"],
+        "paired_95_percent_bootstrap_lower_bound_fraction": decision[
+            "paired_95_percent_bootstrap_lower_bound_fraction"
+        ],
+        # No plan prediction is bound to the benchmark run.
+        "prediction_error_fraction": None,
+        "decision": decision["decision"],
+        "reasons": list(decision["reasons"]),
+        "qualification_claim": False,
+        "promotion_authorized": False,
+        "provenance": dict(provenance),
+    }
+    try:
+        return validate_replica_benchmark_v2(record)
+    except ValueError as error:
+        raise GateError("replica_benchmark_v2_invalid") from error
+
+
+def seal_benchmark_evidence(
+    *,
+    fixture: Mapping[str, Any],
+    decision: Mapping[str, Any],
+    deployment_id: object,
+    route_generation: object,
+    provenance: Mapping[str, str],
+    started_at_unix_ms: int,
+    finished_at_unix_ms: int,
+    observed: Mapping[str, Any],
+) -> dict[str, Any]:
+    """The mycelium.a5_benchmark_evidence.v2 envelope for a protocol v2 run."""
+
+    digest = protocol_v2_digest(PROTOCOL)
+    if (
+        fixture.get("protocol") != RUN_PROTOCOL_V2
+        or fixture.get("benchmark_protocol_digest") != digest
+    ):
+        raise GateError("benchmark_protocol_not_pre_registered")
+    return {
+        "protocol": EVIDENCE_PROTOCOL_V2,
+        "benchmark_protocol": BENCHMARK_ACCEPTANCE_V2_PROTOCOL,
+        "benchmark_protocol_digest": digest,
+        "qualification_claim": False,
+        "promotion_authorized": False,
+        "decision": dict(decision),
+        "replica_benchmark": replica_benchmark_v2_record(
+            fixture=fixture,
+            decision=decision,
+            deployment_id=deployment_id,
+            route_generation=route_generation,
+            provenance=provenance,
+            started_at_unix_ms=started_at_unix_ms,
+            finished_at_unix_ms=finished_at_unix_ms,
+        ),
+        "run_fixture": dict(fixture),
+        "observed": dict(observed),
     }
 
 

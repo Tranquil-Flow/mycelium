@@ -820,6 +820,7 @@ def _drive_gate(monkeypatch, calibration_completed: dict[float, int]) -> tuple[d
             "protocol": "mycelium.live_route_status.v1",
             "route_alive": True,
             "replica_track_qualification": True,
+            "deployment_id": "deployment-gate-test",
         },
     )
     monkeypatch.setattr(benchmark_gate, "_zero_live_resources", lambda status: True)
