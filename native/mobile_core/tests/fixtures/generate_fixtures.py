@@ -24,6 +24,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey  #
 from mycelium_invite.bundle import INVITE_BUNDLE_PROTOCOL, mint_invite_bundle  # noqa: E402
 from mycelium_membership.contracts import JOIN_REQUEST_PROTOCOL, sign_membership_message  # noqa: E402
 from mycelium_mobile import android_onboarding as onboarding  # noqa: E402
+from mycelium_mobile import pixel_stage  # noqa: E402
 from mycelium_qualification.evidence import canonical_json_bytes  # noqa: E402
 from mycelium_qualification.signing import Ed25519EvidenceSigner  # noqa: E402
 
@@ -152,5 +153,64 @@ def main() -> None:
     write("join_envelope.json", sign_membership_message(signer=device, message=join))
 
 
+def stage_fixture() -> None:
+    import random
+
+    rng = random.Random(20260927)
+    hidden, inner, layer = 8, 32, 1
+
+    def vec(n: int) -> list[float]:
+        return [round(rng.uniform(-0.5, 0.5), 6) for _ in range(n)]
+
+    def mat(r: int, c: int) -> list[list[float]]:
+        return [vec(c) for _ in range(r)]
+
+    prefix = f"transformer.h.{layer}."
+    tensors = {
+        prefix + "ln_1.weight": [1.0 + x for x in vec(hidden)],
+        prefix + "ln_1.bias": vec(hidden),
+        prefix + "attn.c_attn.weight": mat(hidden, 3 * hidden),
+        prefix + "attn.c_attn.bias": vec(3 * hidden),
+        prefix + "attn.c_proj.weight": mat(hidden, hidden),
+        prefix + "attn.c_proj.bias": vec(hidden),
+        prefix + "ln_2.weight": [1.0 + x for x in vec(hidden)],
+        prefix + "ln_2.bias": vec(hidden),
+        prefix + "mlp.c_fc.weight": mat(hidden, inner),
+        prefix + "mlp.c_fc.bias": vec(inner),
+        prefix + "mlp.c_proj.weight": mat(inner, hidden),
+        prefix + "mlp.c_proj.bias": vec(hidden),
+    }
+    digest = "sha256:" + "a" * 64
+    pack = pixel_stage.build_stage_pack(
+        run_id="run-fixture",
+        deployment_id="deployment-fixture",
+        assignment_id="assignment-fixture",
+        stage_id="stage-1",
+        model_id="local/tiny-gpt2-qualification",
+        resolved_commit="fixture",
+        manifest_digest=digest,
+        parent_assignment_digest=digest,
+        parent_load_proof_digest=digest,
+        start_layer=layer,
+        end_layer_exclusive=layer + 1,
+        n_head=2,
+        hidden_size=hidden,
+        epsilon=1e-05,
+        activation_function="gelu_new",
+        scale_attn_weights=True,
+        scale_attn_by_inverse_layer_idx=False,
+        reorder_and_upcast_attn=False,
+        add_cross_attention=False,
+        tensors=tensors,
+    )
+    stage = pixel_stage.PixelStage.from_document(pack)
+    rows = [vec(hidden) for _ in range(5)]
+    output = stage.execute(
+        request_id="req-1", assignment_id="assignment-fixture", stage_id="stage-1", hidden=rows
+    )
+    write("gpt2_stage.json", {"pack": pack, "hidden": rows, "output": output})
+
+
 if __name__ == "__main__":
+    stage_fixture()
     main()
