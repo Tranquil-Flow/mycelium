@@ -169,8 +169,8 @@ BOUNDARY_CALLS = {
          owner_private_root="private:root",
          benchmark_manifest_digest=DIGEST,
          acceptance_inventory_digest=DIGEST,
-         baseline_windows=3,
-         candidate_windows=3,
+         baseline_windows=12,
+         candidate_windows=12,
       )
    ),
    "qualify_target_verifier": lambda: atv.qualify_target_verifier(
@@ -480,7 +480,12 @@ def test_duplicate_interval_ref_is_rejected():
 @pytest.mark.parametrize(
    "overrides,code",
    [
-      ({"baseline_windows": 3, "candidate_windows": 3}, None),
+      ({"baseline_windows": 12, "candidate_windows": 12}, None),
+      # v1 three-pair shape is below the benchmark protocol v2 floor
+      ({"baseline_windows": 3, "candidate_windows": 3}, "invalid_benchmark_window_count"),
+      ({"baseline_windows": 11, "candidate_windows": 11}, "invalid_benchmark_window_count"),
+      ({"baseline_windows": 12, "candidate_windows": 11}, "invalid_benchmark_window_count"),
+      ({"baseline_windows": 13, "candidate_windows": 13}, "invalid_benchmark_window_count"),
       ({"baseline_windows": 2, "candidate_windows": 3}, "invalid_benchmark_window_count"),
       ({"baseline_windows": 0}, "invalid_benchmark_window_count"),
       ({"benchmark_manifest_digest": "sha256:zz"}, "invalid_benchmark_manifest_digest"),
@@ -492,13 +497,13 @@ def test_qualification_request_rejections_are_coded(overrides, code):
       "owner_private_root": "private:root",
       "benchmark_manifest_digest": DIGEST,
       "acceptance_inventory_digest": DIGEST,
-      "baseline_windows": 3,
-      "candidate_windows": 3,
+      "baseline_windows": 12,
+      "candidate_windows": 12,
    }
    values.update(overrides)
    if code is None:
       request = rrb.QualificationRequest(**values)
-      assert request.baseline_windows + request.candidate_windows == 6
+      assert request.baseline_windows + request.candidate_windows == 24
       return
    with pytest.raises(rrb.A10ContractError) as raised:
       rrb.QualificationRequest(**values)

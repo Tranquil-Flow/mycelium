@@ -67,7 +67,17 @@ EARNED_CLOSURE_REQUIREMENTS: frozenset[str] = frozenset()
 MINIMUM_PHYSICAL_BATCH_MEMBERS = 2
 BACKEND_INVOCATIONS_PER_OBSERVED_BATCH = 1
 MEMBERSHIP_AUTHORITY_STAGE_RUNTIME = "stage_runtime"
+# v1 inventory value (six measured windows, three pairs).  Superseded for
+# qualification by the pre-registered benchmark protocol v2 below; retained so
+# the frozen v1 inventory stays mirrored verbatim.
 MEASURED_PAIRED_WINDOWS = 6
+# Sourced verbatim from the benchmark protocol v2
+# (tests/a10_acceptance/benchmark_protocol.v2.json; owner ruling 2026-09-27,
+# pre-registered amendment after r33 underpowered result): twelve scheduled
+# baseline/candidate pairs, of which at least twelve must be valid.
+BENCHMARK_PROTOCOL = "tests/a10_acceptance/benchmark_protocol.v2.json"
+SCHEDULED_BENCHMARK_PAIRS = 12
+MINIMUM_VALID_BENCHMARK_PAIRS = 12
 
 # Scaffold-level sanity ceilings only.  They are NOT qualified bounds: the qualified
 # bounds are policy inputs owned by A9/A4 qualification, never by this module.
@@ -412,19 +422,21 @@ class QualificationRequest:
       _text(self.owner_private_root, code="invalid_qualification_root")
       _digest(self.benchmark_manifest_digest, code="invalid_benchmark_manifest_digest")
       _digest(self.acceptance_inventory_digest, code="invalid_acceptance_inventory_digest")
+      # Benchmark protocol v2: one baseline and one candidate window per
+      # scheduled pair, and never fewer pairs than the pre-registered floor.
       _bounded_int(
          self.baseline_windows,
          code="invalid_benchmark_window_count",
-         minimum=1,
-         maximum=MEASURED_PAIRED_WINDOWS,
+         minimum=MINIMUM_VALID_BENCHMARK_PAIRS,
+         maximum=SCHEDULED_BENCHMARK_PAIRS,
       )
       _bounded_int(
          self.candidate_windows,
          code="invalid_benchmark_window_count",
-         minimum=1,
-         maximum=MEASURED_PAIRED_WINDOWS,
+         minimum=MINIMUM_VALID_BENCHMARK_PAIRS,
+         maximum=SCHEDULED_BENCHMARK_PAIRS,
       )
-      if self.baseline_windows + self.candidate_windows != MEASURED_PAIRED_WINDOWS:
+      if self.baseline_windows != self.candidate_windows:
          _reject("invalid_benchmark_window_count")
 
 
