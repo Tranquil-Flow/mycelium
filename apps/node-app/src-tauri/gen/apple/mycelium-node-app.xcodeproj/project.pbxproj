@@ -12,6 +12,7 @@
 		1779ABA8E041641C8FCB5C4E /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4C11A069E62B2223ECAF3213 /* CoreGraphics.framework */; };
 		21A76EA44C1863FB11032669 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 465BF0018E5ACBD797F4516C /* QuartzCore.framework */; };
 		26E0EE889B3ED1DEC883D62C /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 79EEC799B93806A08D20D8A2 /* LaunchScreen.storyboard */; };
+		5348203D58D1D52B76C28530 /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 31FEF96B3BE78516915286FA /* SystemConfiguration.framework */; };
 		6D3A9C89DFD2F0C5243BB34E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 11DA6F7DCABA2A8A42A72E09 /* Assets.xcassets */; };
 		894834A4D264C222DFC1937A /* assets in Resources */ = {isa = PBXBuildFile; fileRef = DA393D3EFA12B6AC499F0E24 /* assets */; };
 		AD9E3684F982D69519E0CEBF /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = C82FE61BC99B182A057FE52F /* main.mm */; };
@@ -24,6 +25,7 @@
 /* Begin PBXFileReference section */
 		10CBBEE66C444071A436CEC4 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		11DA6F7DCABA2A8A42A72E09 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		31FEF96B3BE78516915286FA /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
 		38AD11C238CB77EE9003A52D /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		3BC4AE42533F9DD75A211A7A /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
 		465BF0018E5ACBD797F4516C /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
@@ -54,6 +56,7 @@
 				E427181968077939E0CEDC64 /* MetalKit.framework in Frameworks */,
 				21A76EA44C1863FB11032669 /* QuartzCore.framework in Frameworks */,
 				0D49E6475156044A93E4E2EF /* Security.framework in Frameworks */,
+				5348203D58D1D52B76C28530 /* SystemConfiguration.framework in Frameworks */,
 				E38B358D42ABF55CC399A6A8 /* UIKit.framework in Frameworks */,
 				F55C956A6B0AF8E1F3108460 /* WebKit.framework in Frameworks */,
 			);
@@ -95,6 +98,7 @@
 				10CBBEE66C444071A436CEC4 /* MetalKit.framework */,
 				465BF0018E5ACBD797F4516C /* QuartzCore.framework */,
 				CFC509C648A60156EC65F362 /* Security.framework */,
+				31FEF96B3BE78516915286FA /* SystemConfiguration.framework */,
 				57D0625969EA98D7C3164F40 /* UIKit.framework */,
 				8C56058B12A9FCC63AAE821D /* WebKit.framework */,
 			);
@@ -150,6 +154,20 @@
 			);
 			name = src;
 			path = ../../src;
+			sourceTree = "<group>";
+		};
+		"TEMP_B5E8E45E-D4B5-45F1-94A5-BC5934F4A856" /* arm64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = arm64;
+			sourceTree = "<group>";
+		};
+		"TEMP_FE426A56-1424-44CF-8DAF-42937C4F2437" /* x86_64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = x86_64;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */

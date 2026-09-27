@@ -35,6 +35,11 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    },
+    "iOS": {
+      "frameworks": [
+        "SystemConfiguration"
+      ]
     }
   },
   "plugins": {

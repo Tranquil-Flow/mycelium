@@ -20,7 +20,22 @@ use crate::runtime::{Gpt2BlockStage, REFERENCE_BACKEND, StageRuntime};
 use crate::transport::{Inbound, NodeTransport, Reachability};
 use crate::wire;
 
+/// The peer class this build may claim. Only the Android native class has an
+/// owner-side pairing contract today; an iOS build reports its own class and
+/// refuses to pair rather than claim to be Android (Apple families never
+/// inherit another platform's qualification).
+#[cfg(not(target_os = "ios"))]
 pub const PEER_CLASS: &str = onboarding::ANDROID_PEER_CLASS;
+#[cfg(target_os = "ios")]
+pub const PEER_CLASS: &str = "ios_native_iroh";
+
+fn require_registered_class() -> Result<(), NodeError> {
+    if PEER_CLASS == onboarding::ANDROID_PEER_CLASS {
+        Ok(())
+    } else {
+        Err(nerr(format!("platform_peer_class_unregistered:{PEER_CLASS}")))
+    }
+}
 pub const PAIRING_CHANNEL_PROTOCOL: &str = "mycelium.pairing_channel.v1";
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
@@ -173,6 +188,7 @@ impl NodeCore {
     /// signed pairing request, post it to the channel and wait for the encrypted
     /// handoff. One scan pairs the device.
     pub fn pair_with_channel_qr(&self, qr: &str, device_ref: &str) -> Result<NodeStatus, NodeError> {
+        require_registered_class().map_err(|e| self.fail(e))?;
         let channel = onboarding::decode_qr(qr).map_err(|e| self.fail(nerr(e.to_string())))?;
         if channel["protocol"] != PAIRING_CHANNEL_PROTOCOL {
             return Err(self.fail(nerr("pairing_channel_invalid")));
@@ -202,6 +218,7 @@ impl NodeCore {
 
     /// Two-QR fallback: show this device QR to the owner console.
     pub fn begin_pairing(&self, device_ref: &str) -> Result<String, NodeError> {
+        require_registered_class()?;
         let session = PairingSession::new(&self.identity, device_ref, now_s(), 300, None)
             .map_err(|e| nerr(e.to_string()))?;
         let qr = session.request_qr().map_err(|e| nerr(e.to_string()))?;
