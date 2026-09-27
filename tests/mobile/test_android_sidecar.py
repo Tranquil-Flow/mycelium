@@ -413,3 +413,117 @@ def test_cleanup_never_signals_a_reused_pid() -> None:
     assert cleanup_argv == [
         ("/data/data/com.termux/files/usr/bin/cat", "/proc/4321/cmdline")
     ]
+
+
+def _package_at_api_level(tmp_path: Path, api_level: object):
+    from mycelium_mobile.android_sidecar import build_android_sidecar_package
+
+    source = tmp_path / f"mycelium-iroh-sidecar-{api_level}"
+    source.write_bytes(_aarch64_elf())
+    source.chmod(0o700)
+    return build_android_sidecar_package(
+        sidecar_binary=source,
+        output_root=tmp_path / f"package-{api_level}",
+        android_api_level=api_level,  # type: ignore[arg-type]
+        source_commit="a" * 40,
+        cargo_lock_digest="sha256:" + "b" * 64,
+    )
+
+
+@pytest.mark.parametrize("api_level", [21, 35, 36], ids=lambda level: f"api{level}")
+def test_android_api_level_band_accepts_android_16(tmp_path: Path, api_level: int) -> None:
+    """Android 16 is API level 36; the band closed at 35 and refused the device."""
+
+    package = _package_at_api_level(tmp_path, api_level)
+    manifest = json.loads(package.manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["android_api_level"] == api_level
+    assert manifest["binary"]["content_digest"] == (
+        "sha256:" + hashlib.sha256(_aarch64_elf()).hexdigest()
+    )
+    assert manifest["target"] == "aarch64-linux-android"
+    assert stat.S_IMODE(package.binary_path.stat().st_mode) == 0o700
+
+
+@pytest.mark.parametrize(
+    "api_level", [20, 1, 0, -1, 37, 100], ids=lambda level: f"api{level}"
+)
+def test_android_api_level_outside_the_band_is_refused(
+    tmp_path: Path, api_level: int
+) -> None:
+    from mycelium_mobile.android_sidecar import AndroidSidecarError
+
+    with pytest.raises(AndroidSidecarError) as caught:
+        _package_at_api_level(tmp_path, api_level)
+
+    assert caught.value.code == "android_api_level_invalid"
+    assert not (tmp_path / f"package-{api_level}").exists()
+
+
+@pytest.mark.parametrize(
+    "api_level", [21.0, 36.0, True, False, "36", None], ids=repr
+)
+def test_a_non_int_android_api_level_is_refused(tmp_path: Path, api_level: object) -> None:
+    """``True`` is not level 1 and ``36.0`` is not level 36 under ``type is int``."""
+
+    from mycelium_mobile.android_sidecar import AndroidSidecarError
+
+    with pytest.raises(AndroidSidecarError) as caught:
+        _package_at_api_level(tmp_path, api_level)
+
+    assert caught.value.code == "android_api_level_invalid"
+    assert not (tmp_path / f"package-{api_level}").exists()
+
+
+def test_elf_and_abi_assertions_are_revalidated_at_android_16(tmp_path: Path) -> None:
+    """The new ceiling accepts the same AArch64 ABI evidence, not the number alone.
+
+    Android 16 does not change the ``aarch64-linux-android`` ABI, so a level-36
+    package must be refused for exactly the same ELF reasons a level-21 package
+    is: a wrong machine, a wrong class and a non-ELF payload.
+    """
+
+    from mycelium_mobile.android_sidecar import (
+        AndroidSidecarError,
+        build_android_sidecar_package,
+    )
+
+    mutations = {
+        "machine": (slice(18, 20), (62).to_bytes(2, "little")),
+        "class": (slice(4, 5), bytes([1])),
+        "magic": (slice(0, 4), b"MZ\x90\x00"),
+    }
+    for name, (where, replacement) in mutations.items():
+        payload = bytearray(_aarch64_elf())
+        payload[where] = replacement
+        source = tmp_path / f"sidecar-{name}"
+        source.write_bytes(bytes(payload))
+        output = tmp_path / f"package-{name}"
+
+        with pytest.raises(AndroidSidecarError) as caught:
+            build_android_sidecar_package(
+                sidecar_binary=source,
+                output_root=output,
+                android_api_level=36,
+                source_commit="a" * 40,
+                cargo_lock_digest="sha256:" + "b" * 64,
+            )
+
+        assert caught.value.code == "android_sidecar_architecture_invalid"
+        assert not output.exists()
+
+
+def test_sidecar_refusals_expose_a_stable_code() -> None:
+    """The refusal code is readable as ``.code``, not only as the message text."""
+
+    from mycelium_mobile.android_sidecar import AndroidSidecarError, _require
+
+    caught_guard = None
+    try:
+        _require(False, "android_sidecar_binary_invalid")
+    except AndroidSidecarError as error:
+        caught_guard = error
+    assert caught_guard is not None
+    assert caught_guard.code == "android_sidecar_binary_invalid"
+    assert str(caught_guard) == "android_sidecar_binary_invalid"
+    assert isinstance(caught_guard.code, str)

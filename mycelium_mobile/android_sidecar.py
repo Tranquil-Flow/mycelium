@@ -25,7 +25,16 @@ _SHA256_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z", re.ASCII)
 
 
 class AndroidSidecarError(RuntimeError):
-    """Stable package validation or construction error."""
+    """Stable package validation or construction error carrying a stable code.
+
+    The refusal code is exposed as ``.code`` -- and, as before, as the exception
+    message -- so a caller can branch on the refusal it actually got instead of
+    parsing text.
+    """
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,8 +152,16 @@ def build_android_sidecar_package(
     android_api_level: int = 21,
 ) -> AndroidSidecarPackage:
     """Validate and package one Android AArch64 sidecar without claiming execution."""
+    # The ceiling tracks the highest platform this lane has been validated
+    # against: Android 16 is API level 36, which is what the physically attached
+    # Pixel 8 Pro reports.  Nothing downstream keys off the level beyond being
+    # carried into the manifest, and the aarch64-linux-android ABI the ELF
+    # assertions below pin (ELFCLASS64, ELFDATA2LSB, EM_AARCH64, ET_EXEC/ET_DYN)
+    # is unchanged from level 21 through 36 -- so 36 is accepted on the same ABI
+    # evidence as 21..35 rather than on the number alone.  A level above the
+    # ceiling is refused, never assumed good.
     _require(
-        type(android_api_level) is int and 21 <= android_api_level <= 35,
+        type(android_api_level) is int and 21 <= android_api_level <= 36,
         "android_api_level_invalid",
     )
     _require(

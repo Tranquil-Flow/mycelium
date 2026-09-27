@@ -233,3 +233,86 @@ def test_product_activation_from_the_bridge_always_fails_closed() -> None:
         )
         == "excluded_development_path_cannot_qualify"
     )
+
+
+def test_the_refusal_a_caller_observes_is_the_policy_code_not_a_bridge_owned_one() -> None:
+    """Honest error surface: the documented refusal is the one that is raised.
+
+    The audit found ``authorize_product_activation_from_bridge`` carrying a
+    refusal branch that cannot be reached as written.  This test pins which code
+    a caller actually gets, so the docstring cannot drift back into advertising
+    an unobservable one.
+    """
+
+    import mycelium_mobile.android_adb_bridge as bridge_module
+
+    attachment = _attachment()
+    handshake = _handshake(attachment)
+    documented = bridge_module.authorize_product_activation_from_bridge
+
+    assert documented.__doc__ is not None
+    assert "excluded_development_path_cannot_qualify" in documented.__doc__
+    assert "ignored" in documented.__doc__
+
+    with pytest.raises(a12.A12ContractError) as caught:
+        authorize_product_activation_from_bridge(
+            attachment=attachment,
+            handshake=handshake,
+            path_kind="signed_native_application",
+        )
+    assert caught.value.code == "excluded_development_path_cannot_qualify"
+    assert str(caught.value) == "excluded_development_path_cannot_qualify"
+
+
+def test_bridge_owned_refusals_are_reached_when_the_label_or_the_policy_moves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The bridge's own fail-closed refusals are reachable, so they are guards.
+
+    ``adb_bridge_product_path_label_invalid`` fires when the module's registered
+    label is no longer an excluded path, and
+    ``adb_bridge_product_activation_unreachable`` fires when the excluded-path
+    policy stops refusing a label this function has already proven excluded --
+    the case that used to be dead code.  Both are simulated here with the
+    production prefix of the function (attachment + handshake) left intact.
+    """
+
+    import mycelium_mobile.android_adb_bridge as bridge_module
+
+    attachment = _attachment()
+    handshake = _handshake(attachment)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(bridge_module, "PRODUCT_PATH_KIND", "signed_native_application")
+        # The attachment record carries the module's label, so a drifted label
+        # passes the attachment check and reaches the bridge's own guard.
+        drifted_attachment = _attachment()
+        drifted_handshake = _handshake(drifted_attachment)
+        with pytest.raises(AdbBridgeError) as drifted:
+            authorize_product_activation_from_bridge(
+                attachment=drifted_attachment, handshake=drifted_handshake
+            )
+        assert drifted.value.code == "adb_bridge_product_path_label_invalid"
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            bridge_module,
+            "require_undivided_product_path",
+            lambda path_kind: str(path_kind),
+        )
+        with pytest.raises(AdbBridgeError) as terminal:
+            bridge_module.authorize_product_activation_from_bridge(
+                attachment=attachment, handshake=handshake
+            )
+        assert terminal.value.code == "adb_bridge_product_activation_unreachable"
+
+    # Unpatched: the excluded-path policy refuses, so neither bridge-owned code
+    # is observable and no activation is returned.
+    assert (
+        _code(
+            lambda: authorize_product_activation_from_bridge(
+                attachment=attachment, handshake=handshake
+            )
+        )
+        == "excluded_development_path_cannot_qualify"
+    )

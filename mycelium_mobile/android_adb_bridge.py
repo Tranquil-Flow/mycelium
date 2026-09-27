@@ -359,16 +359,31 @@ def authorize_product_activation_from_bridge(
 ) -> NoReturn:
     """Always refuse: the bridge is not the ordinary product path.
 
-    The refusal is computed from the bridge's own path kind, never from the
-    caller's claim, so no ``path_kind`` argument can turn a development session
-    into a product activation (inventory decision ``native_product_path_only``).
+    ``path_kind`` is accepted for call-site compatibility and then deliberately
+    **ignored** -- it is never read.  The refusal is computed from the bridge's
+    own registered label (``PRODUCT_PATH_KIND``), never from the caller's claim,
+    so no argument can turn a development session into a product activation
+    (inventory decision ``native_product_path_only``).
+
+    The refusal a caller actually observes is the excluded-path policy code
+    ``excluded_development_path_cannot_qualify``, raised by
+    :func:`require_undivided_product_path`.  The two ``AdbBridgeError`` codes
+    below are this module's own fail-closed guards and are reached only when the
+    label or the policy has moved: ``adb_bridge_product_path_label_invalid`` when
+    ``PRODUCT_PATH_KIND`` is no longer registered as an excluded path, and
+    ``adb_bridge_product_activation_unreachable`` when the excluded-path policy
+    stops refusing a label this function has already proven excluded.
     """
 
     record = _require_attachment(attachment)
     _require_handshake(handshake, attachment_digest=_digest(record))
+    del path_kind  # never consulted: the caller's label is not an authority here
     if PRODUCT_PATH_KIND not in EXCLUDED_NORMAL_PRODUCT_PATHS:
         raise AdbBridgeError("adb_bridge_product_path_label_invalid")
     require_undivided_product_path(PRODUCT_PATH_KIND)
+    # Reached only if the excluded-path policy stops refusing the bridge's own
+    # excluded label; the bridge then refuses in its own voice instead of
+    # returning an activation.
     raise AdbBridgeError("adb_bridge_product_activation_unreachable")
 
 
