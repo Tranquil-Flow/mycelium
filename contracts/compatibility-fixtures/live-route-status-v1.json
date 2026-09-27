@@ -14,7 +14,7 @@
     "shared_process_termination_used": false
   },
   "counters": {
-    "applied_operation_count": 0,
+    "applied_operation_count": 18,
     "fatal": null,
     "frames_received": 0,
     "frames_sent": 0
@@ -36,7 +36,7 @@
       "activation_output_bytes": 8192,
       "active_kv_bytes": 0,
       "active_kv_state_count": 0,
-      "applied_operation_count": 0,
+      "applied_operation_count": 9,
       "architecture": "qwen2",
       "current_position": null,
       "data_plane_health_observed": true,
@@ -93,7 +93,7 @@
       "activation_output_bytes": 8192,
       "active_kv_bytes": 0,
       "active_kv_state_count": 0,
-      "applied_operation_count": 0,
+      "applied_operation_count": 9,
       "architecture": "qwen2",
       "current_position": null,
       "data_plane_health_observed": true,

@@ -834,8 +834,8 @@
     {
       "fixture": {
         "path": "contracts/compatibility-fixtures/live-route-status-v1.json",
-        "sha256": "59d2cdc1492bddb4a050c2113fbface71a1cce550b4cd25a00b8c18f82d4f192",
-        "size_bytes": 5576
+        "sha256": "81a67c0d803cf65f8d4fdb637a880a5e4a82e77030522646eb3a241dfb6c8137",
+        "size_bytes": 5577
       },
       "owner_sources": [
         {

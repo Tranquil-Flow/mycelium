@@ -1683,6 +1683,16 @@ def model_preparation_authorization_v2() -> dict[str, Any]:
     }
 
 
+# One observation's operation triple for every stage of the synthetic route.  The
+# product publishes that triple from a single observation and increments ``applied``
+# together with exactly one of ``prefill``/``decode`` inside the same locked
+# operation, so a record that violates ``applied == prefill + decode`` models a shape
+# ``mycelium_live.route`` can no longer emit; the values are derived instead of
+# hand-written so the fixture cannot drift back into that false-evidence shape.
+_LIVE_ROUTE_PREFILL_OPERATIONS = 1
+_LIVE_ROUTE_DECODE_OPERATIONS = 8
+
+
 def live_route_status(graph_document: dict[str, Any]) -> dict[str, Any]:
     stages = [
         {
@@ -1706,7 +1716,9 @@ def live_route_status(graph_document: dict[str, Any]) -> dict[str, Any]:
                 "placements": placements,
                 "frames_sent": 0,
                 "frames_received": 0,
-                "applied_operation_count": 0,
+                "applied_operation_count": (
+                    _LIVE_ROUTE_PREFILL_OPERATIONS + _LIVE_ROUTE_DECODE_OPERATIONS
+                ),
                 "decode_mode": "stage_local_kv",
                 "architecture": "qwen2",
                 "supported_decode_modes": [
@@ -1721,9 +1733,9 @@ def live_route_status(graph_document: dict[str, Any]) -> dict[str, Any]:
                 "active_kv_state_count": 0,
                 "active_kv_bytes": 0,
                 "peak_kv_bytes": 4096,
-                "prefill_operation_count": 1,
+                "prefill_operation_count": _LIVE_ROUTE_PREFILL_OPERATIONS,
                 "prefill_input_token_count": 9,
-                "decode_operation_count": 8,
+                "decode_operation_count": _LIVE_ROUTE_DECODE_OPERATIONS,
                 "decode_input_token_count": 8,
                 "activation_output_bytes": 8192,
                 "current_position": None,
@@ -1758,10 +1770,15 @@ def live_route_status(graph_document: dict[str, Any]) -> dict[str, Any]:
         "model_id": graph_document["model_id"],
         "topology_version": graph_document["topology_version"],
         "decode_mode": "stage_local_kv",
+        # Exactly the product's aggregate rule: ``PhysicalLiveRoute.counters()`` sums
+        # frames and applied operations over the published peers, so derive the
+        # aggregate from the peer records instead of repeating literals that can drift.
         "counters": {
-            "frames_sent": 0,
-            "frames_received": 0,
-            "applied_operation_count": 0,
+            "frames_sent": sum(peer["frames_sent"] for peer in peers),
+            "frames_received": sum(peer["frames_received"] for peer in peers),
+            "applied_operation_count": sum(
+                peer["applied_operation_count"] for peer in peers
+            ),
             "fatal": None,
         },
         "stages": stages,

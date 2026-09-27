@@ -40,7 +40,7 @@ SCAFFOLD_PROTOCOL = "mycelium.a10_scaffold.v1"
 SCAFFOLD_STATE = "design_only"
 ACCEPTANCE_INVENTORY = "tests/a10_acceptance/scenarios.v1.json"
 ACCEPTANCE_INVENTORY_DIGEST = (
-   "sha256:0a9f5ebd1f22de5b87f29de057c99c3219d40664fd42c6ad26d2779220c6d67a"
+   "sha256:3fccdc3c12183c2f4d3fee9142969de20508c7e71cf553835811b60ff1e20542"
 )
 SPECIFICATION = (
    "docs/superpowers/specs/"
