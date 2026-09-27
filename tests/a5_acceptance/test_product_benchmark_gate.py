@@ -433,12 +433,16 @@ def test_each_benchmark_window_opens_fresh_browser_ownership(
             sessions.append(self)
 
     class _Driver:
-        def __init__(self, session: object, rng: random.Random) -> None:
+        def __init__(
+            self, session: object, rng: random.Random, arrival_rate: float
+        ) -> None:
             self.session = session
             self.rng = rng
+            self.arrival_rate = arrival_rate
             drivers.append(self)
 
-        def run(self) -> dict[str, object]:
+        def run(self, *, duration_after_measure: float) -> dict[str, object]:
+            self.duration_after_measure = duration_after_measure
             return {"request_count": 60}
 
     monkeypatch.setattr(benchmark_gate, "ProductSession", _Session)
@@ -446,7 +450,7 @@ def test_each_benchmark_window_opens_fresh_browser_ownership(
     rng = random.Random(165)
 
     first = benchmark_gate._run_isolated_window("http://route.invalid", rng)
-    second = benchmark_gate._run_isolated_window("http://route.invalid", rng)
+    second = benchmark_gate._run_isolated_window("http://route.invalid", rng, 0.0625)
 
     assert first == {"request_count": 60}
     assert second == {"request_count": 60}
@@ -454,6 +458,15 @@ def test_each_benchmark_window_opens_fresh_browser_ownership(
     assert sessions[0] is not sessions[1]
     assert [driver.session for driver in drivers] == sessions
     assert all(driver.rng is rng for driver in drivers)
+    assert [driver.arrival_rate for driver in drivers] == [
+        benchmark_gate.ARRIVAL_RATE,
+        0.0625,
+    ]
+    assert drivers[0].duration_after_measure == (
+        benchmark_gate.WINDOW_COLLECTION_TIMEOUT_SECONDS
+    )
+    # A low calibrated rate widens the budget so 60 terminals remain reachable.
+    assert drivers[1].duration_after_measure == 2.0 * 60 / 0.0625
 
 
 def test_main_seals_private_source_bound_failure_observation(
@@ -532,7 +545,7 @@ def test_main_seals_private_source_bound_failure_observation(
     assert failure.stat().st_mode & 0o777 == 0o600
     assert document == {
         "benchmark_artifact_created": False,
-        "benchmark_protocol_digest": benchmark_gate.protocol_digest(
+        "benchmark_protocol_digest": benchmark_gate.protocol_v2_digest(
             benchmark_gate.PROTOCOL
         ),
         "captured_at_unix_ms": document["captured_at_unix_ms"],

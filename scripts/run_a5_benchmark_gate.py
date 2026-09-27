@@ -2,11 +2,19 @@
 """Run the frozen A5 materiality benchmark through the ordinary product HTTP API.
 
 Drives the frozen workload (tests/a5_acceptance/workload_manifest.v1.json)
-against the frozen protocol (tests/a5_acceptance/benchmark_protocol.v1.json):
-one unscored warmup per mode, then 12 measured ABBA x 3 windows of at least
-60 terminal requests each. The run fixture is validated by the frozen
-materiality harness (tests/a5_acceptance/materiality_harness.evaluate_benchmark)
-and sealed with the decision into the output file.
+against the pre-registered protocol v2
+(tests/a5_acceptance/benchmark_protocol.v2.json, owner ruling 2026-09-27 after
+the underpowered r33 result): a recorded baseline-only calibration phase first
+walks the frozen descending rate ladder and selects the highest offered arrival
+rate whose baseline trial completes at least 90% of offered requests; then one
+unscored warmup per mode and 24 measured ABBA x 6 windows (12 pairs) of at least
+60 terminal requests each run at that calibrated rate. A baseline window that
+completes under 90% of its offered requests is invalid, excluded with its pair,
+and recorded in the decision; fewer than 12 valid pairs is inconclusive. The
+run fixture is validated by the materiality harness
+(tests/a5_acceptance/materiality_harness.evaluate_benchmark_v2) and sealed with
+the decision into the output file. If no ladder rate qualifies, no scored
+window runs and the sealed decision is inconclusive.
 
 Mode switching (Evi decision 2026-08-20, no request-path contract change):
 - baseline windows: POST /__mycelium/replica-qualification/install with
@@ -57,14 +65,19 @@ import sys  # noqa: E402
 sys.path.insert(0, str(REPO_ROOT))
 
 from tests.a5_acceptance.materiality_harness import (  # noqa: E402
-    evaluate_benchmark,
-    load_protocol,
+    RUN_PROTOCOL_V2,
+    baseline_window_is_valid,
+    evaluate_benchmark_v2,
+    load_protocol_v2,
     load_workload_manifest,
-    protocol_digest,
+    protocol_v2_digest,
     workload_manifest_digest,
 )
 
-PROTOCOL = load_protocol()
+PROTOCOL = load_protocol_v2()
+CALIBRATION = PROTOCOL["calibration"]
+CALIBRATION_RATE_LADDER = CALIBRATION["rate_ladder_per_second"]
+MIN_CALIBRATION_REQUESTS = CALIBRATION["minimum_requests_per_trial"]
 MANIFEST = load_workload_manifest()
 SCHEDULE = PROTOCOL["schedule"]
 MIN_WINDOW_REQUESTS = SCHEDULE["minimum_requests_per_measured_window"]
@@ -391,10 +404,19 @@ def _live_route_binding(status: Mapping[str, Any]) -> str:
 
 def _bindings(
     actual_provenance: Mapping[str, str] | None = None,
+    *,
+    arrival_rate: float | None = None,
 ) -> dict[str, Any]:
-    """The 15 frozen identical binding fields, derived from the frozen manifest."""
+    """The 15 frozen identical binding fields, derived from the frozen manifest.
+
+    ``arrival_rate`` is the calibrated offered rate; it is folded into the
+    arrival-schedule digest so every scored window binds the same schedule.
+    """
 
     session = MANIFEST["product_benchmark_session"]
+    arrival_schedule = dict(MANIFEST["arrival_schedule"])
+    if arrival_rate is not None:
+        arrival_schedule["rate_per_second"] = arrival_rate
     bindings = {
         "model_id": MANIFEST["model"]["model_id"],
         "model_revision": MANIFEST["model"]["model_revision"],
@@ -402,7 +424,7 @@ def _bindings(
         "base_deployment_id": MANIFEST["base_deployment_id"],
         "route_generation": MANIFEST["route_generation"],
         "workload_digest": workload_manifest_digest(),
-        "arrival_schedule_digest": _digest(MANIFEST["arrival_schedule"]),
+        "arrival_schedule_digest": _digest(arrival_schedule),
         "prompt_output_buckets_digest": _digest(MANIFEST["prompt_output_buckets"]),
         "qos_mix_digest": _digest(MANIFEST["qos_mix"]),
         "offered_concurrency": MANIFEST["offered_concurrency"],
@@ -429,9 +451,12 @@ def _bindings(
 
 
 def _window_bindings(
-    mode: str, actual_provenance: Mapping[str, str] | None = None
+    mode: str,
+    actual_provenance: Mapping[str, str] | None = None,
+    *,
+    arrival_rate: float | None = None,
 ) -> dict[str, Any]:
-    bindings = _bindings(actual_provenance)
+    bindings = _bindings(actual_provenance, arrival_rate=arrival_rate)
     bindings["qualified_track_policy_digest"] = POLICY_BY_MODE[mode]
     return bindings
 
@@ -452,9 +477,19 @@ class _WindowDriver:
     """Drives one measured window: Poisson arrivals, bounded concurrency,
     60+ terminal requests counted after the warmup span."""
 
-    def __init__(self, session: ProductSession, rng: random.Random) -> None:
+    def __init__(
+        self,
+        session: ProductSession,
+        rng: random.Random,
+        arrival_rate: float | None = None,
+    ) -> None:
         self._session = session
         self._rng = rng
+        self._arrival_rate = ARRIVAL_RATE if arrival_rate is None else arrival_rate
+        # Arrivals the offered schedule produced inside the measured span but
+        # the client shed at the offered-concurrency cap.  They are offered
+        # load, so they stay in the baseline completion denominator.
+        self._measured_shed = 0
         self._lock = threading.Lock()
         self._measured_outcomes = _outcomes()
         self._measured_terminals = 0
@@ -473,7 +508,7 @@ class _WindowDriver:
         self._measured_end: float | None = None
 
     def _next_arrival_delay(self) -> float:
-        return -math.log(1.0 - self._rng.random()) / ARRIVAL_RATE
+        return -math.log(1.0 - self._rng.random()) / self._arrival_rate
 
     def _prompt_for_target(self, index: int, target_prompt_tokens: int) -> str:
         # Qwen tokenizes the repeated leading-space lexical unit as one token;
@@ -649,6 +684,12 @@ class _WindowDriver:
                     break
                 with self._lock:
                     if self._in_flight >= OFFERED_CONCURRENCY:
+                        if (
+                            self._measured_start is not None
+                            and self._measured_end is None
+                            and time.monotonic() >= self._measured_start
+                        ):
+                            self._measured_shed += 1
                         continue
                     self._in_flight += 1
                 index += 1
@@ -697,17 +738,30 @@ class _WindowDriver:
             raise GateError(
                 f"window_cancellation_control_failed:{cancellation_errors[0]}"
             )
+        request_count = sum(self._measured_outcomes.values())
         return {
             "outcomes": dict(sorted(self._measured_outcomes.items())),
             "completed_generated_tokens": self._measured_tokens,
             "wall_clock_seconds": measured_end - measured_start,
-            "request_count": sum(self._measured_outcomes.values()),
+            "request_count": request_count,
+            "offered_request_count": request_count + self._measured_shed,
         }
+
+
+def _collection_budget_seconds(arrival_rate: float) -> float:
+    """Measured-span budget that still admits the minimum terminals at a low
+    calibrated rate: twice the expected time to offer them, never below the
+    frozen default."""
+
+    return max(
+        WINDOW_COLLECTION_TIMEOUT_SECONDS, 2.0 * MIN_WINDOW_REQUESTS / arrival_rate
+    )
 
 
 def _run_isolated_window(
     base_url: str,
     rng: random.Random,
+    arrival_rate: float = ARRIVAL_RATE,
 ) -> dict[str, Any]:
     """Run one window in a fresh bounded browser-ownership session.
 
@@ -717,7 +771,9 @@ def _run_isolated_window(
     request-capacity rejections instead of measuring the selected route mode.
     """
 
-    return _WindowDriver(ProductSession(base_url), rng).run()
+    return _WindowDriver(ProductSession(base_url), rng, arrival_rate).run(
+        duration_after_measure=_collection_budget_seconds(arrival_rate)
+    )
 
 
 def _load_replica_documents(paths: list[Path]) -> list[dict[str, Any]]:
@@ -738,6 +794,72 @@ def _load_replica_documents(paths: list[Path]) -> list[dict[str, Any]]:
             raise GateError("replica_qualification_invalid") from exc
         documents.append(validate_replica_qualification(document))
     return documents
+
+
+def _await_clean_route(base_url: str, route_binding_digest: str) -> None:
+    wait_for(
+        lambda: (
+            status
+            if _zero_live_resources(
+                status := public_json(base_url, "/__mycelium/runtime/admission-status")
+            )
+            else None
+        ),
+        timeout=ROUTE_ZERO_RESOURCE_TIMEOUT_SECONDS,
+    )
+    if (
+        _live_route_binding(public_json(base_url, "/__mycelium/live-status"))
+        != route_binding_digest
+    ):
+        raise GateError("benchmark_route_binding_changed")
+
+
+def _run_calibration(
+    base_url: str,
+    rng: random.Random,
+    route_binding_digest: str,
+) -> dict[str, Any]:
+    """Recorded baseline-only calibration, completed before any scored window.
+
+    Walks the frozen descending ladder and stops at the first rate whose
+    baseline trial completes at least 90% of offered requests.  No later rate
+    is tried once one qualifies, so the selection cannot be shopped.
+    """
+
+    trials: list[dict[str, Any]] = []
+    selected: float | None = None
+    for ordinal, rate in enumerate(CALIBRATION_RATE_LADDER):
+        if (
+            _live_route_binding(public_json(base_url, "/__mycelium/live-status"))
+            != route_binding_digest
+        ):
+            raise GateError("benchmark_route_binding_changed")
+        install_replica_qualification(base_url, [])
+        trial = _run_isolated_window(base_url, rng, rate)
+        if trial["request_count"] < MIN_CALIBRATION_REQUESTS:
+            raise GateError("calibration_below_minimum_requests")
+        trials.append(
+            {
+                "ordinal": ordinal,
+                "offered_arrival_rate_per_second": rate,
+                "request_count": trial["request_count"],
+                "offered_request_count": trial["offered_request_count"],
+                "outcomes": trial["outcomes"],
+            }
+        )
+        _await_clean_route(base_url, route_binding_digest)
+        if baseline_window_is_valid(
+            trial["outcomes"]["completed"], trial["offered_request_count"]
+        ):
+            selected = rate
+            break
+    return {
+        "mode": "baseline",
+        "scored": False,
+        "rate_ladder_per_second": list(CALIBRATION_RATE_LADDER),
+        "trials": trials,
+        "selected_offered_arrival_rate_per_second": selected,
+    }
 
 
 def run_benchmark(
@@ -767,10 +889,14 @@ def run_benchmark(
     }
 
     rng = random.Random(ARRIVAL_SEED)
-    fixture_bindings = _bindings(actual_provenance)
+    calibration = _run_calibration(base_url, rng, route_binding_digest)
+    rate = calibration["selected_offered_arrival_rate_per_second"]
+    fixture_bindings = _bindings(actual_provenance, arrival_rate=rate)
     warmups: list[dict[str, Any]] = []
     windows: list[dict[str, Any]] = []
-    for mode in SCHEDULE["warmup_modes"]:
+    # No qualifying calibrated rate: no warmup or scored window runs and the
+    # sealed decision is inconclusive.
+    for mode in SCHEDULE["warmup_modes"] if rate is not None else []:
         if (
             _live_route_binding(public_json(base_url, "/__mycelium/live-status"))
             != route_binding_digest
@@ -779,14 +905,17 @@ def run_benchmark(
         install_replica_qualification(
             base_url, replica_documents if mode == "candidate" else []
         )
-        warmup = _run_isolated_window(base_url, rng)
+        warmup = _run_isolated_window(base_url, rng, rate)
         warmups.append(
             {
                 "mode": mode,
                 "scored": False,
                 "request_count": warmup["request_count"],
+                "offered_arrival_rate_per_second": rate,
                 "outcomes": warmup["outcomes"],
-                "bindings": _window_bindings(mode, actual_provenance),
+                "bindings": _window_bindings(
+                    mode, actual_provenance, arrival_rate=rate
+                ),
                 "invalidations": [],
             }
         )
@@ -810,12 +939,12 @@ def run_benchmark(
         ):
             raise GateError("benchmark_route_binding_changed")
 
-    for expected in SCHEDULE["measured_windows"]:
+    for expected in SCHEDULE["measured_windows"] if rate is not None else []:
         mode = expected["mode"]
         install_replica_qualification(
             base_url, replica_documents if mode == "candidate" else []
         )
-        window = _run_isolated_window(base_url, rng)
+        window = _run_isolated_window(base_url, rng, rate)
         if window["request_count"] < MIN_WINDOW_REQUESTS:
             raise GateError("window_below_minimum_requests")
         windows.append(
@@ -825,7 +954,10 @@ def run_benchmark(
                 "pair_id": expected["pair_id"],
                 "mode": mode,
                 **window,
-                "bindings": _window_bindings(mode, actual_provenance),
+                "offered_arrival_rate_per_second": rate,
+                "bindings": _window_bindings(
+                    mode, actual_provenance, arrival_rate=rate
+                ),
                 "invalidations": [],
             }
         )
@@ -848,13 +980,14 @@ def run_benchmark(
             raise GateError("benchmark_route_binding_changed")
 
     fixture = {
-        "protocol": "mycelium.a5_benchmark_run_fixture.v1",
-        "benchmark_protocol_digest": protocol_digest(PROTOCOL),
+        "protocol": RUN_PROTOCOL_V2,
+        "benchmark_protocol_digest": protocol_v2_digest(PROTOCOL),
         "workload_manifest_digest": workload_manifest_digest(),
+        "calibration": calibration,
         "warmups": warmups,
         "windows": windows,
     }
-    decision = evaluate_benchmark(fixture)
+    decision = evaluate_benchmark_v2(fixture)
     after_status = public_json(base_url, "/__mycelium/live-status")
     return {
         "protocol": "mycelium.a5_benchmark_evidence.v1",
@@ -866,7 +999,8 @@ def run_benchmark(
             "identical_bindings": fixture_bindings,
             "policy_by_mode": POLICY_BY_MODE,
             "arrival_rng_seed": ARRIVAL_SEED,
-            "arrival_rate_per_second": ARRIVAL_RATE,
+            "arrival_rate_per_second": rate,
+            "manifest_arrival_rate_per_second": ARRIVAL_RATE,
             "offered_concurrency": OFFERED_CONCURRENCY,
             "warmup_seconds": WARMUP_SECONDS,
             "qos_submission_mapping": QOS_SUBMISSION,
@@ -1002,7 +1136,7 @@ def _failure_observation(
         "promotion_authorized": False,
         "captured_at_unix_ms": int(time.time() * 1_000),
         "source_manifest_digest": source_manifest_digest,
-        "benchmark_protocol_digest": protocol_digest(PROTOCOL),
+        "benchmark_protocol_digest": protocol_v2_digest(PROTOCOL),
         "workload_manifest_digest": workload_manifest_digest(),
         "reason_code": str(error)
         if isinstance(error, GateError)
