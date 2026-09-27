@@ -4,8 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 use tauri::{
-    plugin::{Builder, TauriPlugin},
     Manager, Runtime,
+    plugin::{Builder, TauriPlugin},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -46,8 +46,13 @@ impl<R: Runtime> NodeService<R> {
         #[cfg(not(target_os = "android"))]
         {
             let _ = StartArgs { detail };
-            self.running.store(true, std::sync::atomic::Ordering::SeqCst);
-            Ok(ServiceStatus { running: true, uptime_ms: 0, mode: "foreground_only".into() })
+            self.running
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(ServiceStatus {
+                running: true,
+                uptime_ms: 0,
+                mode: "foreground_only".into(),
+            })
         }
     }
 
@@ -63,8 +68,13 @@ impl<R: Runtime> NodeService<R> {
         }
         #[cfg(not(target_os = "android"))]
         {
-            self.running.store(false, std::sync::atomic::Ordering::SeqCst);
-            Ok(ServiceStatus { running: false, uptime_ms: 0, mode: "foreground_only".into() })
+            self.running
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            Ok(ServiceStatus {
+                running: false,
+                uptime_ms: 0,
+                mode: "foreground_only".into(),
+            })
         }
     }
 
@@ -81,7 +91,11 @@ impl<R: Runtime> NodeService<R> {
         #[cfg(not(target_os = "android"))]
         {
             let running = self.running.load(std::sync::atomic::Ordering::SeqCst);
-            Ok(ServiceStatus { running, uptime_ms: 0, mode: "foreground_only".into() })
+            Ok(ServiceStatus {
+                running,
+                uptime_ms: 0,
+                mode: "foreground_only".into(),
+            })
         }
     }
 }

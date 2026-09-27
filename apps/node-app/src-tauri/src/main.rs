@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-  mycelium_node_app_lib::run();
+    mycelium_node_app_lib::run();
 }
