@@ -51,10 +51,14 @@ surface for future seams; the deterministic core still imports only the standard
 library, and the A6 seam is imported lazily *inside* the handoff function, only
 read, and never at module import time.
 
-A7 stays `design_only`: nothing here is product-integrated, durable, networked,
-threaded, qualified, promoted or physically proven, and A6 is untouched. Running
-this in-process cycle is not A7 product runtime execution, and the honest claim
-boundary keeps reporting `runtime_executed=False`.
+A7 stays `design_only`: the live router now classifies every replacement-path
+attempt through `evaluate_cutover_eligibility`
+(`mycelium_router.entry.classify_kv_successor_recovery`), but nothing here is
+durable, networked, threaded, qualified, promoted or physically proven: there
+is no checkpoint transport, no fence persistence, no cutover execution, no
+product runtime execution, and A6 is untouched. Running this in-process cycle
+is not A7 product runtime execution, and the honest claim boundary keeps
+reporting `runtime_executed=False`.
 """
 
 from __future__ import annotations
@@ -1031,7 +1035,8 @@ class FenceLedger:
     """Monotonic fence generations, all-installer receipts, publication CAS.
 
     In-memory only: durable persistence of the generation before successor decode
-    is NOT implemented (`persist_fence_generation` raises `A7ScaffoldBoundary`).
+    is NOT implemented -- `persist_fence_generation` stores in a process-local
+    register whose receipt says `durability=not_durable_in_process_scaffold`.
     """
 
     def __init__(
@@ -1230,10 +1235,13 @@ def scaffold_claim_boundary() -> dict[str, Any]:
         "scaffold_state": SCAFFOLD_STATE,
         "claim_boundary": (
             "A7 deterministic contract core plus a deterministic in-process runtime "
-            "cycle only: no product runtime execution, no durable persistence, no "
-            "networked transport, no product integration, no browser surface, no "
-            "physical evidence, no qualification and no promotion claim; A6 remains "
-            "the blocking dependency for the real gate close."
+            "cycle only: the live router replacement-path classification dispatches "
+            "to the closed cutover-eligibility predicate "
+            "(mycelium_router.entry.classify_kv_successor_recovery), but there is no "
+            "checkpoint transport, no durable persistence, no networked transport, "
+            "no cutover execution, no product runtime execution, no browser "
+            "surface, no physical evidence, no qualification and no promotion "
+            "claim; A6 remains the blocking dependency for the real gate close."
         ),
         "unearned_closure_requirements": sorted(UNEARNED_CLOSURE_REQUIREMENTS),
         "unearned_count": len(UNEARNED_CLOSURE_REQUIREMENTS),

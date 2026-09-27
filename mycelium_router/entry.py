@@ -1,5 +1,7 @@
-"""Request admission, checkpointing, decode, and failure recovery."""
+"""Request admission, checkpointing, decode, failure recovery, and the A7
+KV-successor classification of every replacement-path attempt."""
 
+import importlib
 from dataclasses import dataclass, field
 from threading import RLock
 from typing import Any
@@ -18,12 +20,149 @@ from mycelium_router.contracts import (
    RequestContext,
    TokenEvent,
 )
-from mycelium_router.idempotency import hop_idempotency_key
+from mycelium_router.idempotency import hop_idempotency_key, payload_fingerprint
 from mycelium_router.payloads import encode_token_ids
 from mycelium_router.routing import RoutingError
 from mycelium_router.state import RequestStateMachine
 from mycelium_router.validation import validate_manifest
 from mycelium_router.leases import validate_hop_leases
+
+
+# ---------------------------------------------------------------------------
+# A7 KV-successor seam: the replacement-path attempt's recovery classification
+# ---------------------------------------------------------------------------
+#
+# A failed placement's replacement path attempt is the Router's
+# checkpoint-coordinator surface (A7 specification section 2: route-wide
+# watermark assembly, acknowledgement, fencing generation, replacement path
+# attempt, cutover and exact source/standby cleanup).  Before this coordinator
+# commits to that attempt, its recovery mode is classified by the A7
+# deterministic contract (`mycelium_a7_kv_successor`), never assumed: the
+# module's closed cutover-eligibility predicate runs on the exact facts this
+# coordinator holds and the result is written to the request record.
+#
+# The classification is load-bearing:
+#
+# * ``full_context_replay`` -- the one outcome this router can execute, the
+#   qualified A6 replay the replacement attempt performs;
+# * ``fenced_kv_successor`` or ``aborted`` -- the attempt fails closed, because
+#   this path cannot execute a fenced KV cutover and must never replay under a
+#   KV-successor classification;
+# * an unimportable A7 module -- the qualified replay proceeds and the record
+#   carries ``a7_kv_successor_unavailable``; the module is never silently
+#   skipped, and the reachability guard
+#   (tests/a7_acceptance/test_a7_live_path_reachability.py) fails when the
+#   dispatch is absent.
+#
+# No acknowledged KV watermark, checkpoint transport, durable fence store or
+# standby exists anywhere on this path, so the predicate's honest live
+# classification is ``full_context_replay`` (``route_watermark_unavailable``).
+
+KV_SUCCESSOR_SEAM_PROTOCOL = "mycelium.router_kv_successor_seam.v1"
+KV_SUCCESSOR_SEAM = "mycelium_router.entry.classify_kv_successor_recovery"
+KV_SUCCESSOR_MODULE = "mycelium_a7_kv_successor"
+KV_SUCCESSOR_CLASSIFIER = "evaluate_cutover_eligibility"
+KV_SUCCESSOR_EXECUTABLE_OUTCOME = "full_context_replay"
+KV_SUCCESSOR_SEAM_REASON_UNAVAILABLE = "a7_kv_successor_unavailable"
+KV_SUCCESSOR_SEAM_CLAIM_BOUNDARY = (
+   "router replacement-attempt classification through the A7 deterministic "
+   "contract only: no acknowledged KV watermark, checkpoint transport, durable "
+   "fence persistence or cutover execution exists in this path, and no "
+   "physical, qualified or promotion claim is made."
+)
+_KV_SUCCESSOR_DECODE_MODES = frozenset(
+   {"stage_local_kv", "complete_context_replay"}
+)
+
+
+def _load_a7_kv_successor():
+   """Import the A7 contract module lazily; its absence is a classified state."""
+
+   try:
+      return importlib.import_module(KV_SUCCESSOR_MODULE)
+   except ImportError:
+      return None
+
+
+def classify_kv_successor_recovery(
+   *,
+   decode_mode,
+   path_attempt,
+   prompt_token_ids,
+   committed_token_ids,
+):
+   """Classify one replacement-path attempt through the A7 KV-successor contract.
+
+   The coordinator calls this with whatever it holds when a non-terminal
+   failure forces a replacement path attempt.  Nothing is invented: the route
+   watermark is unavailable (no acknowledgement chain exists), no successor
+   identity is bound (A7 contract D8: unknown identity data is incompatible,
+   never assumed), nothing is qualified or fenced, and the replacement IS the
+   qualified full-context replay path, so the closed predicate classifies the
+   attempt as ``full_context_replay``.
+
+   Returns a closed record; ``classification`` carries the A7 predicate's own
+   closed outcome record when the module ran, and ``None`` when it could not be
+   imported (``reason=a7_kv_successor_unavailable``) -- never a fabricated
+   classification.  Inputs are validated fail-closed: an unknown decode mode,
+   a non-positive path attempt or non-integer token ids raise ``ValueError``.
+   """
+
+   if decode_mode not in _KV_SUCCESSOR_DECODE_MODES:
+      raise ValueError("invalid_runtime_decode_mode")
+   if type(path_attempt) is not int or path_attempt < 1:
+      raise ValueError("invalid_path_attempt")
+   prompt = tuple(prompt_token_ids)
+   committed = tuple(committed_token_ids)
+   if any(type(token) is not int for token in prompt) or any(
+      type(token) is not int for token in committed
+   ):
+      raise ValueError("invalid_token_ids")
+   committed_token_count = len(committed)
+   record = {
+      "protocol": KV_SUCCESSOR_SEAM_PROTOCOL,
+      "seam": KV_SUCCESSOR_SEAM,
+      "dispatched": False,
+      "authoritative_module": KV_SUCCESSOR_MODULE,
+      "authoritative_function": KV_SUCCESSOR_CLASSIFIER,
+      "decode_mode": decode_mode,
+      "path_attempt": path_attempt,
+      "committed_token_count": committed_token_count,
+      "recovery_mode": KV_SUCCESSOR_EXECUTABLE_OUTCOME,
+      "kv_successor_eligible": False,
+      "reason": KV_SUCCESSOR_SEAM_REASON_UNAVAILABLE,
+      "classification": None,
+      "claim_boundary": KV_SUCCESSOR_SEAM_CLAIM_BOUNDARY,
+   }
+   module = _load_a7_kv_successor()
+   if module is None:
+      return record
+   classification = module.evaluate_cutover_eligibility(
+      # No replacement stage has acknowledged a route-wide KV watermark, so
+      # the predicate's first honest rejection is `route_watermark_unavailable`;
+      # the gateway count/digest are this coordinator's own committed-prefix
+      # facts and are never compared in that state.
+      route_watermark=None,
+      gateway_committed_token_count=committed_token_count,
+      gateway_committed_prefix_digest="sha256:"
+      + payload_fingerprint(prompt + committed),
+      # No successor identity is bound on this path; A7's rule is that unknown
+      # identity data is incompatible, never assumed.
+      compatibility=module.compare_compatibility({}, {}),
+      qualifier_current=False,
+      fence_installed=False,
+      # The replacement attempt this classification covers IS the qualified
+      # full-context replay path, so A6 fallback is available here.
+      a6_available=True,
+   )
+   record.update(
+      dispatched=True,
+      recovery_mode=classification["outcome"],
+      kv_successor_eligible=classification["kv_successor_eligible"],
+      reason=classification["reason"],
+      classification=classification,
+   )
+   return record
 
 
 @dataclass
@@ -41,6 +180,7 @@ class RequestRecord:
    excluded_edges: frozenset[str] = frozenset()
    excluded_devices: frozenset[str] = frozenset()
    cleaned_up: bool = False
+   kv_successor_recovery: dict | None = None
    lock: Any = field(default_factory=RLock, repr=False, compare=False)
 
    @property
@@ -822,6 +962,8 @@ class EntryCoordinator:
       excluded_devices: frozenset[str] = frozenset()
       old_reservations: tuple[str, ...] = ()
       new_attempt = 0
+      replacement_prompt: tuple[int, ...] = ()
+      replacement_committed: tuple[int, ...] = ()
       with record.lock:
          if record.status in {
             "COMPLETED",
@@ -870,9 +1012,36 @@ class EntryCoordinator:
                hop.reservation_id for hop in manifest.ordered_hops
             )
             new_attempt = manifest.path_attempt + 1
+            replacement_prompt = record.request.prompt_token_ids
+            replacement_committed = tuple(record.generated_token_ids)
             record.state_machine.begin_recovery(path_attempt=new_attempt)
       if terminal_failure:
          self._cleanup_record(record)
+         return False
+      # A7 KV-successor seam: the replacement-path attempt's recovery mode is
+      # classified by the A7 contract before this coordinator commits to it.
+      kv_successor_recovery = classify_kv_successor_recovery(
+         decode_mode=self.relay.decode_mode,
+         path_attempt=new_attempt,
+         prompt_token_ids=replacement_prompt,
+         committed_token_ids=replacement_committed,
+      )
+      with record.lock:
+         record.kv_successor_recovery = kv_successor_recovery
+      if kv_successor_recovery["recovery_mode"] != KV_SUCCESSOR_EXECUTABLE_OUTCOME:
+         # A fenced KV cutover is not wired in this path, so an eligible (or
+         # aborted) classification fails the attempt closed instead of being
+         # silently downgraded to a replayed attempt.
+         refused = False
+         with record.lock:
+            if record.status != "CANCELLED":
+               record.state_machine.transition(
+                  "FAILED",
+                  path_attempt=new_attempt,
+               )
+               refused = True
+         if refused:
+            self._cleanup_record(record)
          return False
       self.capacity.release(old_reservations)
       self.relay.release_path(

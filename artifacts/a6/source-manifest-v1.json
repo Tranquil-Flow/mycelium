@@ -308,8 +308,8 @@
     },
     {
       "path": "mycelium_a7_kv_successor.py",
-      "sha256": "sha256:10be4fe6861f27693920ae0b58fb875210407d5af7acfdb5496d20623783b35f",
-      "size_bytes": 101851
+      "sha256": "sha256:091672908b69d42987bc530636f2c7ebdedf52e27c1858b9c2eb1e5b1ab15ace",
+      "size_bytes": 102418
     },
     {
       "path": "mycelium_demo/cli.py",
@@ -680,6 +680,11 @@
       "path": "mycelium_router/decoding.py",
       "sha256": "sha256:1c7273f000d26d4a3c017fc13902499216f1ea6fdec360870efccf3a996826b4",
       "size_bytes": 13259
+    },
+    {
+      "path": "mycelium_router/entry.py",
+      "sha256": "sha256:684e3be9dad9dae28fc27cb8467024df6ccc070636b6047bf2ba10e5a77e4749",
+      "size_bytes": 46257
     },
     {
       "path": "mycelium_router/instrument.py",
@@ -1185,6 +1190,11 @@
       "path": "tests/a7_acceptance/conftest.py",
       "sha256": "sha256:713a0befb640c1e9ee2bd9f62652d6d25cdf26784631794838a72f3e9d11af1f",
       "size_bytes": 1307
+    },
+    {
+      "path": "tests/a7_acceptance/test_a7_live_path_reachability.py",
+      "sha256": "sha256:d00f0e68ef7d9e2a5516b3ad41b55b0ad437242686332cff9abbe4dd8f5de60e",
+      "size_bytes": 14146
     },
     {
       "path": "tests/a7_acceptance/test_kv_successor_boundaries.py",
@@ -1978,5 +1988,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:32f03875e123cf5f8eac593eec96b8e5ff49f7e01054f92e0336695ce1ae2b91"
+  "source_digest": "sha256:0f3a924853893cee8d2d9ca87e28e2411528afa153b4e651945f1851eb139aaa"
 }
