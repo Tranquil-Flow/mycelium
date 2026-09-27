@@ -177,6 +177,7 @@ EXPECTED_PROTOCOLS = {
     "replica-qualification-v1.json": "mycelium.replica_qualification.v1",
     "replica-runtime-v1.json": "mycelium.replica_runtime.v1",
     "replica-benchmark-v1.json": "mycelium.replica_benchmark.v1",
+    "replica-benchmark-v2.json": "mycelium.replica_benchmark.v2",
 }
 
 

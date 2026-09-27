@@ -497,13 +497,14 @@ def test_replica_benchmark_rejects_nested_private_sample_data():
 
 # ---------- compatibility_fixtures() ----------
 
-def test_compatibility_fixtures_returns_all_four_shapes():
+def test_compatibility_fixtures_returns_every_shape():
     fixtures = compatibility_fixtures()
     assert set(fixtures) == {
         "replica-plan-v1.json",
         "replica-qualification-v1.json",
         "replica-runtime-v1.json",
         "replica-benchmark-v1.json",
+        "replica-benchmark-v2.json",
     }
 
 

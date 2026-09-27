@@ -139,6 +139,27 @@ Benchmark run output. Frozen primary-only and replicated workloads, samples, thr
 
 `primary_only_samples` and `replicated_samples` carry aggregate throughput and latency; **no individual request prompts, output, or token IDs.** `paired_improvements` is the only individual-window result exposed; all other sample detail stays in the underlying benchmark run fixture (`tests/a5_acceptance/benchmark_protocol.v1.json` run fixture, not emitted to the product path).
 
+## Shape 4b: `mycelium.replica_benchmark.v2`
+
+Added 2026-09-28 for the pre-registered calibrated-load benchmark protocol v2 (`tests/a5_acceptance/benchmark_protocol.v2.json`). Shape 4 (v1) is unchanged and still requires exactly six paired improvements, so historical r33 evidence stays valid as recorded; v2 is a separate contract, not a relaxation of v1.
+
+Fields shared with v1: `protocol` (`"mycelium.replica_benchmark.v2"`), `benchmark_run_id`, `benchmark_protocol_digest`, `workload_manifest_digest`, `deployment_id`, `route_generation`, `started_at_unix_ms`, `finished_at_unix_ms`, `paired_improvements`, `point_estimate_fraction`, `paired_95_percent_bootstrap_lower_bound_fraction`, `prediction_error_fraction`, `decision`, `reasons`, `qualification_claim` (`false`), `promotion_authorized` (`false`), `provenance`. v1's `deployment_epoch`, `primary_only_samples` and `replicated_samples` are not carried because the benchmark gate does not observe them.
+
+Fields added by v2:
+
+| Field | Type | Rule |
+|---|---|---|
+| `benchmark_protocol` | literal string | `"mycelium.a5_benchmark_acceptance.v2"` |
+| `calibration` | object | Baseline-only, unscored; the registered descending ladder; trials `{ordinal, offered_arrival_rate_per_second, request_count, offered_request_count, completed}` stop at the first rate completing ≥90% of offered; `selected_offered_arrival_rate_per_second` is that rate, or `null` only after every ladder rate failed |
+| `scheduled_pairs` | literal `16` | |
+| `minimum_valid_pairs` | literal `12` | |
+| `pair_selection` | literal string | `"all_valid_pairs_no_selection_or_trimming"` |
+| `material_threshold_fraction` | literal `0.1` | Unchanged from v1 |
+| `valid_pair_ids` | sorted unique ints in 0..15 | |
+| `excluded_windows` | list | `{pair_id, baseline_index, reason, baseline_completed, baseline_offered}`; reason `baseline_completion_below_minimum_fraction`; the recorded counts must actually fail the ≥90% rule; `baseline_index` is the scheduled ABBA baseline index |
+
+Consistency rules: valid and excluded pair ids are disjoint and either both empty (refused before pairing) or together exactly 0..15. A scored record carries one improvement per valid pair (all of them), at least 12 valid pairs, a point estimate equal to their mean, and a decision derived from the unchanged +10% point and lower-bound thresholds. An unscored record is `inconclusive` with null estimates and fewer than 12 valid pairs (or a `nonfinite_measurement` reason). `prediction_error_fraction` may be `null` when no plan prediction is bound.
+
 ## Cross-shape invariants
 
 1. **Same canonical digest method.** All four shapes use the same `sha256_canonical_json` digest method.

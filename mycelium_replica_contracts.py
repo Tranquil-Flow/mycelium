@@ -1,6 +1,6 @@
 """Closed, privacy-reduced A5 replica-path contracts.
 
-Defines the four capability-named, closed, bounded, canonically digest-bound
+Defines the capability-named, closed, bounded, canonically digest-bound
 records the A5 gate emits on the production path. See
 ``docs/superpowers/notes/2026-08-20-mycelium-a5-replica-contract-shapes.md``
 for the authoritative field definitions (mirror of spec §7 + §8).
@@ -25,6 +25,21 @@ REPLICA_PLAN_PROTOCOL = "mycelium.replica_plan.v1"
 REPLICA_QUALIFICATION_PROTOCOL = "mycelium.replica_qualification.v1"
 REPLICA_RUNTIME_PROTOCOL = "mycelium.replica_runtime.v1"
 REPLICA_BENCHMARK_PROTOCOL = "mycelium.replica_benchmark.v1"
+REPLICA_BENCHMARK_V2_PROTOCOL = "mycelium.replica_benchmark.v2"
+
+# Pre-registered A5 benchmark acceptance protocol v2 (calibrated offered load,
+# 16 scheduled pairs, at least 12 valid pairs, every valid pair scored).  These
+# mirror tests/a5_acceptance/benchmark_protocol.v2.json; a test pins them to
+# the registered JSON so neither side can drift alone.  The v1 contract above
+# is untouched and keeps its exact six-pair shape for historical evidence.
+BENCHMARK_ACCEPTANCE_V2_PROTOCOL = "mycelium.a5_benchmark_acceptance.v2"
+BENCHMARK_V2_SCHEDULED_PAIRS = 16
+BENCHMARK_V2_MINIMUM_VALID_PAIRS = 12
+BENCHMARK_V2_MATERIAL_THRESHOLD_FRACTION = 0.1
+BENCHMARK_V2_PAIR_SELECTION = "all_valid_pairs_no_selection_or_trimming"
+BENCHMARK_V2_RATE_LADDER_PER_SECOND = (4.0, 2.0, 1.0, 0.5, 0.25, 0.125, 0.0625)
+BENCHMARK_V2_MINIMUM_REQUESTS_PER_TRIAL = 60
+BENCHMARK_V2_INVALID_WINDOW_REASON = "baseline_completion_below_minimum_fraction"
 
 _REJECTION_REASONS = frozenset({
     "artifact_verification_failed",
@@ -467,6 +482,228 @@ def validate_replica_benchmark(document: Mapping[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _v2_baseline_completion_met(completed: int, offered: int) -> bool:
+    # Exact integer form of completed / offered >= 0.9.
+    return completed * 10 >= offered * 9
+
+
+def _v2_calibration_valid(calibration: object) -> bool:
+    """The recorded baseline-only calibration obeys the registered ladder rule.
+
+    Trials run in descending ladder order and stop at the first rate whose
+    baseline completes at least 90% of offered requests; that rate is the only
+    admissible selection.  No qualifying rate means every ladder rate was tried
+    and nothing is selected.
+    """
+
+    if not isinstance(calibration, Mapping) or set(calibration) != {
+        "mode", "scored", "rate_ladder_per_second", "trials",
+        "selected_offered_arrival_rate_per_second",
+    }:
+        return False
+    ladder = list(BENCHMARK_V2_RATE_LADDER_PER_SECOND)
+    trials = calibration["trials"]
+    if (
+        calibration["mode"] != "baseline"
+        or calibration["scored"] is not False
+        or calibration["rate_ladder_per_second"] != ladder
+        or not isinstance(trials, list)
+        or not 1 <= len(trials) <= len(ladder)
+    ):
+        return False
+    qualifying = None
+    for ordinal, trial in enumerate(trials):
+        if qualifying is not None:
+            return False
+        if (
+            not isinstance(trial, Mapping)
+            or set(trial) != {
+                "ordinal", "offered_arrival_rate_per_second", "request_count",
+                "offered_request_count", "completed",
+            }
+            or trial["ordinal"] != ordinal
+            or type(trial["ordinal"]) is not int
+            or trial["offered_arrival_rate_per_second"] != ladder[ordinal]
+            or not _integer(trial["request_count"])
+            or trial["request_count"] < BENCHMARK_V2_MINIMUM_REQUESTS_PER_TRIAL
+            or not _integer(trial["offered_request_count"])
+            or trial["offered_request_count"] < trial["request_count"]
+            or not _integer(trial["completed"])
+            or trial["completed"] > trial["request_count"]
+        ):
+            return False
+        if _v2_baseline_completion_met(trial["completed"], trial["offered_request_count"]):
+            qualifying = ladder[ordinal]
+    selected = calibration["selected_offered_arrival_rate_per_second"]
+    if qualifying is None:
+        return len(trials) == len(ladder) and selected is None
+    return type(selected) is float and selected == qualifying
+
+
+def _v2_scheduled_baseline_index(pair_id: int) -> int:
+    # ABBA schedule: even pairs run baseline first, odd pairs baseline second.
+    return 2 * pair_id + (pair_id % 2)
+
+
+def validate_replica_benchmark_v2(document: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate a closed replica benchmark result under benchmark protocol v2.
+
+    Carries the pre-registered v2 decision: 16 scheduled pairs, the valid pair
+    ids that were scored (all of them, no selection), every excluded window
+    with its reason, the baseline calibration record, and the unchanged +10%
+    threshold.  Fewer than 12 valid pairs can never be material.  Always
+    reports qualification_claim=false and promotion_authorized=false.  The v1
+    shape (exactly six paired improvements) is a separate contract and is not
+    relaxed by this one.
+    """
+    code = "invalid_replica_benchmark_v2"
+    fields = {
+        "protocol", "benchmark_run_id", "benchmark_protocol",
+        "benchmark_protocol_digest", "workload_manifest_digest",
+        "deployment_id", "route_generation", "started_at_unix_ms",
+        "finished_at_unix_ms", "calibration", "scheduled_pairs",
+        "minimum_valid_pairs", "pair_selection", "material_threshold_fraction",
+        "valid_pair_ids", "excluded_windows", "paired_improvements",
+        "point_estimate_fraction",
+        "paired_95_percent_bootstrap_lower_bound_fraction",
+        "prediction_error_fraction", "decision", "reasons",
+        "qualification_claim", "promotion_authorized", "provenance",
+    }
+    data = _exact(document, fields, code)
+    _bounded_privacy_reduced_json(data, code)
+    if (
+        data["protocol"] != REPLICA_BENCHMARK_V2_PROTOCOL
+        or data["benchmark_protocol"] != BENCHMARK_ACCEPTANCE_V2_PROTOCOL
+        or not _bounded_text(data["benchmark_run_id"])
+        or not _digest(data["benchmark_protocol_digest"])
+        or not _digest(data["workload_manifest_digest"])
+        or not _bounded_text(data["deployment_id"])
+        or not _integer(data["route_generation"])
+        or not _integer(data["started_at_unix_ms"])
+        or not _integer(data["finished_at_unix_ms"])
+        or data["finished_at_unix_ms"] < data["started_at_unix_ms"]
+        or type(data["scheduled_pairs"]) is not int
+        or data["scheduled_pairs"] != BENCHMARK_V2_SCHEDULED_PAIRS
+        or type(data["minimum_valid_pairs"]) is not int
+        or data["minimum_valid_pairs"] != BENCHMARK_V2_MINIMUM_VALID_PAIRS
+        or data["pair_selection"] != BENCHMARK_V2_PAIR_SELECTION
+        or type(data["material_threshold_fraction"]) is not float
+        or data["material_threshold_fraction"] != BENCHMARK_V2_MATERIAL_THRESHOLD_FRACTION
+        or data["decision"] not in _BENCHMARK_DECISIONS
+        or not isinstance(data["reasons"], list)
+        or not all(_bounded_text(r) for r in data["reasons"])
+        or data["qualification_claim"] is not False
+        or data["promotion_authorized"] is not False
+        or not isinstance(data["provenance"], Mapping)
+        or not _v2_calibration_valid(data["calibration"])
+    ):
+        raise ValueError(code)
+    if not (
+        set(data["provenance"]) == {
+            "software_digest", "configuration_digest", "instrumentation_digest"
+        }
+        and all(_digest(value) for value in data["provenance"].values())
+    ):
+        raise ValueError(code)
+
+    scheduled = set(range(BENCHMARK_V2_SCHEDULED_PAIRS))
+    valid_ids = data["valid_pair_ids"]
+    excluded = data["excluded_windows"]
+    if (
+        not isinstance(valid_ids, list)
+        or not all(type(v) is int and v in scheduled for v in valid_ids)
+        or valid_ids != sorted(set(valid_ids))
+        or not isinstance(excluded, list)
+    ):
+        raise ValueError(code)
+    excluded_ids: list[int] = []
+    for window in excluded:
+        if (
+            not isinstance(window, Mapping)
+            or set(window) != {
+                "pair_id", "baseline_index", "reason", "baseline_completed",
+                "baseline_offered",
+            }
+            or type(window["pair_id"]) is not int
+            or window["pair_id"] not in scheduled
+            or type(window["baseline_index"]) is not int
+            or window["baseline_index"] != _v2_scheduled_baseline_index(window["pair_id"])
+            or window["reason"] != BENCHMARK_V2_INVALID_WINDOW_REASON
+            or not _integer(window["baseline_completed"])
+            or not _integer(window["baseline_offered"], minimum=1)
+            or window["baseline_completed"] > window["baseline_offered"]
+            # An excluded window must actually fail the registered rule.
+            or _v2_baseline_completion_met(
+                window["baseline_completed"], window["baseline_offered"]
+            )
+        ):
+            raise ValueError(code)
+        excluded_ids.append(window["pair_id"])
+    if excluded_ids != sorted(set(excluded_ids)) or set(excluded_ids) & set(valid_ids):
+        raise ValueError(code)
+    accounted = set(valid_ids) | set(excluded_ids)
+    # Either nothing was scored (refused before pairing) or every scheduled
+    # pair is accounted for: valid and scored, or excluded with its reason.
+    if accounted and accounted != scheduled:
+        raise ValueError(code)
+    if data["calibration"]["selected_offered_arrival_rate_per_second"] is None and accounted:
+        raise ValueError(code)
+
+    improvements = data["paired_improvements"]
+    point = data["point_estimate_fraction"]
+    lower = data["paired_95_percent_bootstrap_lower_bound_fraction"]
+    prediction_error = data["prediction_error_fraction"]
+    if not isinstance(improvements, list) or not all(
+        type(v) is float and _float(v) for v in improvements
+    ):
+        raise ValueError(code)
+    if prediction_error is not None and not (
+        type(prediction_error) is float and _float(prediction_error)
+    ):
+        raise ValueError(code)
+    threshold = BENCHMARK_V2_MATERIAL_THRESHOLD_FRACTION
+
+    def at_least(value: float) -> bool:
+        return value > threshold or abs(value - threshold) <= 1e-12
+
+    if not improvements:
+        # Unscored: never material, and no estimate may be claimed.
+        if (
+            data["decision"] != "inconclusive"
+            or point is not None
+            or lower is not None
+            or prediction_error is not None
+            # Enough valid pairs but no scores is only admissible when the
+            # measurements themselves were unusable.
+            or (
+                len(valid_ids) >= BENCHMARK_V2_MINIMUM_VALID_PAIRS
+                and "nonfinite_measurement" not in data["reasons"]
+            )
+        ):
+            raise ValueError(code)
+        return data
+    # Scored: every valid pair, and only valid pairs, carries an improvement.
+    if (
+        len(improvements) != len(valid_ids)
+        or len(valid_ids) < BENCHMARK_V2_MINIMUM_VALID_PAIRS
+        or type(point) is not float
+        or not _float(point)
+        or type(lower) is not float
+        or not _float(lower)
+        or abs(point - sum(improvements) / len(improvements)) > 1e-9
+    ):
+        raise ValueError(code)
+    if not at_least(point):
+        expected = "not_material"
+    elif not at_least(lower):
+        expected = "inconclusive"
+    else:
+        expected = "material"
+    if data["decision"] != expected:
+        raise ValueError(code)
+    return data
+
+
 def _compatibility_qualification_fixture(
     *, digest_b: str, digest_c: str, digest_d: str, digest_e: str
 ) -> dict[str, Any]:
@@ -612,6 +849,96 @@ def compatibility_fixtures() -> dict[str, dict[str, Any]]:
                 },
             }
         ),
+        "replica-benchmark-v2.json": validate_replica_benchmark_v2(
+            _compatibility_benchmark_v2_fixture(
+                digest_a=digest_a,
+                digest_b=digest_b,
+                digest_c=digest_c,
+                digest_d=digest_d,
+                digest_e=digest_e,
+            )
+        ),
+    }
+
+
+def _compatibility_benchmark_v2_fixture(
+    *, digest_a: str, digest_b: str, digest_c: str, digest_d: str, digest_e: str
+) -> dict[str, Any]:
+    # Calibration: 4 and 2 req/s overload the baseline, 1 req/s qualifies.
+    # Pairs 3 and 9 fail the baseline completion rule and are excluded; the
+    # other 14 valid pairs are all scored.
+    excluded_pairs = (3, 9)
+    valid_pair_ids = [
+        pair for pair in range(BENCHMARK_V2_SCHEDULED_PAIRS) if pair not in excluded_pairs
+    ]
+    improvements = [0.125 + 0.0078125 * (index % 4) for index in range(len(valid_pair_ids))]
+    return {
+        "protocol": REPLICA_BENCHMARK_V2_PROTOCOL,
+        "benchmark_run_id": "run-fixture-v2",
+        "benchmark_protocol": BENCHMARK_ACCEPTANCE_V2_PROTOCOL,
+        "benchmark_protocol_digest": digest_a,
+        "workload_manifest_digest": digest_b,
+        "deployment_id": "deployment-fixture",
+        "route_generation": 7,
+        "started_at_unix_ms": 10_000,
+        "finished_at_unix_ms": 2_000_000,
+        "calibration": {
+            "mode": "baseline",
+            "scored": False,
+            "rate_ladder_per_second": list(BENCHMARK_V2_RATE_LADDER_PER_SECOND),
+            "trials": [
+                {
+                    "ordinal": 0,
+                    "offered_arrival_rate_per_second": 4.0,
+                    "request_count": 60,
+                    "offered_request_count": 240,
+                    "completed": 12,
+                },
+                {
+                    "ordinal": 1,
+                    "offered_arrival_rate_per_second": 2.0,
+                    "request_count": 60,
+                    "offered_request_count": 120,
+                    "completed": 40,
+                },
+                {
+                    "ordinal": 2,
+                    "offered_arrival_rate_per_second": 1.0,
+                    "request_count": 60,
+                    "offered_request_count": 60,
+                    "completed": 58,
+                },
+            ],
+            "selected_offered_arrival_rate_per_second": 1.0,
+        },
+        "scheduled_pairs": BENCHMARK_V2_SCHEDULED_PAIRS,
+        "minimum_valid_pairs": BENCHMARK_V2_MINIMUM_VALID_PAIRS,
+        "pair_selection": BENCHMARK_V2_PAIR_SELECTION,
+        "material_threshold_fraction": BENCHMARK_V2_MATERIAL_THRESHOLD_FRACTION,
+        "valid_pair_ids": valid_pair_ids,
+        "excluded_windows": [
+            {
+                "pair_id": pair,
+                "baseline_index": _v2_scheduled_baseline_index(pair),
+                "reason": BENCHMARK_V2_INVALID_WINDOW_REASON,
+                "baseline_completed": 50,
+                "baseline_offered": 60,
+            }
+            for pair in excluded_pairs
+        ],
+        "paired_improvements": improvements,
+        "point_estimate_fraction": sum(improvements) / len(improvements),
+        "paired_95_percent_bootstrap_lower_bound_fraction": 0.125,
+        "prediction_error_fraction": None,
+        "decision": "material",
+        "reasons": [],
+        "qualification_claim": False,
+        "promotion_authorized": False,
+        "provenance": {
+            "software_digest": digest_c,
+            "configuration_digest": digest_d,
+            "instrumentation_digest": digest_e,
+        },
     }
 
 
@@ -621,9 +948,12 @@ __all__ = [
     "REPLICA_QUALIFICATION_PROTOCOL",
     "REPLICA_RUNTIME_PROTOCOL",
     "REPLICA_BENCHMARK_PROTOCOL",
+    "REPLICA_BENCHMARK_V2_PROTOCOL",
+    "BENCHMARK_ACCEPTANCE_V2_PROTOCOL",
     "validate_replica_plan",
     "validate_replica_qualification",
     "validate_replica_runtime",
     "validate_replica_benchmark",
+    "validate_replica_benchmark_v2",
     "compatibility_fixtures",
 ]

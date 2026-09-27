@@ -1,0 +1,112 @@
+{
+  "benchmark_protocol": "mycelium.a5_benchmark_acceptance.v2",
+  "benchmark_protocol_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "benchmark_run_id": "run-fixture-v2",
+  "calibration": {
+    "mode": "baseline",
+    "rate_ladder_per_second": [
+      4.0,
+      2.0,
+      1.0,
+      0.5,
+      0.25,
+      0.125,
+      0.0625
+    ],
+    "scored": false,
+    "selected_offered_arrival_rate_per_second": 1.0,
+    "trials": [
+      {
+        "completed": 12,
+        "offered_arrival_rate_per_second": 4.0,
+        "offered_request_count": 240,
+        "ordinal": 0,
+        "request_count": 60
+      },
+      {
+        "completed": 40,
+        "offered_arrival_rate_per_second": 2.0,
+        "offered_request_count": 120,
+        "ordinal": 1,
+        "request_count": 60
+      },
+      {
+        "completed": 58,
+        "offered_arrival_rate_per_second": 1.0,
+        "offered_request_count": 60,
+        "ordinal": 2,
+        "request_count": 60
+      }
+    ]
+  },
+  "decision": "material",
+  "deployment_id": "deployment-fixture",
+  "excluded_windows": [
+    {
+      "baseline_completed": 50,
+      "baseline_index": 7,
+      "baseline_offered": 60,
+      "pair_id": 3,
+      "reason": "baseline_completion_below_minimum_fraction"
+    },
+    {
+      "baseline_completed": 50,
+      "baseline_index": 19,
+      "baseline_offered": 60,
+      "pair_id": 9,
+      "reason": "baseline_completion_below_minimum_fraction"
+    }
+  ],
+  "finished_at_unix_ms": 2000000,
+  "material_threshold_fraction": 0.1,
+  "minimum_valid_pairs": 12,
+  "pair_selection": "all_valid_pairs_no_selection_or_trimming",
+  "paired_95_percent_bootstrap_lower_bound_fraction": 0.125,
+  "paired_improvements": [
+    0.125,
+    0.1328125,
+    0.140625,
+    0.1484375,
+    0.125,
+    0.1328125,
+    0.140625,
+    0.1484375,
+    0.125,
+    0.1328125,
+    0.140625,
+    0.1484375,
+    0.125,
+    0.1328125
+  ],
+  "point_estimate_fraction": 0.13560267857142858,
+  "prediction_error_fraction": null,
+  "promotion_authorized": false,
+  "protocol": "mycelium.replica_benchmark.v2",
+  "provenance": {
+    "configuration_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "instrumentation_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "software_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "qualification_claim": false,
+  "reasons": [],
+  "route_generation": 7,
+  "scheduled_pairs": 16,
+  "started_at_unix_ms": 10000,
+  "valid_pair_ids": [
+    0,
+    1,
+    2,
+    4,
+    5,
+    6,
+    7,
+    8,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "workload_manifest_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}

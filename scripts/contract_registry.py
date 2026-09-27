@@ -629,6 +629,11 @@ CONTRACT_SPECS = (
         ("mycelium_replica_contracts.py",),
     ),
     ContractSpec(
+        "replica-benchmark-v2.json",
+        "mycelium.replica_benchmark.v2",
+        ("mycelium_replica_contracts.py",),
+    ),
+    ContractSpec(
         "internet-bootstrap-status-v1.json",
         "mycelium.internet_bootstrap_status.v1",
         ("mycelium_internet/contracts.py",),
