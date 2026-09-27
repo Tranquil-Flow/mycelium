@@ -1,6 +1,10 @@
 #!/usr/bin/env node
-// A1 browser acceptance. Local conformance exercises only negative UI contracts;
-// positive mode is gated by a live, qualified physical route and real completion.
+// A1 browser acceptance. Local conformance exercises only negative UI contracts, and those
+// contracts live behind live-only surfaces, so this arm requires the live-observatory bundle
+// (`npm run build:live` in ui/web), not the plain `npm run build` fixture output that the
+// loopback host would otherwise serve from ui/web/dist.
+// Positive mode is gated by a live, qualified physical route and real completion, so it
+// needs an explicit --origin and is refused with --local-conformance.
 import { chromium, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -41,6 +45,15 @@ async function launchLocal() {
   check(started.evidence_class === 'local_conformance' && started.physical_devices === 0, 'local_conformance_not_physical');
   return started.origin;
 }
+// The negative contracts below live behind live-only surfaces: App.tsx mounts the Evidence
+// provenance panel only for a live Observatory source, and the AppShell badge names the mode
+// actually served. Refuse a fixture/replay bundle by name here, so an impossible composition
+// fails as a named precondition instead of a locator timeout inside an assertion.
+async function requireLiveObservatoryBundle(page) {
+  const shell = page.locator('[aria-label="Live semantic evidence state"], [aria-label="Fixture data, not live"], [aria-label="Replay evidence, not live"]');
+  await shell.first().waitFor({ state: 'visible', timeout: 30000 }).catch(() => { throw Error('app_shell_not_rendered'); });
+  check(await page.locator('[aria-label="Live semantic evidence state"]').count() > 0, 'live_observatory_bundle_required_build_with_npm_run_build_live');
+}
 async function checkEightWorkspaces(page) {
   for (const route of ['lab','network','plans','incidents','readiness','nodes','settings','inference']) {
     await page.locator(`nav[aria-label="Product sections"] a[href="#${route}"]`).click();
@@ -62,6 +75,7 @@ async function negative(page) {
   await page.route('**/__mycelium/evidence/runtime', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(base) }));
   await page.route('**/__mycelium/evidence/history', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ protocol: 'mycelium.evidence_history.v1', records: [sealed] }) }));
   await page.goto(`${origin}/#inference`, { waitUntil: 'domcontentloaded' });
+  await requireLiveObservatoryBundle(page);
   const panel = page.getByRole('region', { name: 'Evidence provenance' });
   await expect(panel.getByRole('heading', { name: 'Stale', exact: true })).toBeVisible({ timeout: 20000 });
   report.checks.push('expired_runtime_displayed_stale_in_production_bundle');
@@ -148,6 +162,10 @@ try {
   check(mode === 'negative' || mode === 'positive', 'mode_required');
   check(reportPath && path.isAbsolute(reportPath), 'absolute_report_path_required');
   check((local && !suppliedOrigin) || (!local && suppliedOrigin), 'explicit_origin_or_local_conformance_required');
+  // The loopback conformance host publishes a deliberately `fixture` product snapshot and
+  // has no physical route, so positive mode can never reach live_current_product_publication
+  // there. Refuse the combination by name instead of dying later inside a DOM assertion.
+  check(!(local && mode === 'positive'), 'positive_mode_requires_a_live_origin_not_local_conformance');
   origin = local ? await launchLocal() : suppliedOrigin?.replace(/\/$/, '');
   check(/^https?:\/\/127\.0\.0\.1:\d+$/.test(origin) && !origin.endsWith(':14351'), 'allowed_loopback_origin_required');
   browser = await chromium.launch({ headless: true });
