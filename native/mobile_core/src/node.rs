@@ -161,9 +161,14 @@ impl NodeCore {
     fn spawn_background(&self) {
         let transport = self.transport.clone();
         let shared = self.shared.clone();
+        // Re-evaluated continuously: on mobile the OS may block the network while
+        // the app is backgrounded and restore it when serving starts.
         self.rt.spawn(async move {
-            let online = transport.online(Duration::from_secs(20)).await;
-            shared.lock().unwrap().status.relay_online = online;
+            loop {
+                let online = transport.online(Duration::from_secs(5)).await;
+                shared.lock().unwrap().status.relay_online = online;
+                tokio::time::sleep(Duration::from_secs(10)).await;
+            }
         });
         let (tx, rx) = mpsc::channel(64);
         self.rt.spawn({
