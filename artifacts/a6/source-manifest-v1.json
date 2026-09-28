@@ -658,7 +658,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:7bedf8b7f667354c18a2077eddcc1ab065ec1dff3ce31422e07ef7472c0eda38",
+      "sha256": "sha256:57cc09304a630db73d33e493418e62facb4adddc840684b87370877ee7ab8726",
       "size_bytes": 71558
     },
     {
@@ -1033,8 +1033,8 @@
     },
     {
       "path": "mycelium_live/route.py",
-      "sha256": "sha256:f2d8a05dbc2e890e977e61b097fc5abe956227256c802dd01722f3f0bb49b6b8",
-      "size_bytes": 283368
+      "sha256": "sha256:8009f3cd88bb3c557d425dd36f29af2142eefabf0a5bf0f7d43e5ef03f5c870f",
+      "size_bytes": 285460
     },
     {
       "path": "mycelium_live/router_port.py",
@@ -1333,8 +1333,13 @@
     },
     {
       "path": "mycelium_router/mlx_runtime.py",
-      "sha256": "sha256:5f98ef379fc1e086310265d1353b5148df54c262b4fcec4c7a5c63e8470d626e",
-      "size_bytes": 97383
+      "sha256": "sha256:f0b871627e3416f8c3d31cf3ee5154cc1d6c70d9af83d724d03e5a1ff7de441d",
+      "size_bytes": 98422
+    },
+    {
+      "path": "mycelium_router/numpy_runtime.py",
+      "sha256": "sha256:304cf1b437b818db8d48ec9a19df44d5f457620ee99a8ab5ce0f6028a1af9c9c",
+      "size_bytes": 58395
     },
     {
       "path": "mycelium_router/openrouter_runtime.py",
@@ -1527,6 +1532,11 @@
       "size_bytes": 3028
     },
     {
+      "path": "physical_inference_node.py",
+      "sha256": "sha256:aa5f75e770d600c10fd3ebd8325a7495a64c246571be9f2334e56e8bb45e3135",
+      "size_bytes": 184716
+    },
+    {
       "path": "physical_inference_qualification.py",
       "sha256": "sha256:fc3c561d559995cd716f4165c7697e3e581793eec7dddf6108700e365d190310",
       "size_bytes": 129943
@@ -1657,6 +1667,11 @@
       "size_bytes": 4983
     },
     {
+      "path": "test_physical_node_infer_start_status.py",
+      "sha256": "sha256:4fb11b863e6d0c153ddbce49302941d73d6e6dbe025575b549ba45a3a996229c",
+      "size_bytes": 5921
+    },
+    {
       "path": "test_router_iroh_integration.py",
       "sha256": "sha256:4648bbe1d9d84c23f151b6faf4f6ce212602d0c5224770913e39c0e3210a1fb9",
       "size_bytes": 13359
@@ -1665,6 +1680,21 @@
       "path": "test_router_iroh_transport.py",
       "sha256": "sha256:2349f239bd5bd8c4c9dd9624f6aef92fcf6b458d455a1551e04083d0385812f4",
       "size_bytes": 103923
+    },
+    {
+      "path": "test_router_mlx_runtime.py",
+      "sha256": "sha256:bc43b432fb3a265f514ac77d77e94d653839a4745f38bc394bb0626567b6d625",
+      "size_bytes": 36890
+    },
+    {
+      "path": "test_router_numpy_replay_locked_path.py",
+      "sha256": "sha256:9c8273c3375aef9ab2d0714ccdf3a663efa83404a01f1f5e4d9023a8e780e621",
+      "size_bytes": 8081
+    },
+    {
+      "path": "test_router_numpy_runtime.py",
+      "sha256": "sha256:1d7cb6dce3f2d26ee509e823f59c2e1be31686db8f9695b8640ca5671b0a885e",
+      "size_bytes": 32478
     },
     {
       "path": "tests/QUARANTINE.md",
@@ -2387,6 +2417,11 @@
       "size_bytes": 8571
     },
     {
+      "path": "tests/live/test_governed_completion_snapshot_refresh.py",
+      "sha256": "sha256:19afa73140139c0de5be0b55989bcfeb295ec595d6252617b0ab4e8f0b4eba8f",
+      "size_bytes": 18233
+    },
+    {
       "path": "tests/live/test_live_servers_reachability.py",
       "sha256": "sha256:b8f6f4e714db1eda9777e618ca26867569677686f4ceb66cc67a50d6b3bb98f3",
       "size_bytes": 13250
@@ -2928,5 +2963,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:38a01868e74e34c9481be11b1094862a817d83705875d32bb0fa127dc64670b7"
+  "source_digest": "sha256:052a639bc69ebc895f6ce0dde733dc861f906891c7f5ea99eca0c98476839a24"
 }
