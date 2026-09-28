@@ -4641,6 +4641,13 @@ class PhysicalLiveRoute:
                     prefill_completed_at = time.monotonic()
                     output = self._output_tokens(observation)
                     status = observation["details"].get("status")
+                    # ``inference_started`` is success-shaped.  Only a request
+                    # that is decoding, already completed, or owner-cancelled
+                    # may continue; a FAILED (or any other) status executed no
+                    # usable work and must never surface as an empty
+                    # completion.
+                    if status not in {"DECODING", "COMPLETED", "CANCELLED"}:
+                        raise RuntimeError("route_inference_start_failed")
                 emitted = 0
                 stopped = False
 

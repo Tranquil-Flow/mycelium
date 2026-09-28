@@ -390,3 +390,83 @@ def test_failed_refresh_keeps_the_request_completed_and_is_recorded(
         ("post_request_snapshot_refresh_failed", "node_response_timeout")
     ]
     assert REQUEST_ID in governed.route._request_outputs
+
+
+@pytest.mark.parametrize("status", ["FAILED", "PREFILL", None])
+def test_non_started_infer_start_status_fails_closed(governed, status) -> None:
+    governed.nodes["node-a"].start_status = status
+
+    with pytest.raises(RuntimeError, match="^route_inference_start_failed$"):
+        governed.run()
+
+    assert REQUEST_ID not in governed.route._request_outputs
+    assert governed.route._incidents[-1]["state"] == "request_failed_closed"
+    assert governed.route._incidents[-1]["reason"] == "route_inference_start_failed"
+    # Failure cleanup still runs and seals its receipt; no refresh follows.
+    assert ("route", "cleanup_receipt_sealed") in governed.log
+    assert ("node-a", "infer_decode") not in governed.log
+    assert ("node-a", "snapshot") not in governed.log
+
+
+def test_node_inference_start_failed_reaches_the_route_as_a_failure(
+    governed, tmp_path_factory
+) -> None:
+    """Node -> wire -> process client -> route, for a real failed locked prefill.
+
+    The entry node's ``infer_start`` runs the real ``PhysicalNodeService``
+    handler over a real locked replay prefill that ends FAILED (the node's
+    own fixture from its fail-closed change).  Its answer is framed exactly as
+    the node's stdout loop frames it (``_response`` + ``canonical_json_bytes``)
+    and parsed by the real ``PhysicalNodeProcess._validate_response`` that
+    backs ``_ConcurrentNodeSession``.  The route must surface the node's named
+    error as a failed request, never an empty completion.
+    """
+
+    from mycelium_node.process import PhysicalNodeProcess
+    from physical_inference_node import _response, canonical_json_bytes
+    from test_physical_node_infer_start_status import _locked_start
+    from test_router_numpy_qwen_kv import _case
+
+    case = _case(tmp_path_factory.mktemp("route-node-replay"), "qwen2")
+    service, router, node_request_id, node_payload = _locked_start(
+        case, chunk_size=2
+    )
+    service.node_id = "node-a"
+    client = object.__new__(PhysicalNodeProcess)
+    client.node_id = "node-a"
+    client._bounded_stderr_tail = lambda *_args, **_kwargs: None
+    entry = governed.nodes["node-a"]
+    scripted_send = entry.send
+
+    def send(*, command_id, command, payload):
+        if command != "infer_start":
+            return scripted_send(command_id=command_id, command=command, payload=payload)
+        entry.log.append(("node-a", command))
+        try:
+            response = _response(
+                service,
+                command_id=command_id,
+                ok=True,
+                result=service._infer_start(node_payload),
+            )
+        except Exception as exc:
+            code = getattr(exc, "code", None)
+            assert isinstance(code, str), exc
+            response = _response(
+                service, command_id=command_id, ok=False, error_code=code
+            )
+        result = client._validate_response(canonical_json_bytes(response), command_id)
+        return {"event": "inference_started", "details": result}
+
+    entry.send = send
+
+    with pytest.raises(Exception) as raised:
+        governed.run()
+
+    assert getattr(raised.value, "code", None) == "inference_start_failed"
+    assert router.request_status(node_request_id) == "FAILED"
+    assert REQUEST_ID not in governed.route._request_outputs
+    assert governed.route._incidents[-1]["state"] == "request_failed_closed"
+    assert governed.route._incidents[-1]["reason"] == "inference_start_failed"
+    assert ("node-a", "infer_decode") not in governed.log
+    assert ("node-a", "snapshot") not in governed.log
