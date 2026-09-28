@@ -4786,6 +4786,33 @@ class PhysicalLiveRoute:
                     )
                     if cleanup_receipt is None:
                         raise RuntimeError("route_cleanup_receipt_unsealed")
+                if route_identity is not None and not cancelled_for_request:
+                    # Governed cleanup is receipt-only and deliberately leaves
+                    # the full live-status projection untouched, so without a
+                    # refresh peers[] keeps its startup counters forever.  Now
+                    # that the cleanup receipt is sealed (outside the strict
+                    # cleanup deadline), take ONE full snapshot of the
+                    # participants, mirroring live_attestation.  Node RPCs run
+                    # without route._lock and _snapshot_nodes commits every
+                    # node's observation in one locked update, or none.  The
+                    # request already completed: a failed refresh keeps the
+                    # previous projection and is recorded, never re-labels the
+                    # request as failed.
+                    try:
+                        self._snapshot_nodes(participating_node_ids)
+                    except Exception as refresh_error:
+                        self._record_incident(
+                            state="post_request_snapshot_refresh_failed",
+                            reason=str(
+                                getattr(
+                                    refresh_error,
+                                    "code",
+                                    str(refresh_error)
+                                    or type(refresh_error).__name__,
+                                )
+                            ),
+                            request_id=request_id,
+                        )
                 if self._fatal is not None:
                     raise RuntimeError(self._fatal)
                 if cancelled_for_request:
