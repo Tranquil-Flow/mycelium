@@ -19,8 +19,9 @@ Windows-specific boundaries:
 * the durable state root and identity file must be reported by the caller as
   ``owner_only`` (the Windows ACL summary an installer would read) AND, on an
   actual (or injected, for testing) win32 host, that observation is
-  independently re-derived from the host via a real ACL reader
-  (``icacls``/win32 security APIs behind an injectable seam) — the caller
+  independently re-derived from the host via a real ACL reader (by default
+  the native security descriptor through ``GetSecurityInfo``, cross-checked
+  against ``icacls``, behind an injectable seam) — the caller
   string alone never satisfies the win32 check, and the check fails CLOSED
   when the reader cannot verify.  On a POSIX host the owner uid and mode are
   checked directly instead;
@@ -36,8 +37,9 @@ Windows-specific boundaries:
 
 Every win32-only code path here is exercised on this host only through the
 injectable seams (``acl_reader`` / ``directory_flush``) plus a monkeypatched
-``sys.platform``; the seams' real bodies (``icacls``, ``ctypes.windll``) are
-unverified on an actual Windows device, same as the rest of the Windows path.
+``sys.platform``; the seams' real bodies (``GetSecurityInfo`` + ``icacls``,
+``FlushFileBuffers`` through :mod:`mycelium_host_platform`) are unverified on
+an actual Windows device, same as the rest of the Windows path.
 """
 
 from __future__ import annotations
@@ -70,7 +72,7 @@ from mycelium_qualification.signing import (
     build_ed25519_verifier,
 )
 
-from .acl import AclVerificationError, read_owner_only_acl
+from .acl import AclVerificationError, read_owner_only_acl_cross_checked
 from .progress import LADDER, advance, new_progress
 
 PAIRING_REQUEST_PROTOCOL = "mycelium.pairing_request.v1"
@@ -472,18 +474,20 @@ def _acl_is_owner_only(acl_observation: object) -> bool:
 
 
 def _default_win32_acl_reader(path: Path) -> str:
-    """Read the real NTFS ACL summary for ``path`` via ``whoami`` + ``icacls``.
+    """Read the real NTFS owner-only observation for ``path``.
 
-    Only reachable on an actual win32 host; refuses (fails closed) rather than
-    guessing when the platform tools are unavailable or their output is
-    unparseable.  The parser lives in :mod:`mycelium_a13_windows.acl` and is
-    tested against recorded listings; never exercised on a Windows device.
+    The verdict comes from the native security descriptor (owner and DACL
+    SIDs through ``GetSecurityInfo``), which is locale-independent; ``icacls``
+    is kept as an independent cross-check whose ACE count must agree.  Only
+    reachable on an actual win32 host; refuses (fails closed) rather than
+    guessing when either source is unavailable, unparseable or disagrees.
+    See :mod:`mycelium_a13_windows.acl`; never exercised on a Windows device.
     """
 
     if sys.platform != "win32":
         raise OnboardingError("onboarding_acl_unverifiable")
     try:
-        return read_owner_only_acl(path)
+        return read_owner_only_acl_cross_checked(path)
     except AclVerificationError as exc:
         raise OnboardingError("onboarding_acl_unverifiable") from exc
 
@@ -573,32 +577,35 @@ def _win32_flush_directory(directory: Path) -> None:
 
     if sys.platform != "win32":
         raise OnboardingError("onboarding_join_durability_unavailable")
-    import ctypes
+    import mycelium_host_platform
+    from mycelium_host_platform import _win32_api as w
 
-    generic_write = 0x40000000
-    file_share_read = 0x00000001
-    file_share_write = 0x00000002
-    open_existing = 3
-    file_flag_backup_semantics = 0x02000000
-    invalid_handle_value = (1 << (ctypes.sizeof(ctypes.c_void_p) * 8)) - 1
-
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-    handle = kernel32.CreateFileW(
-        str(directory),
-        generic_write,
-        file_share_read | file_share_write,
-        None,
-        open_existing,
-        file_flag_backup_semantics,
-        None,
-    )
-    if not handle or handle == invalid_handle_value:
-        raise OnboardingError("onboarding_join_durability_unavailable")
     try:
-        if not kernel32.FlushFileBuffers(handle):
+        api = mycelium_host_platform.win32_api()
+        handle = api.open(
+            str(directory),
+            access=w.GENERIC_READ | w.GENERIC_WRITE,
+            share=w.FILE_SHARE_READ | w.FILE_SHARE_WRITE | w.FILE_SHARE_DELETE,
+            disposition=w.OPEN_EXISTING,
+            flags=w.FILE_FLAG_BACKUP_SEMANTICS | w.FILE_FLAG_OPEN_REPARSE_POINT,
+        )
+    except (mycelium_host_platform.HostPlatformError, w.Win32Error) as exc:
+        raise OnboardingError("onboarding_join_durability_unavailable") from exc
+    try:
+        information = api.information(handle)
+        if (
+            information.attributes & w.FILE_ATTRIBUTE_REPARSE_POINT
+            or not information.attributes & w.FILE_ATTRIBUTE_DIRECTORY
+        ):
             raise OnboardingError("onboarding_join_durability_unavailable")
+        api.flush(handle)
+    except w.Win32Error as exc:
+        raise OnboardingError("onboarding_join_durability_unavailable") from exc
     finally:
-        kernel32.CloseHandle(handle)
+        try:
+            api.close(handle)
+        except w.Win32Error:
+            pass
 
 
 def _win32_temp_write_is_unsafe(temporary: Path) -> bool:
