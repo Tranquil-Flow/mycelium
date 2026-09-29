@@ -559,6 +559,24 @@ class FakeWin32Api:
         self.event_handles[self._next_handle] = name
         return self._next_handle
 
+    def create_event(self, name: str) -> tuple[int, bool]:
+        self.calls.append(("create_event", name))
+        self._maybe_fail("create_event")
+        events = self._events_table()
+        existed = name in events
+        events.setdefault(name, self._threading.Event())
+        self._next_handle += 4
+        self.event_handles[self._next_handle] = name
+        return self._next_handle, existed
+
+    def set_event(self, event: int) -> None:
+        self.calls.append(("set_event", event))
+        self._maybe_fail("set_event")
+        name = self.event_handles.get(event)
+        if name is None:
+            raise w.Win32Error(w.ERROR_INVALID_HANDLE, "SetEvent")
+        self.events[name].set()
+
     def wait_event(self, event: int, timeout_ms: int) -> bool:
         name = self.event_handles.get(event)
         if name is None:

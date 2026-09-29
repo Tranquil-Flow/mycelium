@@ -479,9 +479,16 @@ def _windows_member_plan(
             "task_definition_file": task_file,
             "install_argv": ["schtasks.exe", "/Create", "/TN", task_name, "/XML", task_file, "/F"],
             "start_argv": ["schtasks.exe", "/Run", "/TN", task_name],
-            "stop_argv": ["schtasks.exe", "/End", "/TN", task_name],
+            # The runner signals its named stop event, the child gets its own
+            # stop event, and after stop_timeout_seconds the runner terminates
+            # the child's job object.  schtasks /End only kills the runner
+            # (whose kill-on-close job then kills the child) and stays the
+            # fallback when the runner no longer answers.
+            "stop_mechanism": "named_event_then_job_terminate",
+            "stop_argv": [*runner, "--stop"],
+            "stop_fallback_argv": ["schtasks.exe", "/End", "/TN", task_name],
             "uninstall_argv": ["schtasks.exe", "/Delete", "/TN", task_name, "/F"],
-            "known_blockers": ["service_runner_stop_path_uses_posix_killpg"],
+            "known_blockers": [],
         }
     delay_ms = int(math.ceil(float(config["restart_delay_seconds"]) * 1000))
     actions = "/".join(["restart", str(delay_ms)] * int(config["restart_limit"]))

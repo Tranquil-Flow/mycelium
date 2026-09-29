@@ -866,9 +866,14 @@ def _run_bound(
     def request_stop(_signum: int, _frame: object) -> None:
         stopping.set()
 
+    stop_watch: threading.Event | None = None
     try:
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous[signum] = signal.signal(signum, request_stop)
+        if mycelium_host_platform.is_win32():
+            # A Windows supervisor stops the node through the named event in
+            # MYCELIUM_STOP_EVENT; SIGTERM is never delivered across processes.
+            stop_watch = mycelium_host_platform.start_stop_event_watcher(stopping.set)
         # The child resolves its descriptor-relative artifact directory during
         # startup, so pin its inherited cwd to the retained state-root fd.
         if command is not None:
@@ -1062,6 +1067,8 @@ def _run_bound(
         )
     finally:
         cleanup_phases = []
+        if stop_watch is not None:
+            stop_watch.set()
         if process is not None:
             try:
                 process.close()

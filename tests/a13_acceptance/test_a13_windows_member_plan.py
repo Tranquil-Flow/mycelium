@@ -184,7 +184,8 @@ def test_the_per_user_member_is_a_least_privilege_logon_task() -> None:
         ROOT + "\\mycelium-win-1-agent.task.xml",
         "/F",
     ]
-    assert "service_runner_stop_path_uses_posix_killpg" in plan["known_blockers"]
+    assert "service_runner_stop_path_uses_posix_killpg" not in plan["known_blockers"]
+    assert plan["stop_mechanism"] == "named_event_then_job_terminate"
     rendered_plan = json.loads(result["_payloads"]["mycelium-win-1-agent.windows-member-plan.json"])
     assert rendered_plan == plan
 

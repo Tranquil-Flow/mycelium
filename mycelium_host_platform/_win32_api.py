@@ -240,6 +240,10 @@ class Win32Api(Protocol):
 
     def wait_event(self, event: int, timeout_ms: int) -> bool: ...
 
+    def create_event(self, name: str) -> tuple[int, bool]: ...
+
+    def set_event(self, event: int) -> None: ...
+
 
 # --------------------------------------------------------------- real binding
 
@@ -962,6 +966,28 @@ class RealWin32Api:  # pragma: no cover - exercised only on a Windows device
         if not handle:
             raise self._fail("OpenEventW")
         return int(handle)
+
+    def create_event(self, name: str) -> tuple[int, bool]:
+        """Manual-reset, initially unsignalled named event; (handle, existed)."""
+
+        self._bind_event_api()
+        wintypes = self._wintypes
+        function = self._kernel32.CreateEventW
+        function.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+        function.restype = wintypes.HANDLE
+        handle = function(None, True, False, name)
+        existed = self._ctypes.get_last_error() == ERROR_ALREADY_EXISTS
+        if not handle:
+            raise self._fail("CreateEventW")
+        return int(handle), existed
+
+    def set_event(self, event: int) -> None:
+        wintypes = self._wintypes
+        function = self._kernel32.SetEvent
+        function.argtypes = [wintypes.HANDLE]
+        function.restype = wintypes.BOOL
+        if not function(event):
+            raise self._fail("SetEvent")
 
     def wait_event(self, event: int, timeout_ms: int) -> bool:
         self._bind_event_api()
