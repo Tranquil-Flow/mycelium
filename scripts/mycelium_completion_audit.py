@@ -54,12 +54,44 @@ EXPECTED_DEPENDENCIES = {
     "A7": {"A6"},
     "A8": {"A3"},
     "A9": {"A8"},
-    "A10": {"A4", "A9"},
+    "A10": {"A4"},
     "A11": {"A10"},
-    "A12": {"A4", "A9"},
+    "A12": {"A4"},
     "A13": {"A12"},
     "A14": {"A8"},
     "A15": {f"A{index}" for index in range(3, 15)},
+}
+# 2026-09-29 owner ruling R1: A10's and A12's dependency on A9 is narrowed to A9's
+# non-Windows parts; the native accelerated Windows provider moves to the Windows
+# track.  The gate-level ledger dependency on A9 is therefore gone for both, but the
+# consumed parts are not: each dependent specification must name every consumed part
+# by its frozen A9 decision ID (``tests/a9_acceptance/inventory.v1.json``) as
+# ``A9.<decision_id>``, so the narrowing can never silently become a deletion.
+NARROWED_PART_DEPENDENCIES = {
+    "A10": {
+        "A9": (
+            "separated_capability_authority",
+            "signed_capability_binding",
+            "unknown_remains_ineligible",
+            "native_synthetic_evidence_separation",
+            "class_specific_qualification",
+            "runtime_backend_registry",
+            "persistent_int8_execution",
+            "qualified_activation_precision",
+            "component_aware_performance_authority",
+        ),
+    },
+    "A12": {
+        "A9": (
+            "separated_capability_authority",
+            "signed_capability_binding",
+            "unknown_remains_ineligible",
+            "native_synthetic_evidence_separation",
+            "class_specific_qualification",
+            "runtime_backend_registry",
+            "dynamic_ui_projection",
+        ),
+    },
 }
 EVIDENCE_PROTOCOL = "mycelium.executed_requirement_evidence.v1"
 EVIDENCE_PROVENANCE = {"source", "live", "replay", "fixture", "historical"}
@@ -668,6 +700,15 @@ def audit(repo_root: str | Path, checklist: str = DEFAULT_CHECKLIST) -> dict[str
                     findings.append(
                         f"{prefix}:specification_workspace_missing:{workspace_id}"
                     )
+            for narrowed_gate, parts in sorted(
+                NARROWED_PART_DEPENDENCIES.get(gate_id, {}).items()
+            ):
+                for part in parts:
+                    if f"{narrowed_gate}.{part}" not in normalized_specification:
+                        findings.append(
+                            f"{prefix}:narrowed_dependency_unrecorded:"
+                            f"{narrowed_gate}.{part}"
+                        )
         handover = gate.get("handover")
         if handover is not None:
             try:

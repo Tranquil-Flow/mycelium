@@ -98,11 +98,31 @@ def _materialize(root: Path, checklist: dict) -> None:
         destination.write_bytes((ROOT / relative).read_bytes())
 
 
-def _fixture(tmp_path: Path, blockers: list[str], *, probe: bool = True) -> Path:
-    """Write a checklist whose only delta from the live one is the gate's blockers."""
+#: The A10/A12 dependency rows as they stood before the 2026-09-29 owner ruling R1
+#: narrowed A9 to its non-Windows parts.  The pinned pre-change audit predates R1, so
+#: a fixture it is run against carries these rows; the current audit never sees them.
+PRE_R1_DEPENDENCIES = {"A10": ["A4", "A9"], "A12": ["A4", "A9"]}
+
+
+def _fixture(
+    tmp_path: Path,
+    blockers: list[str],
+    *,
+    probe: bool = True,
+    pre_r1_dependencies: bool = False,
+) -> Path:
+    """Write a checklist whose only delta from the live one is the gate's blockers.
+
+    With ``pre_r1_dependencies`` the fixture also restores the pre-R1 A10/A12
+    dependency rows, because the pinned pre-change audit it is run against
+    predates that ruling.
+    """
 
     checklist = _real_checklist()
     _gate(checklist, GATE)["blockers"] = list(blockers)
+    if pre_r1_dependencies:
+        for gate_id, dependencies in PRE_R1_DEPENDENCIES.items():
+            _gate(checklist, gate_id)["dependencies"] = list(dependencies)
     _materialize(tmp_path, checklist)
     if probe:
         artifact = tmp_path / PROBE
@@ -296,7 +316,7 @@ def test_the_pre_change_audit_accepts_a_blocker_its_artifact_refutes(
 ) -> None:
     """RED: the F1 defect, re-run against the pinned pre-change audit."""
 
-    root = _fixture(tmp_path, _stale_blockers(tmp_path))
+    root = _fixture(tmp_path, _stale_blockers(tmp_path), pre_r1_dependencies=True)
     base = _write_script(tmp_path)
     assert base.read_bytes() != (ROOT / AUDIT_SCRIPT).read_bytes()
 
@@ -311,7 +331,7 @@ def test_the_pre_change_audit_was_not_vacuously_green_on_this_tree(
 ) -> None:
     """Control for the red: the pinned audit fails on this tree when the form is wrong."""
 
-    root = _fixture(tmp_path, [])
+    root = _fixture(tmp_path, [], pre_r1_dependencies=True)
     base = _write_script(tmp_path)
 
     completed = _run_audit_cli(base, root, tmp_path, json_output=False)
