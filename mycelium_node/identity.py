@@ -15,6 +15,8 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
 )
 
+import mycelium_host_platform
+from mycelium_host_platform import HostPlatformError
 from mycelium_qualification.evidence import sha256_bytes
 from mycelium_qualification.signing import Ed25519EvidenceSigner
 
@@ -39,7 +41,89 @@ def _absolute_path(value: str | Path) -> Path:
     return Path(os.path.abspath(path))
 
 
+_WIN32_ERRORS = {
+    "host_permissions_invalid": "node_identity_permissions_invalid",
+    "host_file_missing": "node_identity_missing",
+    "host_io_failed": "node_identity_path_invalid",
+}
+
+
+def _win32_identity_error(exc: HostPlatformError) -> NodeIdentityError:
+    return NodeIdentityError(_WIN32_ERRORS.get(exc.code, "node_identity_path_invalid"))
+
+
+def _win32_prepare_private_parent(key_path: Path) -> None:
+    """Create/verify the owner-only key directory through the win32 seam."""
+
+    try:
+        with mycelium_host_platform.private_directory(key_path.parent, create=True):
+            pass
+    except HostPlatformError as exc:
+        raise _win32_identity_error(exc) from exc
+
+
+def _win32_load_existing(
+    key_path: Path,
+    *,
+    allow_incomplete: bool,
+    endpoint_id: str | None,
+) -> Ed25519EvidenceSigner | None:
+    """Read one owner-only, single-link key file through a leased directory."""
+
+    try:
+        with mycelium_host_platform.private_directory(
+            key_path.parent, create=False
+        ) as parent:
+            if not parent.exists:
+                raise NodeIdentityError("node_identity_path_invalid")
+            private_bytes = parent.read_file(key_path.name, max_bytes=_KEY_BYTES + 1)
+    except NodeIdentityError:
+        raise
+    except HostPlatformError as exc:
+        if exc.code == "host_file_missing":
+            if allow_incomplete:
+                return None
+            raise NodeIdentityError("node_identity_missing") from None
+        if exc.code == "host_file_invalid" and exc.detail == "size":
+            raise NodeIdentityError("node_identity_invalid") from exc
+        raise _win32_identity_error(exc) from exc
+    if len(private_bytes) < _KEY_BYTES and allow_incomplete:
+        return None
+    if len(private_bytes) != _KEY_BYTES:
+        raise NodeIdentityError("node_identity_invalid")
+    return _signer(private_bytes, endpoint_id=endpoint_id)
+
+
+def _win32_write_new(
+    key_path: Path,
+    *,
+    endpoint_id: str | None,
+) -> Ed25519EvidenceSigner | None:
+    """CREATE_NEW one owner-only key file; ``None`` when another writer won."""
+
+    private_key = Ed25519PrivateKey.generate()
+    private_bytes = private_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+    try:
+        with mycelium_host_platform.private_directory(
+            key_path.parent, create=False
+        ) as parent:
+            if not parent.exists:
+                raise NodeIdentityError("node_identity_path_invalid")
+            parent.create_file_exclusive(key_path.name, private_bytes)
+    except NodeIdentityError:
+        raise
+    except HostPlatformError as exc:
+        if exc.code == "host_file_exists":
+            return None
+        if exc.code == "host_io_failed":
+            raise NodeIdentityError("node_identity_write_failed") from exc
+        raise _win32_identity_error(exc) from exc
+    return _signer(private_bytes, endpoint_id=endpoint_id)
+
+
 def _prepare_private_parent(key_path: Path) -> None:
+    if mycelium_host_platform.is_win32():
+        return _win32_prepare_private_parent(key_path)
     parent = key_path.parent
     try:
         missing: list[Path] = []
@@ -140,6 +224,10 @@ def _load_existing(
     allow_incomplete: bool = False,
     endpoint_id: str | None = None,
 ) -> Ed25519EvidenceSigner | None:
+    if mycelium_host_platform.is_win32():
+        return _win32_load_existing(
+            key_path, allow_incomplete=allow_incomplete, endpoint_id=endpoint_id
+        )
     descriptors: list[int] = []
     try:
         descriptors = _open_private_parent(key_path)
@@ -204,6 +292,8 @@ def _write_new(
     *,
     endpoint_id: str | None = None,
 ) -> Ed25519EvidenceSigner | None:
+    if mycelium_host_platform.is_win32():
+        return _win32_write_new(key_path, endpoint_id=endpoint_id)
     private_key = Ed25519PrivateKey.generate()
     private_bytes = private_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
     flags = (

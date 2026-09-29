@@ -26,6 +26,8 @@ from typing import Any, Iterator
 import uuid
 
 import mycelium_deadlines
+import mycelium_host_platform
+from mycelium_host_platform import HostPlatformError
 from mycelium_qualification.evidence import canonical_json_bytes
 
 
@@ -526,6 +528,119 @@ class PrivateDirectoryLease:
         self.close()
 
 
+class _Win32PrivateDirectoryLease:
+    """win32 lease: the same interface as ``PrivateDirectoryLease`` over handles.
+
+    The directory and its parent are held open without ``FILE_SHARE_DELETE``
+    (so neither can be renamed or removed while leased) and every
+    revalidation re-checks handle identity, the final path and the owner-only
+    DACL through :mod:`mycelium_host_platform`.  ``working_directory`` pins
+    the process cwd by path; the held handle keeps that path bound to the
+    leased directory for the whole block.
+    """
+
+    def __init__(self, path: Path, lease: Any) -> None:
+        self.path = path
+        self._lease = lease
+        self._closed = False
+
+    @property
+    def exists(self) -> bool:
+        return bool(self._lease.exists) and not self._closed
+
+    def _require_open(self) -> None:
+        if self._closed or not self._lease.exists:
+            raise ValueError("data directory is unavailable")
+
+    def revalidate(self) -> None:
+        self._require_open()
+        try:
+            self._lease.revalidate()
+        except HostPlatformError as exc:
+            raise ValueError("data directory binding changed") from exc
+
+    def private_subdirectory(self, name: str) -> "_Win32PrivateDirectoryLease":
+        name = PrivateDirectoryLease._relative_component(name)
+        self.revalidate()
+        try:
+            child = self._lease.subdirectory(name)
+        except HostPlatformError as exc:
+            raise ValueError("data directory is unavailable") from exc
+        lease = _Win32PrivateDirectoryLease(self.path / name, child)
+        try:
+            self.revalidate()
+            lease.revalidate()
+        except BaseException:
+            lease.close()
+            raise
+        return lease
+
+    @contextmanager
+    def working_directory(self) -> Iterator[None]:
+        self._require_open()
+        with _CWD_LEASE_LOCK:
+            original = os.getcwd()
+            self.revalidate()
+            os.chdir(self.path)
+            body_failure: BaseException | None = None
+            try:
+                yield
+            except BaseException as exc:
+                body_failure = exc
+                raise
+            finally:
+                restored = False
+                for _attempt in range(_CWD_RESTORE_ATTEMPTS):
+                    try:
+                        os.chdir(original)
+                    except OSError:
+                        continue
+                    restored = True
+                    break
+                if not restored:
+                    if body_failure is not None:
+                        body_failure.add_note(_CWD_RESTORATION_ERROR)
+                    else:
+                        raise ValueError(_CWD_RESTORATION_ERROR)
+                try:
+                    self.revalidate()
+                except ValueError:
+                    if body_failure is None:
+                        raise
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._lease.close()
+        except HostPlatformError as exc:
+            raise ValueError("data directory close failed") from exc
+
+    def __enter__(self) -> "_Win32PrivateDirectoryLease":
+        if self._closed:
+            raise ValueError("data directory is unavailable")
+        return self
+
+    def __exit__(self, _type: Any, _value: Any, _traceback: Any) -> None:
+        self.close()
+
+
+def _win32_private_directory_lease(
+    value: str | Path, *, create: bool
+) -> _Win32PrivateDirectoryLease:
+    path = _absolute_path(value)
+    if path == Path(path.anchor):
+        raise ValueError("data directory is invalid")
+    try:
+        lease = mycelium_host_platform.private_directory(path, create=create)
+    except HostPlatformError as exc:
+        if exc.code == "host_permissions_invalid":
+            raise ValueError("data directory is invalid") from exc
+        raise ValueError("data directory is unavailable") from exc
+    return _Win32PrivateDirectoryLease(path, lease)
+
+
 def private_directory_lease(
     value: str | Path,
     *,
@@ -533,6 +648,8 @@ def private_directory_lease(
 ) -> PrivateDirectoryLease:
     """Open a private directory while retaining its parent and final descriptors."""
 
+    if mycelium_host_platform.is_win32():
+        return _win32_private_directory_lease(value, create=create)  # type: ignore[return-value]
     if not getattr(os, "O_NOFOLLOW", 0) or not getattr(os, "O_DIRECTORY", 0):
         raise ValueError("data directory is unavailable")
     path = _absolute_path(value)
@@ -647,6 +764,55 @@ def _identity_from_stat(path: Path, metadata: os.stat_result) -> _ExecutableIden
     )
 
 
+_WIN32_EXECUTABLE_SUFFIXES = frozenset({".exe", ".com"})
+
+
+def _win32_capture_executable_identity(
+    value: str | Path,
+    *,
+    require_canonical: bool,
+    require_private_owner: bool,
+    require_executable: bool,
+) -> _ExecutableIdentity:
+    """Handle-bound executable fingerprint on win32 (reparse points refused)."""
+
+    supplied = Path(value).expanduser()
+    if require_canonical:
+        if not supplied.is_absolute() or supplied != _absolute_path(supplied):
+            raise ValueError("executable path is not canonical")
+        path = supplied
+    else:
+        if supplied.parent == Path(".") and not supplied.is_absolute():
+            located = shutil.which(str(supplied))
+            if located is None:
+                raise ValueError("executable is unavailable")
+            supplied = Path(located)
+        try:
+            path = supplied.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise ValueError("executable is unavailable") from exc
+    if require_executable and path.suffix.lower() not in _WIN32_EXECUTABLE_SUFFIXES:
+        raise ValueError("executable is invalid")
+    try:
+        fingerprint = mycelium_host_platform.executable_fingerprint(
+            path, require_private_owner=require_private_owner
+        )
+    except HostPlatformError as exc:
+        if exc.code in {"host_permissions_invalid", "host_file_invalid", "host_path_invalid"}:
+            raise ValueError("executable is invalid") from exc
+        raise ValueError("executable is unavailable") from exc
+    return _ExecutableIdentity(
+        path=str(path),
+        device=fingerprint.volume,
+        inode=fingerprint.index,
+        mode=stat.S_IFREG | 0o700,
+        uid=0,
+        size=fingerprint.size,
+        mtime_ns=fingerprint.last_write_ns,
+        ctime_ns=fingerprint.creation_ns,
+    )
+
+
 def capture_executable_identity(
     value: str | Path,
     *,
@@ -656,6 +822,13 @@ def capture_executable_identity(
 ) -> _ExecutableIdentity:
     """Open and fingerprint one executable without following untrusted symlinks."""
 
+    if mycelium_host_platform.is_win32():
+        return _win32_capture_executable_identity(
+            value,
+            require_canonical=require_canonical,
+            require_private_owner=require_private_owner,
+            require_executable=require_executable,
+        )
     supplied = Path(value).expanduser()
     if require_canonical:
         if not supplied.is_absolute() or supplied != _absolute_path(supplied):
@@ -708,6 +881,10 @@ def private_directory_parent_fd(
 ) -> int:
     """Open an absolute path's parent with a descriptor-relative no-follow walk."""
 
+    if mycelium_host_platform.is_win32():
+        # win32 has no directory descriptors; callers dispatch to the host
+        # platform seam instead of walking by fd.
+        raise ValueError("path is invalid")
     if not path.is_absolute() or not getattr(os, "O_NOFOLLOW", 0):
         raise ValueError("path is invalid")
     descriptor, relative_parts = _walk_start(path)

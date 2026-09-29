@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import random
+import shutil
 import signal
 import stat
 import sys
@@ -19,6 +20,8 @@ import time
 from typing import Any, NoReturn, Sequence
 from urllib.parse import urlsplit
 
+import mycelium_host_platform
+from mycelium_host_platform import HostPlatformError
 from mycelium_invite import verify_invite_bundle
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import generate_ed25519_signer
@@ -152,7 +155,23 @@ def _canonical_document_bytes(raw: bytes) -> dict[str, Any]:
     return document
 
 
+def _win32_canonical_document(path_value: str | Path) -> dict[str, Any]:
+    path = Path(path_value).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    path = Path(os.path.abspath(path))
+    try:
+        raw = mycelium_host_platform.read_owner_file(
+            path, max_bytes=_MAX_JOIN_BUNDLE_BYTES
+        )
+    except HostPlatformError as exc:
+        raise ValueError("join bundle file is invalid") from exc
+    return _canonical_document_bytes(raw)
+
+
 def _canonical_document(path_value: str | Path) -> dict[str, Any]:
+    if mycelium_host_platform.is_win32():
+        return _win32_canonical_document(path_value)
     path = Path(path_value).expanduser()
     if not path.is_absolute():
         path = Path.cwd() / path
@@ -220,7 +239,33 @@ def _stdin_document() -> dict[str, Any]:
     return _canonical_document_bytes(raw)
 
 
+_WIN32_SIDECAR_NAME = "mycelium-iroh-sidecar.exe"
+
+
+def _win32_sidecar_candidates() -> list[Path]:
+    root = Path(__file__).resolve().parents[1]
+    target = root / "native" / "iroh_transport" / "target"
+    return [
+        root / "bin" / _WIN32_SIDECAR_NAME,
+        target / "release" / _WIN32_SIDECAR_NAME,
+        target / "x86_64-pc-windows-msvc" / "release" / _WIN32_SIDECAR_NAME,
+        target / "debug" / _WIN32_SIDECAR_NAME,
+    ]
+
+
 def _sidecar_path(value: str | None) -> Path:
+    if mycelium_host_platform.is_win32() and value is None:
+        for candidate in _win32_sidecar_candidates():
+            try:
+                identity = capture_executable_identity(
+                    candidate,
+                    require_canonical=True,
+                    require_private_owner=True,
+                )
+            except (OSError, RuntimeError, TypeError, ValueError):
+                continue
+            return Path(identity.path)
+        raise ValueError("sidecar binary is unavailable")
     if value is not None:
         supplied = Path(value).expanduser()
         if not supplied.is_absolute() or supplied != Path(os.path.abspath(supplied)):
@@ -340,7 +385,43 @@ class _TemporaryRoot:
     inode: int
 
 
+def _win32_temporary_root() -> _TemporaryRoot:
+    import uuid
+
+    trusted_root = Path(tempfile.gettempdir()).resolve(strict=True)
+    path = trusted_root / f"myc-node-{uuid.uuid4().hex}"
+    if os.path.lexists(path):
+        raise ValueError("temporary root is invalid")
+    try:
+        with mycelium_host_platform.private_directory(path, create=True) as lease:
+            identity = lease.identity
+    except HostPlatformError as exc:
+        raise ValueError("temporary root is invalid") from exc
+    if identity is None:
+        raise ValueError("temporary root is invalid")
+    return _TemporaryRoot(path, identity.volume, identity.index)
+
+
+def _win32_remove_temporary_root(root: _TemporaryRoot) -> None:
+    try:
+        with mycelium_host_platform.private_directory(root.path, create=False) as lease:
+            identity = lease.identity
+    except HostPlatformError as exc:
+        raise RuntimeError("temporary root cleanup failed") from exc
+    if identity is None or (identity.volume, identity.index) != (root.device, root.inode):
+        raise RuntimeError("temporary root cleanup failed")
+    try:
+        # Python's rmtree never follows junctions or symlinks on Windows.
+        shutil.rmtree(root.path)
+    except OSError as exc:
+        raise RuntimeError("temporary root cleanup failed") from exc
+    if os.path.lexists(root.path):
+        raise RuntimeError("temporary root cleanup failed")
+
+
 def _temporary_root() -> _TemporaryRoot:
+    if mycelium_host_platform.is_win32():
+        return _win32_temporary_root()
     trusted_root = Path(tempfile.gettempdir()).resolve(strict=True)
     path = Path(tempfile.mkdtemp(prefix="myc-node-", dir=trusted_root))
     parent = private_directory_parent_fd(path)
@@ -388,6 +469,8 @@ def _clear_directory(descriptor: int) -> None:
 
 
 def _remove_temporary_root(root: _TemporaryRoot) -> None:
+    if mycelium_host_platform.is_win32():
+        return _win32_remove_temporary_root(root)
     parent = private_directory_parent_fd(root.path)
     descriptor: int | None = None
     try:

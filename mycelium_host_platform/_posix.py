@@ -333,6 +333,36 @@ def open_beneath(root: str | os.PathLike[str], relative_parts: tuple[str, ...]) 
         os.close(root_fd)
 
 
+def read_owner_file(path: str | os.PathLike[str], *, max_bytes: int) -> bytes:
+    target = os.fspath(path)
+    try:
+        descriptor = os.open(target, _FILE_READ_FLAGS)
+    except FileNotFoundError as exc:
+        raise HostPlatformError("host_file_missing") from exc
+    except OSError as exc:
+        raise HostPlatformError("host_io_failed", "open") from exc
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise HostPlatformError("host_file_invalid", "not_plain_file")
+        if before.st_uid != os.getuid() or stat.S_IMODE(before.st_mode) & 0o077:
+            raise HostPlatformError("host_permissions_invalid", "file_mode")
+        if before.st_size <= 0 or before.st_size > max_bytes:
+            raise HostPlatformError("host_file_invalid", "size")
+        raw = os.read(descriptor, max_bytes + 1)
+        after = os.fstat(descriptor)
+    except OSError as exc:
+        raise HostPlatformError("host_io_failed", "read") from exc
+    finally:
+        os.close(descriptor)
+    if len(raw) != before.st_size or (after.st_size, after.st_mtime_ns) != (
+        before.st_size,
+        before.st_mtime_ns,
+    ):
+        raise HostPlatformError("host_file_invalid", "changed_during_read")
+    return raw
+
+
 def executable_fingerprint(
     path: str | os.PathLike[str], *, require_private_owner: bool
 ) -> ExecutableFingerprint:
@@ -368,4 +398,5 @@ __all__ = [
     "executable_fingerprint",
     "open_beneath",
     "open_private_directory",
+    "read_owner_file",
 ]

@@ -14,6 +14,8 @@ import stat
 from typing import Any
 import uuid
 
+import mycelium_host_platform
+from mycelium_host_platform import HostPlatformError
 from mycelium_qualification.evidence import canonical_json_bytes
 
 
@@ -90,9 +92,50 @@ def _validate(value: Mapping[str, Any]) -> dict[str, Any]:
         raise DurableMembershipError("node_membership_state_invalid") from exc
 
 
+def _win32_load_membership_state(state_root: Path) -> dict[str, Any] | None:
+    """Read the state file through a leased owner-only directory handle."""
+
+    try:
+        with mycelium_host_platform.private_directory(state_root, create=False) as root:
+            if not root.exists:
+                raise DurableMembershipError("node_membership_state_unavailable")
+            raw = root.read_file(FILENAME, max_bytes=_MAX_BYTES)
+    except HostPlatformError as exc:
+        if exc.code == "host_file_missing":
+            return None
+        if exc.code in {"host_file_invalid", "host_permissions_invalid", "host_path_invalid"}:
+            raise DurableMembershipError("node_membership_state_invalid") from exc
+        raise DurableMembershipError("node_membership_state_unavailable") from exc
+    if not raw:
+        raise DurableMembershipError("node_membership_state_invalid")
+    try:
+        value = json.loads(raw.decode("utf-8"))
+        if not isinstance(value, Mapping) or canonical_json_bytes(dict(value)) != raw:
+            raise DurableMembershipError("node_membership_state_invalid")
+    except DurableMembershipError:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise DurableMembershipError("node_membership_state_invalid") from exc
+    return _validate(value)
+
+
+def _win32_save_membership_state(state_root: Path, raw: bytes) -> None:
+    """CREATE_NEW + flush + MoveFileExW(WRITE_THROUGH) + directory flush."""
+
+    try:
+        with mycelium_host_platform.private_directory(state_root, create=False) as root:
+            if not root.exists:
+                raise DurableMembershipError("node_membership_state_write_failed")
+            root.atomic_replace(FILENAME, raw)
+    except HostPlatformError as exc:
+        raise DurableMembershipError("node_membership_state_write_failed") from exc
+
+
 def load_membership_state(state_root: Path) -> dict[str, Any] | None:
     """Load an exact owner-only state file; absence means first enrollment."""
 
+    if mycelium_host_platform.is_win32():
+        return _win32_load_membership_state(state_root)
     path = state_root / FILENAME
     try:
         metadata = path.lstat()
@@ -140,6 +183,12 @@ def save_membership_state(state_root: Path, value: Mapping[str, Any]) -> dict[st
 
     validated = _validate(value)
     raw = canonical_json_bytes(validated)
+    if mycelium_host_platform.is_win32():
+        _win32_save_membership_state(state_root, raw)
+        loaded = load_membership_state(state_root)
+        if loaded != validated:
+            raise DurableMembershipError("node_membership_state_write_failed")
+        return validated
     path = state_root / FILENAME
     temporary = state_root / f".{FILENAME}.{uuid.uuid4().hex}.tmp"
     flags = (

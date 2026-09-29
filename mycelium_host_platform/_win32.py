@@ -645,6 +645,76 @@ def open_beneath(
             _close_quietly(api, handle)
 
 
+# --------------------------------------------------------- user-owned file
+
+
+def read_owner_file(
+    api: Any,
+    path: str | os.PathLike[str],
+    *,
+    max_bytes: int,
+) -> bytes:
+    """Read one single-link plain file readable only by user, SYSTEM, Administrators.
+
+    The Windows analogue of a POSIX ``0600``-style user file outside a
+    private directory (an invite bundle in the user's profile): the DACL may
+    be inherited, but it must be owned by the token user and grant nobody
+    else.
+    """
+
+    target = _absolute(path)
+    user_sid = _user_sid(api)
+    try:
+        handle = api.open(
+            target,
+            access=w.GENERIC_READ,
+            share=w.FILE_SHARE_READ,
+            disposition=w.OPEN_EXISTING,
+            flags=w.FILE_FLAG_OPEN_REPARSE_POINT,
+        )
+    except w.Win32Error as exc:
+        if exc.winerror in _MISSING_ERRORS:
+            raise HostPlatformError("host_file_missing") from exc
+        raise HostPlatformError("host_io_failed", "open") from exc
+    try:
+        before = _information(api, handle)
+        _require_plain_file(before)
+        if before.number_of_links != 1:
+            raise HostPlatformError("host_file_invalid", "link_count")
+        if before.size <= 0 or before.size > max_bytes:
+            raise HostPlatformError("host_file_invalid", "size")
+        _require_final_path(api, handle, target)
+        try:
+            descriptor = api.security(handle)
+        except w.Win32Error as exc:
+            raise HostPlatformError("host_permissions_invalid", "security_unreadable") from exc
+        reason = owner_only_violation(
+            descriptor,
+            user_sid,
+            trusted_sids=(w.SYSTEM_SID, w.ADMINISTRATORS_SID),
+            require_protected=False,
+        )
+        if reason is not None:
+            raise HostPlatformError("host_permissions_invalid", reason)
+        chunks: list[bytes] = []
+        remaining = max_bytes + 1
+        while remaining > 0:
+            try:
+                chunk = api.read(handle, min(_READ_CHUNK, remaining))
+            except w.Win32Error as exc:
+                raise HostPlatformError("host_io_failed", "read") from exc
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        if len(raw) != before.size or _information(api, handle) != before:
+            raise HostPlatformError("host_file_invalid", "changed_during_read")
+        return raw
+    finally:
+        _close_quietly(api, handle)
+
+
 # ------------------------------------------------------ executable identity
 
 
@@ -702,5 +772,6 @@ __all__ = [
     "open_beneath",
     "open_private_directory",
     "owner_only_violation",
+    "read_owner_file",
     "require_owner_only",
 ]

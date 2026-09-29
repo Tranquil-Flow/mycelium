@@ -95,6 +95,18 @@ def open_beneath(
     return _posix.open_beneath(root, tuple(relative_parts))
 
 
+def read_owner_file(path: str | os.PathLike[str], *, max_bytes: int) -> bytes:
+    """Read one single-link file that only the current user can access."""
+
+    if is_win32():
+        from . import _win32
+
+        return _win32.read_owner_file(win32_api(), path, max_bytes=max_bytes)
+    from . import _posix
+
+    return _posix.read_owner_file(path, max_bytes=max_bytes)
+
+
 def executable_fingerprint(
     path: str | os.PathLike[str], *, require_private_owner: bool = False
 ) -> ExecutableFingerprint:
@@ -120,6 +132,7 @@ __all__ = [
     "is_win32",
     "open_beneath",
     "private_directory",
+    "read_owner_file",
     "use_win32_api",
     "win32_api",
 ]
