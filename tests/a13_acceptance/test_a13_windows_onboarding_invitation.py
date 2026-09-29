@@ -344,3 +344,90 @@ def test_plaintext_handoff_state_is_erased_after_durable_acceptance(tmp_path) ->
     result = _join(case, root, identity, plaintext_handoff_file=plaintext)
     assert result["plaintext_erased"] is True
     assert not plaintext.exists()
+
+
+def test_the_mac_owner_module_approves_a_windows_target_request_end_to_end(tmp_path) -> None:
+    """Gap A1, owner side end to end: the SHIPPED owner module serves Windows.
+
+    Every other test here approves through the Windows tranche's own
+    ``approve_windows_pairing_request``.  This one proves the real owner path:
+    a request minted by the Windows target verifies through the Mac owner
+    module, the Mac owner approves it, only the Windows target's recipient key
+    decrypts the handoff back to the bound invitation, and the Windows target
+    completes its one local join from the owner-minted handoff.
+    """
+
+    case = _case(nonce="pair-win1-owner")
+    verified = mac_pairing.verify_pairing_request(case["request"], now=NOW)
+    assert verified["peer_class"] == WINDOWS_PEER_CLASS
+
+    owner_handoff = mac_pairing.approve_pairing_request(
+        request=case["request"],
+        invite_bundle=case["bundle"],
+        quota=QUOTA,
+        now=NOW,
+    )
+    payload = decrypt_windows_invitation_handoff(
+        request=case["request"],
+        handoff=owner_handoff,
+        recipient_private_key=case["private_key"],
+        now=NOW + 1,
+    )
+    assert payload["peer_class"] == WINDOWS_PEER_CLASS
+    assert payload["invite_bundle"] == case["bundle"]
+    assert payload["seed_key_digest"] == case["seed"].verification_key_digest
+
+    # Only the requesting Windows target's recipient key opens the owner handoff.
+    stranger = _case(nonce="pair-win1-owner")
+    assert _code(
+        lambda: decrypt_windows_invitation_handoff(
+            request=case["request"],
+            handoff=owner_handoff,
+            recipient_private_key=stranger["private_key"],
+            now=NOW + 1,
+        )
+    ) == "onboarding_recipient_mismatch"
+
+    root = _state_root(tmp_path)
+    identity = _identity(root)
+    result = _join({**case, "handoff": owner_handoff}, root, identity)
+    assert result["joined"] is True
+    assert result["eligibility"] == "member_only"
+    assert result["route_ready"] is False
+
+
+def test_the_mac_owner_module_refuses_an_unlisted_class_on_the_verify_path() -> None:
+    """Negative control on the owner's VERIFY path (not only on minting).
+
+    A correctly signed request whose peer class nobody declared is refused by
+    the owner module's verifier, and therefore can never be approved.
+    """
+
+    signer = generate_ed25519_signer(endpoint_id="judge-mac")
+    request, _ = mac_pairing.new_pairing_request(
+        signer=signer,
+        node_id="judge-mac",
+        peer_class=WINDOWS_PEER_CLASS,
+        now=NOW,
+        ttl_seconds=300,
+        nonce=NONCE,
+    )
+    unsigned = {key: value for key, value in request.items() if key != "signature"}
+    unsigned["peer_class"] = "windows_future_unlisted_iroh"
+    forged = dict(unsigned, signature=signer.sign(unsigned))
+    with pytest.raises(mac_pairing.PairingError) as verified:
+        mac_pairing.verify_pairing_request(forged, now=NOW)
+    assert verified.value.code == "pairing_request_invalid"
+    bundle = mint_invite_bundle(
+        signer=generate_ed25519_signer(endpoint_id="seed-endpoint"),
+        swarm_id="judge-swarm",
+        seed_url="https://127.0.0.1:4443",
+        ttl_seconds=120,
+        nonce=NONCE,
+        issued_at=NOW,
+    )
+    with pytest.raises(mac_pairing.PairingError) as approved:
+        mac_pairing.approve_pairing_request(
+            request=forged, invite_bundle=bundle, quota=QUOTA, now=NOW
+        )
+    assert approved.value.code == "pairing_request_invalid"
