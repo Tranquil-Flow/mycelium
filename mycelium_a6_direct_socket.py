@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Test-only direct IPv4 loopback socket transport for A6LocalFaultReceiver.
+"""Direct IPv4 loopback socket transport for A6LocalFaultReceiver.
 
-No proxy, public mount, inferred peer, model or physical fault is supplied here.
+Test compositions bind an ephemeral port; the product serve process may bind an
+explicit loopback port only with the exact fleet grant. No proxy, public mount,
+inferred peer, model or physical fault is supplied here.
 One server thread handles requests serially, so the receiver's asyncio.Lock is
 never contended by separate event loops. An injected seam remains the caller's
 responsibility, not a claim of physical measurement.
@@ -9,6 +11,7 @@ responsibility, not a claim of physical measurement.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import secrets
 import socket
@@ -17,6 +20,7 @@ from socketserver import BaseRequestHandler, TCPServer
 from threading import Thread
 from typing import cast
 
+from mycelium_a6_fault_control import EXACT_FLEET_GRANT
 from mycelium_a6_http_fault_control import A6LocalFaultReceiver
 
 _MAX_HEAD = 8192
@@ -155,13 +159,27 @@ class _Handler(BaseRequestHandler):
 
 
 class A6DirectSocketServer:
-    """Context-managed test listener; bind only ephemeral 127.0.0.1:0."""
+    """Context-managed listener bound only to 127.0.0.1.
+
+    A test composition binds only the ephemeral port 0. A grant-gated product
+    mount may bind one explicit unprivileged loopback port, never a wildcard.
+    """
 
     def __init__(self, *, receiver: A6LocalFaultReceiver, bind_host: str,
-                 port: int = 0, test_only: bool = False):
-        if (test_only is not True or type(receiver) is not A6LocalFaultReceiver
-                or bind_host != "127.0.0.1" or type(port) is not int or port != 0):
+                 port: int = 0, test_only: bool = False,
+                 product_grant: str | None = None):
+        granted = (test_only is not True and isinstance(product_grant, str)
+                   and hmac.compare_digest(product_grant.encode("utf-8"),
+                                           EXACT_FLEET_GRANT.encode("ascii")))
+        if (type(receiver) is not A6LocalFaultReceiver or bind_host != "127.0.0.1"
+                or type(port) is not int):
             raise ValueError("test_only_ephemeral_ipv4_loopback_required")
+        if granted:
+            if port != 0 and not 1024 <= port <= 65535:
+                raise ValueError("product_loopback_port_invalid")
+        elif test_only is not True or port != 0:
+            raise ValueError("test_only_ephemeral_ipv4_loopback_required")
+        self._port = port
         self._receiver = receiver
         self._server: _Server | None = None
         self._thread: Thread | None = None
@@ -170,7 +188,7 @@ class A6DirectSocketServer:
     def __enter__(self) -> A6DirectSocketServer:
         if self._server is not None:
             raise RuntimeError("listener_already_started")
-        server = _Server(("127.0.0.1", 0), _Handler)
+        server = _Server(("127.0.0.1", self._port), _Handler)
         self._lifetime_id = secrets.token_hex(32)
         server.receiver = self._receiver
         self._server = server

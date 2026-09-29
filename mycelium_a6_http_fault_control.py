@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Unmounted A6 test-only ASGI receiver for a direct local socket peer.
+"""A6 grant-gated ASGI receiver for a direct local socket peer.
 
 The ASGI server must supply the original, unmodified TCP peer in scope['client']
 and its own loopback listening address in scope['server']. Never mount this on
-an origin/proxy or behind peer-rewriting middleware. Construct it only in an
-explicit test composition with injected real measured FaultSeam instances.
-It does not start a listener, select cases, or manufacture physical evidence.
+an origin/proxy or behind peer-rewriting middleware. Construct it either in an
+explicit test composition (``test_only=True``) or, for the ordinary product
+serve process, with the exact fleet grant (``product_grant``) behind the
+direct-socket listener in ``mycelium_a6_product_fault_control``. Either way it
+only dispatches to injected FaultSeam instances. It does not start a listener,
+select cases, or manufacture physical evidence.
 """
 from __future__ import annotations
 
@@ -86,15 +89,20 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 class A6LocalFaultReceiver:
-    """Explicitly injected direct-peer ASGI control, never product mounted.
+    """Explicitly injected direct-peer ASGI control; product mount needs the grant.
 
     An ASGI scope is trustworthy only if a direct server provides its original
     socket peer; a proxy that rewrites scope['client'] invalidates this contract.
     """
 
     def __init__(self, *, seams: Mapping[str, FaultSeam], clock_ms: Callable[[], int],
-                 path: str, test_only: bool = False, body_timeout_seconds: float = 2.0):
-        if test_only is not True:
+                 path: str, test_only: bool = False, body_timeout_seconds: float = 2.0,
+                 product_grant: str | None = None):
+        # A product mount is admitted only by the exact fleet grant, compared in
+        # constant time; anything else keeps the historical test-only refusal.
+        granted = isinstance(product_grant, str) and hmac.compare_digest(
+            product_grant.encode("utf-8"), EXACT_FLEET_GRANT.encode("ascii"))
+        if test_only is not True and not granted:
             raise ValueError("test_only_composition_required")
         if not isinstance(path, str) or not path.startswith("/") or path == "/" or "?" in path:
             raise ValueError("exact_control_path_required")

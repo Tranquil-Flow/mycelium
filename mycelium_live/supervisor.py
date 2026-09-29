@@ -3396,6 +3396,7 @@ def run_physical_server(
     trusted_https_proxy: bool = False,
     trusted_proxy_capability: bytes | None = None,
     force_relay: bool = False,
+    a6_fault_control_port: int | None = None,
 ) -> int:
     deployment = native_deployment_projection(operator_plan)
     selected_deployment_dir: Path | None = None
@@ -3481,6 +3482,7 @@ def run_physical_server(
     startup_complete = False
     capacity_refresh: ModelCapacityRefresh | None = None
     artifact_acquisition_store: ArtifactAcquisitionStore | None = None
+    a6_fault_control: Any | None = None
     try:
         representation_authorization = _representation_authorization(
             representation_authorization_file
@@ -3561,9 +3563,18 @@ def run_physical_server(
             route=route,
             model_id=getattr(deployment, "model_id", None),
         )
-        startup_complete = True
-
         stop = threading.Event()
+        if a6_fault_control_port is not None:
+            a6_fault_control = _mount_a6_product_fault_control(
+                stack=stack,
+                route=route,
+                product_port=port,
+                control_port=a6_fault_control_port,
+                public_origin=public_origin,
+                trusted_https_proxy=trusted_https_proxy,
+                request_stop=stop.set,
+            )
+        startup_complete = True
 
         def request_stop(_signum: int, _frame: Any) -> None:
             stop.set()
@@ -3582,6 +3593,11 @@ def run_physical_server(
                     "simulated": False,
                     "startup_counters": _counter_document(route.counters()),
                     "openai_shim": openai_shim.status(),
+                    **(
+                        {}
+                        if a6_fault_control is None
+                        else {"a6_fault_control": a6_fault_control.status()}
+                    ),
                 }
             ).decode("utf-8"),
             flush=True,
@@ -3594,6 +3610,8 @@ def run_physical_server(
                 signal.signal(signum, handler)
         return 0
     finally:
+        if a6_fault_control is not None:
+            a6_fault_control.close()
         if openai_shim is not None:
             openai_shim.close()
         if capacity_refresh is not None:
@@ -3612,6 +3630,55 @@ def run_physical_server(
                 # flight and record the cleanup failure in the serve
                 # log instead.
                 _emit_serve_diagnostic(cleanup_exc, stage="route_cleanup")
+
+
+def _a6_product_fault_seams(
+    *,
+    stack: LiveStack,
+    route: Any,
+    request_stop: Callable[[], None],
+) -> Mapping[str, Any]:
+    """Seams the mounted A6 receiver may dispatch to; none until bound."""
+
+    del stack, route, request_stop
+    return {}
+
+
+def _mount_a6_product_fault_control(
+    *,
+    stack: LiveStack,
+    route: Any,
+    product_port: int,
+    control_port: int,
+    public_origin: str | None,
+    trusted_https_proxy: bool,
+    request_stop: Callable[[], None],
+) -> Any:
+    """Mount the grant-gated A6 receiver on its own direct loopback listener."""
+
+    from mycelium_a6_product_fault_control import (
+        ProductFaultControl,
+        ProductFaultControlRefused,
+        grant_from_environment,
+    )
+
+    try:
+        control = ProductFaultControl(
+            grant=grant_from_environment(),
+            seams=_a6_product_fault_seams(
+                stack=stack, route=route, request_stop=request_stop
+            ),
+            product_port=product_port,
+            port=control_port,
+            public_origin=public_origin,
+            trusted_https_proxy=trusted_https_proxy,
+        )
+        control.start()
+    except ProductFaultControlRefused as exc:
+        raise RuntimeError(f"startup_a6_fault_control_refused:{exc}") from exc
+    except OSError as exc:
+        raise RuntimeError("startup_a6_fault_control_bind_failed") from exc
+    return control
 
 
 class _DiscardSink:
@@ -3783,6 +3850,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="operator-only physical qualification control; path evidence stays observed",
     )
+    parser.add_argument(
+        "--a6-fault-control-port",
+        type=int,
+        help=(
+            "mount the grant-gated A6 controlled-fault receiver on this direct "
+            "127.0.0.1 port (0 = ephemeral); requires MYCELIUM_A6_FLEET_GRANT"
+        ),
+    )
     return parser
 
 
@@ -3799,6 +3874,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--trusted-https-proxy, --public-origin, and "
             "--trusted-proxy-capability-file require each other"
         )
+    if args.a6_fault_control_port is not None and not (
+        args.a6_fault_control_port == 0
+        or 1_024 <= args.a6_fault_control_port <= 65_535
+    ):
+        raise SystemExit("--a6-fault-control-port must be 0 or from 1024 through 65535")
     trusted_proxy_capability = None
     if args.trusted_proxy_capability_file is not None:
         try:
@@ -3840,7 +3920,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             trusted_https_proxy=args.trusted_https_proxy,
             trusted_proxy_capability=trusted_proxy_capability,
             force_relay=args.a8_force_relay,
+            **(
+                {}
+                if args.a6_fault_control_port is None
+                else {"a6_fault_control_port": args.a6_fault_control_port}
+            ),
         )
+    if args.a6_fault_control_port is not None:
+        raise SystemExit("--a6-fault-control-port is valid only with one --operator-plan")
     if args.deployment_dir is not None:
         raise SystemExit("--deployment-dir is valid only with one --operator-plan")
     return run_registry_server(

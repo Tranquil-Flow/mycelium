@@ -198,6 +198,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="operator-only physical qualification control; never authors path evidence",
     )
+    serve.add_argument(
+        "--a6-fault-control-port",
+        type=int,
+        help="grant-gated A6 controlled-fault loopback port for a live physical gate",
+    )
     return parser
 
 
@@ -295,6 +300,8 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
         )
     if args.a8_force_relay:
         result.append("--a8-force-relay")
+    if args.a6_fault_control_port is not None:
+        result.extend(("--a6-fault-control-port", str(args.a6_fault_control_port)))
     return result
 
 
@@ -331,6 +338,7 @@ def _fixture_has_live_only_arguments(args: argparse.Namespace) -> bool:
             args.member_model_inventory_authorities_file,
             args.representation_authorization_file,
             args.seed_url,
+            args.a6_fault_control_port,
         )
     )
 
