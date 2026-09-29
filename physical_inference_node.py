@@ -2444,6 +2444,16 @@ class PhysicalNodeService:
                     ),
                 }
             )
+            # A10 live publication: the runtime's own bounded, privacy-reduced
+            # stage-compute intervals and runtime batch observations, co-signed
+            # with this snapshot.  An unavailable publication is omitted (absent),
+            # never zeroed.
+            publication = getattr(self.runtime, "a10_publication_snapshot", None)
+            if callable(publication):
+                try:
+                    details["a10_publication"] = _plain_json(publication())
+                except Exception:  # noqa: BLE001 - evidence is absent, never fatal
+                    pass
             details["interruptibility"] = {
                 "runtime_backend": details["runtime"].get("backend"),
                 "decode_mode": details["runtime"].get("mode"),

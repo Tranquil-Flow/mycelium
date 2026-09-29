@@ -619,6 +619,12 @@ class MLXRuntimePort:
       self._observed_work_unit_count = 0
       self._closed = False
       self._state_lock = RLock()
+      # A10 live publication: bounded, privacy-reduced stage-compute intervals of
+      # the operations this stage actually executed (physical monotonic clock).
+      from mycelium_router.a10_live_publication import StageComputePublication
+
+      self._a10_publication = StageComputePublication(node_id=node_id, graph=graph)
+      self._a10_publication_failures = 0
       self._cancellation_lock = RLock()
       self._cancellation_condition = Condition(self._cancellation_lock)
       self._cancellation_pending = 0
@@ -1125,6 +1131,41 @@ class MLXRuntimePort:
       finally:
          self._state_lock.release()
 
+   def _a10_record(
+      self,
+      item: HopWorkItem,
+      started_at: float,
+      finished_at: float,
+      result: RuntimeResult,
+      *,
+      runtime_batch_ref: str = "",
+   ) -> None:
+      """Record one executed stage operation; publication never fails the work."""
+
+      try:
+         self._a10_publication.record(
+            item,
+            started_at=started_at,
+            finished_at=finished_at,
+            result=result,
+            runtime_batch_ref=runtime_batch_ref,
+         )
+      except Exception:  # noqa: BLE001 - evidence loss is counted, never fatal
+         self._a10_publication_failures += 1
+
+   def a10_publication_snapshot(self) -> dict[str, Any]:
+      """The bounded A10 live publication: stage-compute intervals and batch records.
+
+      Runtime-owned, privacy-reduced and closed
+      (``mycelium_router.a10_live_publication.PUBLICATION_PROTOCOL``); the node
+      co-signs it inside its ordinary snapshot.
+      """
+
+      observations = getattr(self, "batch_observations", None)
+      return self._a10_publication.snapshot(
+         batch_observations=observations() if callable(observations) else ()
+      )
+
    def operation_counter_snapshot(self) -> dict[str, int]:
       """Return lock-free monotonic work telemetry for active health probes."""
 
@@ -1215,7 +1256,10 @@ class MLXRuntimePort:
             return self._failure(exc.code)
          try:
             self.expire_leases()
-            return self._execute_bound(item)
+            started_at = time.monotonic()
+            result = self._execute_bound(item)
+            self._a10_record(item, started_at, time.monotonic(), result)
+            return result
          except PayloadError as exc:
             return self._failure(exc.code)
          except MLXRuntimeError as exc:
@@ -2414,9 +2458,24 @@ class MLXRuntimePort:
          and len(accepted) == request.proposed_member_count
       )
       if complete and self._batch_group_refusal(accepted) is None:
+         invocation_started = time.monotonic()
          executions, outcomes = self._batched_dispatch(accepted)
+         invocation_finished = time.monotonic()
          dispatch_mode = RUNTIME_BATCH_DISPATCH_MODE
          backend_invocations = BACKEND_INVOCATIONS_PER_OBSERVED_BATCH
+         # Every member was computed inside the one backend invocation, so each
+         # member's stage-compute interval is that invocation's interval.
+         members = {member.member_ref: member for member in accepted}
+         for execution in executions:
+            member = members.get(execution.member_ref)
+            if member is not None:
+               self._a10_record(
+                  member.item,
+                  invocation_started,
+                  invocation_finished,
+                  execution.result,
+                  runtime_batch_ref=request.batch_ref,
+               )
       else:
          executions, outcomes = self._run_members_individually(accepted)
          dispatch_mode = SEQUENTIAL_DISPATCH_MODE
