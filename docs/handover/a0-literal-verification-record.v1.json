@@ -1,0 +1,149 @@
+{
+  "protocol": "mycelium.a0_literal_verification_record.v1",
+  "gate_id": "A0",
+  "state": "prepared_not_executed",
+  "claim_boundary": "Structure only. Nothing in this record has been executed on any candidate; every result is null. It does not claim A0 is complete, does not amend the A0 specification or the governing plan, adds no register row, and changes no audit, ledger, manifest or checklist.",
+  "specification": {
+    "path": "docs/superpowers/specs/2026-08-11-mycelium-a0-governance-reconciliation.md",
+    "digest": "sha256:f42a9ea77aeafe69229b07e8221dcae4ef3e9a1c0f4b103544e3feddf912b63a",
+    "governing_plan": "docs/superpowers/plans/2026-08-11-mycelium-completion-plan.md"
+  },
+  "predecessor_record": "docs/handover/a0-completion-record.v1.json",
+  "candidate": {
+    "commit": null,
+    "clean_tree": null,
+    "bound_at_unix_ms": null,
+    "binding_rule": "Bind the final candidate commit (40 hex) and a clean `git status --porcelain` before any obligation result is written; a result from any other commit is not admissible here."
+  },
+  "obligations": [
+    {
+      "obligation_id": "7.1_rejection_classes",
+      "authority": "A0 spec \u00a77.1",
+      "origin": "a0_specification",
+      "commands": [
+        "env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.14 -B -m pytest -q -p no:cacheprovider tests/governance/test_governance_audit.py"
+      ],
+      "required_observations": [
+        "unknown_ledger_field_rejected",
+        "invalid_state_rejected",
+        "unsupported_promotion_rejected",
+        "duplicate_milestone_rejected",
+        "absent_governing_plan_rejected",
+        "unpinned_boundary_protocol_rejected",
+        "unlisted_ui_write_surface_rejected"
+      ],
+      "executed_on_candidate": false,
+      "result": null,
+      "evidence": null
+    },
+    {
+      "obligation_id": "7.2_contract_owner_suites",
+      "authority": "A0 spec \u00a75 and \u00a77.2",
+      "origin": "a0_specification",
+      "commands": [
+        "env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.14 -B -m pytest -q -p no:cacheprovider tests/live/test_deployment_registry.py tests/live/test_deployment_activation.py tests/live/test_local_preparer.py tests/live/test_supervisor.py"
+      ],
+      "required_observations": [
+        "registry_selection_fail_closed",
+        "activation_and_unload_transitions",
+        "representation_preparation_decision",
+        "supervisor_request_closure",
+        "fixture_registry_ownership"
+      ],
+      "executed_on_candidate": false,
+      "result": null,
+      "evidence": null
+    },
+    {
+      "obligation_id": "7.3_aggregate_and_child_audits",
+      "authority": "A0 spec \u00a76 and \u00a77.3",
+      "origin": "a0_specification",
+      "commands": [
+        "env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.14 -B scripts/governance_gate.py",
+        "env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.14 -B scripts/governance_audit.py",
+        "env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.14 -B scripts/claim_boundary_audit.py",
+        "env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.14 -B scripts/contract_audit.py"
+      ],
+      "required_observations": [
+        "aggregate_exit_zero",
+        "each_child_exit_zero",
+        "each_child_finding_count_zero",
+        "release_ready_false"
+      ],
+      "executed_on_candidate": false,
+      "result": null,
+      "evidence": null
+    },
+    {
+      "obligation_id": "7.4_negative_repository_copies",
+      "authority": "A0 spec \u00a77.4",
+      "origin": "a0_specification",
+      "commands": [
+        "env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.14 -B -m pytest -q -p no:cacheprovider tests/governance/test_governance_gate_negative_copies.py"
+      ],
+      "required_observations": [
+        "unlisted_post_surface_copy_fails_deterministically",
+        "unregistered_boundary_protocol_copy_fails_deterministically",
+        "promoted_milestone_copy_fails_deterministically",
+        "unmodified_copy_passes"
+      ],
+      "executed_on_candidate": false,
+      "result": null,
+      "evidence": null
+    },
+    {
+      "obligation_id": "7.5_real_browser_path",
+      "authority": "A0 spec \u00a76 and \u00a77.5; governing plan global browser obligations",
+      "origin": "a0_specification_and_governing_plan",
+      "commands": [
+        "cd ui/web && npm run build:live",
+        "cd ui/web && MYCELIUM_A0_PYTHON=/opt/homebrew/bin/python3.14 MYCELIUM_A0_BROWSER_EVIDENCE=<owner-private-evidence-dir> node scripts/a0-governance-browser-closeout.mjs"
+      ],
+      "required_observations": [
+        "settings_and_readiness_show_ledger_protocol_and_version",
+        "settings_and_readiness_show_manifest_protocol_and_digest",
+        "source_commit_shown",
+        "gate_state_shown",
+        "release_exclusions_shown",
+        "never_release_ready",
+        "survives_refresh",
+        "survives_workspace_switching",
+        "chromium_firefox_webkit_all_pass",
+        "degraded_stale_and_sealed_history_truthful",
+        "second_session_and_reconnect_truthful"
+      ],
+      "executed_on_candidate": false,
+      "result": null,
+      "evidence": null
+    },
+    {
+      "obligation_id": "full_regressions",
+      "authority": "A0 spec \u00a77.6; governing plan regression gate",
+      "origin": "governing_plan",
+      "commands": [
+        "one L2 fire on the final candidate (orchestrator-owned single-use ledger)"
+      ],
+      "required_observations": [
+        "l2_green_on_candidate",
+        "no_suite_excluded_to_reach_green"
+      ],
+      "executed_on_candidate": false,
+      "result": null,
+      "evidence": null
+    }
+  ],
+  "atomic_commit": {
+    "requirement": "A0 spec \u00a77.6: A0 lands as one atomic commit.",
+    "reading": null,
+    "owner_ruling": "R4",
+    "commit": null,
+    "note": "The reading of the atomic-commit clause for an A0 whose machinery already landed across several commits is owner ruling R4; this record neither rewrites history nor fabricates a feature diff."
+  },
+  "remaining_before_complete": [
+    "freeze the final candidate and bind candidate.commit/clean_tree",
+    "execute 7.4 negative repository copies on that candidate and bind results",
+    "execute 7.5 three-engine browser closeout on that candidate and bind receipts",
+    "bind L2 GREEN for that candidate",
+    "resolve R4 and bind the closing commit"
+  ]
+}
