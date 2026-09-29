@@ -16,8 +16,9 @@ by the implementation contract is unchanged while the executable body stays smal
 Claim boundary: deterministic, in-process behaviour over a verifier port that reports
 its own per-position decisions and committed state.  Candidate token IDs, logits,
 tensors and KV bytes never leave the private path -- the projection carries counts,
-positions and digests only.  ``qualify_target_verifier`` still refuses and no capability
-is advertised, so nothing here is qualification or physical evidence.
+positions and digests only.  ``qualify_target_verifier`` decides only from an executed
+operation matrix (``a10_qualification``), so nothing here is qualification or physical
+evidence and no capability is advertised from it.
 """
 
 from __future__ import annotations

@@ -372,6 +372,13 @@ class RuntimeTargetVerifier:
       if not isinstance(verification_ref, str) or not verification_ref.strip():
          _reject("invalid_verification_ref")
       self.verification_ref = verification_ref
+      # One runtime incarnation for every verifier over the same loaded stages: the
+      # stage identities, not the per-operation reference.
+      self.runtime_incarnation = "incarnation:" + hashlib.sha256(
+         json.dumps(
+            [[stage.backend, stage.placement_id, stage.stage_id, id(getattr(stage, "_port", None))] for stage in self._stages]
+         ).encode()
+      ).hexdigest()[:32]
       self._path_id = f"a10-verification:{verification_ref}"
       tokens = _token_sequence(
          prefix_tokens, code="invalid_prefix_tokens", vocab_size=self.vocab_size
@@ -398,6 +405,12 @@ class RuntimeTargetVerifier:
       self._rollbacks = 0
       self._cleanups = 0
       self._open_transactions = 0
+
+   @property
+   def path_id(self) -> str:
+      """The runtime path this verifier's stage work checkpoints against."""
+
+      return self._path_id
 
    # -- private staging ----------------------------------------------------
    def stage_candidates(self, tokens: Sequence[int], *, transaction_mode: str) -> int:

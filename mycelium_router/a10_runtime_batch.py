@@ -495,16 +495,28 @@ def observe_pipeline_overlap(trace: object) -> object:
    return _observe(trace)
 
 
-def qualify_runtime_batch(request: QualificationRequest) -> NoReturn:
+def qualify_runtime_batch(
+   request: QualificationRequest,
+   evidence: Any = None,
+) -> dict[str, Any]:
    """Produce the owner-private runtime-batch qualification bundle.
 
-   NOT IMPLEMENTED.  Qualification is a physical, owner-private act and cannot be
-   produced from a scaffold.
+   Decided from executed evidence only (``mycelium_router.a10_qualification``): the
+   runtime-owned live publications (observed batch, continuous late arrival, causal
+   overlap), the v2 paired benchmark windows, latency, reliability, output parity,
+   residual resources and the physical negatives.  ``qualified`` additionally needs
+   live provenance on the ordinary product path.  Without executed evidence there is
+   nothing to qualify and the entry point refuses with
+   ``runtime_batch_qualification_absent``.
    """
 
    if not isinstance(request, QualificationRequest):
       _reject("invalid_qualification_request_argument")
-   raise A10NotImplementedError("runtime_batch_qualification_absent")
+   if evidence is None:
+      raise A10NotImplementedError("runtime_batch_qualification_absent")
+   from mycelium_router.a10_qualification import qualify_runtime_batch_from_evidence
+
+   return qualify_runtime_batch_from_evidence(request, evidence)
 
 
 BOUNDARIES: tuple[tuple[str, str], ...] = (

@@ -15,8 +15,9 @@ inspectable.
 
 Claim boundary: this is deterministic, in-process behaviour over a dispatch port that
 reports what it actually did.  It is not physical overlap evidence, not a benchmark, not
-a browser or product claim and not qualification.  ``qualify_runtime_batch`` still
-refuses, and nothing here advertises an unqualified capability.
+a browser or product claim and not qualification.  ``qualify_runtime_batch`` decides
+only from executed live evidence (``a10_qualification``), and nothing here advertises an
+unqualified capability.
 """
 
 from __future__ import annotations

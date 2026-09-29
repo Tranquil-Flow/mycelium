@@ -329,16 +329,30 @@ def sequential_parity_reference(
 
 def qualify_target_verifier(
    request: TargetVerificationQualificationRequest,
-) -> NoReturn:
+   operations: Any = None,
+   negatives: Any = (),
+) -> dict[str, Any]:
    """Produce the owner-private verifier qualification matrix.
 
-   NOT IMPLEMENTED.  The correctness matrix is a physical act on one exact target
-   runtime and cannot be produced from a scaffold.
+   Decided from executed operation records only
+   (``mycelium_router.a10_qualification``): at least 100 operations over the widths
+   ``one``, ``qualified_default`` and ``qualified_maximum`` in at least two prefix
+   buckets, every transaction mode, exact sequential parity for every operation, and
+   the required negatives.  ``qualified`` additionally needs live provenance through
+   the product dispatcher, and only then is a capability (bound to the bundle's
+   digest) emitted.  Without executed operations the entry point refuses with
+   ``target_verification_qualification_absent``.
    """
 
    if not isinstance(request, TargetVerificationQualificationRequest):
       _reject("invalid_target_verification_qualification_argument")
-   raise A10NotImplementedError("target_verification_qualification_absent")
+   if operations is None:
+      raise A10NotImplementedError("target_verification_qualification_absent")
+   from mycelium_router.a10_qualification import (
+      qualify_target_verifier_from_operations,
+   )
+
+   return qualify_target_verifier_from_operations(request, operations, negatives)
 
 
 BOUNDARIES: tuple[tuple[str, str], ...] = (
