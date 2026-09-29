@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //! Route neighbour for the device checkpoint: sends one HopHeader + MYAC float32
 //! activation to the phone over production iroh (n0 relays / hole punching, no
-//! Tailscale), waits for the phone's forwarded output, and checks it against the
-//! pixel_stage fixture output at float32.
+//! Tailscale), waits for the phone's forwarded output, and checks it at float32
+//! against this crate's reference executor run on the same float32-rounded input
+//! the wire carried (the fixture output was computed from float64 inputs, so it
+//! cannot be matched exactly after the MYAC float32 hop).
 //!
 //! `cargo run --features net --example route_peer -- <phone_endpoint_id> <generation> <fixture.json>`
 
 use std::time::{Duration, Instant};
 
+use mycelium_mobile_core::runtime::{Gpt2BlockStage, StageRuntime};
 use mycelium_mobile_core::transport::{NodeTransport, Reachability, parse_endpoint_id};
 use mycelium_mobile_core::wire::{self, Activation};
 use serde_json::{Value, json};
@@ -35,7 +38,9 @@ async fn main() {
     let _accept = peer.spawn_accept(tx);
 
     let hidden = rows(&fixture["hidden"]);
-    let expected = rows(&fixture["output"]);
+    let fixture_output = rows(&fixture["output"]);
+    let wire_hidden: Vec<Vec<f64>> = hidden.iter().map(|r| r.iter().map(|x| f64::from(*x as f32)).collect()).collect();
+    let expected = Gpt2BlockStage::from_document(&fixture["pack"]).unwrap().execute("route-peer-reference", &wire_hidden).unwrap();
     let payload = Activation::from_rows_f32(&hidden).encode().unwrap();
     for attempt in 0..3u32 {
         let body = json!({"request_id": format!("device-checkpoint-{attempt}"), "hop_index": 1});
@@ -47,12 +52,14 @@ async fn main() {
             Ok(Some(inbound)) => {
                 let out = Activation::decode(&inbound.frame.payload).unwrap().to_rows_f64().unwrap();
                 let exact = out.iter().flatten().zip(expected.iter().flatten()).all(|(a, b)| *a as f32 == *b as f32);
+                let max_abs_diff_vs_fixture = out.iter().flatten().zip(fixture_output.iter().flatten()).map(|(a, b)| (a - b).abs()).fold(0.0f64, f64::max);
                 println!("{}", json!({
                     "event": "forwarded_output",
                     "attempt": attempt,
                     "round_trip_ms": started.elapsed().as_millis(),
                     "hop_index": inbound.frame.body["hop_index"],
-                    "float32_identical_to_pixel_stage": exact,
+                    "float32_identical_to_reference_on_wire_input": exact,
+                    "max_abs_diff_vs_float64_fixture": max_abs_diff_vs_fixture,
                 }));
             }
             other => println!("{}", json!({"event": "no_output", "attempt": attempt, "detail": format!("{other:?}")})),
