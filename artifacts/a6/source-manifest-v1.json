@@ -1428,8 +1428,8 @@
     },
     {
       "path": "native/mobile_core/examples/route_peer.rs",
-      "sha256": "sha256:b980de82a9de70368837857e4e4c20cb5db21020d3142eddb15e98b25880282a",
-      "size_bytes": 3170
+      "sha256": "sha256:49e93fbfedd6e06144412aad027d9035d6898c873d548eda5ff95492add6807e",
+      "size_bytes": 3921
     },
     {
       "path": "native/mobile_core/src/canonical.rs",
@@ -2963,5 +2963,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:052a639bc69ebc895f6ce0dde733dc861f906891c7f5ea99eca0c98476839a24"
+  "source_digest": "sha256:d6a8e27846b34aa4d3dd47b936007bdb729e4dbd136707816f3e1ad6bbd6536a"
 }
