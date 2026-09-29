@@ -29,6 +29,7 @@ class ProductEvidenceApplication:
         qualification_source: Callable[[], Mapping[str, Any] | None],
         internet_native_source: Callable[[], Mapping[str, Any]] | None = None,
         recovery_source: Callable[[], Mapping[str, Any] | None] | None = None,
+        coarse_region_source: Callable[[], Sequence[Mapping[str, Any]]] | None = None,
         clock_unix_ms: Callable[[], int] | None = None,
         replay_limit: int = 128,
         state_root: str | Path | None = None,
@@ -54,6 +55,9 @@ class ProductEvidenceApplication:
         self._route_source = route_source
         if recovery_source is not None and not callable(recovery_source):
             raise ValueError("product_source_invalid")
+        if coarse_region_source is not None and not callable(coarse_region_source):
+            raise ValueError("product_source_invalid")
+        self._coarse_region_source = coarse_region_source
         self._qualification_source = qualification_source
         self._internet_native_source = internet_native_source
         # Live transport observations become immutable transition history here,
@@ -183,6 +187,14 @@ class ProductEvidenceApplication:
                     recovery_status = self._recovery_source()
                 except Exception:
                     source_errors["recovery-source"] = "recovery_source_failed"
+            coarse_region_evidence = None
+            if self._coarse_region_source is not None:
+                try:
+                    records = list(self._coarse_region_source())
+                except Exception:
+                    records = []  # an unreadable declaration publishes nothing
+                # Without a record the A14a projection stays exactly as it was.
+                coarse_region_evidence = records or None
             snapshot = self._projector.project(
                 members=members,
                 assignments=assignments,
@@ -192,6 +204,7 @@ class ProductEvidenceApplication:
                 recovery_status=recovery_status,
                 now_unix_ms=self._clock_unix_ms(),
                 source_errors=source_errors,
+                coarse_region_evidence=coarse_region_evidence,
             )
             cursor = snapshot["publication"]["cursor"]
             event = validate_product_event(

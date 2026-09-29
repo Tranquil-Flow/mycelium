@@ -1181,6 +1181,7 @@ def build_live_stack(
     ) = None,
     recovery_tokenizer_digest: str | None = None,
     recovery_a4_atomic_commit: str | None = None,
+    coarse_region_declaration_file: Path | None = None,
 ) -> LiveStack:
     """Compose the production browser and request gateways around a live route."""
     if (recovery_qualification_source is None) != (
@@ -1241,6 +1242,7 @@ def build_live_stack(
             health,
             recovery_source=recovery_source,
             state_root=product_state_root,
+            coarse_region_declaration_file=coarse_region_declaration_file,
         )
 
     checkpoint_root = _prepare_product_checkpoint_root(product_state_root)
@@ -1352,6 +1354,7 @@ def _product_application(
     *,
     recovery_source: Callable[[], Mapping[str, Any]] | None = None,
     state_root: Path | None = None,
+    coarse_region_declaration_file: Path | None = None,
 ) -> Any:
     membership = getattr(route, "product_membership_records", None)
     salt = getattr(route, "product_pseudonym_salt", None)
@@ -1373,8 +1376,20 @@ def _product_application(
             raise ValueError("product_internet_native_source_invalid")
         return document
 
+    projector = ProductProjector(pseudonym_salt=salt())
+    coarse_region_source = None
+    if coarse_region_declaration_file is not None:
+        from mycelium_product_spine.region_declarations import (
+            OperatorRegionEvidenceSource,
+        )
+
+        coarse_region_source = OperatorRegionEvidenceSource(
+            coarse_region_declaration_file,
+            member_entity_id=projector._pseudonym,
+        )
     return ProductEvidenceApplication(
-        projector=ProductProjector(pseudonym_salt=salt()),
+        projector=projector,
+        coarse_region_source=coarse_region_source,
         membership_source=membership,
         assignment_source=assignments if callable(assignments) else None,
         route_source=public_status,
@@ -1399,6 +1414,7 @@ def _optional_product_application(
     *,
     recovery_source: Callable[[], Mapping[str, Any]] | None = None,
     state_root: Path | None = None,
+    coarse_region_declaration_file: Path | None = None,
 ) -> Any | None:
     required = (
         getattr(route, "product_membership_records", None),
@@ -1410,6 +1426,7 @@ def _optional_product_application(
     return _product_application(
         route, qualification_source, recovery_source=recovery_source,
         state_root=state_root,
+        coarse_region_declaration_file=coarse_region_declaration_file,
     )
 
 
@@ -3347,6 +3364,7 @@ def _build_physical_product_stack(
     public_origin: str | None = None,
     trusted_https_proxy: bool = False,
     trusted_proxy_capability: bytes | None = None,
+    coarse_region_declaration_file: Path | None = None,
 ) -> LiveStack:
     tokenizer_digest = tokenizer_artifact_digest(deployment_dir)
     qualifier = LiveA6RecoveryQualifier(
@@ -3368,6 +3386,7 @@ def _build_physical_product_stack(
         public_origin=public_origin,
         trusted_https_proxy=trusted_https_proxy,
         trusted_proxy_capability=trusted_proxy_capability,
+        coarse_region_declaration_file=coarse_region_declaration_file,
     )
 
 
@@ -3397,6 +3416,7 @@ def run_physical_server(
     trusted_proxy_capability: bytes | None = None,
     force_relay: bool = False,
     a6_fault_control_port: int | None = None,
+    coarse_region_declaration_file: Path | None = None,
 ) -> int:
     deployment = native_deployment_projection(operator_plan)
     selected_deployment_dir: Path | None = None
@@ -3504,6 +3524,7 @@ def run_physical_server(
             public_origin=public_origin,
             trusted_https_proxy=trusted_https_proxy,
             trusted_proxy_capability=trusted_proxy_capability,
+            coarse_region_declaration_file=coarse_region_declaration_file,
         )
         stack.health.publish(qualification)
         if stack.router is None:
@@ -3995,6 +4016,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="operator-only physical qualification control; path evidence stays observed",
     )
     parser.add_argument(
+        "--coarse-region-declaration-file",
+        type=Path,
+        help=(
+            "owner-private mycelium.operator_region_declaration.v1 file; publishes "
+            "owner-declared coarse regions to the live route explorer"
+        ),
+    )
+    parser.add_argument(
         "--a6-fault-control-port",
         type=int,
         help=(
@@ -4069,6 +4098,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if args.a6_fault_control_port is None
                 else {"a6_fault_control_port": args.a6_fault_control_port}
             ),
+            **(
+                {}
+                if args.coarse_region_declaration_file is None
+                else {
+                    "coarse_region_declaration_file": args.coarse_region_declaration_file
+                }
+            ),
+        )
+    if args.coarse_region_declaration_file is not None:
+        raise SystemExit(
+            "--coarse-region-declaration-file is valid only with one --operator-plan"
         )
     if args.a6_fault_control_port is not None:
         raise SystemExit("--a6-fault-control-port is valid only with one --operator-plan")
