@@ -832,14 +832,19 @@
       "size_bytes": 2053
     },
     {
+      "path": "mycelium_a13_windows/acl.py",
+      "sha256": "sha256:1663912b7f9966449bf04922566f670c2ec2679df83bf2f618ade00b69605157",
+      "size_bytes": 7068
+    },
+    {
       "path": "mycelium_a13_windows/install_source.py",
       "sha256": "sha256:17811568e80f9fa0bb5d955a4964e73f3dd6fe3ceb13bf63805c033cf8b81bdc",
       "size_bytes": 13066
     },
     {
       "path": "mycelium_a13_windows/onboarding.py",
-      "sha256": "sha256:df2f5b6036fb63ce9527bba49eb84f3bc076f9bd1040de7f89a34979cd73aa35",
-      "size_bytes": 34359
+      "sha256": "sha256:1d6835f66df298396e7d3b204ea9f8cc3dda2804fa544b5d55dbe509e3050dfb",
+      "size_bytes": 32553
     },
     {
       "path": "mycelium_a13_windows/package_manifest.py",
@@ -1378,8 +1383,8 @@
     },
     {
       "path": "mycelium_service_package.py",
-      "sha256": "sha256:6789c6ba3286f1eaa91453edb950abeb1018facefa92329c82e9427d001790da",
-      "size_bytes": 14536
+      "sha256": "sha256:3b2fd4d9b76dc42a98aee27fd9035d644564445a063d6be46c6683e064b27ad6",
+      "size_bytes": 26356
     },
     {
       "path": "mycelium_speculative_decode.py",
@@ -1570,6 +1575,11 @@
       "path": "scripts/a13_operator/ssh_window_evidence.py",
       "sha256": "sha256:45dde76eae697988574707c3344419e72da69207f5ff0f6c3958216f2303b27f",
       "size_bytes": 51620
+    },
+    {
+      "path": "scripts/a13_windows_device_bringup.ps1",
+      "sha256": "sha256:86897789986ca23c2996dec594edd843493bdc822da7fc71beeb8ff0814f4313",
+      "size_bytes": 23854
     },
     {
       "path": "scripts/a15_run_intake.py",
@@ -1892,9 +1902,19 @@
       "size_bytes": 7757
     },
     {
+      "path": "tests/a13_acceptance/test_a13_windows_acl_verification.py",
+      "sha256": "sha256:50f5c88ab09bff0039da5182d55dba6e784cc22fd8e7f00756198c9cece58cb3",
+      "size_bytes": 10709
+    },
+    {
       "path": "tests/a13_acceptance/test_a13_windows_build.py",
       "sha256": "sha256:927f18852339a733e8d6f68ed3c0fc24fa8583d4545be5413b7d5248c590c2ce",
       "size_bytes": 8850
+    },
+    {
+      "path": "tests/a13_acceptance/test_a13_windows_device_bringup_script.py",
+      "sha256": "sha256:bc725e9c14a4b53b9139bdceb9f335488ea4a4724b4fc7cebfb8a5a3968307ae",
+      "size_bytes": 9663
     },
     {
       "path": "tests/a13_acceptance/test_a13_windows_install_source.py",
@@ -1907,9 +1927,14 @@
       "size_bytes": 10886
     },
     {
+      "path": "tests/a13_acceptance/test_a13_windows_member_plan.py",
+      "sha256": "sha256:d14fa8dc8822c364254c9109d2232ace1d65207f884bae957d3170921549bc18",
+      "size_bytes": 12179
+    },
+    {
       "path": "tests/a13_acceptance/test_a13_windows_onboarding_invitation.py",
-      "sha256": "sha256:e3ab33cb2c7ba743ba9adeeb34d48935f700ec3e1116d5c1183a48592e2e5ecb",
-      "size_bytes": 12634
+      "sha256": "sha256:e2141fcc01744a13f1bcf4f739592ec1db63bc4dd3b6b91767ea16fa5d7437a2",
+      "size_bytes": 16137
     },
     {
       "path": "tests/a13_acceptance/test_a13_windows_onboarding_progress.py",
@@ -2963,5 +2988,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:d6a8e27846b34aa4d3dd47b936007bdb729e4dbd136707816f3e1ad6bbd6536a"
+  "source_digest": "sha256:a2a9de9d93a11ba52e311c213aba1f94f73fa63b92b6c48095f9960b8f34fbdf"
 }
