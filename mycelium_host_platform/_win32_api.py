@@ -230,6 +230,16 @@ class Win32Api(Protocol):
 
     def terminate_job(self, job: int, exit_code: int) -> None: ...
 
+    # Memory and named events.
+
+    def process_working_set_bytes(self) -> int: ...
+
+    def available_physical_bytes(self) -> int: ...
+
+    def open_event(self, name: str) -> int: ...
+
+    def wait_event(self, event: int, timeout_ms: int) -> bool: ...
+
 
 # --------------------------------------------------------------- real binding
 
@@ -872,6 +882,95 @@ class RealWin32Api:  # pragma: no cover - exercised only on a Windows device
         self._bind_process_api()
         if not self._TerminateJobObject(job, exit_code):
             raise self._fail("TerminateJobObject")
+
+    # ------------------------------------------------ memory and events
+
+    def process_working_set_bytes(self) -> int:
+        ctypes = self._ctypes
+        wintypes = self._wintypes
+
+        class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD),
+                ("PageFaultCount", wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        function = self._kernel32.K32GetProcessMemoryInfo
+        function.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(PROCESS_MEMORY_COUNTERS),
+            wintypes.DWORD,
+        ]
+        function.restype = wintypes.BOOL
+        counters = PROCESS_MEMORY_COUNTERS()
+        counters.cb = ctypes.sizeof(counters)
+        if not function(self._GetCurrentProcess(), ctypes.byref(counters), counters.cb):
+            raise self._fail("K32GetProcessMemoryInfo")
+        return int(counters.WorkingSetSize)
+
+    def available_physical_bytes(self) -> int:
+        ctypes = self._ctypes
+        wintypes = self._wintypes
+
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", wintypes.DWORD),
+                ("dwMemoryLoad", wintypes.DWORD),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        function = self._kernel32.GlobalMemoryStatusEx
+        function.argtypes = [ctypes.POINTER(MEMORYSTATUSEX)]
+        function.restype = wintypes.BOOL
+        status = MEMORYSTATUSEX()
+        status.dwLength = ctypes.sizeof(status)
+        if not function(ctypes.byref(status)):
+            raise self._fail("GlobalMemoryStatusEx")
+        return int(status.ullAvailPhys)
+
+    def _bind_event_api(self) -> None:
+        if getattr(self, "_event_api_bound", False):
+            return
+        wintypes = self._wintypes
+        kernel32 = self._kernel32
+        self._OpenEventW = kernel32.OpenEventW
+        self._OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+        self._OpenEventW.restype = wintypes.HANDLE
+        self._WaitForSingleObject = kernel32.WaitForSingleObject
+        self._WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        self._WaitForSingleObject.restype = wintypes.DWORD
+        self._event_api_bound = True
+
+    def open_event(self, name: str) -> int:
+        self._bind_event_api()
+        # SYNCHRONIZE | EVENT_MODIFY_STATE
+        handle = self._OpenEventW(0x00100000 | 0x0002, False, name)
+        if not handle:
+            raise self._fail("OpenEventW")
+        return int(handle)
+
+    def wait_event(self, event: int, timeout_ms: int) -> bool:
+        self._bind_event_api()
+        status = self._WaitForSingleObject(event, timeout_ms)
+        if status == 0:
+            return True
+        if status == 0x00000102:
+            return False
+        raise self._fail("WaitForSingleObject")
 
 
 __all__ = [

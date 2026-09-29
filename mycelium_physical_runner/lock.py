@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import errno
-import fcntl
 import os
 import stat
 from pathlib import Path
 
 from .errors import RunnerError
 from .private_fs import prepare_private_parent, verify_private_parent
+
+try:  # POSIX advisory locks; absent on Windows, where the lock refuses.
+    import fcntl
+except ImportError:  # pragma: no cover - exercised by the win32 import tests
+    fcntl = None  # type: ignore[assignment]
 
 LOCK_FILE_MODE = 0o600
 
@@ -23,6 +27,8 @@ class ExclusiveLock:
         return self._fd is not None
 
     def acquire(self) -> None:
+        if fcntl is None:
+            raise RunnerError("lock_unavailable_on_host")
         if self._fd is not None:
             raise RunnerError("runner_lock_held")
         try:

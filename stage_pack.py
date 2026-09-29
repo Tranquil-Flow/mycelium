@@ -1444,7 +1444,22 @@ def _validate_against_assignment(
         raise ValueError("stage pack assignment mismatch: files")
 
 
+def _win32_open_beneath(root: Path, relative: PurePosixPath) -> BinaryIO:
+    import mycelium_host_platform
+
+    try:
+        return mycelium_host_platform.open_beneath(root, tuple(relative.parts))
+    except mycelium_host_platform.HostPlatformError as exc:
+        raise ValueError(
+            f"unable to open verified artifact (symlink forbidden): {relative}"
+        ) from exc
+
+
 def _open_beneath(root: Path, relative: PurePosixPath) -> BinaryIO:
+    import mycelium_host_platform
+
+    if mycelium_host_platform.is_win32():
+        return _win32_open_beneath(root, relative)
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     cloexec = getattr(os, "O_CLOEXEC", 0)
     directory = getattr(os, "O_DIRECTORY", 0)

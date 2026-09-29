@@ -500,6 +500,9 @@ class FakeWin32Api:
 
     def close_process_or_job(self, handle: int) -> bool:
         self._init_processes()
+        if handle in getattr(self, "event_handles", {}):
+            del self.event_handles[handle]
+            return True
         if handle in self.process_handles:
             del self.process_handles[handle]
             return True
@@ -514,6 +517,53 @@ class FakeWin32Api:
             self.closed_jobs.append(handle)
             return True
         return False
+
+    # ------------------------------------------------ memory and events
+
+    working_set_bytes = 123_456_789
+    available_bytes = 8 * 1024**3
+
+    def process_working_set_bytes(self) -> int:
+        self.calls.append(("process_working_set_bytes",))
+        self._maybe_fail("process_working_set_bytes")
+        return self.working_set_bytes
+
+    def available_physical_bytes(self) -> int:
+        self.calls.append(("available_physical_bytes",))
+        self._maybe_fail("available_physical_bytes")
+        return self.available_bytes
+
+    def _events_table(self) -> dict[str, Any]:
+        if not hasattr(self, "events"):
+            import threading
+
+            self.events: dict[str, Any] = {}
+            self.event_handles: dict[int, str] = {}
+            self._threading = threading
+        return self.events
+
+    def create_named_event(self, name: str) -> Any:
+        """Test helper: the supervisor side of a named event."""
+
+        events = self._events_table()
+        events.setdefault(name, self._threading.Event())
+        return events[name]
+
+    def open_event(self, name: str) -> int:
+        self.calls.append(("open_event", name))
+        self._maybe_fail("open_event")
+        events = self._events_table()
+        if name not in events:
+            raise w.Win32Error(w.ERROR_FILE_NOT_FOUND, "OpenEventW")
+        self._next_handle += 4
+        self.event_handles[self._next_handle] = name
+        return self._next_handle
+
+    def wait_event(self, event: int, timeout_ms: int) -> bool:
+        name = self.event_handles.get(event)
+        if name is None:
+            raise w.Win32Error(w.ERROR_INVALID_HANDLE, "WaitForSingleObject")
+        return self.events[name].wait(timeout_ms / 1000)
 
     # --------------------------------------------------------- inspection
 

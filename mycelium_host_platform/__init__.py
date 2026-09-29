@@ -107,6 +107,82 @@ def read_owner_file(path: str | os.PathLike[str], *, max_bytes: int) -> bytes:
     return _posix.read_owner_file(path, max_bytes=max_bytes)
 
 
+def process_resident_bytes() -> int:
+    """Resident memory of this process (win32: working set via GetProcessMemoryInfo)."""
+
+    if not is_win32():
+        raise HostPlatformError("host_platform_unavailable", "win32_only")
+    try:
+        value = int(win32_api().process_working_set_bytes())
+    except OSError as exc:
+        raise HostPlatformError("host_io_failed", "memory") from exc
+    if value <= 0:
+        raise HostPlatformError("host_io_failed", "memory")
+    return value
+
+
+def available_memory_bytes() -> int:
+    """Available physical memory (win32: GlobalMemoryStatusEx.ullAvailPhys)."""
+
+    if not is_win32():
+        raise HostPlatformError("host_platform_unavailable", "win32_only")
+    try:
+        return int(win32_api().available_physical_bytes())
+    except OSError as exc:
+        raise HostPlatformError("host_io_failed", "memory") from exc
+
+
+STOP_EVENT_ENV = "MYCELIUM_STOP_EVENT"
+_STOP_EVENT_POLL_MS = 250
+
+
+def start_stop_event_watcher(
+    on_stop: Any,
+    *,
+    environ: Any = None,
+) -> threading.Event | None:
+    """Watch the named stop event a win32 supervisor passes in ``MYCELIUM_STOP_EVENT``.
+
+    Returns a ``threading.Event`` that stops the watcher when set, or ``None``
+    when no event is configured.  A configured event that cannot be opened
+    raises ``host_platform_unavailable``: a supervisor that asked for a
+    graceful-stop channel must not be silently ignored.
+    """
+
+    source = os.environ if environ is None else environ
+    name = source.get(STOP_EVENT_ENV)
+    if not name:
+        return None
+    if not is_win32():
+        raise HostPlatformError("host_platform_unavailable", "stop_event_win32_only")
+    api = win32_api()
+    try:
+        event = api.open_event(name)
+    except OSError as exc:
+        raise HostPlatformError("host_platform_unavailable", "stop_event") from exc
+    cancelled = threading.Event()
+
+    def watch() -> None:
+        try:
+            while not cancelled.is_set():
+                try:
+                    signalled = api.wait_event(event, _STOP_EVENT_POLL_MS)
+                except OSError:
+                    signalled = True  # an unwatchable channel stops, never hangs
+                if signalled:
+                    if not cancelled.is_set():
+                        on_stop()
+                    return
+        finally:
+            try:
+                api.close(event)
+            except OSError:
+                pass
+
+    threading.Thread(target=watch, name="mycelium-stop-event", daemon=True).start()
+    return cancelled
+
+
 def executable_fingerprint(
     path: str | os.PathLike[str], *, require_private_owner: bool = False
 ) -> ExecutableFingerprint:
@@ -125,6 +201,7 @@ def executable_fingerprint(
 
 __all__ = [
     "ERROR_CODES",
+    "available_memory_bytes",
     "ExecutableFingerprint",
     "FileIdentity",
     "HostPlatformError",
@@ -132,6 +209,8 @@ __all__ = [
     "is_win32",
     "open_beneath",
     "private_directory",
+    "process_resident_bytes",
+    "start_stop_event_watcher",
     "read_owner_file",
     "use_win32_api",
     "win32_api",

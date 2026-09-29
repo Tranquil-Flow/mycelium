@@ -634,6 +634,49 @@ def _artifact_fingerprint(metadata: os.stat_result) -> tuple[int, ...]:
     )
 
 
+def _win32_open_verified_artifact(
+    cache_root: Path,
+    relative: PurePosixPath,
+    assigned_record: dict[str, Any],
+) -> tuple[BinaryIO, tuple[int, ...]]:
+    """Handle-bound, reparse-refusing open of one verified artifact on win32."""
+
+    import mycelium_host_platform
+
+    try:
+        handle = mycelium_host_platform.open_beneath(cache_root, tuple(relative.parts))
+    except mycelium_host_platform.HostPlatformError as exc:
+        raise _fail(f"unable to open verified artifact: {relative}") from exc
+    try:
+        metadata = os.fstat(handle.fileno())
+        fingerprint = _artifact_fingerprint(metadata)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise _fail(f"verified artifact is not a regular file: {relative}")
+        if metadata.st_nlink != 1:
+            raise _fail(f"verified artifact must have exactly one hard link: {relative}")
+        if metadata.st_size != assigned_record.get("size_bytes"):
+            raise _fail(f"verified artifact size mismatch: {relative}")
+        digest = hashlib.sha256()
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+        if _artifact_fingerprint(os.fstat(handle.fileno())) != fingerprint:
+            raise _fail(f"verified artifact changed during hashing: {relative}")
+        actual_digest = "sha256:" + digest.hexdigest()
+        if actual_digest != assigned_record.get("content_digest"):
+            raise _fail(f"verified artifact digest mismatch: {relative}")
+        handle.seek(0)
+        return handle, fingerprint
+    except RuntimeLoadError:
+        handle.close()
+        raise
+    except OSError as exc:
+        handle.close()
+        raise _fail(f"unable to open verified artifact: {relative}") from exc
+
+
 def _open_verified_artifact(
     assignment: dict[str, Any],
     report: dict[str, Any],
@@ -661,6 +704,10 @@ def _open_verified_artifact(
             f"verified local path escapes artifact cache root or mismatches assignment: {relative}"
         )
 
+    import mycelium_host_platform
+
+    if mycelium_host_platform.is_win32():
+        return _win32_open_verified_artifact(cache_root, relative, assigned_record)
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     cloexec = getattr(os, "O_CLOEXEC", 0)
     directory = getattr(os, "O_DIRECTORY", 0)

@@ -18,7 +18,6 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
-import resource
 import select
 import shutil
 import signal
@@ -32,7 +31,13 @@ import traceback
 from typing import Any, Callable, Mapping
 import uuid
 
+try:  # POSIX-only; the win32 memory probe goes through mycelium_host_platform.
+    import resource
+except ImportError:  # pragma: no cover - exercised by the win32 import tests
+    resource = None  # type: ignore[assignment]
+
 import mycelium_deadlines
+import mycelium_host_platform
 from mycelium_iroh_sidecar import SidecarClient
 from mycelium_node.identity import load_node_signer
 from mycelium_physical_runner.remote_probe import derive_local_run_scoped_identity
@@ -151,6 +156,10 @@ def _cancel_phase_diagnostic(
             sort_keys=True,
         )
         if len(line.encode("utf-8")) > _CANCEL_PHASE_DIAGNOSTIC_LINE_BYTES:
+            return
+        if not hasattr(os, "O_NOFOLLOW"):
+            # No no-follow append on this host: skip the optional diagnostic
+            # rather than follow a planted link.
             return
         descriptor = os.open(
             destination,
@@ -443,6 +452,8 @@ def _bounded_command_output(command: list[str]) -> str | None:
 
 
 def _host_available_memory_bytes() -> int:
+    if mycelium_host_platform.is_win32():
+        return mycelium_host_platform.available_memory_bytes()
     if sys.platform.startswith("linux"):
         try:
             values = {
@@ -484,6 +495,8 @@ def _host_available_memory_bytes() -> int:
 
 
 def _process_rss_bytes() -> int:
+    if mycelium_host_platform.is_win32():
+        return mycelium_host_platform.process_resident_bytes()
     if sys.platform.startswith("linux"):
         try:
             resident_pages = int(Path("/proc/self/statm").read_text().split()[1])
@@ -1088,7 +1101,9 @@ class PhysicalNodeService:
         self.node_id = node_id
         self.artifact_root = artifact_root.resolve(strict=True)
         self.socket_root = socket_root
-        if capacity_root is not None:
+        if capacity_root is not None and mycelium_host_platform.is_win32():
+            _require(_win32_private_root(capacity_root), "invalid_capacity_root")
+        elif capacity_root is not None:
             _require(capacity_root.is_absolute()
                      and capacity_root.resolve(strict=True) == capacity_root
                      and capacity_root.is_dir()
@@ -1165,6 +1180,8 @@ class PhysicalNodeService:
             and all(part not in {"", ".", ".."} for part in relative.parts),
             code,
         )
+        if mycelium_host_platform.is_win32():
+            return self._win32_safe_document(relative, relative_path, code)
         nofollow = getattr(os, "O_NOFOLLOW", 0)
         cloexec = getattr(os, "O_CLOEXEC", 0)
         directory = getattr(os, "O_DIRECTORY", 0)
@@ -1239,6 +1256,41 @@ class PhysicalNodeService:
                 os.close(current_fd)
             if root_fd is not None:
                 os.close(root_fd)
+        try:
+            document = canonical_json_loads(raw, path=relative_path)
+        except Exception as exc:
+            raise NodeCommandError(code) from exc
+        _require(isinstance(document, dict), code)
+        return document
+
+    def _win32_safe_document(
+        self, relative: PurePosixPath, relative_path: str, code: str
+    ) -> dict[str, Any]:
+        """Read one control document below the artifact root through handles."""
+
+        try:
+            with mycelium_host_platform.open_beneath(
+                self.artifact_root, tuple(relative.parts)
+            ) as handle:
+                before = os.fstat(handle.fileno())
+                _require(
+                    stat.S_ISREG(before.st_mode)
+                    and before.st_nlink == 1
+                    and 0 < before.st_size <= MAX_COMMAND_BYTES,
+                    code,
+                )
+                raw = handle.read(MAX_COMMAND_BYTES + 1)
+                after = os.fstat(handle.fileno())
+                _require(
+                    len(raw) == before.st_size
+                    and (after.st_size, after.st_mtime_ns)
+                    == (before.st_size, before.st_mtime_ns),
+                    code,
+                )
+        except NodeCommandError:
+            raise
+        except (OSError, ValueError, mycelium_host_platform.HostPlatformError) as exc:
+            raise NodeCommandError(code) from exc
         try:
             document = canonical_json_loads(raw, path=relative_path)
         except Exception as exc:
@@ -4057,11 +4109,95 @@ class PhysicalNodeService:
                 "boot_id": self.boot_id}
 
 
+def _win32_private_root(path: Path) -> bool:
+    """A capacity root must be an absolute owner-only directory (win32 DACL)."""
+
+    if not path.is_absolute():
+        return False
+    try:
+        with mycelium_host_platform.private_directory(path, create=False) as root:
+            return bool(root.exists)
+    except mycelium_host_platform.HostPlatformError:
+        return False
+
+
+class _Win32DeadlineState:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.active = True
+        self.fired = False
+        self.delivered = False
+
+
+_WIN32_DEADLINE_DRAIN_SECONDS = 1.0
+
+
+@contextmanager
+def _win32_command_deadline(seconds: float):
+    """Real command deadline where ``setitimer`` does not exist.
+
+    A timer thread marks the deadline as fired and interrupts the main thread
+    with a simulated SIGINT.  The SIGINT handler installed for the block turns
+    exactly that interrupt into ``NodeCommandError("command_timeout")``; any
+    other SIGINT (a real Ctrl+C) still reaches the previous handler.  A
+    deadline that fires as the block is leaving is drained before the handler
+    is restored, so it can never leak into unrelated code.  C-level work that
+    does not return to the interpreter is bounded by the parent's response
+    timeout and job kill instead.
+    """
+
+    import _thread
+
+    if threading.current_thread() is not threading.main_thread():
+        raise NodeCommandError("command_deadline_unavailable")
+    state = _Win32DeadlineState()
+
+    def handler(signum: int, frame: Any) -> None:
+        if state.fired and not state.delivered:
+            state.delivered = True
+            raise NodeCommandError("command_timeout")
+        if callable(previous):
+            previous(signum, frame)
+            return
+        if previous == signal.SIG_IGN:
+            return
+        raise KeyboardInterrupt
+
+    def fire() -> None:
+        with state.lock:
+            if not state.active:
+                return
+            state.fired = True
+            _thread.interrupt_main(signal.SIGINT)
+
+    previous = signal.signal(signal.SIGINT, handler)
+    try:
+        timer = threading.Timer(seconds, fire)
+        timer.daemon = True
+        timer.start()
+        try:
+            yield
+        finally:
+            with state.lock:
+                state.active = False
+            timer.cancel()
+            if state.fired and not state.delivered:
+                drain_until = time.monotonic() + _WIN32_DEADLINE_DRAIN_SECONDS
+                while not state.delivered and time.monotonic() < drain_until:
+                    time.sleep(0.001)
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+
 @contextmanager
 def _command_deadline(seconds: float):
-    if not hasattr(signal, "setitimer"):
-        yield
+    if mycelium_host_platform.is_win32():
+        with _win32_command_deadline(seconds):
+            yield
         return
+    if not hasattr(signal, "setitimer"):
+        # No deadline primitive on this host: refuse rather than run unbounded.
+        raise NodeCommandError("command_deadline_unavailable")
 
     def timeout_handler(_signum: int, _frame: Any) -> None:
         raise NodeCommandError("command_timeout")
@@ -4205,6 +4341,23 @@ def main() -> int:
         signum: signal.signal(signum, stop_on_signal)
         for signum in (signal.SIGINT, signal.SIGTERM)
     }
+    stop_watch = None
+    if mycelium_host_platform.is_win32():
+        # Windows delivers no SIGTERM between processes: a supervisor asks for
+        # a graceful stop through the named event in MYCELIUM_STOP_EVENT, which
+        # is routed into the same stop_on_signal path.
+        import _thread
+
+        try:
+            stop_watch = mycelium_host_platform.start_stop_event_watcher(
+                lambda: _thread.interrupt_main(signal.SIGTERM)
+            )
+        except mycelium_host_platform.HostPlatformError:
+            for signum, handler in prior_signal_handlers.items():
+                signal.signal(signum, handler)
+            service.close()
+            print("physical-node startup rejected: stop_event", file=sys.stderr)
+            return 2
 
     response_emitter = _ResponseEmitter()
     active_lock = threading.Lock()
@@ -4402,6 +4555,8 @@ def main() -> int:
         inference_executor.shutdown(wait=True, cancel_futures=False)
         control_executor.shutdown(wait=True, cancel_futures=False)
         cleanup_executor.shutdown(wait=True, cancel_futures=False)
+        if stop_watch is not None:
+            stop_watch.set()
         for signum, handler in prior_signal_handlers.items():
             signal.signal(signum, handler)
         service.close()
