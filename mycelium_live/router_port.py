@@ -914,6 +914,84 @@ class LiveRouterPort:
                                         if placement.placement_id == pending.placement_ids[0]), None),
             }
 
+    # -- A6 controlled physical fault reads ---------------------------------
+    #
+    # The product-mounted A6 receiver binds its seams through these reads. They
+    # are detached snapshots: none mints an identity, advances an attempt, or
+    # publishes output. ``a6_withhold_recovery_successors`` is the only write:
+    # it narrows the successor candidate set for one owned request, which can
+    # only make recovery refuse, never succeed.
+
+    def a6_controlled_fault_binding(self, request_id: str) -> dict[str, Any] | None:
+        """Admitted in-flight command identity for a grant-gated product fault."""
+        return self._a6_test_only_source_fault_binding(request_id)
+
+    def a6_source_failure_observed(self, binding: dict[str, Any]) -> bool:
+        return self._a6_test_only_source_failure_observed(binding)
+
+    def a6_inflight_request_ids(self) -> tuple[str, ...]:
+        """Requests executing on their source attempt with no terminal yet."""
+        with self._lock:
+            return tuple(sorted(
+                request_id for request_id, pending in self._pending.items()
+                if pending.execution_started and pending.terminal_status is None
+                and pending.terminal_blocked_reason is None
+                and not pending.recovery_required
+                and pending.source_failure_identity is None
+                and not pending.cancellation_requested.is_set()
+            ))
+
+    def a6_request_view(self, request_id: str) -> dict[str, Any] | None:
+        """Privacy-reduced recovery state of one request; no token material."""
+        with self._lock:
+            pending = self._pending.get(request_id)
+            if pending is None:
+                reason = self._recovery_failures.get(request_id)
+                return None if reason is None else {
+                    "retained": False, "recovery_failure_reason": reason}
+            identity = pending.command_identity
+            return {
+                "retained": True,
+                "execution_started": pending.execution_started,
+                "terminal_status": pending.terminal_status,
+                "terminal_error_code": pending.terminal_error_code,
+                "terminal_blocked_reason": pending.terminal_blocked_reason,
+                "recovery_required": pending.recovery_required,
+                "recovery_phase": pending.recovery_phase,
+                "recovery_attempts": pending.recovery_attempts,
+                "recovery_failure_reason": pending.recovery_failure_reason,
+                "source_failure_observed": pending.source_failure_identity is not None,
+                "cancellation_requested": pending.cancellation_requested.is_set(),
+                "cancellation_linearized": pending.cancellation_linearized,
+                "token_count": len(pending.tokens),
+                "cursor": pending.cursor,
+                "placement_ids": tuple(pending.placement_ids or ()),
+                "excluded_placement_ids": tuple(sorted(pending.recovery_excluded_placements)),
+                "request_attempt": None if identity is None else identity.request_attempt,
+                "path_id": None if identity is None else identity.path_id,
+                "path_attempt": None if identity is None else identity.path_attempt,
+                "path_digest": None if identity is None else identity.path_digest,
+                "command_id": None if identity is None else identity.command_id,
+                "route_identity": (None if pending.route_identity is None
+                                   else dict(pending.route_identity)),
+            }
+
+    def a6_placement_node_ids(self) -> dict[str, str]:
+        """Placement to node mapping of the current deployment graph."""
+        return {placement.placement_id: placement.node_id
+                for stage in self._graph.stages for placement in stage.placements}
+
+    def a6_withhold_recovery_successors(self, request_id: str) -> bool:
+        """Exclude every placement from this request's successor candidates."""
+        placements = set(self.a6_placement_node_ids())
+        with self._changed:
+            pending = self._pending.get(request_id)
+            if (pending is None or not pending.execution_started
+                    or pending.terminal_status is not None or not placements):
+                return False
+            pending.recovery_excluded_placements.update(placements)
+            return True
+
     def request_error_code(self, request_id: str) -> str | None:
         """Return one bounded terminal failure code without private diagnostics."""
 

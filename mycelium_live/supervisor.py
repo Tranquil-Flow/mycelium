@@ -3573,6 +3573,7 @@ def run_physical_server(
                 public_origin=public_origin,
                 trusted_https_proxy=trusted_https_proxy,
                 request_stop=stop.set,
+                stop_requested=stop.is_set,
             )
         startup_complete = True
 
@@ -3637,11 +3638,31 @@ def _a6_product_fault_seams(
     stack: LiveStack,
     route: Any,
     request_stop: Callable[[], None],
+    stop_requested: Callable[[], bool] | None = None,
+    grant: str | None = None,
 ) -> Mapping[str, Any]:
-    """Seams the mounted A6 receiver may dispatch to; none until bound."""
+    """Bind every A6 case to real peer/path faults on this product stack."""
 
-    del stack, route, request_stop
-    return {}
+    from mycelium_a6_product_fault_seams import (
+        LiveProductFaultTarget,
+        build_product_case_seams,
+        request_gateway_service,
+    )
+
+    router = stack.router
+    service = request_gateway_service(stack.app)
+    if router is None or service is None or grant is None:
+        raise RuntimeError("startup_a6_fault_control_product_unavailable")
+    target = LiveProductFaultTarget(
+        router=router,
+        route=route,
+        service=service,
+        qualifier=getattr(router, "_recovery_qualification_source", None),
+        request_stop=request_stop,
+        stop_requested=stop_requested,
+        grant=grant,
+    )
+    return build_product_case_seams(target)
 
 
 def _mount_a6_product_fault_control(
@@ -3653,6 +3674,7 @@ def _mount_a6_product_fault_control(
     public_origin: str | None,
     trusted_https_proxy: bool,
     request_stop: Callable[[], None],
+    stop_requested: Callable[[], bool] | None = None,
 ) -> Any:
     """Mount the grant-gated A6 receiver on its own direct loopback listener."""
 
@@ -3662,11 +3684,20 @@ def _mount_a6_product_fault_control(
         grant_from_environment,
     )
 
+    grant = grant_from_environment()
     try:
         control = ProductFaultControl(
-            grant=grant_from_environment(),
-            seams=_a6_product_fault_seams(
-                stack=stack, route=route, request_stop=request_stop
+            grant=grant,
+            seams=(
+                {}
+                if grant is None
+                else _a6_product_fault_seams(
+                    stack=stack,
+                    route=route,
+                    request_stop=request_stop,
+                    stop_requested=stop_requested,
+                    grant=grant,
+                )
             ),
             product_port=product_port,
             port=control_port,

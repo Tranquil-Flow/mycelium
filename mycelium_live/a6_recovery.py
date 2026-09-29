@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 import hashlib
+import hmac
 import json
 from pathlib import Path
+import threading
 import time
 from typing import Any
 import uuid
@@ -23,6 +25,19 @@ from mycelium_a6_recovery import (
     recovery_request_binding,
 )
 from mycelium_router.serialization import execution_graph_to_dict
+
+#: Grant-gated qualifier faults the product-mounted A6 receiver may arm. Each
+#: one makes the qualifier issue a qualification the recovery authority must
+#: refuse; none can make an unqualified successor pass.
+CONTROLLED_QUALIFICATION_FAULTS = (
+    "incompatible",
+    "stale",
+    "foreign",
+    "unexecuted",
+    "mismatched_path_attempt",
+)
+_CONTROLLED_FAULT_GRANT = "FLEET GRANTED TO A6"
+_MAX_RETAINED_OBSERVATIONS = 64
 
 
 _TOKENIZER_FILES = (
@@ -184,6 +199,43 @@ class LiveA6RecoveryQualifier:
         self._route = route
         self._physical_challenge = physical_challenge or self._run_physical_challenge
         self._clock_ms = clock_ms or (lambda: int(time.time() * 1_000))
+        self._fault_lock = threading.Lock()
+        self._armed_faults: dict[str, str] = {}
+        self._issued: dict[str, dict[str, Any]] = {}
+
+    def arm_controlled_fault(self, *, request_id: str, kind: str, grant: str) -> None:
+        """Arm one qualification fault for one request; consumed by one issue."""
+
+        if not isinstance(grant, str) or not hmac.compare_digest(
+            grant.encode("utf-8"), _CONTROLLED_FAULT_GRANT.encode("ascii")
+        ):
+            raise PermissionError("explicit_fleet_grant_required")
+        if kind not in CONTROLLED_QUALIFICATION_FAULTS:
+            raise ValueError("a6_controlled_qualification_fault_unknown")
+        if not isinstance(request_id, str) or not request_id:
+            raise ValueError("a6_controlled_qualification_fault_request_invalid")
+        with self._fault_lock:
+            if request_id in self._armed_faults:
+                raise ValueError("a6_controlled_qualification_fault_already_armed")
+            self._armed_faults[request_id] = kind
+
+    def issued_qualification_facts(self, request_id: str) -> dict[str, Any] | None:
+        """What this qualifier last issued for one request, as measured facts."""
+
+        with self._fault_lock:
+            facts = self._issued.get(request_id)
+            return None if facts is None else json.loads(json.dumps(facts))
+
+    def _consume_fault(self, request_id: str) -> str | None:
+        with self._fault_lock:
+            return self._armed_faults.pop(request_id, None)
+
+    def _record_issue(self, request_id: str, facts: Mapping[str, Any]) -> None:
+        with self._fault_lock:
+            self._issued.pop(request_id, None)
+            self._issued[request_id] = dict(facts)
+            while len(self._issued) > _MAX_RETAINED_OBSERVATIONS:
+                self._issued.pop(next(iter(self._issued)))
 
     def __call__(
         self,
@@ -224,13 +276,25 @@ class LiveA6RecoveryQualifier:
         ):
             raise ValueError("source_compatibility_binding_mismatch")
 
-        challenge = self._physical_challenge(
-            request_id=request_id,
-            placement_ids=tuple(
-                hop.placement_id for hop in successor_manifest.ordered_hops
-            ),
-            absolute_deadline_unix_ms=checkpoint.expiry_unix_ms,
+        fault = self._consume_fault(request_id)
+        placement_ids = tuple(
+            hop.placement_id for hop in successor_manifest.ordered_hops
         )
+        if fault == "unexecuted":
+            # The physical challenge is deliberately never run; the issued
+            # record says so and the authority must refuse it.
+            prompt_digest = _digest({"challenge": "not_executed"})
+            challenge = {
+                "passed": True,
+                "parity_policy_digest": prompt_digest,
+                "workload_envelope_digest": prompt_digest,
+            }
+        else:
+            challenge = self._physical_challenge(
+                request_id=request_id,
+                placement_ids=placement_ids,
+                absolute_deadline_unix_ms=checkpoint.expiry_unix_ms,
+            )
         if set(challenge) != {
             "passed",
             "parity_policy_digest",
@@ -255,11 +319,20 @@ class LiveA6RecoveryQualifier:
             workload_envelope_digest=str(challenge["workload_envelope_digest"]),
         )
         successor = dict(source)
+        if fault == "incompatible":
+            successor["architecture_digest"] = _digest(
+                {"controlled_fault": "incompatible", "source": source["architecture_digest"]}
+            )
         passed = bool(challenge["passed"]) and compatibility_matches(source, successor)
         now = self._clock_ms()
         expiry = min(checkpoint.expiry_unix_ms, now + 30_000)
         if expiry <= now:
             raise ValueError("recovery_qualification_expired")
+        issued_at = now
+        if fault == "stale":
+            # A well-formed record whose validity window already closed.
+            issued_at = max(1, now - 60_000)
+            expiry = max(issued_at + 1, now - 30_000)
         binding = {
             "deployment_id": self._graph.deployment_id,
             "deployment_epoch": self._graph.deployment_epoch,
@@ -269,20 +342,57 @@ class LiveA6RecoveryQualifier:
             "representation_digest": self._graph.manifest_digest,
             "graph_digest": _graph_digest(self._graph),
         }
+        request_binding = recovery_request_binding(checkpoint)
+        if fault == "foreign":
+            request_binding = dict(request_binding)
+            request_binding["request_id"] = f"foreign-{uuid.uuid4().hex}"
+        successor_binding = recovery_successor_binding(
+            successor_identity,
+            successor_manifest,
+        )
+        if fault == "mismatched_path_attempt":
+            successor_binding = dict(successor_binding)
+            successor_binding["path_attempt"] = successor_binding["path_attempt"] + 1
+        # The physical challenge result is reported as measured; compatibility
+        # is a separate fact the authority checks against the source.
+        physical = "passed" if challenge["passed"] else "failed"
+        if fault == "unexecuted":
+            physical = "unexecuted"
         qualification = build_recovery_qualification(
             binding,
             qualification_id=f"a6-successor-{uuid.uuid4().hex}",
-            request_binding=recovery_request_binding(checkpoint),
-            successor_binding=recovery_successor_binding(
-                successor_identity,
-                successor_manifest,
-            ),
+            request_binding=request_binding,
+            successor_binding=successor_binding,
             compatibility=successor,
             compatible=passed,
-            issued_at_unix_ms=now,
+            issued_at_unix_ms=issued_at,
             expiry_unix_ms=expiry,
-            reason_codes=() if passed else ("successor_physical_challenge_failed",),
-            physical_challenge="passed" if passed else "failed",
+            reason_codes=(
+                ()
+                if passed
+                else ("successor_compatibility_mismatch",)
+                if challenge["passed"]
+                else ("successor_physical_challenge_failed",)
+            ),
+            physical_challenge=physical,
+        )
+        self._record_issue(
+            request_id,
+            {
+                "controlled_fault": fault,
+                "successor_placement_ids": list(placement_ids),
+                "successor_request_attempt": successor_identity.get("request_attempt"),
+                "successor_path_attempt": successor_manifest.path_attempt,
+                "issued_path_attempt": qualification["successor_binding"]["path_attempt"],
+                "compatibility_matches_source": compatibility_matches(source, successor),
+                "request_binding_matches": (
+                    qualification["request_binding"] == recovery_request_binding(checkpoint)
+                ),
+                "physical_challenge": qualification["physical_challenge"],
+                "issued_at_unix_ms": qualification["issued_at_unix_ms"],
+                "expiry_unix_ms": qualification["expiry_unix_ms"],
+                "measured_at_unix_ms": now,
+            },
         )
         return source, qualification
 
@@ -351,4 +461,8 @@ class LiveA6RecoveryQualifier:
         }
 
 
-__all__ = ["LiveA6RecoveryQualifier", "tokenizer_artifact_digest"]
+__all__ = [
+    "CONTROLLED_QUALIFICATION_FAULTS",
+    "LiveA6RecoveryQualifier",
+    "tokenizer_artifact_digest",
+]
