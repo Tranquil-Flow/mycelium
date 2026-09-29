@@ -165,6 +165,13 @@ def project_route_explorer(snapshot):
                 binding=dict(deployment=None if b['deployment_id'] is None else digest(b['deployment_id']),
                              request=None, attempt=None, track=None, path_generation=b['route_generation']))
     history = snapshot['internet_native']['activation_history']
+    # An observation is historical once a later observation exists for the same
+    # endpoint: a direct/relay transition adds a segment and never rewrites the
+    # earlier one, and an unrelated unknown projection supersedes nothing.
+    latest = {}
+    for i, a in enumerate(history):
+        if a['endpoint_pseudonym'] is not None:
+            latest[a['endpoint_pseudonym']] = i
     for i, a in enumerate(history):
         if a['endpoint_pseudonym'] is None:
             continue
@@ -173,7 +180,7 @@ def project_route_explorer(snapshot):
         segment(immutable, destination=node(a['endpoint_pseudonym'], 'endpoint'),
                 edge_kind='transport_observation', path_status='observed' if resolved else 'unknown',
                 transport=a['path_class'] if resolved else 'unknown',
-                freshness=a['freshness'], history=i != len(history) - 1,
+                freshness=a['freshness'], history=i != latest[a['endpoint_pseudonym']],
                 connection_generation=a['connection_generation'], issued_at=a['observed_at_unix_ms'],
                 expires_at=a['evidence_lifetime_until_unix_ms'], metrics=a['metrics'] if resolved else dict(empty_metrics))
     # An identical evidence record is one immutable segment, never duplicate traffic.

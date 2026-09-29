@@ -13,6 +13,7 @@ from typing import Any, Callable, Mapping, Sequence
 from .contracts import validate_product_event
 from .projector import ProductProjector
 from .state import ProductEvidenceStateStore
+from .transport_history import TransportTransitionHistory
 
 
 class ProductEvidenceApplication:
@@ -55,6 +56,9 @@ class ProductEvidenceApplication:
             raise ValueError("product_source_invalid")
         self._qualification_source = qualification_source
         self._internet_native_source = internet_native_source
+        # Live transport observations become immutable transition history here,
+        # independent of the route object's lifetime (cold route restarts).
+        self._transport_history = TransportTransitionHistory()
         self._recovery_source = recovery_source
         self._clock_unix_ms = clock_unix_ms or (lambda: int(time.time() * 1_000))
         self._store = (
@@ -168,7 +172,10 @@ class ProductEvidenceApplication:
             internet_native = (
                 None
                 if self._internet_native_source is None
-                else self._internet_native_source()
+                else self._transport_history.observe(
+                    self._internet_native_source(),
+                    now_unix_ms=self._clock_unix_ms(),
+                )
             )
             recovery_status = None
             if self._recovery_source is not None:
