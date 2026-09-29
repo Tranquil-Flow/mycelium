@@ -6,6 +6,11 @@ existing caller of :func:`build_service_package`/:func:`write_service_package`
 (the M22 service package and the A13 Linux tranche) gets exactly the same
 launchd+systemd payload set it always has. Only the A13 Windows tranche
 (``mycelium_a13_windows.service_lifecycle``) asks for the Windows member.
+
+:func:`build_windows_member_package` separately renders Windows-native members
+a Windows host can consume (a Task Scheduler logon task for the per-user mode,
+an ``sc.exe`` argv plan for the per-service mode) from Windows drive-absolute
+paths.  It is pure rendering: nothing is executed, registered or signed.
 """
 
 from __future__ import annotations
@@ -13,11 +18,13 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 import hashlib
 import json
+import math
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import plistlib
 import re
 import stat
+import subprocess
 from typing import Any
 
 from mycelium_qualification.evidence import canonical_json_bytes
@@ -47,7 +54,8 @@ def _absolute(value: Any, code: str) -> str:
     return value
 
 
-def _argv(value: Any) -> tuple[str, ...]:
+def _argv(value: Any, *, absolute: Any = None) -> tuple[str, ...]:
+    check = _absolute if absolute is None else absolute
     if (
         not isinstance(value, Sequence)
         or isinstance(value, (str, bytes, bytearray))
@@ -56,11 +64,15 @@ def _argv(value: Any) -> tuple[str, ...]:
     ):
         raise ServicePackageError("service_argv_invalid")
     result = tuple(value)
-    _absolute(result[0], "service_executable_invalid")
+    check(result[0], "service_executable_invalid")
     return result
 
 
 def validate_service_config(value: Mapping[str, Any]) -> dict[str, Any]:
+    return _validate_config(value, absolute=_absolute)
+
+
+def _validate_config(value: Mapping[str, Any], *, absolute: Any) -> dict[str, Any]:
     fields = {
         "protocol",
         "package_version",
@@ -133,10 +145,10 @@ def validate_service_config(value: Mapping[str, Any]) -> dict[str, Any]:
         "package_version": version,
         "service_id": service_id,
         "role": role,
-        "argv": list(_argv(value["argv"])),
-        "working_directory": _absolute(value["working_directory"], "service_working_directory_invalid"),
-        "state_directory": _absolute(value["state_directory"], "service_state_directory_invalid"),
-        "log_directory": _absolute(value["log_directory"], "service_log_directory_invalid"),
+        "argv": list(_argv(value["argv"], absolute=absolute)),
+        "working_directory": absolute(value["working_directory"], "service_working_directory_invalid"),
+        "state_directory": absolute(value["state_directory"], "service_state_directory_invalid"),
+        "log_directory": absolute(value["log_directory"], "service_log_directory_invalid"),
         "environment": normalized_environment,
         "health_url": health_url,
         **limits,
@@ -302,6 +314,264 @@ WINDOWS_MEMBER_NAMES: dict[str, str] = {
 }
 
 
+# ------------------------------------------------ Windows-native member plans
+#
+# ``_windows_service_xml`` above is a declarative descriptor that nothing on a
+# Windows host consumes, and it is rendered from a POSIX-path config.  The
+# functions below render members a Windows host CAN consume -- a Task
+# Scheduler 1.2 task definition for the per-user mode and an ``sc.exe`` argv
+# plan for the per-service mode -- from a config whose paths are validated as
+# Windows drive-absolute paths on every host (``PureWindowsPath``), so the
+# rendering is byte-identical on macOS, Linux and Windows.  Pure rendering:
+# nothing here runs ``schtasks.exe``, ``sc.exe`` or anything else.
+
+WINDOWS_MEMBER_PLAN_PROTOCOL = "mycelium.windows_member_plan.v1"
+WINDOWS_INSTALL_MODES: tuple[str, ...] = ("windows_service", "windows_service_per_user")
+_TASK_NAMESPACE = "http://schemas.microsoft.com/windows/2004/02/mit/task"
+_TASK_FOLDER = "\\Mycelium\\"
+_WINDOWS_DRIVE_PATH = re.compile(r"^[A-Za-z]:\\")
+_WINDOWS_FORBIDDEN_PATH_CHARACTERS = frozenset('"<>|?*\n\r\t\x00')
+_WINDOWS_PRINCIPAL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,62}\\[A-Za-z0-9][A-Za-z0-9._ $-]{0,63}$")
+_WINDOWS_NON_USER_DOMAINS = ("NT AUTHORITY\\", "BUILTIN\\", "NT SERVICE\\", "NT VIRTUAL MACHINE\\")
+#: The only privilege the per-service member keeps (``sc.exe privs``).
+WINDOWS_SERVICE_PRIVILEGES: tuple[str, ...] = ("SeChangeNotifyPrivilege",)
+
+
+def _windows_absolute(value: Any, code: str) -> str:
+    """A Windows drive-absolute path, judged identically on every host."""
+
+    if (
+        not isinstance(value, str)
+        or not value
+        or _WINDOWS_DRIVE_PATH.match(value) is None
+        or any(character in _WINDOWS_FORBIDDEN_PATH_CHARACTERS for character in value)
+        or ":" in value[2:]
+        or "/" in value
+    ):
+        raise ServicePackageError(code)
+    path = PureWindowsPath(value)
+    if (
+        not path.is_absolute()
+        or str(path) != value
+        or any(part in {".", ".."} for part in path.parts)
+    ):
+        raise ServicePackageError(code)
+    return value
+
+
+def validate_windows_service_config(value: Mapping[str, Any]) -> dict[str, Any]:
+    """The shared service config, with every path a Windows drive-absolute path."""
+
+    return _validate_config(value, absolute=_windows_absolute)
+
+
+def _windows_principal(value: Any) -> str:
+    if (
+        not isinstance(value, str)
+        or _WINDOWS_PRINCIPAL.fullmatch(value) is None
+        # Groups and machine identities are never "the signed-in user".
+        or value.upper().startswith(_WINDOWS_NON_USER_DOMAINS)
+    ):
+        raise ServicePackageError("service_windows_principal_invalid")
+    return value
+
+
+def _windows_command_line(argv: Sequence[str]) -> str:
+    """The exact CreateProcess command line (MSVC ``CommandLineToArgvW`` rules)."""
+
+    return subprocess.list2cmdline(list(argv))
+
+
+def _task_duration_minutes(seconds: int | float) -> str:
+    # Task Scheduler refuses a RestartOnFailure interval under one minute.
+    return f"PT{max(1, math.ceil(float(seconds) / 60))}M"
+
+
+def _windows_task_xml(
+    config: Mapping[str, Any], config_path: str, *, principal: str
+) -> bytes:
+    """Task Scheduler 1.2 definition for ``windows_service_per_user``.
+
+    Runs at the named user's logon, in that user's own interactive token, at
+    ``LeastPrivilege`` (never elevated), one instance at a time, with a bounded
+    restart budget.  Encoded UTF-16 with a BOM, as ``schtasks /XML`` expects.
+    """
+
+    runner = _runner_argv(config, config_path)
+    task_name = f"mycelium-{config['service_id']}"
+    document = (
+        '<?xml version="1.0" encoding="UTF-16"?>\n'
+        f'<Task version="1.2" xmlns="{_TASK_NAMESPACE}">\n'
+        "  <RegistrationInfo>\n"
+        f"    <Description>Mycelium {_xml_escape(config['role'])} ({_xml_escape(config['service_id'])})</Description>\n"
+        f"    <URI>{_xml_escape(_TASK_FOLDER + task_name)}</URI>\n"
+        "  </RegistrationInfo>\n"
+        "  <Triggers>\n"
+        "    <LogonTrigger>\n"
+        "      <Enabled>true</Enabled>\n"
+        f"      <UserId>{_xml_escape(principal)}</UserId>\n"
+        "    </LogonTrigger>\n"
+        "  </Triggers>\n"
+        "  <Principals>\n"
+        '    <Principal id="Author">\n'
+        f"      <UserId>{_xml_escape(principal)}</UserId>\n"
+        "      <LogonType>InteractiveToken</LogonType>\n"
+        "      <RunLevel>LeastPrivilege</RunLevel>\n"
+        "    </Principal>\n"
+        "  </Principals>\n"
+        "  <Settings>\n"
+        "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n"
+        "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n"
+        "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n"
+        "    <AllowHardTerminate>true</AllowHardTerminate>\n"
+        "    <StartWhenAvailable>true</StartWhenAvailable>\n"
+        "    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>\n"
+        "    <AllowStartOnDemand>true</AllowStartOnDemand>\n"
+        "    <Enabled>true</Enabled>\n"
+        "    <Hidden>false</Hidden>\n"
+        "    <RunOnlyIfIdle>false</RunOnlyIfIdle>\n"
+        "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n"
+        "    <RestartOnFailure>\n"
+        f"      <Interval>{_task_duration_minutes(config['restart_delay_seconds'])}</Interval>\n"
+        f"      <Count>{int(config['restart_limit'])}</Count>\n"
+        "    </RestartOnFailure>\n"
+        "  </Settings>\n"
+        '  <Actions Context="Author">\n'
+        "    <Exec>\n"
+        f"      <Command>{_xml_escape(runner[0])}</Command>\n"
+        f"      <Arguments>{_xml_escape(_windows_command_line(runner[1:]))}</Arguments>\n"
+        f"      <WorkingDirectory>{_xml_escape(config['working_directory'])}</WorkingDirectory>\n"
+        "    </Exec>\n"
+        "  </Actions>\n"
+        "</Task>\n"
+    )
+    return b"\xff\xfe" + document.encode("utf-16-le")
+
+
+def _windows_member_plan(
+    config: Mapping[str, Any],
+    config_path: str,
+    *,
+    install_mode: str,
+    task_file: str | None,
+) -> dict[str, Any]:
+    name = f"mycelium-{config['service_id']}"
+    runner = _runner_argv(config, config_path)
+    common = {
+        "protocol": WINDOWS_MEMBER_PLAN_PROTOCOL,
+        "install_mode": install_mode,
+        "service_id": config["service_id"],
+        "runner_argv": runner,
+        "runner_command_line": _windows_command_line(runner),
+        "working_directory": config["working_directory"],
+        "public_listener": False,
+        "executed": False,
+        "signed": False,
+    }
+    if install_mode == "windows_service_per_user":
+        task_name = _TASK_FOLDER + name
+        return {
+            **common,
+            "mechanism": "task_scheduler_logon_task",
+            "elevation_required": False,
+            "run_level": "LeastPrivilege",
+            "task_name": task_name,
+            "task_definition_file": task_file,
+            "install_argv": ["schtasks.exe", "/Create", "/TN", task_name, "/XML", task_file, "/F"],
+            "start_argv": ["schtasks.exe", "/Run", "/TN", task_name],
+            "stop_argv": ["schtasks.exe", "/End", "/TN", task_name],
+            "uninstall_argv": ["schtasks.exe", "/Delete", "/TN", task_name, "/F"],
+            "known_blockers": ["service_runner_stop_path_uses_posix_killpg"],
+        }
+    delay_ms = int(math.ceil(float(config["restart_delay_seconds"]) * 1000))
+    actions = "/".join(["restart", str(delay_ms)] * int(config["restart_limit"]))
+    start = "demand"
+    return {
+        **common,
+        "mechanism": "service_control_manager",
+        "elevation_required": True,
+        "service_account": f"NT SERVICE\\{name}",
+        "service_sid_type": "restricted",
+        "privileges": list(WINDOWS_SERVICE_PRIVILEGES),
+        "install_argv": [
+            [
+                "sc.exe", "create", name,
+                "binPath=", _windows_command_line(runner),
+                "type=", "own",
+                "start=", start,
+                "obj=", f"NT SERVICE\\{name}",
+                "DisplayName=", f"Mycelium {config['role']} ({config['service_id']})",
+            ],
+            ["sc.exe", "sidtype", name, "restricted"],
+            ["sc.exe", "privs", name, "/".join(WINDOWS_SERVICE_PRIVILEGES)],
+            [
+                "sc.exe", "failure", name,
+                "reset=", str(int(math.ceil(float(config["restart_window_seconds"])))),
+                "actions=", actions,
+            ],
+            ["sc.exe", "failureflag", name, "1"],
+        ],
+        "start_argv": ["sc.exe", "start", name],
+        "stop_argv": ["sc.exe", "stop", name],
+        "uninstall_argv": ["sc.exe", "delete", name],
+        # A plain ``python.exe`` never calls StartServiceCtrlDispatcher, so the
+        # SCM would kill it (error 1053) -- this plan is not registrable as is.
+        "known_blockers": [
+            "python_runner_implements_no_scm_control_handler",
+            "service_runner_stop_path_uses_posix_killpg",
+        ],
+    }
+
+
+def build_windows_member_package(
+    value: Mapping[str, Any],
+    *,
+    package_root: str,
+    install_mode: str,
+    principal: str | None = None,
+) -> dict[str, Any]:
+    """Render one Windows-native member plan (and, per-user, its task XML).
+
+    ``package_root`` is the Windows directory the package will live in on the
+    target (validated with Windows path rules on every host); ``principal`` is
+    the signed-in ``DOMAIN\\user`` the per-user task runs as (observed on the
+    device, e.g. by ``whoami``) and is refused for the per-service mode, where
+    the account is the service's own virtual account.
+    """
+
+    if install_mode not in WINDOWS_INSTALL_MODES:
+        raise ServicePackageError("service_windows_install_mode_invalid")
+    config = validate_windows_service_config(value)
+    root = _windows_absolute(package_root, "service_package_root_invalid")
+    config_path = str(PureWindowsPath(root) / "service-config.json")
+    config_raw = canonical_json_bytes(config)
+    payloads: dict[str, bytes] = {"service-config.json": config_raw}
+    task_file = None
+    if install_mode == "windows_service_per_user":
+        user = _windows_principal(principal)
+        task_name = f"mycelium-{config['service_id']}.task.xml"
+        payloads[task_name] = _windows_task_xml(config, config_path, principal=user)
+        task_file = str(PureWindowsPath(root) / task_name)
+    elif principal is not None:
+        raise ServicePackageError("service_windows_principal_invalid")
+    plan = _windows_member_plan(
+        config, config_path, install_mode=install_mode, task_file=task_file
+    )
+    plan_name = f"mycelium-{config['service_id']}.windows-member-plan.json"
+    payloads[plan_name] = canonical_json_bytes(plan)
+    return {
+        "protocol": WINDOWS_MEMBER_PLAN_PROTOCOL,
+        "install_mode": install_mode,
+        "service_id": config["service_id"],
+        "plan": plan,
+        "files": {
+            name: {"mode": "0600", "sha256": _digest(raw), "bytes": len(raw)}
+            for name, raw in sorted(payloads.items())
+        },
+        "_payloads": payloads,
+    }
+
+
 def build_service_package(
     value: Mapping[str, Any], *, package_root: Path, include_windows_member: bool = False
 ) -> dict[str, Any]:
@@ -378,8 +648,13 @@ def write_service_package(
 
 __all__ = [
     "PROTOCOL",
+    "WINDOWS_INSTALL_MODES",
+    "WINDOWS_MEMBER_PLAN_PROTOCOL",
+    "WINDOWS_SERVICE_PRIVILEGES",
     "ServicePackageError",
     "build_service_package",
+    "build_windows_member_package",
     "validate_service_config",
+    "validate_windows_service_config",
     "write_service_package",
 ]
