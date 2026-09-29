@@ -63,7 +63,14 @@ class ExecutedCase:
     binding: dict[str, Any]
     source_node_id: str
     armed_reservation_count: int | None
+    deadline_unix_ms: int | None = None
     post_state: dict[str, Any] = field(default_factory=dict)
+    #: (gateway event sequence, gateway-committed count) when the fault landed.
+    failure_marker: tuple[int, int] | None = None
+
+    @property
+    def committed_at_failure(self) -> int | None:
+        return None if self.failure_marker is None else self.failure_marker[1]
 
 
 class LiveProductFaultTarget:
@@ -101,6 +108,12 @@ class LiveProductFaultTarget:
         self._armed: dict[str, ExecutedCase] = {}
         self._executed: list[ExecutedCase] = []
         self._stopped_nodes: set[str] = set()
+        self._listeners: list[Callable[[ExecutedCase], None]] = []
+
+    def add_listener(self, listener: Callable[[ExecutedCase], None]) -> None:
+        """Be told about every executed case (for source-owned observations)."""
+        with self._lock:
+            self._listeners.append(listener)
 
     # -- reads ---------------------------------------------------------------
 
@@ -130,6 +143,14 @@ class LiveProductFaultTarget:
             if item["request_id"] == request_id:
                 return int(item["reservation_count"])
         return None
+
+    def coordinator_terminal(self, request_id: str) -> str | None:
+        coordinator = getattr(self.router, "_coordinator", None)
+        return None if coordinator is None else coordinator.terminal_state(request_id)
+
+    def gateway_committed(self, request_id: str) -> tuple[int, int] | None:
+        from mycelium_a6_case_observations import gateway_failure_marker
+        return gateway_failure_marker(self.service, request_id)
 
     def placement_nodes(self) -> dict[str, str]:
         return dict(self.router.a6_placement_node_ids())
@@ -165,10 +186,14 @@ class LiveProductFaultTarget:
             prior = self._armed.get(case_id)
             if prior is not None and prior.binding != binding:
                 raise FaultRejected("a6_fault_binding_changed")
+            deadline = binding.get("absolute_deadline_ms")
             self._armed[case_id] = ExecutedCase(
                 case_id=case_id, request_id=request_id, binding=dict(binding),
                 source_node_id=source,
                 armed_reservation_count=self.reservation_count(request_id),
+                # The command deadline is monotonic; publish it on the wall clock.
+                deadline_unix_ms=(None if type(deadline) is not int else int(
+                    time.time() * 1_000 + deadline - time.monotonic() * 1_000)),
             )
         return {
             "admitted_through_ordinary_gateway": True,
@@ -191,6 +216,12 @@ class LiveProductFaultTarget:
         with self._lock:
             self._armed.pop(record.case_id, None)
             self._executed.append(record)
+            listeners = list(self._listeners)
+        for listener in listeners:
+            try:
+                listener(record)
+            except Exception:
+                pass  # an observer can never change a measured fault
         return dict(post_state)
 
     @property
@@ -228,6 +259,7 @@ class LiveProductFaultTarget:
         """Kill (or sever) the source peer and measure the route's own incident."""
 
         baseline = {item.get("incident_id") for item in self.incidents()}
+        record.failure_marker = self.gateway_committed(record.request_id)
         self.signal_node(record.source_node_id, signal.SIGKILL)
         identity = {name: record.binding[name] for name in IDENTITY_FIELDS}
 
@@ -342,6 +374,11 @@ class ProductCaseSeam:
 
     def _apply_ordinary_browser_source_failure_recovery(self, record):
         target = self._target
+        # Continuity is claimed only for a nonzero committed prefix: give an
+        # in-flight request a short grace to commit one. A zero prefix is not
+        # refused here; it is measured, and the case observation then fails.
+        target.wait(lambda: (lambda m: m is not None and m[1] >= 1)(
+            target.gateway_committed(record.request_id)), seconds=2.0)
         incident = target.fail_source(record)
         view = target.wait(lambda: (lambda v: v if (
             v.get("recovery_required") or v.get("recovery_attempts", 0) >= 1

@@ -1,0 +1,527 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""Produce the source-owned A6 case observations the physical gate reads.
+
+``scripts/run_a6_recovery_case.py`` validates one closed
+``mycelium.a6_source_owned_case_observation.v1`` envelope per case, and one
+``mycelium.a6_source_owned_cleanup_observation.v1`` document, below
+``<evidence_output_dir>/a6-production-observations/``. Until now nothing wrote
+them. This module is the writer, owned by the product serve process:
+
+* a case observation exists only for a case the product-mounted receiver
+  actually executed on a real admitted request (``ExecutedCase``);
+* every field is derived from product authorities read after that request
+  settled: the router's recovery view, the gateway's delivery ledger and
+  terminal notice, the M16 coordinator's reservations, and the qualifier's
+  issued facts. No field is copied from a case contract or a caller;
+* each envelope is validated by the reader's own validator before it is
+  written, so a case whose measured facts do not satisfy its contract is
+  refused here and simply has no file: the gate then fails that case;
+* files are written atomically once, 0600 inside a 0700 directory, and an
+  existing observation is never replaced.
+
+The binding digests are source-owned too: the A6 source manifest's source
+digest, the A6 specification bytes and the contract manifest bytes of the
+serving tree, plus the exact operator-plan bytes. The operator copies the
+published values into the owner-private execution plan; any drift fails the
+gate's binding check.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import socket
+import stat
+import threading
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Mapping
+
+from scripts.run_a6_recovery_case import (
+    AUTHORITY,
+    OBSERVATION_PROTOCOL,
+    REQUIRED_CASES,
+    _canonical,
+    _sha256,
+    validate_source_owned_observation,
+)
+
+OBSERVATIONS_DIRNAME = "a6-production-observations"
+CLEANUP_PROTOCOL = "mycelium.a6_source_owned_cleanup_observation.v1"
+CLEANUP_FILENAME = "cleanup.json"
+POSITIVE_CASE = "ordinary_browser_source_failure_recovery"
+SPEC_PATH = "docs/superpowers/specs/2026-08-18-mycelium-a6-full-context-replay-recovery.md"
+SOURCE_MANIFEST_PATH = "artifacts/a6/source-manifest-v1.json"
+CONTRACT_MANIFEST_PATH = "contracts/contract-manifest.v1.json"
+_PRIVATE_MARKERS = (
+    "encoded_prompt_token_ids", "committed_prefix_tokens", "checkpoint_path",
+    "node_secret", "ssh_identity", "private_key",
+)
+_TERMINAL_STATUSES = frozenset({"COMPLETED", "FAILED", "CANCELLED"})
+
+
+class ObservationRefused(ValueError):
+    """Nothing is written when an observation is refused."""
+
+
+@dataclass(frozen=True)
+class ObservationAuthority:
+    """Run identity and source-owned digests every envelope is bound to."""
+
+    run_id: str
+    evidence_output_dir: Path
+    operator_plan_digest: str
+    source_digest: str
+    spec_digest: str
+    contract_digest: str
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "operator_plan_digest": self.operator_plan_digest,
+            "source_digest": self.source_digest,
+            "spec_digest": self.spec_digest,
+            "contract_digest": self.contract_digest,
+        }
+
+
+def _file_digest(path: Path) -> str:
+    return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def observation_authority(*, operator_plan: Path, repo_root: Path) -> ObservationAuthority:
+    """Bind the physical-runner operator plan and the serving tree's digests."""
+
+    from mycelium_physical_runner import load_operator_plan
+
+    try:
+        config = load_operator_plan(operator_plan)
+        manifest = json.loads((repo_root / SOURCE_MANIFEST_PATH).read_text("utf-8"))
+        source_digest = manifest["source_digest"]
+        spec_digest = _file_digest(repo_root / SPEC_PATH)
+        contract_digest = _file_digest(repo_root / CONTRACT_MANIFEST_PATH)
+    except Exception as exc:
+        raise ObservationRefused("a6_observation_authority_unavailable") from exc
+    if not isinstance(source_digest, str) or not source_digest.startswith("sha256:"):
+        raise ObservationRefused("a6_observation_authority_unavailable")
+    return ObservationAuthority(
+        run_id=config.run_id,
+        evidence_output_dir=Path(config.evidence_output_dir),
+        operator_plan_digest=_file_digest(Path(operator_plan)),
+        source_digest=source_digest,
+        spec_digest=spec_digest,
+        contract_digest=contract_digest,
+    )
+
+
+def _private_dir(path: Path) -> None:
+    if not path.exists():
+        path.mkdir(mode=0o700, parents=True)
+        os.chmod(path, 0o700)
+    info = path.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o700
+            or info.st_uid != os.getuid()):
+        raise ObservationRefused("a6_observation_root_invalid")
+
+
+def _write_once(path: Path, document: Mapping[str, Any]) -> None:
+    _private_dir(path.parent)
+    if path.exists() or path.is_symlink():
+        raise ObservationRefused("a6_observation_exists")
+    payload = json.dumps(document, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+    temporary = path.parent / f".{path.name}.tmp-{os.getpid()}-{threading.get_ident()}"
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        os.write(fd, payload)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.link(temporary, path)  # never replaces an existing observation
+    os.unlink(temporary)
+
+
+# -- product facts --------------------------------------------------------------
+
+
+def gateway_facts(service: Any, request_id: str, *, failure_sequence: int | None,
+                  committed_at_failure: int | None) -> dict[str, Any] | None:
+    """Privacy-reduced delivery-ledger facts for one request; no token content."""
+
+    try:
+        session = service._get_session(request_id)
+    except Exception:
+        return None
+    with session.condition:
+        events = list(session.events)
+        terminal = session.terminal_event
+        indices = [event.token_index for event in events if event.kind == "token"]
+        late = 0
+        if failure_sequence is not None and committed_at_failure is not None:
+            late = sum(1 for event in events if event.kind == "token"
+                       and event.sequence > failure_sequence
+                       and event.token_index is not None
+                       and event.token_index < committed_at_failure)
+        return {
+            "terminal_count": session.terminal_count,
+            "terminal_kind": None if terminal is None else terminal.kind,
+            "terminal_code": None if terminal is None else terminal.code,
+            "committed_count": len(session.token_digests),
+            "expected_token_index": session.expected_token_index,
+            "duplicated_token_count": len(indices) - len(set(indices)),
+            "late_source_publication_count": late,
+            "subscribed": bool(session.ever_subscribed),
+            "cleanup_notice_provenance": session.terminal_provenance,
+        }
+
+
+def gateway_failure_marker(service: Any, request_id: str) -> tuple[int, int] | None:
+    """(latest event sequence, committed count) at the instant of a fault."""
+
+    try:
+        session = service._get_session(request_id)
+    except Exception:
+        return None
+    with session.condition:
+        return session.latest_sequence, len(session.token_digests)
+
+
+@dataclass
+class SettledFacts:
+    """Everything read from product authorities once one case settled."""
+
+    view: dict[str, Any]
+    gateway: dict[str, Any] | None
+    reservation_count: int | None
+    coordinator_terminal: str | None
+    qualification: dict[str, Any] | None
+    deadline_unix_ms: int | None
+
+
+def _terminal_state(case_id: str, settled: SettledFacts) -> str | None:
+    view, gateway = settled.view, settled.gateway or {}
+    if view.get("terminal_blocked_reason") is not None:
+        return "TERMINAL_BLOCKED"
+    kind = gateway.get("terminal_kind")
+    if kind == "completed":
+        return "completed"
+    if kind == "cancelled":
+        return "cancelled"
+    if kind == "failed":
+        if gateway.get("terminal_code") == "request_cleanup_unproven":
+            return "TERMINAL_BLOCKED"
+        reason = view.get("recovery_failure_reason")
+        if reason == "recovery_timeout" or view.get("terminal_error_code") == "deadline_exceeded":
+            return "timed_out"
+        if case_id == "shutdown_during_recovery":
+            return "shutdown"
+        return "aborted"
+    return None
+
+
+def _cleanup_complete(settled: SettledFacts) -> bool:
+    return settled.reservation_count == 0 and settled.coordinator_terminal is not None
+
+
+def _rejection_observed(case_id: str, post: Mapping[str, Any]) -> bool:
+    keys = {
+        "incompatible_successor": "recovery_refused",
+        "stale_qualification": "recovery_refused",
+        "foreign_qualification": "recovery_refused",
+        "unexecuted_qualification": "recovery_refused",
+        "mismatched_path_attempt": "recovery_refused",
+        "no_successor": "truthful_abort_required",
+        "successor_prefill_failure": "successor_failure_injected",
+        "cancellation_before_recovery": "cancellation_observed_before_recovery",
+        "cancellation_during_prefill": "cancellation_observed_during_prefill",
+        "timeout_during_recovery": "recovery_deadline_exceeded",
+        "exhausted_recovery_attempts": "attempts_exhausted",
+        "stale_source_output_after_fencing": "late_publication_rejected",
+        "cleanup_authority_failure": "cleanup_authority_refused",
+        "shutdown_during_recovery": "shutdown_observed",
+    }
+    return post.get(keys[case_id]) is True
+
+
+def _cutover_identity(executed: Any, view: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The committed route identity, only when a successor cutover committed.
+
+    A reserved successor command advances the command attempt before prefill;
+    only the cutover compare-and-swap replaces the request's route identity.
+    """
+
+    identity = view.get("route_identity")
+    if not isinstance(identity, Mapping):
+        return None
+    attempt = identity.get("request_attempt")
+    if type(attempt) is not int or attempt <= executed.binding["source_attempt"]:
+        return None
+    return dict(identity)
+
+
+def derive_observation(case_id: str, executed: Any, settled: SettledFacts) -> dict[str, Any]:
+    """Derive the closed case observation from settled product facts only."""
+
+    post = dict(executed.post_state)
+    view, gateway = settled.view, settled.gateway or {}
+    source_attempt = executed.binding["source_attempt"]
+    committed = _cutover_identity(executed, view)
+    cut_over = committed is not None
+    final_attempt = None if committed is None else committed["request_attempt"]
+    common = {
+        "case_id": case_id,
+        "executed": True,
+        "ordinary_product_path": settled.gateway is not None,
+        "private_material_exposed": False,
+        "process_cleanup_complete": _cleanup_complete(settled),
+        "stale_reservation_count": settled.reservation_count,
+        "terminal_event_count": gateway.get("terminal_count"),
+    }
+    if case_id == POSITIVE_CASE:
+        facts = settled.qualification or {}
+        return {
+            **common,
+            "browser_originated": gateway.get("subscribed") is True,
+            "source_failure_observed": post.get("source_failure_observed") is True,
+            "checkpoint_frozen": (view.get("recovery_attempts") or 0) >= 1,
+            "successor_qualified": (
+                cut_over and facts.get("controlled_fault") is None
+                and facts.get("physical_challenge") == "passed"
+                and facts.get("compatibility_matches_source") is True),
+            "source_fenced": cut_over,
+            "successor_prefill": cut_over,
+            "publication_generation_cas_count": (
+                final_attempt - source_attempt if isinstance(final_attempt, int) else None),
+            "duplicated_token_count": gateway.get("duplicated_token_count"),
+            "omitted_committed_token_count": (
+                None if not gateway else
+                gateway["expected_token_index"] - gateway["committed_count"]),
+            "late_source_publication_count": gateway.get("late_source_publication_count"),
+            "logical_stream_count": 1 if settled.gateway is not None else 0,
+            "terminal_state": _terminal_state(case_id, settled),
+        }
+    if case_id == "cleanup_reservation_release":
+        return {
+            **{key: value for key, value in common.items()},
+            "release_observed": post.get("release_observed") is True,
+            "release_count": executed.armed_reservation_count,
+        }
+    base = {
+        **common,
+        "rejection_observed": _rejection_observed(case_id, post),
+        "fail_closed": not cut_over or view.get("terminal_status") != "COMPLETED",
+        "terminal_state": _terminal_state(case_id, settled),
+    }
+    if case_id == "cleanup_authority_failure":
+        base["unpublishable_suffix_discarded"] = post.get("unpublishable_suffix_discarded") is True
+    return base
+
+
+def derive_bindings(authority: ObservationAuthority, executed: Any,
+                    settled: SettledFacts) -> dict[str, Any]:
+    binding, view = executed.binding, settled.view
+    source_attempt = binding["source_attempt"]
+    committed = _cutover_identity(executed, view)
+    successor = committed is not None
+    final_attempt = None if committed is None else committed["request_attempt"]
+    deadline = settled.deadline_unix_ms
+    return {
+        "source_digest": authority.source_digest,
+        "spec_digest": authority.spec_digest,
+        "contract_digest": authority.contract_digest,
+        "operator_plan_digest": authority.operator_plan_digest,
+        "run_id": authority.run_id,
+        "deployment_id": binding["deployment_id"],
+        "deployment_epoch": binding["deployment_epoch"],
+        "request_id": executed.request_id,
+        "source_path_id": binding["path_id"],
+        "source_attempt": source_attempt,
+        "source_path_attempt": binding["path_attempt"],
+        # A path generation is the request-attempt publication generation it
+        # served; A6 cutover increments both together.
+        "source_path_generation": source_attempt,
+        "successor_path_id": committed.get("path_id") if committed else None,
+        "successor_attempt": final_attempt,
+        "successor_path_attempt": committed.get("path_attempt") if committed else None,
+        "successor_path_generation": final_attempt if successor else None,
+        "successor_qualification_generation": (
+            view.get("recovery_attempts") if successor else None),
+        # The gateway-committed prefix frozen at the fault; a case without a
+        # source fault binds the prefix the gateway committed by its terminal.
+        "committed_token_count": (
+            executed.committed_at_failure if executed.committed_at_failure is not None
+            else (settled.gateway or {}).get("committed_count")),
+        "source_absolute_deadline_unix_ms": deadline,
+        # The successor command inherits the source command's absolute deadline.
+        "successor_absolute_deadline_unix_ms": deadline if successor else None,
+    }
+
+
+def build_envelope(case_id: str, bindings: Mapping[str, Any],
+                   observation: Mapping[str, Any]) -> dict[str, Any]:
+    body = {
+        "protocol": OBSERVATION_PROTOCOL,
+        "authority": AUTHORITY,
+        "case_id": case_id,
+        "bindings": dict(bindings),
+        "observation": dict(observation),
+    }
+    body["observation_digest"] = _sha256(_canonical(body))
+    return body
+
+
+class CaseObservationRecorder:
+    """Watch executed cases until they settle, then write their observations."""
+
+    def __init__(self, *, authority: ObservationAuthority, target: Any,
+                 settle_seconds: float = 180.0,
+                 clock: Callable[[], float] = time.monotonic,
+                 sleep: Callable[[float], None] = time.sleep) -> None:
+        self._authority = authority
+        self._target = target
+        self._settle_seconds = settle_seconds
+        self._clock = clock
+        self._sleep = sleep
+        self._lock = threading.Lock()
+        self._threads: list[threading.Thread] = []
+        self._written: dict[str, str] = {}
+        self._refused: dict[str, str] = {}
+
+    @property
+    def root(self) -> Path:
+        return self._authority.evidence_output_dir / OBSERVATIONS_DIRNAME
+
+    def observe(self, executed: Any) -> None:
+        """Called by the fault target once a case executed; never blocks it."""
+
+        thread = threading.Thread(target=self._record, args=(executed,),
+                                  name=f"a6-observation-{executed.case_id}", daemon=True)
+        with self._lock:
+            self._threads.append(thread)
+        thread.start()
+
+    def _settle(self, executed: Any) -> SettledFacts:
+        target = self._target
+        deadline = self._clock() + self._settle_seconds
+        view: dict[str, Any] = {}
+        last_retained: dict[str, Any] = {}
+        while True:
+            current = target.view(executed.request_id)
+            if current.get("retained") is True:
+                last_retained = current
+                view = current
+            else:
+                # The router releases a settled request; keep its final retained
+                # view and add only what the release retained (a failure code).
+                view = {**last_retained, **{key: value for key, value in current.items()
+                                            if value is not None}, "retained": False}
+            coordinator_terminal = target.coordinator_terminal(executed.request_id)
+            settled = (view.get("retained") is False
+                       or view.get("terminal_status") in _TERMINAL_STATUSES
+                       or view.get("terminal_blocked_reason") is not None)
+            gateway_done = (target.gateway_terminal_count(executed.request_id) or 0) >= 1
+            if (settled and (gateway_done or view.get("terminal_blocked_reason"))) or (
+                    self._clock() >= deadline):
+                break
+            self._sleep(0.05)
+        marker = executed.failure_marker
+        return SettledFacts(
+            view=view,
+            gateway=gateway_facts(
+                target.service, executed.request_id,
+                failure_sequence=None if marker is None else marker[0],
+                committed_at_failure=None if marker is None else marker[1]),
+            reservation_count=target.reservation_count(executed.request_id),
+            coordinator_terminal=coordinator_terminal,
+            qualification=(None if target.qualifier is None else
+                           target.qualifier.issued_qualification_facts(executed.request_id)),
+            deadline_unix_ms=executed.deadline_unix_ms,
+        )
+
+    def _record(self, executed: Any) -> None:
+        case_id = executed.case_id
+        try:
+            settled = self._settle(executed)
+            self.write(case_id, executed, settled)
+        except Exception as error:  # a refused case simply has no observation
+            with self._lock:
+                self._refused[case_id] = str(error)[:96] or type(error).__name__
+
+    def write(self, case_id: str, executed: Any, settled: SettledFacts) -> Path:
+        if case_id not in REQUIRED_CASES:
+            raise ObservationRefused("a6_observation_case_unknown")
+        envelope = build_envelope(case_id, derive_bindings(self._authority, executed, settled),
+                                  derive_observation(case_id, executed, settled))
+        serialized = json.dumps(envelope, sort_keys=True)
+        if any(marker in serialized for marker in _PRIVATE_MARKERS):
+            raise ObservationRefused("a6_observation_private_material")
+        try:
+            validate_source_owned_observation(envelope, case_id=case_id)
+        except ValueError as error:
+            raise ObservationRefused(f"a6_observation_unsatisfied:{error}") from error
+        path = self.root / f"{case_id}.json"
+        _private_dir(self._authority.evidence_output_dir)
+        _write_once(path, envelope)
+        with self._lock:
+            self._written[case_id] = envelope["observation_digest"]
+        return path
+
+    def join(self, timeout: float) -> None:
+        deadline = self._clock() + timeout
+        with self._lock:
+            threads = list(self._threads)
+        for thread in threads:
+            thread.join(timeout=max(0.0, deadline - self._clock()))
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            return {"root": str(self.root), "written": dict(self._written),
+                    "refused": dict(self._refused), **self._authority.status()}
+
+
+def local_listener_count(port: int) -> int:
+    """1 when something still accepts on 127.0.0.1:port, else 0."""
+
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            return 1
+    except OSError:
+        return 0
+
+
+def write_cleanup_observation(*, authority: ObservationAuthority, product_port: int,
+                              physical_process_count: int, reservation_count: int) -> Path:
+    """Written by the product after its listener, route and peers are closed."""
+
+    for value in (physical_process_count, reservation_count):
+        if type(value) is not int or value < 0:
+            raise ObservationRefused("a6_cleanup_observation_unmeasured")
+    document = {
+        "protocol": CLEANUP_PROTOCOL,
+        "authority": AUTHORITY,
+        "run_id": authority.run_id,
+        "local_product_port_listener_count": local_listener_count(product_port),
+        "physical_process_count": physical_process_count,
+        "reservation_count": reservation_count,
+    }
+    path = authority.evidence_output_dir / OBSERVATIONS_DIRNAME / CLEANUP_FILENAME
+    _private_dir(authority.evidence_output_dir)
+    _write_once(path, document)
+    return path
+
+
+__all__ = [
+    "CLEANUP_PROTOCOL",
+    "CaseObservationRecorder",
+    "ObservationAuthority",
+    "ObservationRefused",
+    "SettledFacts",
+    "build_envelope",
+    "derive_bindings",
+    "derive_observation",
+    "gateway_facts",
+    "gateway_failure_marker",
+    "local_listener_count",
+    "observation_authority",
+    "write_cleanup_observation",
+]

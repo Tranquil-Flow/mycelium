@@ -3574,6 +3574,7 @@ def run_physical_server(
                 trusted_https_proxy=trusted_https_proxy,
                 request_stop=stop.set,
                 stop_requested=stop.is_set,
+                operator_plan=operator_plan,
             )
         startup_complete = True
 
@@ -3611,6 +3612,9 @@ def run_physical_server(
                 signal.signal(signum, handler)
         return 0
     finally:
+        a6_processes = (
+            () if a6_fault_control is None else _a6_session_processes(route)
+        )
         if a6_fault_control is not None:
             a6_fault_control.close()
         if openai_shim is not None:
@@ -3622,6 +3626,12 @@ def run_physical_server(
         if server is not None:
             server.server_close()
         route.close()
+        if a6_fault_control is not None and stack is not None:
+            a6_fault_control.finalize(
+                product_port=port,
+                processes=a6_processes,
+                router=stack.router,
+            )
         if not startup_complete:
             try:
                 route.cleanup()
@@ -3633,6 +3643,84 @@ def run_physical_server(
                 _emit_serve_diagnostic(cleanup_exc, stage="route_cleanup")
 
 
+class _A6FaultControlMount:
+    """The mounted receiver plus the product's source-owned A6 observations."""
+
+    def __init__(self, control: Any, recorder: Any | None, authority: Any | None) -> None:
+        self.control = control
+        self.recorder = recorder
+        self.authority = authority
+
+    @property
+    def port(self) -> int:
+        return self.control.port
+
+    @property
+    def executed_case_ids(self) -> tuple[str, ...]:
+        return self.control.executed_case_ids
+
+    def status(self) -> dict[str, Any]:
+        status = dict(self.control.status())
+        if self.recorder is not None:
+            status["observations"] = self.recorder.status()
+        return status
+
+    def close(self) -> None:
+        self.control.close()
+
+    def finalize(self, *, product_port: int, processes: Sequence[Any], router: Any) -> None:
+        """After the listener, route and peers closed: settle and write cleanup.
+
+        Case observations are settled at every shutdown. The cleanup
+        observation is measured only by the run's final shutdown, the one the
+        frozen last case (``shutdown_during_recovery``) triggers; an earlier
+        serve lifetime of the same run writes none.
+        """
+
+        if self.recorder is None or self.authority is None:
+            return
+        from mycelium_a6_case_observations import write_cleanup_observation
+
+        self.recorder.join(timeout=60.0)
+        if "shutdown_during_recovery" not in self.control.executed_case_ids:
+            return
+        try:
+            write_cleanup_observation(
+                authority=self.authority,
+                product_port=product_port,
+                physical_process_count=sum(
+                    1 for process in processes if process.returncode is None
+                ),
+                reservation_count=_a6_reservation_count(router),
+            )
+        except Exception as exc:  # never mask the serve exit; no file is written
+            _emit_serve_diagnostic(exc, stage="a6_cleanup_observation")
+
+
+def _a6_session_processes(route: Any) -> tuple[Any, ...]:
+    """The node processes this serve launched, captured before route close."""
+
+    try:
+        concrete = route._current_route_or_raise()
+    except Exception:
+        return ()
+    sessions = getattr(concrete, "_sessions", None)
+    if not isinstance(sessions, Mapping):
+        return ()
+    return tuple(
+        process
+        for process in (getattr(session, "_process", None) for session in sessions.values())
+        if process is not None
+    )
+
+
+def _a6_reservation_count(router: Any) -> int:
+    coordinator = getattr(router, "_coordinator", None)
+    if coordinator is None:
+        raise RuntimeError("a6_reservation_count_unavailable")
+    return sum(int(item["reservation_count"]) for item in coordinator.status()["requests"])
+
+
 def _a6_product_fault_seams(
     *,
     stack: LiveStack,
@@ -3640,6 +3728,7 @@ def _a6_product_fault_seams(
     request_stop: Callable[[], None],
     stop_requested: Callable[[], bool] | None = None,
     grant: str | None = None,
+    target_sink: list[Any] | None = None,
 ) -> Mapping[str, Any]:
     """Bind every A6 case to real peer/path faults on this product stack."""
 
@@ -3662,6 +3751,8 @@ def _a6_product_fault_seams(
         stop_requested=stop_requested,
         grant=grant,
     )
+    if target_sink is not None:
+        target_sink.append(target)
     return build_product_case_seams(target)
 
 
@@ -3675,8 +3766,14 @@ def _mount_a6_product_fault_control(
     trusted_https_proxy: bool,
     request_stop: Callable[[], None],
     stop_requested: Callable[[], bool] | None = None,
+    operator_plan: Path | None = None,
 ) -> Any:
-    """Mount the grant-gated A6 receiver on its own direct loopback listener."""
+    """Mount the grant-gated A6 receiver on its own direct loopback listener.
+
+    With a physical-runner operator plan the product also records the
+    source-owned case observations and the cleanup observation the A6 gate
+    reads below that plan's evidence directory.
+    """
 
     from mycelium_a6_product_fault_control import (
         ProductFaultControl,
@@ -3685,6 +3782,15 @@ def _mount_a6_product_fault_control(
     )
 
     grant = grant_from_environment()
+    targets: list[Any] = []
+    authority = None
+    if grant is not None and operator_plan is not None:
+        from mycelium_a6_case_observations import ObservationRefused, observation_authority
+
+        try:
+            authority = observation_authority(operator_plan=operator_plan, repo_root=ROOT)
+        except ObservationRefused as exc:
+            raise RuntimeError(f"startup_a6_fault_control_refused:{exc}") from exc
     try:
         control = ProductFaultControl(
             grant=grant,
@@ -3697,6 +3803,7 @@ def _mount_a6_product_fault_control(
                     request_stop=request_stop,
                     stop_requested=stop_requested,
                     grant=grant,
+                    target_sink=targets,
                 )
             ),
             product_port=product_port,
@@ -3709,7 +3816,13 @@ def _mount_a6_product_fault_control(
         raise RuntimeError(f"startup_a6_fault_control_refused:{exc}") from exc
     except OSError as exc:
         raise RuntimeError("startup_a6_fault_control_bind_failed") from exc
-    return control
+    recorder = None
+    if authority is not None and targets:
+        from mycelium_a6_case_observations import CaseObservationRecorder
+
+        recorder = CaseObservationRecorder(authority=authority, target=targets[0])
+        targets[0].add_listener(recorder.observe)
+    return _A6FaultControlMount(control, recorder, authority)
 
 
 class _DiscardSink:
