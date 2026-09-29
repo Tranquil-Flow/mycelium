@@ -6,6 +6,16 @@
 **Depends on:** A8 internet-native control and activation physically closed
 **Architecture:** Synthesized architecture sections 4.4, 4.5, 4.12, 4.14, and 4.15
 
+**[2026-09-29 owner ruling R1 — cross-reference]** A10 and A12 no longer depend on the
+whole atomic A9 close. Each depends only on the A9 non-Windows parts it names by
+frozen decision ID in its own specification
+(`2026-08-18-mycelium-a10-runtime-batching-overlap-target-verification.md` and
+`2026-08-18-mycelium-a12-generic-mobile-activation.md`). The native accelerated
+Windows provider (`accelerated_windows_backend`, section 3.4) moves to the Windows
+track: it is still required for A9's own close and for A15, but it is not a dependency
+of A10 or A12, and a Windows performance miss no longer blocks A10. Nothing in A9's own
+scope, thresholds or completion rule changes.
+
 ## 1. Outcome and claim boundary
 
 A9 replaces brand-shaped peer classes with one signed, versioned membership and
@@ -193,7 +203,8 @@ stage-local KV and exact cleanup remain proven, median decode rate is at least 2
 reference with a paired 95% confidence lower bound above 1.5x, median decode reaches at
 least 8 tokens/s, interactive p95 TTFT is at most 1,500 ms, and reliability/cleanup do
 not regress. A miss is published honestly, keeps the candidate visible but performance-
-ineligible, and blocks A10; thresholds are not weakened after measurement.
+ineligible, and blocks A10 only on a route that includes the Windows member (ruling
+R1); thresholds are not weakened after measurement.
 
 ## 4. Versioned contracts
 
@@ -345,7 +356,8 @@ internal class strings.
 - **Readiness:** separates member, profile, evidence, class qualification, artifact,
   load, accelerated Windows, int8 rematerialization, activation codec, component timing,
   single-request performance, deployment qualification, registration, and selection
-  proofs. A10 remains blocked until every A9 performance prerequisite is current.
+  proofs. A10 remains blocked until every A9 non-Windows performance prerequisite it
+  names (ruling R1) is current for its exact route.
 - **Incidents:** records migration, stale profile, changed build, unsupported capability,
   provider fallback, rematerialization, precision withdrawal, prediction drift,
   performance-floor failure, lease/revocation, lifecycle drain, and eligibility
@@ -490,6 +502,7 @@ eligibility negatives pass physically, the accelerated Windows provider and exac
 Qwen2.5-0.5B route pass the no-rematerialization, activation-codec, component-cost,
 planner, single-request performance, cleanup, browser, and negative gates, all eight
 workspaces pass live verification, full contracts, privacy, governance, security,
-Python and frontend suites are green, and one atomic A9 feature commit exists. A10 has
-direct dependencies on both A4 and this atomic A9 close. Until then this document remains
-`design_only`.
+Python and frontend suites are green, and one atomic A9 feature commit exists. Under
+the 2026-09-29 owner ruling R1, A10 and A12 depend directly on A4 and only on the A9
+non-Windows parts each names, not on this atomic A9 close; A15 still depends on it.
+Until then this document remains `design_only`.

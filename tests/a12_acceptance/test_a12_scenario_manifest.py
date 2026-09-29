@@ -41,7 +41,8 @@ def test_a12_acceptance_inventory_has_exact_direct_dependencies() -> None:
     assert {scenario["scenario_id"] for scenario in scenarios} == REQUIRED_SCENARIOS
     for scenario in scenarios:
         assert set(scenario) == SCENARIO_FIELDS
-        assert scenario["direct_dependencies"] == ["A4", "A9"]
+        # [2026-09-29 OWNER RULING R1] A9 narrowed to named non-Windows parts.
+        assert scenario["direct_dependencies"] == ["A4"]
         assert "A11" not in scenario["direct_dependencies"]
         invariants = scenario["required_invariants"]
         assert isinstance(invariants, list) and 1 <= len(invariants) <= 16

@@ -74,7 +74,26 @@ REQUIRED_GATE_FAMILIES = {
     "artifact",
     "parity",
 }
-EXACT_GATE_DEPENDENCIES = {"A4", "A9"}
+# [2026-09-29 OWNER RULING R1] A9 is narrowed to its non-Windows parts: the exact
+# gate-level dependency is A4 alone and the consumed A9 parts are recorded as a
+# narrowed part-level dependency (``narrowed_part_dependencies``).
+EXACT_GATE_DEPENDENCIES = {"A4"}
+A9_CONSUMED_PARTS = [
+    "separated_capability_authority",
+    "signed_capability_binding",
+    "unknown_remains_ineligible",
+    "native_synthetic_evidence_separation",
+    "class_specific_qualification",
+    "runtime_backend_registry",
+    "dynamic_ui_projection",
+]
+A9_NOT_DEPENDENCIES = [
+    "accelerated_windows_backend",
+    "persistent_int8_execution",
+    "qualified_activation_precision",
+    "component_aware_performance_authority",
+    "identity_preserving_v2_migration",
+]
 RUNG_FIELDS = {"rung_id", "authority", "requires", "grants", "cannot_grant"}
 DECISION_FIELDS = {"decision_id", "required_invariants", "forbidden_shortcuts"}
 CASE_FIELDS = {
@@ -200,13 +219,37 @@ def test_a12_inventory_is_closed_design_only_and_a9_input_bound() -> None:
     ]
 
 
-def test_a12_generic_closure_requires_exactly_a4_and_a9_not_a11() -> None:
+def test_a12_generic_closure_requires_exactly_a4_and_the_narrowed_a9_parts_not_a11() -> None:
+    """[2026-09-29 OWNER RULING R1] A12 depends on A4 plus named non-Windows A9 parts."""
+
     inventory = _inventory()
     policy = inventory["dependency_policy"]
-    assert policy["exact_gate_dependencies"] == ["A4", "A9"]
+    assert policy["exact_gate_dependencies"] == ["A4"]
     assert set(policy["forbidden_blanket_dependencies"]) >= {"A11"}
+    assert policy["narrowed_part_dependencies"] == [
+        {
+            "gate": "A9",
+            "ruling": "owner_ruling_2026_09_29_r1_a9_dependency_narrowed_to_non_windows_parts",
+            "consumed_parts": A9_CONSUMED_PARTS,
+            "not_dependencies": A9_NOT_DEPENDENCIES,
+            "moved_to_track": {"accelerated_windows_backend": "windows"},
+        }
+    ]
+    a9_decisions = {
+        decision["decision_id"]
+        for decision in json.loads(
+            (ROOT / "tests" / "a9_acceptance" / "inventory.v1.json").read_text("utf-8")
+        )["decisions"]
+    }
+    # The consumed and excluded parts partition the frozen A9 decision set exactly,
+    # so no A9 decision is silently dropped from both sides.
+    assert set(A9_CONSUMED_PARTS) | set(A9_NOT_DEPENDENCIES) == a9_decisions
+    assert not set(A9_CONSUMED_PARTS) & set(A9_NOT_DEPENDENCIES)
+    specification = SPECIFICATION.read_text("utf-8")
+    for part in A9_CONSUMED_PARTS:
+        assert f"A9.{part}" in specification
 
-    assert _dependency_findings(inventory, {"A4", "A9"}, set()) == set()
+    assert _dependency_findings(inventory, {"A4"}, set()) == set()
     assert "a12_gate_dependency_incomplete:A4" in _dependency_findings(
         inventory, {"A9", "A11"}, set()
     )
@@ -215,17 +258,23 @@ def test_a12_generic_closure_requires_exactly_a4_and_a9_not_a11() -> None:
 def test_a12_optional_draft_claim_fails_closed_until_a11_closes() -> None:
     inventory = _inventory()
     claim = "speculative_draft_worker"
-    assert _dependency_findings(inventory, {"A4", "A9"}, {claim}) == {
+    assert _dependency_findings(inventory, {"A4"}, {claim}) == {
         "a12_claim_dependency_incomplete:speculative_draft_worker:A11"
     }
-    assert _dependency_findings(inventory, {"A4", "A9", "A11"}, {claim}) == set()
+    assert _dependency_findings(inventory, {"A4", "A11"}, {claim}) == set()
 
 
 def test_a12_dependency_mutations_reject_blanket_a11_and_missing_claim_guard() -> None:
     inventory = _inventory()
     inventory["dependency_policy"]["exact_gate_dependencies"].append("A11")
     assert "a12_gate_dependencies_not_exact" in _dependency_findings(
-        inventory, {"A4", "A9", "A11"}, set()
+        inventory, {"A4", "A11"}, set()
+    )
+
+    inventory = _inventory()
+    inventory["dependency_policy"]["exact_gate_dependencies"].append("A9")
+    assert "a12_gate_dependencies_not_exact" in _dependency_findings(
+        inventory, {"A4", "A9"}, set()
     )
 
     inventory = _inventory()
@@ -233,7 +282,7 @@ def test_a12_dependency_mutations_reject_blanket_a11_and_missing_claim_guard() -
         "dependencies"
     ] = []
     assert "a12_claim_dependency_policy_not_exact" in _dependency_findings(
-        inventory, {"A4", "A9"}, {"speculative_draft_worker"}
+        inventory, {"A4"}, {"speculative_draft_worker"}
     )
 
 
@@ -370,6 +419,10 @@ def test_a12_platform_requirements_freeze_family_bound_initial_claim_and_apple_f
             "physical_device_required": True,
             "simulator_may_qualify": False,
             "ios_ipados_qualification_carryover_allowed": False,
+            # [2026-09-29 OWNER RULING R2] Apple mobile is deferred, not deleted.
+            "initial_build_claim_scope": "deferred",
+            "deferral_ruling": "owner_ruling_2026_09_29_r2_apple_mobile_deferred_android_only",
+            "deferred_until": "before_any_ios_or_ipados_claim_of_any_role",
         },
         "excluded_normal_product_paths": ["termux", "adb", "ssh"],
     }

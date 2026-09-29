@@ -77,15 +77,17 @@ ACCEPTANCE_SCENARIOS = "tests/a12_acceptance/scenarios.v1.json"
 # are re-pinned in place whenever an input is amended: both were re-pinned on
 # 2026-09-27 with the owner's ``two_android_family_proof`` narrowing for the initial
 # build (status/decisions.log) — the amendment is a claim narrowing, never a digest
-# chase, and it keeps ``one_phone_generic_android_claim`` forbidden.
+# chase, and it keeps ``one_phone_generic_android_claim`` forbidden.  All three were
+# re-pinned on 2026-09-29 with the owner's rulings R1 (A9 dependency narrowed to its
+# named non-Windows parts) and R2 (Apple mobile deferred; A12 is Android-only).
 SPECIFICATION_DIGEST = (
-    "sha256:d1c8fbbe2852966522528f55c7e73e6a8054d96f69ef8aab00827cffe2c81197"
+    "sha256:b3c23c040991a88a6f1556cf19b27c33ad454d5f42b9ceebdfc409131bd6a18f"
 )
 ACCEPTANCE_INVENTORY_DIGEST = (
-    "sha256:42af758fbcdc03b0141fef04d464c1955ecfd681d88c3abf8bfe0207882245dc"
+    "sha256:045f38bf66c73849f8cfe474f674204cfa2bfb80aee2558f2d6b1b974e705eec"
 )
 ACCEPTANCE_SCENARIOS_DIGEST = (
-    "sha256:66d82d9683fc1132051dbd2d8a6fdb6d356a08d6b09cccb7172b25652b2fc9b2"
+    "sha256:45b9253d9c04be3f45a88919a0dd08677c88e0bcc21300f4786f3249af2f7bbf"
 )
 
 CLAIM_BOUNDARY = (

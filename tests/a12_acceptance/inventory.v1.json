@@ -20,7 +20,30 @@
     }
   ],
   "dependency_policy": {
-    "exact_gate_dependencies": ["A4", "A9"],
+    "exact_gate_dependencies": ["A4"],
+    "narrowed_part_dependencies": [
+      {
+        "gate": "A9",
+        "ruling": "owner_ruling_2026_09_29_r1_a9_dependency_narrowed_to_non_windows_parts",
+        "consumed_parts": [
+          "separated_capability_authority",
+          "signed_capability_binding",
+          "unknown_remains_ineligible",
+          "native_synthetic_evidence_separation",
+          "class_specific_qualification",
+          "runtime_backend_registry",
+          "dynamic_ui_projection"
+        ],
+        "not_dependencies": [
+          "accelerated_windows_backend",
+          "persistent_int8_execution",
+          "qualified_activation_precision",
+          "component_aware_performance_authority",
+          "identity_preserving_v2_migration"
+        ],
+        "moved_to_track": {"accelerated_windows_backend": "windows"}
+      }
+    ],
     "transitive_dependencies": ["A3", "A8"],
     "optional_claim_prerequisites": [
       {
@@ -138,7 +161,10 @@
       "initial_inference_eligibility": "foreground_active_only",
       "physical_device_required": true,
       "simulator_may_qualify": false,
-      "ios_ipados_qualification_carryover_allowed": false
+      "ios_ipados_qualification_carryover_allowed": false,
+      "initial_build_claim_scope": "deferred",
+      "deferral_ruling": "owner_ruling_2026_09_29_r2_apple_mobile_deferred_android_only",
+      "deferred_until": "before_any_ios_or_ipados_claim_of_any_role"
     },
     "excluded_normal_product_paths": ["termux", "adb", "ssh"]
   },

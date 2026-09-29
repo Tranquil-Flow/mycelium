@@ -1,7 +1,8 @@
 # Mycelium A10 Runtime Batching, Pipeline Overlap, and Target Verification Specification
 
 **Status:** `design_only`; dependency-ready acceptance boundary; production integration
-waits for atomic A4 and A9 closure
+waits for atomic A4 closure and for the A9 non-Windows parts named in the 2026-09-29
+owner ruling R1 below
 
 **Gate:** A10
 
@@ -12,9 +13,39 @@ batching notes in `docs/router-phase-aware-batching.md`
 
 **Depends on:** A3 qualified useful target; A4 concurrent dispatcher, interruptible
 commands, scoped liveness, bounded cleanup, and ordinary browser request path; A9
-physically qualified platform-neutral runtime profiles, accelerated Windows backend,
-efficient int8 execution, activation codec, component/edge timing, and single-request
-performance baseline
+physically qualified platform-neutral runtime profiles, efficient int8 execution,
+activation codec, component/edge timing, and single-request performance baseline for
+the exact participating route (the A9 non-Windows parts; see the ruling below). The
+accelerated Windows backend is **not** an A10 dependency.
+
+**[2026-09-29 owner ruling R1 — A10's A9 dependency NARROWED to A9's non-Windows
+parts, not deleted]** A10 consumes only the following A9 parts, named by their frozen
+A9 decision IDs (`tests/a9_acceptance/inventory.v1.json`), each bound to the exact
+members, placements, edges and runtimes of the A10 route:
+
+- `A9.separated_capability_authority`, `A9.signed_capability_binding`,
+  `A9.unknown_remains_ineligible`, `A9.native_synthetic_evidence_separation`,
+  `A9.class_specific_qualification` and `A9.runtime_backend_registry` — the physically
+  qualified platform-neutral runtime profiles and class qualification of the
+  participating members and their registered runtime backends;
+- `A9.persistent_int8_execution` — whenever the benchmarked representation is int8
+  weights: zero decode-time full-weight materialization on the participating runtime;
+- `A9.qualified_activation_precision` — for every route edge that carries a
+  reduced-precision activation codec;
+- `A9.component_aware_performance_authority` — component and edge timing and the
+  frozen single-request performance baseline of the exact A10 route.
+
+`A9.accelerated_windows_backend` is **not** an A10 dependency: the native accelerated
+Windows provider moves to the Windows track, and A10 neither waits for it nor claims
+it. `A9.identity_preserving_v2_migration` and `A9.dynamic_ui_projection` are not
+consumed either (A10 needs current v2 profiles of its own members, not the migration
+record of every platform, and owns its own eight-workspace contract). At the ledger,
+A4 is therefore A10's only direct gate dependency (A3 stays transitive through A4);
+the parts above are a narrowed part-level dependency recorded here and checked by
+`scripts/mycelium_completion_audit.py`. The A10 qualification bundle binds current
+evidence for every named part; an absent, stale or failed part blocks A10 exactly as
+the whole-gate dependency did. The dependency reactivates at whole-gate granularity for
+any A10 claim made on a route that includes a Windows member.
 
 **Architecture:** Synthesized architecture sections 4.4 and 4.7; provides the verifier prerequisite for
 A11
@@ -57,7 +88,9 @@ performance, overlap, runtime-batch, target-verifier, browser, or physical claim
   grouping. The stage runtime owns final membership, actual backend batch execution,
   per-member results, and physical timing.
 - A9 owns runtime/provider performance readiness, activation-codec qualification,
-  component and edge service observations, and the frozen single-request baseline. A10
+  component and edge service observations, and the frozen single-request baseline
+  (for the exact non-Windows route under ruling R1; the accelerated Windows provider
+  is not consumed). A10
   may change only its declared batching/overlap policy during the paired benchmark; it
   cannot hide backend, precision, materialization, component-placement, or transport
   changes inside a scheduling result.

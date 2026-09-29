@@ -6,7 +6,7 @@
       "scenario_id": "ordinary_mobile_stage_after_a4_a9",
       "claim_kind": "required_a12_closure",
       "role": "qualified_model_stage",
-      "direct_dependencies": ["A4", "A9"],
+      "direct_dependencies": ["A4"],
       "a11_required": false,
       "expected_eligibility": "eligible_after_exact_role_gates",
       "required_invariants": [
@@ -20,7 +20,7 @@
       "scenario_id": "ordinary_mobile_probe_after_a4_a9",
       "claim_kind": "required_a12_closure",
       "role": "probe_contributor",
-      "direct_dependencies": ["A4", "A9"],
+      "direct_dependencies": ["A4"],
       "a11_required": false,
       "expected_eligibility": "eligible_after_exact_role_gates",
       "required_invariants": [
@@ -33,7 +33,7 @@
       "scenario_id": "mobile_draft_before_a11",
       "claim_kind": "optional_draft_claim",
       "role": "speculative_draft_worker",
-      "direct_dependencies": ["A4", "A9"],
+      "direct_dependencies": ["A4"],
       "a11_required": true,
       "expected_eligibility": "ineligible_a11_physical_qualification_required",
       "required_invariants": [
@@ -46,7 +46,7 @@
       "scenario_id": "mobile_draft_after_a11",
       "claim_kind": "optional_draft_claim",
       "role": "speculative_draft_worker",
-      "direct_dependencies": ["A4", "A9"],
+      "direct_dependencies": ["A4"],
       "a11_required": true,
       "expected_eligibility": "eligible_after_a11_and_exact_draft_gates",
       "required_invariants": [

@@ -3,14 +3,59 @@
 **Status:** `design_only`; dependency-ready mobile qualification boundary
 **Gate:** A12
 **Parent:** `2026-08-11-mycelium-completion-plan.md`
-**Depends on:** A4 scoped lifecycle and A9 membership/capability v2 physically closed.
-A8 is transitive through A9. A11 is not a blanket gate prerequisite; it must be
-physically closed before an optional mobile draft-worker claim.
+**Depends on:** A4 scoped lifecycle, and the A9 non-Windows membership/capability v2
+parts named in the 2026-09-29 owner ruling R1 below, physically closed for the exact
+mobile platform and role claimed. A8 is transitive through those A9 parts. The A9
+accelerated Windows provider is **not** an A12 dependency. A11 is not a blanket gate
+prerequisite; it must be physically closed before an optional mobile draft-worker
+claim.
 **Reviewed design input:** A9 acceptance commit
 `0f79a2b1a7f553499579b24c6c9362e801809dab`; its separated authority,
 signed-capability, unknown-ineligible, native/synthetic, role-specific qualification,
 and dynamic-projection decisions are adopted as design inputs, not execution evidence
 **Architecture:** Synthesized architecture sections 4.5, 4.10, 4.12, 4.14, and 4.15
+
+**[2026-09-29 owner ruling R1 — A12's A9 dependency NARROWED to A9's non-Windows
+parts, not deleted]** A12 consumes only the following A9 parts, named by their frozen
+A9 decision IDs (`tests/a9_acceptance/inventory.v1.json`), for the exact mobile member,
+platform family, runtime and role claimed:
+
+- `A9.separated_capability_authority` — separately authored membership, capability,
+  class-qualification and eligibility authorities (rungs 1 and 2 of section 4);
+- `A9.signed_capability_binding` — the member-signed v2 peer profile and capability
+  reports bound to membership generation, incarnation and expiry;
+- `A9.unknown_remains_ineligible` — missing or denied platform observations remain
+  `unknown` and block;
+- `A9.native_synthetic_evidence_separation` — source kind per capability family;
+- `A9.class_specific_qualification` — the exact platform/runtime/transport/build role
+  qualifier (`a9_role_class_qualifier`);
+- `A9.runtime_backend_registry` — the separately registered native mobile runtime; and
+- `A9.dynamic_ui_projection` — the registry-driven all-eight projection the mobile
+  rungs extend.
+
+These are the six A9 design inputs adopted in section 10.1 plus the runtime registry
+that section 3 requires. `A9.accelerated_windows_backend`,
+`A9.persistent_int8_execution`, `A9.qualified_activation_precision`,
+`A9.component_aware_performance_authority` and `A9.identity_preserving_v2_migration`
+are **not** A12 dependencies: the native accelerated Windows provider moves to the
+Windows track, mobile performance is A12's own sustainable-gate evidence, and a new
+mobile member enrolls directly at v2. At the ledger, A4 is therefore A12's only direct
+gate dependency; the parts above are a narrowed part-level dependency recorded here and
+checked by `scripts/mycelium_completion_audit.py`. The A12 qualification bundle binds
+current evidence for every named part; an absent, stale or failed part blocks the
+affected rung exactly as the whole-gate dependency did.
+
+**[2026-09-29 owner ruling R2 — A12 iOS/iPadOS DEFERRED; A12 narrowed to Android-only,
+not deleted]** The initial-build A12 claim is Android-only, and within Android it stays
+family-bound per the 2026-09-27 ruling below (Google Pixel 8 Pro, `husky`, SDK 36,
+Android 16). Every iOS and iPadOS requirement of this specification — section 7, the
+`apple_foreground_initial` decision, the section 11 iOS/iPadOS positive and negative
+gates and the Apple clause of section 12 — is **deferred, not deleted**: it reactivates
+before any iOS or iPadOS claim of any role, exactly as written. Until then no Apple
+platform family is claimed, qualified or projected as eligible; an Apple member remains
+visibly ineligible with the deferral as its blocker, and a simulator, an Android result
+or a macOS result can never stand in for it. This is the same stance as the second-
+Android-family deferral.
 
 ## 1. Outcome and claim boundary
 
@@ -215,6 +260,9 @@ mobile lifecycle as corruption.
 
 ## 7. iOS and iPadOS requirements
 
+**[2026-09-29 owner ruling R2: this whole section is deferred for the initial build;
+not deleted. It reactivates before any iOS or iPadOS claim.]**
+
 The Apple-mobile path is a native signed application. It embeds authenticated transport
 and a separately qualified native model runtime; no Python, Termux, shell, or executable
 download assumption is permitted. Model artifacts remain inert assignment-local data and
@@ -312,7 +360,7 @@ reuse the A9 commit as mobile execution, device, qualification, or completion ev
 | `four_rung_authority` | Signed membership, capability eligibility, artifact readiness, and operation qualification remain separately authored and generation-bound. |
 | `generic_platform_architecture` | Registered platform/runtime/transport/operation capabilities drive behavior; Pixel or other brand/model text never does. |
 | `two_android_family_proof` | **Amended 2026-09-27 (owner ruling):** the initial-build claim is family-bound to one named family (Google Pixel 8 Pro, `husky`, SDK 36, Android 16). A *general* Android role still requires two independently manufactured families using the same native product contracts and role gates; that requirement is deferred, not deleted, and reactivates before any general/cross-vendor Android claim, including any public or swarm-scope claim. `one_phone_generic_android_claim` remains a forbidden shortcut. |
-| `apple_foreground_initial` | Initial iOS/iPadOS inference eligibility is foreground-active-only and exact-platform-bound. |
+| `apple_foreground_initial` | Initial iOS/iPadOS inference eligibility is foreground-active-only and exact-platform-bound. **Deferred 2026-09-29 (owner ruling R2), not deleted:** it reactivates before any iOS or iPadOS claim; until then no Apple family is claimed. |
 | `sustainable_mobile_gates` | Thermal, power, memory, lifecycle, network, artifact, and parity gates remain independent, fresh, sustainable, and fail closed. |
 | `a11_bound_optional_draft` | Mobile draft work is optional and requires the exact physically closed A11 target-authoritative binding; it never grants stage eligibility. |
 | `native_product_path_only` | The signed native application is the ordinary product path; Termux, ADB, and SSH remain development/conformance tools only. |
@@ -371,6 +419,8 @@ unassigned data, duplicate output, route-global failure, or incumbent displaceme
 
 ### iOS/iPadOS positive
 
+**[2026-09-29 owner ruling R2: deferred for the initial build; not deleted.]**
+
 On an available physical iOS or iPadOS device, use the signed native app with embedded
 authenticated transport and native runtime. Join off-tailnet with no SSH, prove
 foreground-active membership and the selected exact role, execute native parity and
@@ -379,6 +429,8 @@ draft claim, require real assigned acquisition, runtime work, browser-visible ev
 and output authority appropriate to that role.
 
 ### iOS/iPadOS negative
+
+**[2026-09-29 owner ruling R2: deferred for the initial build; not deleted.]**
 
 Background/suspend the app during bounded work, trigger or observe memory and thermal
 withdrawal using a reviewed non-destructive harness, interrupt network access, revoke
@@ -407,10 +459,13 @@ counters; the A9 reviewed design-input hash and A12 acceptance-inventory digest;
 eight UI checks; and contract, privacy, governance, security, Python, native-platform
 and frontend regression outputs.
 
-A12 closes only after its exact direct prerequisites A4 and A9 are closed; two Android
-device families pass the exact general-Android role claimed; an available physical iOS
+A12 closes only after its exact direct prerequisite A4 is closed and the A9 non-Windows
+parts named by ruling R1 are current for the exact platform and role; two Android
+device families pass the exact general-Android role claimed (family-bound to one named
+family for the initial build, 2026-09-27 ruling); an available physical iOS
 or iPadOS device passes
-its exact named role; native versus synthetic truth remains separate; lifecycle,
+its exact named role (deferred for the initial build by ruling R2; it reactivates
+before any Apple claim); native versus synthetic truth remains separate; lifecycle,
 thermal/power, memory, network-loss, cancellation, revocation, artifact, parity and
 cleanup negatives pass; the UI verifies all relevant live states; and one atomic A12
 feature commit exists. Until then A12 remains `design_only` and every mobile role not
