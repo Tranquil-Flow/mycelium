@@ -301,6 +301,8 @@ class RouterSessionBackend:
                 if is_cancelled() or self._is_cancelled(request_id):
                     self._cancel_once(request_id)
                 status = self._router.request_status(request_id)
+                if status in ("COMPLETED", "CANCELLED", "FAILED"):
+                    self._capture_terminal_attempt(request_id, emit_token)
                 if status == "COMPLETED":
                     return "completed"
                 if status == "CANCELLED":
@@ -334,6 +336,8 @@ class RouterSessionBackend:
                     checkpoint = freeze(**frozen_binding)
                     if recover(request_id, checkpoint) is not True:
                         recovery_status = self._router.request_status(request_id)
+                        if recovery_status in ("CANCELLED", "FAILED"):
+                            self._capture_terminal_attempt(request_id, emit_token)
                         if recovery_status == "CANCELLED":
                             return "cancelled"
                         if recovery_status == "TERMINAL_BLOCKED":
@@ -355,6 +359,19 @@ class RouterSessionBackend:
             if admitted:
                 self._cancel_once(request_id)
             raise
+
+    def _capture_terminal_attempt(self, request_id: str, emit_token: TokenEmitter) -> None:
+        """Bind the command that owns this terminal before release."""
+        try:
+            source = getattr(self._router, "terminal_command_identity", None)
+            bind = getattr(emit_token, "bind_terminal_command_identity", None)
+            if callable(source) and callable(bind):
+                identity = source(request_id)
+                if identity is not None:
+                    bind(identity)
+        except Exception:
+            # A receipt must never obstruct the user's terminal event.
+            pass
 
     def _capture_terminal_blocked(self, request_id: str, emit_token: TokenEmitter) -> None:
         """Snapshot the outcome before release; no later attempt lookup."""

@@ -85,9 +85,16 @@ def validate_observation(document: Mapping[str, Any]) -> dict[str, Any]:
         if (authority["request_id"] != binding["request_id"]
             or authority["request_attempt"] != binding["request_attempt"]):
             raise ValueError("cleanup_v2_authority_binding_mismatch")
+    # OWNER RULING 2026-09-27 "A6 CASE15 COUNT-LAYER CLAUSE AMENDED"
+    # (status/decisions.log): FROM terminal_cas_count == 0 TO terminal_cas_count
+    # == 1, together with complete cleanup and zero stale reservations (both
+    # still required above). Releasing the reservations IS the committed command
+    # terminal, so zero was unsatisfiable on every real path. This is a clause
+    # change, not a weakened assertion: the cardinality stays exact, and a claimed
+    # complete cleanup with zero committed CAS (or more than one) stays refused.
     if (not _int(command["registered_command_count"], 1)
         or not _int(command["terminal_cas_count"], 0)
-        or command["terminal_cas_count"] != 0):
+        or command["terminal_cas_count"] != 1):
         raise ValueError("cleanup_v2_command_terminal_invalid")
     if (not _int(gateway["terminal_event_count"], 0)
         or gateway["terminal_event_count"] != 1

@@ -82,6 +82,10 @@ class _Session:
     terminal_count: int = 0
     blocked_identity: tuple[str, int, str, str] | None = None
     terminal_provenance: tuple[str, int, str, str] | None = None
+    # Router command identity bound by the backend before release; the
+    # gateway's terminal receipt below is the authoritative attempt.
+    terminal_command_identity: tuple[str, int, str, str] | None = None
+    terminal_attempt: tuple[str, int, str, str] | None = None
     maximum_buffered: int = 0
     active_subscription: bool = False
     cancellation_started: bool = False
@@ -166,6 +170,17 @@ class _GatewayEmission:
         with self._session.condition:
             if self._session.terminal_event is None and self._session.blocked_identity is None:
                 self._session.blocked_identity = identity
+
+    def bind_terminal_command_identity(self, identity: object) -> None:
+        """Private snapshot of the command that owns this run's terminal."""
+        if (not isinstance(identity, tuple) or len(identity) != 4
+                or identity[0] != self._session.request_id
+                or type(identity[1]) is not int or identity[1] < 1
+                or not all(isinstance(item, str) and item for item in identity[2:])):
+            return
+        with self._session.condition:
+            if self._session.terminal_event is None:
+                self._session.terminal_command_identity = identity
 
     def freeze_replay_checkpoint(
         self,
@@ -612,6 +627,16 @@ class RequestGatewayService:
         with session.condition:
             return session.terminal_provenance
 
+    def terminal_attempt_receipt(self, request_id: str) -> tuple[str, int, str, str] | None:
+        """(request, attempt, path digest, command) the published terminal belongs to.
+
+        Written once, atomically with the terminal event, from the command
+        identity the backend bound before release; never a later router lookup.
+        """
+        session = self._get_session(request_id)
+        with session.condition:
+            return session.terminal_attempt
+
     def freeze_replay_checkpoint(
         self,
         request_id: str,
@@ -1013,6 +1038,9 @@ class RequestGatewayService:
             session.terminal_count += 1
             if kind == "failed" and code == "request_cleanup_unproven":
                 session.terminal_provenance = session.blocked_identity
+                session.terminal_attempt = session.blocked_identity
+            else:
+                session.terminal_attempt = session.terminal_command_identity
             session.blocked_identity = None
             self._metrics.increment(
                 {

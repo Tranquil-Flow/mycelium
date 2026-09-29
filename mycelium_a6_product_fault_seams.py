@@ -155,7 +155,8 @@ class LiveProductFaultTarget:
     def placement_nodes(self) -> dict[str, str]:
         return dict(self.router.a6_placement_node_ids())
 
-    def wait(self, predicate: Callable[[], Any], seconds: float | None = None) -> Any:
+    def wait(self, predicate: Callable[[], Any], seconds: float | None = None,
+             poll_seconds: float | None = None) -> Any:
         deadline = self._clock() + (self._wait_seconds if seconds is None else seconds)
         while True:
             value = predicate()
@@ -163,7 +164,13 @@ class LiveProductFaultTarget:
                 return value
             if self._clock() >= deadline:
                 return None
-            self._sleep(self._poll)
+            self._sleep(self._poll if poll_seconds is None else poll_seconds)
+
+    def gateway_max_tokens(self, request_id: str) -> int | None:
+        try:
+            return int(self.service._get_session(request_id).max_new_tokens)
+        except Exception:
+            return None
 
     # -- the shared admitted precondition -------------------------------------
 
@@ -573,24 +580,42 @@ class ProductCaseSeam:
         }
 
     def _apply_cleanup_authority_failure(self, record):
+        """Owner-approved v2 shape: the releasing attempt is the successor.
+
+        Fail the source, let the ordinary product cut over to its successor,
+        then stall the successor's peers once the last token is generated so
+        the route cannot prove request cleanup. The cleanup authority must
+        refuse to publish a result (TERMINAL_BLOCKED, one failure notice); the
+        stalled peers are resumed afterwards so a late cleanup proof can
+        release the retained reservations with exactly one command terminal.
+        """
+
         target = self._target
-        others = sorted(set(target.placement_nodes().values()) - {record.source_node_id})
-        coordinator = getattr(target.router, "_coordinator", None)
-        if coordinator is None:
-            raise FaultRejected("a6_fault_coordinator_unavailable")
-        # Lose the participants once decoding is done and request cleanup has
-        # begun, so the route cannot prove cleanup: the cleanup authority must
-        # refuse to publish a terminal for work it cannot prove released.
-        done = target.wait(lambda: coordinator.phase(record.request_id) == "cleanup",
-                           seconds=120.0)
-        if done:
-            for node in others or [record.source_node_id]:
-                target.signal_node(node, signal.SIGKILL)
-        view = target.wait_terminal(record, seconds=120.0)
-        refused = view.get("terminal_blocked_reason") is not None or (
-            view.get("recovery_failure_reason") == "cleanup_authority_failed")
+        target.wait(lambda: (lambda m: m is not None and m[1] >= 1)(
+            target.gateway_committed(record.request_id)), seconds=2.0)
+        target.fail_source(record)
+        source_attempt = record.binding["source_attempt"]
+        cut_over = target.wait(lambda: (lambda v: (
+            isinstance(v.get("route_identity"), Mapping)
+            and (v["route_identity"].get("request_attempt") or 0) > source_attempt))(
+            target.view(record.request_id)), seconds=120.0)
+        limit = target.gateway_max_tokens(record.request_id)
+        stalled = False
+        if cut_over and isinstance(limit, int):
+            generated = target.wait(lambda: (
+                target.view(record.request_id).get("token_count", 0) >= limit
+                or target.view(record.request_id).get("terminal_status") is not None),
+                seconds=120.0, poll_seconds=0.001)
+            if generated and target.view(record.request_id).get("terminal_status") is None:
+                for node in target.successor_nodes(record, 1):
+                    target.signal_node(node, signal.SIGSTOP)
+                    stalled = True
+        view = (target.wait(lambda: (lambda v: v if v.get("terminal_blocked_reason")
+                                     else None)(target.view(record.request_id)),
+                            seconds=120.0) if stalled else None) or {}
+        refused = view.get("terminal_blocked_reason") is not None
         return {
-            "cleanup_authority_refused": bool(done) and refused,
+            "cleanup_authority_refused": refused,
             # Nothing past the gateway-delivered cursor is ever published.
             "unpublishable_suffix_discarded": (
                 refused and view.get("cursor") == view.get("token_count")),

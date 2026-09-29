@@ -33,8 +33,10 @@ def sample():
         "rejection_observed": True, "fail_closed": True,
         "terminal_state": "TERMINAL_BLOCKED", "unpublishable_suffix_discarded": True,
         "process_cleanup_complete": True, "stale_reservation_count": 0,
+        # Owner ruling 2026-09-27 ("A6 CASE15 COUNT-LAYER CLAUSE AMENDED"): the
+        # releasing attempt commits exactly one terminal CAS (was zero).
         "command_authority": {"request_id": request, "request_attempt": attempt,
-                              "registered_command_count": 1, "terminal_cas_count": 0},
+                              "registered_command_count": 1, "terminal_cas_count": 1},
         "gateway_authority": {"request_id": request, "request_attempt": attempt,
                               "terminal_event_count": 1, "terminal_kind": "failed",
                               "terminal_code": "request_cleanup_unproven"},
@@ -57,7 +59,8 @@ def resign(doc):
 
 def test_v2_accepts_distinct_bound_authorities_and_v1_remains_rejecting():
     doc = sample()
-    assert validate_observation(doc)["command_authority"]["terminal_cas_count"] == 0
+    # Clause amended by the owner ruling of 2026-09-27: exactly one CAS, never 0.
+    assert validate_observation(doc)["command_authority"]["terminal_cas_count"] == 1
     old = {k: v for k, v in doc["observation"].items() if k not in ("command_authority", "gateway_authority")}
     old["terminal_event_count"] = 1
     with pytest.raises(ValueError, match="physical_observation_invalid"):
@@ -73,7 +76,10 @@ def test_v2_accepts_distinct_bound_authorities_and_v1_remains_rejecting():
     (("gateway_authority", "request_attempt"), 1),
     (("command_authority", "request_id"), "foreign"),
     (("command_authority", "request_attempt"), 3),
-    (("command_authority", "terminal_cas_count"), 1),
+    # 2026-09-27 ruling: zero CAS behind a claimed complete cleanup stays refused,
+    # and the cardinality is exact (more than one is refused too).
+    (("command_authority", "terminal_cas_count"), 0),
+    (("command_authority", "terminal_cas_count"), 2),
     (("command_authority", "terminal_cas_count"), None),
     (("command_authority", "registered_command_count"), 0),
     (("command_authority", "registered_command_count"), None),

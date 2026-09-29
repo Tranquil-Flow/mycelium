@@ -45,6 +45,14 @@ REQUIRED_CLEANUP_CHECKS = (
 EXPECTED_PLACEMENTS = ("node-0", "node-2")
 EXPECTED_ORIGIN = "http://127.0.0.1:8787"
 TRUSTED_CASE_RUNNER = Path(__file__).resolve().with_name("run_a6_recovery_case.py")
+# Owner ruling R6: the cleanup-authority-failure case is admitted under the
+# owner-approved v2 contract (docs/superpowers/specs/
+# 2026-09-25-mycelium-a6-cleanup-authority-v2.md, clause amended 2026-09-27).
+# The frozen v1 runner stays admissible for it; its v1 predicate is unchanged.
+TRUSTED_CASE_RUNNER_V2 = Path(__file__).resolve().with_name("run_a6_recovery_case_v2.py")
+V2_CASES = ("cleanup_authority_failure",)
+V1_RECORD_PROTOCOL = "mycelium.a6_physical_recovery_case.v1"
+V2_RECORD_PROTOCOL = "mycelium.a6_physical_recovery_case.v2"
 
 
 def _fail(code: str) -> None:
@@ -113,13 +121,28 @@ def validate_plan(document: Mapping[str, Any]) -> dict[str, Any]:
             "--operator-plan",
             str(document["operator_plan"]),
         )
-        if argv != expected_argv:
+        expected_v2_argv = (
+            sys.executable,
+            str(TRUSTED_CASE_RUNNER_V2),
+            "--case",
+            case_id,
+            "--contract-version",
+            "v2",
+            "--operator-plan",
+            str(document["operator_plan"]),
+        )
+        if argv == expected_argv:
+            contract_version = "v1"
+        elif case_id in V2_CASES and argv == expected_v2_argv:
+            contract_version = "v2"
+        else:
             _fail(f"physical_case_runner_untrusted:{case_id}")
         cases.append(
             {
                 "case_id": case_id,
                 "argv": list(argv),
                 "evidence_file": str(evidence_file),
+                "contract_version": contract_version,
             }
         )
 
@@ -170,6 +193,7 @@ def preparation_plan() -> dict[str, Any]:
         "expected_product_port": 8787,
         "expected_placements": list(EXPECTED_PLACEMENTS),
         "required_cases": list(REQUIRED_CASES),
+        "v2_admissible_cases": list(V2_CASES),
         "required_cleanup_checks": list(REQUIRED_CLEANUP_CHECKS),
         "evidence_root_template": str(
             Path.home() / ".mycelium" / "evidence" / "a6" / "<source-digest>"
@@ -192,6 +216,8 @@ def preparation_plan() -> dict[str, Any]:
                 "<fresh-owner-private-seed-state-root>",
                 "--deployment-dir",
                 "<exact-staged-deployment>",
+                "--a6-fault-control-port",
+                "<a6-fault-control-port>",
             ],
             "physical_gate": [
                 "/usr/bin/env",
@@ -225,7 +251,9 @@ def _require_private_root(path: Path) -> None:
         _fail("physical_evidence_root_owner_invalid")
 
 
-def _verify_case_record(path: Path, case_id: str, plan: Mapping[str, Any]) -> None:
+def _verify_case_record(
+    path: Path, case_id: str, plan: Mapping[str, Any], contract_version: str = "v1"
+) -> None:
     info = path.stat()
     if stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.getuid():
         _fail(f"physical_case_record_permissions_invalid:{case_id}")
@@ -236,6 +264,11 @@ def _verify_case_record(path: Path, case_id: str, plan: Mapping[str, Any]) -> No
         or record.get("result") != "passed"
     ):
         _fail(f"physical_case_record_not_passing:{case_id}")
+    expected_protocol = V2_RECORD_PROTOCOL if contract_version == "v2" else V1_RECORD_PROTOCOL
+    if record.get("protocol") != expected_protocol or (
+        contract_version == "v2" and record.get("contract_version") != "v2"
+    ):
+        _fail(f"physical_case_record_contract_mismatch:{case_id}")
     for field in ("source_digest", "spec_digest", "contract_digest"):
         if record.get(field) != plan[field]:
             _fail(f"physical_case_record_binding_mismatch:{case_id}:{field}")
@@ -263,7 +296,10 @@ def execute(plan: Mapping[str, Any]) -> dict[str, Any]:
             if result.returncode != 0:
                 _fail(f"physical_case_command_failed:{case['case_id']}")
             _verify_case_record(
-                Path(case["evidence_file"]), case["case_id"], validated
+                Path(case["evidence_file"]),
+                case["case_id"],
+                validated,
+                case["contract_version"],
             )
             completed.append(case["case_id"])
     except (OSError, ValueError, json.JSONDecodeError) as error:
@@ -291,6 +327,9 @@ def execute(plan: Mapping[str, Any]) -> dict[str, Any]:
         "spec_digest": validated["spec_digest"],
         "contract_digest": validated["contract_digest"],
         "completed_cases": completed,
+        "case_contracts": {
+            case["case_id"]: case["contract_version"] for case in validated["cases"]
+        },
         "cleanup_checks": cleanup_results,
         "failure_code": failure,
     }

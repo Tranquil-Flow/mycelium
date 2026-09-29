@@ -68,11 +68,12 @@ def _executed(case_id, post_state, *, committed=3, reservations=2):
     return record
 
 
-def _gateway(kind, code=None, count=1, committed=5):
+def _gateway(kind, code=None, count=1, committed=5, terminal_attempt=None):
     return {"terminal_count": count, "terminal_kind": kind, "terminal_code": code,
             "committed_count": committed, "expected_token_index": committed,
             "duplicated_token_count": 0, "late_source_publication_count": 0,
-            "subscribed": True, "cleanup_notice_provenance": None}
+            "subscribed": True, "cleanup_notice_provenance": None,
+            "terminal_attempt": terminal_attempt}
 
 
 def _settled(view, gateway, *, reservations=0, qualification=None):
@@ -103,7 +104,8 @@ def _product_outcomes():
     aborted = _settled(_FAILED_VIEW, _gateway("failed", "recovery_failed"))
     outcomes = {
         POSITIVE: ({"source_failure_observed": True, "recovery_required": True},
-                   _settled(completed_view, _gateway("completed"), qualification=qualified)),
+                   _settled(completed_view, _gateway("completed", terminal_attempt=2),
+                            qualification=qualified)),
         "no_successor": ({"source_failure_observed": True, "candidate_available": False,
                           "truthful_abort_required": True},
                          _settled({"retained": False, "request_attempt": 1, "path_id": "path-source",
@@ -207,7 +209,8 @@ def test_zero_prefix_positive_fault_is_measured_but_never_written(plan: Path):
                 / f"{POSITIVE}.json").exists()
 
 
-@pytest.mark.parametrize("mutation", ["no_cutover", "stale_reservation", "duplicate", "late"])
+@pytest.mark.parametrize("mutation", ["no_cutover", "stale_reservation", "duplicate", "late",
+                                      "gateway_attempt_missing", "gateway_attempt_foreign"])
 def test_positive_observation_is_derived_from_authorities_not_asserted(plan: Path, mutation):
     authority = observation_authority(operator_plan=plan, repo_root=ROOT)
     recorder = CaseObservationRecorder(authority=authority, target=SimpleNamespace())
@@ -219,8 +222,12 @@ def test_positive_observation_is_derived_from_authorities_not_asserted(plan: Pat
         settled.reservation_count, settled.coordinator_terminal = 1, None
     elif mutation == "duplicate":
         settled.gateway = {**settled.gateway, "duplicated_token_count": 1}
-    else:
+    elif mutation == "late":
         settled.gateway = {**settled.gateway, "late_source_publication_count": 1}
+    elif mutation == "gateway_attempt_missing":
+        settled.gateway = {**settled.gateway, "terminal_attempt": None}
+    else:
+        settled.gateway = {**settled.gateway, "terminal_attempt": 1}
     with pytest.raises(ObservationRefused):
         recorder.write(POSITIVE, _executed(POSITIVE, post), settled)
 

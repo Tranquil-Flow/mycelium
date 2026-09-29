@@ -75,11 +75,14 @@ class ObservationAuthority:
     source_digest: str
     spec_digest: str
     contract_digest: str
+    #: The exact A6 source-manifest bytes (base commit plus file set) served.
+    candidate_digest: str = ""
 
     def status(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
             "operator_plan_digest": self.operator_plan_digest,
+            "candidate_digest": self.candidate_digest,
             "source_digest": self.source_digest,
             "spec_digest": self.spec_digest,
             "contract_digest": self.contract_digest,
@@ -112,6 +115,7 @@ def observation_authority(*, operator_plan: Path, repo_root: Path) -> Observatio
         source_digest=source_digest,
         spec_digest=spec_digest,
         contract_digest=contract_digest,
+        candidate_digest=_file_digest(repo_root / SOURCE_MANIFEST_PATH),
     )
 
 
@@ -172,6 +176,9 @@ def gateway_facts(service: Any, request_id: str, *, failure_sequence: int | None
             "late_source_publication_count": late,
             "subscribed": bool(session.ever_subscribed),
             "cleanup_notice_provenance": session.terminal_provenance,
+            # The gateway's own receipt of the attempt its terminal belongs to.
+            "terminal_attempt": (None if not isinstance(session.terminal_attempt, tuple)
+                                 else session.terminal_attempt[1]),
         }
 
 
@@ -266,8 +273,10 @@ def derive_observation(case_id: str, executed: Any, settled: SettledFacts) -> di
     view, gateway = settled.view, settled.gateway or {}
     source_attempt = executed.binding["source_attempt"]
     committed = _cutover_identity(executed, view)
-    cut_over = committed is not None
     final_attempt = None if committed is None else committed["request_attempt"]
+    # A cutover counts only when the gateway's own terminal receipt names the
+    # same attempt the router committed; a router-only fact is not enough.
+    cut_over = committed is not None and gateway.get("terminal_attempt") == final_attempt
     common = {
         "case_id": case_id,
         "executed": True,
@@ -291,7 +300,7 @@ def derive_observation(case_id: str, executed: Any, settled: SettledFacts) -> di
             "source_fenced": cut_over,
             "successor_prefill": cut_over,
             "publication_generation_cas_count": (
-                final_attempt - source_attempt if isinstance(final_attempt, int) else None),
+                final_attempt - source_attempt if cut_over else None),
             "duplicated_token_count": gateway.get("duplicated_token_count"),
             "omitted_committed_token_count": (
                 None if not gateway else
@@ -400,11 +409,12 @@ class CaseObservationRecorder:
             self._threads.append(thread)
         thread.start()
 
-    def _settle(self, executed: Any) -> SettledFacts:
+    def _settle(self, executed: Any,
+                prior_view: Mapping[str, Any] | None = None) -> SettledFacts:
         target = self._target
         deadline = self._clock() + self._settle_seconds
         view: dict[str, Any] = {}
-        last_retained: dict[str, Any] = {}
+        last_retained: dict[str, Any] = dict(prior_view or {})
         while True:
             current = target.view(executed.request_id)
             if current.get("retained") is True:
@@ -440,12 +450,36 @@ class CaseObservationRecorder:
 
     def _record(self, executed: Any) -> None:
         case_id = executed.case_id
+        settled = None
         try:
             settled = self._settle(executed)
             self.write(case_id, executed, settled)
         except Exception as error:  # a refused case simply has no observation
             with self._lock:
                 self._refused[case_id] = str(error)[:96] or type(error).__name__
+        if case_id == "cleanup_authority_failure":
+            try:
+                released = self._settle_release(
+                    executed, None if settled is None else settled.view)
+                self.write_cleanup_authority_v2(
+                    executed, released,
+                    self._target.router.a6_command_authority(executed.request_id))
+            except Exception as error:
+                with self._lock:
+                    self._refused[f"{case_id}.v2"] = (
+                        str(error)[:96] or type(error).__name__)
+
+    def _settle_release(self, executed: Any,
+                        prior_view: Mapping[str, Any] | None) -> SettledFacts:
+        """Wait for a blocked request's late cleanup proof to release it."""
+
+        target = self._target
+        deadline = self._clock() + self._settle_seconds
+        while (self._clock() < deadline and not (
+                target.coordinator_terminal(executed.request_id) is not None
+                and target.reservation_count(executed.request_id) == 0)):
+            self._sleep(0.05)
+        return self._settle(executed, prior_view)
 
     def write(self, case_id: str, executed: Any, settled: SettledFacts) -> Path:
         if case_id not in REQUIRED_CASES:
@@ -464,6 +498,96 @@ class CaseObservationRecorder:
         _write_once(path, envelope)
         with self._lock:
             self._written[case_id] = envelope["observation_digest"]
+        return path
+
+    def write_cleanup_authority_v2(self, executed: Any, settled: SettledFacts,
+                                   command_authority: Mapping[str, Any] | None) -> Path:
+        """The owner-approved v2 envelope for cleanup_authority_failure (R6)."""
+
+        from mycelium_a6_cleanup_observation_v2 import (
+            AUTHORITY as V2_AUTHORITY,
+            CASE as V2_CASE,
+            PROTOCOL as V2_PROTOCOL,
+            reconcile_count_layers,
+            validate_observation,
+        )
+
+        gateway = settled.gateway or {}
+        receipt = gateway.get("cleanup_notice_provenance")
+        committed = _cutover_identity(executed, settled.view)
+        if (not isinstance(receipt, tuple) or len(receipt) != 4 or command_authority is None
+                or committed is None):
+            raise ObservationRefused("a6_cleanup_v2_authority_unavailable")
+        binding = executed.binding
+        bindings = {
+            "request_id": executed.request_id,
+            "request_attempt": receipt[1],
+            "source_digest": self._authority.source_digest,
+            "candidate_digest": self._authority.candidate_digest,
+            "spec_digest": self._authority.spec_digest,
+            "contract_digest": self._authority.contract_digest,
+            "operator_plan_digest": self._authority.operator_plan_digest,
+            "run_id": self._authority.run_id,
+            "deployment_id": binding["deployment_id"],
+            "deployment_epoch": binding["deployment_epoch"],
+            "source_path_id": binding["path_id"],
+            "source_attempt": binding["source_attempt"],
+            "source_path_attempt": binding["path_attempt"],
+            "source_path_generation": binding["source_attempt"],
+            "successor_path_id": committed.get("path_id"),
+            "successor_attempt": committed["request_attempt"],
+            "successor_path_attempt": committed.get("path_attempt"),
+            "successor_path_generation": committed["request_attempt"],
+        }
+        post = executed.post_state
+        observation = {
+            "case_id": V2_CASE,
+            "executed": True,
+            "ordinary_product_path": settled.gateway is not None,
+            "private_material_exposed": False,
+            "rejection_observed": post.get("cleanup_authority_refused") is True,
+            "fail_closed": gateway.get("terminal_kind") != "completed",
+            "terminal_state": ("TERMINAL_BLOCKED"
+                               if gateway.get("terminal_code") == "request_cleanup_unproven"
+                               else _terminal_state(V2_CASE, settled)),
+            "unpublishable_suffix_discarded": post.get("unpublishable_suffix_discarded") is True,
+            "process_cleanup_complete": _cleanup_complete(settled),
+            "stale_reservation_count": settled.reservation_count,
+            "command_authority": dict(command_authority),
+            "gateway_authority": {
+                "request_id": receipt[0],
+                "request_attempt": receipt[1],
+                "terminal_event_count": gateway.get("terminal_count"),
+                "terminal_kind": gateway.get("terminal_kind"),
+                "terminal_code": gateway.get("terminal_code"),
+            },
+        }
+        body = {"protocol": V2_PROTOCOL, "authority": V2_AUTHORITY, "case_id": V2_CASE,
+                "bindings": bindings, "observation": observation}
+        body["observation_digest"] = "sha256:" + hashlib.sha256(json.dumps(
+            body, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            allow_nan=False).encode("utf-8")).hexdigest()
+        try:
+            validated = validate_observation(body)
+            layers = reconcile_count_layers(
+                command_authority=validated["command_authority"],
+                gateway_authority=validated["gateway_authority"],
+                cleanup_authority={
+                    "request_id": bindings["request_id"],
+                    "request_attempt": bindings["request_attempt"],
+                    "stale_reservation_count": validated["stale_reservation_count"],
+                    "process_cleanup_complete": validated["process_cleanup_complete"],
+                },
+            )
+        except ValueError as error:
+            raise ObservationRefused(f"a6_cleanup_v2_unsatisfied:{error}") from error
+        if layers["v2_envelope_authorized"] is not True:
+            raise ObservationRefused("a6_cleanup_v2_unauthorized")
+        path = self.root / f"{V2_CASE}.v2.json"
+        _private_dir(self._authority.evidence_output_dir)
+        _write_once(path, body)
+        with self._lock:
+            self._written[f"{V2_CASE}.v2"] = body["observation_digest"]
         return path
 
     def join(self, timeout: float) -> None:

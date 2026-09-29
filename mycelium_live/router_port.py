@@ -861,6 +861,52 @@ class LiveRouterPort:
             return (identity.request_id, identity.request_attempt,
                     identity.path_digest, identity.command_id)
 
+    def terminal_command_identity(self, request_id: str) -> tuple[str, int, str, str] | None:
+        """Snapshot the command that owns a published terminal, before release."""
+        with self._lock:
+            pending = self._pending.get(request_id)
+            if pending is None or pending.terminal_status is None:
+                return None
+            identity = pending.command_identity
+            if identity is None or identity.request_id != request_id:
+                return None
+            return (identity.request_id, identity.request_attempt,
+                    identity.path_digest, identity.command_id)
+
+    def a6_command_authority(self, request_id: str) -> dict[str, Any] | None:
+        """CommandController counts for a request's current or retired attempt.
+
+        Read from the live controller while the command is registered, else
+        from the snapshot taken immediately before retirement. Unavailable is
+        ``None``, never zero.
+        """
+        with self._lock:
+            pending = self._pending.get(request_id)
+            identity = None if pending is None else pending.command_identity
+            retained = getattr(self, "_a6_retired_command_authority", {}).get(request_id)
+        if identity is not None and identity.request_id == request_id:
+            live = self._command_authority_snapshot(identity)
+            if live is not None:
+                return live
+        return None if retained is None else dict(retained)
+
+    def _command_authority_snapshot(self, identity: CommandIdentity) -> dict[str, Any] | None:
+        snapshots = self._commands.snapshot(
+            identity.request_id, request_attempt=identity.request_attempt)
+        if not snapshots or any(
+            item.identity.request_id != identity.request_id
+            or item.identity.request_attempt != identity.request_attempt
+            or item.identity.path_digest != identity.path_digest
+            for item in snapshots
+        ):
+            return None
+        return {
+            "request_id": identity.request_id,
+            "request_attempt": identity.request_attempt,
+            "registered_command_count": len(snapshots),
+            "terminal_cas_count": sum(item.terminal_revision for item in snapshots),
+        }
+
     def _a6_test_only_source_failure_observed(self, binding: dict[str, Any]) -> bool:
         """Read the source recovery transition, not a successor's current status."""
         request_id = binding.get("request_id")
@@ -2145,6 +2191,22 @@ class LiveRouterPort:
         identity = pending.command_identity
         if identity is None:
             return
+        # Keep the exact command counts past retirement for the A6 cleanup
+        # observation; bounded, and never a substitute for an unread count.
+        try:
+            receipt = self._command_authority_snapshot(identity)
+        except Exception:
+            receipt = None
+        if receipt is not None:
+            with self._lock:
+                retained = getattr(self, "_a6_retired_command_authority", None)
+                if retained is None:
+                    retained = {}
+                    self._a6_retired_command_authority = retained
+                retained.pop(identity.request_id, None)
+                retained[identity.request_id] = receipt
+                while len(retained) > 256:
+                    retained.pop(next(iter(retained)))
         retired = self._commands.retire(
             identity.request_id,
             expected_attempt=identity.request_attempt,
