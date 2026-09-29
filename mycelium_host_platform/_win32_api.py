@@ -68,6 +68,15 @@ ERROR_LOCK_VIOLATION = 33
 ERROR_FILE_EXISTS = 80
 ERROR_ALREADY_EXISTS = 183
 
+CREATE_SUSPENDED = 0x00000004
+CREATE_NEW_PROCESS_GROUP = 0x00000200
+CREATE_NO_WINDOW = 0x08000000
+
+JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION = 0x00000400
+JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x00000800
+JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK = 0x00001000
+JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+
 ACCESS_ALLOWED_ACE_TYPE = 0
 ACCESS_DENIED_ACE_TYPE = 1
 
@@ -190,6 +199,36 @@ class Win32Api(Protocol):
     def delete(self, path: str) -> None: ...
 
     def handle_to_fd(self, handle: int) -> int: ...
+
+    # Processes and job objects.
+
+    def spawn_suspended(self, argv: list[str], *, creationflags: int, **popen: Any) -> Any: ...
+
+    def open_process(self, pid: int) -> int: ...
+
+    def current_process(self) -> int: ...
+
+    def process_image_name(self, process: int) -> str: ...
+
+    def process_creation_time(self, process: int) -> int: ...
+
+    def resume_process(self, pid: int) -> int: ...
+
+    def terminate_process(self, process: int, exit_code: int) -> None: ...
+
+    def create_job(self) -> int: ...
+
+    def set_job_limits(self, job: int, limit_flags: int) -> None: ...
+
+    def job_limit_flags(self, job: int) -> int: ...
+
+    def assign_process(self, job: int, process: int) -> None: ...
+
+    def is_process_in_job(self, process: int, job: int) -> bool: ...
+
+    def job_active_processes(self, job: int) -> int: ...
+
+    def terminate_job(self, job: int, exit_code: int) -> None: ...
 
 
 # --------------------------------------------------------------- real binding
@@ -613,6 +652,226 @@ class RealWin32Api:  # pragma: no cover - exercised only on a Windows device
         import os
 
         return msvcrt.open_osfhandle(handle, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+
+    # ---------------------------------------------------- process and job
+
+    def _bind_process_api(self) -> None:
+        if getattr(self, "_process_api_bound", False):
+            return
+        ctypes = self._ctypes
+        wintypes = self._wintypes
+        kernel32 = self._kernel32
+        HANDLE, DWORD, BOOL = wintypes.HANDLE, wintypes.DWORD, wintypes.BOOL
+
+        class IO_COUNTERS(ctypes.Structure):
+            _fields_ = [(name, ctypes.c_ulonglong) for name in (
+                "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
+            )]
+
+        class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit", ctypes.c_int64),
+                ("LimitFlags", DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", DWORD),
+                ("SchedulingClass", DWORD),
+            ]
+
+        class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+                ("IoInfo", IO_COUNTERS),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        class JOBOBJECT_BASIC_ACCOUNTING_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("TotalUserTime", ctypes.c_int64),
+                ("TotalKernelTime", ctypes.c_int64),
+                ("ThisPeriodTotalUserTime", ctypes.c_int64),
+                ("ThisPeriodTotalKernelTime", ctypes.c_int64),
+                ("TotalPageFaultCount", DWORD),
+                ("TotalProcesses", DWORD),
+                ("ActiveProcesses", DWORD),
+                ("TotalTerminatedProcesses", DWORD),
+            ]
+
+        class THREADENTRY32(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", DWORD),
+                ("cntUsage", DWORD),
+                ("th32ThreadID", DWORD),
+                ("th32OwnerProcessID", DWORD),
+                ("tpBasePri", wintypes.LONG),
+                ("tpDeltaPri", wintypes.LONG),
+                ("dwFlags", DWORD),
+            ]
+
+        self.JOBOBJECT_EXTENDED_LIMIT_INFORMATION = JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+        self.JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION
+        self.THREADENTRY32 = THREADENTRY32
+
+        def bind(name: str, argtypes: list[Any], restype: Any) -> Any:
+            function = getattr(kernel32, name)
+            function.argtypes = argtypes
+            function.restype = restype
+            return function
+
+        self._OpenProcess = bind("OpenProcess", [DWORD, BOOL, DWORD], HANDLE)
+        self._QueryFullProcessImageNameW = bind(
+            "QueryFullProcessImageNameW",
+            [HANDLE, DWORD, wintypes.LPWSTR, ctypes.POINTER(DWORD)],
+            BOOL,
+        )
+        self._GetProcessTimes = bind(
+            "GetProcessTimes",
+            [HANDLE] + [ctypes.POINTER(self.FILETIME)] * 4,
+            BOOL,
+        )
+        self._CreateToolhelp32Snapshot = bind("CreateToolhelp32Snapshot", [DWORD, DWORD], HANDLE)
+        self._Thread32First = bind("Thread32First", [HANDLE, ctypes.POINTER(THREADENTRY32)], BOOL)
+        self._Thread32Next = bind("Thread32Next", [HANDLE, ctypes.POINTER(THREADENTRY32)], BOOL)
+        self._OpenThread = bind("OpenThread", [DWORD, BOOL, DWORD], HANDLE)
+        self._ResumeThread = bind("ResumeThread", [HANDLE], DWORD)
+        self._TerminateProcess = bind("TerminateProcess", [HANDLE, wintypes.UINT], BOOL)
+        self._CreateJobObjectW = bind("CreateJobObjectW", [wintypes.LPVOID, wintypes.LPCWSTR], HANDLE)
+        self._SetInformationJobObject = bind(
+            "SetInformationJobObject", [HANDLE, ctypes.c_int, wintypes.LPVOID, DWORD], BOOL
+        )
+        self._QueryInformationJobObject = bind(
+            "QueryInformationJobObject",
+            [HANDLE, ctypes.c_int, wintypes.LPVOID, DWORD, ctypes.POINTER(DWORD)],
+            BOOL,
+        )
+        self._AssignProcessToJobObject = bind("AssignProcessToJobObject", [HANDLE, HANDLE], BOOL)
+        self._IsProcessInJob = bind("IsProcessInJob", [HANDLE, HANDLE, ctypes.POINTER(BOOL)], BOOL)
+        self._TerminateJobObject = bind("TerminateJobObject", [HANDLE, wintypes.UINT], BOOL)
+        self._process_api_bound = True
+
+    def spawn_suspended(self, argv: list[str], *, creationflags: int, **popen: Any) -> Any:
+        import subprocess
+
+        return subprocess.Popen(argv, creationflags=creationflags, **popen)
+
+    def open_process(self, pid: int) -> int:
+        self._bind_process_api()
+        # QUERY_LIMITED_INFORMATION | TERMINATE | SET_QUOTA | SYNCHRONIZE
+        handle = self._OpenProcess(0x1000 | 0x0001 | 0x0100 | 0x00100000, False, pid)
+        if not handle:
+            raise self._fail("OpenProcess")
+        return int(handle)
+
+    def current_process(self) -> int:
+        return int(self._GetCurrentProcess())
+
+    def process_image_name(self, process: int) -> str:
+        self._bind_process_api()
+        ctypes = self._ctypes
+        size = self._wintypes.DWORD(32768)
+        buffer = ctypes.create_unicode_buffer(size.value)
+        if not self._QueryFullProcessImageNameW(process, 0, buffer, ctypes.byref(size)):
+            raise self._fail("QueryFullProcessImageNameW")
+        return buffer.value
+
+    def process_creation_time(self, process: int) -> int:
+        self._bind_process_api()
+        ctypes = self._ctypes
+        times = [self.FILETIME() for _ in range(4)]
+        if not self._GetProcessTimes(process, *(ctypes.byref(item) for item in times)):
+            raise self._fail("GetProcessTimes")
+        return self._filetime_ns(times[0])
+
+    def resume_process(self, pid: int) -> int:
+        self._bind_process_api()
+        ctypes = self._ctypes
+        snapshot = self._CreateToolhelp32Snapshot(0x00000004, 0)  # TH32CS_SNAPTHREAD
+        if not snapshot or snapshot == self._invalid_handle:
+            raise self._fail("CreateToolhelp32Snapshot")
+        resumed = 0
+        try:
+            entry = self.THREADENTRY32()
+            entry.dwSize = ctypes.sizeof(entry)
+            more = self._Thread32First(snapshot, ctypes.byref(entry))
+            while more:
+                if entry.th32OwnerProcessID == pid:
+                    thread = self._OpenThread(0x0002, False, entry.th32ThreadID)
+                    if not thread:
+                        raise self._fail("OpenThread")
+                    try:
+                        if self._ResumeThread(thread) == 0xFFFFFFFF:
+                            raise self._fail("ResumeThread")
+                        resumed += 1
+                    finally:
+                        self._CloseHandle(thread)
+                more = self._Thread32Next(snapshot, ctypes.byref(entry))
+        finally:
+            self._CloseHandle(snapshot)
+        return resumed
+
+    def terminate_process(self, process: int, exit_code: int) -> None:
+        self._bind_process_api()
+        if not self._TerminateProcess(process, exit_code):
+            raise self._fail("TerminateProcess")
+
+    def create_job(self) -> int:
+        self._bind_process_api()
+        handle = self._CreateJobObjectW(None, None)
+        if not handle:
+            raise self._fail("CreateJobObjectW")
+        return int(handle)
+
+    def set_job_limits(self, job: int, limit_flags: int) -> None:
+        self._bind_process_api()
+        ctypes = self._ctypes
+        info = self.JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        info.BasicLimitInformation.LimitFlags = limit_flags
+        if not self._SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
+            raise self._fail("SetInformationJobObject")
+
+    def job_limit_flags(self, job: int) -> int:
+        self._bind_process_api()
+        ctypes = self._ctypes
+        info = self.JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        if not self._QueryInformationJobObject(
+            job, 9, ctypes.byref(info), ctypes.sizeof(info), None
+        ):
+            raise self._fail("QueryInformationJobObject")
+        return int(info.BasicLimitInformation.LimitFlags)
+
+    def assign_process(self, job: int, process: int) -> None:
+        self._bind_process_api()
+        if not self._AssignProcessToJobObject(job, process):
+            raise self._fail("AssignProcessToJobObject")
+
+    def is_process_in_job(self, process: int, job: int) -> bool:
+        self._bind_process_api()
+        result = self._wintypes.BOOL()
+        if not self._IsProcessInJob(process, job, self._ctypes.byref(result)):
+            raise self._fail("IsProcessInJob")
+        return bool(result.value)
+
+    def job_active_processes(self, job: int) -> int:
+        self._bind_process_api()
+        ctypes = self._ctypes
+        info = self.JOBOBJECT_BASIC_ACCOUNTING_INFORMATION()
+        if not self._QueryInformationJobObject(
+            job, 1, ctypes.byref(info), ctypes.sizeof(info), None
+        ):
+            raise self._fail("QueryInformationJobObject")
+        return int(info.ActiveProcesses)
+
+    def terminate_job(self, job: int, exit_code: int) -> None:
+        self._bind_process_api()
+        if not self._TerminateJobObject(job, exit_code):
+            raise self._fail("TerminateJobObject")
 
 
 __all__ = [

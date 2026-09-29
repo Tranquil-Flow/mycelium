@@ -123,6 +123,8 @@ class FakeWin32Api:
         self.move_failures: list[int] = []
         self.final_path_overrides: dict[str, str] = {}
         self.short_writes = False
+        self.closed_jobs: list[int] = []
+        self._init_processes()
 
     # ------------------------------------------------------------ helpers
 
@@ -276,6 +278,8 @@ class FakeWin32Api:
 
     def close(self, handle: int) -> None:
         self.calls.append(("close", handle))
+        if self.close_process_or_job(handle):
+            return
         record = self.handles.pop(handle, None)
         if record is None:
             raise w.Win32Error(w.ERROR_INVALID_HANDLE, "CloseHandle")
@@ -368,6 +372,148 @@ class FakeWin32Api:
         record = self.handles.pop(handle)
         assert record.fd is not None
         return record.fd
+
+    # ------------------------------------------------- processes and jobs
+    #
+    # A spawned child is a real (POSIX) child process.  ``image_for`` maps the
+    # argv[0] the backend asked for to the image name the fake reports, and
+    # ``interpreter`` is the real program actually executed for it.
+
+    CURRENT_PROCESS = -1
+
+    def _init_processes(self) -> None:
+        if hasattr(self, "jobs"):
+            return
+        self.jobs: dict[int, dict[str, Any]] = {}
+        self.process_handles: dict[int, int] = {}
+        self.popen_by_pid: dict[int, Any] = {}
+        self.images: dict[int, str] = {}
+        self.image_override: str | None = None
+        self.interpreter: str | None = None
+        self.current_process_in_job: set[int] = set()
+        self.resume_count = 1
+        self.limit_flags_override: int | None = None
+
+    def spawn_suspended(self, argv: list[str], *, creationflags: int, **popen: Any) -> Any:
+        import subprocess
+
+        self._init_processes()
+        self.calls.append(("spawn_suspended", tuple(argv), creationflags))
+        self._maybe_fail("spawn_suspended")
+        real = [self.interpreter or argv[0], *argv[1:]]
+        process = subprocess.Popen(real, **popen)
+        self.popen_by_pid[process.pid] = process
+        self.images[process.pid] = argv[0]
+        return process
+
+    def open_process(self, pid: int) -> int:
+        self._init_processes()
+        self.calls.append(("open_process", pid))
+        self._maybe_fail("open_process")
+        self._next_handle += 4
+        self.process_handles[self._next_handle] = pid
+        return self._next_handle
+
+    def current_process(self) -> int:
+        return self.CURRENT_PROCESS
+
+    def _pid(self, process: int) -> int:
+        self._init_processes()
+        if process not in self.process_handles:
+            raise w.Win32Error(w.ERROR_INVALID_HANDLE, "process")
+        return self.process_handles[process]
+
+    def process_image_name(self, process: int) -> str:
+        self.calls.append(("process_image_name", process))
+        self._maybe_fail("process_image_name")
+        pid = self._pid(process)
+        return self.image_override or self.images[pid]
+
+    def process_creation_time(self, process: int) -> int:
+        self.calls.append(("process_creation_time", process))
+        return 1_000_000 + self._pid(process)
+
+    def resume_process(self, pid: int) -> int:
+        self.calls.append(("resume_process", pid))
+        self._maybe_fail("resume_process")
+        return self.resume_count
+
+    def terminate_process(self, process: int, exit_code: int) -> None:
+        self.calls.append(("terminate_process", process, exit_code))
+        popen = self.popen_by_pid.get(self._pid(process))
+        if popen is not None and popen.poll() is None:
+            popen.kill()
+
+    def create_job(self) -> int:
+        self._init_processes()
+        self.calls.append(("create_job",))
+        self._maybe_fail("create_job")
+        self._next_handle += 4
+        self.jobs[self._next_handle] = {"limits": 0, "pids": set(), "terminated": False}
+        return self._next_handle
+
+    def _job(self, job: int) -> dict[str, Any]:
+        self._init_processes()
+        if job not in self.jobs:
+            raise w.Win32Error(w.ERROR_INVALID_HANDLE, "job")
+        return self.jobs[job]
+
+    def set_job_limits(self, job: int, limit_flags: int) -> None:
+        self.calls.append(("set_job_limits", job, limit_flags))
+        self._maybe_fail("set_job_limits")
+        self._job(job)["limits"] = limit_flags
+
+    def job_limit_flags(self, job: int) -> int:
+        self.calls.append(("job_limit_flags", job))
+        if self.limit_flags_override is not None:
+            return self.limit_flags_override
+        return self._job(job)["limits"]
+
+    def assign_process(self, job: int, process: int) -> None:
+        self.calls.append(("assign_process", job, process))
+        self._maybe_fail("assign_process")
+        self._job(job)["pids"].add(self._pid(process))
+
+    def is_process_in_job(self, process: int, job: int) -> bool:
+        self.calls.append(("is_process_in_job", process, job))
+        if process == self.CURRENT_PROCESS:
+            return job in self.current_process_in_job
+        return self._pid(process) in self._job(job)["pids"]
+
+    def job_active_processes(self, job: int) -> int:
+        self.calls.append(("job_active_processes", job))
+        return sum(
+            1
+            for pid in self._job(job)["pids"]
+            if self.popen_by_pid[pid].poll() is None
+        )
+
+    def terminate_job(self, job: int, exit_code: int) -> None:
+        self.calls.append(("terminate_job", job, exit_code))
+        self._maybe_fail("terminate_job")
+        record = self._job(job)
+        record["terminated"] = True
+        for pid in record["pids"]:
+            popen = self.popen_by_pid[pid]
+            if popen.poll() is None:
+                popen.kill()
+
+    def close_process_or_job(self, handle: int) -> bool:
+        self._init_processes()
+        if handle in self.process_handles:
+            del self.process_handles[handle]
+            return True
+        if handle in self.jobs:
+            record = self.jobs.pop(handle)
+            # KILL_ON_JOB_CLOSE.
+            if record["limits"] & w.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE:
+                for pid in record["pids"]:
+                    popen = self.popen_by_pid[pid]
+                    if popen.poll() is None:
+                        popen.kill()
+            self.closed_jobs.append(handle)
+            return True
+        return False
 
     # --------------------------------------------------------- inspection
 

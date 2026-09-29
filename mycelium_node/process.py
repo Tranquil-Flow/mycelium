@@ -163,9 +163,54 @@ class _ControlFrameWriteTimeout(NodeProcessError):
         super().__init__("node_response_timeout")
 
 
+def _win32_write_control_frame_before(
+    stream: Any, payload: bytes, deadline: float
+) -> None:
+    """win32 anonymous pipes cannot be selected: write on a bounded thread.
+
+    The write progress of a thread that misses the deadline is unknown, so a
+    timeout is always reported as partial and the caller fails closed (the
+    job is killed, which breaks the pipe and releases the thread).
+    """
+
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise _ControlFrameWriteTimeout(partial=False)
+    done = threading.Event()
+    failures: list[BaseException] = []
+
+    def write() -> None:
+        try:
+            descriptor = stream.fileno()
+            offset = 0
+            while offset < len(payload):
+                written = os.write(descriptor, payload[offset:])
+                if written <= 0:
+                    raise BrokenPipeError("node control pipe write failed")
+                offset += written
+        except BaseException as exc:  # noqa: BLE001 - reported to the owner
+            failures.append(exc)
+        finally:
+            done.set()
+
+    writer = threading.Thread(
+        target=write, name="mycelium-node-control-writer", daemon=True
+    )
+    writer.start()
+    if not done.wait(remaining):
+        raise _ControlFrameWriteTimeout(partial=True)
+    if failures:
+        failure = failures[0]
+        if isinstance(failure, (OSError, ValueError)):
+            raise failure
+        raise BrokenPipeError("node control pipe write failed") from failure
+
+
 def _write_control_frame_before(stream: Any, payload: bytes, deadline: float) -> None:
     """Write one owned JSONL frame without exceeding its command deadline."""
 
+    if mycelium_host_platform.is_win32():
+        return _win32_write_control_frame_before(stream, payload, deadline)
     descriptor = stream.fileno()
     os.set_blocking(descriptor, False)
     offset = 0
@@ -1714,6 +1759,10 @@ class PhysicalNodeProcess:
         self._launch_identity: _ProcessIdentity | None = None
         self._stdout_thread: threading.Thread | None = None
         self._stderr_thread: threading.Thread | None = None
+        self._win32_job: Any = None
+        if mycelium_host_platform.is_win32():
+            self._start_win32_job(launch_command, command_identity)
+            return
         try:
             handshake = _handshake_pipes()
         except Exception as exc:
@@ -1855,6 +1904,82 @@ class PhysicalNodeProcess:
         finally:
             for name in tuple(handshake):
                 _close_handshake_descriptor(handshake, name)
+
+    def _start_win32_job(
+        self,
+        launch_command: Sequence[str],
+        command_identity: _ExecutableIdentity,
+    ) -> None:
+        """Suspended spawn -> job assign -> identity check -> resume (win32)."""
+
+        from mycelium_host_platform._win32_job import Win32JobProcess
+
+        def image_matches(image: str) -> bool:
+            if os.path.normcase(os.path.normpath(image)).casefold() != os.path.normcase(
+                os.path.normpath(command_identity.path)
+            ).casefold():
+                return False
+            try:
+                observed = capture_executable_identity(image, require_canonical=True)
+            except (OSError, RuntimeError, TypeError, ValueError):
+                return False
+            return observed == command_identity
+
+        try:
+            api = mycelium_host_platform.win32_api()
+            job = Win32JobProcess.start(
+                api,
+                list(launch_command),
+                image_matches=image_matches,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=-1,
+                shell=False,
+                close_fds=True,
+            )
+        except HostPlatformError as exc:
+            self._closed = True
+            code = (
+                "node_process_identity_invalid"
+                if exc.code == "host_process_identity_invalid"
+                else "node_process_start_failed"
+            )
+            raise NodeProcessError(code) from exc
+        self._process = job.process
+        self._win32_job = job
+        try:
+            self._stdout_thread = threading.Thread(
+                target=self._read_stdout,
+                name=f"mycelium-node-stdout-{self.node_id}",
+                daemon=False,
+            )
+            self._stderr_thread = threading.Thread(
+                target=self._read_stderr,
+                name=f"mycelium-node-stderr-{self.node_id}",
+                daemon=False,
+            )
+            self._stdout_thread.start()
+            self._stderr_thread.start()
+        except Exception as exc:
+            self._closed = True
+            cleaned = self._cleanup_resources(
+                time.monotonic() + self.shutdown_timeout_seconds,
+                terminate=True,
+            )
+            raise NodeProcessError(
+                "node_process_start_failed" if cleaned else "node_process_cleanup_failed",
+                cleanup_owner=None if cleaned else self,
+            ) from exc
+
+    def _win32_owned_group_state(self, deadline: float) -> str:
+        job = getattr(self, "_win32_job", None)
+        if job is None or time.monotonic() > deadline:
+            return "unsafe"
+        state = job.state()
+        if state == "empty":
+            job.close()
+        return state
 
     @property
     def pid(self) -> int:
@@ -2008,6 +2133,14 @@ class PhysicalNodeProcess:
         signum: int,
         deadline: float | None = None,
     ) -> bool:
+        if mycelium_host_platform.is_win32():
+            # No signals reach a job: every hard stop is TerminateJobObject.
+            job = getattr(self, "_win32_job", None)
+            if job is None:
+                return False
+            if deadline is None:
+                deadline = time.monotonic() + self.shutdown_timeout_seconds
+            return job.terminate(deadline)
         process = self._process
         ownership = getattr(self, "_pre_exec_ownership", None)
         launch = getattr(self, "_launch_identity", None)
@@ -2107,6 +2240,8 @@ class PhysicalNodeProcess:
         return True
 
     def _owned_group_state(self, deadline: float) -> str:
+        if mycelium_host_platform.is_win32():
+            return self._win32_owned_group_state(deadline)
         ownership = getattr(self, "_pre_exec_ownership", None)
         launch = getattr(self, "_launch_identity", None)
         if ownership is None and isinstance(launch, _ProcessIdentity):
@@ -2202,6 +2337,9 @@ class PhysicalNodeProcess:
                 threading.Event().wait(interval)
 
     def _terminate_process(self, deadline: float) -> bool:
+        if mycelium_host_platform.is_win32():
+            job = getattr(self, "_win32_job", None)
+            return job is not None and job.terminate(deadline)
         term_sent = self._signal_process_group(signal.SIGTERM, deadline)
         remaining = max(0.0, deadline - time.monotonic())
         term_deadline = min(
