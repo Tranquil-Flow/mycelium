@@ -316,9 +316,15 @@ def _gpt2_block_with_kv(
       all_key = mx.concatenate((past[0], key), axis=2)
       all_value = mx.concatenate((past[1], value), axis=2)
    scores = mx.matmul(query, all_key.transpose(0, 1, 3, 2)) / math.sqrt(head_size)
-   if past is None:
-      positions = mx.arange(sequence)
-      causal = positions[:, None] >= positions[None, :]
+   if int(sequence) > 1:
+      # A multi-position chunk is causal against its own positions whether or not
+      # it extends retained KV: query ``offset + i`` may attend keys ``0..offset+i``
+      # only.  (A single-position decode needs no mask: every retained key is at
+      # or before the query position.)
+      offset = 0 if past is None else int(past[0].shape[2])
+      query_positions = mx.arange(offset, offset + int(sequence))
+      key_positions = mx.arange(int(all_key.shape[2]))
+      causal = query_positions[:, None] >= key_positions[None, :]
       scores = mx.where(
          causal[None, None, :, :],
          scores,
@@ -1124,6 +1130,50 @@ class MLXRuntimePort:
 
       return {"applied_operation_count": self._applied_operation_count}
 
+   def a10_verifier_stages(self) -> tuple[Any, ...]:
+      """This port's local target stages as A10 verifier stages, in graph order.
+
+      Each stage runs this port's own stage kernel under its stage-state lock; the
+      final stage returns the greedy target decision for every input position.
+      """
+
+      from mycelium_router.a10_runtime_verifier import (
+         PortVerifierStage,
+         local_verifier_stages,
+      )
+
+      return local_verifier_stages(
+         self,
+         lambda placement_id: PortVerifierStage(
+            self,
+            placement_id,
+            token_array=lambda tokens: mx.array((tokens,), dtype=mx.uint32),
+            logits_row=lambda output, index: output[0, index, :].tolist(),
+         ),
+      )
+
+   def begin_target_verifier(
+      self,
+      prefix_tokens: Any,
+      *,
+      verification_ref: str,
+      stages: Any = None,
+   ) -> Any:
+      """Open one request-local A10 target verifier over this port's target stages.
+
+      The returned object is a real ``TargetVerificationRuntimePort``
+      (``begin_verification`` / ``sequential_reference``).  ``stages`` may extend
+      the chain with another local port's stages for a split in-process target.
+      """
+
+      from mycelium_router.a10_runtime_verifier import RuntimeTargetVerifier
+
+      return RuntimeTargetVerifier(
+         self.a10_verifier_stages() if stages is None else stages,
+         prefix_tokens=prefix_tokens,
+         verification_ref=verification_ref,
+      )
+
    def kv_subject_clean(
       self,
       request_id: str,
@@ -1251,6 +1301,7 @@ class MLXRuntimePort:
       past_layers: Mapping[int, tuple[mx.array, mx.array]],
       path_id: str,
       produce_logits: bool = True,
+      all_positions: bool = False,
    ) -> tuple[mx.array, dict[int, tuple[mx.array, mx.array]]]:
       config = runtime["model_config"]
       tensors = loaded.tensors
@@ -1288,6 +1339,7 @@ class MLXRuntimePort:
          # required for the next autoregressive vocabulary projection.
          if (
             produce_logits
+            and not all_positions
             and "lm_head" in stage.component_roles
             and int(hidden.shape[1]) > 1
          ):

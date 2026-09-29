@@ -849,6 +849,50 @@ class NumpyRuntimePort:
 
       return {"applied_operation_count": self._applied_operation_count}
 
+   def a10_verifier_stages(self) -> tuple[Any, ...]:
+      """This port's local target stages as A10 verifier stages, in graph order.
+
+      Each stage runs this port's own stage kernel under its stage-state lock; the
+      final stage returns the greedy target decision for every input position.
+      """
+
+      from mycelium_router.a10_runtime_verifier import (
+         PortVerifierStage,
+         local_verifier_stages,
+      )
+
+      return local_verifier_stages(
+         self,
+         lambda placement_id: PortVerifierStage(
+            self,
+            placement_id,
+            token_array=lambda tokens: np.array((tokens,), dtype=np.int64),
+            logits_row=lambda output, index: output[0, index, :].tolist(),
+         ),
+      )
+
+   def begin_target_verifier(
+      self,
+      prefix_tokens: Any,
+      *,
+      verification_ref: str,
+      stages: Any = None,
+   ) -> Any:
+      """Open one request-local A10 target verifier over this port's target stages.
+
+      The returned object is a real ``TargetVerificationRuntimePort``
+      (``begin_verification`` / ``sequential_reference``).  ``stages`` may extend
+      the chain with another local port's stages for a split in-process target.
+      """
+
+      from mycelium_router.a10_runtime_verifier import RuntimeTargetVerifier
+
+      return RuntimeTargetVerifier(
+         self.a10_verifier_stages() if stages is None else stages,
+         prefix_tokens=prefix_tokens,
+         verification_ref=verification_ref,
+      )
+
    def kv_subject_clean(
       self,
       request_id: str,
@@ -1017,6 +1061,7 @@ class NumpyRuntimePort:
       past_layers: Mapping[int, tuple[np.ndarray, np.ndarray]],
       path_id: str,
       produce_logits: bool = True,
+      all_positions: bool = False,
    ) -> tuple[np.ndarray, dict[int, tuple[np.ndarray, np.ndarray]]]:
       if runtime["architecture"] not in {"qwen2", "qwen3"}:
          _reject("stage_local_kv_unsupported_architecture")
@@ -1064,6 +1109,7 @@ class NumpyRuntimePort:
       # autoregressive sampling consumes logits only for its final position.
       if (
          produce_logits
+         and not all_positions
          and "lm_head" in stage.component_roles
          and int(hidden.shape[1]) > 1
       ):
