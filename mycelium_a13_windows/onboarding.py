@@ -70,6 +70,7 @@ from mycelium_qualification.signing import (
     build_ed25519_verifier,
 )
 
+from .acl import AclVerificationError, read_owner_only_acl
 from .progress import LADDER, advance, new_progress
 
 PAIRING_REQUEST_PROTOCOL = "mycelium.pairing_request.v1"
@@ -470,76 +471,21 @@ def _acl_is_owner_only(acl_observation: object) -> bool:
     return acl_observation == OWNER_ONLY_ACL
 
 
-_WIN32_TRUSTED_ACL_PRINCIPALS = frozenset(
-    {"NT AUTHORITY\\SYSTEM", "BUILTIN\\ADMINISTRATORS"}
-)
-
-
-def _win32_current_principal() -> str:
-    """The interactive user's ``DOMAIN\\USER`` principal, as ``icacls`` prints it."""
-
-    domain = os.environ.get("USERDOMAIN")
-    user = os.environ.get("USERNAME")
-    if not domain or not user:
-        raise OnboardingError("onboarding_acl_unverifiable")
-    return f"{domain}\\{user}".upper()
-
-
-def _parse_icacls_owner_only(output: str, *, path: Path) -> str:
-    """Reduce one ``icacls`` listing to an :data:`ACL_OBSERVATIONS` value.
-
-    Fails closed (raises) on anything the parser cannot read unambiguously
-    rather than guessing; only returns ``owner_only`` when every principal
-    granted an ACE is the current user, SYSTEM, or Administrators.
-    """
-
-    header = str(path)
-    principals: set[str] = set()
-    for raw_line in output.splitlines():
-        line = raw_line.strip()
-        if not line or line.lower().startswith("successfully processed"):
-            continue
-        if line.startswith(header):
-            line = line[len(header) :].strip()
-        if ":" not in line:
-            continue
-        principal = line.split(":", 1)[0].strip()
-        if not principal:
-            raise OnboardingError("onboarding_acl_unverifiable")
-        principals.add(principal.upper())
-    if not principals:
-        raise OnboardingError("onboarding_acl_unverifiable")
-    trusted = _WIN32_TRUSTED_ACL_PRINCIPALS | {_win32_current_principal()}
-    if principals - trusted:
-        return "not_owner_only"
-    return OWNER_ONLY_ACL
-
-
 def _default_win32_acl_reader(path: Path) -> str:
-    """Read the real NTFS ACL summary for ``path`` via ``icacls``.
+    """Read the real NTFS ACL summary for ``path`` via ``whoami`` + ``icacls``.
 
     Only reachable on an actual win32 host; refuses (fails closed) rather than
-    guessing when the platform tool is unavailable or its output is
-    unparseable.  Never exercised on Windows by this program (see FINDINGS).
+    guessing when the platform tools are unavailable or their output is
+    unparseable.  The parser lives in :mod:`mycelium_a13_windows.acl` and is
+    tested against recorded listings; never exercised on a Windows device.
     """
 
     if sys.platform != "win32":
         raise OnboardingError("onboarding_acl_unverifiable")
-    import subprocess
-
     try:
-        completed = subprocess.run(
-            ["icacls", str(path)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (OSError, ValueError) as exc:
+        return read_owner_only_acl(path)
+    except AclVerificationError as exc:
         raise OnboardingError("onboarding_acl_unverifiable") from exc
-    if completed.returncode != 0 or not completed.stdout.strip():
-        raise OnboardingError("onboarding_acl_unverifiable")
-    return _parse_icacls_owner_only(completed.stdout, path=path)
 
 
 def _observed_win32_acl(path: Path, *, acl_reader: Callable[[Path], str] | None) -> str:
