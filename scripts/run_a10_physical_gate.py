@@ -31,6 +31,16 @@ Subcommands (every output is an owner-private file under ``--out``, mode 0700/06
     missing publications invalidate the window (``missing_measurement``), never
     count as batching.  Output parity is judged privately per request shape.
 
+``verifier-product``
+    Runs the same matrix and negatives through the product dispatcher of a live
+    serve: one operation per request to the grant-gated loopback A10 control
+    (``--a10-verify-control-port``, grant in ``MYCELIUM_A10_FLEET_GRANT``), which
+    the live router port admits exclusively and sends to the target node, whose
+    own runtime produces each record (``execution_path = product_dispatcher``).
+    The binding digests describe the deployed target and are supplied by the
+    operator from its deployment.  Any refused operation stops the run without a
+    decision.
+
 ``negatives``
     Executes the runtime-batch negatives the product API can drive
     (cancellation isolation, queue overflow, slow consumer) and records every other
@@ -55,6 +65,7 @@ import json
 import math
 import os
 import random
+import re
 import shlex
 import stat
 import subprocess
@@ -86,7 +97,11 @@ from mycelium_router.a10_target_verification import (
    TargetVerificationQualificationRequest,
    qualify_target_verifier,
 )
-from mycelium_router.a10_verifier_matrix import MatrixPlan, run_verifier_matrix
+from mycelium_router.a10_verifier_matrix import (
+   VERIFIER_NEGATIVE_ORDER,
+   MatrixPlan,
+   run_verifier_matrix,
+)
 from tests.a10_acceptance.benchmark_amendment import (
    RUN_PROTOCOL,
    evaluate_throughput,
@@ -995,6 +1010,134 @@ def assemble_and_qualify(out: Path, *, benchmark_manifest_digest: str, cross_hos
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# verifier-product: the same matrix through the product dispatcher
+# ---------------------------------------------------------------------------
+
+_REFUSAL_CODE = re.compile(r"[a-z][a-z0-9_:]{0,80}\Z")
+
+
+class ProductVerifierClient:
+   """Send one operation to the grant-gated loopback A10 control of a live serve."""
+
+   def __init__(self, control_url: str, *, grant: str, timeout_s: float) -> None:
+      from urllib.parse import urlsplit
+
+      from mycelium_a10_verify_control import CONTROL_PATH
+
+      parts = urlsplit(control_url)
+      if (
+         parts.scheme != "http"
+         or parts.hostname != "127.0.0.1"
+         or parts.port is None
+         or parts.path != CONTROL_PATH
+         or parts.query
+         or parts.fragment
+      ):
+         raise GateError("control_url_invalid")
+      self._port = parts.port
+      self._path = CONTROL_PATH
+      self._grant = grant
+      self._timeout_s = timeout_s
+
+   def __call__(self, node_id: str, payload: Mapping[str, Any]) -> tuple[str, Any]:
+      import http.client
+
+      body = json.dumps(
+         {"node_id": node_id, "operation": dict(payload), "timeout_s": self._timeout_s}
+      ).encode("utf-8")
+      connection = http.client.HTTPConnection("127.0.0.1", self._port, timeout=self._timeout_s + 30)
+      try:
+         connection.request("POST", self._path, body=body, headers={
+            "Content-Type": "application/json",
+            "X-Mycelium-A10-Fleet-Grant": self._grant,
+         })
+         response = connection.getresponse()
+         status, raw = response.status, response.read()
+      except OSError:
+         raise GateError("product_verification_transport_failed") from None
+      finally:
+         connection.close()
+      try:
+         document = json.loads(raw.decode("utf-8"))
+      except (ValueError, UnicodeDecodeError):
+         raise GateError("product_verification_response_invalid") from None
+      if status != 200:
+         code = document.get("code") if isinstance(document, dict) else None
+         if not isinstance(code, str) or not _REFUSAL_CODE.fullmatch(code):
+            code = "unknown"
+         raise GateError(f"product_verification_refused:{code}")
+      if not isinstance(document, dict) or set(document) != {"kind", "result"}:
+         raise GateError("product_verification_response_invalid")
+      return document["kind"], document["result"]
+
+
+def run_product_verifier_gate(
+   client: Callable[[str, Mapping[str, Any]], tuple[str, Any]],
+   *,
+   node_id: str,
+   plan: MatrixPlan,
+   binding: Mapping[str, str],
+   out: Path,
+   progress: Callable[[str], None] = lambda message: None,
+) -> dict[str, Any]:
+   from mycelium_router.a10_product_verifier import (
+      A10ProductVerifierError,
+      operation_payload,
+      unwrap_product_result,
+   )
+   from mycelium_router.a10_qualification import VERIFIER_NEGATIVE_FIELDS
+
+   started = time.monotonic()
+   records: list[dict[str, Any]] = []
+   negatives: list[dict[str, Any]] = []
+   try:
+      for index in range(plan.operations):
+         payload = operation_payload(plan, index=index, **binding)
+         kind, record = client(node_id, payload)
+         if kind != "operation":
+            raise GateError("product_verification_response_invalid")
+         records.append(unwrap_product_result(payload, record)[1])
+         progress(f"operation {index + 1}/{plan.operations}")
+      for case_id in VERIFIER_NEGATIVE_ORDER:
+         payload = operation_payload(plan, case_id=case_id, **binding)
+         kind, negative = client(node_id, payload)
+         if (
+            kind != "negative"
+            or not isinstance(negative, Mapping)
+            or set(negative) != VERIFIER_NEGATIVE_FIELDS
+            or negative["case_id"] != case_id
+         ):
+            raise GateError("product_verification_response_invalid")
+         negatives.append(dict(negative))
+   except A10ProductVerifierError as error:
+      raise GateError(f"product_verification_invalid:{error.code}") from None
+   request = TargetVerificationQualificationRequest(
+      owner_private_root=str(out.name),
+      runtime_digest=binding["runtime_digest"],
+      width_classes=("one", "qualified_default", "qualified_maximum"),
+      prefix_length_buckets=len(plan.prefix_buckets),
+      operations=plan.operations,
+      sequential_parity_proof_digest=canonical_digest(records),
+   )
+   bundle = qualify_target_verifier(request, records, negatives)
+   summary = {
+      "protocol": GATE_PROTOCOL,
+      "subcommand": "verifier-product",
+      "backend": binding["backend"],
+      "execution_path": "product_dispatcher",
+      "elapsed_seconds": round(time.monotonic() - started, 3),
+      "decision": bundle["decision"],
+      "matrix_passed": bundle["matrix_passed"],
+      "blockers": bundle["blockers"],
+   }
+   write_private_json(out / "verifier-operations.json", records)
+   write_private_json(out / "verifier-negatives.json", negatives)
+   write_private_json(out / "verifier-qualification.json", bundle)
+   write_private_json(out / "verifier-summary.json", summary)
+   return bundle
+
+
 def _widths(value: str) -> dict[str, int]:
    parts = [int(item) for item in value.split(",")]
    if len(parts) != 3:
@@ -1022,6 +1165,20 @@ def parser() -> argparse.ArgumentParser:
    matrix.add_argument("--operations", type=int, default=102)
    matrix.add_argument("--provenance", choices=("live", "fixture"), default="live")
    matrix.add_argument("--out", type=Path, required=True)
+   product = sub.add_parser("verifier-product")
+   product.add_argument("--control-url", required=True)
+   product.add_argument("--node-id", required=True)
+   product.add_argument("--runtime-digest", required=True)
+   product.add_argument("--model-digest", required=True)
+   product.add_argument("--representation-digest", required=True)
+   product.add_argument("--backend", choices=("mlx", "numpy"), required=True)
+   product.add_argument("--vocab-size", type=int, required=True)
+   product.add_argument("--widths", type=_widths, default=_widths("1,4,8"))
+   product.add_argument("--short-prefix", type=_lengths, default=(16, 24))
+   product.add_argument("--long-prefix", type=_lengths, default=(96, 128))
+   product.add_argument("--operations", type=int, default=102)
+   product.add_argument("--timeout-s", type=float, default=60.0)
+   product.add_argument("--out", type=Path, required=True)
    bench = sub.add_parser("benchmark")
    bench.add_argument("--base-url", required=True)
    bench.add_argument("--baseline-command", required=True)
@@ -1057,6 +1214,41 @@ def main(argv: Sequence[str] | None = None) -> int:
             prefix_buckets={"short": arguments.short_prefix, "long": arguments.long_prefix},
             operations=arguments.operations,
             provenance=arguments.provenance,
+            out=out,
+            progress=lambda message: print(message, file=sys.stderr, flush=True),
+         )
+         print(json.dumps({"decision": bundle["decision"], "matrix_passed": bundle["matrix_passed"], "blockers": bundle["blockers"]}, sort_keys=True))
+         return 0 if bundle["matrix_passed"] else 1
+      if arguments.command == "verifier-product":
+         from mycelium_a10_verify_control import grant_from_environment
+
+         grant = grant_from_environment()
+         if grant is None:
+            raise GateError("explicit_fleet_grant_required")
+         if not 0 < arguments.timeout_s <= 120:
+            raise GateError("timeout_invalid")
+         client = ProductVerifierClient(
+            arguments.control_url, grant=grant, timeout_s=arguments.timeout_s
+         )
+         try:
+            plan = MatrixPlan(
+               widths=dict(arguments.widths),
+               prefix_buckets={"short": arguments.short_prefix, "long": arguments.long_prefix},
+               operations=arguments.operations,
+               vocab_size=arguments.vocab_size,
+            )
+         except Exception:  # noqa: BLE001 - only the code is recorded
+            raise GateError("matrix_plan_invalid") from None
+         bundle = run_product_verifier_gate(
+            client,
+            node_id=arguments.node_id,
+            plan=plan,
+            binding={
+               "runtime_digest": arguments.runtime_digest,
+               "model_digest": arguments.model_digest,
+               "representation_digest": arguments.representation_digest,
+               "backend": arguments.backend,
+            },
             out=out,
             progress=lambda message: print(message, file=sys.stderr, flush=True),
          )
