@@ -1,16 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use std::num::NonZeroUsize;
+#[cfg(unix)]
 use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::process::ExitCode;
+#[cfg(any(windows, feature = "loopback-test"))]
+use std::sync::Arc;
 
-use clap::Parser;
+use clap::{Args, Parser};
+#[cfg(any(windows, feature = "loopback-test"))]
+use mycelium_iroh_transport::local_ipc::{SystemConnectionTable, read_bootstrap_stdin};
+#[cfg(unix)]
+use mycelium_iroh_transport::sidecar::read_bootstrap_secret;
 use mycelium_iroh_transport::sidecar::{
-    DEFAULT_QUEUE_CAPACITY, SidecarConfig, log_event, read_bootstrap_secret, read_endpoint_secret,
-    run_sidecar,
+    DEFAULT_QUEUE_CAPACITY, LocalChannel, SidecarConfig, SidecarError, log_event,
+    read_endpoint_secret, run_sidecar,
 };
+use zeroize::Zeroizing;
 
+/// POSIX hosts: the Router reaches the sidecar over a Unix-domain socket.
+#[cfg(all(unix, not(feature = "loopback-test")))]
 #[derive(Debug, Parser)]
 #[command(
     name = "mycelium-iroh-sidecar",
@@ -26,6 +36,129 @@ struct Arguments {
     #[arg(long, value_name = "FD")]
     bootstrap_fd: RawFd,
 
+    #[command(flatten)]
+    common: CommonArguments,
+}
+
+#[cfg(all(unix, not(feature = "loopback-test")))]
+impl Arguments {
+    fn channel(&self) -> Result<(LocalChannel, Zeroizing<[u8; 32]>), SidecarError> {
+        let secret = read_bootstrap_secret(self.bootstrap_fd)?;
+        Ok((LocalChannel::UnixSocket(self.uds.clone()), secret))
+    }
+}
+
+/// Test builds on POSIX hosts: either the Unix socket or the loopback channel.
+#[cfg(all(unix, feature = "loopback-test"))]
+#[derive(Debug, Parser)]
+#[command(
+    name = "mycelium-iroh-sidecar",
+    version,
+    disable_help_subcommand = true
+)]
+struct Arguments {
+    /// Unix-domain socket used by the local Router process.
+    #[arg(
+        long,
+        value_name = "PATH",
+        required_unless_present = "loopback",
+        conflicts_with = "loopback",
+        requires = "bootstrap_fd"
+    )]
+    uds: Option<PathBuf>,
+
+    /// Inherited pipe descriptor containing exactly 32 bootstrap bytes.
+    #[arg(long, value_name = "FD", conflicts_with = "loopback", requires = "uds")]
+    bootstrap_fd: Option<RawFd>,
+
+    #[command(flatten)]
+    loopback: LoopbackArguments,
+
+    #[command(flatten)]
+    common: CommonArguments,
+}
+
+#[cfg(all(unix, feature = "loopback-test"))]
+impl Arguments {
+    fn channel(&self) -> Result<(LocalChannel, Zeroizing<[u8; 32]>), SidecarError> {
+        match (&self.uds, self.bootstrap_fd) {
+            (Some(uds), Some(fd)) => {
+                let secret = read_bootstrap_secret(fd)?;
+                Ok((LocalChannel::UnixSocket(uds.clone()), secret))
+            }
+            _ => self.loopback.channel(),
+        }
+    }
+}
+
+/// Windows hosts: the Router reaches the sidecar over authenticated loopback.
+#[cfg(windows)]
+#[derive(Debug, Parser)]
+#[command(
+    name = "mycelium-iroh-sidecar",
+    version,
+    disable_help_subcommand = true
+)]
+struct Arguments {
+    #[command(flatten)]
+    loopback: LoopbackArguments,
+
+    #[command(flatten)]
+    common: CommonArguments,
+}
+
+#[cfg(windows)]
+impl Arguments {
+    fn channel(&self) -> Result<(LocalChannel, Zeroizing<[u8; 32]>), SidecarError> {
+        self.loopback.channel()
+    }
+}
+
+#[cfg(any(windows, feature = "loopback-test"))]
+#[derive(Debug, Args)]
+struct LoopbackArguments {
+    /// Serve the local Router on an ephemeral 127.0.0.1 TCP port, announced
+    /// as `local_port` in the ready record.
+    #[arg(long, requires_all = ["bootstrap_stdin", "allowed_client_pid"])]
+    #[cfg_attr(windows, arg(required = true))]
+    loopback: bool,
+
+    /// Read exactly 32 bootstrap bytes from stdin, which must be a pipe
+    /// closed right after them.
+    #[arg(long, requires = "loopback")]
+    bootstrap_stdin: bool,
+
+    /// Only the process with this id may own a local connection's client end.
+    #[arg(
+        long,
+        value_name = "PID",
+        requires = "loopback",
+        value_parser = clap::value_parser!(u32).range(1..)
+    )]
+    allowed_client_pid: Option<u32>,
+}
+
+#[cfg(any(windows, feature = "loopback-test"))]
+impl LoopbackArguments {
+    fn channel(&self) -> Result<(LocalChannel, Zeroizing<[u8; 32]>), SidecarError> {
+        let (true, true, Some(allowed_client_pid)) =
+            (self.loopback, self.bootstrap_stdin, self.allowed_client_pid)
+        else {
+            return Err(SidecarError::InvalidBootstrapFd);
+        };
+        let secret = read_bootstrap_stdin()?;
+        Ok((
+            LocalChannel::Loopback {
+                allowed_client_pid,
+                owners: Arc::new(SystemConnectionTable),
+            },
+            secret,
+        ))
+    }
+}
+
+#[derive(Debug, Args)]
+struct CommonArguments {
     /// Host-local raw 32-byte Iroh identity key; never copied by the controller.
     #[arg(long, value_name = "PATH")]
     endpoint_secret_file: Option<PathBuf>,
@@ -46,14 +179,15 @@ struct Arguments {
 #[tokio::main]
 async fn main() -> ExitCode {
     let arguments = Arguments::parse();
-    let secret = match read_bootstrap_secret(arguments.bootstrap_fd) {
-        Ok(secret) => secret,
+    let (channel, secret) = match arguments.channel() {
+        Ok(selected) => selected,
         Err(_) => {
             log_event("bootstrap_rejected");
             return ExitCode::FAILURE;
         }
     };
-    let endpoint_secret = match arguments.endpoint_secret_file.as_deref() {
+    let common = arguments.common;
+    let endpoint_secret = match common.endpoint_secret_file.as_deref() {
         Some(path) => match read_endpoint_secret(path) {
             Ok(secret) => Some(secret),
             Err(_) => {
@@ -64,10 +198,10 @@ async fn main() -> ExitCode {
         None => None,
     };
     let config = SidecarConfig {
-        uds: arguments.uds,
-        queue_capacity: arguments.queue_capacity,
-        local_only: arguments.local_only,
-        force_relay: arguments.force_relay,
+        channel,
+        queue_capacity: common.queue_capacity,
+        local_only: common.local_only,
+        force_relay: common.force_relay,
         endpoint_secret,
     };
     match run_sidecar(config, secret).await {

@@ -6,11 +6,15 @@ use std::error::Error;
 use std::fmt;
 use std::fs;
 use std::io::{self, Read};
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::num::NonZeroUsize;
+#[cfg(unix)]
 use std::os::fd::{FromRawFd, RawFd};
+#[cfg(unix)]
 use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -20,7 +24,8 @@ use iroh::endpoint::{RecvStream, SendStream, VarInt, presets};
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, TransportAddr};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+#[cfg(unix)]
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, Notify, OwnedSemaphorePermit, RwLock, Semaphore, watch};
 use tokio::time::{Instant, sleep, timeout};
@@ -30,6 +35,9 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::local::{
     ClientHello, LOCAL_MAX_RECORD_BYTES, MAX_HELLO_BYTES, Record, RecordKind, SequenceGuard,
     ServerHello, SessionKeys, decode_record, derive_session_keys, encode_record,
+};
+use crate::local_ipc::{
+    ConnectionOwnerTable, LoopbackListener, authorize_loopback_client, loopback_ready_record,
 };
 use crate::protocol::{WireError, decode_frame};
 use crate::ready_address::{
@@ -107,8 +115,21 @@ pub fn validate_router_ingress(frame: &[u8]) -> Result<(), IngressError> {
         .map_err(IngressError::InvalidFrame)
 }
 
+/// How the local Router reaches the sidecar.
+pub enum LocalChannel {
+    /// Owner-only Unix-domain socket; peers must share the effective uid.
+    #[cfg(unix)]
+    UnixSocket(PathBuf),
+    /// `127.0.0.1:0` TCP listener; the client end of every connection must be
+    /// owned by `allowed_client_pid` according to `owners`.
+    Loopback {
+        allowed_client_pid: u32,
+        owners: Arc<dyn ConnectionOwnerTable>,
+    },
+}
+
 pub struct SidecarConfig {
-    pub uds: PathBuf,
+    pub channel: LocalChannel,
     pub queue_capacity: NonZeroUsize,
     pub local_only: bool,
     pub force_relay: bool,
@@ -158,6 +179,7 @@ impl Error for SidecarError {}
 
 /// Consumes an inherited pipe descriptor and accepts exactly 32 bytes before EOF.
 /// The descriptor is closed on both success and failure.
+#[cfg(unix)]
 pub fn read_bootstrap_secret(fd: RawFd) -> Result<Zeroizing<[u8; 32]>, SidecarError> {
     if fd < 0 {
         return Err(SidecarError::InvalidBootstrapFd);
@@ -192,6 +214,7 @@ pub fn read_bootstrap_secret(fd: RawFd) -> Result<Zeroizing<[u8; 32]>, SidecarEr
 ///
 /// O_NOFOLLOW prevents a symlink swap from redirecting the sidecar into reading
 /// unrelated host secrets before descriptor metadata is validated.
+#[cfg(unix)]
 pub fn read_endpoint_secret(path: &Path) -> Result<Zeroizing<[u8; 32]>, SidecarError> {
     let mut file = fs::OpenOptions::new()
         .read(true)
@@ -225,12 +248,273 @@ pub fn read_endpoint_secret(path: &Path) -> Result<Zeroizing<[u8; 32]>, SidecarE
     Ok(secret)
 }
 
+/// Reads exactly 32 endpoint-secret bytes from an owner-only regular file.
+///
+/// The file is opened without following reparse points and must be owned by
+/// the current user with a protected DACL whose only entries grant access to
+/// that user and to SYSTEM: the Windows analogue of an owned mode-0600 file.
+#[cfg(windows)]
+pub fn read_endpoint_secret(path: &Path) -> Result<Zeroizing<[u8; 32]>, SidecarError> {
+    use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+    };
+
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .map_err(|_| SidecarError::EndpointSecretSecurity)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| SidecarError::EndpointSecretSecurity)?;
+    if !metadata.file_type().is_file()
+        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        || metadata.len() != 32
+        || !windows_security::handle_is_owner_only(file.as_raw_handle())
+    {
+        return Err(SidecarError::EndpointSecretSecurity);
+    }
+    let mut bytes = Vec::with_capacity(33);
+    file.by_ref()
+        .take(33)
+        .read_to_end(&mut bytes)
+        .map_err(|_| SidecarError::EndpointSecretSecurity)?;
+    if bytes.len() != 32 {
+        bytes.zeroize();
+        return Err(SidecarError::EndpointSecretSecurity);
+    }
+    let mut secret = Zeroizing::new([0_u8; 32]);
+    secret.copy_from_slice(&bytes);
+    bytes.zeroize();
+    Ok(secret)
+}
+
+#[cfg(windows)]
+mod windows_security {
+    use std::ffi::c_void;
+    use std::ptr::null_mut;
+
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, LocalFree};
+    use windows_sys::Win32::Security::Authorization::{GetSecurityInfo, SE_FILE_OBJECT};
+    use windows_sys::Win32::Security::{
+        ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
+        DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation,
+        GetSecurityDescriptorControl, GetTokenInformation, IsWellKnownSid,
+        OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED, TOKEN_QUERY,
+        TOKEN_USER, TokenUser, WinLocalSystemSid,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    /// `ACCESS_ALLOWED_ACE_TYPE` from winnt.h.
+    const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+
+    struct LocalAllocation(*mut c_void);
+
+    impl Drop for LocalAllocation {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                // SAFETY: the pointer was allocated by the API for LocalFree.
+                unsafe { LocalFree(self.0) };
+            }
+        }
+    }
+
+    /// The current process token's `TOKEN_USER`, kept in aligned storage.
+    struct TokenUserBuffer(Vec<u64>);
+
+    impl TokenUserBuffer {
+        fn current() -> Option<Self> {
+            let mut token: HANDLE = null_mut();
+            // SAFETY: GetCurrentProcess returns a pseudo handle; `token` is a
+            // valid out pointer and is closed below on every path.
+            if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+                return None;
+            }
+            let mut length = 0_u32;
+            // SAFETY: a size query with a null buffer of length zero.
+            unsafe { GetTokenInformation(token, TokenUser, null_mut(), 0, &mut length) };
+            let mut storage = vec![0_u64; (length as usize).div_ceil(8).max(1)];
+            let capacity = u32::try_from(storage.len() * 8).unwrap_or(0);
+            // SAFETY: `storage` is writable for `capacity` bytes.
+            let filled = unsafe {
+                GetTokenInformation(
+                    token,
+                    TokenUser,
+                    storage.as_mut_ptr().cast(),
+                    capacity,
+                    &mut length,
+                )
+            };
+            // SAFETY: `token` was opened above and is not used afterwards.
+            unsafe { CloseHandle(token) };
+            (filled != 0 && length as usize >= size_of::<TOKEN_USER>()).then_some(Self(storage))
+        }
+
+        fn sid(&self) -> PSID {
+            // SAFETY: the buffer was filled with a TOKEN_USER by the API and
+            // is aligned for it; the SID it points at lives inside the buffer.
+            unsafe { (*self.0.as_ptr().cast::<TOKEN_USER>()).User.Sid }
+        }
+    }
+
+    /// `true` when the object behind `handle` is owned by the current user
+    /// and its protected DACL allows only that user and SYSTEM.
+    pub(super) fn handle_is_owner_only(handle: std::os::windows::io::RawHandle) -> bool {
+        let Some(user) = TokenUserBuffer::current() else {
+            return false;
+        };
+        let mut owner: PSID = null_mut();
+        let mut dacl: *mut ACL = null_mut();
+        let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
+        // SAFETY: all out pointers are valid; the descriptor that owns the
+        // returned owner and DACL pointers is released by `_descriptor`.
+        let status = unsafe {
+            GetSecurityInfo(
+                handle,
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                &mut owner,
+                null_mut(),
+                &mut dacl,
+                null_mut(),
+                &mut descriptor,
+            )
+        };
+        let _descriptor = LocalAllocation(descriptor);
+        if status != 0 || owner.is_null() || dacl.is_null() || descriptor.is_null() {
+            // A null DACL grants everyone full access.
+            return false;
+        }
+        // SAFETY: `owner` and the token SID are valid SIDs for these calls.
+        if unsafe { EqualSid(owner, user.sid()) } == 0 {
+            return false;
+        }
+        let mut control = 0_u16;
+        let mut revision = 0_u32;
+        // SAFETY: `descriptor` is a valid self-relative descriptor.
+        if unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) } == 0
+            || control & SE_DACL_PROTECTED == 0
+        {
+            return false;
+        }
+        let mut information = ACL_SIZE_INFORMATION::default();
+        // SAFETY: `information` is writable for the size passed.
+        if unsafe {
+            GetAclInformation(
+                dacl,
+                (&raw mut information).cast(),
+                size_of::<ACL_SIZE_INFORMATION>() as u32,
+                AclSizeInformation,
+            )
+        } == 0
+        {
+            return false;
+        }
+        let mut grants_user = false;
+        for index in 0..information.AceCount {
+            let mut ace: *mut c_void = null_mut();
+            // SAFETY: `index` is below the ACE count reported for `dacl`.
+            if unsafe { GetAce(dacl, index, &mut ace) } == 0 || ace.is_null() {
+                return false;
+            }
+            // SAFETY: every ACE starts with an ACE_HEADER.
+            let header = unsafe { *ace.cast::<ACE_HEADER>() };
+            if header.AceType != ACCESS_ALLOWED_ACE_TYPE {
+                return false;
+            }
+            let allowed = ace.cast::<ACCESS_ALLOWED_ACE>();
+            // SAFETY: an access-allowed ACE stores its SID at SidStart.
+            let sid: PSID = unsafe { (&raw mut (*allowed).SidStart).cast() };
+            // SAFETY: `sid` points at a SID inside the live DACL.
+            if unsafe { EqualSid(sid, user.sid()) } != 0 {
+                grants_user = true;
+            } else if unsafe { IsWellKnownSid(sid, WinLocalSystemSid) } == 0 {
+                return false;
+            }
+        }
+        grants_user
+    }
+}
+
+#[cfg(any(unix, test))]
 #[derive(Serialize)]
 struct ReadyEvent<'a> {
     event: &'static str,
     endpoint_id: String,
     endpoint_addr: &'a EndpointAddr,
     alpn: &'static str,
+}
+
+#[cfg(any(unix, test))]
+/// The POSIX ready record: exactly `{event, endpoint_id, endpoint_addr, alpn}`.
+pub(crate) fn posix_ready_record(
+    endpoint_id: &str,
+    endpoint_addr: &EndpointAddr,
+    alpn: &'static str,
+) -> Result<String, SidecarError> {
+    let ready = ReadyEvent {
+        event: "ready",
+        endpoint_id: endpoint_id.to_owned(),
+        endpoint_addr,
+        alpn,
+    };
+    serde_json::to_string(&ready).map_err(|_| SidecarError::ReadyOutput)
+}
+
+/// The listener selected by [`LocalChannel`], bound before the endpoint.
+enum BoundChannel {
+    #[cfg(unix)]
+    UnixSocket {
+        listener: UnixListener,
+        /// Removes the socket file when the channel is dropped.
+        _cleanup: SocketCleanup,
+    },
+    Loopback {
+        listener: LoopbackListener,
+        allowed_client_pid: u32,
+        owners: Arc<dyn ConnectionOwnerTable>,
+    },
+}
+
+impl BoundChannel {
+    fn bind(channel: LocalChannel) -> Result<Self, SidecarError> {
+        match channel {
+            #[cfg(unix)]
+            LocalChannel::UnixSocket(path) => {
+                let listener = bind_secure_uds(&path)?;
+                Ok(Self::UnixSocket {
+                    listener,
+                    _cleanup: SocketCleanup(path),
+                })
+            }
+            LocalChannel::Loopback {
+                allowed_client_pid,
+                owners,
+            } => Ok(Self::Loopback {
+                listener: LoopbackListener::bind()?,
+                allowed_client_pid,
+                owners,
+            }),
+        }
+    }
+
+    fn ready_record(
+        &self,
+        endpoint_id: &str,
+        endpoint_addr: &EndpointAddr,
+        alpn: &'static str,
+    ) -> Result<String, SidecarError> {
+        match self {
+            #[cfg(unix)]
+            Self::UnixSocket { .. } => posix_ready_record(endpoint_id, endpoint_addr, alpn),
+            Self::Loopback { listener, .. } => {
+                loopback_ready_record(endpoint_id, endpoint_addr, alpn, listener.local_port())
+            }
+        }
+    }
 }
 
 /// Runs until SIGINT, SIGTERM/process termination, or a fatal listener error.
@@ -241,8 +525,7 @@ pub async fn run_sidecar(
     if config.local_only && config.force_relay {
         return Err(SidecarError::InvalidNetworkMode);
     }
-    let listener = bind_secure_uds(&config.uds)?;
-    let _socket_cleanup = SocketCleanup(config.uds.clone());
+    let channel = BoundChannel::bind(config.channel)?;
     let endpoint = bind_endpoint(
         config.local_only,
         config.force_relay,
@@ -271,13 +554,11 @@ pub async fn run_sidecar(
     let outbound_task = tokio::spawn(outbound_worker(endpoint.clone(), state.clone()));
     let incoming_task = tokio::spawn(incoming_worker(endpoint.clone(), state.clone()));
 
-    let ready = ReadyEvent {
-        event: "ready",
-        endpoint_id: endpoint_id.clone(),
-        endpoint_addr: &endpoint_addr,
-        alpn: std::str::from_utf8(IROH_ALPN).expect("ALPN is ASCII"),
-    };
-    let ready_json = serde_json::to_string(&ready).map_err(|_| SidecarError::ReadyOutput)?;
+    let ready_json = channel.ready_record(
+        &endpoint_id,
+        &endpoint_addr,
+        std::str::from_utf8(IROH_ALPN).expect("ALPN is ASCII"),
+    )?;
     {
         use std::io::Write as _;
         let mut stdout = io::stdout().lock();
@@ -309,44 +590,143 @@ pub async fn run_sidecar(
         };
 
         let accepted = tokio::select! {
-            result = listener.accept() => result,
+            result = channel.accept() => result,
             signal = tokio::signal::ctrl_c() => {
                 let _ = signal;
                 break Ok(());
             }
         };
-        let (stream, _) = match accepted {
-            Ok(pair) => pair,
+        let stream = match accepted {
+            Ok(stream) => stream,
             Err(_) => break Err(SidecarError::Runtime),
         };
-        if !same_effective_uid(&stream) {
-            drop(permit);
-            log_event("local_peer_rejected");
-            continue;
-        }
+        match stream {
+            #[cfg(unix)]
+            AcceptedStream::UnixSocket(stream) => {
+                if !same_effective_uid(&stream) {
+                    drop(permit);
+                    log_event("local_peer_rejected");
+                    continue;
+                }
 
-        let session_id = next_session.fetch_add(1, Ordering::Relaxed);
-        let session_state = state.clone();
-        let session_secret = secret.clone();
-        let public_id = endpoint_id.clone();
-        tokio::spawn(async move {
-            let _permit = permit;
-            let _ = handle_local_session(
+                let session_id = next_session.fetch_add(1, Ordering::Relaxed);
+                tokio::spawn(serve_local_session(
+                    stream,
+                    permit,
+                    session_id,
+                    secret.clone(),
+                    endpoint_id.clone(),
+                    state.clone(),
+                ));
+            }
+            AcceptedStream::Loopback {
                 stream,
-                session_id,
-                session_secret.as_ref().as_ref(),
-                &public_id,
-                session_state.clone(),
-            )
-            .await;
-            session_state.redeliver_session(session_id).await;
-        });
+                client,
+                server,
+                allowed_client_pid,
+                owners,
+            } => {
+                let session_id = next_session.fetch_add(1, Ordering::Relaxed);
+                let session_secret = secret.clone();
+                let public_id = endpoint_id.clone();
+                let session_state = state.clone();
+                tokio::spawn(async move {
+                    // The owner lookup can block (it walks the host TCP table),
+                    // so it runs off the reactor and before any handshake byte.
+                    let authorized = tokio::task::spawn_blocking(move || {
+                        authorize_loopback_client(
+                            owners.as_ref(),
+                            client,
+                            server,
+                            allowed_client_pid,
+                        )
+                    })
+                    .await;
+                    if !matches!(authorized, Ok(Ok(()))) {
+                        drop(permit);
+                        log_event("local_peer_rejected");
+                        return;
+                    }
+                    serve_local_session(
+                        stream,
+                        permit,
+                        session_id,
+                        session_secret,
+                        public_id,
+                        session_state,
+                    )
+                    .await;
+                });
+            }
+        }
     };
 
     endpoint.close().await;
     outbound_task.abort();
     incoming_task.abort();
     listener_result
+}
+
+/// One accepted local connection, still to be authorized for its channel.
+enum AcceptedStream {
+    #[cfg(unix)]
+    UnixSocket(UnixStream),
+    Loopback {
+        stream: tokio::net::TcpStream,
+        client: SocketAddr,
+        server: SocketAddr,
+        allowed_client_pid: u32,
+        owners: Arc<dyn ConnectionOwnerTable>,
+    },
+}
+
+impl BoundChannel {
+    async fn accept(&self) -> io::Result<AcceptedStream> {
+        match self {
+            #[cfg(unix)]
+            Self::UnixSocket { listener, .. } => {
+                let (stream, _) = listener.accept().await?;
+                Ok(AcceptedStream::UnixSocket(stream))
+            }
+            Self::Loopback {
+                listener,
+                allowed_client_pid,
+                owners,
+            } => {
+                let (stream, client) = listener.accept().await?;
+                Ok(AcceptedStream::Loopback {
+                    stream,
+                    client,
+                    server: SocketAddr::V4(listener.local_addr()),
+                    allowed_client_pid: *allowed_client_pid,
+                    owners: owners.clone(),
+                })
+            }
+        }
+    }
+}
+
+/// Runs one authenticated session and hands its undelivered messages back.
+async fn serve_local_session<S>(
+    stream: S,
+    permit: OwnedSemaphorePermit,
+    session_id: u64,
+    secret: Arc<Zeroizing<[u8; 32]>>,
+    endpoint_id: String,
+    state: Arc<RuntimeState>,
+) where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let _permit = permit;
+    let _ = handle_local_session(
+        stream,
+        session_id,
+        secret.as_ref().as_ref(),
+        &endpoint_id,
+        state.clone(),
+    )
+    .await;
+    state.redeliver_session(session_id).await;
 }
 
 /// Publish the endpoint's own address changes into a watch channel.
@@ -398,6 +778,7 @@ async fn bind_endpoint(
         .map_err(|_| SidecarError::EndpointBind)
 }
 
+#[cfg(unix)]
 fn bind_secure_uds(path: &Path) -> Result<UnixListener, SidecarError> {
     let parent = path
         .parent()
@@ -441,6 +822,7 @@ fn bind_secure_uds(path: &Path) -> Result<UnixListener, SidecarError> {
     Ok(listener)
 }
 
+#[cfg(unix)]
 fn same_effective_uid(stream: &UnixStream) -> bool {
     let Ok(credentials) = stream.peer_cred() else {
         return false;
@@ -449,8 +831,10 @@ fn same_effective_uid(stream: &UnixStream) -> bool {
     credentials.uid() == unsafe { libc::geteuid() }
 }
 
+#[cfg(unix)]
 struct SocketCleanup(PathBuf);
 
+#[cfg(unix)]
 impl Drop for SocketCleanup {
     fn drop(&mut self) {
         if fs::symlink_metadata(&self.0).is_ok_and(|metadata| metadata.file_type().is_socket()) {
@@ -482,13 +866,16 @@ struct ErrorPayload<'a> {
     code: &'a str,
 }
 
-async fn handle_local_session(
-    mut stream: UnixStream,
+async fn handle_local_session<S>(
+    mut stream: S,
     session_id: u64,
     secret: &[u8],
     endpoint_id: &str,
     state: Arc<RuntimeState>,
-) -> Result<(), SessionError> {
+) -> Result<(), SessionError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let hello_bytes = timeout(
         LOCAL_HANDSHAKE_TIMEOUT,
         read_length_prefixed(&mut stream, MAX_HELLO_BYTES),
@@ -519,12 +906,15 @@ async fn handle_local_session(
     authenticated_session_loop(&mut stream, session_id, &keys, state).await
 }
 
-async fn authenticated_session_loop(
-    stream: &mut UnixStream,
+async fn authenticated_session_loop<S>(
+    stream: &mut S,
     session_id: u64,
     keys: &SessionKeys,
     state: Arc<RuntimeState>,
-) -> Result<(), SessionError> {
+) -> Result<(), SessionError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let mut receive_sequence = SequenceGuard::new();
     let mut send_sequence = Some(0_u64);
     loop {
@@ -535,20 +925,17 @@ async fn authenticated_session_loop(
         let response = process_local_record(record, session_id, &state);
         tokio::pin!(response);
         let response = if confirmed {
-            loop {
-                tokio::select! {
-                    response = &mut response => break response,
-                    readable = stream.readable() => {
-                        readable.map_err(|_| SessionError::Disconnected)?;
-                        let mut unexpected = [0_u8; 1];
-                        match stream.try_read(&mut unexpected) {
-                            Ok(0) => return Ok(()),
-                            Ok(_) => return Err(SessionError::Protocol),
-                            Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
-                            Err(_) => return Err(SessionError::Disconnected),
-                        }
-                    }
-                }
+            // A confirmed send waits for its terminal outcome; meanwhile the
+            // client may only hang up. `read` is cancel-safe, so losing the
+            // race to the response consumes no byte.
+            let mut unexpected = [0_u8; 1];
+            tokio::select! {
+                response = &mut response => response,
+                read = stream.read(&mut unexpected) => match read {
+                    Ok(0) => return Ok(()),
+                    Ok(_) => return Err(SessionError::Protocol),
+                    Err(_) => return Err(SessionError::Disconnected),
+                },
             }
         } else {
             response.await
@@ -773,8 +1160,8 @@ fn error_response(message_id: MessageId, code: &str) -> ResponseRecord {
     }
 }
 
-async fn write_authenticated_record(
-    stream: &mut UnixStream,
+async fn write_authenticated_record<S: AsyncWrite + Unpin>(
+    stream: &mut S,
     response: ResponseRecord,
     key: &[u8],
     sequence: &mut Option<u64>,
@@ -792,8 +1179,8 @@ async fn write_authenticated_record(
     write_length_prefixed(stream, &encoded).await
 }
 
-async fn read_length_prefixed(
-    stream: &mut UnixStream,
+async fn read_length_prefixed<S: AsyncRead + Unpin>(
+    stream: &mut S,
     maximum: usize,
 ) -> Result<Vec<u8>, SessionError> {
     let length = stream
@@ -811,7 +1198,10 @@ async fn read_length_prefixed(
     Ok(bytes)
 }
 
-async fn write_length_prefixed(stream: &mut UnixStream, bytes: &[u8]) -> Result<(), SessionError> {
+async fn write_length_prefixed<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+    bytes: &[u8],
+) -> Result<(), SessionError> {
     let length = u32::try_from(bytes.len()).map_err(|_| SessionError::Protocol)?;
     stream
         .write_u32(length)
@@ -2218,12 +2608,16 @@ mod tests {
     use super::*;
     use crate::protocol::{MessageType, encode_frame};
     use serde_json::json;
+    #[cfg(unix)]
     use std::fs::OpenOptions;
+    #[cfg(unix)]
     use std::io::Write;
-    use std::net::SocketAddr;
+    #[cfg(unix)]
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink};
+    #[cfg(unix)]
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    #[cfg(unix)]
     fn temporary_path(label: &str) -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -2255,6 +2649,7 @@ mod tests {
         assert_eq!(state.selected_path_changes, 3);
     }
 
+    #[cfg(unix)]
     #[test]
     fn endpoint_secret_file_requires_owned_regular_mode_0600_bytes() {
         let path = temporary_path("secret");
@@ -2657,5 +3052,150 @@ mod tests {
             state.admit_inbound(active_id, valid_frame()).await,
             AdmissionOutcome::PendingDuplicate(_)
         ));
+    }
+
+    const SESSION_SECRET: [u8; 32] = [0x5a; 32];
+    const SESSION_ENDPOINT: &str = "duplex-endpoint";
+
+    /// Runs the client half of the bootstrap handshake over any stream.
+    async fn client_handshake<S>(stream: &mut S, secret: &[u8; 32]) -> Option<SessionKeys>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        let client_nonce = [0x21_u8; 32];
+        let hello = ClientHello::new(secret, &client_nonce).unwrap();
+        write_length_prefixed(stream, &serde_json::to_vec(&hello).unwrap())
+            .await
+            .ok()?;
+        let reply = read_length_prefixed(stream, MAX_HELLO_BYTES).await.ok()?;
+        let server: ServerHello = serde_json::from_slice(&reply).unwrap();
+        assert_eq!(server.endpoint_id, SESSION_ENDPOINT);
+        let server_nonce = server.verify(secret, &client_nonce).unwrap();
+        Some(derive_session_keys(secret, &client_nonce, &server_nonce).unwrap())
+    }
+
+    fn spawn_duplex_session(
+        state: Arc<RuntimeState>,
+    ) -> (
+        tokio::io::DuplexStream,
+        tokio::task::JoinHandle<Result<(), SessionError>>,
+    ) {
+        let (client, server) = tokio::io::duplex(64 * 1024);
+        let session = tokio::spawn(async move {
+            handle_local_session(server, 1, &SESSION_SECRET, SESSION_ENDPOINT, state).await
+        });
+        (client, session)
+    }
+
+    #[tokio::test]
+    async fn session_runs_over_any_async_stream_after_the_hmac_handshake() {
+        let (mut client, session) = spawn_duplex_session(RuntimeState::new(1, true));
+        let keys = client_handshake(&mut client, &SESSION_SECRET)
+            .await
+            .expect("the sidecar answers a correct client proof");
+
+        let ping =
+            encode_record(RecordKind::Ping, 0, [4; 16], b"", &keys.client_to_sidecar).unwrap();
+        write_length_prefixed(&mut client, &ping).await.unwrap();
+        let reply = read_length_prefixed(&mut client, LOCAL_MAX_RECORD_BYTES)
+            .await
+            .unwrap();
+        let mut guard = SequenceGuard::new();
+        let record = decode_record(&reply, &keys.sidecar_to_client, &mut guard).unwrap();
+        assert_eq!(record.kind, RecordKind::Ack);
+        assert_eq!(record.message_id, [4; 16]);
+
+        drop(client);
+        assert_eq!(session.await.unwrap(), Err(SessionError::Disconnected));
+    }
+
+    #[tokio::test]
+    async fn session_refuses_a_wrong_client_proof_without_answering() {
+        let (mut client, session) = spawn_duplex_session(RuntimeState::new(1, true));
+        assert!(
+            client_handshake(&mut client, &[0x5b; 32]).await.is_none(),
+            "a wrong HMAC must not receive a server hello"
+        );
+        assert_eq!(session.await.unwrap(), Err(SessionError::Authentication));
+    }
+
+    #[tokio::test]
+    async fn session_refuses_records_sealed_with_the_wrong_direction_key() {
+        let (mut client, session) = spawn_duplex_session(RuntimeState::new(1, true));
+        let keys = client_handshake(&mut client, &SESSION_SECRET)
+            .await
+            .unwrap();
+        let reflected =
+            encode_record(RecordKind::Ping, 0, [4; 16], b"", &keys.sidecar_to_client).unwrap();
+        write_length_prefixed(&mut client, &reflected)
+            .await
+            .unwrap();
+        assert_eq!(session.await.unwrap(), Err(SessionError::Authentication));
+    }
+
+    fn confirmed_send(keys: &SessionKeys) -> Vec<u8> {
+        let payload = [
+            3_u64.to_be_bytes().as_slice(),
+            1_u64.to_be_bytes().as_slice(),
+            valid_frame().as_slice(),
+        ]
+        .concat();
+        encode_record(
+            RecordKind::SendConfirmed,
+            0,
+            [6; 16],
+            &payload,
+            &keys.client_to_sidecar,
+        )
+        .unwrap()
+    }
+
+    /// A confirmed send stays pending (no outbound worker runs here) until
+    /// the client hangs up, which ends the session cleanly.
+    #[tokio::test]
+    async fn pending_confirmed_send_ends_cleanly_when_the_client_hangs_up() {
+        let state = RuntimeState::new(1, true);
+        state.configure_peer(loopback_peer(1, 3)).await.unwrap();
+        let (mut client, session) = spawn_duplex_session(state);
+        let keys = client_handshake(&mut client, &SESSION_SECRET)
+            .await
+            .unwrap();
+        write_length_prefixed(&mut client, &confirmed_send(&keys))
+            .await
+            .unwrap();
+        tokio::task::yield_now().await;
+        assert!(!session.is_finished());
+
+        drop(client);
+        assert_eq!(
+            timeout(Duration::from_secs(5), session)
+                .await
+                .expect("hang-up is observed while the send is pending")
+                .unwrap(),
+            Ok(())
+        );
+    }
+
+    /// Any byte the client sends while a confirmed send is pending is a
+    /// protocol violation.
+    #[tokio::test]
+    async fn pending_confirmed_send_refuses_unexpected_client_bytes() {
+        let state = RuntimeState::new(1, true);
+        state.configure_peer(loopback_peer(1, 3)).await.unwrap();
+        let (mut client, session) = spawn_duplex_session(state);
+        let keys = client_handshake(&mut client, &SESSION_SECRET)
+            .await
+            .unwrap();
+        write_length_prefixed(&mut client, &confirmed_send(&keys))
+            .await
+            .unwrap();
+        client.write_all(&[0]).await.unwrap();
+        assert_eq!(
+            timeout(Duration::from_secs(5), session)
+                .await
+                .expect("the stray byte is observed while the send is pending")
+                .unwrap(),
+            Err(SessionError::Protocol)
+        );
     }
 }
