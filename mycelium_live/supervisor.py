@@ -3440,6 +3440,7 @@ def run_physical_server(
     force_relay: bool = False,
     a6_fault_control_port: int | None = None,
     coarse_region_declaration_file: Path | None = None,
+    a10_verify_control_port: int | None = None,
 ) -> int:
     deployment = native_deployment_projection(operator_plan)
     selected_deployment_dir: Path | None = None
@@ -3526,6 +3527,7 @@ def run_physical_server(
     capacity_refresh: ModelCapacityRefresh | None = None
     artifact_acquisition_store: ArtifactAcquisitionStore | None = None
     a6_fault_control: Any | None = None
+    a10_verify_control: Any | None = None
     try:
         representation_authorization = _representation_authorization(
             representation_authorization_file
@@ -3620,6 +3622,14 @@ def run_physical_server(
                 stop_requested=stop.is_set,
                 operator_plan=operator_plan,
             )
+        if a10_verify_control_port is not None:
+            a10_verify_control = _mount_a10_verify_control(
+                stack=stack,
+                product_port=port,
+                control_port=a10_verify_control_port,
+                public_origin=public_origin,
+                trusted_https_proxy=trusted_https_proxy,
+            )
         startup_complete = True
 
         def request_stop(_signum: int, _frame: Any) -> None:
@@ -3644,6 +3654,11 @@ def run_physical_server(
                         if a6_fault_control is None
                         else {"a6_fault_control": a6_fault_control.status()}
                     ),
+                    **(
+                        {}
+                        if a10_verify_control is None
+                        else {"a10_verify_control": a10_verify_control.status()}
+                    ),
                 }
             ).decode("utf-8"),
             flush=True,
@@ -3659,6 +3674,8 @@ def run_physical_server(
         a6_processes = (
             () if a6_fault_control is None else _a6_session_processes(route)
         )
+        if a10_verify_control is not None:
+            a10_verify_control.close()
         if a6_fault_control is not None:
             a6_fault_control.close()
             print(
@@ -3689,6 +3706,47 @@ def run_physical_server(
                 # flight and record the cleanup failure in the serve
                 # log instead.
                 _emit_serve_diagnostic(cleanup_exc, stage="route_cleanup")
+
+
+def _mount_a10_verify_control(
+    *,
+    stack: Any,
+    product_port: int,
+    control_port: int,
+    public_origin: str | None,
+    trusted_https_proxy: bool,
+) -> Any:
+    """Mount the grant-gated A10 verification control on its own loopback listener.
+
+    Every request is handed to the product dispatcher (the live router port),
+    which admits the operation exclusively and accepts only the node's record.
+    """
+
+    from mycelium_a10_verify_control import (
+        A10VerifyControl,
+        A10VerifyControlRefused,
+        grant_from_environment,
+    )
+
+    dispatch = getattr(getattr(stack, "router", None), "a10_target_verify", None)
+    grant = grant_from_environment()
+    try:
+        if grant is not None and not callable(dispatch):
+            raise RuntimeError("startup_a10_verify_control_dispatcher_unavailable")
+        control = A10VerifyControl(
+            grant=grant,
+            dispatch=dispatch,  # type: ignore[arg-type]
+            product_port=product_port,
+            port=control_port,
+            public_origin=public_origin,
+            trusted_https_proxy=trusted_https_proxy,
+        )
+        control.start()
+    except A10VerifyControlRefused as exc:
+        raise RuntimeError(f"startup_a10_verify_control_refused:{exc}") from exc
+    except OSError as exc:
+        raise RuntimeError("startup_a10_verify_control_bind_failed") from exc
+    return control
 
 
 A6_FAULT_CONTROL_TEARDOWN_PROTOCOL = "mycelium.live_server_a6_fault_control_stopped.v1"
@@ -4079,6 +4137,14 @@ def build_parser() -> argparse.ArgumentParser:
             "127.0.0.1 port (0 = ephemeral); requires MYCELIUM_A6_FLEET_GRANT"
         ),
     )
+    parser.add_argument(
+        "--a10-verify-control-port",
+        type=int,
+        help=(
+            "mount the grant-gated A10 target-verification control on this direct "
+            "127.0.0.1 port (0 = ephemeral); requires MYCELIUM_A10_FLEET_GRANT"
+        ),
+    )
     return parser
 
 
@@ -4100,6 +4166,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         or 1_024 <= args.a6_fault_control_port <= 65_535
     ):
         raise SystemExit("--a6-fault-control-port must be 0 or from 1024 through 65535")
+    if args.a10_verify_control_port is not None and not (
+        args.a10_verify_control_port == 0
+        or 1_024 <= args.a10_verify_control_port <= 65_535
+    ):
+        raise SystemExit("--a10-verify-control-port must be 0 or from 1024 through 65535")
     trusted_proxy_capability = None
     if args.trusted_proxy_capability_file is not None:
         try:
@@ -4148,6 +4219,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             **(
                 {}
+                if args.a10_verify_control_port is None
+                else {"a10_verify_control_port": args.a10_verify_control_port}
+            ),
+            **(
+                {}
                 if args.coarse_region_declaration_file is None
                 else {
                     "coarse_region_declaration_file": args.coarse_region_declaration_file
@@ -4160,6 +4236,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     if args.a6_fault_control_port is not None:
         raise SystemExit("--a6-fault-control-port is valid only with one --operator-plan")
+    if args.a10_verify_control_port is not None:
+        raise SystemExit("--a10-verify-control-port is valid only with one --operator-plan")
     if args.deployment_dir is not None:
         raise SystemExit("--deployment-dir is valid only with one --operator-plan")
     return run_registry_server(

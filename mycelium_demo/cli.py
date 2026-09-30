@@ -204,6 +204,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="grant-gated A6 controlled-fault loopback port for a live physical gate",
     )
+    serve.add_argument(
+        "--a10-verify-control-port",
+        type=int,
+        help="grant-gated A10 target-verification loopback port for a live physical gate",
+    )
     return parser
 
 
@@ -303,6 +308,8 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
         result.append("--a8-force-relay")
     if args.a6_fault_control_port is not None:
         result.extend(("--a6-fault-control-port", str(args.a6_fault_control_port)))
+    if args.a10_verify_control_port is not None:
+        result.extend(("--a10-verify-control-port", str(args.a10_verify_control_port)))
     if args.coarse_region_declaration_file is not None:
         result.extend(
             ("--coarse-region-declaration-file", str(args.coarse_region_declaration_file))
@@ -345,6 +352,7 @@ def _fixture_has_live_only_arguments(args: argparse.Namespace) -> bool:
             args.seed_url,
             args.a6_fault_control_port,
             args.coarse_region_declaration_file,
+            args.a10_verify_control_port,
         )
     )
 
