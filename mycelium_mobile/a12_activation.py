@@ -1863,9 +1863,21 @@ def project_mobile_rungs(
 
 
 def run_mobile_physical_gate(
-    *, platform_family: object, roles: object
+    *, platform_family: object, roles: object, execution: object = None
 ) -> dict[str, Any]:
-    """Declared owner-private physical/browser gate seam.  Not implemented."""
+    """Seal one owner-private executed physical gate bundle.
+
+    ``execution`` is what the physical gate driver
+    (``scripts/run_a12_mobile_physical_gate.py``) observed on hardware: the
+    seed-recorded member key, the runtime build, the family reference, the product
+    path, every positive and negative case outcome, whether ADB was used during the
+    gate, provenance, and the digests of the member-signed observations it verified.
+    The bundle is closed and digest-sealed (``mycelium.mobile_activation_qualification.v1``)
+    so ``qualify_mobile_operation`` can detect any later edit.  Sealing records what
+    ran; it decides nothing -- the role decision stays with
+    ``qualify_mobile_operation``.  Without executed evidence the seam refuses; Apple
+    mobile is deferred (ruling R2).
+    """
 
     if platform_family not in MOBILE_PLATFORM_FAMILIES:
         _reject("mobile_physical_gate_platform_invalid")
@@ -1876,7 +1888,22 @@ def run_mobile_physical_gate(
         or any(role not in MOBILE_ROLES for role in roles)
     ):
         _reject("mobile_physical_gate_role_invalid")
-    _refuse("mobile_physical_gate_absent")
+    if execution is None:
+        _refuse("mobile_physical_gate_absent")
+    if platform_family in APPLE_PLATFORM_FAMILIES:
+        _reject(APPLE_DEFERRED_CODE)
+    executed = _closed(
+        execution,
+        fields=PHYSICAL_GATE_FIELDS - {"protocol", "platform_family", "roles", "gate_digest"},
+        code="mobile_physical_gate_fields_invalid",
+    )
+    body = {
+        "protocol": ACTIVATION_QUALIFICATION_PROTOCOL,
+        "platform_family": platform_family,
+        "roles": list(roles),
+        **executed,
+    }
+    return validate_mobile_physical_gate({**body, "gate_digest": _canonical_digest(body)})
 
 
 # name -> refusal code, in the order the specification's rungs are ordered.  The

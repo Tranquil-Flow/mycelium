@@ -1,0 +1,427 @@
+#!/usr/bin/env python3
+"""Run the A12 native Android physical gate (Mac seed + one Android device).
+
+Android only: iOS/iPadOS is deferred by the 2026-09-29 owner ruling R2.  The
+claim is family-bound to the one named initial-build family (2026-09-27 ruling).
+
+The device joins through the ordinary signed native app with a fresh invite; no
+ADB, SSH or Termux is used while the gate runs (the run records that it used
+none).  Every physical transition is performed by the operator on the device when
+prompted, and every outcome is judged by the driver from the seed's durable
+membership authority (``mycelium_seed.seed_inventory``) and from the device's own
+member-signed runtime observations, never from an operator's say-so.
+
+Cases
+-----
+Positives: ``off_tailnet_join``, ``reconnect``, ``native_evidence_published``
+and, for a model-stage claim, ``router_frames_executed``, ``native_parity`` and
+``browser_request_completed`` (the frame and parity cases run the operator's
+``--route-peer-command``; the browser case needs the phone on a live product route
+and is recorded ``not_executed`` otherwise).
+
+Negatives (specification section 11, Android): ``background`` (the member drains
+or stays a member, never corrupts, and returns), ``network_loss`` (the lease goes
+stale, then the same member reconnects), ``revocation`` (the seed fences the
+generation and the member cannot renew), ``process_death`` (the old incarnation is
+fenced and a restart resumes with a new one) and ``thermal_window`` (a sustained
+observation window; if the device crosses the thermal ceiling it must stop
+executing, otherwise the case is recorded as not executed rather than passed).
+
+After the gate, the operator exports the app's sealed observations
+(``<app data>/node/evidence/runtime-observation-*.json``) to ``--evidence-dir``;
+the driver verifies each envelope against the enrolled member key, binds their
+digests into the owner-private gate bundle and decides the role with
+``qualify_mobile_operation``.
+"""
+
+# ruff: noqa: E402 -- direct script execution needs the repository on sys.path.
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shlex
+import subprocess
+import sys
+import time
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+   sys.path.insert(0, str(REPO_ROOT))
+
+from mycelium_mobile import a12_activation as a12
+
+GATE_PROTOCOL = "mycelium.a12_mobile_physical_gate_run.v1"
+ANDROID_CLASS = "android_native_iroh"
+THERMAL_CEILING_CELSIUS = 45.0
+POLL_SECONDS = 2.0
+
+
+class GateError(RuntimeError):
+   """A coded gate failure."""
+
+
+def write_private_json(path: Path, document: object) -> None:
+   path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+   os.chmod(path.parent, 0o700)
+   temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+   descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+   with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+      json.dump(document, handle, sort_keys=True, indent=1, allow_nan=False)
+      handle.write("\n")
+   os.replace(temporary, path)
+
+
+class SeedAuthority:
+   """Reads the seed's durable membership store and fences generations."""
+
+   def __init__(self, state_root: Path) -> None:
+      self.state_root = Path(state_root)
+
+   def members(self) -> list[dict[str, Any]]:
+      from mycelium_seed import seed_inventory
+
+      return list(seed_inventory(self.state_root)["members"])
+
+   def member_key_digest(self, node_id: str) -> str:
+      """The member key the seed recorded at the signed join (never the device's claim)."""
+
+      from mycelium_seed.operator import _load_authority
+
+      lease, coordinator, _binding = _load_authority(self.state_root, incarnation="a12-gate-member-key")
+      try:
+         member = next((item for item in coordinator.members() if item["node_id"] == node_id), None)
+      finally:
+         lease.close()
+      if member is None:
+         raise GateError("member_absent")
+      return str(member["verification_key_digest"])
+
+   def revoke(self, node_id: str, generation: int) -> dict[str, Any]:
+      from mycelium_seed import revoke_seed_member
+
+      return revoke_seed_member(
+         self.state_root,
+         node_id=node_id,
+         expected_generation=generation,
+         reason="a12_physical_gate_revocation",
+      )
+
+
+def _member(authority: Any, node_id: str) -> dict[str, Any] | None:
+   return next((item for item in authority.members() if item["node_id"] == node_id), None)
+
+
+def wait_until(
+   predicate: Callable[[], Any], *, timeout: float, clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep
+) -> Any:
+   deadline = clock() + timeout
+   while True:
+      value = predicate()
+      if value:
+         return value
+      if clock() >= deadline:
+         return None
+      sleep(POLL_SECONDS)
+
+
+class Gate:
+   """One physical gate run over an injectable seed authority and operator."""
+
+   def __init__(
+      self,
+      *,
+      authority: Any,
+      operator: Callable[[str], None],
+      role: str,
+      route_peer_command: str | None,
+      timeout: float = 600.0,
+      wait: Callable[..., Any] = wait_until,
+      run_command: Callable[[str], int] | None = None,
+   ) -> None:
+      if role not in ("probe_contributor", "qualified_model_stage"):
+         raise GateError("mobile_gate_role_unsupported")
+      self.authority = authority
+      self.operator = operator
+      self.role = role
+      self.route_peer_command = route_peer_command
+      self.timeout = timeout
+      self.wait = wait
+      self.run_command = run_command or (lambda command: subprocess.run(shlex.split(command), check=False, timeout=900).returncode)
+      self.node_id: str | None = None
+      self.positives: dict[str, dict[str, Any]] = {}
+      self.negatives: dict[str, dict[str, Any]] = {}
+
+   # -- helpers --------------------------------------------------------------
+   def _current(self) -> dict[str, Any] | None:
+      return _member(self.authority, self.node_id) if self.node_id else None
+
+   def _fresh(self) -> dict[str, Any] | None:
+      member = self._current()
+      return member if member and member["lease_freshness"] == "fresh" and member["revocation_state"] == "active" else None
+
+   def _record(self, table: dict[str, dict[str, Any]], case: str, outcome: str, **facts: Any) -> None:
+      table[case] = {"outcome": outcome, **facts}
+
+   # -- positives ------------------------------------------------------------
+   def join(self) -> None:
+      before = {item["node_id"] for item in self.authority.members()}
+      self.operator(
+         "Create a fresh invite on the Mac and scan it with the node app on the phone "
+         "(phone off the tailnet, on its own network). Then tap Start serving."
+      )
+      joined = self.wait(
+         lambda: next(
+            (
+               item
+               for item in self.authority.members()
+               if item["node_id"] not in before
+               and item["peer_class"] == ANDROID_CLASS
+               and item["lease_freshness"] == "fresh"
+            ),
+            None,
+         ),
+         timeout=self.timeout,
+      )
+      if joined is None:
+         self._record(self.positives, "off_tailnet_join", "violated", reason="no_new_android_member")
+         raise GateError("mobile_join_not_observed")
+      self.node_id = joined["node_id"]
+      self._record(self.positives, "off_tailnet_join", "passed", generation=joined["generation"])
+
+   def reconnect(self) -> None:
+      before = self._current()
+      self.operator("Toggle the phone's network off for ~20 seconds, then back on.")
+      renewed = self.wait(
+         lambda: (m := self._fresh()) and before and m["generation"] >= before["generation"] and m,
+         timeout=self.timeout,
+      )
+      self._record(self.positives, "reconnect", "passed" if renewed else "violated")
+
+   def route_frames(self) -> None:
+      if self.role != "qualified_model_stage":
+         return
+      if not self.route_peer_command:
+         for case in ("router_frames_executed", "native_parity"):
+            self._record(self.positives, case, "not_executed", reason="route_peer_command_absent")
+      else:
+         code = self.run_command(self.route_peer_command)
+         outcome = "passed" if code == 0 else "violated"
+         self._record(self.positives, "router_frames_executed", outcome)
+         self._record(self.positives, "native_parity", outcome)
+      self._record(self.positives, "browser_request_completed", "not_executed", reason="phone_not_on_a_live_product_route")
+
+   # -- negatives ------------------------------------------------------------
+   def background(self) -> None:
+      self.operator("Send the node app to the background for 60 seconds, then bring it back.")
+      member = self.wait(self._fresh, timeout=self.timeout)
+      self._record(self.negatives, "background", "failed_closed" if member else "violated")
+
+   def network_loss(self) -> None:
+      before = self._current()
+      self.operator("Enable airplane mode and keep it on until prompted again (the lease must expire).")
+      stale = self.wait(lambda: (m := self._current()) and m["lease_freshness"] == "expired" and m, timeout=self.timeout)
+      self.operator("Disable airplane mode now.")
+      back = self.wait(self._fresh, timeout=self.timeout)
+      same_member = back is not None and before is not None and back["node_id"] == before["node_id"]
+      self._record(
+         self.negatives,
+         "network_loss",
+         "failed_closed" if stale and same_member else "violated",
+         lease_went_stale=bool(stale),
+         reconnected=bool(back),
+      )
+
+   def process_death(self) -> None:
+      before = self._current()
+      self.operator("Force-stop the node app from Android settings, wait 10 seconds, then reopen it.")
+      restarted = self.wait(
+         lambda: (m := self._fresh()) and before and m["incarnation"] != before["incarnation"] and m,
+         timeout=self.timeout,
+      )
+      self._record(self.negatives, "process_death", "failed_closed" if restarted else "violated", new_incarnation=bool(restarted))
+
+   def revocation(self) -> None:
+      member = self._current()
+      if member is None:
+         self._record(self.negatives, "revocation", "violated", reason="member_absent")
+         return
+      fenced = self.authority.revoke(member["node_id"], member["generation"])
+      self.operator("Leave the app open for 90 seconds (it must not regain membership).")
+      regained = self.wait(self._fresh, timeout=min(self.timeout, 90.0))
+      after = self._current()
+      ok = fenced.get("lifecycle_state") == "STOPPED" and not regained and after is not None and after["revocation_state"] == "revoked"
+      self._record(self.negatives, "revocation", "failed_closed" if ok else "violated")
+
+   def thermal_window(self, observations: Sequence[Mapping[str, Any]]) -> None:
+      documents = [item["observation"] for item in observations]
+      covered = sum(float(doc["measurement_duration_ms"]) for doc in documents)
+      thermal = [doc["metrics"].get("thermal_max_celsius", "unknown") for doc in documents]
+      if covered < a12.SUSTAINED_OBSERVATION_WINDOW_MS or any(value == "unknown" for value in thermal):
+         self._record(self.negatives, "thermal_window", "violated", reason="sustained_thermal_window_not_observed")
+         return
+      hot = [index for index, value in enumerate(thermal) if float(value) >= THERMAL_CEILING_CELSIUS]
+      if not hot:
+         self._record(self.negatives, "thermal_window", "not_executed", reason="thermal_pressure_not_reached", window_ms=covered)
+         return
+      after = documents[hot[0] + 1 :]
+      drained = all(doc["metrics"].get("frames_executed_window") in (0, 0.0) for doc in after) and bool(after)
+      self._record(self.negatives, "thermal_window", "failed_closed" if drained else "violated", window_ms=covered)
+
+
+def load_observations(
+   evidence_dir: Path, *, member_ref: str, build: str, member_key_digest: str, now_unix_ms: float
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+   envelopes = [
+      json.loads(path.read_text("utf-8"))
+      for path in sorted(Path(evidence_dir).glob("runtime-observation-*.json"))
+   ]
+   records = [
+      a12.observe_mobile_runtime(
+         member_ref=member_ref,
+         platform_family="android",
+         runtime_build_digest=build,
+         observation_envelope=envelope,
+         expected_member_key_digest=member_key_digest,
+         now_unix_ms=now_unix_ms,
+      )
+      for envelope in envelopes
+   ]
+   return envelopes, records
+
+
+def run_gate(
+   gate: Gate,
+   *,
+   evidence_loader: Callable[[str], tuple[list[dict[str, Any]], list[dict[str, Any]]]],
+   member_key_digest: str | None,
+   runtime_build_digest: str,
+   family_ref: str,
+   out: Path,
+   provenance: str = "live",
+) -> dict[str, Any]:
+   started = time.time()
+   gate.join()
+   recorded_key = gate.authority.member_key_digest(gate.node_id)
+   if member_key_digest is not None and member_key_digest != recorded_key:
+      raise GateError("member_key_digest_mismatch")
+   member_key_digest = recorded_key
+   gate.reconnect()
+   gate.route_frames()
+   gate.background()
+   gate.network_loss()
+   gate.process_death()
+   gate.operator(
+      "Export the app's sealed evidence (node/evidence/runtime-observation-*.json) to the "
+      "evidence directory now; the gate itself is over, so a cable may be used for the copy."
+   )
+   envelopes, observations = evidence_loader(member_key_digest)
+   gate.positives["native_evidence_published"] = {
+      "outcome": "passed" if observations else "violated",
+      "observations": len(observations),
+   }
+   gate.thermal_window(observations)
+   # Revocation is terminal for this member, so it runs last.
+   gate.revocation()
+   bundle = a12.run_mobile_physical_gate(
+      platform_family="android",
+      roles=(gate.role,),
+      execution={
+         "member_key_digest": member_key_digest,
+         "runtime_build_digest": runtime_build_digest,
+         "family_ref": family_ref,
+         "execution_path": "signed_native_application",
+         "positives": gate.positives,
+         "negatives": gate.negatives,
+         "adb_used_during_gate": False,
+         "provenance": provenance,
+         "observation_digests": [item["observation_digest"] for item in observations],
+      },
+   )
+   qualification = a12.qualify_mobile_operation(
+      member_ref=gate.node_id or "member:unknown",
+      role=gate.role,
+      platform_family="android",
+      runtime_build_digest=runtime_build_digest,
+      prior_rung_decisions={
+         "signed_membership": "eligible",
+         "capability_eligibility": "eligible",
+         **({"artifact_readiness": "eligible"} if gate.role == "qualified_model_stage" else {}),
+      },
+      observation_envelopes=envelopes,
+      physical_gate=bundle,
+      member_key_digest=member_key_digest,
+      family_ref=family_ref,
+   ) if envelopes else {"decision": "withheld", "blockers": ["mobile_observations_absent"]}
+   summary = {
+      "protocol": GATE_PROTOCOL,
+      "started_at_unix_ms": int(started * 1000),
+      "finished_at_unix_ms": int(time.time() * 1000),
+      "role": gate.role,
+      "positives": {case: item["outcome"] for case, item in sorted(gate.positives.items())},
+      "negatives": {case: item["outcome"] for case, item in sorted(gate.negatives.items())},
+      "decision": qualification["decision"],
+      "blockers": qualification["blockers"],
+   }
+   write_private_json(out / "mobile-physical-gate.json", bundle)
+   write_private_json(out / "mobile-role-qualification.json", qualification)
+   write_private_json(out / "mobile-gate-summary.json", summary)
+   return summary
+
+
+def _operator_prompt(message: str) -> None:
+   print(f"\n[operator] {message}\nPress Enter when done.", file=sys.stderr, flush=True)
+   sys.stdin.readline()
+
+
+def parser() -> argparse.ArgumentParser:
+   root = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+   root.add_argument("--seed-state-root", type=Path, required=True)
+   root.add_argument("--role", choices=("probe_contributor", "qualified_model_stage"), default="probe_contributor")
+   root.add_argument("--member-key-digest", help="optional cross-check of the seed-recorded member key")
+   root.add_argument("--runtime-build-digest", required=True)
+   root.add_argument("--family-ref", required=True)
+   root.add_argument("--evidence-dir", type=Path, required=True)
+   root.add_argument("--route-peer-command")
+   root.add_argument("--timeout", type=float, default=600.0)
+   root.add_argument("--out", type=Path, required=True)
+   return root
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+   arguments = parser().parse_args(argv)
+   gate = Gate(
+      authority=SeedAuthority(arguments.seed_state_root),
+      operator=_operator_prompt,
+      role=arguments.role,
+      route_peer_command=arguments.route_peer_command,
+      timeout=arguments.timeout,
+   )
+   try:
+      summary = run_gate(
+         gate,
+         evidence_loader=lambda key_digest: load_observations(
+            arguments.evidence_dir,
+            member_ref=gate.node_id or "member:unknown",
+            build=arguments.runtime_build_digest,
+            member_key_digest=key_digest,
+            now_unix_ms=time.time() * 1000,
+         ),
+         member_key_digest=arguments.member_key_digest,
+         runtime_build_digest=arguments.runtime_build_digest,
+         family_ref=arguments.family_ref,
+         out=arguments.out,
+      )
+   except GateError as error:
+      print(json.dumps({"error": str(error)}), file=sys.stderr)
+      return 2
+   print(json.dumps({"decision": summary["decision"], "blockers": summary["blockers"]}, sort_keys=True))
+   return 0 if summary["decision"] == "eligible" else 1
+
+
+if __name__ == "__main__":
+   raise SystemExit(main())
