@@ -16,6 +16,11 @@ import uuid
 
 RUNTIME_MANIFEST_PROTOCOL = "mycelium.member_runtime_closure_manifest.v1"
 RUNTIME_PATHS = (
+    "mycelium_host_platform/__init__.py",
+    "mycelium_host_platform/_common.py",
+    "mycelium_host_platform/_posix.py",
+    "mycelium_host_platform/_win32.py",
+    "mycelium_host_platform/_win32_api.py",
     "mycelium_live/__init__.py",
     "mycelium_live/artifact_provisioner.py",
     "mycelium_live/artifact_transport.py",

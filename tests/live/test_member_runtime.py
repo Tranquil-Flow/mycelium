@@ -74,3 +74,31 @@ def test_member_runtime_rejects_manifest_outside_runtime_root(tmp_path: Path) ->
             output_root=output,
             manifest_path=tmp_path / "runtime-manifest.json",
         )
+
+
+def test_member_runtime_carries_both_host_platform_backends(tmp_path: Path) -> None:
+    output = tmp_path / "runtime"
+    output.mkdir(mode=0o700)
+    build_member_runtime(
+        repo_root=ROOT,
+        output_root=output,
+        manifest_path=output / "runtime-manifest.json",
+    )
+
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import mycelium_host_platform._posix, mycelium_host_platform._win32; "
+                "print('ok')"
+            ),
+        ],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(output), "PYTHONDONTWRITEBYTECODE": "1"},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert probe.returncode == 0, probe.stderr
+    assert probe.stdout == "ok\n"
