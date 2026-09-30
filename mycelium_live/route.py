@@ -59,6 +59,10 @@ from mycelium_router.rtt_measurement import (
 )
 from mycelium_router.serialization import execution_graph_to_dict
 from mycelium_topology_evidence import validate_transport_path_observation
+from mycelium_router.a10_live_publication import (
+    A10PublicationError,
+    validate_publication as _validate_a10_publication,
+)
 from physical_inference_node import execution_graph_from_document
 from physical_inference_qualification import (
     ControllerError,
@@ -588,6 +592,17 @@ _PEER_OPERATION_TRIPLE = (
     "prefill_operation_count",
     "decode_operation_count",
 )
+
+
+def _public_a10_publication(value: object) -> dict[str, Any] | None:
+    """Project one node's A10 live publication, or None when absent or invalid."""
+
+    if value is None:
+        return None
+    try:
+        return _validate_a10_publication(value)
+    except A10PublicationError:
+        return None
 
 
 def _observation_counter_material(
@@ -5788,6 +5803,12 @@ class PhysicalLiveRoute:
                             dict(interruptibility)
                             if isinstance(interruptibility, Mapping)
                             else None
+                        ),
+                        # A10: the node-co-signed runtime publication (stage-compute
+                        # intervals and runtime batch observations), re-validated
+                        # closed and privacy-reduced; absent or invalid -> None.
+                        "a10_publication": _public_a10_publication(
+                            details.get("a10_publication")
                         ),
                     }
                 )
