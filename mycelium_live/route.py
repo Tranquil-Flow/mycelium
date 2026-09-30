@@ -5401,6 +5401,42 @@ class PhysicalLiveRoute:
                 "route_ready": False,
             }
 
+    def a10_target_verify(
+        self,
+        node_id: str,
+        *,
+        operation: Mapping[str, Any],
+        deadline_monotonic_s: float,
+    ) -> dict[str, Any]:
+        """Carry one private A10 target-verification operation to a live target node.
+
+        The route only transports the operation; the node's own runtime executes
+        and decides it (``a10_target_verify``).  An unknown or exited session, a
+        missed deadline or any response that is not the node's own verification
+        record fails closed; nothing is retried or synthesized here.
+        """
+
+        with self._lock:
+            session = self._sessions.get(node_id)
+        if session is None or session.returncode is not None:
+            raise RuntimeError("a10_target_verify_node_unavailable")
+        response = self._send_before(
+            node_id,
+            command_id=self._command_id(node_id, "a10_target_verify"),
+            command="a10_target_verify",
+            payload=dict(operation),
+            deadline_monotonic_s=deadline_monotonic_s,
+        )
+        result = response.get("result") if isinstance(response, Mapping) else None
+        if (
+            not isinstance(result, Mapping)
+            or result.get("protocol")
+            != "mycelium.target_verification_operation_record.v1"
+            or result.get("execution_path") != "product_dispatcher"
+        ):
+            raise RuntimeError("a10_target_verify_response_invalid")
+        return dict(result)
+
     def release_request(self, request_id: str) -> None:
         """Forget prompt/output token material after the gateway releases a request."""
 
