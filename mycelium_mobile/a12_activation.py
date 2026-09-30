@@ -1777,13 +1777,89 @@ def observe_mobile_runtime(
     }
 
 
-def project_mobile_rungs(*, workspace: object, member_ref: object) -> dict[str, Any]:
-    """Declared privacy-reduced all-eight projection seam.  Not implemented."""
+def project_mobile_rungs(
+    *, workspace: object, member_ref: object, source: object = None
+) -> dict[str, Any]:
+    """Project one member's four rungs and roles into one of the eight workspaces.
+
+    ``source`` is one public generation of the rung ledger:
+    ``{"generation": int, "freshness": str, "members": [{"member_ref",
+    "platform_family", "rungs": {rung_id: rung record}, "roles": {role: role
+    qualification record}}]}``.  Each rung renders only from its own record (a
+    missing rung is ``unknown`` with a blocker, never inferred from another), only
+    native evidence can show an eligible operation, Apple members stay deferred
+    (ruling R2), and the projection carries decisions, blockers and source kinds
+    only -- no endpoint, key, address, device or payload material.  Without a
+    source generation there is nothing to project and the seam refuses.
+    """
 
     if workspace not in WORKSPACES:
         _reject("mobile_projection_workspace_invalid")
-    _text(member_ref, code="mobile_projection_member_invalid")
-    _refuse("mobile_projection_absent")
+    member = _text(member_ref, code="mobile_projection_member_invalid")
+    if source is None:
+        _refuse("mobile_projection_absent")
+    if not isinstance(source, Mapping):
+        _reject("mobile_projection_source_invalid")
+    generation = _counter(source.get("generation"), code="mobile_projection_generation_invalid")
+    freshness = source.get("freshness")
+    if freshness not in PROJECTION_FRESHNESS:
+        _reject("mobile_projection_freshness_invalid")
+    members = source.get("members")
+    if isinstance(members, (str, bytes)) or not isinstance(members, Sequence):
+        _reject("mobile_projection_source_invalid")
+    entry = next(
+        (item for item in members if isinstance(item, Mapping) and item.get("member_ref") == member),
+        None,
+    )
+    if entry is None:
+        _reject("mobile_projection_member_absent")
+    platform = entry.get("platform_family")
+    if platform not in (*MOBILE_PLATFORM_FAMILIES, "unknown"):
+        _reject("mobile_projection_platform_invalid")
+    deferred = platform in APPLE_PLATFORM_FAMILIES
+
+    def reduced(record: object, *, operation: bool) -> dict[str, Any]:
+        if deferred:
+            return {"decision": "withheld", "blockers": [APPLE_DEFERRED_CODE], "source_kind": "unknown"}
+        if record is None:
+            return {"decision": "unknown", "blockers": ["rung_record_absent"], "source_kind": "unknown"}
+        if not isinstance(record, Mapping):
+            _reject("mobile_projection_record_invalid")
+        decision = record.get("decision")
+        _decision_rank(decision)
+        source_kind = record.get("source_kind", "unknown")
+        if source_kind not in SOURCE_KINDS:
+            _reject("mobile_projection_record_invalid")
+        blockers = [str(item) for item in record.get("blockers", ())]
+        if operation and decision == "eligible" and source_kind != NATIVE_SOURCE_KIND:
+            return {
+                "decision": "withheld",
+                "blockers": [*blockers, "non_native_source_cannot_qualify"],
+                "source_kind": source_kind,
+            }
+        return {"decision": decision, "blockers": blockers, "source_kind": source_kind}
+
+    rungs_source = entry.get("rungs") or {}
+    roles_source = entry.get("roles") or {}
+    if not isinstance(rungs_source, Mapping) or not isinstance(roles_source, Mapping):
+        _reject("mobile_projection_record_invalid")
+    rungs = {
+        rung: reduced(rungs_source.get(rung), operation=rung == "operation_qualification")
+        for rung in RUNG_IDS
+    }
+    roles = {role: reduced(roles_source.get(role), operation=True) for role in MOBILE_ROLES}
+    return {
+        "protocol": MOBILE_PROJECTION_PROTOCOL,
+        "workspace": workspace,
+        "generation": generation,
+        "freshness": freshness,
+        "member_ref": member,
+        "platform_family": platform,
+        "platform_state": "deferred" if deferred else "active",
+        "rungs": rungs,
+        "roles": roles,
+        "route_ready": ROUTE_READY_AT_ENROLLMENT,
+    }
 
 
 def run_mobile_physical_gate(
@@ -1864,6 +1940,8 @@ REQUIRED_MOBILE_NEGATIVES = (
     "thermal_window",
 )
 PHYSICAL_CASE_OUTCOMES = ("passed", "failed_closed", "violated", "not_executed")
+MOBILE_PROJECTION_PROTOCOL = "mycelium.mobile_rung_projection.v1"
+PROJECTION_FRESHNESS = ("live", "stale", "historical", "fixture", "unknown")
 PHYSICAL_GATE_FIELDS = frozenset(
     {
         "protocol",
