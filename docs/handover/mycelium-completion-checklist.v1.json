@@ -1327,7 +1327,7 @@
      "protocol": "mycelium.executed_requirement_evidence.v1",
      "requirement": "specification",
      "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-peer-capability.md",
-     "artifact_digest": "sha256:847bdeaac60cec1c90dcdc07005363bbb797aa5c7b012e8110d7430d506c29d8",
+     "artifact_digest": "sha256:58af598b481874cf9f381c2de3ab2906cbba8e4b528d9fe594f8b349be386dea",
      "provenance": "source",
      "subject": "A9:specification",
      "observed_at": "2026-09-23T15:05:21Z",
@@ -1374,8 +1374,7 @@
    "gate_id": "A10",
    "name": "Runtime batching, overlap, and target verification",
    "dependencies": [
-    "A4",
-    "A9"
+    "A4"
    ],
    "specification": "docs/superpowers/specs/2026-08-18-mycelium-a10-runtime-batching-overlap-target-verification.md",
    "state": "design_only",
@@ -1391,7 +1390,7 @@
      "protocol": "mycelium.executed_requirement_evidence.v1",
      "requirement": "specification",
      "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a10-runtime-batching-overlap-target-verification.md",
-     "artifact_digest": "sha256:63882c82049f62cff6d2a1e4c5478934963e035a91c36045c4c809b28feb368e",
+     "artifact_digest": "sha256:4230b93363fac5ea27394a28f289f1beac5332710e299b00ea87a64c1dd01373",
      "provenance": "source",
      "subject": "A10:specification",
      "observed_at": "2026-08-18T00:00:00Z",
@@ -1501,8 +1500,7 @@
    "gate_id": "A12",
    "name": "Generic mobile activation",
    "dependencies": [
-    "A4",
-    "A9"
+    "A4"
    ],
    "specification": "docs/superpowers/specs/2026-08-18-mycelium-a12-generic-mobile-activation.md",
    "state": "design_only",
@@ -1519,7 +1517,7 @@
      "protocol": "mycelium.executed_requirement_evidence.v1",
      "requirement": "specification",
      "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a12-generic-mobile-activation.md",
-     "artifact_digest": "sha256:d1c8fbbe2852966522528f55c7e73e6a8054d96f69ef8aab00827cffe2c81197",
+     "artifact_digest": "sha256:b3c23c040991a88a6f1556cf19b27c33ad454d5f42b9ceebdfc409131bd6a18f",
      "provenance": "source",
      "subject": "A12:specification",
      "observed_at": "2026-08-18T00:00:00Z",
