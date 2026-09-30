@@ -20,6 +20,8 @@
     "test:a6-browser-harness": "node --test scripts/a6-product-browser-e2e.test.mjs",
     "test:a6-browser-matrix": "node --test scripts/a6-product-browser-matrix.test.mjs",
     "test:a6-live-browser": "node scripts/a6-product-browser-e2e.mjs",
+    "test:a6-serve-factory": "node --test scripts/a6-serve-receiver-factory.test.mjs",
+    "test:a6-live-matrix": "node scripts/a6-serve-receiver-factory.mjs",
     "test:a14-live-browser": "node scripts/a14-live-browser.mjs",
     "test:a14-live-browser-harness": "node --test scripts/a14-live-browser.test.mjs",
     "test:e2e": "PLAYWRIGHT_NO_COPY_PROMPT=1 VITE_OBSERVATORY_SOURCE_MODE=fixture npm run build && PLAYWRIGHT_NO_COPY_PROMPT=1 playwright test",

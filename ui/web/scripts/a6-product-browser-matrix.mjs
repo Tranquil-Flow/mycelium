@@ -13,7 +13,7 @@ const engines = Object.freeze(['chromium','firefox','webkit']);
 const workspaces = Object.freeze(['lab','network','plans','incidents','readiness','nodes','settings','inference']);
 const cases = Object.freeze(['ordinary_browser_source_failure_recovery','no_successor']);
 const scenarios = Object.freeze(['positive_source_failure_recovery','truthful_no_successor_abort','privacy_canaries','reconnect_before_cutover','reconnect_after_cutover','reload_during_recovery','back_forward','workspace_switching','clean_second_session','no_stale_source','no_duplicate_terminal','console_page_cross_origin_errors']);
-const sources = ['ui/web/scripts/a6-product-browser-e2e.mjs','ui/web/scripts/a6-product-browser-matrix.mjs','mycelium_a6_direct_socket.py','mycelium_a6_http_fault_control.py','mycelium_a6_fault_control.py','scripts/run_a6_recovery_gate.py'];
+const sources = ['ui/web/scripts/a6-product-browser-e2e.mjs','ui/web/scripts/a6-product-browser-matrix.mjs','ui/web/scripts/a6-serve-receiver-factory.mjs','mycelium_a6_direct_socket.py','mycelium_a6_http_fault_control.py','mycelium_a6_fault_control.py','scripts/run_a6_recovery_gate.py'];
 const fail = () => { throw new Error('matrix_receipt_invalid'); };
 export function sourceBinding() {
   const hash=createHash('sha256');

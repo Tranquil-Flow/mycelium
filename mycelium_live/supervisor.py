@@ -3638,6 +3638,10 @@ def run_physical_server(
         )
         if a6_fault_control is not None:
             a6_fault_control.close()
+            print(
+                _json_bytes(a6_fault_control.teardown_witness()).decode("utf-8"),
+                flush=True,
+            )
         if openai_shim is not None:
             openai_shim.close()
         if capacity_refresh is not None:
@@ -3664,6 +3668,9 @@ def run_physical_server(
                 _emit_serve_diagnostic(cleanup_exc, stage="route_cleanup")
 
 
+A6_FAULT_CONTROL_TEARDOWN_PROTOCOL = "mycelium.live_server_a6_fault_control_stopped.v1"
+
+
 class _A6FaultControlMount:
     """The mounted receiver plus the product's source-owned A6 observations."""
 
@@ -3688,6 +3695,24 @@ class _A6FaultControlMount:
 
     def close(self) -> None:
         self.control.close()
+
+    def teardown_witness(self) -> dict[str, Any]:
+        """The closed receiver's own lifetime and successful executions.
+
+        Only a receiver that listened and has since closed can report; the
+        case ids are the receiver's 200-completed execution order, so a
+        refused or repeated request never appears.
+        """
+
+        status = self.control.status()
+        if status["mounted"] or status["lifetime_id"] is None:
+            raise RuntimeError("a6_fault_control_teardown_before_close")
+        return {
+            "protocol": A6_FAULT_CONTROL_TEARDOWN_PROTOCOL,
+            "lifetime_id": status["lifetime_id"],
+            "executed_case_ids": list(status["executed_case_ids"]),
+            "torn_down": True,
+        }
 
     def finalize(self, *, product_port: int, processes: Sequence[Any], router: Any) -> None:
         """After the listener, route and peers closed: settle and write cleanup.

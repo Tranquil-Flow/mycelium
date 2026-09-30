@@ -167,6 +167,40 @@ def test_supervisor_mount_listens_with_the_grant(monkeypatch):
         control.close()
 
 
+def test_supervisor_mount_teardown_witness_is_refused_while_listening(monkeypatch):
+    monkeypatch.setenv(GRANT_ENVIRONMENT, EXACT_FLEET_GRANT)
+    monkeypatch.setattr(supervisor_module, "_a6_product_fault_seams",
+                        lambda **_kwargs: {})
+    control = supervisor_module._mount_a6_product_fault_control(
+        stack=None, route=None, product_port=8787, control_port=0,
+        public_origin=None, trusted_https_proxy=False, request_stop=lambda: None)
+    try:
+        with pytest.raises(RuntimeError, match="a6_fault_control_teardown_before_close"):
+            control.teardown_witness()
+    finally:
+        control.close()
+
+
+def test_supervisor_mount_teardown_witness_is_receiver_derived_after_close(monkeypatch):
+    seam = _MeasuringSeam()
+    monkeypatch.setenv(GRANT_ENVIRONMENT, EXACT_FLEET_GRANT)
+    monkeypatch.setattr(supervisor_module, "_a6_product_fault_seams",
+                        lambda **_kwargs: {seam.seam_id: seam})
+    control = supervisor_module._mount_a6_product_fault_control(
+        stack=None, route=None, product_port=8787, control_port=0,
+        public_origin=None, trusted_https_proxy=False, request_stop=lambda: None)
+    lifetime_id = control.status()["lifetime_id"]
+    assert _post(control.port)[0] == 200
+    assert _post(control.port)[0] == 409  # a refused repeat never enters the witness
+    control.close()
+    assert control.teardown_witness() == {
+        "protocol": supervisor_module.A6_FAULT_CONTROL_TEARDOWN_PROTOCOL,
+        "lifetime_id": lifetime_id,
+        "executed_case_ids": [CASE],
+        "torn_down": True,
+    }
+
+
 def test_supervisor_main_forwards_the_port_only_when_requested(tmp_path: Path, monkeypatch):
     calls: list[dict] = []
     monkeypatch.setattr(supervisor_module, "run_physical_server",
