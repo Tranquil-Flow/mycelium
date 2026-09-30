@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
+use crate::evidence;
 use crate::identity::Identity;
 use crate::membership::{self, MemberConfig};
 use crate::onboarding::{self, PairingSession};
@@ -39,6 +40,21 @@ fn require_registered_class() -> Result<(), NodeError> {
 pub const PAIRING_CHANNEL_PROTOCOL: &str = "mycelium.pairing_channel.v1";
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
+/// Native runtime observations are sealed on this cadence into app-private
+/// `evidence/`, keeping the newest `EVIDENCE_RETAINED` envelopes.
+const EVIDENCE_INTERVAL: Duration = Duration::from_secs(60);
+const EVIDENCE_RETAINED: u64 = 64;
+
+/// The build identity the node app binds its observations to: an explicit
+/// build digest when the release pipeline sets one, else this core's version.
+pub fn runtime_build_digest() -> String {
+    match option_env!("MYCELIUM_NODE_BUILD_DIGEST") {
+        Some(digest) if digest.len() == 71 && digest.starts_with("sha256:") => digest.to_owned(),
+        _ => crate::canonical::sha256_prefixed(
+            format!("mycelium-mobile-core:{}", env!("CARGO_PKG_VERSION")).as_bytes(),
+        ),
+    }
+}
 
 pub fn now_s() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
@@ -72,7 +88,16 @@ pub struct NodeStatus {
     pub route_ready: bool,
 }
 
+/// Where the last sealed observation window ended, so each observation covers
+/// exactly the runtime work since the previous one.
+struct ObservationCursor {
+    window_started_at: f64,
+    frames_at_window_start: u64,
+    evidence_generation: u64,
+}
+
 struct Shared {
+    observation: ObservationCursor,
     status: NodeStatus,
     session: Option<PairingSession>,
     invitation: Option<Value>,
@@ -143,7 +168,14 @@ impl NodeCore {
             data_dir: data_dir.to_owned(),
             identity: Arc::new(identity),
             transport,
-            shared: Arc::new(Mutex::new(Shared { status, session: None, invitation: None, stage: None, forward: None })),
+            shared: Arc::new(Mutex::new(Shared {
+                observation: ObservationCursor { window_started_at: now_s(), frames_at_window_start: 0, evidence_generation: 0 },
+                status,
+                session: None,
+                invitation: None,
+                stage: None,
+                forward: None,
+            })),
             http,
             incarnation: format!("inc-{}", hex::encode(incarnation_raw)),
         };
@@ -178,11 +210,96 @@ impl NodeCore {
             }
         });
         self.rt.spawn(serve_inbox(rx, self.shared.clone(), self.transport.clone()));
+        // Seal native runtime observations into app-private evidence/ on a fixed
+        // cadence for the lifetime of the node (the app owns one core).
+        let (data_dir, shared, identity) = (self.data_dir.clone(), self.shared.clone(), self.identity.clone());
+        self.rt.spawn(async move {
+            loop {
+                tokio::time::sleep(EVIDENCE_INTERVAL).await;
+                let (d, s, i) = (data_dir.clone(), shared.clone(), identity.clone());
+                let _ = tokio::task::spawn_blocking(move || seal_observation(&d, &s, &i)).await;
+            }
+        });
     }
+
 
     pub fn status(&self) -> NodeStatus {
         self.shared.lock().unwrap().status.clone()
     }
+
+    /// Seal one member-signed `mycelium.mobile_runtime_observation.v1` covering the
+    /// runtime work since the previous observation: the core's own counters plus
+    /// the platform metrics the OS exposes to the app (unknown otherwise).
+    /// Only the registered Android class observes; an Apple build refuses (A12
+    /// Apple mobile is deferred).
+    pub fn runtime_observation(&self, platform: &evidence::Metrics) -> Result<Value, NodeError> {
+        observe_runtime(&self.shared, &self.identity, platform)
+    }
+}
+
+fn observe_runtime(
+    shared: &Arc<Mutex<Shared>>,
+    identity: &Identity,
+    platform: &evidence::Metrics,
+) -> Result<Value, NodeError> {
+        require_registered_class()?;
+        let now = now_s();
+        let (mut metrics, duration_ms, samples, profile_generation, generation) = {
+            let mut s = shared.lock().unwrap();
+            let frames = s.status.frames_executed;
+            let delta = frames.saturating_sub(s.observation.frames_at_window_start);
+            let duration_ms = ((now - s.observation.window_started_at) * 1000.0).max(1.0);
+            s.observation.window_started_at = now;
+            s.observation.frames_at_window_start = frames;
+            s.observation.evidence_generation += 1;
+            let mut metrics = evidence::Metrics::new();
+            metrics.insert("frames_executed_window".into(), Some(delta as f64));
+            metrics.insert("last_execute_ms".into(), s.status.last_execute_ms);
+            metrics.insert("relay_online".into(), Some(if s.status.relay_online { 1.0 } else { 0.0 }));
+            metrics.insert("stage_loaded".into(), Some(if s.status.stage_loaded.is_some() { 1.0 } else { 0.0 }));
+            metrics.insert("heartbeats_sent".into(), Some(s.status.heartbeats_sent as f64));
+            metrics.insert(
+                "lifecycle_member".into(),
+                Some(if s.status.phase == "member" { 1.0 } else { 0.0 }),
+            );
+            (metrics, duration_ms, 1 + delta, s.status.member_generation.unwrap_or(1), s.observation.evidence_generation)
+        };
+        for (name, value) in platform {
+            metrics.entry(name.clone()).or_insert(*value);
+        }
+        let build = runtime_build_digest();
+        let document = evidence::runtime_observation(&evidence::Observation {
+            platform_family: "android",
+            runtime_build_digest: &build,
+            profile_generation: profile_generation.max(1),
+            evidence_generation: generation,
+            observed_at_unix_ms: now * 1000.0,
+            measurement_duration_ms: duration_ms,
+            sample_count: samples,
+            authority: evidence::OBSERVATION_AUTHORITY,
+            metrics: &metrics,
+        })
+        .map_err(|e| nerr(e.0))?;
+        evidence::sign_observation(identity, &document).map_err(|e| nerr(e.0))
+}
+
+fn seal_observation(data_dir: &Path, shared: &Arc<Mutex<Shared>>, identity: &Identity) {
+        let dir = data_dir.join("evidence");
+        if std::fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let Ok(envelope) = observe_runtime(shared, identity, &evidence::platform_metrics(Path::new("/"))) else {
+            return;
+        };
+        let generation = envelope["message"]["evidence_generation"].as_u64().unwrap_or(0);
+        let bytes = serde_json::to_vec(&envelope).unwrap_or_default();
+        let _ = write_private(&dir.join(format!("runtime-observation-{:06}.json", generation % 1_000_000)), &bytes);
+        if generation > EVIDENCE_RETAINED {
+            let _ = std::fs::remove_file(dir.join(format!("runtime-observation-{:06}.json", (generation - EVIDENCE_RETAINED) % 1_000_000)));
+        }
+}
+
+impl NodeCore {
 
     fn fail(&self, e: NodeError) -> NodeError {
         self.shared.lock().unwrap().status.last_error = Some(e.0.clone());

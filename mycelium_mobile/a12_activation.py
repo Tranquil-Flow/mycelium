@@ -20,15 +20,24 @@ IMPLEMENTED (deterministic half, no device executes anything here)
   ``withheld``/``unknown``/``revoked`` plus the exact missing input, and missing
   evidence is ``None``/``unknown`` — never zero, healthy or inferred support.
 
-REFUSED (unchanged seams, still RED by design)
+DECIDED FROM EXECUTED EVIDENCE (Android only; Apple mobile deferred by ruling R2)
 
-Runtime observation production, the optional A11 draft binding, the all-eight
-product projection and the owner-private physical gate are NOT implemented.  Each
-validates its closed input shape and then raises ``A12NotImplementedError`` with
-the fixed message ``not_implemented:<code>``; none returns a value and none records
-success.  Rung 4 can never be authored here either: it needs
-``physical_positive_and_negative_evidence`` that only the owner-private physical
-gate can produce, and the declared ``qualify_mobile_operation`` seam still refuses.
+- ``observe_mobile_runtime`` accepts a runtime-owned observation only inside the
+  member-signed envelope the native core seals (``native/mobile_core``), bound to the
+  enrolled member key, native, fresh and for the exact platform and build;
+- ``qualify_mobile_operation`` re-verifies those envelopes and decides the exact
+  native Android role from them plus the owner-private executed physical gate
+  bundle, emitting one closed ``mycelium.mobile_role_qualification.v1`` record.
+
+REFUSED (still RED by design)
+
+Called without executed evidence, the observation and operation seams refuse with
+``not_implemented:<code>``: there is nothing to accept or qualify.  The optional A11
+draft binding, the all-eight product projection and the owner-private physical gate
+are NOT implemented here; each validates its closed input shape and then raises
+``A12NotImplementedError``; none returns a value and none records success.  The
+deterministic ``author_operation_qualification`` still never authors rung 4: the
+physical evidence path is ``qualify_mobile_operation``.
 
 State: ``design_only``.  ``EARNED_CLOSURE_REQUIREMENTS`` is empty by construction:
 this gate earns none of the thirteen live closure requirements of
@@ -1508,23 +1517,183 @@ def qualify_mobile_operation(
     platform_family: object,
     runtime_build_digest: object,
     prior_rung_decisions: object,
+    observation_envelopes: object = None,
+    physical_gate: object = None,
+    member_key_digest: object = None,
+    family_ref: object = None,
+    now_unix_ms: object = None,
+    validity_ms: object = None,
 ) -> dict[str, Any]:
-    """Declared A12 rung 4 execution seam.  Not implemented.
+    """Rung 4: qualify one exact native Android operation from runtime evidence.
 
-    The deterministic half of this rung is ``author_operation_qualification``; this
-    seam stays refusing because an operation qualification needs physically executed
-    positive and negative native evidence that only the owner-private physical gate
-    can produce, and no caller-supplied bundle may stand in for it.
+    Decided only from (a) member-signed runtime observations the native app sealed
+    itself (``observe_mobile_runtime`` re-verifies every envelope here; a caller
+    summary is never accepted) and (b) the owner-private executed physical gate
+    bundle of ``run_mobile_physical_gate``.  Without that executed evidence there is
+    nothing to qualify and the seam refuses with ``operation_qualification_absent``.
+
+    The result is one closed ``mycelium.mobile_role_qualification.v1`` record for
+    exactly this member, platform, runtime build and role.  It is ``eligible`` only
+    when every blocker is clear; otherwise ``withheld`` with the exact blockers.
+    Apple mobile is deferred (ruling R2) and the optional draft role still needs a
+    physically closed A11 binding, so both refuse.
     """
 
-    _text(member_ref, code="operation_qualification_member_invalid")
+    member = _text(member_ref, code="operation_qualification_member_invalid")
     if role not in MOBILE_ROLES:
         _reject("mobile_role_invalid")
     if platform_family not in MOBILE_PLATFORM_FAMILIES:
         _reject("operation_qualification_platform_invalid")
-    _digest(runtime_build_digest, code="operation_qualification_build_invalid")
+    build = _digest(runtime_build_digest, code="operation_qualification_build_invalid")
     require_rung_isolation("operation_qualification", prior_rung_decisions)
-    _refuse("operation_qualification_absent")
+    if observation_envelopes is None and physical_gate is None:
+        _refuse("operation_qualification_absent")
+    if platform_family in APPLE_PLATFORM_FAMILIES:
+        _reject(APPLE_DEFERRED_CODE)
+    if role == "speculative_draft_worker":
+        _refuse("draft_worker_qualification_absent")
+    key_digest = _digest(member_key_digest, code="mobile_observation_member_key_unbound")
+    family = _text(family_ref, code="android_family_ref_invalid")
+    if not _FAMILY_REF.fullmatch(family):
+        _reject("android_family_ref_invalid")
+    now = _now_ms(now_unix_ms)
+    if (
+        isinstance(observation_envelopes, (str, bytes))
+        or not isinstance(observation_envelopes, Sequence)
+        or not observation_envelopes
+    ):
+        _reject("mobile_observations_absent")
+    observations = [
+        observe_mobile_runtime(
+            member_ref=member,
+            platform_family=platform_family,
+            runtime_build_digest=build,
+            observation_envelope=envelope,
+            expected_member_key_digest=key_digest,
+            now_unix_ms=now,
+            maximum_age_ms=MAX_QUALIFYING_OBSERVATION_AGE_MS,
+        )
+        for envelope in observation_envelopes
+    ]
+    prior = {str(name): str(value) for name, value in dict(prior_rung_decisions).items()}
+    blockers: list[str] = []
+    for rung in ("signed_membership", "capability_eligibility"):
+        if prior.get(rung) != "eligible":
+            blockers.append(f"{rung}_not_current")
+    artifact = prior.get("artifact_readiness")
+    if role == "qualified_model_stage" and artifact != "eligible":
+        blockers.append("artifact_readiness_not_current")
+    if role == "probe_contributor" and artifact not in (None, "not_applicable"):
+        blockers.append("artifact_rung_must_be_not_applicable_for_probe")
+
+    generations = [item["observation"]["evidence_generation"] for item in observations]
+    if generations != sorted(set(generations)):
+        blockers.append("observation_generations_not_monotonic")
+    covered = sum(float(item["observation"]["measurement_duration_ms"]) for item in observations)
+    if covered < SUSTAINED_OBSERVATION_WINDOW_MS:
+        blockers.append("sustained_observation_window_not_covered")
+    families = OPERATION_GATE_FAMILIES[role]
+    for family_name in families:
+        for metric in GATE_FAMILY_METRICS[family_name]:
+            values = [item["observation"]["metrics"].get(metric, _UNKNOWN_METRIC) for item in observations]
+            if any(value == _UNKNOWN_METRIC for value in values):
+                blockers.append(f"gate_family_unknown:{family_name}:{metric}")
+
+    gate = validate_mobile_physical_gate(physical_gate)
+    if gate["platform_family"] != platform_family or role not in gate["roles"]:
+        blockers.append("physical_gate_not_for_this_platform_and_role")
+    if gate["member_key_digest"] != key_digest or gate["runtime_build_digest"] != build:
+        blockers.append("physical_gate_bound_to_another_member_or_build")
+    if gate["family_ref"] != family:
+        blockers.append("physical_gate_bound_to_another_family")
+    for case_id in REQUIRED_MOBILE_POSITIVES[role]:
+        if gate["positives"].get(case_id, {}).get("outcome") != "passed":
+            blockers.append(f"physical_positive_not_passed:{case_id}")
+    for case_id in REQUIRED_MOBILE_NEGATIVES:
+        if gate["negatives"].get(case_id, {}).get("outcome") != "failed_closed":
+            blockers.append(f"physical_negative_not_passed:{case_id}")
+    if gate["adb_used_during_gate"] is not False:
+        blockers.append("adb_used_during_gate")
+    if gate["provenance"] != "live":
+        blockers.append("non_live_provenance_cannot_qualify")
+    observation_digests = [item["observation_digest"] for item in observations]
+    if not set(observation_digests) <= set(gate["observation_digests"]):
+        blockers.append("observation_not_bound_to_physical_gate")
+
+    decision = "eligible" if not blockers else "withheld"
+    return {
+        "protocol": ROLE_QUALIFICATION_PROTOCOL,
+        "rung_id": "operation_qualification",
+        "authority": RUNG_AUTHORITIES["operation_qualification"],
+        "decision": decision,
+        "member_ref": member,
+        "platform_family": platform_family,
+        "role": role,
+        "runtime_build_digest": build,
+        "member_key_digest": key_digest,
+        "claim_scope": ANDROID_FAMILY_BOUND_CLAIM_SCOPE,
+        "family_ref": family,
+        "grants": [RUNG_GRANTS["operation_qualification"]] if decision == "eligible" else [],
+        "cannot_grant": list(RUNG_CANNOT_GRANT["operation_qualification"]),
+        "blockers": sorted(set(blockers)),
+        "route_ready": ROUTE_READY_AT_ENROLLMENT,
+        "source_kind": NATIVE_SOURCE_KIND,
+        "observation_digests": observation_digests,
+        "observed_window_ms": covered,
+        "physical_gate_digest": gate["gate_digest"],
+        "issued_at_unix_ms": now,
+        "expires_at_unix_ms": now + _validity_ms(validity_ms),
+    }
+
+
+def validate_mobile_physical_gate(bundle: object) -> dict[str, Any]:
+    """Validate one owner-private executed physical gate bundle (closed shape)."""
+
+    record = _closed(bundle, fields=PHYSICAL_GATE_FIELDS, code="mobile_physical_gate_fields_invalid")
+    if record["protocol"] != ACTIVATION_QUALIFICATION_PROTOCOL:
+        _reject("mobile_physical_gate_protocol_invalid")
+    if record["platform_family"] not in MOBILE_PLATFORM_FAMILIES:
+        _reject("mobile_physical_gate_platform_invalid")
+    if (
+        not isinstance(record["roles"], list)
+        or not record["roles"]
+        or any(role not in MOBILE_ROLES for role in record["roles"])
+    ):
+        _reject("mobile_physical_gate_role_invalid")
+    _digest(record["member_key_digest"], code="mobile_physical_gate_binding_invalid")
+    _digest(record["runtime_build_digest"], code="mobile_physical_gate_binding_invalid")
+    if not _FAMILY_REF.fullmatch(str(record["family_ref"])):
+        _reject("android_family_ref_invalid")
+    require_undivided_product_path(record["execution_path"])
+    for field in ("positives", "negatives"):
+        cases = record[field]
+        if not isinstance(cases, Mapping):
+            _reject("mobile_physical_gate_cases_invalid")
+        for case_id, result in cases.items():
+            if (
+                not isinstance(case_id, str)
+                or not isinstance(result, Mapping)
+                or result.get("outcome") not in PHYSICAL_CASE_OUTCOMES
+            ):
+                _reject("mobile_physical_gate_cases_invalid")
+    if not isinstance(record["adb_used_during_gate"], bool):
+        _reject("mobile_physical_gate_adb_invalid")
+    if record["provenance"] not in ("live", "fixture", "replay", "historical"):
+        _reject("mobile_physical_gate_provenance_invalid")
+    if not isinstance(record["observation_digests"], list) or any(
+        _SHA256.fullmatch(str(item)) is None for item in record["observation_digests"]
+    ):
+        _reject("mobile_physical_gate_observations_invalid")
+    body = {key: value for key, value in record.items() if key != "gate_digest"}
+    if record["gate_digest"] != _canonical_digest(body):
+        _reject("mobile_physical_gate_digest_mismatch")
+    return record
+
+
+def _canonical_digest(value: object) -> str:
+    import hashlib
+
+    return "sha256:" + hashlib.sha256(canonical_json_bytes(value)).hexdigest()
 
 
 def bind_speculative_draft_worker(
@@ -1547,14 +1716,65 @@ def observe_mobile_runtime(
     member_ref: object,
     platform_family: object,
     runtime_build_digest: object,
+    observation_envelope: object = None,
+    expected_member_key_digest: object = None,
+    now_unix_ms: object = None,
+    maximum_age_ms: object = None,
 ) -> dict[str, Any]:
-    """Declared runtime-owned observation seam.  Not implemented."""
+    """Accept one runtime-owned observation sealed by the native node app.
 
-    _text(member_ref, code="mobile_runtime_observation_member_invalid")
+    The observation must arrive inside the member-signed envelope the native core
+    seals (``native/mobile_core`` ``evidence::sign_observation``): the exact
+    enrolled member key signed a closed ``mycelium.mobile_runtime_observation.v1``
+    with native source kind and the node-app authority, for this platform and build,
+    and it is fresh.  The caller never authors an observation: without a sealed
+    envelope the seam refuses with ``mobile_runtime_observation_absent``.
+    """
+
+    member = _text(member_ref, code="mobile_runtime_observation_member_invalid")
     if platform_family not in MOBILE_PLATFORM_FAMILIES:
         _reject("mobile_runtime_observation_platform_invalid")
-    _digest(runtime_build_digest, code="mobile_runtime_observation_build_invalid")
-    _refuse("mobile_runtime_observation_absent")
+    build = _digest(runtime_build_digest, code="mobile_runtime_observation_build_invalid")
+    if observation_envelope is None:
+        _refuse("mobile_runtime_observation_absent")
+    if platform_family in APPLE_PLATFORM_FAMILIES:
+        _reject(APPLE_DEFERRED_CODE)
+    key_digest = _digest(expected_member_key_digest, code="mobile_observation_member_key_unbound")
+    envelope = _closed(
+        observation_envelope, fields=MEMBER_ENVELOPE_FIELDS, code="mobile_observation_envelope_invalid"
+    )
+    if envelope["protocol"] != MEMBER_ENVELOPE_PROTOCOL:
+        _reject("mobile_observation_envelope_invalid")
+    observation = validate_mobile_runtime_observation(envelope["message"])
+    signature = envelope["signature"]
+    if not isinstance(signature, Mapping) or signature.get("verification_key_digest") != key_digest:
+        _reject("mobile_observation_signer_not_member")
+    _verify_envelope_signature(observation, signature, envelope["verification_key"])
+    require_native_observation(observation["source_kind"])
+    if observation["authority"] != NATIVE_OBSERVATION_AUTHORITY:
+        _reject("mobile_observation_not_runtime_owned")
+    if observation["platform_family"] != platform_family:
+        _reject("mobile_observation_platform_mismatch")
+    if observation["runtime_build_digest"] != build:
+        _reject("mobile_observation_build_mismatch")
+    now = _now_ms(now_unix_ms)
+    age_limit = (
+        MAX_QUALIFYING_OBSERVATION_AGE_MS
+        if maximum_age_ms is None
+        else _finite(maximum_age_ms, code="mobile_observation_age_invalid", minimum=0.0)
+    )
+    observed_at = float(observation["observed_at_unix_ms"])
+    if observed_at > now + MAX_CLOCK_SKEW_MS:
+        _reject("mobile_observation_time_invalid")
+    if now - observed_at > age_limit:
+        _reject("mobile_observation_stale")
+    return {
+        "protocol": OBSERVATION_RECORD_PROTOCOL,
+        "member_ref": member,
+        "member_key_digest": key_digest,
+        "observation": observation,
+        "observation_digest": _canonical_digest(observation),
+    }
 
 
 def project_mobile_rungs(*, workspace: object, member_ref: object) -> dict[str, Any]:
@@ -1595,6 +1815,72 @@ BOUNDARIES: tuple[tuple[str, str], ...] = (
 )
 
 BOUNDARY_CODES: frozenset[str] = frozenset(code for _, code in BOUNDARIES)
+
+# ---------------------------------------------------------------------------
+# Native Android operation qualification vocabulary (implementation-lane owned,
+# contract resolution 11): the metric names the native core
+# (``native/mobile_core/src/evidence.rs``, ``node.rs``) seals, per gate family.
+# ---------------------------------------------------------------------------
+
+#: [2026-09-29 OWNER RULING R2] Apple mobile is deferred; A12 is Android-only.
+APPLE_DEFERRED_CODE = "apple_mobile_deferred_by_owner_ruling_r2"
+NATIVE_OBSERVATION_AUTHORITY = "mycelium_node_app"
+OBSERVATION_RECORD_PROTOCOL = "mycelium.mobile_runtime_observation_record.v1"
+MAX_QUALIFYING_OBSERVATION_AGE_MS = 6 * 3_600_000.0
+#: The frozen sustained window the observations must jointly cover (10 minutes).
+SUSTAINED_OBSERVATION_WINDOW_MS = 600_000.0
+GATE_FAMILY_METRICS: dict[str, tuple[str, ...]] = {
+    "thermal": ("thermal_max_celsius",),
+    "power": ("battery_level_percent", "charging"),
+    "memory": ("memory_available_bytes",),
+    "lifecycle": ("lifecycle_member",),
+    "network": ("relay_online",),
+    "artifact": ("stage_loaded",),
+    "parity": ("frames_executed_window",),
+}
+OPERATION_GATE_FAMILIES: dict[str, tuple[str, ...]] = {
+    "probe_contributor": ("thermal", "power", "memory", "lifecycle", "network"),
+    "qualified_model_stage": REQUIRED_GATE_FAMILIES,
+    "speculative_draft_worker": REQUIRED_GATE_FAMILIES,
+}
+REQUIRED_MOBILE_POSITIVES: dict[str, tuple[str, ...]] = {
+    "probe_contributor": ("off_tailnet_join", "reconnect", "native_evidence_published"),
+    "qualified_model_stage": (
+        "off_tailnet_join",
+        "reconnect",
+        "native_evidence_published",
+        "router_frames_executed",
+        "native_parity",
+        "browser_request_completed",
+    ),
+    "speculative_draft_worker": (),
+}
+#: Section 11 Android negatives this lane's physical gate driver executes.
+REQUIRED_MOBILE_NEGATIVES = (
+    "background",
+    "network_loss",
+    "revocation",
+    "process_death",
+    "thermal_window",
+)
+PHYSICAL_CASE_OUTCOMES = ("passed", "failed_closed", "violated", "not_executed")
+PHYSICAL_GATE_FIELDS = frozenset(
+    {
+        "protocol",
+        "platform_family",
+        "roles",
+        "member_key_digest",
+        "runtime_build_digest",
+        "family_ref",
+        "execution_path",
+        "positives",
+        "negatives",
+        "adb_used_during_gate",
+        "provenance",
+        "observation_digests",
+        "gate_digest",
+    }
+)
 
 
 def scaffold_status() -> dict[str, Any]:

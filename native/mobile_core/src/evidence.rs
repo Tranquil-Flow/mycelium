@@ -6,10 +6,12 @@
 //! the string `unknown`, never a fabricated number.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use serde_json::{Map, Value, json};
 
 use crate::canonical;
+use crate::identity::Identity;
 
 pub const RUNTIME_OBSERVATION_PROTOCOL: &str = "mycelium.mobile_runtime_observation.v1";
 pub const NATIVE_SOURCE_KIND: &str = "native_device_observation";
@@ -18,6 +20,10 @@ pub const EXCLUDED_PRODUCT_PATHS: [&str; 3] = ["termux", "adb", "ssh"];
 pub const MOBILE_PLATFORM_FAMILIES: [&str; 3] = ["android", "ios", "ipados"];
 pub const METRIC_COUNT_CEILING: usize = 256;
 pub const APPLE_INITIAL_ELIGIBILITY: &str = "foreground_active_only";
+/// The runtime authority a native node-app observation is attributed to.
+pub const OBSERVATION_AUTHORITY: &str = "mycelium_node_app";
+/// The member-signed envelope shape (`mycelium_membership/contracts.py`).
+pub const SIGNED_MESSAGE_PROTOCOL: &str = "mycelium.membership.signed_message.v1";
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
@@ -111,6 +117,67 @@ pub fn runtime_observation(o: &Observation<'_>) -> Result<Value, EvidenceError> 
     }))
 }
 
+/// Sign one closed runtime observation with the member's durable key.
+///
+/// The envelope is the A9 signed-message shape the A12 gate verifies
+/// (`observe_mobile_runtime`): only a document this module would emit, carrying
+/// native source kind and the node-app authority, can be signed.
+pub fn sign_observation(identity: &Identity, observation: &Value) -> Result<Value, EvidenceError> {
+    if observation["protocol"] != RUNTIME_OBSERVATION_PROTOCOL
+        || observation["source_kind"] != NATIVE_SOURCE_KIND
+        || observation["authority"] != OBSERVATION_AUTHORITY
+        || observation.as_object().map(|o| o.len()) != Some(11)
+    {
+        return Err(EvidenceError("mobile_observation_unsignable"));
+    }
+    let signature = identity.sign(observation).map_err(|_| EvidenceError("mobile_observation_signature_failed"))?;
+    Ok(json!({
+        "protocol": SIGNED_MESSAGE_PROTOCOL,
+        "message": observation,
+        "signature": signature,
+        "verification_key": identity.public_key_record(),
+    }))
+}
+
+fn read_trimmed(path: &Path) -> Option<String> {
+    std::fs::read_to_string(path).ok().map(|s| s.trim().to_owned())
+}
+
+/// Best-effort native platform metrics from the Linux/Android procfs and sysfs
+/// under `root` (`/` on the device). A source the OS does not expose to the app,
+/// or that does not parse, is `None` and serializes as `unknown` — never a
+/// fabricated number.
+pub fn platform_metrics(root: &Path) -> Metrics {
+    let mut metrics = Metrics::new();
+    let memory = read_trimmed(&root.join("proc/meminfo")).and_then(|text| {
+        text.lines()
+            .find(|line| line.starts_with("MemAvailable:"))
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|kb| kb.parse::<f64>().ok())
+            .map(|kb| kb * 1024.0)
+    });
+    metrics.insert("memory_available_bytes".into(), memory);
+    let battery = root.join("sys/class/power_supply/battery");
+    metrics.insert(
+        "battery_level_percent".into(),
+        read_trimmed(&battery.join("capacity")).and_then(|v| v.parse::<f64>().ok()),
+    );
+    metrics.insert(
+        "charging".into(),
+        read_trimmed(&battery.join("status")).map(|s| if s == "Charging" || s == "Full" { 1.0 } else { 0.0 }),
+    );
+    let thermal = std::fs::read_dir(root.join("sys/class/thermal")).ok().and_then(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().starts_with("thermal_zone"))
+            .filter_map(|e| read_trimmed(&e.path().join("temp")).and_then(|v| v.parse::<f64>().ok()))
+            .map(|milli| milli / 1000.0)
+            .fold(None, |acc: Option<f64>, v| Some(acc.map_or(v, |a| a.max(v))))
+    });
+    metrics.insert("thermal_max_celsius".into(), thermal);
+    metrics
+}
+
 /// Pseudonymous device-family reference from registered capability fields only
 /// (ABI, OS API level, accelerator capability class) — never from brand or model
 /// text, which the function does not accept.
@@ -168,6 +235,60 @@ mod tests {
         nan.insert("x".into(), Some(f64::NAN));
         assert!(runtime_observation(&Observation { metrics: &nan, ..o }).is_err());
         assert!(runtime_observation(&Observation { platform_family: "termux", ..o }).is_err());
+    }
+
+    fn observation_doc(metrics: &Metrics) -> Value {
+        runtime_observation(&Observation {
+            platform_family: "android",
+            runtime_build_digest: &format!("sha256:{}", "b".repeat(64)),
+            profile_generation: 2,
+            evidence_generation: 5,
+            observed_at_unix_ms: 1_000.0,
+            measurement_duration_ms: 60_000.0,
+            sample_count: 12,
+            authority: OBSERVATION_AUTHORITY,
+            metrics,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn signed_observation_verifies_with_the_member_key_only() {
+        let identity = Identity::generate("member-endpoint").unwrap();
+        let doc = observation_doc(&Metrics::new());
+        let envelope = sign_observation(&identity, &doc).unwrap();
+        assert_eq!(envelope["protocol"], SIGNED_MESSAGE_PROTOCOL);
+        assert_eq!(envelope["message"], doc);
+        crate::identity::verify(&envelope["message"], &envelope["signature"], &envelope["verification_key"]).unwrap();
+        let mut tampered = envelope["message"].clone();
+        tampered["sample_count"] = json!(13);
+        assert!(crate::identity::verify(&tampered, &envelope["signature"], &envelope["verification_key"]).is_err());
+        let mut foreign = doc.clone();
+        foreign["authority"] = json!("operator");
+        assert_eq!(sign_observation(&identity, &foreign).unwrap_err().0, "mobile_observation_unsignable");
+        let mut synthetic = doc.clone();
+        synthetic["source_kind"] = json!("synthetic_conformance");
+        assert!(sign_observation(&identity, &synthetic).is_err());
+    }
+
+    #[test]
+    fn platform_metrics_read_procfs_and_sysfs_and_leave_the_rest_unknown() {
+        let root = std::env::temp_dir().join(format!("mycelium-evidence-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("proc")).unwrap();
+        std::fs::write(root.join("proc/meminfo"), "MemTotal: 100 kB\nMemAvailable:   2048 kB\n").unwrap();
+        std::fs::create_dir_all(root.join("sys/class/thermal/thermal_zone0")).unwrap();
+        std::fs::create_dir_all(root.join("sys/class/thermal/thermal_zone3")).unwrap();
+        std::fs::write(root.join("sys/class/thermal/thermal_zone0/temp"), "41000\n").unwrap();
+        std::fs::write(root.join("sys/class/thermal/thermal_zone3/temp"), "47500\n").unwrap();
+        let metrics = platform_metrics(&root);
+        assert_eq!(metrics["memory_available_bytes"], Some(2048.0 * 1024.0));
+        assert_eq!(metrics["thermal_max_celsius"], Some(47.5));
+        assert_eq!(metrics["battery_level_percent"], None);
+        assert_eq!(metrics["charging"], None);
+        let doc = observation_doc(&metrics);
+        assert_eq!(doc["metrics"]["battery_level_percent"], "unknown");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
