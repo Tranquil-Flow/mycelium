@@ -86,6 +86,88 @@ def _request(verifier: Any, width: int, mode: str, ref: str, *, policy: str = DE
    )
 
 
+def run_matrix_operation(
+   plan: MatrixPlan,
+   index: int,
+   *,
+   open_verifier: Callable[[tuple[int, ...], str], Any],
+   runtime_digest: str,
+   model_digest: str,
+   representation_digest: str,
+   backend: str,
+   provenance: str,
+   execution_path: str,
+) -> dict[str, Any]:
+   """Execute matrix operation ``index`` on a fresh verifier; return its record."""
+
+   if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < plan.operations:
+      raise A10ContractError("invalid_matrix_operation_index")
+   cells = [
+      (bucket, width_class)
+      for bucket in plan.prefix_buckets
+      for width_class in QUALIFIED_WIDTH_CLASSES
+   ]
+   bucket, width_class = cells[index % len(cells)]
+   lengths = plan.prefix_buckets[bucket]
+   length = lengths[(index // len(cells)) % len(lengths)]
+   width = plan.widths[width_class]
+   mode = TRANSACTION_MODES[index % len(TRANSACTION_MODES)]
+   ref = f"a10-matrix-{index:04d}"
+   verifier = open_verifier(_prefix(plan, bucket, length, index), ref)
+   candidates = list(verifier.greedy_continuation(width))
+   # Schedule: every third operation fully accepted; the others miss at a
+   # rotating offset so rejection and correction are both exercised.
+   if index % 3 != 0:
+      miss = (index // 3) % width
+      # Always a different token: 1 + c mod (V-1) never equals c for V > 2.
+      candidates[miss] = 1 + candidates[miss] % (plan.vocab_size - 1)
+   verifier.stage_candidates(tuple(candidates), transaction_mode=mode)
+   request = _request(verifier, width, mode, ref)
+   result = sequential_parity_reference(verifier, request)
+   return verifier_operation_record(
+      operation_ref=ref,
+      parity_result=result,
+      request=request,
+      width_class=width_class,
+      prefix_bucket=bucket,
+      runtime_digest=runtime_digest,
+      model_digest=model_digest,
+      representation_digest=representation_digest,
+      backend=backend,
+      provenance=provenance,
+      execution_path=execution_path,
+   )
+
+
+def run_verifier_negative(
+   case_id: str,
+   plan: MatrixPlan,
+   *,
+   open_verifier: Callable[[tuple[int, ...], str], Any],
+   cancel_verification: Callable[[Any], None],
+) -> dict[str, Any]:
+   """Execute one required verifier negative; it must fail closed."""
+
+   if case_id == "stale_prefix":
+      return _stale_prefix_negative(plan, open_verifier)
+   if case_id == "unsupported_generation_policy":
+      return _generation_policy_negative(plan, open_verifier)
+   if case_id == "position_bound":
+      return _position_bound_negative(plan, open_verifier)
+   if case_id == "cancellation_during_verification":
+      return _cancellation_negative(plan, open_verifier, cancel_verification)
+   raise A10ContractError("invalid_verifier_negative_case")
+
+
+#: The required negatives in their execution order.
+VERIFIER_NEGATIVE_ORDER = (
+   "stale_prefix",
+   "unsupported_generation_policy",
+   "position_bound",
+   "cancellation_during_verification",
+)
+
+
 def run_verifier_matrix(
    plan: MatrixPlan,
    *,
@@ -101,36 +183,12 @@ def run_verifier_matrix(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
    """Run the matrix and the required negatives; return (operations, negatives)."""
 
-   cells = [
-      (bucket, width_class)
-      for bucket in plan.prefix_buckets
-      for width_class in QUALIFIED_WIDTH_CLASSES
-   ]
    operations: list[dict[str, Any]] = []
    for index in range(plan.operations):
-      bucket, width_class = cells[index % len(cells)]
-      lengths = plan.prefix_buckets[bucket]
-      length = lengths[(index // len(cells)) % len(lengths)]
-      width = plan.widths[width_class]
-      mode = TRANSACTION_MODES[index % len(TRANSACTION_MODES)]
-      ref = f"a10-matrix-{index:04d}"
-      verifier = open_verifier(_prefix(plan, bucket, length, index), ref)
-      candidates = list(verifier.greedy_continuation(width))
-      # Schedule: every third operation fully accepted; the others miss at a
-      # rotating offset so rejection and correction are both exercised.
-      if index % 3 != 0:
-         miss = (index // 3) % width
-         # Always a different token: 1 + c mod (V-1) never equals c for V > 2.
-         candidates[miss] = 1 + candidates[miss] % (plan.vocab_size - 1)
-      verifier.stage_candidates(tuple(candidates), transaction_mode=mode)
-      request = _request(verifier, width, mode, ref)
-      result = sequential_parity_reference(verifier, request)
-      record = verifier_operation_record(
-         operation_ref=ref,
-         parity_result=result,
-         request=request,
-         width_class=width_class,
-         prefix_bucket=bucket,
+      record = run_matrix_operation(
+         plan,
+         index,
+         open_verifier=open_verifier,
          runtime_digest=runtime_digest,
          model_digest=model_digest,
          representation_digest=representation_digest,
@@ -143,10 +201,13 @@ def run_verifier_matrix(
          on_operation(index, record)
 
    negatives = [
-      _stale_prefix_negative(plan, open_verifier),
-      _generation_policy_negative(plan, open_verifier),
-      _position_bound_negative(plan, open_verifier),
-      _cancellation_negative(plan, open_verifier, cancel_verification),
+      run_verifier_negative(
+         case_id,
+         plan,
+         open_verifier=open_verifier,
+         cancel_verification=cancel_verification,
+      )
+      for case_id in VERIFIER_NEGATIVE_ORDER
    ]
    assert {item["case_id"] for item in negatives} == set(REQUIRED_VERIFIER_NEGATIVES)
    return operations, negatives
@@ -228,4 +289,11 @@ def _cancellation_negative(
    return _negative("cancellation_during_verification", verifier, before, code)
 
 
-__all__ = ["DEFAULT_GENERATION_POLICY", "MatrixPlan", "run_verifier_matrix"]
+__all__ = [
+   "DEFAULT_GENERATION_POLICY",
+   "MatrixPlan",
+   "VERIFIER_NEGATIVE_ORDER",
+   "run_matrix_operation",
+   "run_verifier_matrix",
+   "run_verifier_negative",
+]
