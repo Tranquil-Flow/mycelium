@@ -155,6 +155,13 @@ def _parse(payload: object) -> tuple[str, int | str, MatrixPlan, dict[str, str]]
    return kind, selector, plan, dict(binding)
 
 
+def validate_operation_payload(payload: object) -> dict[str, Any]:
+   """Validate one product verification payload before it is dispatched."""
+
+   _parse(payload)
+   return dict(payload)  # type: ignore[arg-type]
+
+
 def execute_product_operation(runtime: Any, payload: Mapping[str, Any]) -> dict[str, Any]:
    """Node side: execute exactly one operation on this node's own target runtime."""
 
@@ -234,4 +241,5 @@ __all__ = [
    "execute_product_operation",
    "operation_payload",
    "unwrap_product_result",
+   "validate_operation_payload",
 ]

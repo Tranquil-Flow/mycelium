@@ -645,6 +645,29 @@ class ColdRouteRestartOwner:
                 raise ColdRouteRestartError(COLD_ROUTE_RESTART_ERROR_CODE) from exc
             raise
 
+    def a10_target_verify(
+        self,
+        node_id: str,
+        *,
+        operation: Mapping[str, Any],
+        deadline_monotonic_s: float,
+    ) -> Any:
+        """Forward one A10 verification operation to the ready route only."""
+
+        with self._lock:
+            route = self._current
+            ready = self._state == "ready" and route is not None
+        if not ready:
+            raise RuntimeError("route_not_open")
+        verify = getattr(route, "a10_target_verify", None)
+        if not callable(verify):
+            raise RuntimeError("a10_verify_route_unsupported")
+        return verify(
+            node_id,
+            operation=operation,
+            deadline_monotonic_s=deadline_monotonic_s,
+        )
+
     def release_request(self, request_id: str) -> None:
         with self._lock:
             route = self._request_routes.pop(request_id, None)

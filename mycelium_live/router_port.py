@@ -323,6 +323,55 @@ class LiveRouterPort:
                     self._recovery_current_request_ids.clear()
                 self._recovery_qualification_digest = digest
 
+    def a10_target_verify(
+        self,
+        node_id: str,
+        payload: Mapping[str, Any],
+        *,
+        timeout_s: float,
+    ) -> tuple[str, dict[str, Any]]:
+        """Dispatch one A10 target-verification operation, admitted exclusively.
+
+        The operation is validated, then admitted only on an open, alive and
+        idle route while the admission lock is held, so no request can be
+        admitted while the target runtime verifies.  It is sent through the
+        route to a node of the current deployment, and only the record for
+        exactly this operation is accepted.
+        """
+
+        from mycelium_router.a10_product_verifier import (
+            unwrap_product_result,
+            validate_operation_payload,
+        )
+
+        if not isinstance(timeout_s, (int, float)) or not 0 < timeout_s <= 120:
+            raise ValueError("a10_verify_deadline_invalid")
+        operation = validate_operation_payload(payload)
+        deployment_nodes = {
+            placement.node_id
+            for stage in self._graph.stages
+            for placement in stage.placements
+        }
+        if node_id not in deployment_nodes:
+            raise RuntimeError("a10_verify_node_not_in_deployment")
+        verify = getattr(self._route, "a10_target_verify", None)
+        if not callable(verify):
+            raise RuntimeError("a10_verify_route_unsupported")
+        with self._admission_dispatch_lock:
+            with self._lock:
+                if self._closed:
+                    raise RuntimeError("route_not_open")
+                if self._pending:
+                    raise RuntimeError("a10_verify_route_busy")
+            if not self._route.is_alive():
+                raise RuntimeError("route_not_open")
+            result = verify(
+                node_id,
+                operation=operation,
+                deadline_monotonic_s=time.monotonic() + float(timeout_s),
+            )
+        return unwrap_product_result(operation, result)
+
     def admit(
         self,
         request: RequestContext,
