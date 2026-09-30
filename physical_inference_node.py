@@ -330,6 +330,14 @@ class NodeCommandError(RuntimeError):
         super().__init__(code)
 
 
+def _a10_execute_product_operation(runtime: Any, payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Execute one A10 product verification operation on this node's runtime."""
+
+    from mycelium_router.a10_product_verifier import execute_product_operation
+
+    return execute_product_operation(runtime, payload)
+
+
 # Router request states an ``inference_started`` observation may report.
 _STARTED_REQUEST_STATUSES = frozenset({"DECODING", "COMPLETED", "CANCELLED"})
 
@@ -4106,10 +4114,32 @@ class PhysicalNodeService:
             "infer_cancel_wait": self._infer_cancel_wait,
             "rotate": self._rotate,
             "stop": self._stop,
+            "a10_target_verify": self._a10_target_verify,
         }
         handler = handlers.get(document["command"])
         _require(handler is not None, "unsupported_command")
         return handler(document["payload"])
+
+    def _a10_target_verify(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Run one A10 target-verification operation on this node's own runtime.
+
+        The record comes from the loaded runtime's verifier only; a refusal is a
+        named code and never carries exception text.
+        """
+
+        from mycelium_router.a10_product_verifier import A10ProductVerifierError
+
+        _require(self.state == "RUNNING", "invalid_state_for_a10_target_verify")
+        try:
+            result = _a10_execute_product_operation(self.runtime, payload)
+        except A10ProductVerifierError as exc:
+            raise NodeCommandError(exc.code) from None
+        except Exception as exc:  # noqa: BLE001 - only a stable code leaves the node
+            code = getattr(exc, "code", None)
+            if isinstance(code, str) and _PREFILL_DIAGNOSTIC_CODE.fullmatch(code):
+                raise NodeCommandError(f"a10_target_verify_failed:{code}") from None
+            raise NodeCommandError("a10_target_verify_failed") from None
+        return _plain_json(result)
 
     def _hello(self, payload: dict[str, Any]) -> dict[str, Any]:
         _exact_fields(payload, set(), "invalid_hello_fields")
