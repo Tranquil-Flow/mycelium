@@ -658,7 +658,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:1f41414a2e8f2bec5e5603f2da42dd2b78840da988b99eeeeea86ad279507e50",
+      "sha256": "sha256:7ff4963a8fc4d0c8172db2310d5e6f48ca6187cdd0590a3fb5117cf56a7e56b7",
       "size_bytes": 71562
     },
     {
@@ -1098,8 +1098,8 @@
     },
     {
       "path": "mycelium_live/route.py",
-      "sha256": "sha256:dee643e1807149e1483839c60541674c60636c2935ac67356231d756511e53b0",
-      "size_bytes": 286301
+      "sha256": "sha256:89a6a51145ca59d0216345b9703ae2f74c65a79328bafbf88f52a2959f76383e",
+      "size_bytes": 287786
     },
     {
       "path": "mycelium_live/router_port.py",
@@ -2702,6 +2702,11 @@
       "size_bytes": 7259
     },
     {
+      "path": "tests/live/test_a10_target_verify_route.py",
+      "sha256": "sha256:f9d35d7a32f4c0b4e217f077be9dbe463ea185af11465eedf72e89d68c071cc1",
+      "size_bytes": 4111
+    },
+    {
       "path": "tests/live/test_a4_ownership.py",
       "sha256": "sha256:9d3bbd618f48fc946f1b3c5ce2f0f83e6f6f3559dc9cc0fcd17addfefaef16b3",
       "size_bytes": 81619
@@ -3388,5 +3393,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:24cce1ad739e88fcc5c35b8e4e0f710c61a2a38ba57d95df1a6bf04a3c26236b"
+  "source_digest": "sha256:72717335fca9a7d8a9bbf6acc725bae5aa0aa70ff86bff548ae92b0a63f2716e"
 }
