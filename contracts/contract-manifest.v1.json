@@ -820,8 +820,8 @@
       "owner_sources": [
         {
           "path": "mycelium_live/route.py",
-          "sha256": "dee643e1807149e1483839c60541674c60636c2935ac67356231d756511e53b0",
-          "size_bytes": 286301
+          "sha256": "89a6a51145ca59d0216345b9703ae2f74c65a79328bafbf88f52a2959f76383e",
+          "size_bytes": 287786
         },
         {
           "path": "mycelium_live/registry.py",
@@ -840,8 +840,8 @@
       "owner_sources": [
         {
           "path": "mycelium_live/route.py",
-          "sha256": "dee643e1807149e1483839c60541674c60636c2935ac67356231d756511e53b0",
-          "size_bytes": 286301
+          "sha256": "89a6a51145ca59d0216345b9703ae2f74c65a79328bafbf88f52a2959f76383e",
+          "size_bytes": 287786
         },
         {
           "path": "ui/web/src/features/liveRoute/routeStatus.ts",
@@ -1485,8 +1485,8 @@
         },
         {
           "path": "mycelium_live/route.py",
-          "sha256": "dee643e1807149e1483839c60541674c60636c2935ac67356231d756511e53b0",
-          "size_bytes": 286301
+          "sha256": "89a6a51145ca59d0216345b9703ae2f74c65a79328bafbf88f52a2959f76383e",
+          "size_bytes": 287786
         }
       ],
       "protocol": "mycelium.product_ui.swarm.v1"
@@ -1795,8 +1795,8 @@
         },
         {
           "path": "mycelium_live/route.py",
-          "sha256": "dee643e1807149e1483839c60541674c60636c2935ac67356231d756511e53b0",
-          "size_bytes": 286301
+          "sha256": "89a6a51145ca59d0216345b9703ae2f74c65a79328bafbf88f52a2959f76383e",
+          "size_bytes": 287786
         }
       ],
       "protocol": "mycelium.scoped_runtime_incident.v1"
@@ -1955,8 +1955,8 @@
         },
         {
           "path": "mycelium_live/route.py",
-          "sha256": "dee643e1807149e1483839c60541674c60636c2935ac67356231d756511e53b0",
-          "size_bytes": 286301
+          "sha256": "89a6a51145ca59d0216345b9703ae2f74c65a79328bafbf88f52a2959f76383e",
+          "size_bytes": 287786
         },
         {
           "path": "mycelium_router/transports/iroh.py",
