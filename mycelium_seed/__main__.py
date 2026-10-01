@@ -14,7 +14,9 @@ import threading
 import stat
 from typing import NoReturn, Sequence
 
+from mycelium_internet.bootstrap import PublicBootstrapPolicy, canonical_https_origin
 from mycelium_invite import SqliteInviteRegistry
+from mycelium_mobile.android_onboarding import validate_android_quota
 from mycelium_node.identity import load_or_create_node_signer
 from mycelium_node.process import (
     PrivateDirectoryLease,
@@ -31,10 +33,12 @@ from .http import (
     _validate_endpoint_url,
 )
 from .operator import verify_seed_key_transition
+from .pairing import MAX_APPROVALS, MAX_WINDOW_SECONDS, AndroidPairingChannel
 from .state import SqliteSeedState
 
 
 _STATUS_PROTOCOL = "mycelium.seed_main_status.v1"
+_LOOPBACK_BINDS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 # Stable process contract shared with the node entrypoint.
 EXIT_SUCCESS = 0
@@ -102,6 +106,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=_canonical_port, default=8765)
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--advertised-url")
+    parser.add_argument(
+        "--trusted-https-proxy",
+        action="store_true",
+        help="advertise an https URL served by a loopback HTTPS proxy",
+    )
+    parser.add_argument("--pairing-port", type=_canonical_port)
+    parser.add_argument("--pairing-url")
+    parser.add_argument("--pairing-quota-file")
+    parser.add_argument("--pairing-window-seconds", type=int, default=600)
+    parser.add_argument("--pairing-max-approvals", type=int, default=1)
     parser.add_argument("--swarm-id", default="mycelium-swarm")
     parser.add_argument("--seed-node-id", default="seed-node")
     parser.add_argument("--incarnation", default="seed-main")
@@ -110,9 +124,37 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+_STATUS_LOCK = threading.Lock()
+
+
 def _emit_status(status: dict[str, object]) -> None:
-    sys.stdout.buffer.write(canonical_json_bytes(status) + b"\n")
-    sys.stdout.buffer.flush()
+    with _STATUS_LOCK:
+        sys.stdout.buffer.write(canonical_json_bytes(status) + b"\n")
+        sys.stdout.buffer.flush()
+
+
+def _pairing_preflight(args: argparse.Namespace) -> None:
+    args.pairing_quota = None
+    if args.pairing_port is None:
+        if args.pairing_quota_file is not None or args.pairing_url is not None:
+            raise ValueError("pairing options require --pairing-port")
+        return
+    if args.pairing_quota_file is None:
+        raise ValueError("pairing requires an owner quota")
+    if args.pairing_port != 0 and args.pairing_port == args.port:
+        raise ValueError("pairing port must differ from the seed port")
+    if not 1 <= args.pairing_window_seconds <= MAX_WINDOW_SECONDS:
+        raise ValueError("pairing window is invalid")
+    if not 1 <= args.pairing_max_approvals <= MAX_APPROVALS:
+        raise ValueError("pairing approvals are invalid")
+    if args.pairing_url is not None:
+        scheme = args.pairing_url.split(":", 1)[0]
+        if scheme != ("https" if args.trusted_https_proxy else "http"):
+            raise ValueError("pairing URL scheme is invalid")
+    elif args.trusted_https_proxy:
+        raise ValueError("pairing URL is required behind a proxy")
+    raw = Path(args.pairing_quota_file).read_bytes()
+    args.pairing_quota = validate_android_quota(json.loads(raw))
 
 
 def _preflight(args: argparse.Namespace) -> PrivateDirectoryLease:
@@ -124,13 +166,21 @@ def _preflight(args: argparse.Namespace) -> PrivateDirectoryLease:
         _validate_bind_address(args.bind, args.port)
         if args.bind in {"0.0.0.0", "::"} and args.advertised_url is None:
             raise ValueError("advertised URL is required for wildcard binds")
-        if args.advertised_url is not None:
+        if args.trusted_https_proxy:
+            if args.bind not in _LOOPBACK_BINDS or args.advertised_url is None:
+                raise ValueError("trusted https proxy requires a loopback bind")
+            canonical = canonical_https_origin(args.advertised_url)
+            if canonical != args.advertised_url:
+                raise ValueError("advertised https URL is not canonical")
+            _validate_endpoint_url(args.advertised_url, expected_scheme="https")
+        elif args.advertised_url is not None:
             _validate_endpoint_url(
                 args.advertised_url,
                 expected_scheme="http",
                 expected_host=(None if args.bind in {"0.0.0.0", "::"} else args.bind),
                 expected_port=None if args.port == 0 else args.port,
             )
+        _pairing_preflight(args)
         if args.init_only and args.dry_run:
             raise ValueError("init-only and dry-run are mutually exclusive")
         state_root = private_directory_lease(args.data_dir, create=args.init_only)
@@ -232,6 +282,7 @@ def _run_bound(
         return EXIT_SUCCESS
 
     server: SeedHTTPServer | None = None
+    pairing: AndroidPairingChannel | None = None
     stopping = threading.Event()
 
     def request_stop(_signum: int, _frame: object) -> None:
@@ -241,26 +292,63 @@ def _run_bound(
     failure: _EntrypointFailure | None = None
     try:
         state_root.revalidate()
-        server = SeedHTTPServer(
-            coordinator,
-            host=args.bind,
-            port=args.port,
-            advertised_url=args.advertised_url,
-            rotation_envelope=rotation_envelope,
-        )
+        if args.trusted_https_proxy:
+            server = SeedHTTPServer(
+                coordinator,
+                host=args.bind,
+                port=args.port,
+                rotation_envelope=rotation_envelope,
+                public_seed_url=args.advertised_url,
+                policy=PublicBootstrapPolicy(canonical_origin=args.advertised_url),
+            )
+        else:
+            server = SeedHTTPServer(
+                coordinator,
+                host=args.bind,
+                port=args.port,
+                advertised_url=args.advertised_url,
+                rotation_envelope=rotation_envelope,
+            )
         state_root.revalidate()
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous[signum] = signal.signal(signum, request_stop)
         server.start()
-        _emit_status(
-            {
-                "protocol": _STATUS_PROTOCOL,
-                "event": "seed_started",
-                "seed_url": coordinator.seed_url,
-                "seed_endpoint_id": signer.endpoint_id,
-                "route_ready": False,
-            }
-        )
+        started = {
+            "protocol": _STATUS_PROTOCOL,
+            "event": "seed_started",
+            "seed_url": coordinator.seed_url,
+            "seed_endpoint_id": signer.endpoint_id,
+            "route_ready": False,
+        }
+        if args.trusted_https_proxy:
+            started["local_url"] = server.base_url
+        _emit_status(started)
+        if args.pairing_port is not None:
+            pairing = AndroidPairingChannel(
+                coordinator,
+                quota=args.pairing_quota,
+                host=args.bind,
+                port=args.pairing_port,
+                pairing_url=args.pairing_url,
+                trusted_https_proxy=args.trusted_https_proxy,
+                window_seconds=args.pairing_window_seconds,
+                max_approvals=args.pairing_max_approvals,
+                on_event=lambda event: _emit_status(
+                    {"protocol": _STATUS_PROTOCOL, **event}
+                ),
+            )
+            pairing.start()
+            _emit_status(
+                {
+                    "protocol": _STATUS_PROTOCOL,
+                    "event": "pairing_channel_open",
+                    "local_url": pairing.local_url,
+                    "pairing_url": pairing.pairing_url,
+                    "invite_qr": pairing.channel_qr,
+                    "expires_at": pairing.expires_at,
+                    "max_approvals": pairing.max_approvals,
+                }
+            )
         while not stopping.wait(0.5):
             pass
     except _EntrypointFailure as exc:
@@ -272,6 +360,11 @@ def _run_bound(
         )
     finally:
         cleanup_phases = []
+        if pairing is not None:
+            try:
+                pairing.close()
+            except Exception:
+                cleanup_phases.append("pairing")
         if server is not None:
             try:
                 server.close()
