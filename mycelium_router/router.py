@@ -184,6 +184,9 @@ class Router:
    def hop_collection_window_seconds(self):
       return self.relay.batch_controller.config.live_hop_collection_window_seconds
 
+   def hop_join_partners_due(self):
+      return self.relay.hop_join_partners_due()
+
    def receive_progressive_prefill(
       self,
       header,

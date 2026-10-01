@@ -2490,18 +2490,35 @@ class IrohTransport:
         acknowledges a queued hop before executing it.  Under a batch cap of one
         there is nothing to collect: the hop is executed here, before its frame
         is acknowledged, exactly as the synchronous path does.  Otherwise the
-        dispatcher keeps collecting until the configured window closes, or
-        drains at once when the batch is full.
+        dispatcher keeps collecting until the configured window closes, and
+        drains at once when the batch is full or when no other active request
+        is predicted to send a hop within the window (nobody left to wait for).
         """
 
         cap = max(1, int(router.runtime_batch_cap()))
-        if cap <= 1 or router.pending_batch_hops() >= cap:
+        if (
+            cap <= 1
+            or router.pending_batch_hops() >= cap
+            or not self._join_partners_due(router)
+        ):
             self._hop_collection_deadline = None
             self._pump_hop_batches(router)
             return
         if self._hop_collection_deadline is None:
             window = max(0.0, float(router.hop_collection_window_seconds()))
             self._hop_collection_deadline = time.monotonic() + window
+
+    @staticmethod
+    def _join_partners_due(router: Any) -> bool:
+        """Whether another request may still join the open collection window.
+
+        A router without the join predictor keeps the plain bounded window.
+        """
+
+        partners = getattr(router, "hop_join_partners_due", None)
+        if not callable(partners):
+            return True
+        return int(partners()) > 0
 
     def _dispatch_wait_seconds(self) -> float:
         """How long the dispatcher may block for the next frame."""
@@ -2631,7 +2648,11 @@ class IrohTransport:
             self._hop_collection_deadline = None
             return
         deadline = self._hop_collection_deadline
-        if deadline is not None and time.monotonic() < deadline:
+        if (
+            deadline is not None
+            and time.monotonic() < deadline
+            and self._join_partners_due(router)
+        ):
             return
         self._hop_collection_deadline = None
         self._pump_hop_batches(router)

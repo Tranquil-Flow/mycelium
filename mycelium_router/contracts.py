@@ -169,6 +169,9 @@ class RouterConfig:
    # drains them as runtime batches (only while the batch cap admits more than
    # one member; a cap of one executes every hop as it arrives).
    live_hop_collection_window_seconds: float = 0.002
+   # A request whose last hop here is older than this is no longer expected to
+   # join a collection window (bounds the arrival tracker; never a wait).
+   live_hop_join_horizon_seconds: float = 5.0
    batch_deadline_guard_seconds: float = 0.001
    batch_bdp_multiplier: float = 2.0
    batch_stats_stale_seconds: float = 10.0

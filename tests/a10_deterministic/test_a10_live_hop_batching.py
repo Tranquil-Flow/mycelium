@@ -495,9 +495,13 @@ def test_candidate_hop_is_acknowledged_then_executed_when_its_window_closes(
    runtime_case,  # noqa: F811 - pytest fixture
 ):
    runtime = _GateRuntime()
-   hub, transport, router = _start(runtime_case, runtime, ("a",))
+   hub, transport, router = _start(runtime_case, runtime, ("a", "b"))
    _policy(router, "candidate")
    runtime.block = True
+   # Request b was just seen on this node, so it may still join a's window.
+   router.relay._hop_arrivals.record(
+      "path-b", at=router.relay.clock.now(), terminal=False
+   )
    try:
       queued_at = time.monotonic()
       _deliver_decode(runtime_case, hub, "a", b"hidden", b"a")
@@ -623,6 +627,28 @@ def test_a_hop_dispatched_off_the_dispatcher_thread_is_drained_by_the_dispatcher
       assert transport.fatal_error is None
    finally:
       runtime.release.set()
+      transport.close()
+
+
+def test_candidate_hop_alone_on_the_node_executes_without_waiting_the_window(
+   runtime_case,  # noqa: F811 - pytest fixture
+):
+   """No other request can join, so the window is never paid."""
+
+   runtime = _GateRuntime()
+   hub, transport, router = _start(runtime_case, runtime, ("a",))
+   _policy(router, "candidate")
+   try:
+      queued_at = time.monotonic()
+      _deliver_decode(runtime_case, hub, "a", b"hidden", b"a")
+      _wait(lambda: set(_tokens(hub)) == {"request-a"})
+      assert (
+         time.monotonic() - queued_at
+         < TEST_CONFIG.live_hop_collection_window_seconds * 0.5
+      )
+      assert [len(batch.items) for batch in runtime.executed_batches] == [1]
+      assert transport.fatal_error is None
+   finally:
       transport.close()
 
 

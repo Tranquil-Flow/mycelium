@@ -250,6 +250,10 @@ class HopScheduler:
       return len(self._queue)
 
    @_locked
+   def queued_path_ids(self) -> frozenset[str]:
+      return frozenset(item.path_id for item in self._queue)
+
+   @_locked
    def placement_depths(self) -> dict[str, int]:
       return dict(Counter(item.placement_id for item in self._queue))
 

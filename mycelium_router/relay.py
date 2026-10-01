@@ -29,6 +29,7 @@ from mycelium_router.contracts import (
    RuntimeResult,
    TokenEvent,
 )
+from mycelium_router.hop_join import HopArrivalTracker
 from mycelium_router.idempotency import (
    hop_idempotency_key,
    payload_fingerprint,
@@ -181,6 +182,13 @@ class RelayEngine:
       # Counts accepted enqueues, so a finishing pump can tell whether work
       # arrived after its last look at the queue (see ``pump_ready_batches``).
       self._enqueue_sequence = 0
+      # Per-path hop arrivals at this node: which other requests could still
+      # join a live collection window (see ``hop_join_partners_due``).
+      self._hop_arrivals = HopArrivalTracker(
+         join_horizon_seconds=max(
+            1e-3, float(scheduler.config.live_hop_join_horizon_seconds)
+         )
+      )
 
    def path_generation(self, path_id: str) -> int:
       """Return the generation used to fence entry-side dispatches."""
@@ -541,6 +549,9 @@ class RelayEngine:
                   ),
                )
             self._paths[manifest.path_id] = (graph, manifest, request)
+            self._hop_arrivals.record_registration(
+               manifest.path_id, at=self.clock.now()
+            )
             self._provisional_paths.pop(manifest.path_id, None)
             self._path_generations[manifest.path_id] = (
                self._path_generations.get(manifest.path_id, 0) + 1
@@ -1463,6 +1474,7 @@ class RelayEngine:
       if cancelled:
          self.batch_scheduler.release_path(header.path_id)
          return HopReceiveResult("REJECTED", "path_cancelled")
+      self._hop_arrivals.record(header.path_id, at=now, terminal=bool(work.terminal))
       return HopReceiveResult("QUEUED")
 
    def drain_ready_batches(
@@ -1641,6 +1653,22 @@ class RelayEngine:
 
    def pending_batch_hops(self) -> int:
       return self.batch_scheduler.queue_depth()
+
+   def hop_join_partners_due(self) -> int:
+      """Active requests, not queued now, predicted to send a hop in the window.
+
+      Zero means no other request can join the current collection window, so a
+      live transport drains queued hops at once instead of waiting.
+      """
+
+      with self._path_lock:
+         active = frozenset(self._paths)
+      return self._hop_arrivals.partners_due(
+         now=self.clock.now(),
+         window_seconds=self.batch_controller.config.live_hop_collection_window_seconds,
+         queued_paths=self.batch_scheduler.queued_path_ids(),
+         active_paths=active,
+      )
 
    def next_batch_deadline(self) -> float | None:
       now = self.clock.now()
@@ -2368,6 +2396,7 @@ class RelayEngine:
    def _release_path_resources(self, path_id: str) -> None:
       self.scheduler.release_path(path_id)
       self.batch_scheduler.release_path(path_id)
+      self._hop_arrivals.forget(path_id)
       self._cancel_runtime(path_id)
 
    def _release_synchronized_capacity(
