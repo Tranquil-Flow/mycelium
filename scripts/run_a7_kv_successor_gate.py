@@ -1,0 +1,381 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""Fail-closed A7 fenced KV-successor physical gate coordinator.
+
+Three modes, mirroring the A6 coordinator:
+
+``--plan OUT``
+    Network-free preparation.  Writes the gate plan for one exact candidate:
+    the required cases, the owner topology (R7), and the pass thresholds,
+    frozen and digest-bound *before* any candidate measurement (spec section
+    11).  The plan digest is bound into every case record.
+
+``--evaluate --plan PLAN --records DIR``
+    Offline verdict over measured case records.  Every record must be closed,
+    bound to the plan digest and candidate, and meet its case's frozen
+    predicate; a missing case, an unknown field, a widened claim or an invented
+    success value fails the gate.
+
+``--execute --plan PLAN --records DIR --case-runner ARGV...``
+    Runs each case through an owner-supplied case runner (one subprocess per
+    case, which drives the ordinary browser request and the physical fault and
+    writes exactly one record), then evaluates.  Refuses without the exact
+    fleet grant phrase in ``MYCELIUM_A7_FLEET_GRANT``.
+
+Nothing here simulates a case: a record exists only when a runner measured it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Mapping
+
+EXACT_FLEET_GRANT = "FLEET GRANTED TO A7"
+PLAN_PROTOCOL = "mycelium.a7_kv_successor_gate_plan.v1"
+CASE_PROTOCOL = "mycelium.a7_physical_case.v1"
+VERDICT_PROTOCOL = "mycelium.a7_kv_successor_gate_verdict.v1"
+DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+COMMIT = re.compile(r"^[0-9a-f]{40}$")
+
+# Owner ruling R7: two Macs; the stage-1 source on the laptop (node-2) and the
+# stage-1 standby as a second MLX placement on node-0.
+TOPOLOGY = {
+   "entry_node": "node-0",
+   "source_node": "node-2",
+   "standby_node": "node-0",
+   "covered_stage_index": 1,
+   "standby_backend": "mlx",
+   "fallback_incompatibility": ("dtype_mismatch", "numpy_runtime"),
+}
+
+POSITIVE = "ordinary_browser_source_kill_kv_successor"
+INCOMPATIBLE = "incompatible_standby_falls_back_to_a6"
+LAGGING = "lagging_standby_falls_back_to_a6"
+ABORT = "no_a6_successor_aborts"
+CASES = (POSITIVE, INCOMPATIBLE, LAGGING, ABORT)
+
+# Frozen before candidate measurement.  Changing any value changes the plan
+# digest, so a record measured under one plan can never pass another.
+THRESHOLDS: dict[str, Any] = {
+   "min_committed_tokens_before_failure": 2,
+   "max_duplicate_tokens": 0,
+   "max_missing_tokens": 0,
+   "exact_publishers": 1,
+   "exact_terminal_results": 1,
+   "max_successor_recovery_prefill_operations": 0,
+   "max_prefix_tokens_sent_to_successor": 0,
+   "max_interruption_ms": 15_000,
+   "max_cutover_ms": 5_000,
+   "max_ack_wait_ms": 2_000,
+   "max_checkpoint_bytes_per_committed_token": 8 * 1024 * 1024,
+   "max_added_tpot_fraction": 0.5,
+   "max_terminal_resource_delta": 0,
+   "required_workspaces": (
+      "inference",
+      "device_lab",
+      "network",
+      "nodes",
+      "plans",
+      "readiness",
+      "incidents",
+      "settings",
+   ),
+}
+
+_CLEANUP_FIELDS = frozenset({"active_state_count_delta", "active_kv_bytes_delta", "shadow_bytes_delta", "reservation_delta", "fence_records_delta"})
+_CASE_FIELDS = frozenset(
+   {
+      "protocol",
+      "case",
+      "candidate_commit",
+      "plan_digest",
+      "ordinary_browser_request",
+      "fault",
+      "outcome",
+      "reason",
+      "kv_continuity_claimed",
+      "committed_before_failure",
+      "acknowledged_before_failure",
+      "successor_recovery_prefill_operations",
+      "prefix_tokens_sent_to_successor",
+      "reference_parity",
+      "duplicate_tokens",
+      "missing_tokens",
+      "publishers",
+      "terminal_results",
+      "successor_decode_operations",
+      "stale_source_publications_accepted",
+      "interruption_ms",
+      "cutover_ms",
+      "checkpoint_bytes_total",
+      "checkpoint_count",
+      "max_ack_wait_ms",
+      "baseline_tpot_ms",
+      "candidate_tpot_ms",
+      "cleanup",
+      "workspaces_checked",
+      "evidence_digest",
+   }
+)
+_EXPECTED_OUTCOME = {
+   POSITIVE: "fenced_kv_successor",
+   INCOMPATIBLE: "full_context_replay",
+   LAGGING: "full_context_replay",
+   ABORT: "aborted",
+}
+_EXPECTED_FAULT = {
+   POSITIVE: "source_process_kill",
+   INCOMPATIBLE: "source_process_kill",
+   LAGGING: "source_process_kill",
+   ABORT: "source_process_kill",
+}
+
+
+def _fail(code: str) -> None:
+   raise ValueError(code)
+
+
+def _canonical(value: Any) -> bytes:
+   return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
+def _sha(value: Any) -> str:
+   return "sha256:" + hashlib.sha256(_canonical(value)).hexdigest()
+
+
+def build_plan(candidate_commit: str) -> dict[str, Any]:
+   if not isinstance(candidate_commit, str) or COMMIT.fullmatch(candidate_commit) is None:
+      _fail("a7_gate_candidate_invalid")
+   body = {
+      "protocol": PLAN_PROTOCOL,
+      "candidate_commit": candidate_commit,
+      "topology": TOPOLOGY,
+      "cases": list(CASES),
+      "thresholds": THRESHOLDS,
+      "claim_boundary": (
+         "A7 physical gate plan only: thresholds are frozen before measurement; "
+         "no case is simulated and no qualification or promotion claim is made by the plan."
+      ),
+   }
+   body = json.loads(_canonical(body))
+   return {**body, "plan_digest": _sha(body)}
+
+
+def _verify_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
+   if not isinstance(plan, Mapping) or plan.get("protocol") != PLAN_PROTOCOL:
+      _fail("a7_gate_plan_invalid")
+   body = {key: value for key, value in plan.items() if key != "plan_digest"}
+   if plan.get("plan_digest") != _sha(body):
+      _fail("a7_gate_plan_digest_mismatch")
+   if body.get("thresholds") != json.loads(_canonical(THRESHOLDS)) or body.get("cases") != list(CASES):
+      # A plan from another threshold set is not this gate.
+      _fail("a7_gate_plan_thresholds_changed")
+   return dict(plan)
+
+
+def _int(value: Any, minimum: int = 0) -> bool:
+   return type(value) is int and value >= minimum
+
+
+def _number(value: Any) -> bool:
+   return isinstance(value, (int, float)) and not isinstance(value, bool) and value == value and value >= 0 and value != float("inf")
+
+
+def evaluate_case(record: Mapping[str, Any], plan: Mapping[str, Any]) -> list[str]:
+   """Every failed predicate of one case record (empty = case passes)."""
+
+   failures: list[str] = []
+   if not isinstance(record, Mapping) or set(record) != _CASE_FIELDS:
+      return ["record_fields"]
+   case = record["case"]
+   if record["protocol"] != CASE_PROTOCOL or case not in CASES:
+      return ["record_protocol_or_case"]
+   body = {key: value for key, value in record.items() if key != "evidence_digest"}
+   if record["evidence_digest"] != _sha(body):
+      return ["record_digest"]
+   if record["plan_digest"] != plan["plan_digest"] or record["candidate_commit"] != plan["candidate_commit"]:
+      return ["record_not_bound_to_plan"]
+   t = plan["thresholds"]
+   integer_fields = (
+      "committed_before_failure",
+      "acknowledged_before_failure",
+      "successor_recovery_prefill_operations",
+      "prefix_tokens_sent_to_successor",
+      "duplicate_tokens",
+      "missing_tokens",
+      "publishers",
+      "terminal_results",
+      "successor_decode_operations",
+      "stale_source_publications_accepted",
+      "checkpoint_bytes_total",
+      "checkpoint_count",
+   )
+   if not all(_int(record[name]) for name in integer_fields):
+      return ["record_counts_invalid"]
+   if not all(_number(record[name]) for name in ("interruption_ms", "cutover_ms", "max_ack_wait_ms", "baseline_tpot_ms", "candidate_tpot_ms")):
+      return ["record_measurements_invalid"]
+   if record["ordinary_browser_request"] is not True:
+      failures.append("not_an_ordinary_browser_request")
+   if record["fault"] != _EXPECTED_FAULT[case]:
+      failures.append("fault_not_observed")
+   if record["outcome"] != _EXPECTED_OUTCOME[case]:
+      failures.append("outcome")
+   if record["kv_continuity_claimed"] is not (case == POSITIVE):
+      failures.append("continuity_claim")
+   if record["committed_before_failure"] < t["min_committed_tokens_before_failure"]:
+      failures.append("committed_before_failure")
+   if record["duplicate_tokens"] > t["max_duplicate_tokens"]:
+      failures.append("duplicate_tokens")
+   if record["terminal_results"] != t["exact_terminal_results"]:
+      failures.append("terminal_results")
+   if record["publishers"] > t["exact_publishers"]:
+      failures.append("publishers")
+   if record["stale_source_publications_accepted"] != 0:
+      failures.append("stale_source_publication")
+   cleanup = record["cleanup"]
+   if not isinstance(cleanup, Mapping) or not cleanup or any(
+      not isinstance(node, Mapping)
+      or set(node) != _CLEANUP_FIELDS
+      or any(not _int(abs(value)) if type(value) is int else True for value in node.values())
+      or any(abs(value) > t["max_terminal_resource_delta"] for value in node.values())
+      for node in cleanup.values()
+   ):
+      failures.append("terminal_resource_delta")
+   if not isinstance(record["workspaces_checked"], list) or sorted(record["workspaces_checked"]) != sorted(t["required_workspaces"]):
+      failures.append("workspaces")
+   if case == ABORT:
+      if record["successor_decode_operations"] != 0 or record["publishers"] > 1:
+         failures.append("abort_successor_work")
+      return failures
+   if record["reference_parity"] is not True:
+      failures.append("reference_parity")
+   if record["missing_tokens"] > t["max_missing_tokens"]:
+      failures.append("missing_tokens")
+   if record["publishers"] != t["exact_publishers"]:
+      failures.append("publishers")
+   if case == POSITIVE:
+      if record["acknowledged_before_failure"] != record["committed_before_failure"]:
+         failures.append("watermark_not_equal_to_committed")
+      if record["successor_recovery_prefill_operations"] > t["max_successor_recovery_prefill_operations"]:
+         failures.append("recovery_prefill")
+      if record["prefix_tokens_sent_to_successor"] > t["max_prefix_tokens_sent_to_successor"]:
+         failures.append("prefix_replayed")
+      if record["successor_decode_operations"] < 1:
+         failures.append("successor_work")
+      if record["interruption_ms"] > t["max_interruption_ms"]:
+         failures.append("interruption")
+      if record["cutover_ms"] > t["max_cutover_ms"]:
+         failures.append("cutover_latency")
+      if record["max_ack_wait_ms"] > t["max_ack_wait_ms"]:
+         failures.append("ack_wait")
+      if record["checkpoint_count"] < record["committed_before_failure"] or (
+         record["checkpoint_bytes_total"]
+         > t["max_checkpoint_bytes_per_committed_token"] * max(record["committed_before_failure"], 1)
+      ):
+         failures.append("checkpoint_cost")
+      baseline = record["baseline_tpot_ms"]
+      if baseline <= 0 or record["candidate_tpot_ms"] > baseline * (1 + t["max_added_tpot_fraction"]):
+         failures.append("added_tpot")
+   else:
+      # Fallback: no KV-successor work and no continuity, ever.
+      if record["successor_decode_operations"] != 0:
+         failures.append("fallback_used_kv_successor")
+   return failures
+
+
+def evaluate(plan: Mapping[str, Any], records: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+   verified = _verify_plan(plan)
+   cases: dict[str, Any] = {}
+   for case in CASES:
+      record = records.get(case)
+      cases[case] = ["record_missing"] if record is None else evaluate_case(record, verified)
+   unexpected = sorted(set(records) - set(CASES))
+   passed = not unexpected and all(not failures for failures in cases.values())
+   verdict = {
+      "protocol": VERDICT_PROTOCOL,
+      "plan_digest": verified["plan_digest"],
+      "candidate_commit": verified["candidate_commit"],
+      "cases": cases,
+      "unexpected_records": unexpected,
+      "passed": passed,
+      "claim_boundary": "verdict over measured records only; promotion requires the owner's ledger step",
+   }
+   return {**verdict, "verdict_digest": _sha(verdict)}
+
+
+def _read_json(path: Path) -> Any:
+   with path.open("rb") as handle:
+      return json.loads(handle.read().decode("utf-8"))
+
+
+def _load_records(directory: Path) -> dict[str, Any]:
+   records: dict[str, Any] = {}
+   for case in CASES:
+      path = directory / f"{case}.json"
+      if path.is_file() and not path.is_symlink():
+         records[case] = _read_json(path)
+   return records
+
+
+def _write_private(path: Path, document: Any) -> None:
+   path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+   descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+   with os.fdopen(descriptor, "wb") as handle:
+      handle.write(_canonical(document) + b"\n")
+
+
+def main(argv: list[str] | None = None) -> int:
+   parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+   mode = parser.add_mutually_exclusive_group(required=True)
+   mode.add_argument("--plan-out", type=Path)
+   mode.add_argument("--evaluate", action="store_true")
+   mode.add_argument("--execute", action="store_true")
+   parser.add_argument("--candidate")
+   parser.add_argument("--plan", type=Path)
+   parser.add_argument("--records", type=Path)
+   parser.add_argument("--verdict-out", type=Path)
+   parser.add_argument("--case-runner", nargs=argparse.REMAINDER)
+   args = parser.parse_args(argv)
+   try:
+      if args.plan_out is not None:
+         _write_private(args.plan_out, build_plan(args.candidate or ""))
+         return 0
+      if args.plan is None or args.records is None:
+         _fail("a7_gate_plan_and_records_required")
+      plan = _verify_plan(_read_json(args.plan))
+      if args.execute:
+         if os.environ.get("MYCELIUM_A7_FLEET_GRANT") != EXACT_FLEET_GRANT:
+            _fail("a7_gate_fleet_grant_missing")
+         runner = args.case_runner or []
+         if not runner or not Path(runner[0]).is_absolute():
+            _fail("a7_gate_case_runner_required")
+         for case in CASES:
+            output = args.records / f"{case}.json"
+            if output.exists():
+               _fail("a7_gate_record_exists")
+            completed = subprocess.run(
+               [*runner, "--case", case, "--plan", str(args.plan), "--record-out", str(output)],
+               check=False,
+               timeout=1800,
+            )
+            if completed.returncode != 0 or not output.is_file():
+               print(json.dumps({"case": case, "runner_exit": completed.returncode}), file=sys.stderr)
+      verdict = evaluate(plan, _load_records(args.records))
+      if args.verdict_out is not None:
+         _write_private(args.verdict_out, verdict)
+      print(json.dumps({"passed": verdict["passed"], "cases": verdict["cases"]}, sort_keys=True))
+      return 0 if verdict["passed"] else 1
+   except (ValueError, OSError, subprocess.SubprocessError) as exc:
+      print(json.dumps({"error": str(exc)}), file=sys.stderr)
+      return 2
+
+
+if __name__ == "__main__":
+   raise SystemExit(main())
