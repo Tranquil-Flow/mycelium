@@ -54,6 +54,7 @@ _HEADER_FIELDS = frozenset(
       "identity",
       "source",
       "position",
+      "kv_span",
       "layers",
       "byte_order",
       "data_bytes",
@@ -123,8 +124,14 @@ def encode_kv_checkpoint(
    source: Mapping[str, Any],
    position: Mapping[str, int],
    layers: Mapping[int, tuple[np.ndarray, np.ndarray]],
+   kv_span: tuple[int, int] | None = None,
 ) -> bytes:
-   """Encode exact KV arrays plus their identity into one canonical payload."""
+   """Encode exact KV arrays plus their identity into one canonical payload.
+
+   ``kv_span`` is the half-open position range the arrays cover.  A full
+   checkpoint covers ``[0, next_position)``; an incremental one covers only the
+   positions added since the previous checkpoint in its chain.
+   """
 
    entries: list[dict[str, Any]] = []
    chunks: list[bytes] = []
@@ -156,6 +163,7 @@ def encode_kv_checkpoint(
       "identity": dict(identity),
       "source": dict(source),
       "position": dict(position),
+      "kv_span": list(kv_span) if kv_span is not None else [0, int(position["next_position"])],
       "layers": entries,
       "byte_order": "little",
       "data_bytes": offset,
@@ -217,6 +225,14 @@ def _validate_header(header: Any) -> None:
       or position["cached_context_tokens"] != position["next_position"]
    ):
       _refuse("kv_checkpoint_position_invalid")
+   span = header["kv_span"]
+   if (
+      not isinstance(span, list)
+      or len(span) != 2
+      or not all(_non_negative_int(bound) for bound in span)
+      or not span[0] < span[1] == position["next_position"]
+   ):
+      _refuse("kv_checkpoint_span_invalid")
    layers = header["layers"]
    if not isinstance(layers, list) or not layers:
       _refuse("kv_checkpoint_layers_invalid")
@@ -240,6 +256,8 @@ def _validate_header(header: Any) -> None:
             or not all(_non_negative_int(dimension) and dimension > 0 for dimension in shape)
          ):
             _refuse("kv_checkpoint_array_invalid")
+         if shape[2] != span[1] - span[0]:
+            _refuse("kv_checkpoint_span_invalid")
          expected_bytes = math.prod(shape) * _DTYPES[array["dtype"]].itemsize
          if array["offset"] != cursor or array["nbytes"] != expected_bytes:
             _refuse("kv_checkpoint_array_invalid")
@@ -344,8 +362,13 @@ def export_port_kv_checkpoint(
    path_id: str,
    *,
    to_numpy: Callable[[Any], np.ndarray],
+   from_position: int = 0,
 ) -> bytes:
-   """Export the exact KV this port holds for ``path_id`` (no mutation)."""
+   """Export the exact KV this port holds for ``path_id`` (no mutation).
+
+   ``from_position > 0`` exports only the positions added since then, as an
+   incremental checkpoint for a standby that already holds the earlier ones.
+   """
 
    if port.decode_mode != "stage_local_kv":
       _refuse("kv_checkpoint_requires_stage_local_kv")
@@ -356,10 +379,16 @@ def export_port_kv_checkpoint(
       if state is None:
          _refuse("kv_checkpoint_state_missing")
       identity = _stage_identity(port, state.placement_id)
+      if not _non_negative_int(from_position) or from_position >= state.next_position:
+         _refuse("kv_checkpoint_span_invalid")
       layers = {
-         int(layer): (to_numpy(pair[0]), to_numpy(pair[1]))
+         int(layer): (
+            np.ascontiguousarray(to_numpy(pair[0])[:, :, from_position:, :]),
+            np.ascontiguousarray(to_numpy(pair[1])[:, :, from_position:, :]),
+         )
          for layer, pair in state.layers.items()
       }
+      span = (from_position, state.next_position)
       source = {
          "request_id": state.request_id,
          "path_id": state.path_id,
@@ -373,7 +402,7 @@ def export_port_kv_checkpoint(
          "cached_context_tokens": state.cached_context_tokens,
       }
    return encode_kv_checkpoint(
-      identity=identity, source=source, position=position, layers=layers
+      identity=identity, source=source, position=position, layers=layers, kv_span=span
    )
 
 
@@ -410,6 +439,8 @@ def import_port_kv_checkpoint(
    ):
       _refuse("kv_checkpoint_successor_invalid")
    header, layers = decode_kv_checkpoint(payload, max_bytes=max_bytes)
+   if header["kv_span"][0] != 0:
+      _refuse("kv_checkpoint_not_full")
    expected_identity = _stage_identity(port, placement_id)
    for field in sorted(_IDENTITY_FIELDS):
       if header["identity"][field] != expected_identity[field]:
@@ -474,3 +505,62 @@ def import_port_kv_checkpoint(
       "next_sequence": position["next_sequence"],
       "successor_path_attempt": path_attempt,
    }
+
+
+def rekey_port_kv_path(
+   port: Any,
+   old_path_id: str,
+   *,
+   new_path_id: str,
+   new_path_attempt: int,
+   lease_expires_at: float,
+) -> dict[str, Any]:
+   """Move a surviving stage's KV from a fenced path to its successor path.
+
+   The KV bytes do not change.  The old path is marked released, so any frame
+   that still arrives for the fenced attempt refuses with ``kv_state_released``:
+   this is how a surviving stage runtime installs the A7 fence.
+   """
+
+   if port.decode_mode != "stage_local_kv":
+      _refuse("kv_checkpoint_requires_stage_local_kv")
+   if not _text(new_path_id) or not _non_negative_int(new_path_attempt):
+      _refuse("kv_checkpoint_successor_invalid")
+   if (
+      not isinstance(lease_expires_at, (int, float))
+      or isinstance(lease_expires_at, bool)
+      or not math.isfinite(float(lease_expires_at))
+   ):
+      _refuse("kv_checkpoint_successor_invalid")
+   with port._state_lock:
+      if port._closed:
+         _refuse("kv_checkpoint_runtime_closed")
+      state = port._kv_states.get(old_path_id)
+      if state is None:
+         _refuse("kv_checkpoint_state_missing")
+      if new_path_id == old_path_id or new_path_attempt <= state.path_attempt:
+         _refuse("kv_checkpoint_successor_not_newer")
+      if new_path_id in port._kv_states or port._released_paths.get(new_path_id) is not None:
+         _refuse("kv_checkpoint_state_already_exists")
+      if float(port._clock()) >= float(lease_expires_at):
+         _refuse("kv_checkpoint_lease_expired")
+      del port._kv_states[old_path_id]
+      state.path_id = new_path_id
+      state.path_attempt = new_path_attempt
+      state.lease_expires_at = float(lease_expires_at)
+      port._kv_states[new_path_id] = state
+      with port._resource_index_lock:
+         port._kv_subjects.pop(old_path_id, None)
+         port._kv_subjects[new_path_id] = (state.request_id, new_path_attempt)
+      port._remember_path_marker(port._released_paths, old_path_id, "fenced_successor_rekey")
+      port._purge_path_replays(old_path_id)
+      return {
+         "protocol": KV_CHECKPOINT_RECEIPT_PROTOCOL,
+         "checkpoint_digest": None,
+         "identity_digest": _sha256_ref(_canonical(_stage_identity(port, state.placement_id))),
+         "layer_count": len(state.layers),
+         "kv_bytes": int(port._kv_bytes(state)),
+         "next_position": state.next_position,
+         "next_sequence": state.next_sequence,
+         "successor_path_attempt": new_path_attempt,
+      }

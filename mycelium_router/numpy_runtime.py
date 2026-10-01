@@ -770,7 +770,7 @@ class NumpyRuntimePort:
       active_bytes = sum(self._kv_bytes(state) for state in self._kv_states.values())
       self._peak_kv_bytes = max(self._peak_kv_bytes, active_bytes)
 
-   def export_kv_checkpoint(self, path_id: str) -> bytes:
+   def export_kv_checkpoint(self, path_id: str, *, from_position: int = 0) -> bytes:
       """Export the exact stage-local KV held for ``path_id`` (A7 successor recovery).
 
       The payload is byte exact and self-describing; it carries no confidentiality.
@@ -779,7 +779,10 @@ class NumpyRuntimePort:
       from mycelium_router.kv_checkpoint import export_port_kv_checkpoint
 
       return export_port_kv_checkpoint(
-         self, path_id, to_numpy=lambda array: np.array(array, copy=True)
+         self,
+         path_id,
+         to_numpy=lambda array: np.array(array, copy=True),
+         from_position=from_position,
       )
 
    def import_kv_checkpoint(
@@ -815,6 +818,26 @@ class NumpyRuntimePort:
          max_bytes=max_bytes,
          from_numpy=lambda array: np.array(array, copy=True),
          state_factory=_KVState,
+      )
+
+   def rekey_kv_path(
+      self,
+      old_path_id: str,
+      *,
+      new_path_id: str,
+      new_path_attempt: int,
+      lease_expires_at: float,
+   ) -> dict[str, Any]:
+      """Move this stage's KV to a fenced successor path (A7 cutover)."""
+
+      from mycelium_router.kv_checkpoint import rekey_port_kv_path
+
+      return rekey_port_kv_path(
+         self,
+         old_path_id,
+         new_path_id=new_path_id,
+         new_path_attempt=new_path_attempt,
+         lease_expires_at=lease_expires_at,
       )
 
    def kv_snapshot(self) -> dict[str, Any]:
