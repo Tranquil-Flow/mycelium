@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { describe, expect, it, vi } from 'vitest';
-import { scanWithPermission } from './api';
+import { errorText, scanWithPermission } from './api';
 
 function fakeScanner(check: string, request: string) {
   return {
@@ -29,5 +29,16 @@ describe('scanWithPermission', () => {
     const scanner = fakeScanner('prompt', 'denied');
     await expect(scanWithPermission(scanner)).rejects.toMatch(/^camera_permission_denied/);
     expect(scanner.scan).not.toHaveBeenCalled();
+  });
+});
+
+describe('errorText', () => {
+  it('never renders an object as [object Object]', () => {
+    expect(errorText('seed_join_refused:x')).toBe('seed_join_refused:x');
+    expect(errorText(new Error('boom'))).toBe('boom');
+    expect(errorText({ message: 'Permission denied' })).toBe('Permission denied');
+    expect(errorText({ code: 'camera_unavailable' })).toBe('camera_unavailable');
+    expect(errorText({ detail: 1 })).toBe('{"detail":1}');
+    expect(errorText(undefined)).toBe('undefined');
   });
 });

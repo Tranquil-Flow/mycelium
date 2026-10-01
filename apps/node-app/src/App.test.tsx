@@ -205,4 +205,19 @@ describe('node app', () => {
     fireEvent.click(screen.getByRole('button', { name: 'status' }));
     expect(screen.getByRole('button', { name: 'Scan invite QR' })).toBeInTheDocument();
   });
+
+  it('shows a plugin rejection object as readable text', async () => {
+    const { api } = fakeApi({
+      scanQr: vi.fn(async () => {
+        throw { message: 'Camera permission denied' };
+      }),
+    });
+    render(<App api={api} />);
+    const scan = await screen.findByRole('button', { name: 'Scan invite QR' });
+    await waitFor(() => expect(scan).toBeEnabled());
+    fireEvent.click(scan);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Camera permission denied');
+    expect(alert).not.toHaveTextContent('[object Object]');
+  });
 });

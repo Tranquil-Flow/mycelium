@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { deviceRef, type EvidenceExport, type NodeApi, type NodeStatus, type ServiceStatus, tauriApi } from './api';
+import { deviceRef, errorText, type EvidenceExport, type NodeApi, type NodeStatus, type ServiceStatus, tauriApi } from './api';
 
 type Tab = 'status' | 'serving' | 'settings';
 
@@ -34,7 +34,7 @@ export function App({ api = tauriApi }: { api?: NodeApi }) {
       try {
         await action();
       } catch (e) {
-        setError(String(e));
+        setError(errorText(e));
       } finally {
         setBusy(null);
       }

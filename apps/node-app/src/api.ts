@@ -84,6 +84,28 @@ export async function scanWithPermission(scanner: ScannerModule): Promise<string
   return result?.content ?? null;
 }
 
+/**
+ * Readable text for anything a command or plugin rejects with: core commands
+ * reject with code strings, mobile plugins with objects ({ message }), and
+ * String() of an object is the useless "[object Object]".
+ */
+export function errorText(e: unknown): string {
+  if (typeof e === 'string') return e;
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === 'object') {
+    for (const key of ['message', 'error', 'code']) {
+      const value = (e as Record<string, unknown>)[key];
+      if (typeof value === 'string' && value) return value;
+    }
+    try {
+      return JSON.stringify(e);
+    } catch {
+      // fall through
+    }
+  }
+  return String(e);
+}
+
 /** Stable pseudonymous device label (never brand/model text). */
 export function deviceRef(endpointId: string): string {
   return `device-${endpointId.slice(0, 12) || 'new'}`;
