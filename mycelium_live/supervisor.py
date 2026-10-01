@@ -683,6 +683,33 @@ class ColdRouteRestartOwner:
             deadline_monotonic_s=deadline_monotonic_s,
         )
 
+    def a10_batch_policy(
+        self,
+        node_id: str,
+        *,
+        policy: str,
+        deadline_monotonic_s: float,
+    ) -> Any:
+        """Forward one A10 batch-policy switch to the ready route only.
+
+        A replacement route starts with its nodes' configured policy; the paired
+        benchmark applies the policy again before every window.
+        """
+
+        with self._lock:
+            route = self._current
+            ready = self._state == "ready" and route is not None
+        if not ready:
+            raise RuntimeError("route_not_open")
+        switch = getattr(route, "a10_batch_policy", None)
+        if not callable(switch):
+            raise RuntimeError("a10_batch_policy_route_unsupported")
+        return switch(
+            node_id,
+            policy=policy,
+            deadline_monotonic_s=deadline_monotonic_s,
+        )
+
     def release_request(self, request_id: str) -> None:
         with self._lock:
             route = self._request_routes.pop(request_id, None)
@@ -3597,6 +3624,7 @@ def run_physical_server(
     a6_fault_control_port: int | None = None,
     coarse_region_declaration_file: Path | None = None,
     a10_verify_control_port: int | None = None,
+    a10_batch_policy_control_port: int | None = None,
     persist_transport_history: bool = False,
 ) -> int:
     deployment = native_deployment_projection(operator_plan)
@@ -3685,6 +3713,7 @@ def run_physical_server(
     artifact_acquisition_store: ArtifactAcquisitionStore | None = None
     a6_fault_control: Any | None = None
     a10_verify_control: Any | None = None
+    a10_batch_policy_control: Any | None = None
     try:
         representation_authorization = _representation_authorization(
             representation_authorization_file
@@ -3788,6 +3817,14 @@ def run_physical_server(
                 public_origin=public_origin,
                 trusted_https_proxy=trusted_https_proxy,
             )
+        if a10_batch_policy_control_port is not None:
+            a10_batch_policy_control = _mount_a10_batch_policy_control(
+                stack=stack,
+                product_port=port,
+                control_port=a10_batch_policy_control_port,
+                public_origin=public_origin,
+                trusted_https_proxy=trusted_https_proxy,
+            )
         startup_complete = True
 
         def request_stop(_signum: int, _frame: Any) -> None:
@@ -3817,6 +3854,15 @@ def run_physical_server(
                         if a10_verify_control is None
                         else {"a10_verify_control": a10_verify_control.status()}
                     ),
+                    **(
+                        {}
+                        if a10_batch_policy_control is None
+                        else {
+                            "a10_batch_policy_control": (
+                                a10_batch_policy_control.status()
+                            )
+                        }
+                    ),
                 }
             ).decode("utf-8"),
             flush=True,
@@ -3832,6 +3878,8 @@ def run_physical_server(
         a6_processes = (
             () if a6_fault_control is None else _a6_session_processes(route)
         )
+        if a10_batch_policy_control is not None:
+            a10_batch_policy_control.close()
         if a10_verify_control is not None:
             a10_verify_control.close()
         if a6_fault_control is not None:
@@ -3904,6 +3952,48 @@ def _mount_a10_verify_control(
         raise RuntimeError(f"startup_a10_verify_control_refused:{exc}") from exc
     except OSError as exc:
         raise RuntimeError("startup_a10_verify_control_bind_failed") from exc
+    return control
+
+
+def _mount_a10_batch_policy_control(
+    *,
+    stack: Any,
+    product_port: int,
+    control_port: int,
+    public_origin: str | None,
+    trusted_https_proxy: bool,
+) -> Any:
+    """Mount the grant-gated A10 batch-policy control on its own loopback listener.
+
+    Every request is handed to the product dispatcher (the live router port),
+    which applies the policy to every node of the deployment and accepts only
+    each node's own receipt.
+    """
+
+    from mycelium_a10_batch_policy_control import (
+        A10BatchPolicyControl,
+        A10BatchPolicyControlRefused,
+        grant_from_environment,
+    )
+
+    dispatch = getattr(getattr(stack, "router", None), "a10_batch_policy", None)
+    grant = grant_from_environment()
+    try:
+        if grant is not None and not callable(dispatch):
+            raise RuntimeError("startup_a10_batch_policy_control_dispatcher_unavailable")
+        control = A10BatchPolicyControl(
+            grant=grant,
+            dispatch=dispatch,  # type: ignore[arg-type]
+            product_port=product_port,
+            port=control_port,
+            public_origin=public_origin,
+            trusted_https_proxy=trusted_https_proxy,
+        )
+        control.start()
+    except A10BatchPolicyControlRefused as exc:
+        raise RuntimeError(f"startup_a10_batch_policy_control_refused:{exc}") from exc
+    except OSError as exc:
+        raise RuntimeError("startup_a10_batch_policy_control_bind_failed") from exc
     return control
 
 
@@ -4311,6 +4401,15 @@ def build_parser() -> argparse.ArgumentParser:
             "127.0.0.1 port (0 = ephemeral); requires MYCELIUM_A10_FLEET_GRANT"
         ),
     )
+    parser.add_argument(
+        "--a10-batch-policy-control-port",
+        type=int,
+        help=(
+            "mount the grant-gated A10 batch-policy control (baseline/candidate) on "
+            "this direct 127.0.0.1 port (0 = ephemeral); requires "
+            "MYCELIUM_A10_FLEET_GRANT"
+        ),
+    )
     return parser
 
 
@@ -4337,6 +4436,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         or 1_024 <= args.a10_verify_control_port <= 65_535
     ):
         raise SystemExit("--a10-verify-control-port must be 0 or from 1024 through 65535")
+    if args.a10_batch_policy_control_port is not None and not (
+        args.a10_batch_policy_control_port == 0
+        or 1_024 <= args.a10_batch_policy_control_port <= 65_535
+    ):
+        raise SystemExit(
+            "--a10-batch-policy-control-port must be 0 or from 1024 through 65535"
+        )
     trusted_proxy_capability = None
     if args.trusted_proxy_capability_file is not None:
         try:
@@ -4390,6 +4496,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             **(
                 {}
+                if args.a10_batch_policy_control_port is None
+                else {
+                    "a10_batch_policy_control_port": args.a10_batch_policy_control_port
+                }
+            ),
+            **(
+                {}
                 if args.coarse_region_declaration_file is None
                 else {
                     "coarse_region_declaration_file": args.coarse_region_declaration_file
@@ -4411,6 +4524,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("--a6-fault-control-port is valid only with one --operator-plan")
     if args.a10_verify_control_port is not None:
         raise SystemExit("--a10-verify-control-port is valid only with one --operator-plan")
+    if args.a10_batch_policy_control_port is not None:
+        raise SystemExit(
+            "--a10-batch-policy-control-port is valid only with one --operator-plan"
+        )
     if args.deployment_dir is not None:
         raise SystemExit("--deployment-dir is valid only with one --operator-plan")
     return run_registry_server(

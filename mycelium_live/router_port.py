@@ -372,6 +372,61 @@ class LiveRouterPort:
             )
         return unwrap_product_result(operation, result)
 
+    def a10_batch_policy(
+        self,
+        policy: str,
+        *,
+        timeout_s: float,
+    ) -> dict[str, Any]:
+        """Apply one A10 batch policy to every node of the current deployment.
+
+        The paired benchmark switches between ``baseline`` (runtime batch cap
+        one) and ``candidate`` on this same route.  The switch is serialized with
+        admission, so no request is admitted while the nodes change policy, and
+        only each node's own receipt for exactly this policy is accepted.  A node
+        that refuses fails the switch with that node's stable code; the caller
+        must not run a benchmark window on a partly switched route.
+        """
+
+        if policy not in ("baseline", "candidate"):
+            raise ValueError("invalid_a10_batch_policy")
+        if not isinstance(timeout_s, (int, float)) or not 0 < timeout_s <= 120:
+            raise ValueError("a10_batch_policy_deadline_invalid")
+        switch = getattr(self._route, "a10_batch_policy", None)
+        if not callable(switch):
+            raise RuntimeError("a10_batch_policy_route_unsupported")
+        node_ids = sorted(
+            {
+                placement.node_id
+                for stage in self._graph.stages
+                for placement in stage.placements
+            }
+        )
+        deadline = time.monotonic() + float(timeout_s)
+        receipts: dict[str, dict[str, Any]] = {}
+        with self._admission_dispatch_lock:
+            with self._lock:
+                if self._closed:
+                    raise RuntimeError("route_not_open")
+            if not self._route.is_alive():
+                raise RuntimeError("route_not_open")
+            for node_id in node_ids:
+                receipt = switch(
+                    node_id,
+                    policy=policy,
+                    deadline_monotonic_s=deadline,
+                )
+                if (
+                    not isinstance(receipt, Mapping)
+                    or receipt.get("policy") != policy
+                    or type(receipt.get("maximum_runtime_batch_size")) is not int
+                ):
+                    raise RuntimeError("a10_batch_policy_response_invalid")
+                receipts[node_id] = {
+                    "maximum_runtime_batch_size": receipt["maximum_runtime_batch_size"],
+                }
+        return {"policy": policy, "nodes": receipts}
+
     def admit(
         self,
         request: RequestContext,
