@@ -594,7 +594,12 @@ class LiveRouterPort:
     def _route_has_scoped_incident_for(self, request: RequestContext | None) -> bool:
         if request is None:
             return False
-        incidents = getattr(self._route, "_scoped_runtime_incidents", None)
+        # A restarting owner answers attribute reads by raising its restart
+        # error; an unreadable route has no incident for this request.
+        try:
+            incidents = getattr(self._route, "_scoped_runtime_incidents", None)
+        except Exception:
+            return False
         if isinstance(incidents, Iterable):
             for incident in incidents:
                 if (
@@ -607,7 +612,10 @@ class LiveRouterPort:
         # deadline) are equally authoritative: the runtime reservation must
         # retire so the bounded admission slot is not leaked while the SSE
         # terminal stays unpublished (fail-closed terminal, bounded runtime).
-        route_incidents = getattr(self._route, "_incidents", None)
+        try:
+            route_incidents = getattr(self._route, "_incidents", None)
+        except Exception:
+            return False
         if isinstance(route_incidents, Iterable):
             for incident in route_incidents:
                 if (

@@ -144,7 +144,7 @@ def test_owner_restarts_once_and_publishes_fresh_qualification() -> None:
     owner.release_request("request-1")
 
     assert first.close_count == 1
-    assert first.cleanup_count == 1
+    assert first.cleanup_count == 0  # the replacement reopens the same staging
     assert first.release_calls == ["request-1"]
     assert second.open_count == 1
     assert owner.current() == "qualification-2-second"

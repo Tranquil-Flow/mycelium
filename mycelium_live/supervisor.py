@@ -617,9 +617,13 @@ class ColdRouteRestartOwner:
         publish_cleanup_receipt: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> Any:
         route, generation = self._ready_route_or_raise()
-        if not self._route_alive(route):
+        if not self._route_alive(route) and not self._route_survives_peer_loss(route):
             self._restart_from(route, generation, reason="route_not_alive")
             raise ColdRouteRestartError(COLD_ROUTE_RESTART_ERROR_CODE)
+        # A route that lost a peer but is neither fatal nor wholly dead still
+        # serves a request whose placements exclude the lost peer (an M16
+        # successor). The route itself refuses a path through a dead peer with
+        # ``selected_route_not_open``, which cold-restarts below.
         with self._lock:
             self._request_routes[request_id] = route
         try:
@@ -637,6 +641,17 @@ class ColdRouteRestartOwner:
                 publish_cleanup_receipt=publish_cleanup_receipt,
             )
         except BaseException as exc:
+            if self._recovery_owns_failure(route, request_id):
+                # The route recorded a request-scoped, non-fatal incident for
+                # this request: M16 recovery owns it. A cold restart here would
+                # retire the incident with the route and strand the request.
+                raise
+            if self._route_survives_peer_loss(route) and self._route_busy_elsewhere(
+                route, request_id
+            ):
+                # Another request (an M16 source awaiting its successor) still
+                # runs on this degraded route; it is replaced once released.
+                raise
             if self._restartable_failure(route, exc):
                 try:
                     self._restart_from(route, generation, reason=self._error_code(exc))
@@ -673,6 +688,67 @@ class ColdRouteRestartOwner:
             route = self._request_routes.pop(request_id, None)
         if route is not None:
             route.release_request(request_id)
+        self._restart_if_idle_after_peer_loss()
+
+    def release_request_scoped(
+        self,
+        request_id: str,
+        *,
+        request_attempt: int,
+        path_id: str,
+        path_attempt: int,
+        path_digest: str,
+        cleanup_owner_id: str,
+    ) -> None:
+        """Forward an exact scoped release to the route that ran the request."""
+
+        with self._lock:
+            route = self._request_routes.get(request_id) or self._current
+        if route is None:
+            return
+        scoped = getattr(route, "release_request_scoped", None)
+        if callable(scoped):
+            scoped(
+                request_id,
+                request_attempt=request_attempt,
+                path_id=path_id,
+                path_attempt=path_attempt,
+                path_digest=path_digest,
+                cleanup_owner_id=cleanup_owner_id,
+            )
+        else:
+            route.release_request(request_id)
+        with self._lock:
+            if self._request_routes.get(request_id) is route:
+                self._request_routes.pop(request_id, None)
+        self._restart_if_idle_after_peer_loss()
+
+    def _restart_if_idle_after_peer_loss(self) -> None:
+        """Cold-restart a degraded route once no request still runs on it.
+
+        Recovery keeps a route that lost a peer open for the successor of the
+        request that observed the loss. Once that request is released the
+        route is replaced, so it does not stay unqualified indefinitely.
+        """
+
+        with self._lock:
+            route = self._current
+            generation = self._generation
+            if (
+                self._closed
+                or self._state != "ready"
+                or route is None
+                or any(item is route for item in self._request_routes.values())
+            ):
+                return
+        if self._route_alive(route):
+            return
+        try:
+            self._restart_from(route, generation, reason="route_not_alive")
+        except ColdRouteRestartError:
+            # State and status already name the outcome; the released request
+            # has its terminal and must not be failed by the replacement.
+            pass
 
     def counters(self) -> RouteCounters:
         with self._lock:
@@ -869,7 +945,9 @@ class ColdRouteRestartOwner:
                 exhausted = False
                 next_generation = generation + 1
         try:
-            self._retire_route(retire_route)
+            # A replacement reopens the same digest-bound staging; only a route
+            # that will not be replaced may delete it.
+            self._retire_route(retire_route, cleanup=exhausted)
         except BaseException as exc:
             self._mark_restart_failed(str(getattr(exc, "code", exc)) or type(exc).__name__)
             raise ColdRouteRestartError(COLD_ROUTE_RESTART_FAILED_CODE) from exc
@@ -913,17 +991,18 @@ class ColdRouteRestartOwner:
             self._changed.notify_all()
 
     @staticmethod
-    def _retire_route(route: LiveRoute) -> None:
+    def _retire_route(route: LiveRoute, *, cleanup: bool = True) -> None:
         close_error: BaseException | None = None
         try:
             route.close()
         except BaseException as exc:  # pragma: no cover - defensive masking guard
             close_error = exc
-        try:
-            route.cleanup()
-        except BaseException as exc:
-            if close_error is None:
-                close_error = exc
+        if cleanup:
+            try:
+                route.cleanup()
+            except BaseException as exc:
+                if close_error is None:
+                    close_error = exc
         if close_error is not None:
             raise RuntimeError("cold_route_restart_retire_failed") from close_error
 
@@ -933,6 +1012,52 @@ class ColdRouteRestartOwner:
             return bool(route.is_alive())
         except BaseException:
             return False
+
+    @staticmethod
+    def _route_survives_peer_loss(route: LiveRoute) -> bool:
+        """True when a route lost peers yet is neither fatal nor wholly dead."""
+
+        try:
+            if route.counters().fatal is not None:
+                return False
+            status = route.a4_liveness_status()  # type: ignore[attr-defined]
+        except BaseException:
+            return False
+        if not isinstance(status, Mapping) or status.get("deployment_fatal_reason") is not None:
+            return False
+        subjects = status.get("subjects")
+        if not isinstance(subjects, (list, tuple)):
+            return False
+        return any(
+            isinstance(subject, Mapping)
+            and subject.get("state") not in {"failed", "quarantined"}
+            for subject in subjects
+        )
+
+    def _route_busy_elsewhere(self, route: LiveRoute, request_id: str) -> bool:
+        with self._lock:
+            return any(
+                other is route and other_id != request_id
+                for other_id, other in self._request_routes.items()
+            )
+
+    def _recovery_owns_failure(self, route: LiveRoute, request_id: str) -> bool:
+        """A request-scoped, non-fatal incident on a surviving route is M16's."""
+
+        if not self._route_survives_peer_loss(route):
+            return False
+        try:
+            incidents = route.a4_scoped_runtime_incidents()  # type: ignore[attr-defined]
+        except BaseException:
+            return False
+        if not isinstance(incidents, (list, tuple)):
+            return False
+        return any(
+            isinstance(incident, Mapping)
+            and incident.get("request_id") == request_id
+            and incident.get("fatal_accepted") is not True
+            for incident in incidents
+        )
 
     def _restartable_failure(self, route: LiveRoute, error: BaseException) -> bool:
         code = self._error_code(error)
