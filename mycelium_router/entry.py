@@ -2,6 +2,7 @@
 KV-successor classification of every replacement-path attempt."""
 
 import importlib
+import time
 from dataclasses import dataclass, field
 from threading import RLock
 from typing import Any
@@ -70,6 +71,13 @@ KV_SUCCESSOR_SEAM_CLAIM_BOUNDARY = (
    "fence persistence or cutover execution exists in this path, and no "
    "physical, qualified or promotion claim is made."
 )
+# A distributed decode driver may call ``decode_one_distributed`` again before
+# the token it already dispatched has come back.  Re-sending that idempotent hop
+# changes nothing, so the call instead waits this long, in short sleeps, for the
+# token (or any state change) and reports progress; a driver then never spins.
+_DECODE_REDRIVE_WAIT_SECONDS = 0.05
+_DECODE_REDRIVE_POLL_SECONDS = 0.001
+
 _KV_SUCCESSOR_DECODE_MODES = frozenset(
    {"stage_local_kv", "complete_context_replay"}
 )
@@ -181,6 +189,9 @@ class RequestRecord:
    excluded_devices: frozenset[str] = frozenset()
    cleaned_up: bool = False
    kv_successor_recovery: dict | None = None
+   # (path_id, path_attempt, path_generation, token_index) of the last decode
+   # hop this entry dispatched for the request.
+   decode_dispatched: tuple[str, int, int, int] | None = None
    lock: Any = field(default_factory=RLock, repr=False, compare=False)
 
    @property
@@ -801,6 +812,16 @@ class EntryCoordinator:
                record.request.prompt_token_ids + tuple(record.generated_token_ids)
             )
          generation = record.path_generation
+         dispatch_key = (
+            manifest.path_id,
+            manifest.path_attempt,
+            generation,
+            token_index,
+         )
+         redrive = record.decode_dispatched == dispatch_key
+      if redrive:
+         self._await_decode_progress(record, dispatch_key)
+         return True
       header = HopHeader(
          request_id=record.request.request_id,
          path_id=manifest.path_id,
@@ -820,7 +841,7 @@ class EntryCoordinator:
             hop_index=0,
          ),
       )
-      return self.relay.dispatch_if_current(
+      dispatched = self.relay.dispatch_if_current(
          path_id=manifest.path_id,
          path_attempt=manifest.path_attempt,
          generation=generation,
@@ -829,6 +850,31 @@ class EntryCoordinator:
             encode_token_ids(decode_tokens),
          ),
       )
+      if dispatched:
+         with record.lock:
+            if len(record.generated_token_ids) == token_index:
+               record.decode_dispatched = dispatch_key
+      return dispatched
+
+   @staticmethod
+   def _await_decode_progress(
+      record: RequestRecord,
+      dispatch_key: tuple[str, int, int, int],
+   ) -> None:
+      """Wait briefly for the outstanding decode token, never re-sending its hop."""
+
+      deadline = time.monotonic() + _DECODE_REDRIVE_WAIT_SECONDS
+      while time.monotonic() < deadline:
+         with record.lock:
+            if (
+               record.status != "DECODING"
+               or len(record.generated_token_ids) != dispatch_key[3]
+               or record.manifest.path_id != dispatch_key[0]
+               or record.manifest.path_attempt != dispatch_key[1]
+               or record.path_generation != dispatch_key[2]
+            ):
+               return
+         time.sleep(_DECODE_REDRIVE_POLL_SECONDS)
 
    def decode_one(self, request_id: str) -> bool:
       if request_id in self._pending_prefills:
