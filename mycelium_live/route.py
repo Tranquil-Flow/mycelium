@@ -5437,6 +5437,41 @@ class PhysicalLiveRoute:
             raise RuntimeError("a10_target_verify_response_invalid")
         return dict(result)
 
+    def a10_batch_policy(
+        self,
+        node_id: str,
+        *,
+        policy: str,
+        deadline_monotonic_s: float,
+    ) -> dict[str, Any]:
+        """Carry one A10 batch-policy switch to a live node.
+
+        The route only transports the switch; the node applies it under its own
+        control lock and answers with its receipt (``a10_batch_policy``).  An
+        unknown or exited session, a missed deadline or any response that is not
+        the node's receipt for the same policy fails closed.
+        """
+
+        with self._lock:
+            session = self._sessions.get(node_id)
+        if session is None or session.returncode is not None:
+            raise RuntimeError("a10_batch_policy_node_unavailable")
+        response = self._send_before(
+            node_id,
+            command_id=self._command_id(node_id, "a10_batch_policy"),
+            command="a10_batch_policy",
+            payload={"policy": policy},
+            deadline_monotonic_s=deadline_monotonic_s,
+        )
+        result = response.get("result") if isinstance(response, Mapping) else None
+        if (
+            not isinstance(result, Mapping)
+            or result.get("protocol") != "mycelium.a10_batch_policy_receipt.v1"
+            or result.get("policy") != policy
+        ):
+            raise RuntimeError("a10_batch_policy_response_invalid")
+        return dict(result)
+
     def release_request(self, request_id: str) -> None:
         """Forget prompt/output token material after the gateway releases a request."""
 
