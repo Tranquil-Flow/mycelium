@@ -45,6 +45,24 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 const EVIDENCE_INTERVAL: Duration = Duration::from_secs(60);
 const EVIDENCE_RETAINED: u64 = 64;
 
+/// A release Android build must carry its own build identity
+/// (`mycelium_mobile_runtime_build.v1`, recomputable from the source commit by
+/// `scripts/run_a12_mobile_physical_gate.py --build-commit`); a release without
+/// one would bind every observation to the generic core version and is refused
+/// at compile time.
+#[cfg(all(target_os = "android", not(debug_assertions)))]
+const fn release_build_digest_present(digest: Option<&str>) -> bool {
+    match digest {
+        Some(d) => d.len() == 71,
+        None => false,
+    }
+}
+#[cfg(all(target_os = "android", not(debug_assertions)))]
+const _: () = assert!(
+    release_build_digest_present(option_env!("MYCELIUM_NODE_BUILD_DIGEST")),
+    "release android builds must set MYCELIUM_NODE_BUILD_DIGEST (sha256:<64 hex>)"
+);
+
 /// The build identity the node app binds its observations to: an explicit
 /// build digest when the release pipeline sets one, else this core's version.
 pub fn runtime_build_digest() -> String {
@@ -232,6 +250,19 @@ impl NodeCore {
     /// the platform metrics the OS exposes to the app (unknown otherwise).
     /// Only the registered Android class observes; an Apple build refuses (A12
     /// Apple mobile is deferred).
+    /// Write the sealed observations as one owner-private export bundle under
+    /// `out_dir` (the app cache the FileProvider shares from); returns its path and
+    /// the number of observations it carries.
+    pub fn export_evidence(&self, out_dir: &Path) -> Result<(PathBuf, usize), NodeError> {
+        let bundle = evidence::export_bundle(&self.data_dir.join("evidence"), &runtime_build_digest())
+            .map_err(|e| nerr(e.0))?;
+        let count = bundle["observations"].as_array().map_or(0, Vec::len);
+        std::fs::create_dir_all(out_dir).map_err(|_| nerr("mobile_evidence_export_unwritable"))?;
+        let path = out_dir.join(format!("mycelium-evidence-{}.json", (now_s() * 1000.0) as u64));
+        write_private(&path, &serde_json::to_vec(&bundle).unwrap_or_default())?;
+        Ok((path, count))
+    }
+
     pub fn runtime_observation(&self, platform: &evidence::Metrics) -> Result<Value, NodeError> {
         observe_runtime(&self.shared, &self.identity, platform)
     }

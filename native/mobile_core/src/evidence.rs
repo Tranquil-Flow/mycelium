@@ -139,6 +139,50 @@ pub fn sign_observation(identity: &Identity, observation: &Value) -> Result<Valu
     }))
 }
 
+/// The bundle the owner shares off the device after an A12 gate: only the sealed,
+/// member-signed runtime observations the driver consumes, never keys or state.
+pub const EVIDENCE_EXPORT_PROTOCOL: &str = "mycelium.mobile_evidence_export.v1";
+const OBSERVATION_FILE_PREFIX: &str = "runtime-observation-";
+
+/// Collect every sealed `runtime-observation-*.json` in `evidence_dir` (sorted by
+/// name) into one export bundle bound to the app's build. Anything that is not a
+/// regular file holding a signed native observation fails the whole export.
+pub fn export_bundle(evidence_dir: &Path, runtime_build_digest: &str) -> Result<Value, EvidenceError> {
+    if runtime_build_digest.len() != 71 || !runtime_build_digest.starts_with("sha256:") {
+        return Err(EvidenceError("mobile_evidence_export_build_invalid"));
+    }
+    let entries = std::fs::read_dir(evidence_dir).map_err(|_| EvidenceError("mobile_evidence_export_empty"))?;
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| n.starts_with(OBSERVATION_FILE_PREFIX) && n.ends_with(".json"))
+        .collect();
+    names.sort();
+    if names.is_empty() {
+        return Err(EvidenceError("mobile_evidence_export_empty"));
+    }
+    let mut observations = Vec::with_capacity(names.len());
+    for name in names {
+        let path = evidence_dir.join(&name);
+        let meta = std::fs::symlink_metadata(&path).map_err(|_| EvidenceError("mobile_evidence_export_not_regular"))?;
+        if !meta.file_type().is_file() {
+            return Err(EvidenceError("mobile_evidence_export_not_regular"));
+        }
+        let bytes = std::fs::read(&path).map_err(|_| EvidenceError("mobile_evidence_export_not_regular"))?;
+        let envelope: Value =
+            serde_json::from_slice(&bytes).map_err(|_| EvidenceError("mobile_evidence_export_envelope_invalid"))?;
+        if envelope["protocol"] != SIGNED_MESSAGE_PROTOCOL || envelope["message"]["protocol"] != RUNTIME_OBSERVATION_PROTOCOL {
+            return Err(EvidenceError("mobile_evidence_export_envelope_invalid"));
+        }
+        observations.push(json!({"name": name, "envelope": envelope}));
+    }
+    Ok(json!({
+        "protocol": EVIDENCE_EXPORT_PROTOCOL,
+        "runtime_build_digest": runtime_build_digest,
+        "observations": observations,
+    }))
+}
+
 fn read_trimmed(path: &Path) -> Option<String> {
     std::fs::read_to_string(path).ok().map(|s| s.trim().to_owned())
 }
@@ -297,5 +341,66 @@ mod tests {
         assert!(r.starts_with("family:") && r.len() == 7 + 32);
         assert_eq!(r, family_ref("android", "arm64-v8a", 36, "gpu_vulkan_1_3"));
         assert_ne!(r, family_ref("android", "arm64-v8a", 35, "gpu_vulkan_1_3"));
+    }
+
+    fn export_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("mycelium-export-{}-{}", tag, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn export_bundle_carries_only_signed_runtime_observations_in_order() {
+        let dir = export_dir("only");
+        let identity = Identity::generate("member-endpoint").unwrap();
+        let envelope = sign_observation(&identity, &observation_doc(&Metrics::new())).unwrap();
+        let bytes = serde_json::to_vec(&envelope).unwrap();
+        std::fs::write(dir.join("runtime-observation-000002.json"), &bytes).unwrap();
+        std::fs::write(dir.join("runtime-observation-000001.json"), &bytes).unwrap();
+        // Private and unrelated state next to the evidence never leaves the device.
+        std::fs::write(dir.join("member.key"), b"secret").unwrap();
+        std::fs::write(dir.join("notes.json"), b"{}").unwrap();
+        let build = format!("sha256:{}", "b".repeat(64));
+        let bundle = export_bundle(&dir, &build).unwrap();
+        assert_eq!(bundle["protocol"], EVIDENCE_EXPORT_PROTOCOL);
+        assert_eq!(bundle["runtime_build_digest"], build);
+        let items = bundle["observations"].as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["name"], "runtime-observation-000001.json");
+        assert_eq!(items[1]["name"], "runtime-observation-000002.json");
+        assert_eq!(items[0]["envelope"], envelope);
+        assert_eq!(bundle.as_object().unwrap().len(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn export_bundle_fails_closed_on_foreign_or_unsigned_documents() {
+        let build = format!("sha256:{}", "b".repeat(64));
+        let dir = export_dir("foreign");
+        std::fs::write(dir.join("runtime-observation-000001.json"), b"{\"protocol\":\"x\"}").unwrap();
+        assert_eq!(export_bundle(&dir, &build).unwrap_err().0, "mobile_evidence_export_envelope_invalid");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let dir = export_dir("empty");
+        assert_eq!(export_bundle(&dir, &build).unwrap_err().0, "mobile_evidence_export_empty");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let dir = export_dir("build");
+        assert_eq!(export_bundle(&dir, "sha256:short").unwrap_err().0, "mobile_evidence_export_build_invalid");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn export_bundle_refuses_symlinked_observations() {
+        let build = format!("sha256:{}", "b".repeat(64));
+        let dir = export_dir("link");
+        let identity = Identity::generate("member-endpoint").unwrap();
+        let envelope = sign_observation(&identity, &observation_doc(&Metrics::new())).unwrap();
+        std::fs::write(dir.join("elsewhere.json"), serde_json::to_vec(&envelope).unwrap()).unwrap();
+        std::os::unix::fs::symlink(dir.join("elsewhere.json"), dir.join("runtime-observation-000001.json")).unwrap();
+        assert_eq!(export_bundle(&dir, &build).unwrap_err().0, "mobile_evidence_export_not_regular");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

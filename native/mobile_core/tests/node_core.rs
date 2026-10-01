@@ -32,3 +32,33 @@ fn identity_is_durable_across_restart_and_bad_qr_fails_closed() {
     second.shutdown();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn evidence_export_writes_one_private_bundle_of_the_sealed_observations() {
+    let dir = std::env::temp_dir().join(format!("mycelium-node-export-{}", std::process::id()));
+    let out = dir.join("exports");
+    let _ = std::fs::remove_dir_all(&dir);
+    let core = NodeCore::open(&dir.join("node"), Reachability::LocalOnly).unwrap();
+    assert_eq!(core.export_evidence(&out).unwrap_err().0, "mobile_evidence_export_empty");
+
+    let envelope = core.runtime_observation(&mycelium_mobile_core::evidence::Metrics::new()).unwrap();
+    std::fs::create_dir_all(dir.join("node/evidence")).unwrap();
+    std::fs::write(dir.join("node/evidence/runtime-observation-000001.json"), serde_json::to_vec(&envelope).unwrap())
+        .unwrap();
+    let (path, count) = core.export_evidence(&out).unwrap();
+    assert_eq!(count, 1);
+    assert!(path.starts_with(&out));
+    let name = path.file_name().unwrap().to_str().unwrap().to_owned();
+    assert!(name.starts_with("mycelium-evidence-") && name.ends_with(".json"));
+    let bundle: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(bundle["protocol"], mycelium_mobile_core::evidence::EVIDENCE_EXPORT_PROTOCOL);
+    assert_eq!(bundle["runtime_build_digest"], mycelium_mobile_core::node::runtime_build_digest());
+    assert_eq!(bundle["observations"].as_array().unwrap().len(), 1);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+    core.shutdown();
+    let _ = std::fs::remove_dir_all(&dir);
+}
