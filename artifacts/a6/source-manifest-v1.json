@@ -658,7 +658,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:744632d03569ea66080bccb0c472e8e7b8ba2302761739cda808a8cff3227229",
+      "sha256": "sha256:71d6741fdd78524d9402ef25b27ae486b14114617dbf6aa4e86d261decaccf64",
       "size_bytes": 71562
     },
     {
@@ -1103,13 +1103,13 @@
     },
     {
       "path": "mycelium_live/router_port.py",
-      "sha256": "sha256:ab7ca19117435b3db6beb2cf6af8182beb85a44fa1f4acdee6ca0d645b974fa4",
-      "size_bytes": 109384
+      "sha256": "sha256:4602265c7b32e4b73b254f14804bd1ffff41bc8003405aec4034811d03969be7",
+      "size_bytes": 109667
     },
     {
       "path": "mycelium_live/supervisor.py",
-      "sha256": "sha256:e03d1595cbbc3f3d72f5b485dd72a38e61c541625249cb5baff8ee681bcb7666",
-      "size_bytes": 170651
+      "sha256": "sha256:5bd6f8817263f31c901a01af46bb7421cca7d06415de77a18b833cba4153e1a2",
+      "size_bytes": 175824
     },
     {
       "path": "mycelium_m16_runtime.py",
@@ -2757,6 +2757,11 @@
       "size_bytes": 11145
     },
     {
+      "path": "tests/live/test_a6_cold_restart_owner_recovery.py",
+      "sha256": "sha256:ba5c31da6f470616efdb17f5eb49e3bda1e04e058f8368473d7044731e3542c1",
+      "size_bytes": 10765
+    },
+    {
       "path": "tests/live/test_a6_direct_socket.py",
       "sha256": "sha256:7ecabdfa3d9933fb7b892961ca9172d32e367c1c201f012f0b0f7d65f8bc9a17",
       "size_bytes": 5154
@@ -2813,8 +2818,8 @@
     },
     {
       "path": "tests/live/test_cold_route_restart.py",
-      "sha256": "sha256:b8d8f64a3e4cb58ce7df30448f02d1d11af003452e07a1a96da1c94672b5496c",
-      "size_bytes": 8557
+      "sha256": "sha256:7b9eb1dfd95e5d505499b8eec8d69155532837c25db9452c6bd3d606a64b6c50",
+      "size_bytes": 8601
     },
     {
       "path": "tests/live/test_experimental_candidate_isolation.py",
@@ -3448,5 +3453,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:77a0fe7f2b130aed6b3f4895b01d365570bdd5095bb5a6105ee6100e83a1e43e"
+  "source_digest": "sha256:7b8288328758b9dd15d380c0233ce0cace75f983dcfdf516dcc7359ab6b2ba44"
 }
