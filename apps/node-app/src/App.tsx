@@ -156,6 +156,15 @@ function ago(ts: number | null): string {
   return `${s}s ago`;
 }
 
+/** What the membership really is right now (the seed-signed lease decides). */
+function membershipText(status: NodeStatus): string {
+  if (status.phase === 'revoked') return 'revoked by the swarm owner';
+  if (status.phase === 'membership_lost') return 'ended — scan a new invite to rejoin';
+  if (!status.member_generation) return '—';
+  if (status.lease_fresh) return `generation ${status.member_generation} · lease held`;
+  return `generation ${status.member_generation} · lease lost, reconnecting…`;
+}
+
 function StatusCard({ status, onJoin, busy }: { status: NodeStatus; onJoin: () => void; busy: boolean }) {
   return (
     <section className="card" aria-label="status">
@@ -163,7 +172,7 @@ function StatusCard({ status, onJoin, busy }: { status: NodeStatus; onJoin: () =
         <dt>Swarm</dt>
         <dd>{status.swarm_id ?? 'not joined'}</dd>
         <dt>Membership</dt>
-        <dd>{status.member_generation ? `generation ${status.member_generation}` : '—'}</dd>
+        <dd>{membershipText(status)}</dd>
         <dt>Heartbeats</dt>
         <dd>
           {status.heartbeats_sent} (last {ago(status.last_heartbeat_at)})
@@ -204,14 +213,21 @@ function ServingCard({
   onStop: () => void;
 }) {
   const running = service?.running ?? false;
+  // The OS service running is not serving: the swarm only sees this node while
+  // its lease is held.
+  const held = status?.lease_fresh ?? false;
   return (
     <section className="card" aria-label="serving">
       <p>
-        {running
-          ? service?.mode === 'foreground_only'
-            ? 'Serving while this app is open.'
-            : 'Serving in the background. Stop any time from the notification.'
-          : 'Not serving.'}
+        {!running
+          ? 'Not serving.'
+          : !held
+            ? status?.phase === 'revoked' || status?.phase === 'membership_lost'
+              ? 'Not serving: this node is no longer a swarm member.'
+              : 'Not serving right now: reconnecting to the swarm…'
+            : service?.mode === 'foreground_only'
+              ? 'Serving while this app is open.'
+              : 'Serving in the background. Stop any time from the notification.'}
       </p>
       <button className={running ? '' : 'primary'} disabled={busy || !status?.member_generation} onClick={running ? onStop : onStart}>
         {running ? 'Stop serving' : 'Start serving'}

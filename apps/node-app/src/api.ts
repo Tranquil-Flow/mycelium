@@ -11,6 +11,8 @@ export type NodeStatus = {
   swarm_id: string | null;
   member_generation: number | null;
   lease_expires_at: number | null;
+  /** True only while the seed-signed lease is unexpired. */
+  lease_fresh: boolean;
   heartbeats_sent: number;
   last_heartbeat_at: number | null;
   last_error: string | null;

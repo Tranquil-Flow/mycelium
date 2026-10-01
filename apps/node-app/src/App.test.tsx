@@ -11,6 +11,7 @@ const base: NodeStatus = {
   swarm_id: null,
   member_generation: null,
   lease_expires_at: null,
+  lease_fresh: false,
   heartbeats_sent: 0,
   last_heartbeat_at: null,
   last_error: null,
@@ -93,7 +94,7 @@ describe('node app', () => {
     await screen.findByRole('button', { name: 'serving' });
     fireEvent.click(screen.getByRole('button', { name: 'serving' }));
     expect(screen.getByRole('button', { name: 'Start serving' })).toBeDisabled();
-    await act(async () => push({ ...base, phase: 'joined', member_generation: 2, heartbeats_sent: 3 }));
+    await act(async () => push({ ...base, phase: 'joined', member_generation: 2, heartbeats_sent: 3, lease_fresh: true }));
     fireEvent.click(screen.getByRole('button', { name: 'Start serving' }));
     await screen.findByRole('button', { name: 'Stop serving' });
     fireEvent.click(screen.getByRole('button', { name: 'Stop serving' }));
@@ -150,5 +151,39 @@ describe('node app', () => {
     fireEvent.click(screen.getByRole('button', { name: 'settings' }));
     fireEvent.click(screen.getByRole('button', { name: 'Export evidence' }));
     expect(await screen.findByText(/mobile_evidence_export_empty/)).toBeInTheDocument();
+  });
+
+  it('says it is not serving while the lease is lost, and serving again once it is held', async () => {
+    const held = { ...base, phase: 'joined', swarm_id: 'swarm-a', member_generation: 1, lease_fresh: true };
+    const { api, push } = fakeApi({
+      status: vi.fn(async () => held),
+      servingStatus: vi.fn(async () => ({ running: true, uptime_ms: 5, mode: 'android_foreground_service' })),
+    });
+    render(<App api={api} />);
+    await screen.findByText(/lease held/);
+    fireEvent.click(screen.getByRole('button', { name: 'serving' }));
+    expect(await screen.findByText(/Serving in the background/)).toBeInTheDocument();
+
+    await act(async () => push({ ...held, phase: 'reconnecting', lease_fresh: false, last_error: 'seed_unreachable:timeout' }));
+    expect(screen.getByText(/Not serving right now: reconnecting/)).toBeInTheDocument();
+    expect(screen.queryByText(/Serving in the background/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('phase')).toHaveTextContent('reconnecting');
+    fireEvent.click(screen.getByRole('button', { name: 'status' }));
+    expect(screen.getByText(/lease lost, reconnecting/)).toBeInTheDocument();
+
+    await act(async () => push({ ...held, member_generation: 2 }));
+    fireEvent.click(screen.getByRole('button', { name: 'serving' }));
+    expect(await screen.findByText(/Serving in the background/)).toBeInTheDocument();
+  });
+
+  it('a revoked node says it is no longer a member', async () => {
+    const { api } = fakeApi({
+      status: vi.fn(async () => ({ ...base, phase: 'revoked', swarm_id: 'swarm-a', member_generation: 1, last_error: 'seed_resume_refused:seed_resume_member_revoked' })),
+      servingStatus: vi.fn(async () => ({ running: true, uptime_ms: 5, mode: 'android_foreground_service' })),
+    });
+    render(<App api={api} />);
+    expect(await screen.findByText(/revoked by the swarm owner/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'serving' }));
+    expect(screen.getByText(/no longer a swarm member/)).toBeInTheDocument();
   });
 });
