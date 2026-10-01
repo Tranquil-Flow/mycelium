@@ -19,3 +19,12 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# ML Kit (barcode scanner plugin) resolves its runtime pieces through the
+# Firebase component container by class; with R8 optimization enabled those
+# lookups returned null in release builds and the scanner crashed on its first
+# camera frame (NPE in mlkit_vision_common while building InputImage). Keep the
+# ML Kit, its internal GMS packages and the component runtime unoptimized.
+-keep class com.google.mlkit.** { *; }
+-keep class com.google.android.gms.internal.mlkit_** { *; }
+-keep class com.google.firebase.components.** { *; }
+-keep class * implements com.google.firebase.components.ComponentRegistrar { *; }
