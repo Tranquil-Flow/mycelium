@@ -31,6 +31,9 @@ struct ShareArgs<'a> {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ShareResult {
     pub shared: bool,
+    /// File name of the copy saved to the public Downloads collection, if any.
+    #[serde(default)]
+    pub downloads: Option<String>,
 }
 
 pub struct NodeService<R: Runtime> {
@@ -100,7 +103,7 @@ impl<R: Runtime> NodeService<R> {
         #[cfg(not(target_os = "android"))]
         {
             let _ = ShareArgs { path };
-            Ok(ShareResult { shared: false })
+            Ok(ShareResult { shared: false, downloads: None })
         }
     }
 

@@ -26,7 +26,7 @@ export type NodeStatus = {
 export type ServiceStatus = { running: boolean; uptime_ms: number; mode: string };
 
 /** Result of sharing the sealed evidence bundle (`mycelium.mobile_evidence_export.v1`). */
-export type EvidenceExport = { shared: boolean; observations: number };
+export type EvidenceExport = { shared: boolean; observations: number; downloads?: string | null };
 
 export interface NodeApi {
   status(): Promise<NodeStatus>;

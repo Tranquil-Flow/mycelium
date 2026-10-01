@@ -119,6 +119,25 @@ describe('node app', () => {
     expect(await screen.findByText(/3 observations shared/)).toBeInTheDocument();
   });
 
+  it('names the copy saved to Downloads next to the share sheet', async () => {
+    const { api } = fakeApi({
+      status: vi.fn(async () => ({ ...base, phase: 'joined', member_generation: 1 })),
+      exportEvidence: vi.fn(async () => ({
+        shared: true,
+        observations: 2,
+        downloads: 'mycelium-evidence-1759320000000.json',
+      })),
+    });
+    render(<App api={api} />);
+    await screen.findByRole('button', { name: 'settings' });
+    fireEvent.click(screen.getByRole('button', { name: 'settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Export evidence' }));
+    expect(await screen.findByText(/2 observations shared/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Saved to Downloads\/mycelium-evidence-1759320000000\.json/),
+    ).toBeInTheDocument();
+  });
+
   it('shows the export refusal code when there is nothing sealed yet', async () => {
     const { api } = fakeApi({
       status: vi.fn(async () => ({ ...base, phase: 'joined', member_generation: 1 })),

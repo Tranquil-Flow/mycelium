@@ -2,10 +2,12 @@ package now.mycelium.node
 
 import android.Manifest
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.SystemClock
+import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -49,13 +51,17 @@ class NodeServicePlugin(private val activity: Activity) : Plugin(activity) {
     invoke.resolve(JSObject().put("running", false))
   }
 
-  /** Offer one exported evidence bundle to the share sheet; only files under cache/exports. */
+  /**
+   * Offer one exported evidence bundle to the share sheet and, on Android 10+, save the same
+   * bytes to the public Downloads collection (MediaStore, no storage permission). Only files
+   * under cache/exports named mycelium-evidence-<ms>.json are accepted.
+   */
   @Command
   fun share(invoke: Invoke) {
     val args = invoke.parseArgs(ShareArgs::class.java)
     val exports = java.io.File(activity.cacheDir, "exports").canonicalFile
     val file = args.path?.let { java.io.File(it).canonicalFile }
-    if (file == null || file.parentFile != exports || !file.isFile) {
+    if (file == null || file.parentFile != exports || !file.isFile || !EVIDENCE_NAME.matches(file.name)) {
       invoke.reject("mobile_evidence_export_path_invalid")
       return
     }
@@ -64,8 +70,34 @@ class NodeServicePlugin(private val activity: Activity) : Plugin(activity) {
       .setType("application/json")
       .putExtra(Intent.EXTRA_STREAM, uri)
       .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    val downloads = saveToDownloads(file)
     activity.startActivity(Intent.createChooser(send, "Export evidence"))
-    invoke.resolve(JSObject().put("shared", true))
+    invoke.resolve(JSObject().put("shared", true).put("downloads", downloads))
+  }
+
+  /** Copy the bundle into Downloads; returns the saved file name, or null below Android 10 or on failure. */
+  private fun saveToDownloads(file: java.io.File): String? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+    val resolver = activity.contentResolver
+    val values = ContentValues().apply {
+      put(MediaStore.MediaColumns.DISPLAY_NAME, file.name)
+      put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
+      put(MediaStore.MediaColumns.IS_PENDING, 1)
+    }
+    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+    return try {
+      resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
+        ?: throw java.io.IOException("no output stream")
+      resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+      file.name
+    } catch (e: Exception) {
+      resolver.delete(uri, null, null)
+      null
+    }
+  }
+
+  private companion object {
+    val EVIDENCE_NAME = Regex("^mycelium-evidence-[0-9]+\\.json$")
   }
 
   @Command

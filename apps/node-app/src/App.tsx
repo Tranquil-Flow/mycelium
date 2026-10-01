@@ -248,6 +248,7 @@ function SettingsCard({
       {exported && (
         <p className="hint">
           {exported.observations} observations {exported.shared ? 'shared' : 'saved'}.
+          {exported.downloads ? ` Saved to Downloads/${exported.downloads}.` : ''}
         </p>
       )}
       <p className="hint">Uninstalling the app removes the node identity from this device.</p>

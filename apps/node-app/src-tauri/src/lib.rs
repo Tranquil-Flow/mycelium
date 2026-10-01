@@ -82,16 +82,18 @@ fn serving_stop(svc: State<'_, NodeService<Wry>>) -> Result<ServiceStatus, Strin
 struct EvidenceExport {
     shared: bool,
     observations: usize,
+    downloads: Option<String>,
 }
 
 /// Seal the current observations into one export bundle under the app cache and
-/// hand it to the share sheet; only signed runtime observations leave the device.
+/// hand it to the share sheet (and, on Android 10+, a copy to Downloads); only
+/// signed runtime observations leave the device.
 #[tauri::command]
 fn node_export_evidence(app: AppHandle, svc: State<'_, NodeService<Wry>>) -> Result<EvidenceExport, String> {
     let out = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("exports");
     let (path, observations) = core()?.export_evidence(&out).map_err(|e| e.0)?;
-    let shared = svc.share(&path.to_string_lossy())?.shared;
-    Ok(EvidenceExport { shared, observations })
+    let result = svc.share(&path.to_string_lossy())?;
+    Ok(EvidenceExport { shared: result.shared, observations, downloads: result.downloads })
 }
 
 #[tauri::command]
