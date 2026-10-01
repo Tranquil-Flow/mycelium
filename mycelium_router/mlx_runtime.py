@@ -22,6 +22,7 @@ from types import MappingProxyType
 from typing import Any, NoReturn
 
 import mlx.core as mx
+import numpy as np
 
 from mycelium_router.a10_batch_admission import (
    BatchExecutionReport,
@@ -1157,6 +1158,53 @@ class MLXRuntimePort:
    def _update_kv_watermark(self) -> None:
       active_bytes = sum(self._kv_bytes(state) for state in self._kv_states.values())
       self._peak_kv_bytes = max(self._peak_kv_bytes, active_bytes)
+
+   def export_kv_checkpoint(self, path_id: str) -> bytes:
+      """Export the exact stage-local KV held for ``path_id`` (A7 successor recovery).
+
+      The payload is byte exact and self-describing; it carries no confidentiality.
+      """
+
+      from mycelium_router.kv_checkpoint import export_port_kv_checkpoint
+
+      return export_port_kv_checkpoint(
+         self, path_id, to_numpy=lambda array: np.array(array, copy=True)
+      )
+
+   def import_kv_checkpoint(
+      self,
+      payload: bytes,
+      *,
+      request_id: str,
+      path_id: str,
+      path_attempt: int,
+      placement_id: str,
+      lease_expires_at: float,
+      expected_next_position: int,
+      max_bytes: int,
+   ) -> dict[str, Any]:
+      """Install an exactly compatible checkpoint as a successor path's KV.
+
+      The successor then continues with DECODE at ``expected_next_position``;
+      no recovery prefill is needed.  Any incompatibility refuses with
+      ``KVCheckpointError`` and changes nothing.
+      """
+
+      from mycelium_router.kv_checkpoint import import_port_kv_checkpoint
+
+      return import_port_kv_checkpoint(
+         self,
+         payload,
+         request_id=request_id,
+         path_id=path_id,
+         path_attempt=path_attempt,
+         placement_id=placement_id,
+         lease_expires_at=lease_expires_at,
+         expected_next_position=expected_next_position,
+         max_bytes=max_bytes,
+         from_numpy=mx.array,
+         state_factory=_KVState,
+      )
 
    def kv_snapshot(self) -> dict[str, Any]:
       """Return identity/lifecycle evidence without exposing KV tensor values."""
