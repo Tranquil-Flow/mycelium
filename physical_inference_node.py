@@ -338,6 +338,11 @@ def _a10_execute_product_operation(runtime: Any, payload: Mapping[str, Any]) -> 
     return execute_product_operation(runtime, payload)
 
 
+#: A10 paired-benchmark batch policies (spec section 8): ``baseline`` is the
+#: target-only runtime batch cap of one, ``candidate`` the configured cap.
+A10_BATCH_POLICIES = ("baseline", "candidate")
+A10_BATCH_POLICY_RECEIPT_PROTOCOL = "mycelium.a10_batch_policy_receipt.v1"
+
 # Router request states an ``inference_started`` observation may report.
 _STARTED_REQUEST_STATUSES = frozenset({"DECODING", "COMPLETED", "CANCELLED"})
 
@@ -4115,6 +4120,7 @@ class PhysicalNodeService:
             "rotate": self._rotate,
             "stop": self._stop,
             "a10_target_verify": self._a10_target_verify,
+            "a10_batch_policy": self._a10_batch_policy,
         }
         handler = handlers.get(document["command"])
         _require(handler is not None, "unsupported_command")
@@ -4140,6 +4146,38 @@ class PhysicalNodeService:
                 raise NodeCommandError(f"a10_target_verify_failed:{code}") from None
             raise NodeCommandError("a10_target_verify_failed") from None
         return _plain_json(result)
+
+    def _a10_batch_policy(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Switch this node's runtime batch policy for the A10 paired benchmark.
+
+        ``baseline`` caps runtime batches at one member (target-only execution);
+        ``candidate`` restores the configured cap.  Only the relay's batch cap
+        changes: pipeline overlap, the runtime and the route stay as they are.
+        The A10 publication shows the effect, since batched intervals carry a
+        ``runtime_batch_ref`` only while the candidate cap admits a batch.
+        """
+
+        _exact_fields(payload, {"policy"}, "invalid_a10_batch_policy_fields")
+        policy = payload["policy"]
+        _require(policy in A10_BATCH_POLICIES, "invalid_a10_batch_policy")
+        with self._control_lock:
+            _require(
+                self.state == "RUNNING" and self.router is not None,
+                "invalid_state_for_a10_batch_policy",
+            )
+            config = (
+                replace(self._router_config, maximum_runtime_batch_size=1)
+                if policy == "baseline"
+                else self._router_config
+            )
+            relay = self.router.relay
+            relay.batch_scheduler.config = config
+            relay.batch_controller.config = config
+        return {
+            "protocol": A10_BATCH_POLICY_RECEIPT_PROTOCOL,
+            "policy": policy,
+            "maximum_runtime_batch_size": config.maximum_runtime_batch_size,
+        }
 
     def _hello(self, payload: dict[str, Any]) -> dict[str, Any]:
         _exact_fields(payload, set(), "invalid_hello_fields")
