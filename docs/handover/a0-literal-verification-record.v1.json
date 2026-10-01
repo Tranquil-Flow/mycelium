@@ -2,7 +2,7 @@
   "protocol": "mycelium.a0_literal_verification_record.v1",
   "gate_id": "A0",
   "state": "executed_on_candidate",
-  "claim_boundary": "Structure only. Nothing in this record has been executed on any candidate; every result is null. It does not claim A0 is complete, does not amend the A0 specification or the governing plan, adds no register row, and changes no audit, ledger, manifest or checklist.",
+  "claim_boundary": "Every A0 literal obligation was executed on the one bound candidate, with its real result and the receipt's name and digest. It does not claim A0 is complete (owner ruling R4 and the closing commit remain), does not amend the A0 specification or the governing plan, adds no register row, and changes no audit, ledger, manifest or checklist.",
   "specification": {
     "path": "docs/superpowers/specs/2026-08-11-mycelium-a0-governance-reconciliation.md",
     "digest": "sha256:f42a9ea77aeafe69229b07e8221dcae4ef3e9a1c0f4b103544e3feddf912b63a",
@@ -158,10 +158,6 @@
     "note": "The reading of the atomic-commit clause for an A0 whose machinery already landed across several commits is owner ruling R4; this record neither rewrites history nor fabricates a feature diff."
   },
   "remaining_before_complete": [
-    "freeze the final candidate and bind candidate.commit/clean_tree",
-    "execute 7.4 negative repository copies on that candidate and bind results",
-    "execute 7.5 three-engine browser closeout on that candidate and bind receipts",
-    "bind L2 GREEN for that candidate",
     "resolve R4 and bind the closing commit"
   ]
 }
