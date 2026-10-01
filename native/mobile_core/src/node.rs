@@ -38,8 +38,41 @@ fn require_registered_class() -> Result<(), NodeError> {
     }
 }
 pub const PAIRING_CHANNEL_PROTOCOL: &str = "mycelium.pairing_channel.v1";
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
-const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
+/// Membership timing. The defaults are the product cadence; tests shorten them
+/// against a short-lease seed.
+#[derive(Debug, Clone, Copy)]
+pub struct NodeTiming {
+    /// Scheduled heartbeat cadence while the lease is held.
+    pub heartbeat_interval: Duration,
+    /// Bound on every seed HTTP exchange.
+    pub http_timeout: Duration,
+    /// First retry delay after a failed heartbeat or resume; doubles up to `retry_max`.
+    pub retry_min: Duration,
+    pub retry_max: Duration,
+}
+
+impl Default for NodeTiming {
+    fn default() -> Self {
+        Self {
+            heartbeat_interval: Duration::from_secs(30),
+            http_timeout: Duration::from_secs(15),
+            retry_min: Duration::from_secs(5),
+            retry_max: Duration::from_secs(60),
+        }
+    }
+}
+
+/// Seed refusals after which a held membership can only come back through
+/// `/seed/resume` (fresh incarnation, next generation).
+const RESUMABLE_REFUSALS: [&str; 2] = ["seed_member_lease_expired", "seed_message_mismatch"];
+/// Seed refusals that end the membership for good: the owner revoked or never
+/// enrolled this member, so the node stops asking instead of retrying.
+const TERMINAL_RESUME_REFUSALS: [&str; 4] = [
+    "seed_resume_member_revoked",
+    "seed_member_unknown",
+    "seed_resume_identity_mismatch",
+    "seed_resume_generation_stale",
+];
 /// Native runtime observations are sealed on this cadence into app-private
 /// `evidence/`, keeping the newest `EVIDENCE_RETAINED` envelopes.
 const EVIDENCE_INTERVAL: Duration = Duration::from_secs(60);
@@ -94,6 +127,9 @@ pub struct NodeStatus {
     pub swarm_id: Option<String>,
     pub member_generation: Option<u64>,
     pub lease_expires_at: Option<f64>,
+    /// True only while the seed-signed lease is unexpired: the node is a member
+    /// the swarm can see. Serving without it is not serving.
+    pub lease_fresh: bool,
     pub heartbeats_sent: u64,
     pub last_heartbeat_at: Option<f64>,
     pub last_error: Option<String>,
@@ -114,8 +150,25 @@ struct ObservationCursor {
     evidence_generation: u64,
 }
 
+/// The durable membership the supervisor keeps alive.
+#[derive(Clone)]
+struct ActiveMembership {
+    cfg: MemberConfig,
+    generation: u64,
+    seed_url: String,
+    pinned: Value,
+    /// The lease was lost (or this is a fresh process): only a resume can restore it.
+    needs_resume: bool,
+    /// An unanswered resume (incarnation, exact envelope). The seed replays a
+    /// committed acceptance only for the byte-identical request, so a retry after
+    /// a lost reply resends it unchanged instead of minting another incarnation.
+    pending_resume: Option<(String, Value)>,
+}
+
 struct Shared {
     observation: ObservationCursor,
+    membership: Option<ActiveMembership>,
+    supervisor_running: bool,
     status: NodeStatus,
     session: Option<PairingSession>,
     invitation: Option<Value>,
@@ -131,6 +184,7 @@ pub struct NodeCore {
     shared: Arc<Mutex<Shared>>,
     http: reqwest::Client,
     incarnation: String,
+    timing: NodeTiming,
 }
 
 fn load_or_create_secret(path: &Path) -> Result<[u8; 32], NodeError> {
@@ -159,6 +213,10 @@ impl NodeCore {
     /// embedded iroh endpoint. The membership signer's endpoint id is the iroh
     /// EndpointID, so the signed profile binds the transport identity.
     pub fn open(data_dir: &Path, reach: Reachability) -> Result<Self, NodeError> {
+        Self::open_with_timing(data_dir, reach, NodeTiming::default())
+    }
+
+    pub fn open_with_timing(data_dir: &Path, reach: Reachability, timing: NodeTiming) -> Result<Self, NodeError> {
         std::fs::create_dir_all(data_dir).map_err(|_| nerr("data_dir_unwritable"))?;
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -171,8 +229,6 @@ impl NodeCore {
         let transport = rt.block_on(NodeTransport::bind(&iroh_secret, reach)).map_err(|e| nerr(e.0))?;
         let identity = Identity::from_secret(&transport.endpoint_id(), &member_secret)
             .map_err(|e| nerr(e.to_string()))?;
-        let mut incarnation_raw = [0u8; 8];
-        getrandom::getrandom(&mut incarnation_raw).map_err(|_| nerr("randomness_unavailable"))?;
         let status = NodeStatus {
             phase: "unpaired".into(),
             endpoint_id: transport.endpoint_id(),
@@ -180,7 +236,7 @@ impl NodeCore {
             runtime_backend: REFERENCE_BACKEND.into(),
             ..Default::default()
         };
-        let http = reqwest::Client::builder().timeout(HTTP_TIMEOUT).build().map_err(|_| nerr("http_client_failed"))?;
+        let http = reqwest::Client::builder().timeout(timing.http_timeout).build().map_err(|_| nerr("http_client_failed"))?;
         let core = Self {
             rt,
             data_dir: data_dir.to_owned(),
@@ -189,13 +245,16 @@ impl NodeCore {
             shared: Arc::new(Mutex::new(Shared {
                 observation: ObservationCursor { window_started_at: now_s(), frames_at_window_start: 0, evidence_generation: 0 },
                 status,
+                membership: None,
+                supervisor_running: false,
                 session: None,
                 invitation: None,
                 stage: None,
                 forward: None,
             })),
             http,
-            incarnation: format!("inc-{}", hex::encode(incarnation_raw)),
+            incarnation: new_incarnation()?,
+            timing,
         };
         if let Ok(raw) = std::fs::read(core.data_dir.join("invitation.json"))
             && let Ok(inv) = serde_json::from_slice::<Value>(&raw)
@@ -242,7 +301,9 @@ impl NodeCore {
 
 
     pub fn status(&self) -> NodeStatus {
-        self.shared.lock().unwrap().status.clone()
+        let mut status = self.shared.lock().unwrap().status.clone();
+        status.lease_fresh = lease_is_fresh(&status, now_s());
+        status
     }
 
     /// Seal one member-signed `mycelium.mobile_runtime_observation.v1` covering the
@@ -291,7 +352,7 @@ fn observe_runtime(
             metrics.insert("heartbeats_sent".into(), Some(s.status.heartbeats_sent as f64));
             metrics.insert(
                 "lifecycle_member".into(),
-                Some(if s.status.phase == "member" { 1.0 } else { 0.0 }),
+                Some(if lease_is_fresh(&s.status, now) { 1.0 } else { 0.0 }),
             );
             (metrics, duration_ms, 1 + delta, s.status.member_generation.unwrap_or(1), s.observation.evidence_generation)
         };
@@ -451,8 +512,7 @@ impl NodeCore {
         pinned: Value,
         lease_expires_at: Option<f64>,
     ) -> Result<(), NodeError> {
-        let record = json!({"cfg": cfg, "generation": generation, "seed_url": seed_url, "seed_key": pinned});
-        write_private(&self.data_dir.join("membership.json"), &serde_json::to_vec(&record).unwrap())?;
+        persist_membership(&self.data_dir, &cfg, generation, &seed_url, &pinned)?;
         {
             let mut s = self.shared.lock().unwrap();
             s.status.phase = "joined".into();
@@ -460,60 +520,66 @@ impl NodeCore {
             s.status.member_generation = Some(generation);
             s.status.lease_expires_at = lease_expires_at;
             s.status.last_error = None;
+            s.membership = Some(ActiveMembership {
+                cfg,
+                generation,
+                seed_url,
+                pinned,
+                needs_resume: false,
+                pending_resume: None,
+            });
         }
-        self.rt.spawn(heartbeat_loop(
-            cfg,
-            self.identity.clone(),
-            generation,
-            seed_url,
-            pinned,
-            self.http.clone(),
-            self.shared.clone(),
-        ));
+        self.ensure_supervisor();
         Ok(())
     }
 
-    /// After a restart: resume the enrolled member with a fresh incarnation
-    /// (no invite is consumed). Old KV/request state is gone with the process.
+    /// After a restart: resume the enrolled member with a fresh incarnation (no
+    /// invite is consumed). Returns at once; the membership supervisor keeps
+    /// retrying with backoff until the seed answers, so a cold start before the
+    /// network is up still comes back. Old KV/request state is gone with the
+    /// process.
     pub fn resume(&self) -> Result<NodeStatus, NodeError> {
         let raw = std::fs::read(self.data_dir.join("membership.json")).map_err(|_| nerr("not_enrolled"))?;
         let record: Value = serde_json::from_slice(&raw).map_err(|_| nerr("membership_store_corrupt"))?;
-        let mut cfg: MemberConfig =
+        let cfg: MemberConfig =
             serde_json::from_value(record["cfg"].clone()).map_err(|_| nerr("membership_store_corrupt"))?;
-        let previous = std::mem::replace(&mut cfg.incarnation, self.incarnation.clone());
         let generation = record["generation"].as_u64().unwrap_or(0);
         let seed_url = record["seed_url"].as_str().unwrap_or_default().to_owned();
-        let pinned = record["seed_key"].clone();
-        let env = membership::resume_request(
-            &cfg,
-            &self.identity,
-            &format!("resume-{}", &self.incarnation[4..]),
-            &previous,
-            generation,
-            &self.transport.advertised_addrs(),
-            now_s(),
-        )
-        .map_err(|e| self.fail(nerr(e.0)))?;
-        let http = self.http.clone();
-        let body = json!({"protocol": membership::SEED_RESUME_HTTP_PROTOCOL, "resume_envelope": env});
-        let url = format!("{seed_url}/seed/resume");
-        let (code, reply): (u16, Value) = self
-            .rt
-            .block_on(async move {
-                let resp = http.post(url).json(&body).send().await?;
-                let code = resp.status().as_u16();
-                Ok::<_, reqwest::Error>((code, resp.json::<Value>().await.unwrap_or(Value::Null)))
-            })
-            .map_err(|e| self.fail(nerr(format!("seed_unreachable:{}", e.without_url()))))?;
-        if code != 200 {
-            let c = reply["error"]["code"].as_str().unwrap_or("seed_resume_refused");
-            return Err(self.fail(nerr(format!("seed_resume_refused:{c}"))));
+        {
+            let mut s = self.shared.lock().unwrap();
+            s.status.phase = "reconnecting".into();
+            s.status.swarm_id = Some(cfg.swarm_id.clone());
+            s.status.member_generation = Some(generation);
+            s.membership = Some(ActiveMembership {
+                cfg,
+                generation,
+                seed_url,
+                pinned: record["seed_key"].clone(),
+                needs_resume: true,
+                pending_resume: None,
+            });
         }
-        let acceptance = membership::verify_seed_envelope(&reply, &pinned, membership::RESUME_ACCEPTANCE_PROTOCOL)
-            .map_err(|e| self.fail(nerr(e.0)))?;
-        let generation = acceptance["membership_generation"].as_u64().unwrap_or(0);
-        self.enter_membership(cfg, generation, seed_url, pinned, acceptance["lease_expires_at"].as_f64())?;
+        self.ensure_supervisor();
         Ok(self.status())
+    }
+
+    /// One supervisor per core owns heartbeats and resumes for the current membership.
+    fn ensure_supervisor(&self) {
+        {
+            let mut s = self.shared.lock().unwrap();
+            if s.supervisor_running {
+                return;
+            }
+            s.supervisor_running = true;
+        }
+        self.rt.spawn(supervise_membership(Supervisor {
+            identity: self.identity.clone(),
+            http: self.http.clone(),
+            shared: self.shared.clone(),
+            transport: self.transport.clone(),
+            data_dir: self.data_dir.clone(),
+            timing: self.timing,
+        }));
     }
 
     pub fn is_enrolled(&self) -> bool {
@@ -555,63 +621,235 @@ impl NodeCore {
     }
 }
 
-async fn heartbeat_loop(
-    cfg: MemberConfig,
-    identity: Arc<Identity>,
+fn lease_is_fresh(status: &NodeStatus, now: f64) -> bool {
+    matches!(status.phase.as_str(), "joined" | "drained") && status.lease_expires_at.is_some_and(|t| now < t)
+}
+
+fn new_incarnation() -> Result<String, NodeError> {
+    let mut raw = [0u8; 8];
+    getrandom::getrandom(&mut raw).map_err(|_| nerr("randomness_unavailable"))?;
+    Ok(format!("inc-{}", hex::encode(raw)))
+}
+
+fn persist_membership(
+    data_dir: &Path,
+    cfg: &MemberConfig,
     generation: u64,
-    seed_url: String,
-    pinned: Value,
+    seed_url: &str,
+    pinned: &Value,
+) -> Result<(), NodeError> {
+    let record = json!({"cfg": cfg, "generation": generation, "seed_url": seed_url, "seed_key": pinned});
+    write_private(&data_dir.join("membership.json"), &serde_json::to_vec(&record).unwrap())
+}
+
+/// What one supervisor step decided.
+enum Step {
+    /// The lease is held (renewed or freshly resumed).
+    Held,
+    /// Transient failure (network, seed busy): try again after the backoff.
+    Retry(String),
+    /// The seed no longer honours this incarnation: resume now.
+    Resume(String),
+    /// The membership is over (revoked, unknown, mismatched): stop.
+    Ended(String),
+}
+
+struct Supervisor {
+    identity: Arc<Identity>,
     http: reqwest::Client,
     shared: Arc<Mutex<Shared>>,
-) {
+    transport: NodeTransport,
+    data_dir: PathBuf,
+    timing: NodeTiming,
+}
+
+/// Keep the membership alive: heartbeat on the product cadence while the lease
+/// is held; once the seed refuses the lease (or it lapses locally while the
+/// network is down) resume with a fresh incarnation, retrying with bounded
+/// exponential backoff until the network and seed answer again.
+async fn supervise_membership(sv: Supervisor) {
     let mut sequence = 0u64;
+    let mut delay = sv.timing.retry_min;
     loop {
-        sequence += 1;
-        let active = shared.lock().unwrap().status.frames_received;
+        let Some(m) = sv.shared.lock().unwrap().membership.clone() else { break };
+        let step = if m.needs_resume {
+            let step = sv.resume_once(m).await;
+            if matches!(step, Step::Held) {
+                sequence = 0;
+            }
+            step
+        } else {
+            sequence += 1;
+            sv.heartbeat_once(&m, sequence).await
+        };
+        let pause = {
+            let mut s = sv.shared.lock().unwrap();
+            match step {
+                Step::Held => {
+                    delay = sv.timing.retry_min;
+                    Some(sv.timing.heartbeat_interval)
+                }
+                Step::Resume(code) => {
+                    s.status.last_error = Some(code);
+                    s.status.phase = "reconnecting".into();
+                    if let Some(m) = s.membership.as_mut() {
+                        m.needs_resume = true;
+                    }
+                    None
+                }
+                Step::Retry(code) => {
+                    s.status.last_error = Some(code);
+                    let lapsed = s.status.lease_expires_at.is_none_or(|t| now_s() >= t);
+                    if lapsed && let Some(m) = s.membership.as_mut() {
+                        // Heartbeats cannot renew a lapsed lease; go straight to resume.
+                        m.needs_resume = true;
+                        s.status.phase = "reconnecting".into();
+                    }
+                    let pause = delay;
+                    delay = (delay * 2).min(sv.timing.retry_max);
+                    Some(pause)
+                }
+                Step::Ended(code) => {
+                    s.status.phase =
+                        if code.ends_with("seed_resume_member_revoked") { "revoked" } else { "membership_lost" }.into();
+                    s.status.last_error = Some(code);
+                    s.membership = None;
+                    break;
+                }
+            }
+        };
+        if let Some(pause) = pause {
+            tokio::time::sleep(pause).await;
+        }
+    }
+    sv.shared.lock().unwrap().supervisor_running = false;
+}
+
+impl Supervisor {
+    async fn post(&self, path: &str, seed_url: &str, body: &Value) -> Result<(u16, Value), String> {
+        let resp = self
+            .http
+            .post(format!("{seed_url}{path}"))
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| format!("seed_unreachable:{}", e.without_url()))?;
+        let code = resp.status().as_u16();
+        Ok((code, resp.json::<Value>().await.unwrap_or(Value::Null)))
+    }
+
+    async fn heartbeat_once(&self, m: &ActiveMembership, sequence: u64) -> Step {
         let env = match membership::heartbeat(
-            &cfg,
-            &identity,
-            &format!("hb-{}-{sequence}", &cfg.incarnation[4..]),
-            generation,
+            &m.cfg,
+            &self.identity,
+            &format!("hb-{}-{sequence}", &m.cfg.incarnation[4..]),
+            m.generation,
             sequence,
             "RUNNING",
             0,
             now_s(),
         ) {
             Ok(env) => env,
-            Err(e) => {
-                shared.lock().unwrap().status.last_error = Some(e.0.into());
-                return;
+            Err(e) => return Step::Ended(e.0.into()),
+        };
+        let body = json!({"protocol": membership::SEED_MEMBER_HTTP_PROTOCOL, "envelope": env});
+        let (code, reply) = match self.post("/seed/message", &m.seed_url, &body).await {
+            Ok(answer) => answer,
+            Err(e) => return Step::Retry(e),
+        };
+        if !(200..300).contains(&code) {
+            let refusal = reply["error"]["code"].as_str().unwrap_or("unknown");
+            let error = format!("heartbeat_refused:{refusal}");
+            return if RESUMABLE_REFUSALS.contains(&refusal) { Step::Resume(error) } else { Step::Retry(error) };
+        }
+        match membership::verify_seed_envelope(&reply, &m.pinned, membership::LEASE_RENEWAL_PROTOCOL) {
+            Ok(renewal) => {
+                let mut s = self.shared.lock().unwrap();
+                s.status.heartbeats_sent += 1;
+                s.status.last_heartbeat_at = Some(now_s());
+                s.status.lease_expires_at = renewal["lease_expires_at"].as_f64();
+                s.status.last_error = None;
+                if s.status.phase == "reconnecting" {
+                    s.status.phase = "joined".into();
+                }
+                Step::Held
+            }
+            Err(e) => Step::Retry(format!("lease_renewal_invalid:{}", e.0)),
+        }
+    }
+
+    async fn resume_once(&self, m: ActiveMembership) -> Step {
+        let (incarnation, env) = match m.pending_resume.clone() {
+            Some(pending) => pending,
+            None => {
+                let incarnation = match new_incarnation() {
+                    Ok(i) => i,
+                    Err(e) => return Step::Retry(e.0),
+                };
+                let mut cfg = m.cfg.clone();
+                let previous = std::mem::replace(&mut cfg.incarnation, incarnation.clone());
+                match membership::resume_request(
+                    &cfg,
+                    &self.identity,
+                    &format!("resume-{}", &incarnation[4..]),
+                    &previous,
+                    m.generation,
+                    &self.transport.advertised_addrs(),
+                    now_s(),
+                ) {
+                    Ok(env) => (incarnation, env),
+                    Err(e) => return Step::Ended(e.0.into()),
+                }
             }
         };
-        let _ = active;
-        let body = json!({"protocol": membership::SEED_MEMBER_HTTP_PROTOCOL, "envelope": env});
-        let result = async {
-            let resp = http.post(format!("{seed_url}/seed/message")).json(&body).send().await?;
-            let ok = resp.status().is_success();
-            Ok::<_, reqwest::Error>((ok, resp.json::<Value>().await.unwrap_or(Value::Null)))
+        if let Some(active) = self.shared.lock().unwrap().membership.as_mut() {
+            active.pending_resume = Some((incarnation.clone(), env.clone()));
         }
-        .await;
-        {
-            let mut s = shared.lock().unwrap();
-            match result {
-                Ok((true, reply)) => match membership::verify_seed_envelope(&reply, &pinned, membership::LEASE_RENEWAL_PROTOCOL) {
-                    Ok(renewal) => {
-                        s.status.heartbeats_sent += 1;
-                        s.status.last_heartbeat_at = Some(now_s());
-                        s.status.lease_expires_at = renewal["lease_expires_at"].as_f64();
-                        s.status.last_error = None;
-                    }
-                    Err(e) => s.status.last_error = Some(format!("lease_renewal_invalid:{}", e.0)),
-                },
-                Ok((false, reply)) => {
-                    s.status.last_error =
-                        Some(format!("heartbeat_refused:{}", reply["error"]["code"].as_str().unwrap_or("unknown")))
-                }
-                Err(e) => s.status.last_error = Some(format!("seed_unreachable:{}", e.without_url())),
+        let body = json!({"protocol": membership::SEED_RESUME_HTTP_PROTOCOL, "resume_envelope": env});
+        let (code, reply) = match self.post("/seed/resume", &m.seed_url, &body).await {
+            Ok(answer) => answer,
+            Err(e) => return Step::Retry(e),
+        };
+        if code != 200 {
+            let refusal = reply["error"]["code"].as_str().unwrap_or("seed_resume_refused").to_owned();
+            if refusal == "membership_message_expired"
+                && let Some(active) = self.shared.lock().unwrap().membership.as_mut()
+            {
+                // Never committed (the seed would have replayed it): mint a fresh request.
+                active.pending_resume = None;
             }
+            let error = format!("seed_resume_refused:{refusal}");
+            return if TERMINAL_RESUME_REFUSALS.contains(&refusal.as_str()) {
+                Step::Ended(error)
+            } else {
+                Step::Retry(error)
+            };
         }
-        tokio::time::sleep(HEARTBEAT_INTERVAL).await;
+        let acceptance =
+            match membership::verify_seed_envelope(&reply, &m.pinned, membership::RESUME_ACCEPTANCE_PROTOCOL) {
+                Ok(a) => a,
+                Err(e) => return Step::Retry(format!("resume_acceptance_invalid:{}", e.0)),
+            };
+        let generation = acceptance["membership_generation"].as_u64().unwrap_or(0);
+        let mut cfg = m.cfg;
+        cfg.incarnation = incarnation;
+        if let Err(e) = persist_membership(&self.data_dir, &cfg, generation, &m.seed_url, &m.pinned) {
+            return Step::Retry(e.0);
+        }
+        let mut s = self.shared.lock().unwrap();
+        s.status.phase = "joined".into();
+        s.status.member_generation = Some(generation);
+        s.status.lease_expires_at = acceptance["lease_expires_at"].as_f64();
+        s.status.last_error = None;
+        s.membership = Some(ActiveMembership {
+            cfg,
+            generation,
+            seed_url: m.seed_url,
+            pinned: m.pinned,
+            needs_resume: false,
+            pending_resume: None,
+        });
+        Step::Held
     }
 }
 
