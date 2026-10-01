@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -46,13 +47,16 @@ from mycelium_a7_standby_store import StandbyShadowError
 from mycelium_a7_successor_coordinator import StandbySide
 from mycelium_router.contracts import (
    KVCheckpointAck,
+   KVCheckpointCommit,
    KVCheckpointShipment,
+   KVShadowRelease,
    KVSuccessorCutover,
    KVSuccessorCutoverReceipt,
 )
 from mycelium_router.kv_checkpoint import KVCheckpointError, decode_kv_checkpoint
 
 Send = Callable[[str, object, bytes], None]
+_MAX_RELEASED_HISTORY = 4096
 
 
 def _canonical(value: Any) -> str:
@@ -82,6 +86,27 @@ class _SourceRole:
    fenced: bool = False
 
 
+@dataclass(frozen=True)
+class SourceCoverage:
+   """Node-static A7 coverage for one local ACTIVE source placement.
+
+   A source role for a request is created from this only when the request's
+   entry node commits output on a path through this placement.
+   """
+
+   stage_id: str
+   port: Any
+   standby_node_id: str
+   standby_placement_id: str
+   standby_placement_digest: str
+   standby_incarnation: str
+   standby_key_record: Mapping[str, Any]
+   verify_standby_signature: Callable[[bytes, dict[str, Any]], bool]
+   source_placement_digest: str
+   max_bytes: int
+   ttl_ms: int = 60_000
+
+
 @dataclass
 class _EntryRole:
    ledger: RouteAckLedger
@@ -100,6 +125,8 @@ class A7NodeAgent:
       self._ports: dict[str, Any] = {}
       self._standby: StandbySide | None = None
       self._session_digest: str | None = None
+      self._coverage: dict[str, SourceCoverage] = {}
+      self._released: OrderedDict[str, None] = OrderedDict()
 
    # -- registration ------------------------------------------------------------
 
@@ -175,7 +202,108 @@ class A7NodeAgent:
             verify_standby_signature=verify_standby_signature,
          )
 
+   def register_source_coverage(self, placement_id: str, coverage: SourceCoverage) -> None:
+      with self._lock:
+         self._coverage[placement_id] = coverage
+
    # -- source role ---------------------------------------------------------------
+
+   def receive_commit(self, commit: KVCheckpointCommit, *, source_node_id: str | None = None) -> bool:
+      """Entry committed output through ``committed_token_count``: ship that KV."""
+
+      if source_node_id is None:
+         return False
+      with self._lock:
+         if commit.request_id in self._released:
+            return False
+         role = self._sources.get(commit.request_id)
+         if role is None:
+            coverage = self._coverage.get(commit.source_placement_id)
+            if coverage is None:
+               return False
+            try:
+               public = verify_standby_key_record(
+                  coverage.standby_key_record,
+                  verify_signature=coverage.verify_standby_signature,
+                  standby_placement_id=coverage.standby_placement_digest,
+                  standby_membership_incarnation=coverage.standby_incarnation,
+               )
+            except CheckpointChannelError:
+               return False
+            role = _SourceRole(
+               stage_id=coverage.stage_id,
+               port=coverage.port,
+               path_id=commit.path_id,
+               path_attempt=commit.path_attempt,
+               standby_node_id=coverage.standby_node_id,
+               standby_placement_id=coverage.standby_placement_id,
+               standby_placement_digest=coverage.standby_placement_digest,
+               standby_incarnation=coverage.standby_incarnation,
+               standby_public_key=public,
+               verify_standby_signature=coverage.verify_standby_signature,
+               source_placement_digest=coverage.source_placement_digest,
+               entry_node_id=source_node_id,
+               max_bytes=coverage.max_bytes,
+               ttl_ms=coverage.ttl_ms,
+            )
+            self._sources[commit.request_id] = role
+         if (
+            role.fenced
+            or source_node_id != role.entry_node_id
+            or commit.path_id != role.path_id
+            or commit.path_attempt != role.path_attempt
+         ):
+            return False
+      try:
+         self.ship(
+            commit.request_id,
+            request_attempt=commit.request_attempt,
+            committed_token_count=commit.committed_token_count,
+            committed_prefix_digest=commit.committed_prefix_digest,
+         )
+      except (A7ContractViolation, KVCheckpointError, CheckpointChannelError, ValueError):
+         return False
+      return True
+
+   def receive_release(self, release: KVShadowRelease, *, source_node_id: str | None = None) -> bool:
+      """Release every A7 record this node holds for a terminal or fenced request."""
+
+      if source_node_id is None:
+         return False
+      with self._lock:
+         role = self._sources.get(release.request_id)
+         if role is not None and source_node_id != role.entry_node_id:
+            return False
+         self._sources.pop(release.request_id, None)
+         self._released[release.request_id] = None
+         while len(self._released) > _MAX_RELEASED_HISTORY:
+            self._released.popitem(last=False)
+         standby = self._standby
+         ports = []
+         for port in self._ports.values():
+            if all(port is not seen for seen in ports):
+               ports.append(port)
+      if standby is not None:
+         standby.store.release_request("sha256:" + request_key(release.request_id))
+      for port in ports:
+         try:
+            # Fences the released path on this node: its KV can never resume.
+            port.cancel(release.path_id)
+         except Exception:
+            continue
+      return True
+
+   def release_entry(self, request_id: str) -> None:
+      with self._lock:
+         self._entries.pop(request_id, None)
+
+   def shadow_snapshot(self) -> dict[str, Any]:
+      with self._lock:
+         standby = self._standby
+         sources = len(self._sources)
+         entries = len(self._entries)
+      snapshot = {} if standby is None else dict(standby.store.snapshot())
+      return {**snapshot, "source_roles": sources, "entry_roles": entries}
 
    def ship(self, request_id: str, *, request_attempt: int, committed_token_count: int, committed_prefix_digest: str) -> int:
       """Ship the KV positions added since the last checkpoint; returns the sequence sent."""
@@ -327,6 +455,7 @@ class A7NodeAgent:
                   new_path_id=cutover.successor_path_id,
                   new_path_attempt=cutover.successor_path_attempt,
                   lease_expires_at=cutover.lease_expires_at,
+                  truncate_to_position=cutover.expected_next_position,
                )
                if receipt["next_position"] != cutover.expected_next_position:
                   port.cancel(cutover.successor_path_id)

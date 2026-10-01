@@ -32,7 +32,9 @@ from mycelium_router.contracts import (
     FailureReport,
     HopHeader,
     KVCheckpointAck,
+    KVCheckpointCommit,
     KVCheckpointShipment,
+    KVShadowRelease,
     KVSuccessorCutover,
     KVSuccessorCutoverReceipt,
     ManifestDelta,
@@ -2834,6 +2836,14 @@ class IrohTransport:
             ):
                 raise IrohTransportError("a7_cutover_receipt_rejected")
             return
+        if isinstance(message, KVCheckpointCommit):
+            if not router.receive_kv_checkpoint_commit(message, source_node_id=source_node_id):
+                raise IrohTransportError("a7_commit_rejected")
+            return
+        if isinstance(message, KVShadowRelease):
+            if not router.receive_kv_shadow_release(message, source_node_id=source_node_id):
+                raise IrohTransportError("a7_release_rejected")
+            return
         raise IrohTransportError(
             "unsupported_router_message",
             type(message).__name__,
@@ -3173,7 +3183,14 @@ class IrohTransport:
 
         if not isinstance(
             message,
-            (KVCheckpointShipment, KVCheckpointAck, KVSuccessorCutover, KVSuccessorCutoverReceipt),
+            (
+                KVCheckpointShipment,
+                KVCheckpointAck,
+                KVSuccessorCutover,
+                KVSuccessorCutoverReceipt,
+                KVCheckpointCommit,
+                KVShadowRelease,
+            ),
         ):
             raise IrohTransportError("a7_message_type_invalid")
         self._send_or_dispatch(destination_node_id, encode_frame(message, payload))
@@ -3240,6 +3257,8 @@ class IrohTransport:
                 KVCheckpointAck,
                 KVSuccessorCutover,
                 KVSuccessorCutoverReceipt,
+                KVCheckpointCommit,
+                KVShadowRelease,
             ),
         )
         if isinstance(message, ManifestLocked):

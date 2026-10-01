@@ -11,7 +11,9 @@ from mycelium_router.contracts import (
    FailureReport,
    HopHeader,
    KVCheckpointAck,
+   KVCheckpointCommit,
    KVCheckpointShipment,
+   KVShadowRelease,
    KVSuccessorCutover,
    KVSuccessorCutoverReceipt,
    ManifestDelta,
@@ -72,6 +74,8 @@ _MESSAGE_TYPES = {
       KVCheckpointAck,
       KVSuccessorCutover,
       KVSuccessorCutoverReceipt,
+      KVCheckpointCommit,
+      KVShadowRelease,
    )
 }
 
@@ -80,6 +84,7 @@ A7_MAX_SEALED_CHECKPOINT_BYTES = 64 * 1024 * 1024
 A7_MAX_SIGNED_ACK_BYTES = 16 * 1024
 A7_CUTOVER_ROLES = frozenset({"standby_import", "surviving_rekey"})
 A7_ACK_HOPS = frozenset({"standby_to_source", "source_to_entry"})
+A7_RELEASE_REASONS = frozenset({"completed", "cancelled", "failed", "fenced", "fallback", "aborted"})
 
 
 def encode_progressive_prefill(
@@ -398,6 +403,25 @@ def _validate_a7_message(message: object) -> None:
          and _a7_text(message.reason)
          and isinstance(message.checkpoint_digest, str)
          and len(message.checkpoint_digest) <= 71
+      )
+   elif isinstance(message, KVCheckpointCommit):
+      valid = (
+         _a7_text(message.request_id)
+         and _a7_text(message.path_id)
+         and _a7_count(message.path_attempt)
+         and _a7_count(message.request_attempt, 1)
+         and _a7_text(message.source_placement_id)
+         and _a7_count(message.committed_token_count, 1)
+         and isinstance(message.committed_prefix_digest, str)
+         and len(message.committed_prefix_digest) == 71
+         and message.committed_prefix_digest.startswith("sha256:")
+      )
+   elif isinstance(message, KVShadowRelease):
+      valid = (
+         _a7_text(message.request_id)
+         and _a7_text(message.path_id)
+         and _a7_count(message.path_attempt)
+         and message.reason in A7_RELEASE_REASONS
       )
    if not valid:
       raise WireError("invalid_wire_field", type(message).__name__)

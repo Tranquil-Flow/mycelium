@@ -241,6 +241,18 @@ class Router:
          return False
       return agent.receive_cutover_receipt(receipt, source_node_id=source_node_id)
 
+   def receive_kv_checkpoint_commit(self, commit, *, source_node_id=None):
+      agent = self.a7_agent
+      if agent is None:
+         return False
+      return agent.receive_commit(commit, source_node_id=source_node_id)
+
+   def receive_kv_shadow_release(self, release, *, source_node_id=None):
+      agent = self.a7_agent
+      if agent is None:
+         return False
+      return agent.receive_release(release, source_node_id=source_node_id)
+
    def receive_failure_report(self, report, *, source_node_id=None):
       return self.entry.receive_failure_report(
          report,

@@ -451,6 +451,32 @@ class KVSuccessorCutoverReceipt:
 
 
 @dataclass(frozen=True)
+class KVCheckpointCommit:
+   """A7: entry -> source: output through this count is committed to the gateway.
+
+   The source ships the stage KV for exactly that committed count and digest.
+   """
+
+   request_id: str
+   path_id: str
+   path_attempt: int
+   request_attempt: int
+   source_placement_id: str
+   committed_token_count: int
+   committed_prefix_digest: str
+
+
+@dataclass(frozen=True)
+class KVShadowRelease:
+   """A7: entry -> source/standby: the request is terminal or fenced; release its shadow state."""
+
+   request_id: str
+   path_id: str
+   path_attempt: int
+   reason: str
+
+
+@dataclass(frozen=True)
 class RuntimeResult:
    success: bool
    payload: object = None
