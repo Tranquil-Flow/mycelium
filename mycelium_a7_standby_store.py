@@ -175,6 +175,12 @@ class StandbyShadowStore:
             kv_span=(0, entry.end),
          )
 
+   def stage_ids(self, request_key: str) -> tuple[str, ...]:
+      """The stages holding a shadow chain for one request."""
+
+      with self._lock:
+         return tuple(sorted(stage for key, stage in self._entries if key == request_key))
+
    def release_request(self, request_key: str) -> int:
       """Drop every shadow entry for one request; returns the bytes released."""
 

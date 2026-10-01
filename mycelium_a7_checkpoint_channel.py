@@ -302,6 +302,12 @@ def open_checkpoint(
    return binding, payload
 
 
+def signed_ack_statement(ack: Mapping[str, Any]) -> bytes:
+   """The exact bytes a standby signs for one acknowledgement."""
+
+   return _canonical(_signed_statement(SIGNED_ACK_PROTOCOL, {"ack": dict(ack)}))
+
+
 def sign_checkpoint_ack(signer: Ed25519EvidenceSigner, ack: Mapping[str, Any]) -> dict[str, Any]:
    """Wrap a validated private checkpoint ack with the standby's node signature."""
 
