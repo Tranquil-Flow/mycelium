@@ -261,3 +261,92 @@ def test_the_physical_gate_seam_refuses_without_execution_and_apple_is_deferred(
    with pytest.raises(a12.A12ContractError) as deferred:
       a12.run_mobile_physical_gate(platform_family="ipados", roles=("probe_contributor",), execution={})
    assert deferred.value.code == a12.APPLE_DEFERRED_CODE
+
+
+def _bundle(envelopes, build=BUILD):
+   return {
+      "protocol": "mycelium.mobile_evidence_export.v1",
+      "runtime_build_digest": build,
+      "observations": [
+         {"name": f"runtime-observation-{i:06d}.json", "envelope": e} for i, e in enumerate(envelopes, start=1)
+      ],
+   }
+
+
+def _load(evidence_dir, signer):
+   return gate_module.load_observations(
+      evidence_dir,
+      member_ref="node-phone",
+      build=BUILD,
+      member_key_digest=signer.verification_key_digest,
+      now_unix_ms=NOW,
+   )
+
+
+def test_an_exported_app_bundle_is_read_and_bound_to_the_build(tmp_path, signer):
+   envelopes = _envelopes(signer, count=3)
+   (tmp_path / "mycelium-evidence-1790000000000.json").write_text(json.dumps(_bundle(envelopes)))
+   loaded, records = _load(tmp_path, signer)
+   assert loaded == envelopes
+   assert len(records) == 3
+
+
+@pytest.mark.parametrize(
+   "mutate, code",
+   [
+      (lambda b: b.update(runtime_build_digest="sha256:" + "c" * 64), "mobile_evidence_export_build_mismatch"),
+      (lambda b: b.update(protocol="mycelium.other.v1"), "mobile_evidence_export_invalid"),
+      (lambda b: b.update(extra=True), "mobile_evidence_export_invalid"),
+      (lambda b: b["observations"].clear(), "mobile_evidence_export_invalid"),
+      (lambda b: b["observations"][0].update(name="member.key"), "mobile_evidence_export_invalid"),
+      (lambda b: b["observations"].append(dict(b["observations"][0])), "mobile_evidence_export_invalid"),
+   ],
+)
+def test_a_foreign_or_malformed_export_bundle_is_refused(tmp_path, signer, mutate, code):
+   bundle = _bundle(_envelopes(signer, count=2))
+   mutate(bundle)
+   (tmp_path / "mycelium-evidence-1.json").write_text(json.dumps(bundle))
+   with pytest.raises(gate_module.GateError) as refused:
+      _load(tmp_path, signer)
+   assert str(refused.value) == code
+
+
+def test_a_bundle_mixed_with_loose_observations_or_a_second_bundle_is_ambiguous(tmp_path, signer):
+   envelopes = _envelopes(signer, count=1)
+   (tmp_path / "mycelium-evidence-1.json").write_text(json.dumps(_bundle(envelopes)))
+   (tmp_path / "runtime-observation-000001.json").write_text(json.dumps(envelopes[0]))
+   with pytest.raises(gate_module.GateError) as refused:
+      _load(tmp_path, signer)
+   assert str(refused.value) == "mobile_evidence_export_ambiguous"
+   (tmp_path / "runtime-observation-000001.json").unlink()
+   (tmp_path / "mycelium-evidence-2.json").write_text(json.dumps(_bundle(envelopes)))
+   with pytest.raises(gate_module.GateError):
+      _load(tmp_path, signer)
+
+
+def test_the_build_digest_is_recomputable_from_the_source_commit_and_core_version():
+   commit = "a" * 40
+   digest = gate_module.mobile_build_digest(commit, "0.1.0")
+   assert digest.startswith("sha256:") and len(digest) == 71
+   assert digest == gate_module.mobile_build_digest(commit, "0.1.0")
+   assert digest != gate_module.mobile_build_digest("b" * 40, "0.1.0")
+   assert digest != gate_module.mobile_build_digest(commit, "0.1.1")
+   for bad in ("abc", "A" * 40, "g" * 40):
+      with pytest.raises(gate_module.GateError) as refused:
+         gate_module.mobile_build_digest(bad, "0.1.0")
+      assert str(refused.value) == "mobile_build_commit_invalid"
+
+
+def test_the_driver_refuses_a_build_digest_that_does_not_match_the_named_commit(tmp_path, capsys):
+   code = gate_module.main(
+      [
+         "--seed-state-root", str(tmp_path / "seed"),
+         "--runtime-build-digest", BUILD,
+         "--build-commit", "a" * 40,
+         "--family-ref", FAMILY,
+         "--evidence-dir", str(tmp_path / "evidence"),
+         "--out", str(tmp_path / "out"),
+      ]
+   )
+   assert code == 2
+   assert "mobile_build_digest_mismatch" in capsys.readouterr().err

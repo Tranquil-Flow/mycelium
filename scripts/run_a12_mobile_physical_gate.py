@@ -27,8 +27,11 @@ fenced and a restart resumes with a new one) and ``thermal_window`` (a sustained
 observation window; if the device crosses the thermal ceiling it must stop
 executing, otherwise the case is recorded as not executed rather than passed).
 
-After the gate, the operator exports the app's sealed observations
-(``<app data>/node/evidence/runtime-observation-*.json``) to ``--evidence-dir``;
+After the gate, the operator exports the app's sealed observations with the app's
+own "Export evidence" share (one ``mycelium-evidence-*.json`` bundle, protocol
+``mycelium.mobile_evidence_export.v1``) into ``--evidence-dir``; loose
+``runtime-observation-*.json`` copies are still accepted, never mixed with a bundle.
+``--build-commit`` recomputes the release build digest from its source commit;
 the driver verifies each envelope against the enrolled member key, binds their
 digests into the owner-private gate bundle and decides the role with
 ``qualify_mobile_operation``.
@@ -39,8 +42,10 @@ digests into the owner-private gate bundle and decides the role with
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -59,6 +64,9 @@ GATE_PROTOCOL = "mycelium.a12_mobile_physical_gate_run.v1"
 ANDROID_CLASS = "android_native_iroh"
 THERMAL_CEILING_CELSIUS = 45.0
 POLL_SECONDS = 2.0
+EXPORT_PROTOCOL = "mycelium.mobile_evidence_export.v1"
+BUILD_PROTOCOL = "mycelium.mobile_runtime_build.v1"
+OBSERVATION_NAME = re.compile(r"runtime-observation-[0-9]{6}\.json")
 
 
 class GateError(RuntimeError):
@@ -273,13 +281,61 @@ class Gate:
       self._record(self.negatives, "thermal_window", "failed_closed" if drained else "violated", window_ms=covered)
 
 
+def mobile_build_digest(source_commit: str, core_version: str) -> str:
+   """The build identity a release node app stamps (``MYCELIUM_NODE_BUILD_DIGEST``).
+
+   Recomputable by anyone holding the source commit the APK was built from.
+   """
+   if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+      raise GateError("mobile_build_commit_invalid")
+   document = {"protocol": BUILD_PROTOCOL, "source_commit": source_commit, "mobile_core_version": core_version}
+   canonical = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+   return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def mobile_core_version() -> str:
+   manifest = (REPO_ROOT / "native" / "mobile_core" / "Cargo.toml").read_text("utf-8")
+   match = re.search(r'^version\s*=\s*"([^"]+)"', manifest, re.MULTILINE)
+   if match is None:
+      raise GateError("mobile_core_version_unknown")
+   return match.group(1)
+
+
+def _exported_envelopes(path: Path, build: str) -> list[dict[str, Any]]:
+   """Unpack the app's shared export bundle; only signed runtime observations pass."""
+   bundle = json.loads(path.read_text("utf-8"))
+   observations = bundle.get("observations") if isinstance(bundle, dict) else None
+   if (
+      not isinstance(bundle, dict)
+      or set(bundle) != {"protocol", "runtime_build_digest", "observations"}
+      or bundle["protocol"] != EXPORT_PROTOCOL
+      or not isinstance(observations, list)
+      or not observations
+   ):
+      raise GateError("mobile_evidence_export_invalid")
+   if bundle["runtime_build_digest"] != build:
+      raise GateError("mobile_evidence_export_build_mismatch")
+   names = [item.get("name") if isinstance(item, dict) else None for item in observations]
+   if (
+      any(not isinstance(name, str) or not OBSERVATION_NAME.fullmatch(name) for name in names)
+      or len(set(names)) != len(names)
+      or any(set(item) != {"name", "envelope"} for item in observations)
+   ):
+      raise GateError("mobile_evidence_export_invalid")
+   return [item["envelope"] for item in sorted(observations, key=lambda item: item["name"])]
+
+
 def load_observations(
    evidence_dir: Path, *, member_ref: str, build: str, member_key_digest: str, now_unix_ms: float
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-   envelopes = [
-      json.loads(path.read_text("utf-8"))
-      for path in sorted(Path(evidence_dir).glob("runtime-observation-*.json"))
-   ]
+   bundles = sorted(Path(evidence_dir).glob("mycelium-evidence-*.json"))
+   loose = sorted(Path(evidence_dir).glob("runtime-observation-*.json"))
+   if len(bundles) > 1 or (bundles and loose):
+      raise GateError("mobile_evidence_export_ambiguous")
+   if bundles:
+      envelopes = _exported_envelopes(bundles[0], build)
+   else:
+      envelopes = [json.loads(path.read_text("utf-8")) for path in loose]
    records = [
       a12.observe_mobile_runtime(
          member_ref=member_ref,
@@ -316,8 +372,9 @@ def run_gate(
    gate.network_loss()
    gate.process_death()
    gate.operator(
-      "Export the app's sealed evidence (node/evidence/runtime-observation-*.json) to the "
-      "evidence directory now; the gate itself is over, so a cable may be used for the copy."
+      "Export the app's sealed evidence now: tap 'Export evidence' in the node app and save the shared "
+      "mycelium-evidence-*.json into the evidence directory (the gate itself is over, so a cable may be used "
+      "for the copy)."
    )
    envelopes, observations = evidence_loader(member_key_digest)
    gate.positives["native_evidence_published"] = {
@@ -384,6 +441,9 @@ def parser() -> argparse.ArgumentParser:
    root.add_argument("--role", choices=("probe_contributor", "qualified_model_stage"), default="probe_contributor")
    root.add_argument("--member-key-digest", help="optional cross-check of the seed-recorded member key")
    root.add_argument("--runtime-build-digest", required=True)
+   root.add_argument(
+      "--build-commit", help="source commit the APK was built from; the build digest must be recomputable from it"
+   )
    root.add_argument("--family-ref", required=True)
    root.add_argument("--evidence-dir", type=Path, required=True)
    root.add_argument("--route-peer-command")
@@ -394,6 +454,15 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
    arguments = parser().parse_args(argv)
+   if arguments.build_commit is not None:
+      try:
+         expected = mobile_build_digest(arguments.build_commit, mobile_core_version())
+      except GateError as error:
+         print(json.dumps({"error": str(error)}), file=sys.stderr)
+         return 2
+      if expected != arguments.runtime_build_digest:
+         print(json.dumps({"error": "mobile_build_digest_mismatch", "expected": expected}), file=sys.stderr)
+         return 2
    gate = Gate(
       authority=SeedAuthority(arguments.seed_state_root),
       operator=_operator_prompt,
