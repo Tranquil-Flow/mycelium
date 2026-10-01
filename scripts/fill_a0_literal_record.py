@@ -30,6 +30,27 @@ EXECUTED = "executed_on_candidate"
 RESULTS = frozenset({"passed", "failed"})
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+PREPARED_CLAIM_BOUNDARY = (
+    "Structure only. Nothing in this record has been executed on any candidate; every "
+    "result is null. It does not claim A0 is complete, does not amend the A0 specification "
+    "or the governing plan, adds no register row, and changes no audit, ledger, manifest or "
+    "checklist."
+)
+PREPARED_REMAINING = (
+    "freeze the final candidate and bind candidate.commit/clean_tree",
+    "execute 7.4 negative repository copies on that candidate and bind results",
+    "execute 7.5 three-engine browser closeout on that candidate and bind receipts",
+    "bind L2 GREEN for that candidate",
+    "resolve R4 and bind the closing commit",
+)
+EXECUTED_CLAIM_BOUNDARY = (
+    "Every A0 literal obligation was executed on the one bound candidate, with its real "
+    "result and the receipt's name and digest. It does not claim A0 is complete (owner "
+    "ruling R4 and the closing commit remain), does not amend the A0 specification or the "
+    "governing plan, adds no register row, and changes no audit, ledger, manifest or "
+    "checklist."
+)
+EXECUTED_REMAINING = ("resolve R4 and bind the closing commit",)
 
 
 def _fail(code: str) -> None:
@@ -37,6 +58,11 @@ def _fail(code: str) -> None:
 
 
 def _validate_prepared(record: Mapping[str, Any]) -> None:
+    if (
+        record["claim_boundary"] != PREPARED_CLAIM_BOUNDARY
+        or list(record["remaining_before_complete"]) != list(PREPARED_REMAINING)
+    ):
+        _fail("a0_record_claim_boundary_stale")
     candidate = record["candidate"]
     if candidate["commit"] is not None or candidate["clean_tree"] is not None:
         _fail("a0_record_prepared_state_claims_a_candidate")
@@ -48,6 +74,11 @@ def _validate_prepared(record: Mapping[str, Any]) -> None:
 
 
 def _validate_executed(record: Mapping[str, Any]) -> None:
+    if (
+        record["claim_boundary"] != EXECUTED_CLAIM_BOUNDARY
+        or list(record["remaining_before_complete"]) != list(EXECUTED_REMAINING)
+    ):
+        _fail("a0_record_claim_boundary_stale")
     candidate = record["candidate"]
     if not isinstance(candidate.get("commit"), str) or not COMMIT.fullmatch(candidate["commit"]):
         _fail("a0_record_candidate_invalid")
@@ -87,6 +118,26 @@ def validate_record(record: Mapping[str, Any]) -> None:
         _fail("a0_record_atomic_commit_half_bound")
 
 
+def prepared_form(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the prepared structure of a record in either state (for re-checking the fill)."""
+
+    prepared = copy.deepcopy(dict(record))
+    prepared["state"] = PREPARED
+    prepared["claim_boundary"] = PREPARED_CLAIM_BOUNDARY
+    prepared["remaining_before_complete"] = list(PREPARED_REMAINING)
+    prepared["candidate"] = {
+        **prepared["candidate"],
+        "commit": None,
+        "clean_tree": None,
+        "bound_at_unix_ms": None,
+    }
+    for item in prepared["obligations"]:
+        item["executed_on_candidate"] = False
+        item["result"] = None
+        item["evidence"] = None
+    return prepared
+
+
 def fill_record(
     record: Mapping[str, Any],
     *,
@@ -103,6 +154,8 @@ def fill_record(
         _fail("a0_record_results_incomplete")
     filled = copy.deepcopy(dict(record))
     filled["state"] = EXECUTED
+    filled["claim_boundary"] = EXECUTED_CLAIM_BOUNDARY
+    filled["remaining_before_complete"] = list(EXECUTED_REMAINING)
     filled["candidate"] = {
         **filled["candidate"],
         "commit": candidate,

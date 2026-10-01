@@ -169,7 +169,7 @@ def test_the_cli_refuses_unless_head_is_the_candidate_on_a_clean_tree(tmp_path: 
     repo = tmp_path / "repo"
     record_dir = repo / "docs" / "handover"
     record_dir.mkdir(parents=True)
-    (record_dir / RECORD.name).write_text(RECORD.read_text("utf-8"), encoding="utf-8")
+    (record_dir / RECORD.name).write_text(json.dumps(_record_prepared()), encoding="utf-8")
     git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     subprocess.run([*git, "add", "-A"], check=True)
@@ -191,7 +191,33 @@ def test_the_cli_refuses_unless_head_is_the_candidate_on_a_clean_tree(tmp_path: 
 
 
 def _record_prepared() -> dict:
-    record = _record()
-    if record["state"] != "prepared_not_executed":
-        pytest.skip("the committed record is no longer the prepared structure")
+    # The fill tests run against the prepared form whether or not the committed record
+    # has been executed, so they keep their coverage after the real fill lands.
+    record = fill.prepared_form(_record())
+    fill.validate_record(record)
     return record
+
+
+def test_the_prepared_form_of_the_committed_record_claims_nothing():
+    record = _record_prepared()
+    assert record["state"] == "prepared_not_executed"
+    assert record["claim_boundary"] == fill.PREPARED_CLAIM_BOUNDARY
+    assert record["remaining_before_complete"] == list(fill.PREPARED_REMAINING)
+    assert record["candidate"]["commit"] is None
+    assert all(item["result"] is None for item in record["obligations"])
+
+
+def test_an_executed_record_states_its_own_boundary(tmp_path: Path):
+    filled = fill.fill_record(_record_prepared(), candidate=CANDIDATE,
+                              results=_results(tmp_path), bound_at_unix_ms=1)
+    assert filled["claim_boundary"] == fill.EXECUTED_CLAIM_BOUNDARY
+    assert filled["remaining_before_complete"] == list(fill.EXECUTED_REMAINING)
+    # A record that says "nothing has been executed" while carrying results is refused.
+    filled["claim_boundary"] = fill.PREPARED_CLAIM_BOUNDARY
+    with pytest.raises(ValueError, match="a0_record_claim_boundary_stale"):
+        fill.validate_record(filled)
+    filled = fill.fill_record(_record_prepared(), candidate=CANDIDATE,
+                              results=_results(tmp_path), bound_at_unix_ms=1)
+    filled["remaining_before_complete"] = list(fill.PREPARED_REMAINING)
+    with pytest.raises(ValueError, match="a0_record_claim_boundary_stale"):
+        fill.validate_record(filled)
