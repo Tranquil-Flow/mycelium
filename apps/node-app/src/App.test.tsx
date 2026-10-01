@@ -186,4 +186,23 @@ describe('node app', () => {
     fireEvent.click(screen.getByRole('button', { name: 'serving' }));
     expect(screen.getByText(/no longer a swarm member/)).toBeInTheDocument();
   });
+
+  it('keeps settings and evidence export reachable while pairing failed or is pending', async () => {
+    const { api } = fakeApi({
+      status: vi.fn(async () => ({ ...base, phase: 'pairing' })),
+      pair: vi.fn(async () => {
+        throw 'pairing_channel_unreachable:HTTP status server error (502 Bad Gateway)';
+      }),
+    });
+    render(<App api={api} />);
+    const scan = await screen.findByRole('button', { name: 'Scan invite QR' });
+    await waitFor(() => expect(scan).toBeEnabled());
+    fireEvent.click(scan);
+    expect(await screen.findByRole('alert')).toHaveTextContent('502 Bad Gateway');
+    fireEvent.click(screen.getByRole('button', { name: 'settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Export evidence' }));
+    await waitFor(() => expect(api.exportEvidence).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'status' }));
+    expect(screen.getByRole('button', { name: 'Scan invite QR' })).toBeInTheDocument();
+  });
 });

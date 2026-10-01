@@ -407,11 +407,17 @@ impl NodeCore {
         if channel["protocol"] != PAIRING_CHANNEL_PROTOCOL {
             return Err(self.fail(nerr("pairing_channel_invalid")));
         }
-        let url = channel["pairing_url"].as_str().ok_or_else(|| nerr("pairing_channel_invalid"))?.to_owned();
+        let url = channel["pairing_url"].as_str().ok_or_else(|| self.fail(nerr("pairing_channel_invalid")))?.to_owned();
         let session = PairingSession::new(&self.identity, device_ref, now_s(), 300, None)
             .map_err(|e| self.fail(nerr(e.to_string())))?;
         let request = session.request.clone();
-        self.shared.lock().unwrap().status.phase = "pairing".into();
+        // A failed attempt puts the node back where it was (paired, joined, ...),
+        // never stuck in `pairing`.
+        let previous = std::mem::replace(&mut self.shared.lock().unwrap().status.phase, "pairing".into());
+        let abandon = |e: NodeError| {
+            self.shared.lock().unwrap().status.phase = previous.clone();
+            self.fail(e)
+        };
         let http = self.http.clone();
         let handoff: Value = self
             .rt
@@ -419,10 +425,11 @@ impl NodeCore {
                 let resp = http.post(&url).json(&json!({"request": request})).send().await?;
                 resp.error_for_status()?.json::<Value>().await
             })
-            .map_err(|e| self.fail(nerr(format!("pairing_channel_unreachable:{}", e.without_url()))))?;
+            .map_err(|e| abandon(nerr(format!("pairing_channel_unreachable:{}", e.without_url()))))?;
         let handoff = handoff.get("handoff").cloned().unwrap_or(handoff);
-        let payload = session.decrypt(&handoff, now_s()).map_err(|e| self.fail(nerr(e.to_string())))?;
-        write_private(&self.data_dir.join("invitation.json"), &serde_json::to_vec(&payload).unwrap())?;
+        let payload = session.decrypt(&handoff, now_s()).map_err(|e| abandon(nerr(e.to_string())))?;
+        write_private(&self.data_dir.join("invitation.json"), &serde_json::to_vec(&payload).unwrap())
+            .map_err(abandon)?;
         let mut s = self.shared.lock().unwrap();
         s.invitation = Some(payload);
         s.status.phase = "paired".into();

@@ -62,3 +62,29 @@ fn evidence_export_writes_one_private_bundle_of_the_sealed_observations() {
     core.shutdown();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_failed_pairing_returns_the_node_to_its_previous_phase() {
+    use base64::Engine;
+    let dir = std::env::temp_dir().join(format!("mycelium-node-pairfail-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    // A closed loopback port: the pairing POST fails like a 502 from a closed channel.
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = closed.local_addr().unwrap().port();
+    drop(closed);
+    let channel = serde_json::json!({
+        "expires_at": 4_000_000_000u64,
+        "pairing_url": format!("http://127.0.0.1:{port}/pair"),
+        "protocol": "mycelium.pairing_channel.v1",
+    });
+    let bytes = mycelium_mobile_core::canonical::to_bytes(&channel).unwrap();
+    let qr = format!("mycelium:{}", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes));
+    let core = NodeCore::open(&dir, Reachability::LocalOnly).unwrap();
+    let err = core.pair_with_channel_qr(&qr, "dev-1").unwrap_err().0;
+    assert!(err.starts_with("pairing_channel_unreachable:"), "{err}");
+    let s = core.status();
+    assert_eq!(s.phase, "unpaired");
+    assert_eq!(s.last_error.as_deref(), Some(err.as_str()));
+    core.shutdown();
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -83,68 +83,69 @@ export function App({ api = tauriApi }: { api?: NodeApi }) {
       )}
       {busy && <p className="busy">{busy}</p>}
 
-      {needsPairing ? (
-        <section className="card" aria-label="onboarding">
-          <h2>Join a swarm</h2>
-          <p>Scan the invite QR code shown by the swarm owner. That is all.</p>
-          <button
-            className="primary"
-            disabled={!!busy || !status}
-            onClick={() =>
-              run('Scanning…', async () => {
-                const qr = await api.scanQr();
-                if (qr) await pairAndJoin(qr);
-              })
-            }
-          >
-            Scan invite QR
+      {/* Tabs stay reachable in every phase: a failed or pending pairing must
+          never hide Settings (evidence export) or the serving controls. */}
+      <nav className="tabs">
+        {(['status', 'serving', 'settings'] as Tab[]).map((t) => (
+          <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)}>
+            {t}
           </button>
-          <details>
-            <summary>Paste an invite code instead</summary>
-            <textarea
-              aria-label="invite code"
-              value={manual}
-              onChange={(e) => setManual(e.target.value)}
-              rows={3}
-            />
-            <button disabled={!!busy || !manual.startsWith('mycelium:')} onClick={() => pairAndJoin(manual)}>
-              Pair
-            </button>
-          </details>
-        </section>
-      ) : (
-        <>
-          <nav className="tabs">
-            {(['status', 'serving', 'settings'] as Tab[]).map((t) => (
-              <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)}>
-                {t}
-              </button>
-            ))}
-          </nav>
-          {tab === 'status' && status && <StatusCard status={status} onJoin={() => run('Joining…', async () => setStatus(await api.join()))} busy={!!busy} />}
-          {tab === 'serving' && (
-            <ServingCard
-              service={service}
-              status={status}
-              busy={!!busy}
-              onStart={() => run('Starting…', async () => setService(await api.servingStart()))}
-              onStop={() =>
-                run('Stopping…', async () => {
-                  setStatus(await api.drain());
-                  setService(await api.servingStop());
+        ))}
+      </nav>
+      {tab === 'status' &&
+        (needsPairing ? (
+          <section className="card" aria-label="onboarding">
+            <h2>Join a swarm</h2>
+            <p>Scan the invite QR code shown by the swarm owner. That is all.</p>
+            <button
+              className="primary"
+              disabled={!!busy || !status}
+              onClick={() =>
+                run('Scanning…', async () => {
+                  const qr = await api.scanQr();
+                  if (qr) await pairAndJoin(qr);
                 })
               }
-            />
-          )}
-          {tab === 'settings' && status && (
-            <SettingsCard
-              status={status}
-              busy={!!busy}
-              exported={exported}
-              onExport={() => run('Exporting…', async () => setExported(await api.exportEvidence()))}
-            />
-          )}
-        </>
+            >
+              Scan invite QR
+            </button>
+            <details>
+              <summary>Paste an invite code instead</summary>
+              <textarea
+                aria-label="invite code"
+                value={manual}
+                onChange={(e) => setManual(e.target.value)}
+                rows={3}
+              />
+              <button disabled={!!busy || !manual.startsWith('mycelium:')} onClick={() => pairAndJoin(manual)}>
+                Pair
+              </button>
+            </details>
+          </section>
+        ) : (
+          status && <StatusCard status={status} onJoin={() => run('Joining…', async () => setStatus(await api.join()))} busy={!!busy} />
+        ))}
+      {tab === 'serving' && (
+        <ServingCard
+          service={service}
+          status={status}
+          busy={!!busy}
+          onStart={() => run('Starting…', async () => setService(await api.servingStart()))}
+          onStop={() =>
+            run('Stopping…', async () => {
+              setStatus(await api.drain());
+              setService(await api.servingStop());
+            })
+          }
+        />
+      )}
+      {tab === 'settings' && status && (
+        <SettingsCard
+          status={status}
+          busy={!!busy}
+          exported={exported}
+          onExport={() => run('Exporting…', async () => setExported(await api.exportEvidence()))}
+        />
       )}
     </main>
   );
@@ -159,7 +160,7 @@ function ago(ts: number | null): string {
 /** What the membership really is right now (the seed-signed lease decides). */
 function membershipText(status: NodeStatus): string {
   if (status.phase === 'revoked') return 'revoked by the swarm owner';
-  if (status.phase === 'membership_lost') return 'ended — scan a new invite to rejoin';
+  if (status.phase === 'membership_lost') return 'ended by the seed';
   if (!status.member_generation) return '—';
   if (status.lease_fresh) return `generation ${status.member_generation} · lease held`;
   return `generation ${status.member_generation} · lease lost, reconnecting…`;
