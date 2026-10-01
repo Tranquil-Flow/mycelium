@@ -48,6 +48,8 @@ import threading
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from mycelium_router.contracts import (
    HopHeader,
    ManifestLocked,
@@ -579,6 +581,48 @@ def test_one_member_completion_failure_is_scoped_to_that_member(
       assert transport.fatal_error is None
    finally:
       router.hold.set()
+      transport.close()
+
+
+class _ThreadRecordingRuntime(_GateRuntime):
+   def __init__(self):
+      super().__init__()
+      self.threads = []
+
+   def execute_batch(self, batch):
+      self.threads.append(threading.current_thread())
+      return super().execute_batch(batch)
+
+
+@pytest.mark.parametrize("policy", ["candidate", "baseline"])
+def test_a_hop_dispatched_off_the_dispatcher_thread_is_drained_by_the_dispatcher(
+   runtime_case,  # noqa: F811 - pytest fixture
+   policy,
+):
+   """A local hop dispatched by another thread (an entry's request worker, say)
+   is only queued there.  The drain, and every member it executes and forwards,
+   runs on the dispatcher, so the caller is never trapped executing other
+   requests' hops or waiting on their remote deliveries."""
+
+   runtime = _ThreadRecordingRuntime()
+   hub, transport, router = _start(runtime_case, runtime, ("a",))
+   _policy(router, policy)
+   entry_node, _ = _nodes(runtime_case)
+   runtime.block = True
+   try:
+      started = time.monotonic()
+      transport._dispatch(
+         decode_frame(encode_frame(_decode_header(runtime_case, "a"), b"hidden")),
+         source_node_id=entry_node,
+      )
+      assert time.monotonic() - started < 0.5
+      assert runtime.entered.wait(5)
+      assert runtime.threads == [transport._dispatcher_thread]
+      runtime.release.set()
+      _wait(lambda: set(_tokens(hub)) == {"request-a"})
+      assert transport.fatal_error is None
+   finally:
+      runtime.release.set()
       transport.close()
 
 

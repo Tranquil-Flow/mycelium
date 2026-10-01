@@ -92,6 +92,11 @@ _NON_DELIVERED_SCOPED_ERRORS = frozenset(
 )
 
 
+#: Queued on the dispatch queue (never sent on the wire) to make the dispatcher
+#: take over hops that another thread queued for a runtime batch.
+_HOP_BATCH_WAKE = object()
+
+
 class IrohTransportError(RuntimeError):
     """Fail-closed adapter error with a stable code."""
 
@@ -597,9 +602,12 @@ class IrohTransport:
         self._receiver_thread: threading.Thread | None = None
         self._dispatcher_thread: threading.Thread | None = None
         self._forward_thread: threading.Thread | None = None
+        # Received frames, plus at most one ``_HOP_BATCH_WAKE`` marker (never on
+        # the wire), which has its own slot so frames keep their full capacity.
         self._dispatch_queue: Queue[
-            tuple[bytes, str, int, bytes, bytes, DecodedFrame | None]
-        ] = Queue(maxsize=queue_capacity)
+            tuple[bytes, str, int, bytes, bytes, DecodedFrame | None] | object
+        ] = Queue(maxsize=queue_capacity + 1)
+        self._hop_wake_pending = False
         self._forward_queue: Queue[
             tuple[str, bytes, str | None, str | None, int | None]
         ] = Queue(maxsize=queue_capacity)
@@ -641,6 +649,9 @@ class IrohTransport:
             OrderedDict()
         )
         self._dispatcher_phase = "idle"
+        # True only on the dispatcher thread while it drains runtime batches:
+        # every forward a drain produces then goes through the forward worker.
+        self._draining_hop_batches = False
         self._last_dispatch_error: dict[str, str] | None = None
         # Monotonic end of the open hop collection window, or None (dispatcher
         # thread only; see ``_queue_hop_for_batch``).
@@ -2093,17 +2104,26 @@ class IrohTransport:
     def _dispatch_loop(self) -> None:
         while not self._stop.is_set():
             try:
-                (
-                    message_id,
-                    source_node_id,
-                    delivery_generation,
-                    _frame,
-                    digest,
-                    decoded,
-                ) = self._dispatch_queue.get(timeout=self._dispatch_wait_seconds())
+                item = self._dispatch_queue.get(timeout=self._dispatch_wait_seconds())
             except Empty:
                 self._service_queued_hops()
                 continue
+            if item is _HOP_BATCH_WAKE:
+                with self._state_lock:
+                    self._hop_wake_pending = False
+                try:
+                    self._take_over_queued_hops()
+                finally:
+                    self._dispatch_queue.task_done()
+                continue
+            (
+                message_id,
+                source_node_id,
+                delivery_generation,
+                _frame,
+                digest,
+                decoded,
+            ) = item
             try:
                 current_generation = self._peers.lookup(source_node_id).generation
                 if delivery_generation != current_generation:
@@ -2491,7 +2511,29 @@ class IrohTransport:
             return self.poll_interval_seconds
         return max(0.0, min(self.poll_interval_seconds, deadline - time.monotonic()))
 
+    @staticmethod
+    def _newly_queued(result: Any) -> bool:
+        return getattr(result, "disposition", None) == "QUEUED" and not getattr(
+            result, "reason", None
+        )
+
+    def _wake_dispatcher_for_hops(self) -> None:
+        with self._state_lock:
+            if self._hop_wake_pending:
+                return
+            self._hop_wake_pending = True
+        try:
+            self._dispatch_queue.put_nowait(_HOP_BATCH_WAKE)
+        except Full:
+            # The dispatcher has frames to take and services queued hops after
+            # each of them, so no marker is needed.
+            with self._state_lock:
+                self._hop_wake_pending = False
+
     def _pump_hop_batches(self, router: Any) -> None:
+        on_dispatcher = threading.current_thread() is self._dispatcher_thread
+        if on_dispatcher:
+            self._draining_hop_batches = True
         try:
             router.pump_ready_batches(on_item_error=self._hop_batch_member_failed)
         except BaseException as error:
@@ -2504,6 +2546,9 @@ class IrohTransport:
                 if isinstance(error, IrohTransportError)
                 else IrohTransportError("router_batch_drain_failed", str(error))
             )
+        finally:
+            if on_dispatcher:
+                self._draining_hop_batches = False
 
     def _hop_batch_member_failed(
         self,
@@ -2558,6 +2603,18 @@ class IrohTransport:
         except BaseException:
             # The scoped incident above is the durable failure signal.
             pass
+
+    def _take_over_queued_hops(self) -> None:
+        """Dispatcher side of ``_wake_dispatcher_for_hops``.
+
+        Hops another thread queued get the same collection decision as a hop
+        the dispatcher queued itself (cap, full batch, partners, window).
+        """
+
+        router = self._batching_router(self._router)
+        if router is None or not router.pending_batch_hops():
+            return
+        self._queue_hop_for_batch(router)
 
     def _service_queued_hops(self) -> None:
         """Dispatcher-thread drain between frames and on idle polls.
@@ -2642,15 +2699,22 @@ class IrohTransport:
                     source_node_id=source_node_id,
                 )
                 return
-            batching.enqueue_hop(
+            queued = batching.enqueue_hop(
                 message,
                 decoded.payload,
                 source_node_id=source_node_id,
             )
+            if not self._newly_queued(queued):
+                # A replay of a hop that is already queued or already done (an
+                # entry re-driving its next hop, say) adds no work to drain.
+                return
             if threading.current_thread() is self._dispatcher_thread:
                 self._queue_hop_for_batch(batching)
             else:
-                self._pump_hop_batches(batching)
+                # Drains run only on the dispatcher.  Another thread (an entry's
+                # request worker dispatching its own local hop, say) must never
+                # end up executing and forwarding other requests' queued hops.
+                self._wake_dispatcher_for_hops()
             return
         if isinstance(message, ManifestLocked):
             entry_node = self._node_for_placement(
@@ -3120,6 +3184,12 @@ class IrohTransport:
                     "dispatching:HopHeader",
                     "dispatching:TokenEvent",
                 }
+            # A dispatcher draining runtime batches between frames must not wait
+            # for a peer's dispatch ACK either: the peer may be waiting on it.
+            response_would_cycle = response_would_cycle or (
+                self._draining_hop_batches
+                and threading.current_thread() is self._dispatcher_thread
+            )
             defer_remote_forward = ordered_forward_pending or response_would_cycle
         if (
             threading.current_thread() is self._dispatcher_thread
