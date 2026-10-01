@@ -23,6 +23,16 @@ struct StartArgs<'a> {
     detail: &'a str,
 }
 
+#[derive(Serialize)]
+struct ShareArgs<'a> {
+    path: &'a str,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ShareResult {
+    pub shared: bool,
+}
+
 pub struct NodeService<R: Runtime> {
     #[cfg(target_os = "android")]
     handle: tauri::plugin::PluginHandle<R>,
@@ -75,6 +85,22 @@ impl<R: Runtime> NodeService<R> {
                 uptime_ms: 0,
                 mode: "foreground_only".into(),
             })
+        }
+    }
+
+    /// Offer one exported evidence bundle (under the app cache) to the system share
+    /// sheet. Android only; elsewhere the bundle stays where it was written.
+    pub fn share(&self, path: &str) -> Result<ShareResult, String> {
+        #[cfg(target_os = "android")]
+        {
+            self.handle
+                .run_mobile_plugin("share", ShareArgs { path })
+                .map_err(|e| e.to_string())
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = ShareArgs { path };
+            Ok(ShareResult { shared: false })
         }
     }
 

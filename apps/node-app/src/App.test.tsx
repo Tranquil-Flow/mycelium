@@ -38,6 +38,7 @@ function fakeApi(overrides: Partial<NodeApi> = {}) {
       push = h;
       return () => undefined;
     }),
+    exportEvidence: vi.fn(async () => ({ shared: true, observations: 3 })),
     scanQr: vi.fn(async () => 'mycelium:QRCODE'),
     onDeepLink: vi.fn(async (h) => {
       link = h;
@@ -107,5 +108,28 @@ describe('node app', () => {
     render(<App api={api} />);
     await act(async () => push({ ...base, phase: 'joined', member_generation: 1 }));
     expect(await screen.findByText(/no \(placement/)).toBeInTheDocument();
+  });
+  it('exports the sealed evidence through the share sheet from settings', async () => {
+    const { api } = fakeApi({ status: vi.fn(async () => ({ ...base, phase: 'joined', member_generation: 1 })) });
+    render(<App api={api} />);
+    await screen.findByRole('button', { name: 'settings' });
+    fireEvent.click(screen.getByRole('button', { name: 'settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Export evidence' }));
+    await waitFor(() => expect(api.exportEvidence).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/3 observations shared/)).toBeInTheDocument();
+  });
+
+  it('shows the export refusal code when there is nothing sealed yet', async () => {
+    const { api } = fakeApi({
+      status: vi.fn(async () => ({ ...base, phase: 'joined', member_generation: 1 })),
+      exportEvidence: vi.fn(async () => {
+        throw 'mobile_evidence_export_empty';
+      }),
+    });
+    render(<App api={api} />);
+    await screen.findByRole('button', { name: 'settings' });
+    fireEvent.click(screen.getByRole('button', { name: 'settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Export evidence' }));
+    expect(await screen.findByText(/mobile_evidence_export_empty/)).toBeInTheDocument();
   });
 });

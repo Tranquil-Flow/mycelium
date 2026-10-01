@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { deviceRef, type NodeApi, type NodeStatus, type ServiceStatus, tauriApi } from './api';
+import { deviceRef, type EvidenceExport, type NodeApi, type NodeStatus, type ServiceStatus, tauriApi } from './api';
 
 type Tab = 'status' | 'serving' | 'settings';
 
@@ -11,6 +11,7 @@ export function App({ api = tauriApi }: { api?: NodeApi }) {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('status');
   const [manual, setManual] = useState('');
+  const [exported, setExported] = useState<EvidenceExport | null>(null);
   const statusRef = useRef<NodeStatus | null>(null);
   statusRef.current = status;
 
@@ -135,7 +136,14 @@ export function App({ api = tauriApi }: { api?: NodeApi }) {
               }
             />
           )}
-          {tab === 'settings' && status && <SettingsCard status={status} />}
+          {tab === 'settings' && status && (
+            <SettingsCard
+              status={status}
+              busy={!!busy}
+              exported={exported}
+              onExport={() => run('Exporting…', async () => setExported(await api.exportEvidence()))}
+            />
+          )}
         </>
       )}
     </main>
@@ -213,7 +221,17 @@ function ServingCard({
   );
 }
 
-function SettingsCard({ status }: { status: NodeStatus }) {
+function SettingsCard({
+  status,
+  busy,
+  exported,
+  onExport,
+}: {
+  status: NodeStatus;
+  busy: boolean;
+  exported: EvidenceExport | null;
+  onExport: () => void;
+}) {
   return (
     <section className="card" aria-label="settings">
       <dl>
@@ -224,6 +242,14 @@ function SettingsCard({ status }: { status: NodeStatus }) {
         <dt>Node id</dt>
         <dd className="mono">{status.endpoint_id.slice(0, 16)}…</dd>
       </dl>
+      <button disabled={busy} onClick={onExport}>
+        Export evidence
+      </button>
+      {exported && (
+        <p className="hint">
+          {exported.observations} observations {exported.shared ? 'shared' : 'saved'}.
+        </p>
+      )}
       <p className="hint">Uninstalling the app removes the node identity from this device.</p>
     </section>
   );

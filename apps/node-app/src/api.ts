@@ -25,6 +25,9 @@ export type NodeStatus = {
 
 export type ServiceStatus = { running: boolean; uptime_ms: number; mode: string };
 
+/** Result of sharing the sealed evidence bundle (`mycelium.mobile_evidence_export.v1`). */
+export type EvidenceExport = { shared: boolean; observations: number };
+
 export interface NodeApi {
   status(): Promise<NodeStatus>;
   pair(qr: string, deviceRef: string): Promise<NodeStatus>;
@@ -33,6 +36,7 @@ export interface NodeApi {
   servingStart(): Promise<ServiceStatus>;
   servingStop(): Promise<ServiceStatus>;
   servingStatus(): Promise<ServiceStatus>;
+  exportEvidence(): Promise<EvidenceExport>;
   onStatus(handler: (s: NodeStatus) => void): Promise<() => void>;
   scanQr(): Promise<string | null>;
   onDeepLink(handler: (url: string) => void): Promise<() => void>;
@@ -46,6 +50,7 @@ export const tauriApi: NodeApi = {
   servingStart: () => invoke('serving_start'),
   servingStop: () => invoke('serving_stop'),
   servingStatus: () => invoke('serving_status'),
+  exportEvidence: () => invoke('node_export_evidence'),
   onStatus: (handler) => listen<NodeStatus>('node://status', (e) => handler(e.payload)),
   async scanQr() {
     const scanner = await import('@tauri-apps/plugin-barcode-scanner');

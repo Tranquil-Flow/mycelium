@@ -78,6 +78,22 @@ fn serving_stop(svc: State<'_, NodeService<Wry>>) -> Result<ServiceStatus, Strin
     svc.stop()
 }
 
+#[derive(serde::Serialize)]
+struct EvidenceExport {
+    shared: bool,
+    observations: usize,
+}
+
+/// Seal the current observations into one export bundle under the app cache and
+/// hand it to the share sheet; only signed runtime observations leave the device.
+#[tauri::command]
+fn node_export_evidence(app: AppHandle, svc: State<'_, NodeService<Wry>>) -> Result<EvidenceExport, String> {
+    let out = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("exports");
+    let (path, observations) = core()?.export_evidence(&out).map_err(|e| e.0)?;
+    let shared = svc.share(&path.to_string_lossy())?.shared;
+    Ok(EvidenceExport { shared, observations })
+}
+
 #[tauri::command]
 fn serving_status(svc: State<'_, NodeService<Wry>>) -> Result<ServiceStatus, String> {
     svc.status()
@@ -196,7 +212,8 @@ pub fn run() {
             node_drain,
             serving_start,
             serving_stop,
-            serving_status
+            serving_status,
+            node_export_evidence
         ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");

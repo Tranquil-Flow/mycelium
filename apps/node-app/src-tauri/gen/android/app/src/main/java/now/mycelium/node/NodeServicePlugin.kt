@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.SystemClock
+import androidx.core.content.FileProvider
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -18,7 +19,12 @@ class StartArgs {
   var detail: String? = null
 }
 
-/** Tauri bridge: start/stop/status of the serving foreground service. */
+@InvokeArg
+class ShareArgs {
+  var path: String? = null
+}
+
+/** Tauri bridge: start/stop/status of the serving foreground service, and evidence share. */
 @TauriPlugin
 class NodeServicePlugin(private val activity: Activity) : Plugin(activity) {
   @Command
@@ -41,6 +47,25 @@ class NodeServicePlugin(private val activity: Activity) : Plugin(activity) {
       .setAction(NodeForegroundService.ACTION_STOP)
     activity.startService(intent)
     invoke.resolve(JSObject().put("running", false))
+  }
+
+  /** Offer one exported evidence bundle to the share sheet; only files under cache/exports. */
+  @Command
+  fun share(invoke: Invoke) {
+    val args = invoke.parseArgs(ShareArgs::class.java)
+    val exports = java.io.File(activity.cacheDir, "exports").canonicalFile
+    val file = args.path?.let { java.io.File(it).canonicalFile }
+    if (file == null || file.parentFile != exports || !file.isFile) {
+      invoke.reject("mobile_evidence_export_path_invalid")
+      return
+    }
+    val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", file)
+    val send = Intent(Intent.ACTION_SEND)
+      .setType("application/json")
+      .putExtra(Intent.EXTRA_STREAM, uri)
+      .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    activity.startActivity(Intent.createChooser(send, "Export evidence"))
+    invoke.resolve(JSObject().put("shared", true))
   }
 
   @Command
