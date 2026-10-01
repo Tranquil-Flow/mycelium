@@ -7,8 +7,13 @@ obligations have actually run, this tool writes ``executed_on_candidate``: the
 candidate commit and clean tree, and for every obligation its real result plus
 the receipt's name and sha256 digest. Owner-private receipt paths never enter the
 record. It refuses unless HEAD is the candidate on a clean tree, refuses partial
-result sets, and records a failed obligation as failed. It never resolves owner
+result sets, and records a failed obligation as failed. The fill never resolves owner
 ruling R4 (the atomic-commit reading) and never claims A0 complete.
+
+``--resolve-r4`` is the separate, later step: on an executed record whose every
+obligation passed, it writes the owner's R4 reading and binds ``atomic_commit.commit``
+to the bound candidate that contains A0's feature and fix commits, giving
+``complete_on_candidate``.
 """
 from __future__ import annotations
 
@@ -27,6 +32,7 @@ RECORD_PATH = Path("docs") / "handover" / "a0-literal-verification-record.v1.jso
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PREPARED = "prepared_not_executed"
 EXECUTED = "executed_on_candidate"
+COMPLETE = "complete_on_candidate"
 RESULTS = frozenset({"passed", "failed"})
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -51,6 +57,17 @@ EXECUTED_CLAIM_BOUNDARY = (
     "checklist."
 )
 EXECUTED_REMAINING = ("resolve R4 and bind the closing commit",)
+R4_READING = (
+    "Owner ruling R4 (2026-10-01): one commit per feature or fix. A0 spec section 7.6 is "
+    "read as A0's machinery landing as separate feature and fix commits, all contained in "
+    "the bound candidate; no single atomic A0 commit is required and no history is rewritten."
+)
+COMPLETE_CLAIM_BOUNDARY = (
+    "Every A0 literal obligation was executed on the one bound candidate and passed, with "
+    "the receipt's name and digest, and owner ruling R4 is resolved with atomic_commit bound "
+    "to that candidate. It does not amend the A0 specification or the governing plan, adds "
+    "no register row, and changes no audit, ledger, manifest or checklist."
+)
 
 
 def _fail(code: str) -> None:
@@ -73,10 +90,14 @@ def _validate_prepared(record: Mapping[str, Any]) -> None:
             _fail("a0_record_prepared_state_claims_execution")
 
 
-def _validate_executed(record: Mapping[str, Any]) -> None:
+def _validate_executed(
+    record: Mapping[str, Any],
+    claim_boundary: str = EXECUTED_CLAIM_BOUNDARY,
+    remaining: Sequence[str] = EXECUTED_REMAINING,
+) -> None:
     if (
-        record["claim_boundary"] != EXECUTED_CLAIM_BOUNDARY
-        or list(record["remaining_before_complete"]) != list(EXECUTED_REMAINING)
+        record["claim_boundary"] != claim_boundary
+        or list(record["remaining_before_complete"]) != list(remaining)
     ):
         _fail("a0_record_claim_boundary_stale")
     candidate = record["candidate"]
@@ -104,18 +125,34 @@ def _validate_executed(record: Mapping[str, Any]) -> None:
             _fail("a0_record_evidence_invalid")
 
 
-def validate_record(record: Mapping[str, Any]) -> None:
-    """Admit exactly the prepared structure or a fully executed, candidate-bound record."""
+def _validate_complete(record: Mapping[str, Any]) -> None:
+    _validate_executed(record, COMPLETE_CLAIM_BOUNDARY, ())
+    if any(item["result"] != "passed" for item in record["obligations"]):
+        _fail("a0_record_obligation_failed")
+    atomic = record["atomic_commit"]
+    if atomic["owner_ruling"] != "R4" or atomic["reading"] != R4_READING:
+        _fail("a0_record_r4_reading_invalid")
+    if atomic["commit"] != record["candidate"]["commit"]:
+        _fail("a0_record_r4_commit_not_the_candidate")
 
+
+def validate_record(record: Mapping[str, Any]) -> None:
+    """Admit the prepared structure, an executed candidate-bound record, or a complete one."""
+
+    atomic = record["atomic_commit"]
+    if (atomic["reading"] is None) != (atomic["commit"] is None):
+        _fail("a0_record_atomic_commit_half_bound")
     if record.get("state") == PREPARED:
         _validate_prepared(record)
     elif record.get("state") == EXECUTED:
         _validate_executed(record)
+    elif record.get("state") == COMPLETE:
+        _validate_complete(record)
+        return
     else:
         _fail("a0_record_state_invalid")
-    atomic = record["atomic_commit"]
-    if (atomic["reading"] is None) != (atomic["commit"] is None):
-        _fail("a0_record_atomic_commit_half_bound")
+    if atomic["reading"] is not None:
+        _fail("a0_record_r4_bound_before_complete")
 
 
 def prepared_form(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -131,11 +168,33 @@ def prepared_form(record: Mapping[str, Any]) -> dict[str, Any]:
         "clean_tree": None,
         "bound_at_unix_ms": None,
     }
+    prepared["atomic_commit"] = {**prepared["atomic_commit"], "reading": None, "commit": None}
     for item in prepared["obligations"]:
         item["executed_on_candidate"] = False
         item["result"] = None
         item["evidence"] = None
     return prepared
+
+
+def resolve_r4(record: Mapping[str, Any], *, reading: str, commit: object) -> dict[str, Any]:
+    """Complete an executed, all-passed record with the owner's R4 reading."""
+
+    if record.get("state") != EXECUTED:
+        _fail("a0_record_not_executed")
+    validate_record(record)
+    if any(item["result"] != "passed" for item in record["obligations"]):
+        _fail("a0_record_obligation_failed")
+    if reading != R4_READING:
+        _fail("a0_record_r4_reading_invalid")
+    if commit != record["candidate"]["commit"]:
+        _fail("a0_record_r4_commit_not_the_candidate")
+    complete = copy.deepcopy(dict(record))
+    complete["state"] = COMPLETE
+    complete["claim_boundary"] = COMPLETE_CLAIM_BOUNDARY
+    complete["remaining_before_complete"] = []
+    complete["atomic_commit"] = {**complete["atomic_commit"], "reading": reading, "commit": commit}
+    validate_record(complete)
+    return complete
 
 
 def fill_record(
@@ -191,15 +250,37 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--results",
         type=Path,
-        required=True,
         help="JSON: {obligation_id: {result: passed|failed, evidence: <receipt path>}}",
+    )
+    parser.add_argument(
+        "--resolve-r4",
+        action="store_true",
+        help="complete an executed record with the owner's R4 reading (no git checks)",
     )
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     return parser
 
 
+def _resolve_r4_main(args: argparse.Namespace) -> int:
+    record_file = args.repo_root / RECORD_PATH
+    try:
+        record = json.loads(record_file.read_text("utf-8"))
+        complete = resolve_r4(record, reading=R4_READING, commit=args.candidate)
+    except (OSError, KeyError, ValueError, json.JSONDecodeError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    record_file.write_text(json.dumps(complete, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({"record": str(RECORD_PATH), "state": COMPLETE, "candidate": args.candidate}))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.resolve_r4:
+        return _resolve_r4_main(args)
+    if args.results is None:
+        print("a0_record_results_required", file=sys.stderr)
+        return 2
     try:
         head = _git(args.repo_root, "rev-parse", "HEAD").strip()
         dirty = _git(args.repo_root, "status", "--porcelain").strip()

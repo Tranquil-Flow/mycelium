@@ -41,7 +41,8 @@ def test_record_is_closed_and_binds_the_exact_a0_specification():
 
 def test_the_committed_record_is_prepared_or_fully_executed():
     record = _record()
-    assert record["state"] in {"prepared_not_executed", "executed_on_candidate"}
+    assert record["state"] in {"prepared_not_executed", "executed_on_candidate",
+                               "complete_on_candidate"}
     fill.validate_record(record)
 
 
@@ -221,3 +222,76 @@ def test_an_executed_record_states_its_own_boundary(tmp_path: Path):
     filled["remaining_before_complete"] = list(fill.PREPARED_REMAINING)
     with pytest.raises(ValueError, match="a0_record_claim_boundary_stale"):
         fill.validate_record(filled)
+
+
+def _executed(tmp_path: Path, result: str = "passed") -> dict:
+    return fill.fill_record(_record_prepared(), candidate=CANDIDATE,
+                            results=_results(tmp_path, result), bound_at_unix_ms=1)
+
+
+def test_resolving_r4_completes_an_all_passed_executed_record(tmp_path: Path):
+    complete = fill.resolve_r4(_executed(tmp_path), reading=fill.R4_READING, commit=CANDIDATE)
+    fill.validate_record(complete)
+    assert complete["state"] == "complete_on_candidate"
+    assert complete["claim_boundary"] == fill.COMPLETE_CLAIM_BOUNDARY
+    assert complete["remaining_before_complete"] == []
+    assert complete["atomic_commit"]["reading"] == fill.R4_READING
+    assert complete["atomic_commit"]["commit"] == CANDIDATE
+    assert complete["atomic_commit"]["owner_ruling"] == "R4"
+    assert complete["obligations"] == _executed(tmp_path)["obligations"]
+
+
+def test_r4_cannot_complete_a_record_with_a_failed_obligation(tmp_path: Path):
+    with pytest.raises(ValueError, match="a0_record_obligation_failed"):
+        fill.resolve_r4(_executed(tmp_path, "failed"), reading=fill.R4_READING, commit=CANDIDATE)
+
+
+def test_r4_refuses_a_prepared_record_another_reading_or_another_commit(tmp_path: Path):
+    with pytest.raises(ValueError, match="a0_record_not_executed"):
+        fill.resolve_r4(_record_prepared(), reading=fill.R4_READING, commit=CANDIDATE)
+    with pytest.raises(ValueError, match="a0_record_r4_reading_invalid"):
+        fill.resolve_r4(_executed(tmp_path), reading="one atomic commit", commit=CANDIDATE)
+    with pytest.raises(ValueError, match="a0_record_r4_commit_not_the_candidate"):
+        fill.resolve_r4(_executed(tmp_path), reading=fill.R4_READING, commit="b" * 40)
+
+
+def test_a_complete_record_that_drifts_is_refused(tmp_path: Path):
+    complete = fill.resolve_r4(_executed(tmp_path), reading=fill.R4_READING, commit=CANDIDATE)
+    drifted = json.loads(json.dumps(complete))
+    drifted["remaining_before_complete"] = list(fill.EXECUTED_REMAINING)
+    with pytest.raises(ValueError, match="a0_record_claim_boundary_stale"):
+        fill.validate_record(drifted)
+    drifted = json.loads(json.dumps(complete))
+    drifted["atomic_commit"]["commit"] = "b" * 40
+    with pytest.raises(ValueError, match="a0_record_r4_commit_not_the_candidate"):
+        fill.validate_record(drifted)
+    drifted = json.loads(json.dumps(complete))
+    drifted["obligations"][0]["result"] = "failed"
+    with pytest.raises(ValueError, match="a0_record_obligation_failed"):
+        fill.validate_record(drifted)
+    # An executed record may not carry an R4 binding without being completed.
+    executed = _executed(tmp_path)
+    executed["atomic_commit"] = dict(complete["atomic_commit"])
+    with pytest.raises(ValueError, match="a0_record_r4_bound_before_complete"):
+        fill.validate_record(executed)
+
+
+def test_the_prepared_form_of_a_complete_record_clears_r4(tmp_path: Path):
+    complete = fill.resolve_r4(_executed(tmp_path), reading=fill.R4_READING, commit=CANDIDATE)
+    prepared = fill.prepared_form(complete)
+    fill.validate_record(prepared)
+    assert prepared["atomic_commit"]["reading"] is None
+    assert prepared["atomic_commit"]["commit"] is None
+
+
+def test_the_cli_resolves_r4_on_an_executed_record(tmp_path: Path):
+    repo = tmp_path / "repo"
+    record_dir = repo / "docs" / "handover"
+    record_dir.mkdir(parents=True)
+    (record_dir / RECORD.name).write_text(json.dumps(_executed(tmp_path)), encoding="utf-8")
+    base = ["--repo-root", str(repo), "--resolve-r4"]
+    assert fill.main([*base, "--candidate", "b" * 40]) == 1
+    assert fill.main([*base, "--candidate", CANDIDATE]) == 0
+    written = json.loads((record_dir / RECORD.name).read_text("utf-8"))
+    assert written["state"] == "complete_on_candidate"
+    assert written["atomic_commit"]["commit"] == CANDIDATE
