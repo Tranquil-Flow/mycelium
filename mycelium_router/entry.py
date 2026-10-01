@@ -15,10 +15,12 @@ from mycelium_router.contracts import (
    ManifestLocked,
    PathBuildState,
    PathCancellation,
+   PathHop,
    PathManifest,
    PrefillChunkCompleted,
    ProgressivePrefillContext,
    RequestContext,
+   ReservationRequest,
    TokenEvent,
 )
 from mycelium_router.idempotency import hop_idempotency_key, payload_fingerprint
@@ -189,6 +191,9 @@ class RequestRecord:
    excluded_devices: frozenset[str] = frozenset()
    cleaned_up: bool = False
    kv_successor_recovery: dict | None = None
+   # A7: the entry controller's fenced-cutover record (privacy-reduced) for the
+   # last covered failure: ``fenced_kv_successor`` or the honest fallback.
+   kv_successor_cutover: dict | None = None
    # (path_id, path_attempt, path_generation, token_index) of the last decode
    # hop this entry dispatched for the request.
    decode_dispatched: tuple[str, int, int, int] | None = None
@@ -211,6 +216,10 @@ class PendingPrefill:
 
 
 class EntryCoordinator:
+   #: A7 entry controller (``mycelium_a7_entry_controller.A7EntryController``);
+   #: ``None`` keeps every request on the qualified A6 path unchanged.
+   a7_controller = None
+
    def __init__(
       self,
       *,
@@ -796,6 +805,7 @@ class EntryCoordinator:
       if request_id in self._pending_prefills:
          return False
       record = self.get_request(request_id)
+      self._a7_await_acknowledged(record)
       with record.lock:
          if record.status != "DECODING":
             return False
@@ -881,6 +891,8 @@ class EntryCoordinator:
          return False
       record = self.get_request(request_id)
       while True:
+         self._a7_await_acknowledged(record)
+         record = self.get_request(request_id)
          with record.lock:
             if record.status != "DECODING":
                return False
@@ -963,6 +975,11 @@ class EntryCoordinator:
             should_cleanup = True
       if should_cleanup:
          self._cleanup_record(record)
+      else:
+         # The gateway acknowledged this token synchronously (``emit``
+         # returned): it is committed output.  A7 coverage ships the source
+         # KV for exactly this committed prefix.
+         self._a7_committed(record)
       return True
 
    @staticmethod
@@ -1064,6 +1081,9 @@ class EntryCoordinator:
       if terminal_failure:
          self._cleanup_record(record)
          return False
+      a7_outcome = self._a7_try_cutover(record, report, new_attempt=new_attempt)
+      if a7_outcome is not None:
+         return a7_outcome
       # A7 KV-successor seam: the replacement-path attempt's recovery mode is
       # classified by the A7 contract before this coordinator commits to it.
       kv_successor_recovery = classify_kv_successor_recovery(
@@ -1284,6 +1304,7 @@ class EntryCoordinator:
             return
          record.cleaned_up = True
          manifest = record.manifest
+         status = record.status
       self.capacity.release(
          tuple(hop.reservation_id for hop in manifest.ordered_hops)
       )
@@ -1291,6 +1312,256 @@ class EntryCoordinator:
          manifest.path_id,
          path_attempt=manifest.path_attempt,
       )
+      controller = self.a7_controller
+      if controller is not None and status in {"COMPLETED", "FAILED", "CANCELLED"}:
+         controller.finish(
+            record.request.request_id,
+            manifest,
+            outcome={"COMPLETED": "completed", "FAILED": "failed", "CANCELLED": "cancelled"}[status],
+         )
+
+   # -- A7 fenced KV-successor recovery ---------------------------------------------
+
+   def _a7_committed(self, record: RequestRecord) -> None:
+      controller = self.a7_controller
+      if controller is None or self.relay.decode_mode != "stage_local_kv":
+         return
+      with record.lock:
+         if record.status != "DECODING":
+            return
+         manifest = record.manifest
+         committed = tuple(record.generated_token_ids)
+      controller.on_committed(record.request.request_id, manifest, committed)
+
+   def _a7_await_acknowledged(self, record: RequestRecord) -> None:
+      """Synchronous-ack policy: the next decode waits (bounded) for the standby ack."""
+
+      controller = self.a7_controller
+      if controller is not None:
+         controller.await_acknowledged(record.request.request_id)
+
+   def _a7_try_cutover(
+      self,
+      record: RequestRecord,
+      report: FailureReport,
+      *,
+      new_attempt: int,
+   ) -> bool | None:
+      """Fenced KV-successor cutover; ``None`` hands the attempt to A6 replay."""
+
+      controller = self.a7_controller
+      if controller is None or self.relay.decode_mode != "stage_local_kv":
+         return None
+      request_id = record.request.request_id
+      with record.lock:
+         if record.status != "PREFILL":
+            return None
+         old = record.manifest
+         graph = record.graph
+         committed = tuple(record.generated_token_ids)
+         prompt = record.request.prompt_token_ids
+      coverage = controller.failure_is_covered(request_id, old, report)
+      if coverage is None:
+         return None
+      try:
+         successor, build = self._build_successor_path(
+            record,
+            graph=graph,
+            old=old,
+            replacements={coverage.source_placement_id: coverage.standby_placement_id},
+            path_attempt=new_attempt,
+         )
+      except RoutingError:
+         result = controller.decline(request_id, old, reason="successor_path_unavailable", gateway_committed_token_ids=committed)
+         return self._a7_fallback(record, result, new_attempt=new_attempt)
+      node_by_placement = {
+         placement.placement_id: placement.node_id
+         for stage in graph.stages
+         for placement in stage.placements
+      }
+
+      def router_fenced(_generation: int) -> bool:
+         with record.lock:
+            # Recovery already moved the request out of DECODING, so no token
+            # or failure of the old attempt can be accepted any more.
+            return (
+               record.status == "PREFILL"
+               and record.manifest is old
+               and record.state_machine.path_attempt == new_attempt
+            )
+
+      def gateway_fenced(_generation: int) -> bool:
+         with record.lock:
+            return tuple(record.generated_token_ids) == committed
+
+      def transport_fenced(_generation: int) -> bool:
+         self.relay.release_path(old.path_id, path_attempt=old.path_attempt)
+         return True
+
+      result = controller.cutover(
+         request_id=request_id,
+         old_manifest=old,
+         successor_manifest=successor,
+         gateway_committed_token_ids=committed,
+         expected_next_position=len(prompt) + len(committed) - 1,
+         lease_expires_at=min(hop.reservation_expires_at for hop in successor.ordered_hops),
+         node_for_placement=node_by_placement.__getitem__,
+         installers={
+            "request_gateway": gateway_fenced,
+            "router": router_fenced,
+            "transport_ingress": transport_fenced,
+         },
+      )
+      if result["outcome"] != "fenced_kv_successor":
+         self.capacity.release(tuple(hop.reservation_id for hop in successor.ordered_hops))
+         return self._a7_fallback(record, result, new_attempt=new_attempt)
+      self.capacity.release(tuple(hop.reservation_id for hop in old.ordered_hops))
+      self.relay.release_path(old.path_id, path_attempt=old.path_attempt)
+      registration_failed = False
+      with record.lock:
+         record.kv_successor_cutover = result
+         if record.status != "PREFILL":
+            cancelled = True
+         else:
+            cancelled = False
+            record.graph = graph
+            record.manifest = successor
+            record.excluded_placements = build.excluded_placements
+            record.cleaned_up = False
+            generation = self.relay.register_path_with_generation(
+               record.request,
+               successor,
+               graph,
+               entry_node_id=self.node_id,
+            )
+            if generation is None:
+               record.state_machine.transition("FAILED", path_attempt=new_attempt)
+               registration_failed = True
+            else:
+               record.path_generation = generation
+               record.decode_dispatched = None
+               record.state_machine.transition("LOCKED", path_attempt=new_attempt)
+      if cancelled:
+         self.capacity.release(tuple(hop.reservation_id for hop in successor.ordered_hops))
+         controller.finish(request_id, successor, outcome="cancelled")
+         return False
+      if registration_failed:
+         self._cleanup_record(record)
+         return False
+      try:
+         self.transport.send_manifest_locked(
+            ManifestLocked(
+               request_id=request_id,
+               path_id=successor.path_id,
+               path_attempt=successor.path_attempt,
+               manifest=successor,
+               build=build,
+            )
+         )
+      except Exception:
+         with record.lock:
+            if record.status == "LOCKED":
+               record.state_machine.transition("FAILED", path_attempt=new_attempt)
+         self._cleanup_record(record)
+         return False
+      with record.lock:
+         if record.status != "LOCKED":
+            return False
+         # No recovery prefill: the successor resumes DECODE at the next
+         # contiguous position from the imported, acknowledged KV.
+         record.state_machine.transition("DECODING", path_attempt=new_attempt)
+      return True
+
+   def _a7_fallback(self, record: RequestRecord, result: dict, *, new_attempt: int) -> bool | None:
+      with record.lock:
+         record.kv_successor_cutover = result
+         if result["outcome"] != "aborted":
+            return None
+         if record.status == "CANCELLED":
+            return False
+         # Neither A7 nor A6 has authority: one explicit terminal result.
+         record.state_machine.transition("FAILED", path_attempt=new_attempt)
+      self._cleanup_record(record)
+      return False
+
+   def _build_successor_path(
+      self,
+      record: RequestRecord,
+      *,
+      graph: ExecutionGraph,
+      old: PathManifest,
+      replacements: dict[str, str],
+      path_attempt: int,
+   ) -> tuple[PathManifest, PathBuildState]:
+      """Reserve the exact successor path: the old hops with the standby substituted."""
+
+      request = record.request
+      build = PathBuildState(
+         request=request,
+         graph=graph,
+         path_id=self.builder.id_source.new("path"),
+         path_attempt=path_attempt,
+         excluded_placements=record.excluded_placements | frozenset(replacements),
+         excluded_edges=record.excluded_edges,
+         excluded_devices=record.excluded_devices,
+      )
+      stages = {stage.stage_id: stage for stage in graph.stages}
+      now = self.clock.now()
+      lease_seconds = self.builder.policy.scorer.config.reservation_lease_seconds
+      for hop in old.ordered_hops:
+         placement_id = replacements.get(hop.placement_id, hop.placement_id)
+         stage = stages[hop.stage_id]
+         reservation = self.capacity.reserve(
+            ReservationRequest(
+               request_id=request.request_id,
+               path_id=build.path_id,
+               path_attempt=path_attempt,
+               placement_id=placement_id,
+               kv_bytes=(len(request.prompt_token_ids) + request.max_new_tokens)
+               * stage.stage_cost.kv_bytes_per_context_token,
+               deployment_epoch=graph.deployment_epoch,
+               lease_expires_at=now + lease_seconds,
+            )
+         )
+         if not (
+            reservation.accepted
+            and reservation.deployment_epoch == graph.deployment_epoch
+            and reservation.expires_at > now
+         ):
+            if reservation.accepted and reservation.reservation_id:
+               self.capacity.release((reservation.reservation_id,))
+            self.builder.abort(build)
+            raise RoutingError("successor_reservation_rejected")
+         build = PathBuildState(
+            request=build.request,
+            graph=build.graph,
+            path_id=build.path_id,
+            path_attempt=build.path_attempt,
+            ordered_hops=build.ordered_hops
+            + (
+               PathHop(
+                  stage_id=stage.stage_id,
+                  placement_id=placement_id,
+                  reservation_id=reservation.reservation_id,
+                  reservation_expires_at=reservation.expires_at,
+                  reservation_epoch=reservation.deployment_epoch,
+               ),
+            ),
+            excluded_placements=build.excluded_placements,
+            excluded_edges=build.excluded_edges,
+            excluded_devices=build.excluded_devices,
+         )
+         self.transport.send_manifest_delta(
+            ManifestDelta(
+               request_id=request.request_id,
+               path_id=build.path_id,
+               path_attempt=build.path_attempt,
+               hop_index=len(build.ordered_hops) - 1,
+               hop=build.ordered_hops[-1],
+            )
+         )
+      manifest = self.builder.lock(build, now=now)
+      return manifest, build
 
    def _build_path(
       self,

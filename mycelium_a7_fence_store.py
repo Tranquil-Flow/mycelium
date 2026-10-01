@@ -33,7 +33,9 @@ DURABLE_FENCE_RECORD_PROTOCOL = "mycelium.a7_durable_fence_record.v1"
 DURABLE_FENCE_RECEIPT_PROTOCOL = "mycelium.a7_durable_fence_receipt.v1"
 RECONCILIATION_PROTOCOL = "mycelium.a7_fence_reconciliation.v1"
 DURABILITY = "fsync_atomic_rename"
-TERMINAL_OUTCOMES = frozenset({"fenced_kv_successor", "full_context_replay", "aborted", "cancelled"})
+TERMINAL_OUTCOMES = frozenset(
+   {"fenced_kv_successor", "full_context_replay", "aborted", "cancelled", "completed", "failed"}
+)
 RECONCILED_STATES = (
    "shadow_restored",
    "fallback_required",
