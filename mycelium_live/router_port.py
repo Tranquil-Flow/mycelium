@@ -1979,6 +1979,111 @@ class LiveRouterPort:
             self._release_route_request(pending)
             self._retire_command(pending)
 
+    def _dead_peer_cleanup_receipt(
+        self,
+        identity: CommandIdentity,
+        owner_id: str,
+    ) -> dict[str, Any] | None:
+        """Seal exact cleanup when the only unproven participants have exited.
+
+        The physical route seals a request cleanup receipt only after every
+        participating node returned an exact clean receipt. A peer whose process
+        was killed can never return one, so a killed source would strand its
+        request in cleanup and make recovery unreachable. Process exit releases
+        every resource that process held, so the route's own identity-bound
+        ``node_process_exited`` incident, confirmed by the peer process's exit status,
+        is that peer's cleanup proof. Every surviving participant must still
+        prove exact cleanup itself. A peer that is only disconnected or stalled
+        (process alive) proves nothing, and the request stays terminal-blocked.
+        """
+
+        route = self._route
+        request_id = identity.request_id
+        # Fields fixed for the command's lifetime. Cancellation generation is
+        # not among them: the failure itself joins the command to the route's
+        # next generation, and the incident keeps the one it was observed at.
+        fixed = {
+            "deployment_id": identity.deployment_id,
+            "deployment_epoch": identity.deployment_epoch,
+            "qualification_digest": identity.qualification_digest,
+            "request_attempt": identity.request_attempt,
+            "path_id": identity.path_id,
+            "path_attempt": identity.path_attempt,
+            "path_digest": identity.path_digest,
+            "topology_generation": identity.topology_generation,
+            "command_id": identity.command_id,
+        }
+
+        def generation_at_most(value: object, current: int) -> bool:
+            return type(value) is int and 0 <= value <= current
+
+        try:
+            incidents = route.a4_scoped_runtime_incidents()
+            active = dict(route._active_route_requests.get(request_id) or {})
+            sessions = dict(route._sessions)
+            subject = route._request_cleanup_subject(request_id)
+            cleanup_complete = route._cancellation_cleanup_complete
+            store_receipt = route._store_request_cleanup_receipt
+        except Exception:
+            return None
+        participating = active.get("participating_node_ids")
+        if not isinstance(participating, (set, frozenset)) or not participating:
+            return None
+        # The cleanup subject is the exact generation the route cancelled; it
+        # must be the command's current generation, as for a node receipt.
+        if (
+            any(active.get(field) != value for field, value in fixed.items())
+            or subject.get("request_id") != request_id
+            or any(subject.get(field) != value for field, value in fixed.items())
+            or subject.get("cancellation_generation") != identity.cancellation_generation
+            or not 1 <= (subject.get("publisher_generation") or 0) <= identity.publisher_generation
+        ):
+            return None
+        exited = frozenset(
+            incident.get("subject_id")
+            for incident in incidents
+            if isinstance(incident, Mapping)
+            and incident.get("request_id") == request_id
+            and incident.get("scope") == "request"
+            and incident.get("reason") == "node_process_exited"
+            and incident.get("fatal_accepted") is False
+            and incident.get("cleanup_owner_id") == owner_id
+            and all(incident.get(field) == value for field, value in fixed.items())
+            and generation_at_most(
+                incident.get("cancellation_generation"), identity.cancellation_generation
+            )
+            and generation_at_most(
+                incident.get("publisher_generation"), identity.publisher_generation
+            )
+        )
+        if not exited or not exited <= participating:
+            return None
+        for node_id in exited:
+            returncode = getattr(sessions.get(node_id), "returncode", None)
+            if type(returncode) is not int:
+                return None
+        survivors = frozenset(participating) - exited
+        try:
+            if survivors and cleanup_complete(survivors, cleanup_subject=subject) is not True:
+                return None
+            receipt = store_receipt(
+                request_id=request_id,
+                cleanup_subject=subject,
+                participating_node_ids=frozenset(participating),
+                deployment_id=identity.deployment_id,
+            )
+        except Exception:
+            return None
+        if not isinstance(receipt, Mapping) or receipt.get("cleanup_owner_id") != owner_id:
+            return None
+        _LOGGER.warning(
+            "request cleanup sealed with exited peers request_id=%s exited=%s survivors=%s",
+            request_id,
+            sorted(exited),
+            sorted(survivors),
+        )
+        return dict(receipt)
+
     def _record_command_cleanup(
         self,
         pending: _Pending,
@@ -2013,6 +2118,12 @@ class LiveRouterPort:
                     if callable(receipt_source)
                     else None
                 )
+        if (
+            receipt is None
+            and pending.execution_started
+            and getattr(self._route, "is_simulated", False) is not True
+        ):
+            receipt = self._dead_peer_cleanup_receipt(identity, owner_id)
         if receipt is None:
             if (
                 pending.execution_started
