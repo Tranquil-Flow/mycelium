@@ -241,7 +241,24 @@ class NumpyRuntimePort:
          for placement_id, (_, placement) in placement_records.items()
          if placement.node_id == node_id and placement.lifecycle_state == "ACTIVE"
       }
+      standby_local_ids = {
+         placement_id
+         for placement_id, (_, placement) in placement_records.items()
+         if placement.node_id == node_id and placement.lifecycle_state == "STANDBY"
+      }
       supplied_ids = set(loaded_stages)
+      # A7: a standby port binds only local STANDBY placements.  It owns no
+      # ordinary work: it never prefills and decodes only a successor path
+      # whose KV a fenced cutover imported.  KV is keyed by path, so a standby
+      # placement never shares a port with an ordinary placement of the same
+      # route.
+      standby_port = bool(supplied_ids) and supplied_ids <= standby_local_ids
+      if standby_port:
+         if decode_mode != "stage_local_kv":
+            _reject("standby_requires_stage_local_kv")
+         active_local_ids = set(supplied_ids)
+      elif supplied_ids & standby_local_ids:
+         _reject("standby_port_mixed_lifecycle", sorted(supplied_ids & standby_local_ids)[0])
       missing = active_local_ids - supplied_ids
       extra = supplied_ids - active_local_ids
       if missing:
@@ -283,6 +300,7 @@ class NumpyRuntimePort:
       self.decode_mode = decode_mode
       self._architecture = canonical_runtime["architecture"]
       self._bound = MappingProxyType(bound)
+      self.standby_placement_ids = frozenset(bound) if standby_port else frozenset()
       if clock is not None and not callable(clock):
          _reject("invalid_runtime_clock")
       self._clock = clock or (importlib.import_module("time").monotonic)
@@ -1408,6 +1426,8 @@ class NumpyRuntimePort:
       binding = self._bound.get(item.placement_id)
       if binding is None:
          _reject("unbound_runtime_placement")
+      if item.placement_id in self.standby_placement_ids and item.phase != "DECODE":
+         _reject("standby_placement_not_serving")
       stage, placement, loaded, runtime = binding
       self._validate_batch_key(item, placement)
       fingerprint = self._operation_fingerprint(item)

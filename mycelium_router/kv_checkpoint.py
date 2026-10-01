@@ -343,6 +343,12 @@ def _stage_identity(port: Any, placement_id: str) -> dict[str, Any]:
    }
 
 
+def stage_kv_identity(port: Any, placement_id: str) -> dict[str, Any]:
+   """The exact KV compatibility identity a port reports for a bound placement."""
+
+   return _stage_identity(port, placement_id)
+
+
 def _expected_kv_heads_and_dim(runtime: Mapping[str, Any]) -> tuple[int, int]:
    config = runtime.get("model_config") if isinstance(runtime, Mapping) else None
    if not isinstance(config, Mapping):
