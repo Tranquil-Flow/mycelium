@@ -10,9 +10,9 @@
   },
   "predecessor_record": "docs/handover/a0-completion-record.v1.json",
   "candidate": {
-    "commit": "955e53ee75aa2aa9d9450cd3f2c129d06508a4da",
+    "commit": "f853bfdf534bae7460601982feaf5ed657c91d82",
     "clean_tree": true,
-    "bound_at_unix_ms": 1790857122181,
+    "bound_at_unix_ms": 1790865044542,
     "binding_rule": "Bind the final candidate commit (40 hex) and a clean `git status --porcelain` before any obligation result is written; a result from any other commit is not admissible here."
   },
   "obligations": [
@@ -36,7 +36,7 @@
       "result": "passed",
       "evidence": {
         "receipt": "7.1.log",
-        "digest": "sha256:3ccd3cbc6e8737a9c801e9edfea7478da953f16bbe6d50c7939089ee3e228fe5"
+        "digest": "sha256:3575a17a8e7bdf7e2de1ed84f8a02b39ec84a1dd77f36ce1281c379db73de1f3"
       }
     },
     {
@@ -57,7 +57,7 @@
       "result": "passed",
       "evidence": {
         "receipt": "7.2.log",
-        "digest": "sha256:e0205fa9168e7e97495336e37bf89df8a94e19457afadeb3381868304f17b7e7"
+        "digest": "sha256:f50675897e4f36020797edf35730bcbf1622bb8e047161d779e6c4c227057271"
       }
     },
     {
@@ -80,7 +80,7 @@
       "result": "passed",
       "evidence": {
         "receipt": "7.3.log",
-        "digest": "sha256:3469aabeab199a76d5e48bd1ff07ec216d82c40972e13adf78de62a633ecefd6"
+        "digest": "sha256:3a5f2c6c020a038c6c9bfe0b84ae5464178ebe6930b0a2ae44142e148ec9774c"
       }
     },
     {
@@ -100,7 +100,7 @@
       "result": "passed",
       "evidence": {
         "receipt": "7.4.log",
-        "digest": "sha256:62feb73c7f150ef42f2e999197a49457fe0586bb849afbb0ce75de4bc34c82f8"
+        "digest": "sha256:731d17d8e3c0a18febc218ddb50e16dcfef53dd138bd2fd47670eb3cbcfc4e7e"
       }
     },
     {
@@ -128,7 +128,7 @@
       "result": "passed",
       "evidence": {
         "receipt": "7.5.log",
-        "digest": "sha256:ea91746f661ad383763904468270c4f5d23185a84786bb459ce536067533be13"
+        "digest": "sha256:6ef0d759e54b7c914b32e4eb4d463e1d87ec7f22816bf13958a4a628ef444687"
       }
     },
     {
@@ -146,7 +146,7 @@
       "result": "passed",
       "evidence": {
         "receipt": "l2.log",
-        "digest": "sha256:80298c8d9b387d733cdce5c68ddecfe2b9f6dc541b70dbf6d6fb09640a5336d6"
+        "digest": "sha256:e85cbb29022e6580d09b3599b570839507f56becfff629fc7674b8639021fcc3"
       }
     }
   ],
