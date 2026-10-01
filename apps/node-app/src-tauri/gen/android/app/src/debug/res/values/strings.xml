@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds install next to the release app (applicationIdSuffix .debug);
+     a distinct label keeps the two apart on the device. -->
+<resources>
+    <string name="app_name">"Mycelium Node [Debug]"</string>
+    <string name="main_activity_title">"Mycelium Node [Debug]"</string>
+</resources>
