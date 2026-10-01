@@ -173,8 +173,14 @@ class RelayEngine:
       ] = {}
       self._pending_hops: dict[
          str,
-         tuple[HopHeader, HopWorkItem, str, int],
+         tuple[HopHeader, HopWorkItem, str, int, str | None],
       ] = {}
+      # One drainer at a time: a drain owns runtime dispatch and forwarding for
+      # the batches it pops.  Ingress never waits for it (``blocking=False``).
+      self._drain_lock = Lock()
+      # Counts accepted enqueues, so a finishing pump can tell whether work
+      # arrived after its last look at the queue (see ``pump_ready_batches``).
+      self._enqueue_sequence = 0
 
    def path_generation(self, path_id: str) -> int:
       """Return the generation used to fence entry-side dispatches."""
@@ -1298,12 +1304,19 @@ class RelayEngine:
       self._remember_hop(header, result, payload_digest, generation)
       return result
 
-   def enqueue_hop(self, header: HopHeader, payload: object) -> HopReceiveResult:
+   def enqueue_hop(
+      self,
+      header: HopHeader,
+      payload: object,
+      *,
+      source_node_id: str | None = None,
+   ) -> HopReceiveResult:
       """Validate and queue one hop without blocking for runtime execution.
 
       Production event loops should call this method for ingress, then call
       ``drain_ready_batches`` immediately and again at ``next_batch_deadline``.
       The synchronous ``receive_hop`` API remains available for compatibility.
+      ``source_node_id`` is checked exactly as ``receive_hop`` checks it.
       """
       now = self.clock.now()
       self._evict_hop_results(now=now)
@@ -1350,6 +1363,17 @@ class RelayEngine:
          for stage in graph.stages
          for placement in stage.placements
       }
+      if source_node_id is not None:
+         if header.hop_index == 0:
+            if self._entry_node_by_path.get(header.path_id) != source_node_id:
+               return HopReceiveResult("REJECTED", "entry_node_mismatch")
+         else:
+            source_placement = placement_map.get(header.source_placement_id)
+            if (
+               source_placement is None
+               or source_placement.node_id != source_node_id
+            ):
+               return HopReceiveResult("REJECTED", "source_node_mismatch")
       placement = placement_map[hop.placement_id]
       if placement.node_id != self.node_id:
          return HopReceiveResult("REJECTED", "destination_not_local")
@@ -1433,7 +1457,9 @@ class RelayEngine:
                work,
                payload_digest,
                generation,
+               source_node_id,
             )
+            self._enqueue_sequence += 1
       if cancelled:
          self.batch_scheduler.release_path(header.path_id)
          return HopReceiveResult("REJECTED", "path_cancelled")
@@ -1444,10 +1470,69 @@ class RelayEngine:
       *,
       force: bool = False,
       maximum_batches: int | None = None,
+      blocking: bool = True,
+      on_item_error=None,
    ) -> tuple[HopReceiveResult, ...]:
-      """Execute ready microbatches; never sleeps or owns an event-loop thread."""
+      """Execute ready microbatches; never sleeps or owns an event-loop thread.
+
+      Drains are serialized.  With ``blocking=False`` a caller that finds another
+      drain in progress returns ``()`` at once; the active drainer keeps taking
+      ready work, including work queued after it started.  A failure while one
+      member is completed (forwarded or reported) is that member's alone: it is
+      passed to ``on_item_error(header, source_node_id, error)`` and the rest of
+      the batch still completes.  Without a handler the first such failure is
+      raised once every member of its batch has been completed.
+      """
       if maximum_batches is not None and maximum_batches <= 0:
          return ()
+      if not self._drain_lock.acquire(blocking=blocking):
+         return ()
+      try:
+         return self._drain_ready_batches_locked(
+            force=force,
+            maximum_batches=maximum_batches,
+            on_item_error=on_item_error,
+         )
+      finally:
+         self._drain_lock.release()
+
+   def pump_ready_batches(self, *, on_item_error=None) -> tuple[HopReceiveResult, ...]:
+      """Drain ready work without ever waiting behind another drainer.
+
+      Every ingress may call this right after ``enqueue_hop``.  A caller that
+      finds a drain in progress returns at once: the active drainer re-checks the
+      queue after it releases, so work queued while it held the drain is never
+      stranded.  Work the controller holds for a collection window stays queued;
+      the caller's timer drains it at ``next_batch_deadline``.
+      """
+      completed: list[HopReceiveResult] = []
+      while True:
+         if not self._drain_lock.acquire(blocking=False):
+            return tuple(completed)
+         try:
+            with self._path_lock:
+               sequence = self._enqueue_sequence
+            completed.extend(
+               self._drain_ready_batches_locked(
+                  force=False,
+                  maximum_batches=None,
+                  on_item_error=on_item_error,
+               )
+            )
+         finally:
+            self._drain_lock.release()
+         with self._path_lock:
+            arrived = self._enqueue_sequence != sequence
+         if not arrived or not self.batch_scheduler.queue_depth():
+            return tuple(completed)
+
+   def _drain_ready_batches_locked(
+      self,
+      *,
+      force: bool,
+      maximum_batches: int | None,
+      on_item_error,
+   ) -> tuple[HopReceiveResult, ...]:
       completed: list[HopReceiveResult] = []
       drained = 0
       while self.batch_scheduler.queue_depth():
@@ -1510,22 +1595,32 @@ class RelayEngine:
                successful=all(result.success for result in runtime_results),
             )
          )
+         unhandled: BaseException | None = None
          for item, runtime_result in zip(batch.items, runtime_results):
             with self._path_lock:
                pending = self._pending_hops.pop(item.idempotency_key, None)
             if pending is None:
                continue
-            header, _, payload_digest, generation = pending
-            completed.append(
-               self._complete_queued_hop(
-                  header,
-                  item,
-                  runtime_result,
-                  payload_digest,
-                  generation,
+            header, _, payload_digest, generation, source_node_id = pending
+            try:
+               completed.append(
+                  self._complete_queued_hop(
+                     header,
+                     item,
+                     runtime_result,
+                     payload_digest,
+                     generation,
+                  )
                )
-            )
+            except Exception as error:
+               if on_item_error is None:
+                  if unhandled is None:
+                     unhandled = error
+                  continue
+               on_item_error(header, source_node_id, error)
          drained += 1
+         if unhandled is not None:
+            raise unhandled
       return tuple(completed)
 
    def update_batch_network_stats(

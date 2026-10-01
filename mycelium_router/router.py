@@ -144,11 +144,18 @@ class Router:
          source_node_id=source_node_id,
       )
 
-   def enqueue_hop(self, header, payload):
-      return self.relay.enqueue_hop(header, payload)
+   def enqueue_hop(self, header, payload, *, source_node_id=None):
+      return self.relay.enqueue_hop(
+         header,
+         payload,
+         source_node_id=source_node_id,
+      )
 
    def drain_ready_batches(self, **kwargs):
       return self.relay.drain_ready_batches(**kwargs)
+
+   def pump_ready_batches(self, **kwargs):
+      return self.relay.pump_ready_batches(**kwargs)
 
    def update_batch_network_stats(self, placement_id, stats):
       return self.relay.update_batch_network_stats(placement_id, stats)
@@ -167,6 +174,15 @@ class Router:
 
    def next_batch_deadline(self):
       return self.relay.next_batch_deadline()
+
+   def batch_clock_now(self):
+      return self.relay.clock.now()
+
+   def runtime_batch_cap(self):
+      return self.relay.batch_controller.config.maximum_runtime_batch_size
+
+   def hop_collection_window_seconds(self):
+      return self.relay.batch_controller.config.live_hop_collection_window_seconds
 
    def receive_progressive_prefill(
       self,

@@ -604,6 +604,10 @@ class IrohTransport:
             tuple[str, bytes, str | None, str | None, int | None]
         ] = Queue(maxsize=queue_capacity)
         self._ack_queue: Queue[_AckRequest] = Queue(maxsize=queue_capacity)
+        # Set whenever a dispatch acknowledgement is queued and whenever the
+        # dispatcher finishes a frame, so the receiver sends the acknowledgement
+        # and takes the next frame at once instead of at its next poll.
+        self._ack_ready = threading.Event()
         self._cancellation_threads: dict[str, threading.Thread] = {}
         self._delivery_cancel_threads: dict[bytes, threading.Thread] = {}
         # Message ids whose registered delivery-cancel worker has actually issued a
@@ -638,6 +642,9 @@ class IrohTransport:
         )
         self._dispatcher_phase = "idle"
         self._last_dispatch_error: dict[str, str] | None = None
+        # Monotonic end of the open hop collection window, or None (dispatcher
+        # thread only; see ``_queue_hop_for_batch``).
+        self._hop_collection_deadline: float | None = None
         self._outbound_trace: deque[str] = deque(maxlen=256)
         self._inflight_receipt_trace_commits = 0
         self._remote_frames_sent = 0
@@ -1964,12 +1971,15 @@ class IrohTransport:
                     return
                 self._set_fatal(IrohTransportError("sidecar_receive_client_missing"))
                 return
+            self._ack_ready.clear()
             if not self._drain_ack_requests(client):
                 return
             with self._state_lock:
                 awaiting_dispatch_ack = bool(self._inflight_received)
             if awaiting_dispatch_ack:
-                self._stop.wait(self.poll_interval_seconds)
+                # Bounded as before; an acknowledgement queued after the drain
+                # above wakes the receiver at once.
+                self._ack_ready.wait(self.poll_interval_seconds)
                 continue
             try:
                 delivery = self._recv(client)
@@ -2090,8 +2100,9 @@ class IrohTransport:
                     _frame,
                     digest,
                     decoded,
-                ) = self._dispatch_queue.get(timeout=self.poll_interval_seconds)
+                ) = self._dispatch_queue.get(timeout=self._dispatch_wait_seconds())
             except Empty:
+                self._service_queued_hops()
                 continue
             try:
                 current_generation = self._peers.lookup(source_node_id).generation
@@ -2217,6 +2228,10 @@ class IrohTransport:
                 return
             finally:
                 self._dispatch_queue.task_done()
+                # The frame is no longer in flight: let the receiver take the next.
+                self._ack_ready.set()
+            if not self._stop.is_set():
+                self._service_queued_hops()
 
     def _forward_loop(self) -> None:
         current = threading.current_thread()
@@ -2320,6 +2335,7 @@ class IrohTransport:
             self._ack_queue.put_nowait(request)
         except Full as error:
             raise IrohTransportError("ack_queue_full") from error
+        self._ack_ready.set()
         deadline = time.monotonic() + self.delivery_timeout_seconds
         while not request.completed.wait(timeout=self.poll_interval_seconds):
             if self._stop.is_set():
@@ -2431,6 +2447,138 @@ class IrohTransport:
                 pass
             raise rejected
 
+    @staticmethod
+    def _batching_router(router: Any) -> Any | None:
+        """The bound router when it offers the queued runtime-batch surface."""
+
+        names = (
+            "enqueue_hop",
+            "pump_ready_batches",
+            "pending_batch_hops",
+            "runtime_batch_cap",
+            "hop_collection_window_seconds",
+        )
+        if all(callable(getattr(router, name, None)) for name in names):
+            return router
+        return None
+
+    def _queue_hop_for_batch(self, router: Any) -> None:
+        """Decide when a hop the dispatcher just queued is executed.
+
+        The receiver takes the next frame only after this one is acknowledged,
+        so concurrent hops can meet in one runtime batch only if the dispatcher
+        acknowledges a queued hop before executing it.  Under a batch cap of one
+        there is nothing to collect: the hop is executed here, before its frame
+        is acknowledged, exactly as the synchronous path does.  Otherwise the
+        dispatcher keeps collecting until the configured window closes, or
+        drains at once when the batch is full.
+        """
+
+        cap = max(1, int(router.runtime_batch_cap()))
+        if cap <= 1 or router.pending_batch_hops() >= cap:
+            self._hop_collection_deadline = None
+            self._pump_hop_batches(router)
+            return
+        if self._hop_collection_deadline is None:
+            window = max(0.0, float(router.hop_collection_window_seconds()))
+            self._hop_collection_deadline = time.monotonic() + window
+
+    def _dispatch_wait_seconds(self) -> float:
+        """How long the dispatcher may block for the next frame."""
+
+        deadline = self._hop_collection_deadline
+        if deadline is None:
+            return self.poll_interval_seconds
+        return max(0.0, min(self.poll_interval_seconds, deadline - time.monotonic()))
+
+    def _pump_hop_batches(self, router: Any) -> None:
+        try:
+            router.pump_ready_batches(on_item_error=self._hop_batch_member_failed)
+        except BaseException as error:
+            if self._stop.is_set():
+                return
+            # Member failures are scoped by the handler; anything else broke the
+            # batch machinery itself, which no request-local outcome can contain.
+            self._set_fatal(
+                error
+                if isinstance(error, IrohTransportError)
+                else IrohTransportError("router_batch_drain_failed", str(error))
+            )
+
+    def _hop_batch_member_failed(
+        self,
+        header: HopHeader,
+        source_node_id: str | None,
+        error: BaseException,
+    ) -> None:
+        """Scope one batch member's completion failure to its own request.
+
+        Mirrors the dispatcher's handling of a hop that fails synchronously: a
+        request-scoped failure incident, and a failure report to the hop's sender.
+        """
+
+        error_code = (
+            error.code
+            if isinstance(error, IrohTransportError)
+            else "router_dispatch_failed"
+        )
+        with self._state_lock:
+            self._last_dispatch_error = {
+                "code": error_code,
+                "exception_type": type(error).__name__[:64],
+                "detail": str(error)[:128],
+            }
+        peer_node_id = source_node_id or self.node_id
+        self._record_scoped_event(
+            event="failure",
+            request_id=header.request_id,
+            path_id=header.path_id,
+            path_attempt=header.path_attempt,
+            peer_node_id=peer_node_id,
+            code=error_code,
+        )
+        if source_node_id is None:
+            return
+        try:
+            self._send_or_dispatch(
+                source_node_id,
+                encode_frame(
+                    FailureReport(
+                        request_id=header.request_id,
+                        path_id=header.path_id,
+                        path_attempt=header.path_attempt,
+                        token_index=header.token_index,
+                        scope="PLACEMENT",
+                        reason=error_code,
+                        placement_id=header.destination_placement_id,
+                        node_id=self.node_id,
+                    )
+                ),
+            )
+        except BaseException:
+            # The scoped incident above is the durable failure signal.
+            pass
+
+    def _service_queued_hops(self) -> None:
+        """Dispatcher-thread drain between frames and on idle polls.
+
+        Collected hops are drained when their collection window closes.  Outside
+        a window, queued work (a prefill the batch controller holds for its own
+        collection window) is re-offered after every frame and idle poll.
+        """
+
+        router = self._batching_router(self._router)
+        if router is None:
+            return
+        if not router.pending_batch_hops():
+            self._hop_collection_deadline = None
+            return
+        deadline = self._hop_collection_deadline
+        if deadline is not None and time.monotonic() < deadline:
+            return
+        self._hop_collection_deadline = None
+        self._pump_hop_batches(router)
+
     def _dispatch(self, decoded: DecodedFrame, *, source_node_id: str) -> None:
         router = self._router
         if router is None:
@@ -2486,11 +2634,23 @@ class IrohTransport:
                 self._forget_path(header.request_id, header.path_id)
             return
         if isinstance(message, HopHeader):
-            router.receive_hop(
+            batching = self._batching_router(router)
+            if batching is None:
+                router.receive_hop(
+                    message,
+                    decoded.payload,
+                    source_node_id=source_node_id,
+                )
+                return
+            batching.enqueue_hop(
                 message,
                 decoded.payload,
                 source_node_id=source_node_id,
             )
+            if threading.current_thread() is self._dispatcher_thread:
+                self._queue_hop_for_batch(batching)
+            else:
+                self._pump_hop_batches(batching)
             return
         if isinstance(message, ManifestLocked):
             entry_node = self._node_for_placement(
@@ -3263,6 +3423,7 @@ class IrohTransport:
                 self._closed = True
                 self._running = False
                 self._stop.set()
+                self._ack_ready.set()
                 for message_id, pending in self._pending.items():
                     reserved, cancellation_client = (
                         self._reserve_pending_cancellation_locked(
@@ -3419,6 +3580,7 @@ class IrohTransport:
                 self._fatal_error = error
             self._running = False
             self._stop.set()
+            self._ack_ready.set()
 
     def _require_running(self) -> None:
         if self._closed:

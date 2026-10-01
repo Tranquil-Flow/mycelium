@@ -165,6 +165,10 @@ class RouterConfig:
    prefill_runtime_batch_size: int = 20
    maximum_runtime_batch_bytes: int = 2_400_000
    prefill_collection_window_seconds: float = 0.002
+   # Bounded time a live transport keeps collecting inbound hops before it
+   # drains them as runtime batches (only while the batch cap admits more than
+   # one member; a cap of one executes every hop as it arrives).
+   live_hop_collection_window_seconds: float = 0.002
    batch_deadline_guard_seconds: float = 0.001
    batch_bdp_multiplier: float = 2.0
    batch_stats_stale_seconds: float = 10.0

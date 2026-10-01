@@ -1,6 +1,8 @@
 """Device-wide fair scheduler for local inter-layer work."""
 
 from collections import Counter
+from functools import wraps
+from threading import RLock
 
 from mycelium_router.contracts import (
    BatchDecision,
@@ -21,13 +23,27 @@ class BackpressureError(RuntimeError):
       super().__init__(f"backpressure:{reason}")
 
 
+def _locked(method):
+   """Serialize one scheduler operation: ingress, drains and releases may run on
+   different threads (the transport dispatcher, local senders, cancellation)."""
+
+   @wraps(method)
+   def wrapper(self, *args, **kwargs):
+      with self._lock:
+         return method(self, *args, **kwargs)
+
+   return wrapper
+
+
 class HopScheduler:
    def __init__(self, config: RouterConfig):
       self.config = config
+      self._lock = RLock()
       self._queue: list[HopWorkItem] = []
       self._queued_payload_bytes = 0
       self._seen_keys: dict[str, tuple[float, str]] = {}
 
+   @_locked
    def enqueue(self, item: HopWorkItem) -> None:
       self._evict_seen(now=item.enqueued_at)
       if item.idempotency_key in self._seen_keys:
@@ -69,6 +85,7 @@ class HopScheduler:
    def pop_next(self, *, now: float) -> HopWorkItem:
       return self.pop_batch(now=now, maximum_items=1).items[0]
 
+   @_locked
    def take(self, item: HopWorkItem) -> HopWorkItem | None:
       """Pop exactly the item one dispatch enqueued, if it is still queued.
 
@@ -85,6 +102,7 @@ class HopScheduler:
             return queued
       return None
 
+   @_locked
    def withdraw(self, item: HopWorkItem) -> bool:
       """Remove a rejected dispatch's item so no later pop can execute it.
 
@@ -103,6 +121,7 @@ class HopScheduler:
             return True
       return False
 
+   @_locked
    def batch_candidates(self, *, now: float) -> tuple[HopWorkItem, ...]:
       """Return priority-ordered work compatible with the next anchor."""
       if not self._queue:
@@ -114,16 +133,19 @@ class HopScheduler:
       anchor = self._queue[anchor_index]
       if anchor.batch_key is None:
          return (anchor,)
-      compatible_indices = sorted(
-         (
-            offset
-            for offset, item in enumerate(self._queue)
-            if item.batch_key == anchor.batch_key
-         ),
-         key=lambda offset: self._priority_key(offset, now=now),
+      compatible_indices = self._one_member_per_request(
+         sorted(
+            (
+               offset
+               for offset, item in enumerate(self._queue)
+               if item.batch_key == anchor.batch_key
+            ),
+            key=lambda offset: self._priority_key(offset, now=now),
+         )
       )
       return tuple(self._queue[offset] for offset in compatible_indices)
 
+   @_locked
    def pop_batch(
       self,
       *,
@@ -155,9 +177,11 @@ class HopScheduler:
             for offset, item in enumerate(self._queue)
             if item.batch_key == anchor.batch_key
          ]
-         selected_indices = sorted(
-            compatible_indices,
-            key=lambda offset: self._priority_key(offset, now=now),
+         selected_indices = self._one_member_per_request(
+            sorted(
+               compatible_indices,
+               key=lambda offset: self._priority_key(offset, now=now),
+            )
          )[:maximum]
       byte_limit = None if maximum_bytes is None else max(1, maximum_bytes)
       if byte_limit is not None:
@@ -180,6 +204,24 @@ class HopScheduler:
          decision=decision,
       )
 
+   def _one_member_per_request(self, offsets: list[int]) -> list[int]:
+      """Keep only each request's first item, in the given priority order.
+
+      One request's queued items depend on each other (a later chunk extends the
+      KV an earlier one writes), so they never share one runtime batch; the later
+      item waits for a following batch.
+      """
+
+      seen: set[str] = set()
+      kept: list[int] = []
+      for offset in offsets:
+         request_id = self._queue[offset].request_id
+         if request_id in seen:
+            continue
+         seen.add(request_id)
+         kept.append(offset)
+      return kept
+
    def _priority_key(self, offset: int, *, now: float) -> tuple:
       item = self._queue[offset]
       return (
@@ -191,6 +233,7 @@ class HopScheduler:
          offset,
       )
 
+   @_locked
    def release_path(self, path_id: str) -> None:
       self._queue = [item for item in self._queue if item.path_id != path_id]
       self._queued_payload_bytes = sum(
@@ -202,12 +245,15 @@ class HopScheduler:
          if value[1] != path_id
       }
 
+   @_locked
    def queue_depth(self) -> int:
       return len(self._queue)
 
+   @_locked
    def placement_depths(self) -> dict[str, int]:
       return dict(Counter(item.placement_id for item in self._queue))
 
+   @_locked
    def queued_payload_bytes(self) -> int:
       return self._queued_payload_bytes
 
@@ -223,6 +269,7 @@ class HopScheduler:
          return len(payload) * 4
       raise TypeError("unsupported_hop_payload_for_byte_accounting")
 
+   @_locked
    def seen_key_count(self) -> int:
       return len(self._seen_keys)
 
