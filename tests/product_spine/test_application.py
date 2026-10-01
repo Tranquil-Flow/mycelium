@@ -283,3 +283,91 @@ def test_failed_authority_is_scoped_degradation_not_whole_endpoint_failure() -> 
         notice["code"] == "membership_source_failed"
         for notice in snapshot["notices"]
     )
+
+
+def _two_endpoint_state(state_root: Path) -> tuple[Path, dict]:
+    """Persist one event whose history crosses two endpoints, as written before
+    the per-endpoint transition-history rule (the last row alone was current)."""
+    from mycelium_product_spine.contracts import validate_internet_native_snapshot
+    from mycelium_product_spine.route_explorer import project_route_explorer
+
+    first = _application(state_root)
+    status, _body = asyncio.run(_request(first, "/v1/product/snapshot"))
+    assert status == 200
+    state_file = state_root / "product-evidence-state.v1.json"
+    persisted = json.loads(state_file.read_text())
+    persisted["events"] = persisted["events"][-1:]
+    snapshot = persisted["events"][0]["snapshot"]
+    template = snapshot["internet_native"]["activation_observation"]
+    history = []
+    for index, endpoint in enumerate(("a" * 64, "b" * 64)):
+        observation = dict(template)
+        observation.update(
+            observation_id=f"observation-{index}",
+            path_class="direct",
+            path_source="bound_live_connection",
+            freshness="current",
+            endpoint_pseudonym=f"sha256:{endpoint}",
+            observed_at_unix_ms=1_000 + index,
+            evidence_lifetime_until_unix_ms=2_000 + index,
+        )
+        history.append(observation)
+    snapshot["internet_native"]["activation_history"] = history
+    snapshot["internet_native"]["activation_observation"] = history[-1]
+    detached = {k: v for k, v in snapshot.items() if k != "route_explorer"}
+    detached["internet_native"] = validate_internet_native_snapshot(
+        snapshot["internet_native"]
+    )
+    snapshot["route_explorer"] = project_route_explorer(detached, legacy_history=True)
+    current = project_route_explorer(detached)
+    assert snapshot["route_explorer"] != current
+    return state_file, {"persisted": persisted, "current": current}
+
+
+def _write_private(state_file: Path, document: dict) -> None:
+    state_file.write_text(json.dumps(document, sort_keys=True, separators=(",", ":")))
+    state_file.chmod(0o600)
+
+
+def test_restart_upgrades_route_explorer_written_before_transition_history(
+    tmp_path: Path,
+) -> None:
+    state_root = tmp_path / "private-product-state"
+    state_root.mkdir(mode=0o700)
+    state_file, case = _two_endpoint_state(state_root)
+    _write_private(state_file, case["persisted"])
+
+    restarted = _application(state_root)
+    event_status, event_body = asyncio.run(
+        _request(restarted, "/v1/product/events", last_event_id=0)
+    )
+    restored = [
+        json.loads(line.removeprefix("data: "))
+        for line in event_body.decode().splitlines()
+        if line.startswith("data: ")
+    ]
+
+    assert event_status == 200
+    explorer = restored[0]["snapshot"]["route_explorer"]
+    assert explorer == case["current"]
+    observed = [s for s in explorer["segments"] if s["edge_kind"] == "transport_observation"]
+    assert len(observed) == 2 and not any(s["history"] for s in observed)
+
+
+def test_restart_still_refuses_a_route_explorer_matching_neither_rule(
+    tmp_path: Path,
+) -> None:
+    from mycelium_product_spine.route_explorer import digest
+
+    state_root = tmp_path / "private-product-state"
+    state_root.mkdir(mode=0o700)
+    state_file, case = _two_endpoint_state(state_root)
+    explorer = case["persisted"]["events"][0]["snapshot"]["route_explorer"]
+    for row in explorer["segments"]:
+        if row["edge_kind"] == "transport_observation":
+            row["history"] = True
+    explorer["digest"] = digest({k: v for k, v in explorer.items() if k != "digest"})
+    _write_private(state_file, case["persisted"])
+
+    with pytest.raises(ProductEvidenceStateError, match="product_evidence_state_corrupt"):
+        _application(state_root)

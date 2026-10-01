@@ -254,6 +254,48 @@ def _write_private(
                 pass
 
 
+def _upgrade_pre_transition_history_route_explorer(value: object) -> Any:
+    """Re-project a route explorer written under the pre-transition-history rule.
+
+    Before per-endpoint transition history, only the last activation observation
+    was current. A stored explorer is replaced only when it is exactly what that
+    rule projects from the same stored snapshot; anything else is left for the
+    ordinary validator to refuse.
+    """
+
+    if not isinstance(value, dict):
+        return value
+    snapshot = value.get("snapshot")
+    if not isinstance(snapshot, dict) or "route_explorer" not in snapshot:
+        return value
+    try:
+        from .contracts import validate_internet_native_snapshot
+        from .route_explorer import project_route_explorer, validate_route_explorer
+
+        detached = {k: v for k, v in snapshot.items() if k != "route_explorer"}
+        detached["internet_native"] = validate_internet_native_snapshot(
+            snapshot["internet_native"]
+        )
+        if "coarse_region_evidence" in snapshot:
+            from .coarse_region import validate_coarse_region_evidence
+
+            detached["coarse_region_evidence"] = [
+                validate_coarse_region_evidence(item)
+                for item in snapshot["coarse_region_evidence"]
+            ]
+        stored = validate_route_explorer(snapshot["route_explorer"])
+        current = project_route_explorer(detached)
+        if stored == current or stored != project_route_explorer(
+            detached, legacy_history=True
+        ):
+            return value
+    except (TypeError, ValueError, KeyError):
+        return value
+    upgraded = dict(value)
+    upgraded["snapshot"] = dict(snapshot, route_explorer=current)
+    return upgraded
+
+
 class ProductEvidenceStateStore:
     """Persist privacy-reduced events under an already-created private root."""
 
@@ -300,8 +342,10 @@ class ProductEvidenceStateStore:
         try:
             events = [
                 validate_product_event(
-                    _upgrade_pre_a8_internet_native_event(
-                        _upgrade_generation_one_event(event)
+                    _upgrade_pre_transition_history_route_explorer(
+                        _upgrade_pre_a8_internet_native_event(
+                            _upgrade_generation_one_event(event)
+                        )
                     )
                 )
                 for event in document["events"]

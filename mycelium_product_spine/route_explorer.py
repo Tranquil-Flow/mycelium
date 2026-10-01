@@ -130,8 +130,13 @@ def validate_route_explorer(value):
     return json.loads(json.dumps(value, allow_nan=False))
 
 
-def project_route_explorer(snapshot):
-    """Called only after the ordinary product validator reduces source authority."""
+def project_route_explorer(snapshot, *, legacy_history=False):
+    """Called only after the ordinary product validator reduces source authority.
+
+    ``legacy_history`` reproduces the rule used before per-endpoint transition
+    history (only the last observation was current). It exists solely so stored
+    state can prove what an older build published before it is re-projected.
+    """
     material = {k: v for k, v in snapshot.items() if k != 'route_explorer'}
     mode = snapshot['publication']['source_mode']
     evidence = snapshot.get('coarse_region_evidence')
@@ -180,7 +185,8 @@ def project_route_explorer(snapshot):
         segment(immutable, destination=node(a['endpoint_pseudonym'], 'endpoint'),
                 edge_kind='transport_observation', path_status='observed' if resolved else 'unknown',
                 transport=a['path_class'] if resolved else 'unknown',
-                freshness=a['freshness'], history=i != latest[a['endpoint_pseudonym']],
+                freshness=a['freshness'],
+                history=i != (len(history) - 1 if legacy_history else latest[a['endpoint_pseudonym']]),
                 connection_generation=a['connection_generation'], issued_at=a['observed_at_unix_ms'],
                 expires_at=a['evidence_lifetime_until_unix_ms'], metrics=a['metrics'] if resolved else dict(empty_metrics))
     # An identical evidence record is one immutable segment, never duplicate traffic.
