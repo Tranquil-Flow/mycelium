@@ -11,6 +11,7 @@ import * as faultHarness from './a6-product-browser-e2e.mjs';
 const {
   assertPrivacyClean,
   atomicPrivateWrite,
+  awaitLiveInferenceEnabled,
   exerciseReconnect,
   expectedWorkspaceFields,
   validateRecoveryHistory,
@@ -295,6 +296,39 @@ test('reconnect helper proves a bounded offline-to-online transition', async () 
   });
   assert.deepEqual(transitions, [true, false]);
   assert.equal(observed, true);
+});
+
+function promptPage({ enabledAfterPolls, evidence = 'connected' }) {
+  const calls = { evidenceWaits: 0, polls: 0, visible: 0 };
+  const prompt = {
+    waitFor: async () => { calls.visible += 1; },
+    isDisabled: async () => {
+      calls.polls += 1;
+      return calls.polls <= enabledAfterPolls;
+    },
+  };
+  const page = {
+    waitForFunction: async () => {
+      calls.evidenceWaits += 1;
+      if (evidence !== 'connected') throw new Error('timeout');
+    },
+    waitForTimeout: async () => undefined,
+  };
+  return { page, prompt, calls };
+}
+
+test('live inference wait outlasts the disabled first paint of a fresh serve', async () => {
+  // First paint: evidence still loading, prompt disabled for a few polls.
+  const { page, prompt, calls } = promptPage({ enabledAfterPolls: 3 });
+  await awaitLiveInferenceEnabled(page, prompt, 60_000);
+  assert.equal(calls.visible, 1);
+  assert.equal(calls.evidenceWaits, 1, 'waits on body[data-evidence] first');
+  assert.equal(calls.polls, 4);
+});
+
+test('live inference wait still fails closed when the prompt never enables', async () => {
+  const { page, prompt } = promptPage({ enabledAfterPolls: Infinity, evidence: 'error' });
+  await assert.rejects(awaitLiveInferenceEnabled(page, prompt, 0), /live_inference_disabled/);
 });
 
 test('fixture history validator accepts bounded aggregate recovery progression', () => {

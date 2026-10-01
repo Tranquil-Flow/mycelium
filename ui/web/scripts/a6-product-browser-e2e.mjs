@@ -292,12 +292,32 @@ async function waitForObservation(page, predicate, timeout = 300_000) {
 }
 
 
+// The prompt renders disabled at first paint: the unified product evidence
+// arrives over SSE afterwards and only then can enable live inference. The
+// product mirrors its evidence status onto document.body[data-evidence] for
+// exactly this wait (the A4 harness uses it too); checking the textbox as soon
+// as it is visible races that effect and refuses every fresh serve.
+export async function awaitLiveInferenceEnabled(page, prompt, timeout = 60_000) {
+  await prompt.waitFor({ state: 'visible', timeout });
+  await page.waitForFunction(
+    () => document.body.dataset.evidence === 'connected',
+    null,
+    { timeout },
+  ).catch(() => {});
+  // Connected evidence can still be catching up to the qualified route; give
+  // the same bounded budget for the prompt itself to become enabled.
+  const deadline = Date.now() + timeout;
+  while (await prompt.isDisabled()) {
+    if (Date.now() >= deadline) fail('live_inference_disabled');
+    await page.waitForTimeout(250);
+  }
+}
+
 async function startRequest(page, privateCanaries, maximumNewTokens) {
   await page.goto(`${page.url().split('/#')[0]}/#inference`, { waitUntil: 'domcontentloaded' });
   const baseline = await productRecoveryStatus(page);
   const prompt = page.getByRole('textbox', { name: /prompt/i });
-  await prompt.waitFor({ state: 'visible', timeout: 60_000 });
-  if (await prompt.isDisabled()) fail('live_inference_disabled');
+  await awaitLiveInferenceEnabled(page, prompt);
   await prompt.fill(`${privateCanaries.join(' ')} Explain bounded request recovery.`);
   await page.getByLabel(/maximum new tokens/i).fill(String(maximumNewTokens));
   const start = page.getByRole('button', { name: /start inference/i });
