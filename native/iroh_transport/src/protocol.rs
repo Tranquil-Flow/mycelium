@@ -27,6 +27,13 @@ pub enum MessageType {
     ReservationCommitResult,
     TokenEvent,
     FailureReport,
+    // A7 fenced KV-successor recovery control frames.
+    KVCheckpointShipment,
+    KVCheckpointAck,
+    KVSuccessorCutover,
+    KVSuccessorCutoverReceipt,
+    KVCheckpointCommit,
+    KVShadowRelease,
 }
 
 impl MessageType {
@@ -43,6 +50,12 @@ impl MessageType {
             Self::ReservationCommitResult => "ReservationCommitResult",
             Self::TokenEvent => "TokenEvent",
             Self::FailureReport => "FailureReport",
+            Self::KVCheckpointShipment => "KVCheckpointShipment",
+            Self::KVCheckpointAck => "KVCheckpointAck",
+            Self::KVSuccessorCutover => "KVSuccessorCutover",
+            Self::KVSuccessorCutoverReceipt => "KVSuccessorCutoverReceipt",
+            Self::KVCheckpointCommit => "KVCheckpointCommit",
+            Self::KVShadowRelease => "KVShadowRelease",
         }
     }
 
@@ -59,6 +72,12 @@ impl MessageType {
             "ReservationCommitResult" => Ok(Self::ReservationCommitResult),
             "TokenEvent" => Ok(Self::TokenEvent),
             "FailureReport" => Ok(Self::FailureReport),
+            "KVCheckpointShipment" => Ok(Self::KVCheckpointShipment),
+            "KVCheckpointAck" => Ok(Self::KVCheckpointAck),
+            "KVSuccessorCutover" => Ok(Self::KVSuccessorCutover),
+            "KVSuccessorCutoverReceipt" => Ok(Self::KVSuccessorCutoverReceipt),
+            "KVCheckpointCommit" => Ok(Self::KVCheckpointCommit),
+            "KVShadowRelease" => Ok(Self::KVShadowRelease),
             _ => Err(WireError::UnknownMessageType),
         }
     }
@@ -122,6 +141,58 @@ impl MessageType {
                 "path_attempt",
                 "token_index",
                 "scope",
+                "reason",
+            ],
+            Self::KVCheckpointShipment => &[
+                "request_id",
+                "path_id",
+                "path_attempt",
+                "standby_placement_id",
+                "checkpoint_sequence",
+                "byte_size",
+            ],
+            Self::KVCheckpointAck => &[
+                "request_id",
+                "path_id",
+                "path_attempt",
+                "hop",
+                "signed_ack",
+            ],
+            Self::KVSuccessorCutover => &[
+                "request_id",
+                "old_path_id",
+                "old_path_attempt",
+                "successor_path_id",
+                "successor_path_attempt",
+                "fencing_generation",
+                "placement_id",
+                "role",
+                "expected_next_position",
+                "lease_expires_at",
+            ],
+            Self::KVSuccessorCutoverReceipt => &[
+                "request_id",
+                "successor_path_id",
+                "successor_path_attempt",
+                "fencing_generation",
+                "placement_id",
+                "installed",
+                "reason",
+                "checkpoint_digest",
+            ],
+            Self::KVCheckpointCommit => &[
+                "request_id",
+                "path_id",
+                "path_attempt",
+                "request_attempt",
+                "source_placement_id",
+                "committed_token_count",
+                "committed_prefix_digest",
+            ],
+            Self::KVShadowRelease => &[
+                "request_id",
+                "path_id",
+                "path_attempt",
                 "reason",
             ],
         }
