@@ -281,14 +281,49 @@ def _gelu_new(hidden: mx.array) -> mx.array:
    return result.astype(hidden.dtype)
 
 
+def _gpt2_attend(
+   query: mx.array,
+   key: mx.array,
+   value: mx.array,
+   past: tuple[mx.array, mx.array] | None,
+   head_size: int,
+) -> tuple[mx.array, mx.array, mx.array]:
+   """GPT-2 attention of ``query`` over retained ``past`` plus the new keys."""
+
+   sequence = int(query.shape[2])
+   if past is None:
+      all_key = key
+      all_value = value
+   else:
+      all_key = mx.concatenate((past[0], key), axis=2)
+      all_value = mx.concatenate((past[1], value), axis=2)
+   scores = mx.matmul(query, all_key.transpose(0, 1, 3, 2)) / math.sqrt(head_size)
+   if sequence > 1:
+      # A multi-position chunk is causal against its own positions whether or not
+      # it extends retained KV: query ``offset + i`` may attend keys ``0..offset+i``
+      # only.  (A single-position decode needs no mask: every retained key is at
+      # or before the query position.)
+      offset = 0 if past is None else int(past[0].shape[2])
+      query_positions = mx.arange(offset, offset + sequence)
+      key_positions = mx.arange(int(all_key.shape[2]))
+      causal = query_positions[:, None] >= key_positions[None, :]
+      scores = mx.where(
+         causal[None, None, :, :],
+         scores,
+         mx.array(-math.inf, dtype=scores.dtype),
+      )
+   weights = mx.softmax(scores, axis=-1)
+   return mx.matmul(weights, all_value), all_key, all_value
+
+
 def _gpt2_block_with_kv(
    hidden: mx.array,
    tensors: Mapping[str, mx.array],
    prefix: str,
    n_head: int,
    epsilon: float,
-   past: tuple[mx.array, mx.array] | None,
-) -> tuple[mx.array, tuple[mx.array, mx.array]]:
+   past: tuple[mx.array, mx.array] | list[tuple[mx.array, mx.array] | None] | None,
+) -> tuple[mx.array, Any]:
    residual = hidden
    normalized = _layer_norm(
       hidden,
@@ -309,29 +344,32 @@ def _gpt2_block_with_kv(
    query = split_heads(query)
    key = split_heads(key)
    value = split_heads(value)
-   if past is None:
-      all_key = key
-      all_value = value
+   layer_kv: Any
+   if isinstance(past, list):
+      # Ragged decode group: every member attends only its own retained KV,
+      # through exactly the single-member arithmetic, so no member ever sees
+      # padding or another member's keys.
+      if len(past) != int(batch):
+         _reject("ragged_batch_member_mismatch")
+      rows: list[mx.array] = []
+      member_kv: list[tuple[mx.array, mx.array]] = []
+      for index, member_past in enumerate(past):
+         row, member_key, member_value = _gpt2_attend(
+            query[index : index + 1],
+            key[index : index + 1],
+            value[index : index + 1],
+            member_past,
+            head_size,
+         )
+         rows.append(row)
+         member_kv.append((member_key, member_value))
+      attention = mx.concatenate(rows, axis=0)
+      layer_kv = member_kv
    else:
-      all_key = mx.concatenate((past[0], key), axis=2)
-      all_value = mx.concatenate((past[1], value), axis=2)
-   scores = mx.matmul(query, all_key.transpose(0, 1, 3, 2)) / math.sqrt(head_size)
-   if int(sequence) > 1:
-      # A multi-position chunk is causal against its own positions whether or not
-      # it extends retained KV: query ``offset + i`` may attend keys ``0..offset+i``
-      # only.  (A single-position decode needs no mask: every retained key is at
-      # or before the query position.)
-      offset = 0 if past is None else int(past[0].shape[2])
-      query_positions = mx.arange(offset, offset + int(sequence))
-      key_positions = mx.arange(int(all_key.shape[2]))
-      causal = query_positions[:, None] >= key_positions[None, :]
-      scores = mx.where(
-         causal[None, None, :, :],
-         scores,
-         mx.array(-math.inf, dtype=scores.dtype),
+      attention, all_key, all_value = _gpt2_attend(
+         query, key, value, past, head_size
       )
-   weights = mx.softmax(scores, axis=-1)
-   attention = mx.matmul(weights, all_value)
+      layer_kv = (all_key, all_value)
    attention = attention.transpose(0, 2, 1, 3).reshape(batch, sequence, hidden_size)
    attention = (
       mx.matmul(attention, tensors[f"{prefix}attn.c_proj.weight"])
@@ -355,7 +393,7 @@ def _gpt2_block_with_kv(
       mx.matmul(feed_forward, tensors[f"{prefix}mlp.c_proj.weight"])
       + tensors[f"{prefix}mlp.c_proj.bias"]
    )
-   return residual + feed_forward, (all_key, all_value)
+   return residual + feed_forward, layer_kv
 
 
 def _rms_norm(
@@ -437,15 +475,61 @@ def _qwen2_rope_at_position(
    )
 
 
+def _qwen2_attend(
+   query: mx.array,
+   key: mx.array,
+   value: mx.array,
+   past: tuple[mx.array, mx.array] | None,
+   position: int,
+   config: Mapping[str, Any],
+) -> tuple[mx.array, mx.array, mx.array]:
+   """Rotate at ``position`` and attend over retained ``past`` plus the new keys."""
+
+   n_head = int(config["n_head"])
+   n_kv_head = int(config["n_kv_head"])
+   head_dim = int(config["head_dim"])
+   sequence = int(query.shape[2])
+   query, key = _qwen2_rope_at_position(
+      query,
+      key,
+      position=position,
+      theta=float(config["rope_theta"]),
+   )
+   if past is None:
+      all_key = key
+      all_value = value
+   else:
+      all_key = mx.concatenate((past[0], key), axis=2)
+      all_value = mx.concatenate((past[1], value), axis=2)
+   repeats = n_head // n_kv_head
+   attention_key = mx.repeat(all_key, repeats, axis=1)
+   attention_value = mx.repeat(all_value, repeats, axis=1)
+   scores = mx.matmul(
+      query, attention_key.transpose(0, 1, 3, 2)
+   ) / math.sqrt(head_dim)
+   query_positions = mx.arange(position, position + sequence)
+   key_positions = mx.arange(int(all_key.shape[2]))
+   causal = query_positions[:, None] >= key_positions[None, :]
+   probabilities = mx.softmax(
+      mx.where(
+         causal[None, None, :, :],
+         scores,
+         mx.array(-math.inf, dtype=scores.dtype),
+      ),
+      axis=-1,
+   )
+   return mx.matmul(probabilities, attention_value), all_key, all_value
+
+
 def _qwen2_block_with_kv(
    hidden: mx.array,
    tensors: Mapping[str, Any],
    prefix: str,
    config: Mapping[str, Any],
-   position: int,
-   past: tuple[mx.array, mx.array] | None,
+   position: int | tuple[int, ...],
+   past: tuple[mx.array, mx.array] | list[tuple[mx.array, mx.array] | None] | None,
    architecture: str = "qwen2",
-) -> tuple[mx.array, tuple[mx.array, mx.array]]:
+) -> tuple[mx.array, Any]:
    n_head = int(config["n_head"])
    n_kv_head = int(config["n_kv_head"])
    head_dim = int(config["head_dim"])
@@ -483,36 +567,38 @@ def _qwen2_block_with_kv(
          tensors[prefix + "self_attn.k_norm.weight"],
          float(config["rms_norm_epsilon"]),
       )
-   query, key = _qwen2_rope_at_position(
-      query,
-      key,
-      position=position,
-      theta=float(config["rope_theta"]),
-   )
-   if past is None:
-      all_key = key
-      all_value = value
+   layer_kv: Any
+   if isinstance(past, list):
+      # Ragged decode group: each member is rotated at its own position and
+      # attends only its own retained KV, through the single-member arithmetic.
+      if (
+         len(past) != batch
+         or not isinstance(position, tuple)
+         or len(position) != batch
+      ):
+         _reject("ragged_batch_member_mismatch")
+      rows: list[mx.array] = []
+      member_kv: list[tuple[mx.array, mx.array]] = []
+      for index, member_past in enumerate(past):
+         row, member_key, member_value = _qwen2_attend(
+            query[index : index + 1],
+            key[index : index + 1],
+            value[index : index + 1],
+            member_past,
+            int(position[index]),
+            config,
+         )
+         rows.append(row)
+         member_kv.append((member_key, member_value))
+      attended = mx.concatenate(rows, axis=0)
+      layer_kv = member_kv
    else:
-      all_key = mx.concatenate((past[0], key), axis=2)
-      all_value = mx.concatenate((past[1], value), axis=2)
-   repeats = n_head // n_kv_head
-   attention_key = mx.repeat(all_key, repeats, axis=1)
-   attention_value = mx.repeat(all_value, repeats, axis=1)
-   scores = mx.matmul(
-      query, attention_key.transpose(0, 1, 3, 2)
-   ) / math.sqrt(head_dim)
-   query_positions = mx.arange(position, position + sequence)
-   key_positions = mx.arange(int(all_key.shape[2]))
-   causal = query_positions[:, None] >= key_positions[None, :]
-   probabilities = mx.softmax(
-      mx.where(
-         causal[None, None, :, :],
-         scores,
-         mx.array(-math.inf, dtype=scores.dtype),
-      ),
-      axis=-1,
-   )
-   attended = mx.matmul(probabilities, attention_value)
+      if not isinstance(position, int) or isinstance(position, bool):
+         _reject("invalid_kv_position")
+      attended, all_key, all_value = _qwen2_attend(
+         query, key, value, past, position, config
+      )
+      layer_kv = (all_key, all_value)
    attended = attended.transpose(0, 2, 1, 3).reshape(batch, sequence, -1)
    hidden = residual + _qwen2_linear(
       attended, tensors[prefix + "self_attn.o_proj.weight"]
@@ -529,7 +615,7 @@ def _qwen2_block_with_kv(
    hidden = residual + _qwen2_linear(
       gate * up, tensors[prefix + "mlp.down_proj.weight"]
    )
-   return hidden, (all_key, all_value)
+   return hidden, layer_kv
 
 
 class MLXRuntimePort:
@@ -1361,12 +1447,12 @@ class MLXRuntimePort:
       runtime: Mapping[str, Any],
       token_ids: mx.array | None,
       hidden_states: mx.array | None,
-      position: int,
-      past_layers: Mapping[int, tuple[mx.array, mx.array]],
+      position: int | tuple[int, ...],
+      past_layers: Mapping[int, Any],
       path_id: str,
       produce_logits: bool = True,
       all_positions: bool = False,
-   ) -> tuple[mx.array, dict[int, tuple[mx.array, mx.array]]]:
+   ) -> tuple[mx.array, dict[int, Any]]:
       config = runtime["model_config"]
       tensors = loaded.tensors
       start = stage.layer_range.start_layer
@@ -1382,7 +1468,7 @@ class MLXRuntimePort:
             if hidden_states is None or token_ids is not None:
                _reject("non_entry_stage_requires_hidden_states")
             hidden = hidden_states
-         next_layers: dict[int, tuple[mx.array, mx.array]] = {}
+         next_layers: dict[int, Any] = {}
          for layer in range(start, end):
             self._checkpoint_path(path_id)
             work_unit_started = time.monotonic()
@@ -1459,17 +1545,34 @@ class MLXRuntimePort:
          if token_ids is None or hidden_states is not None:
             _reject("entry_stage_requires_token_ids")
          sequence = int(token_ids.shape[1])
-         positions = mx.arange(position, position + sequence, dtype=mx.int32)
-         hidden = tensors[f"{namespace}wte.weight"][token_ids] + tensors[
-            f"{namespace}wpe.weight"
-         ][positions]
+         if isinstance(position, tuple):
+            # Ragged decode group: each member is embedded at its own position.
+            if len(position) != int(token_ids.shape[0]):
+               _reject("ragged_batch_member_mismatch")
+            rows = [
+               tensors[f"{namespace}wte.weight"][token_ids[index : index + 1]]
+               + tensors[f"{namespace}wpe.weight"][
+                  mx.arange(
+                     int(member_position),
+                     int(member_position) + sequence,
+                     dtype=mx.int32,
+                  )
+               ]
+               for index, member_position in enumerate(position)
+            ]
+            hidden = mx.concatenate(rows, axis=0)
+         else:
+            positions = mx.arange(position, position + sequence, dtype=mx.int32)
+            hidden = tensors[f"{namespace}wte.weight"][token_ids] + tensors[
+               f"{namespace}wpe.weight"
+            ][positions]
       else:
          if hidden_states is None or token_ids is not None:
             _reject("non_entry_stage_requires_hidden_states")
          hidden = hidden_states
 
       epsilon = float(config["layer_norm_epsilon"])
-      next_layers: dict[int, tuple[mx.array, mx.array]] = {}
+      next_layers: dict[int, Any] = {}
       for layer in range(start, end):
          self._checkpoint_path(path_id)
          work_unit_started = time.monotonic()
@@ -2069,7 +2172,10 @@ class MLXRuntimePort:
             return "heterogeneous_proposed_group"
          if item.phase != first.item.phase:
             return "mixed_member_phases"
-         if item.position != first.item.position:
+         # A decode group may mix positions: each member is rotated/embedded at
+         # its own position and attends only its own retained KV.  Every other
+         # phase still needs one shared start position.
+         if item.position != first.item.position and item.phase != "DECODE":
             return "mixed_start_positions"
          if bool(item.emits_token) != bool(first.item.emits_token):
             return "mixed_member_readout"
@@ -2093,20 +2199,39 @@ class MLXRuntimePort:
       widths = {
          int(next(iter(layers.values()))[0].shape[2]) for layers in pasts
       }
-      if len(layer_sets) != 1 or len(widths) != 1:
+      if len(layer_sets) != 1:
+         return "member_kv_width_mismatch"
+      if len(widths) != 1 and first.item.phase != "DECODE":
          return "member_kv_width_mismatch"
       return None
 
    def _single_invocation_context(
       self,
       members: tuple[_OfferedMember, ...],
-   ) -> tuple[bool, int, dict[int, tuple[mx.array, mx.array]]]:
-      """The shared start position and stacked past for the one invocation."""
+   ) -> tuple[bool, int | tuple[int, ...], dict[int, Any]]:
+      """The start position(s) and retained past for the one invocation.
+
+      Members at one shared position with equal retained widths are stacked into
+      one past per layer.  A decode group with mixed positions keeps every
+      member's own past (a per-layer list) and one position per member, so each
+      member attends exactly its own unpadded KV.
+      """
 
       first = members[0].item
       if self._item_starts_kv(first):
          return True, int(first.position), {}
       pasts = [self._kv_states[member.item.path_id].layers for member in members]
+      if len({int(member.item.position) for member in members}) != 1 or len(
+         {int(next(iter(layers.values()))[0].shape[2]) for layers in pasts}
+      ) != 1:
+         ragged: dict[int, list[tuple[mx.array, mx.array]]] = {
+            layer: [layers[layer] for layers in pasts] for layer in pasts[0]
+         }
+         return (
+            False,
+            tuple(int(member.item.position) for member in members),
+            ragged,
+         )
       stacked: dict[int, tuple[mx.array, mx.array]] = {}
       for layer in pasts[0]:
          keys = [layers[layer][0] for layers in pasts]
@@ -2303,17 +2428,24 @@ class MLXRuntimePort:
                _reject("nonfinite_stage_output")
             result = self._runtime_result(stage, runtime, row, produce_token=emit)
             layers: dict[int, tuple[mx.array, mx.array]] = {}
-            for layer, (all_key, all_value) in next_layers.items():
-               key_rows = all_key[index : index + 1]
-               value_rows = all_value[index : index + 1]
-               # Keep the member's whole retained prefix plus its own real
-               # positions; only padding past that is dropped.
-               retained = (
-                  int(past_layers[layer][0].shape[2]) if layer in past_layers else 0
-               )
-               if int(key_rows.shape[2]) > retained + length:
-                  key_rows = key_rows[:, :, : retained + length, :]
-                  value_rows = value_rows[:, :, : retained + length, :]
+            for layer, layer_kv in next_layers.items():
+               if isinstance(layer_kv, list):
+                  # Ragged decode: the member's own unpadded past plus its key.
+                  key_rows, value_rows = layer_kv[index]
+               else:
+                  all_key, all_value = layer_kv
+                  key_rows = all_key[index : index + 1]
+                  value_rows = all_value[index : index + 1]
+                  # Keep the member's whole retained prefix plus its own real
+                  # positions; only padding past that is dropped.
+                  retained = (
+                     int(past_layers[layer][0].shape[2])
+                     if layer in past_layers
+                     else 0
+                  )
+                  if int(key_rows.shape[2]) > retained + length:
+                     key_rows = key_rows[:, :, : retained + length, :]
+                     value_rows = value_rows[:, :, : retained + length, :]
                layers[layer] = (key_rows, value_rows)
             pending.append((member, length, result, layers))
          executions: list[MemberExecution] = []
