@@ -12,7 +12,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from .contracts import validate_product_event
 from .projector import ProductProjector
-from .state import ProductEvidenceStateStore
+from .state import ProductEvidenceStateStore, TransportHistoryStateStore
 from .transport_history import TransportTransitionHistory
 
 
@@ -33,6 +33,7 @@ class ProductEvidenceApplication:
         clock_unix_ms: Callable[[], int] | None = None,
         replay_limit: int = 128,
         state_root: str | Path | None = None,
+        transport_binding: str | None = None,
     ) -> None:
         if not isinstance(projector, ProductProjector):
             raise ValueError("product_projector_invalid")
@@ -60,9 +61,18 @@ class ProductEvidenceApplication:
         self._coarse_region_source = coarse_region_source
         self._qualification_source = qualification_source
         self._internet_native_source = internet_native_source
+        if transport_binding is not None and state_root is None:
+            raise ValueError("product_transport_binding_requires_state_root")
         # Live transport observations become immutable transition history here,
-        # independent of the route object's lifetime (cold route restarts).
-        self._transport_history = TransportTransitionHistory()
+        # independent of the route object's lifetime (cold route restarts). With
+        # a deployment binding the ledger also survives a planned serve restart.
+        self._transport_history = TransportTransitionHistory(
+            store=(
+                None
+                if transport_binding is None
+                else TransportHistoryStateStore(state_root, binding=transport_binding)
+            )
+        )
         self._recovery_source = recovery_source
         self._clock_unix_ms = clock_unix_ms or (lambda: int(time.time() * 1_000))
         self._store = (

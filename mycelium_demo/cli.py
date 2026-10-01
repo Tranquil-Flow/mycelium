@@ -200,6 +200,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     serve.add_argument("--coarse-region-declaration-file", type=Path)
     serve.add_argument(
+        "--persist-transport-history",
+        action="store_true",
+        help="operator-only A14 control: keep the direct/relay ledger across planned restarts",
+    )
+    serve.add_argument(
         "--a6-fault-control-port",
         type=int,
         help="grant-gated A6 controlled-fault loopback port for a live physical gate",
@@ -314,11 +319,16 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
         result.extend(
             ("--coarse-region-declaration-file", str(args.coarse_region_declaration_file))
         )
+    if args.persist_transport_history:
+        result.append("--persist-transport-history")
     return result
 
 
 def _fixture_has_live_only_arguments(args: argparse.Namespace) -> bool:
-    return args.a8_force_relay or args.trusted_https_proxy or any(
+    live_only_switches = (
+        args.a8_force_relay or args.trusted_https_proxy or args.persist_transport_history
+    )
+    return live_only_switches or any(
         value is not None
         for value in (
             args.state_root,

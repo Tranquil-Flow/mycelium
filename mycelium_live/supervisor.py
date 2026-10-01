@@ -1205,8 +1205,14 @@ def build_live_stack(
     recovery_tokenizer_digest: str | None = None,
     recovery_a4_atomic_commit: str | None = None,
     coarse_region_declaration_file: Path | None = None,
+    persist_transport_history: bool = False,
 ) -> LiveStack:
     """Compose the production browser and request gateways around a live route."""
+    transport_binding = _transport_history_binding(
+        execution_graph,
+        product_state_root=product_state_root,
+        persist=persist_transport_history,
+    )
     if (recovery_qualification_source is None) != (
         recovery_tokenizer_digest is None
     ):
@@ -1266,6 +1272,7 @@ def build_live_stack(
             recovery_source=recovery_source,
             state_root=product_state_root,
             coarse_region_declaration_file=coarse_region_declaration_file,
+            transport_binding=transport_binding,
         )
 
     checkpoint_root = _prepare_product_checkpoint_root(product_state_root)
@@ -1371,6 +1378,24 @@ def _prepare_product_checkpoint_root(state_root: Path | None) -> Path | None:
     return checkpoint
 
 
+def _transport_history_binding(
+    execution_graph: Any,
+    *,
+    product_state_root: Path | None,
+    persist: bool,
+) -> str | None:
+    """Bind the persisted direct/relay ledger to the served deployment (opt-in)."""
+
+    if not persist:
+        return None
+    if product_state_root is None:
+        raise ValueError("a14_transport_history_state_root_required")
+    deployment_id = getattr(execution_graph, "deployment_id", None)
+    if not isinstance(deployment_id, str) or not deployment_id:
+        raise ValueError("a14_transport_history_deployment_unavailable")
+    return deployment_id
+
+
 def _product_application(
     route: Any,
     qualification_source: Any,
@@ -1378,6 +1403,7 @@ def _product_application(
     recovery_source: Callable[[], Mapping[str, Any]] | None = None,
     state_root: Path | None = None,
     coarse_region_declaration_file: Path | None = None,
+    transport_binding: str | None = None,
 ) -> Any:
     membership = getattr(route, "product_membership_records", None)
     salt = getattr(route, "product_pseudonym_salt", None)
@@ -1428,6 +1454,7 @@ def _product_application(
             else None
         ),
         state_root=state_root,
+        transport_binding=transport_binding,
     )
 
 
@@ -1438,6 +1465,7 @@ def _optional_product_application(
     recovery_source: Callable[[], Mapping[str, Any]] | None = None,
     state_root: Path | None = None,
     coarse_region_declaration_file: Path | None = None,
+    transport_binding: str | None = None,
 ) -> Any | None:
     required = (
         getattr(route, "product_membership_records", None),
@@ -1450,6 +1478,7 @@ def _optional_product_application(
         route, qualification_source, recovery_source=recovery_source,
         state_root=state_root,
         coarse_region_declaration_file=coarse_region_declaration_file,
+        transport_binding=transport_binding,
     )
 
 
@@ -3388,6 +3417,7 @@ def _build_physical_product_stack(
     trusted_https_proxy: bool = False,
     trusted_proxy_capability: bytes | None = None,
     coarse_region_declaration_file: Path | None = None,
+    persist_transport_history: bool = False,
 ) -> LiveStack:
     tokenizer_digest = tokenizer_artifact_digest(deployment_dir)
     qualifier = LiveA6RecoveryQualifier(
@@ -3410,6 +3440,7 @@ def _build_physical_product_stack(
         trusted_https_proxy=trusted_https_proxy,
         trusted_proxy_capability=trusted_proxy_capability,
         coarse_region_declaration_file=coarse_region_declaration_file,
+        persist_transport_history=persist_transport_history,
     )
 
 
@@ -3441,6 +3472,7 @@ def run_physical_server(
     a6_fault_control_port: int | None = None,
     coarse_region_declaration_file: Path | None = None,
     a10_verify_control_port: int | None = None,
+    persist_transport_history: bool = False,
 ) -> int:
     deployment = native_deployment_projection(operator_plan)
     selected_deployment_dir: Path | None = None
@@ -3550,6 +3582,7 @@ def run_physical_server(
             trusted_https_proxy=trusted_https_proxy,
             trusted_proxy_capability=trusted_proxy_capability,
             coarse_region_declaration_file=coarse_region_declaration_file,
+            persist_transport_history=persist_transport_history,
         )
         stack.health.publish(qualification)
         if stack.router is None:
@@ -4130,6 +4163,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--persist-transport-history",
+        action="store_true",
+        help=(
+            "operator-only A14 control: keep the direct/relay ledger in the product "
+            "state root, bound to the served deployment, across planned restarts"
+        ),
+    )
+    parser.add_argument(
         "--a6-fault-control-port",
         type=int,
         help=(
@@ -4229,7 +4270,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "coarse_region_declaration_file": args.coarse_region_declaration_file
                 }
             ),
+            **(
+                {"persist_transport_history": True}
+                if args.persist_transport_history
+                else {}
+            ),
         )
+    if args.persist_transport_history:
+        raise SystemExit("--persist-transport-history is valid only with one --operator-plan")
     if args.coarse_region_declaration_file is not None:
         raise SystemExit(
             "--coarse-region-declaration-file is valid only with one --operator-plan"

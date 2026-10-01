@@ -20,7 +20,11 @@ observations. For every publication it:
   projection's authority. A refused current observation never becomes current:
   the published current observation is the unknown projection;
 * bounds the ledger deterministically and never invents an observation, a
-  transition, a region or a metric.
+  transition, a region or a metric;
+* optionally persists the ledger in the owner-private product state root,
+  bound to one deployment, so a transition across a planned serve restart is
+  still observed. A restored ledger is re-admitted through the same refusal
+  rules; any refusal, duplicate, malformed item or overflow fails closed.
 
 A transition is two consecutive retained observations of one endpoint whose
 path classes differ; the route explorer projects each as its own immutable
@@ -31,7 +35,10 @@ from __future__ import annotations
 import threading
 from typing import Any, Mapping
 
+from mycelium_internet.contracts import validate_activation_observation
+
 from .contracts import ProductContractError, validate_internet_native_snapshot
+from .state import ProductEvidenceStateError, TransportHistoryStateStore
 
 MAX_RETAINED = 63
 _RESOLVED = frozenset({"direct", "relay"})
@@ -58,13 +65,42 @@ def _unknown_current(now_unix_ms: int) -> dict[str, Any]:
 class TransportTransitionHistory:
     """Append-only, bounded ledger of accepted live transport observations."""
 
-    def __init__(self, *, limit: int = MAX_RETAINED) -> None:
+    def __init__(
+        self,
+        *,
+        limit: int = MAX_RETAINED,
+        store: TransportHistoryStateStore | None = None,
+    ) -> None:
         if type(limit) is not int or not 1 <= limit <= MAX_RETAINED:
             raise ValueError("transport_history_limit_invalid")
+        if store is not None and not isinstance(store, TransportHistoryStateStore):
+            raise ValueError("transport_history_store_invalid")
         self._limit = limit
         self._lock = threading.Lock()
         self._ledger: dict[str, dict[str, Any]] = {}
         self._rejections = {"rewrite": 0, "regression": 0, "contradiction": 0}
+        self._store = store
+        if store is not None:
+            self._restore(store.load())
+
+    def _restore(self, items: list[Any]) -> None:
+        """Re-admit a persisted ledger exactly, or refuse the whole of it."""
+
+        if len(items) > self._limit:
+            raise ProductEvidenceStateError("product_transport_history_corrupt")
+        for item in items:
+            try:
+                valid = dict(validate_activation_observation(item)) == item
+            except (TypeError, ValueError, KeyError):
+                valid = False
+            if (
+                not valid
+                or not _resolved(item)
+                or item["observation_id"] in self._ledger
+                or self._refusal(item, 0) is not None
+            ):
+                raise ProductEvidenceStateError("product_transport_history_corrupt")
+            self._ledger[item["observation_id"]] = dict(item)
 
     @property
     def rejections(self) -> dict[str, int]:
@@ -126,6 +162,7 @@ class TransportTransitionHistory:
         current = detached["activation_observation"]
         current_refused = False
         with self._lock:
+            before = list(self._ledger)
             for item in detached["activation_history"]:
                 if not _resolved(item):
                     continue
@@ -140,6 +177,8 @@ class TransportTransitionHistory:
             while len(self._ledger) > self._limit:
                 self._ledger.pop(next(iter(self._ledger)))
             retained = [dict(item) for item in self._ledger.values()]
+            if self._store is not None and list(self._ledger) != before:
+                self._store.write(retained)
         if current_refused:
             current = _unknown_current(now_unix_ms)
             detached["relay_projection"] = None

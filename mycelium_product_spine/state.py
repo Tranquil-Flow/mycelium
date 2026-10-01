@@ -16,6 +16,9 @@ from .contracts import validate_product_event
 STATE_PROTOCOL = "mycelium.product_evidence_state.v1"
 STATE_FILE = "product-evidence-state.v1.json"
 MAX_STATE_BYTES = 32 * 1024 * 1024
+TRANSPORT_HISTORY_PROTOCOL = "mycelium.product_transport_history.v1"
+TRANSPORT_HISTORY_FILE = "product-transport-history.v1.json"
+MAX_TRANSPORT_HISTORY_BYTES = 1024 * 1024
 _LEGACY_DEVICE_ATTRIBUTE_FIELDS = frozenset(
     {
         "peer_class",
@@ -158,6 +161,99 @@ def _upgrade_pre_a8_internet_native_event(value: object) -> Any:
     return value
 
 
+def _validated_root(root: Path, code: str) -> tuple[int, int]:
+    try:
+        metadata = root.lstat()
+    except OSError as exc:
+        raise ProductEvidenceStateError(code) from exc
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        raise ProductEvidenceStateError(code)
+    return metadata.st_dev, metadata.st_ino
+
+
+def _read_private(path: Path, *, limit: int, prefix: str) -> bytes | None:
+    """Read one owner-only regular file; ``None`` when it does not exist."""
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ProductEvidenceStateError(f"{prefix}_unavailable") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or metadata.st_nlink != 1
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise ProductEvidenceStateError(f"{prefix}_unavailable")
+        raw = b""
+        while len(raw) <= limit:
+            chunk = os.read(descriptor, min(1024 * 1024, limit + 1 - len(raw)))
+            if not chunk:
+                break
+            raw += chunk
+    finally:
+        os.close(descriptor)
+    if len(raw) > limit:
+        raise ProductEvidenceStateError(f"{prefix}_too_large")
+    return raw
+
+
+def _write_private(
+    root: Path,
+    path: Path,
+    payload: bytes,
+    *,
+    revalidate: Any,
+    prefix: str,
+) -> None:
+    """Atomically replace one owner-only file under a revalidated private root."""
+
+    revalidate()
+    temporary: Path | None = None
+    try:
+        descriptor, raw_path = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=root,
+        )
+        temporary = Path(raw_path)
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb", closefd=True) as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        revalidate()
+        os.replace(temporary, path)
+        temporary = None
+        os.chmod(path, 0o600, follow_symlinks=False)
+        directory = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        revalidate()
+    except ProductEvidenceStateError:
+        raise
+    except OSError as exc:
+        raise ProductEvidenceStateError(f"{prefix}_write_failed") from exc
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 class ProductEvidenceStateStore:
     """Persist privacy-reduced events under an already-created private root."""
 
@@ -175,18 +271,7 @@ class ProductEvidenceStateStore:
         return self._path
 
     def _validate_root(self) -> tuple[int, int]:
-        try:
-            metadata = self._root.lstat()
-        except OSError as exc:
-            raise ProductEvidenceStateError("product_evidence_state_root_invalid") from exc
-        if (
-            stat.S_ISLNK(metadata.st_mode)
-            or not stat.S_ISDIR(metadata.st_mode)
-            or metadata.st_uid != os.getuid()
-            or stat.S_IMODE(metadata.st_mode) != 0o700
-        ):
-            raise ProductEvidenceStateError("product_evidence_state_root_invalid")
-        return metadata.st_dev, metadata.st_ino
+        return _validated_root(self._root, "product_evidence_state_root_invalid")
 
     def _revalidate_root(self) -> None:
         if self._validate_root() != self._root_identity:
@@ -194,32 +279,11 @@ class ProductEvidenceStateStore:
 
     def load(self) -> list[dict[str, Any]]:
         self._revalidate_root()
-        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-        try:
-            descriptor = os.open(self._path, flags)
-        except FileNotFoundError:
+        raw = _read_private(
+            self._path, limit=MAX_STATE_BYTES, prefix="product_evidence_state"
+        )
+        if raw is None:
             return []
-        except OSError as exc:
-            raise ProductEvidenceStateError("product_evidence_state_unavailable") from exc
-        try:
-            metadata = os.fstat(descriptor)
-            if (
-                not stat.S_ISREG(metadata.st_mode)
-                or metadata.st_uid != os.getuid()
-                or metadata.st_nlink != 1
-                or stat.S_IMODE(metadata.st_mode) != 0o600
-            ):
-                raise ProductEvidenceStateError("product_evidence_state_unavailable")
-            raw = b""
-            while len(raw) <= MAX_STATE_BYTES:
-                chunk = os.read(descriptor, min(1024 * 1024, MAX_STATE_BYTES + 1 - len(raw)))
-                if not chunk:
-                    break
-                raw += chunk
-        finally:
-            os.close(descriptor)
-        if len(raw) > MAX_STATE_BYTES:
-            raise ProductEvidenceStateError("product_evidence_state_too_large")
         try:
             document = json.loads(raw.decode("utf-8"))
         except (UnicodeError, ValueError, RecursionError) as exc:
@@ -266,47 +330,108 @@ class ProductEvidenceStateStore:
             if len(retained) <= 1:
                 raise ProductEvidenceStateError("product_evidence_state_too_large")
             retained = retained[1:]
-        self._revalidate_root()
-        temporary: Path | None = None
-        try:
-            descriptor, raw_path = tempfile.mkstemp(
-                prefix=f".{STATE_FILE}.",
-                suffix=".tmp",
-                dir=self._root,
-            )
-            temporary = Path(raw_path)
-            os.fchmod(descriptor, 0o600)
-            with os.fdopen(descriptor, "wb", closefd=True) as stream:
-                stream.write(payload)
-                stream.flush()
-                os.fsync(stream.fileno())
-            self._revalidate_root()
-            os.replace(temporary, self._path)
-            temporary = None
-            os.chmod(self._path, 0o600, follow_symlinks=False)
-            directory = os.open(self._root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
-            self._revalidate_root()
-        except ProductEvidenceStateError:
-            raise
-        except OSError as exc:
-            raise ProductEvidenceStateError("product_evidence_state_write_failed") from exc
-        finally:
-            if temporary is not None:
-                try:
-                    temporary.unlink(missing_ok=True)
-                except OSError:
-                    pass
+        _write_private(
+            self._root,
+            self._path,
+            payload,
+            revalidate=self._revalidate_root,
+            prefix="product_evidence_state",
+        )
         return retained
+
+
+class TransportHistoryStateStore:
+    """Persist the direct/relay ledger of one deployment under the private root.
+
+    The file is bound to the deployment it was observed for: a ledger written
+    for another deployment is refused, never merged, so a transition can only be
+    assembled from observations of the same deployment across planned serve
+    restarts. Content validation (shape, order, monotonic generations) belongs
+    to the ledger, which re-admits every restored observation through its own
+    refusal rules.
+    """
+
+    def __init__(self, root: str | Path, *, binding: str) -> None:
+        if (
+            type(binding) is not str
+            or not 1 <= len(binding) <= 128
+            or not all(ch.isalnum() or ch in "-_.:" for ch in binding)
+        ):
+            raise ValueError("product_transport_history_binding_invalid")
+        path = Path(root).expanduser()
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        self._root = Path(os.path.abspath(path))
+        self._path = self._root / TRANSPORT_HISTORY_FILE
+        self._binding = binding
+        self._root_identity = self._validate_root()
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    def _validate_root(self) -> tuple[int, int]:
+        return _validated_root(self._root, "product_transport_history_root_invalid")
+
+    def _revalidate_root(self) -> None:
+        if self._validate_root() != self._root_identity:
+            raise ProductEvidenceStateError("product_transport_history_root_changed")
+
+    def load(self) -> list[dict[str, Any]]:
+        self._revalidate_root()
+        raw = _read_private(
+            self._path,
+            limit=MAX_TRANSPORT_HISTORY_BYTES,
+            prefix="product_transport_history",
+        )
+        if raw is None:
+            return []
+        try:
+            document = json.loads(raw.decode("utf-8"))
+        except (UnicodeError, ValueError, RecursionError) as exc:
+            raise ProductEvidenceStateError("product_transport_history_corrupt") from exc
+        if (
+            not isinstance(document, dict)
+            or set(document) != {"protocol", "binding", "observations"}
+            or document.get("protocol") != TRANSPORT_HISTORY_PROTOCOL
+            or not isinstance(document.get("binding"), str)
+            or not isinstance(document.get("observations"), list)
+        ):
+            raise ProductEvidenceStateError("product_transport_history_corrupt")
+        if document["binding"] != self._binding:
+            raise ProductEvidenceStateError(
+                "product_transport_history_foreign_deployment"
+            )
+        self._revalidate_root()
+        return document["observations"]
+
+    def write(self, observations: Sequence[Mapping[str, Any]]) -> None:
+        payload = _encoded(
+            {
+                "protocol": TRANSPORT_HISTORY_PROTOCOL,
+                "binding": self._binding,
+                "observations": [dict(item) for item in observations],
+            }
+        )
+        if len(payload) > MAX_TRANSPORT_HISTORY_BYTES:
+            raise ProductEvidenceStateError("product_transport_history_too_large")
+        _write_private(
+            self._root,
+            self._path,
+            payload,
+            revalidate=self._revalidate_root,
+            prefix="product_transport_history",
+        )
 
 
 __all__ = [
     "MAX_STATE_BYTES",
+    "MAX_TRANSPORT_HISTORY_BYTES",
     "ProductEvidenceStateError",
     "ProductEvidenceStateStore",
     "STATE_FILE",
     "STATE_PROTOCOL",
+    "TRANSPORT_HISTORY_FILE",
+    "TRANSPORT_HISTORY_PROTOCOL",
+    "TransportHistoryStateStore",
 ]
