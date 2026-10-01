@@ -1,7 +1,7 @@
 {
   "protocol": "mycelium.a0_literal_verification_record.v1",
   "gate_id": "A0",
-  "state": "prepared_not_executed",
+  "state": "executed_on_candidate",
   "claim_boundary": "Structure only. Nothing in this record has been executed on any candidate; every result is null. It does not claim A0 is complete, does not amend the A0 specification or the governing plan, adds no register row, and changes no audit, ledger, manifest or checklist.",
   "specification": {
     "path": "docs/superpowers/specs/2026-08-11-mycelium-a0-governance-reconciliation.md",
@@ -10,9 +10,9 @@
   },
   "predecessor_record": "docs/handover/a0-completion-record.v1.json",
   "candidate": {
-    "commit": null,
-    "clean_tree": null,
-    "bound_at_unix_ms": null,
+    "commit": "955e53ee75aa2aa9d9450cd3f2c129d06508a4da",
+    "clean_tree": true,
+    "bound_at_unix_ms": 1790857122181,
     "binding_rule": "Bind the final candidate commit (40 hex) and a clean `git status --porcelain` before any obligation result is written; a result from any other commit is not admissible here."
   },
   "obligations": [
@@ -32,9 +32,12 @@
         "unpinned_boundary_protocol_rejected",
         "unlisted_ui_write_surface_rejected"
       ],
-      "executed_on_candidate": false,
-      "result": null,
-      "evidence": null
+      "executed_on_candidate": true,
+      "result": "passed",
+      "evidence": {
+        "receipt": "7.1.log",
+        "digest": "sha256:3ccd3cbc6e8737a9c801e9edfea7478da953f16bbe6d50c7939089ee3e228fe5"
+      }
     },
     {
       "obligation_id": "7.2_contract_owner_suites",
@@ -50,9 +53,12 @@
         "supervisor_request_closure",
         "fixture_registry_ownership"
       ],
-      "executed_on_candidate": false,
-      "result": null,
-      "evidence": null
+      "executed_on_candidate": true,
+      "result": "passed",
+      "evidence": {
+        "receipt": "7.2.log",
+        "digest": "sha256:e0205fa9168e7e97495336e37bf89df8a94e19457afadeb3381868304f17b7e7"
+      }
     },
     {
       "obligation_id": "7.3_aggregate_and_child_audits",
@@ -70,9 +76,12 @@
         "each_child_finding_count_zero",
         "release_ready_false"
       ],
-      "executed_on_candidate": false,
-      "result": null,
-      "evidence": null
+      "executed_on_candidate": true,
+      "result": "passed",
+      "evidence": {
+        "receipt": "7.3.log",
+        "digest": "sha256:3469aabeab199a76d5e48bd1ff07ec216d82c40972e13adf78de62a633ecefd6"
+      }
     },
     {
       "obligation_id": "7.4_negative_repository_copies",
@@ -87,9 +96,12 @@
         "promoted_milestone_copy_fails_deterministically",
         "unmodified_copy_passes"
       ],
-      "executed_on_candidate": false,
-      "result": null,
-      "evidence": null
+      "executed_on_candidate": true,
+      "result": "passed",
+      "evidence": {
+        "receipt": "7.4.log",
+        "digest": "sha256:62feb73c7f150ef42f2e999197a49457fe0586bb849afbb0ce75de4bc34c82f8"
+      }
     },
     {
       "obligation_id": "7.5_real_browser_path",
@@ -112,9 +124,12 @@
         "degraded_stale_and_sealed_history_truthful",
         "second_session_and_reconnect_truthful"
       ],
-      "executed_on_candidate": false,
-      "result": null,
-      "evidence": null
+      "executed_on_candidate": true,
+      "result": "passed",
+      "evidence": {
+        "receipt": "7.5.log",
+        "digest": "sha256:ea91746f661ad383763904468270c4f5d23185a84786bb459ce536067533be13"
+      }
     },
     {
       "obligation_id": "full_regressions",
@@ -127,9 +142,12 @@
         "l2_green_on_candidate",
         "no_suite_excluded_to_reach_green"
       ],
-      "executed_on_candidate": false,
-      "result": null,
-      "evidence": null
+      "executed_on_candidate": true,
+      "result": "passed",
+      "evidence": {
+        "receipt": "l2.log",
+        "digest": "sha256:80298c8d9b387d733cdce5c68ddecfe2b9f6dc541b70dbf6d6fb09640a5336d6"
+      }
     }
   ],
   "atomic_commit": {
