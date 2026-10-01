@@ -2286,9 +2286,14 @@ class MLXRuntimePort:
             for layer, (all_key, all_value) in next_layers.items():
                key_rows = all_key[index : index + 1]
                value_rows = all_value[index : index + 1]
-               if int(key_rows.shape[2]) > length:
-                  key_rows = key_rows[:, :, :length, :]
-                  value_rows = value_rows[:, :, :length, :]
+               # Keep the member's whole retained prefix plus its own real
+               # positions; only padding past that is dropped.
+               retained = (
+                  int(past_layers[layer][0].shape[2]) if layer in past_layers else 0
+               )
+               if int(key_rows.shape[2]) > retained + length:
+                  key_rows = key_rows[:, :, : retained + length, :]
+                  value_rows = value_rows[:, :, : retained + length, :]
                layers[layer] = (key_rows, value_rows)
             pending.append((member, length, result, layers))
          executions: list[MemberExecution] = []
