@@ -55,9 +55,7 @@ export const tauriApi: NodeApi = {
   exportEvidence: () => invoke('node_export_evidence'),
   onStatus: (handler) => listen<NodeStatus>('node://status', (e) => handler(e.payload)),
   async scanQr() {
-    const scanner = await import('@tauri-apps/plugin-barcode-scanner');
-    const result = await scanner.scan({ formats: [scanner.Format.QRCode], windowed: false });
-    return result?.content ?? null;
+    return scanWithPermission(await import('@tauri-apps/plugin-barcode-scanner'));
   },
   async onDeepLink(handler) {
     const dl = await import('@tauri-apps/plugin-deep-link');
@@ -66,6 +64,25 @@ export const tauriApi: NodeApi = {
     return dl.onOpenUrl((urls) => urls.forEach(handler));
   },
 };
+
+type ScannerModule = Pick<
+  typeof import('@tauri-apps/plugin-barcode-scanner'),
+  'checkPermissions' | 'requestPermissions' | 'scan' | 'Format'
+>;
+
+/**
+ * Scan one QR code, asking for the camera first: Android only shows the camera
+ * after a runtime grant, so a scan without one fails instead of prompting.
+ */
+export async function scanWithPermission(scanner: ScannerModule): Promise<string | null> {
+  let state = await scanner.checkPermissions();
+  if (state !== 'granted') state = await scanner.requestPermissions();
+  if (state !== 'granted') {
+    throw 'camera_permission_denied: allow the camera for Mycelium Node in Android settings, or paste the invite code instead';
+  }
+  const result = await scanner.scan({ formats: [scanner.Format.QRCode], windowed: false });
+  return result?.content ?? null;
+}
 
 /** Stable pseudonymous device label (never brand/model text). */
 export function deviceRef(endpointId: string): string {
