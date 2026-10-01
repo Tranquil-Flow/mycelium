@@ -11,9 +11,10 @@ switch, and only that:
 * it listens on its own direct IPv4 loopback socket beside the product origin,
   refuses a non-loopback peer and any forwarding header, and refuses to start
   when the product is served behind a trusted HTTPS proxy or a public origin;
-* it accepts only ``baseline`` or ``candidate`` and hands the policy to the
-  product dispatcher, which applies it to every node of the deployment and
-  accepts only each node's own receipt for exactly that policy.
+* it accepts only ``baseline`` or ``candidate`` (optionally with a bounded
+  ``window_ms`` live hop collection window) and hands it to the product
+  dispatcher, which applies it to every node of the deployment and accepts only
+  each node's own receipt for exactly that policy and window.
 
 A refusal carries only a stable code, never exception text.  A mounted control is
 a control surface, not evidence: its status never claims a qualification.
@@ -38,6 +39,9 @@ _FORWARDING_HEADERS = frozenset({"forwarded", "via", "x-real-ip", "x-client-ip"}
 _MAX_BODY = 4 * 1024
 _CODE = re.compile(r"[a-z][a-z0-9_:]{0,80}\Z")
 _REQUEST_FIELDS = frozenset({"policy", "timeout_s"})
+_OPTIONAL_FIELDS = frozenset({"window_ms"})
+#: Candidate collection window bound, in whole milliseconds.
+MAXIMUM_WINDOW_MS = 250
 
 Dispatch = Callable[..., Mapping[str, Any]]
 
@@ -94,18 +98,28 @@ class _Handler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             request = None
         timeout = request.get("timeout_s") if isinstance(request, dict) else None
+        window = request.get("window_ms") if isinstance(request, dict) else None
         if (
             not isinstance(request, dict)
-            or set(request) != _REQUEST_FIELDS
+            or not _REQUEST_FIELDS <= set(request) <= _REQUEST_FIELDS | _OPTIONAL_FIELDS
             or request["policy"] not in POLICIES
             or isinstance(timeout, bool)
             or not isinstance(timeout, (int, float))
             or not math.isfinite(timeout)
+            or (
+                "window_ms" in request
+                and (
+                    request["policy"] != "candidate"
+                    or type(window) is not int
+                    or not 0 <= window <= MAXIMUM_WINDOW_MS
+                )
+            )
         ):
             self._reply(400, {"code": "a10_batch_policy_request_invalid"})
             return
+        extra = {} if "window_ms" not in request else {"window_ms": window}
         try:
-            result = control.dispatch(request["policy"], timeout_s=timeout)
+            result = control.dispatch(request["policy"], timeout_s=timeout, **extra)
         except Exception as error:  # noqa: BLE001 - only a stable code leaves
             code = _stable_code(error)
             if code is None:
@@ -221,6 +235,7 @@ __all__ = [
     "A10BatchPolicyControl",
     "A10BatchPolicyControlRefused",
     "CONTROL_PATH",
+    "MAXIMUM_WINDOW_MS",
     "POLICIES",
     "STATUS_PROTOCOL",
     "grant_from_environment",

@@ -11,6 +11,7 @@ check sees a batch exactly when the candidate policy is in force.
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -66,7 +67,7 @@ def test_baseline_caps_runtime_batches_at_one_and_candidate_restores_the_configu
 
    receipt = service.dispatch(_command({"policy": "baseline"}))
    assert receipt == {"protocol": A10_BATCH_POLICY_RECEIPT_PROTOCOL, "policy": "baseline",
-                      "maximum_runtime_batch_size": 1}
+                      "maximum_runtime_batch_size": 1, "collection_window_ms": 2.0}
    assert relay.batch_scheduler.config.maximum_runtime_batch_size == 1
    assert relay.batch_controller.config.maximum_runtime_batch_size == 1
    # Only the cap changes: every other router setting is the node's own.
@@ -76,6 +77,39 @@ def test_baseline_caps_runtime_batches_at_one_and_candidate_restores_the_configu
    assert receipt["maximum_runtime_batch_size"] == 12
    assert relay.batch_scheduler.config is config
    assert relay.batch_controller.config is config
+
+
+def test_candidate_with_a_window_sets_the_live_collection_window_and_echoes_it():
+   relay = _relay(object())
+   config = RouterConfig(maximum_runtime_batch_size=12)
+   service = _service(relay, config=config)
+
+   receipt = service.dispatch(_command({"policy": "candidate@40"}))
+   assert receipt == {"protocol": A10_BATCH_POLICY_RECEIPT_PROTOCOL, "policy": "candidate@40",
+                      "maximum_runtime_batch_size": 12, "collection_window_ms": 40.0}
+   assert relay.batch_controller.config.live_hop_collection_window_seconds == 0.04
+   assert relay.batch_scheduler.config == replace(
+      config, live_hop_collection_window_seconds=0.04)
+   assert service.dispatch(_command({"policy": "candidate@0"}))["collection_window_ms"] == 0.0
+   assert service.dispatch(_command({"policy": "candidate@250"}))["collection_window_ms"] == 250.0
+   # Plain candidate restores the node's configured window; baseline keeps it.
+   assert service.dispatch(_command({"policy": "candidate"}))["collection_window_ms"] == 2.0
+   assert relay.batch_controller.config is config
+   service.dispatch(_command({"policy": "candidate@40"}))
+   assert service.dispatch(_command({"policy": "baseline"}))["collection_window_ms"] == 2.0
+
+
+@pytest.mark.parametrize(
+   "policy",
+   ["candidate@251", "candidate@1000", "candidate@-1", "candidate@040", "candidate@1.5",
+    "candidate@", "baseline@40", "candidate@40 ", "CANDIDATE@40"],
+)
+def test_a_window_outside_the_bounds_or_grammar_is_refused_and_changes_nothing(policy):
+   relay = _relay(object())
+   before = relay.batch_controller.config
+   with pytest.raises(NodeCommandError, match="invalid_a10_batch_policy"):
+      _service(relay).dispatch(_command({"policy": policy}))
+   assert relay.batch_controller.config is before
 
 
 @pytest.mark.parametrize("state", ["CONFIGURED", "STOPPING", "STOPPED"])

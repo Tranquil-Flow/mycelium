@@ -29,8 +29,13 @@ Failure modes this suite catches (one per test, by name):
   test_demo_serve_forwards_the_port_to_live_but_fixture_rejects_it
       The serve not mounting the control when asked, or mounting it unasked.
   test_client_switches_and_verifies_every_node_receipt
+  test_client_sets_and_verifies_the_candidate_window
   test_client_fails_on_a_refusal_a_partial_or_a_wrong_cap
-      The gate's mode command succeeding although some node did not switch.
+      The gate's mode command succeeding although some node did not switch, or
+      did not take the requested collection window.
+  test_forwards_a_candidate_window_to_the_dispatcher
+  test_the_window_bound_agrees_everywhere
+      A window that the control, the router port and the node bound differently.
 """
 
 from __future__ import annotations
@@ -81,8 +86,8 @@ class Dispatcher:
          "maximum_runtime_batch_size": 1}}}
       self.error = error
 
-   def __call__(self, policy, *, timeout_s):
-      self.calls.append((policy, timeout_s))
+   def __call__(self, policy, *, timeout_s, **kwargs):
+      self.calls.append((policy, timeout_s, *kwargs.values()))
       if self.error is not None:
          raise self.error
       return self.result
@@ -117,6 +122,27 @@ def test_refuses_an_invalid_or_product_port(port, code):
    with pytest.raises(A10BatchPolicyControlRefused, match=code):
       A10BatchPolicyControl(grant=EXACT_FLEET_GRANT, dispatch=Dispatcher(),
                             product_port=8787, port=port)
+
+
+def test_forwards_a_candidate_window_to_the_dispatcher():
+   dispatcher = Dispatcher()
+   control = _control(dispatcher)
+   try:
+      status, _document = _post(control.port,
+                                {"policy": "candidate", "timeout_s": 30, "window_ms": 40})
+      assert status == 200
+      assert dispatcher.calls == [("candidate", 30, 40)]
+   finally:
+      control.close()
+
+
+def test_the_window_bound_agrees_everywhere():
+   import physical_inference_node
+   from mycelium_a10_batch_policy_control import MAXIMUM_WINDOW_MS
+   from mycelium_live import router_port
+
+   assert (MAXIMUM_WINDOW_MS == router_port.A10_MAXIMUM_COLLECTION_WINDOW_MS
+           == physical_inference_node.A10_MAXIMUM_COLLECTION_WINDOW_MS == 250)
 
 
 def test_forwards_one_well_formed_policy_and_returns_the_dispatcher_result():
@@ -170,6 +196,12 @@ def test_refuses_any_request_without_grant_path_method_or_with_forwarding(kwargs
       {"policy": "baseline", "timeout_s": "30"},
       {"policy": "baseline", "timeout_s": 30, "node_id": "node-0"},
       ["baseline"],
+      {"policy": "baseline", "timeout_s": 30, "window_ms": 40},
+      {"policy": "candidate", "timeout_s": 30, "window_ms": 251},
+      {"policy": "candidate", "timeout_s": 30, "window_ms": -1},
+      {"policy": "candidate", "timeout_s": 30, "window_ms": 4.5},
+      {"policy": "candidate", "timeout_s": 30, "window_ms": True},
+      {"policy": "candidate", "timeout_s": 30, "window_ms": "40"},
    ],
 )
 def test_refuses_a_malformed_body_before_dispatch(body):
@@ -215,8 +247,9 @@ class _Route:
       if self.refuse == node_id:
          raise RuntimeError("a10_batch_policy_node_unavailable")
       cap = self.cap if self.cap is not None else (1 if policy == "baseline" else 20)
+      window = float(policy.split("@", 1)[1]) if "@" in policy else 2.0
       return {"protocol": "mycelium.a10_batch_policy_receipt.v1", "policy": policy,
-              "maximum_runtime_batch_size": cap}
+              "maximum_runtime_batch_size": cap, "collection_window_ms": window}
 
 
 def _port(route):
@@ -238,10 +271,34 @@ def test_router_port_switches_every_deployment_node_serialized_with_admission():
    port = _port(route)
    assert port.a10_batch_policy("baseline", timeout_s=30) == {
       "policy": "baseline",
-      "nodes": {"node-0": {"maximum_runtime_batch_size": 1},
-                "node-2": {"maximum_runtime_batch_size": 1}},
+      "window_ms": None,
+      "nodes": {"node-0": {"maximum_runtime_batch_size": 1, "collection_window_ms": 2.0},
+                "node-2": {"maximum_runtime_batch_size": 1, "collection_window_ms": 2.0}},
    }
    assert route.calls == [("node-0", "baseline"), ("node-2", "baseline")]
+
+   # A candidate window travels inside the policy string the route carries.
+   route.calls.clear()
+   assert port.a10_batch_policy("candidate", timeout_s=30, window_ms=40) == {
+      "policy": "candidate",
+      "window_ms": 40,
+      "nodes": {"node-0": {"maximum_runtime_batch_size": 20, "collection_window_ms": 40.0},
+                "node-2": {"maximum_runtime_batch_size": 20, "collection_window_ms": 40.0}},
+   }
+   assert route.calls == [("node-0", "candidate@40"), ("node-2", "candidate@40")]
+   for window_ms in (-1, 251, 4.5, True):
+      with pytest.raises(ValueError, match="invalid_a10_collection_window"):
+         port.a10_batch_policy("candidate", timeout_s=30, window_ms=window_ms)
+   with pytest.raises(ValueError, match="invalid_a10_collection_window"):
+      port.a10_batch_policy("baseline", timeout_s=30, window_ms=40)
+
+   class _IgnoredWindow(_Route):
+      def a10_batch_policy(self, node_id, *, policy, deadline_monotonic_s):
+         return {"policy": policy, "maximum_runtime_batch_size": 20,
+                 "collection_window_ms": 2.0}
+
+   with pytest.raises(RuntimeError, match="a10_batch_policy_response_invalid"):
+      _port(_IgnoredWindow()).a10_batch_policy("candidate", timeout_s=30, window_ms=40)
 
    # The switch holds the admission lock: no request is admitted mid-switch.
    port._admission_dispatch_lock.acquire()
@@ -350,6 +407,25 @@ def test_demo_serve_forwards_the_port_to_live_but_fixture_rejects_it(tmp_path: P
                environ={})
 
 
+def test_client_sets_and_verifies_the_candidate_window(monkeypatch, capsys):
+   result = {"policy": "candidate", "window_ms": 40, "nodes": {
+      "node-0": {"maximum_runtime_batch_size": 20, "collection_window_ms": 40.0}}}
+   dispatcher = Dispatcher(result=result)
+   control = _control(dispatcher)
+   try:
+      monkeypatch.setenv(GRANT_ENVIRONMENT, EXACT_FLEET_GRANT)
+      assert client.main(["candidate", "--port", str(control.port), "--window-ms", "40"]) == 0
+      assert json.loads(capsys.readouterr().out) == result
+      assert dispatcher.calls == [("candidate", 30.0, 40)]
+      # A node reporting another window fails the mode command.
+      dispatcher.result = {"policy": "candidate", "window_ms": 40, "nodes": {
+         "node-0": {"maximum_runtime_batch_size": 20, "collection_window_ms": 2.0}}}
+      with pytest.raises(SystemExit, match="a10_batch_policy_response_invalid"):
+         client.main(["candidate", "--port", str(control.port), "--window-ms", "40"])
+   finally:
+      control.close()
+
+
 def test_client_switches_and_verifies_every_node_receipt(monkeypatch, capsys):
    result = {"policy": "candidate", "nodes": {"node-0": {"maximum_runtime_batch_size": 20},
                                               "node-2": {"maximum_runtime_batch_size": 20}}}
@@ -360,6 +436,10 @@ def test_client_switches_and_verifies_every_node_receipt(monkeypatch, capsys):
       assert client.main(["candidate", "--port", str(control.port), "--timeout", "30"]) == 0
       assert json.loads(capsys.readouterr().out) == result
       assert dispatcher.calls == [("candidate", 30.0)]
+      for bad in (["baseline", "--window-ms", "40"], ["candidate", "--window-ms", "251"],
+                  ["candidate", "--window-ms", "-1"]):
+         with pytest.raises(SystemExit, match="--window-ms is valid only with candidate"):
+            client.main([*bad, "--port", str(control.port)])
       monkeypatch.delenv(GRANT_ENVIRONMENT)
       with pytest.raises(SystemExit, match="explicit_fleet_grant_required"):
          client.main(["candidate", "--port", str(control.port)])

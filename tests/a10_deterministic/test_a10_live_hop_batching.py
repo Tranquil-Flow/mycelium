@@ -656,6 +656,23 @@ def test_a_router_without_the_batch_surface_keeps_the_synchronous_hop_path(
       transport.close()
 
 
+def test_a_switched_window_is_the_one_the_dispatcher_collects_for(
+   runtime_case,  # noqa: F811 - pytest fixture
+):
+   transport = _transport(_Hub(), runtime_case)
+   router = _router(runtime_case, FakeRuntimePort(), None)
+   _service(router.relay, config=RouterConfig()).dispatch(
+      _command({"policy": "candidate@120"}))
+   assert router.hop_collection_window_seconds() == 0.12
+   opened = time.monotonic()
+   transport._queue_hop_for_batch(SimpleNamespace(
+      runtime_batch_cap=router.runtime_batch_cap,
+      pending_batch_hops=lambda: 1,
+      hop_collection_window_seconds=router.hop_collection_window_seconds,
+   ))
+   assert opened + 0.12 <= transport._hop_collection_deadline <= time.monotonic() + 0.12
+
+
 def test_router_facade_exposes_the_batch_surface(runtime_case):  # noqa: F811
    router = _router(runtime_case, FakeRuntimePort(), None)
    assert router.runtime_batch_cap() == RouterConfig().maximum_runtime_batch_size

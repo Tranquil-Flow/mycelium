@@ -342,6 +342,27 @@ def _a10_execute_product_operation(runtime: Any, payload: Mapping[str, Any]) -> 
 #: target-only runtime batch cap of one, ``candidate`` the configured cap.
 A10_BATCH_POLICIES = ("baseline", "candidate")
 A10_BATCH_POLICY_RECEIPT_PROTOCOL = "mycelium.a10_batch_policy_receipt.v1"
+#: ``candidate@<ms>`` also sets the live hop collection window, in whole
+#: milliseconds from 0 through this bound (the cross-host hop RTT is the guide).
+A10_MAXIMUM_COLLECTION_WINDOW_MS = 250
+_A10_CANDIDATE_WINDOW = re.compile(r"candidate@(0|[1-9][0-9]{0,2})\Z")
+
+
+def parse_a10_batch_policy(policy: object) -> tuple[str, int | None]:
+    """``(mode, window_ms)`` for one wire policy, or ``invalid_a10_batch_policy``.
+
+    ``baseline`` and ``candidate`` keep the node's configured window;
+    ``candidate@<ms>`` sets it.  Anything else, including a window above
+    ``A10_MAXIMUM_COLLECTION_WINDOW_MS``, is refused.
+    """
+
+    if isinstance(policy, str) and policy in A10_BATCH_POLICIES:
+        return policy, None
+    match = _A10_CANDIDATE_WINDOW.fullmatch(policy) if isinstance(policy, str) else None
+    _require(match is not None, "invalid_a10_batch_policy")
+    window_ms = int(match.group(1))
+    _require(window_ms <= A10_MAXIMUM_COLLECTION_WINDOW_MS, "invalid_a10_batch_policy")
+    return "candidate", window_ms
 
 # Router request states an ``inference_started`` observation may report.
 _STARTED_REQUEST_STATUSES = frozenset({"DECODING", "COMPLETED", "CANCELLED"})
@@ -4151,25 +4172,31 @@ class PhysicalNodeService:
         """Switch this node's runtime batch policy for the A10 paired benchmark.
 
         ``baseline`` caps runtime batches at one member (target-only execution);
-        ``candidate`` restores the configured cap.  Only the relay's batch cap
-        changes: pipeline overlap, the runtime and the route stay as they are.
-        The A10 publication shows the effect, since batched intervals carry a
+        ``candidate`` restores the configured cap, and ``candidate@<ms>`` also sets
+        the live hop collection window.  Only the relay's batch cap and window
+        change: pipeline overlap, the runtime and the route stay as they are.
+        The receipt echoes the wire policy with the cap and window now in force;
+        the A10 publication shows the effect, since batched intervals carry a
         ``runtime_batch_ref`` only while the candidate cap admits a batch.
         """
 
         _exact_fields(payload, {"policy"}, "invalid_a10_batch_policy_fields")
         policy = payload["policy"]
-        _require(policy in A10_BATCH_POLICIES, "invalid_a10_batch_policy")
+        mode, window_ms = parse_a10_batch_policy(policy)
         with self._control_lock:
             _require(
                 self.state == "RUNNING" and self.router is not None,
                 "invalid_state_for_a10_batch_policy",
             )
-            config = (
-                replace(self._router_config, maximum_runtime_batch_size=1)
-                if policy == "baseline"
-                else self._router_config
-            )
+            if mode == "baseline":
+                config = replace(self._router_config, maximum_runtime_batch_size=1)
+            elif window_ms is None:
+                config = self._router_config
+            else:
+                config = replace(
+                    self._router_config,
+                    live_hop_collection_window_seconds=window_ms / 1_000.0,
+                )
             relay = self.router.relay
             relay.batch_scheduler.config = config
             relay.batch_controller.config = config
@@ -4177,6 +4204,9 @@ class PhysicalNodeService:
             "protocol": A10_BATCH_POLICY_RECEIPT_PROTOCOL,
             "policy": policy,
             "maximum_runtime_batch_size": config.maximum_runtime_batch_size,
+            "collection_window_ms": round(
+                config.live_hop_collection_window_seconds * 1_000.0, 3
+            ),
         }
 
     def _hello(self, payload: dict[str, Any]) -> dict[str, Any]:

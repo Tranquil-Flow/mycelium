@@ -187,6 +187,11 @@ class _Pending:
     recovery_excluded_placements: set[str] = field(default_factory=set)
 
 
+#: Upper bound of the A10 candidate collection window (``physical_inference_node``
+#: refuses anything above the same bound).
+A10_MAXIMUM_COLLECTION_WINDOW_MS = 250
+
+
 class LiveRouterPort:
     """Drive one persistent physical route through the RouterPort contract."""
 
@@ -377,24 +382,36 @@ class LiveRouterPort:
         policy: str,
         *,
         timeout_s: float,
+        window_ms: int | None = None,
     ) -> dict[str, Any]:
         """Apply one A10 batch policy to every node of the current deployment.
 
         The paired benchmark switches between ``baseline`` (runtime batch cap
-        one) and ``candidate`` on this same route.  The switch is serialized with
-        admission, so no request is admitted while the nodes change policy, and
-        only each node's own receipt for exactly this policy is accepted.  A node
-        that refuses fails the switch with that node's stable code; the caller
-        must not run a benchmark window on a partly switched route.
+        one) and ``candidate`` on this same route; ``window_ms`` (candidate only,
+        0 through 250) also sets each node's live hop collection window.  The
+        switch is serialized with admission, so no request is admitted while the
+        nodes change policy, and only each node's own receipt for exactly this
+        policy and window is accepted.  A node that refuses fails the switch with
+        that node's stable code; the caller must not run a benchmark window on a
+        partly switched route.
         """
 
         if policy not in ("baseline", "candidate"):
             raise ValueError("invalid_a10_batch_policy")
+        if window_ms is not None and (
+            policy != "candidate"
+            or type(window_ms) is not int
+            or not 0 <= window_ms <= A10_MAXIMUM_COLLECTION_WINDOW_MS
+        ):
+            raise ValueError("invalid_a10_collection_window")
         if not isinstance(timeout_s, (int, float)) or not 0 < timeout_s <= 120:
             raise ValueError("a10_batch_policy_deadline_invalid")
         switch = getattr(self._route, "a10_batch_policy", None)
         if not callable(switch):
             raise RuntimeError("a10_batch_policy_route_unsupported")
+        # The route carries the policy string unchanged and accepts only the
+        # node's receipt echoing it, so the window travels inside it.
+        wire_policy = policy if window_ms is None else f"candidate@{window_ms}"
         node_ids = sorted(
             {
                 placement.node_id
@@ -413,19 +430,28 @@ class LiveRouterPort:
             for node_id in node_ids:
                 receipt = switch(
                     node_id,
-                    policy=policy,
+                    policy=wire_policy,
                     deadline_monotonic_s=deadline,
+                )
+                window = (
+                    receipt.get("collection_window_ms")
+                    if isinstance(receipt, Mapping)
+                    else None
                 )
                 if (
                     not isinstance(receipt, Mapping)
-                    or receipt.get("policy") != policy
+                    or receipt.get("policy") != wire_policy
                     or type(receipt.get("maximum_runtime_batch_size")) is not int
+                    or isinstance(window, bool)
+                    or not isinstance(window, (int, float))
+                    or (window_ms is not None and window != window_ms)
                 ):
                     raise RuntimeError("a10_batch_policy_response_invalid")
                 receipts[node_id] = {
                     "maximum_runtime_batch_size": receipt["maximum_runtime_batch_size"],
+                    "collection_window_ms": window,
                 }
-        return {"policy": policy, "nodes": receipts}
+        return {"policy": policy, "window_ms": window_ms, "nodes": receipts}
 
     def admit(
         self,
