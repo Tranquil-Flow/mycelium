@@ -31,6 +31,10 @@ from mycelium_iroh_sidecar import (
 from mycelium_router.contracts import (
     FailureReport,
     HopHeader,
+    KVCheckpointAck,
+    KVCheckpointShipment,
+    KVSuccessorCutover,
+    KVSuccessorCutoverReceipt,
     ManifestDelta,
     ManifestLocked,
     PathCancellation,
@@ -2808,6 +2812,28 @@ class IrohTransport:
         if isinstance(message, FailureReport):
             router.receive_failure_report(message, source_node_id=source_node_id)
             return
+        if isinstance(message, KVCheckpointShipment):
+            if len(decoded.payload) != message.byte_size:
+                raise IrohTransportError("a7_shipment_size_mismatch")
+            if not router.receive_kv_checkpoint_shipment(
+                message, decoded.payload, source_node_id=source_node_id
+            ):
+                raise IrohTransportError("a7_shipment_rejected")
+            return
+        if isinstance(message, KVCheckpointAck):
+            if not router.receive_kv_checkpoint_ack(message, source_node_id=source_node_id):
+                raise IrohTransportError("a7_ack_rejected")
+            return
+        if isinstance(message, KVSuccessorCutover):
+            if not router.receive_kv_successor_cutover(message, source_node_id=source_node_id):
+                raise IrohTransportError("a7_cutover_rejected")
+            return
+        if isinstance(message, KVSuccessorCutoverReceipt):
+            if not router.receive_kv_successor_cutover_receipt(
+                message, source_node_id=source_node_id
+            ):
+                raise IrohTransportError("a7_cutover_receipt_rejected")
+            return
         raise IrohTransportError(
             "unsupported_router_message",
             type(message).__name__,
@@ -3137,6 +3163,21 @@ class IrohTransport:
             encode_frame(report),
         )
 
+    def send_a7_message(
+        self,
+        destination_node_id: str,
+        message: object,
+        payload: bytes = b"",
+    ) -> None:
+        """Send one A7 control message (checkpoint, ack, cutover, receipt) to a node."""
+
+        if not isinstance(
+            message,
+            (KVCheckpointShipment, KVCheckpointAck, KVSuccessorCutover, KVSuccessorCutoverReceipt),
+        ):
+            raise IrohTransportError("a7_message_type_invalid")
+        self._send_or_dispatch(destination_node_id, encode_frame(message, payload))
+
     def send_token_event(self, event: TokenEvent) -> None:
         self._send_or_dispatch(
             self._entry_node(event.request_id),
@@ -3189,7 +3230,17 @@ class IrohTransport:
         message = decoded.message
         defer_remote_forward = isinstance(
             message,
-            (FailureReport, HopHeader, ProgressivePrefillMessage),
+            (
+                FailureReport,
+                HopHeader,
+                ProgressivePrefillMessage,
+                # A7 control replies are produced inside inbound dispatch; never
+                # wait for their remote ACK on the dispatcher thread.
+                KVCheckpointShipment,
+                KVCheckpointAck,
+                KVSuccessorCutover,
+                KVSuccessorCutoverReceipt,
+            ),
         )
         if isinstance(message, ManifestLocked):
             entry_node = self._node_for_placement(

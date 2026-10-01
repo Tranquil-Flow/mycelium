@@ -398,6 +398,59 @@ class FailureReport:
 
 
 @dataclass(frozen=True)
+class KVCheckpointShipment:
+   """A7: one sealed shadow checkpoint, source stage -> its standby (payload = sealed bytes)."""
+
+   request_id: str
+   path_id: str
+   path_attempt: int
+   standby_placement_id: str
+   checkpoint_sequence: int
+   byte_size: int
+
+
+@dataclass(frozen=True)
+class KVCheckpointAck:
+   """A7: a standby's signed checkpoint acknowledgement (canonical JSON)."""
+
+   request_id: str
+   path_id: str
+   path_attempt: int
+   hop: str
+   signed_ack: str
+
+
+@dataclass(frozen=True)
+class KVSuccessorCutover:
+   """A7: install the fence for a successor path on one participant stage."""
+
+   request_id: str
+   old_path_id: str
+   old_path_attempt: int
+   successor_path_id: str
+   successor_path_attempt: int
+   fencing_generation: int
+   placement_id: str
+   role: str
+   expected_next_position: int
+   lease_expires_at: float
+
+
+@dataclass(frozen=True)
+class KVSuccessorCutoverReceipt:
+   """A7: a participant's fence-install result for one successor path."""
+
+   request_id: str
+   successor_path_id: str
+   successor_path_attempt: int
+   fencing_generation: int
+   placement_id: str
+   installed: bool
+   reason: str
+   checkpoint_digest: str
+
+
+@dataclass(frozen=True)
 class RuntimeResult:
    success: bool
    payload: object = None

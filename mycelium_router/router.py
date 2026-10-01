@@ -214,6 +214,33 @@ class Router:
          source_node_id=source_node_id,
       )
 
+   #: The node's A7 successor-recovery agent; ``None`` refuses every A7 message.
+   a7_agent = None
+
+   def receive_kv_checkpoint_shipment(self, shipment, sealed, *, source_node_id=None):
+      agent = self.a7_agent
+      if agent is None:
+         return False
+      return agent.receive_shipment(shipment, sealed, source_node_id=source_node_id)
+
+   def receive_kv_checkpoint_ack(self, ack, *, source_node_id=None):
+      agent = self.a7_agent
+      if agent is None:
+         return False
+      return agent.receive_ack(ack, source_node_id=source_node_id)
+
+   def receive_kv_successor_cutover(self, cutover, *, source_node_id=None):
+      agent = self.a7_agent
+      if agent is None:
+         return False
+      return agent.receive_cutover(cutover, source_node_id=source_node_id)
+
+   def receive_kv_successor_cutover_receipt(self, receipt, *, source_node_id=None):
+      agent = self.a7_agent
+      if agent is None:
+         return False
+      return agent.receive_cutover_receipt(receipt, source_node_id=source_node_id)
+
    def receive_failure_report(self, report, *, source_node_id=None):
       return self.entry.receive_failure_report(
          report,

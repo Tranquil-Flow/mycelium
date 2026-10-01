@@ -3,12 +3,17 @@
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import math
 import struct
 from typing import Any
 
 from mycelium_router.contracts import (
    FailureReport,
    HopHeader,
+   KVCheckpointAck,
+   KVCheckpointShipment,
+   KVSuccessorCutover,
+   KVSuccessorCutoverReceipt,
    ManifestDelta,
    ManifestLocked,
    PathCancellation,
@@ -63,8 +68,18 @@ _MESSAGE_TYPES = {
       ReservationCommitResult,
       TokenEvent,
       FailureReport,
+      KVCheckpointShipment,
+      KVCheckpointAck,
+      KVSuccessorCutover,
+      KVSuccessorCutoverReceipt,
    )
 }
+
+#: A7 bounds: a sealed checkpoint and a signed acknowledgement stay small and exact.
+A7_MAX_SEALED_CHECKPOINT_BYTES = 64 * 1024 * 1024
+A7_MAX_SIGNED_ACK_BYTES = 16 * 1024
+A7_CUTOVER_ROLES = frozenset({"standby_import", "surviving_rekey"})
+A7_ACK_HOPS = frozenset({"standby_to_source", "source_to_entry"})
 
 
 def encode_progressive_prefill(
@@ -326,7 +341,70 @@ def _build_from_dict(body: dict[str, Any]) -> PathBuildState:
    )
 
 
+def _a7_text(value: object) -> bool:
+   return isinstance(value, str) and bool(value) and len(value) <= 512 and value == value.strip()
+
+
+def _a7_count(value: object, minimum: int = 0) -> bool:
+   return type(value) is int and value >= minimum
+
+
+def _validate_a7_message(message: object) -> None:
+   valid = True
+   if isinstance(message, KVCheckpointShipment):
+      valid = (
+         _a7_text(message.request_id)
+         and _a7_text(message.path_id)
+         and _a7_count(message.path_attempt)
+         and _a7_text(message.standby_placement_id)
+         and _a7_count(message.checkpoint_sequence)
+         and _a7_count(message.byte_size, 1)
+         and message.byte_size <= A7_MAX_SEALED_CHECKPOINT_BYTES
+      )
+   elif isinstance(message, KVCheckpointAck):
+      valid = (
+         _a7_text(message.request_id)
+         and _a7_text(message.path_id)
+         and _a7_count(message.path_attempt)
+         and message.hop in A7_ACK_HOPS
+         and isinstance(message.signed_ack, str)
+         and 2 <= len(message.signed_ack.encode("utf-8")) <= A7_MAX_SIGNED_ACK_BYTES
+      )
+   elif isinstance(message, KVSuccessorCutover):
+      valid = (
+         _a7_text(message.request_id)
+         and _a7_text(message.old_path_id)
+         and _a7_text(message.successor_path_id)
+         and message.old_path_id != message.successor_path_id
+         and _a7_count(message.old_path_attempt)
+         and _a7_count(message.successor_path_attempt, 1)
+         and message.successor_path_attempt > message.old_path_attempt
+         and _a7_count(message.fencing_generation, 1)
+         and _a7_text(message.placement_id)
+         and message.role in A7_CUTOVER_ROLES
+         and _a7_count(message.expected_next_position, 1)
+         and isinstance(message.lease_expires_at, (int, float))
+         and not isinstance(message.lease_expires_at, bool)
+         and math.isfinite(float(message.lease_expires_at))
+      )
+   elif isinstance(message, KVSuccessorCutoverReceipt):
+      valid = (
+         _a7_text(message.request_id)
+         and _a7_text(message.successor_path_id)
+         and _a7_count(message.successor_path_attempt, 1)
+         and _a7_count(message.fencing_generation, 1)
+         and _a7_text(message.placement_id)
+         and type(message.installed) is bool
+         and _a7_text(message.reason)
+         and isinstance(message.checkpoint_digest, str)
+         and len(message.checkpoint_digest) <= 71
+      )
+   if not valid:
+      raise WireError("invalid_wire_field", type(message).__name__)
+
+
 def _validate_message(message: object) -> None:
+   _validate_a7_message(message)
    if isinstance(message, PathCancellation) and (
       type(message.path_attempt) is not int
       or type(message.topology_version) is not int
