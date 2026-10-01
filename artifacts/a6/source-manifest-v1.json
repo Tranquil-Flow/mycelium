@@ -103,8 +103,8 @@
     },
     {
       "path": "apps/node-app/src-tauri/gen/android/app/src/main/java/now/mycelium/node/NodeServicePlugin.kt",
-      "sha256": "sha256:6bd12efaff87c6b725a0706c180ae31f1f8511f2492cdd7f0456eeadc0a7742f",
-      "size_bytes": 1841
+      "sha256": "sha256:5047fdf8f1f201fdf5963bc2c8ceede193c9a1121df3cfa8e9f08ad1f9570d78",
+      "size_bytes": 2843
     },
     {
       "path": "apps/node-app/src-tauri/gen/android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml",
@@ -518,8 +518,8 @@
     },
     {
       "path": "apps/node-app/src-tauri/src/lib.rs",
-      "sha256": "sha256:5a47131cb63cc7d3da0b268d7add877a66fc614ad4ea25bab2a646d2afe5dd1d",
-      "size_bytes": 7437
+      "sha256": "sha256:97c634ce6839b4c28cd80cf8c3cf86f40edcb73706f740abe595a1da60caea99",
+      "size_bytes": 8139
     },
     {
       "path": "apps/node-app/src-tauri/src/main.rs",
@@ -528,8 +528,8 @@
     },
     {
       "path": "apps/node-app/src-tauri/src/node_service.rs",
-      "sha256": "sha256:df447e63ff12f3d8385991dc1b36bd4ab0f6ef11ebcf69de5e05545296a19ea6",
-      "size_bytes": 3673
+      "sha256": "sha256:62e935b79fc425677eca8c5529db5ea63b52f3bdad06c6ea3c3915035eace5f8",
+      "size_bytes": 4404
     },
     {
       "path": "apps/node-app/src-tauri/tauri.conf.json",
@@ -538,18 +538,18 @@
     },
     {
       "path": "apps/node-app/src/App.test.tsx",
-      "sha256": "sha256:5d1cccf5996c18bc883ad8cc6dc6b46e35e0cac716f6e9ae807ebeed91cdef52",
-      "size_bytes": 5055
+      "sha256": "sha256:355f66e1755e084bcbe711910ff2dc57ff5944ebd2932b1759cba86baa9e7120",
+      "size_bytes": 6385
     },
     {
       "path": "apps/node-app/src/App.tsx",
-      "sha256": "sha256:372ed8cd92314c7324ad154b02ada88c19f3b25ef032c83fe68d4c811ac2d9a6",
-      "size_bytes": 7359
+      "sha256": "sha256:b5ff40215638f06ba002328e4ae93da1a2db5ddb10062518525bb2856ffc488c",
+      "size_bytes": 8034
     },
     {
       "path": "apps/node-app/src/api.ts",
-      "sha256": "sha256:9aaf6def00c76b89a6c5047a8d732d024c806f8bb182a048ee252de7acecf702",
-      "size_bytes": 2429
+      "sha256": "sha256:d40400296c4147f1b12fc353bca863ebf4b7340d3bcd5b3644c87a9720428e5f",
+      "size_bytes": 2695
     },
     {
       "path": "apps/node-app/src/main.tsx",
@@ -1608,8 +1608,8 @@
     },
     {
       "path": "native/mobile_core/src/evidence.rs",
-      "sha256": "sha256:0b440d3e01c4f61039a78d04a9d1aa94f8141107fe0cb9b575f96d80214176f0",
-      "size_bytes": 13522
+      "sha256": "sha256:559ed780381e663934d2cd71c16000c3d900ed91e20dd1e7011b6a0e904501a1",
+      "size_bytes": 19116
     },
     {
       "path": "native/mobile_core/src/identity.rs",
@@ -1628,8 +1628,8 @@
     },
     {
       "path": "native/mobile_core/src/node.rs",
-      "sha256": "sha256:99c53173ea0b791aa163e749017798db785f0ee9b62ff2a4dd3b692d1f14808e",
-      "size_bytes": 28222
+      "sha256": "sha256:83c95e8680b7d6620ce6c70b636d9e1303ef5e4cd26eaf3d36a7f568eb9f3b6c",
+      "size_bytes": 29831
     },
     {
       "path": "native/mobile_core/src/onboarding.rs",
@@ -1678,8 +1678,8 @@
     },
     {
       "path": "native/mobile_core/tests/node_core.rs",
-      "sha256": "sha256:cb1fcf5c77b03f1fc768e335f58bf0d00936c238a1c0f7d342d4301056bceab4",
-      "size_bytes": 1466
+      "sha256": "sha256:2850f4d317b3e76699cb75d2b5e9f9f786c272b128a001fee0eba46be8614c5d",
+      "size_bytes": 3079
     },
     {
       "path": "native/mobile_core/tests/python_interop.rs",
@@ -1833,8 +1833,8 @@
     },
     {
       "path": "scripts/run_a12_mobile_physical_gate.py",
-      "sha256": "sha256:3e95916cdcdde75d7ac08280a6e7c2eda7cbbabdcab1a70ec5da087aa1f1cd7d",
-      "size_bytes": 17872
+      "sha256": "sha256:b292ba75e7d9b04392bf266e227ba1845c237d6f8cee3b677a4308a383514ab6",
+      "size_bytes": 21309
     },
     {
       "path": "scripts/run_a5_benchmark_gate.py",
@@ -2128,8 +2128,8 @@
     },
     {
       "path": "tests/a12_mobile_deterministic/test_run_a12_mobile_physical_gate.py",
-      "sha256": "sha256:5473a4a2685fb714fb1d66f4876e00ab531e222977a595cc957a22a2414e487a",
-      "size_bytes": 10021
+      "sha256": "sha256:a3e7c20c7c377b18d3a79e98734fdee522a843fae551f3c116ee780d6eeb659b",
+      "size_bytes": 13705
     },
     {
       "path": "tests/a12_scaffold/test_a12_scaffold_boundaries.py",
@@ -3423,5 +3423,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:74fae21122d17138c5fa8530e09f5e97463adc74bc97c6517f9766f2a60b6ccb"
+  "source_digest": "sha256:1d3c719b4eb622bb0d25acdb9f4588fd0153043bc7672148d34271f8bb039ee7"
 }
