@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
+
+import pytest
+
+from scripts import fill_a0_literal_record as fill
 
 ROOT = Path(__file__).resolve().parents[2]
 RECORD = ROOT / "docs" / "handover" / "a0-literal-verification-record.v1.json"
@@ -34,9 +39,16 @@ def test_record_is_closed_and_binds_the_exact_a0_specification():
     assert (ROOT / record["predecessor_record"]).is_file()
 
 
+def test_the_committed_record_is_prepared_or_fully_executed():
+    record = _record()
+    assert record["state"] in {"prepared_not_executed", "executed_on_candidate"}
+    fill.validate_record(record)
+
+
 def test_prepared_record_claims_no_execution_and_no_completion():
     record = _record()
-    assert record["state"] == "prepared_not_executed"
+    if record["state"] != "prepared_not_executed":
+        pytest.skip("the committed record is executed; see the executed-state tests")
     assert record["candidate"]["commit"] is None and record["candidate"]["clean_tree"] is None
     assert record["atomic_commit"]["commit"] is None
     assert record["atomic_commit"]["reading"] is None
@@ -66,3 +78,120 @@ def test_every_named_command_target_exists_in_the_tree():
                 if token.startswith(("tests/", "scripts/")) and token.endswith((".py", ".mjs")):
                     base = ROOT / "ui" / "web" if token.endswith(".mjs") else ROOT
                     assert (base / token).is_file(), token
+
+
+# ---- executed state: admitted only when every obligation is bound to one clean candidate ----
+
+CANDIDATE = "a" * 40
+
+
+def _receipt(tmp_path: Path, name: str) -> Path:
+    path = tmp_path / f"{name}.json"
+    path.write_text(json.dumps({"obligation": name}), encoding="utf-8")
+    return path
+
+
+def _results(tmp_path: Path, result: str = "passed") -> dict:
+    return {
+        obligation: {"result": result, "evidence": str(_receipt(tmp_path, obligation))}
+        for obligation in REQUIRED_OBLIGATIONS
+    }
+
+
+def test_filling_binds_every_obligation_to_the_candidate(tmp_path: Path):
+    filled = fill.fill_record(_record_prepared(), candidate=CANDIDATE,
+                              results=_results(tmp_path), bound_at_unix_ms=1)
+    fill.validate_record(filled)
+    assert filled["state"] == "executed_on_candidate"
+    assert filled["candidate"] == {**_record_prepared()["candidate"], "commit": CANDIDATE,
+                                   "clean_tree": True, "bound_at_unix_ms": 1}
+    for item in filled["obligations"]:
+        assert item["executed_on_candidate"] is True
+        assert item["result"] == "passed"
+        receipt = tmp_path / f"{item['obligation_id']}.json"
+        # Owner-private paths never enter the committed record: only the name and digest.
+        assert item["evidence"] == {
+            "receipt": receipt.name,
+            "digest": "sha256:" + hashlib.sha256(receipt.read_bytes()).hexdigest(),
+        }
+    assert filled["atomic_commit"] == _record_prepared()["atomic_commit"]
+
+
+def test_a_failed_obligation_is_recorded_as_failed_not_hidden(tmp_path: Path):
+    filled = fill.fill_record(_record_prepared(), candidate=CANDIDATE,
+                              results=_results(tmp_path, "failed"), bound_at_unix_ms=1)
+    fill.validate_record(filled)
+    assert {item["result"] for item in filled["obligations"]} == {"failed"}
+
+
+@pytest.mark.parametrize("candidate", ["abc", "A" * 40, "g" * 40, None])
+def test_a_non_commit_candidate_is_refused(tmp_path: Path, candidate):
+    with pytest.raises(ValueError, match="a0_record_candidate_invalid"):
+        fill.fill_record(_record_prepared(), candidate=candidate,
+                         results=_results(tmp_path), bound_at_unix_ms=1)
+
+
+def test_a_partial_result_set_is_refused(tmp_path: Path):
+    results = _results(tmp_path)
+    results.pop("7.5_real_browser_path")
+    with pytest.raises(ValueError, match="a0_record_results_incomplete"):
+        fill.fill_record(_record_prepared(), candidate=CANDIDATE, results=results,
+                         bound_at_unix_ms=1)
+
+
+def test_an_unknown_result_or_missing_receipt_is_refused(tmp_path: Path):
+    results = _results(tmp_path)
+    results["7.1_rejection_classes"]["result"] = "mostly"
+    with pytest.raises(ValueError, match="a0_record_result_invalid"):
+        fill.fill_record(_record_prepared(), candidate=CANDIDATE, results=results,
+                         bound_at_unix_ms=1)
+    results = _results(tmp_path)
+    results["7.1_rejection_classes"]["evidence"] = str(tmp_path / "absent.json")
+    with pytest.raises(ValueError, match="a0_record_evidence_missing"):
+        fill.fill_record(_record_prepared(), candidate=CANDIDATE, results=results,
+                         bound_at_unix_ms=1)
+
+
+def test_a_half_executed_record_is_refused(tmp_path: Path):
+    filled = fill.fill_record(_record_prepared(), candidate=CANDIDATE,
+                              results=_results(tmp_path), bound_at_unix_ms=1)
+    filled["obligations"][0]["executed_on_candidate"] = False
+    with pytest.raises(ValueError, match="a0_record_obligation_not_executed"):
+        fill.validate_record(filled)
+    filled = fill.fill_record(_record_prepared(), candidate=CANDIDATE,
+                              results=_results(tmp_path), bound_at_unix_ms=1)
+    filled["candidate"]["clean_tree"] = False
+    with pytest.raises(ValueError, match="a0_record_candidate_tree_not_clean"):
+        fill.validate_record(filled)
+
+
+def test_the_cli_refuses_unless_head_is_the_candidate_on_a_clean_tree(tmp_path: Path):
+    repo = tmp_path / "repo"
+    record_dir = repo / "docs" / "handover"
+    record_dir.mkdir(parents=True)
+    (record_dir / RECORD.name).write_text(RECORD.read_text("utf-8"), encoding="utf-8")
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "init"], check=True)
+    head = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True,
+                          text=True).stdout.strip()
+    results_file = tmp_path / "results.json"
+    results_file.write_text(json.dumps(_results(tmp_path)), encoding="utf-8")
+    base = ["--repo-root", str(repo), "--results", str(results_file)]
+
+    assert fill.main([*base, "--candidate", "b" * 40]) == 2
+    (repo / "dirty.txt").write_text("x", encoding="utf-8")
+    assert fill.main([*base, "--candidate", head]) == 2
+    (repo / "dirty.txt").unlink()
+    assert fill.main([*base, "--candidate", head]) == 0
+    written = json.loads((record_dir / RECORD.name).read_text("utf-8"))
+    assert written["state"] == "executed_on_candidate"
+    assert written["candidate"]["commit"] == head
+
+
+def _record_prepared() -> dict:
+    record = _record()
+    if record["state"] != "prepared_not_executed":
+        pytest.skip("the committed record is no longer the prepared structure")
+    return record
