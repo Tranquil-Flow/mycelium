@@ -1015,6 +1015,7 @@ class EntryCoordinator:
       report: FailureReport,
       *,
       source_node_id: str | None = None,
+      redispatch_successor: bool | None = None,
    ) -> bool:
       record = self._requests.get(report.request_id)
       if record is None:
@@ -1081,7 +1082,16 @@ class EntryCoordinator:
       if terminal_failure:
          self._cleanup_record(record)
          return False
-      a7_outcome = self._a7_try_cutover(record, report, new_attempt=new_attempt)
+      a7_outcome = self._a7_try_cutover(
+         record,
+         report,
+         new_attempt=new_attempt,
+         redispatch=(
+            source_node_id is not None
+            if redispatch_successor is None
+            else redispatch_successor
+         ),
+      )
       if a7_outcome is not None:
          return a7_outcome
       # A7 KV-successor seam: the replacement-path attempt's recovery mode is
@@ -1346,8 +1356,15 @@ class EntryCoordinator:
       report: FailureReport,
       *,
       new_attempt: int,
+      redispatch: bool = False,
    ) -> bool | None:
-      """Fenced KV-successor cutover; ``None`` hands the attempt to A6 replay."""
+      """Fenced KV-successor cutover; ``None`` hands the attempt to A6 replay.
+
+      ``redispatch`` (a transport-delivered failure report): the distributed
+      decode driver is waiting for the token of the failed step, so the
+      successor re-sends exactly that DECODE step itself.  A synchronous
+      ``decode_one`` caller re-executes it on its own.
+      """
 
       controller = self.a7_controller
       if controller is None or self.relay.decode_mode != "stage_local_kv":
@@ -1470,6 +1487,8 @@ class EntryCoordinator:
          # No recovery prefill: the successor resumes DECODE at the next
          # contiguous position from the imported, acknowledged KV.
          record.state_machine.transition("DECODING", path_attempt=new_attempt)
+      if redispatch:
+         self.decode_one_distributed(request_id)
       return True
 
    def _a7_fallback(self, record: RequestRecord, result: dict, *, new_attempt: int) -> bool | None:

@@ -2259,6 +2259,23 @@ class IrohTransport:
             if not self._stop.is_set():
                 self._service_queued_hops()
 
+    #: A7: optional ``observer(header, destination_node_id, code)`` told when a
+    #: forwarded hop could not be delivered.  ``None`` (the default) changes
+    #: nothing; only an A7-configured node installs one.
+    forward_failure_observer = None
+
+    def _notify_forward_failure(self, frame: bytes, destination: str, code: str) -> None:
+        observer = self.forward_failure_observer
+        if observer is None:
+            return
+        try:
+            decoded = decode_frame(frame)
+            if isinstance(decoded.message, HopHeader):
+                observer(decoded.message, destination, code)
+        except BaseException:
+            # The scoped incident below remains the durable failure signal.
+            pass
+
     def _forward_loop(self) -> None:
         current = threading.current_thread()
         while not self._stop.is_set():
@@ -2324,6 +2341,7 @@ class IrohTransport:
                         if isinstance(error, IrohTransportError)
                         else self._map_sidecar_error("forward_delivery_failed", error)
                     )
+                    self._notify_forward_failure(frame, destination, mapped.code)
                     if not self._record_scoped_event(
                         event="failure",
                         request_id=request_id,

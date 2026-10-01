@@ -147,10 +147,18 @@ class StandbyCheckpointKey:
       signer: Ed25519EvidenceSigner,
       standby_placement_id: str,
       standby_membership_incarnation: str,
+      x25519_private_bytes: bytes | None = None,
    ) -> None:
       if not _is_digest(standby_placement_id) or not _is_digest(standby_membership_incarnation):
          _refuse("a7_standby_key_identity_invalid")
-      self._private = X25519PrivateKey.generate()
+      if x25519_private_bytes is None:
+         self._private = X25519PrivateKey.generate()
+      else:
+         # A staged, owner-only standby key: its public record can be pinned on
+         # the source and entry nodes before the standby process starts.
+         if not isinstance(x25519_private_bytes, bytes) or len(x25519_private_bytes) != 32:
+            _refuse("a7_standby_key_material_invalid")
+         self._private = X25519PrivateKey.from_private_bytes(x25519_private_bytes)
       self.standby_placement_id = standby_placement_id
       self.standby_membership_incarnation = standby_membership_incarnation
       body = {

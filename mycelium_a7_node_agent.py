@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -127,6 +127,7 @@ class A7NodeAgent:
       self._session_digest: str | None = None
       self._coverage: dict[str, SourceCoverage] = {}
       self._released: OrderedDict[str, None] = OrderedDict()
+      self._refusals: Counter[str] = Counter()
 
    # -- registration ------------------------------------------------------------
 
@@ -212,15 +213,15 @@ class A7NodeAgent:
       """Entry committed output through ``committed_token_count``: ship that KV."""
 
       if source_node_id is None:
-         return False
+         return self._refuse("commit_unauthenticated")
       with self._lock:
          if commit.request_id in self._released:
-            return False
+            return self._refuse("commit_request_released")
          role = self._sources.get(commit.request_id)
          if role is None:
             coverage = self._coverage.get(commit.source_placement_id)
             if coverage is None:
-               return False
+               return self._refuse("commit_placement_not_covered")
             try:
                public = verify_standby_key_record(
                   coverage.standby_key_record,
@@ -229,7 +230,7 @@ class A7NodeAgent:
                   standby_membership_incarnation=coverage.standby_incarnation,
                )
             except CheckpointChannelError:
-               return False
+               return self._refuse("commit_standby_key_invalid")
             role = _SourceRole(
                stage_id=coverage.stage_id,
                port=coverage.port,
@@ -253,7 +254,7 @@ class A7NodeAgent:
             or commit.path_id != role.path_id
             or commit.path_attempt != role.path_attempt
          ):
-            return False
+            return self._refuse("commit_role_mismatch")
       try:
          self.ship(
             commit.request_id,
@@ -261,8 +262,8 @@ class A7NodeAgent:
             committed_token_count=commit.committed_token_count,
             committed_prefix_digest=commit.committed_prefix_digest,
          )
-      except (A7ContractViolation, KVCheckpointError, CheckpointChannelError, ValueError):
-         return False
+      except (A7ContractViolation, KVCheckpointError, CheckpointChannelError, ValueError) as exc:
+         return self._refuse("ship_" + str(getattr(exc, "code", None) or exc)[:64])
       return True
 
    def receive_release(self, release: KVShadowRelease, *, source_node_id: str | None = None) -> bool:
@@ -293,6 +294,12 @@ class A7NodeAgent:
             continue
       return True
 
+   def _refuse(self, code: str) -> bool:
+      with self._lock:
+         if code in self._refusals or len(self._refusals) < 64:
+            self._refusals[code] += 1
+      return False
+
    def release_entry(self, request_id: str) -> None:
       with self._lock:
          self._entries.pop(request_id, None)
@@ -303,7 +310,9 @@ class A7NodeAgent:
          sources = len(self._sources)
          entries = len(self._entries)
       snapshot = {} if standby is None else dict(standby.store.snapshot())
-      return {**snapshot, "source_roles": sources, "entry_roles": entries}
+      with self._lock:
+         refusals = dict(self._refusals)
+      return {**snapshot, "source_roles": sources, "entry_roles": entries, "refusals": refusals}
 
    def ship(self, request_id: str, *, request_attempt: int, committed_token_count: int, committed_prefix_digest: str) -> int:
       """Ship the KV positions added since the last checkpoint; returns the sequence sent."""

@@ -1163,6 +1163,8 @@ class PhysicalNodeService:
         self.capacity: SQLiteQualificationCapacityPort | None = None
         self.runtime: Any = None
         self.runtime_identity: dict[str, str] | None = None
+        # A7: staged KV-successor roles (``a7/node.json``); ``None`` = A6 only.
+        self._a7_wiring: Any = None
         self.sidecar: NativeSidecarProcess | None = None
         self.transport: IrohTransport | None = None
         self.router: Router | None = None
@@ -1642,6 +1644,177 @@ class PhysicalNodeService:
             prefill_chunk_size_tokens=8 if mode == "stage_local_kv" else 0,
         )
 
+    # -- A7 fenced KV-successor recovery -------------------------------------------
+
+    def _a7_configure(self, graph: ExecutionGraph, runtime: Any) -> tuple[Any, Any]:
+        """Bind the staged A7 roles; absent configuration leaves the node unchanged."""
+
+        from mycelium_a7_node_wiring import A7_NODE_CONFIG_PATH
+
+        if not os.path.lexists(self.artifact_root / A7_NODE_CONFIG_PATH):
+            return runtime, None
+        from mycelium_a7_node_wiring import (
+            A7NodeWiring,
+            A7WiringError,
+            validate_against_graph,
+            validate_node_config,
+        )
+        from mycelium_router.standby_dispatch import StandbyDispatchRuntime
+
+        try:
+            config = validate_node_config(
+                self._safe_document(A7_NODE_CONFIG_PATH, "invalid_a7_node_config"),
+                deployment_id=self.deployment_id,
+                node_id=self.node_id,
+            )
+            validate_against_graph(config, graph, node_id=self.node_id)
+            _require(
+                getattr(runtime, "decode_mode", None) == "stage_local_kv",
+                "a7_requires_stage_local_kv",
+            )
+            wiring = A7NodeWiring(
+                config,
+                node_id=self.node_id,
+                read_document=lambda relative: self._safe_document(
+                    relative, "invalid_a7_document"
+                ),
+                read_secret=self._a7_read_secret,
+                fence_root=Path(self.capacity_root),
+            )
+            if config["standby"] is not None:
+                placement = next(
+                    item
+                    for stage in graph.stages
+                    for item in stage.placements
+                    if item.placement_id == config["standby"]["placement_id"]
+                )
+                loaded = self._a7_load_standby_stage(config["standby"], placement)
+                standby_port = self._build_runtime_port(placement, graph, loaded)
+                wiring.bind_standby(standby_port)
+                runtime = StandbyDispatchRuntime(
+                    runtime, {placement.placement_id: standby_port}
+                )
+            wiring.load_qualifications(now_unix_ms=int(time.time() * 1000))
+        except A7WiringError as exc:
+            raise NodeCommandError(exc.code) from None
+        except (ValueError, TypeError) as exc:
+            raise NodeCommandError("invalid_a7_configuration") from exc
+        return runtime, wiring
+
+    def _a7_read_secret(self, relative_path: str) -> bytes:
+        """Read the standby's staged owner-only secret (exact size, no symlinks)."""
+
+        _require(
+            isinstance(relative_path, str)
+            and bool(relative_path)
+            and not PurePosixPath(relative_path).is_absolute()
+            and ".." not in PurePosixPath(relative_path).parts,
+            "invalid_a7_secret_file",
+        )
+        from mycelium_a7_node_wiring import STANDBY_SECRET_BYTES
+
+        path = self.artifact_root / relative_path
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        try:
+            descriptor = os.open(path, flags)
+        except OSError as exc:
+            raise NodeCommandError("invalid_a7_secret_file") from exc
+        try:
+            metadata = os.fstat(descriptor)
+            _require(
+                stat.S_ISREG(metadata.st_mode)
+                and (mycelium_host_platform.is_win32() or (
+                    metadata.st_mode & 0o077 == 0
+                    and metadata.st_uid == os.getuid()
+                ))
+                and metadata.st_size == STANDBY_SECRET_BYTES,
+                "invalid_a7_secret_file",
+            )
+            secret = os.read(descriptor, STANDBY_SECRET_BYTES + 1)
+        finally:
+            os.close(descriptor)
+        _require(len(secret) == STANDBY_SECRET_BYTES, "invalid_a7_secret_file")
+        return secret
+
+    def _a7_load_standby_stage(self, standby: Mapping[str, Any], placement: Placement) -> Any:
+        """Verify and load the standby's own assignment-local stage pack."""
+
+        from runtime_loader import canonical_json, load_assignment_stage
+        from stage_pack import artifact_report_for_loader, verify_stage_pack
+
+        assignment = self._safe_document(
+            standby["assignment_file"], "invalid_a7_standby_assignment"
+        )
+        _require(
+            assignment.get("deployment_id") == self.deployment_id
+            and assignment.get("node_id") == self.node_id
+            and assignment.get("assignment_id") == placement.assignment_id,
+            "a7_standby_assignment_mismatch",
+        )
+        manifest = self._safe_document(standby["manifest_file"], "invalid_a7_manifest")
+        pack = self._safe_document(standby["stage_pack_file"], "invalid_a7_stage_pack")
+        try:
+            verification = verify_stage_pack(pack, assignment=assignment, manifest=manifest)
+            report = artifact_report_for_loader(
+                pack, verification, assignment=assignment, manifest=manifest
+            )
+        except (TypeError, ValueError) as exc:
+            raise NodeCommandError("invalid_a7_stage_pack") from exc
+        loaded = load_assignment_stage(
+            assignment, report, load_generation=standby["load_generation"]
+        )
+        _require(
+            layer_load_proof_digest(json.loads(canonical_json(loaded.proof)))
+            == placement.load_proof_digest,
+            "a7_standby_load_proof_mismatch",
+        )
+        return loaded
+
+    def _a7_attach(self, router: Router, transport: Any) -> None:
+        wiring = self._a7_wiring
+        if wiring is None:
+            return
+        from mycelium_router.standby_dispatch import StandbyDispatchRuntime
+
+        runtime = self.runtime
+        primary = (
+            runtime.primary if isinstance(runtime, StandbyDispatchRuntime) else runtime
+        )
+        assert self.graph is not None
+        ports = {
+            placement.placement_id: primary
+            for stage in self.graph.stages
+            for placement in stage.placements
+            if placement.node_id == self.node_id
+            and placement.lifecycle_state == "ACTIVE"
+        }
+        wiring.attach(
+            router,
+            send=transport.send_a7_message,
+            primary_port=primary,
+            ports_by_placement=ports,
+        )
+        if wiring.controller is not None:
+            transport.forward_failure_observer = wiring.forward_failure_observer(
+                router, node_id=self.node_id
+            )
+
+    def _a7_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
+        _require(
+            isinstance(payload, dict)
+            and set(payload) in ({"request_id"}, set())
+            and (
+                "request_id" not in payload
+                or (isinstance(payload["request_id"], str) and bool(payload["request_id"]))
+            ),
+            "invalid_a7_snapshot_fields",
+        )
+        _require(self._a7_wiring is not None, "a7_not_configured")
+        return self._signed_result(
+            "a7_snapshot",
+            self._a7_wiring.snapshot(payload.get("request_id")),
+        )
+
     def _configure(self, payload: dict[str, Any]) -> dict[str, Any]:
         _require(self.state == "NEW", "invalid_state_for_configure")
         legacy_fields = {
@@ -1858,12 +2031,18 @@ class PhysicalNodeService:
             parent_assignment_digest=parent_assignment_digest,
         )
         self._bind_router_config_to_runtime(runtime)
+        try:
+            runtime, a7_wiring = self._a7_configure(graph, runtime)
+        except BaseException:
+            runtime.close(reason="configure_failed")
+            raise
         sidecar = self._new_sidecar_process()
         try:
             ready = sidecar.start()
         except BaseException:
             runtime.close(reason="configure_failed")
             raise
+        self._a7_wiring = a7_wiring
         self.graph = graph
         self.topology = topology
         self.device_states = device_provider
@@ -1996,6 +2175,7 @@ class PhysicalNodeService:
         )
         try:
             transport.bind_router(router)
+            self._a7_attach(router, transport)
             transport.start()
         except BaseException:
             transport.close()
@@ -4142,6 +4322,7 @@ class PhysicalNodeService:
             "stop": self._stop,
             "a10_target_verify": self._a10_target_verify,
             "a10_batch_policy": self._a10_batch_policy,
+            "a7_snapshot": self._a7_snapshot,
         }
         handler = handlers.get(document["command"])
         _require(handler is not None, "unsupported_command")

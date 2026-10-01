@@ -100,6 +100,7 @@ class _Coverage:
    max_ack_wait_ms: float = 0.0
    commits_sent: int = 0
    finished: bool = False
+   last_send_error: str | None = None
    result: dict[str, Any] | None = None
    participants: set[str] = field(default_factory=set)
 
@@ -201,10 +202,11 @@ class A7EntryController:
          destination = state.coverage.source_node_id
       try:
          self._send(destination, message, b"")
-      except Exception:
+      except Exception as exc:
          with self._lock:
             state.lag_events += 1
             state.pending_since = None
+            state.last_send_error = str(getattr(exc, "code", None) or type(exc).__name__)[:64]
          return False
       return True
 
@@ -248,6 +250,16 @@ class A7EntryController:
          return None
       return state.coverage
 
+   def covers_failed_hop(self, request_id: str, path_id: str, placement_id: str) -> bool:
+      with self._lock:
+         state = self._requests.get(request_id)
+         return (
+            state is not None
+            and not state.finished
+            and state.path_id == path_id
+            and state.coverage.source_placement_id == placement_id
+         )
+
    def _compatibility(self, coverage: StandbyCoverage) -> dict[str, Any]:
       qualification = coverage.qualification
       source = {name: f"{name}:{qualification.get('source_identity_digest')}" for name in COMPATIBILITY_IDENTITY_FIELDS}
@@ -272,6 +284,12 @@ class A7EntryController:
       if state is None or state.finished:
          return self._result(None, "route_watermark_unavailable", gateway_committed_token_ids, started)
       coverage = state.coverage
+      # The failed source is fenced by authority, never trusted to stop and
+      # never sent anything again: a message to it could only sit undelivered
+      # and block the exact cleanup proof of whichever path owns the request.
+      with self._lock:
+         if coverage.source_node_id != self.node_id:
+            state.participants.discard(coverage.source_node_id)
       watermark = self._agent.route_watermark(request_id)
       gateway_count = len(gateway_committed_token_ids)
       gateway_digest = committed_prefix_digest(request_id, gateway_committed_token_ids)
@@ -390,6 +408,8 @@ class A7EntryController:
       started = time.monotonic()
       with self._lock:
          state = self._requests.get(request_id)
+         if state is not None and state.coverage.source_node_id != self.node_id:
+            state.participants.discard(state.coverage.source_node_id)
       if state is None:
          return self._result(None, reason, gateway_committed_token_ids, started)
       watermark = self._agent.route_watermark(request_id)
@@ -486,5 +506,6 @@ class A7EntryController:
             "request_attempt": state.request_attempt,
             "fencing_generation": state.generation,
             "finished": state.finished,
+            "last_send_error": state.last_send_error,
             "result": None if state.result is None else dict(state.result),
          }
