@@ -371,14 +371,34 @@ def _rms_norm(
    return (normalized * weight.astype(mx.float32)).astype(dtype)
 
 
+def _row_stable_matmul(hidden: mx.array, weight_t: mx.array) -> mx.array:
+   """``hidden @ weight_t`` whose every row is independent of the batch size.
+
+   MLX computes a single-row product with a different kernel than a multi-row
+   one, and the two differ in the last bits.  A lone row is therefore computed
+   as row 0 of a two-row product (the second row is zeros and is discarded), so
+   a request's arithmetic is bit-identical whether it runs alone or as any
+   member of a runtime batch; exact output parity between batched and
+   target-only execution then holds by construction.
+   """
+
+   rows = 1
+   for extent in hidden.shape[:-1]:
+      rows *= int(extent)
+   if rows == 1:
+      padded = mx.concatenate((hidden, mx.zeros_like(hidden)), axis=0)
+      return mx.matmul(padded, weight_t)[:1]
+   return mx.matmul(hidden, weight_t)
+
+
 def _qwen2_linear(hidden: mx.array, weight: Any) -> mx.array:
    if isinstance(weight, Int8RowwiseWeight):
-      projected = mx.matmul(
+      projected = _row_stable_matmul(
          hidden,
          weight.values.astype(mx.float32).transpose(1, 0),
       )
       return projected * weight.scales
-   return mx.matmul(hidden, weight.transpose(1, 0))
+   return _row_stable_matmul(hidden, weight.transpose(1, 0))
 
 
 def _qwen2_embedding(weight: Any, token_ids: mx.array) -> mx.array:
