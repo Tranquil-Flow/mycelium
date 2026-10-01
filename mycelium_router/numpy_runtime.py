@@ -845,6 +845,7 @@ class NumpyRuntimePort:
       new_path_id: str,
       new_path_attempt: int,
       lease_expires_at: float,
+      truncate_to_position: int | None = None,
    ) -> dict[str, Any]:
       """Move this stage's KV to a fenced successor path (A7 cutover)."""
 
@@ -856,6 +857,7 @@ class NumpyRuntimePort:
          new_path_id=new_path_id,
          new_path_attempt=new_path_attempt,
          lease_expires_at=lease_expires_at,
+         truncate_to_position=truncate_to_position,
       )
 
    def kv_snapshot(self) -> dict[str, Any]:

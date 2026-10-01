@@ -520,12 +520,21 @@ def rekey_port_kv_path(
    new_path_id: str,
    new_path_attempt: int,
    lease_expires_at: float,
+   truncate_to_position: int | None = None,
 ) -> dict[str, Any]:
    """Move a surviving stage's KV from a fenced path to its successor path.
 
-   The KV bytes do not change.  The old path is marked released, so any frame
-   that still arrives for the fenced attempt refuses with ``kv_state_released``:
-   this is how a surviving stage runtime installs the A7 fence.
+   The committed KV bytes do not change.  The old path is marked released, so
+   any frame that still arrives for the fenced attempt refuses with
+   ``kv_state_released``: this is how a surviving stage runtime installs the A7
+   fence.
+
+   ``truncate_to_position`` rolls back the one in-flight, uncommitted decode
+   position a surviving stage may already have computed when a later stage
+   failed (the entry dispatches a decode only after the previous token is
+   committed and acknowledged, so at most one position can be ahead).  Earlier
+   positions are causal and unaffected by a later one, so the truncated prefix
+   is byte-identical to the committed KV.
    """
 
    if port.decode_mode != "stage_local_kv":
@@ -550,6 +559,23 @@ def rekey_port_kv_path(
          _refuse("kv_checkpoint_state_already_exists")
       if float(port._clock()) >= float(lease_expires_at):
          _refuse("kv_checkpoint_lease_expired")
+      if truncate_to_position is not None:
+         if not _non_negative_int(truncate_to_position) or truncate_to_position < 1:
+            _refuse("kv_checkpoint_position_mismatch")
+         rollback = state.next_position - truncate_to_position
+         if rollback not in (0, 1) or state.next_sequence - rollback < 1:
+            _refuse("kv_checkpoint_position_mismatch")
+         if rollback:
+            def _prefix(array: Any) -> Any:
+               sliced = array[:, :, :truncate_to_position, :]
+               return np.ascontiguousarray(sliced) if isinstance(array, np.ndarray) else sliced
+
+            state.layers = {
+               layer: (_prefix(pair[0]), _prefix(pair[1])) for layer, pair in state.layers.items()
+            }
+            state.next_position -= rollback
+            state.next_sequence -= rollback
+            state.cached_context_tokens -= rollback
       del port._kv_states[old_path_id]
       state.path_id = new_path_id
       state.path_attempt = new_path_attempt
