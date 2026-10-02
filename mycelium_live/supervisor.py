@@ -6,6 +6,7 @@ import argparse
 import asyncio
 from dataclasses import dataclass
 import hmac
+import logging
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -62,6 +63,7 @@ from mycelium_ui_gateway.coordinator import CoordinatorError
 from physical_inference_qualification import ControllerError
 
 from .activation import DeploymentActivationError, PreparedDeploymentActivation
+from .a7_authority import install_route_authority
 from .a6_recovery import LiveA6RecoveryQualifier, tokenizer_artifact_digest
 from .artifact_provisioner import ArtifactAcquisitionStore
 from .codec import prompt_codec_from_deployment
@@ -95,6 +97,15 @@ CONTENT_SECURITY_POLICY = (
     "connect-src 'self'; img-src 'self'; base-uri 'none'; "
     "frame-ancestors 'none'; form-action 'self'"
 )
+_LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _A7StagedAuthority:
+    stage_id: str
+    entry_node_id: str
+    source_node_id: str
+    standby_node_id: str
 
 
 def _json_bytes(value: Mapping[str, Any]) -> bytes:
@@ -131,6 +142,174 @@ def _validate_route_identity(identity: RouteIdentity, execution_graph: Any) -> N
         or len(set(endpoint_ids)) != len(endpoint_ids)
     ):
         raise RuntimeError("startup_endpoint_identity_invalid")
+
+
+def _a7_entry_command_only(*_args: Any, **_kwargs: Any) -> Any:
+    raise RuntimeError("a7_entry_command_dispatch_only")
+
+
+def _a7_route_authority_target(route: Any) -> Any | None:
+    current = route
+    seen: set[int] = set()
+    for _ in range(8):
+        if current is None or id(current) in seen:
+            return None
+        seen.add(id(current))
+        try:
+            setter = getattr(current, "set_peer_exit_successor_authority", None)
+        except Exception:
+            setter = None
+        if callable(setter):
+            return current
+        try:
+            current = getattr(current, "_route", None)
+        except Exception:
+            return None
+    return None
+
+
+def _a7_route_graph(route: Any) -> Any | None:
+    try:
+        current_deployment = getattr(route, "current_deployment", None)
+    except Exception:
+        current_deployment = None
+    if callable(current_deployment):
+        try:
+            graph = current_deployment()
+        except Exception:
+            graph = None
+        if graph is not None:
+            return graph
+    for name in ("execution_graph", "_graph"):
+        try:
+            graph = getattr(route, name, None)
+        except Exception:
+            graph = None
+        if graph is not None:
+            return graph
+    return None
+
+
+def _a7_route_id(route: Any) -> str:
+    graph = _a7_route_graph(route)
+    deployment_id = getattr(graph, "deployment_id", None)
+    if isinstance(deployment_id, str) and deployment_id:
+        return deployment_id
+    return hex(id(route))
+
+
+def _a7_stage_log_value(stage_id: str) -> str:
+    text = str(stage_id)
+    for prefix in ("stage-", "stage_"):
+        if text.startswith(prefix) and text[len(prefix):].isdigit():
+            return str(int(text[len(prefix):]))
+    return text
+
+
+def _a7_staged_authority(route: Any) -> _A7StagedAuthority | None:
+    graph = _a7_route_graph(route)
+    if graph is None or not isinstance(getattr(graph, "deployment_id", None), str):
+        return None
+    try:
+        peers = getattr(route, "_peers", None)
+    except Exception:
+        return None
+    if not isinstance(peers, Mapping):
+        return None
+
+    from mycelium_a7_node_wiring import (
+        A7_NODE_CONFIG_PATH,
+        validate_against_graph,
+        validate_node_config,
+    )
+
+    placement_stage: dict[str, str] = {}
+    for stage in getattr(graph, "stages", ()):
+        stage_id = getattr(stage, "stage_id", None)
+        if not isinstance(stage_id, str):
+            continue
+        for placement in getattr(stage, "placements", ()):
+            placement_id = getattr(placement, "placement_id", None)
+            if isinstance(placement_id, str):
+                placement_stage[placement_id] = stage_id
+
+    entries: list[tuple[str, str, str, str, str, str]] = []
+    sources_by_stage: dict[str, set[tuple[str, str, str, str]]] = {}
+    standbys_by_stage: dict[str, set[tuple[str, str]]] = {}
+    saw_config = False
+    for peer in peers.values():
+        node_id = getattr(peer, "node_id", None)
+        staging_root = getattr(peer, "staging_root", None)
+        if not isinstance(node_id, str) or not isinstance(staging_root, str):
+            continue
+        config_path = Path(staging_root) / A7_NODE_CONFIG_PATH
+        if not config_path.is_file():
+            continue
+        saw_config = True
+        try:
+            config = validate_node_config(
+                json.loads(config_path.read_text(encoding="utf-8")),
+                deployment_id=graph.deployment_id,
+                node_id=node_id,
+            )
+            validate_against_graph(config, graph, node_id=node_id)
+        except Exception:
+            return None
+        source = config["source"]
+        if source is not None:
+            stage_id = source["stage_id"]
+            sources_by_stage.setdefault(stage_id, set()).add(
+                (
+                    node_id,
+                    source["source_placement_id"],
+                    source["standby_node_id"],
+                    source["standby_placement_id"],
+                )
+            )
+        standby = config["standby"]
+        if standby is not None:
+            stage_id = placement_stage.get(standby["placement_id"])
+            if stage_id is not None:
+                standbys_by_stage.setdefault(stage_id, set()).add(
+                    (node_id, standby["placement_id"])
+                )
+        entry = config["entry"]
+        if entry is not None:
+            for coverage in entry["coverage"]:
+                entries.append(
+                    (
+                        coverage["stage_id"],
+                        node_id,
+                        coverage["source_node_id"],
+                        coverage["standby_node_id"],
+                        coverage["source_placement_id"],
+                        coverage["standby_placement_id"],
+                    )
+                )
+    if not saw_config:
+        return None
+
+    for (
+        stage_id,
+        entry_node_id,
+        source_node_id,
+        standby_node_id,
+        source_placement_id,
+        standby_placement_id,
+    ) in entries:
+        if (
+            (source_node_id, source_placement_id, standby_node_id, standby_placement_id)
+            in sources_by_stage.get(stage_id, set())
+            and (standby_node_id, standby_placement_id)
+            in standbys_by_stage.get(stage_id, set())
+        ):
+            return _A7StagedAuthority(
+                stage_id=stage_id,
+                entry_node_id=entry_node_id,
+                source_node_id=source_node_id,
+                standby_node_id=standby_node_id,
+            )
+    return None
 
 
 class LiveObservatoryApplication:
@@ -921,6 +1100,29 @@ class ColdRouteRestartOwner:
             configure_model = getattr(route, "set_m17_model_operation", None)
             if callable(configure_model):
                 configure_model(model_operation)
+        self._install_a7_route_authority_if_staged(route)
+
+    def _install_a7_route_authority_if_staged(self, route: LiveRoute) -> None:
+        target = _a7_route_authority_target(route)
+        if target is None:
+            return
+        staged = _a7_staged_authority(target)
+        if staged is None:
+            return
+        install_route_authority(
+            target,
+            node_id_for_command=staged.entry_node_id,
+            accept_source_lost=_a7_entry_command_only,
+            cut_over_lost_source=_a7_entry_command_only,
+        )
+        _LOGGER.info(
+            "a7 authority installed on route id=%s stage=%s standby_node=%s entry_node=%s source_node=%s",
+            _a7_route_id(target),
+            _a7_stage_log_value(staged.stage_id),
+            staged.standby_node_id,
+            staged.entry_node_id,
+            staged.source_node_id,
+        )
 
     def _ready_route_or_raise(self) -> tuple[LiveRoute, int]:
         with self._lock:

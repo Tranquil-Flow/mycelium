@@ -1878,7 +1878,12 @@ class PhysicalNodeService:
             decision = self._a7_wiring.accept_source_lost(request_id, lost_node_id)
         result = self._signed_result(
             "a7_source_lost",
-            {"request_id": request_id, "lost_node_id": lost_node_id, **decision},
+            {
+                **decision,
+                "request_id": request_id,
+                "lost_node_id": lost_node_id,
+                "control": dict(control),
+            },
         )
         if decision.get("accepted") is True and decision.get("cutover_pending") is True:
             wiring = self._a7_wiring

@@ -78,7 +78,7 @@ def test_accepts_for_the_exact_bound_control_and_cuts_over_only_after_the_respon
    result = service._a7_source_lost(_payload())
 
    assert result["event"] == "a7_source_lost"
-   assert result["details"] == {"request_id": "request-a7", "lost_node_id": "node-2", **_ACCEPTED}
+   assert result["details"] == {"request_id": "request-a7", "lost_node_id": "node-2", "control": dict(_CONTROL), **_ACCEPTED}
    assert wiring.claims == [("request-a7", "node-2")]
    # Accept first: nothing runs until the response has been emitted.
    time.sleep(0.05)
@@ -143,6 +143,7 @@ def test_the_entry_refusal_is_reported_and_nothing_is_deferred() -> None:
    assert result["details"] == {
       "request_id": "request-a7",
       "lost_node_id": "node-2",
+      "control": dict(_CONTROL),
       "accepted": False,
       "reason": "request_not_covered",
    }
