@@ -5700,6 +5700,7 @@ class PhysicalLiveRoute:
         )
 
     _peer_exit_successor_authority: Callable[..., bool] | None = None
+    _peer_exit_claim_lock: Any = None
 
     def set_peer_exit_successor_authority(
         self,
@@ -5710,6 +5711,8 @@ class PhysicalLiveRoute:
         with self._lock:
             if self._closed:
                 raise RuntimeError("route_closed")
+            if self._peer_exit_claim_lock is None:
+                self._peer_exit_claim_lock = threading.Lock()
             self._peer_exit_successor_authority = authority
 
     def _bound_participants(
@@ -5813,21 +5816,31 @@ class PhysicalLiveRoute:
                 if session.returncode is not None
             )
         for node_id in lost:
-            with self._lock:
-                active_tracks = tuple(
-                    request_id
-                    for request_id, active in self._active_route_requests.items()
-                    if active.get("terminal") is not True
-                    and active.get("cancellation_requested") is not True
-                    and node_id in active["participating_node_ids"]
-                )
             authority = self._peer_exit_successor_authority
-            covered = frozenset(
-                request_id
-                for request_id in active_tracks
-                if authority is not None
-                and self._bind_covered_peer_exit(authority, request_id, node_id)
-            )
+            # A7: serialise snapshot and claim so a concurrent detection caller
+            # cannot act on a track another caller is handing to its successor.
+            # Never taken under self._lock; absent when no authority exists.
+            claim_lock = self._peer_exit_claim_lock if authority is not None else None
+            if claim_lock is not None:
+                claim_lock.acquire()
+            try:
+                with self._lock:
+                    active_tracks = tuple(
+                        request_id
+                        for request_id, active in self._active_route_requests.items()
+                        if active.get("terminal") is not True
+                        and active.get("cancellation_requested") is not True
+                        and node_id in active["participating_node_ids"]
+                    )
+                covered = frozenset(
+                    request_id
+                    for request_id in active_tracks
+                    if authority is not None
+                    and self._bind_covered_peer_exit(authority, request_id, node_id)
+                )
+            finally:
+                if claim_lock is not None:
+                    claim_lock.release()
             subject = self._liveness_subjects.get(node_id)
             if subject is not None:
                 snapshot = self._liveness.subject_snapshot(subject)
