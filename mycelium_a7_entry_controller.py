@@ -103,6 +103,7 @@ class _Coverage:
    last_send_error: str | None = None
    result: dict[str, Any] | None = None
    participants: set[str] = field(default_factory=set)
+   source_lost_accepted: bool = False
    old_path_fenced: bool = False
 
 
@@ -266,6 +267,41 @@ class A7EntryController:
             and state.path_id == path_id
             and state.coverage.source_placement_id == placement_id
          )
+
+   def accept_source_lost(self, request_id: str, lost_node_id: str) -> dict[str, Any]:
+      """A4 observed ``lost_node_id``'s process exit: does this entry own it?
+
+      Accepts only a request this entry covers whose covered source runs on
+      ``lost_node_id`` and that has not been released terminally.  Acceptance
+      means the entry owns the failure handling (fenced cutover, or its own
+      truthful A6/abort fallback); it is decided before any cutover work, so
+      the route can bind the claim first.  Records are privacy-reduced.
+      """
+
+      with self._lock:
+         state = self._requests.get(request_id)
+         if state is None:
+            return {"accepted": False, "reason": "request_not_covered"}
+         if lost_node_id == self.node_id or state.coverage.source_node_id != lost_node_id:
+            return {"accepted": False, "reason": "lost_node_not_covered_source"}
+         if state.result is not None and state.result.get("terminal_released"):
+            return {"accepted": False, "reason": "request_terminal"}
+         repeated = state.source_lost_accepted
+         state.source_lost_accepted = True
+         return {
+            "accepted": True,
+            "reason": "source_lost_accepted",
+            "repeated": repeated,
+            "source_placement_id": state.coverage.source_placement_id,
+            "cutover_pending": not state.finished,
+         }
+
+   def covered_source_placement(self, request_id: str, lost_node_id: str) -> str | None:
+      with self._lock:
+         state = self._requests.get(request_id)
+         if state is None or state.finished or state.coverage.source_node_id != lost_node_id:
+            return None
+         return state.coverage.source_placement_id
 
    def _fence_old_path(self, state: _Coverage, request_id: str, manifest: PathManifest) -> None:
       fence = self.fence_old_path
@@ -530,6 +566,7 @@ class A7EntryController:
             "fencing_generation": state.generation,
             "finished": state.finished,
             "last_send_error": state.last_send_error,
+            "source_lost_accepted": state.source_lost_accepted,
             "old_path_fenced": state.old_path_fenced,
             "result": None if state.result is None else dict(state.result),
          }

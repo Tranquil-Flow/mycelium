@@ -1184,6 +1184,9 @@ class PhysicalNodeService:
         self._cancellations_by_subject: dict[tuple[str, str, int], dict[str, Any]] = {}
         self._control_lock = threading.RLock()
         self._request_controls: dict[str, dict[str, Any]] = {}
+        # Work a command defers until its response has been emitted (A7
+        # accept-first: the route binds the claim before the cutover starts).
+        self._after_response = threading.local()
         self._pending_cancellations: dict[str, dict[str, Any]] = {}
         self._cancellation_controls: dict[str, dict[str, Any]] = {}
         self._cancellation_workers: dict[str, threading.Thread] = {}
@@ -1815,6 +1818,76 @@ class PhysicalNodeService:
             "a7_snapshot",
             self._a7_wiring.snapshot(payload.get("request_id")),
         )
+
+    def _defer_after_response(self, action: Callable[[], Any], *, name: str) -> None:
+        pending = getattr(self._after_response, "actions", None)
+        if pending is None:
+            pending = []
+            self._after_response.actions = pending
+        pending.append((name, action))
+
+    def run_after_response(self) -> None:
+        """Start the work the just-answered command deferred (on its own thread)."""
+
+        pending = getattr(self._after_response, "actions", None)
+        self._after_response.actions = None
+        for name, action in pending or ():
+            threading.Thread(target=action, name=name, daemon=True).start()
+
+    def discard_after_response(self) -> None:
+        self._after_response.actions = None
+
+    def _a7_source_lost(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """A4 process-exit feed: hand one exited covered source to this entry.
+
+        The route sends its exact request control and the exited node.  The
+        entry accepts only for that bound control and a request whose covered
+        source runs on that node, answers first, and only after the response is
+        emitted reports the source PLACEMENT failure (fenced KV-successor
+        cutover, or its truthful A6/abort fallback).
+        """
+
+        _require(
+            isinstance(payload, dict)
+            and set(payload) == {"request_id", "control", "lost_node_id"}
+            and isinstance(payload["request_id"], str)
+            and bool(payload["request_id"])
+            and isinstance(payload["lost_node_id"], str)
+            and bool(payload["lost_node_id"]),
+            "invalid_a7_source_lost_fields",
+        )
+        _require(
+            self.state == "RUNNING" and self.router is not None,
+            "invalid_state_for_a7_source_lost",
+        )
+        _require(self._a7_wiring is not None, "a7_not_configured")
+        control = self._validated_request_control(
+            payload["control"],
+            code="invalid_a7_source_lost_control",
+            initial=False,
+        )
+        request_id = payload["request_id"]
+        lost_node_id = payload["lost_node_id"]
+        with self._control_lock:
+            bound = self._request_controls.get(request_id)
+        if lost_node_id == self.node_id:
+            decision: dict[str, Any] = {"accepted": False, "reason": "lost_node_is_entry"}
+        elif bound is None or dict(bound) != control:
+            decision = {"accepted": False, "reason": "stale_request_control"}
+        else:
+            decision = self._a7_wiring.accept_source_lost(request_id, lost_node_id)
+        result = self._signed_result(
+            "a7_source_lost",
+            {"request_id": request_id, "lost_node_id": lost_node_id, **decision},
+        )
+        if decision.get("accepted") is True and decision.get("cutover_pending") is True:
+            wiring = self._a7_wiring
+            router = self.router
+            self._defer_after_response(
+                lambda: wiring.cut_over_lost_source(router, request_id, lost_node_id),
+                name="a7-source-lost",
+            )
+        return result
 
     def _configure(self, payload: dict[str, Any]) -> dict[str, Any]:
         _require(self.state == "NEW", "invalid_state_for_configure")
@@ -4324,6 +4397,7 @@ class PhysicalNodeService:
             "a10_target_verify": self._a10_target_verify,
             "a10_batch_policy": self._a10_batch_policy,
             "a7_snapshot": self._a7_snapshot,
+            "a7_source_lost": self._a7_source_lost,
         }
         handler = handlers.get(document["command"])
         _require(handler is not None, "unsupported_command")
@@ -4680,6 +4754,7 @@ def main() -> int:
                 _response(service, command_id=command_id, ok=True, result=result),
                 cleanup_priority=cleanup_priority,
             )
+            service.run_after_response()
         except NodeCommandError as exc:
             response_emitter.emit(
                 _response(
@@ -4729,6 +4804,7 @@ def main() -> int:
                 cleanup_priority=cleanup_priority,
             )
         finally:
+            service.discard_after_response()
             with active_lock:
                 active_command_ids.discard(command_id)
             lane_capacity.release()

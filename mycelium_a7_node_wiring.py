@@ -362,6 +362,28 @@ class A7NodeWiring:
 
       return observe
 
+   def accept_source_lost(self, request_id: str, lost_node_id: str) -> dict[str, Any]:
+      """Answer the route's A4 process-exit claim (accept first, cut over after)."""
+
+      if self.controller is None:
+         return {"accepted": False, "reason": "a7_entry_not_configured"}
+      return self.controller.accept_source_lost(request_id, lost_node_id)
+
+   def cut_over_lost_source(self, router: Any, request_id: str, lost_node_id: str) -> bool:
+      """Run the accepted claim: the entry's own PLACEMENT failure for the source.
+
+      A cutover that a transport-observed failure already started (or finished)
+      is not repeated: only a still-covered source placement is reported.
+      """
+
+      controller = self.controller
+      if controller is None:
+         return False
+      placement_id = controller.covered_source_placement(request_id, lost_node_id)
+      if placement_id is None:
+         return False
+      return router.entry.report_lost_source(request_id, placement_id, reason="node_process_exited")
+
    def snapshot(self, request_id: str | None = None) -> dict[str, Any]:
       """Privacy-reduced A7 node evidence (counts, bytes, states; never KV)."""
 

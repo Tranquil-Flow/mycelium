@@ -1491,6 +1491,38 @@ class EntryCoordinator:
          self.decode_one_distributed(request_id)
       return True
 
+   def report_lost_source(self, request_id: str, placement_id: str, *, reason: str = "node_process_exited") -> bool:
+      """A7: an exited source placement observed by liveness, not by this transport.
+
+      Builds the PLACEMENT failure report for the request's current locked path
+      at the exact decode position and hands it to the ordinary failure path
+      (fenced KV-successor cutover, or its truthful A6/abort fallback).  The
+      waiting decode driver needs the successor to re-send the failed step.
+      Returns whether the report was accepted; a request that is not decoding
+      through ``placement_id`` keeps its existing handling.
+      """
+
+      record = self._requests.get(request_id)
+      if record is None:
+         return False
+      with record.lock:
+         if record.status != "DECODING":
+            return False
+         manifest = record.manifest
+         if placement_id not in {hop.placement_id for hop in manifest.ordered_hops}:
+            return False
+         report = FailureReport(
+            request_id=request_id,
+            path_id=manifest.path_id,
+            path_attempt=manifest.path_attempt,
+            token_index=len(record.generated_token_ids),
+            scope="PLACEMENT",
+            reason=reason[:64],
+            placement_id=placement_id,
+            node_id=self.node_id,
+         )
+      return self.receive_failure_report(report, redispatch_successor=True)
+
    def _a7_fallback(self, record: RequestRecord, result: dict, *, new_attempt: int) -> bool | None:
       with record.lock:
          record.kv_successor_cutover = result
