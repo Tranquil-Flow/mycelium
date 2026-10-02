@@ -11,7 +11,7 @@ owner-approved A7 route change (``set_peer_exit_successor_authority``,
   behave exactly as before;
 * every refusal shape keeps today's interruption;
 * concurrent detection callers cannot cancel a request that one of them
-  handed to its successor.
+  handed to its successor (the serialised peer-exit claim).
 """
 
 from __future__ import annotations
@@ -346,15 +346,6 @@ def test_covered_exit_is_not_reclaimed_by_a_later_status_read() -> None:
     assert log["cancelled"] == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "d5aee63 race: two concurrent detection callers (status read and the "
-        "monitor tick) both snapshot the track before either rebinds; the "
-        "loser of the rebind returns False and cancels the covered request. "
-        "Needs the serialising claim lock reported to the owner."
-    ),
-)
 def test_concurrent_detection_callers_never_cancel_a_covered_request() -> None:
     first_in_authority = threading.Event()
     second_in_authority = threading.Event()
