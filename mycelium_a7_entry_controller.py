@@ -103,9 +103,16 @@ class _Coverage:
    last_send_error: str | None = None
    result: dict[str, Any] | None = None
    participants: set[str] = field(default_factory=set)
+   old_path_fenced: bool = False
 
 
 class A7EntryController:
+   #: Optional ``fence_old_path(request_id, path_id, path_attempt)``: fences the
+   #: failed attempt's in-flight and queued transport forwards at cutover, so a
+   #: send still blocked on the dead source cannot hold this entry's cleanup
+   #: receipt open until the delivery deadline.  ``None`` changes nothing.
+   fence_old_path: Callable[[str, str, int], Any] | None = None
+
    def __init__(
       self,
       *,
@@ -260,6 +267,18 @@ class A7EntryController:
             and state.coverage.source_placement_id == placement_id
          )
 
+   def _fence_old_path(self, state: _Coverage, request_id: str, manifest: PathManifest) -> None:
+      fence = self.fence_old_path
+      if fence is None or state.old_path_fenced:
+         return
+      state.old_path_fenced = True
+      try:
+         fence(request_id, manifest.path_id, manifest.path_attempt)
+      except Exception:
+         # The durable fence already excludes the old attempt; a transport that
+         # cannot sweep it keeps its own delivery deadline.
+         pass
+
    def _compatibility(self, coverage: StandbyCoverage) -> dict[str, Any]:
       qualification = coverage.qualification
       source = {name: f"{name}:{qualification.get('source_identity_digest')}" for name in COMPATIBILITY_IDENTITY_FIELDS}
@@ -300,6 +319,9 @@ class A7EntryController:
          return self._finish_fallback(state, request_id, old_manifest, None, "fence_not_installed", gateway_committed_token_ids, started, watermark)
       state.request_attempt = fenced["request_attempt"]
       state.generation = fenced["fencing_generation"]
+      # The failed attempt is now excluded by authority: stop its transport
+      # forwards too, whether this cutover succeeds or falls back.
+      self._fence_old_path(state, request_id, old_manifest)
       compatibility = self._compatibility(coverage)
       qualifier_current = standby_qualification_is_current(coverage.qualification, now_unix_ms=self._clock_ms())
       pre = evaluate_cutover_eligibility(
@@ -432,6 +454,7 @@ class A7EntryController:
             deliver(destination)
 
    def _finish_fallback(self, state, request_id, old_manifest, successor_manifest, reason, gateway_tokens, started, watermark) -> dict[str, Any]:
+      self._fence_old_path(state, request_id, old_manifest)
       if successor_manifest is not None:
          self._release_participants(state, request_id, successor_manifest, "fallback")
       self._release_participants(state, request_id, old_manifest, "fallback")
@@ -507,5 +530,6 @@ class A7EntryController:
             "fencing_generation": state.generation,
             "finished": state.finished,
             "last_send_error": state.last_send_error,
+            "old_path_fenced": state.old_path_fenced,
             "result": None if state.result is None else dict(state.result),
          }

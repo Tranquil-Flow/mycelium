@@ -1798,6 +1798,7 @@ class PhysicalNodeService:
             transport.forward_failure_observer = wiring.forward_failure_observer(
                 router, node_id=self.node_id
             )
+            wiring.controller.fence_old_path = transport.fence_path_forwards
 
     def _a7_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
         _require(

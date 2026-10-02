@@ -520,6 +520,15 @@ class _ScopedTransportEvent:
 ClientFactory = Callable[..., Any]
 
 
+@dataclass(frozen=True)
+class _ForwardFenceScope:
+    """The exact (request, path, attempt) subject an A7 forward fence sweeps."""
+
+    request_id: str
+    path_id: str
+    path_attempt: int
+
+
 class IrohTransport:
     """Authenticated iroh adapter implementing ``TransportPort``.
 
@@ -1648,6 +1657,42 @@ class IrohTransport:
             interrupted_client = self._forward_client
             self._forward_client = None
         return interrupted_client
+
+    def fence_path_forwards(
+        self,
+        request_id: str,
+        path_id: str,
+        path_attempt: int,
+    ) -> bool:
+        """A7: fence one superseded path attempt's transport forwards.
+
+        Called by the entry once a fenced KV-successor cutover (or its fallback)
+        has durably excluded the failed attempt.  Queued deferred forwards of
+        that exact attempt are dropped, a forward still blocked sending to the
+        dead source is interrupted, and its pending deliveries are cancelled
+        through the sidecar control lane, so the entry's request cleanup
+        receipt does not wait for the original delivery deadline.  An
+        interrupted forward is a fenced scope, never reported as a new failure.
+        Other attempts, requests and the A7 message lane are untouched.
+        """
+
+        if (
+            not isinstance(request_id, str)
+            or not request_id
+            or not isinstance(path_id, str)
+            or not path_id
+            or type(path_attempt) is not int
+            or path_attempt < 0
+        ):
+            raise ValueError("invalid_forward_fence_scope")
+        scope = _ForwardFenceScope(request_id, path_id, path_attempt)
+        with self._state_lock:
+            if self._router is None:
+                return False
+            interrupted = self._cancel_forward_scope_locked(scope)  # type: ignore[arg-type]
+            self._cancel_pending_scope_locked(scope)  # type: ignore[arg-type]
+        self._interrupt_client(interrupted)
+        return True
 
     def _cancel_pending_scope_locked(
         self,
