@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -118,6 +119,10 @@ def _sha(value: Any) -> str:
    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
+_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
 def _flatten(identity: Mapping[str, Any], placement: Any, stage_id: str) -> dict[str, Any]:
    runtime = identity.get("runtime_identity") or {}
    flat: dict[str, Any] = {
@@ -175,6 +180,93 @@ def parity_challenge_result(
       "executed": True,
       "passed": source_digest == standby_digest,
    }
+
+
+_CROSS_HOST_FIELDS = frozenset(
+   {
+      "protocol",
+      "challenge_id",
+      "source_identity_digest",
+      "standby_identity_digest",
+      "source_output_digest",
+      "standby_output_digest",
+      "candidate_commit",
+      "measured_at_unix_ms",
+      "evidence_digest",
+   }
+)
+
+
+def physical_parity_challenge(
+   *,
+   challenge_id: str,
+   source_identity: Mapping[str, Any],
+   standby_identity: Mapping[str, Any],
+   source_output_digest: str,
+   standby_output_digest: str,
+   candidate_commit: str,
+   measured_at_unix_ms: int,
+) -> dict[str, Any]:
+   """Closed cross-host parity record from one measured source/standby pair.
+
+   Refuses (fail closed) when the two placement identities differ in any
+   KV identity field, when either output digest is malformed, or when the
+   outputs differ: a failing parity is never sealed as a challenge.  The
+   record is digest-bound so it cannot be re-issued against another
+   qualification.
+   """
+
+   if not isinstance(challenge_id, str) or not challenge_id:
+      raise StandbyQualificationError("physical_parity_invalid")
+   if not isinstance(source_identity, Mapping) or not isinstance(standby_identity, Mapping):
+      raise StandbyQualificationError("physical_parity_identity_invalid")
+   if not isinstance(source_output_digest, str) or not _DIGEST_RE.fullmatch(source_output_digest):
+      raise StandbyQualificationError("physical_parity_output_digest_invalid")
+   if not isinstance(standby_output_digest, str) or not _DIGEST_RE.fullmatch(standby_output_digest):
+      raise StandbyQualificationError("physical_parity_output_digest_invalid")
+   if source_output_digest != standby_output_digest:
+      raise StandbyQualificationError("physical_parity_outputs_differ")
+   if not isinstance(candidate_commit, str) or not _COMMIT_RE.fullmatch(candidate_commit):
+      raise StandbyQualificationError("physical_parity_commit_invalid")
+   if type(measured_at_unix_ms) is not int or measured_at_unix_ms < 1:
+      raise StandbyQualificationError("physical_parity_clock_invalid")
+   left = {key: source_identity.get(key) for key in _IDENTITY_FIELDS}
+   right = {key: standby_identity.get(key) for key in _IDENTITY_FIELDS}
+   if left != right:
+      mismatched = sorted(
+         key for key in _IDENTITY_FIELDS if left.get(key) != right.get(key)
+      )
+      raise StandbyQualificationError("physical_parity_identity_mismatch")
+   record = {
+      "protocol": PARITY_CHALLENGE_PROTOCOL,
+      "challenge_id": _sha(challenge_id.encode("utf-8")),
+      "source_identity_digest": _sha(left),
+      "standby_identity_digest": _sha(right),
+      "source_output_digest": source_output_digest,
+      "standby_output_digest": standby_output_digest,
+      "candidate_commit": candidate_commit,
+      "measured_at_unix_ms": measured_at_unix_ms,
+   }
+   record["evidence_digest"] = _sha(record)
+   return record
+
+
+def validate_physical_parity_challenge(document: Any) -> dict[str, Any]:
+   """Closed-shape, digest-bound validation of a cross-host parity record."""
+
+   if not isinstance(document, Mapping) or set(document) != _CROSS_HOST_FIELDS:
+      raise StandbyQualificationError("physical_parity_invalid")
+   record = dict(document)
+   if record["protocol"] != PARITY_CHALLENGE_PROTOCOL:
+      raise StandbyQualificationError("physical_parity_invalid")
+   body = {key: value for key, value in record.items() if key != "evidence_digest"}
+   if record["evidence_digest"] != _sha(body):
+      raise StandbyQualificationError("physical_parity_digest_mismatch")
+   if record["source_output_digest"] != record["standby_output_digest"]:
+      raise StandbyQualificationError("physical_parity_outputs_differ")
+   if record["source_identity_digest"] != record["standby_identity_digest"]:
+      raise StandbyQualificationError("physical_parity_identity_mismatch")
+   return record
 
 
 def qualify_standby(
