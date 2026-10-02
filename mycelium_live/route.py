@@ -2530,6 +2530,10 @@ class PhysicalLiveRoute:
         if not any(health_results):
             self._handle_lost_peer_processes()
             return
+        if not all(health_results) and self._peer_exit_successor_authority is not None:
+            # A7: hand an exited non-entry participant to its request-scoped
+            # successor within this tick instead of the next status read.
+            self._handle_lost_peer_processes()
         with self._lock:
             failed_nodes: dict[str, str] = {}
             for node_id in active_node_ids:
@@ -4731,6 +4735,12 @@ class PhysicalLiveRoute:
                     if not cancelled_for_request:
                         emit_new_tokens(output)
                 cancelled_for_stop = stopped and status == "DECODING"
+                # A7: an exited participant whose placement a fenced successor
+                # replaced is no longer bound to this request (see
+                # _bind_covered_peer_exit); its process exit is its proof.
+                participating_node_ids = self._bound_participants(
+                    request_id, participating_node_ids
+                )
                 if cancelled_for_stop:
                     if route_identity is None:
                         cancelled_response = self._sessions[entry_node_id].send(
@@ -4885,6 +4895,9 @@ class PhysicalLiveRoute:
                     and self.request_cleanup_receipt(request_id) is None
                 ):
                     cleanup_deadline = failure_observed_at + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+                    participating_node_ids = self._bound_participants(
+                        request_id, participating_node_ids
+                    )
                     try:
                         assert authorize_cleanup is not None
                         cleanup_deadline = self._authorize_failed_request_cleanup(
@@ -5686,6 +5699,107 @@ class PhysicalLiveRoute:
             }
         )
 
+    _peer_exit_successor_authority: Callable[..., bool] | None = None
+
+    def set_peer_exit_successor_authority(
+        self,
+        authority: Callable[..., bool] | None,
+    ) -> None:
+        """Install the A7 owner that may claim one exited non-entry participant."""
+
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("route_closed")
+            self._peer_exit_successor_authority = authority
+
+    def _bound_participants(
+        self,
+        request_id: str,
+        fallback: frozenset[str],
+    ) -> frozenset[str]:
+        with self._lock:
+            active = self._active_route_requests.get(request_id)
+            if active is None:
+                return fallback
+            return frozenset(active["participating_node_ids"])
+
+    def _bind_covered_peer_exit(
+        self,
+        authority: Callable[..., bool],
+        request_id: str,
+        node_id: str,
+    ) -> bool:
+        """Let the request's entry own one exited participant (A7), or refuse.
+
+        The authority sends the exact control identity and the exited node to
+        the request's live entry and returns True only when that entry accepted
+        request-scoped ownership (fenced KV-successor cutover, or its own
+        truthful fallback reported through the in-flight decode). The exited
+        peer then leaves this request's cleanup participants: process exit is
+        its cleanup proof, as for A6. Any error or refusal keeps the existing
+        interruption below.
+        """
+
+        with self._lock:
+            active = self._active_route_requests.get(request_id)
+            if (
+                active is None
+                or active.get("terminal") is True
+                or active.get("cancellation_requested") is True
+                or active.get("control_bound") is not True
+                or node_id == active["entry_node_id"]
+                or node_id not in active["participating_node_ids"]
+            ):
+                return False
+            entry_node_id = active["entry_node_id"]
+            control = self._request_control_identity(request_id)
+
+        def send_to_entry(
+            command: str,
+            payload: Mapping[str, Any],
+            deadline_monotonic_s: float,
+        ) -> dict[str, Any]:
+            response = self._send_before(
+                entry_node_id,
+                command_id=self._command_id(entry_node_id, command),
+                command=command,
+                payload=dict(payload),
+                deadline_monotonic_s=deadline_monotonic_s,
+            )
+            return self._verify_observation(entry_node_id, response, event=command)
+
+        try:
+            accepted = authority(
+                request_id=request_id,
+                lost_node_id=node_id,
+                control=dict(control),
+                send_to_entry=send_to_entry,
+            )
+        except BaseException:
+            return False
+        if accepted is not True:
+            return False
+        with self._lock:
+            active = self._active_route_requests.get(request_id)
+            if (
+                active is None
+                or active.get("terminal") is True
+                or active.get("cancellation_requested") is True
+                or node_id not in active["participating_node_ids"]
+                or any(active.get(field) != value for field, value in control.items())
+            ):
+                return False
+            active["participating_node_ids"] = frozenset(
+                active["participating_node_ids"]
+            ) - {node_id}
+        self._record_scoped_runtime_incident(
+            request_id=request_id,
+            subject_id=node_id,
+            scope="request",
+            reason="node_process_exited",
+        )
+        return True
+
     def _handle_lost_peer_processes(self) -> None:
         """Interrupt only active requests whose physical participant exited."""
 
@@ -5707,6 +5821,13 @@ class PhysicalLiveRoute:
                     and active.get("cancellation_requested") is not True
                     and node_id in active["participating_node_ids"]
                 )
+            authority = self._peer_exit_successor_authority
+            covered = frozenset(
+                request_id
+                for request_id in active_tracks
+                if authority is not None
+                and self._bind_covered_peer_exit(authority, request_id, node_id)
+            )
             subject = self._liveness_subjects.get(node_id)
             if subject is not None:
                 snapshot = self._liveness.subject_snapshot(subject)
@@ -5731,6 +5852,8 @@ class PhysicalLiveRoute:
                         )
             interruption_deadline = observed_at_s + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
             for request_id in active_tracks:
+                if request_id in covered:
+                    continue
                 try:
                     self.cancel_request(
                         request_id,
