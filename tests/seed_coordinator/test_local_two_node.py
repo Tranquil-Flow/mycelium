@@ -289,7 +289,7 @@ class _IsolatedNodeClient(_NodeClient):
     def stop(self) -> None:
         if self.process.poll() is None:
             self.command("stop")
-            self.process.wait(timeout=harness.PROCESS_WAIT_TIMEOUT)
+            self.process.wait(timeout=harness.GRACEFUL_STOP_TIMEOUT)
 
     def request_stop(self) -> bool:
         if self.process.poll() is not None:
