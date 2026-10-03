@@ -430,7 +430,155 @@ def _row_stable_matmul(hidden: mx.array, weight_t: mx.array) -> mx.array:
    return mx.matmul(hidden, weight_t)
 
 
+#: ``int8_execution`` of a port whose int8 linears run on persistent packed state.
+INT8_EXECUTION_PERSISTENT_PACKED = "persistent_packed_int8"
+#: ``int8_execution`` of a port that upcasts every int8 weight per linear call.
+INT8_EXECUTION_PER_CALL_MATERIALIZATION = "per_call_float32_materialization"
+#: ``int8_execution`` of a port that holds no row-wise int8 weights.
+INT8_EXECUTION_NONE = "none"
+
+# Persistent packed int8 execution (A9 ``persistent_int8_execution``): the row-wise
+# int8 values are packed ONCE, at port construction, into MLX's unsigned 8-bit
+# affine layout with group scale 1 and group bias -128.  Every packed value
+# therefore dequantizes to exactly its signed int8 value, the row scale is
+# applied to the product exactly as before, and no decode-time call converts a
+# whole weight matrix to float32.
+_PACKED_INT8_GROUP_SIZE = 128
+_PACKED_INT8_BITS = 8
+# MLX computes a product with few rows by a vector kernel and one with many rows
+# by a tiled matrix kernel, and the two differ in the last bits.  Every packed
+# product is therefore computed with at least this many rows (zero rows pad a
+# smaller input and are discarded), so a row's arithmetic does not depend on how
+# many other rows share the call.  Port construction verifies that property for
+# every packed shape and refuses packing when it does not hold.
+_PACKED_INT8_MINIMUM_ROWS = 32
+
+
+@dataclass(frozen=True, slots=True)
+class PackedInt8RowwiseWeight(Int8RowwiseWeight):
+   """A row-wise int8 weight plus its persistent packed execution state."""
+
+   packed: Any
+   group_scales: Any
+   group_biases: Any
+
+
+def _pack_int8_rowwise(weight: Int8RowwiseWeight) -> Int8RowwiseWeight:
+   """Return ``weight`` with persistent packed state, or unchanged if unpackable."""
+
+   values = weight.values
+   if (
+      isinstance(weight, PackedInt8RowwiseWeight)
+      or not isinstance(values, mx.array)
+      or values.dtype != mx.int8
+      or values.ndim != 2
+   ):
+      return weight
+   rows, columns = (int(extent) for extent in values.shape)
+   if rows < 1 or columns < 1 or columns % _PACKED_INT8_GROUP_SIZE:
+      return weight
+   unsigned = (values.astype(mx.int16) + 128).astype(mx.uint8)
+   packed = (
+      unsigned.reshape(rows, columns // 4, 4)
+      .view(mx.uint32)
+      .reshape(rows, columns // 4)
+   )
+   groups = columns // _PACKED_INT8_GROUP_SIZE
+   group_scales = mx.ones((rows, groups), dtype=mx.float32)
+   group_biases = mx.full((rows, groups), -128.0, dtype=mx.float32)
+   mx.eval(packed, group_scales, group_biases)
+   return PackedInt8RowwiseWeight(
+      values=values,
+      scales=weight.scales,
+      packed=packed,
+      group_scales=group_scales,
+      group_biases=group_biases,
+   )
+
+
+def _packed_int8_product(hidden: mx.array, weight: PackedInt8RowwiseWeight) -> mx.array:
+   """``hidden @ values.T`` from the packed state, row-stable by construction."""
+
+   width = int(hidden.shape[-1])
+   leading = tuple(int(extent) for extent in hidden.shape[:-1])
+   flat = hidden.reshape(-1, width)
+   rows = int(flat.shape[0])
+   if rows < _PACKED_INT8_MINIMUM_ROWS:
+      flat = mx.concatenate(
+         (
+            flat,
+            mx.zeros((_PACKED_INT8_MINIMUM_ROWS - rows, width), dtype=flat.dtype),
+         ),
+         axis=0,
+      )
+   product = mx.quantized_matmul(
+      flat,
+      weight.packed,
+      weight.group_scales,
+      weight.group_biases,
+      transpose=True,
+      group_size=_PACKED_INT8_GROUP_SIZE,
+      bits=_PACKED_INT8_BITS,
+   )[:rows]
+   return product.reshape(*leading, int(product.shape[-1]))
+
+
+def _packed_int8_rows_are_call_independent(weight: PackedInt8RowwiseWeight) -> bool:
+   """Every row of a packed product must not depend on the rows it shares a call with."""
+
+   width = int(weight.packed.shape[1]) * 4
+   floor = _PACKED_INT8_MINIMUM_ROWS
+   # The reference row count is independent of the floor and well inside the
+   # tiled kernel's range, so a floor that admits the vector kernel is caught.
+   total = max(2 * floor + 1, 129)
+   probe = mx.random.normal((total, width), key=mx.random.key(0x5EED))
+   reference = _packed_int8_product(probe, weight)
+   mx.eval(reference)
+   for rows in sorted({1, 2, 8, max(1, floor - 1), floor, floor + 1, 2 * floor + 1}):
+      partial = _packed_int8_product(probe[:rows], weight)
+      if not bool(mx.array_equal(partial, reference[:rows]).item()):
+         return False
+   return True
+
+
+def _persistent_int8_tensors(
+   tensors: Mapping[str, Any],
+) -> tuple[Mapping[str, Any], str]:
+   """Pack every row-wise int8 matrix once; fall back whole-stage if unsafe.
+
+   Returns the execution tensor mapping and the resulting ``int8_execution``.
+   Packing is all-or-nothing per mapping so a stage never mixes kernels.
+   """
+
+   quantized = {
+      key: value
+      for key, value in tensors.items()
+      if isinstance(value, Int8RowwiseWeight)
+   }
+   if not quantized:
+      return tensors, INT8_EXECUTION_NONE
+   packed: dict[str, Any] = {}
+   for key, value in quantized.items():
+      candidate = _pack_int8_rowwise(value)
+      if not isinstance(candidate, PackedInt8RowwiseWeight):
+         return tensors, INT8_EXECUTION_PER_CALL_MATERIALIZATION
+      packed[key] = candidate
+   verified_shapes: set[tuple[int, int]] = set()
+   for value in packed.values():
+      shape = tuple(int(extent) for extent in value.values.shape)
+      if shape in verified_shapes:
+         continue
+      if not _packed_int8_rows_are_call_independent(value):
+         return tensors, INT8_EXECUTION_PER_CALL_MATERIALIZATION
+      verified_shapes.add(shape)
+   execution = dict(tensors)
+   execution.update(packed)
+   return MappingProxyType(execution), INT8_EXECUTION_PERSISTENT_PACKED
+
+
 def _qwen2_linear(hidden: mx.array, weight: Any) -> mx.array:
+   if isinstance(weight, PackedInt8RowwiseWeight):
+      return _packed_int8_product(hidden, weight) * weight.scales
    if isinstance(weight, Int8RowwiseWeight):
       projected = _row_stable_matmul(
          hidden,
@@ -718,6 +866,27 @@ class MLXRuntimePort:
       self.decode_mode = decode_mode
       self._architecture = canonical_runtime["architecture"]
       self._bound = MappingProxyType(bound)
+      # Persistent packed int8 state is built once here (load/warmup), never
+      # per operation; the authenticated LoadedStage tensors stay untouched.
+      self._execution_tensors: dict[int, Mapping[str, Any]] = {}
+      int8_modes: set[str] = set()
+      for _stage, _placement, loaded, _runtime in bound.values():
+         if self._architecture in {"qwen2", "qwen3"}:
+            execution, mode = _persistent_int8_tensors(loaded.tensors)
+         else:
+            execution, mode = loaded.tensors, INT8_EXECUTION_NONE
+         self._execution_tensors[id(loaded)] = execution
+         int8_modes.add(mode)
+      int8_modes.discard(INT8_EXECUTION_NONE)
+      #: How this port executes row-wise int8 weights (one mode per port).
+      self.int8_execution = (
+         INT8_EXECUTION_PER_CALL_MATERIALIZATION
+         if INT8_EXECUTION_PER_CALL_MATERIALIZATION in int8_modes
+         else (int8_modes.pop() if int8_modes else INT8_EXECUTION_NONE)
+      )
+      if self.int8_execution == INT8_EXECUTION_PER_CALL_MATERIALIZATION:
+         for _stage, _placement, loaded, _runtime in bound.values():
+            self._execution_tensors[id(loaded)] = loaded.tensors
       self.standby_placement_ids = frozenset(bound) if standby_port else frozenset()
       if clock is not None and not callable(clock):
          _reject("invalid_runtime_clock")
@@ -1545,7 +1714,7 @@ class MLXRuntimePort:
       all_positions: bool = False,
    ) -> tuple[mx.array, dict[int, Any]]:
       config = runtime["model_config"]
-      tensors = loaded.tensors
+      tensors = self._tensors_for(loaded)
       start = stage.layer_range.start_layer
       end = stage.layer_range.end_layer_exclusive
       if runtime["architecture"] in {"qwen2", "qwen3"}:
@@ -1714,6 +1883,12 @@ class MLXRuntimePort:
       if not bool(mx.all(mx.isfinite(hidden)).item()):
          _reject("nonfinite_stage_output")
       return hidden, next_layers
+
+   def _tensors_for(self, loaded: LoadedStage) -> Mapping[str, Any]:
+      """The execution tensors of a bound stage (packed int8 when available)."""
+
+      execution = self._execution_tensors.get(id(loaded))
+      return loaded.tensors if execution is None else execution
 
    def _observe_cooperative_work_unit(self, started_at: float) -> None:
       elapsed_ms = max(0.0, (time.monotonic() - started_at) * 1_000.0)
@@ -2405,7 +2580,7 @@ class MLXRuntimePort:
       if runtime["architecture"] not in {"qwen2", "qwen3"}:
          return hidden
       roles = stage.component_roles
-      tensors = loaded.tensors
+      tensors = self._tensors_for(loaded)
       config = runtime["model_config"]
       if "final_norm" in roles:
          hidden = _rms_norm(
