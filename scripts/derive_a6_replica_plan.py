@@ -239,18 +239,16 @@ def replica_documents(
     }
 
 
-def _link_tree(source: Path, destination: Path) -> None:
-    """Hard-link an immutable bundle; new documents are written beside it."""
+def _copy_tree(source: Path, destination: Path) -> None:
+    """Copy an immutable bundle; new documents are written beside it.
+
+    Staging refuses any transfer file with st_nlink != 1, so the copy must be
+    bytes, never hard links (a link would also make the source unstageable).
+    """
 
     if destination.exists():
         raise DerivationError("a6_replica_bundle_exists")
-    def link_or_copy(src: str, dst: str) -> None:
-        try:
-            os.link(src, dst)
-        except OSError:  # another volume: copy the bytes instead
-            shutil.copy2(src, dst)
-
-    shutil.copytree(source, destination, copy_function=link_or_copy)
+    shutil.copytree(source, destination, copy_function=shutil.copy2)
     destination.chmod(0o700)
 
 
@@ -314,7 +312,7 @@ def derive_plan(
     states = build_physical_device_states(documents["graph"])
     state_document = json.loads(json.dumps({key: asdict(value) for key, value in states.items()}))
 
-    _link_tree(bundle_in, bundle_out)
+    _copy_tree(bundle_in, bundle_out)
     control = bundle_out / "control"
     files: dict[str, dict[str, str]] = {}
     for node, assignment, pack, verification, proof in zip(
