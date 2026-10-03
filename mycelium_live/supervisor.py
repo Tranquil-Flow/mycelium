@@ -596,6 +596,7 @@ class ColdRouteRestartOwner:
         self._closed = False
         self._dropped = False
         self._request_routes: dict[str, LiveRoute] = {}
+        self._settled_request_authority: dict[str, Any] = {}
         self._stop_token_ids: tuple[int, ...] | None = None
         self._m16_runtime_source: Callable[[], Mapping[str, Any] | None] | None = None
         self._m17_model_operation_set = False
@@ -749,6 +750,39 @@ class ColdRouteRestartOwner:
         except BaseException:
             return None
 
+    def current_for_request(self, request_id: str) -> Any | None:
+        """Authority for one request already running on the current route.
+
+        A route that lost a peer is no longer current for admission, but it
+        is kept open (not cold-restarted) for the requests mapped to it, which
+        A4 scopes the loss to and M16 recovery may continue on surviving
+        placements. Those requests keep the qualification they were admitted
+        under until they are released; nothing else is authorized by it.
+        """
+
+        with self._lock:
+            if self._dropped or self._closed:
+                return None
+            settled = self._settled_request_authority.get(request_id)
+            mapped = self._request_routes.get(request_id)
+        if settled is not None and mapped is None:
+            # Released: the terminal is sealed against the authority the
+            # request ran under, even if its route was replaced since.
+            return settled
+        current = self.current()
+        if current is not None:
+            return current
+        with self._lock:
+            route = self._current
+            qualification = self._qualification
+            if (
+                self._state != "ready"
+                or route is None or qualification is None
+                or self._request_routes.get(request_id) is not route
+            ):
+                return None
+        return qualification if self._route_survives_peer_loss(route) else None
+
     def peek_current(self) -> Any | None:
         """Non-refreshing authority snapshot for HTTP status/projection reads."""
         with self._lock:
@@ -892,9 +926,28 @@ class ColdRouteRestartOwner:
     def release_request(self, request_id: str) -> None:
         with self._lock:
             route = self._request_routes.pop(request_id, None)
+            self._settle_request_authority_locked(request_id, route)
         if route is not None:
             route.release_request(request_id)
         self._restart_if_idle_after_peer_loss()
+
+    def _settle_request_authority_locked(
+        self, request_id: str, route: LiveRoute | None
+    ) -> None:
+        """Remember the authority a released request ran under (bounded).
+
+        Releasing the last request on a degraded route cold-restarts it, which
+        publishes the replacement's qualification before the gateway seals the
+        released request's terminal. The request was produced entirely under
+        its own route's qualification; only that request may still read it.
+        """
+
+        settled = self._settled_request_authority
+        settled.pop(request_id, None)
+        if route is not None and route is self._current and self._qualification is not None:
+            settled[request_id] = self._qualification
+            while len(settled) > 256:
+                settled.pop(next(iter(settled)))
 
     def release_request_scoped(
         self,
@@ -910,6 +963,8 @@ class ColdRouteRestartOwner:
 
         with self._lock:
             route = self._request_routes.get(request_id) or self._current
+            self._settle_request_authority_locked(
+                request_id, self._request_routes.get(request_id))
         if route is None:
             return
         scoped = getattr(route, "release_request_scoped", None)
