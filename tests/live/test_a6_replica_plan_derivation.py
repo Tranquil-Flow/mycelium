@@ -72,6 +72,13 @@ def test_replica_documents_bind_two_complete_disjoint_paths(tmp_path) -> None:
     assert successor_placements and successor_placements.isdisjoint(source_placements)
 
 
+# node-b's plan root lives on another host (as node-2's does on the fleet): it
+# was provisioned for the old split, so only an operator assertion proves it.
+REMOTE_PLAN_ROOT = "/remote-host/old-split/deployment"
+REMOTE_FULL_ROOT = "/remote-host/full-model/deployment"
+ROOTS = {"node-b": REMOTE_FULL_ROOT}
+
+
 def _synthetic_base(tmp_path: Path, deployment) -> dict:
     bundle = tmp_path / "bundle"
     (bundle / "control").mkdir(parents=True)
@@ -85,7 +92,10 @@ def _synthetic_base(tmp_path: Path, deployment) -> dict:
     for index, assignment in enumerate(deployment.assignments):
         node_id = assignment["node_id"]
         name = f"control/node-{index}-assignment.json"
-        (bundle / name).write_text(json.dumps(assignment))
+        template = dict(assignment)
+        template["artifact_cache_root"] = (
+            str((bundle / "deployment").resolve()) if index == 0 else REMOTE_PLAN_ROOT)
+        (bundle / name).write_text(json.dumps(template))
         nodes.append({"node_id": node_id, "configure": {
             "assignment_file": name, "manifest_file": "control/model-manifest.json",
             "stage_pack_file": f"control/node-{index}-stage-pack.json",
@@ -108,7 +118,8 @@ def _synthetic_base(tmp_path: Path, deployment) -> dict:
 def test_derive_plan_rewrites_only_the_replica_bindings(tmp_path) -> None:
     deployment = _deployment(tmp_path)
     base = _synthetic_base(tmp_path, deployment)
-    plan, report = derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r")
+    plan, report = derive.derive_plan(
+        base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS)
     controller = plan["controller"]
     assert controller["source_root"] == str(tmp_path / "bundle-a6r")
     assert plan["run_id"] == base["run_id"]
@@ -143,7 +154,7 @@ def test_derive_plan_never_hard_links_the_bundle(tmp_path) -> None:
     # Staging refuses transfer files with st_nlink != 1, in both bundles.
     deployment = _deployment(tmp_path)
     base = _synthetic_base(tmp_path, deployment)
-    derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r")
+    derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS)
     for root in (Path(base["controller"]["source_root"]), tmp_path / "bundle-a6r"):
         files = [path for path in root.rglob("*") if path.is_file()]
         assert files
@@ -156,7 +167,7 @@ def test_derive_plan_refuses_backends_that_disagree(tmp_path, monkeypatch) -> No
     outputs = iter([(1, 2, 3), (1, 2, 4)])
     monkeypatch.setattr(derive, "_run_challenge", lambda *_args: next(outputs))
     with pytest.raises(derive.DerivationError, match="backend_parity_mismatch"):
-        derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r")
+        derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS)
     assert not (tmp_path / "bundle-a6r").exists()
 
 
@@ -165,4 +176,63 @@ def test_derive_plan_refuses_an_output_bundle_that_exists(tmp_path) -> None:
     base = _synthetic_base(tmp_path, deployment)
     (tmp_path / "bundle-a6r").mkdir()
     with pytest.raises(derive.DerivationError, match="bundle_exists"):
+        derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS)
+
+
+def test_derive_plan_refuses_a_remote_node_without_an_asserted_root(tmp_path) -> None:
+    # The derive-time challenge only measures the controller's local copy, so
+    # it can never prove that node-b's own root holds every shard.
+    deployment = _deployment(tmp_path)
+    base = _synthetic_base(tmp_path, deployment)
+    with pytest.raises(derive.DerivationError, match="a6_replica_artifact_root_unproven"):
         derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r")
+    with pytest.raises(derive.DerivationError, match="a6_replica_artifact_root_unknown_node"):
+        derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r",
+                           artifact_roots={**ROOTS, "node-z": REMOTE_FULL_ROOT})
+    with pytest.raises(derive.DerivationError, match="a6_replica_artifact_root_invalid"):
+        derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r",
+                           artifact_roots={"node-b": "relative/deployment"})
+    assert not (tmp_path / "bundle-a6r").exists()
+
+
+def test_derive_plan_compiles_each_node_against_its_proven_root(tmp_path) -> None:
+    deployment = _deployment(tmp_path)
+    base = _synthetic_base(tmp_path, deployment)
+    bundle_out = tmp_path / "bundle-a6r"
+    plan, report = derive.derive_plan(base, bundle_out=bundle_out, artifact_roots=ROOTS)
+    local_root = str((Path(base["controller"]["source_root"]) / "deployment").resolve())
+    expected = {"node-a": local_root, "node-b": REMOTE_FULL_ROOT}
+    for node in plan["controller"]["run_plan"]["nodes"]:
+        configure = node["configure"]
+        assignment = json.loads((bundle_out / configure["assignment_file"]).read_text())
+        pack = json.loads((bundle_out / configure["stage_pack_file"]).read_text())
+        assert assignment["artifact_cache_root"] == expected[node["node_id"]]
+        assert pack["artifact_root"] == expected[node["node_id"]]
+    assert report["artifact_roots"] == {
+        "node-a": {"artifact_root": local_root, "proof": "local_disk_checked"},
+        "node-b": {"artifact_root": REMOTE_FULL_ROOT, "proof": "operator_asserted"},
+    }
+
+
+@pytest.mark.parametrize("damage", ["missing", "truncated"])
+def test_derive_plan_refuses_a_local_root_missing_a_full_model_file(tmp_path, damage) -> None:
+    deployment = _deployment(tmp_path)
+    base = _synthetic_base(tmp_path, deployment)
+    shard = (Path(base["controller"]["source_root"]) / "deployment" /
+             deployment.assignments[1]["files"][0]["path"])
+    if damage == "missing":
+        shard.unlink()
+    else:
+        shard.write_bytes(shard.read_bytes()[:-1])
+    with pytest.raises(derive.DerivationError, match="a6_replica_local_artifact_missing"):
+        derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS)
+    assert not (tmp_path / "bundle-a6r").exists()
+
+
+def test_cli_refuses_a_malformed_artifact_root(tmp_path, capsys) -> None:
+    code = derive.main([
+        "--base-plan", str(tmp_path / "base.json"), "--output-plan", str(tmp_path / "o.json"),
+        "--bundle-out", str(tmp_path / "b"), "--report", str(tmp_path / "r.json"),
+        "--unbound", "--artifact-root", "node-b"])
+    assert code == 2
+    assert "a6_replica_artifact_root_invalid" in capsys.readouterr().out
