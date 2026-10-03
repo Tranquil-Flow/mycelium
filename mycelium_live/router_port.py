@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
@@ -43,6 +44,37 @@ _MAX_CANCELLATION_AND_CLEANUP_SECONDS = mycelium_deadlines.CANCEL_AND_CLEANUP_BU
 
 
 _LOGGER = logging.getLogger(__name__)
+def _source_failure_matches(
+    identity: Mapping[str, Any], binding: Mapping[str, Any]
+) -> bool:
+    """Exact source identity, except the failure's own cancellation generation.
+
+    A physical source failure interrupts the command, which joins the route's
+    next cancellation generation before the router records the failure. A
+    binding captured while the source was executing therefore carries the
+    generation the failure started from: it may trail the observed one, never
+    lead it. Every other identity field must match exactly.
+    """
+
+    for field, observed in identity.items():
+        bound = binding.get(field)
+        if field == "cancellation_generation":
+            if (
+                type(bound) is not int
+                or type(observed) is not int
+                or not 0 <= bound <= observed
+            ):
+                return False
+        elif bound != observed:
+            return False
+    return True
+
+
+#: Released requests whose observed source-failure identity stays readable.
+#: The gateway releases a request as soon as its backend run returns, which
+#: for a synchronously refused recovery happens before a controlled-fault
+#: observer can poll; the bounded map keeps that one transition observable.
+_RETAINED_SOURCE_FAILURES_MAX = 256
 
 # A withheld terminal is the route's most consequential refusal: the client sees a stream that simply ends.
 # Until round p78r1 (ERRATA-23) the reason lived only in ``LiveRoute._incidents`` -- in memory -- so it died
@@ -241,6 +273,8 @@ class LiveRouterPort:
         self._pending: dict[str, _Pending] = {}
         self._sinks: dict[str, object] = {}
         self._recovery_failures: dict[str, str] = {}
+        self._retained_source_failures: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._retained_recovery_attempts: OrderedDict[str, int] = OrderedDict()
         self._coordinator = runtime_coordinator
         self._recovery_authority = recovery_authority
         self._recovery_qualification_source = recovery_qualification_source
@@ -524,7 +558,13 @@ class LiveRouterPort:
                     }
                 )
             with self._lock:
-                if self._recovery_qualification_digest not in (None, qualification_digest):
+                bound = self._recovery_qualification_digest
+                if bound not in (None, qualification_digest) and not (
+                    # The route owner replaced the route (cold restart) and
+                    # publishes the replacement's qualification as current
+                    # authority: rotate, as an idle renewal does.
+                    self._rotate_binding_locked(qualification_digest, expected_bound=bound)
+                ):
                     coordinator.cancel(request.request_id)
                     raise M16AdmissionError("qualification_binding_changed")
                 self._recovery_qualification_digest = qualification_digest
@@ -855,6 +895,8 @@ class LiveRouterPort:
                             "publisher_generation", "cancellation_generation",
                         )
                     }
+                    self._retain_source_failure_identity(
+                        request_id, pending.source_failure_identity)
                 pending.recovery_required = True
                 pending.recovery_phase = "failure_observed"
                 pending.execution_started = False
@@ -1045,19 +1087,53 @@ class LiveRouterPort:
             "terminal_cas_count": sum(item.terminal_revision for item in snapshots),
         }
 
+    def _retain_source_failure_identity(
+        self, request_id: str, identity: Mapping[str, Any] | None
+    ) -> None:
+        """Keep one observed source-failure identity past request release.
+
+        Caller holds ``self._lock``. Bounded FIFO: the oldest released
+        observation is evicted first; a live pending request never depends on
+        this map.
+        """
+        if identity is None:
+            return
+        retained = self._retained_source_failures
+        retained.pop(request_id, None)
+        retained[request_id] = dict(identity)
+        while len(retained) > _RETAINED_SOURCE_FAILURES_MAX:
+            retained.popitem(last=False)
+
+    def _retain_recovery_attempts(self, request_id: str, attempts: int) -> None:
+        """Keep how many recovery attempts started past request release.
+
+        Caller holds ``self._lock``. A recovery that settles quickly is
+        released by the gateway before an observer polls; the released view
+        still reports that recovery ran, never its private state.
+        """
+        retained = self._retained_recovery_attempts
+        retained.pop(request_id, None)
+        retained[request_id] = attempts
+        while len(retained) > _RETAINED_SOURCE_FAILURES_MAX:
+            retained.popitem(last=False)
+
     def _a6_test_only_source_failure_observed(self, binding: dict[str, Any]) -> bool:
-        """Read the source recovery transition, not a successor's current status."""
+        """Read the source recovery transition, not a successor's current status.
+
+        The pending request is authoritative while it exists. Once the gateway
+        has released it (a recovery refused synchronously settles and releases
+        before an observer can poll), the bounded retained identity answers.
+        """
         request_id = binding.get("request_id")
         if not isinstance(request_id, str):
             return False
         with self._lock:
             pending = self._pending.get(request_id)
-            return bool(
-                pending is not None and pending.source_failure_identity is not None
-                and pending.source_failure_identity == {
-                    field: binding.get(field) for field in pending.source_failure_identity
-                }
+            identity = (
+                self._retained_source_failures.get(request_id)
+                if pending is None else pending.source_failure_identity
             )
+            return identity is not None and _source_failure_matches(identity, binding)
 
     def _a6_test_only_source_fault_binding(self, request_id: str) -> dict[str, Any] | None:
         """Detached admitted-command snapshot; no public fault or route mutation.
@@ -1131,8 +1207,16 @@ class LiveRouterPort:
             pending = self._pending.get(request_id)
             if pending is None:
                 reason = self._recovery_failures.get(request_id)
-                return None if reason is None else {
+                attempts = self._retained_recovery_attempts.get(request_id)
+                if reason is None and attempts is None:
+                    return None
+                view: dict[str, Any] = {
                     "retained": False, "recovery_failure_reason": reason}
+                if attempts is not None:
+                    view["recovery_attempts"] = attempts
+                    view["source_failure_observed"] = (
+                        request_id in self._retained_source_failures)
+                return view
             identity = pending.command_identity
             return {
                 "retained": True,
@@ -1273,6 +1357,7 @@ class LiveRouterPort:
             )
             pending.recovery_attempts += 1
             pending.recovery_phase = "successor_pending"
+            self._retain_recovery_attempts(request_id, pending.recovery_attempts)
 
         successor_identity: dict[str, Any] | None = None
         source_fenced = False
@@ -1356,6 +1441,7 @@ class LiveRouterPort:
                     )
                 ),
             }
+            self._release_predecessor_attempt(pending, source_command)
             with self._changed:
                 pending.execution_started = True
                 pending.recovery_phase = "recovery_prefill"
@@ -1525,6 +1611,69 @@ class LiveRouterPort:
                     self._changed.notify_all()
             return False
 
+    def _rotate_binding_locked(self, candidate: str, *, expected_bound: str) -> bool:
+        """Rotate the bound digest to ``candidate``; caller holds ``self._lock``.
+
+        The check and the mutation are one critical section: the source's
+        current record is re-read here, under the lock, so a record published
+        (or a route replaced again) after any earlier read can never be bound.
+        Refused unless the binding is still ``expected_bound``, no admitted
+        request would cross the boundary, and ``candidate`` is exactly the
+        source's non-refreshing current record for this deployment and graph.
+        Lock order: router lock, then the source's own short lock (the owner
+        never calls back into the router while holding its lock).
+        """
+
+        if (
+            self._recovery_qualification_digest != expected_bound
+            or self._pending
+            or self._replacement_binding_digest(candidate) != candidate
+        ):
+            return False
+        self._recovery_current_request_ids.clear()
+        self._recovery_qualification_digest = candidate
+        return True
+
+    def _replacement_binding_digest(self, candidate: str | None) -> str | None:
+        """The candidate digest iff it is the qualifier's current authority.
+
+        After a cold route restart the owner qualifies the replacement route
+        and publishes it as current; the bound digest still names the retired
+        route. Only the source's side-effect-free ``peek_current`` snapshot may
+        rotate the binding (a refreshing ``current()`` could run a challenge
+        or renew authority), and only for this exact deployment and graph.
+        """
+
+        source = self._qualification_source
+        if source is None or not isinstance(candidate, str):
+            return None
+        reader = getattr(source, "peek_current", None)
+        if not callable(reader):
+            return None
+        try:
+            record = reader()
+        except Exception:
+            return None
+        from mycelium_qualification.contracts import RouteQualificationV1
+        from mycelium_request_gateway.contracts import qualification_digest
+
+        if (
+            not isinstance(record, RouteQualificationV1)
+            or record.route_ready is not True
+            or record.deployment_id != self._graph.deployment_id
+            or record.deployment_epoch != self._graph.deployment_epoch
+            or record.topology_version != self._graph.topology_version
+            or record.model_id != self._graph.model_id
+            or record.resolved_commit != self._graph.resolved_commit
+            or record.manifest_digest != self._graph.manifest_digest
+        ):
+            return None
+        try:
+            current = qualification_digest(record)
+        except Exception:
+            return None
+        return candidate if current == candidate else None
+
     def _recovery_projection_qualification_digest(self) -> str:
         """Resolve the current qualifier binding for the public projection.
 
@@ -1575,7 +1724,11 @@ class LiveRouterPort:
         ):
             raise M16AdmissionError("recovery_projection_binding_invalid")
         if bound is not None and digest != bound:
-            raise M16AdmissionError("recovery_projection_binding_mismatch")
+            with self._lock:
+                # Idle after a route replacement: the projection binds the
+                # replacement's current qualification, as before any admission.
+                if not self._rotate_binding_locked(digest, expected_bound=bound):
+                    raise M16AdmissionError("recovery_projection_binding_mismatch")
         return digest
 
     def recovery_public_projection(
@@ -2412,6 +2565,37 @@ class LiveRouterPort:
         if should_release:
             self._release_route_request(pending)
             self._retire_command(pending)
+
+    def _release_predecessor_attempt(
+        self, pending: _Pending, predecessor: CommandIdentity
+    ) -> None:
+        """Retire the failed attempt's route state before its successor runs.
+
+        A physical route keeps one active record and one cleanup receipt per
+        request id. The failed attempt's exact cleanup receipt (sealed when
+        its command terminal was recorded) would otherwise collide with the
+        successor's own receipt on the same route, and the successor's exact
+        cleanup could never be stored. Release only the predecessor's exact
+        scoped identity, after its cleanup proof; never a request-wide release
+        (that would let a route owner replace the route under the successor).
+        """
+
+        owner_id = pending.cleanup_owner_id
+        release = getattr(self._route, "release_attempt_scoped", None)
+        if not callable(release):
+            release = getattr(self._route, "release_request_scoped", None)
+        if owner_id is None or not callable(release):
+            return
+        if getattr(self._route, "is_simulated", False) is True:
+            return
+        release(
+            predecessor.request_id,
+            request_attempt=predecessor.request_attempt,
+            path_id=predecessor.path_id,
+            path_attempt=predecessor.path_attempt,
+            path_digest=predecessor.path_digest,
+            cleanup_owner_id=owner_id,
+        )
 
     def _release_route_request(self, pending: _Pending) -> None:
         identity = pending.command_identity

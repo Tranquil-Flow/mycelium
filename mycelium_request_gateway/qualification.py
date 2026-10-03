@@ -33,8 +33,16 @@ class QualificationGate:
         self._compare(requested, actual)
         return CapturedQualification(qualification=current, binding=actual)
 
-    def revalidate(self, captured: CapturedQualification) -> None:
-        current = self._read_current()
+    def revalidate(
+        self, captured: CapturedQualification, *, request_id: str | None = None
+    ) -> None:
+        """Revalidate an admitted request's exact binding.
+
+        A source that scopes authority per admitted request (a route owner
+        whose route lost one peer yet still serves the requests mapped to it)
+        answers for that request; admission always reads ``current()``.
+        """
+        current = self._read_current(request_id)
         actual = qualification_binding(current)
         self._compare(captured.binding, actual)
 
@@ -42,9 +50,13 @@ class QualificationGate:
         """Return current record for an allowlisted projection, fail closed if absent."""
         return self._read_current()
 
-    def _read_current(self) -> RouteQualificationV1:
+    def _read_current(self, request_id: str | None = None) -> RouteQualificationV1:
+        scoped = (
+            None if request_id is None
+            else getattr(self._source, "current_for_request", None)
+        )
         try:
-            current = self._source.current()
+            current = scoped(request_id) if callable(scoped) else self._source.current()
         except Exception as exc:
             raise AdmissionError("qualification_unavailable") from exc
         if current is None:

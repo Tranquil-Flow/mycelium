@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from mycelium_m16_runtime import path_manifest_document_digest
 from mycelium_a6_fault_control import (
     EXACT_FLEET_GRANT,
     INJECTION_POINTS,
@@ -311,7 +312,7 @@ def _qualify(qualifier):
     checkpoint = _checkpoint()
     identity = {"request_id": checkpoint.request_id, "request_attempt": 2,
                 "path_id": "successor-path", "path_attempt": 1,
-                "path_manifest_digest": _manifest().manifest_digest,
+                "path_manifest_digest": path_manifest_document_digest(_manifest()),
                 "deployment_id": "deployment-a6", "deployment_epoch": 7,
                 "topology_generation": 11}
     return checkpoint, qualifier(checkpoint.request_id, checkpoint, identity, _manifest())

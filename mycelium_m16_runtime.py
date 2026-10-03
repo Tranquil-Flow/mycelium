@@ -124,6 +124,18 @@ def _digest(document: object) -> str:
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
+def path_manifest_document_digest(manifest: PathManifest) -> str:
+    """Digest of the exact locked path document a route executes.
+
+    ``PathManifest.manifest_digest`` names the model/representation manifest
+    the path was built against; the route identity's ``path_manifest_digest``
+    is the digest of the serialized path itself, which the physical route
+    recomputes from the locked manifest it receives.
+    """
+
+    return _digest(path_manifest_to_dict(manifest))
+
+
 @dataclass
 class _Reservation:
     reservation_id: str
@@ -435,7 +447,7 @@ class M16RuntimeCoordinator:
                 "resource_unavailable",
             )
             raise M16AdmissionError("resource_unavailable") from exc
-        path_digest = _digest(path_manifest_to_dict(manifest))
+        path_digest = path_manifest_document_digest(manifest)
         queued_at = self._clock.now()
         item = HopWorkItem(
             request_id=request.request_id,
@@ -803,7 +815,7 @@ class M16RuntimeCoordinator:
         record["recovery_successor"] = {
             "request": recovery_request,
             "manifest": manifest,
-            "path_manifest_digest": manifest.manifest_digest,
+            "path_manifest_digest": path_manifest_document_digest(manifest),
             "request_attempt": record["request_attempt"] + 1,
         }
         record["recovery_attempts"] = recovery_attempt
@@ -1255,5 +1267,6 @@ __all__ = [
     "M16RuntimeCoordinator",
     "PROTOCOL",
     "build_live_m16_runtime",
+    "path_manifest_document_digest",
     "validate_m16_runtime_status",
 ]

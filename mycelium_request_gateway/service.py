@@ -770,7 +770,7 @@ class RequestGatewayService:
             submission = session.submission
             if captured is None or submission is None:
                 raise AdmissionError("request_state_released")
-            self._gate.revalidate(captured)
+            self._gate.revalidate(captured, request_id=session.request_id)
             self._append_lifecycle(session, "admission")
             with session.condition:
                 if session.cancellation_started:
@@ -804,7 +804,7 @@ class RequestGatewayService:
                     captured = session.captured
                     if captured is None:
                         raise AdmissionError("request_state_released")
-                    self._gate.revalidate(captured)
+                    self._gate.revalidate(captured, request_id=session.request_id)
                     self._append_terminal(session, "completed")
             elif outcome == "cancelled":
                 cancellation_resolution = self._await_backend_cancellation(session)
@@ -923,7 +923,7 @@ class RequestGatewayService:
             captured = session.captured
             if captured is None:
                 raise AdmissionError("request_state_released")
-            self._gate.revalidate(captured)
+            self._gate.revalidate(captured, request_id=session.request_id)
             with session.condition:
                 if session.stop.is_set() or session.terminal_event is not None:
                     raise AdmissionError("request_cancelled")

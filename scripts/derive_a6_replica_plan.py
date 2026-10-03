@@ -1,0 +1,485 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""Derive a two-disjoint-path A6 operator plan from a bound two-host plan.
+
+A6 physical recovery needs a successor path that survives the loss of every
+source placement (spec 2026-08-18 section 10: "two compatible independently
+qualified immutable physical paths"). The production controller runs exactly
+one node process per physically distinct host and one ACTIVE placement per
+node process, so with two hosts the only disjoint two-path shape is a
+complete-model replica on each host: one stage, two placements, each a full
+path (``placement-000`` on the entry host, ``placement-001`` on the other).
+
+This derivation reuses the canonical builder steps of
+``scripts/build_qwen_live_route.py`` (local compile, provision, stage pack,
+load; target report and proof rebound to each node's own artifact root) and
+the plan's own representation, runtime backends, control-plane binding,
+peers, startup prompt and run id. Nothing is invented:
+
+* each node's full assignment is compiled by ``compile_layer_assignments`` for
+  that node's existing runtime and artifact cache root;
+* each load proof is measured by loading the full assignment locally with that
+  node's runtime backend, exactly as the builder measured the split proofs;
+* the startup challenge output is recomputed through BOTH full paths and the
+  derivation refuses unless the two backends agree token for token (the A6
+  successor qualification replays the same challenge on the successor path);
+* offers keep their recipients and are re-signed by the plan binding with the
+  seed's own key (``--seed-state-root``), or left for the caller to bind.
+
+Offline: no peer, transport or fleet contact. Staging the derived bundle (both
+hosts now need every model shard) remains the operator's ``stage_live_route``.
+"""
+from __future__ import annotations
+
+import argparse
+import copy
+import gc
+import json
+import os
+import shutil
+import sys
+import time
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any, Callable, Mapping, Sequence
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+PROTOCOL = "mycelium.a6_replica_plan_derivation.v1"
+PLACEMENT_IDS = ("placement-000", "placement-001")
+REPLICA_GROUP = "full-model"
+FULL_COMPONENTS = ("input_embedding", "decoder", "final_norm", "lm_head")
+
+
+class DerivationError(RuntimeError):
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+def _read_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _single_node_route(manifest: Mapping[str, Any], node_id: str) -> dict[str, Any]:
+    from model_manifest import manifest_digest_ref
+
+    layers = int(manifest["num_layers"])
+    full = {"start_layer": 0, "end_layer_exclusive": layers, "layer_count": layers}
+    return {
+        "ok": True,
+        "protocol": "mycelium.manual_provisioning_route.v1",
+        "claim_boundary": "a6 complete-model replica assignment compilation only",
+        "model": {
+            "model_id": manifest["model_id"],
+            "num_layers": layers,
+            "manifest_digest": manifest_digest_ref(manifest),
+            "resolved_commit": manifest["resolved_commit"],
+        },
+        "route": [{"node_id": node_id, "range": full}],
+        "node_order": [node_id],
+    }
+
+
+def _compile_full(
+    manifest: Mapping[str, Any], template: Mapping[str, Any], cache_root: str
+) -> dict[str, Any]:
+    from layer_assignment import compile_layer_assignments
+
+    node_id = template["node_id"]
+    (assignment,) = compile_layer_assignments(
+        route_plan=_single_node_route(manifest, node_id),
+        manifest=dict(manifest),
+        deployment_id=template["deployment_id"],
+        deployment_epoch=template["deployment_epoch"],
+        cache_roots={node_id: cache_root},
+        runtime_by_node={node_id: {
+            field: template["runtime"][field] for field in ("backend", "dtype", "quantization")}},
+        control_plane_binding=copy.deepcopy(template["control_plane_binding"]),
+    )
+    if tuple(assignment["components"]) != FULL_COMPONENTS:
+        raise DerivationError("a6_replica_assignment_not_complete")
+    return assignment
+
+
+def _run_challenge(loaded: Any, backend: str, prompt: Sequence[int], count: int) -> tuple[int, ...]:
+    from mycelium_router.decoding import quantized_greedy_token_id
+
+    context = tuple(int(token) for token in prompt)
+    generated: list[int] = []
+    for _ in range(count):
+        if backend == "mlx":
+            import mlx.core as mx
+            from runtime_loader import execute_loaded_stage
+
+            logits = execute_loaded_stage(loaded, token_ids=mx.array((context,), dtype=mx.int32))
+            mx.eval(logits)
+        elif backend == "numpy":
+            import numpy as np
+            from runtime_loader import execute_loaded_numpy_stage
+
+            logits = execute_loaded_numpy_stage(
+                loaded, token_ids=np.asarray((context,), dtype=np.int64))
+        else:
+            raise DerivationError("a6_replica_runtime_backend_unsupported")
+        token = quantized_greedy_token_id(logits[0, -1, :].tolist())
+        generated.append(token)
+        context = (*context, token)
+    return tuple(generated)
+
+
+def _release_memory() -> None:
+    gc.collect()
+    try:
+        import mlx.core as mx
+
+        clear = getattr(mx, "clear_cache", None)
+        if callable(clear):
+            clear()
+    except ImportError:
+        pass
+
+
+def replica_documents(
+    *,
+    manifest: Mapping[str, Any],
+    templates: Sequence[Mapping[str, Any]],
+    local_artifact_root: Path,
+    load_generation: int,
+    challenge_prompt: Sequence[int],
+    challenge_count: int,
+    on_progress: Callable[[str, Mapping[str, Any]], None] = lambda _stage, _fields: None,
+) -> dict[str, Any]:
+    """Compile, measure and bind one complete-model placement per node.
+
+    ``templates`` are the nodes' current assignments, in placement order (the
+    first is the entry/primary path). Returns assignments, stage packs,
+    verifications, proofs, the replicated execution graph and the measured
+    challenge output of every path.
+    """
+
+    from mycelium_qualification.physical_deployment import build_replicated_execution_graph
+    from runtime_loader import canonical_json, load_assignment_stage
+    from scripts.build_qwen_live_route import _target_proof, _target_report
+    from stage_pack import artifact_report_for_loader, compile_stage_pack, verify_stage_pack
+    from weight_provisioning import provision_assignment
+
+    if len(templates) != len(PLACEMENT_IDS):
+        raise DerivationError("a6_replica_requires_two_hosts")
+    local_root = Path(local_artifact_root)
+
+    def local_fetch(model_id, revision, filename, cache_root, *, local_files_only):
+        del model_id, revision, cache_root, local_files_only
+        return local_root / filename, True
+
+    assignments, packs, verifications, proofs, outputs = [], [], [], [], {}
+    for template in templates:
+        node_id = template["node_id"]
+        backend = template["runtime"]["backend"]
+        assignment = _compile_full(manifest, template, template["artifact_cache_root"])
+        local = _compile_full(manifest, template, str(local_root))
+        report = provision_assignment(local, fetch_file=local_fetch, local_files_only=True)
+        local_pack = compile_stage_pack(local, dict(manifest), report)
+        local_verification = verify_stage_pack(local_pack, assignment=local, manifest=dict(manifest))
+        loader_report = artifact_report_for_loader(
+            local_pack, local_verification, assignment=local, manifest=dict(manifest))
+        on_progress("loading", {"node_id": node_id, "backend": backend})
+        loaded = load_assignment_stage(local, loader_report, load_generation=load_generation)
+        try:
+            base_proof = json.loads(canonical_json(loaded.proof))
+            outputs[node_id] = list(
+                _run_challenge(loaded, backend, challenge_prompt, challenge_count))
+        finally:
+            del loaded
+            _release_memory()
+        on_progress("challenged", {"node_id": node_id, "output": outputs[node_id]})
+        target_report = _target_report(loader_report, assignment)
+        pack = compile_stage_pack(
+            assignment, dict(manifest), target_report, source_artifact_root=local_root)
+        verification = verify_stage_pack(
+            pack, assignment=assignment, manifest=dict(manifest), source_artifact_root=local_root)
+        assignments.append(assignment)
+        packs.append(pack)
+        verifications.append(verification)
+        proofs.append(_target_proof(base_proof, assignment, pack, verification))
+
+    layers = int(manifest["num_layers"])
+    route_plan = {
+        "protocol": "mycelium.route_plan.v2",
+        "placements": [
+            {
+                "placement_id": placement_id,
+                "replica_group_id": REPLICA_GROUP,
+                "node_id": assignment["node_id"],
+                "layer_range": {"start": 0, "end": layers},
+                "primary": index == 0,
+            }
+            for index, (placement_id, assignment) in enumerate(
+                zip(PLACEMENT_IDS, assignments, strict=True))
+        ],
+        "forward_edges": [],
+        "loopbacks": [],
+    }
+    graph = build_replicated_execution_graph(
+        dict(zip(PLACEMENT_IDS, assignments, strict=True)),
+        dict(zip(PLACEMENT_IDS, proofs, strict=True)),
+        route_plan,
+        link_scheme="iroh",
+        runtime_scheme="iroh",
+    )
+    return {
+        "assignments": assignments,
+        "packs": packs,
+        "verifications": verifications,
+        "proofs": proofs,
+        "graph": graph,
+        "challenge_outputs": outputs,
+    }
+
+
+def _link_tree(source: Path, destination: Path) -> None:
+    """Hard-link an immutable bundle; new documents are written beside it."""
+
+    if destination.exists():
+        raise DerivationError("a6_replica_bundle_exists")
+    def link_or_copy(src: str, dst: str) -> None:
+        try:
+            os.link(src, dst)
+        except OSError:  # another volume: copy the bytes instead
+            shutil.copy2(src, dst)
+
+    shutil.copytree(source, destination, copy_function=link_or_copy)
+    destination.chmod(0o700)
+
+
+def derive_plan(
+    base: Mapping[str, Any],
+    *,
+    bundle_out: Path,
+    on_progress: Callable[[str, Mapping[str, Any]], None] = lambda _stage, _fields: None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return (unbound derived plan, derivation report); writes ``bundle_out``."""
+
+    from mycelium_qualification.physical_deployment import build_physical_device_states
+    from scripts.build_qwen_live_route import (
+        _bytes,
+        _digest,
+        _node_transfer_manifests,
+        _physical_graph_document,
+        _transfer_manifest,
+        _write_document,
+    )
+
+    if Path(bundle_out).exists():
+        raise DerivationError("a6_replica_bundle_exists")
+    plan = json.loads(json.dumps(dict(base)))
+    controller = plan["controller"]
+    run_plan = controller["run_plan"]
+    bundle_in = Path(controller["source_root"])
+    nodes = run_plan["nodes"]
+    if len(nodes) != 2 or nodes[0]["node_id"] != run_plan["entry_node_id"]:
+        raise DerivationError("a6_replica_requires_entry_first_two_hosts")
+    load_generations = {node["configure"]["load_generation"] for node in nodes}
+    if len(load_generations) != 1:
+        raise DerivationError("a6_replica_load_generation_ambiguous")
+    (load_generation,) = load_generations
+    manifest_files = {node["configure"]["manifest_file"] for node in nodes}
+    if len(manifest_files) != 1:
+        raise DerivationError("a6_replica_manifest_ambiguous")
+    (manifest_file,) = manifest_files
+    manifest = _read_json(bundle_in / manifest_file)
+    templates = [_read_json(bundle_in / node["configure"]["assignment_file"]) for node in nodes]
+    if [template["node_id"] for template in templates] != [node["node_id"] for node in nodes]:
+        raise DerivationError("a6_replica_template_node_mismatch")
+    expected = list(run_plan["expected_token_ids"])
+    documents = replica_documents(
+        manifest=manifest,
+        templates=templates,
+        local_artifact_root=bundle_in / "deployment",
+        load_generation=load_generation,
+        challenge_prompt=run_plan["request"]["prompt_token_ids"],
+        challenge_count=len(expected),
+        on_progress=on_progress,
+    )
+    outputs = documents["challenge_outputs"]
+    if len({tuple(value) for value in outputs.values()}) != 1:
+        # The successor's qualification replays the startup challenge on its
+        # own path; backends that disagree can never qualify each other.
+        raise DerivationError("a6_replica_backend_parity_mismatch")
+    path_output = next(iter(outputs.values()))
+
+    graph_document = _physical_graph_document(documents["graph"])
+    states = build_physical_device_states(documents["graph"])
+    state_document = json.loads(json.dumps({key: asdict(value) for key, value in states.items()}))
+
+    _link_tree(bundle_in, bundle_out)
+    control = bundle_out / "control"
+    files: dict[str, dict[str, str]] = {}
+    for node, assignment, pack, verification, proof in zip(
+        nodes, documents["assignments"], documents["packs"], documents["verifications"],
+        documents["proofs"], strict=True,
+    ):
+        node_id = node["node_id"]
+        names = {
+            "assignment_file": f"control/a6r-{node_id}-assignment.json",
+            "stage_pack_file": f"control/a6r-{node_id}-stage-pack.json",
+        }
+        _write_document(bundle_out / names["assignment_file"], assignment)
+        _write_document(bundle_out / names["stage_pack_file"], pack)
+        _write_document(control / f"a6r-{node_id}-stage-pack-verification.json", verification)
+        _write_document(control / f"a6r-{node_id}-load-proof.json", proof)
+        files[node_id] = names
+    _write_document(control / "a6r-execution-graph.json", graph_document)
+    _write_document(control / "a6r-device-states.json", state_document)
+
+    for node in nodes:
+        configure = node["configure"]
+        configure["assignment_file"] = files[node["node_id"]]["assignment_file"]
+        configure["stage_pack_file"] = files[node["node_id"]]["stage_pack_file"]
+        configure["graph"] = graph_document
+        configure["device_states"] = state_document
+    run_plan["expected_token_ids"] = list(path_output)
+    transfer = _transfer_manifest(bundle_out)
+    controller["source_root"] = str(bundle_out)
+    controller["transfer_manifest"] = transfer
+    controller["node_transfer_manifests"] = _node_transfer_manifests(transfer, documents["packs"])
+
+    by_node = {
+        assignment["node_id"]: (assignment, pack)
+        for assignment, pack in zip(documents["assignments"], documents["packs"], strict=True)
+    }
+    graph_digest = _digest(_bytes(graph_document))
+    for envelope in controller["membership_snapshot"]["assignment_offers"]:
+        message = envelope["message"]
+        assignment, pack = by_node[message["recipient_node_id"]]
+        message["assignment_id"] = assignment["assignment_id"]
+        message["assignment_digest"] = _digest(_bytes(assignment))
+        message["stage_pack_digest"] = pack["stage_pack_digest"]
+        message["graph_digest"] = graph_digest
+        message["load_generation"] = load_generation
+    plan["plan_id"] = f"{plan['plan_id']}-a6-replica"
+
+    report = {
+        "protocol": PROTOCOL,
+        "base_plan_id": base["plan_id"],
+        "plan_id": plan["plan_id"],
+        "run_id": plan["run_id"],
+        "source_root": str(bundle_out),
+        "placements": [
+            {
+                "placement_id": placement.placement_id,
+                "node_id": placement.node_id,
+                "assignment_id": placement.assignment_id,
+                "runtime_backend": placement.runtime_backend,
+                "load_proof_digest": placement.load_proof_digest,
+            }
+            for stage in documents["graph"].stages
+            for placement in stage.placements
+        ],
+        "challenge_outputs": outputs,
+        "base_expected_token_ids": expected,
+        "expected_token_ids": list(path_output),
+        "graph_digest": graph_digest,
+        "node_transfer_file_counts": {
+            node_id: len(document["files"])
+            for node_id, document in controller["node_transfer_manifests"]["manifests"].items()
+        },
+        "bound": False,
+    }
+    return plan, report
+
+
+def bind(plan: Mapping[str, Any], seed_state_root: Path, *, now: float) -> dict[str, Any]:
+    from mycelium_seed.plan_binding import bind_operator_plan_document
+    from scripts.bind_operator_plan_to_seed import _load_seed
+
+    signer, swarm_id, seed_node_id, members = _load_seed(Path(seed_state_root))
+    bound = bind_operator_plan_document(
+        plan, signer=signer, swarm_id=swarm_id, seed_node_id=seed_node_id,
+        members=members, now=now)
+    bound["now_unix_ms"] = int(now * 1_000)
+    return bound
+
+
+def validate(plan_path: Path) -> dict[str, Any]:
+    """Offline structural validation through the product's own loaders."""
+
+    from mycelium_live.representation import native_deployment_projection
+    from mycelium_physical_runner import load_operator_plan
+    from mycelium_router.serialization import execution_graph_from_dict
+    from mycelium_router.validation import validate_execution_graph
+
+    load_operator_plan(plan_path)
+    projection = native_deployment_projection(plan_path)
+    plan = _read_json(plan_path)
+    graph_document = plan["controller"]["run_plan"]["nodes"][0]["configure"]["graph"]
+    normalized = json.loads(json.dumps(graph_document))
+    for stage in normalized["stages"]:
+        stage["range"] = stage.pop("layer_range")
+    graph = execution_graph_from_dict(normalized)
+    validate_execution_graph(graph)
+    placements = [
+        (placement.placement_id, placement.node_id)
+        for stage in graph.stages for placement in stage.placements
+    ]
+    if len(graph.stages) != 1 or len({node for _, node in placements}) != 2:
+        raise DerivationError("a6_replica_graph_not_two_disjoint_paths")
+    return {
+        "deployment_id": projection.deployment_id,
+        "model_id": projection.model_id,
+        "stages": len(graph.stages),
+        "placements": placements,
+    }
+
+
+def _write_private(path: Path, document: Mapping[str, Any]) -> None:
+    payload = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base-plan", type=Path, required=True)
+    parser.add_argument("--output-plan", type=Path, required=True)
+    parser.add_argument("--bundle-out", type=Path, required=True)
+    parser.add_argument("--report", type=Path, required=True)
+    binding = parser.add_mutually_exclusive_group(required=True)
+    binding.add_argument("--seed-state-root", type=Path)
+    binding.add_argument("--unbound", action="store_true",
+                         help="leave offers unsigned (structural rehearsal only)")
+    args = parser.parse_args(argv)
+    for path in (args.output_plan, args.report):
+        if path.exists():
+            print(json.dumps({"refused": "output_exists", "path": str(path)}))
+            return 2
+
+    def progress(stage: str, fields: Mapping[str, Any]) -> None:
+        print(json.dumps({"stage": stage, **fields}, sort_keys=True), flush=True)
+
+    try:
+        plan, report = derive_plan(
+            _read_json(args.base_plan), bundle_out=args.bundle_out, on_progress=progress)
+        if args.seed_state_root is not None:
+            plan = bind(plan, args.seed_state_root, now=time.time())
+            report["bound"] = True
+        _write_private(args.output_plan, plan)
+        report["validation"] = validate(args.output_plan)
+        _write_private(args.report, report)
+    except DerivationError as error:
+        print(json.dumps({"refused": error.code}))
+        return 1
+    print(json.dumps({"stage": "derived", "output_plan": str(args.output_plan),
+                      "bound": report["bound"], "expected_token_ids": report["expected_token_ids"],
+                      "challenge_outputs": report["challenge_outputs"]}, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
