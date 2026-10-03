@@ -34,8 +34,51 @@ from mycelium_qualification.signing import generate_ed25519_signer
 from mycelium_seed import SeedCoordinator
 from mycelium_seed.http import SeedHTTPClient, SeedHTTPError, SeedHTTPServer
 from tests.e2e_request_iroh.conftest import (
-    native_iroh_sidecar_binary as node_main_sidecar_binary,  # noqa: F401
+    native_iroh_sidecar_binary,  # noqa: F401
 )
+
+
+def _private_sidecar_copy(source: Path, destination_root: Path) -> Path:
+    """Copy the built sidecar to a test-private path and return the copy.
+
+    Every xdist worker's session fixture (and other Iroh tests) runs ``cargo
+    build`` on the shared crate, and even a no-op build re-uplifts
+    ``target/debug/mycelium-iroh-sidecar`` as a new file (new inode and
+    ctime).  A node launched from the shared path while it is replaced fails
+    its sidecar startup ("process exited before startup status: 4:
+    node_runtime_failed").  A private copy keeps the launched executable
+    stable for the whole module.  Reading through one open descriptor yields
+    one consistent file even if the shared path is replaced while it is read.
+    """
+
+    for _attempt in range(50):
+        try:
+            with source.open("rb") as handle:
+                content = handle.read()
+            break
+        except FileNotFoundError:
+            time.sleep(0.1)
+    else:
+        raise AssertionError(f"sidecar binary unavailable: {source}")
+    assert content, "sidecar binary is empty"
+    destination_root.mkdir(mode=0o700)
+    destination = destination_root / source.name
+    descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(content)
+    assert destination.read_bytes() == content
+    return destination
+
+
+@pytest.fixture(scope="module")
+def node_main_sidecar_binary(
+    native_iroh_sidecar_binary: Path,  # noqa: F811
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    return _private_sidecar_copy(
+        native_iroh_sidecar_binary,
+        tmp_path_factory.mktemp("node-main-sidecar") / "private-sidecar",
+    )
 
 
 def _ids():
