@@ -1,5 +1,5 @@
 {
-  "base_commit": "53d1222b",
+  "base_commit": "53d1222b05f1a9c565e32071e16d33ecadfcdd06",
   "files": [
     {
       "path": "apps/node-app/src-tauri/gen/android/app/src/main/java/now/mycelium/node/NodeServicePlugin.kt",
@@ -578,5 +578,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:17395c9b6f98d84aa98375e7bb7a925f2ab14c2108db46c69c20a510234d8ff3"
+  "source_digest": "sha256:e40615a517d6f4bca643826a87a00447bb94be1e10b6be7a4d0b9a4922f78fba"
 }
