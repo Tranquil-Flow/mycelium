@@ -134,9 +134,20 @@ def test_derive_plan_rewrites_only_the_replica_bindings(tmp_path) -> None:
         assert message["graph_digest"] == report["graph_digest"]
     assert controller["run_plan"]["expected_token_ids"] == report["expected_token_ids"]
     assert report["challenge_outputs"]["node-a"] == report["challenge_outputs"]["node-b"]
-    # The base bundle is never written: new documents sit beside hard links.
+    # The base bundle is never written: new documents sit beside byte copies.
     assert not (Path(base["controller"]["source_root"]) / "control" /
                 "a6r-execution-graph.json").exists()
+
+
+def test_derive_plan_never_hard_links_the_bundle(tmp_path) -> None:
+    # Staging refuses transfer files with st_nlink != 1, in both bundles.
+    deployment = _deployment(tmp_path)
+    base = _synthetic_base(tmp_path, deployment)
+    derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r")
+    for root in (Path(base["controller"]["source_root"]), tmp_path / "bundle-a6r"):
+        files = [path for path in root.rglob("*") if path.is_file()]
+        assert files
+        assert all(path.stat().st_nlink == 1 for path in files)
 
 
 def test_derive_plan_refuses_backends_that_disagree(tmp_path, monkeypatch) -> None:
