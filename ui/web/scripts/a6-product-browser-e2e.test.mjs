@@ -390,3 +390,9 @@ test('browser product has no divergent raw recovery runtime decoder', () => {
     assert.equal(existsSync(fileURLToPath(new URL(relative, import.meta.url))), false, relative);
   }
 });
+
+test('controlled fault transport outlasts the product seam bounds', () => {
+  // Two 30 s seam waits per browser case plus transport margin.
+  assert.ok(faultHarness.CONTROLLED_FAULT_TIMEOUT_MS > 2 * 30_000);
+  assert.ok(faultHarness.CONTROLLED_FAULT_TIMEOUT_MS <= 120_000);
+});

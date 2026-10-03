@@ -7,6 +7,11 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const EXACT_FLEET_GRANT = 'FLEET GRANTED TO A6';
+// The control answers only after the product seam has measured the fault. The
+// two browser cases each wait up to two seam bounds of 30 s (source failure
+// observed, then the recovery transition or the terminal), so the transport
+// must outlast 60 s; 10 s abandoned a case the product was still measuring.
+export const CONTROLLED_FAULT_TIMEOUT_MS = 75_000;
 const validatedControls = new WeakSet();
 const ENGINES = Object.freeze(['chromium', 'firefox', 'webkit']);
 const WORKSPACES = Object.freeze([
@@ -224,7 +229,7 @@ export async function sendControlledFault(control, usedCases, requestFactory = h
         response.resume();
       });
       request.on('error', () => rejectSafe('controlled_fault_transport_failed'));
-      request.setTimeout(10_000, () => request.destroy(new Error('controlled_fault_timeout')));
+      request.setTimeout(CONTROLLED_FAULT_TIMEOUT_MS, () => request.destroy(new Error('controlled_fault_timeout')));
       request.end(body);
     } catch {
       rejectSafe('controlled_fault_transport_failed');
