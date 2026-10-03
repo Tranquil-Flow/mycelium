@@ -190,6 +190,7 @@ def test_plug_in_measures_the_positive_cutover_from_product_evidence(tmp_path: P
         harness._ENTRY_NODE_ID: {name: 0 for name in gate._CLEANUP_FIELDS}
     }
     assert observations["fault"]["group_gone"] is True
+    assert observations["fault"]["kill_condition"] == "acknowledged_equals_committed"
     assert observations["detection_latency_ms"] is not None
     assert -50 <= observations["detection_latency_ms"] < 1_000
     assert len(scoped) == 1

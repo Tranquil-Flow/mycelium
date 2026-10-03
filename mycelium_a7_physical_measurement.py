@@ -700,23 +700,25 @@ def measure(
     if running.request_id is None:
         raise MeasurementRefused("a7_request_id_unavailable")
     request_id = running.request_id
-    # Wait until N tokens are committed and acknowledged, then freeze the source
-    # (SIGSTOP) and re-read the entry's watermark: the kill lands only on a
-    # frozen source whose committed output is fully acknowledged, so the
-    # measured case is the one the gate names, not a race with the next
-    # commit.  A frozen source that is mid-acknowledgement is resumed and
-    # retried; the entry's own bounded ack window still governs it.
+    # Wait until N tokens are committed, then freeze the source (SIGSTOP) and
+    # re-read the entry's watermark.  The kill lands only on a frozen source
+    # whose standby state is settled: either every committed token is
+    # acknowledged, or the entry has itself recorded acknowledgement lag (a
+    # standby that lags by configuration).  A source frozen in the middle of
+    # one acknowledgement is resumed and retried, so the kill never races the
+    # next commit; the entry's own bounded ack window still governs it.
     deadline = time.monotonic() + settings.ack_timeout_s
     ready = False
     while time.monotonic() < deadline and not running.done.is_set():
         state = _request_state(evidence.request(request_id))
-        if state is not None and _int(state.get("acknowledged")) is not None and state["acknowledged"] >= settings.kill_after_committed:
+        if state is not None and _int(state.get("committed")) is not None and state["committed"] >= settings.kill_after_committed:
             ready = True
             break
         time.sleep(settings.poll_s)
     if not ready:
         raise MeasurementRefused("a7_request_ended_before_fault" if running.done.is_set() else "a7_acknowledgement_timeout")
     pre_kill: Mapping[str, Any] | None = None
+    kill_condition: str | None = None
     pause_attempts = 0
     paused_ms = 0.0
     while pause_attempts < settings.max_pause_attempts and not running.done.is_set():
@@ -726,14 +728,15 @@ def measure(
             raise MeasurementRefused("a7_fault_pause_failed")
         current = evidence.request(request_id)
         state = _request_state(current)
-        if (
-            state is not None
-            and _int(state.get("committed")) is not None
-            and state.get("acknowledged") == state["committed"] >= settings.kill_after_committed
-            and state.get("result") is None
-        ):
-            pre_kill = current
-            break
+        committed_now = None if state is None else _int(state.get("committed"))
+        if committed_now is not None and committed_now >= settings.kill_after_committed and state.get("result") is None:
+            if state.get("acknowledged") == committed_now:
+                pre_kill, kill_condition = current, "acknowledged_equals_committed"
+                break
+            lag = _int(state.get("ack_lag_events"))
+            if lag is not None and lag > 0:
+                pre_kill, kill_condition = current, "entry_recorded_ack_lag"
+                break
         fault.resume(group)
         paused_ms += (time.monotonic() - paused_at) * 1000.0
         time.sleep(settings.poll_s)
@@ -856,6 +859,7 @@ def measure(
             "group_gone": fault_confirmed,
             "tokens_received_at_kill": tokens_at_kill,
             "pause_attempts": pause_attempts,
+            "kill_condition": kill_condition,
             "resumed_pause_ms": round(paused_ms, 3),
             "watermark_at_kill": {
                 key: (_request_state(pre_kill) or {}).get(key) for key in ("committed", "acknowledged", "commits_sent", "ack_lag_events")
