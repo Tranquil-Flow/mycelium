@@ -23,6 +23,9 @@ export type NodeStatus = {
   peer_class: string;
   runtime_backend: string;
   route_ready: boolean;
+  /** The owner-issued, seed-signed route assignment this node runs, if any. */
+  route_assignment: string | null;
+  route_assignment_error: string | null;
 };
 
 export type ServiceStatus = { running: boolean; uptime_ms: number; mode: string };

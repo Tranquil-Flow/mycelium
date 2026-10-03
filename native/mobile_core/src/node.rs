@@ -17,6 +17,7 @@ use crate::evidence;
 use crate::identity::Identity;
 use crate::membership::{self, MemberConfig};
 use crate::onboarding::{self, PairingSession};
+use crate::route_assignment::{self, RouteAssignment};
 use crate::runtime::{Gpt2BlockStage, REFERENCE_BACKEND, StageRuntime};
 use crate::transport::{Inbound, NodeTransport, Reachability};
 use crate::wire;
@@ -140,6 +141,10 @@ pub struct NodeStatus {
     pub peer_class: String,
     pub runtime_backend: String,
     pub route_ready: bool,
+    /// The owner-issued, seed-signed route assignment this node runs (stage
+    /// loaded and route peer allow-listed), if any.
+    pub route_assignment: Option<String>,
+    pub route_assignment_error: Option<String>,
 }
 
 /// Where the last sealed observation window ended, so each observation covers
@@ -174,6 +179,13 @@ struct Shared {
     invitation: Option<Value>,
     stage: Option<Box<dyn StageRuntime>>,
     forward: Option<(iroh::EndpointAddr, u64)>,
+    route: Option<AppliedRoute>,
+}
+
+/// The seed-delivered assignment currently applied to the stage and transport.
+struct AppliedRoute {
+    assignment: RouteAssignment,
+    peer: iroh::EndpointId,
 }
 
 pub struct NodeCore {
@@ -251,6 +263,7 @@ impl NodeCore {
                 invitation: None,
                 stage: None,
                 forward: None,
+                route: None,
             })),
             http,
             incarnation: new_incarnation()?,
@@ -689,6 +702,7 @@ async fn supervise_membership(sv: Supervisor) {
             sequence += 1;
             sv.heartbeat_once(&m, sequence).await
         };
+        let held = matches!(step, Step::Held);
         let pause = {
             let mut s = sv.shared.lock().unwrap();
             match step {
@@ -725,11 +739,35 @@ async fn supervise_membership(sv: Supervisor) {
                 }
             }
         };
+        if held {
+            // The lease is held: pick up (or drop) the owner's route assignment.
+            sv.sync_route().await;
+        }
         if let Some(pause) = pause {
             tokio::time::sleep(pause).await;
         }
     }
-    sv.shared.lock().unwrap().supervisor_running = false;
+    // The membership is over: no route peer is admitted on its behalf any more.
+    let old = {
+        let mut s = sv.shared.lock().unwrap();
+        s.supervisor_running = false;
+        clear_route(&mut s)
+    };
+    if let Some(old) = old {
+        sv.transport.remove_peer(old.peer).await;
+    }
+}
+
+/// Forget the applied route: stage unloaded, nothing forwarded.
+fn clear_route(s: &mut Shared) -> Option<AppliedRoute> {
+    let old = s.route.take();
+    if old.is_some() {
+        s.stage = None;
+        s.forward = None;
+        s.status.stage_loaded = None;
+        s.status.route_assignment = None;
+    }
+    old
 }
 
 impl Supervisor {
@@ -783,6 +821,81 @@ impl Supervisor {
             }
             Err(e) => Step::Retry(format!("lease_renewal_invalid:{}", e.0)),
         }
+    }
+
+    /// Ask the seed for this member's route assignment and apply what it signed:
+    /// load the digest-verified stage, allow-list the route peer at the route
+    /// generation and forward executed activations to it. A newly applied
+    /// assignment is reported back at once so the owner sees it running.
+    async fn sync_route(&self) {
+        for _ in 0..2 {
+            match self.route_exchange().await {
+                Ok(true) => continue,
+                Ok(false) => break,
+                Err(code) => {
+                    self.shared.lock().unwrap().status.route_assignment_error = Some(code);
+                    break;
+                }
+            }
+        }
+    }
+
+    /// One request/answer; `Ok(true)` when the applied route changed.
+    async fn route_exchange(&self) -> Result<bool, String> {
+        let (m, applied) = {
+            let s = self.shared.lock().unwrap();
+            (s.membership.clone(), s.route.as_ref().map(|r| r.assignment.assignment_id.clone()))
+        };
+        let Some(m) = m.filter(|m| !m.needs_resume) else { return Ok(false) };
+        let message_id = format!("route-{}", &new_incarnation().map_err(|e| e.0)?[4..]);
+        let env = route_assignment::request(&m.cfg, &self.identity, &message_id, m.generation, applied.as_deref(), now_s())
+            .map_err(|e| e.0)?;
+        let body = json!({"protocol": membership::SEED_MEMBER_HTTP_PROTOCOL, "envelope": env});
+        let (code, reply) = self.post("/seed/message", &m.seed_url, &body).await?;
+        if !(200..300).contains(&code) {
+            return Err(format!("route_assignment_refused:{}", reply["error"]["code"].as_str().unwrap_or("unknown")));
+        }
+        let verified = route_assignment::verify_delivery(
+            &reply,
+            &route_assignment::Expected {
+                pinned_seed_key: &m.pinned,
+                swarm_id: &m.cfg.swarm_id,
+                seed_node_id: &m.cfg.seed_node_id,
+                node_id: &m.cfg.node_id,
+                endpoint_id: self.identity.endpoint_id(),
+                generation: m.generation,
+                request_message_id: &message_id,
+                now: now_s(),
+            },
+        )
+        .map_err(|e| e.0)?;
+        self.shared.lock().unwrap().status.route_assignment_error = None;
+        let Some((assignment, stage)) = verified else {
+            let old = clear_route(&mut self.shared.lock().unwrap());
+            if let Some(old) = old {
+                self.transport.remove_peer(old.peer).await;
+            }
+            return Ok(false);
+        };
+        if applied.as_deref() == Some(assignment.assignment_id.as_str()) {
+            return Ok(false);
+        }
+        let peer = crate::transport::parse_endpoint_id(&assignment.peer_endpoint_id).map_err(|e| e.0)?;
+        self.transport.configure_peer(peer, assignment.route_generation).await;
+        let old = {
+            let mut s = self.shared.lock().unwrap();
+            s.status.stage_loaded = Some(stage.pack_digest().to_owned());
+            s.stage = Some(Box::new(stage));
+            s.forward = assignment.forward_to.then(|| (iroh::EndpointAddr::from(peer), assignment.route_generation));
+            s.status.route_assignment = Some(assignment.assignment_id.clone());
+            s.route.replace(AppliedRoute { assignment, peer })
+        };
+        if let Some(old) = old
+            && old.peer != peer
+        {
+            self.transport.remove_peer(old.peer).await;
+        }
+        Ok(true)
     }
 
     async fn resume_once(&self, m: ActiveMembership) -> Step {

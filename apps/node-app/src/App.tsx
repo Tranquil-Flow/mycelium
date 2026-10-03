@@ -182,6 +182,11 @@ function StatusCard({ status, onJoin, busy }: { status: NodeStatus; onJoin: () =
         <dd>{status.relay_online ? 'iroh online' : 'connecting…'}</dd>
         <dt>Route ready</dt>
         <dd>{status.route_ready ? 'yes' : 'no (placement is the planner’s decision)'}</dd>
+        <dt>Route assignment</dt>
+        <dd>
+          {status.route_assignment ? `${status.route_assignment} (issued by the swarm owner)` : 'none'}
+          {status.route_assignment_error && ` · ${status.route_assignment_error}`}
+        </dd>
         <dt>Stage</dt>
         <dd>{status.stage_loaded ? status.stage_loaded.slice(0, 19) : 'none assigned'}</dd>
         <dt>Frames</dt>

@@ -1,0 +1,310 @@
+"""Owner-issued route assignments delivered to the enrolled member only.
+
+The owner records one assignment (digest-verified stage pack, route peer, route
+generation) for one activation-eligible Android member; the running seed answers
+only that member's signed, current-generation request, over ``/seed/message``,
+with a seed-signed statement bound to the request.
+"""
+
+from __future__ import annotations
+
+from http.client import HTTPConnection
+from itertools import count
+import json
+from pathlib import Path
+
+import pytest
+
+from mycelium_invite import SqliteInviteRegistry, verify_invite_bundle
+from mycelium_membership import ROUTER_ACTIVATION_PROTOCOL
+from mycelium_node import NodeMembershipSession, load_or_create_node_signer
+from mycelium_qualification.evidence import canonical_json_bytes
+from mycelium_qualification.signing import generate_ed25519_signer
+from mycelium_seed import SeedCoordinator, SeedCoordinatorError, SqliteSeedState
+from mycelium_seed.http import SeedHTTPServer
+from mycelium_seed import route_assignment as ra
+
+ROOT = Path(__file__).resolve().parents[2]
+PACK = json.loads((ROOT / "native/mobile_core/tests/fixtures/gpt2_stage.json").read_text())["pack"]
+PEER = "0d7550754e0800a5d237eef5826035766b9b3e5a15868a940ab289958788e3b0"
+NOW = 5_000.0
+ANDROID = {
+    "runtime_backend": "mobile-rust-reference",
+    "transport": "iroh",
+    "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
+}
+WINDOWS = {"runtime_backend": "tbd", "transport": "iroh", "activation_protocol": None}
+
+
+def _ids(prefix: str):
+    values = count(1)
+    return lambda: f"{prefix}-{next(values)}"
+
+
+class Swarm:
+    def __init__(self, tmp_path: Path) -> None:
+        self.clock = [NOW]
+        root = tmp_path / "seed"
+        self.database = root / "state.sqlite3"
+        self.coordinator = SeedCoordinator(
+            swarm_id="swarm-a",
+            seed_node_id="seed-node",
+            seed_url="http://127.0.0.1:8788",
+            signer=generate_ed25519_signer(endpoint_id="seed-endpoint"),
+            invite_registry=SqliteInviteRegistry(self.database),
+            state=SqliteSeedState(self.database),
+            incarnation="seed-incarnation",
+            clock=lambda: self.clock[0],
+            id_source=_ids("seed-message"),
+            lease_seconds=300.0,
+        )
+        self.tmp = tmp_path
+        self.nodes: dict[str, NodeMembershipSession] = {}
+
+    def join(self, node_id: str, peer_class: str, capability: dict) -> NodeMembershipSession:
+        node = NodeMembershipSession(
+            node_id=node_id,
+            swarm_id="swarm-a",
+            seed_node_id="seed-node",
+            signer=load_or_create_node_signer(self.tmp / "nodes" / f"{node_id}.key"),
+            incarnation=f"incarnation-{node_id}",
+            software_version="mycelium-test",
+            peer_class=peer_class,
+            runtime_capability=capability,
+            clock=lambda: self.clock[0],
+            id_source=_ids(f"{node_id}-message"),
+        )
+        bundle = self.coordinator.mint_invite(nonce=f"invite-{node_id}", ttl_seconds=120)
+        verified = verify_invite_bundle(bundle, now=self.clock[0])
+        request = node.join_request(
+            invite_nonce=verified["payload"]["nonce"],
+            endpoint_addrs=["https://127.0.0.1:9443/control"],
+        )
+        acceptance = self.coordinator.accept_join(invite_token=bundle["token"], join_envelope=request)
+        node.accept_join(acceptance, seed_key_digest=verified["seed_key_digest"])
+        self.nodes[node_id] = node
+        return node
+
+    def service(self) -> ra.RouteAssignmentService:
+        return ra.service_for(self.coordinator)
+
+    def request(self, node_id: str, *, applied: str | None = None, generation: int | None = None,
+                incarnation: str | None = None, signer=None, issued_at: float | None = None,
+                message_id: str = "route-request-1") -> dict:
+        node = self.nodes[node_id]
+        member = self.coordinator.member(node_id)
+        signer = signer or node.signer  # the member's own enrolled key
+        issued = self.clock[0] if issued_at is None else issued_at
+        message = {
+            "protocol": ra.ROUTE_ASSIGNMENT_REQUEST_PROTOCOL,
+            "message_id": message_id,
+            "swarm_id": "swarm-a",
+            "sender_node_id": node_id,
+            "sender_endpoint_id": member["endpoint_id"],
+            "recipient_node_id": "seed-node",
+            "incarnation": incarnation or member["incarnation"],
+            "generation": generation or member["generation"],
+            "issued_at": issued,
+            "expires_at": issued + 60.0,
+            "applied_assignment_id": applied,
+        }
+        return {
+            "protocol": ra.SIGNED_MESSAGE_PROTOCOL,
+            "message": message,
+            "signature": signer.sign(message),
+            "verification_key": signer.public_key_record(),
+        }
+
+    def issue(self, node_id: str, **overrides) -> dict:
+        arguments = dict(
+            node_id=node_id,
+            stage_pack=PACK,
+            peer_endpoint_id=PEER,
+            route_generation=7,
+            now=lambda: self.clock[0],
+            id_source=lambda: "route-1",
+        )
+        arguments.update(overrides)
+        return ra.issue_route_assignment(self.database, **arguments)
+
+
+@pytest.fixture()
+def swarm(tmp_path: Path) -> Swarm:
+    swarm = Swarm(tmp_path)
+    swarm.join("node-phone", "android_native_iroh", ANDROID)
+    return swarm
+
+
+def _verify(swarm: Swarm, delivery: dict, node_id: str = "node-phone") -> dict:
+    assert set(delivery) == {"protocol", "envelope", "stage_pack"}
+    assert delivery["protocol"] == ra.ROUTE_ASSIGNMENT_DELIVERY_PROTOCOL
+    envelope = delivery["envelope"]
+    assert envelope["verification_key"] == swarm.coordinator.signer.public_key_record()
+    from mycelium_qualification.signing import build_ed25519_verifier
+
+    verify = build_ed25519_verifier([envelope["verification_key"]])
+    assert verify(canonical_json_bytes(envelope["message"]), envelope["signature"])
+    message = envelope["message"]
+    assert message["recipient_node_id"] == node_id
+    assert message["route_ready"] is False
+    return message
+
+
+def test_the_member_receives_its_signed_assignment_and_pack(swarm: Swarm) -> None:
+    record = swarm.issue("node-phone")
+    assert record["state"] == "issued"
+    assert record["stage_pack_digest"] == PACK["pack_digest"]
+    delivery = swarm.service().answer(swarm.request("node-phone"))
+    message = _verify(swarm, delivery)
+    member = swarm.coordinator.member("node-phone")
+    assert message["recipient_endpoint_id"] == member["endpoint_id"]
+    assert message["generation"] == member["generation"]
+    assert message["request_message_id"] == "route-request-1"
+    assert message["assignment"] == {
+        "assignment_id": "route-1",
+        "stage_pack_digest": PACK["pack_digest"],
+        "peer_endpoint_id": PEER,
+        "route_generation": 7,
+        "forward_to": True,
+        "expires_at": NOW + ra.DEFAULT_ASSIGNMENT_TTL_SECONDS,
+    }
+    assert delivery["stage_pack"] == PACK
+    status = ra.route_assignment_status(swarm.database, node_id="node-phone", now=lambda: NOW)
+    assert status["state"] == "delivered"
+
+    # The member reports it applied; a restarted member that has not yet re-applied it
+    # is not counted as applied.
+    swarm.service().answer(swarm.request("node-phone", applied="route-1", message_id="route-request-2"))
+    status = ra.route_assignment_status(swarm.database, node_id="node-phone", now=lambda: NOW)
+    assert status["state"] == "applied" and status["applied_generation"] == member["generation"]
+    swarm.service().answer(swarm.request("node-phone", message_id="route-request-3"))
+    assert ra.route_assignment_status(swarm.database, node_id="node-phone", now=lambda: NOW)["state"] == "delivered"
+
+
+def test_no_assignment_withdrawal_and_expiry_answer_a_signed_none(swarm: Swarm) -> None:
+    delivery = swarm.service().answer(swarm.request("node-phone"))
+    assert _verify(swarm, delivery)["assignment"] is None and delivery["stage_pack"] is None
+    swarm.issue("node-phone", ttl_seconds=100.0)
+    assert ra.withdraw_route_assignment(swarm.database, node_id="node-phone")["state"] == "withdrawn"
+    assert _verify(swarm, swarm.service().answer(swarm.request("node-phone")))["assignment"] is None
+    swarm.issue("node-phone", ttl_seconds=100.0, id_source=lambda: "route-2")
+    assert _verify(swarm, swarm.service().answer(swarm.request("node-phone")))["assignment"]["assignment_id"] == "route-2"
+    swarm.clock[0] = NOW + 100.0  # the 300 s lease still holds; the assignment expired
+    assert _verify(swarm, swarm.service().answer(swarm.request("node-phone")))["assignment"] is None
+
+
+def test_issue_refuses_ineligible_unknown_or_malformed_assignments(swarm: Swarm) -> None:
+    swarm.join("node-windows", "windows_native_iroh", WINDOWS)
+    swarm.join("node-mac", "mac_mlx_iroh", {**ANDROID, "runtime_backend": "mlx"})
+
+    def code(**kwargs) -> str:
+        with pytest.raises(SeedCoordinatorError) as caught:
+            swarm.issue(**kwargs)
+        return caught.value.code
+
+    assert code(node_id="node-windows") == "seed_member_activation_ineligible"
+    assert code(node_id="node-mac") == "seed_member_activation_ineligible"
+    assert code(node_id="node-ghost") == "seed_member_unknown"
+    assert code(node_id="node-phone", peer_endpoint_id="not-hex") == "seed_route_assignment_peer_invalid"
+    assert code(node_id="node-phone", route_generation=0) == "seed_route_assignment_generation_invalid"
+    assert code(node_id="node-phone", ttl_seconds=0.0) == "seed_route_assignment_ttl_invalid"
+    tampered = {**PACK, "epsilon": 0.5}
+    assert code(node_id="node-phone", stage_pack=tampered).startswith("seed_route_assignment_stage_pack_invalid")
+    member = swarm.coordinator.member("node-phone")
+    swarm.coordinator.advance_member_generation(
+        node_id="node-phone", expected_generation=member["generation"], lifecycle_state="STOPPED"
+    )
+    assert code(node_id="node-phone") == "seed_member_revoked"
+
+
+def test_only_the_current_member_with_its_own_key_is_answered(swarm: Swarm) -> None:
+    swarm.issue("node-phone")
+    service = swarm.service()
+
+    def code(envelope: dict) -> str:
+        with pytest.raises(SeedCoordinatorError) as caught:
+            service.answer(envelope)
+        return caught.value.code
+
+    stranger = generate_ed25519_signer(endpoint_id="stranger")
+    assert code(swarm.request("node-phone", signer=stranger)) == "membership_key_pin_mismatch"
+    forged = swarm.request("node-phone")
+    forged["message"]["applied_assignment_id"] = "route-9"
+    assert code(forged) == "membership_signature_invalid"
+    assert code(swarm.request("node-phone", generation=9)) == "seed_state_member_stale"
+    assert code(swarm.request("node-phone", incarnation="incarnation-old")) == "seed_state_member_stale"
+    assert code(swarm.request("node-phone", issued_at=NOW - 120.0)) == "membership_message_expired"
+    assert code(swarm.request("node-phone", issued_at=NOW + 120.0)) == "membership_message_from_future"
+    extra = swarm.request("node-phone")
+    extra["message"]["peer_endpoint_id"] = PEER
+    assert code(extra) == "seed_message_malformed"
+    assert code({"protocol": ra.SIGNED_MESSAGE_PROTOCOL}) == "seed_message_malformed"
+
+    # A lapsed lease or a revoked member is not answered.
+    swarm.clock[0] = NOW + 301.0
+    assert code(swarm.request("node-phone")) == "seed_member_lease_expired"
+    swarm.clock[0] = NOW
+    member = swarm.coordinator.member("node-phone")
+    swarm.coordinator.advance_member_generation(
+        node_id="node-phone", expected_generation=member["generation"], lifecycle_state="STOPPED"
+    )
+    assert code(swarm.request("node-phone", generation=member["generation"] + 1)) == "seed_member_revoked"
+
+
+def test_an_assignment_never_follows_a_re_enrolled_device(swarm: Swarm) -> None:
+    swarm.issue("node-phone")
+    import sqlite3
+
+    with sqlite3.connect(swarm.database) as connection:
+        connection.execute(
+            "UPDATE seed_route_assignments SET verification_key_digest = ? WHERE node_id = ?",
+            ("sha256:" + "0" * 64, "node-phone"),
+        )
+    assert _verify(swarm, swarm.service().answer(swarm.request("node-phone")))["assignment"] is None
+
+
+def test_the_seed_http_member_channel_carries_the_request(swarm: Swarm) -> None:
+    swarm.issue("node-phone")
+    swarm.coordinator.seed_url = None  # invites are minted; let the server bind its own URL
+    with SeedHTTPServer(swarm.coordinator, host="127.0.0.1", port=0) as server:
+        server.start()
+        host, port = server.base_url.removeprefix("http://").split(":")
+        body = canonical_json_bytes(
+            {"protocol": "mycelium.seed.member_http.v1", "envelope": swarm.request("node-phone")}
+        )
+        connection = HTTPConnection(host, int(port), timeout=5)
+        connection.request("POST", "/seed/message", body=body, headers={"Content-Type": "application/json"})
+        response = connection.getresponse()
+        delivery = json.loads(response.read())
+        assert response.status == 200
+        assert _verify(swarm, delivery)["assignment"]["assignment_id"] == "route-1"
+
+        stranger = generate_ed25519_signer(endpoint_id="stranger")
+        body = canonical_json_bytes(
+            {"protocol": "mycelium.seed.member_http.v1", "envelope": swarm.request("node-phone", signer=stranger)}
+        )
+        connection = HTTPConnection(host, int(port), timeout=5)
+        connection.request("POST", "/seed/message", body=body, headers={"Content-Type": "application/json"})
+        response = connection.getresponse()
+        assert response.status == 401
+        assert json.loads(response.read())["error"]["code"] == "membership_key_pin_mismatch"
+
+
+def test_operator_command_issues_and_reports_status(swarm: Swarm, tmp_path: Path, capsys) -> None:
+    fixture = ROOT / "native/mobile_core/tests/fixtures/gpt2_stage.json"
+    state_root = swarm.database.parent
+    # Real wall clock for the CLI: refresh the member's lease relative to now.
+    import sqlite3
+    import time
+
+    with sqlite3.connect(swarm.database) as connection:
+        connection.execute("UPDATE seed_members SET lease_expires_at = ?", (time.time() + 300.0,))
+    argv = ["--state-root", str(state_root)]
+    assert ra.main([*argv, "issue", "--stage-pack", str(fixture), "--peer-endpoint-id", PEER, "--route-generation", "7"]) == 0
+    issued = json.loads(capsys.readouterr().out)
+    assert issued["node_id"] == "node-phone" and issued["state"] == "issued"
+    assert issued["peer_endpoint_id"] == PEER and issued["route_generation"] == 7
+    assert ra.main([*argv, "status", "--wait-applied", "0.5"]) == 1
+    assert json.loads(capsys.readouterr().out)["state"] == "issued"
+    assert ra.main([*argv, "withdraw"]) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "withdrawn"

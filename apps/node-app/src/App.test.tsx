@@ -22,6 +22,8 @@ const base: NodeStatus = {
   peer_class: 'android_native_iroh',
   runtime_backend: 'mobile-rust-reference',
   route_ready: false,
+  route_assignment: null,
+  route_assignment_error: null,
 };
 
 function fakeApi(overrides: Partial<NodeApi> = {}) {
@@ -110,6 +112,26 @@ describe('node app', () => {
     await act(async () => push({ ...base, phase: 'joined', member_generation: 1 }));
     expect(await screen.findByText(/no \(placement/)).toBeInTheDocument();
   });
+  it('shows the owner-issued route assignment and its stage, never route readiness', async () => {
+    const { api, push } = fakeApi({ status: vi.fn(async () => ({ ...base, phase: 'joined', member_generation: 1 })) });
+    render(<App api={api} />);
+    expect(await screen.findByText('none')).toBeInTheDocument();
+    await act(async () =>
+      push({
+        ...base,
+        phase: 'joined',
+        member_generation: 2,
+        route_assignment: 'route-1a2b',
+        stage_loaded: 'sha256:ed97b63c01f619ce350bc726419e9cb605de0d54893e00a37b8898db4b87ab9c',
+      }),
+    );
+    expect(screen.getByText(/route-1a2b \(issued by the swarm owner\)/)).toBeInTheDocument();
+    expect(screen.getByText('sha256:ed97b63c01f6')).toBeInTheDocument();
+    expect(screen.getByText(/no \(placement/)).toBeInTheDocument();
+    await act(async () => push({ ...base, phase: 'joined', member_generation: 2, route_assignment_error: 'route_assignment_refused:seed_member_lease_expired' }));
+    expect(screen.getByText(/route_assignment_refused:seed_member_lease_expired/)).toBeInTheDocument();
+  });
+
   it('exports the sealed evidence through the share sheet from settings', async () => {
     const { api } = fakeApi({ status: vi.fn(async () => ({ ...base, phase: 'joined', member_generation: 1 })) });
     render(<App api={api} />);

@@ -57,7 +57,15 @@ fn main() {
             let mut last = String::new();
             while Instant::now() < until {
                 let status = core.status();
-                let key = format!("{}|{}|{:?}|{:?}", status.phase, status.lease_fresh, status.member_generation, status.last_error);
+                let key = format!(
+                    "{}|{}|{:?}|{:?}|{:?}|{:?}",
+                    status.phase,
+                    status.lease_fresh,
+                    status.member_generation,
+                    status.last_error,
+                    status.route_assignment,
+                    status.route_assignment_error
+                );
                 if key != last {
                     last = key;
                     show("status", &core);

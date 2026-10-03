@@ -32,3 +32,21 @@ async fn admitted_peer_frames_are_acked_and_unknown_or_stale_peers_are_refused()
     assert!(stranger.send(phone.addr(), 5, &frame).await.is_err());
     assert!(rx.try_recv().is_err());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_peer_is_refused_on_its_next_send() {
+    let phone = NodeTransport::bind(&[4; 32], Reachability::LocalOnly).await.unwrap();
+    let mac = NodeTransport::bind(&[5; 32], Reachability::LocalOnly).await.unwrap();
+    let (tx, mut rx) = mpsc::channel(8);
+    let _accept = phone.spawn_accept(tx);
+    let mac_id = mycelium_mobile_core::transport::parse_endpoint_id(&mac.endpoint_id()).unwrap();
+    phone.configure_peer(mac_id, 7).await;
+    let act = wire::Activation::from_rows_f32(&[vec![1.0]]).encode().unwrap();
+    let frame = wire::encode_frame("HopHeader", &json!({"request_id": "r1"}), &act).unwrap();
+    mac.send(phone.addr(), 7, &frame).await.unwrap();
+    assert!(rx.recv().await.is_some());
+
+    phone.remove_peer(mac_id).await;
+    assert!(mac.send(phone.addr(), 7, &frame).await.is_err());
+    assert!(rx.try_recv().is_err());
+}
