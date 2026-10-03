@@ -1435,6 +1435,7 @@ class LiveRouterPort:
                     )
                 ),
             }
+            self._release_predecessor_attempt(pending, source_command)
             with self._changed:
                 pending.execution_started = True
                 pending.recovery_phase = "recovery_prefill"
@@ -2491,6 +2492,37 @@ class LiveRouterPort:
         if should_release:
             self._release_route_request(pending)
             self._retire_command(pending)
+
+    def _release_predecessor_attempt(
+        self, pending: _Pending, predecessor: CommandIdentity
+    ) -> None:
+        """Retire the failed attempt's route state before its successor runs.
+
+        A physical route keeps one active record and one cleanup receipt per
+        request id. The failed attempt's exact cleanup receipt (sealed when
+        its command terminal was recorded) would otherwise collide with the
+        successor's own receipt on the same route, and the successor's exact
+        cleanup could never be stored. Release only the predecessor's exact
+        scoped identity, after its cleanup proof; never a request-wide release
+        (that would let a route owner replace the route under the successor).
+        """
+
+        owner_id = pending.cleanup_owner_id
+        release = getattr(self._route, "release_attempt_scoped", None)
+        if not callable(release):
+            release = getattr(self._route, "release_request_scoped", None)
+        if owner_id is None or not callable(release):
+            return
+        if getattr(self._route, "is_simulated", False) is True:
+            return
+        release(
+            predecessor.request_id,
+            request_attempt=predecessor.request_attempt,
+            path_id=predecessor.path_id,
+            path_attempt=predecessor.path_attempt,
+            path_digest=predecessor.path_digest,
+            cleanup_owner_id=owner_id,
+        )
 
     def _release_route_request(self, pending: _Pending) -> None:
         identity = pending.command_identity

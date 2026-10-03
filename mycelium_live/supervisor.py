@@ -929,6 +929,40 @@ class ColdRouteRestartOwner:
                 self._request_routes.pop(request_id, None)
         self._restart_if_idle_after_peer_loss()
 
+    def release_attempt_scoped(
+        self,
+        request_id: str,
+        *,
+        request_attempt: int,
+        path_id: str,
+        path_attempt: int,
+        path_digest: str,
+        cleanup_owner_id: str,
+    ) -> None:
+        """Retire one proven attempt's route state; the request stays bound.
+
+        Unlike ``release_request_scoped`` the request is not released: an A6
+        successor attempt of the same request is about to run on this route,
+        so the route stays mapped to the request and no idle cold restart may
+        replace it underneath the successor.
+        """
+
+        with self._lock:
+            route = self._request_routes.get(request_id) or self._current
+        if route is None:
+            raise RuntimeError("route_not_open")
+        scoped = getattr(route, "release_request_scoped", None)
+        if not callable(scoped):
+            return  # a route without per-attempt state has nothing to retire
+        scoped(
+            request_id,
+            request_attempt=request_attempt,
+            path_id=path_id,
+            path_attempt=path_attempt,
+            path_digest=path_digest,
+            cleanup_owner_id=cleanup_owner_id,
+        )
+
     def _restart_if_idle_after_peer_loss(self) -> None:
         """Cold-restart a degraded route once no request still runs on it.
 
