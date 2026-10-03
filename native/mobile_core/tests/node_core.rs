@@ -88,3 +88,30 @@ fn a_failed_pairing_returns_the_node_to_its_previous_phase() {
     core.shutdown();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn shell_sampled_power_and_thermal_readings_reach_the_sealed_observation() {
+    use mycelium_mobile_core::evidence::Metrics;
+    let dir = std::env::temp_dir().join(format!("mycelium-node-platform-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let core = NodeCore::open(&dir, Reachability::LocalOnly).unwrap();
+    let mut sample = Metrics::new();
+    sample.insert("battery_level_percent".into(), Some(64.0));
+    sample.insert("charging".into(), Some(0.0));
+    sample.insert("battery_temperature_celsius".into(), Some(33.5));
+    sample.insert("thermal_status".into(), Some(1.0));
+    core.set_platform_metrics(sample);
+    let metrics = core.platform_metrics();
+    assert_eq!(metrics["battery_level_percent"], Some(64.0));
+    assert_eq!(metrics["charging"], Some(0.0));
+    assert_eq!(metrics["thermal_status"], Some(1.0));
+    // The host's own readable thermal zones (if any) may be hotter than the battery.
+    assert!(metrics["thermal_max_celsius"].is_some_and(|t| t >= 33.5));
+    let envelope = core.runtime_observation(&metrics).unwrap();
+    let observed = &envelope["message"]["metrics"];
+    assert_eq!(observed["battery_level_percent"], 64.0);
+    assert_eq!(observed["charging"], 0.0);
+    assert!(observed["thermal_max_celsius"].is_number());
+    core.shutdown();
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -180,6 +180,8 @@ struct Shared {
     stage: Option<Box<dyn StageRuntime>>,
     forward: Option<(iroh::EndpointAddr, u64)>,
     route: Option<AppliedRoute>,
+    /// The latest OS readings the app shell sampled, and when.
+    shell_metrics: Option<(evidence::Metrics, f64)>,
 }
 
 /// The seed-delivered assignment currently applied to the stage and transport.
@@ -264,6 +266,7 @@ impl NodeCore {
                 stage: None,
                 forward: None,
                 route: None,
+                shell_metrics: None,
             })),
             http,
             incarnation: new_incarnation()?,
@@ -340,6 +343,28 @@ impl NodeCore {
     pub fn runtime_observation(&self, platform: &evidence::Metrics) -> Result<Value, NodeError> {
         observe_runtime(&self.shared, &self.identity, platform)
     }
+
+    /// Record the OS readings the app shell sampled (battery, charging, battery
+    /// temperature, thermal status); sealed observations use them while fresh.
+    pub fn set_platform_metrics(&self, sample: evidence::Metrics) {
+        self.shared.lock().unwrap().shell_metrics = Some((sample, now_s()));
+    }
+
+    /// The platform metrics the next sealed observation carries.
+    pub fn platform_metrics(&self) -> evidence::Metrics {
+        current_platform_metrics(&self.shared)
+    }
+}
+
+fn current_platform_metrics(shared: &Arc<Mutex<Shared>>) -> evidence::Metrics {
+    let shell = {
+        let s = shared.lock().unwrap();
+        s.shell_metrics
+            .as_ref()
+            .filter(|(_, at)| now_s() - at <= evidence::SHELL_SAMPLE_MAX_AGE_S)
+            .map(|(m, _)| m.clone())
+    };
+    evidence::merge_platform_metrics(evidence::platform_metrics(Path::new("/")), Some(&shell.unwrap_or_default()))
 }
 
 fn observe_runtime(
@@ -393,7 +418,7 @@ fn seal_observation(data_dir: &Path, shared: &Arc<Mutex<Shared>>, identity: &Ide
         if std::fs::create_dir_all(&dir).is_err() {
             return;
         }
-        let Ok(envelope) = observe_runtime(shared, identity, &evidence::platform_metrics(Path::new("/"))) else {
+        let Ok(envelope) = observe_runtime(shared, identity, &current_platform_metrics(shared)) else {
             return;
         };
         let generation = envelope["message"]["evidence_generation"].as_u64().unwrap_or(0);

@@ -140,8 +140,16 @@ fn start_core(app: &AppHandle) {
             #[cfg(debug_assertions)]
             let mut last_dump = String::new();
             // Throttled status stream (<= 2 Hz): the UI never polls in a loop.
+            let mut tick: u64 = 0;
             loop {
                 if let Ok(c) = core() {
+                    // OS power/thermal readings for the sealed observations, every ~10 s.
+                    if tick.is_multiple_of(20)
+                        && let Some(svc) = handle.try_state::<NodeService<Wry>>()
+                        && let Ok(sample) = svc.platform_metrics()
+                    {
+                        c.set_platform_metrics(sample);
+                    }
                     let status = c.status();
                     #[cfg(debug_assertions)]
                     if let Some(dir) = &dev_dir {
@@ -149,6 +157,7 @@ fn start_core(app: &AppHandle) {
                     }
                     let _ = handle.emit("node://status", status);
                 }
+                tick = tick.wrapping_add(1);
                 std::thread::sleep(Duration::from_millis(500));
             }
         })
