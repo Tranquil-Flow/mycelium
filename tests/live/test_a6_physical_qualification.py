@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from mycelium_m16_runtime import path_manifest_document_digest
 from mycelium_a6_gateway import CommittedDeliverySnapshot, freeze_replay_checkpoint
 from mycelium_live.a6_recovery import LiveA6RecoveryQualifier, tokenizer_artifact_digest
 from mycelium_router.contracts import PathHop, PathManifest
@@ -57,7 +58,7 @@ def _manifest() -> PathManifest:
         deployment_epoch=7,
         topology_version=11,
         manifest_digest="sha256:" + "f" * 64,
-        ordered_hops=(PathHop("stage-0", "successor-placement", "reservation-1"),),
+        ordered_hops=(PathHop("stage-0", "successor-placement", "reservation-1", 1e15),),
         loopback_edge_id="loopback-0",
     )
 
@@ -117,7 +118,7 @@ def test_qualifier_binds_exact_reserved_path_and_derived_physical_challenge(tmp_
             "request_attempt": 2,
             "path_id": "successor-path",
             "path_attempt": 1,
-            "path_manifest_digest": _manifest().manifest_digest,
+            "path_manifest_digest": path_manifest_document_digest(_manifest()),
             "deployment_id": "deployment-a6",
             "deployment_epoch": 7,
             "topology_generation": 11,
@@ -171,7 +172,7 @@ def test_qualifier_never_turns_failed_challenge_into_eligibility(tmp_path: Path)
             "request_attempt": 2,
             "path_id": "successor-path",
             "path_attempt": 1,
-            "path_manifest_digest": _manifest().manifest_digest,
+            "path_manifest_digest": path_manifest_document_digest(_manifest()),
             "deployment_id": "deployment-a6",
             "deployment_epoch": 7,
             "topology_generation": 11,
@@ -212,7 +213,7 @@ def test_qualifier_rejects_foreign_successor_identity_before_challenge(tmp_path:
                 "request_attempt": 2,
                 "path_id": "successor-path",
                 "path_attempt": 1,
-                "path_manifest_digest": _manifest().manifest_digest,
+                "path_manifest_digest": path_manifest_document_digest(_manifest()),
                 "deployment_id": "deployment-a6",
                 "deployment_epoch": 7,
                 "topology_generation": 11,

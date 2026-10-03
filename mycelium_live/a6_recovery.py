@@ -18,6 +18,7 @@ from typing import Any
 import uuid
 
 from mycelium_a6_m16 import recovery_successor_binding
+from mycelium_m16_runtime import path_manifest_document_digest
 from mycelium_a6_recovery import (
     ReplayCheckpoint,
     build_recovery_qualification,
@@ -251,7 +252,7 @@ class LiveA6RecoveryQualifier:
             "request_attempt": checkpoint.source_attempt + 1,
             "path_id": successor_manifest.path_id,
             "path_attempt": successor_manifest.path_attempt,
-            "path_manifest_digest": successor_manifest.manifest_digest,
+            "path_manifest_digest": path_manifest_document_digest(successor_manifest),
             "deployment_id": checkpoint.deployment_id,
             "deployment_epoch": checkpoint.deployment_epoch,
             "topology_generation": checkpoint.topology_generation,
