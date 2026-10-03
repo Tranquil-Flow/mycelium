@@ -24,6 +24,13 @@ WORKTREE_ROOT = Path(__file__).resolve().parents[2]
 TEMP_ROOT_PREFIX = "myc-seed-e2e-"
 OWNED_ROOT_SENTINEL = ".mycelium-owned-root-v1"
 PROCESS_WAIT_TIMEOUT = POLL_TIMEOUT = 2.0
+# A requested graceful stop must be allowed to finish the node's own bounded
+# shutdown before cleanup escalates to SIGTERM: on "stop" the physical node
+# closes its native sidecar with SIGINT and waits up to 5 s for it
+# (physical_inference_node.NativeSidecarProcess.close), then drains its command
+# executors.  A shorter wait turns a slow-but-graceful stop on a loaded host
+# (-n8 L2 while the sidecar is compiled) into SIGTERM and a non-zero exit code.
+GRACEFUL_STOP_TIMEOUT = 10.0
 _RENAME_EXCL = 0x00000004
 _RENAME_NOREPLACE = 0x00000001
 _OWNED_ROOT_SENTINEL_KEY = secrets.token_bytes(32)
@@ -1381,7 +1388,7 @@ def cleanup_node_processes(
             graceful_stop_requested.append(owner)
     for owner in graceful_stop_requested:
         try:
-            owner.process.wait(timeout=PROCESS_WAIT_TIMEOUT)
+            owner.process.wait(timeout=GRACEFUL_STOP_TIMEOUT)
         except subprocess.TimeoutExpired:
             pass
         except BaseException as error:

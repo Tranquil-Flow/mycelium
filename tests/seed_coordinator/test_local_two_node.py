@@ -243,6 +243,7 @@ class _IsolatedNodeClient(_NodeClient):
         artifact_root: Path,
         socket_root: Path,
         owned_groups: dict[str, harness.OwnedGroup],
+        sidecar_binary: Path = SIDECAR_BINARY,
     ) -> None:
         self.node_id = node_id
         self.run_id = run_id
@@ -265,7 +266,7 @@ class _IsolatedNodeClient(_NodeClient):
                 "--socket-root",
                 str(socket_root),
                 "--sidecar-binary",
-                str(SIDECAR_BINARY),
+                str(sidecar_binary),
                 "--sidecar-local-only",
                 "--command-timeout",
                 "30",
@@ -288,7 +289,7 @@ class _IsolatedNodeClient(_NodeClient):
     def stop(self) -> None:
         if self.process.poll() is None:
             self.command("stop")
-            self.process.wait(timeout=harness.PROCESS_WAIT_TIMEOUT)
+            self.process.wait(timeout=harness.GRACEFUL_STOP_TIMEOUT)
 
     def request_stop(self) -> bool:
         if self.process.poll() is not None:
@@ -321,6 +322,39 @@ class _IsolatedNodeClient(_NodeClient):
         if written != len(encoded):
             raise BlockingIOError("incomplete owned stop request")
         return True
+
+
+def _private_sidecar_copy(source: Path, destination_root: Path) -> Path:
+    """Copy the built sidecar to a test-private path and return the copy.
+
+    Every xdist worker's session fixture (and other Iroh tests) runs ``cargo
+    build`` on the shared crate, and even a no-op build re-uplifts
+    ``target/debug/mycelium-iroh-sidecar`` as a new file (new inode and
+    ctime).  The cleanup harness pins each live process's executable path
+    identity, so a sidecar launched from the shared path is reported as
+    "executable identity changed" whenever another worker builds mid-test.
+    A private copy keeps the launched executable stable for the whole test.
+    Reading through one open descriptor yields one consistent file even if
+    the shared path is replaced while it is read.
+    """
+
+    for _attempt in range(50):
+        try:
+            with source.open("rb") as handle:
+                content = handle.read()
+            break
+        except FileNotFoundError:
+            time.sleep(0.1)
+    else:
+        raise AssertionError(f"sidecar binary unavailable: {source}")
+    assert content, "sidecar binary is empty"
+    destination_root.mkdir(mode=0o700)
+    destination = destination_root / source.name
+    descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(content)
+    assert destination.read_bytes() == content
+    return destination
 
 
 def _native_sidecar_pid(
@@ -2420,6 +2454,9 @@ def test_local_two_node_native_process_e2e(
     local_control_sidecar_binary: Path,  # noqa: F811
 ) -> None:
     assert local_control_sidecar_binary == SIDECAR_BINARY and SIDECAR_BINARY.is_file()
+    private_sidecar = _private_sidecar_copy(
+        local_control_sidecar_binary, tmp_path / "private-sidecar"
+    )
     deployment = prepare_physical_deployment(tmp_path / "deployment", node_ids=NODE_IDS)
     assignment_reports = zip(
         deployment.assignments, deployment.artifact_reports, strict=True
@@ -2485,6 +2522,7 @@ def test_local_two_node_native_process_e2e(
                 artifact_root=tmp_path,
                 socket_root=socket_root / suffix,
                 owned_groups=owned_groups,
+                sidecar_binary=private_sidecar,
             )
         for node_id, process in node_processes.items():
             response = process.raw_command(
@@ -2509,6 +2547,7 @@ def test_local_two_node_native_process_e2e(
                 owned_groups,
                 node_id,
                 discovered_pids=discovered_child_pids,
+                expected_binary=private_sidecar,
             )
         service_pid_by_node = {
             node_id: process.process.pid for node_id, process in node_processes.items()

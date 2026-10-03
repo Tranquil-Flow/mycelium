@@ -69,11 +69,41 @@ def test_a_finished_block_is_never_interrupted_later(fake) -> None:
     _spin(0.6)  # the cancelled timer must not fire into unrelated code
 
 
-def test_a_real_ctrl_c_is_not_reported_as_a_timeout(fake) -> None:
+@pytest.fixture
+def sigint_disposition():
+    """Pin the SIGINT handler the deadline block finds, restoring it afterwards.
+
+    A real Ctrl+C is delegated to whatever handler was in place before the
+    block, so these tests must not depend on how the test process was launched:
+    a runner started as a background job of a non-interactive shell inherits
+    SIGINT as SIG_IGN, and Python then never installs ``default_int_handler``.
+    """
+
+    inherited = signal.getsignal(signal.SIGINT)
+
+    def install(handler: object) -> None:
+        signal.signal(signal.SIGINT, handler)
+
+    try:
+        yield install
+    finally:
+        signal.signal(signal.SIGINT, inherited)
+
+
+def test_a_real_ctrl_c_is_not_reported_as_a_timeout(fake, sigint_disposition) -> None:
+    sigint_disposition(signal.default_int_handler)
     with pytest.raises(KeyboardInterrupt):
         with node._command_deadline(30.0):
             _thread.interrupt_main(signal.SIGINT)
             _spin(20.0)
+
+
+def test_an_inherited_ignored_sigint_stays_ignored(fake, sigint_disposition) -> None:
+    sigint_disposition(signal.SIG_IGN)
+    with node._command_deadline(30.0):
+        _thread.interrupt_main(signal.SIGINT)
+        _spin(0.2)
+    assert signal.getsignal(signal.SIGINT) == signal.SIG_IGN
 
 
 def test_the_win32_deadline_refuses_off_the_main_thread(fake) -> None:
