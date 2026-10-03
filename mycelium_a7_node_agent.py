@@ -112,6 +112,7 @@ class _EntryRole:
    ledger: RouteAckLedger
    verify_standby_signature: Callable[[bytes, dict[str, Any]], bool]
    receipts: list[KVSuccessorCutoverReceipt] = field(default_factory=list)
+   last_ack: dict[str, Any] | None = None
 
 
 class A7NodeAgent:
@@ -426,9 +427,28 @@ class A7NodeAgent:
       try:
          with self._lock:
             entry_role.ledger.record(signed["ack"])
+            entry_role.last_ack = {
+               "checkpoint_sequence": signed["ack"].get("checkpoint_sequence"),
+               "committed_token_count": signed["ack"].get("committed_token_count"),
+               "received_monotonic_s": time.monotonic(),
+            }
       except A7ContractViolation:
          return False
       return True
+
+   def entry_last_ack(self, request_id: str) -> dict[str, Any] | None:
+      """The last verified acknowledgement this entry recorded for one request."""
+
+      with self._lock:
+         role = self._entries.get(request_id)
+         return None if role is None or role.last_ack is None else dict(role.last_ack)
+
+   def standby_last_stored(self) -> dict[str, Any] | None:
+      """The standby's last stored (non-idempotent) checkpoint, when this node is a standby."""
+
+      with self._lock:
+         standby = self._standby
+      return None if standby is None else standby.store.last_stored()
 
    def receive_cutover(self, cutover: KVSuccessorCutover, *, source_node_id: str | None = None) -> bool:
       if source_node_id is None:

@@ -824,18 +824,112 @@ function decodeAttributes(kind: ProductEntityKind, value: unknown, field: string
   return { ...candidate };
 }
 
+/** A7 fenced KV-successor recovery evidence (one `recovery` entity, mirrored in mycelium_product_spine/contracts.py). */
+export const A7_RECOVERY_ENTITY_ID = 'a7-kv-successor-runtime';
+const A7_RECOVERY_ATTRIBUTE_TYPES: Readonly<Record<string, string>> = Object.freeze({
+  committed_token_count: 'count',
+  sync_ack_wait_median_ms: 'number',
+  recovery_prefill_operations: 'count',
+  duplicate_token_count: 'count',
+  standby_placement_fingerprint: 'digest',
+  runtime_backend: 'code',
+  kv_reservation_bytes: 'count',
+  measured_free_bytes: 'count',
+  last_checkpoint_bytes_per_sec: 'number',
+  last_ack_rtt_ms: 'number',
+  fence_advance_sequence: 'count',
+  transport_rtt_to_standby_ms: 'number',
+  entry_node_binding: 'identifier',
+  source_node_binding: 'identifier',
+  standby_node_binding: 'identifier',
+  process_exited_incident_count: 'count',
+  standby_plan_digest: 'digest',
+  deployment_id_epoch: 'identifier',
+  qualification_age_s: 'signed_number',
+  parity_challenge_digest: 'digest',
+  fence_ledger_state: 'fence_ledger_state',
+  durable_fence_generation: 'count',
+  parity_challenge_status: 'parity_challenge_status',
+  qualification_ttl_remaining_s: 'signed_number',
+  scoped_incident_count_1h: 'count',
+  incident_reason_code: 'code',
+  recovery_path_chosen: 'recovery_path',
+  terminal_blocked_count: 'count',
+  collection_window_ms: 'number',
+  command_timeout_ms: 'count',
+  ack_timeout_s: 'number',
+  receipt_timeout_s: 'number',
+});
+const A7_ENUMS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  fence_ledger_state: ['empty', 'holding'],
+  parity_challenge_status: ['passed', 'failed', 'missing'],
+  recovery_path: ['fenced_kv_successor', 'full_context_replay', 'aborted'],
+});
+
+function decodeA7Value(kind: string, value: unknown, field: string): void {
+  switch (kind) {
+    case 'count':
+      integer(value, field);
+      return;
+    case 'number':
+    case 'signed_number': {
+      const decoded = nullableFiniteNumber(value, field);
+      if (decoded === null || (kind === 'number' && decoded < 0)) fail(field, 'invalid measurement');
+      return;
+    }
+    case 'digest':
+      text(value, field, DIGEST);
+      return;
+    case 'code':
+      text(value, field, CODE);
+      return;
+    case 'identifier':
+      text(value, field);
+      return;
+    default:
+      enumeration(value, A7_ENUMS[kind] ?? [], field);
+  }
+}
+
+function decodeA7RecoveryAttributes(value: unknown, field: string): Record<string, unknown> {
+  const keys = Object.keys(A7_RECOVERY_ATTRIBUTE_TYPES);
+  const candidate = exact(value, [...keys, 'unavailable_reasons'], field);
+  const reasonsField = `${field}.unavailable_reasons`;
+  const rawReasons = own(candidate, 'unavailable_reasons', reasonsField);
+  if (typeof rawReasons !== 'object' || rawReasons === null || Array.isArray(rawReasons)) {
+    return fail(reasonsField, 'expected object');
+  }
+  const reasons = rawReasons as Record<string, unknown>;
+  if (Object.keys(reasons).some((key) => !keys.includes(key))) return fail(reasonsField, 'unexpected fields');
+  for (const key of keys) {
+    const item = own(candidate, key, `${field}.${key}`);
+    if (item === null) {
+      text(reasons[key], `${reasonsField}.${key}`, CODE);
+    } else {
+      if (Object.prototype.hasOwnProperty.call(reasons, key)) return fail(`${reasonsField}.${key}`, 'reason for an observed value');
+      decodeA7Value(A7_RECOVERY_ATTRIBUTE_TYPES[key], item, `${field}.${key}`);
+    }
+  }
+  return { ...candidate };
+}
+
 function decodeEntity(value: unknown, index: number): ProductEntity {
   const field = `snapshot.entities[${index}]`;
   const candidate = exact(value, ['entity_id', 'kind', 'label', 'source_id', 'binding', 'freshness', 'attributes'], field);
   const kind = enumeration(own(candidate, 'kind', field), PRODUCT_ENTITY_KINDS, `${field}.kind`);
+  const entityId = text(own(candidate, 'entity_id', field), `${field}.entity_id`);
+  const attributesField = `${field}.attributes`;
+  const rawAttributes = own(candidate, 'attributes', field);
   return {
-    entity_id: text(own(candidate, 'entity_id', field), `${field}.entity_id`),
+    entity_id: entityId,
     kind,
     label: label(own(candidate, 'label', field), `${field}.label`),
     source_id: text(own(candidate, 'source_id', field), `${field}.source_id`),
     binding: binding(own(candidate, 'binding', field), `${field}.binding`),
     freshness: freshness(own(candidate, 'freshness', field), `${field}.freshness`),
-    attributes: decodeAttributes(kind, own(candidate, 'attributes', field), `${field}.attributes`),
+    attributes: kind === 'recovery' && entityId === A7_RECOVERY_ENTITY_ID
+      ? decodeA7RecoveryAttributes(rawAttributes, attributesField)
+      : decodeAttributes(kind, rawAttributes, attributesField),
   };
 }
 

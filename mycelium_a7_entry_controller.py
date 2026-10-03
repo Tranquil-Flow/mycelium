@@ -105,6 +105,13 @@ class _Coverage:
    participants: set[str] = field(default_factory=set)
    source_lost_accepted: bool = False
    old_path_fenced: bool = False
+   # Product evidence (privacy-reduced timings and counts, never token values).
+   commit_sent_at: dict[int, float] = field(default_factory=dict)
+   ack_waits_ms: list[float] = field(default_factory=list)
+   duplicate_commits: int = 0
+   standby_receipt_rtt_ms: float | None = None
+   last_ack_rtt_ms: float | None = None
+   last_ack_sequence: int | None = None
 
 
 class A7EntryController:
@@ -142,6 +149,8 @@ class A7EntryController:
       self._release_async = release_remote_asynchronously
       self._lock = threading.RLock()
       self._requests: dict[str, _Coverage] = {}
+      self._last_request_id: str | None = None
+      self._fence_advances = 0
 
    # -- coverage ------------------------------------------------------------------
 
@@ -161,6 +170,7 @@ class A7EntryController:
          self._fences.grant_publication(request_id, generation=begun["fencing_generation"])
       except FenceStoreError:
          return None
+      self._fence_advances += 1
       self._agent.register_entry(
          request_id,
          stage_id=stage_digest(coverage.stage_id),
@@ -195,9 +205,17 @@ class A7EntryController:
          if state.finished or state.path_id != manifest.path_id or state.path_attempt != manifest.path_attempt:
             # A successor path has no further standby: coverage ended at cutover.
             return False
+         if count <= state.committed:
+            # The gateway was handed a count that did not advance the committed
+            # output: a repeated publication at the entry's commit hook.
+            state.duplicate_commits += 1
          state.committed = count
          state.pending_since = time.monotonic()
          state.commits_sent += 1
+         state.commit_sent_at[count] = state.pending_since
+         if len(state.commit_sent_at) > 64:
+            del state.commit_sent_at[min(state.commit_sent_at)]
+         self._last_request_id = request_id
          message = KVCheckpointCommit(
             request_id=request_id,
             path_id=state.path_id,
@@ -222,6 +240,20 @@ class A7EntryController:
       watermark = self._agent.route_watermark(request_id)
       return -1 if watermark is None else int(watermark["committed_token_count"])
 
+   def _note_ack(self, state: _Coverage, request_id: str) -> None:
+      """Record the round trip (commit sent here -> verified ack recorded here) of the last ack."""
+
+      reader = getattr(self._agent, "entry_last_ack", None)
+      ack = reader(request_id) if callable(reader) else None
+      if ack is None or type(ack.get("committed_token_count")) is not int:
+         return
+      with self._lock:
+         sent = state.commit_sent_at.get(ack["committed_token_count"])
+         if sent is not None:
+            state.last_ack_rtt_ms = round((ack["received_monotonic_s"] - sent) * 1000.0, 3)
+            sequence = ack.get("checkpoint_sequence")
+            state.last_ack_sequence = sequence if type(sequence) is int else None
+
    def await_acknowledged(self, request_id: str) -> bool:
       """Wait (bounded) until the standby acknowledged the current committed count."""
 
@@ -234,10 +266,14 @@ class A7EntryController:
       deadline = started + self._ack_timeout
       while True:
          if self._acknowledged(request_id) >= target:
+            self._note_ack(state, request_id)
             with self._lock:
                if state.pending_since == started:
                   state.pending_since = None
-                  state.max_ack_wait_ms = max(state.max_ack_wait_ms, (time.monotonic() - started) * 1000.0)
+                  waited = (time.monotonic() - started) * 1000.0
+                  state.max_ack_wait_ms = max(state.max_ack_wait_ms, waited)
+                  if len(state.ack_waits_ms) < 4096:
+                     state.ack_waits_ms.append(waited)
             return True
          if time.monotonic() >= deadline:
             with self._lock:
@@ -355,6 +391,8 @@ class A7EntryController:
          return self._finish_fallback(state, request_id, old_manifest, None, "fence_not_installed", gateway_committed_token_ids, started, watermark)
       state.request_attempt = fenced["request_attempt"]
       state.generation = fenced["fencing_generation"]
+      with self._lock:
+         self._fence_advances += 1
       # The failed attempt is now excluded by authority: stop its transport
       # forwards too, whether this cutover succeeds or falls back.
       self._fence_old_path(state, request_id, old_manifest)
@@ -399,6 +437,7 @@ class A7EntryController:
                ),
             )
          )
+      sent_at = time.monotonic()
       for destination, message in messages:
          state.participants.add(destination)
          try:
@@ -417,6 +456,8 @@ class A7EntryController:
                and receipt.placement_id in expected
             ):
                receipts.setdefault(receipt.placement_id, receipt)
+               if receipt.placement_id == coverage.standby_placement_id and state.standby_receipt_rtt_ms is None:
+                  state.standby_receipt_rtt_ms = round((time.monotonic() - sent_at) * 1000.0, 3)
          if set(receipts) == expected or any(not item.installed for item in receipts.values()):
             break
          if time.monotonic() >= deadline:
@@ -555,6 +596,38 @@ class A7EntryController:
       """Durable fence records this entry currently holds (terminal records are released)."""
 
       return self._fences.record_count()
+
+   def product_evidence(self) -> dict[str, Any] | None:
+      """Privacy-reduced evidence of the most recent covered request (product projection).
+
+      Every value is this entry's own observation: counts, generations,
+      timings measured here, and the request's cutover decision.  ``None``
+      before any covered request.
+      """
+
+      with self._lock:
+         request_id = self._last_request_id
+         state = None if request_id is None else self._requests.get(request_id)
+         if state is None:
+            return None
+         waits = sorted(state.ack_waits_ms)
+         document = {
+            "committed": state.committed,
+            "ack_wait_median_ms": None if not waits else round(
+               waits[len(waits) // 2] if len(waits) % 2 else (waits[len(waits) // 2 - 1] + waits[len(waits) // 2]) / 2.0, 3
+            ),
+            "duplicate_commits": state.duplicate_commits,
+            "fencing_generation": state.generation,
+            "fence_advances": self._fence_advances,
+            "standby_receipt_rtt_ms": state.standby_receipt_rtt_ms,
+            "outcome": None if state.result is None else state.result.get("outcome"),
+            "request_key": "sha256:" + request_key(request_id),
+         }
+      if state.last_ack_rtt_ms is None:
+         self._note_ack(state, request_id)
+      document["last_ack_rtt_ms"] = state.last_ack_rtt_ms
+      document["last_ack_checkpoint_sequence"] = state.last_ack_sequence
+      return document
 
    def snapshot(self, request_id: str) -> dict[str, Any] | None:
       with self._lock:

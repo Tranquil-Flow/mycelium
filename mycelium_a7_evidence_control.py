@@ -174,6 +174,60 @@ class RouteA7Evidence:
             "scoped_incidents": _detached(incidents),
         }
 
+    def product(self) -> dict[str, Any] | None:
+        """The A7 workspace evidence for the product projection; ``None`` when A7 is not staged.
+
+        A7 counts as staged only when the route owner installed the peer-exit
+        authority (from the nodes' signed configured attestations).  The entry
+        answers with its own signed ``a7_snapshot`` product block; the route
+        contributes its request-scoped incident counts.
+        """
+
+        current = self._route
+        resolver = getattr(current, "_current_route_or_raise", None)
+        if callable(resolver):
+            try:
+                current = resolver()
+            except Exception:
+                return None  # no live route: nothing is staged right now
+        authority = getattr(current, "_peer_exit_successor_authority", None)
+        entry_node_id = getattr(authority, "a7_entry_node_id", None)
+        if authority is None or not isinstance(entry_node_id, str):
+            return None
+        concrete = self._concrete()
+        if not self._alive(concrete, entry_node_id):
+            raise A7EvidenceUnavailable("a7_evidence_entry_unavailable")
+        details = self._node_a7(concrete, entry_node_id, None)
+        node = details.get("product")
+        if not isinstance(node, Mapping):
+            raise A7EvidenceUnavailable("a7_evidence_product_missing")
+        graph = getattr(concrete, "execution_graph", None)
+        incidents_reader = getattr(concrete, "a4_scoped_runtime_incidents", None)
+        incidents = [item for item in (incidents_reader() if callable(incidents_reader) else ()) if isinstance(item, Mapping)]
+        now_ms = self._clock_ms()
+        recent = [
+            item
+            for item in incidents
+            if type(item.get("observed_at_monotonic_ms")) is int and now_ms - item["observed_at_monotonic_ms"] <= 3_600_000
+        ]
+        last_reason = None
+        if recent:
+            newest = max(recent, key=lambda item: item["observed_at_monotonic_ms"])
+            reason = newest.get("reason")
+            last_reason = reason if isinstance(reason, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", reason) else None
+        return {
+            "protocol": "mycelium.a7_product_evidence.v1",
+            "deployment_id": getattr(graph, "deployment_id", None),
+            "deployment_epoch": getattr(graph, "deployment_epoch", None),
+            "topology_version": getattr(graph, "topology_version", None),
+            "node": _detached(node),
+            "incidents": {
+                "scoped_incident_count_1h": len(recent),
+                "process_exited_incident_count": sum(1 for item in incidents if item.get("reason") == "node_process_exited"),
+                "last_reason_code": last_reason,
+            },
+        }
+
     def resources(self) -> dict[str, Any]:
         """Per live node resource counters for the terminal resource delta.
 

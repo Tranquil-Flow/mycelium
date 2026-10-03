@@ -1814,10 +1814,22 @@ class PhysicalNodeService:
             "invalid_a7_snapshot_fields",
         )
         _require(self._a7_wiring is not None, "a7_not_configured")
-        return self._signed_result(
-            "a7_snapshot",
-            self._a7_wiring.snapshot(payload.get("request_id")),
-        )
+        document = self._a7_wiring.snapshot(payload.get("request_id"))
+        if "request_id" not in payload:
+            window_ms = None
+            relay = getattr(self.router, "relay", None) if self.router is not None else None
+            config = getattr(getattr(relay, "batch_scheduler", None), "config", None)
+            seconds = getattr(config, "live_hop_collection_window_seconds", None)
+            if isinstance(seconds, (int, float)) and not isinstance(seconds, bool) and seconds >= 0:
+                window_ms = round(float(seconds) * 1_000.0, 3)
+            product = self._a7_wiring.product_projection(
+                now_unix_ms=int(time.time() * 1_000),
+                command_timeout_ms=int(round(self.command_timeout * 1_000.0)),
+                collection_window_ms=window_ms,
+            )
+            if product is not None:
+                document["product"] = product
+        return self._signed_result("a7_snapshot", document)
 
     def _defer_after_response(self, action: Callable[[], Any], *, name: str) -> None:
         pending = getattr(self._after_response, "actions", None)

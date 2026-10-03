@@ -1839,7 +1839,16 @@ def _product_application(
         ),
         state_root=state_root,
         transport_binding=transport_binding,
+        a7_source=_a7_product_source(route),
     )
+
+
+def _a7_product_source(route: Any) -> Callable[[], Mapping[str, Any] | None]:
+    """The A7 workspace evidence reader; it answers ``None`` while A7 is not staged."""
+
+    from mycelium_a7_evidence_control import RouteA7Evidence
+
+    return RouteA7Evidence(route).product
 
 
 def _optional_product_application(

@@ -144,6 +144,7 @@ def _measure_with_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, qu
         case = gate.INCOMPATIBLE if qualification_expired else gate.POSITIVE
         record = runner._measured_record(plan, case, fields)
         scoped = harness._scoped_node_exit_incidents(state.route, observations_request_id(state))
+        observations["_product_evidence"] = RouteA7Evidence(state.route).product()
         return record, observations, plan, scoped
     finally:
         if control is not None:
@@ -378,3 +379,72 @@ def test_product_http_driver_parses_the_ordinary_gateway_stream() -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def _projected_a7_entity(product_evidence: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    from mycelium_product_spine.contracts import A7_RECOVERY_ENTITY_ID, validate_product_snapshot
+    from mycelium_product_spine.projector import ProductProjector
+
+    snapshot = ProductProjector(pseudonym_salt=b"s" * 32).project(
+        members=[], route_status=None, qualification=None, now_unix_ms=int(time.time() * 1000), a7_status=product_evidence
+    )
+    validated = validate_product_snapshot(snapshot)
+    entity = next(item for item in validated["entities"] if item["entity_id"] == A7_RECOVERY_ENTITY_ID)
+    source = next(item for item in validated["source_states"] if item["source_id"] == "a7-source")
+    return entity, source
+
+
+@needs_sidecar
+def test_product_evidence_projects_the_a7_workspaces_from_real_entry_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mycelium_a7_physical_measurement import WORKSPACE_ATTRIBUTES
+
+    record, observations, _plan, _scoped = _measure_with_harness(tmp_path, monkeypatch, qualification_expired=False)
+    product = observations["_product_evidence"]
+    assert product is not None and product["protocol"] == "mycelium.a7_product_evidence.v1"
+    entity, source = _projected_a7_entity(product)
+    assert source["status"] == "current"
+    attributes = entity["attributes"]
+    reasons = attributes["unavailable_reasons"]
+    # The positive cutover leaves every field measured except the A6 recovery
+    # count (no A6 recovery source in this harness).
+    assert set(reasons) == {"terminal_blocked_count"}
+    assert attributes["recovery_path_chosen"] == "fenced_kv_successor"
+    assert attributes["recovery_prefill_operations"] == 0
+    assert attributes["duplicate_token_count"] == 0
+    # Coverage ends at the cutover: the covered attempt's committed watermark.
+    assert attributes["committed_token_count"] == record["committed_before_failure"]
+    assert attributes["fence_ledger_state"] == "empty"
+    assert attributes["parity_challenge_status"] == "passed"
+    assert attributes["runtime_backend"] == "mlx"
+    assert attributes["process_exited_incident_count"] == 1
+    assert attributes["scoped_incident_count_1h"] >= 1
+    assert isinstance(attributes["incident_reason_code"], str)  # the newest scoped incident's reason
+    assert attributes["transport_rtt_to_standby_ms"] > 0
+    assert attributes["last_ack_rtt_ms"] > 0 and attributes["last_checkpoint_bytes_per_sec"] > 0
+    assert attributes["ack_timeout_s"] == 5.0 and attributes["command_timeout_ms"] == 900_000
+    assert attributes["entry_node_binding"].startswith("device-")
+    assert attributes["entry_node_binding"] == attributes["standby_node_binding"] != attributes["source_node_binding"]
+    for workspace, keys in WORKSPACE_ATTRIBUTES.items():
+        assert all(key in attributes for key in keys), workspace
+    assert record["outcome"] == "fenced_kv_successor"
+
+
+def test_a7_entity_contract_refuses_defaulted_or_unexplained_values() -> None:
+    from mycelium_product_spine.contracts import A7_RECOVERY_ATTRIBUTE_TYPES, _a7_recovery
+
+    attributes: dict[str, Any] = {key: None for key in A7_RECOVERY_ATTRIBUTE_TYPES}
+    reasons = {key: "not_observed" for key in A7_RECOVERY_ATTRIBUTE_TYPES}
+    assert _a7_recovery({**attributes, "unavailable_reasons": reasons}) is True
+    # A null without a stated reason is refused.
+    assert _a7_recovery({**attributes, "unavailable_reasons": {**reasons, "last_ack_rtt_ms": None} | {}}) is False
+    missing = dict(reasons)
+    del missing["last_ack_rtt_ms"]
+    assert _a7_recovery({**attributes, "unavailable_reasons": missing}) is False
+    # A value and a reason for the same field is refused.
+    assert _a7_recovery({**attributes, "last_ack_rtt_ms": 1.5, "unavailable_reasons": reasons}) is False
+    observed = dict(reasons)
+    del observed["last_ack_rtt_ms"]
+    assert _a7_recovery({**attributes, "last_ack_rtt_ms": 1.5, "unavailable_reasons": observed}) is True
+    assert _a7_recovery({**attributes, "last_ack_rtt_ms": -1.0, "unavailable_reasons": observed}) is False
+    assert _a7_recovery({**attributes, "recovery_path_chosen": "maybe", "unavailable_reasons": {k: v for k, v in reasons.items() if k != "recovery_path_chosen"}}) is False
+    assert _a7_recovery({**attributes, "extra": 1, "unavailable_reasons": reasons}) is False

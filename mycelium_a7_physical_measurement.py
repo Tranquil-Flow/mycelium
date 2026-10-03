@@ -443,10 +443,19 @@ class ProductHttpDriver:
         attributes = entity.get("attributes") if isinstance(entity, Mapping) else None
         if not isinstance(attributes, Mapping):
             return []
+        reasons = attributes.get("unavailable_reasons")
+        reasons = reasons if isinstance(reasons, Mapping) else {}
+        # A workspace is checked when every field it renders is product evidence:
+        # a measured value, or an explicit product-stated reason why the value
+        # is unobserved (rendered as "unavailable"), never a silent gap.
         return sorted(
             workspace
             for workspace, keys in WORKSPACE_ATTRIBUTES.items()
-            if all(attributes.get(key) is not None for key in keys)
+            if all(
+                key in attributes
+                and (attributes[key] is not None or isinstance(reasons.get(key), str))
+                for key in keys
+            )
         )
 
 

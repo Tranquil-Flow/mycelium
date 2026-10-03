@@ -34,6 +34,7 @@ class ProductEvidenceApplication:
         replay_limit: int = 128,
         state_root: str | Path | None = None,
         transport_binding: str | None = None,
+        a7_source: Callable[[], Mapping[str, Any] | None] | None = None,
     ) -> None:
         if not isinstance(projector, ProductProjector):
             raise ValueError("product_projector_invalid")
@@ -74,6 +75,9 @@ class ProductEvidenceApplication:
             )
         )
         self._recovery_source = recovery_source
+        if a7_source is not None and not callable(a7_source):
+            raise ValueError("product_source_invalid")
+        self._a7_source = a7_source
         self._clock_unix_ms = clock_unix_ms or (lambda: int(time.time() * 1_000))
         self._store = (
             None
@@ -197,6 +201,12 @@ class ProductEvidenceApplication:
                     recovery_status = self._recovery_source()
                 except Exception:
                     source_errors["recovery-source"] = "recovery_source_failed"
+            a7_status = None
+            if self._a7_source is not None:
+                try:
+                    a7_status = self._a7_source()
+                except Exception:
+                    source_errors["a7-source"] = "a7_source_failed"
             coarse_region_evidence = None
             if self._coarse_region_source is not None:
                 try:
@@ -214,6 +224,8 @@ class ProductEvidenceApplication:
                 recovery_status=recovery_status,
                 now_unix_ms=self._clock_unix_ms(),
                 source_errors=source_errors,
+                a7_status=a7_status,
+                a7_configured=self._a7_source is not None and (a7_status is not None or "a7-source" in source_errors),
                 coarse_region_evidence=coarse_region_evidence,
             )
             cursor = snapshot["publication"]["cursor"]
