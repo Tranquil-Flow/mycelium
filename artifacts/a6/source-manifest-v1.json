@@ -532,6 +532,21 @@
       "size_bytes": 2949
     },
     {
+      "path": "tests/node_agent/test_physical_service_win32.py",
+      "sha256": "sha256:74aa10358e2d319c580316975352b2948ff01ace5a993dca0d0fb9e1d7e9d3d4",
+      "size_bytes": 11305
+    },
+    {
+      "path": "tests/seed_coordinator/native_process_harness.py",
+      "sha256": "sha256:77319fce1a0d03c4bc4196639a1c7fd490491fd70634fde2c9a64f7d68c2c4af",
+      "size_bytes": 51686
+    },
+    {
+      "path": "tests/seed_coordinator/test_local_two_node.py",
+      "sha256": "sha256:01c935804fdc473341a740df9b12c371a23072cc385ee74bdab9985914de2211",
+      "size_bytes": 116036
+    },
+    {
       "path": "tests/seed_coordinator/test_route_assignment.py",
       "sha256": "sha256:dcf20b2473f9121d380bcdc6ed0ad0d6f6b0b50bd0e3faab978fe603a92b4736",
       "size_bytes": 23952
@@ -578,5 +593,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:588a2f1b40ea0cb004ef75efdd8be433709cc4157c73053a5e2575b162290828"
+  "source_digest": "sha256:a290ff1ebd48ca015c5253d7c15bfa8174e6e3fa88afb88d59e8ea9fe30dbe3a"
 }
