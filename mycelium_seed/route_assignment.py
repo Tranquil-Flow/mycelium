@@ -52,6 +52,8 @@ DELIVERY_TTL_SECONDS = 60.0
 DEFAULT_ASSIGNMENT_TTL_SECONDS = 6 * 3_600.0
 MAX_ASSIGNMENT_TTL_SECONDS = 24 * 3_600.0
 MAX_STAGE_PACK_BYTES = 512 * 1024
+#: Same per-member-generation replay window the coordinator keeps.
+MAX_REPLAY_IDS = 4096
 _REQUEST_FIELDS = frozenset(
     {
         "protocol",
@@ -415,6 +417,9 @@ class RouteAssignmentService:
         node_id = message["sender_node_id"]
         connection = _connect(self.database)
         try:
+            # One transaction: the member checks, the replay record and the
+            # delivery bookkeeping commit together or not at all.
+            connection.execute("BEGIN IMMEDIATE")
             member = _member_row(connection, node_id)
             if member is None:
                 raise _fail("seed_member_unknown")
@@ -437,6 +442,22 @@ class RouteAssignmentService:
                 raise _fail("seed_member_revoked")
             if now >= float(member["lease_expires_at"]):
                 raise _fail("seed_member_lease_expired")
+            # Replay protection shared with every other member message: one
+            # message id per member generation, kept until the request expires.
+            connection.execute("DELETE FROM seed_replay WHERE expires_at < ?", (now,))
+            (window,) = connection.execute(
+                "SELECT COUNT(*) FROM seed_replay WHERE node_id = ? AND generation = ?",
+                (node_id, generation),
+            ).fetchone()
+            if int(window) >= MAX_REPLAY_IDS:
+                raise _fail("seed_replay_window_full")
+            try:
+                connection.execute(
+                    "INSERT INTO seed_replay (node_id, generation, message_id, expires_at) VALUES (?, ?, ?, ?)",
+                    (node_id, generation, message["message_id"], expires_at),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise _fail("seed_message_replayed") from exc
             row = connection.execute(
                 """
                 SELECT * FROM seed_route_assignments
@@ -472,8 +493,13 @@ class RouteAssignmentService:
                     """,
                     (now, generation, node_id, row["assignment_id"]),
                 )
-        except sqlite3.Error as exc:
-            raise _fail("seed_route_assignment_store_unavailable") from exc
+            connection.execute("COMMIT")
+        except BaseException as exc:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            if isinstance(exc, sqlite3.Error):
+                raise _fail("seed_route_assignment_store_unavailable") from exc
+            raise
         finally:
             connection.close()
         assignment = None

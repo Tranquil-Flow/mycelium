@@ -758,6 +758,25 @@ async fn supervise_membership(sv: Supervisor) {
     }
 }
 
+/// Drop the applied route and withdraw its peer from the allow-list.
+async fn drop_route(shared: &Arc<Mutex<Shared>>, transport: &NodeTransport) {
+    let old = clear_route(&mut shared.lock().unwrap());
+    if let Some(old) = old {
+        transport.remove_peer(old.peer).await;
+    }
+}
+
+/// An assignment past its signed expiry is never served, even when the seed
+/// cannot be reached to say so.
+async fn drop_expired_route(shared: &Arc<Mutex<Shared>>, transport: &NodeTransport) -> bool {
+    let expired = shared.lock().unwrap().route.as_ref().is_some_and(|r| now_s() >= r.assignment.expires_at);
+    if expired {
+        drop_route(shared, transport).await;
+        shared.lock().unwrap().status.route_assignment_error = Some("route_assignment_expired".into());
+    }
+    expired
+}
+
 /// Forget the applied route: stage unloaded, nothing forwarded.
 fn clear_route(s: &mut Shared) -> Option<AppliedRoute> {
     let old = s.route.take();
@@ -827,17 +846,26 @@ impl Supervisor {
     /// load the digest-verified stage, allow-list the route peer at the route
     /// generation and forward executed activations to it. A newly applied
     /// assignment is reported back at once so the owner sees it running.
+    ///
+    /// Fails closed: an answer that does not verify (signature, recipient,
+    /// generation, request binding, stage digest) or a seed refusal drops the
+    /// applied route; only an unreachable seed keeps a still-unexpired route.
     async fn sync_route(&self) {
         for _ in 0..2 {
             match self.route_exchange().await {
                 Ok(true) => continue,
                 Ok(false) => break,
                 Err(code) => {
+                    let transient = code.starts_with("seed_unreachable");
                     self.shared.lock().unwrap().status.route_assignment_error = Some(code);
+                    if !transient {
+                        drop_route(&self.shared, &self.transport).await;
+                    }
                     break;
                 }
             }
         }
+        drop_expired_route(&self.shared, &self.transport).await;
     }
 
     /// One request/answer; `Ok(true)` when the applied route changed.
@@ -871,10 +899,7 @@ impl Supervisor {
         .map_err(|e| e.0)?;
         self.shared.lock().unwrap().status.route_assignment_error = None;
         let Some((assignment, stage)) = verified else {
-            let old = clear_route(&mut self.shared.lock().unwrap());
-            if let Some(old) = old {
-                self.transport.remove_peer(old.peer).await;
-            }
+            drop_route(&self.shared, &self.transport).await;
             return Ok(false);
         };
         if applied.as_deref() == Some(assignment.assignment_id.as_str()) {
@@ -977,6 +1002,7 @@ impl Supervisor {
 /// loaded stage and forward the result to the configured next peer.
 async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>, transport: NodeTransport) {
     while let Some(inbound) = rx.recv().await {
+        drop_expired_route(&shared, &transport).await;
         let started = std::time::Instant::now();
         let outcome = {
             let mut s = shared.lock().unwrap();

@@ -60,6 +60,7 @@ class Swarm:
         )
         self.tmp = tmp_path
         self.nodes: dict[str, NodeMembershipSession] = {}
+        self.requests = 0
 
     def join(self, node_id: str, peer_class: str, capability: dict) -> NodeMembershipSession:
         node = NodeMembershipSession(
@@ -90,11 +91,14 @@ class Swarm:
 
     def request(self, node_id: str, *, applied: str | None = None, generation: int | None = None,
                 incarnation: str | None = None, signer=None, issued_at: float | None = None,
-                message_id: str = "route-request-1") -> dict:
+                message_id: str | None = None) -> dict:
         node = self.nodes[node_id]
         member = self.coordinator.member(node_id)
         signer = signer or node.signer  # the member's own enrolled key
         issued = self.clock[0] if issued_at is None else issued_at
+        if message_id is None:
+            self.requests += 1
+            message_id = f"route-request-{self.requests}"
         message = {
             "protocol": ra.ROUTE_ASSIGNMENT_REQUEST_PROTOCOL,
             "message_id": message_id,
@@ -308,3 +312,90 @@ def test_operator_command_issues_and_reports_status(swarm: Swarm, tmp_path: Path
     assert json.loads(capsys.readouterr().out)["state"] == "issued"
     assert ra.main([*argv, "withdraw"]) == 0
     assert json.loads(capsys.readouterr().out)["state"] == "withdrawn"
+
+
+def test_a_replayed_request_is_refused_and_records_nothing(swarm: Swarm) -> None:
+    swarm.issue("node-phone")
+    service = swarm.service()
+    envelope = swarm.request("node-phone", applied="route-1", message_id="route-request-replay")
+    service.answer(envelope)
+    first = ra.route_assignment_status(swarm.database, node_id="node-phone", now=lambda: NOW)
+    assert first["state"] == "applied"
+    swarm.clock[0] = NOW + 5.0
+    with pytest.raises(SeedCoordinatorError) as caught:
+        service.answer(envelope)
+    assert caught.value.code == "seed_message_replayed"
+    # The replay changed nothing (same delivery time) and shares the seed_replay table.
+    again = ra.route_assignment_status(swarm.database, node_id="node-phone", now=lambda: NOW)
+    assert again["delivered_at"] == first["delivered_at"] == NOW
+    import sqlite3
+
+    with sqlite3.connect(swarm.database) as connection:
+        rows = connection.execute(
+            "SELECT generation FROM seed_replay WHERE node_id = ? AND message_id = ?",
+            ("node-phone", "route-request-replay"),
+        ).fetchall()
+    assert rows == [(swarm.coordinator.member("node-phone")["generation"],)]
+
+
+def test_a_refused_request_leaves_no_delivery_or_replay_record(swarm: Swarm) -> None:
+    swarm.issue("node-phone")
+    with pytest.raises(SeedCoordinatorError):
+        swarm.service().answer(swarm.request("node-phone", generation=9, message_id="route-request-stale"))
+    assert ra.route_assignment_status(swarm.database, node_id="node-phone", now=lambda: NOW)["state"] == "issued"
+    import sqlite3
+
+    with sqlite3.connect(swarm.database) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM seed_replay WHERE message_id = 'route-request-stale'"
+        ).fetchone() == (0,)
+
+
+def test_another_member_can_neither_fetch_nor_ack_the_assignment(swarm: Swarm) -> None:
+    swarm.join("node-other", "android_native_iroh", ANDROID)
+    swarm.issue("node-phone")
+    service = swarm.service()
+    other = swarm.nodes["node-other"].signer
+    # The other member signs a request claiming to be the phone: wrong key.
+    with pytest.raises(SeedCoordinatorError) as caught:
+        service.answer(swarm.request("node-phone", signer=other, applied="route-1"))
+    assert caught.value.code == "membership_key_pin_mismatch"
+    # Asking as itself, it only ever learns that it has no assignment.
+    own = service.answer(swarm.request("node-other", message_id="route-request-other"))
+    assert _verify(swarm, own, node_id="node-other")["assignment"] is None and own["stage_pack"] is None
+    assert ra.route_assignment_status(swarm.database, node_id="node-phone", now=lambda: NOW)["state"] == "issued"
+
+
+def test_after_a_resume_only_the_new_generation_and_incarnation_are_answered(swarm: Swarm) -> None:
+    swarm.issue("node-phone")
+    old = swarm.coordinator.member("node-phone")
+    stale = swarm.request("node-phone", message_id="route-request-old")
+    previous = swarm.nodes["node-phone"]
+    restarted = NodeMembershipSession(
+        node_id="node-phone",
+        swarm_id="swarm-a",
+        seed_node_id="seed-node",
+        signer=previous.signer,
+        incarnation="incarnation-node-phone-2",
+        software_version="mycelium-test",
+        peer_class="android_native_iroh",
+        runtime_capability=ANDROID,
+        clock=lambda: swarm.clock[0],
+        id_source=_ids("node-phone-restart"),
+    )
+    resume = restarted.resume_request(
+        previous_generation=old["generation"],
+        previous_incarnation=old["incarnation"],
+        endpoint_addrs=["https://127.0.0.1:9443/control"],
+    )
+    swarm.coordinator.accept_resume(resume_envelope=resume)
+    swarm.nodes["node-phone"] = restarted
+    current = swarm.coordinator.member("node-phone")
+    assert current["generation"] == old["generation"] + 1
+    with pytest.raises(SeedCoordinatorError) as caught:
+        swarm.service().answer(stale)
+    assert caught.value.code == "seed_state_member_stale"
+    fresh = swarm.service().answer(swarm.request("node-phone", message_id="route-request-new"))
+    message = _verify(swarm, fresh)
+    assert message["generation"] == current["generation"]
+    assert message["assignment"]["assignment_id"] == "route-1"
