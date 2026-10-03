@@ -82,7 +82,7 @@ class _Env:
       self.env = {
          k: v
          for k, v in os.environ.items()
-         if k not in {"MYCELIUM_A7_FLEET_GRANT"}
+         if k not in {"MYCELIUM_A7_FLEET_GRANT", "MYCELIUM_A7_PARITY_CONFIG"}
       }
       if grant is not None:
          self.env["MYCELIUM_A7_FLEET_GRANT"] = grant
@@ -182,11 +182,11 @@ def test_missing_fleet_grant_exits_2_and_writes_nothing(tmp_path: Path) -> None:
    assert not parity_dir.exists() or not any(parity_dir.iterdir())
 
 
-def test_grant_present_refuses_unimplemented_measurement(tmp_path: Path) -> None:
+def test_grant_present_without_config_refuses_measurement(tmp_path: Path) -> None:
    env = _Env(tmp_path, grant="FLEET GRANTED TO A7")
    result = env.run_case("ordinary_browser_source_kill_kv_successor")
    assert result.returncode == 2
-   assert "physical_parity_runner_not_implemented" in result.stderr
+   assert "physical_parity_config_missing" in result.stderr
    parity_dir = env.records / "parity"
    assert not parity_dir.exists() or not any(parity_dir.iterdir())
 
