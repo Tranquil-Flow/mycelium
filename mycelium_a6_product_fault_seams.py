@@ -67,6 +67,11 @@ class ExecutedCase:
     post_state: dict[str, Any] = field(default_factory=dict)
     #: (gateway event sequence, gateway-committed count) when the fault landed.
     failure_marker: tuple[int, int] | None = None
+    #: The concrete route that executed the source attempt. Its own A4 reader
+    #: records the source incident; a cold restart after the request is
+    #: released replaces the owner's current route, so the incident is read
+    #: from this route, never from its replacement.
+    source_route: Any = field(default=None, repr=False, compare=False)
 
     @property
     def committed_at_failure(self) -> int | None:
@@ -146,8 +151,9 @@ class LiveProductFaultTarget:
         view = self.router.a6_request_view(request_id)
         return {} if view is None else dict(view)
 
-    def incidents(self) -> list[dict[str, Any]]:
-        reader = getattr(self._concrete_route(), "a4_scoped_runtime_incidents", None)
+    def incidents(self, route: Any | None = None) -> list[dict[str, Any]]:
+        source = self._concrete_route() if route is None else route
+        reader = getattr(source, "a4_scoped_runtime_incidents", None)
         return [] if not callable(reader) else [dict(item) for item in reader()]
 
     def gateway_terminal_count(self, request_id: str) -> int | None:
@@ -210,6 +216,10 @@ class LiveProductFaultTarget:
         source = binding.get("source_node_id")
         if not isinstance(source, str) or not source:
             raise FaultRejected("a6_fault_source_unavailable")
+        try:
+            source_route = self._concrete_route()
+        except Exception as error:
+            raise FaultRejected("a6_fault_route_unavailable") from error
         with self._lock:
             prior = self._armed.get(case_id)
             if prior is not None and prior.binding != binding:
@@ -219,6 +229,7 @@ class LiveProductFaultTarget:
                 case_id=case_id, request_id=request_id, binding=dict(binding),
                 source_node_id=source,
                 armed_reservation_count=self.reservation_count(request_id),
+                source_route=source_route,
                 # The command deadline is monotonic; publish it on the wall clock.
                 deadline_unix_ms=(None if type(deadline) is not int else int(
                     time.time() * 1_000 + deadline - time.monotonic() * 1_000)),
@@ -259,10 +270,11 @@ class LiveProductFaultTarget:
 
     # -- real peer and path faults ----------------------------------------------
 
-    def signal_node(self, node_id: str, signum: int) -> None:
+    def signal_node(self, node_id: str, signum: int, route: Any | None = None) -> None:
         """Signal the owned process group of one node's control session."""
 
-        sessions = getattr(self._concrete_route(), "_sessions", None)
+        source = self._concrete_route() if route is None else route
+        sessions = getattr(source, "_sessions", None)
         session = None if not isinstance(sessions, Mapping) else sessions.get(node_id)
         process = getattr(session, "_process", None)
         deliver = getattr(process, "_signal_process_group", None)
@@ -286,15 +298,16 @@ class LiveProductFaultTarget:
     def fail_source(self, record: ExecutedCase) -> dict[str, Any]:
         """Kill (or sever) the source peer and measure the route's own incident."""
 
-        baseline = {item.get("incident_id") for item in self.incidents()}
+        route = record.source_route
+        baseline = {item.get("incident_id") for item in self.incidents(route)}
         record.failure_marker = self.gateway_committed(record.request_id)
-        self.signal_node(record.source_node_id, signal.SIGKILL)
+        self.signal_node(record.source_node_id, signal.SIGKILL, route)
         identity = {name: record.binding[name] for name in IDENTITY_FIELDS}
 
         def observed() -> dict[str, Any] | None:
             if not self.router.a6_source_failure_observed(record.binding):
                 return None
-            for incident in self.incidents():
+            for incident in self.incidents(route):
                 if (incident.get("incident_id") not in baseline
                         and incident.get("request_id") == record.request_id
                         and incident.get("subject_id") == record.source_node_id
