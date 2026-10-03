@@ -1142,6 +1142,12 @@ class EntryCoordinator:
                path_attempt=new_attempt,
             )
             record.cleaned_up = True
+            failed_manifest = record.manifest
+         # The old path was released above; an A7-covered request still owns its
+         # durable fence record and shadow, which only the terminal finish releases.
+         controller = self.a7_controller
+         if controller is not None:
+            controller.finish(record.request.request_id, failed_manifest, outcome="failed")
          return False
 
       registration_failed = False

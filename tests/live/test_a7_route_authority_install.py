@@ -1,4 +1,10 @@
-"""A7 route authority installation is gated by staged node configs."""
+"""A7 route authority installation is gated by the nodes' attested A7 configs.
+
+Each node attests its validated ``a7/node.json`` in its signed ``configured``
+observation; the supervisor derives A7 staging from the route's verified
+observations, never from node-0's disk (a remote source's staging root is not
+readable there).
+"""
 
 from __future__ import annotations
 
@@ -58,10 +64,12 @@ def _graph() -> Any:
 class _Route:
     def __init__(self, root: Path) -> None:
         self.execution_graph = _graph()
+        # node-2's staging root is on the laptop: it does not exist on this host.
         self._peers = {
             "node-0": SimpleNamespace(node_id="node-0", staging_root=str(root / "node-0")),
-            "node-2": SimpleNamespace(node_id="node-2", staging_root=str(root / "node-2")),
+            "node-2": SimpleNamespace(node_id="node-2", staging_root="/Users/evinova/mycelium-a7-n2"),
         }
+        self._signed_observations: list[dict[str, Any]] = []
         self._peer_exit_successor_authority: Callable[..., bool] | None = None
         self.public_status = Mock(name="public_status")
 
@@ -147,9 +155,20 @@ def _source_config() -> dict[str, Any]:
     }
 
 
-def _stage_a7(root: Path) -> None:
-    _write_json(root / "node-0" / "a7" / "node.json", _entry_config())
-    _write_json(root / "node-2" / "a7" / "node.json", _source_config())
+def _configured(node_id: str, a7_config: Mapping[str, Any] | None) -> dict[str, Any]:
+    details: dict[str, Any] = {"assignment_id": f"assignment-{node_id}", "runtime_mode": "stage_local_kv"}
+    if a7_config is not None:
+        details["a7_node_config"] = dict(a7_config)
+    return {"observation": {"node_id": node_id, "event": "configured", "details": details}}
+
+
+def _attest_a7(route: _Route, *, entry: Mapping[str, Any] | None = None, source: Mapping[str, Any] | None = None) -> None:
+    route._signed_observations.append(_configured("node-0", _entry_config() if entry is None else entry))
+    route._signed_observations.append(_configured("node-2", _source_config() if source is None else source))
+
+
+def _stage_a7(root: Path, route: _Route) -> None:
+    _attest_a7(route)
 
 
 def _owner() -> ColdRouteRestartOwner:
@@ -158,7 +177,7 @@ def _owner() -> ColdRouteRestartOwner:
 
 def test_apply_cached_configuration_installs_authority_only_when_a7_is_staged(tmp_path: Path) -> None:
     route = _Route(tmp_path)
-    _stage_a7(tmp_path)
+    _stage_a7(tmp_path, route)
 
     _owner()._apply_cached_configuration(route)
 
@@ -178,11 +197,61 @@ def test_apply_cached_configuration_leaves_unstaged_route_without_authority(tmp_
 def test_apply_cached_configuration_sets_the_inner_live_route_when_wrapped(tmp_path: Path) -> None:
     route = _Route(tmp_path)
     wrapper = _RouterPortWrapper(route)
-    _stage_a7(tmp_path)
+    _stage_a7(tmp_path, route)
 
     _owner()._apply_cached_configuration(wrapper)  # type: ignore[arg-type]
 
     assert route._peer_exit_successor_authority is not None
+
+
+def test_disk_staged_configs_without_attestation_install_nothing(tmp_path: Path) -> None:
+    route = _Route(tmp_path)
+    _write_json(tmp_path / "node-0" / "a7" / "node.json", _entry_config())
+    route._signed_observations += [_configured("node-0", None), _configured("node-2", None)]
+
+    _owner()._apply_cached_configuration(route)
+
+    assert route._peer_exit_successor_authority is None
+
+
+def test_only_entry_attested_without_the_remote_source_installs_nothing(tmp_path: Path) -> None:
+    route = _Route(tmp_path)
+    route._signed_observations += [_configured("node-0", _entry_config()), _configured("node-2", None)]
+
+    _owner()._apply_cached_configuration(route)
+
+    assert route._peer_exit_successor_authority is None
+
+
+def test_attestation_mismatch_fails_closed(tmp_path: Path) -> None:
+    # A config attested by a node for another node id.
+    route = _Route(tmp_path)
+    _attest_a7(route, source={**_source_config(), "node_id": "node-0"})
+    _owner()._apply_cached_configuration(route)
+    assert route._peer_exit_successor_authority is None
+    # A coverage naming a placement the source did not attest.
+    route = _Route(tmp_path)
+    entry = _entry_config()
+    entry["entry"]["coverage"][0]["source_placement_id"] = "entry-p0"
+    _attest_a7(route, entry=entry)
+    _owner()._apply_cached_configuration(route)
+    assert route._peer_exit_successor_authority is None
+    # An attestation from a node that is not a route peer.
+    route = _Route(tmp_path)
+    _attest_a7(route)
+    route._signed_observations.append(_configured("node-9", _source_config()))
+    _owner()._apply_cached_configuration(route)
+    assert route._peer_exit_successor_authority is None
+
+
+def test_latest_configured_observation_per_node_wins(tmp_path: Path) -> None:
+    route = _Route(tmp_path)
+    _attest_a7(route)
+    route._signed_observations.append(_configured("node-2", None))  # the source restarted without A7
+
+    _owner()._apply_cached_configuration(route)
+
+    assert route._peer_exit_successor_authority is None
 
 
 def _install_for_closure() -> tuple[_Route, Callable[..., bool]]:

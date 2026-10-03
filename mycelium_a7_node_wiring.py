@@ -20,6 +20,7 @@ Every refusal is a stable code; nothing is inferred or defaulted into coverage.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -39,8 +40,22 @@ from mycelium_a7_standby_store import StandbyShadowStore
 from mycelium_a7_successor_coordinator import StandbySide
 from mycelium_qualification.signing import Ed25519EvidenceSigner, build_ed25519_verifier
 
+
+def _canonical_bytes(value: Any) -> bytes:
+   return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
 A7_NODE_CONFIG_PROTOCOL = "mycelium.a7_node_config.v1"
 A7_NODE_CONFIG_PATH = "a7/node.json"
+_NODE_ID_PATH_SAFE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+
+
+def a7_node_config_path_for(node_id: str) -> str:
+   """The per-node staged config path (one transfer bundle can stage every node's own file)."""
+
+   if not isinstance(node_id, str) or _NODE_ID_PATH_SAFE.fullmatch(node_id) is None or node_id in {".", ".."}:
+      raise A7WiringError("a7_node_id_invalid")
+   return f"a7/{node_id}/node.json"
 STANDBY_SECRET_BYTES = 64
 MAX_CHECKPOINT_BYTES = 256 * 1024 * 1024
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -384,6 +399,86 @@ class A7NodeWiring:
          return False
       return router.entry.report_lost_source(request_id, placement_id, reason="node_process_exited")
 
+   def product_projection(self, *, now_unix_ms: int, command_timeout_ms: int | None, collection_window_ms: int | None) -> dict[str, Any] | None:
+      """The entry's A7 recovery evidence for the product projection (entry role only).
+
+      Values are this node's own state: its latest covered request, its
+      qualification record, its standby port and its configuration.  A value
+      that has no observation yet is ``None`` and its key carries a stable
+      reason in ``unavailable_reasons``; nothing is defaulted.
+      """
+
+      entry = self.config["entry"]
+      if entry is None or self.controller is None or not entry["coverage"]:
+         return None
+      coverage = entry["coverage"][0]
+      qualification = self.qualifications.get(coverage["source_placement_id"]) or {}
+      challenge = qualification.get("parity_challenge")
+      evidence = self.controller.product_evidence()
+      reasons: dict[str, str] = {}
+
+      def value(key: str, observed: Any, reason: str) -> Any:
+         if observed is None:
+            reasons[key] = reason
+         return observed
+
+      standby_runtime = None
+      if self.standby_port is not None:
+         standby_runtime = self.standby_port.kv_snapshot()
+      last_stored = None if self.agent is None else self.agent.standby_last_stored()
+      bytes_per_sec = None
+      if (
+         evidence is not None
+         and isinstance(evidence.get("last_ack_rtt_ms"), (int, float))
+         and evidence["last_ack_rtt_ms"] > 0
+         and last_stored is not None
+         and last_stored.get("request_key") == evidence["request_key"]
+         and last_stored.get("checkpoint_sequence") == evidence.get("last_ack_checkpoint_sequence")
+      ):
+         bytes_per_sec = round(last_stored["payload_bytes"] * 1000.0 / evidence["last_ack_rtt_ms"], 3)
+      issued = qualification.get("issued_at_unix_ms")
+      expires = qualification.get("expires_at_unix_ms")
+      no_request = "no_covered_request_observed"
+      attributes = {
+         "committed_token_count": value("committed_token_count", None if evidence is None else evidence["committed"], no_request),
+         "sync_ack_wait_median_ms": value("sync_ack_wait_median_ms", None if evidence is None else evidence["ack_wait_median_ms"], no_request if evidence is None else "no_acknowledgement_waited"),
+         "recovery_prefill_operations": value("recovery_prefill_operations", None if standby_runtime is None else standby_runtime.get("prefill_operation_count"), "standby_not_on_entry"),
+         "duplicate_token_count": value("duplicate_token_count", None if evidence is None else evidence["duplicate_commits"], no_request),
+         "standby_placement_fingerprint": value("standby_placement_fingerprint", qualification.get("standby_placement_id"), "qualification_unavailable"),
+         "runtime_backend": value("runtime_backend", None if standby_runtime is None else standby_runtime.get("backend"), "standby_not_on_entry"),
+         "kv_reservation_bytes": value("kv_reservation_bytes", qualification.get("reserved_kv_bytes"), "qualification_unavailable"),
+         "measured_free_bytes": value("measured_free_bytes", qualification.get("available_bytes"), "standby_free_bytes_unmeasured"),
+         "last_checkpoint_bytes_per_sec": value("last_checkpoint_bytes_per_sec", bytes_per_sec, no_request if evidence is None else "checkpoint_rate_unobserved"),
+         "last_ack_rtt_ms": value("last_ack_rtt_ms", None if evidence is None else evidence["last_ack_rtt_ms"], no_request if evidence is None else "acknowledgement_unobserved"),
+         "fence_advance_sequence": value("fence_advance_sequence", None if evidence is None else evidence["fence_advances"], no_request),
+         "transport_rtt_to_standby_ms": value("transport_rtt_to_standby_ms", None if evidence is None else evidence["standby_receipt_rtt_ms"], "no_standby_cutover_exchange"),
+         "standby_plan_digest": "sha256:" + hashlib.sha256(_canonical_bytes(coverage)).hexdigest(),
+         "qualification_age_s": value("qualification_age_s", None if type(issued) is not int else round((now_unix_ms - issued) / 1000.0, 3), "qualification_unavailable"),
+         "parity_challenge_digest": value(
+            "parity_challenge_digest",
+            None if not isinstance(challenge, Mapping) else "sha256:" + hashlib.sha256(_canonical_bytes(challenge)).hexdigest(),
+            "parity_challenge_missing",
+         ),
+         "fence_ledger_state": "empty" if self.controller.fence_record_count() == 0 else "holding",
+         "durable_fence_generation": value("durable_fence_generation", None if evidence is None else evidence["fencing_generation"], no_request),
+         "parity_challenge_status": "missing" if not isinstance(challenge, Mapping) else ("passed" if challenge.get("passed") is True else "failed"),
+         "qualification_ttl_remaining_s": value("qualification_ttl_remaining_s", None if type(expires) is not int else round((expires - now_unix_ms) / 1000.0, 3), "qualification_unavailable"),
+         "recovery_path_chosen": value("recovery_path_chosen", None if evidence is None else evidence["outcome"], no_request if evidence is None else "no_cutover_decided"),
+         "collection_window_ms": value("collection_window_ms", collection_window_ms, "collection_window_off"),
+         "command_timeout_ms": value("command_timeout_ms", command_timeout_ms, "command_timeout_unknown"),
+         "ack_timeout_s": float(entry["ack_timeout_seconds"]),
+         "receipt_timeout_s": float(entry["receipt_timeout_seconds"]),
+      }
+      return {
+         "attributes": attributes,
+         "unavailable_reasons": dict(sorted(reasons.items())),
+         "roles": {
+            "entry_node_id": self.node_id,
+            "source_node_id": coverage["source_node_id"],
+            "standby_node_id": coverage["standby_node_id"],
+         },
+      }
+
    def snapshot(self, request_id: str | None = None) -> dict[str, Any]:
       """Privacy-reduced A7 node evidence (counts, bytes, states; never KV)."""
 
@@ -395,8 +490,16 @@ class A7NodeWiring:
          snapshot = self.standby_port.kv_snapshot()
          document["standby_runtime"] = {
             key: snapshot.get(key)
-            for key in ("active_state_count", "active_kv_bytes", "prefill_operation_count", "decode_operation_count")
+            for key in (
+               "active_state_count",
+               "active_kv_bytes",
+               "prefill_operation_count",
+               "prefill_input_token_count",
+               "decode_operation_count",
+            )
          }
+      if self.controller is not None:
+         document["entry_fence_record_count"] = self.controller.fence_record_count()
       if self.controller is not None and request_id is not None:
          document["request"] = self.controller.snapshot(request_id)
       return document

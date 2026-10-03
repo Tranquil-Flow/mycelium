@@ -54,6 +54,8 @@ import { SettingsProvider } from './features/settings/SettingsContext';
 import { SettingsWorkspace } from './features/settings/SettingsWorkspace';
 import { GovernanceReadinessSource } from './features/governance/GovernanceReadinessSource';
 import { RecoveryStatusBar } from './features/recovery/RecoveryStatusBar';
+import { A7RecoveryStatusBar, type A7WorkspaceKey } from './features/a7Recovery/A7RecoveryStatusBar';
+import { A7_RECOVERY_ENTITY_ID } from './features/productEvidence/contracts';
 import { IncidentsView } from './views/IncidentsView';
 import { NetworkView } from './views/NetworkView';
 import { PlansView } from './views/PlansView';
@@ -484,6 +486,14 @@ function OperatorApp({
         productEvidenceState={productEvidence.visible}
       >
         <RecoveryStatusBar route={activeView} enabled={source.source_mode === 'live'} />
+        {productEvidence.visible?.snapshot.entities.some(
+          ({ kind, entity_id }) => kind === 'recovery' && entity_id === A7_RECOVERY_ENTITY_ID,
+        ) ? (
+          <A7RecoveryStatusBar
+            workspace={(activeView === 'lab' ? 'device_lab' : activeView) as A7WorkspaceKey}
+            enabled={source.source_mode === 'live'}
+          />
+        ) : null}
         <ProductFeatureSlot
           route={activeView}
           registry={featureRegistry}

@@ -476,6 +476,87 @@ def _source_provenance(value: object) -> bool:
     )
 
 
+# A7 fenced KV-successor recovery evidence: one ``recovery`` entity with this
+# id carries the eight A7 workspaces' fields.  Every value is measured (or a
+# configured setting); an unobserved value is ``None`` and must carry a stable
+# reason in ``unavailable_reasons`` -- never a default.
+A7_RECOVERY_ENTITY_ID = "a7-kv-successor-runtime"
+A7_RECOVERY_ATTRIBUTE_TYPES: dict[str, str] = {
+    "committed_token_count": "count",
+    "sync_ack_wait_median_ms": "number",
+    "recovery_prefill_operations": "count",
+    "duplicate_token_count": "count",
+    "standby_placement_fingerprint": "digest",
+    "runtime_backend": "code",
+    "kv_reservation_bytes": "count",
+    "measured_free_bytes": "count",
+    "last_checkpoint_bytes_per_sec": "number",
+    "last_ack_rtt_ms": "number",
+    "fence_advance_sequence": "count",
+    "transport_rtt_to_standby_ms": "number",
+    "entry_node_binding": "identifier",
+    "source_node_binding": "identifier",
+    "standby_node_binding": "identifier",
+    "process_exited_incident_count": "count",
+    "standby_plan_digest": "digest",
+    "deployment_id_epoch": "identifier",
+    "qualification_age_s": "signed_number",
+    "parity_challenge_digest": "digest",
+    "fence_ledger_state": "fence_ledger_state",
+    "durable_fence_generation": "count",
+    "parity_challenge_status": "parity_challenge_status",
+    "qualification_ttl_remaining_s": "signed_number",
+    "scoped_incident_count_1h": "count",
+    "incident_reason_code": "code",
+    "recovery_path_chosen": "recovery_path",
+    "terminal_blocked_count": "count",
+    "collection_window_ms": "number",
+    "command_timeout_ms": "count",
+    "ack_timeout_s": "number",
+    "receipt_timeout_s": "number",
+}
+_A7_ENUMS = {
+    "fence_ledger_state": {"empty", "holding"},
+    "parity_challenge_status": {"passed", "failed", "missing"},
+    "recovery_path": {"fenced_kv_successor", "full_context_replay", "aborted"},
+}
+
+
+def _a7_value(kind: str, value: object) -> bool:
+    if kind == "count":
+        return _integer(value)
+    if kind in {"number", "signed_number"}:
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            and (kind == "signed_number" or value >= 0)
+        )
+    if kind == "digest":
+        return _digest(value)
+    if kind == "code":
+        return _code(value)
+    if kind == "identifier":
+        return _identifier(value)
+    return isinstance(value, str) and value in _A7_ENUMS[kind]
+
+
+def _a7_recovery(value: object) -> bool:
+    if not _exact(value, set(A7_RECOVERY_ATTRIBUTE_TYPES) | {"unavailable_reasons"}):
+        return False
+    reasons = value["unavailable_reasons"]
+    if not isinstance(reasons, Mapping) or not set(reasons) <= set(A7_RECOVERY_ATTRIBUTE_TYPES):
+        return False
+    for key, kind in A7_RECOVERY_ATTRIBUTE_TYPES.items():
+        item = value[key]
+        if item is None:
+            if not _code(reasons.get(key)):
+                return False
+        elif key in reasons or not _a7_value(kind, item):
+            return False
+    return True
+
+
 _ATTRIBUTE_VALIDATORS: dict[str, Callable[[object], bool]] = {
     "artifact": _artifact,
     "assignment": _assignment,
@@ -550,6 +631,8 @@ def _entity(value: object) -> bool:
         return False
     kind = value["kind"]
     validator = _ATTRIBUTE_VALIDATORS.get(kind)
+    if kind == "recovery" and value.get("entity_id") == A7_RECOVERY_ENTITY_ID:
+        validator = _a7_recovery
     return (
         validator is not None
         and _identifier(value["entity_id"])

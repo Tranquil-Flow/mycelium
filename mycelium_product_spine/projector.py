@@ -10,7 +10,12 @@ import re
 import threading
 from typing import Any, Mapping, Sequence
 
-from .contracts import ENTITY_KINDS, validate_product_snapshot
+from .contracts import (
+    A7_RECOVERY_ATTRIBUTE_TYPES,
+    A7_RECOVERY_ENTITY_ID,
+    ENTITY_KINDS,
+    validate_product_snapshot,
+)
 
 import mycelium_deadlines
 
@@ -123,6 +128,74 @@ _RECOVERY_PHASES = frozenset(
         "aborted",
     }
 )
+
+
+A7_PRODUCT_EVIDENCE_PROTOCOL = "mycelium.a7_product_evidence.v1"
+_A7_NODE_ATTRIBUTES = frozenset(A7_RECOVERY_ATTRIBUTE_TYPES) - {
+    "entry_node_binding",
+    "source_node_binding",
+    "standby_node_binding",
+    "process_exited_incident_count",
+    "scoped_incident_count_1h",
+    "incident_reason_code",
+    "terminal_blocked_count",
+    "deployment_id_epoch",
+}
+
+
+def _a7_recovery_entity(
+    value: Mapping[str, Any],
+    *,
+    pseudonym: Any,
+    recovery_attributes: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The A7 workspace entity from the entry's signed A7 evidence and route incidents."""
+
+    if value.get("protocol") != A7_PRODUCT_EVIDENCE_PROTOCOL:
+        raise ValueError("a7_projection_invalid")
+    node = value.get("node")
+    incidents = value.get("incidents")
+    if not isinstance(node, Mapping) or not isinstance(incidents, Mapping):
+        raise ValueError("a7_projection_invalid")
+    attributes = node.get("attributes")
+    reasons = node.get("unavailable_reasons")
+    roles = node.get("roles")
+    if (
+        not isinstance(attributes, Mapping)
+        or set(attributes) != _A7_NODE_ATTRIBUTES
+        or not isinstance(reasons, Mapping)
+        or not isinstance(roles, Mapping)
+        or not all(isinstance(roles.get(key), str) and roles[key] for key in ("entry_node_id", "source_node_id", "standby_node_id"))
+    ):
+        raise ValueError("a7_projection_invalid")
+    deployment_id = value.get("deployment_id")
+    epoch = value.get("deployment_epoch")
+    if not isinstance(deployment_id, str) or type(epoch) is not int:
+        raise ValueError("a7_projection_invalid")
+    projected = dict(attributes)
+    unavailable = {key: reason for key, reason in reasons.items() if key in _A7_NODE_ATTRIBUTES}
+    projected["entry_node_binding"] = pseudonym(roles["entry_node_id"])
+    projected["source_node_binding"] = pseudonym(roles["source_node_id"])
+    projected["standby_node_binding"] = pseudonym(roles["standby_node_id"])
+    projected["deployment_id_epoch"] = f"{deployment_id}:{epoch}"
+    projected["process_exited_incident_count"] = incidents.get("process_exited_incident_count")
+    projected["scoped_incident_count_1h"] = incidents.get("scoped_incident_count_1h")
+    projected["incident_reason_code"] = incidents.get("last_reason_code")
+    if projected["incident_reason_code"] is None:
+        unavailable["incident_reason_code"] = "no_scoped_incident"
+    terminal_blocked = None if recovery_attributes is None else recovery_attributes.get("terminal_blocked_count")
+    projected["terminal_blocked_count"] = terminal_blocked
+    if terminal_blocked is None:
+        unavailable["terminal_blocked_count"] = "recovery_source_missing"
+    projected["unavailable_reasons"] = dict(sorted(unavailable.items()))
+    binding = {
+        "deployment_id": deployment_id,
+        "deployment_epoch": epoch,
+        "route_id": None,
+        "route_generation": None,
+        "topology_version": value.get("topology_version") if type(value.get("topology_version")) is int else None,
+    }
+    return binding, projected
 
 
 def _recovery_aggregate(value: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, int | str]]:
@@ -239,6 +312,8 @@ class ProductProjector:
         recovery_status: Mapping[str, Any] | None = None,
         now_unix_ms: int,
         source_mode: str = "live",
+        a7_status: Mapping[str, Any] | None = None,
+        a7_configured: bool = False,
         source_errors: Mapping[str, str] | None = None,
         coarse_region_evidence: Sequence[Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
@@ -257,6 +332,7 @@ class ProductProjector:
                 "route-source",
                 "qualification-source",
                 "recovery-source",
+                "a7-source",
             }
             or _CODE.fullmatch(reason) is None
             for source_id, reason in errors.items()
@@ -278,6 +354,8 @@ class ProductProjector:
                 recovery_status=recovery_status,
                 now_unix_ms=now_unix_ms,
                 source_mode=source_mode,
+                a7_status=a7_status,
+                a7_configured=a7_configured or a7_status is not None or "a7-source" in errors,
                 generation=generation,
                 cursor=cursor,
                 source_errors=errors,
@@ -302,6 +380,8 @@ class ProductProjector:
         recovery_status: Mapping[str, Any] | None,
         now_unix_ms: int,
         source_mode: str,
+        a7_status: Mapping[str, Any] | None,
+        a7_configured: bool,
         generation: int,
         cursor: int,
         source_errors: Mapping[str, str],
@@ -466,6 +546,43 @@ class ProductProjector:
                 placed_by_raw_node.setdefault(stage["node_id"], []).append(stage)
 
         entities: list[dict[str, Any]] = []
+        if a7_configured:
+            a7_error = source_errors.get("a7-source")
+            a7_entity = None
+            if a7_error is None and isinstance(a7_status, Mapping):
+                try:
+                    a7_entity = _a7_recovery_entity(
+                        a7_status,
+                        pseudonym=self._pseudonym,
+                        recovery_attributes=recovery_attributes if recovery_current else None,
+                    )
+                except (TypeError, ValueError):
+                    a7_error = "a7_projection_invalid"
+            source_states.append(
+                self._source_state(
+                    "a7-source",
+                    "a7_entry_signed_evidence",
+                    "current" if a7_entity is not None else "missing",
+                    now_unix_ms,
+                    None if a7_entity is not None else (a7_error or "a7_source_missing"),
+                )
+            )
+            if a7_entity is not None:
+                entities.append(
+                    {
+                        "entity_id": A7_RECOVERY_ENTITY_ID,
+                        "kind": "recovery",
+                        "label": "Fenced KV-successor recovery",
+                        "source_id": "a7-source",
+                        "binding": a7_entity[0],
+                        "freshness": {
+                            "status": "current",
+                            "observed_at_unix_ms": now_unix_ms,
+                            "valid_until_unix_ms": now_unix_ms,
+                        },
+                        "attributes": a7_entity[1],
+                    }
+                )
         if recovery_current and recovery_binding is not None and recovery_attributes is not None:
             entities.append(
                 {
@@ -1189,6 +1306,7 @@ class ProductProjector:
                             "runtime-source": "mycelium.live_route_status.v1",
                             "request-source": "mycelium.observatory.request_projection.v1",
                             "recovery-source": "mycelium.full_context_recovery_runtime.v1",
+                            "a7-source": "mycelium.a7_product_evidence.v1",
                         }[source["source_id"]],
                         "source_generation": source["generation"],
                         "evidence_digest": None,

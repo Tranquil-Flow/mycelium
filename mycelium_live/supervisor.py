@@ -206,6 +206,46 @@ def _a7_stage_log_value(stage_id: str) -> str:
     return text
 
 
+A7_ATTESTED_CONFIG_FIELD = "a7_node_config"
+
+
+def _a7_attested_node_configs(route: Any, peers: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The A7 node configs each live node attested in its signed ``configured`` observation.
+
+    Detection is derived from the route's own verified observations, never from
+    node-0's disk: a remote source's staging root is not readable here.  The
+    route records an observation only after verifying its signature; the
+    latest ``configured`` observation per peer is the current node process.
+    An attestation from a node that is not a route peer fails closed (None).
+    """
+
+    try:
+        envelopes = list(getattr(route, "_signed_observations", None) or ())
+    except Exception:
+        return None
+    peer_nodes = {
+        getattr(peer, "node_id", None) for peer in peers.values()
+    }
+    configured: dict[str, Mapping[str, Any]] = {}
+    for envelope in envelopes:
+        observation = envelope.get("observation") if isinstance(envelope, Mapping) else None
+        if not isinstance(observation, Mapping) or observation.get("event") != "configured":
+            continue
+        node_id = observation.get("node_id")
+        details = observation.get("details")
+        if not isinstance(node_id, str) or not isinstance(details, Mapping):
+            continue
+        configured[node_id] = details
+    attested: dict[str, Any] = {}
+    for node_id, details in configured.items():
+        if A7_ATTESTED_CONFIG_FIELD not in details:
+            continue
+        if node_id not in peer_nodes or not isinstance(details[A7_ATTESTED_CONFIG_FIELD], Mapping):
+            return None
+        attested[node_id] = json.loads(json.dumps(details[A7_ATTESTED_CONFIG_FIELD]))
+    return attested
+
+
 def _a7_staged_authority(route: Any) -> _A7StagedAuthority | None:
     graph = _a7_route_graph(route)
     if graph is None or not isinstance(getattr(graph, "deployment_id", None), str):
@@ -217,11 +257,7 @@ def _a7_staged_authority(route: Any) -> _A7StagedAuthority | None:
     if not isinstance(peers, Mapping):
         return None
 
-    from mycelium_a7_node_wiring import (
-        A7_NODE_CONFIG_PATH,
-        validate_against_graph,
-        validate_node_config,
-    )
+    from mycelium_a7_node_wiring import validate_against_graph, validate_node_config
 
     placement_stage: dict[str, str] = {}
     for stage in getattr(graph, "stages", ()):
@@ -233,22 +269,16 @@ def _a7_staged_authority(route: Any) -> _A7StagedAuthority | None:
             if isinstance(placement_id, str):
                 placement_stage[placement_id] = stage_id
 
+    attested = _a7_attested_node_configs(route, peers)
+    if attested is None:
+        return None
     entries: list[tuple[str, str, str, str, str, str]] = []
     sources_by_stage: dict[str, set[tuple[str, str, str, str]]] = {}
     standbys_by_stage: dict[str, set[tuple[str, str]]] = {}
-    saw_config = False
-    for peer in peers.values():
-        node_id = getattr(peer, "node_id", None)
-        staging_root = getattr(peer, "staging_root", None)
-        if not isinstance(node_id, str) or not isinstance(staging_root, str):
-            continue
-        config_path = Path(staging_root) / A7_NODE_CONFIG_PATH
-        if not config_path.is_file():
-            continue
-        saw_config = True
+    for node_id, document in sorted(attested.items()):
         try:
             config = validate_node_config(
-                json.loads(config_path.read_text(encoding="utf-8")),
+                document,
                 deployment_id=graph.deployment_id,
                 node_id=node_id,
             )
@@ -286,7 +316,7 @@ def _a7_staged_authority(route: Any) -> _A7StagedAuthority | None:
                         coverage["standby_placement_id"],
                     )
                 )
-    if not saw_config:
+    if not attested:
         return None
 
     for (
@@ -1809,7 +1839,16 @@ def _product_application(
         ),
         state_root=state_root,
         transport_binding=transport_binding,
+        a7_source=_a7_product_source(route),
     )
+
+
+def _a7_product_source(route: Any) -> Callable[[], Mapping[str, Any] | None]:
+    """The A7 workspace evidence reader; it answers ``None`` while A7 is not staged."""
+
+    from mycelium_a7_evidence_control import RouteA7Evidence
+
+    return RouteA7Evidence(route).product
 
 
 def _optional_product_application(
@@ -3828,6 +3867,7 @@ def run_physical_server(
     a10_verify_control_port: int | None = None,
     a10_batch_policy_control_port: int | None = None,
     persist_transport_history: bool = False,
+    a7_evidence_control_port: int | None = None,
 ) -> int:
     deployment = native_deployment_projection(operator_plan)
     selected_deployment_dir: Path | None = None
@@ -3916,6 +3956,7 @@ def run_physical_server(
     a6_fault_control: Any | None = None
     a10_verify_control: Any | None = None
     a10_batch_policy_control: Any | None = None
+    a7_evidence_control: Any | None = None
     try:
         representation_authorization = _representation_authorization(
             representation_authorization_file
@@ -4027,6 +4068,15 @@ def run_physical_server(
                 public_origin=public_origin,
                 trusted_https_proxy=trusted_https_proxy,
             )
+        if a7_evidence_control_port is not None:
+            a7_evidence_control = _mount_a7_evidence_control(
+                stack=stack,
+                route=route,
+                product_port=port,
+                control_port=a7_evidence_control_port,
+                public_origin=public_origin,
+                trusted_https_proxy=trusted_https_proxy,
+            )
         startup_complete = True
 
         def request_stop(_signum: int, _frame: Any) -> None:
@@ -4065,6 +4115,11 @@ def run_physical_server(
                             )
                         }
                     ),
+                    **(
+                        {}
+                        if a7_evidence_control is None
+                        else {"a7_evidence_control": a7_evidence_control.status()}
+                    ),
                 }
             ).decode("utf-8"),
             flush=True,
@@ -4080,6 +4135,8 @@ def run_physical_server(
         a6_processes = (
             () if a6_fault_control is None else _a6_session_processes(route)
         )
+        if a7_evidence_control is not None:
+            a7_evidence_control.close()
         if a10_batch_policy_control is not None:
             a10_batch_policy_control.close()
         if a10_verify_control is not None:
@@ -4196,6 +4253,46 @@ def _mount_a10_batch_policy_control(
         raise RuntimeError(f"startup_a10_batch_policy_control_refused:{exc}") from exc
     except OSError as exc:
         raise RuntimeError("startup_a10_batch_policy_control_bind_failed") from exc
+    return control
+
+
+def _mount_a7_evidence_control(
+    *,
+    stack: Any,
+    route: Any,
+    product_port: int,
+    control_port: int,
+    public_origin: str | None,
+    trusted_https_proxy: bool,
+) -> Any:
+    """Mount the grant-gated, read-only A7 evidence door on its own loopback listener.
+
+    The door reads only the entry's signed ``a7_snapshot`` observation, the
+    route's request-scoped incidents and resource counters; it never mutates
+    the route, the router or a node.
+    """
+
+    from mycelium_a7_evidence_control import (
+        A7EvidenceControl,
+        A7EvidenceControlRefused,
+        RouteA7Evidence,
+        grant_from_environment,
+    )
+
+    try:
+        control = A7EvidenceControl(
+            grant=grant_from_environment(),
+            source=RouteA7Evidence(route, router=getattr(stack, "router", None)),
+            product_port=product_port,
+            port=control_port,
+            public_origin=public_origin,
+            trusted_https_proxy=trusted_https_proxy,
+        )
+        control.start()
+    except A7EvidenceControlRefused as exc:
+        raise RuntimeError(f"startup_a7_evidence_control_refused:{exc}") from exc
+    except OSError as exc:
+        raise RuntimeError("startup_a7_evidence_control_bind_failed") from exc
     return control
 
 
@@ -4612,6 +4709,14 @@ def build_parser() -> argparse.ArgumentParser:
             "MYCELIUM_A10_FLEET_GRANT"
         ),
     )
+    parser.add_argument(
+        "--a7-evidence-control-port",
+        type=int,
+        help=(
+            "mount the grant-gated, read-only A7 evidence door on this direct "
+            "127.0.0.1 port (0 = ephemeral); requires MYCELIUM_A7_FLEET_GRANT"
+        ),
+    )
     return parser
 
 
@@ -4645,6 +4750,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(
             "--a10-batch-policy-control-port must be 0 or from 1024 through 65535"
         )
+    if args.a7_evidence_control_port is not None and not (
+        args.a7_evidence_control_port == 0
+        or 1_024 <= args.a7_evidence_control_port <= 65_535
+    ):
+        raise SystemExit("--a7-evidence-control-port must be 0 or from 1024 through 65535")
     trusted_proxy_capability = None
     if args.trusted_proxy_capability_file is not None:
         try:
@@ -4715,6 +4825,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if args.persist_transport_history
                 else {}
             ),
+            **(
+                {}
+                if args.a7_evidence_control_port is None
+                else {"a7_evidence_control_port": args.a7_evidence_control_port}
+            ),
         )
     if args.persist_transport_history:
         raise SystemExit("--persist-transport-history is valid only with one --operator-plan")
@@ -4730,6 +4845,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(
             "--a10-batch-policy-control-port is valid only with one --operator-plan"
         )
+    if args.a7_evidence_control_port is not None:
+        raise SystemExit("--a7-evidence-control-port is valid only with one --operator-plan")
     if args.deployment_dir is not None:
         raise SystemExit("--deployment-dir is valid only with one --operator-plan")
     return run_registry_server(

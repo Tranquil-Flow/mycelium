@@ -55,6 +55,8 @@ class _Entry:
    last_digest: str
    end: int
    kv_bytes: int
+   checkpoint_count: int = 1
+   checkpoint_payload_bytes: int = 0
 
 
 def _layer_bytes(layers: dict[int, tuple[np.ndarray, np.ndarray]]) -> int:
@@ -71,6 +73,7 @@ class StandbyShadowStore:
       self._max_entry_bytes = max_entry_bytes
       self._max_entries = max_entries
       self._entries: dict[tuple[str, str], _Entry] = {}
+      self._last_stored: dict[str, Any] | None = None
       self._lock = threading.RLock()
 
    def accept(
@@ -109,10 +112,13 @@ class StandbyShadowStore:
                last_digest=digest,
                end=end,
                kv_bytes=_layer_bytes(layers),
+               checkpoint_count=1,
+               checkpoint_payload_bytes=len(payload),
             )
             if entry.kv_bytes > self._max_entry_bytes:
                raise StandbyShadowError("shadow_entry_too_large")
             self._entries[key] = entry
+            self._last_stored = {"request_key": request_key, "checkpoint_sequence": 0, "payload_bytes": len(payload)}
             return self._receipt(entry, digest, "advanced")
          if sequence == entry.sequence:
             if digest == entry.last_digest:
@@ -146,6 +152,9 @@ class StandbyShadowStore:
          entry.last_digest = digest
          entry.end = end
          entry.kv_bytes = merged_bytes
+         entry.checkpoint_count += 1
+         entry.checkpoint_payload_bytes += len(payload)
+         self._last_stored = {"request_key": request_key, "checkpoint_sequence": sequence, "payload_bytes": len(payload)}
          return self._receipt(entry, digest, "advanced")
 
    @staticmethod
@@ -196,4 +205,21 @@ class StandbyShadowStore:
          return {
             "shadow_entry_count": len(self._entries),
             "shadow_kv_bytes": sum(entry.kv_bytes for entry in self._entries.values()),
+         }
+
+   def last_stored(self) -> dict[str, Any] | None:
+      """The last stored checkpoint's (request key, sequence, payload bytes); kept after release."""
+
+      with self._lock:
+         return None if self._last_stored is None else dict(self._last_stored)
+
+   def checkpoint_snapshot(self) -> dict[str, int]:
+      """Stored (verified, non-idempotent) checkpoints and their payload bytes, for held chains."""
+
+      with self._lock:
+         return {
+            "shadow_checkpoint_count": sum(entry.checkpoint_count for entry in self._entries.values()),
+            "shadow_checkpoint_payload_bytes": sum(
+               entry.checkpoint_payload_bytes for entry in self._entries.values()
+            ),
          }

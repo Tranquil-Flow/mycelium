@@ -319,6 +319,16 @@ class DurableFenceStore:
          self._fsync_dir(self._root)
       return True
 
+   def record_count(self) -> int:
+      """Durable fence records currently held (temporary and quarantined files excluded)."""
+
+      with self._exclusive():
+         return sum(
+            1
+            for path in self._root.iterdir()
+            if path.suffix == ".json" and not path.name.startswith(".") and path.is_file() and not path.is_symlink()
+         )
+
    def reconcile(self, request_id: str, *, shadow_checkpoint_valid: bool, a6_available: bool) -> dict[str, Any]:
       """Reconcile one request after a coordinator restart (spec section 8).
 

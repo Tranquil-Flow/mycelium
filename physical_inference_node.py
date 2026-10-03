@@ -1652,10 +1652,27 @@ class PhysicalNodeService:
     def _a7_configure(self, graph: ExecutionGraph, runtime: Any) -> tuple[Any, Any]:
         """Bind the staged A7 roles; absent configuration leaves the node unchanged."""
 
-        from mycelium_a7_node_wiring import A7_NODE_CONFIG_PATH
+        from mycelium_a7_node_wiring import (
+            A7_NODE_CONFIG_PATH,
+            A7WiringError,
+            a7_node_config_path_for,
+        )
 
-        if not os.path.lexists(self.artifact_root / A7_NODE_CONFIG_PATH):
+        # One transfer bundle stages every node's own file under a7/<node_id>/;
+        # a node-local a7/node.json is the single-node spelling.  Both is ambiguous.
+        try:
+            candidates: tuple[str, ...] = (a7_node_config_path_for(self.node_id), A7_NODE_CONFIG_PATH)
+        except A7WiringError:
+            candidates = (A7_NODE_CONFIG_PATH,)
+        staged = [
+            relative
+            for relative in candidates
+            if os.path.lexists(self.artifact_root / relative)
+        ]
+        if not staged:
             return runtime, None
+        _require(len(staged) == 1, "a7_node_config_ambiguous")
+        config_path = staged[0]
         from mycelium_a7_node_wiring import (
             A7NodeWiring,
             A7WiringError,
@@ -1666,7 +1683,7 @@ class PhysicalNodeService:
 
         try:
             config = validate_node_config(
-                self._safe_document(A7_NODE_CONFIG_PATH, "invalid_a7_node_config"),
+                self._safe_document(config_path, "invalid_a7_node_config"),
                 deployment_id=self.deployment_id,
                 node_id=self.node_id,
             )
@@ -1814,10 +1831,22 @@ class PhysicalNodeService:
             "invalid_a7_snapshot_fields",
         )
         _require(self._a7_wiring is not None, "a7_not_configured")
-        return self._signed_result(
-            "a7_snapshot",
-            self._a7_wiring.snapshot(payload.get("request_id")),
-        )
+        document = self._a7_wiring.snapshot(payload.get("request_id"))
+        if "request_id" not in payload:
+            window_ms = None
+            relay = getattr(self.router, "relay", None) if self.router is not None else None
+            config = getattr(getattr(relay, "batch_scheduler", None), "config", None)
+            seconds = getattr(config, "live_hop_collection_window_seconds", None)
+            if isinstance(seconds, (int, float)) and not isinstance(seconds, bool) and seconds >= 0:
+                window_ms = round(float(seconds) * 1_000.0, 3)
+            product = self._a7_wiring.product_projection(
+                now_unix_ms=int(time.time() * 1_000),
+                command_timeout_ms=int(round(self.command_timeout * 1_000.0)),
+                collection_window_ms=window_ms,
+            )
+            if product is not None:
+                document["product"] = product
+        return self._signed_result("a7_snapshot", document)
 
     def _defer_after_response(self, action: Callable[[], Any], *, name: str) -> None:
         pending = getattr(self._after_response, "actions", None)
@@ -2161,6 +2190,11 @@ class PhysicalNodeService:
                 configured_details["stage_pack_verification_digest"] = report[
                     "stage_pack_verification_digest"
                 ]
+        if a7_wiring is not None:
+            # A7: attest the exact validated staged roles (public records only,
+            # never key material) so the route owner detects A7 staging from this
+            # signed observation instead of reading a peer's disk.
+            configured_details["a7_node_config"] = json.loads(json.dumps(a7_wiring.config))
         return self._signed_result("configured", configured_details)
 
     def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
