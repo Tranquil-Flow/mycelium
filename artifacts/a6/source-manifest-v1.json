@@ -313,8 +313,8 @@
     },
     {
       "path": "scripts/derive_a6_replica_plan.py",
-      "sha256": "sha256:1763dd8d86dcf683bbecdca4b0300c3feef7e2e328b35b4e12e8354d4b0b0e9c",
-      "size_bytes": 20594
+      "sha256": "sha256:cdc31cbdb0a2da421f10b9583e764eaa5b25da821284456401a87ebf3ab83b9c",
+      "size_bytes": 25098
     },
     {
       "path": "scripts/run_a7_kv_successor_case_runner.py",
@@ -458,8 +458,8 @@
     },
     {
       "path": "tests/live/test_a6_replica_plan_derivation.py",
-      "sha256": "sha256:9b130f569e2a573cb1c348829681361a8ab34c8002e239e853e9bdd088172bbc",
-      "size_bytes": 8077
+      "sha256": "sha256:b247f592aa3658a4cb113b1010de1831e7a7abdb0530e49019e6d1da4751b606",
+      "size_bytes": 11885
     },
     {
       "path": "tests/live/test_a6_request_scoped_qualification.py",
@@ -532,6 +532,11 @@
       "size_bytes": 2949
     },
     {
+      "path": "tests/node_agent/test_node_main.py",
+      "sha256": "sha256:1dd93db24d3d767225e361f49fc9f2bfe924f4aa5e5104be1b2119e5702e82fe",
+      "size_bytes": 130381
+    },
+    {
       "path": "tests/node_agent/test_physical_service_win32.py",
       "sha256": "sha256:74aa10358e2d319c580316975352b2948ff01ace5a993dca0d0fb9e1d7e9d3d4",
       "size_bytes": 11305
@@ -593,5 +598,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:a290ff1ebd48ca015c5253d7c15bfa8174e6e3fa88afb88d59e8ea9fe30dbe3a"
+  "source_digest": "sha256:fe45c82b0819f30b8b1c3f779249ad158ae32064253b3fb815ee7c403711a420"
 }
