@@ -1,5 +1,5 @@
 {
-  "base_commit": "53d1222b05f1a9c565e32071e16d33ecadfcdd06",
+  "base_commit": "53d1222b",
   "files": [
     {
       "path": "apps/node-app/src-tauri/gen/android/app/src/main/java/now/mycelium/node/NodeServicePlugin.kt",
@@ -188,8 +188,8 @@
     },
     {
       "path": "mycelium_router/mlx_runtime.py",
-      "sha256": "sha256:de143d9a318c099af149f5ffa9a84988bc3ebdb317704d37cdf2ba05586ab112",
-      "size_bytes": 112439
+      "sha256": "sha256:e49883762cdff6cd50e684d9ed664ee22e19b46b6ac94ea25dee5c95718a689a",
+      "size_bytes": 119685
     },
     {
       "path": "mycelium_router/numpy_runtime.py",
@@ -325,6 +325,11 @@
       "path": "scripts/run_a7_kv_successor_gate.py",
       "sha256": "sha256:24fa1199c023444c3c8f714561f60628fc64a44e2f3be277488b07be5fd90d7a",
       "size_bytes": 15068
+    },
+    {
+      "path": "test_router_mlx_persistent_int8.py",
+      "sha256": "sha256:614c1cf8c1959e5315a522a449127960f2ff3fbdb23a1cf09d4ce30c9845b4a3",
+      "size_bytes": 8038
     },
     {
       "path": "tests/a12_mobile_deterministic/test_route_assignment_delivery.py",
@@ -573,5 +578,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:738563a5a3e51c78189f070fdeb8f49f5d41de6b2d656e910ab5b153c537fed8"
+  "source_digest": "sha256:17395c9b6f98d84aa98375e7bb7a925f2ab14c2108db46c69c20a510234d8ff3"
 }
