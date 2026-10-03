@@ -1,0 +1,384 @@
+"""The A7 physical measurement plug-in over two real local node processes.
+
+These tests drive the plug-in's own measurement (``measure``) against a real
+``PhysicalLiveRoute`` that opens two real ``physical_inference_node.py``
+processes over native iroh (the R7 harness of ``test_a7_product_path``), read
+the evidence through the product's grant-gated A7 evidence door over loopback
+HTTP, and kill the stage-1 source's process group with the plug-in's own fault
+target (discovered by command-line pattern, exactly as on the fleet).
+
+The request is driven through the route, not through the product's browser
+gateway, so the driver honestly reports ``ordinary_browser_request = False``
+and the product evidence stream has no A7 workspace entity: the gate must
+therefore reject these records on exactly those predicates (plus, for the
+fallback harness, the predicates the missing A6 replay cannot satisfy), while
+every A7 predicate the plug-in measured is judged on real observations.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+import time
+import uuid
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from mycelium_a7_evidence_control import (
+    EXACT_FLEET_GRANT,
+    A7EvidenceControl,
+    RouteA7Evidence,
+)
+from mycelium_a7_physical_measurement import (
+    HttpEvidence,
+    MeasurementRefused,
+    MeasurementSettings,
+    RunningRequest,
+    SourceProcessGroupTarget,
+    measure,
+    measure_case,
+)
+from tests.live import test_a7_product_path as harness
+from tests.physical_qualification.test_node_service import NODE_SCRIPT, SIDECAR_BINARY
+
+ROOT = Path(__file__).resolve().parents[2]
+_GATE_SPEC = importlib.util.spec_from_file_location("a7_gate_for_measurement", ROOT / "scripts" / "run_a7_kv_successor_gate.py")
+assert _GATE_SPEC is not None and _GATE_SPEC.loader is not None
+gate = importlib.util.module_from_spec(_GATE_SPEC)
+_GATE_SPEC.loader.exec_module(gate)
+_RUNNER_SPEC = importlib.util.spec_from_file_location("a7_runner_for_measurement", ROOT / "scripts" / "run_a7_kv_successor_case_runner.py")
+assert _RUNNER_SPEC is not None and _RUNNER_SPEC.loader is not None
+runner = importlib.util.module_from_spec(_RUNNER_SPEC)
+_RUNNER_SPEC.loader.exec_module(runner)
+
+CANDIDATE = "b" * 40
+_MAX_NEW = 12  # the local deployment has n_positions=16 (prompt 3 + 12 - 1 < 16)
+_HARNESS_ONLY = {"not_an_ordinary_browser_request", "workspaces"}
+
+needs_sidecar = pytest.mark.skipif(not SIDECAR_BINARY.is_file(), reason="native iroh sidecar not built")
+
+
+class _RouteDriver:
+    """Drive ``PhysicalLiveRoute.infer`` (not the browser gateway) into a RunningRequest."""
+
+    ordinary_browser_request = False
+
+    def __init__(self, state: Any) -> None:
+        self._state = state
+        self.request_ids: list[str] = []
+
+    def start(self, label: str) -> RunningRequest:
+        running = RunningRequest(label=label)
+        request_id = f"a7m{label[:4]}" + uuid.uuid4().hex[:20]
+        running.request_id = request_id
+        self.request_ids.append(request_id)
+        manifest, route_identity, command_identity = harness._product_identity(self._state.graph, request_id)
+
+        class _Sink:
+            def emit(self, token_index: int, token_id: int) -> None:
+                running.on_token(token_index, token_id, publisher_generation=command_identity["publisher_generation"])
+
+        def run() -> None:
+            route = self._state.route
+            try:
+                route.infer(
+                    harness._PROMPT,
+                    max_new_tokens=harness._MAX_NEW,
+                    request_id=request_id,
+                    sink=_Sink(),
+                    route_identity=route_identity,
+                    locked_path_manifest=manifest,
+                    command_identity=command_identity,
+                    authorize_cleanup=lambda deadline: deadline,
+                    publish_cleanup_receipt=lambda _receipt: None,
+                )
+                running.on_terminal("completed")
+            except Exception:  # noqa: BLE001 - the terminal is the observation
+                running.on_terminal("failed")
+            finally:
+                # The gateway releases the route's request state after a terminal.
+                route.release_request(request_id)
+                running.finish()
+
+        threading.Thread(target=run, name=f"a7-measure-{label}", daemon=True).start()
+        return running
+
+    def workspaces_checked(self) -> list[str]:
+        return []
+
+
+def _source_target(state: Any) -> SourceProcessGroupTarget:
+    run_id = state.route._plan["run_id"]
+    return SourceProcessGroupTarget(
+        transport="local",
+        process_pattern=re.escape(str(NODE_SCRIPT)) + r" .*--run-id " + re.escape(run_id) + r" .*--node-id " + re.escape(harness._SOURCE_NODE_ID) + r"(\s|$)",
+    )
+
+
+def _measure_with_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, qualification_expired: bool) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], Any]:
+    # Long enough that the measured request is still decoding when the
+    # measurement (HTTP evidence reads, freeze, kill) acts on the ~ms local model.
+    monkeypatch.setattr(harness, "_MAX_NEW", _MAX_NEW)
+    state = harness._build_r7_staged_route(tmp_path, monkeypatch, qualification_expired=qualification_expired)
+    control = None
+    try:
+        state.route.open()
+        state.route._deployment_qualification = type("Qualified", (), {"route_ready": True})()
+        control = A7EvidenceControl(grant=EXACT_FLEET_GRANT, source=RouteA7Evidence(state.route), product_port=8787, port=0)
+        control.start()
+        evidence = HttpEvidence(f"http://127.0.0.1:{control.port}/a7/evidence", grant=EXACT_FLEET_GRANT)
+        fields, observations = measure(
+            driver=_RouteDriver(state),
+            evidence=evidence,
+            fault=_source_target(state),
+            settings=MeasurementSettings(kill_after_committed=2, settle_timeout_s=10.0, result_timeout_s=20.0, terminal_timeout_s=120.0),
+        )
+        plan = gate.build_plan(CANDIDATE)
+        case = gate.INCOMPATIBLE if qualification_expired else gate.POSITIVE
+        record = runner._measured_record(plan, case, fields)
+        scoped = harness._scoped_node_exit_incidents(state.route, observations_request_id(state))
+        return record, observations, plan, scoped
+    finally:
+        if control is not None:
+            control.close()
+        state.close()
+
+
+def observations_request_id(state: Any) -> str:
+    # The measured request is the most recently registered A7 request on the route.
+    incidents = [item for item in state.route.a4_scoped_runtime_incidents() if item.get("subject_id") == harness._SOURCE_NODE_ID]
+    return incidents[-1]["request_id"] if incidents else ""
+
+
+@needs_sidecar
+def test_plug_in_measures_the_positive_cutover_from_product_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    record, observations, plan, scoped = _measure_with_harness(tmp_path, monkeypatch, qualification_expired=False)
+
+    # Structurally a closed, plan-bound case record the gate judges.
+    assert set(record) == set(gate._CASE_FIELDS)
+    failures = gate.evaluate_case(record, plan)
+    assert "not_an_ordinary_browser_request" in failures
+    assert "workspaces" in failures
+    # Every A7 predicate measured here passes; only the harness limits (and, on
+    # this tiny local model, possibly the TPOT budget, whose base is a ~ms
+    # decode) remain.
+    assert set(failures) - _HARNESS_ONLY <= {"added_tpot"}, failures
+    print(json.dumps({"positive_failures": failures, "interruption_ms": record["interruption_ms"], "cutover_ms": record["cutover_ms"], "baseline_tpot_ms": record["baseline_tpot_ms"], "candidate_tpot_ms": record["candidate_tpot_ms"], "detection_latency_ms": observations["detection_latency_ms"], "checkpoint_count": record["checkpoint_count"], "checkpoint_bytes_total": record["checkpoint_bytes_total"]}, sort_keys=True))
+
+    assert record["fault"] == "source_process_kill"
+    assert record["outcome"] == "fenced_kv_successor"
+    assert record["kv_continuity_claimed"] is True
+    assert record["committed_before_failure"] >= 2
+    assert record["acknowledged_before_failure"] == record["committed_before_failure"]
+    assert record["successor_recovery_prefill_operations"] == 0
+    assert record["prefix_tokens_sent_to_successor"] == 0
+    assert record["successor_decode_operations"] >= 1
+    assert record["reference_parity"] is True
+    assert record["duplicate_tokens"] == record["missing_tokens"] == 0
+    assert record["publishers"] == record["terminal_results"] == 1
+    assert record["checkpoint_count"] >= record["committed_before_failure"]
+    assert record["checkpoint_bytes_total"] > 0
+    assert record["interruption_ms"] <= gate.THRESHOLDS["max_interruption_ms"]
+    assert record["cleanup"] == {
+        harness._ENTRY_NODE_ID: {name: 0 for name in gate._CLEANUP_FIELDS}
+    }
+    assert observations["fault"]["group_gone"] is True
+    assert observations["detection_latency_ms"] is not None
+    assert -50 <= observations["detection_latency_ms"] < 1_000
+    assert len(scoped) == 1
+
+
+@needs_sidecar
+def test_plug_in_measures_the_truthful_fallback_from_product_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    record, observations, plan, scoped = _measure_with_harness(tmp_path, monkeypatch, qualification_expired=True)
+
+    assert set(record) == set(gate._CASE_FIELDS)
+    assert record["fault"] == "source_process_kill"
+    assert record["outcome"] == "full_context_replay"
+    assert record["reason"] == "qualification_not_current"
+    assert record["kv_continuity_claimed"] is False
+    assert record["successor_decode_operations"] == 0
+    assert record["successor_recovery_prefill_operations"] == 0
+    assert record["committed_before_failure"] >= 2
+    assert record["terminal_results"] == 1
+    assert record["duplicate_tokens"] == 0
+    assert record["stale_source_publications_accepted"] == 0
+    # MEASURED FINDING (2026-10-03): after the A6-handed fallback the entry's
+    # A7 controller is never finished for the failed attempt, so its durable
+    # fence record stays (every other terminal counter returns to baseline).
+    assert record["cleanup"] == {
+        harness._ENTRY_NODE_ID: {
+            **{name: 0 for name in gate._CLEANUP_FIELDS},
+            "fence_records_delta": 1,
+        }
+    }
+    assert "terminal_released" not in observations["a7_result"]
+    assert observations["measured"]["terminals"] == ["failed"]
+    assert len(scoped) == 1 and scoped[0]["reason"] == "node_process_exited"
+    failures = gate.evaluate_case(record, plan)
+    # The route harness has no product router port, so no A6 full-context
+    # replay completes the request: the gate rejects the missing output, and
+    # the retained fence record fails the terminal resource delta.
+    assert set(failures) == _HARNESS_ONLY | {"reference_parity", "missing_tokens", "terminal_resource_delta"}, failures
+
+
+def _plan_file(tmp_path: Path) -> Path:
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(gate.build_plan(CANDIDATE), sort_keys=True), encoding="utf-8")
+    return path
+
+
+def _run_case_runner(tmp_path: Path, env_extra: dict[str, str]) -> tuple[subprocess.CompletedProcess[str], Path]:
+    record_out = tmp_path / f"{gate.POSITIVE}.json"
+    env = {key: value for key, value in os.environ.items() if not key.startswith("MYCELIUM_A7_")}
+    env.update(env_extra, PYTHONDONTWRITEBYTECODE="1")
+    completed = subprocess.run(
+        [sys.executable, "-B", str(ROOT / "scripts" / "run_a7_kv_successor_case_runner.py"), "--case", gate.POSITIVE, "--plan", str(_plan_file(tmp_path)), "--record-out", str(record_out)],
+        cwd=ROOT, env=env, text=True, capture_output=True, check=False,
+    )
+    return completed, record_out
+
+
+def test_case_runner_without_grant_never_reaches_the_plug_in(tmp_path: Path) -> None:
+    config = tmp_path / "config.json"
+    config.write_text("{}", encoding="utf-8")
+    completed, record_out = _run_case_runner(tmp_path, {"MYCELIUM_A7_PHYSICAL_CONFIG": str(config)})
+    assert completed.returncode == 0, completed.stderr
+    record = json.loads(record_out.read_text(encoding="utf-8"))
+    assert record["reason"] == "fleet_grant_missing"
+    assert record["outcome"] == "unknown"
+    assert not record_out.with_name(f"{gate.POSITIVE}.measurement.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("config_text", "reason"),
+    [(None, "a7_measurement_config_missing"), ("{}", "a7_measurement_config_invalid")],
+)
+def test_case_runner_with_grant_refuses_closed_without_a_valid_config(tmp_path: Path, config_text: str | None, reason: str) -> None:
+    env = {"MYCELIUM_A7_FLEET_GRANT": gate.EXACT_FLEET_GRANT}
+    if config_text is not None:
+        config = tmp_path / "config.json"
+        config.write_text(config_text, encoding="utf-8")
+        env["MYCELIUM_A7_PHYSICAL_CONFIG"] = str(config)
+    completed, record_out = _run_case_runner(tmp_path, env)
+    assert completed.returncode == 1
+    record = json.loads(record_out.read_text(encoding="utf-8"))
+    assert record["reason"] == reason
+    assert gate.evaluate(gate.build_plan(CANDIDATE), {gate.POSITIVE: record})["passed"] is False
+
+
+def test_measure_case_refuses_without_the_exact_grant() -> None:
+    with pytest.raises(MeasurementRefused) as refused:
+        measure_case(plan=gate.build_plan(CANDIDATE), case=gate.POSITIVE, grant="FLEET GRANTED TO A6", config_path="/nonexistent")
+    assert refused.value.code == "fleet_grant_missing"
+
+
+def test_fault_target_refuses_ambiguous_missing_and_own_groups(tmp_path: Path) -> None:
+    marker = "a7-fault-target-" + uuid.uuid4().hex
+    script = f"import time; time.sleep(60)  # {marker}"
+    processes = [subprocess.Popen([sys.executable, "-c", script], start_new_session=True) for _ in range(2)]
+    try:
+        time.sleep(0.3)
+        with pytest.raises(MeasurementRefused) as ambiguous:
+            SourceProcessGroupTarget(transport="local", process_pattern=re.escape(marker)).discover()
+        assert ambiguous.value.code == "a7_fault_target_not_unique"
+        with pytest.raises(MeasurementRefused) as missing:
+            SourceProcessGroupTarget(transport="local", process_pattern=re.escape(marker + "-absent")).discover()
+        assert missing.value.code == "a7_fault_target_not_found"
+        processes[1].kill()
+        processes[1].wait(timeout=10)
+        target = SourceProcessGroupTarget(transport="local", process_pattern=re.escape(marker))
+        group = target.discover()
+        assert group.pgid == processes[0].pid
+        killed = target.kill(group)
+        assert killed.kill_exit_status == 0
+        assert processes[0].wait(timeout=10) == -9
+        assert target.group_gone(group, timeout_s=5.0) is True
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
+    own = subprocess.Popen([sys.executable, "-c", script])  # same process group as this test
+    try:
+        time.sleep(0.3)
+        with pytest.raises(MeasurementRefused) as unsafe:
+            SourceProcessGroupTarget(transport="local", process_pattern=re.escape(marker)).discover()
+        assert unsafe.value.code == "a7_fault_target_unsafe"
+    finally:
+        own.kill()
+        own.wait(timeout=10)
+    with pytest.raises(MeasurementRefused):
+        SourceProcessGroupTarget(transport="ssh", process_pattern="x", ssh_target="-oProxyCommand=evil")
+
+
+def test_product_http_driver_parses_the_ordinary_gateway_stream() -> None:
+    """Parsing only: a loopback stand-in for the gateway's wire shapes (no record is built)."""
+
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from mycelium_a7_physical_measurement import WORKSPACE_ATTRIBUTES, ProductHttpDriver
+
+    seen: dict[str, Any] = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args: Any) -> None:
+            return
+
+        def _json(self, document: Any) -> None:
+            body = json.dumps(document).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self) -> None:  # noqa: N802
+            if self.path == "/api/v1/bootstrap":
+                self._json({"session": {"csrf_header": "X-CSRF", "csrf_token": "t" * 32}})
+            elif self.path == "/api/v1/qualification/current":
+                self._json({"binding": {"qualification_digest": "sha256:" + "1" * 64}})
+            elif self.path == "/api/v1/product/snapshot":
+                attributes = {key: 1 for key in WORKSPACE_ATTRIBUTES["inference"]}
+                self._json({"snapshot": {"entities": [{"kind": "recovery", "entity_id": "a7-kv-successor-runtime", "attributes": attributes}]}})
+            elif self.path == "/api/v1/inference/r1/events":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                for index, token in enumerate((11, 12, 13)):
+                    data = {"protocol": "p", "request_id": "r1", "sequence": index + 1, "type": "token", "token_index": index, "text": "x", "token_id": token, "publisher_generation": 1}
+                    self.wfile.write(f"id: 1:{index + 1}\nevent: token\ndata: {json.dumps(data)}\n\n".encode())
+                self.wfile.write(b'id: 1:9\nevent: completed\ndata: {"type": "completed"}\n\n')
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        def do_POST(self) -> None:  # noqa: N802
+            seen["csrf"] = self.headers.get("X-CSRF")
+            seen["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            self._json({"request_id": "r1", "event_path": "/api/v1/inference/r1/events"})
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        driver = ProductHttpDriver(f"http://127.0.0.1:{server.server_address[1]}", prompt="hello", max_new_tokens=8)
+        running = driver.start("baseline")
+        assert running.done.wait(timeout=10)
+        tokens, terminals = running.snapshot()
+        assert [(event.index, event.token_id, event.publisher_generation) for event in tokens] == [(0, 11, 1), (1, 12, 1), (2, 13, 1)]
+        assert [kind for kind, _ in terminals] == ["completed"]
+        assert running.request_id == "r1" and running.error is None
+        assert seen["csrf"] == "t" * 32 and seen["body"]["max_new_tokens"] == 8
+        assert driver.workspaces_checked() == ["inference"]
+        assert driver.ordinary_browser_request is True
+    finally:
+        server.shutdown()
+        server.server_close()

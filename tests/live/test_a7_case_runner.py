@@ -35,6 +35,7 @@ def _note_path(record_out: Path) -> Path:
 
 def _runner_env(*, fleet_grant: bool) -> dict[str, str]:
     env = os.environ.copy()
+    env.pop("MYCELIUM_A7_PHYSICAL_CONFIG", None)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     if fleet_grant:
         env["MYCELIUM_A7_FLEET_GRANT"] = gate.EXACT_FLEET_GRANT
@@ -97,7 +98,7 @@ def test_positive_without_fleet_grant_writes_closed_refusal_record_and_note(tmp_
     assert "completion-step residual race" in note["known_limit"]
 
 
-def test_fleet_grant_reaches_unimplemented_physical_plug_and_gate_rejects_record(tmp_path: Path) -> None:
+def test_fleet_grant_reaches_the_physical_plug_in_and_gate_rejects_its_refusal(tmp_path: Path) -> None:
     plan_path = tmp_path / "plan.json"
     plan = _write_plan(plan_path)
     record_out = tmp_path / f"{gate.POSITIVE}.json"
@@ -106,7 +107,8 @@ def test_fleet_grant_reaches_unimplemented_physical_plug_and_gate_rejects_record
 
     assert completed.returncode != 0
     record = _load_json(record_out)
-    assert record["reason"] == "physical_measurement_runner_not_implemented"
+    # No measurement configuration: the plug-in refuses before any physical action.
+    assert record["reason"] == "a7_measurement_config_missing"
     verdict = gate.evaluate(plan, {gate.POSITIVE: record})
     assert verdict["passed"] is False
     assert "outcome" in verdict["cases"][gate.POSITIVE]
