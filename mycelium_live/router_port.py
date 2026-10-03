@@ -557,17 +557,16 @@ class LiveRouterPort:
                         "simulation_only": True,
                     }
                 )
-            rotation = self._replacement_binding_digest(qualification_digest)
             with self._lock:
-                if self._recovery_qualification_digest not in (None, qualification_digest):
-                    if rotation != qualification_digest or self._pending:
-                        coordinator.cancel(request.request_id)
-                        raise M16AdmissionError("qualification_binding_changed")
+                bound = self._recovery_qualification_digest
+                if bound not in (None, qualification_digest) and not (
                     # The route owner replaced the route (cold restart) and
                     # publishes the replacement's qualification as current
-                    # authority. Rotate, as an idle renewal does; no admitted
-                    # request crosses the boundary.
-                    self._recovery_current_request_ids.clear()
+                    # authority: rotate, as an idle renewal does.
+                    self._rotate_binding_locked(qualification_digest, expected_bound=bound)
+                ):
+                    coordinator.cancel(request.request_id)
+                    raise M16AdmissionError("qualification_binding_changed")
                 self._recovery_qualification_digest = qualification_digest
             issued_at_ms = int(time.monotonic() * 1_000)
             publisher_generation = kwargs.get("publisher_generation", 1)
@@ -1612,13 +1611,37 @@ class LiveRouterPort:
                     self._changed.notify_all()
             return False
 
+    def _rotate_binding_locked(self, candidate: str, *, expected_bound: str) -> bool:
+        """Rotate the bound digest to ``candidate``; caller holds ``self._lock``.
+
+        The check and the mutation are one critical section: the source's
+        current record is re-read here, under the lock, so a record published
+        (or a route replaced again) after any earlier read can never be bound.
+        Refused unless the binding is still ``expected_bound``, no admitted
+        request would cross the boundary, and ``candidate`` is exactly the
+        source's non-refreshing current record for this deployment and graph.
+        Lock order: router lock, then the source's own short lock (the owner
+        never calls back into the router while holding its lock).
+        """
+
+        if (
+            self._recovery_qualification_digest != expected_bound
+            or self._pending
+            or self._replacement_binding_digest(candidate) != candidate
+        ):
+            return False
+        self._recovery_current_request_ids.clear()
+        self._recovery_qualification_digest = candidate
+        return True
+
     def _replacement_binding_digest(self, candidate: str | None) -> str | None:
         """The candidate digest iff it is the qualifier's current authority.
 
         After a cold route restart the owner qualifies the replacement route
         and publishes it as current; the bound digest still names the retired
-        route. Only the source's non-refreshing current record may rotate the
-        binding, and only for this exact deployment and graph.
+        route. Only the source's side-effect-free ``peek_current`` snapshot may
+        rotate the binding (a refreshing ``current()`` could run a challenge
+        or renew authority), and only for this exact deployment and graph.
         """
 
         source = self._qualification_source
@@ -1626,7 +1649,7 @@ class LiveRouterPort:
             return None
         reader = getattr(source, "peek_current", None)
         if not callable(reader):
-            reader = source.current
+            return None
         try:
             record = reader()
         except Exception:
@@ -1701,15 +1724,11 @@ class LiveRouterPort:
         ):
             raise M16AdmissionError("recovery_projection_binding_invalid")
         if bound is not None and digest != bound:
-            if self._replacement_binding_digest(digest) != digest:
-                raise M16AdmissionError("recovery_projection_binding_mismatch")
             with self._lock:
-                if self._pending or self._recovery_qualification_digest != bound:
-                    raise M16AdmissionError("recovery_projection_binding_mismatch")
                 # Idle after a route replacement: the projection binds the
                 # replacement's current qualification, as before any admission.
-                self._recovery_current_request_ids.clear()
-                self._recovery_qualification_digest = digest
+                if not self._rotate_binding_locked(digest, expected_bound=bound):
+                    raise M16AdmissionError("recovery_projection_binding_mismatch")
         return digest
 
     def recovery_public_projection(
