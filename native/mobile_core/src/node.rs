@@ -696,6 +696,15 @@ fn read_serving_intent(data_dir: &Path) -> bool {
         .is_some_and(|v| v["protocol"] == SERVING_INTENT_PROTOCOL && v["serving"] == Value::Bool(true))
 }
 
+/// Refuse work at or above the owner's thermal ceiling (`quota.thermal_ceiling_c`
+/// from the invitation), judged on `thermal_max_celsius`. Unknown temperature
+/// or no ceiling refuses nothing.
+fn thermal_refusal(ceiling: Option<f64>, metrics: &evidence::Metrics) -> Option<String> {
+    let ceiling = ceiling.filter(|c| c.is_finite())?;
+    let hottest = metrics.get("thermal_max_celsius").copied().flatten()?;
+    (hottest >= ceiling).then(|| format!("thermal_ceiling_reached:{hottest}>={ceiling}"))
+}
+
 fn lease_is_fresh(status: &NodeStatus, now: f64) -> bool {
     matches!(status.phase.as_str(), "joined" | "drained") && status.lease_expires_at.is_some_and(|t| now < t)
 }
@@ -1058,11 +1067,20 @@ impl Supervisor {
 async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>, transport: NodeTransport) {
     while let Some(inbound) = rx.recv().await {
         drop_expired_route(&shared, &transport).await;
+        // The owner's quota bounds how hot the device may run while serving.
+        let ceiling = {
+            let s = shared.lock().unwrap();
+            s.invitation.as_ref().and_then(|inv| inv["quota"]["thermal_ceiling_c"].as_f64())
+        };
+        let hot = thermal_refusal(ceiling, &current_platform_metrics(&shared));
         let started = std::time::Instant::now();
         let outcome = {
             let mut s = shared.lock().unwrap();
             s.status.frames_received += 1;
-            if inbound.frame.message_type != "HopHeader" {
+            if let Some(code) = hot {
+                s.status.last_error = Some(code);
+                None
+            } else if inbound.frame.message_type != "HopHeader" {
                 None
             } else {
                 let request_id = inbound.frame.body["request_id"].as_str().unwrap_or("").to_owned();
@@ -1097,5 +1115,22 @@ async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>
                 shared.lock().unwrap().status.last_error = Some(format!("forward_failed:{}", e.0));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frames_are_refused_at_the_owner_thermal_ceiling_only() {
+        let mut m = evidence::Metrics::new();
+        m.insert("thermal_max_celsius".into(), Some(44.9));
+        assert_eq!(thermal_refusal(Some(45.0), &m), None);
+        m.insert("thermal_max_celsius".into(), Some(45.0));
+        assert_eq!(thermal_refusal(Some(45.0), &m).as_deref(), Some("thermal_ceiling_reached:45>=45"));
+        assert_eq!(thermal_refusal(None, &m), None);
+        m.insert("thermal_max_celsius".into(), None);
+        assert_eq!(thermal_refusal(Some(45.0), &m), None);
     }
 }
