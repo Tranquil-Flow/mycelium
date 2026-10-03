@@ -17,7 +17,15 @@ the plan's own representation, runtime backends, control-plane binding,
 peers, startup prompt and run id. Nothing is invented:
 
 * each node's full assignment is compiled by ``compile_layer_assignments`` for
-  that node's existing runtime and artifact cache root;
+  that node's existing runtime and a PROVEN artifact root: the root on the
+  node that holds every model shard. A node whose plan root is the
+  controller's own base artifact root is proven on disk (every pack artifact
+  present with its manifest size); any other node needs the operator's
+  assertion ``--artifact-root NODE=PATH``, otherwise the derivation refuses
+  (``a6_replica_artifact_root_unproven``). The base plan's root of a remote
+  node was provisioned for the old split and may lack the other stage's shard,
+  and the derive-time challenge cannot see that: it measures the controller's
+  local copy;
 * each load proof is measured by loading the full assignment locally with that
   node's runtime backend, exactly as the builder measured the split proofs;
 * the startup challenge output is recomputed through BOTH full paths and the
@@ -26,8 +34,11 @@ peers, startup prompt and run id. Nothing is invented:
 * offers keep their recipients and are re-signed by the plan binding with the
   seed's own key (``--seed-state-root``), or left for the caller to bind.
 
-Offline: no peer, transport or fleet contact. Staging the derived bundle (both
-hosts now need every model shard) remains the operator's ``stage_live_route``.
+Offline: no peer, transport or fleet contact. Staging the derived bundle
+(``stage_live_route``) transfers the control documents and code, NOT model
+shards: each node reads its shards from its own artifact root, so a remote
+node's asserted root must already hold the complete model before the plan is
+served (the node refuses ``invalid_stage_pack_file`` at configure otherwise).
 """
 from __future__ import annotations
 
@@ -37,6 +48,7 @@ import gc
 import json
 import os
 import shutil
+import stat
 import sys
 import time
 from dataclasses import asdict
@@ -104,6 +116,55 @@ def _compile_full(
     return assignment
 
 
+def _check_local_root(manifest: Mapping[str, Any], template: Mapping[str, Any], root: str) -> None:
+    """Every artifact the full pack names exists under ``root`` with its size."""
+
+    base = Path(root)
+    for record in _compile_full(manifest, template, root)["files"]:
+        try:
+            metadata = (base / record["path"]).lstat()
+        except OSError:
+            raise DerivationError("a6_replica_local_artifact_missing") from None
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != record["size_bytes"]:
+            raise DerivationError("a6_replica_local_artifact_missing")
+
+
+def resolve_artifact_roots(
+    manifest: Mapping[str, Any],
+    templates: Sequence[Mapping[str, Any]],
+    asserted: Mapping[str, str],
+    local_artifact_root: Path,
+) -> dict[str, dict[str, str]]:
+    """Return ``{node_id: {"artifact_root", "proof"}}`` or refuse.
+
+    ``proof`` is ``local_disk_checked`` when the root is the controller's own
+    base artifact root (checked here, file by file) and ``operator_asserted``
+    for a root the operator vouched for with ``--artifact-root``. A node with
+    neither has no proven root and the derivation refuses.
+    """
+
+    node_ids = [template["node_id"] for template in templates]
+    unknown = sorted(set(asserted) - set(node_ids))
+    if unknown:
+        raise DerivationError("a6_replica_artifact_root_unknown_node")
+    local = Path(local_artifact_root).resolve()
+    roots: dict[str, dict[str, str]] = {}
+    for template in templates:
+        node_id = template["node_id"]
+        root = asserted.get(node_id, template["artifact_cache_root"])
+        if (not isinstance(root, str) or not os.path.isabs(root)
+                or os.path.normpath(root) != root or root == os.sep):
+            raise DerivationError("a6_replica_artifact_root_invalid")
+        if Path(root).resolve() == local:
+            _check_local_root(manifest, template, root)
+            roots[node_id] = {"artifact_root": root, "proof": "local_disk_checked"}
+        elif node_id in asserted:
+            roots[node_id] = {"artifact_root": root, "proof": "operator_asserted"}
+        else:
+            raise DerivationError("a6_replica_artifact_root_unproven")
+    return roots
+
+
 def _run_challenge(loaded: Any, backend: str, prompt: Sequence[int], count: int) -> tuple[int, ...]:
     from mycelium_router.decoding import quantized_greedy_token_id
 
@@ -150,12 +211,15 @@ def replica_documents(
     load_generation: int,
     challenge_prompt: Sequence[int],
     challenge_count: int,
+    artifact_roots: Mapping[str, str] | None = None,
     on_progress: Callable[[str, Mapping[str, Any]], None] = lambda _stage, _fields: None,
 ) -> dict[str, Any]:
     """Compile, measure and bind one complete-model placement per node.
 
     ``templates`` are the nodes' current assignments, in placement order (the
-    first is the entry/primary path). Returns assignments, stage packs,
+    first is the entry/primary path). ``artifact_roots`` maps each node to its
+    proven artifact root (see ``resolve_artifact_roots``); a node missing from
+    it keeps its template root. Returns assignments, stage packs,
     verifications, proofs, the replicated execution graph and the measured
     challenge output of every path.
     """
@@ -178,7 +242,8 @@ def replica_documents(
     for template in templates:
         node_id = template["node_id"]
         backend = template["runtime"]["backend"]
-        assignment = _compile_full(manifest, template, template["artifact_cache_root"])
+        target_root = (artifact_roots or {}).get(node_id, template["artifact_cache_root"])
+        assignment = _compile_full(manifest, template, target_root)
         local = _compile_full(manifest, template, str(local_root))
         report = provision_assignment(local, fetch_file=local_fetch, local_files_only=True)
         local_pack = compile_stage_pack(local, dict(manifest), report)
@@ -256,9 +321,15 @@ def derive_plan(
     base: Mapping[str, Any],
     *,
     bundle_out: Path,
+    artifact_roots: Mapping[str, str] | None = None,
     on_progress: Callable[[str, Mapping[str, Any]], None] = lambda _stage, _fields: None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Return (unbound derived plan, derivation report); writes ``bundle_out``."""
+    """Return (unbound derived plan, derivation report); writes ``bundle_out``.
+
+    ``artifact_roots`` holds the operator's assertions ``{node_id: root}``: the
+    root on that node which holds the complete model. Every node not proven
+    local needs one (``resolve_artifact_roots``).
+    """
 
     from mycelium_qualification.physical_deployment import build_physical_device_states
     from scripts.build_qwen_live_route import (
@@ -292,10 +363,14 @@ def derive_plan(
     if [template["node_id"] for template in templates] != [node["node_id"] for node in nodes]:
         raise DerivationError("a6_replica_template_node_mismatch")
     expected = list(run_plan["expected_token_ids"])
+    local_artifact_root = bundle_in / "deployment"
+    roots = resolve_artifact_roots(
+        manifest, templates, dict(artifact_roots or {}), local_artifact_root)
     documents = replica_documents(
         manifest=manifest,
         templates=templates,
-        local_artifact_root=bundle_in / "deployment",
+        local_artifact_root=local_artifact_root,
+        artifact_roots={node_id: entry["artifact_root"] for node_id, entry in roots.items()},
         load_generation=load_generation,
         challenge_prompt=run_plan["request"]["prompt_token_ids"],
         challenge_count=len(expected),
@@ -376,6 +451,7 @@ def derive_plan(
             for stage in documents["graph"].stages
             for placement in stage.placements
         ],
+        "artifact_roots": roots,
         "challenge_outputs": outputs,
         "base_expected_token_ids": expected,
         "expected_token_ids": list(path_output),
@@ -448,6 +524,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output-plan", type=Path, required=True)
     parser.add_argument("--bundle-out", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument(
+        "--artifact-root", action="append", default=[], metavar="NODE=PATH",
+        help="assert that PATH on NODE holds the complete model (repeatable); required "
+             "for every node whose root is not the controller's own base artifact root")
     binding = parser.add_mutually_exclusive_group(required=True)
     binding.add_argument("--seed-state-root", type=Path)
     binding.add_argument("--unbound", action="store_true",
@@ -458,12 +538,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps({"refused": "output_exists", "path": str(path)}))
             return 2
 
+    asserted: dict[str, str] = {}
+    for item in args.artifact_root:
+        node_id, separator, root = item.partition("=")
+        if not separator or not node_id or not root or node_id in asserted:
+            print(json.dumps({"refused": "a6_replica_artifact_root_invalid", "value": item}))
+            return 2
+        asserted[node_id] = root
+
     def progress(stage: str, fields: Mapping[str, Any]) -> None:
         print(json.dumps({"stage": stage, **fields}, sort_keys=True), flush=True)
 
     try:
         plan, report = derive_plan(
-            _read_json(args.base_plan), bundle_out=args.bundle_out, on_progress=progress)
+            _read_json(args.base_plan), bundle_out=args.bundle_out,
+            artifact_roots=asserted, on_progress=progress)
         if args.seed_state_root is not None:
             plan = bind(plan, args.seed_state_root, now=time.time())
             report["bound"] = True
