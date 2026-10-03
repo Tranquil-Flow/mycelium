@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
@@ -43,6 +44,11 @@ _MAX_CANCELLATION_AND_CLEANUP_SECONDS = mycelium_deadlines.CANCEL_AND_CLEANUP_BU
 
 
 _LOGGER = logging.getLogger(__name__)
+#: Released requests whose observed source-failure identity stays readable.
+#: The gateway releases a request as soon as its backend run returns, which
+#: for a synchronously refused recovery happens before a controlled-fault
+#: observer can poll; the bounded map keeps that one transition observable.
+_RETAINED_SOURCE_FAILURES_MAX = 256
 
 # A withheld terminal is the route's most consequential refusal: the client sees a stream that simply ends.
 # Until round p78r1 (ERRATA-23) the reason lived only in ``LiveRoute._incidents`` -- in memory -- so it died
@@ -241,6 +247,7 @@ class LiveRouterPort:
         self._pending: dict[str, _Pending] = {}
         self._sinks: dict[str, object] = {}
         self._recovery_failures: dict[str, str] = {}
+        self._retained_source_failures: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._coordinator = runtime_coordinator
         self._recovery_authority = recovery_authority
         self._recovery_qualification_source = recovery_qualification_source
@@ -855,6 +862,8 @@ class LiveRouterPort:
                             "publisher_generation", "cancellation_generation",
                         )
                     }
+                    self._retain_source_failure_identity(
+                        request_id, pending.source_failure_identity)
                 pending.recovery_required = True
                 pending.recovery_phase = "failure_observed"
                 pending.execution_started = False
@@ -1045,18 +1054,42 @@ class LiveRouterPort:
             "terminal_cas_count": sum(item.terminal_revision for item in snapshots),
         }
 
+    def _retain_source_failure_identity(
+        self, request_id: str, identity: Mapping[str, Any] | None
+    ) -> None:
+        """Keep one observed source-failure identity past request release.
+
+        Caller holds ``self._lock``. Bounded FIFO: the oldest released
+        observation is evicted first; a live pending request never depends on
+        this map.
+        """
+        if identity is None:
+            return
+        retained = self._retained_source_failures
+        retained.pop(request_id, None)
+        retained[request_id] = dict(identity)
+        while len(retained) > _RETAINED_SOURCE_FAILURES_MAX:
+            retained.popitem(last=False)
+
     def _a6_test_only_source_failure_observed(self, binding: dict[str, Any]) -> bool:
-        """Read the source recovery transition, not a successor's current status."""
+        """Read the source recovery transition, not a successor's current status.
+
+        The pending request is authoritative while it exists. Once the gateway
+        has released it (a recovery refused synchronously settles and releases
+        before an observer can poll), the bounded retained identity answers.
+        """
         request_id = binding.get("request_id")
         if not isinstance(request_id, str):
             return False
         with self._lock:
             pending = self._pending.get(request_id)
+            identity = (
+                self._retained_source_failures.get(request_id)
+                if pending is None else pending.source_failure_identity
+            )
             return bool(
-                pending is not None and pending.source_failure_identity is not None
-                and pending.source_failure_identity == {
-                    field: binding.get(field) for field in pending.source_failure_identity
-                }
+                identity is not None
+                and identity == {field: binding.get(field) for field in identity}
             )
 
     def _a6_test_only_source_fault_binding(self, request_id: str) -> dict[str, Any] | None:
