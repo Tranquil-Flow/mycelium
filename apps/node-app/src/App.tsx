@@ -17,13 +17,21 @@ export function App({ api = tauriApi }: { api?: NodeApi }) {
 
   useEffect(() => {
     let off: (() => void) | undefined;
+    let offService: (() => void) | undefined;
     let alive = true;
     api.onStatus((s) => alive && setStatus(s)).then((u) => (off = u));
+    // The serving service also changes without a tap here (restored after a
+    // restart, stopped from the notification): follow it, never a stale snapshot.
+    api
+      .onService((s) => alive && setService(s))
+      .then((u) => (offService = u))
+      .catch(() => undefined);
     api.status().then((s) => alive && setStatus(s)).catch(() => undefined);
     api.servingStatus().then((s) => alive && setService(s)).catch(() => undefined);
     return () => {
       alive = false;
       off?.();
+      offService?.();
     };
   }, [api]);
 
@@ -182,6 +190,11 @@ function StatusCard({ status, onJoin, busy }: { status: NodeStatus; onJoin: () =
         <dd>{status.relay_online ? 'iroh online' : 'connecting…'}</dd>
         <dt>Route ready</dt>
         <dd>{status.route_ready ? 'yes' : 'no (placement is the planner’s decision)'}</dd>
+        <dt>Route assignment</dt>
+        <dd>
+          {status.route_assignment ? `${status.route_assignment} (issued by the swarm owner)` : 'none'}
+          {status.route_assignment_error && ` · ${status.route_assignment_error}`}
+        </dd>
         <dt>Stage</dt>
         <dd>{status.stage_loaded ? status.stage_loaded.slice(0, 19) : 'none assigned'}</dd>
         <dt>Frames</dt>

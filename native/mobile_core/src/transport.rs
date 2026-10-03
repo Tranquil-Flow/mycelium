@@ -107,6 +107,11 @@ impl NodeTransport {
         self.peers.write().await.insert(peer, generation);
     }
 
+    /// Withdraw a peer from the allow-list (its next connection is refused).
+    pub async fn remove_peer(&self, peer: EndpointId) {
+        self.peers.write().await.remove(&peer);
+    }
+
     pub async fn close(&self) {
         self.endpoint.close().await;
     }

@@ -2,7 +2,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
-import type { NodeApi, NodeStatus } from './api';
+import type { NodeApi, NodeStatus, ServiceStatus } from './api';
 
 const base: NodeStatus = {
   phase: 'unpaired',
@@ -22,10 +22,14 @@ const base: NodeStatus = {
   peer_class: 'android_native_iroh',
   runtime_backend: 'mobile-rust-reference',
   route_ready: false,
+  route_assignment: null,
+  route_assignment_error: null,
+  serving_intent: false,
 };
 
 function fakeApi(overrides: Partial<NodeApi> = {}) {
   let push: (s: NodeStatus) => void = () => undefined;
+  let pushService: (s: ServiceStatus) => void = () => undefined;
   let link: (u: string) => void = () => undefined;
   const api: NodeApi = {
     status: vi.fn(async () => base),
@@ -39,6 +43,10 @@ function fakeApi(overrides: Partial<NodeApi> = {}) {
       push = h;
       return () => undefined;
     }),
+    onService: vi.fn(async (h) => {
+      pushService = h;
+      return () => undefined;
+    }),
     exportEvidence: vi.fn(async () => ({ shared: true, observations: 3 })),
     scanQr: vi.fn(async () => 'mycelium:QRCODE'),
     onDeepLink: vi.fn(async (h) => {
@@ -47,7 +55,12 @@ function fakeApi(overrides: Partial<NodeApi> = {}) {
     }),
     ...overrides,
   };
-  return { api, push: (s: NodeStatus) => push(s), link: (u: string) => link(u) };
+  return {
+    api,
+    push: (s: NodeStatus) => push(s),
+    pushService: (s: ServiceStatus) => pushService(s),
+    link: (u: string) => link(u),
+  };
 }
 
 describe('node app', () => {
@@ -110,6 +123,26 @@ describe('node app', () => {
     await act(async () => push({ ...base, phase: 'joined', member_generation: 1 }));
     expect(await screen.findByText(/no \(placement/)).toBeInTheDocument();
   });
+  it('shows the owner-issued route assignment and its stage, never route readiness', async () => {
+    const { api, push } = fakeApi({ status: vi.fn(async () => ({ ...base, phase: 'joined', member_generation: 1 })) });
+    render(<App api={api} />);
+    expect(await screen.findByText('none')).toBeInTheDocument();
+    await act(async () =>
+      push({
+        ...base,
+        phase: 'joined',
+        member_generation: 2,
+        route_assignment: 'route-1a2b',
+        stage_loaded: 'sha256:ed97b63c01f619ce350bc726419e9cb605de0d54893e00a37b8898db4b87ab9c',
+      }),
+    );
+    expect(screen.getByText(/route-1a2b \(issued by the swarm owner\)/)).toBeInTheDocument();
+    expect(screen.getByText('sha256:ed97b63c01f6')).toBeInTheDocument();
+    expect(screen.getByText(/no \(placement/)).toBeInTheDocument();
+    await act(async () => push({ ...base, phase: 'joined', member_generation: 2, route_assignment_error: 'route_assignment_refused:seed_member_lease_expired' }));
+    expect(screen.getByText(/route_assignment_refused:seed_member_lease_expired/)).toBeInTheDocument();
+  });
+
   it('exports the sealed evidence through the share sheet from settings', async () => {
     const { api } = fakeApi({ status: vi.fn(async () => ({ ...base, phase: 'joined', member_generation: 1 })) });
     render(<App api={api} />);
@@ -174,6 +207,25 @@ describe('node app', () => {
     await act(async () => push({ ...held, member_generation: 2 }));
     fireEvent.click(screen.getByRole('button', { name: 'serving' }));
     expect(await screen.findByText(/Serving in the background/)).toBeInTheDocument();
+  });
+
+  it('a restarted app that restored serving says it is serving once the resumed lease is held', async () => {
+    // Process death: the service snapshot at mount is "not running"; the shell
+    // restores it from the persisted intent and streams the change.
+    const resumed = { ...base, phase: 'reconnecting', swarm_id: 'swarm-a', member_generation: 3, serving_intent: true };
+    const { api, push, pushService } = fakeApi({ status: vi.fn(async () => resumed) });
+    render(<App api={api} />);
+    await screen.findByRole('button', { name: 'serving' });
+    fireEvent.click(screen.getByRole('button', { name: 'serving' }));
+    expect(await screen.findByText('Not serving.')).toBeInTheDocument();
+    await act(async () => pushService({ running: true, uptime_ms: 0, mode: 'android_foreground_service' }));
+    expect(screen.getByText(/Not serving right now: reconnecting/)).toBeInTheDocument();
+    await act(async () => push({ ...resumed, phase: 'joined', member_generation: 4, lease_fresh: true }));
+    expect(screen.getByText(/Serving in the background/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop serving' })).toBeInTheDocument();
+    // Stopped from the notification: the label follows.
+    await act(async () => pushService({ running: false, uptime_ms: 0, mode: 'android_foreground_service' }));
+    expect(screen.getByText('Not serving.')).toBeInTheDocument();
   });
 
   it('a revoked node says it is no longer a member', async () => {

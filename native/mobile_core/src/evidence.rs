@@ -218,8 +218,55 @@ pub fn platform_metrics(root: &Path) -> Metrics {
             .map(|milli| milli / 1000.0)
             .fold(None, |acc: Option<f64>, v| Some(acc.map_or(v, |a| a.max(v))))
     });
+    metrics.insert("thermal_zone_max_celsius".into(), thermal);
     metrics.insert("thermal_max_celsius".into(), thermal);
     metrics
+}
+
+/// A reading the app shell sampled from OS APIs is used for at most this long.
+pub const SHELL_SAMPLE_MAX_AGE_S: f64 = 180.0;
+
+/// Readings the app shell may supply, with the range a real reading falls in:
+/// * `battery_level_percent` — sticky `ACTION_BATTERY_CHANGED` level/scale × 100;
+/// * `charging` — 1 when the battery status is charging or full, else 0;
+/// * `battery_temperature_celsius` — `BatteryManager.EXTRA_TEMPERATURE` / 10;
+/// * `thermal_status` — `PowerManager.getCurrentThermalStatus()` (0 none … 6 shutdown);
+/// * `thermal_headroom` — `PowerManager.getThermalHeadroom(0)` (1.0 = severe throttling).
+pub const SHELL_METRICS: [(&str, f64, f64); 5] = [
+    ("battery_level_percent", 0.0, 100.0),
+    ("charging", 0.0, 1.0),
+    ("battery_temperature_celsius", -40.0, 150.0),
+    ("thermal_status", 0.0, 6.0),
+    ("thermal_headroom", 0.0, 100.0),
+];
+
+/// Combine the procfs/sysfs readings with the OS readings the app shell sampled
+/// (Android `BatteryManager` / `PowerManager`; an unprivileged app usually cannot
+/// read the sysfs battery and thermal nodes). A shell reading outside its range
+/// is dropped, never clamped. `thermal_max_celsius` is the hottest temperature in
+/// degrees Celsius among the sensors the app can read: the battery temperature
+/// and any readable `/sys/class/thermal` zone. It is not a skin or SoC
+/// temperature when no zone is readable, and the unitless thermal status and
+/// headroom never feed it. Anything with no reading stays unknown.
+pub fn merge_platform_metrics(mut base: Metrics, shell: Option<&Metrics>) -> Metrics {
+    if let Some(shell) = shell {
+        for (name, low, high) in SHELL_METRICS {
+            if let Some(Some(v)) = shell.get(name)
+                && v.is_finite()
+                && (low..=high).contains(v)
+            {
+                base.insert(name.into(), Some(*v));
+            } else {
+                base.entry(name.into()).or_insert(None);
+            }
+        }
+    }
+    let thermal = ["thermal_zone_max_celsius", "battery_temperature_celsius"]
+        .iter()
+        .filter_map(|name| base.get(*name).copied().flatten())
+        .fold(None, |acc: Option<f64>, v| Some(acc.map_or(v, |a| a.max(v))));
+    base.insert("thermal_max_celsius".into(), thermal);
+    base
 }
 
 /// Pseudonymous device-family reference from registered capability fields only
@@ -333,6 +380,53 @@ mod tests {
         let doc = observation_doc(&metrics);
         assert_eq!(doc["metrics"]["battery_level_percent"], "unknown");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn shell_readings_fill_power_and_thermal_and_out_of_range_stays_unknown() {
+        // No readable sysfs (an unprivileged Android app): everything unknown.
+        let empty = std::env::temp_dir().join(format!("mycelium-evidence-none-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&empty);
+        std::fs::create_dir_all(&empty).unwrap();
+        let base = platform_metrics(&empty);
+        assert_eq!(merge_platform_metrics(base.clone(), None)["thermal_max_celsius"], None);
+
+        let mut shell = Metrics::new();
+        shell.insert("battery_level_percent".into(), Some(87.0));
+        shell.insert("charging".into(), Some(1.0));
+        shell.insert("battery_temperature_celsius".into(), Some(31.4));
+        shell.insert("thermal_status".into(), Some(0.0));
+        shell.insert("thermal_headroom".into(), None);
+        shell.insert("memory_available_bytes".into(), Some(1.0)); // not a shell metric
+        let merged = merge_platform_metrics(base.clone(), Some(&shell));
+        assert_eq!(merged["battery_level_percent"], Some(87.0));
+        assert_eq!(merged["charging"], Some(1.0));
+        assert_eq!(merged["battery_temperature_celsius"], Some(31.4));
+        assert_eq!(merged["thermal_max_celsius"], Some(31.4));
+        assert_eq!(merged["thermal_status"], Some(0.0));
+        assert_eq!(merged["thermal_headroom"], None);
+        assert_eq!(merged["memory_available_bytes"], None);
+        let doc = observation_doc(&merged);
+        assert_eq!(doc["metrics"]["thermal_max_celsius"], 31.4);
+        assert_eq!(doc["metrics"]["charging"], 1.0);
+        assert_eq!(doc["metrics"]["thermal_headroom"], "unknown");
+
+        // Out-of-range readings are dropped, not clamped.
+        let mut bad = shell.clone();
+        bad.insert("battery_level_percent".into(), Some(140.0));
+        bad.insert("battery_temperature_celsius".into(), Some(f64::NAN));
+        let merged = merge_platform_metrics(base, Some(&bad));
+        assert_eq!(merged["battery_level_percent"], None);
+        assert_eq!(merged["battery_temperature_celsius"], None);
+        assert_eq!(merged["thermal_max_celsius"], None);
+
+        // A readable thermal zone hotter than the battery wins.
+        std::fs::create_dir_all(empty.join("sys/class/thermal/thermal_zone1")).unwrap();
+        std::fs::write(empty.join("sys/class/thermal/thermal_zone1/temp"), "52000\n").unwrap();
+        let merged = merge_platform_metrics(platform_metrics(&empty), Some(&shell));
+        assert_eq!(merged["thermal_zone_max_celsius"], Some(52.0));
+        assert_eq!(merged["thermal_max_celsius"], Some(52.0));
+        let _ = std::fs::remove_dir_all(&empty);
     }
 
     #[test]

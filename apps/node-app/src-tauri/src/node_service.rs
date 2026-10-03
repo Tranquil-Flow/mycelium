@@ -107,6 +107,23 @@ impl<R: Runtime> NodeService<R> {
         }
     }
 
+    /// Battery, charging and thermal readings from the OS (Android
+    /// `BatteryManager` / `PowerManager`); empty where the shell has none.
+    pub fn platform_metrics(&self) -> Result<mycelium_mobile_core::evidence::Metrics, String> {
+        #[cfg(target_os = "android")]
+        {
+            let raw: std::collections::BTreeMap<String, Option<f64>> = self
+                .handle
+                .run_mobile_plugin("platformMetrics", ())
+                .map_err(|e| e.to_string())?;
+            Ok(raw.into_iter().collect())
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            Ok(Default::default())
+        }
+    }
+
     pub fn status(&self) -> Result<ServiceStatus, String> {
         #[cfg(target_os = "android")]
         {

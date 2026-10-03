@@ -3,6 +3,7 @@
 
 Run from the repository root:
     python3 -B native/mobile_core/tests/fixtures/generate_fixtures.py
+    python3 -B native/mobile_core/tests/fixtures/generate_fixtures.py route_assignment
 
 Every fixture is produced by the repository's own Python implementations
 (signing, invite bundles, A12 Android onboarding), so the Rust tests prove byte
@@ -211,6 +212,101 @@ def stage_fixture() -> None:
     write("gpt2_stage.json", {"pack": pack, "hidden": rows, "output": output})
 
 
+def route_assignment_fixture() -> None:
+    """A real seed's answer to a member's signed route-assignment request."""
+
+    import sqlite3
+    import tempfile
+
+    from mycelium_seed.route_assignment import (
+        ROUTE_ASSIGNMENT_REQUEST_PROTOCOL,
+        RouteAssignmentService,
+        issue_route_assignment,
+    )
+    from mycelium_seed.state import SqliteSeedState
+
+    seed = signer(0x22, "seed-endpoint-1")
+    member = signer(0x11, "a" * 64)
+    peer = "0d7550754e0800a5d237eef5826035766b9b3e5a15868a940ab289958788e3b0"
+    pack = json.loads((OUT / "gpt2_stage.json").read_text())["pack"]
+    capability = {
+        "runtime_backend": "mobile-rust-reference",
+        "transport": "iroh",
+        "activation_protocol": "mycelium.router_wire.v1",
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        database = Path(tmp).resolve() / "state.sqlite3"
+        SqliteSeedState(database)
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                "INSERT INTO seed_members VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    "node-phone-1", member.endpoint_id, json.dumps([]),
+                    "android_native_iroh", json.dumps(capability),
+                    member.verification_key_digest, "inc-fixture-2", 3,
+                    NOW + 300, 1, NOW, NOW + 30, None, 0, "RUNNING",
+                ),
+            )
+        issue_route_assignment(
+            database,
+            node_id="node-phone-1",
+            stage_pack=pack,
+            peer_endpoint_id=peer,
+            route_generation=7,
+            now=lambda: NOW,
+            id_source=lambda: "route-fixture-1",
+        )
+        request = {
+            "protocol": ROUTE_ASSIGNMENT_REQUEST_PROTOCOL,
+            "message_id": "route-request-fixture-1",
+            "swarm_id": "swarm-fixture",
+            "sender_node_id": "node-phone-1",
+            "sender_endpoint_id": member.endpoint_id,
+            "recipient_node_id": "seed-node-1",
+            "incarnation": "inc-fixture-2",
+            "generation": 3,
+            "issued_at": NOW + 1,
+            "expires_at": NOW + 61,
+            "applied_assignment_id": None,
+        }
+        envelope = {
+            "protocol": "mycelium.membership.signed_message.v1",
+            "message": request,
+            "signature": member.sign(request),
+            "verification_key": member.public_key_record(),
+        }
+        delivery = RouteAssignmentService(
+            database=database,
+            signer=seed,
+            swarm_id="swarm-fixture",
+            seed_node_id="seed-node-1",
+            incarnation="seed-inc-fixture",
+            clock=lambda: NOW + 2,
+            id_source=lambda: "route-delivery-fixture-1",
+        ).answer(envelope)
+    write(
+        "route_assignment.json",
+        {
+            "seed_key": seed.public_key_record(),
+            "delivery": delivery,
+            "expected": {
+                "swarm_id": "swarm-fixture",
+                "seed_node_id": "seed-node-1",
+                "node_id": "node-phone-1",
+                "endpoint_id": member.endpoint_id,
+                "generation": 3,
+                "request_message_id": "route-request-fixture-1",
+                "peer_endpoint_id": peer,
+                "now": NOW + 3,
+            },
+        },
+    )
+
+
 if __name__ == "__main__":
-    stage_fixture()
-    main()
+    if sys.argv[1:] == ["route_assignment"]:
+        route_assignment_fixture()
+    else:
+        stage_fixture()
+        main()
+        route_assignment_fixture()

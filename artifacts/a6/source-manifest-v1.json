@@ -2,8 +2,38 @@
   "base_commit": "53d1222b05f1a9c565e32071e16d33ecadfcdd06",
   "files": [
     {
+      "path": "apps/node-app/src-tauri/gen/android/app/src/main/java/now/mycelium/node/NodeServicePlugin.kt",
+      "sha256": "sha256:62b57ab47a8b781b5b981ff2737ebd88b41769f6269b7b9125f849fea9f9f359",
+      "size_bytes": 6249
+    },
+    {
+      "path": "apps/node-app/src-tauri/src/lib.rs",
+      "sha256": "sha256:4ec7663893ee69a7a096d9140fd001e728299162821bcdba079de12e80908341",
+      "size_bytes": 10524
+    },
+    {
+      "path": "apps/node-app/src-tauri/src/node_service.rs",
+      "sha256": "sha256:a67fb4f01eeb64d0d0e7361d726e36f0ed93486d625b0653454b4ac464fbb2bc",
+      "size_bytes": 5207
+    },
+    {
+      "path": "apps/node-app/src/App.test.tsx",
+      "sha256": "sha256:5eeccfc44484b7fa22b2265bb560bafe386d97bf00001de0cd813d35b23c7be0",
+      "size_bytes": 13722
+    },
+    {
+      "path": "apps/node-app/src/App.tsx",
+      "sha256": "sha256:66fc3995fc1df79386fb05b4e38b8d4d6ef5b6a6f76149f60f291755f9b4777f",
+      "size_bytes": 9655
+    },
+    {
+      "path": "apps/node-app/src/api.ts",
+      "sha256": "sha256:69216089d6d68a2c4d441bc3c67acdac87a9b91e780c7b423355a13d7b6d6e60",
+      "size_bytes": 4694
+    },
+    {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:0a4a361bfea81a3b9211487404840e9e196bc1c019fb04ff1115df27108e0bbb",
+      "sha256": "sha256:039aa95c2d2ac28bfdf28c2171747afcaf27706fcf58a7b04348506da92ae646",
       "size_bytes": 71562
     },
     {
@@ -117,6 +147,16 @@
       "size_bytes": 18629
     },
     {
+      "path": "mycelium_seed/http.py",
+      "sha256": "sha256:a1867b8b50936fe768894c61e93b370ff8262dc92b7096284e25d8cf284d64e1",
+      "size_bytes": 43992
+    },
+    {
+      "path": "mycelium_seed/route_assignment.py",
+      "sha256": "sha256:561861408f4e8e44a356d96d5b3b160a81c1079f4a5a914b0deb8669f3f4c9a6",
+      "size_bytes": 26675
+    },
+    {
       "path": "native/iroh_transport/src/protocol.rs",
       "sha256": "sha256:c45f23a47812802f611a3e516dfdcd9de33466c68b7979fe53b42fbd001b176e",
       "size_bytes": 17985
@@ -125,6 +165,56 @@
       "path": "native/iroh_transport/tests/router_wire_golden.rs",
       "sha256": "sha256:9a5a50eec450726cad6d71bc88f17c3b01805df5e156ab38e7291f6b18b20e70",
       "size_bytes": 16976
+    },
+    {
+      "path": "native/mobile_core/examples/node_cli.rs",
+      "sha256": "sha256:dceb93e5197ba6647410dd124dea7567f52c59aca303efe5de863b4a7f81c02d",
+      "size_bytes": 2995
+    },
+    {
+      "path": "native/mobile_core/src/evidence.rs",
+      "sha256": "sha256:5b88fff54409ebde4f157508857ff1942daf31af13d08b22053945526df1c0f3",
+      "size_bytes": 24137
+    },
+    {
+      "path": "native/mobile_core/src/lib.rs",
+      "sha256": "sha256:6077d9f79b53242bc3ecd25c87d504ffec279f3861dbb5f47640d87b6f0878b4",
+      "size_bytes": 643
+    },
+    {
+      "path": "native/mobile_core/src/node.rs",
+      "sha256": "sha256:cfafb6a4ff4eb97b293b141737745482d61c69441cbf1b4492844ae694be3efe",
+      "size_bytes": 49250
+    },
+    {
+      "path": "native/mobile_core/src/route_assignment.rs",
+      "sha256": "sha256:6972ef79257d1857dd3e81134528c087513b60b7ccdf999ab415501510e3b25b",
+      "size_bytes": 15221
+    },
+    {
+      "path": "native/mobile_core/src/transport.rs",
+      "sha256": "sha256:762c661aec2d5ffe4625053bc5193372be26cad773a339f0f84f9cccd7c8ef38",
+      "size_bytes": 9199
+    },
+    {
+      "path": "native/mobile_core/tests/fixtures/generate_fixtures.py",
+      "sha256": "sha256:3e3bc1a319d7b1a5f56d2446fb3792916e664c4f7d444f1a22d9670bc54073c0",
+      "size_bytes": 11304
+    },
+    {
+      "path": "native/mobile_core/tests/fixtures/route_assignment.json",
+      "sha256": "sha256:c59f08bb2ed71da0400706ce57c8b76a58b9bea97fb4f2cb1df94af553dddd69",
+      "size_bytes": 25127
+    },
+    {
+      "path": "native/mobile_core/tests/node_core.rs",
+      "sha256": "sha256:9a61b728df6d9ecad4eafbf7b4bb3591c4465f2f7e660f07d7d1f257f3363584",
+      "size_bytes": 6859
+    },
+    {
+      "path": "native/mobile_core/tests/transport_local.rs",
+      "sha256": "sha256:42c962e7c560cea7b5a7b3689f5bca47e0aecba2001d8fd0a742cfc8ab56d071",
+      "size_bytes": 2719
     },
     {
       "path": "physical_inference_node.py",
@@ -150,6 +240,11 @@
       "path": "scripts/run_a7_kv_successor_gate.py",
       "sha256": "sha256:24fa1199c023444c3c8f714561f60628fc64a44e2f3be277488b07be5fd90d7a",
       "size_bytes": 15068
+    },
+    {
+      "path": "tests/a12_mobile_deterministic/test_route_assignment_delivery.py",
+      "sha256": "sha256:3fadc93ce2b0c8d5c27ba818122e7343fca3dac60dc016b7220fa9f724852e7b",
+      "size_bytes": 10364
     },
     {
       "path": "tests/a7_acceptance/test_a7_two_node_native.py",
@@ -257,6 +352,11 @@
       "size_bytes": 2949
     },
     {
+      "path": "tests/seed_coordinator/test_route_assignment.py",
+      "sha256": "sha256:dcf20b2473f9121d380bcdc6ed0ad0d6f6b0b50bd0e3faab978fe603a92b4736",
+      "size_bytes": 23952
+    },
+    {
       "path": "ui/web/src/features/a7Recovery/A7RecoveryStatusBar.test.tsx",
       "sha256": "sha256:4520674af1a3e10ee6fc02ad201afa1d1e53c0a4c5ed8e380dd1f178d39f4867",
       "size_bytes": 4813
@@ -273,5 +373,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:c84529b2aee2f33a6602c6a5b4e360f287ef1c1c3fc18caed3b8d56b23bb7f30"
+  "source_digest": "sha256:5888d96a4d8b41d293d87b0550e18c41240a8409fc86f40a1384bf497e4600f3"
 }

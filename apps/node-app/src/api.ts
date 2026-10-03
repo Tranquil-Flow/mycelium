@@ -23,6 +23,11 @@ export type NodeStatus = {
   peer_class: string;
   runtime_backend: string;
   route_ready: boolean;
+  /** The owner-issued, seed-signed route assignment this node runs, if any. */
+  route_assignment: string | null;
+  route_assignment_error: string | null;
+  /** The user chose to serve; a restarted app restores serving from it. */
+  serving_intent: boolean;
 };
 
 export type ServiceStatus = { running: boolean; uptime_ms: number; mode: string };
@@ -40,6 +45,8 @@ export interface NodeApi {
   servingStatus(): Promise<ServiceStatus>;
   exportEvidence(): Promise<EvidenceExport>;
   onStatus(handler: (s: NodeStatus) => void): Promise<() => void>;
+  /** The OS serving service changed (started, stopped from the notification, restored). */
+  onService(handler: (s: ServiceStatus) => void): Promise<() => void>;
   scanQr(): Promise<string | null>;
   onDeepLink(handler: (url: string) => void): Promise<() => void>;
 }
@@ -54,6 +61,7 @@ export const tauriApi: NodeApi = {
   servingStatus: () => invoke('serving_status'),
   exportEvidence: () => invoke('node_export_evidence'),
   onStatus: (handler) => listen<NodeStatus>('node://status', (e) => handler(e.payload)),
+  onService: (handler) => listen<ServiceStatus>('node://service', (e) => handler(e.payload)),
   async scanQr() {
     return scanWithPermission(await import('@tauri-apps/plugin-barcode-scanner'));
   },

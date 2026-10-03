@@ -42,6 +42,8 @@ from .coordinator import (
     SeedCoordinatorError,
 )
 from .operator import SeedOperatorError, verify_seed_key_transition
+from .route_assignment import ROUTE_ASSIGNMENT_REQUEST_PROTOCOL
+from .route_assignment import service_for as route_assignment_service_for
 
 
 SEED_JOIN_HTTP_PROTOCOL = "mycelium.seed.join_http.v1"
@@ -578,6 +580,14 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
                     expected_protocol = envelope["message"]["protocol"]
                 except (KeyError, TypeError) as exc:
                     raise SeedHTTPError("seed_http_body_invalid") from exc
+                if expected_protocol == ROUTE_ASSIGNMENT_REQUEST_PROTOCOL:
+                    # Owner-issued route assignments ride the member channel:
+                    # the member signs the request, the seed signs the answer.
+                    self._send(
+                        HTTPStatus.OK,
+                        route_assignment_service_for(self.coordinator).answer(envelope),
+                    )
+                    return
                 message = self.coordinator.receive_member_message(
                     envelope,
                     expected_protocol=expected_protocol,

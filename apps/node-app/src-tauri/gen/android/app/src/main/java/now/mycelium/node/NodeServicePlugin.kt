@@ -3,9 +3,13 @@ package now.mycelium.node
 import android.Manifest
 import android.app.Activity
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.os.BatteryManager
 import android.os.Build
+import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
@@ -103,6 +107,41 @@ class NodeServicePlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun status(invoke: Invoke) {
     invoke.resolve(status())
+  }
+
+  /**
+   * Power and thermal readings an unprivileged app can take, for the node core's
+   * sealed runtime observations. Battery level, charging and battery temperature
+   * come from the sticky ACTION_BATTERY_CHANGED broadcast (no receiver is
+   * registered); thermal status (API 29+) and headroom (API 30+) from PowerManager.
+   * A reading the OS does not provide is null, never a guess.
+   */
+  @Command
+  fun platformMetrics(invoke: Invoke) {
+    val out = JSObject()
+    val battery = activity.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+    val level = battery?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+    val scale = battery?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+    out.put("battery_level_percent", if (level >= 0 && scale > 0) level * 100.0 / scale else null)
+    val status = battery?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+    out.put(
+      "charging",
+      when (status) {
+        BatteryManager.BATTERY_STATUS_CHARGING, BatteryManager.BATTERY_STATUS_FULL -> 1.0
+        BatteryManager.BATTERY_STATUS_DISCHARGING, BatteryManager.BATTERY_STATUS_NOT_CHARGING -> 0.0
+        else -> null
+      },
+    )
+    val tenths = battery?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE) ?: Int.MIN_VALUE
+    out.put("battery_temperature_celsius", if (tenths != Int.MIN_VALUE) tenths / 10.0 else null)
+    val power = activity.getSystemService(Context.POWER_SERVICE) as PowerManager
+    out.put(
+      "thermal_status",
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) power.currentThermalStatus.toDouble() else null,
+    )
+    val headroom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) power.getThermalHeadroom(0) else Float.NaN
+    out.put("thermal_headroom", if (headroom.isNaN()) null else headroom.toDouble())
+    invoke.resolve(out)
   }
 
   private fun status(): JSObject {

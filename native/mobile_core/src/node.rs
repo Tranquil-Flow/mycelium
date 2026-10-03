@@ -17,6 +17,7 @@ use crate::evidence;
 use crate::identity::Identity;
 use crate::membership::{self, MemberConfig};
 use crate::onboarding::{self, PairingSession};
+use crate::route_assignment::{self, RouteAssignment};
 use crate::runtime::{Gpt2BlockStage, REFERENCE_BACKEND, StageRuntime};
 use crate::transport::{Inbound, NodeTransport, Reachability};
 use crate::wire;
@@ -140,6 +141,13 @@ pub struct NodeStatus {
     pub peer_class: String,
     pub runtime_backend: String,
     pub route_ready: bool,
+    /// The owner-issued, seed-signed route assignment this node runs (stage
+    /// loaded and route peer allow-listed), if any.
+    pub route_assignment: Option<String>,
+    pub route_assignment_error: Option<String>,
+    /// The owner of this device chose to serve (persisted across restarts, so a
+    /// restarted app restores serving instead of silently dropping it).
+    pub serving_intent: bool,
 }
 
 /// Where the last sealed observation window ended, so each observation covers
@@ -174,6 +182,15 @@ struct Shared {
     invitation: Option<Value>,
     stage: Option<Box<dyn StageRuntime>>,
     forward: Option<(iroh::EndpointAddr, u64)>,
+    route: Option<AppliedRoute>,
+    /// The latest OS readings the app shell sampled, and when.
+    shell_metrics: Option<(evidence::Metrics, f64)>,
+}
+
+/// The seed-delivered assignment currently applied to the stage and transport.
+struct AppliedRoute {
+    assignment: RouteAssignment,
+    peer: iroh::EndpointId,
 }
 
 pub struct NodeCore {
@@ -251,11 +268,14 @@ impl NodeCore {
                 invitation: None,
                 stage: None,
                 forward: None,
+                route: None,
+                shell_metrics: None,
             })),
             http,
             incarnation: new_incarnation()?,
             timing,
         };
+        core.shared.lock().unwrap().status.serving_intent = read_serving_intent(&core.data_dir);
         if let Ok(raw) = std::fs::read(core.data_dir.join("invitation.json"))
             && let Ok(inv) = serde_json::from_slice::<Value>(&raw)
         {
@@ -327,6 +347,28 @@ impl NodeCore {
     pub fn runtime_observation(&self, platform: &evidence::Metrics) -> Result<Value, NodeError> {
         observe_runtime(&self.shared, &self.identity, platform)
     }
+
+    /// Record the OS readings the app shell sampled (battery, charging, battery
+    /// temperature, thermal status); sealed observations use them while fresh.
+    pub fn set_platform_metrics(&self, sample: evidence::Metrics) {
+        self.shared.lock().unwrap().shell_metrics = Some((sample, now_s()));
+    }
+
+    /// The platform metrics the next sealed observation carries.
+    pub fn platform_metrics(&self) -> evidence::Metrics {
+        current_platform_metrics(&self.shared)
+    }
+}
+
+fn current_platform_metrics(shared: &Arc<Mutex<Shared>>) -> evidence::Metrics {
+    let shell = {
+        let s = shared.lock().unwrap();
+        s.shell_metrics
+            .as_ref()
+            .filter(|(_, at)| now_s() - at <= evidence::SHELL_SAMPLE_MAX_AGE_S)
+            .map(|(m, _)| m.clone())
+    };
+    evidence::merge_platform_metrics(evidence::platform_metrics(Path::new("/")), Some(&shell.unwrap_or_default()))
 }
 
 fn observe_runtime(
@@ -380,7 +422,7 @@ fn seal_observation(data_dir: &Path, shared: &Arc<Mutex<Shared>>, identity: &Ide
         if std::fs::create_dir_all(&dir).is_err() {
             return;
         }
-        let Ok(envelope) = observe_runtime(shared, identity, &evidence::platform_metrics(Path::new("/"))) else {
+        let Ok(envelope) = observe_runtime(shared, identity, &current_platform_metrics(shared)) else {
             return;
         };
         let generation = envelope["message"]["evidence_generation"].as_u64().unwrap_or(0);
@@ -593,6 +635,21 @@ impl NodeCore {
         self.data_dir.join("membership.json").exists()
     }
 
+    /// Persist whether the user chose to serve. A restarted app reads it back
+    /// and restores serving after resuming the membership.
+    pub fn set_serving_intent(&self, serving: bool) -> Result<NodeStatus, NodeError> {
+        let record = json!({"protocol": SERVING_INTENT_PROTOCOL, "serving": serving});
+        write_private(&self.data_dir.join(SERVING_INTENT_FILE), &serde_json::to_vec(&record).unwrap())
+            .map_err(|_| self.fail(nerr("serving_intent_unwritable")))?;
+        let mut s = self.shared.lock().unwrap();
+        s.status.serving_intent = serving;
+        Ok(s.status.clone())
+    }
+
+    pub fn serving_intent(&self) -> bool {
+        self.shared.lock().unwrap().status.serving_intent
+    }
+
     /// Load one assignment-local stage pack (digest-verified by the runtime).
     pub fn load_stage(&self, pack: &Value) -> Result<NodeStatus, NodeError> {
         let stage = Gpt2BlockStage::from_document(pack).map_err(|e| self.fail(nerr(e.0)))?;
@@ -626,6 +683,26 @@ impl NodeCore {
         let t = self.transport.clone();
         self.rt.block_on(async move { t.close().await });
     }
+}
+
+const SERVING_INTENT_FILE: &str = "serving.json";
+const SERVING_INTENT_PROTOCOL: &str = "mycelium.node_serving_intent.v1";
+
+/// Missing or unreadable intent means "not serving": never serve by accident.
+fn read_serving_intent(data_dir: &Path) -> bool {
+    std::fs::read(data_dir.join(SERVING_INTENT_FILE))
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
+        .is_some_and(|v| v["protocol"] == SERVING_INTENT_PROTOCOL && v["serving"] == Value::Bool(true))
+}
+
+/// Refuse work at or above the owner's thermal ceiling (`quota.thermal_ceiling_c`
+/// from the invitation), judged on `thermal_max_celsius`. Unknown temperature
+/// or no ceiling refuses nothing.
+fn thermal_refusal(ceiling: Option<f64>, metrics: &evidence::Metrics) -> Option<String> {
+    let ceiling = ceiling.filter(|c| c.is_finite())?;
+    let hottest = metrics.get("thermal_max_celsius").copied().flatten()?;
+    (hottest >= ceiling).then(|| format!("thermal_ceiling_reached:{hottest}>={ceiling}"))
 }
 
 fn lease_is_fresh(status: &NodeStatus, now: f64) -> bool {
@@ -689,6 +766,7 @@ async fn supervise_membership(sv: Supervisor) {
             sequence += 1;
             sv.heartbeat_once(&m, sequence).await
         };
+        let held = matches!(step, Step::Held);
         let pause = {
             let mut s = sv.shared.lock().unwrap();
             match step {
@@ -725,11 +803,54 @@ async fn supervise_membership(sv: Supervisor) {
                 }
             }
         };
+        if held {
+            // The lease is held: pick up (or drop) the owner's route assignment.
+            sv.sync_route().await;
+        }
         if let Some(pause) = pause {
             tokio::time::sleep(pause).await;
         }
     }
-    sv.shared.lock().unwrap().supervisor_running = false;
+    // The membership is over: no route peer is admitted on its behalf any more.
+    let old = {
+        let mut s = sv.shared.lock().unwrap();
+        s.supervisor_running = false;
+        clear_route(&mut s)
+    };
+    if let Some(old) = old {
+        sv.transport.remove_peer(old.peer).await;
+    }
+}
+
+/// Drop the applied route and withdraw its peer from the allow-list.
+async fn drop_route(shared: &Arc<Mutex<Shared>>, transport: &NodeTransport) {
+    let old = clear_route(&mut shared.lock().unwrap());
+    if let Some(old) = old {
+        transport.remove_peer(old.peer).await;
+    }
+}
+
+/// An assignment past its signed expiry is never served, even when the seed
+/// cannot be reached to say so.
+async fn drop_expired_route(shared: &Arc<Mutex<Shared>>, transport: &NodeTransport) -> bool {
+    let expired = shared.lock().unwrap().route.as_ref().is_some_and(|r| now_s() >= r.assignment.expires_at);
+    if expired {
+        drop_route(shared, transport).await;
+        shared.lock().unwrap().status.route_assignment_error = Some("route_assignment_expired".into());
+    }
+    expired
+}
+
+/// Forget the applied route: stage unloaded, nothing forwarded.
+fn clear_route(s: &mut Shared) -> Option<AppliedRoute> {
+    let old = s.route.take();
+    if old.is_some() {
+        s.stage = None;
+        s.forward = None;
+        s.status.stage_loaded = None;
+        s.status.route_assignment = None;
+    }
+    old
 }
 
 impl Supervisor {
@@ -783,6 +904,87 @@ impl Supervisor {
             }
             Err(e) => Step::Retry(format!("lease_renewal_invalid:{}", e.0)),
         }
+    }
+
+    /// Ask the seed for this member's route assignment and apply what it signed:
+    /// load the digest-verified stage, allow-list the route peer at the route
+    /// generation and forward executed activations to it. A newly applied
+    /// assignment is reported back at once so the owner sees it running.
+    ///
+    /// Fails closed: an answer that does not verify (signature, recipient,
+    /// generation, request binding, stage digest) or a seed refusal drops the
+    /// applied route; only an unreachable seed keeps a still-unexpired route.
+    async fn sync_route(&self) {
+        for _ in 0..2 {
+            match self.route_exchange().await {
+                Ok(true) => continue,
+                Ok(false) => break,
+                Err(code) => {
+                    let transient = code.starts_with("seed_unreachable");
+                    self.shared.lock().unwrap().status.route_assignment_error = Some(code);
+                    if !transient {
+                        drop_route(&self.shared, &self.transport).await;
+                    }
+                    break;
+                }
+            }
+        }
+        drop_expired_route(&self.shared, &self.transport).await;
+    }
+
+    /// One request/answer; `Ok(true)` when the applied route changed.
+    async fn route_exchange(&self) -> Result<bool, String> {
+        let (m, applied) = {
+            let s = self.shared.lock().unwrap();
+            (s.membership.clone(), s.route.as_ref().map(|r| r.assignment.assignment_id.clone()))
+        };
+        let Some(m) = m.filter(|m| !m.needs_resume) else { return Ok(false) };
+        let message_id = format!("route-{}", &new_incarnation().map_err(|e| e.0)?[4..]);
+        let env = route_assignment::request(&m.cfg, &self.identity, &message_id, m.generation, applied.as_deref(), now_s())
+            .map_err(|e| e.0)?;
+        let body = json!({"protocol": membership::SEED_MEMBER_HTTP_PROTOCOL, "envelope": env});
+        let (code, reply) = self.post("/seed/message", &m.seed_url, &body).await?;
+        if !(200..300).contains(&code) {
+            return Err(format!("route_assignment_refused:{}", reply["error"]["code"].as_str().unwrap_or("unknown")));
+        }
+        let verified = route_assignment::verify_delivery(
+            &reply,
+            &route_assignment::Expected {
+                pinned_seed_key: &m.pinned,
+                swarm_id: &m.cfg.swarm_id,
+                seed_node_id: &m.cfg.seed_node_id,
+                node_id: &m.cfg.node_id,
+                endpoint_id: self.identity.endpoint_id(),
+                generation: m.generation,
+                request_message_id: &message_id,
+                now: now_s(),
+            },
+        )
+        .map_err(|e| e.0)?;
+        self.shared.lock().unwrap().status.route_assignment_error = None;
+        let Some((assignment, stage)) = verified else {
+            drop_route(&self.shared, &self.transport).await;
+            return Ok(false);
+        };
+        if applied.as_deref() == Some(assignment.assignment_id.as_str()) {
+            return Ok(false);
+        }
+        let peer = crate::transport::parse_endpoint_id(&assignment.peer_endpoint_id).map_err(|e| e.0)?;
+        self.transport.configure_peer(peer, assignment.route_generation).await;
+        let old = {
+            let mut s = self.shared.lock().unwrap();
+            s.status.stage_loaded = Some(stage.pack_digest().to_owned());
+            s.stage = Some(Box::new(stage));
+            s.forward = assignment.forward_to.then(|| (iroh::EndpointAddr::from(peer), assignment.route_generation));
+            s.status.route_assignment = Some(assignment.assignment_id.clone());
+            s.route.replace(AppliedRoute { assignment, peer })
+        };
+        if let Some(old) = old
+            && old.peer != peer
+        {
+            self.transport.remove_peer(old.peer).await;
+        }
+        Ok(true)
     }
 
     async fn resume_once(&self, m: ActiveMembership) -> Step {
@@ -864,11 +1066,21 @@ impl Supervisor {
 /// loaded stage and forward the result to the configured next peer.
 async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>, transport: NodeTransport) {
     while let Some(inbound) = rx.recv().await {
+        drop_expired_route(&shared, &transport).await;
+        // The owner's quota bounds how hot the device may run while serving.
+        let ceiling = {
+            let s = shared.lock().unwrap();
+            s.invitation.as_ref().and_then(|inv| inv["quota"]["thermal_ceiling_c"].as_f64())
+        };
+        let hot = thermal_refusal(ceiling, &current_platform_metrics(&shared));
         let started = std::time::Instant::now();
         let outcome = {
             let mut s = shared.lock().unwrap();
             s.status.frames_received += 1;
-            if inbound.frame.message_type != "HopHeader" {
+            if let Some(code) = hot {
+                s.status.last_error = Some(code);
+                None
+            } else if inbound.frame.message_type != "HopHeader" {
                 None
             } else {
                 let request_id = inbound.frame.body["request_id"].as_str().unwrap_or("").to_owned();
@@ -903,5 +1115,22 @@ async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>
                 shared.lock().unwrap().status.last_error = Some(format!("forward_failed:{}", e.0));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frames_are_refused_at_the_owner_thermal_ceiling_only() {
+        let mut m = evidence::Metrics::new();
+        m.insert("thermal_max_celsius".into(), Some(44.9));
+        assert_eq!(thermal_refusal(Some(45.0), &m), None);
+        m.insert("thermal_max_celsius".into(), Some(45.0));
+        assert_eq!(thermal_refusal(Some(45.0), &m).as_deref(), Some("thermal_ceiling_reached:45>=45"));
+        assert_eq!(thermal_refusal(None, &m), None);
+        m.insert("thermal_max_celsius".into(), None);
+        assert_eq!(thermal_refusal(Some(45.0), &m), None);
     }
 }
