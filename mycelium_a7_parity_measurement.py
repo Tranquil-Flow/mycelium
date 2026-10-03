@@ -239,4 +239,38 @@ def measure_parity(config: Mapping[str, Any], *, candidate_commit: str, clock_ms
     return {"document": document, "qualification": qualification, "observation": observation}
 
 
-__all__ = ("CONFIG_PROTOCOL", "ParityRefused", "measure_parity", "validate_config")
+def measure_identity_qualification(config: Mapping[str, Any], *, clock_ms: Any = None) -> dict[str, Any]:
+   """Qualify a standby from the two placements' measured KV identities only.
+
+   For the incompatible gate case: the standby's identity differs from the
+   source's, so no parity challenge can be meaningful; the qualifier records
+   ``identity_incompatible`` from the identities both workers report.
+   """
+
+   config = validate_config(config)
+   if config["qualification"] is None:
+      raise ParityRefused("a7_parity_config_qualification_invalid")
+   now_ms = clock_ms or (lambda: int(time.time() * 1000))
+   timeout = float(config["worker_timeout_s"])
+   workers: dict[str, _Worker] = {}
+   try:
+      for role in ("source", "standby"):
+         workers[role] = _Worker(role, config["workers"][role], timeout_s=timeout)
+      source_identity = workers["source"].call("identity")
+      standby_identity = workers["standby"].call("identity")
+   finally:
+      for worker in workers.values():
+         worker.close()
+   available = standby_identity.get("available_bytes")
+   return qualify_standby(
+      source_identity=source_identity["identity"],
+      standby_identity=standby_identity["identity"],
+      parity_challenge=None,
+      reserved_kv_bytes=config["qualification"]["reserved_kv_bytes"],
+      available_bytes=available if type(available) is int else None,
+      issued_at_unix_ms=now_ms(),
+      ttl_ms=config["qualification"]["ttl_ms"],
+   )
+
+
+__all__ = ("CONFIG_PROTOCOL", "ParityRefused", "measure_identity_qualification", "measure_parity", "validate_config")

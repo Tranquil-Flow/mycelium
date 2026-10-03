@@ -1652,10 +1652,27 @@ class PhysicalNodeService:
     def _a7_configure(self, graph: ExecutionGraph, runtime: Any) -> tuple[Any, Any]:
         """Bind the staged A7 roles; absent configuration leaves the node unchanged."""
 
-        from mycelium_a7_node_wiring import A7_NODE_CONFIG_PATH
+        from mycelium_a7_node_wiring import (
+            A7_NODE_CONFIG_PATH,
+            A7WiringError,
+            a7_node_config_path_for,
+        )
 
-        if not os.path.lexists(self.artifact_root / A7_NODE_CONFIG_PATH):
+        # One transfer bundle stages every node's own file under a7/<node_id>/;
+        # a node-local a7/node.json is the single-node spelling.  Both is ambiguous.
+        try:
+            candidates: tuple[str, ...] = (a7_node_config_path_for(self.node_id), A7_NODE_CONFIG_PATH)
+        except A7WiringError:
+            candidates = (A7_NODE_CONFIG_PATH,)
+        staged = [
+            relative
+            for relative in candidates
+            if os.path.lexists(self.artifact_root / relative)
+        ]
+        if not staged:
             return runtime, None
+        _require(len(staged) == 1, "a7_node_config_ambiguous")
+        config_path = staged[0]
         from mycelium_a7_node_wiring import (
             A7NodeWiring,
             A7WiringError,
@@ -1666,7 +1683,7 @@ class PhysicalNodeService:
 
         try:
             config = validate_node_config(
-                self._safe_document(A7_NODE_CONFIG_PATH, "invalid_a7_node_config"),
+                self._safe_document(config_path, "invalid_a7_node_config"),
                 deployment_id=self.deployment_id,
                 node_id=self.node_id,
             )

@@ -900,7 +900,14 @@ def measure(
     }
     if result is None:
         raise MeasurementRefused("a7_result_unobserved", observations=observations)
-    if _int(committed) is None or _int(acknowledged) is None:
+    if _int(committed) is None:
+        raise MeasurementRefused("a7_watermark_unobserved", observations=observations)
+    if acknowledged is None:
+        # The entry recorded no standby acknowledgement at all for this
+        # request (no route watermark): zero committed tokens were acknowledged.
+        observations["acknowledged_watermark_absent"] = True
+        acknowledged = 0
+    elif _int(acknowledged) is None:
         raise MeasurementRefused("a7_watermark_unobserved", observations=observations)
     for name in ("cutover_ms", "max_ack_wait_ms"):
         value = result.get(name)

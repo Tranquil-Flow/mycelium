@@ -47,6 +47,15 @@ def _canonical_bytes(value: Any) -> bytes:
 
 A7_NODE_CONFIG_PROTOCOL = "mycelium.a7_node_config.v1"
 A7_NODE_CONFIG_PATH = "a7/node.json"
+_NODE_ID_PATH_SAFE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+
+
+def a7_node_config_path_for(node_id: str) -> str:
+   """The per-node staged config path (one transfer bundle can stage every node's own file)."""
+
+   if not isinstance(node_id, str) or _NODE_ID_PATH_SAFE.fullmatch(node_id) is None or node_id in {".", ".."}:
+      raise A7WiringError("a7_node_id_invalid")
+   return f"a7/{node_id}/node.json"
 STANDBY_SECRET_BYTES = 64
 MAX_CHECKPOINT_BYTES = 256 * 1024 * 1024
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
