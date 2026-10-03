@@ -719,11 +719,6 @@ def _build_r7_staged_route(
         session_factory=session_factory,
     )
     _install_endpoint_learning_verifier(route)
-    ColdRouteRestartOwner(  # type: ignore[arg-type]
-        route_factory=lambda: None,
-        open_and_qualify=lambda _route, _generation: None,
-    )._apply_cached_configuration(route)
-    assert route._peer_exit_successor_authority is not None
     return _RouteState(
         route=route,
         graph=graph,
@@ -734,6 +729,25 @@ def _build_r7_staged_route(
         dtype_mismatch=dtype_mismatch,
         qualification_expired=qualification_expired,
     )
+
+
+def _open_with_a7_authority(state: _RouteState) -> Any:
+    """Open the route, then install the authority as the supervisor does after open.
+
+    Detection reads the nodes' signed ``configured`` attestations, so nothing is
+    installed before the nodes have configured.
+    """
+
+    owner = ColdRouteRestartOwner(  # type: ignore[arg-type]
+        route_factory=lambda: None,
+        open_and_qualify=lambda _route, _generation: None,
+    )
+    owner._apply_cached_configuration(state.route)
+    assert state.route._peer_exit_successor_authority is None
+    identity = state.route.open()
+    owner._apply_cached_configuration(state.route)
+    assert state.route._peer_exit_successor_authority is not None
+    return identity
 
 
 def _node_observation(
@@ -891,7 +905,7 @@ def test_two_node_physical_live_route_cuts_over_after_source_kill(
 ) -> None:
     state = _build_r7_staged_route(tmp_path, monkeypatch, dtype_mismatch=False)
     try:
-        identity = state.route.open()
+        identity = _open_with_a7_authority(state)
         assert len(set(identity.endpoint_ids)) == 2
         state.route._deployment_qualification = SimpleNamespace(route_ready=True)
         request_id = "a7ok" + uuid.uuid4().hex[:24]
@@ -938,7 +952,7 @@ def test_standby_incompatible_dtype_routes_to_a6_recovery(
 ) -> None:
     state = _build_r7_staged_route(tmp_path, monkeypatch, dtype_mismatch=False, qualification_expired=True)
     try:
-        identity = state.route.open()
+        identity = _open_with_a7_authority(state)
         assert len(set(identity.endpoint_ids)) == 2
         state.route._deployment_qualification = SimpleNamespace(route_ready=True)
         request_id = "a7bad" + uuid.uuid4().hex[:24]

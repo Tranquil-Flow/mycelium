@@ -2161,6 +2161,11 @@ class PhysicalNodeService:
                 configured_details["stage_pack_verification_digest"] = report[
                     "stage_pack_verification_digest"
                 ]
+        if a7_wiring is not None:
+            # A7: attest the exact validated staged roles (public records only,
+            # never key material) so the route owner detects A7 staging from this
+            # signed observation instead of reading a peer's disk.
+            configured_details["a7_node_config"] = json.loads(json.dumps(a7_wiring.config))
         return self._signed_result("configured", configured_details)
 
     def _start(self, payload: dict[str, Any]) -> dict[str, Any]:

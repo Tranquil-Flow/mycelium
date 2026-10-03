@@ -129,7 +129,7 @@ def _measure_with_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, qu
     state = harness._build_r7_staged_route(tmp_path, monkeypatch, qualification_expired=qualification_expired)
     control = None
     try:
-        state.route.open()
+        harness._open_with_a7_authority(state)
         state.route._deployment_qualification = type("Qualified", (), {"route_ready": True})()
         control = A7EvidenceControl(grant=EXACT_FLEET_GRANT, source=RouteA7Evidence(state.route), product_port=8787, port=0)
         control.start()
