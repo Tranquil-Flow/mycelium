@@ -153,8 +153,8 @@
     },
     {
       "path": "mycelium_seed/route_assignment.py",
-      "sha256": "sha256:0a6f3523f694281cb7aac62dc1ff2e7cbfec472a42ab86ceeb20a4da7fd8d88a",
-      "size_bytes": 25420
+      "sha256": "sha256:561861408f4e8e44a356d96d5b3b160a81c1079f4a5a914b0deb8669f3f4c9a6",
+      "size_bytes": 26675
     },
     {
       "path": "native/iroh_transport/src/protocol.rs",
@@ -353,8 +353,8 @@
     },
     {
       "path": "tests/seed_coordinator/test_route_assignment.py",
-      "sha256": "sha256:d8be45bd51266e7c2166e83e0137ceaa20fe35c80f19f465679d1600a0aef0f9",
-      "size_bytes": 19258
+      "sha256": "sha256:dcf20b2473f9121d380bcdc6ed0ad0d6f6b0b50bd0e3faab978fe603a92b4736",
+      "size_bytes": 23952
     },
     {
       "path": "ui/web/src/features/a7Recovery/A7RecoveryStatusBar.test.tsx",
@@ -373,5 +373,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:4054a5deb741354c1cf7d53d55920cf6458ed0d91147f72f31b81961e81762b6"
+  "source_digest": "sha256:5888d96a4d8b41d293d87b0550e18c41240a8409fc86f40a1384bf497e4600f3"
 }
