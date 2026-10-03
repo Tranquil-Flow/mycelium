@@ -45,12 +45,14 @@ class Swarm:
     def __init__(self, tmp_path: Path) -> None:
         self.clock = [NOW]
         root = tmp_path / "seed"
+        root.mkdir(mode=0o700)
         self.database = root / "state.sqlite3"
         self.coordinator = SeedCoordinator(
             swarm_id="swarm-a",
             seed_node_id="seed-node",
             seed_url="http://127.0.0.1:8788",
-            signer=generate_ed25519_signer(endpoint_id="seed-endpoint"),
+            # On-disk seed key bound to the state, as the operator commands require.
+            signer=load_or_create_node_signer(root / "identity" / "seed.key"),
             invite_registry=SqliteInviteRegistry(self.database),
             state=SqliteSeedState(self.database),
             incarnation="seed-incarnation",
@@ -399,3 +401,105 @@ def test_after_a_resume_only_the_new_generation_and_incarnation_are_answered(swa
     message = _verify(swarm, fresh)
     assert message["generation"] == current["generation"]
     assert message["assignment"]["assignment_id"] == "route-1"
+
+
+def _cli(argv: list[str], capsys) -> tuple[int, dict]:
+    code = ra.main(argv)
+    captured = capsys.readouterr()
+    return code, json.loads(captured.out or captured.err)
+
+
+def test_operator_command_takes_the_seed_authority_and_refuses_unsafe_roots(swarm: Swarm, tmp_path: Path, capsys) -> None:
+    import os
+
+    fixture = ROOT / "native/mobile_core/tests/fixtures/gpt2_stage.json"
+    issue = ["issue", "--node-id", "node-phone", "--stage-pack", str(fixture), "--peer-endpoint-id", PEER, "--route-generation", "7"]
+    root = swarm.database.parent
+    # A world-readable state root is not the owner's seed authority.
+    os.chmod(root, 0o755)
+    code, out = _cli(["--state-root", str(root), *issue], capsys)
+    assert code == 2 and out["error"].startswith("seed_operator_")
+    os.chmod(root, 0o700)
+    # A symlink to the state root is refused, not followed.
+    link = tmp_path / "seed-link"
+    link.symlink_to(root)
+    code, out = _cli(["--state-root", str(link), *issue], capsys)
+    assert code == 2 and out["error"].startswith("seed_operator_")
+    # A directory without the bound seed key is refused.
+    other = tmp_path / "not-a-seed"
+    other.mkdir(mode=0o700)
+    code, out = _cli(["--state-root", str(other), *issue], capsys)
+    assert code == 2 and out["error"].startswith("seed_operator_")
+    # A seed key that is not the one bound to the state is refused.
+    key = root / "identity" / "seed.key"
+    original = key.read_bytes()
+    key.unlink()
+    load_or_create_node_signer(key)
+    code, out = _cli(["--state-root", str(root), *issue], capsys)
+    assert code == 2 and out["error"].startswith("seed_operator_identity")
+    key.unlink()
+    key.write_bytes(original)
+    os.chmod(key, 0o600)
+    with pytest.raises(SeedCoordinatorError):
+        ra.route_assignment_status(swarm.database, node_id="node-phone")
+
+
+def test_operator_writes_are_safe_next_to_a_live_seed_serving_the_member(swarm: Swarm, capsys) -> None:
+    """The lease is not exclusive: the command runs while the seed answers the
+    member, and SQLite serializes every write, so no answer or command fails and
+    each answer reflects one consistent assignment."""
+
+    import sqlite3
+    import threading
+    import time as wall
+
+    fixture = ROOT / "native/mobile_core/tests/fixtures/gpt2_stage.json"
+    root = swarm.database.parent
+    with sqlite3.connect(swarm.database) as connection:
+        connection.execute("UPDATE seed_members SET lease_expires_at = ?", (wall.time() + 300.0,))
+    swarm.clock[0] = wall.time()
+    live = ra.service_for(swarm.coordinator)
+    live.clock = wall.time
+    errors: list[str] = []
+    seen: set[str | None] = set()
+    stop = threading.Event()
+
+    def member(lane: int) -> None:
+        sequence = 0
+        while not stop.is_set():
+            sequence += 1
+            swarm.clock[0] = wall.time()
+            try:
+                answer = live.answer(swarm.request("node-phone", message_id=f"live-{lane}-{sequence}"))
+                assignment = answer["envelope"]["message"]["assignment"]
+                if assignment is not None:
+                    assert answer["stage_pack"]["pack_digest"] == assignment["stage_pack_digest"]
+                    seen.add(assignment["assignment_id"])
+                else:
+                    assert answer["stage_pack"] is None
+                    seen.add(None)
+            except Exception as exc:  # noqa: BLE001 - collected for the assertion
+                errors.append(repr(exc))
+
+    threads = [threading.Thread(target=member, args=(lane,)) for lane in range(3)]
+    for thread in threads:
+        thread.start()
+    try:
+        base = ["--state-root", str(root)]
+        issued = []
+        for round_ in range(6):
+            code, out = _cli([*base, "issue", "--node-id", "node-phone", "--stage-pack", str(fixture),
+                              "--peer-endpoint-id", PEER, "--route-generation", str(7 + round_)], capsys)
+            assert code == 0, out
+            issued.append(out["assignment_id"])
+            if round_ % 2:
+                code, out = _cli([*base, "withdraw", "--node-id", "node-phone"], capsys)
+                assert code == 0 and out["state"] == "withdrawn", out
+    finally:
+        stop.set()
+        for thread in threads:
+            thread.join(timeout=30)
+    assert errors == []
+    assert seen and seen <= {None, *issued}
+    code, out = _cli(["--state-root", str(root), "status", "--node-id", "node-phone"], capsys)
+    assert code == 0 and out["assignment_id"] == issued[-1] and out["state"] == "withdrawn"  # the last round withdrew it

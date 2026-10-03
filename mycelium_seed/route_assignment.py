@@ -38,6 +38,7 @@ from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import build_ed25519_verifier
 
 from .coordinator import SeedCoordinatorError
+from .operator import SeedOperatorError, _load_authority
 
 
 ROUTE_ASSIGNMENT_REQUEST_PROTOCOL = "mycelium.seed.route_assignment_request.v1"
@@ -297,12 +298,18 @@ def withdraw_route_assignment(
     _ensure_schema(database)
     connection = _connect(database)
     try:
-        connection.execute(
-            "UPDATE seed_route_assignments SET withdrawn = 1 WHERE node_id = ?", (node_id,)
-        )
-        row = connection.execute(
-            "SELECT * FROM seed_route_assignments WHERE node_id = ?", (node_id,)
-        ).fetchone()
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            connection.execute(
+                "UPDATE seed_route_assignments SET withdrawn = 1 WHERE node_id = ?", (node_id,)
+            )
+            row = connection.execute(
+                "SELECT * FROM seed_route_assignments WHERE node_id = ?", (node_id,)
+            ).fetchone()
+            connection.execute("COMMIT")
+        except BaseException:
+            connection.execute("ROLLBACK")
+            raise
     except sqlite3.Error as exc:
         raise _fail("seed_route_assignment_store_unavailable") from exc
     finally:
@@ -592,13 +599,29 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Owner command. Like every seed operator command it opens the state root
+    through ``_load_authority``: the private-directory lease (owner-only 0700
+    directory, no symlink or rename swap, revalidated before each write), the
+    owner-only database file and the seed key bound to the stored identity.
+
+    The lease is a descriptor binding, not an exclusive lock, so the command
+    runs next to the live seed. Concurrent writers are serialized by SQLite:
+    every write here is one ``BEGIN IMMEDIATE`` transaction with a 30 s busy
+    timeout, and the seed reads the assignment table fresh on each request.
+    """
+
     args = _parser().parse_args(argv)
-    database = args.state_root / "state.sqlite3"
-    if not database.is_file():
-        print(json.dumps({"error": "seed_operator_state_missing"}), file=sys.stderr)
+    try:
+        lease, _coordinator, _binding = _load_authority(
+            args.state_root, incarnation="seed-operator-route-assignment"
+        )
+    except SeedOperatorError as exc:
+        print(json.dumps({"error": exc.code}), file=sys.stderr)
         return 2
     try:
+        database = lease.path / "state.sqlite3"
         node_id = args.node_id or newest_android_member(database)
+        lease.revalidate()
         if args.command == "issue":
             result = issue_route_assignment(
                 database,
@@ -614,6 +637,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             deadline = time.monotonic() + max(0.0, args.wait_applied)
             while True:
+                lease.revalidate()
                 result = route_assignment_status(database, node_id=node_id)
                 if result["state"] == "applied" or time.monotonic() >= deadline:
                     break
@@ -624,9 +648,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SeedCoordinatorError as exc:
         print(json.dumps({"error": exc.code}), file=sys.stderr)
         return 1
+    except ValueError:
+        print(json.dumps({"error": "seed_operator_state_invalid"}), file=sys.stderr)
+        return 2
+    finally:
+        lease.close()
     print(json.dumps(result, sort_keys=True))
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
