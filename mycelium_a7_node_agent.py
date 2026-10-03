@@ -309,7 +309,7 @@ class A7NodeAgent:
          standby = self._standby
          sources = len(self._sources)
          entries = len(self._entries)
-      snapshot = {} if standby is None else dict(standby.store.snapshot())
+      snapshot = {} if standby is None else {**standby.store.snapshot(), **standby.store.checkpoint_snapshot()}
       with self._lock:
          refusals = dict(self._refusals)
       return {**snapshot, "source_roles": sources, "entry_roles": entries, "refusals": refusals}

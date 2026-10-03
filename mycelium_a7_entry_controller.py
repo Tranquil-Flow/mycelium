@@ -551,6 +551,11 @@ class A7EntryController:
          # reconciliation; it is never silently dropped.
          pass
 
+   def fence_record_count(self) -> int:
+      """Durable fence records this entry currently holds (terminal records are released)."""
+
+      return self._fences.record_count()
+
    def snapshot(self, request_id: str) -> dict[str, Any] | None:
       with self._lock:
          state = self._requests.get(request_id)

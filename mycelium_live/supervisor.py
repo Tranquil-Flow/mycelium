@@ -3828,6 +3828,7 @@ def run_physical_server(
     a10_verify_control_port: int | None = None,
     a10_batch_policy_control_port: int | None = None,
     persist_transport_history: bool = False,
+    a7_evidence_control_port: int | None = None,
 ) -> int:
     deployment = native_deployment_projection(operator_plan)
     selected_deployment_dir: Path | None = None
@@ -3916,6 +3917,7 @@ def run_physical_server(
     a6_fault_control: Any | None = None
     a10_verify_control: Any | None = None
     a10_batch_policy_control: Any | None = None
+    a7_evidence_control: Any | None = None
     try:
         representation_authorization = _representation_authorization(
             representation_authorization_file
@@ -4027,6 +4029,15 @@ def run_physical_server(
                 public_origin=public_origin,
                 trusted_https_proxy=trusted_https_proxy,
             )
+        if a7_evidence_control_port is not None:
+            a7_evidence_control = _mount_a7_evidence_control(
+                stack=stack,
+                route=route,
+                product_port=port,
+                control_port=a7_evidence_control_port,
+                public_origin=public_origin,
+                trusted_https_proxy=trusted_https_proxy,
+            )
         startup_complete = True
 
         def request_stop(_signum: int, _frame: Any) -> None:
@@ -4065,6 +4076,11 @@ def run_physical_server(
                             )
                         }
                     ),
+                    **(
+                        {}
+                        if a7_evidence_control is None
+                        else {"a7_evidence_control": a7_evidence_control.status()}
+                    ),
                 }
             ).decode("utf-8"),
             flush=True,
@@ -4080,6 +4096,8 @@ def run_physical_server(
         a6_processes = (
             () if a6_fault_control is None else _a6_session_processes(route)
         )
+        if a7_evidence_control is not None:
+            a7_evidence_control.close()
         if a10_batch_policy_control is not None:
             a10_batch_policy_control.close()
         if a10_verify_control is not None:
@@ -4196,6 +4214,46 @@ def _mount_a10_batch_policy_control(
         raise RuntimeError(f"startup_a10_batch_policy_control_refused:{exc}") from exc
     except OSError as exc:
         raise RuntimeError("startup_a10_batch_policy_control_bind_failed") from exc
+    return control
+
+
+def _mount_a7_evidence_control(
+    *,
+    stack: Any,
+    route: Any,
+    product_port: int,
+    control_port: int,
+    public_origin: str | None,
+    trusted_https_proxy: bool,
+) -> Any:
+    """Mount the grant-gated, read-only A7 evidence door on its own loopback listener.
+
+    The door reads only the entry's signed ``a7_snapshot`` observation, the
+    route's request-scoped incidents and resource counters; it never mutates
+    the route, the router or a node.
+    """
+
+    from mycelium_a7_evidence_control import (
+        A7EvidenceControl,
+        A7EvidenceControlRefused,
+        RouteA7Evidence,
+        grant_from_environment,
+    )
+
+    try:
+        control = A7EvidenceControl(
+            grant=grant_from_environment(),
+            source=RouteA7Evidence(route, router=getattr(stack, "router", None)),
+            product_port=product_port,
+            port=control_port,
+            public_origin=public_origin,
+            trusted_https_proxy=trusted_https_proxy,
+        )
+        control.start()
+    except A7EvidenceControlRefused as exc:
+        raise RuntimeError(f"startup_a7_evidence_control_refused:{exc}") from exc
+    except OSError as exc:
+        raise RuntimeError("startup_a7_evidence_control_bind_failed") from exc
     return control
 
 
@@ -4612,6 +4670,14 @@ def build_parser() -> argparse.ArgumentParser:
             "MYCELIUM_A10_FLEET_GRANT"
         ),
     )
+    parser.add_argument(
+        "--a7-evidence-control-port",
+        type=int,
+        help=(
+            "mount the grant-gated, read-only A7 evidence door on this direct "
+            "127.0.0.1 port (0 = ephemeral); requires MYCELIUM_A7_FLEET_GRANT"
+        ),
+    )
     return parser
 
 
@@ -4645,6 +4711,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(
             "--a10-batch-policy-control-port must be 0 or from 1024 through 65535"
         )
+    if args.a7_evidence_control_port is not None and not (
+        args.a7_evidence_control_port == 0
+        or 1_024 <= args.a7_evidence_control_port <= 65_535
+    ):
+        raise SystemExit("--a7-evidence-control-port must be 0 or from 1024 through 65535")
     trusted_proxy_capability = None
     if args.trusted_proxy_capability_file is not None:
         try:
@@ -4715,6 +4786,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if args.persist_transport_history
                 else {}
             ),
+            **(
+                {}
+                if args.a7_evidence_control_port is None
+                else {"a7_evidence_control_port": args.a7_evidence_control_port}
+            ),
         )
     if args.persist_transport_history:
         raise SystemExit("--persist-transport-history is valid only with one --operator-plan")
@@ -4730,6 +4806,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(
             "--a10-batch-policy-control-port is valid only with one --operator-plan"
         )
+    if args.a7_evidence_control_port is not None:
+        raise SystemExit("--a7-evidence-control-port is valid only with one --operator-plan")
     if args.deployment_dir is not None:
         raise SystemExit("--deployment-dir is valid only with one --operator-plan")
     return run_registry_server(

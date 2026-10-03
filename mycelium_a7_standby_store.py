@@ -55,6 +55,8 @@ class _Entry:
    last_digest: str
    end: int
    kv_bytes: int
+   checkpoint_count: int = 1
+   checkpoint_payload_bytes: int = 0
 
 
 def _layer_bytes(layers: dict[int, tuple[np.ndarray, np.ndarray]]) -> int:
@@ -109,6 +111,8 @@ class StandbyShadowStore:
                last_digest=digest,
                end=end,
                kv_bytes=_layer_bytes(layers),
+               checkpoint_count=1,
+               checkpoint_payload_bytes=len(payload),
             )
             if entry.kv_bytes > self._max_entry_bytes:
                raise StandbyShadowError("shadow_entry_too_large")
@@ -146,6 +150,8 @@ class StandbyShadowStore:
          entry.last_digest = digest
          entry.end = end
          entry.kv_bytes = merged_bytes
+         entry.checkpoint_count += 1
+         entry.checkpoint_payload_bytes += len(payload)
          return self._receipt(entry, digest, "advanced")
 
    @staticmethod
@@ -196,4 +202,15 @@ class StandbyShadowStore:
          return {
             "shadow_entry_count": len(self._entries),
             "shadow_kv_bytes": sum(entry.kv_bytes for entry in self._entries.values()),
+         }
+
+   def checkpoint_snapshot(self) -> dict[str, int]:
+      """Stored (verified, non-idempotent) checkpoints and their payload bytes, for held chains."""
+
+      with self._lock:
+         return {
+            "shadow_checkpoint_count": sum(entry.checkpoint_count for entry in self._entries.values()),
+            "shadow_checkpoint_payload_bytes": sum(
+               entry.checkpoint_payload_bytes for entry in self._entries.values()
+            ),
          }

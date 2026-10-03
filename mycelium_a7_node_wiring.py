@@ -395,8 +395,16 @@ class A7NodeWiring:
          snapshot = self.standby_port.kv_snapshot()
          document["standby_runtime"] = {
             key: snapshot.get(key)
-            for key in ("active_state_count", "active_kv_bytes", "prefill_operation_count", "decode_operation_count")
+            for key in (
+               "active_state_count",
+               "active_kv_bytes",
+               "prefill_operation_count",
+               "prefill_input_token_count",
+               "decode_operation_count",
+            )
          }
+      if self.controller is not None:
+         document["entry_fence_record_count"] = self.controller.fence_record_count()
       if self.controller is not None and request_id is not None:
          document["request"] = self.controller.snapshot(request_id)
       return document
