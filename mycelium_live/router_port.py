@@ -557,10 +557,17 @@ class LiveRouterPort:
                         "simulation_only": True,
                     }
                 )
+            rotation = self._replacement_binding_digest(qualification_digest)
             with self._lock:
                 if self._recovery_qualification_digest not in (None, qualification_digest):
-                    coordinator.cancel(request.request_id)
-                    raise M16AdmissionError("qualification_binding_changed")
+                    if rotation != qualification_digest or self._pending:
+                        coordinator.cancel(request.request_id)
+                        raise M16AdmissionError("qualification_binding_changed")
+                    # The route owner replaced the route (cold restart) and
+                    # publishes the replacement's qualification as current
+                    # authority. Rotate, as an idle renewal does; no admitted
+                    # request crosses the boundary.
+                    self._recovery_current_request_ids.clear()
                 self._recovery_qualification_digest = qualification_digest
             issued_at_ms = int(time.monotonic() * 1_000)
             publisher_generation = kwargs.get("publisher_generation", 1)
@@ -1605,6 +1612,45 @@ class LiveRouterPort:
                     self._changed.notify_all()
             return False
 
+    def _replacement_binding_digest(self, candidate: str | None) -> str | None:
+        """The candidate digest iff it is the qualifier's current authority.
+
+        After a cold route restart the owner qualifies the replacement route
+        and publishes it as current; the bound digest still names the retired
+        route. Only the source's non-refreshing current record may rotate the
+        binding, and only for this exact deployment and graph.
+        """
+
+        source = self._qualification_source
+        if source is None or not isinstance(candidate, str):
+            return None
+        reader = getattr(source, "peek_current", None)
+        if not callable(reader):
+            reader = source.current
+        try:
+            record = reader()
+        except Exception:
+            return None
+        from mycelium_qualification.contracts import RouteQualificationV1
+        from mycelium_request_gateway.contracts import qualification_digest
+
+        if (
+            not isinstance(record, RouteQualificationV1)
+            or record.route_ready is not True
+            or record.deployment_id != self._graph.deployment_id
+            or record.deployment_epoch != self._graph.deployment_epoch
+            or record.topology_version != self._graph.topology_version
+            or record.model_id != self._graph.model_id
+            or record.resolved_commit != self._graph.resolved_commit
+            or record.manifest_digest != self._graph.manifest_digest
+        ):
+            return None
+        try:
+            current = qualification_digest(record)
+        except Exception:
+            return None
+        return candidate if current == candidate else None
+
     def _recovery_projection_qualification_digest(self) -> str:
         """Resolve the current qualifier binding for the public projection.
 
@@ -1655,7 +1701,15 @@ class LiveRouterPort:
         ):
             raise M16AdmissionError("recovery_projection_binding_invalid")
         if bound is not None and digest != bound:
-            raise M16AdmissionError("recovery_projection_binding_mismatch")
+            if self._replacement_binding_digest(digest) != digest:
+                raise M16AdmissionError("recovery_projection_binding_mismatch")
+            with self._lock:
+                if self._pending or self._recovery_qualification_digest != bound:
+                    raise M16AdmissionError("recovery_projection_binding_mismatch")
+                # Idle after a route replacement: the projection binds the
+                # replacement's current qualification, as before any admission.
+                self._recovery_current_request_ids.clear()
+                self._recovery_qualification_digest = digest
         return digest
 
     def recovery_public_projection(
