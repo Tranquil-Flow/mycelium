@@ -101,3 +101,14 @@ def test_node_side_counters_the_door_reads(tmp_path: Path) -> None:
     shadow = StandbyShadowStore(max_entry_bytes=1024, max_entries=4)
     assert shadow.snapshot() == {"shadow_entry_count": 0, "shadow_kv_bytes": 0}
     assert shadow.checkpoint_snapshot() == {"shadow_checkpoint_count": 0, "shadow_checkpoint_payload_bytes": 0}
+
+
+def test_demo_cli_forwards_the_evidence_port_to_the_live_serve() -> None:
+    from mycelium_demo.cli import _fixture_has_live_only_arguments, _live_arguments, build_parser
+
+    plain = build_parser().parse_args(["serve", "--mode", "live"])
+    assert "--a7-evidence-control-port" not in _live_arguments(plain)
+    args = build_parser().parse_args(["serve", "--mode", "live", "--a7-evidence-control-port", "18797"])
+    forwarded = _live_arguments(args)
+    assert forwarded[forwarded.index("--a7-evidence-control-port") + 1] == "18797"
+    assert _fixture_has_live_only_arguments(args) is True
