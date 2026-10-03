@@ -274,6 +274,7 @@ class LiveRouterPort:
         self._sinks: dict[str, object] = {}
         self._recovery_failures: dict[str, str] = {}
         self._retained_source_failures: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._retained_recovery_attempts: OrderedDict[str, int] = OrderedDict()
         self._coordinator = runtime_coordinator
         self._recovery_authority = recovery_authority
         self._recovery_qualification_source = recovery_qualification_source
@@ -1097,6 +1098,19 @@ class LiveRouterPort:
         while len(retained) > _RETAINED_SOURCE_FAILURES_MAX:
             retained.popitem(last=False)
 
+    def _retain_recovery_attempts(self, request_id: str, attempts: int) -> None:
+        """Keep how many recovery attempts started past request release.
+
+        Caller holds ``self._lock``. A recovery that settles quickly is
+        released by the gateway before an observer polls; the released view
+        still reports that recovery ran, never its private state.
+        """
+        retained = self._retained_recovery_attempts
+        retained.pop(request_id, None)
+        retained[request_id] = attempts
+        while len(retained) > _RETAINED_SOURCE_FAILURES_MAX:
+            retained.popitem(last=False)
+
     def _a6_test_only_source_failure_observed(self, binding: dict[str, Any]) -> bool:
         """Read the source recovery transition, not a successor's current status.
 
@@ -1187,8 +1201,16 @@ class LiveRouterPort:
             pending = self._pending.get(request_id)
             if pending is None:
                 reason = self._recovery_failures.get(request_id)
-                return None if reason is None else {
+                attempts = self._retained_recovery_attempts.get(request_id)
+                if reason is None and attempts is None:
+                    return None
+                view: dict[str, Any] = {
                     "retained": False, "recovery_failure_reason": reason}
+                if attempts is not None:
+                    view["recovery_attempts"] = attempts
+                    view["source_failure_observed"] = (
+                        request_id in self._retained_source_failures)
+                return view
             identity = pending.command_identity
             return {
                 "retained": True,
@@ -1329,6 +1351,7 @@ class LiveRouterPort:
             )
             pending.recovery_attempts += 1
             pending.recovery_phase = "successor_pending"
+            self._retain_recovery_attempts(request_id, pending.recovery_attempts)
 
         successor_identity: dict[str, Any] | None = None
         source_fenced = False
