@@ -44,6 +44,32 @@ _MAX_CANCELLATION_AND_CLEANUP_SECONDS = mycelium_deadlines.CANCEL_AND_CLEANUP_BU
 
 
 _LOGGER = logging.getLogger(__name__)
+def _source_failure_matches(
+    identity: Mapping[str, Any], binding: Mapping[str, Any]
+) -> bool:
+    """Exact source identity, except the failure's own cancellation generation.
+
+    A physical source failure interrupts the command, which joins the route's
+    next cancellation generation before the router records the failure. A
+    binding captured while the source was executing therefore carries the
+    generation the failure started from: it may trail the observed one, never
+    lead it. Every other identity field must match exactly.
+    """
+
+    for field, observed in identity.items():
+        bound = binding.get(field)
+        if field == "cancellation_generation":
+            if (
+                type(bound) is not int
+                or type(observed) is not int
+                or not 0 <= bound <= observed
+            ):
+                return False
+        elif bound != observed:
+            return False
+    return True
+
+
 #: Released requests whose observed source-failure identity stays readable.
 #: The gateway releases a request as soon as its backend run returns, which
 #: for a synchronously refused recovery happens before a controlled-fault
@@ -1087,10 +1113,7 @@ class LiveRouterPort:
                 self._retained_source_failures.get(request_id)
                 if pending is None else pending.source_failure_identity
             )
-            return bool(
-                identity is not None
-                and identity == {field: binding.get(field) for field in identity}
-            )
+            return identity is not None and _source_failure_matches(identity, binding)
 
     def _a6_test_only_source_fault_binding(self, request_id: str) -> dict[str, Any] | None:
         """Detached admitted-command snapshot; no public fault or route mutation.

@@ -73,6 +73,27 @@ class ExecutedCase:
         return None if self.failure_marker is None else self.failure_marker[1]
 
 
+def _incident_identity_matches(incident: Mapping[str, Any],
+                               identity: Mapping[str, Any]) -> bool:
+    """The incident names the armed command; its generation may have advanced.
+
+    The route records the incident at whichever cancellation generation is
+    current when its reader observes the failure: before or after the failure
+    joins the command to the next generation. It never precedes the armed one.
+    """
+
+    for name, value in identity.items():
+        if name not in incident:
+            continue
+        observed = incident[name]
+        if name == "cancellation_generation":
+            if type(observed) is not int or type(value) is not int or observed < value:
+                return False
+        elif observed != value:
+            return False
+    return True
+
+
 class LiveProductFaultTarget:
     """Real product authorities one controlled fault reads and acts on."""
 
@@ -279,8 +300,7 @@ class LiveProductFaultTarget:
                         and incident.get("subject_id") == record.source_node_id
                         and incident.get("scope") == "request"
                         and incident.get("fatal_accepted") is False
-                        and all(incident.get(name) == value for name, value in identity.items()
-                                if name in incident)):
+                        and _incident_identity_matches(incident, identity)):
                     return incident
             return None
 

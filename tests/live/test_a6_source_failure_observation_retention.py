@@ -120,3 +120,26 @@ def test_pending_request_identity_remains_authoritative(tmp_path) -> None:
             {"request_id": "request-x", "command_id": 1}) is True
     finally:
         service.close()
+
+
+def test_binding_from_the_executing_generation_matches_the_failure_generation(tmp_path) -> None:
+    """The failure joins the next cancellation generation; the armed binding trails it."""
+
+    route = FailingThenRecoveringRoute()
+    _coordinator, router, service, _qualification = _runtime(
+        tmp_path, route, base_graph=_source_only_graph()
+    )
+    identity = {"request_id": "request-g", "command_id": "c", "cancellation_generation": 1}
+    try:
+        with router._lock:
+            router._retain_source_failure_identity("request-g", identity)
+        for generation, expected in ((0, True), (1, True), (2, False), (-1, False), ("0", False)):
+            binding = {**identity, "cancellation_generation": generation}
+            assert router.a6_source_failure_observed(binding) is expected, generation
+        assert router.a6_source_failure_observed(
+            {"request_id": "request-g", "command_id": "c"}) is False
+        assert router.a6_source_failure_observed(
+            {**identity, "cancellation_generation": 0, "command_id": "other"}) is False
+    finally:
+        service.close()
+
