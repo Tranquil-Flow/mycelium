@@ -211,23 +211,18 @@ def test_plug_in_measures_the_truthful_fallback_from_product_evidence(tmp_path: 
     assert record["terminal_results"] == 1
     assert record["duplicate_tokens"] == 0
     assert record["stale_source_publications_accepted"] == 0
-    # MEASURED FINDING (2026-10-03): after the A6-handed fallback the entry's
-    # A7 controller is never finished for the failed attempt, so its durable
-    # fence record stays (every other terminal counter returns to baseline).
+    # The A6-handed fallback releases the entry's durable fence record and
+    # shadow at its terminal (G4): every terminal counter returns to baseline.
     assert record["cleanup"] == {
-        harness._ENTRY_NODE_ID: {
-            **{name: 0 for name in gate._CLEANUP_FIELDS},
-            "fence_records_delta": 1,
-        }
+        harness._ENTRY_NODE_ID: {name: 0 for name in gate._CLEANUP_FIELDS}
     }
-    assert "terminal_released" not in observations["a7_result"]
+    assert observations["a7_result"]["outcome"] == "full_context_replay"
     assert observations["measured"]["terminals"] == ["failed"]
     assert len(scoped) == 1 and scoped[0]["reason"] == "node_process_exited"
     failures = gate.evaluate_case(record, plan)
     # The route harness has no product router port, so no A6 full-context
-    # replay completes the request: the gate rejects the missing output, and
-    # the retained fence record fails the terminal resource delta.
-    assert set(failures) == _HARNESS_ONLY | {"reference_parity", "missing_tokens", "terminal_resource_delta"}, failures
+    # replay completes the request: the gate rejects the missing output.
+    assert set(failures) == _HARNESS_ONLY | {"reference_parity", "missing_tokens"}, failures
 
 
 def _plan_file(tmp_path: Path) -> Path:

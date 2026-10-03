@@ -358,6 +358,10 @@ def test_unqualified_or_lagging_standby_falls_back_without_continuity(tmp_path: 
    assert harness.standby_port.kv_snapshot()["active_state_count"] == 0
    assert harness.shadow.snapshot()["shadow_entry_count"] == 0
    assert STANDBY_ID not in {hop.placement_id for hop in record.manifest.ordered_hops}
+   # The A6-ended request finishes its A7 coverage: no durable fence record stays.
+   assert harness.fences.current("request:a7-fallback") is None
+   assert harness.fences.record_count() == 0
+   assert record.kv_successor_cutover["outcome"] == "full_context_replay"
 
 
 def test_no_a6_authority_aborts_explicitly(tmp_path: Path) -> None:
