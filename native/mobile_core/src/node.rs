@@ -145,6 +145,9 @@ pub struct NodeStatus {
     /// loaded and route peer allow-listed), if any.
     pub route_assignment: Option<String>,
     pub route_assignment_error: Option<String>,
+    /// The owner of this device chose to serve (persisted across restarts, so a
+    /// restarted app restores serving instead of silently dropping it).
+    pub serving_intent: bool,
 }
 
 /// Where the last sealed observation window ended, so each observation covers
@@ -272,6 +275,7 @@ impl NodeCore {
             incarnation: new_incarnation()?,
             timing,
         };
+        core.shared.lock().unwrap().status.serving_intent = read_serving_intent(&core.data_dir);
         if let Ok(raw) = std::fs::read(core.data_dir.join("invitation.json"))
             && let Ok(inv) = serde_json::from_slice::<Value>(&raw)
         {
@@ -631,6 +635,21 @@ impl NodeCore {
         self.data_dir.join("membership.json").exists()
     }
 
+    /// Persist whether the user chose to serve. A restarted app reads it back
+    /// and restores serving after resuming the membership.
+    pub fn set_serving_intent(&self, serving: bool) -> Result<NodeStatus, NodeError> {
+        let record = json!({"protocol": SERVING_INTENT_PROTOCOL, "serving": serving});
+        write_private(&self.data_dir.join(SERVING_INTENT_FILE), &serde_json::to_vec(&record).unwrap())
+            .map_err(|_| self.fail(nerr("serving_intent_unwritable")))?;
+        let mut s = self.shared.lock().unwrap();
+        s.status.serving_intent = serving;
+        Ok(s.status.clone())
+    }
+
+    pub fn serving_intent(&self) -> bool {
+        self.shared.lock().unwrap().status.serving_intent
+    }
+
     /// Load one assignment-local stage pack (digest-verified by the runtime).
     pub fn load_stage(&self, pack: &Value) -> Result<NodeStatus, NodeError> {
         let stage = Gpt2BlockStage::from_document(pack).map_err(|e| self.fail(nerr(e.0)))?;
@@ -664,6 +683,17 @@ impl NodeCore {
         let t = self.transport.clone();
         self.rt.block_on(async move { t.close().await });
     }
+}
+
+const SERVING_INTENT_FILE: &str = "serving.json";
+const SERVING_INTENT_PROTOCOL: &str = "mycelium.node_serving_intent.v1";
+
+/// Missing or unreadable intent means "not serving": never serve by accident.
+fn read_serving_intent(data_dir: &Path) -> bool {
+    std::fs::read(data_dir.join(SERVING_INTENT_FILE))
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
+        .is_some_and(|v| v["protocol"] == SERVING_INTENT_PROTOCOL && v["serving"] == Value::Bool(true))
 }
 
 fn lease_is_fresh(status: &NodeStatus, now: f64) -> bool {

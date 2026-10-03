@@ -68,13 +68,20 @@ async fn node_drain() -> Result<NodeStatus, String> {
     blocking(|c| Ok(c.drain())).await
 }
 
+const SERVING_DETAIL: &str = "Serving as a Mycelium node";
+
+/// Start the OS serving contract and remember the choice, so a restarted app
+/// (process death, force-stop) restores serving once it has resumed.
 #[tauri::command]
 fn serving_start(svc: State<'_, NodeService<Wry>>) -> Result<ServiceStatus, String> {
-    svc.start("Serving as a Mycelium node")
+    let status = svc.start(SERVING_DETAIL)?;
+    core()?.set_serving_intent(true).map_err(|e| e.0)?;
+    Ok(status)
 }
 
 #[tauri::command]
 fn serving_stop(svc: State<'_, NodeService<Wry>>) -> Result<ServiceStatus, String> {
+    core()?.set_serving_intent(false).map_err(|e| e.0)?;
     svc.stop()
 }
 
@@ -134,6 +141,13 @@ fn start_core(app: &AppHandle) {
                 && c.is_enrolled()
             {
                 let _ = c.resume();
+                // The user had chosen to serve before the process died: bring
+                // the serving service back (the app is in the foreground now).
+                if c.serving_intent()
+                    && let Some(svc) = handle.try_state::<NodeService<Wry>>()
+                {
+                    let _ = svc.start(SERVING_DETAIL);
+                }
             }
             #[cfg(debug_assertions)]
             let dev_dir = handle.path().app_data_dir().ok().map(|d| d.join("node"));
@@ -141,7 +155,26 @@ fn start_core(app: &AppHandle) {
             let mut last_dump = String::new();
             // Throttled status stream (<= 2 Hz): the UI never polls in a loop.
             let mut tick: u64 = 0;
+            let mut last_service: Option<ServiceStatus> = None;
             loop {
+                // The OS service can stop or come back without a UI action
+                // (notification Stop, process restart): stream it too (~2 s).
+                if tick.is_multiple_of(4)
+                    && let Some(svc) = handle.try_state::<NodeService<Wry>>()
+                    && let Ok(service) = svc.status()
+                    && last_service.as_ref().map(|l| (l.running, &l.mode)) != Some((service.running, &service.mode))
+                {
+                    // Stopped from outside the app (the notification's Stop):
+                    // that is the user's choice too, so do not restore it later.
+                    if last_service.as_ref().is_some_and(|l| l.running)
+                        && !service.running
+                        && let Ok(c) = core()
+                    {
+                        let _ = c.set_serving_intent(false);
+                    }
+                    let _ = handle.emit("node://service", service.clone());
+                    last_service = Some(service);
+                }
                 if let Ok(c) = core() {
                     // OS power/thermal readings for the sealed observations, every ~10 s.
                     if tick.is_multiple_of(20)

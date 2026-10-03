@@ -115,3 +115,29 @@ fn shell_sampled_power_and_thermal_readings_reach_the_sealed_observation() {
     core.shutdown();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn serving_intent_survives_a_restart_and_defaults_to_not_serving() {
+    let dir = std::env::temp_dir().join(format!("mycelium-node-serving-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let first = NodeCore::open(&dir, Reachability::LocalOnly).unwrap();
+    assert!(!first.serving_intent());
+    assert!(!first.status().serving_intent);
+    assert!(first.set_serving_intent(true).unwrap().serving_intent);
+    first.shutdown();
+
+    let second = NodeCore::open(&dir, Reachability::LocalOnly).unwrap();
+    assert!(second.serving_intent(), "a restarted node remembers the user chose to serve");
+    assert!(!second.set_serving_intent(false).unwrap().serving_intent);
+    second.shutdown();
+    let third = NodeCore::open(&dir, Reachability::LocalOnly).unwrap();
+    assert!(!third.serving_intent());
+    third.shutdown();
+
+    // A corrupt record never turns serving on.
+    std::fs::write(dir.join("serving.json"), b"{\"serving\": true}").unwrap();
+    let fourth = NodeCore::open(&dir, Reachability::LocalOnly).unwrap();
+    assert!(!fourth.serving_intent());
+    fourth.shutdown();
+    let _ = std::fs::remove_dir_all(&dir);
+}

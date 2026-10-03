@@ -17,13 +17,21 @@ export function App({ api = tauriApi }: { api?: NodeApi }) {
 
   useEffect(() => {
     let off: (() => void) | undefined;
+    let offService: (() => void) | undefined;
     let alive = true;
     api.onStatus((s) => alive && setStatus(s)).then((u) => (off = u));
+    // The serving service also changes without a tap here (restored after a
+    // restart, stopped from the notification): follow it, never a stale snapshot.
+    api
+      .onService((s) => alive && setService(s))
+      .then((u) => (offService = u))
+      .catch(() => undefined);
     api.status().then((s) => alive && setStatus(s)).catch(() => undefined);
     api.servingStatus().then((s) => alive && setService(s)).catch(() => undefined);
     return () => {
       alive = false;
       off?.();
+      offService?.();
     };
   }, [api]);
 
