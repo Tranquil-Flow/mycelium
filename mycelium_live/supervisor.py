@@ -858,6 +858,7 @@ class ColdRouteRestartOwner:
         command_identity: Mapping[str, Any] | None = None,
         authorize_cleanup: Callable[[float], float] | None = None,
         publish_cleanup_receipt: Callable[[Mapping[str, Any]], None] | None = None,
+        _stop_token_ids_override: frozenset[int] | None = None,
     ) -> Any:
         route, generation = self._ready_route_or_raise()
         if not self._route_alive(route) and not self._route_survives_peer_loss(route):
@@ -867,6 +868,13 @@ class ColdRouteRestartOwner:
         # serves a request whose placements exclude the lost peer (an M16
         # successor). The route itself refuses a path through a dead peer with
         # ``selected_route_not_open``, which cold-restarts below.
+        # Qualification challenges must reproduce the exact controller-owned
+        # output, including tokens that are terminal for the product codec;
+        # forward the request-local override only when one is requested so
+        # routes without stop filtering keep their plain signature.
+        extra: dict[str, Any] = {}
+        if _stop_token_ids_override is not None:
+            extra["_stop_token_ids_override"] = _stop_token_ids_override
         with self._lock:
             self._request_routes[request_id] = route
         try:
@@ -882,6 +890,7 @@ class ColdRouteRestartOwner:
                 command_identity=command_identity,
                 authorize_cleanup=authorize_cleanup,
                 publish_cleanup_receipt=publish_cleanup_receipt,
+                **extra,
             )
         except BaseException as exc:
             if self._recovery_owns_failure(route, request_id):

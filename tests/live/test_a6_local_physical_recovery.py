@@ -11,6 +11,8 @@ Local multi-process session only; never physical or browser qualification.
 from __future__ import annotations
 
 import faulthandler
+import json
+import logging
 import sys
 import threading
 import time
@@ -185,7 +187,8 @@ def watchdog():
     faulthandler.cancel_dump_traceback_later()
 
 
-def test_single_path_source_kill_is_observed_then_route_cold_restarts(tmp_path, watchdog) -> None:
+def test_single_path_source_kill_is_observed_then_route_cold_restarts(
+        tmp_path, watchdog, caplog) -> None:
     """Run-day topology: no disjoint successor exists.
 
     The source failure is observed even though the refused recovery settles
@@ -204,6 +207,16 @@ def test_single_path_source_kill_is_observed_then_route_cold_restarts(tmp_path, 
         assert outcome["post_state"]["actual_incident"]["subject_id"] == "node-a"
         assert outcome["kinds"] == ["failed"], outcome
         assert router.recovery_failure_reason(request_id) == "recovery_successor_unavailable"
+        # The refusal reason is the failed terminal's code and is logged.
+        assert ("failed", "recovery_successor_unavailable") in outcome["events"], outcome
+        logged = [json.loads(record.getMessage()) for record in caplog.records
+                  if record.name == "mycelium_live.router_port"
+                  and record.levelno == logging.WARNING
+                  and record.getMessage().startswith('{"error_code"')]
+        assert any(document["event"] == "a6_recovery_failed"
+                   and document["request_id"] == request_id
+                   and document["reason"] == "recovery_successor_unavailable"
+                   for document in logged), logged
         status = _wait_ready(owner, 120)
         assert status["state"] == "ready", status
         assert status["generation"] == 2
@@ -242,6 +255,8 @@ def test_full_replica_source_kill_recovers_on_the_disjoint_successor(tmp_path, w
         issued = target.qualifier.issued_qualification_facts(request_id)
         assert issued["successor_placement_ids"] == ["placement-001"]
         assert issued["physical_challenge"] == "passed"
+        challenge = target.qualifier.physical_challenge_outcome(request_id)
+        assert challenge["outcome"] == "passed", challenge
         assert router.recovery_failure_reason(request_id) is None
         status = _wait_ready(owner, 120)
         assert status["state"] == "ready" and status["generation"] == 2, status

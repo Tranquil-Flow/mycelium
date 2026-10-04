@@ -20,6 +20,7 @@ from .contracts import (
     TokenEmitter,
     REQUEST_GATEWAY_PROTOCOL_V2,
     StreamEvent,
+    is_safe_error_code,
     is_valid_request_id,
     safe_qualification_projection,
 )
@@ -815,7 +816,11 @@ class RequestGatewayService:
             elif outcome == "terminal_blocked":
                 self._append_cleanup_unproven_terminal(session)
             else:
-                self._append_terminal(session, "failed", code="backend_failed")
+                self._append_terminal(
+                    session,
+                    "failed",
+                    code=self._backend_failure_code(session.request_id),
+                )
             with session.condition:
                 session.outcome = outcome
         except AdmissionError as exc:
@@ -1276,6 +1281,19 @@ class RequestGatewayService:
                 session.backend_cancellation_complete = True
                 session.condition.notify_all()
         return accepted
+
+    def _backend_failure_code(self, request_id: str) -> str:
+        """A backend-retained bounded failure code, else the generic one."""
+
+        code_of = getattr(self._backend, "terminal_failure_code", None)
+        if callable(code_of):
+            try:
+                code = code_of(request_id)
+            except Exception:
+                code = None
+            if is_safe_error_code(code):
+                return code
+        return "backend_failed"
 
     def _release_backend_once(self, session: _Session) -> None:
         with session.condition:

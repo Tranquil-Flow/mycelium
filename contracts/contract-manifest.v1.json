@@ -135,8 +135,8 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "2d4b0d44f02a8d4b84e52bc8df0d5385eee87f68412e2710a4e351a6eb7de4c4",
-          "size_bytes": 127206
+          "sha256": "19c027eb2b3ceb2482b985738f2b534c968bb10839085b45d8768db8b684bdf7",
+          "size_bytes": 129794
         },
         {
           "path": "ui/web/src/features/liveRoute/m16Runtime.ts",
@@ -200,8 +200,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "2aaab4ed4c1041b77a52d21964c0f4d6efab88137b7146630787d227438e72c4",
-          "size_bytes": 195245
+          "sha256": "fda95248fba9e56b3b2007fe4d5c349447ef84174299f377b80b3e40a1fdd793",
+          "size_bytes": 195787
         },
         {
           "path": "ui/web/src/features/liveRoute/deploymentActivation.ts",
@@ -240,8 +240,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "2aaab4ed4c1041b77a52d21964c0f4d6efab88137b7146630787d227438e72c4",
-          "size_bytes": 195245
+          "sha256": "fda95248fba9e56b3b2007fe4d5c349447ef84174299f377b80b3e40a1fdd793",
+          "size_bytes": 195787
         },
         {
           "path": "ui/web/src/features/liveRoute/deploymentActivation.ts",
@@ -275,8 +275,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "2aaab4ed4c1041b77a52d21964c0f4d6efab88137b7146630787d227438e72c4",
-          "size_bytes": 195245
+          "sha256": "fda95248fba9e56b3b2007fe4d5c349447ef84174299f377b80b3e40a1fdd793",
+          "size_bytes": 195787
         },
         {
           "path": "ui/web/src/features/evidence/evidenceProjection.ts",
@@ -310,8 +310,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "2aaab4ed4c1041b77a52d21964c0f4d6efab88137b7146630787d227438e72c4",
-          "size_bytes": 195245
+          "sha256": "fda95248fba9e56b3b2007fe4d5c349447ef84174299f377b80b3e40a1fdd793",
+          "size_bytes": 195787
         },
         {
           "path": "ui/web/src/features/evidence/evidenceProjection.ts",
@@ -425,8 +425,8 @@
         },
         {
           "path": "mycelium_live/a6_recovery.py",
-          "sha256": "b95d52aeb94abf04ce3846534d2c1537bcff8ad540f758fa157ebdf1f49560ac",
-          "size_bytes": 18479
+          "sha256": "d537cbf24fcb1b83e5a9657104c810940f8bdb4ffd7f8e1443b5bddc8ab81c46",
+          "size_bytes": 21892
         }
       ],
       "protocol": "mycelium.full_context_recovery_qualification.v1"
@@ -450,13 +450,13 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "2d4b0d44f02a8d4b84e52bc8df0d5385eee87f68412e2710a4e351a6eb7de4c4",
-          "size_bytes": 127206
+          "sha256": "19c027eb2b3ceb2482b985738f2b534c968bb10839085b45d8768db8b684bdf7",
+          "size_bytes": 129794
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "2aaab4ed4c1041b77a52d21964c0f4d6efab88137b7146630787d227438e72c4",
-          "size_bytes": 195245
+          "sha256": "fda95248fba9e56b3b2007fe4d5c349447ef84174299f377b80b3e40a1fdd793",
+          "size_bytes": 195787
         },
         {
           "path": "mycelium_m16_runtime.py",
@@ -480,13 +480,13 @@
         },
         {
           "path": "mycelium_request_gateway/backend.py",
-          "sha256": "492f021d29bc144c5f6dd6829401b36763f192a636092d3c2aa195653b3bc0d6",
-          "size_bytes": 28497
+          "sha256": "64f04385ba8ca0d1429688e9f6589143ce61d61b15b12e36564a980e25d7341f",
+          "size_bytes": 29141
         },
         {
           "path": "mycelium_request_gateway/service.py",
-          "sha256": "860fb63dcbfe37d2aa85c5cdd0bc87a8cff1621231865a8371f2a1c97f5fbb7d",
-          "size_bytes": 59775
+          "sha256": "405b81a768868dbbdb63ebbdb2b97ef59cd42ce7e09a89f804447d834d3961b7",
+          "size_bytes": 60369
         },
         {
           "path": "mycelium_ui_gateway/app.py",
@@ -590,8 +590,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "2aaab4ed4c1041b77a52d21964c0f4d6efab88137b7146630787d227438e72c4",
-          "size_bytes": 195245
+          "sha256": "fda95248fba9e56b3b2007fe4d5c349447ef84174299f377b80b3e40a1fdd793",
+          "size_bytes": 195787
         },
         {
           "path": "ui/web/src/features/governance/governanceReadiness.ts",
@@ -670,8 +670,8 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "2d4b0d44f02a8d4b84e52bc8df0d5385eee87f68412e2710a4e351a6eb7de4c4",
-          "size_bytes": 127206
+          "sha256": "19c027eb2b3ceb2482b985738f2b534c968bb10839085b45d8768db8b684bdf7",
+          "size_bytes": 129794
         },
         {
           "path": "physical_inference_node.py",
@@ -1370,8 +1370,8 @@
         },
         {
           "path": "mycelium_request_gateway/service.py",
-          "sha256": "860fb63dcbfe37d2aa85c5cdd0bc87a8cff1621231865a8371f2a1c97f5fbb7d",
-          "size_bytes": 59775
+          "sha256": "405b81a768868dbbdb63ebbdb2b97ef59cd42ce7e09a89f804447d834d3961b7",
+          "size_bytes": 60369
         }
       ],
       "protocol": "mycelium.private_request_replay_checkpoint.v1"
@@ -1400,8 +1400,8 @@
         },
         {
           "path": "mycelium_request_gateway/service.py",
-          "sha256": "860fb63dcbfe37d2aa85c5cdd0bc87a8cff1621231865a8371f2a1c97f5fbb7d",
-          "size_bytes": 59775
+          "sha256": "405b81a768868dbbdb63ebbdb2b97ef59cd42ce7e09a89f804447d834d3961b7",
+          "size_bytes": 60369
         },
         {
           "path": "ui/web/src/features/inference/useInferenceSession.ts",
@@ -1635,8 +1635,8 @@
         },
         {
           "path": "mycelium_request_gateway/service.py",
-          "sha256": "860fb63dcbfe37d2aa85c5cdd0bc87a8cff1621231865a8371f2a1c97f5fbb7d",
-          "size_bytes": 59775
+          "sha256": "405b81a768868dbbdb63ebbdb2b97ef59cd42ce7e09a89f804447d834d3961b7",
+          "size_bytes": 60369
         },
         {
           "path": "mycelium_ui_gateway/validation.py",

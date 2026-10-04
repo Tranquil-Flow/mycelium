@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import socket
 import stat
@@ -46,6 +47,8 @@ from scripts.run_a6_recovery_case import (
     _sha256,
     validate_source_owned_observation,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 OBSERVATIONS_DIRNAME = "a6-production-observations"
 CLEANUP_PROTOCOL = "mycelium.a6_source_owned_cleanup_observation.v1"
@@ -455,8 +458,7 @@ class CaseObservationRecorder:
             settled = self._settle(executed)
             self.write(case_id, executed, settled)
         except Exception as error:  # a refused case simply has no observation
-            with self._lock:
-                self._refused[case_id] = str(error)[:96] or type(error).__name__
+            self._refuse(case_id, executed, error)
         if case_id == "cleanup_authority_failure":
             try:
                 released = self._settle_release(
@@ -465,9 +467,17 @@ class CaseObservationRecorder:
                     executed, released,
                     self._target.router.a6_command_authority(executed.request_id))
             except Exception as error:
-                with self._lock:
-                    self._refused[f"{case_id}.v2"] = (
-                        str(error)[:96] or type(error).__name__)
+                self._refuse(f"{case_id}.v2", executed, error)
+
+    def _refuse(self, key: str, executed: Any, error: BaseException) -> None:
+        reason = str(error)[:96] or type(error).__name__
+        with self._lock:
+            self._refused[key] = reason
+        _LOGGER.warning("%s", json.dumps(
+            {"event": "a6_case_observation_refused", "case": key,
+             "request_id": getattr(executed, "request_id", None),
+             "error_type": type(error).__name__, "reason": reason},
+            sort_keys=True, separators=(",", ":")))
 
     def _settle_release(self, executed: Any,
                         prior_view: Mapping[str, Any] | None) -> SettledFacts:

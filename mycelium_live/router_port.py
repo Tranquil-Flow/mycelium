@@ -275,6 +275,7 @@ class LiveRouterPort:
         self._recovery_failures: dict[str, str] = {}
         self._retained_source_failures: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._retained_recovery_attempts: OrderedDict[str, int] = OrderedDict()
+        self._retained_terminal_statuses: OrderedDict[str, str] = OrderedDict()
         self._coordinator = runtime_coordinator
         self._recovery_authority = recovery_authority
         self._recovery_qualification_source = recovery_qualification_source
@@ -970,6 +971,7 @@ class LiveRouterPort:
             if pending.release_requested and pending.terminal_status is not None:
                 self._pending.pop(request_id, None)
                 self._sinks.pop(request_id, None)
+                self._retain_terminal_status(request_id, pending.terminal_status)
                 should_release = True
             self._changed.notify_all()
         if should_release:
@@ -1104,6 +1106,22 @@ class LiveRouterPort:
         while len(retained) > _RETAINED_SOURCE_FAILURES_MAX:
             retained.popitem(last=False)
 
+    def _retain_terminal_status(self, request_id: str, status: str | None) -> None:
+        """Keep a released request's terminal status (bounded FIFO).
+
+        Caller holds ``self._lock``. The gateway releases a settled request
+        before an observer may poll; without this a request that never needed
+        recovery would have no released view at all and observers waiting for
+        its terminal would time out.
+        """
+        if status is None:
+            return
+        retained = self._retained_terminal_statuses
+        retained.pop(request_id, None)
+        retained[request_id] = status
+        while len(retained) > _RETAINED_SOURCE_FAILURES_MAX:
+            retained.popitem(last=False)
+
     def _retain_recovery_attempts(self, request_id: str, attempts: int) -> None:
         """Keep how many recovery attempts started past request release.
 
@@ -1208,10 +1226,13 @@ class LiveRouterPort:
             if pending is None:
                 reason = self._recovery_failures.get(request_id)
                 attempts = self._retained_recovery_attempts.get(request_id)
-                if reason is None and attempts is None:
+                terminal = self._retained_terminal_statuses.get(request_id)
+                if reason is None and attempts is None and terminal is None:
                     return None
                 view: dict[str, Any] = {
                     "retained": False, "recovery_failure_reason": reason}
+                if terminal is not None:
+                    view["terminal_status"] = terminal
                 if attempts is not None:
                     view["recovery_attempts"] = attempts
                     view["source_failure_observed"] = (
@@ -1609,6 +1630,30 @@ class LiveRouterPort:
                     if command_terminal_error is not None:
                         pending.terminal_blocked_reason = command_terminal_error
                     self._changed.notify_all()
+            if not cancelled:
+                # Operator diagnostics only: bounded codes, no request content.
+                _LOGGER.warning(
+                    "%s",
+                    json.dumps(
+                        {
+                            "event": "a6_recovery_failed",
+                            "request_id": request_id,
+                            "reason": pending.recovery_failure_reason,
+                            "error_type": type(error).__name__,
+                            "error_code": self._bounded_error_code(error),
+                            "source_fenced": source_fenced,
+                            "successor_reserved": successor_identity is not None,
+                            "recovery_attempts": pending.recovery_attempts,
+                            "terminal_blocked_reason": (
+                                None
+                                if command_terminal_error is None
+                                else command_terminal_error[:96]
+                            ),
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                )
             return False
 
     def _rotate_binding_locked(self, candidate: str, *, expected_bound: str) -> bool:
@@ -2159,6 +2204,7 @@ class LiveRouterPort:
                 if should_release:
                     self._pending.pop(request_id, None)
                     self._sinks.pop(request_id, None)
+                    self._retain_terminal_status(request_id, pending.terminal_status)
                 self._changed.notify_all()
             else:
                 # Retain the exact receipt with command ownership before any
@@ -2205,6 +2251,7 @@ class LiveRouterPort:
                     if pending.release_requested and request_id is not None:
                         self._pending.pop(request_id, None)
                         self._sinks.pop(request_id, None)
+                        self._retain_terminal_status(request_id, pending.terminal_status)
                         should_release = True
                     self._changed.notify_all()
             elif not late_finalized:
@@ -2560,6 +2607,7 @@ class LiveRouterPort:
             else:
                 self._pending.pop(request_id, None)
                 self._sinks.pop(request_id, None)
+                self._retain_terminal_status(request_id, pending.terminal_status)
                 should_release = True
             self._changed.notify_all()
         if should_release:
@@ -2719,6 +2767,7 @@ class LiveRouterPort:
             for request_id, _pending in releasable:
                 self._pending.pop(request_id, None)
                 self._sinks.pop(request_id, None)
+                self._retain_terminal_status(request_id, _pending.terminal_status)
         for request_id, pending in releasable:
             self._release_route_request(pending)
             self._retire_command(pending)
