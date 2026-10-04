@@ -287,6 +287,8 @@ def test_live_preflight_uses_local_probe_for_controller_and_bounded_strict_ssh_f
             assert "-i" in argv
             assert argv[argv.index("-i") + 1] == PRIVATE_SSH_IDENTITY
             assert any(value.startswith("ConnectTimeout=") for value in argv)
+            assert "ServerAliveInterval=10" in argv
+            assert "ServerAliveCountMax=6" in argv
             assert "--" in argv
             assert argv[-1] == (
                 'cd "$HOME/mycelium-physical-run/run-w8-001/source" && '

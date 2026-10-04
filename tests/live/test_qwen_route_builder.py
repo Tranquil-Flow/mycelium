@@ -130,6 +130,10 @@ def test_remote_peer_preflight_runs_before_candidate_materialization(
             "BatchMode=yes",
             "-o",
             "ConnectTimeout=5",
+            "-o",
+            "ServerAliveInterval=10",
+            "-o",
+            "ServerAliveCountMax=6",
             "operator@remote-1",
             "true",
         ]

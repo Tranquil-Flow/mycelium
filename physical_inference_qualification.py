@@ -79,6 +79,16 @@ _MAX_TRANSFER_BYTES = 8 * 1024 * 1024 * 1024
 _MAX_RUNNER_OUTPUT_BYTES = 1_048_576
 _MAX_RUNNER_TIMEOUT_SECONDS = 6 * 60 * 60.0
 NODE_COMMAND_TIMEOUT_SECONDS = 900.0
+# ConnectTimeout only bounds connection setup.  Without application-level
+# keepalives an established ssh session whose network path silently dies
+# blocks forever at 0% CPU; probe the server every 10 s and give up after six
+# unanswered probes (~60 s) so a dead link fails closed instead of hanging.
+SSH_KEEPALIVE_OPTIONS: tuple[str, ...] = (
+    "-o",
+    "ServerAliveInterval=10",
+    "-o",
+    "ServerAliveCountMax=6",
+)
 NODE_SESSION_TIMEOUT_SECONDS = 930.0
 _MIN_STAGE_TIMEOUT_SECONDS = 120.0
 _MAX_STAGE_TIMEOUT_SECONDS = _MAX_RUNNER_TIMEOUT_SECONDS
@@ -644,6 +654,7 @@ def _peer_process_argv(
         "StrictHostKeyChecking=yes",
         "-o",
         "ConnectTimeout=15",
+        *SSH_KEEPALIVE_OPTIONS,
         # This persistent SSH process is the node lifecycle control plane, not
         # a bulk artifact transfer. Mark every non-interactive packet as
         # expedited so cancellation receipts and cleanup snapshots retain the

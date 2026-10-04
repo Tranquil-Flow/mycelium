@@ -27,7 +27,15 @@ peers, startup prompt and run id. Nothing is invented:
   and the derive-time challenge cannot see that: it measures the controller's
   local copy;
 * each load proof is measured by loading the full assignment locally with that
-  node's runtime backend, exactly as the builder measured the split proofs;
+  node's runtime backend, exactly as the builder measured the split proofs,
+  then its ``runtime_identity`` (backend version and device) is rebound to the
+  identity OBSERVED on that node's own interpreter: the node recomputes the
+  proof at configure and refuses ``placement_load_proof_mismatch`` if, say,
+  its NumPy differs from the deriving interpreter's. A node with local process
+  transport is observed here by running its own ``python_executable``; any
+  other node needs ``--runtime-identity NODE=PATH`` (the JSON printed by
+  ``RUNTIME_IDENTITY_PROGRAM`` run with that node's interpreter on that node),
+  otherwise the derivation refuses (``a6_replica_runtime_identity_unobserved``);
 * the startup challenge output is recomputed through BOTH full paths and the
   derivation refuses unless the two backends agree token for token (the A6
   successor qualification replays the same challenge on the successor path);
@@ -35,10 +43,13 @@ peers, startup prompt and run id. Nothing is invented:
   seed's own key (``--seed-state-root``), or left for the caller to bind.
 
 Offline: no peer, transport or fleet contact. Staging the derived bundle
-(``stage_live_route``) transfers the control documents and code, NOT model
-shards: each node reads its shards from its own artifact root, so a remote
-node's asserted root must already hold the complete model before the plan is
-served (the node refuses ``invalid_stage_pack_file`` at configure otherwise).
+(``stage_live_route``) transfers each node its ``node_transfer_manifests``
+selection, which for a complete-model replica is the control documents, the
+code AND every model shard (about 1 GB per node for the 0.5B model), into that
+node's staging root. The node, however, loads from the assignment's artifact
+root, so a remote node's asserted root must itself hold the complete model
+before the plan is served (the node refuses ``invalid_stage_pack_file`` at
+configure otherwise).
 """
 from __future__ import annotations
 
@@ -49,6 +60,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import time
 from dataclasses import asdict
@@ -63,6 +75,22 @@ PROTOCOL = "mycelium.a6_replica_plan_derivation.v1"
 PLACEMENT_IDS = ("placement-000", "placement-001")
 REPLICA_GROUP = "full-model"
 FULL_COMPONENTS = ("input_embedding", "decoder", "final_norm", "lm_head")
+RUNTIME_IDENTITY_FIELDS = ("backend", "backend_version", "device")
+# Mirrors runtime_loader._actual_runtime_identity for the host-dependent fields.
+# Run on the node with that node's own interpreter: ``python -c PROGRAM BACKEND``.
+RUNTIME_IDENTITY_PROGRAM = """
+import importlib.metadata as metadata, json, sys
+backend = sys.argv[1]
+if backend == "numpy":
+    device = "cpu"
+elif backend == "mlx":
+    import mlx.core as mx
+    device = str(mx.default_device())
+else:
+    raise SystemExit("unsupported backend")
+print(json.dumps({"backend": backend, "backend_version": metadata.version(backend),
+                  "device": device}, sort_keys=True))
+"""
 
 
 class DerivationError(RuntimeError):
@@ -165,6 +193,89 @@ def resolve_artifact_roots(
     return roots
 
 
+def _valid_runtime_identity(observed: Any, backend: str) -> dict[str, str]:
+    if (not isinstance(observed, Mapping) or set(observed) != set(RUNTIME_IDENTITY_FIELDS)
+            or not all(isinstance(observed[field], str) and observed[field]
+                       for field in RUNTIME_IDENTITY_FIELDS)
+            or observed["backend_version"] == "unknown"):
+        raise DerivationError("a6_replica_runtime_identity_invalid")
+    if observed["backend"] != backend:
+        raise DerivationError("a6_replica_runtime_identity_backend_mismatch")
+    return {field: observed[field] for field in RUNTIME_IDENTITY_FIELDS}
+
+
+def observe_local_runtime_identity(python_executable: str, backend: str) -> dict[str, str]:
+    """Run ``RUNTIME_IDENTITY_PROGRAM`` with a node's own local interpreter."""
+
+    try:
+        completed = subprocess.run(
+            [python_executable, "-c", RUNTIME_IDENTITY_PROGRAM, backend],
+            capture_output=True, text=True, timeout=60.0, check=False)
+        observed = json.loads(completed.stdout) if completed.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        observed = None
+    if observed is None:
+        raise DerivationError("a6_replica_runtime_identity_unobserved")
+    return _valid_runtime_identity(observed, backend)
+
+
+def resolve_runtime_identities(
+    controller: Mapping[str, Any],
+    templates: Sequence[Mapping[str, Any]],
+    observed: Mapping[str, Any],
+    *,
+    observe_local: Callable[[str, str], dict[str, str]] = observe_local_runtime_identity,
+) -> dict[str, dict[str, Any]]:
+    """Return ``{node_id: {"identity", "source"}}`` or refuse.
+
+    A load proof binds the backend version and device of the interpreter that
+    loads it. The node recomputes its proof with its OWN interpreter, so the
+    identity is taken from that interpreter, never from the deriving one:
+    ``operator_observed`` for an identity the operator measured on the node
+    (``--runtime-identity``), ``local_interpreter_observed`` for a node with
+    local process transport whose ``python_executable`` is run here.
+    """
+
+    node_ids = [template["node_id"] for template in templates]
+    if set(observed) - set(node_ids):
+        raise DerivationError("a6_replica_runtime_identity_unknown_node")
+    peers = {peer.get("node_id"): peer for peer in controller.get("peers", ())}
+    executables = {
+        node.get("node_id"): node.get("python_executable")
+        for node in controller["run_plan"]["nodes"]
+    }
+    identities: dict[str, dict[str, Any]] = {}
+    for template in templates:
+        node_id = template["node_id"]
+        backend = template["runtime"]["backend"]
+        python_executable = executables.get(node_id)
+        if node_id in observed:
+            identities[node_id] = {
+                "identity": _valid_runtime_identity(observed[node_id], backend),
+                "source": "operator_observed",
+            }
+        elif (peers.get(node_id, {}).get("process_transport") == "local"
+              and isinstance(python_executable, str) and os.path.isabs(python_executable)):
+            identities[node_id] = {
+                "identity": _valid_runtime_identity(
+                    observe_local(python_executable, backend), backend),
+                "source": "local_interpreter_observed",
+            }
+        else:
+            raise DerivationError("a6_replica_runtime_identity_unobserved")
+    return identities
+
+
+def _rebind_runtime_identity(proof: dict[str, Any], identity: Mapping[str, str]) -> None:
+    """Replace the deriving interpreter's host fields with the node's own."""
+
+    measured = proof.get("runtime_identity")
+    if not isinstance(measured, dict) or measured.get("backend") != identity["backend"]:
+        raise DerivationError("a6_replica_runtime_identity_backend_mismatch")
+    measured["backend_version"] = identity["backend_version"]
+    measured["device"] = identity["device"]
+
+
 def _run_challenge(loaded: Any, backend: str, prompt: Sequence[int], count: int) -> tuple[int, ...]:
     from mycelium_router.decoding import quantized_greedy_token_id
 
@@ -211,6 +322,7 @@ def replica_documents(
     load_generation: int,
     challenge_prompt: Sequence[int],
     challenge_count: int,
+    runtime_identities: Mapping[str, Mapping[str, str]],
     artifact_roots: Mapping[str, str] | None = None,
     on_progress: Callable[[str, Mapping[str, Any]], None] = lambda _stage, _fields: None,
 ) -> dict[str, Any]:
@@ -219,7 +331,9 @@ def replica_documents(
     ``templates`` are the nodes' current assignments, in placement order (the
     first is the entry/primary path). ``artifact_roots`` maps each node to its
     proven artifact root (see ``resolve_artifact_roots``); a node missing from
-    it keeps its template root. Returns assignments, stage packs,
+    it keeps its template root. ``runtime_identities`` maps every node to the
+    runtime identity observed on that node (see ``resolve_runtime_identities``);
+    a node missing from it refuses. Returns assignments, stage packs,
     verifications, proofs, the replicated execution graph and the measured
     challenge output of every path.
     """
@@ -239,9 +353,12 @@ def replica_documents(
         return local_root / filename, True
 
     assignments, packs, verifications, proofs, outputs = [], [], [], [], {}
+    if set(runtime_identities) != {template["node_id"] for template in templates}:
+        raise DerivationError("a6_replica_runtime_identity_unobserved")
     for template in templates:
         node_id = template["node_id"]
         backend = template["runtime"]["backend"]
+        identity = _valid_runtime_identity(runtime_identities[node_id], backend)
         target_root = (artifact_roots or {}).get(node_id, template["artifact_cache_root"])
         assignment = _compile_full(manifest, template, target_root)
         local = _compile_full(manifest, template, str(local_root))
@@ -254,6 +371,7 @@ def replica_documents(
         loaded = load_assignment_stage(local, loader_report, load_generation=load_generation)
         try:
             base_proof = json.loads(canonical_json(loaded.proof))
+            _rebind_runtime_identity(base_proof, identity)
             outputs[node_id] = list(
                 _run_challenge(loaded, backend, challenge_prompt, challenge_count))
         finally:
@@ -322,13 +440,18 @@ def derive_plan(
     *,
     bundle_out: Path,
     artifact_roots: Mapping[str, str] | None = None,
+    runtime_identities: Mapping[str, Any] | None = None,
+    observe_local: Callable[[str, str], dict[str, str]] = observe_local_runtime_identity,
     on_progress: Callable[[str, Mapping[str, Any]], None] = lambda _stage, _fields: None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return (unbound derived plan, derivation report); writes ``bundle_out``.
 
     ``artifact_roots`` holds the operator's assertions ``{node_id: root}``: the
     root on that node which holds the complete model. Every node not proven
-    local needs one (``resolve_artifact_roots``).
+    local needs one (``resolve_artifact_roots``). ``runtime_identities`` holds
+    the runtime identities ``{node_id: {"backend", "backend_version",
+    "device"}}`` the operator observed on the nodes; every node without local
+    process transport needs one (``resolve_runtime_identities``).
     """
 
     from mycelium_qualification.physical_deployment import build_physical_device_states
@@ -366,10 +489,13 @@ def derive_plan(
     local_artifact_root = bundle_in / "deployment"
     roots = resolve_artifact_roots(
         manifest, templates, dict(artifact_roots or {}), local_artifact_root)
+    identities = resolve_runtime_identities(
+        controller, templates, dict(runtime_identities or {}), observe_local=observe_local)
     documents = replica_documents(
         manifest=manifest,
         templates=templates,
         local_artifact_root=local_artifact_root,
+        runtime_identities={node_id: entry["identity"] for node_id, entry in identities.items()},
         artifact_roots={node_id: entry["artifact_root"] for node_id, entry in roots.items()},
         load_generation=load_generation,
         challenge_prompt=run_plan["request"]["prompt_token_ids"],
@@ -452,6 +578,7 @@ def derive_plan(
             for placement in stage.placements
         ],
         "artifact_roots": roots,
+        "runtime_identities": identities,
         "challenge_outputs": outputs,
         "base_expected_token_ids": expected,
         "expected_token_ids": list(path_output),
@@ -528,6 +655,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--artifact-root", action="append", default=[], metavar="NODE=PATH",
         help="assert that PATH on NODE holds the complete model (repeatable); required "
              "for every node whose root is not the controller's own base artifact root")
+    parser.add_argument(
+        "--runtime-identity", action="append", default=[], metavar="NODE=PATH",
+        help="JSON runtime identity observed on NODE by running RUNTIME_IDENTITY_PROGRAM with "
+             "that node's own python_executable (repeatable); required for every node "
+             "without local process transport")
     binding = parser.add_mutually_exclusive_group(required=True)
     binding.add_argument("--seed-state-root", type=Path)
     binding.add_argument("--unbound", action="store_true",
@@ -546,13 +678,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         asserted[node_id] = root
 
+    observed: dict[str, Any] = {}
+    for item in args.runtime_identity:
+        node_id, separator, path = item.partition("=")
+        if not separator or not node_id or not path or node_id in observed:
+            print(json.dumps({"refused": "a6_replica_runtime_identity_invalid", "value": item}))
+            return 2
+        try:
+            observed[node_id] = _read_json(Path(path))
+        except (OSError, ValueError):
+            print(json.dumps({"refused": "a6_replica_runtime_identity_invalid", "value": item}))
+            return 2
+
     def progress(stage: str, fields: Mapping[str, Any]) -> None:
         print(json.dumps({"stage": stage, **fields}, sort_keys=True), flush=True)
 
     try:
         plan, report = derive_plan(
             _read_json(args.base_plan), bundle_out=args.bundle_out,
-            artifact_roots=asserted, on_progress=progress)
+            artifact_roots=asserted, runtime_identities=observed, on_progress=progress)
         if args.seed_state_root is not None:
             plan = bind(plan, args.seed_state_root, now=time.time())
             report["bound"] = True

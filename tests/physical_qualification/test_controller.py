@@ -1574,8 +1574,35 @@ def test_ssh_process_transport_round_trips_exact_remote_argv(tmp_path: Path) -> 
     argv = _peer_process_argv(peer, command)
 
     assert argv[0] == "ssh"
-    assert argv[11:13] == ("-i", peer.ssh_identity_file)
+    assert argv[15:17] == ("-i", peer.ssh_identity_file)
     assert shlex.split(argv[-1]) == list(command)
+
+
+def _option_pairs(argv: tuple[str, ...]) -> set[str]:
+    return {argv[i + 1] for i, value in enumerate(argv[:-1]) if value == "-o"}
+
+
+def test_ssh_process_transport_fails_dead_links_with_keepalives(tmp_path: Path) -> None:
+    """A silently dropped network must end the ssh session in ~60 s, not hang."""
+
+    from physical_inference_qualification import SSH_KEEPALIVE_OPTIONS
+
+    peer = PeerIdentity(
+        node_id="node-1",
+        ssh_target="operator@peer.example",
+        host_id="host-1",
+        boot_id="boot-1",
+        staging_root="/tmp/mycelium-controller/run-a/node-1",
+        process_transport="ssh",
+        ssh_identity_file=str(_private_identity_file(tmp_path)),
+    )
+
+    argv = _peer_process_argv(peer, ("/usr/bin/python3", "-c", "pass"))
+
+    assert SSH_KEEPALIVE_OPTIONS == (
+        "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6")
+    assert {"ServerAliveInterval=10", "ServerAliveCountMax=6"} <= _option_pairs(argv)
+    assert argv.index("--") > argv.index("ServerAliveCountMax=6")
 
 
 def test_node_process_environment_reserves_native_control_capacity() -> None:
@@ -1838,7 +1865,7 @@ def test_physical_cleanup_attempts_every_declared_peer_and_stays_not_ready(
     assert len(runner.calls) == len(peers)
     for peer, call in zip(peers, runner.calls, strict=True):
         argv = call[0]
-        assert argv[:15] == (
+        assert argv[:19] == (
             "ssh",
             "-o",
             "BatchMode=yes",
@@ -1848,6 +1875,10 @@ def test_physical_cleanup_attempts_every_declared_peer_and_stays_not_ready(
             "StrictHostKeyChecking=yes",
             "-o",
             "ConnectTimeout=15",
+            "-o",
+            "ServerAliveInterval=10",
+            "-o",
+            "ServerAliveCountMax=6",
             "-o",
             "IPQoS=ef",
             "-i",

@@ -329,22 +329,28 @@ def test_product_http_driver_parses_the_ordinary_gateway_stream() -> None:
         def log_message(self, *_args: Any) -> None:
             return
 
-        def _json(self, document: Any) -> None:
+        def _json(self, document: Any, *, status: int = 200, cookie: str | None = None) -> None:
             body = json.dumps(document).encode()
-            self.send_response(200)
+            self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            if cookie is not None:
+                self.send_header("Set-Cookie", f"mycelium_session={cookie}; Path=/; HttpOnly")
             self.end_headers()
             self.wfile.write(body)
 
         def do_GET(self) -> None:  # noqa: N802
+            # Like the UI gateway: every route but bootstrap needs the session cookie.
             if self.path == "/api/v1/bootstrap":
-                self._json({"session": {"csrf_header": "X-CSRF", "csrf_token": "t" * 32}})
+                self._json({"session": {"csrf_header": "X-CSRF", "csrf_token": "t" * 32}}, cookie="s1")
+            elif "mycelium_session=s1" not in (self.headers.get("Cookie") or ""):
+                self._json({"error": {"code": "session_required"}}, status=401)
             elif self.path == "/api/v1/qualification/current":
                 self._json({"binding": {"qualification_digest": "sha256:" + "1" * 64}})
             elif self.path == "/api/v1/product/snapshot":
                 attributes = {key: 1 for key in WORKSPACE_ATTRIBUTES["inference"]}
-                self._json({"snapshot": {"entities": [{"kind": "recovery", "entity_id": "a7-kv-successor-runtime", "attributes": attributes}]}})
+                entities = [] if seen.get("entity_missing") else [{"kind": "recovery", "entity_id": "a7-kv-successor-runtime", "attributes": attributes}]
+                self._json({"snapshot": {"entities": entities}})
             elif self.path == "/api/v1/inference/r1/events":
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -375,7 +381,12 @@ def test_product_http_driver_parses_the_ordinary_gateway_stream() -> None:
         assert running.request_id == "r1" and running.error is None
         assert seen["csrf"] == "t" * 32 and seen["body"]["max_new_tokens"] == 8
         assert driver.workspaces_checked() == ["inference"]
+        assert driver.workspaces_unchecked_reason is None
         assert driver.ordinary_browser_request is True
+        # An empty result says why: here the product publishes no A7 entity.
+        seen["entity_missing"] = True
+        assert driver.workspaces_checked() == []
+        assert driver.workspaces_unchecked_reason == "a7_workspace_entity_missing"
     finally:
         server.shutdown()
         server.server_close()
@@ -448,3 +459,21 @@ def test_a7_entity_contract_refuses_defaulted_or_unexplained_values() -> None:
     assert _a7_recovery({**attributes, "last_ack_rtt_ms": -1.0, "unavailable_reasons": observed}) is False
     assert _a7_recovery({**attributes, "recovery_path_chosen": "maybe", "unavailable_reasons": {k: v for k, v in reasons.items() if k != "recovery_path_chosen"}}) is False
     assert _a7_recovery({**attributes, "extra": 1, "unavailable_reasons": reasons}) is False
+
+
+def test_ssh_fault_target_fails_dead_links_with_keepalives() -> None:
+    target = SourceProcessGroupTarget(
+        transport="ssh", process_pattern="x", ssh_target="node@peer.example")
+    argv = target._ssh_argv("true")
+    assert argv[0] == "ssh" and argv[-2:] == ["node@peer.example", "true"]
+    assert "ServerAliveInterval=10" in argv
+    assert "ServerAliveCountMax=6" in argv
+
+
+def test_workspaces_checked_records_a_product_refusal() -> None:
+    from mycelium_a7_physical_measurement import ProductHttpDriver
+
+    # Nothing listens on this origin: the refusal code is recorded, not swallowed.
+    driver = ProductHttpDriver("http://127.0.0.1:9", prompt="hello", max_new_tokens=8)
+    assert driver.workspaces_checked() == []
+    assert driver.workspaces_unchecked_reason == "a7_product_http_get_unavailable"

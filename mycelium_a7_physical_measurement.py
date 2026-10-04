@@ -156,7 +156,7 @@ class SourceProcessGroupTarget:
     # -- execution ---------------------------------------------------------------------
 
     def _ssh_argv(self, script: str) -> list[str]:
-        argv = ["ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={int(self.connect_timeout_s)}"]
+        argv = ["ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={int(self.connect_timeout_s)}", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6"]
         if self.ssh_identity_file:
             argv += ["-i", self.ssh_identity_file, "-o", "IdentitiesOnly=yes"]
         return [*argv, str(self.ssh_target), script]
@@ -423,12 +423,25 @@ class ProductHttpDriver:
         threading.Thread(target=stream, name=f"a7-stream-{label}", daemon=True).start()
         return running
 
-    def workspaces_checked(self) -> list[str]:
-        """Workspaces whose every rendered attribute is present in the product evidence."""
+    # Why the last ``workspaces_checked`` call checked no workspace (a product
+    # refusal code, or the A7 entity/attributes being absent); None otherwise.
+    workspaces_unchecked_reason: str | None = None
 
+    def workspaces_checked(self) -> list[str]:
+        """Workspaces whose every rendered attribute is present in the product evidence.
+
+        Like a browser, the read first bootstraps a product session: every
+        product route except ``/api/v1/bootstrap`` refuses a request without
+        the session cookie (401 ``session_required``).
+        """
+
+        self.workspaces_unchecked_reason = None
+        opener = self._opener()
         try:
-            document = self._json(self._opener(), "GET", "/api/v1/product/snapshot")
-        except MeasurementRefused:
+            self._json(opener, "GET", "/api/v1/bootstrap")
+            document = self._json(opener, "GET", "/api/v1/product/snapshot")
+        except MeasurementRefused as exc:
+            self.workspaces_unchecked_reason = exc.code
             return []
         snapshot = document.get("snapshot") if isinstance(document.get("snapshot"), Mapping) else document
         entities = snapshot.get("entities") if isinstance(snapshot, Mapping) else None
@@ -440,15 +453,19 @@ class ProductHttpDriver:
             ),
             None,
         )
-        attributes = entity.get("attributes") if isinstance(entity, Mapping) else None
+        if not isinstance(entity, Mapping):
+            self.workspaces_unchecked_reason = "a7_workspace_entity_missing"
+            return []
+        attributes = entity.get("attributes")
         if not isinstance(attributes, Mapping):
+            self.workspaces_unchecked_reason = "a7_workspace_attributes_missing"
             return []
         reasons = attributes.get("unavailable_reasons")
         reasons = reasons if isinstance(reasons, Mapping) else {}
         # A workspace is checked when every field it renders is product evidence:
         # a measured value, or an explicit product-stated reason why the value
         # is unobserved (rendered as "unavailable"), never a silent gap.
-        return sorted(
+        checked = sorted(
             workspace
             for workspace, keys in WORKSPACE_ATTRIBUTES.items()
             if all(
@@ -457,6 +474,9 @@ class ProductHttpDriver:
                 for key in keys
             )
         )
+        if not checked:
+            self.workspaces_unchecked_reason = "a7_workspace_attributes_incomplete"
+        return checked
 
 
 # ---------------------------------------------------------------------------
@@ -766,25 +786,44 @@ def measure(
     result_evidence: Mapping[str, Any] | None = None
     last_request_evidence: Mapping[str, Any] = pre_kill
     incidents: list[Mapping[str, Any]] = []
+    # Why the cutover record was (not) observed: privacy-reduced counts and codes
+    # of every post-kill read, so an unobserved result names its cause.
+    result_poll: dict[str, Any] = {
+        "reads": 0,
+        "refusals": {},
+        "stop": "result_timeout",
+        "stream_done_at_stop": False,
+        "last_state": None,
+    }
     result_deadline = time.monotonic() + settings.result_timeout_s
     while time.monotonic() < result_deadline:
         try:
             current = evidence.request(request_id)
-        except MeasurementRefused:
+        except MeasurementRefused as exc:
+            result_poll["refusals"][exc.code] = result_poll["refusals"].get(exc.code, 0) + 1
             if running.done.is_set():
+                result_poll["stop"] = "refused_after_terminal"
                 break
             time.sleep(settings.poll_s)
             continue
+        result_poll["reads"] += 1
         state = _request_state(current)
         if state is None:
+            result_poll["stop"] = "entry_request_absent"
             break  # the entry no longer holds the request (route replaced)
+        result_poll["last_state"] = {
+            key: state.get(key) for key in ("committed", "finished", "source_lost_accepted", "old_path_fenced", "request_attempt")
+        }
+        result_poll["last_state"]["result_present"] = isinstance(state.get("result"), Mapping)
         last_request_evidence = current
         incidents = [item for item in current.get("scoped_incidents", ()) if isinstance(item, Mapping)]
         if isinstance(state.get("result"), Mapping):
             result_evidence = current
             if running.done.is_set() or any(item.get("subject_id") == source_node for item in incidents):
+                result_poll["stop"] = "result_observed"
                 break
         time.sleep(settings.poll_s)
+    result_poll["stream_done_at_stop"] = running.done.is_set()
 
     _wait_done(running, settings.terminal_timeout_s)
     tokens, terminals = running.snapshot()
@@ -878,6 +917,7 @@ def measure(
         "source_incidents": [dict(item) for item in source_incidents],
         "a7_result": None if result is None else dict(result),
         "a7_result_observed": result is not None,
+        "result_poll": result_poll,
         "entry_request_released": _request_state(last_request_evidence) is None,
         "baseline": {
             "token_count": len(baseline_tokens),
@@ -940,6 +980,9 @@ def measure(
         "cleanup": {entry_node: {name: deltas[name] for name in CLEANUP_FIELDS}},
         "workspaces_checked": driver.workspaces_checked(),
     }
+    # The closed case record cannot say why no workspace was checked; the
+    # measurement observations do.
+    observations["workspaces_unchecked_reason"] = getattr(driver, "workspaces_unchecked_reason", None)
     return fields, observations
 
 

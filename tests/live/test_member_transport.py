@@ -233,7 +233,7 @@ def test_source_ssh_control_is_closed_port_bound_and_argv_only(tmp_path: Path) -
     source = transport._plan["sources"][0]
     command = transport._source_argv(source, ("/usr/bin/python3", "-c", "pass"))
 
-    assert command[:10] == [
+    assert command[:14] == [
         "ssh",
         "-o",
         "BatchMode=yes",
@@ -243,18 +243,29 @@ def test_source_ssh_control_is_closed_port_bound_and_argv_only(tmp_path: Path) -
         "StrictHostKeyChecking=yes",
         "-o",
         "ConnectTimeout=15",
+        "-o",
+        "ServerAliveInterval=10",
+        "-o",
+        "ServerAliveCountMax=6",
         "-p",
     ]
-    assert command[10:14] == [
+    assert command[14:18] == [
         "8022",
         "-i",
         plan["provisioner_identity_key_file"],
         "--",
     ]
-    assert command[14:] == [
+    assert command[18:] == [
         "source@example.test",
         "/usr/bin/python3 -c pass",
     ]
+    peer_command = transport._ssh(
+        {"ssh_target": "member@example.test", "ssh_identity_file": "/keys/member"},
+        ("/usr/bin/python3", "-c", "pass"),
+    )
+    assert "ServerAliveInterval=10" in peer_command
+    assert "ServerAliveCountMax=6" in peer_command
+    assert peer_command.index("ServerAliveCountMax=6") < peer_command.index("--")
 
     plan["sources"][0]["control"]["port"] = 0
     path.write_bytes(_canonical(plan))

@@ -373,7 +373,7 @@ def parity_worker_argv(plan: Mapping[str, Any], *, role_node: str, placement_id:
    remote = " ".join(shlex.quote(part) for part in argv)
    if code_root is not None:
       remote = f"cd {shlex.quote(code_root)} && PYTHONPATH={shlex.quote(code_root)} {remote}"
-   command = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
+   command = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6"]
    if ssh.get("identity_file"):
       command += ["-i", str(ssh["identity_file"]), "-o", "IdentitiesOnly=yes"]
    return [*command, str(ssh["target"]), remote]
