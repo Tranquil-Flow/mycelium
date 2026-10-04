@@ -53,8 +53,14 @@ class _Evidence:
       pre_kill_counters: dict[str, int] | None = _SAME_PROCESS_COUNTERS,
       before_counters: dict[str, int] = _SAME_PROCESS_COUNTERS,
       processes: tuple[dict[str, Any], dict[str, Any]] | None = None,
+      old_exit_status: int | None = -15,
+      replacement_state: dict[str, Any] | None = None,
+      old_transport: str | None = "local",
    ) -> None:
+      self._old_transport = old_transport
       self._processes = processes
+      self._old_exit_status = old_exit_status
+      self._replacement_state = replacement_state or {}
       self._fault = fault
       self._refused = refused_after_kill
       self._restored = restored
@@ -84,6 +90,18 @@ class _Evidence:
          if self._fault.killed.is_set():
             document["exited_nodes"] = ["node-2"]
             del document["nodes"]["node-2"]
+            old, new = self._processes
+            if old != new:
+               entry.update(self._replacement_state)
+               document["retired_entry_processes"] = [
+                  {
+                     "node_id": "node-0",
+                     **old,
+                     "process_transport": self._old_transport,
+                     "exit_status": self._old_exit_status,
+                     "observed_by": "retired_route_session_exit_status",
+                  }
+               ]
       return document
 
    def _document(self, request_id: str, request: dict[str, Any] | None, counters: dict[str, int] | None) -> dict[str, Any]:
@@ -167,10 +185,19 @@ _NEW_PROCESS = {"host_id": "host-0", "process_id": 4200}
 _NOT_MEASURED_CLEANUP = {"cleanup_measurement": "not_measured", "cleanup_unmeasured_reason": "entry_process_replaced"}
 
 
+def _not_measured(cleanup: dict[str, Any]) -> dict[str, Any]:
+   node = cleanup["node-0"]
+   assert {key: node[key] for key in _NOT_MEASURED_CLEANUP} == _NOT_MEASURED_CLEANUP
+   assert node["cleanup_proof"] == "process_exit"
+   assert not any(key.endswith("_delta") for key in node)
+   return node["cleanup_proof_evidence"]
+
+
 @pytest.mark.parametrize("processes", [None, (_OLD_PROCESS, _NEW_PROCESS)])
 def test_a_restored_record_reports_cleanup_as_not_measured(processes) -> None:
    fields, observations = _measure({"refused_after_kill": 2, "processes": processes})
-   assert fields["cleanup"] == {"node-0": _NOT_MEASURED_CLEANUP}
+   evidence = _not_measured(fields["cleanup"])
+   assert observations["cleanup"]["cleanup_proof_evidence"] == evidence
    cleanup = observations["cleanup"]
    assert cleanup["cleanup_measurement"] == "not_measured"
    assert cleanup["cleanup_unmeasured_reason"] == "entry_process_replaced"
@@ -184,7 +211,7 @@ def test_a_restored_record_reports_cleanup_as_not_measured(processes) -> None:
 def test_a_replaced_entry_process_without_a_restored_read_is_not_measured() -> None:
    # The original process answered with its own record, then the route was replaced.
    fields, observations = _measure({"refused_after_kill": 0, "live_result": True, "processes": (_OLD_PROCESS, _NEW_PROCESS)})
-   assert fields["cleanup"] == {"node-0": _NOT_MEASURED_CLEANUP}
+   _not_measured(fields["cleanup"])
    assert observations["cleanup"]["restored_from"] is None
    assert observations["cleanup"]["entry_process_after"] == _NEW_PROCESS
 
@@ -202,3 +229,59 @@ def test_same_process_cleanup_is_measured_exactly_as_before(processes) -> None:
       }
    }
    assert observations["cleanup"] == {"cleanup_measurement": "measured"}
+
+
+def test_a_replaced_entry_records_the_observed_process_exit_evidence() -> None:
+   fields, _observations = _measure({"refused_after_kill": 2, "processes": (_OLD_PROCESS, _NEW_PROCESS)})
+   evidence = _not_measured(fields["cleanup"])
+   assert evidence == {
+      "old_entry_process": _OLD_PROCESS,
+      "old_entry_exit": {**_OLD_PROCESS, "process_transport": "local", "exit_status": -15, "observed_by": "retired_route_session_exit_status"},
+      "replacement_entry_process": _NEW_PROCESS,
+      "replacement_terminal_state": {
+         "active_state_count": 0,
+         "active_kv_bytes": 0,
+         "shadow_kv_bytes": 0,
+         "shadow_checkpoint_count": 0,
+         "entry_fence_record_count": 0,
+         "route_request_registrations": 0,
+         "gateway_reservations": 0,
+         "request_live": False,
+      },
+      "old_entry_process_live": False,
+   }
+
+
+def test_process_exit_evidence_records_what_is_missing_without_concluding() -> None:
+   fields, _observations = _measure(
+      {
+         "refused_after_kill": 2,
+         "processes": (_OLD_PROCESS, _NEW_PROCESS),
+         "old_exit_status": None,
+         "replacement_state": {"active_state_count": 1},
+      }
+   )
+   evidence = _not_measured(fields["cleanup"])
+   assert evidence["old_entry_exit"]["exit_status"] is None
+   assert evidence["replacement_terminal_state"]["active_state_count"] == 1
+
+
+def test_measured_process_exit_proof_passes_the_gate_and_a_missing_exit_fails_it() -> None:
+   from tests.a7_acceptance.test_kv_successor_gate import CANDIDATE, _record, gate
+
+   plan = gate.build_plan(CANDIDATE)
+   fields, _observations = _measure({"refused_after_kill": 2, "processes": (_OLD_PROCESS, _NEW_PROCESS)})
+   assert gate.evaluate_case(_record(plan, gate.ABORT, cleanup=fields["cleanup"]), plan) == []
+   fields, _observations = _measure({"refused_after_kill": 2, "processes": (_OLD_PROCESS, _NEW_PROCESS), "old_exit_status": None})
+   assert gate.evaluate_case(_record(plan, gate.ABORT, cleanup=fields["cleanup"]), plan) == ["process_exit_not_observed"]
+   fields, _observations = _measure({"refused_after_kill": 2})  # no verified process identity at all
+   assert "process_exit_old_process_unobserved" in gate.evaluate_case(_record(plan, gate.ABORT, cleanup=fields["cleanup"]), plan)
+
+
+def test_measured_ssh_entry_exit_is_remote_unconfirmed_at_the_gate() -> None:
+   from tests.a7_acceptance.test_kv_successor_gate import CANDIDATE, _record, gate
+
+   plan = gate.build_plan(CANDIDATE)
+   fields, _observations = _measure({"refused_after_kill": 2, "processes": (_OLD_PROCESS, _NEW_PROCESS), "old_transport": "ssh"})
+   assert fields["cleanup"]["node-0"]["cleanup_proof_evidence"]["old_entry_exit"]["process_transport"] == "ssh"
+   assert gate.evaluate_case(_record(plan, gate.ABORT, cleanup=fields["cleanup"]), plan) == ["process_exit_remote_unconfirmed"]

@@ -90,7 +90,26 @@ THRESHOLDS: dict[str, Any] = {
 }
 
 _CLEANUP_FIELDS = frozenset({"active_state_count_delta", "active_kv_bytes_delta", "shadow_bytes_delta", "reservation_delta", "fence_records_delta"})
-_CLEANUP_NOT_MEASURED_FIELDS = frozenset({"cleanup_measurement", "cleanup_unmeasured_reason"})
+_CLEANUP_NOT_MEASURED_FIELDS = frozenset({"cleanup_measurement", "cleanup_unmeasured_reason", "cleanup_proof", "cleanup_proof_evidence"})
+PROCESS_EXIT_PROOF = "process_exit"
+PROCESS_EXIT_SOURCE = "retired_route_session_exit_status"
+LOCAL_PROCESS_TRANSPORT = "local"
+_EXIT_RECORD_FIELDS = frozenset({"host_id", "process_id", "process_transport", "exit_status", "observed_by"})
+_PROCESS_EXIT_EVIDENCE_FIELDS = frozenset(
+   {"old_entry_process", "old_entry_exit", "replacement_entry_process", "replacement_terminal_state", "old_entry_process_live"}
+)
+_REPLACEMENT_STATE_FIELDS = frozenset(
+   {
+      "active_state_count",
+      "active_kv_bytes",
+      "shadow_kv_bytes",
+      "shadow_checkpoint_count",
+      "entry_fence_record_count",
+      "route_request_registrations",
+      "gateway_reservations",
+      "request_live",
+   }
+)
 _CASE_FIELDS = frozenset(
    {
       "protocol",
@@ -196,7 +215,98 @@ def _cleanup_not_measured(node: Any) -> bool:
       and node["cleanup_measurement"] == "not_measured"
       and isinstance(node["cleanup_unmeasured_reason"], str)
       and bool(node["cleanup_unmeasured_reason"])
+      and node["cleanup_proof"] in (None, PROCESS_EXIT_PROOF)
+      and (node["cleanup_proof_evidence"] is None or isinstance(node["cleanup_proof_evidence"], Mapping))
    )
+
+
+def _process_identity(value: Any) -> bool:
+   return (
+      isinstance(value, Mapping)
+      and set(value) == {"host_id", "process_id"}
+      and isinstance(value["host_id"], str)
+      and bool(value["host_id"])
+      and type(value["process_id"]) is int
+   )
+
+
+def _process_exit_proof_failures(node: Mapping[str, Any]) -> list[str]:
+   """Unmet conditions of the process-exit cleanup proof (empty = proof accepted).
+
+   The A6 rule (``mycelium_live/router_port.py`` ``_dead_peer_cleanup_receipt``):
+   process exit releases every resource that process held, so the
+   identity-bound process, confirmed by its exit status, is its own cleanup
+   proof; a process that is only unreachable proves nothing.  For a replaced
+   A7 entry all four must hold: (1) the old entry process was observed before
+   the kill; (2) that exact process was observed exited with an exit status
+   from a local session (a remote launch only shows its client's exit);
+   (3) the replacement entry (another process) reports a clean terminal
+   resource state and does not hold the request; (4) nothing shows the old
+   process still running.
+   """
+
+   evidence = node["cleanup_proof_evidence"]
+   if (
+      node["cleanup_proof"] != PROCESS_EXIT_PROOF
+      or node["cleanup_unmeasured_reason"] != "entry_process_replaced"
+      or not isinstance(evidence, Mapping)
+   ):
+      return ["terminal_resource_delta_not_measured"]
+   if set(evidence) != _PROCESS_EXIT_EVIDENCE_FIELDS:
+      return ["process_exit_evidence_invalid"]
+   failures: list[str] = []
+   old = evidence["old_entry_process"]
+   if not _process_identity(old):
+      failures.append("process_exit_old_process_unobserved")
+      old = None
+   exited = evidence["old_entry_exit"]
+   if isinstance(exited, Mapping) and set(exited) != _EXIT_RECORD_FIELDS:
+      return ["process_exit_evidence_invalid"]
+   if isinstance(exited, Mapping) and (not isinstance(exited["process_transport"], str) or not exited["process_transport"]):
+      return ["process_exit_evidence_invalid"]
+   if not (
+      old is not None
+      and isinstance(exited, Mapping)
+      and set(exited) == _EXIT_RECORD_FIELDS
+      and exited["host_id"] == old["host_id"]
+      and exited["process_id"] == old["process_id"]
+      and type(exited["exit_status"]) is int
+      and exited["observed_by"] == PROCESS_EXIT_SOURCE
+   ):
+      failures.append("process_exit_not_observed")
+   elif exited["process_transport"] != LOCAL_PROCESS_TRANSPORT:
+      # Only a local session's exit status is the node process's own exit; a
+      # remote launch's status is its transport client's (no remote confirmation).
+      failures.append("process_exit_remote_unconfirmed")
+   replacement = evidence["replacement_entry_process"]
+   if not _process_identity(replacement) or replacement == old:
+      failures.append("process_exit_replacement_unobserved")
+   state = evidence["replacement_terminal_state"]
+   if not (
+      isinstance(state, Mapping)
+      and set(state) == _REPLACEMENT_STATE_FIELDS
+      and state["request_live"] is False
+      and all(type(state[name]) is int and state[name] == 0 for name in _REPLACEMENT_STATE_FIELDS - {"request_live"})
+   ):
+      failures.append("process_exit_replacement_not_clean")
+   if evidence["old_entry_process_live"] is not False:
+      failures.append("process_exit_old_process_live")
+   return failures
+
+
+def _cleanup_proof(record: Any) -> str | None:
+   """Which cleanup proof a record carries: ``measured_delta``, ``process_exit`` or ``None``."""
+
+   cleanup = record.get("cleanup") if isinstance(record, Mapping) else None
+   if not isinstance(cleanup, Mapping) or not cleanup:
+      return None
+   proofs = {
+      PROCESS_EXIT_PROOF if _cleanup_not_measured(node) and node["cleanup_proof"] == PROCESS_EXIT_PROOF
+      else "not_measured" if _cleanup_not_measured(node)
+      else "measured_delta"
+      for node in cleanup.values()
+   }
+   return proofs.pop() if len(proofs) == 1 else "mixed"
 
 
 def evaluate_case(record: Mapping[str, Any], plan: Mapping[str, Any]) -> list[str]:
@@ -251,18 +361,24 @@ def evaluate_case(record: Mapping[str, Any], plan: Mapping[str, Any]) -> list[st
    if record["stale_source_publications_accepted"] != 0:
       failures.append("stale_source_publication")
    cleanup = record["cleanup"]
-   if isinstance(cleanup, Mapping) and cleanup and any(_cleanup_not_measured(node) for node in cleanup.values()):
-      # A replaced entry process cannot prove its own cleanup: the required
-      # terminal resource delta is unmet, never a pass.
-      failures.append("terminal_resource_delta_not_measured")
-   elif not isinstance(cleanup, Mapping) or not cleanup or any(
-      not isinstance(node, Mapping)
-      or set(node) != _CLEANUP_FIELDS
-      or any(not _int(abs(value)) if type(value) is int else True for value in node.values())
-      or any(abs(value) > t["max_terminal_resource_delta"] for value in node.values())
-      for node in cleanup.values()
-   ):
+   if not isinstance(cleanup, Mapping) or not cleanup:
       failures.append("terminal_resource_delta")
+   else:
+      for node in cleanup.values():
+         if _cleanup_not_measured(node):
+            # A replaced entry process has no measured delta.  Its cleanup is
+            # accepted only by the verified process-exit proof, never as a delta.
+            for code in _process_exit_proof_failures(node):
+               if code not in failures:
+                  failures.append(code)
+         elif (
+            not isinstance(node, Mapping)
+            or set(node) != _CLEANUP_FIELDS
+            or any(not _int(abs(value)) if type(value) is int else True for value in node.values())
+            or any(abs(value) > t["max_terminal_resource_delta"] for value in node.values())
+         ):
+            if "terminal_resource_delta" not in failures:
+               failures.append("terminal_resource_delta")
    if not isinstance(record["workspaces_checked"], list) or sorted(record["workspaces_checked"]) != sorted(t["required_workspaces"]):
       failures.append("workspaces")
    if case == ABORT:
@@ -319,6 +435,7 @@ def evaluate(plan: Mapping[str, Any], records: Mapping[str, Mapping[str, Any]]) 
       "candidate_commit": verified["candidate_commit"],
       "cases": cases,
       "unexpected_records": unexpected,
+      "cleanup_proofs": {case: _cleanup_proof(records.get(case)) for case in CASES},
       "passed": passed,
       "claim_boundary": "verdict over measured records only; promotion requires the owner's ledger step",
    }

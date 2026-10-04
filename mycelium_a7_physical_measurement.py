@@ -60,6 +60,7 @@ TERMINAL_KINDS = frozenset({"completed", "cancelled", "failed"})
 CLEANUP_NOT_MEASURED = "not_measured"
 ENTRY_PROCESS_REPLACED = "entry_process_replaced"
 ENTRY_PROCESS_IDENTITY_UNOBSERVED = "entry_process_identity_unobserved"
+PROCESS_EXIT_PROOF = "process_exit"
 CLEANUP_FIELDS = (
     "active_state_count_delta",
     "active_kv_bytes_delta",
@@ -676,6 +677,62 @@ def _entry_process_replaced(
     return None
 
 
+def _from_replacement(document: Mapping[str, Any], serving_process: Any) -> bool:
+    """True when a request read was signed by another process than the serving entry."""
+
+    process = document.get("entry_process")
+    return isinstance(serving_process, Mapping) and isinstance(process, Mapping) and process != serving_process
+
+
+_REPLACEMENT_STATE_FIELDS = ("active_state_count", "active_kv_bytes", "shadow_kv_bytes", "shadow_checkpoint_count", "entry_fence_record_count")
+
+
+def _process_exit_evidence(
+    entry_node: str,
+    before: Mapping[str, Any],
+    pre_kill: Mapping[str, Any],
+    after: Mapping[str, Any],
+    *,
+    replacement_request_live: bool,
+) -> dict[str, Any]:
+    """The observed facts the gate's process-exit cleanup proof is checked against.
+
+    Every value is as observed; nothing is concluded here.  ``old_entry_process``
+    is set only when the before and at-kill reads name the same verified process.
+    """
+
+    at_before = _entry_process(before, entry_node)
+    at_kill = _entry_process(pre_kill, entry_node, request=True)
+    old = at_before if isinstance(at_before, Mapping) and at_before == at_kill else None
+    retired = [item for item in (after.get("retired_entry_processes") or ()) if isinstance(item, Mapping)]
+    exit_record = next(
+        (
+            {key: item.get(key) for key in ("host_id", "process_id", "process_transport", "exit_status", "observed_by")}
+            for item in retired
+            if old is not None
+            and item.get("node_id") == entry_node
+            and item.get("host_id") == old.get("host_id")
+            and item.get("process_id") == old.get("process_id")
+        ),
+        None,
+    )
+    nodes = after.get("nodes") if isinstance(after.get("nodes"), Mapping) else {}
+    entry = nodes.get(entry_node) if isinstance(nodes.get(entry_node), Mapping) else {}
+    live_processes = [node.get("process") for node in nodes.values() if isinstance(node, Mapping)]
+    return {
+        "old_entry_process": None if old is None else dict(old),
+        "old_entry_exit": exit_record,
+        "replacement_entry_process": entry.get("process") if isinstance(entry.get("process"), Mapping) else None,
+        "replacement_terminal_state": {
+            **{name: entry.get(name) for name in _REPLACEMENT_STATE_FIELDS},
+            "route_request_registrations": after.get("route_request_registrations"),
+            "gateway_reservations": after.get("gateway_reservations"),
+            "request_live": replacement_request_live,
+        },
+        "old_entry_process_live": old is not None and any(process == old for process in live_processes),
+    }
+
+
 def _cleanup_observation(
     entry_node: str,
     before: Mapping[str, Any],
@@ -862,6 +919,8 @@ def measure(
     last_request_evidence: Mapping[str, Any] = pre_kill
     counter_read = "pre_kill"
     result_read: str | None = None
+    serving_process = _entry_process(pre_kill, entry_node, request=True)
+    replacement_request_live = False
     incidents: list[Mapping[str, Any]] = []
     # Why the cutover record was (not) observed: privacy-reduced counts and codes
     # of every post-kill read, so an unobserved result names its cause.
@@ -893,9 +952,16 @@ def measure(
         }
         result_poll["last_state"]["result_present"] = isinstance(state.get("result"), Mapping)
         restored = _restored_from(state)
+        replacement = _from_replacement(current, serving_process)
+        if replacement and restored is None:
+            # The replacement entry holds this request live: never its counters,
+            # and it refutes a clean replacement state.
+            replacement_request_live = True
         if restored is not None:
             result_poll["restored_reads"] = result_poll.get("restored_reads", 0) + 1
             result_poll["restored_from"] = restored
+        elif replacement:
+            pass
         else:
             last_request_evidence = current
             counter_read = f"poll:{result_poll['reads']}"
@@ -927,12 +993,15 @@ def measure(
                 continue
             break
         final_state = _request_state(final)
+        final_replacement = _from_replacement(final, serving_process)
+        if final_state is not None and final_replacement and _restored_from(final_state) is None:
+            replacement_request_live = True
         if final_state is not None and _restored_from(final_state) is not None:
             if result_evidence is None and isinstance(final_state.get("result"), Mapping):
                 result_evidence = final
                 result_read = "final"
             result_poll["restored_from"] = _restored_from(final_state)
-        elif final_state is not None:
+        elif final_state is not None and not final_replacement:
             last_request_evidence = final
             counter_read = "final"
             incidents = [item for item in final.get("scoped_incidents", ()) if isinstance(item, Mapping)] or incidents
@@ -1005,6 +1074,13 @@ def measure(
         restored_seen=result_poll.get("restored_from") is not None,
     )
     deltas = None if unmeasured_reason is not None else _cleanup_deltas(before, after)
+    # A replaced entry may prove its cleanup only by its verified process exit
+    # (the A6 rule); the gate checks every condition of this evidence.
+    exit_proof = (
+        _process_exit_evidence(entry_node, before, pre_kill, after, replacement_request_live=replacement_request_live)
+        if unmeasured_reason == ENTRY_PROCESS_REPLACED
+        else None
+    )
     acknowledged = None if result is None else result.get("acknowledged_token_count")
     committed = None if result is None else result.get("gateway_committed_token_count")
     source_incidents = [item for item in incidents if item.get("subject_id") == source_node]
@@ -1062,7 +1138,10 @@ def measure(
         "standby_counters": {"before": list(standby_before), "after": list(standby_after)},
         "resources_before": dict(before),
         "resources_after": dict(after),
-        "cleanup": _cleanup_observation(entry_node, before, pre_kill, after, unmeasured_reason, result_poll.get("restored_from")),
+        "cleanup": {
+            **_cleanup_observation(entry_node, before, pre_kill, after, unmeasured_reason, result_poll.get("restored_from")),
+            **({} if exit_proof is None else {"cleanup_proof": PROCESS_EXIT_PROOF, "cleanup_proof_evidence": exit_proof}),
+        },
     }
     if result is None:
         raise MeasurementRefused("a7_result_unobserved", observations=observations)
@@ -1106,7 +1185,12 @@ def measure(
         "cleanup": {
             entry_node: {name: deltas[name] for name in CLEANUP_FIELDS}
             if deltas is not None
-            else {"cleanup_measurement": CLEANUP_NOT_MEASURED, "cleanup_unmeasured_reason": unmeasured_reason}
+            else {
+                "cleanup_measurement": CLEANUP_NOT_MEASURED,
+                "cleanup_unmeasured_reason": unmeasured_reason,
+                "cleanup_proof": None if exit_proof is None else PROCESS_EXIT_PROOF,
+                "cleanup_proof_evidence": exit_proof,
+            }
         },
         "workspaces_checked": driver.workspaces_checked(),
     }
