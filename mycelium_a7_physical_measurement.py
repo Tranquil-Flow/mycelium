@@ -423,12 +423,25 @@ class ProductHttpDriver:
         threading.Thread(target=stream, name=f"a7-stream-{label}", daemon=True).start()
         return running
 
-    def workspaces_checked(self) -> list[str]:
-        """Workspaces whose every rendered attribute is present in the product evidence."""
+    # Why the last ``workspaces_checked`` call checked no workspace (a product
+    # refusal code, or the A7 entity/attributes being absent); None otherwise.
+    workspaces_unchecked_reason: str | None = None
 
+    def workspaces_checked(self) -> list[str]:
+        """Workspaces whose every rendered attribute is present in the product evidence.
+
+        Like a browser, the read first bootstraps a product session: every
+        product route except ``/api/v1/bootstrap`` refuses a request without
+        the session cookie (401 ``session_required``).
+        """
+
+        self.workspaces_unchecked_reason = None
+        opener = self._opener()
         try:
-            document = self._json(self._opener(), "GET", "/api/v1/product/snapshot")
-        except MeasurementRefused:
+            self._json(opener, "GET", "/api/v1/bootstrap")
+            document = self._json(opener, "GET", "/api/v1/product/snapshot")
+        except MeasurementRefused as exc:
+            self.workspaces_unchecked_reason = exc.code
             return []
         snapshot = document.get("snapshot") if isinstance(document.get("snapshot"), Mapping) else document
         entities = snapshot.get("entities") if isinstance(snapshot, Mapping) else None
@@ -440,15 +453,19 @@ class ProductHttpDriver:
             ),
             None,
         )
-        attributes = entity.get("attributes") if isinstance(entity, Mapping) else None
+        if not isinstance(entity, Mapping):
+            self.workspaces_unchecked_reason = "a7_workspace_entity_missing"
+            return []
+        attributes = entity.get("attributes")
         if not isinstance(attributes, Mapping):
+            self.workspaces_unchecked_reason = "a7_workspace_attributes_missing"
             return []
         reasons = attributes.get("unavailable_reasons")
         reasons = reasons if isinstance(reasons, Mapping) else {}
         # A workspace is checked when every field it renders is product evidence:
         # a measured value, or an explicit product-stated reason why the value
         # is unobserved (rendered as "unavailable"), never a silent gap.
-        return sorted(
+        checked = sorted(
             workspace
             for workspace, keys in WORKSPACE_ATTRIBUTES.items()
             if all(
@@ -457,6 +474,9 @@ class ProductHttpDriver:
                 for key in keys
             )
         )
+        if not checked:
+            self.workspaces_unchecked_reason = "a7_workspace_attributes_incomplete"
+        return checked
 
 
 # ---------------------------------------------------------------------------
@@ -940,6 +960,9 @@ def measure(
         "cleanup": {entry_node: {name: deltas[name] for name in CLEANUP_FIELDS}},
         "workspaces_checked": driver.workspaces_checked(),
     }
+    # The closed case record cannot say why no workspace was checked; the
+    # measurement observations do.
+    observations["workspaces_unchecked_reason"] = getattr(driver, "workspaces_unchecked_reason", None)
     return fields, observations
 
 
