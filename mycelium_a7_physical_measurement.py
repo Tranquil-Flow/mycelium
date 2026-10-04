@@ -156,7 +156,7 @@ class SourceProcessGroupTarget:
     # -- execution ---------------------------------------------------------------------
 
     def _ssh_argv(self, script: str) -> list[str]:
-        argv = ["ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={int(self.connect_timeout_s)}"]
+        argv = ["ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={int(self.connect_timeout_s)}", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6"]
         if self.ssh_identity_file:
             argv += ["-i", self.ssh_identity_file, "-o", "IdentitiesOnly=yes"]
         return [*argv, str(self.ssh_target), script]

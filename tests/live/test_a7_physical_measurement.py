@@ -448,3 +448,12 @@ def test_a7_entity_contract_refuses_defaulted_or_unexplained_values() -> None:
     assert _a7_recovery({**attributes, "last_ack_rtt_ms": -1.0, "unavailable_reasons": observed}) is False
     assert _a7_recovery({**attributes, "recovery_path_chosen": "maybe", "unavailable_reasons": {k: v for k, v in reasons.items() if k != "recovery_path_chosen"}}) is False
     assert _a7_recovery({**attributes, "extra": 1, "unavailable_reasons": reasons}) is False
+
+
+def test_ssh_fault_target_fails_dead_links_with_keepalives() -> None:
+    target = SourceProcessGroupTarget(
+        transport="ssh", process_pattern="x", ssh_target="node@peer.example")
+    argv = target._ssh_argv("true")
+    assert argv[0] == "ssh" and argv[-2:] == ["node@peer.example", "true"]
+    assert "ServerAliveInterval=10" in argv
+    assert "ServerAliveCountMax=6" in argv

@@ -1077,6 +1077,12 @@ def refresh_peer_identities(
                 (
                     "-o",
                     "BatchMode=yes",
+                    "-o",
+                    "ConnectTimeout=15",
+                    "-o",
+                    "ServerAliveInterval=10",
+                    "-o",
+                    "ServerAliveCountMax=6",
                     peer["ssh_target"],
                     (python_executables_by_node or {}).get(
                         peer["node_id"], "/usr/bin/python3"
@@ -1118,6 +1124,10 @@ def preflight_remote_peers(topology: list[dict[str, Any]]) -> None:
                 "BatchMode=yes",
                 "-o",
                 "ConnectTimeout=5",
+                "-o",
+                "ServerAliveInterval=10",
+                "-o",
+                "ServerAliveCountMax=6",
                 peer["ssh_target"],
                 "true",
             )
