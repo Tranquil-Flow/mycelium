@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -30,10 +31,12 @@ def _request(request_id: str) -> RequestContext:
 
 def test_replica_documents_bind_two_complete_disjoint_paths(tmp_path) -> None:
     deployment = _deployment(tmp_path)
+    local = derive.observe_local_runtime_identity(sys.executable, "mlx")
     documents = derive.replica_documents(
         manifest=deployment.manifest,
         templates=deployment.assignments,
         local_artifact_root=deployment.root,
+        runtime_identities={"node-a": local, "node-b": local},
         load_generation=7,
         challenge_prompt=(1, 2, 3),
         challenge_count=3,
@@ -77,6 +80,10 @@ def test_replica_documents_bind_two_complete_disjoint_paths(tmp_path) -> None:
 REMOTE_PLAN_ROOT = "/remote-host/old-split/deployment"
 REMOTE_FULL_ROOT = "/remote-host/full-model/deployment"
 ROOTS = {"node-b": REMOTE_FULL_ROOT}
+# node-b's interpreter differs from the deriving one (as the laptop's NumPy
+# 2.4.3 differed from the Mac's 2.5.1); its identity is observed on node-b.
+REMOTE_IDENTITY = {"backend": "mlx", "backend_version": "0.0.1-node-b", "device": "Device(gpu, 0)"}
+IDENTITIES = {"node-b": REMOTE_IDENTITY}
 
 
 def _synthetic_base(tmp_path: Path, deployment) -> dict:
@@ -88,6 +95,7 @@ def _synthetic_base(tmp_path: Path, deployment) -> dict:
     shutil.copy2(Path(derive.ROOT) / "physical_inference_node.py",
                  bundle / "physical_inference_node.py")
     nodes = []
+    peers = []
     offers = []
     for index, assignment in enumerate(deployment.assignments):
         node_id = assignment["node_id"]
@@ -96,7 +104,8 @@ def _synthetic_base(tmp_path: Path, deployment) -> dict:
         template["artifact_cache_root"] = (
             str((bundle / "deployment").resolve()) if index == 0 else REMOTE_PLAN_ROOT)
         (bundle / name).write_text(json.dumps(template))
-        nodes.append({"node_id": node_id, "configure": {
+        peers.append({"node_id": node_id, "process_transport": "local" if index == 0 else "ssh"})
+        nodes.append({"node_id": node_id, "python_executable": sys.executable, "configure": {
             "assignment_file": name, "manifest_file": "control/model-manifest.json",
             "stage_pack_file": f"control/node-{index}-stage-pack.json",
             "graph": {}, "device_states": {}, "load_generation": 7}})
@@ -107,6 +116,7 @@ def _synthetic_base(tmp_path: Path, deployment) -> dict:
         "run_id": "synthetic-run",
         "controller": {
             "source_root": str(bundle),
+            "peers": peers,
             "membership_snapshot": {"assignment_offers": offers},
             "run_plan": {"entry_node_id": "node-a", "nodes": nodes,
                          "request": {"prompt_token_ids": [1, 2, 3]},
@@ -119,7 +129,8 @@ def test_derive_plan_rewrites_only_the_replica_bindings(tmp_path) -> None:
     deployment = _deployment(tmp_path)
     base = _synthetic_base(tmp_path, deployment)
     plan, report = derive.derive_plan(
-        base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS)
+        base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS,
+        runtime_identities=IDENTITIES)
     controller = plan["controller"]
     assert controller["source_root"] == str(tmp_path / "bundle-a6r")
     assert plan["run_id"] == base["run_id"]
@@ -154,7 +165,8 @@ def test_derive_plan_never_hard_links_the_bundle(tmp_path) -> None:
     # Staging refuses transfer files with st_nlink != 1, in both bundles.
     deployment = _deployment(tmp_path)
     base = _synthetic_base(tmp_path, deployment)
-    derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS)
+    derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS,
+        runtime_identities=IDENTITIES)
     for root in (Path(base["controller"]["source_root"]), tmp_path / "bundle-a6r"):
         files = [path for path in root.rglob("*") if path.is_file()]
         assert files
@@ -167,7 +179,8 @@ def test_derive_plan_refuses_backends_that_disagree(tmp_path, monkeypatch) -> No
     outputs = iter([(1, 2, 3), (1, 2, 4)])
     monkeypatch.setattr(derive, "_run_challenge", lambda *_args: next(outputs))
     with pytest.raises(derive.DerivationError, match="backend_parity_mismatch"):
-        derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS)
+        derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS,
+        runtime_identities=IDENTITIES)
     assert not (tmp_path / "bundle-a6r").exists()
 
 
@@ -176,7 +189,8 @@ def test_derive_plan_refuses_an_output_bundle_that_exists(tmp_path) -> None:
     base = _synthetic_base(tmp_path, deployment)
     (tmp_path / "bundle-a6r").mkdir()
     with pytest.raises(derive.DerivationError, match="bundle_exists"):
-        derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS)
+        derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS,
+        runtime_identities=IDENTITIES)
 
 
 def test_derive_plan_refuses_a_remote_node_without_an_asserted_root(tmp_path) -> None:
@@ -185,13 +199,16 @@ def test_derive_plan_refuses_a_remote_node_without_an_asserted_root(tmp_path) ->
     deployment = _deployment(tmp_path)
     base = _synthetic_base(tmp_path, deployment)
     with pytest.raises(derive.DerivationError, match="a6_replica_artifact_root_unproven"):
-        derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r")
+        derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r",
+                           runtime_identities=IDENTITIES)
     with pytest.raises(derive.DerivationError, match="a6_replica_artifact_root_unknown_node"):
         derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r",
-                           artifact_roots={**ROOTS, "node-z": REMOTE_FULL_ROOT})
+                           artifact_roots={**ROOTS, "node-z": REMOTE_FULL_ROOT},
+                           runtime_identities=IDENTITIES)
     with pytest.raises(derive.DerivationError, match="a6_replica_artifact_root_invalid"):
         derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r",
-                           artifact_roots={"node-b": "relative/deployment"})
+                           artifact_roots={"node-b": "relative/deployment"},
+                           runtime_identities=IDENTITIES)
     assert not (tmp_path / "bundle-a6r").exists()
 
 
@@ -199,7 +216,8 @@ def test_derive_plan_compiles_each_node_against_its_proven_root(tmp_path) -> Non
     deployment = _deployment(tmp_path)
     base = _synthetic_base(tmp_path, deployment)
     bundle_out = tmp_path / "bundle-a6r"
-    plan, report = derive.derive_plan(base, bundle_out=bundle_out, artifact_roots=ROOTS)
+    plan, report = derive.derive_plan(base, bundle_out=bundle_out, artifact_roots=ROOTS,
+        runtime_identities=IDENTITIES)
     local_root = str((Path(base["controller"]["source_root"]) / "deployment").resolve())
     expected = {"node-a": local_root, "node-b": REMOTE_FULL_ROOT}
     for node in plan["controller"]["run_plan"]["nodes"]:
@@ -225,7 +243,8 @@ def test_derive_plan_refuses_a_local_root_missing_a_full_model_file(tmp_path, da
     else:
         shard.write_bytes(shard.read_bytes()[:-1])
     with pytest.raises(derive.DerivationError, match="a6_replica_local_artifact_missing"):
-        derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS)
+        derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS,
+        runtime_identities=IDENTITIES)
     assert not (tmp_path / "bundle-a6r").exists()
 
 
@@ -236,3 +255,79 @@ def test_cli_refuses_a_malformed_artifact_root(tmp_path, capsys) -> None:
         "--unbound", "--artifact-root", "node-b"])
     assert code == 2
     assert "a6_replica_artifact_root_invalid" in capsys.readouterr().out
+
+
+def test_derive_plan_binds_each_proof_to_the_node_observed_runtime_identity(tmp_path) -> None:
+    from mycelium_router.layer_builder import layer_load_proof_digest
+
+    deployment = _deployment(tmp_path)
+    base = _synthetic_base(tmp_path, deployment)
+    bundle_out = tmp_path / "bundle-a6r"
+    local_calls = []
+
+    def observe_local(python_executable, backend):
+        local_calls.append((python_executable, backend))
+        return derive.observe_local_runtime_identity(python_executable, backend)
+
+    plan, report = derive.derive_plan(
+        base, bundle_out=bundle_out, artifact_roots=ROOTS, runtime_identities=IDENTITIES,
+        observe_local=observe_local)
+    # Only the local-transport node is observed here, with its own interpreter.
+    assert local_calls == [(sys.executable, "mlx")]
+    local_identity = derive.observe_local_runtime_identity(sys.executable, "mlx")
+    assert report["runtime_identities"] == {
+        "node-a": {"identity": local_identity, "source": "local_interpreter_observed"},
+        "node-b": {"identity": REMOTE_IDENTITY, "source": "operator_observed"},
+    }
+    digests = {item["node_id"]: item["load_proof_digest"] for item in report["placements"]}
+    for node_id, expected in (("node-a", local_identity), ("node-b", REMOTE_IDENTITY)):
+        proof = json.loads((bundle_out / "control" / f"a6r-{node_id}-load-proof.json").read_text())
+        identity = proof["runtime_identity"]
+        assert {field: identity[field] for field in derive.RUNTIME_IDENTITY_FIELDS} == expected
+        # The placement digest is the digest the node recomputes at configure.
+        assert digests[node_id] == layer_load_proof_digest(proof)
+
+
+@pytest.mark.parametrize(
+    ("identities", "code"),
+    [
+        ({}, "a6_replica_runtime_identity_unobserved"),
+        ({**IDENTITIES, "node-z": REMOTE_IDENTITY}, "a6_replica_runtime_identity_unknown_node"),
+        ({"node-b": {**REMOTE_IDENTITY, "backend_version": "unknown"}},
+         "a6_replica_runtime_identity_invalid"),
+        ({"node-b": {**REMOTE_IDENTITY, "extra": "x"}}, "a6_replica_runtime_identity_invalid"),
+        ({"node-b": {**REMOTE_IDENTITY, "backend": "numpy"}},
+         "a6_replica_runtime_identity_backend_mismatch"),
+    ],
+)
+def test_derive_plan_refuses_a_remote_node_without_a_valid_observed_identity(
+        tmp_path, identities, code) -> None:
+    # The deriving interpreter's backend version is never assumed for another host.
+    deployment = _deployment(tmp_path)
+    base = _synthetic_base(tmp_path, deployment)
+    with pytest.raises(derive.DerivationError, match=code):
+        derive.derive_plan(base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS,
+                           runtime_identities=identities)
+    assert not (tmp_path / "bundle-a6r").exists()
+
+
+def test_local_identity_observation_fails_closed(tmp_path) -> None:
+    with pytest.raises(derive.DerivationError, match="a6_replica_runtime_identity_unobserved"):
+        derive.observe_local_runtime_identity(str(tmp_path / "missing-python"), "numpy")
+    observed = derive.observe_local_runtime_identity(sys.executable, "numpy")
+    assert observed["backend"] == "numpy" and observed["device"] == "cpu"
+    from runtime_loader import _actual_runtime_identity
+
+    actual = _actual_runtime_identity({
+        "backend": "numpy", "dtype": "float32", "quantization": "none", "architecture": "qwen2"})
+    assert observed["backend_version"] == actual["backend_version"]
+
+
+def test_cli_refuses_a_malformed_runtime_identity(tmp_path, capsys) -> None:
+    for value in ("node-b", f"node-b={tmp_path / 'missing.json'}"):
+        code = derive.main([
+            "--base-plan", str(tmp_path / "base.json"), "--output-plan", str(tmp_path / "o.json"),
+            "--bundle-out", str(tmp_path / "b"), "--report", str(tmp_path / "r.json"),
+            "--unbound", "--runtime-identity", value])
+        assert code == 2
+        assert "a6_replica_runtime_identity_invalid" in capsys.readouterr().out
