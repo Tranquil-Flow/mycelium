@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -216,3 +217,79 @@ def test_remote_probe_rejects_path_traversal_aliases(tmp_path: Path) -> None:
         assert exc.code == "remote_probe_request_invalid"
     else:
         raise AssertionError("path traversal alias accepted")
+
+
+def _fake_sysctl(values: dict[str, object]):
+    import subprocess as _subprocess
+
+    def run(argv, **_kwargs):
+        name = argv[-1]
+        value = values.get(name)
+        if callable(value):
+            value = value()
+        if value is None:
+            return _subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+        return _subprocess.CompletedProcess(argv, 0, stdout=f"{value}\n", stderr="")
+
+    return run
+
+
+def test_darwin_boot_identity_survives_a_wall_clock_step(monkeypatch) -> None:
+    from mycelium_physical_runner import remote_probe
+
+    boottimes = iter(
+        (
+            "{ sec = 1791001291, usec = 757260 } Sat Oct  3 06:21:31 2026",
+            "{ sec = 1791001291, usec = 845113 } Sat Oct  3 06:21:31 2026",
+        )
+    )
+    monkeypatch.setattr(remote_probe.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        remote_probe.subprocess,
+        "run",
+        _fake_sysctl(
+            {
+                "kern.bootsessionuuid": "9A98D86A-02FA-4F54-A383-3F0F36ACA7DC",
+                "kern.boottime": lambda: next(boottimes),
+            }
+        ),
+    )
+
+    assert remote_probe._boot_identity("host-a") == remote_probe._boot_identity("host-a")
+
+
+def test_darwin_boot_identity_falls_back_to_boottime(monkeypatch) -> None:
+    from mycelium_physical_runner import remote_probe
+
+    monkeypatch.setattr(remote_probe.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        remote_probe.subprocess,
+        "run",
+        _fake_sysctl({"kern.bootsessionuuid": None, "kern.boottime": "{ sec = 1 }"}),
+    )
+    fallback = remote_probe._boot_identity("host-a")
+    monkeypatch.setattr(
+        remote_probe.subprocess, "run", _fake_sysctl({"kern.bootsessionuuid": None, "kern.boottime": None})
+    )
+
+    assert fallback.startswith("boot-")
+    assert fallback != remote_probe._boot_identity("host-a")
+
+
+def test_route_builder_identity_program_matches_local_preflight() -> None:
+    import subprocess
+    import sys
+
+    from scripts.build_qwen_live_route import _remote_identity_program
+    from mycelium_physical_runner.remote_probe import derive_local_run_scoped_identity
+
+    run_id = "run-identity-parity"
+    completed = subprocess.run(
+        (sys.executable, "-c", _remote_identity_program(run_id)),
+        capture_output=True,
+        text=True,
+        timeout=30.0,
+        check=True,
+    )
+
+    assert tuple(json.loads(completed.stdout)) == derive_local_run_scoped_identity(run_id)
