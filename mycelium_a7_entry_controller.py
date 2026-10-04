@@ -54,6 +54,7 @@ from mycelium_router.contracts import (
 )
 
 CUTOVER_RECORD_PROTOCOL = "mycelium.a7_entry_cutover.v1"
+LAST_CUTOVER_SOURCE = "durable_last_cutover"
 ENTRY_INSTALLERS = ("request_gateway", "router", "transport_ingress")
 _MAX_TRACKED_REQUESTS = 4096
 
@@ -151,6 +152,7 @@ class A7EntryController:
       self._requests: dict[str, _Coverage] = {}
       self._last_request_id: str | None = None
       self._fence_advances = 0
+      self._last_cutover_persist_failures = 0
 
    # -- coverage ------------------------------------------------------------------
 
@@ -499,6 +501,7 @@ class A7EntryController:
       result["successor_checkpoint_digest"] = standby_receipt.checkpoint_digest
       result["successor_kv_position"] = expected_next_position
       state.result = result
+      self._persist_last_cutover(request_id)
       return result
 
    def decline(self, request_id: str, old_manifest: PathManifest, *, reason: str, gateway_committed_token_ids: Sequence[int]) -> dict[str, Any]:
@@ -542,7 +545,29 @@ class A7EntryController:
          state.pending_since = None
       result = self._result(state, reason, gateway_tokens, started, outcome=outcome, watermark=watermark)
       state.result = result
+      self._persist_last_cutover(request_id)
       return result
+
+   def _persist_last_cutover(self, request_id: str) -> None:
+      """Durably keep this request's cutover record beside the fence ledger.
+
+      A route cold restart retires this process and its in-memory record; the
+      restarted entry serves the persisted copy for exactly this request.  A
+      write failure never changes the request's outcome.
+      """
+
+      snapshot = self.snapshot(request_id)
+      result = None if snapshot is None else snapshot.get("result")
+      if not isinstance(result, dict) or result.get("protocol") != CUTOVER_RECORD_PROTOCOL:
+         return  # no cutover decision for this request: nothing to keep
+      persist = getattr(self._fences, "persist_last_cutover", None)
+      if not callable(persist):
+         return
+      try:
+         persist(request_id, node_id=self.node_id, snapshot=snapshot)
+      except (FenceStoreError, OSError):
+         with self._lock:
+            self._last_cutover_persist_failures += 1
 
    def _result(self, state, reason, gateway_tokens, started, *, outcome=None, watermark=None) -> dict[str, Any]:
       gateway_count = len(gateway_tokens)
@@ -576,6 +601,7 @@ class A7EntryController:
          state.finished = True
          state.pending_since = None
          state.result = {**(state.result or {}), "terminal_released": True, "terminal_outcome": outcome}
+      self._persist_last_cutover(request_id)
       if state.result.get("outcome") == "aborted":
          outcome = "aborted"
       try:
@@ -633,7 +659,7 @@ class A7EntryController:
       with self._lock:
          state = self._requests.get(request_id)
          if state is None:
-            return None
+            return self._persisted_snapshot(request_id)
          return {
             "covered": True,
             "committed": state.committed,
@@ -648,3 +674,24 @@ class A7EntryController:
             "old_path_fenced": state.old_path_fenced,
             "result": None if state.result is None else dict(state.result),
          }
+
+   def _persisted_snapshot(self, request_id: str) -> dict[str, Any] | None:
+      """The durable last cutover record of exactly this request, when this process has none.
+
+      Served only for the same request digest and entry node; it is the
+      record as observed when it was written, marked as restored, never
+      recomputed or invented.
+      """
+
+      reader = getattr(self._fences, "last_cutover", None)
+      if not callable(reader):
+         return None
+      try:
+         snapshot = reader(request_id, node_id=self.node_id)
+      except (FenceStoreError, OSError):
+         return None
+      if not isinstance(snapshot, dict) or not isinstance(snapshot.get("result"), dict):
+         return None
+      if snapshot["result"].get("protocol") != CUTOVER_RECORD_PROTOCOL:
+         return None
+      return {**snapshot, "restored_from": LAST_CUTOVER_SOURCE}

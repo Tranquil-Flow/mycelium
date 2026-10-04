@@ -53,8 +53,8 @@
     },
     {
       "path": "mycelium_a7_entry_controller.py",
-      "sha256": "sha256:c49e100d73bc697e34ca1eaf3d1236ceea097f3f2be20e135307ec22a4bf2b4d",
-      "size_bytes": 30754
+      "sha256": "sha256:d20cc327ac8098b86915a87771353aaa18b1225c1302ebd8e31018a1fb468121",
+      "size_bytes": 32837
     },
     {
       "path": "mycelium_a7_evidence_control.py",
@@ -63,8 +63,8 @@
     },
     {
       "path": "mycelium_a7_fence_store.py",
-      "sha256": "sha256:f6e16de09b3b278857e61db380a925c40ef4b2e36ef031a6e8149e40352f8b6c",
-      "size_bytes": 15806
+      "sha256": "sha256:903469614cc1bf3bcefeb107dc6d0cf78147ad73a189cbf3591237a22a5496db",
+      "size_bytes": 19964
     },
     {
       "path": "mycelium_a7_node_agent.py",
@@ -427,6 +427,11 @@
       "size_bytes": 6242
     },
     {
+      "path": "tests/a7_acceptance/test_last_cutover_persistence.py",
+      "sha256": "sha256:b04a743e3711ba685a326c0e18c684a8b0bebbdcd958c363fa311edfc81e40eb",
+      "size_bytes": 4688
+    },
+    {
       "path": "tests/a7_acceptance/test_node_agent_messages.py",
       "sha256": "sha256:1666f1e6e72ba07362682b659d6812371b2b011d64779774ea07f211d33529d6",
       "size_bytes": 10503
@@ -683,5 +688,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:b062e07989fc0eaa533fc287f60508a1f7cd8b5459ee44818ee81028e1cacc9d"
+  "source_digest": "sha256:25b02470af7630d702dd8885eebf121c6424c5be0e69a9f77273c2ca131bcacf"
 }
