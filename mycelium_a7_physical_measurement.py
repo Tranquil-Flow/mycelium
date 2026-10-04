@@ -786,25 +786,44 @@ def measure(
     result_evidence: Mapping[str, Any] | None = None
     last_request_evidence: Mapping[str, Any] = pre_kill
     incidents: list[Mapping[str, Any]] = []
+    # Why the cutover record was (not) observed: privacy-reduced counts and codes
+    # of every post-kill read, so an unobserved result names its cause.
+    result_poll: dict[str, Any] = {
+        "reads": 0,
+        "refusals": {},
+        "stop": "result_timeout",
+        "stream_done_at_stop": False,
+        "last_state": None,
+    }
     result_deadline = time.monotonic() + settings.result_timeout_s
     while time.monotonic() < result_deadline:
         try:
             current = evidence.request(request_id)
-        except MeasurementRefused:
+        except MeasurementRefused as exc:
+            result_poll["refusals"][exc.code] = result_poll["refusals"].get(exc.code, 0) + 1
             if running.done.is_set():
+                result_poll["stop"] = "refused_after_terminal"
                 break
             time.sleep(settings.poll_s)
             continue
+        result_poll["reads"] += 1
         state = _request_state(current)
         if state is None:
+            result_poll["stop"] = "entry_request_absent"
             break  # the entry no longer holds the request (route replaced)
+        result_poll["last_state"] = {
+            key: state.get(key) for key in ("committed", "finished", "source_lost_accepted", "old_path_fenced", "request_attempt")
+        }
+        result_poll["last_state"]["result_present"] = isinstance(state.get("result"), Mapping)
         last_request_evidence = current
         incidents = [item for item in current.get("scoped_incidents", ()) if isinstance(item, Mapping)]
         if isinstance(state.get("result"), Mapping):
             result_evidence = current
             if running.done.is_set() or any(item.get("subject_id") == source_node for item in incidents):
+                result_poll["stop"] = "result_observed"
                 break
         time.sleep(settings.poll_s)
+    result_poll["stream_done_at_stop"] = running.done.is_set()
 
     _wait_done(running, settings.terminal_timeout_s)
     tokens, terminals = running.snapshot()
@@ -898,6 +917,7 @@ def measure(
         "source_incidents": [dict(item) for item in source_incidents],
         "a7_result": None if result is None else dict(result),
         "a7_result_observed": result is not None,
+        "result_poll": result_poll,
         "entry_request_released": _request_state(last_request_evidence) is None,
         "baseline": {
             "token_count": len(baseline_tokens),
