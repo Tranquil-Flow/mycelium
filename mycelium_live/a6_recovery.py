@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping
 import hashlib
 import hmac
 import json
+import logging
 from pathlib import Path
 import threading
 import time
@@ -39,6 +40,15 @@ CONTROLLED_QUALIFICATION_FAULTS = (
 )
 _CONTROLLED_FAULT_GRANT = "FLEET GRANTED TO A6"
 _MAX_RETAINED_OBSERVATIONS = 64
+_MAX_DIAGNOSTIC_MESSAGE = 160
+_LOGGER = logging.getLogger(__name__)
+
+
+def _bounded_message(error: BaseException) -> str:
+    """One-line, length-bounded exception text for operator diagnostics."""
+
+    text = " ".join(str(error).split())
+    return text[:_MAX_DIAGNOSTIC_MESSAGE]
 
 
 _TOKENIZER_FILES = (
@@ -203,6 +213,7 @@ class LiveA6RecoveryQualifier:
         self._fault_lock = threading.Lock()
         self._armed_faults: dict[str, str] = {}
         self._issued: dict[str, dict[str, Any]] = {}
+        self._challenge_outcomes: dict[str, dict[str, Any]] = {}
 
     def arm_controlled_fault(self, *, request_id: str, kind: str, grant: str) -> None:
         """Arm one qualification fault for one request; consumed by one issue."""
@@ -226,6 +237,29 @@ class LiveA6RecoveryQualifier:
         with self._fault_lock:
             facts = self._issued.get(request_id)
             return None if facts is None else json.loads(json.dumps(facts))
+
+    def physical_challenge_outcome(self, request_id: str) -> dict[str, Any] | None:
+        """Why the last successor physical challenge for one request passed or failed."""
+
+        with self._fault_lock:
+            outcome = self._challenge_outcomes.get(request_id)
+            return None if outcome is None else json.loads(json.dumps(outcome))
+
+    def _record_challenge_outcome(self, request_id: str, outcome: Mapping[str, Any]) -> None:
+        with self._fault_lock:
+            self._challenge_outcomes.pop(request_id, None)
+            self._challenge_outcomes[request_id] = dict(outcome)
+            while len(self._challenge_outcomes) > _MAX_RETAINED_OBSERVATIONS:
+                self._challenge_outcomes.pop(next(iter(self._challenge_outcomes)))
+        document = json.dumps(
+            {"event": "a6_successor_physical_challenge", "request_id": request_id, **outcome},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if outcome.get("passed") is True:
+            _LOGGER.info("%s", document)
+        else:
+            _LOGGER.warning("%s", document)
 
     def _consume_fault(self, request_id: str) -> str | None:
         with self._fault_lock:
@@ -431,8 +465,22 @@ class LiveA6RecoveryQualifier:
 
         probe_id = f"a6-qual-{hashlib.sha256(request_id.encode()).hexdigest()[:16]}-{uuid.uuid4().hex[:8]}"
         passed = False
+        outcome: dict[str, Any] = {
+            "passed": False,
+            "outcome": "not_started",
+            "placement_ids": list(placement_ids),
+            "expected_token_count": len(expected),
+            "observed_token_count": None,
+            "emitted_token_count": 0,
+            "first_mismatch_index": None,
+            "error_type": None,
+            "error": None,
+            "release_error_type": None,
+            "release_error": None,
+        }
         try:
             if self._clock_ms() >= absolute_deadline_unix_ms:
+                outcome["outcome"] = "deadline_elapsed"
                 return {
                     "passed": False,
                     "parity_policy_digest": policy_digest,
@@ -445,16 +493,36 @@ class LiveA6RecoveryQualifier:
                 sink=Sink(),
                 selected_placement_ids=placement_ids,
             )
-            passed = tuple(result.token_ids) == tuple(expected) and tuple(emitted) == tuple(
-                expected
-            )
-        except Exception:
+            observed = tuple(result.token_ids)
+            passed = observed == tuple(expected) and tuple(emitted) == tuple(expected)
+            outcome["observed_token_count"] = len(observed)
+            outcome["outcome"] = "passed" if passed else "output_mismatch"
+            if not passed:
+                outcome["first_mismatch_index"] = next(
+                    (
+                        index
+                        for index, (left, right) in enumerate(zip(observed, expected))
+                        if left != right
+                    ),
+                    min(len(observed), len(expected)),
+                )
+        except Exception as error:
             passed = False
+            outcome["outcome"] = "infer_error"
+            outcome["error_type"] = type(error).__name__
+            outcome["error"] = _bounded_message(error)
         finally:
+            outcome["emitted_token_count"] = len(emitted)
             try:
                 route.release_request(probe_id)
-            except Exception:
+            except Exception as error:
                 passed = False
+                outcome["release_error_type"] = type(error).__name__
+                outcome["release_error"] = _bounded_message(error)
+                if outcome["outcome"] == "passed":
+                    outcome["outcome"] = "release_error"
+            outcome["passed"] = passed
+            self._record_challenge_outcome(request_id, outcome)
         return {
             "passed": passed,
             "parity_policy_digest": policy_digest,

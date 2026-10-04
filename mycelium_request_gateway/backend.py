@@ -13,7 +13,13 @@ from mycelium_router.contracts import ExecutionGraph, RequestContext
 from mycelium_router.serialization import execution_graph_to_dict
 from mycelium_m16_runtime import M16AdmissionError
 
-from .contracts import AdmissionError, InferenceSubmission, TokenEmitter, qualification_binding
+from .contracts import (
+    AdmissionError,
+    InferenceSubmission,
+    TokenEmitter,
+    is_safe_error_code,
+    qualification_binding,
+)
 from .qualification import QualificationSource
 
 
@@ -580,6 +586,22 @@ class RouterSessionBackend:
         release = getattr(self._router, "release_request", None)
         if callable(release):
             release(request_id)
+
+    def terminal_failure_code(self, request_id: str) -> str | None:
+        """The bounded recovery failure code for a failed request, if any.
+
+        Only the router's retained, non-disclosing recovery code is surfaced;
+        every other failure keeps the generic gateway code.
+        """
+
+        reason_of = getattr(self._router, "recovery_failure_reason", None)
+        if not callable(reason_of):
+            return None
+        try:
+            reason = reason_of(request_id)
+        except Exception:
+            return None
+        return reason if is_safe_error_code(reason) else None
 
     def update_publisher_generation(
         self,

@@ -376,3 +376,19 @@ def test_only_the_final_shutdown_of_a_run_measures_cleanup(plan: Path):
         assert cleanup.exists() is expected
     document = json.loads(cleanup.read_text())
     assert (document["physical_process_count"], document["reservation_count"]) == (0, 0)
+
+
+def test_a_refused_observation_is_logged_with_its_reason(plan: Path, caplog):
+    import logging
+
+    authority = observation_authority(operator_plan=plan, repo_root=ROOT)
+    recorder = CaseObservationRecorder(authority=authority, target=SimpleNamespace())
+    recorder._record(SimpleNamespace(case_id="no_successor", request_id="request-x"))
+    status = recorder.status()
+    assert "no_successor" in status["refused"]
+    logged = [json.loads(record.getMessage()) for record in caplog.records
+              if record.name == "mycelium_a6_case_observations"
+              and record.levelno == logging.WARNING]
+    assert logged == [{"case": "no_successor", "error_type": "AttributeError",
+                       "event": "a6_case_observation_refused", "reason":
+                       status["refused"]["no_successor"], "request_id": "request-x"}]

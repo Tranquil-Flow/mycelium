@@ -1609,6 +1609,30 @@ class LiveRouterPort:
                     if command_terminal_error is not None:
                         pending.terminal_blocked_reason = command_terminal_error
                     self._changed.notify_all()
+            if not cancelled:
+                # Operator diagnostics only: bounded codes, no request content.
+                _LOGGER.warning(
+                    "%s",
+                    json.dumps(
+                        {
+                            "event": "a6_recovery_failed",
+                            "request_id": request_id,
+                            "reason": pending.recovery_failure_reason,
+                            "error_type": type(error).__name__,
+                            "error_code": self._bounded_error_code(error),
+                            "source_fenced": source_fenced,
+                            "successor_reserved": successor_identity is not None,
+                            "recovery_attempts": pending.recovery_attempts,
+                            "terminal_blocked_reason": (
+                                None
+                                if command_terminal_error is None
+                                else command_terminal_error[:96]
+                            ),
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                )
             return False
 
     def _rotate_binding_locked(self, candidate: str, *, expected_bound: str) -> bool:
