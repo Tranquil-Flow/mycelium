@@ -33,7 +33,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:7476dcc01325d152cba47c136898d234e1c46a2f511c229fca8e430aeeff8e0a",
+      "sha256": "sha256:35bff5f59bfcb616bd56f5d9bdedf7b8dfb5407ea7f792e9be76a582311283cf",
       "size_bytes": 71562
     },
     {
@@ -123,8 +123,8 @@
     },
     {
       "path": "mycelium_live/a6_recovery.py",
-      "sha256": "sha256:fa4dcc257599208de70609d66fe332d553761b5903458d6246bb2e8827ed342d",
-      "size_bytes": 21544
+      "sha256": "sha256:d537cbf24fcb1b83e5a9657104c810940f8bdb4ffd7f8e1443b5bddc8ab81c46",
+      "size_bytes": 21892
     },
     {
       "path": "mycelium_live/a7_authority.py",
@@ -143,8 +143,8 @@
     },
     {
       "path": "mycelium_live/supervisor.py",
-      "sha256": "sha256:2aaab4ed4c1041b77a52d21964c0f4d6efab88137b7146630787d227438e72c4",
-      "size_bytes": 195245
+      "sha256": "sha256:fda95248fba9e56b3b2007fe4d5c349447ef84174299f377b80b3e40a1fdd793",
+      "size_bytes": 195787
     },
     {
       "path": "mycelium_m16_runtime.py",
@@ -468,8 +468,8 @@
     },
     {
       "path": "tests/live/test_a6_recovery_diagnostics.py",
-      "sha256": "sha256:7fad669d0236b6d3fd878b6da8ba1756df27af5787ade9870f8025cde0a3deb2",
-      "size_bytes": 5558
+      "sha256": "sha256:ee7b3248a235b5fd1c514c115761445a1d3af5779370dd25845ce95d8c859bb4",
+      "size_bytes": 6704
     },
     {
       "path": "tests/live/test_a6_released_recovery_view.py",
@@ -495,6 +495,11 @@
       "path": "tests/live/test_a6_source_failure_observation_retention.py",
       "sha256": "sha256:5d04d8bb90d56c9e94774714106b1ec00887a6c4121a68abbe5665a1759bb91f",
       "size_bytes": 6079
+    },
+    {
+      "path": "tests/live/test_a6_successor_challenge_stop_tokens.py",
+      "sha256": "sha256:d070d9be108b54b6a790283502a21557f51d0eb2a6787e866cacc3e287185dd5",
+      "size_bytes": 1745
     },
     {
       "path": "tests/live/test_a6_successor_path_digest.py",
@@ -618,5 +623,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:946ee269ae470df30abfc48a3dfebb18f7340e334894516dbdf52ca290dccbdb"
+  "source_digest": "sha256:a425de1d8929a86db42acbfa0a9231a7f8087921f5fa4c8ead4b203096c22ee8"
 }

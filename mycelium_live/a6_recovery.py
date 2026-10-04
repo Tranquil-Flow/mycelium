@@ -492,6 +492,11 @@ class LiveA6RecoveryQualifier:
                 request_id=probe_id,
                 sink=Sink(),
                 selected_placement_ids=placement_ids,
+                # Like the startup renewal, the successor challenge is compared
+                # to the exact controller-owned output. Product stop tokens
+                # (e.g. Qwen ``<|im_end|>``) would truncate it and fail every
+                # successor; the override is request-local.
+                _stop_token_ids_override=frozenset(),
             )
             observed = tuple(result.token_ids)
             passed = observed == tuple(expected) and tuple(emitted) == tuple(expected)

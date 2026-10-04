@@ -23,9 +23,11 @@ class _Route:
         self.infer_error = infer_error
         self.release_error = release_error
         self.released: list[str] = []
+        self.kwargs: dict = {}
 
     def infer(self, prompt, *, max_new_tokens, request_id, sink, selected_placement_ids,
-              **_kwargs):
+              **kwargs):
+        self.kwargs = kwargs
         if self.infer_error is not None:
             raise self.infer_error
         for index, token in enumerate(self.output):
@@ -75,6 +77,8 @@ def test_passed_challenge_is_recorded_at_info(tmp_path, caplog) -> None:
     [(level, document)] = _logged(caplog, "a6_successor_physical_challenge")
     assert level == logging.INFO and document["request_id"] == "req-1"
     assert len(route.released) == 1
+    # The challenge compares the exact startup output: no product stop filter.
+    assert route.kwargs == {"_stop_token_ids_override": frozenset()}
 
 
 def test_truncated_output_reports_mismatch_index_and_counts(tmp_path, caplog) -> None:
@@ -131,3 +135,20 @@ def test_backend_surfaces_only_safe_recovery_codes(reason, expected) -> None:
     backend = RouterSessionBackend.__new__(RouterSessionBackend)
     backend._router = SimpleNamespace(recovery_failure_reason=lambda _request_id: reason)
     assert backend.terminal_failure_code("req-1") == expected
+
+
+@pytest.mark.parametrize("override", [None, frozenset()])
+def test_owner_forwards_the_stop_override_only_when_requested(override, monkeypatch) -> None:
+    from mycelium_live.supervisor import ColdRouteRestartOwner
+
+    route = _Route()
+    owner = ColdRouteRestartOwner.__new__(ColdRouteRestartOwner)
+    owner._lock = __import__("threading").RLock()
+    owner._request_routes = {}
+    monkeypatch.setattr(owner, "_ready_route_or_raise", lambda: (route, 1), raising=False)
+    monkeypatch.setattr(ColdRouteRestartOwner, "_route_alive", staticmethod(lambda _r: True))
+    extra = {} if override is None else {"_stop_token_ids_override": override}
+    owner.infer((1, 2, 3), max_new_tokens=4, request_id="probe", sink=SimpleNamespace(
+        emit=lambda *_a: None), selected_placement_ids=("placement-001",), **extra)
+    forwarded = {key: value for key, value in route.kwargs.items() if value is not None}
+    assert forwarded == extra
