@@ -58,8 +58,8 @@
     },
     {
       "path": "mycelium_a7_evidence_control.py",
-      "sha256": "sha256:4ae1aa0eb1d002933794649146b249e9e28bc8f9dfeedf87abfb799631118f36",
-      "size_bytes": 19796
+      "sha256": "sha256:ddba5fe70d740e6680c2a36b1a89958066e4482c37d59075903bdaea9c84133b",
+      "size_bytes": 22058
     },
     {
       "path": "mycelium_a7_fence_store.py",
@@ -93,8 +93,8 @@
     },
     {
       "path": "mycelium_a7_physical_measurement.py",
-      "sha256": "sha256:155691d862b527ab2e8c2e1eba9ce548a7171dcf33464cba5b11a940fb98abd9",
-      "size_bytes": 59803
+      "sha256": "sha256:61a956a7d7fd2dd4ca83dbd62e37bf8266f5fbed11a42d0695c4d8ebe9bbc202",
+      "size_bytes": 63829
     },
     {
       "path": "mycelium_a7_standby_plan.py",
@@ -358,8 +358,8 @@
     },
     {
       "path": "scripts/run_a7_kv_successor_gate.py",
-      "sha256": "sha256:bae3ba4b55f65192edd380a45a86a26ffb4ac483b3bb892581ffc1f45df967cb",
-      "size_bytes": 15789
+      "sha256": "sha256:6b37d469ac4f2e6d909c5a3122d0cf72ba8badf932652f52bde0b433418b1d61",
+      "size_bytes": 20171
     },
     {
       "path": "test_router_mlx_persistent_int8.py",
@@ -403,8 +403,8 @@
     },
     {
       "path": "tests/a7_acceptance/test_cleanup_not_measured.py",
-      "sha256": "sha256:650d7e62ea8c151a47cdca7d533ca8df91bb73ac53223ab2f51726cde49e3640",
-      "size_bytes": 4251
+      "sha256": "sha256:e9940db8a9108e4e3705518f14800945e44fc9028e8d55c941835f75061cc6f1",
+      "size_bytes": 10059
     },
     {
       "path": "tests/a7_acceptance/test_durable_fence_store.py",
@@ -553,8 +553,8 @@
     },
     {
       "path": "tests/live/test_a7_measurement_restored_record.py",
-      "sha256": "sha256:be2fb8839e861c4af2e19593af9e6b24d3a1ba7f67f7415ee3b3503fbb396b1e",
-      "size_bytes": 9434
+      "sha256": "sha256:f2bf46148cd307a80ba59f616b303224b4397f0b3d34a22a1aec2ab80efbb7fc",
+      "size_bytes": 12557
     },
     {
       "path": "tests/live/test_a7_measurement_result_poll.py",
@@ -698,5 +698,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:26137384114221e6efd2e9d89b90139de2b8400e3a0186b3e6d42fbee857dab9"
+  "source_digest": "sha256:12e277d06c7d87d168f60cddf0affe1263486dcf75e77af8300836454268cb34"
 }

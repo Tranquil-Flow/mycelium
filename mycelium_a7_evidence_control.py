@@ -48,6 +48,8 @@ _FORWARDING_HEADERS = frozenset({"forwarded", "via", "x-real-ip", "x-client-ip"}
 _CODE = re.compile(r"[a-z][a-z0-9_:]{0,80}\Z")
 _REQUEST_ID = re.compile(r"[A-Za-z0-9._:-]{1,160}\Z")
 _COMMAND_TIMEOUT_S = 3.0
+_RETIRED_ROUTES_KEPT = 4
+RETIRED_EXIT_SOURCE = "retired_route_session_exit_status"
 
 
 class A7EvidenceControlRefused(ValueError):
@@ -111,6 +113,9 @@ class RouteA7Evidence:
         self._router = router
         self._timeout = float(command_timeout_s)
         self._clock_ms = clock_ms or (lambda: int(time.monotonic() * 1_000))
+        self._routes_lock = threading.Lock()
+        self._last_route: Any = None
+        self._retired_routes: list[Any] = []
 
     # -- route resolution --------------------------------------------------------------
 
@@ -125,7 +130,47 @@ class RouteA7Evidence:
         for name in ("_sessions", "_peers", "_plan", "_send_before", "_verify_observation", "_command_id"):
             if not hasattr(current, name):
                 raise A7EvidenceUnavailable("a7_evidence_route_unsupported")
+        with self._routes_lock:
+            if self._last_route is not None and self._last_route is not current:
+                # A cold restart replaced the route: keep the retired route so
+                # its entry process's exit status stays observable.
+                self._retired_routes.append(self._last_route)
+                del self._retired_routes[:-_RETIRED_ROUTES_KEPT]
+            self._last_route = current
         return current
+
+    def _retired_entry_processes(self) -> list[dict[str, Any]]:
+        """Entry processes of routes this door saw replaced, with their exit status.
+
+        A6 precedent (``mycelium_live/router_port.py``
+        ``_dead_peer_cleanup_receipt``): process exit releases every resource
+        that process held, so the identity-bound process, confirmed by its exit
+        status, is its own cleanup proof.  A process without an integer exit
+        status (still running or unknown) proves nothing and is reported so.
+        """
+
+        with self._routes_lock:
+            retired = list(self._retired_routes)
+        records: list[dict[str, Any]] = []
+        for route in retired:
+            plan = getattr(route, "_plan", None)
+            node_id = plan.get("entry_node_id") if isinstance(plan, Mapping) else None
+            identities = getattr(route, "_identities", None)
+            identity = identities.get(node_id) if isinstance(identities, Mapping) and isinstance(node_id, str) else None
+            process = _process_identity(identity)
+            if process is None:
+                continue
+            session = getattr(route, "_sessions", {}).get(node_id)
+            exit_status = getattr(session, "returncode", None)
+            records.append(
+                {
+                    "node_id": node_id,
+                    **process,
+                    "exit_status": exit_status if type(exit_status) is int else None,
+                    "observed_by": RETIRED_EXIT_SOURCE,
+                }
+            )
+        return records
 
     @staticmethod
     def _alive(concrete: Any, node_id: str) -> bool:
@@ -298,6 +343,7 @@ class RouteA7Evidence:
             "entry_node_id": concrete._plan.get("entry_node_id"),
             "nodes": _detached(nodes),
             "exited_nodes": exited,
+            "retired_entry_processes": self._retired_entry_processes(),
             "route_request_registrations": registrations,
             "gateway_reservations": reservations,
         }
