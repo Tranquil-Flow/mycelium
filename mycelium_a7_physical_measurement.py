@@ -560,6 +560,13 @@ def _request_state(evidence: Mapping[str, Any]) -> Mapping[str, Any] | None:
     return request if isinstance(request, Mapping) else None
 
 
+def _restored_from(state: Mapping[str, Any]) -> str | None:
+    """The durable-record marker of request evidence served by a restarted entry."""
+
+    marker = state.get("restored_from")
+    return marker if isinstance(marker, str) and marker else None
+
+
 def _node_with_role(resources: Mapping[str, Any], role: str) -> str | None:
     nodes = resources.get("nodes")
     if not isinstance(nodes, Mapping):
@@ -784,7 +791,13 @@ def measure(
 
     # 3. the entry's cutover record (captured before any A6 restart replaces it).
     result_evidence: Mapping[str, Any] | None = None
+    # Process-live fields (standby counters, incidents, release state) come
+    # only from reads of the entry process that served the request.  A read
+    # whose request evidence is ``restored_from`` a durable record was answered
+    # by a restarted entry: it may supply the cutover record, nothing else.
     last_request_evidence: Mapping[str, Any] = pre_kill
+    counter_read = "pre_kill"
+    result_read: str | None = None
     incidents: list[Mapping[str, Any]] = []
     # Why the cutover record was (not) observed: privacy-reduced counts and codes
     # of every post-kill read, so an unobserved result names its cause.
@@ -815,10 +828,17 @@ def measure(
             key: state.get(key) for key in ("committed", "finished", "source_lost_accepted", "old_path_fenced", "request_attempt")
         }
         result_poll["last_state"]["result_present"] = isinstance(state.get("result"), Mapping)
-        last_request_evidence = current
-        incidents = [item for item in current.get("scoped_incidents", ()) if isinstance(item, Mapping)]
+        restored = _restored_from(state)
+        if restored is not None:
+            result_poll["restored_reads"] = result_poll.get("restored_reads", 0) + 1
+            result_poll["restored_from"] = restored
+        else:
+            last_request_evidence = current
+            counter_read = f"poll:{result_poll['reads']}"
+            incidents = [item for item in current.get("scoped_incidents", ()) if isinstance(item, Mapping)]
         if isinstance(state.get("result"), Mapping):
             result_evidence = current
+            result_read = f"poll:{result_poll['reads']}"
             if running.done.is_set() or any(item.get("subject_id") == source_node for item in incidents):
                 result_poll["stop"] = "result_observed"
                 break
@@ -828,13 +848,32 @@ def measure(
     _wait_done(running, settings.terminal_timeout_s)
     tokens, terminals = running.snapshot()
     # Post-terminal standby counters from the same entry process, when it still holds the request.
-    try:
-        final = evidence.request(request_id)
-        if _request_state(final) is not None:
+    # While no cutover record was observed, a refused read (the route is being
+    # cold-restarted) is retried until the result deadline, so a restarted
+    # entry's durable record can still be read; it supplies the record only.
+    final_reads = {"attempts": 0, "refusals": {}}
+    while True:
+        final_reads["attempts"] += 1
+        try:
+            final = evidence.request(request_id)
+        except MeasurementRefused as exc:
+            final_reads["refusals"][exc.code] = final_reads["refusals"].get(exc.code, 0) + 1
+            if result_evidence is None and time.monotonic() < result_deadline:
+                time.sleep(max(settings.poll_s, 0.2))
+                continue
+            break
+        final_state = _request_state(final)
+        if final_state is not None and _restored_from(final_state) is not None:
+            if result_evidence is None and isinstance(final_state.get("result"), Mapping):
+                result_evidence = final
+                result_read = "final"
+            result_poll["restored_from"] = _restored_from(final_state)
+        elif final_state is not None:
             last_request_evidence = final
+            counter_read = "final"
             incidents = [item for item in final.get("scoped_incidents", ()) if isinstance(item, Mapping)] or incidents
-    except MeasurementRefused:
-        pass
+        break
+    result_poll["final_reads"] = final_reads
     after = _settled_resources(evidence, before, timeout_s=settings.settle_timeout_s, poll_s=settings.poll_s)
     fault_confirmed = killed.kill_exit_status == 0 and fault.group_gone(group)
 
@@ -859,8 +898,14 @@ def measure(
         _standby_counter(last_request_evidence, "prefill_input_token_count"),
         _standby_counter(last_request_evidence, "decode_operation_count"),
     )
-    if None in standby_before or None in standby_after:
+    if None in standby_before:
         raise MeasurementRefused("a7_standby_counters_unavailable")
+    if None in standby_after:
+        # No read of the serving entry process carried the counters; a restarted
+        # entry's counters belong to another process and are never compared.
+        raise MeasurementRefused(
+            "a7_standby_counters_unobserved" if result_poll.get("restored_from") is not None else "a7_standby_counters_unavailable"
+        )
     prefill_ops, prefix_tokens, decode_ops = (end - start for start, end in zip(standby_before, standby_after))
     if min(prefill_ops, prefix_tokens, decode_ops) < 0:
         raise MeasurementRefused("a7_standby_counters_regressed")
@@ -918,6 +963,11 @@ def measure(
         "a7_result": None if result is None else dict(result),
         "a7_result_observed": result is not None,
         "result_poll": result_poll,
+        "evidence_reads": {
+            "result_read": result_read,
+            "result_restored_from": None if result_evidence is None else _restored_from(_request_state(result_evidence) or {}),
+            "counter_read": counter_read,
+        },
         "entry_request_released": _request_state(last_request_evidence) is None,
         "baseline": {
             "token_count": len(baseline_tokens),

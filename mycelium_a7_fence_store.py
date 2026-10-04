@@ -43,6 +43,11 @@ RECONCILED_STATES = (
    "aborted",
    "already_terminal",
 )
+LAST_CUTOVER_PROTOCOL = "mycelium.a7_entry_last_cutover.v1"
+LAST_CUTOVER_DIRECTORY = "last-cutover"
+LAST_CUTOVER_FILE = "last.json"
+LAST_CUTOVER_MAX_BYTES = 16 * 1024
+_LAST_CUTOVER_FIELDS = frozenset({"protocol", "request_key", "node_id", "snapshot", "evidence_digest"})
 _RECORD_FIELDS = frozenset(
    {
       "protocol",
@@ -328,6 +333,100 @@ class DurableFenceStore:
             for path in self._root.iterdir()
             if path.suffix == ".json" and not path.name.startswith(".") and path.is_file() and not path.is_symlink()
          )
+
+   # -- last cutover record ---------------------------------------------------------
+
+   def _last_cutover_dir(self) -> Path:
+      directory = self._root / LAST_CUTOVER_DIRECTORY
+      directory.mkdir(mode=0o700, exist_ok=True)
+      info = os.lstat(directory)
+      if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+         raise FenceStoreError("last_cutover_directory_invalid")
+      return directory
+
+   def persist_last_cutover(self, request_id: str, *, node_id: str, snapshot: dict[str, Any]) -> None:
+      """Durably replace this coordinator's last cutover record (one bounded file).
+
+      The record outlives the coordinator process, so the entry's evidence can
+      still be read after a restart retires the in-memory record.  It is kept
+      outside the fence ledger (never counted as a fence record) and bound to
+      the request digest and the node that recorded it.
+      """
+
+      if not isinstance(node_id, str) or not node_id or not isinstance(snapshot, dict):
+         raise FenceStoreError("last_cutover_invalid")
+      body = {
+         "protocol": LAST_CUTOVER_PROTOCOL,
+         "request_key": request_key(request_id),
+         "node_id": node_id,
+         "snapshot": snapshot,
+      }
+      try:
+         data = _canonical({**body, "evidence_digest": _digest(body)})
+      except (TypeError, ValueError) as exc:
+         raise FenceStoreError("last_cutover_invalid") from exc
+      if len(data) > LAST_CUTOVER_MAX_BYTES:
+         raise FenceStoreError("last_cutover_too_large")
+      with self._exclusive():
+         directory = self._last_cutover_dir()
+         temporary = directory / f".{LAST_CUTOVER_FILE}.{os.getpid()}.{threading.get_ident()}.tmp"
+         descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+         try:
+            os.write(descriptor, data)
+            os.fsync(descriptor)
+         except BaseException:
+            os.close(descriptor)
+            temporary.unlink(missing_ok=True)
+            raise
+         os.close(descriptor)
+         os.replace(temporary, directory / LAST_CUTOVER_FILE)
+         self._fsync_dir(directory)
+
+   def last_cutover(self, request_id: str, *, node_id: str) -> dict[str, Any] | None:
+      """The persisted last cutover snapshot, only for this exact request and node.
+
+      Fail-closed: a record of another request or node, or one that is not an
+      owner-only, bounded, canonical, digest-valid file, is never served.
+      """
+
+      key = request_key(request_id)
+      with self._exclusive():
+         path = self._root / LAST_CUTOVER_DIRECTORY / LAST_CUTOVER_FILE
+         try:
+            info = os.lstat(path)
+         except FileNotFoundError:
+            return None
+         if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_size > LAST_CUTOVER_MAX_BYTES
+         ):
+            return None
+         raw = path.read_bytes()
+      if len(raw) > LAST_CUTOVER_MAX_BYTES:
+         return None
+      try:
+         record = json.loads(raw.decode("utf-8"))
+      except (UnicodeDecodeError, ValueError):
+         return None
+      if not isinstance(record, dict) or frozenset(record) != _LAST_CUTOVER_FIELDS:
+         return None
+      body = {field: value for field, value in record.items() if field != "evidence_digest"}
+      try:
+         if _canonical(record) != raw or record["evidence_digest"] != _digest(body):
+            return None
+      except (TypeError, ValueError):
+         return None
+      if (
+         record["protocol"] != LAST_CUTOVER_PROTOCOL
+         or record["request_key"] != key
+         or record["node_id"] != node_id
+         or not isinstance(record["snapshot"], dict)
+      ):
+         return None
+      return record["snapshot"]
 
    def reconcile(self, request_id: str, *, shadow_checkpoint_valid: bool, a6_available: bool) -> dict[str, Any]:
       """Reconcile one request after a coordinator restart (spec section 8).

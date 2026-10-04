@@ -53,8 +53,8 @@
     },
     {
       "path": "mycelium_a7_entry_controller.py",
-      "sha256": "sha256:c49e100d73bc697e34ca1eaf3d1236ceea097f3f2be20e135307ec22a4bf2b4d",
-      "size_bytes": 30754
+      "sha256": "sha256:9602e54554f48c0f4491ee3e4424f73430be0798d299d8f61d039827aadd9f9b",
+      "size_bytes": 33805
     },
     {
       "path": "mycelium_a7_evidence_control.py",
@@ -63,8 +63,8 @@
     },
     {
       "path": "mycelium_a7_fence_store.py",
-      "sha256": "sha256:f6e16de09b3b278857e61db380a925c40ef4b2e36ef031a6e8149e40352f8b6c",
-      "size_bytes": 15806
+      "sha256": "sha256:903469614cc1bf3bcefeb107dc6d0cf78147ad73a189cbf3591237a22a5496db",
+      "size_bytes": 19964
     },
     {
       "path": "mycelium_a7_node_agent.py",
@@ -93,8 +93,8 @@
     },
     {
       "path": "mycelium_a7_physical_measurement.py",
-      "sha256": "sha256:da2e87147aa95f6367573d915070564a7393679724ce4b33e31b722428b93177",
-      "size_bytes": 53827
+      "sha256": "sha256:323e7f3f990fc72079f39682858a0453cfefeb53fd364cf56468275762a81a90",
+      "size_bytes": 56449
     },
     {
       "path": "mycelium_a7_standby_plan.py",
@@ -432,6 +432,11 @@
       "size_bytes": 6242
     },
     {
+      "path": "tests/a7_acceptance/test_last_cutover_persistence.py",
+      "sha256": "sha256:c573c50afedc161b53ac57ed6d21b7b4c06732cbfd2cc606966abb58123b4f47",
+      "size_bytes": 5899
+    },
+    {
       "path": "tests/a7_acceptance/test_node_agent_messages.py",
       "sha256": "sha256:1666f1e6e72ba07362682b659d6812371b2b011d64779774ea07f211d33529d6",
       "size_bytes": 10503
@@ -545,6 +550,11 @@
       "path": "tests/live/test_a7_evidence_control.py",
       "sha256": "sha256:4abfca76ec35e357cd6ff1781601f8dca46d886b37ed2b82a6f1e898fc67eea1",
       "size_bytes": 5945
+    },
+    {
+      "path": "tests/live/test_a7_measurement_restored_record.py",
+      "sha256": "sha256:4d6222bf0a13675921aa0e0d7261f050c999828119d88e222230a6618e02f2e4",
+      "size_bytes": 6460
     },
     {
       "path": "tests/live/test_a7_measurement_result_poll.py",
@@ -688,5 +698,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:4fc30ed9c8f0b0723295e58eb83df9c5a512a4c209900bf5f3f8d4fd8a33925a"
+  "source_digest": "sha256:e9962192b2b8f4a79bdb6ee5235b0af4b8609ab793f678ee80751ffc7fe16ea5"
 }
