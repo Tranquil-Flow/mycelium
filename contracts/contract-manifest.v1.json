@@ -1230,8 +1230,8 @@
         },
         {
           "path": "scripts/build_qwen_live_route.py",
-          "sha256": "c3d68b3c53a54ea233c563e390da6e57496b1cb036769c972e007265500bb43b",
-          "size_bytes": 91641
+          "sha256": "a374e3611bf72b74a8f5a5cf1c54260ab8498c01893dad31348b147a928cf6a1",
+          "size_bytes": 92084
         },
         {
           "path": "ui/web/src/features/models/modelPreparation.ts",
