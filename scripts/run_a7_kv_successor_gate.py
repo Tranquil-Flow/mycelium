@@ -90,6 +90,7 @@ THRESHOLDS: dict[str, Any] = {
 }
 
 _CLEANUP_FIELDS = frozenset({"active_state_count_delta", "active_kv_bytes_delta", "shadow_bytes_delta", "reservation_delta", "fence_records_delta"})
+_CLEANUP_NOT_MEASURED_FIELDS = frozenset({"cleanup_measurement", "cleanup_unmeasured_reason"})
 _CASE_FIELDS = frozenset(
    {
       "protocol",
@@ -188,6 +189,16 @@ def _number(value: Any) -> bool:
    return isinstance(value, (int, float)) and not isinstance(value, bool) and value == value and value >= 0 and value != float("inf")
 
 
+def _cleanup_not_measured(node: Any) -> bool:
+   return (
+      isinstance(node, Mapping)
+      and set(node) == _CLEANUP_NOT_MEASURED_FIELDS
+      and node["cleanup_measurement"] == "not_measured"
+      and isinstance(node["cleanup_unmeasured_reason"], str)
+      and bool(node["cleanup_unmeasured_reason"])
+   )
+
+
 def evaluate_case(record: Mapping[str, Any], plan: Mapping[str, Any]) -> list[str]:
    """Every failed predicate of one case record (empty = case passes)."""
 
@@ -240,7 +251,11 @@ def evaluate_case(record: Mapping[str, Any], plan: Mapping[str, Any]) -> list[st
    if record["stale_source_publications_accepted"] != 0:
       failures.append("stale_source_publication")
    cleanup = record["cleanup"]
-   if not isinstance(cleanup, Mapping) or not cleanup or any(
+   if isinstance(cleanup, Mapping) and cleanup and any(_cleanup_not_measured(node) for node in cleanup.values()):
+      # A replaced entry process cannot prove its own cleanup: the required
+      # terminal resource delta is unmet, never a pass.
+      failures.append("terminal_resource_delta_not_measured")
+   elif not isinstance(cleanup, Mapping) or not cleanup or any(
       not isinstance(node, Mapping)
       or set(node) != _CLEANUP_FIELDS
       or any(not _int(abs(value)) if type(value) is int else True for value in node.values())
