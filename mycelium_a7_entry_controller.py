@@ -153,6 +153,9 @@ class A7EntryController:
       self._last_request_id: str | None = None
       self._fence_advances = 0
       self._last_cutover_persist_failures = 0
+      self._last_cutover_sequence = 0
+      self._last_cutover_written = 0
+      self._last_cutover_write_lock = threading.Lock()
 
    # -- coverage ------------------------------------------------------------------
 
@@ -501,7 +504,8 @@ class A7EntryController:
       result["successor_checkpoint_digest"] = standby_receipt.checkpoint_digest
       result["successor_kv_position"] = expected_next_position
       state.result = result
-      self._persist_last_cutover(request_id)
+      # Off the decode-resume path: the terminal release persists it again, synchronously.
+      self._persist_last_cutover(request_id, background=True)
       return result
 
    def decline(self, request_id: str, old_manifest: PathManifest, *, reason: str, gateway_committed_token_ids: Sequence[int]) -> dict[str, Any]:
@@ -548,12 +552,14 @@ class A7EntryController:
       self._persist_last_cutover(request_id)
       return result
 
-   def _persist_last_cutover(self, request_id: str) -> None:
+   def _persist_last_cutover(self, request_id: str, *, background: bool = False) -> None:
       """Durably keep this request's cutover record beside the fence ledger.
 
       A route cold restart retires this process and its in-memory record; the
       restarted entry serves the persisted copy for exactly this request.  A
-      write failure never changes the request's outcome.
+      write failure never changes the request's outcome.  Writes are ordered
+      by the snapshot they carry: a background write never replaces a newer
+      record.
       """
 
       snapshot = self.snapshot(request_id)
@@ -563,11 +569,25 @@ class A7EntryController:
       persist = getattr(self._fences, "persist_last_cutover", None)
       if not callable(persist):
          return
-      try:
-         persist(request_id, node_id=self.node_id, snapshot=snapshot)
-      except (FenceStoreError, OSError):
-         with self._lock:
-            self._last_cutover_persist_failures += 1
+      with self._lock:
+         self._last_cutover_sequence += 1
+         sequence = self._last_cutover_sequence
+
+      def write() -> None:
+         with self._last_cutover_write_lock:
+            if sequence < self._last_cutover_written:
+               return
+            try:
+               persist(request_id, node_id=self.node_id, snapshot=snapshot)
+               self._last_cutover_written = sequence
+            except (FenceStoreError, OSError):
+               with self._lock:
+                  self._last_cutover_persist_failures += 1
+
+      if background:
+         threading.Thread(target=write, name="a7-last-cutover", daemon=True).start()
+      else:
+         write()
 
    def _result(self, state, reason, gateway_tokens, started, *, outcome=None, watermark=None) -> dict[str, Any]:
       gateway_count = len(gateway_tokens)
@@ -658,8 +678,10 @@ class A7EntryController:
    def snapshot(self, request_id: str) -> dict[str, Any] | None:
       with self._lock:
          state = self._requests.get(request_id)
-         if state is None:
-            return self._persisted_snapshot(request_id)
+      if state is None:
+         # Read outside the controller lock, so a slow disk never holds up the request path.
+         return self._persisted_snapshot(request_id)
+      with self._lock:
          return {
             "covered": True,
             "committed": state.committed,

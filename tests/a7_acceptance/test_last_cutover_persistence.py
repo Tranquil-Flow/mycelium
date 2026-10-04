@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 
 from mycelium_a7_entry_controller import CUTOVER_RECORD_PROTOCOL, LAST_CUTOVER_SOURCE, A7EntryController
@@ -109,3 +110,23 @@ def test_a_request_without_a_cutover_decision_writes_no_record(tmp_path: Path) -
    harness.run("request:a7-clean-restart", kill_after=None)
    assert not (tmp_path / "fences" / LAST_CUTOVER_DIRECTORY / LAST_CUTOVER_FILE).exists()
    assert _restarted(harness, tmp_path).snapshot("request:a7-clean-restart") is None
+
+
+def test_a_successful_cutover_keeps_its_terminal_record(tmp_path: Path) -> None:
+   harness = _Harness(tmp_path)
+   harness.run("request:a7-cutover-restart", kill_after=3)
+   assert harness.entry.request_status("request:a7-cutover-restart") == "COMPLETED"
+   live = harness.controller.snapshot("request:a7-cutover-restart")
+   # The terminal release writes synchronously; an earlier background write
+   # of the cutover decision can never replace it.
+   for thread in [item for item in threading.enumerate() if item.name == "a7-last-cutover"]:
+      thread.join(timeout=5)
+   served = _restarted(harness, tmp_path).snapshot("request:a7-cutover-restart")
+   assert served is not None and served["restored_from"] == LAST_CUTOVER_SOURCE
+   # As observed when written (before the terminal release dropped the watermark).
+   assert served["acknowledged"] == 3 and live["acknowledged"] == -1
+   assert {key: value for key, value in served.items() if key not in {"restored_from", "acknowledged"}} == {
+      key: value for key, value in live.items() if key != "acknowledged"
+   }
+   assert served["result"]["outcome"] == "fenced_kv_successor"
+   assert served["result"]["terminal_released"] is True

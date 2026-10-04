@@ -53,8 +53,8 @@
     },
     {
       "path": "mycelium_a7_entry_controller.py",
-      "sha256": "sha256:d20cc327ac8098b86915a87771353aaa18b1225c1302ebd8e31018a1fb468121",
-      "size_bytes": 32837
+      "sha256": "sha256:9602e54554f48c0f4491ee3e4424f73430be0798d299d8f61d039827aadd9f9b",
+      "size_bytes": 33805
     },
     {
       "path": "mycelium_a7_evidence_control.py",
@@ -93,8 +93,8 @@
     },
     {
       "path": "mycelium_a7_physical_measurement.py",
-      "sha256": "sha256:da2e87147aa95f6367573d915070564a7393679724ce4b33e31b722428b93177",
-      "size_bytes": 53827
+      "sha256": "sha256:323e7f3f990fc72079f39682858a0453cfefeb53fd364cf56468275762a81a90",
+      "size_bytes": 56449
     },
     {
       "path": "mycelium_a7_standby_plan.py",
@@ -428,8 +428,8 @@
     },
     {
       "path": "tests/a7_acceptance/test_last_cutover_persistence.py",
-      "sha256": "sha256:b04a743e3711ba685a326c0e18c684a8b0bebbdcd958c363fa311edfc81e40eb",
-      "size_bytes": 4688
+      "sha256": "sha256:c573c50afedc161b53ac57ed6d21b7b4c06732cbfd2cc606966abb58123b4f47",
+      "size_bytes": 5899
     },
     {
       "path": "tests/a7_acceptance/test_node_agent_messages.py",
@@ -545,6 +545,11 @@
       "path": "tests/live/test_a7_evidence_control.py",
       "sha256": "sha256:4abfca76ec35e357cd6ff1781601f8dca46d886b37ed2b82a6f1e898fc67eea1",
       "size_bytes": 5945
+    },
+    {
+      "path": "tests/live/test_a7_measurement_restored_record.py",
+      "sha256": "sha256:4d6222bf0a13675921aa0e0d7261f050c999828119d88e222230a6618e02f2e4",
+      "size_bytes": 6460
     },
     {
       "path": "tests/live/test_a7_measurement_result_poll.py",
@@ -688,5 +693,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:25b02470af7630d702dd8885eebf121c6424c5be0e69a9f77273c2ca131bcacf"
+  "source_digest": "sha256:6d8e859b6241aab60558e9c9d7654bec3f18bf2dda86a716ebc6f40ee20acaf3"
 }
