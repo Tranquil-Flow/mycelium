@@ -4,11 +4,16 @@
 Every case in ``mycelium_a6_fault_control.INJECTION_POINTS`` starts from the
 same measured precondition: one request admitted through the ordinary gateway
 and executing on its source attempt. The shared trigger is a real failure of
-the request's assigned source peer: the product signals the owned process group
-of that node's control session with ``SIGKILL``. For a node the serve process
-launched locally this kills the peer; for a node reached through a launched
-transport (for example ssh) it severs that path. Either way the route observes
-the failure through its own reader and records an A4 scoped runtime incident.
+the request's assigned source peer, killed with ``SIGKILL``. For a node the
+serve process launched locally the product signals the owned process group of
+that node's control session. For a node reached over ssh it never signals the
+local ssh client: it runs a bounded script on the remote host, through the
+peer's own pinned ssh argv, that re-verifies the worker PID the node reported
+in its authenticated hello (its command line must name
+``physical_inference_node.py`` and the exact ``--run-id``) and signals that
+worker and its children (for example its sidecar) there. Either way the route
+observes the failure through its own reader and records an A4 scoped runtime
+incident.
 
 Case-specific faults then use only real product levers:
 
@@ -30,13 +35,16 @@ and refuses the case when they differ.
 """
 from __future__ import annotations
 
+import re
 import signal
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 from mycelium_a6_fault_control import EXACT_FLEET_GRANT, FaultRejected, INJECTION_POINTS
+from physical_inference_qualification import ControllerError, _peer_process_argv
 
 IDENTITY_FIELDS = (
     "deployment_id", "deployment_epoch", "qualification_digest", "request_id",
@@ -52,6 +60,67 @@ QUALIFICATION_CASES = {
 }
 _TERMINAL_STATUSES = frozenset({"COMPLETED", "FAILED", "CANCELLED"})
 _FENCED_PHASES = frozenset({"recovery_prefill", "cutover_pending", "recovered_decode"})
+
+#: Signals a remote fault may deliver, by the name the remote script accepts.
+_REMOTE_SIGNAL_NAMES = {
+    signal.SIGKILL: "KILL",
+    signal.SIGSTOP: "STOP",
+    signal.SIGCONT: "CONT",
+}
+_RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+REMOTE_SIGNAL_TIMEOUT_SECONDS = 30.0
+#: Exit status of the remote script when the PID is not the bound node worker.
+REMOTE_IDENTITY_MISMATCH_EXIT = 65
+#: Runs on the peer's host as ``/bin/sh -c SCRIPT a6-fault-signal SIG PID RUN_ID``.
+#: It re-verifies that PID is this run's node worker before signalling, and
+#: signals only that worker's process group (when the worker leads it) or the
+#: worker's direct children and then the worker. It never touches the ssh
+#: session that carried it to the host.
+REMOTE_SIGNAL_SCRIPT = r"""set -u
+sig=$1
+pid=$2
+run_id=$3
+case $sig in KILL|STOP|CONT) ;; *) exit 64 ;; esac
+case $pid in ''|*[!0-9]*) exit 64 ;; esac
+case $run_id in ''|*[!A-Za-z0-9._:-]*) exit 64 ;; esac
+[ "$pid" -gt 1 ] || exit 64
+args=$(ps -ww -o args= -p "$pid" 2>/dev/null) || exit 65
+case " $args " in *" "*physical_inference_node.py" "*) ;; *) exit 65 ;; esac
+case " $args " in *" --run-id $run_id "*) ;; *) exit 65 ;; esac
+pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ') || exit 65
+if [ "$pgid" = "$pid" ]; then
+  kill -s "$sig" -- "-$pid" || exit 66
+else
+  command -v pkill >/dev/null 2>&1 || exit 67
+  pkill "-$sig" -P "$pid"
+  [ $? -le 1 ] || exit 66
+  kill -s "$sig" "$pid" || exit 66
+fi
+"""
+
+
+def remote_signal_command(signum: int, process_id: int, run_id: str) -> tuple[str, ...]:
+    """The remote argv that signals one verified node worker on its own host."""
+
+    name = _REMOTE_SIGNAL_NAMES.get(signum)
+    if name is None:
+        raise FaultRejected("a6_fault_remote_signal_unsupported")
+    if type(process_id) is not int or process_id <= 1:
+        raise FaultRejected("a6_fault_remote_process_identity_unavailable")
+    if not isinstance(run_id, str) or _RUN_ID_PATTERN.fullmatch(run_id) is None:
+        raise FaultRejected("a6_fault_remote_run_identity_unavailable")
+    return ("/bin/sh", "-c", REMOTE_SIGNAL_SCRIPT, "a6-fault-signal",
+            name, str(process_id), run_id)
+
+
+def _run_remote(argv: tuple[str, ...]) -> int:
+    try:
+        return subprocess.run(
+            argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, timeout=REMOTE_SIGNAL_TIMEOUT_SECONDS,
+            check=False).returncode
+    except (OSError, subprocess.SubprocessError):
+        return -1
 
 
 @dataclass
@@ -116,6 +185,7 @@ class LiveProductFaultTarget:
         sleep: Callable[[float], None] = time.sleep,
         wait_seconds: float = 30.0,
         poll_seconds: float = 0.01,
+        remote_runner: Callable[[tuple[str, ...]], int] = _run_remote,
     ) -> None:
         if grant != EXACT_FLEET_GRANT:
             raise FaultRejected("explicit_fleet_grant_required")
@@ -133,7 +203,10 @@ class LiveProductFaultTarget:
         self._lock = threading.Lock()
         self._armed: dict[str, ExecutedCase] = {}
         self._executed: list[ExecutedCase] = []
-        self._stopped_nodes: set[str] = set()
+        #: Stalled node -> the route whose node was stalled, so it is resumed
+        #: on exactly the process(es) that were stopped.
+        self._stopped_nodes: dict[str, Any] = {}
+        self._remote_runner = remote_runner
         self._listeners: list[Callable[[ExecutedCase], None]] = []
 
     def add_listener(self, listener: Callable[[ExecutedCase], None]) -> None:
@@ -271,27 +344,56 @@ class LiveProductFaultTarget:
     # -- real peer and path faults ----------------------------------------------
 
     def signal_node(self, node_id: str, signum: int, route: Any | None = None) -> None:
-        """Signal the owned process group of one node's control session."""
+        """Signal one node: its remote worker over ssh, else its owned process group."""
 
         source = self._concrete_route() if route is None else route
-        sessions = getattr(source, "_sessions", None)
-        session = None if not isinstance(sessions, Mapping) else sessions.get(node_id)
-        process = getattr(session, "_process", None)
-        deliver = getattr(process, "_signal_process_group", None)
-        if not callable(deliver) or deliver(signum) is not True:
-            raise FaultRejected("a6_fault_peer_signal_refused")
+        peers = getattr(source, "_peers", None)
+        peer = None if not isinstance(peers, Mapping) else peers.get(node_id)
+        if getattr(peer, "process_transport", None) == "ssh":
+            self._signal_remote_worker(source, peer, node_id, signum)
+        else:
+            sessions = getattr(source, "_sessions", None)
+            session = None if not isinstance(sessions, Mapping) else sessions.get(node_id)
+            process = getattr(session, "_process", None)
+            deliver = getattr(process, "_signal_process_group", None)
+            if not callable(deliver) or deliver(signum) is not True:
+                raise FaultRejected("a6_fault_peer_signal_refused")
         with self._lock:
             if signum == signal.SIGSTOP:
-                self._stopped_nodes.add(node_id)
+                self._stopped_nodes[node_id] = source
             elif signum in (signal.SIGCONT, signal.SIGKILL):
-                self._stopped_nodes.discard(node_id)
+                self._stopped_nodes.pop(node_id, None)
+
+    def _signal_remote_worker(self, source: Any, peer: Any, node_id: str,
+                              signum: int) -> None:
+        """Signal the hello-verified worker on the peer's host, never the ssh client."""
+
+        reader = getattr(source, "process_id", None)
+        try:
+            process_id = reader(node_id) if callable(reader) else None
+        except Exception as error:
+            raise FaultRejected("a6_fault_remote_process_identity_unavailable") from error
+        plan = getattr(source, "_plan", None)
+        run_id = plan.get("run_id") if isinstance(plan, Mapping) else None
+        command = remote_signal_command(signum, process_id, run_id)
+        try:
+            argv = _peer_process_argv(peer, command)
+        except ControllerError as error:
+            raise FaultRejected("a6_fault_peer_signal_refused") from error
+        if not argv or argv[0] != "ssh":
+            raise FaultRejected("a6_fault_peer_signal_refused")
+        returncode = self._remote_runner(argv)
+        if returncode == REMOTE_IDENTITY_MISMATCH_EXIT:
+            raise FaultRejected("a6_fault_remote_process_identity_mismatch")
+        if returncode != 0:
+            raise FaultRejected("a6_fault_peer_signal_refused")
 
     def resume_stopped_nodes(self) -> None:
         with self._lock:
-            stopped = sorted(self._stopped_nodes)
-        for node_id in stopped:
+            stopped = sorted(self._stopped_nodes.items(), key=lambda item: item[0])
+        for node_id, route in stopped:
             try:
-                self.signal_node(node_id, signal.SIGCONT)
+                self.signal_node(node_id, signal.SIGCONT, route)
             except FaultRejected:
                 pass
 
