@@ -957,9 +957,11 @@ if not host:
     host='host-'+hashlib.sha256(platform.node().encode()).hexdigest()[:32]
 source=''
 if platform.system() == 'Darwin':
-    completed=subprocess.run(('sysctl','-n','kern.boottime'),capture_output=True,text=True,timeout=5.0)
-    if completed.returncode == 0:
-        source=completed.stdout.strip()
+    for name in ('kern.bootsessionuuid','kern.boottime'):
+        completed=subprocess.run(('sysctl','-n',name),capture_output=True,text=True,timeout=5.0)
+        if completed.returncode == 0 and completed.stdout.strip():
+            source=completed.stdout.strip()
+            break
 else:
     try:
         source=Path('/proc/sys/kernel/random/boot_id').read_text(encoding='ascii').strip()

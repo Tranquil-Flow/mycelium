@@ -105,19 +105,23 @@ def _host_identity() -> str:
 def _boot_identity(host_id: str) -> str:
     source = ""
     if platform.system() == "Darwin":
-        try:
-            completed = subprocess.run(
-                ("sysctl", "-n", "kern.boottime"),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=5.0,
-                text=True,
-            )
-            if completed.returncode == 0:
+        # kern.bootsessionuuid is fixed for the life of a boot; kern.boottime is not,
+        # because macOS shifts it whenever the wall clock is stepped.
+        for name in ("kern.bootsessionuuid", "kern.boottime"):
+            try:
+                completed = subprocess.run(
+                    ("sysctl", "-n", name),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=5.0,
+                    text=True,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if completed.returncode == 0 and completed.stdout.strip():
                 source = completed.stdout.strip()
-        except (OSError, subprocess.SubprocessError):
-            pass
+                break
     else:
         try:
             source = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
