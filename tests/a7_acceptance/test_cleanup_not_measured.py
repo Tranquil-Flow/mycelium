@@ -37,7 +37,7 @@ _OLD = {"host_id": "host-0", "process_id": 4100}
 _NEW = {"host_id": "host-0", "process_id": 4200}
 _EVIDENCE = {
    "old_entry_process": _OLD,
-   "old_entry_exit": {**_OLD, "exit_status": -15, "observed_by": "retired_route_session_exit_status"},
+   "old_entry_exit": {**_OLD, "process_transport": "local", "exit_status": -15, "observed_by": "retired_route_session_exit_status"},
    "replacement_entry_process": _NEW,
    "replacement_terminal_state": {
       "active_state_count": 0,
@@ -161,7 +161,7 @@ class _Route:
 
    def __init__(self, process_id: int) -> None:
       self._sessions = {"node-0": _Session()}
-      self._peers = {"node-0": object()}
+      self._peers = {"node-0": type("Peer", (), {"process_transport": "local"})()}
       self._plan = {"entry_node_id": "node-0"}
       self._process_id = process_id
 
@@ -219,7 +219,14 @@ def test_evidence_door_keeps_the_replaced_entry_process_exit_status() -> None:
    resources = door.resources()
    assert resources["nodes"]["node-0"]["process"] == {"host_id": "host-0", "process_id": 4200}
    assert resources["retired_entry_processes"] == [
-      {"node_id": "node-0", "host_id": "host-0", "process_id": 4100, "exit_status": -15, "observed_by": "retired_route_session_exit_status"}
+      {
+         "node_id": "node-0",
+         "host_id": "host-0",
+         "process_id": 4100,
+         "process_transport": "local",
+         "exit_status": -15,
+         "observed_by": "retired_route_session_exit_status",
+      }
    ]
 
 
@@ -230,3 +237,36 @@ def test_a_retired_entry_without_an_exit_status_is_reported_unproven() -> None:
    door.resources()
    owner.current = _identified(4200, None)
    assert door.resources()["retired_entry_processes"][0]["exit_status"] is None
+
+
+def test_a_remote_entry_exit_is_not_accepted_without_remote_confirmation() -> None:
+   plan = gate.build_plan(CANDIDATE)
+   for transport in ("ssh", "managed_https"):
+      cleanup = _process_exit(old_entry_exit__process_transport=transport)
+      assert gate.evaluate_case(_record(plan, gate.ABORT, cleanup=cleanup), plan) == ["process_exit_remote_unconfirmed"]
+
+
+def test_a_missing_exit_transport_is_invalid_evidence() -> None:
+   plan = gate.build_plan(CANDIDATE)
+   for transport in (None, ""):
+      cleanup = _process_exit(old_entry_exit__process_transport=transport)
+      assert gate.evaluate_case(_record(plan, gate.ABORT, cleanup=cleanup), plan) == ["process_exit_evidence_invalid"]
+   cleanup = _process_exit()
+   del cleanup["node-0"]["cleanup_proof_evidence"]["old_entry_exit"]["process_transport"]
+   assert gate.evaluate_case(_record(plan, gate.ABORT, cleanup=cleanup), plan) == ["process_exit_evidence_invalid"]
+
+
+def test_evidence_door_records_the_retired_entry_transport() -> None:
+   old = _identified(4100, -15)
+   old._peers = {"node-0": type("Peer", (), {"process_transport": "ssh"})()}
+   owner = _Owner(old)
+   door = RouteA7Evidence(owner)
+   door.resources()
+   owner.current = _identified(4200, None)
+   assert door.resources()["retired_entry_processes"][0]["process_transport"] == "ssh"
+   bare = _identified(4300, -15)
+   bare._peers = {"node-0": object()}
+   owner.current = bare
+   door.resources()
+   owner.current = _identified(4400, None)
+   assert door.resources()["retired_entry_processes"][-1]["process_transport"] is None

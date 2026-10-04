@@ -162,10 +162,15 @@ class RouteA7Evidence:
                 continue
             session = getattr(route, "_sessions", {}).get(node_id)
             exit_status = getattr(session, "returncode", None)
+            peers = getattr(route, "_peers", None)
+            transport = getattr(peers.get(node_id), "process_transport", None) if isinstance(peers, Mapping) else None
             records.append(
                 {
                     "node_id": node_id,
                     **process,
+                    # The session's exit status is the local process's; for a
+                    # remote (ssh) launch it is the transport client's, not the node's.
+                    "process_transport": transport if isinstance(transport, str) and transport else None,
                     "exit_status": exit_status if type(exit_status) is int else None,
                     "observed_by": RETIRED_EXIT_SOURCE,
                 }

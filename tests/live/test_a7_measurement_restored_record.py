@@ -55,7 +55,9 @@ class _Evidence:
       processes: tuple[dict[str, Any], dict[str, Any]] | None = None,
       old_exit_status: int | None = -15,
       replacement_state: dict[str, Any] | None = None,
+      old_transport: str | None = "local",
    ) -> None:
+      self._old_transport = old_transport
       self._processes = processes
       self._old_exit_status = old_exit_status
       self._replacement_state = replacement_state or {}
@@ -92,7 +94,13 @@ class _Evidence:
             if old != new:
                entry.update(self._replacement_state)
                document["retired_entry_processes"] = [
-                  {"node_id": "node-0", **old, "exit_status": self._old_exit_status, "observed_by": "retired_route_session_exit_status"}
+                  {
+                     "node_id": "node-0",
+                     **old,
+                     "process_transport": self._old_transport,
+                     "exit_status": self._old_exit_status,
+                     "observed_by": "retired_route_session_exit_status",
+                  }
                ]
       return document
 
@@ -228,7 +236,7 @@ def test_a_replaced_entry_records_the_observed_process_exit_evidence() -> None:
    evidence = _not_measured(fields["cleanup"])
    assert evidence == {
       "old_entry_process": _OLD_PROCESS,
-      "old_entry_exit": {**_OLD_PROCESS, "exit_status": -15, "observed_by": "retired_route_session_exit_status"},
+      "old_entry_exit": {**_OLD_PROCESS, "process_transport": "local", "exit_status": -15, "observed_by": "retired_route_session_exit_status"},
       "replacement_entry_process": _NEW_PROCESS,
       "replacement_terminal_state": {
          "active_state_count": 0,
@@ -268,3 +276,12 @@ def test_measured_process_exit_proof_passes_the_gate_and_a_missing_exit_fails_it
    assert gate.evaluate_case(_record(plan, gate.ABORT, cleanup=fields["cleanup"]), plan) == ["process_exit_not_observed"]
    fields, _observations = _measure({"refused_after_kill": 2})  # no verified process identity at all
    assert "process_exit_old_process_unobserved" in gate.evaluate_case(_record(plan, gate.ABORT, cleanup=fields["cleanup"]), plan)
+
+
+def test_measured_ssh_entry_exit_is_remote_unconfirmed_at_the_gate() -> None:
+   from tests.a7_acceptance.test_kv_successor_gate import CANDIDATE, _record, gate
+
+   plan = gate.build_plan(CANDIDATE)
+   fields, _observations = _measure({"refused_after_kill": 2, "processes": (_OLD_PROCESS, _NEW_PROCESS), "old_transport": "ssh"})
+   assert fields["cleanup"]["node-0"]["cleanup_proof_evidence"]["old_entry_exit"]["process_transport"] == "ssh"
+   assert gate.evaluate_case(_record(plan, gate.ABORT, cleanup=fields["cleanup"]), plan) == ["process_exit_remote_unconfirmed"]

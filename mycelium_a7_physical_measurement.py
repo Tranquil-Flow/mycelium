@@ -707,7 +707,7 @@ def _process_exit_evidence(
     retired = [item for item in (after.get("retired_entry_processes") or ()) if isinstance(item, Mapping)]
     exit_record = next(
         (
-            {key: item.get(key) for key in ("host_id", "process_id", "exit_status", "observed_by")}
+            {key: item.get(key) for key in ("host_id", "process_id", "process_transport", "exit_status", "observed_by")}
             for item in retired
             if old is not None
             and item.get("node_id") == entry_node

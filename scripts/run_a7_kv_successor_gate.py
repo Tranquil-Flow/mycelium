@@ -93,6 +93,8 @@ _CLEANUP_FIELDS = frozenset({"active_state_count_delta", "active_kv_bytes_delta"
 _CLEANUP_NOT_MEASURED_FIELDS = frozenset({"cleanup_measurement", "cleanup_unmeasured_reason", "cleanup_proof", "cleanup_proof_evidence"})
 PROCESS_EXIT_PROOF = "process_exit"
 PROCESS_EXIT_SOURCE = "retired_route_session_exit_status"
+LOCAL_PROCESS_TRANSPORT = "local"
+_EXIT_RECORD_FIELDS = frozenset({"host_id", "process_id", "process_transport", "exit_status", "observed_by"})
 _PROCESS_EXIT_EVIDENCE_FIELDS = frozenset(
    {"old_entry_process", "old_entry_exit", "replacement_entry_process", "replacement_terminal_state", "old_entry_process_live"}
 )
@@ -236,7 +238,8 @@ def _process_exit_proof_failures(node: Mapping[str, Any]) -> list[str]:
    identity-bound process, confirmed by its exit status, is its own cleanup
    proof; a process that is only unreachable proves nothing.  For a replaced
    A7 entry all four must hold: (1) the old entry process was observed before
-   the kill; (2) that exact process was observed exited with an exit status;
+   the kill; (2) that exact process was observed exited with an exit status
+   from a local session (a remote launch only shows its client's exit);
    (3) the replacement entry (another process) reports a clean terminal
    resource state and does not hold the request; (4) nothing shows the old
    process still running.
@@ -257,16 +260,24 @@ def _process_exit_proof_failures(node: Mapping[str, Any]) -> list[str]:
       failures.append("process_exit_old_process_unobserved")
       old = None
    exited = evidence["old_entry_exit"]
+   if isinstance(exited, Mapping) and set(exited) != _EXIT_RECORD_FIELDS:
+      return ["process_exit_evidence_invalid"]
+   if isinstance(exited, Mapping) and (not isinstance(exited["process_transport"], str) or not exited["process_transport"]):
+      return ["process_exit_evidence_invalid"]
    if not (
       old is not None
       and isinstance(exited, Mapping)
-      and set(exited) == {"host_id", "process_id", "exit_status", "observed_by"}
+      and set(exited) == _EXIT_RECORD_FIELDS
       and exited["host_id"] == old["host_id"]
       and exited["process_id"] == old["process_id"]
       and type(exited["exit_status"]) is int
       and exited["observed_by"] == PROCESS_EXIT_SOURCE
    ):
       failures.append("process_exit_not_observed")
+   elif exited["process_transport"] != LOCAL_PROCESS_TRANSPORT:
+      # Only a local session's exit status is the node process's own exit; a
+      # remote launch's status is its transport client's (no remote confirmation).
+      failures.append("process_exit_remote_unconfirmed")
    replacement = evidence["replacement_entry_process"]
    if not _process_identity(replacement) or replacement == old:
       failures.append("process_exit_replacement_unobserved")
