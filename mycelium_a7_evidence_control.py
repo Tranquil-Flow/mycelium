@@ -77,6 +77,17 @@ def _stable_code(error: BaseException) -> str | None:
     return None
 
 
+def _process_identity(observation: Any) -> dict[str, Any] | None:
+    """The signing process of one verified observation (host and process id only)."""
+
+    if not isinstance(observation, Mapping):
+        return None
+    host_id, process_id = observation.get("host_id"), observation.get("process_id")
+    if not isinstance(host_id, str) or type(process_id) is not int:
+        return None
+    return {"host_id": host_id, "process_id": process_id}
+
+
 def _detached(value: Any) -> Any:
     return json.loads(json.dumps(value, sort_keys=True, allow_nan=False))
 
@@ -122,6 +133,11 @@ class RouteA7Evidence:
         return session is not None and getattr(session, "returncode", None) is None
 
     def _node_a7(self, concrete: Any, node_id: str, request_id: str | None) -> dict[str, Any]:
+        return self._node_a7_with_process(concrete, node_id, request_id)[0]
+
+    def _node_a7_with_process(self, concrete: Any, node_id: str, request_id: str | None) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """The node's verified A7 details and the process identity that signed them."""
+
         payload = {} if request_id is None else {"request_id": request_id}
         try:
             response = concrete._send_before(
@@ -137,7 +153,7 @@ class RouteA7Evidence:
         details = observation.get("details") if isinstance(observation, Mapping) else None
         if not isinstance(details, Mapping):
             raise A7EvidenceUnavailable("a7_evidence_snapshot_invalid")
-        return _detached(details)
+        return _detached(details), _process_identity(observation)
 
     # -- evidence kinds ----------------------------------------------------------------
 
@@ -150,7 +166,7 @@ class RouteA7Evidence:
         entry_node_id = concrete._plan.get("entry_node_id")
         if not isinstance(entry_node_id, str) or not self._alive(concrete, entry_node_id):
             raise A7EvidenceUnavailable("a7_evidence_entry_unavailable")
-        details = self._node_a7(concrete, entry_node_id, request_id)
+        details, entry_process = self._node_a7_with_process(concrete, entry_node_id, request_id)
         incidents_reader = getattr(concrete, "a4_scoped_runtime_incidents", None)
         incidents = (
             [
@@ -169,6 +185,7 @@ class RouteA7Evidence:
             "kind": "request",
             "request_id": request_id,
             "entry_node_id": entry_node_id,
+            "entry_process": entry_process,
             "observed_at_monotonic_ms": self._clock_ms(),
             "a7": details,
             "scoped_incidents": _detached(incidents),
@@ -251,9 +268,10 @@ class RouteA7Evidence:
             peer = peers.get(node_id)
             if not isinstance(peer, Mapping):
                 raise A7EvidenceUnavailable("a7_evidence_peer_status_missing")
-            details = self._node_a7(concrete, node_id, None)
+            details, process = self._node_a7_with_process(concrete, node_id, None)
             agent = details.get("agent") if isinstance(details.get("agent"), Mapping) else {}
             nodes[node_id] = {
+                "process": process,
                 "a7_roles": list(details.get("roles", [])),
                 "active_state_count": peer.get("active_kv_state_count"),
                 "active_kv_bytes": peer.get("active_kv_bytes"),

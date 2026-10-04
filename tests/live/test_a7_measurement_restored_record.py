@@ -52,7 +52,9 @@ class _Evidence:
       live_result: bool = False,
       pre_kill_counters: dict[str, int] | None = _SAME_PROCESS_COUNTERS,
       before_counters: dict[str, int] = _SAME_PROCESS_COUNTERS,
+      processes: tuple[dict[str, Any], dict[str, Any]] | None = None,
    ) -> None:
+      self._processes = processes
       self._fault = fault
       self._refused = refused_after_kill
       self._restored = restored
@@ -60,20 +62,32 @@ class _Evidence:
       self._pre_kill_counters = pre_kill_counters
       self._before_counters = before_counters
 
+   def _entry_process(self, *, serving: bool) -> dict[str, Any] | None:
+      """The verified entry process identity; the replacement once killed unless ``serving``."""
+
+      if self._processes is None:
+         return None
+      old, new = self._processes
+      return old if serving or not self._fault.killed.is_set() else new
+
    def resources(self) -> dict[str, Any]:
-      return {
+      entry = {**_NODE, "a7_roles": ["entry", "standby"], "standby_runtime": dict(self._before_counters)}
+      document = {
          "entry_node_id": "node-0",
          "exited_nodes": [],
          "gateway_reservations": 0,
          "route_request_registrations": 0,
-         "nodes": {
-            "node-0": {**_NODE, "a7_roles": ["entry", "standby"], "standby_runtime": dict(self._before_counters)},
-            "node-2": {**_NODE, "a7_roles": ["source"], "standby_runtime": None},
-         },
+         "nodes": {"node-0": entry, "node-2": {**_NODE, "a7_roles": ["source"], "standby_runtime": None}},
       }
+      if self._processes is not None:
+         entry["process"] = self._entry_process(serving=False)
+         if self._fault.killed.is_set():
+            document["exited_nodes"] = ["node-2"]
+            del document["nodes"]["node-2"]
+      return document
 
    def _document(self, request_id: str, request: dict[str, Any] | None, counters: dict[str, int] | None) -> dict[str, Any]:
-      return {
+      document = {
          "request_id": request_id,
          "a7": {
             "request": request,
@@ -82,6 +96,10 @@ class _Evidence:
          },
          "scoped_incidents": [],
       }
+      if self._processes is not None:
+         serving = request is not None and "restored_from" not in request
+         document["entry_process"] = self._entry_process(serving=serving)
+      return document
 
    def request(self, request_id: str) -> dict[str, Any]:
       state = {"committed": 3, "acknowledged": -1, "ack_lag_events": 3, "commits_sent": 3, "result": None}
@@ -142,3 +160,45 @@ def test_a_live_same_process_record_behaves_as_before() -> None:
    assert reads["counter_read"] == "final" or reads["counter_read"].startswith("poll:")
    assert "restored_from" not in observations["result_poll"]
    assert observations["standby_counters"]["after"] == list(_SAME_PROCESS_COUNTERS.values())
+
+
+_OLD_PROCESS = {"host_id": "host-0", "process_id": 4100}
+_NEW_PROCESS = {"host_id": "host-0", "process_id": 4200}
+_NOT_MEASURED_CLEANUP = {"cleanup_measurement": "not_measured", "cleanup_unmeasured_reason": "entry_process_replaced"}
+
+
+@pytest.mark.parametrize("processes", [None, (_OLD_PROCESS, _NEW_PROCESS)])
+def test_a_restored_record_reports_cleanup_as_not_measured(processes) -> None:
+   fields, observations = _measure({"refused_after_kill": 2, "processes": processes})
+   assert fields["cleanup"] == {"node-0": _NOT_MEASURED_CLEANUP}
+   cleanup = observations["cleanup"]
+   assert cleanup["cleanup_measurement"] == "not_measured"
+   assert cleanup["cleanup_unmeasured_reason"] == "entry_process_replaced"
+   assert cleanup["restored_from"] == _RESTORED
+   if processes is not None:
+      assert cleanup["entry_process_before"] == _OLD_PROCESS == cleanup["entry_process_at_kill"]
+      assert cleanup["entry_process_after"] == _NEW_PROCESS
+      assert cleanup["exited_nodes_after"] == ["node-2"]
+
+
+def test_a_replaced_entry_process_without_a_restored_read_is_not_measured() -> None:
+   # The original process answered with its own record, then the route was replaced.
+   fields, observations = _measure({"refused_after_kill": 0, "live_result": True, "processes": (_OLD_PROCESS, _NEW_PROCESS)})
+   assert fields["cleanup"] == {"node-0": _NOT_MEASURED_CLEANUP}
+   assert observations["cleanup"]["restored_from"] is None
+   assert observations["cleanup"]["entry_process_after"] == _NEW_PROCESS
+
+
+@pytest.mark.parametrize("processes", [None, (_OLD_PROCESS, _OLD_PROCESS)])
+def test_same_process_cleanup_is_measured_exactly_as_before(processes) -> None:
+   fields, observations = _measure({"refused_after_kill": 0, "live_result": True, "processes": processes})
+   assert fields["cleanup"] == {
+      "node-0": {
+         "active_state_count_delta": 0,
+         "active_kv_bytes_delta": 0,
+         "shadow_bytes_delta": 0,
+         "reservation_delta": 0,
+         "fence_records_delta": 0,
+      }
+   }
+   assert observations["cleanup"] == {"cleanup_measurement": "measured"}

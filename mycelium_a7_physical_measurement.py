@@ -57,6 +57,9 @@ GRANT_HEADER = "X-Mycelium-A7-Fleet-Grant"
 FAULT = "source_process_kill"
 FAULT_UNCONFIRMED = "source_process_kill_unconfirmed"
 TERMINAL_KINDS = frozenset({"completed", "cancelled", "failed"})
+CLEANUP_NOT_MEASURED = "not_measured"
+ENTRY_PROCESS_REPLACED = "entry_process_replaced"
+ENTRY_PROCESS_IDENTITY_UNOBSERVED = "entry_process_identity_unobserved"
 CLEANUP_FIELDS = (
     "active_state_count_delta",
     "active_kv_bytes_delta",
@@ -634,6 +637,67 @@ def _settled_resources(evidence: EvidenceSource, before: Mapping[str, Any], *, t
     return latest
 
 
+def _entry_process(document: Mapping[str, Any], entry_node: str, *, request: bool = False) -> Any:
+    """The verified process identity of the entry in one door document (``None`` if absent)."""
+
+    if request:
+        return document.get("entry_process")
+    nodes = document.get("nodes")
+    node = nodes.get(entry_node) if isinstance(nodes, Mapping) else None
+    return node.get("process") if isinstance(node, Mapping) else None
+
+
+def _entry_process_replaced(
+    entry_node: str,
+    before: Mapping[str, Any],
+    pre_kill: Mapping[str, Any],
+    after: Mapping[str, Any],
+    *,
+    restored_seen: bool,
+) -> str | None:
+    """Why the entry's cleanup cannot be measured as one process's delta (``None``: it can)."""
+
+    if restored_seen:
+        return ENTRY_PROCESS_REPLACED
+    nodes = after.get("nodes")
+    if not isinstance(nodes, Mapping) or not isinstance(nodes.get(entry_node), Mapping):
+        return None  # no live entry to read: the delta refuses exactly as before
+    identities = [
+        _entry_process(before, entry_node),
+        _entry_process(pre_kill, entry_node, request=True),
+        _entry_process(after, entry_node),
+    ]
+    if all(identity is None for identity in identities):
+        return None  # a door without process identity: the single-process reading as before
+    if any(not isinstance(identity, Mapping) for identity in identities):
+        return ENTRY_PROCESS_IDENTITY_UNOBSERVED
+    if any(identity != identities[0] for identity in identities[1:]):
+        return ENTRY_PROCESS_REPLACED
+    return None
+
+
+def _cleanup_observation(
+    entry_node: str,
+    before: Mapping[str, Any],
+    pre_kill: Mapping[str, Any],
+    after: Mapping[str, Any],
+    reason: str | None,
+    restored_from: Any,
+) -> dict[str, Any]:
+    if reason is None:
+        return {"cleanup_measurement": "measured"}
+    return {
+        "cleanup_measurement": CLEANUP_NOT_MEASURED,
+        "cleanup_unmeasured_reason": reason,
+        "restored_from": restored_from,
+        "entry_process_before": _entry_process(before, entry_node),
+        "entry_process_at_kill": _entry_process(pre_kill, entry_node, request=True),
+        "entry_process_after": _entry_process(after, entry_node),
+        "exited_nodes_before": list(before.get("exited_nodes") or ()),
+        "exited_nodes_after": list(after.get("exited_nodes") or ()),
+    }
+
+
 def _cleanup_deltas(before: Mapping[str, Any], after: Mapping[str, Any], *, strict: bool = True) -> dict[str, int]:
     entry = before.get("entry_node_id")
     if entry != after.get("entry_node_id") or not isinstance(entry, str):
@@ -929,7 +993,18 @@ def measure(
     candidate_tpot = _tpot_ms(tokens)
     if baseline_tpot is None or candidate_tpot is None:
         raise MeasurementRefused("a7_tpot_unmeasured")
-    deltas = _cleanup_deltas(before, after)
+    # Cleanup is a delta of one entry process.  When the process that served
+    # the request was replaced (a restarted entry answered, or the verified
+    # process identity changed), no delta is computed across the two
+    # processes: cleanup is reported as not measured, with the exit evidence.
+    unmeasured_reason = _entry_process_replaced(
+        entry_node,
+        before,
+        pre_kill,
+        after,
+        restored_seen=result_poll.get("restored_from") is not None,
+    )
+    deltas = None if unmeasured_reason is not None else _cleanup_deltas(before, after)
     acknowledged = None if result is None else result.get("acknowledged_token_count")
     committed = None if result is None else result.get("gateway_committed_token_count")
     source_incidents = [item for item in incidents if item.get("subject_id") == source_node]
@@ -987,6 +1062,7 @@ def measure(
         "standby_counters": {"before": list(standby_before), "after": list(standby_after)},
         "resources_before": dict(before),
         "resources_after": dict(after),
+        "cleanup": _cleanup_observation(entry_node, before, pre_kill, after, unmeasured_reason, result_poll.get("restored_from")),
     }
     if result is None:
         raise MeasurementRefused("a7_result_unobserved", observations=observations)
@@ -1027,7 +1103,11 @@ def measure(
         "max_ack_wait_ms": float(result["max_ack_wait_ms"]),
         "baseline_tpot_ms": baseline_tpot,
         "candidate_tpot_ms": candidate_tpot,
-        "cleanup": {entry_node: {name: deltas[name] for name in CLEANUP_FIELDS}},
+        "cleanup": {
+            entry_node: {name: deltas[name] for name in CLEANUP_FIELDS}
+            if deltas is not None
+            else {"cleanup_measurement": CLEANUP_NOT_MEASURED, "cleanup_unmeasured_reason": unmeasured_reason}
+        },
         "workspaces_checked": driver.workspaces_checked(),
     }
     # The closed case record cannot say why no workspace was checked; the
