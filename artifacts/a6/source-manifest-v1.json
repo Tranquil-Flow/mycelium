@@ -43,8 +43,8 @@
     },
     {
       "path": "mycelium_a6_product_fault_seams.py",
-      "sha256": "sha256:bb8a9cb13682990a0f8ac3b930e2f22be6398ee8797e889e0dd0d02b571c3978",
-      "size_bytes": 31599
+      "sha256": "sha256:47006248fb83d7618352c53ac4e5b04449bef7bd86ad538c9343746e5aab43c5",
+      "size_bytes": 36346
     },
     {
       "path": "mycelium_a7_checkpoint_channel.py",
@@ -387,6 +387,11 @@
       "size_bytes": 1987
     },
     {
+      "path": "tests/a6_acceptance/test_product_fault_seams_remote_signal.py",
+      "sha256": "sha256:2f76f306b0afd5b026570f5b90abdfa87c2f893d46ece71ec964f58f15a83af5",
+      "size_bytes": 11751
+    },
+    {
       "path": "tests/a6_acceptance/test_product_fault_seams_source_route.py",
       "sha256": "sha256:f3899d4740ee3a08bdfde3dadad4043d0c500baa6cdcf9f332f1c1d80941f366",
       "size_bytes": 4053
@@ -683,5 +688,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:b062e07989fc0eaa533fc287f60508a1f7cd8b5459ee44818ee81028e1cacc9d"
+  "source_digest": "sha256:4fc30ed9c8f0b0723295e58eb83df9c5a512a4c209900bf5f3f8d4fd8a33925a"
 }
