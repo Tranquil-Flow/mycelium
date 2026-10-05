@@ -257,7 +257,7 @@ def test_cleanup_evidence_is_read_from_the_route_that_ran_the_request() -> None:
     cleanup evidence (exited-peer incidents, exact receipts) from the retired
     route the owner still maps it to, never from the replacement."""
 
-    from mycelium_live.router_port import LiveRouterPort
+    from mycelium_live.router_port import _route_that_ran
 
     route = _RefusingRoute()
     spare = _RefusingRoute()
@@ -268,10 +268,8 @@ def test_cleanup_evidence_is_read_from_the_route_that_ran_the_request() -> None:
         owner.infer((1,), max_new_tokens=1, request_id="successor", sink=None)
     assert owner.public_status()["cold_route_restart"]["generation"] == 2
     assert owner.route_for_request("successor") is route
-    port = type("_Port", (), {"_route": owner})()
-    assert LiveRouterPort._route_that_ran(port, "successor") is route
-    assert LiveRouterPort._route_that_ran(port, "unknown") is owner
+    assert _route_that_ran(owner, "successor") is route
+    assert _route_that_ran(owner, "unknown") is owner
     owner.release_request("successor")
     assert owner.route_for_request("successor") is None
-    plain = type("_Port", (), {"_route": route})()
-    assert LiveRouterPort._route_that_ran(plain, "successor") is route
+    assert _route_that_ran(route, "successor") is route

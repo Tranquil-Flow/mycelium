@@ -244,6 +244,26 @@ class _RecoveryDeadlineGuard:
         self._done.set()
 
 
+def _route_that_ran(route: Any, request_id: str) -> Any:
+    """The concrete route that executed ``request_id``, else ``route``.
+
+    A cold-restart owner replaces its route when every peer is lost. The
+    replacement never ran the request, so its cleanup evidence (exact
+    receipts, exited-peer incidents) is read from the retired route that
+    did; the owner keeps that mapping until the request is released.
+    """
+
+    reader = getattr(type(route), "route_for_request", None)
+    if callable(reader):
+        try:
+            ran = route.route_for_request(request_id)
+        except Exception:
+            ran = None
+        if ran is not None:
+            return ran
+    return route
+
+
 @dataclass
 class _Pending:
     request: RequestContext | None = None
@@ -2387,25 +2407,6 @@ class LiveRouterPort:
             self._release_route_request(pending)
             self._retire_command(pending)
 
-    def _route_that_ran(self, request_id: str) -> Any:
-        """The concrete route that executed ``request_id``, else the route.
-
-        A cold-restart owner replaces its route when every peer is lost. The
-        replacement never ran the request, so its cleanup evidence (exact
-        receipts, exited-peer incidents) is read from the retired route that
-        did; the owner keeps that mapping until the request is released.
-        """
-
-        reader = getattr(type(self._route), "route_for_request", None)
-        if callable(reader):
-            try:
-                route = self._route.route_for_request(request_id)
-            except Exception:
-                route = None
-            if route is not None:
-                return route
-        return self._route
-
     def _dead_peer_cleanup_receipt(
         self,
         identity: CommandIdentity,
@@ -2425,7 +2426,7 @@ class LiveRouterPort:
         """
 
         request_id = identity.request_id
-        route = self._route_that_ran(request_id)
+        route = _route_that_ran(self._route, request_id)
         # Fields fixed for the command's lifetime. Cancellation generation is
         # not among them: the failure itself joins the command to the route's
         # next generation, and the incident keeps the one it was observed at.
@@ -2525,7 +2526,7 @@ class LiveRouterPort:
             receipt = dict(pending.cleanup_receipt)
         if receipt is None:
             scoped_receipt_source = getattr(
-                self._route_that_ran(identity.request_id),
+                _route_that_ran(self._route, identity.request_id),
                 "request_cleanup_receipt_scoped",
                 None,
             )

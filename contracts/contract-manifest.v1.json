@@ -135,8 +135,8 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "28cf55a7364759fed089524f8deeed57edc9e1be2b15524829ab46646ac2f96f",
-          "size_bytes": 136338
+          "sha256": "cf006f81cb5f06cd16d673e6da69b1709cc052771b4c9263fa70ef4aae0c5f3a",
+          "size_bytes": 136271
         },
         {
           "path": "ui/web/src/features/liveRoute/m16Runtime.ts",
@@ -450,8 +450,8 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "28cf55a7364759fed089524f8deeed57edc9e1be2b15524829ab46646ac2f96f",
-          "size_bytes": 136338
+          "sha256": "cf006f81cb5f06cd16d673e6da69b1709cc052771b4c9263fa70ef4aae0c5f3a",
+          "size_bytes": 136271
         },
         {
           "path": "mycelium_live/supervisor.py",
@@ -670,8 +670,8 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "28cf55a7364759fed089524f8deeed57edc9e1be2b15524829ab46646ac2f96f",
-          "size_bytes": 136338
+          "sha256": "cf006f81cb5f06cd16d673e6da69b1709cc052771b4c9263fa70ef4aae0c5f3a",
+          "size_bytes": 136271
         },
         {
           "path": "physical_inference_node.py",
