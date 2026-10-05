@@ -224,6 +224,44 @@ def test_a_release_racing_a_shipment_drops_what_the_shipment_stored(topology, mo
 
 
 @pytest.mark.parametrize(
+   "header",
+   [{"request_id": "request:a7-other"}, {"checkpoint_sequence": 1}],
+   ids=["request", "sequence"],
+)
+def test_a_shipment_header_that_disagrees_with_the_sealed_binding_is_refused(topology, header) -> None:
+   case, network, standby = topology
+   origin, decoded = _held_shipment(case, network)
+   # Only the sealed binding is authenticated: the outer header cannot steer the
+   # released check or name another request or sequence than the one stored.
+   forged = KVCheckpointShipment(**{**decoded.message.__dict__, **header})
+
+   assert network.agents["node-s"].receive_shipment(forged, decoded.payload, source_node_id=origin) is False
+
+   snapshot = network.agents["node-s"].shadow_snapshot()
+   assert (snapshot["shadow_entry_count"], snapshot["shadow_checkpoint_count"]) == (0, 0)
+   assert snapshot["refusals"] == {"shipment_header_mismatch": 1}
+   assert not network.queue
+   # The genuine shipment is still accepted afterwards.
+   assert network.agents["node-s"].receive_shipment(decoded.message, decoded.payload, source_node_id=origin) is True
+   assert network.agents["node-s"].shadow_snapshot()["shadow_checkpoint_count"] == 1
+
+
+def test_a_released_request_is_refused_under_another_request_header(topology) -> None:
+   case, network, standby = topology
+   origin, decoded = _held_shipment(case, network)
+   assert network.agents["node-s"].receive_release(_release(), source_node_id="node-a") is True
+   relabelled = KVCheckpointShipment(**{**decoded.message.__dict__, "request_id": "request:a7-other"})
+
+   assert network.agents["node-s"].receive_shipment(relabelled, decoded.payload, source_node_id=origin) is False
+   assert network.agents["node-s"].receive_shipment(decoded.message, decoded.payload, source_node_id=origin) is False
+
+   snapshot = network.agents["node-s"].shadow_snapshot()
+   assert (snapshot["shadow_entry_count"], snapshot["shadow_checkpoint_count"]) == (0, 0)
+   assert snapshot["refusals"] == {"shipment_header_mismatch": 1, "shipment_request_released": 1}
+   assert not network.queue
+
+
+@pytest.mark.parametrize(
    "message",
    [
       KVCheckpointShipment(request_id="r", path_id="p", path_attempt=0, standby_placement_id="s", checkpoint_sequence=0, byte_size=0),

@@ -254,14 +254,8 @@ def seal_checkpoint(
    return SEALED_MAGIC + _HEADER_LENGTH.pack(len(encoded)) + encoded + ciphertext
 
 
-def open_checkpoint(
-   sealed: bytes,
-   *,
-   standby_key: StandbyCheckpointKey,
-   max_bytes: int,
-   now_unix_ms: int | None = None,
-) -> tuple[dict[str, Any], bytes]:
-   """Authenticate and decrypt a sealed checkpoint addressed to this standby."""
+def _sealed_header(sealed: bytes, *, max_bytes: int) -> tuple[dict[str, Any], bytes, int, int]:
+   """Parse the sealed header; its raw bytes are the AEAD associated data."""
 
    if not isinstance(sealed, (bytes, bytearray)) or len(sealed) > max_bytes + _MAX_HEADER + 64:
       _refuse("a7_sealed_checkpoint_too_large")
@@ -283,6 +277,31 @@ def open_checkpoint(
       or _canonical(header) != raw
    ):
       _refuse("a7_sealed_checkpoint_invalid")
+   return header, raw, prefix, length
+
+
+def sealed_checkpoint_binding(sealed: bytes, *, max_bytes: int) -> dict[str, Any]:
+   """The binding a sealed checkpoint names, read before it is opened.
+
+   Not authenticated by itself: ``open_checkpoint`` authenticates exactly these
+   header bytes as associated data, so a checkpoint that opens stores this
+   binding and no other. Use it to refuse a shipment before storing anything.
+   """
+
+   header, _raw, _prefix, _length = _sealed_header(sealed, max_bytes=max_bytes)
+   return validate_binding(header["binding"])
+
+
+def open_checkpoint(
+   sealed: bytes,
+   *,
+   standby_key: StandbyCheckpointKey,
+   max_bytes: int,
+   now_unix_ms: int | None = None,
+) -> tuple[dict[str, Any], bytes]:
+   """Authenticate and decrypt a sealed checkpoint addressed to this standby."""
+
+   header, raw, prefix, length = _sealed_header(sealed, max_bytes=max_bytes)
    binding = validate_binding(header["binding"])
    if binding["standby_placement_id"] != standby_key.standby_placement_id:
       _refuse("a7_sealed_checkpoint_wrong_standby")

@@ -38,6 +38,7 @@ from mycelium_a7_checkpoint_channel import (
    signed_ack_statement,
    payload_digest,
    seal_checkpoint,
+   sealed_checkpoint_binding,
    verify_signed_checkpoint_ack,
    verify_standby_key_record,
 )
@@ -57,6 +58,15 @@ from mycelium_router.kv_checkpoint import KVCheckpointError, decode_kv_checkpoin
 
 Send = Callable[[str, object, bytes], None]
 _MAX_RELEASED_HISTORY = 4096
+
+
+def _shadow_key(request_id: str) -> str | None:
+   """The request key a sealed checkpoint and the standby store use for ``request_id``."""
+
+   try:
+      return "sha256:" + request_key(request_id)
+   except ValueError:
+      return None
 
 
 def _canonical(value: Any) -> str:
@@ -127,7 +137,9 @@ class A7NodeAgent:
       self._standby: StandbySide | None = None
       self._session_digest: str | None = None
       self._coverage: dict[str, SourceCoverage] = {}
-      self._released: OrderedDict[str, None] = OrderedDict()
+      # Released request ids -> their shadow request key (what a sealed checkpoint names).
+      self._released: OrderedDict[str, str | None] = OrderedDict()
+      self._released_keys: set[str] = set()
       self._refusals: Counter[str] = Counter()
 
    # -- registration ------------------------------------------------------------
@@ -277,9 +289,14 @@ class A7NodeAgent:
          if role is not None and source_node_id != role.entry_node_id:
             return False
          self._sources.pop(release.request_id, None)
-         self._released[release.request_id] = None
+         key = _shadow_key(release.request_id)
+         self._released[release.request_id] = key
+         if key is not None:
+            self._released_keys.add(key)
          while len(self._released) > _MAX_RELEASED_HISTORY:
-            self._released.popitem(last=False)
+            _, dropped = self._released.popitem(last=False)
+            if dropped is not None:
+               self._released_keys.discard(dropped)
          standby = self._standby
          ports = []
          for port in self._ports.values():
@@ -370,25 +387,36 @@ class A7NodeAgent:
    # -- inbound -------------------------------------------------------------------
 
    def receive_shipment(self, shipment: KVCheckpointShipment, sealed: bytes, *, source_node_id: str | None = None) -> bool:
+      with self._lock:
+         standby = self._standby
+         session = self._session_digest
+      if standby is None or shipment.standby_placement_id != standby.placement_id or source_node_id is None:
+         return False
+      # The outer shipment header is not signed. Key every check on the request
+      # and sequence the sealed checkpoint names (open_checkpoint authenticates
+      # exactly that binding) and refuse a header that disagrees with it.
+      try:
+         binding = sealed_checkpoint_binding(sealed, max_bytes=standby.max_checkpoint_bytes)
+      except (CheckpointChannelError, ValueError):
+         return False
+      shadow_key = binding["request_key"]
+      if shadow_key != _shadow_key(shipment.request_id) or binding["checkpoint_sequence"] != shipment.checkpoint_sequence:
+         return self._refuse("shipment_header_mismatch")
       # A shipment that lands after its request was released must not rebuild
       # the shadow chain the release just dropped (a late sequence 0 would).
       with self._lock:
-         released = shipment.request_id in self._released
-         standby = self._standby
-         session = self._session_digest
+         released = shadow_key in self._released_keys
       if released:
          return self._refuse("shipment_request_released")
-      if standby is None or shipment.standby_placement_id != standby.placement_id or source_node_id is None:
-         return False
       try:
          signed = standby.receive(sealed, session_digest=session, now_unix_ms=self._clock_ms())
       except (CheckpointChannelError, StandbyShadowError, KVCheckpointError, ValueError):
          return False
       with self._lock:
-         released = shipment.request_id in self._released
+         released = shadow_key in self._released_keys
       if released:
          # The release raced this shipment: drop what it just stored.
-         standby.store.release_request("sha256:" + request_key(shipment.request_id))
+         standby.store.release_request(shadow_key)
          return self._refuse("shipment_request_released")
       self._send(
          source_node_id,
