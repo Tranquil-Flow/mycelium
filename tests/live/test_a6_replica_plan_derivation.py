@@ -331,3 +331,99 @@ def test_cli_refuses_a_malformed_runtime_identity(tmp_path, capsys) -> None:
             "--unbound", "--runtime-identity", value])
         assert code == 2
         assert "a6_replica_runtime_identity_invalid" in capsys.readouterr().out
+
+
+def _third_host(deployment):
+    """A third complete-model host (SB2 on the fleet), templated like node-b."""
+
+    import copy
+
+    third = copy.deepcopy(deployment.assignments[1])
+    third["node_id"] = "node-c"
+    return [*deployment.assignments, third]
+
+
+def test_replica_documents_bind_three_complete_disjoint_paths(tmp_path) -> None:
+    deployment = _deployment(tmp_path)
+    local = derive.observe_local_runtime_identity(sys.executable, "mlx")
+    documents = derive.replica_documents(
+        manifest=deployment.manifest,
+        templates=_third_host(deployment),
+        local_artifact_root=deployment.root,
+        runtime_identities={"node-a": local, "node-b": local, "node-c": local},
+        load_generation=7,
+        challenge_prompt=(1, 2, 3),
+        challenge_count=3,
+    )
+    graph = documents["graph"]
+    assert [(p.placement_id, p.node_id) for p in graph.stages[0].placements] == [
+        ("placement-000", "node-a"), ("placement-001", "node-b"), ("placement-002", "node-c")]
+    # The ordinary M16 runtime finds a first and then a second disjoint
+    # successor: the exhausted-attempts case has a real second attempt.
+    coordinator = build_live_m16_runtime(graph)
+    request = _request("request-a6r3")
+    source = coordinator.admit(request, workload_profile_id="interactive_chat_v1")
+    assert coordinator.next_dispatch() == request.request_id
+    excluded = {hop.placement_id for hop in source.ordered_hops}
+    first = coordinator.reserve_recovery_successor(
+        request.request_id, recovery_request=request,
+        expected_source_identity=coordinator.route_identity(request.request_id),
+        excluded_placements=frozenset(excluded))
+    first_placements = {hop.placement_id for hop in first.ordered_hops}
+    assert first_placements and first_placements.isdisjoint(excluded)
+    coordinator.discard_recovery_successor(
+        request.request_id, expected_source_identity=coordinator.route_identity(request.request_id))
+    second = coordinator.reserve_recovery_successor(
+        request.request_id, recovery_request=request,
+        expected_source_identity=coordinator.route_identity(request.request_id),
+        excluded_placements=frozenset(excluded | first_placements))
+    second_placements = {hop.placement_id for hop in second.ordered_hops}
+    assert second_placements and second_placements.isdisjoint(excluded | first_placements)
+
+
+def test_replica_documents_refuse_one_or_four_hosts(tmp_path) -> None:
+    deployment = _deployment(tmp_path)
+    for templates in (deployment.assignments[:1], [*_third_host(deployment)] * 2):
+        with pytest.raises(derive.DerivationError, match="a6_replica_requires_two_hosts"):
+            derive.replica_documents(
+                manifest=deployment.manifest, templates=templates,
+                local_artifact_root=deployment.root, runtime_identities={},
+                load_generation=7, challenge_prompt=(1, 2, 3), challenge_count=3)
+
+
+def test_derive_plan_prepositions_each_node_shards_from_its_proven_root(tmp_path) -> None:
+    from physical_inference_qualification import _PREPOSITIONED_PROTOCOL
+
+    deployment = _deployment(tmp_path)
+    base = _synthetic_base(tmp_path, deployment)
+    plan, report = derive.derive_plan(
+        base, bundle_out=tmp_path / "bundle-a6r", artifact_roots=ROOTS,
+        runtime_identities=IDENTITIES, preposition=True)
+    controller = plan["controller"]
+    prepositioned = controller["prepositioned_artifacts"]
+    assert prepositioned["protocol"] == _PREPOSITIONED_PROTOCOL
+    transfer = {record["path"]: record for record in controller["transfer_manifest"]["files"]}
+    local_root = str((Path(base["controller"]["source_root"]) / "deployment").resolve())
+    roots = {"node-a": local_root, "node-b": REMOTE_FULL_ROOT}
+    for node_id, records in prepositioned["members"].items():
+        assert records and [r["destination_path"] for r in records] == sorted(
+            r["destination_path"] for r in records)
+        selected = {r["path"] for r in controller["node_transfer_manifests"]["manifests"][
+            node_id]["files"]}
+        for record in records:
+            # Bound to the controller's own transfer record, sourced on the node.
+            base_record = transfer[record["destination_path"]]
+            assert (record["size_bytes"], record["content_digest"]) == (
+                base_record["size_bytes"], base_record["content_digest"])
+            assert record["source_path"].startswith(roots[node_id] + "/")
+            assert record["destination_path"] not in selected  # never shipped twice
+        assert "physical_inference_node.py" in selected
+        assert not any(path.endswith(".safetensors") for path in selected)
+    assert report["prepositioned_file_counts"] == {
+        node_id: len(records) for node_id, records in prepositioned["members"].items()}
+    # Without the flag nothing is prepositioned and every shard is shipped.
+    plain, plain_report = derive.derive_plan(
+        base, bundle_out=tmp_path / "bundle-plain", artifact_roots=ROOTS,
+        runtime_identities=IDENTITIES)
+    assert "prepositioned_artifacts" not in plain["controller"]
+    assert plain_report["prepositioned_file_counts"] is None
