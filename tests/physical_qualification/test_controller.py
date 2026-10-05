@@ -1368,6 +1368,84 @@ def test_physical_prepare_cleans_attempted_peers_when_staging_fails(
         assert cleanup_stdin is None
 
 
+def test_physical_prepare_keeps_the_stage_error_when_cleanup_also_fails(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(2, tmp_path)
+    source_root, transfers = _transfers(tmp_path)
+    archive = build_transfer_archive(source_root, transfers)
+    first_ack = {
+        "protocol": "mycelium.controller_remote_stage_ack.v1",
+        "node_id": peers[0].node_id,
+        "staging_root": peers[0].staging_root,
+        "archive_digest": "sha256:" + hashlib.sha256(archive).hexdigest(),
+        "archive_size_bytes": len(archive),
+    }
+    cleanup_ack = {
+        "protocol": "mycelium.controller_remote_cleanup_ack.v1",
+        "node_id": peers[0].node_id,
+        "staging_root": peers[0].staging_root,
+        "removed": True,
+    }
+    runner = StagingRunner(
+        [
+            CommandCapture(
+                argv=(),
+                returncode=0,
+                stdout=(json.dumps(first_ack, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+                stderr=b"",
+            ),
+            CommandCapture(argv=(), returncode=2, stdout=b"", stderr=b"remote_stage_rejected\n"),
+            CommandCapture(
+                argv=(),
+                returncode=0,
+                stdout=(json.dumps(cleanup_ack, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+                stderr=b"",
+            ),
+            # The second peer's cleanup fails too, e.g. a leftover root of another stage.
+            CommandCapture(argv=(), returncode=2, stdout=b"", stderr=b"remote_cleanup_rejected\n"),
+        ]
+    )
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+    )
+
+    with pytest.raises(ControllerError) as caught:
+        controller.execute("prepare")
+
+    assert caught.value.code == "remote_cleanup_failed"
+    assert caught.value.remote_code == "remote_stage_failed"
+    assert isinstance(caught.value.__cause__, ControllerError)
+    assert caught.value.__cause__.code == "remote_stage_failed"
+    assert len(runner.calls) == 4
+
+
+def test_cli_error_reports_the_remote_code_beside_the_code(
+    monkeypatch: pytest.MonkeyPatch, capsysbinary: pytest.CaptureFixture[bytes]
+) -> None:
+    class _Parser:
+        def parse_args(self, _argv):
+            raise ControllerError(
+                "remote_cleanup_failed", remote_code="remote_stage_failed"
+            )
+
+    monkeypatch.setattr(controller_module, "_parser", lambda: _Parser())
+
+    assert controller_module.main(["prepare"]) == 2
+    output = json.loads(capsysbinary.readouterr().err)
+    assert output["error"] == {
+        "code": "remote_cleanup_failed",
+        "remote_code": "remote_stage_failed",
+    }
+    assert output["ok"] is False
+
+
 def test_physical_run_orchestrates_signed_nodes_and_cleans_staging(
     tmp_path: Path,
 ) -> None:

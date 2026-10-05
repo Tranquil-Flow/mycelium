@@ -2806,7 +2806,13 @@ class QualificationController:
                 except ControllerError:
                     cleanup_failed = True
             if cleanup_failed:
-                raise ControllerError("remote_cleanup_failed") from stage_error
+                # Keep the stage failure that caused the cleanup: without it a
+                # failed cleanup masks why staging failed in the first place.
+                raise ControllerError(
+                    "remote_cleanup_failed",
+                    remote_code=stage_error.code,
+                    diagnostic=stage_error.diagnostic,
+                ) from stage_error
             raise
         peers = [
             {
@@ -3008,8 +3014,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             "ok": False,
             "route_ready": False,
         }
-        if isinstance(sys.exc_info()[1], ControllerError):
-            output["error"]["code"] = sys.exc_info()[1].code
+        error = sys.exc_info()[1]
+        if isinstance(error, ControllerError):
+            output["error"]["code"] = error.code
+            if error.remote_code is not None:
+                output["error"]["remote_code"] = error.remote_code
         sys.stderr.buffer.write(_canonical_bytes(output))
         sys.stderr.buffer.flush()
         return 2
