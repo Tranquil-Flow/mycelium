@@ -127,9 +127,12 @@ def _product_outcomes():
                                               "recovery_failure_reason": "recovery_timeout"},
                                              _gateway("failed", "deadline_exceeded"))),
         "exhausted_recovery_attempts": ({"source_failure_observed": True, "attempts_used": 2,
-                                         "attempts_exhausted": True},
+                                         "attempts_exhausted": True,
+                                         "successor_nodes_failed": [["node-2"], ["node-3"]]},
                                         _settled({**_FAILED_VIEW, "recovery_attempts": 2},
-                                                 _gateway("failed", "recovery_failed"))),
+                                                 _gateway("failed", "recovery_failed"),
+                                                 qualification={
+                                                     "successor_path_attempt": 2})),
         # Real fleet behaviour (owner ruling): the fenced source's late
         # publication is refused and the request completes on its successor.
         "stale_source_output_after_fencing": ({"source_failure_observed": True,
@@ -534,3 +537,24 @@ def test_cleanup_authority_failure_records_only_the_v2_contract(plan: Path):
     assert "cleanup_authority_failure" not in status["refused"]
     assert status["refused"]["cleanup_authority_failure.v2"] == (
         "a6_cleanup_v2_authority_unavailable")
+
+
+EXHAUSTED = "exhausted_recovery_attempts"
+
+
+@pytest.mark.parametrize("mutation", ["one_successor", "same_node", "no_second_issue"])
+def test_exhausted_attempts_needs_evidence_of_a_second_real_successor(mutation):
+    post, settled = _product_outcomes()[EXHAUSTED]
+    post = dict(post)
+    if mutation == "one_successor":
+        post.update(attempts_used=1, successor_nodes_failed=[["node-2"]])
+    elif mutation == "same_node":
+        post["successor_nodes_failed"] = [["node-2"], ["node-2"]]
+    else:
+        # Two placements: the counter reached 2 but the qualifier only ever
+        # issued a record for the first successor.
+        settled.qualification = {"successor_path_attempt": 1}
+    observation = derive_observation(EXHAUSTED, _executed(EXHAUSTED, post), settled)
+    assert observation["rejection_observed"] is False
+    with pytest.raises(ValueError, match="physical_observation_invalid"):
+        runner.validate_case_observation(EXHAUSTED, observation)

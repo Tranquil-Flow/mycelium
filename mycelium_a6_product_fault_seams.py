@@ -69,6 +69,9 @@ _REMOTE_SIGNAL_NAMES = {
 }
 _RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 REMOTE_SIGNAL_TIMEOUT_SECONDS = 30.0
+#: Bound of each timeout-case wait. The router's recovery deadline is the
+#: replay checkpoint expiry, 30 s after the checkpoint froze.
+RECOVERY_DEADLINE_WAIT_SECONDS = 120.0
 #: Exit status of the remote script when the PID is not the bound node worker.
 REMOTE_IDENTITY_MISMATCH_EXIT = 65
 #: Runs on the peer's host as ``/bin/sh -c SCRIPT a6-fault-signal SIG PID RUN_ID``.
@@ -273,6 +276,10 @@ class LiveProductFaultTarget:
 
     def placement_nodes(self) -> dict[str, str]:
         return dict(self.router.a6_placement_node_ids())
+
+    @property
+    def wait_seconds(self) -> float:
+        return self._wait_seconds
 
     def wait(self, predicate: Callable[[], Any], seconds: float | None = None,
              poll_seconds: float | None = None) -> Any:
@@ -480,13 +487,44 @@ class LiveProductFaultTarget:
         return self.wait(settled, seconds) or self.view(record.request_id)
 
     def cancel(self, record: ExecutedCase) -> bool:
-        cancel = getattr(self.service, "cancel", None)
-        if not callable(cancel):
+        """Cancel the armed request through the gateway's own cancellation path.
+
+        Every ordinary ASGI submission mints a session owner token the fault
+        control never holds, so ``service.cancel(request_id)`` would always be
+        refused (``session_owner_mismatch``). The grant-gated fault control
+        acts as the product operator for the one request it armed: it skips
+        only the owner-token comparison and runs the exact session
+        cancellation the owner's request would have run.
+        """
+
+        get_session = getattr(self.service, "_get_session", None)
+        cancel_session = getattr(self.service, "_cancel_session", None)
+        if not callable(get_session) or not callable(cancel_session):
             return False
         try:
-            return bool(cancel(record.request_id))
+            return bool(cancel_session(get_session(record.request_id)))
         except Exception:
             return False
+
+    def start_cancel(self, record: ExecutedCase) -> Callable[[float], bool]:
+        """Run :meth:`cancel` concurrently; the returned join yields its result.
+
+        A cancellation fans out to the request's physical participants and
+        waits for their cleanup proof; a seam that stalled those participants
+        must be able to observe the linearized cancellation and resume them
+        while that fan-out is still in flight.
+        """
+
+        result: list[bool] = []
+        thread = threading.Thread(target=lambda: result.append(self.cancel(record)),
+                                  name="a6-fault-cancel", daemon=True)
+        thread.start()
+
+        def join(seconds: float) -> bool:
+            thread.join(timeout=seconds)
+            return bool(result and result[0])
+
+        return join
 
     def arm_qualification_fault(self, record: ExecutedCase, kind: str) -> None:
         arm = getattr(self.qualifier, "arm_controlled_fault", None)
@@ -637,8 +675,14 @@ class ProductCaseSeam:
 
     def _apply_cancellation_before_recovery(self, record):
         target = self._target
-        # Stall every other peer first so the successor challenge cannot run
-        # ahead of the owner's cancellation; they are resumed on return.
+        # Hold the source first: stopping the other peers takes an ssh round
+        # trip per peer, during which an unstalled source can finish the whole
+        # request, and then there is no in-flight request left to fail. A
+        # stopped source still runs no further work and is then killed (the
+        # same real source failure as every case); the remaining peers are
+        # stalled so the successor challenge cannot run ahead of the owner's
+        # cancellation. Every stalled peer is resumed on return.
+        target.signal_node(record.source_node_id, signal.SIGSTOP, record.source_route)
         others = sorted(set(target.placement_nodes().values()) - {record.source_node_id})
         for node in others:
             target.signal_node(node, signal.SIGSTOP)
@@ -661,10 +705,23 @@ class ProductCaseSeam:
         if target.wait_phase(record, "recovery_prefill", attempts=1):
             for node in target.successor_nodes(record, 1):
                 target.signal_node(node, signal.SIGSTOP)
-            accepted = target.cancel(record)
+            # The stalled successor keeps the recovery in prefill while the
+            # owner's cancellation linearizes; it is resumed before the
+            # cancellation's cleanup fan-out has to reach it.
+            join = target.start_cancel(record)
+            linearized = target.wait(lambda: (lambda v: v if (
+                v.get("cancellation_linearized") is True
+                or v.get("cancellation_requested") is True
+                or v.get("terminal_status") in _TERMINAL_STATUSES
+                or v.get("retained") is False) else None)(
+                target.view(record.request_id))) or {}
+            in_prefill = linearized.get("recovery_phase") == "recovery_prefill"
+            target.resume_stopped_nodes()
+            accepted = join(target.wait_seconds)
             view = target.view(record.request_id)
-            observed = (accepted and view.get("cancellation_requested") is True
-                        and view.get("recovery_phase") == "recovery_prefill")
+            observed = (accepted and in_prefill
+                        and (view.get("cancellation_requested") is True
+                             or view.get("terminal_status") == "CANCELLED"))
         return {"source_failure_observed": True,
                 "cancellation_observed_during_prefill": observed}
 
@@ -675,27 +732,50 @@ class ProductCaseSeam:
         if target.wait_phase(record, "recovery_prefill", attempts=1):
             for node in target.successor_nodes(record, 1):
                 target.signal_node(node, signal.SIGSTOP)
-            view = target.wait(lambda: (lambda v: v if (
-                v.get("recovery_failure_reason") == "recovery_timeout"
-                or v.get("terminal_error_code") == "deadline_exceeded") else None)(
-                target.view(record.request_id)), seconds=120.0) or {}
-            exceeded = bool(view)
+            # The router's frozen recovery deadline is the replay checkpoint's
+            # expiry (30 s after the checkpoint froze). Hold the successor
+            # until the router reports that it interrupted the stalled work,
+            # then resume it so the interruption's cleanup can be proven.
+            fired = target.wait(lambda: (lambda v: v if (
+                v.get("recovery_deadline_exceeded") is True
+                or v.get("recovery_failure_reason") is not None
+                or v.get("terminal_status") in _TERMINAL_STATUSES
+                or v.get("retained") is False) else None)(
+                target.view(record.request_id)), seconds=RECOVERY_DEADLINE_WAIT_SECONDS) or {}
+            target.resume_stopped_nodes()
+            if fired:
+                view = target.wait(lambda: (lambda v: v if (
+                    v.get("recovery_failure_reason") is not None
+                    or v.get("terminal_blocked_reason") is not None) else None)(
+                    target.view(record.request_id)), seconds=RECOVERY_DEADLINE_WAIT_SECONDS) or {}
+                exceeded = (fired.get("recovery_deadline_exceeded") is True
+                            and view.get("recovery_failure_reason") == "recovery_timeout")
         return {"source_failure_observed": True, "recovery_deadline_exceeded": exceeded}
 
     def _apply_exhausted_recovery_attempts(self, record):
         target = self._target
         target.fail_source(record)
+        # Count only attempts whose successor really started: the router
+        # increments its attempt counter before reserving, so a deployment
+        # with no second disjoint successor reaches "2 attempts" without a
+        # second successor ever running.
+        killed: list[tuple[int, tuple[str, ...]]] = []
         for attempt in (1, 2):
             if not target.wait_phase(record, "recovery_prefill", attempts=attempt):
                 break
-            for node in target.successor_nodes(record, attempt):
+            nodes = tuple(target.successor_nodes(record, attempt))
+            for node in nodes:
                 target.signal_node(node, signal.SIGKILL)
+            killed.append((attempt, nodes))
         view = target.wait_terminal(record)
         attempts = view.get("recovery_attempts")
+        distinct = len(killed) == 2 and not set(killed[0][1]) & set(killed[1][1])
         return {
             "source_failure_observed": True,
-            "attempts_used": attempts,
-            "attempts_exhausted": (attempts == 2 and view.get("terminal_status") == "FAILED"),
+            "attempts_used": len(killed),
+            "attempts_exhausted": (distinct and attempts == 2
+                                   and view.get("terminal_status") == "FAILED"),
+            "successor_nodes_failed": [list(nodes) for _attempt, nodes in killed],
         }
 
     def _apply_stale_source_output_after_fencing(self, record):
@@ -736,38 +816,47 @@ class ProductCaseSeam:
     def _apply_cleanup_authority_failure(self, record):
         """Owner-approved v2 shape: the releasing attempt is the successor.
 
-        Fail the source, let the ordinary product cut over to its successor,
-        then stall the successor's peers once the last token is generated so
-        the route cannot prove request cleanup. The cleanup authority must
-        refuse to publish a result (TERMINAL_BLOCKED, one failure notice); the
-        stalled peers are resumed afterwards so a late cleanup proof can
-        release the retained reservations with exactly one command terminal.
+        Fail the source and let the ordinary product start its successor.
+        A successor's output is buffered until cutover, and cutover, the
+        command terminal and the request release follow each other at once,
+        so stalling after the committed cutover is too late: the successor's
+        completion cleanup has already been proven. Instead stall the
+        successor's peers in recovery prefill once the router has buffered its
+        complete output, so the completion cleanup cannot be proven. The
+        cleanup authority must refuse to publish a result (TERMINAL_BLOCKED,
+        one failure notice); the stalled peers are resumed afterwards so a
+        late cleanup proof can release the retained reservations.
         """
 
         target = self._target
         target.wait(lambda: (lambda m: m is not None and m[1] >= 1)(
             target.gateway_committed(record.request_id)), seconds=2.0)
         target.fail_source(record)
-        source_attempt = record.binding["source_attempt"]
-        cut_over = target.wait(lambda: (lambda v: (
-            isinstance(v.get("route_identity"), Mapping)
-            and (v["route_identity"].get("request_attempt") or 0) > source_attempt))(
-            target.view(record.request_id)), seconds=120.0)
-        limit = target.gateway_max_tokens(record.request_id)
         stalled = False
-        if cut_over and isinstance(limit, int):
-            generated = target.wait(lambda: (
-                target.view(record.request_id).get("token_count", 0) >= limit
-                or target.view(record.request_id).get("terminal_status") is not None),
-                seconds=120.0, poll_seconds=0.001)
-            if generated and target.view(record.request_id).get("terminal_status") is None:
-                for node in target.successor_nodes(record, 1):
+        if target.wait_phase(record, "recovery_prefill", attempts=1):
+            nodes = target.successor_nodes(record, 1)
+
+            def output_complete() -> dict[str, Any] | None:
+                view = target.view(record.request_id)
+                limit = view.get("recovery_output_limit")
+                if view.get("recovery_phase") != "recovery_prefill":
+                    return {"late": True}
+                if isinstance(limit, int) and (view.get("recovery_output_count") or 0) >= limit:
+                    return view
+                return None
+
+            generated = target.wait(output_complete, seconds=120.0, poll_seconds=0.001)
+            if generated and not generated.get("late"):
+                for node in nodes:
                     target.signal_node(node, signal.SIGSTOP)
                     stalled = True
         view = (target.wait(lambda: (lambda v: v if v.get("terminal_blocked_reason")
                                      else None)(target.view(record.request_id)),
                             seconds=120.0) if stalled else None) or {}
-        refused = view.get("terminal_blocked_reason") is not None
+        source_attempt = record.binding["source_attempt"]
+        committed = target.committed_route_identity(record.request_id) or {}
+        cut_over = (committed.get("request_attempt") or 0) > source_attempt
+        refused = view.get("terminal_blocked_reason") is not None and cut_over
         return {
             "cleanup_authority_refused": refused,
             # Nothing past the gateway-delivered cursor is ever published.

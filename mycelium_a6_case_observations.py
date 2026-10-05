@@ -361,9 +361,24 @@ def derive_observation(case_id: str, executed: Any, settled: SettledFacts) -> di
             and gateway.get("duplicated_token_count") == 0)
     else:
         fail_closed = not cut_over or view.get("terminal_status") != "COMPLETED"
+    rejection_observed = _rejection_observed(case_id, post)
+    if case_id == "exhausted_recovery_attempts":
+        # The router counts an attempt before reserving its successor, so the
+        # counter alone can reach two with no second successor. Require two
+        # distinct failed successors and the qualifier's own record of the
+        # second one (M16 path attempt = source path attempt + 2).
+        failed = post.get("successor_nodes_failed")
+        facts = settled.qualification or {}
+        rejection_observed = (
+            rejection_observed
+            and post.get("attempts_used") == 2
+            and isinstance(failed, list) and len(failed) == 2
+            and all(isinstance(nodes, list) and nodes for nodes in failed)
+            and not set(failed[0]) & set(failed[1])
+            and facts.get("successor_path_attempt") == executed.binding["path_attempt"] + 2)
     base = {
         **common,
-        "rejection_observed": _rejection_observed(case_id, post),
+        "rejection_observed": rejection_observed,
         "fail_closed": fail_closed,
         "terminal_state": _terminal_state(case_id, settled),
     }
