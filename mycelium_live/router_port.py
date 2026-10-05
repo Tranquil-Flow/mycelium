@@ -271,6 +271,10 @@ class _Pending:
     #: The frozen recovery deadline (the replay checkpoint's expiry) elapsed
     #: while successor work was still in flight, and that work was interrupted.
     recovery_deadline_exceeded: bool = False
+    #: Successor output buffered before cutover, and the successor's bound;
+    #: counts only, never token material.
+    recovery_output_count: int = 0
+    recovery_output_limit: int | None = None
 
 
 #: Upper bound of the A10 candidate collection window (``physical_inference_node``
@@ -1304,6 +1308,8 @@ class LiveRouterPort:
                 "recovery_attempts": pending.recovery_attempts,
                 "recovery_failure_reason": pending.recovery_failure_reason,
                 "recovery_deadline_exceeded": pending.recovery_deadline_exceeded,
+                "recovery_output_count": pending.recovery_output_count,
+                "recovery_output_limit": pending.recovery_output_limit,
                 "source_failure_observed": pending.source_failure_identity is not None,
                 "cancellation_requested": pending.cancellation_requested.is_set(),
                 "cancellation_linearized": pending.cancellation_linearized,
@@ -1503,6 +1509,7 @@ class LiveRouterPort:
                     ):
                         raise M16AdmissionError("recovery_output_noncontiguous")
                     buffered.append((token_index, token_id))
+                    pending.recovery_output_count = len(buffered)
 
             identity = pending.command_identity
             assert identity is not None
@@ -1526,6 +1533,8 @@ class LiveRouterPort:
             self._release_predecessor_attempt(pending, source_command)
             with self._changed:
                 pending.execution_started = True
+                pending.recovery_output_count = 0
+                pending.recovery_output_limit = successor_request.max_new_tokens
                 pending.recovery_phase = "recovery_prefill"
             deadline_guard = _RecoveryDeadlineGuard(
                 deadline_unix_ms=checkpoint.expiry_unix_ms,
@@ -2378,6 +2387,25 @@ class LiveRouterPort:
             self._release_route_request(pending)
             self._retire_command(pending)
 
+    def _route_that_ran(self, request_id: str) -> Any:
+        """The concrete route that executed ``request_id``, else the route.
+
+        A cold-restart owner replaces its route when every peer is lost. The
+        replacement never ran the request, so its cleanup evidence (exact
+        receipts, exited-peer incidents) is read from the retired route that
+        did; the owner keeps that mapping until the request is released.
+        """
+
+        reader = getattr(type(self._route), "route_for_request", None)
+        if callable(reader):
+            try:
+                route = self._route.route_for_request(request_id)
+            except Exception:
+                route = None
+            if route is not None:
+                return route
+        return self._route
+
     def _dead_peer_cleanup_receipt(
         self,
         identity: CommandIdentity,
@@ -2396,8 +2424,8 @@ class LiveRouterPort:
         (process alive) proves nothing, and the request stays terminal-blocked.
         """
 
-        route = self._route
         request_id = identity.request_id
+        route = self._route_that_ran(request_id)
         # Fields fixed for the command's lifetime. Cancellation generation is
         # not among them: the failure itself joins the command to the route's
         # next generation, and the incident keeps the one it was observed at.
@@ -2497,7 +2525,7 @@ class LiveRouterPort:
             receipt = dict(pending.cleanup_receipt)
         if receipt is None:
             scoped_receipt_source = getattr(
-                self._route,
+                self._route_that_ran(identity.request_id),
                 "request_cleanup_receipt_scoped",
                 None,
             )

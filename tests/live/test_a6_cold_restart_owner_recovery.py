@@ -249,3 +249,29 @@ def test_an_ordinary_request_through_the_dead_peer_cold_restarts_an_idle_route()
     assert caught.value.code == COLD_ROUTE_RESTART_ERROR_CODE
     assert route.close_count == 1 and route.cleanup_count == 0
     assert owner.public_status()["cold_route_restart"]["generation"] == 2
+
+
+def test_cleanup_evidence_is_read_from_the_route_that_ran_the_request() -> None:
+    """When the last peer of an A6 successor dies the owner cold-restarts; the
+    replacement never ran the request, so the router must read that request's
+    cleanup evidence (exited-peer incidents, exact receipts) from the retired
+    route the owner still maps it to, never from the replacement."""
+
+    from mycelium_live.router_port import LiveRouterPort
+
+    route = _RefusingRoute()
+    spare = _RefusingRoute()
+    owner = _owner([route, spare], "qualification")
+    owner.open()
+    route.source_killed = True
+    with pytest.raises(ColdRouteRestartError):
+        owner.infer((1,), max_new_tokens=1, request_id="successor", sink=None)
+    assert owner.public_status()["cold_route_restart"]["generation"] == 2
+    assert owner.route_for_request("successor") is route
+    port = type("_Port", (), {"_route": owner})()
+    assert LiveRouterPort._route_that_ran(port, "successor") is route
+    assert LiveRouterPort._route_that_ran(port, "unknown") is owner
+    owner.release_request("successor")
+    assert owner.route_for_request("successor") is None
+    plain = type("_Port", (), {"_route": route})()
+    assert LiveRouterPort._route_that_ran(plain, "successor") is route
