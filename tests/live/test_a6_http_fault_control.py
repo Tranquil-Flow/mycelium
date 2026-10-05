@@ -199,3 +199,24 @@ def test_partial_body_times_out_without_arming():
         sent.append(value)
     asyncio.run(app(scope, receive, send))
     assert sent[0]["status"] == 400 and seam.calls == []
+
+
+def test_a_refused_fault_logs_its_bounded_code_and_unmet_measurements(caplog):
+    import logging
+
+    class UnprovenSeam(MeasuredSeam):
+        def apply(self, *, case_id):
+            self.calls.append(("apply", case_id))
+            return {"source_failure_observed": True, "candidate_available": True,
+                    "truthful_abort_required": False}
+
+    app = receiver(UnprovenSeam())
+    with caplog.at_level(logging.WARNING, logger="mycelium_a6_http_fault_control"):
+        status, result = request(app)
+    assert status == 403 and result == {"code": "controlled_fault_refused"}
+    logged = [json.loads(record.getMessage()) for record in caplog.records
+              if record.name == "mycelium_a6_http_fault_control"]
+    assert logged == [{"event": "a6_controlled_fault_refused", "case_id": CASE,
+                       "code": f"controlled_fault_injection_unproven:{CASE}",
+                       "unmet": {"candidate_available": True,
+                                 "truthful_abort_required": False}}]

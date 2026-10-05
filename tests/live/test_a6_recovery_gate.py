@@ -31,7 +31,9 @@ def test_plan_declares_exact_physical_cases_without_execution() -> None:
     assert report["fleet_contact_attempted"] is False
     assert report["required_cases"] == list(REQUIRED_CASES)
     assert report["expected_product_origin"] == "http://127.0.0.1:8787"
-    assert report["expected_placements"] == ["node-0", "node-2"]
+    assert report["expected_placements"] == ["node-0", "node-2", "node-3"]
+    assert report["admissible_placements"] == [
+        ["node-0", "node-2"], ["node-0", "node-2", "node-3"]]
     assert report["evidence_root_template"].endswith("/<source-digest>")
     physical = report["commands_after_grant"]["physical_gate"]
     browser = report["commands_after_grant"]["browser_gate"]

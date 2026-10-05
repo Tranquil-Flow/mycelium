@@ -193,6 +193,77 @@ def _record_blocked_terminal(
         pass
 
 
+#: Expiry of the frozen recovery deadline as reported by the checkpoint
+#: authority and the successor qualifier.
+_RECOVERY_EXPIRY_CODES = frozenset({
+    "recovery_qualification_expired",
+    "recovery_checkpoint_stale",
+    "recovery_deadline_exceeded",
+})
+#: Longest single wait of the recovery deadline guard; the injected recovery
+#: clock is re-read after every wait.
+_RECOVERY_DEADLINE_POLL_SECONDS = 0.25
+
+
+class _RecoveryDeadlineGuard:
+    """Interrupt in-flight successor work once the frozen recovery deadline passes.
+
+    The replay checkpoint's expiry bounds the whole recovery: neither the
+    successor qualification nor the cutover can succeed after it. Without this
+    guard a stalled successor would hold the request until the command's
+    absolute deadline (one hour) instead of failing at that bound.
+    """
+
+    def __init__(self, *, deadline_unix_ms: int, clock_ms: Callable[[], int],
+                 interrupt: Callable[[Callable[[], bool]], bool]) -> None:
+        self._deadline_unix_ms = deadline_unix_ms
+        self._clock_ms = clock_ms
+        self._interrupt = interrupt
+        self._done = threading.Event()
+        self.fired = False
+        self._thread = threading.Thread(
+            target=self._run, name="a6-recovery-deadline", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._done.is_set():
+            remaining_ms = self._deadline_unix_ms - self._clock_ms()
+            if remaining_ms <= 0:
+                break
+            self._done.wait(min(_RECOVERY_DEADLINE_POLL_SECONDS, remaining_ms / 1_000.0))
+        if self._done.is_set():
+            return
+        try:
+            self.fired = bool(self._interrupt(self._done.is_set))
+        except Exception:
+            # The interruption itself failed; the work still ran past the
+            # deadline, so its result can never be published.
+            self.fired = True
+
+    def stop(self) -> None:
+        self._done.set()
+
+
+def _route_that_ran(route: Any, request_id: str) -> Any:
+    """The concrete route that executed ``request_id``, else ``route``.
+
+    A cold-restart owner replaces its route when every peer is lost. The
+    replacement never ran the request, so its cleanup evidence (exact
+    receipts, exited-peer incidents) is read from the retired route that
+    did; the owner keeps that mapping until the request is released.
+    """
+
+    reader = getattr(type(route), "route_for_request", None)
+    if callable(reader):
+        try:
+            ran = route.route_for_request(request_id)
+        except Exception:
+            ran = None
+        if ran is not None:
+            return ran
+    return route
+
+
 @dataclass
 class _Pending:
     request: RequestContext | None = None
@@ -217,6 +288,13 @@ class _Pending:
     recovery_attempts: int = 0
     recovery_failure_reason: str | None = None
     recovery_excluded_placements: set[str] = field(default_factory=set)
+    #: The frozen recovery deadline (the replay checkpoint's expiry) elapsed
+    #: while successor work was still in flight, and that work was interrupted.
+    recovery_deadline_exceeded: bool = False
+    #: Successor output buffered before cutover, and the successor's bound;
+    #: counts only, never token material.
+    recovery_output_count: int = 0
+    recovery_output_limit: int | None = None
 
 
 #: Upper bound of the A10 candidate collection window (``physical_inference_node``
@@ -1249,6 +1327,9 @@ class LiveRouterPort:
                 "recovery_phase": pending.recovery_phase,
                 "recovery_attempts": pending.recovery_attempts,
                 "recovery_failure_reason": pending.recovery_failure_reason,
+                "recovery_deadline_exceeded": pending.recovery_deadline_exceeded,
+                "recovery_output_count": pending.recovery_output_count,
+                "recovery_output_limit": pending.recovery_output_limit,
                 "source_failure_observed": pending.source_failure_identity is not None,
                 "cancellation_requested": pending.cancellation_requested.is_set(),
                 "cancellation_linearized": pending.cancellation_linearized,
@@ -1322,6 +1403,12 @@ class LiveRouterPort:
     def _recovery_failure_code(error: BaseException) -> str:
         """Map internal failures to bounded non-disclosing retained codes."""
 
+        if isinstance(error, (M16AdmissionError, ValueError)) and str(error) in (
+            _RECOVERY_EXPIRY_CODES
+        ):
+            # Owner ruling: a replay checkpoint or successor qualification that
+            # expires while recovery is in flight is the recovery timeout.
+            return "recovery_timeout"
         if isinstance(error, M16AdmissionError):
             code = str(error)
             if (
@@ -1442,6 +1529,7 @@ class LiveRouterPort:
                     ):
                         raise M16AdmissionError("recovery_output_noncontiguous")
                     buffered.append((token_index, token_id))
+                    pending.recovery_output_count = len(buffered)
 
             identity = pending.command_identity
             assert identity is not None
@@ -1465,15 +1553,35 @@ class LiveRouterPort:
             self._release_predecessor_attempt(pending, source_command)
             with self._changed:
                 pending.execution_started = True
+                pending.recovery_output_count = 0
+                pending.recovery_output_limit = successor_request.max_new_tokens
                 pending.recovery_phase = "recovery_prefill"
-            self._route.infer(
-                successor_request.prompt_token_ids,
-                max_new_tokens=successor_request.max_new_tokens,
-                request_id=request_id,
-                sink=_RecoveryCollector(),
-                cancel_requested=pending.cancellation_requested.is_set,
-                **route_options,
+            deadline_guard = _RecoveryDeadlineGuard(
+                deadline_unix_ms=checkpoint.expiry_unix_ms,
+                clock_ms=self._recovery_clock_ms,
+                interrupt=lambda stopped: self._interrupt_recovery_at_deadline(
+                    pending, request_id, stopped=stopped),
             )
+            try:
+                self._route.infer(
+                    successor_request.prompt_token_ids,
+                    max_new_tokens=successor_request.max_new_tokens,
+                    request_id=request_id,
+                    sink=_RecoveryCollector(),
+                    cancel_requested=pending.cancellation_requested.is_set,
+                    **route_options,
+                )
+            except Exception as error:
+                if pending.recovery_deadline_exceeded:
+                    raise TimeoutError("recovery_deadline_exceeded") from error
+                raise
+            finally:
+                with self._changed:
+                    # Under the router lock: the guard either interrupted the
+                    # work above or can no longer fire.
+                    deadline_guard.stop()
+            if pending.recovery_deadline_exceeded:
+                raise TimeoutError("recovery_deadline_exceeded")
             if len(buffered) > successor_request.max_new_tokens:
                 raise M16AdmissionError("recovery_output_overflow")
 
@@ -1551,6 +1659,8 @@ class LiveRouterPort:
                 and not isinstance(error, (InferenceCancelled, M16AdmissionError))
                 and not pending.cancellation_requested.is_set()
                 and pending.recovery_attempts < 2
+                # The checkpoint expired: no further attempt can qualify.
+                and not pending.recovery_deadline_exceeded
             )
             if retryable_successor_failure:
                 try:
@@ -1655,6 +1765,43 @@ class LiveRouterPort:
                     ),
                 )
             return False
+
+    def _interrupt_recovery_at_deadline(
+        self,
+        pending: _Pending,
+        request_id: str,
+        *,
+        stopped: Callable[[], bool],
+    ) -> bool:
+        """Interrupt the successor command whose recovery deadline elapsed.
+
+        Uses the owner cancellation mechanics (command-controller cancellation
+        generation, then physical fan-out) without setting the owner's
+        cancellation latch, so the request fails as a recovery timeout.
+        """
+
+        route_cancel = None
+        with self._changed:
+            if (stopped()
+                    or pending.cancellation_requested.is_set()
+                    or pending.terminal_status is not None
+                    or pending.recovery_phase != "recovery_prefill"):
+                return False
+            pending.recovery_deadline_exceeded = True
+            cancellation_deadline = self._request_command_cancellation(
+                pending,
+                deadline_monotonic_s=(
+                    time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS),
+            )
+            route_cancel = getattr(self._route, "cancel_request", None)
+            self._changed.notify_all()
+        _LOGGER.warning("%s", json.dumps(
+            {"event": "a6_recovery_deadline_exceeded", "request_id": request_id,
+             "recovery_attempts": pending.recovery_attempts},
+            sort_keys=True, separators=(",", ":")))
+        if callable(route_cancel):
+            route_cancel(request_id, deadline_monotonic_s=cancellation_deadline)
+        return True
 
     def _rotate_binding_locked(self, candidate: str, *, expected_bound: str) -> bool:
         """Rotate the bound digest to ``candidate``; caller holds ``self._lock``.
@@ -2278,8 +2425,8 @@ class LiveRouterPort:
         (process alive) proves nothing, and the request stays terminal-blocked.
         """
 
-        route = self._route
         request_id = identity.request_id
+        route = _route_that_ran(self._route, request_id)
         # Fields fixed for the command's lifetime. Cancellation generation is
         # not among them: the failure itself joins the command to the route's
         # next generation, and the incident keeps the one it was observed at.
@@ -2379,7 +2526,7 @@ class LiveRouterPort:
             receipt = dict(pending.cleanup_receipt)
         if receipt is None:
             scoped_receipt_source = getattr(
-                self._route,
+                _route_that_ran(self._route, identity.request_id),
                 "request_cleanup_receipt_scoped",
                 None,
             )

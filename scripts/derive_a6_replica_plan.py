@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Derive a two-disjoint-path A6 operator plan from a bound two-host plan.
+"""Derive a disjoint-path A6 operator plan from a bound two- or three-host plan.
 
 A6 physical recovery needs a successor path that survives the loss of every
 source placement (spec 2026-08-18 section 10: "two compatible independently
@@ -46,7 +46,9 @@ Offline: no peer, transport or fleet contact. Staging the derived bundle
 (``stage_live_route``) transfers each node its ``node_transfer_manifests``
 selection, which for a complete-model replica is the control documents, the
 code AND every model shard (about 1 GB per node for the 0.5B model), into that
-node's staging root. The node, however, loads from the assignment's artifact
+node's staging root, unless ``--preposition-artifacts`` binds every shard to
+the copy already in that node's proven root (``controller.prepositioned_artifacts``).
+With a third host (``placement-002``) the plan has three disjoint full paths. The node, however, loads from the assignment's artifact
 root, so a remote node's asserted root must itself hold the complete model
 before the plan is served (the node refuses ``invalid_stage_pack_file`` at
 configure otherwise).
@@ -64,7 +66,7 @@ import subprocess
 import sys
 import time
 from dataclasses import asdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -72,7 +74,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 PROTOCOL = "mycelium.a6_replica_plan_derivation.v1"
-PLACEMENT_IDS = ("placement-000", "placement-001")
+#: One complete-model placement per host, in plan node order (entry first). A6
+#: needs at least two hosts; a third host gives the exhausted-attempts case a
+#: real second disjoint successor.
+PLACEMENT_IDS = ("placement-000", "placement-001", "placement-002")
+MINIMUM_HOSTS = 2
+PREPOSITIONED_PROTOCOL = "mycelium.controller_prepositioned_artifacts.v1"
 REPLICA_GROUP = "full-model"
 FULL_COMPONENTS = ("input_embedding", "decoder", "final_norm", "lm_head")
 RUNTIME_IDENTITY_FIELDS = ("backend", "backend_version", "device")
@@ -344,8 +351,9 @@ def replica_documents(
     from stage_pack import artifact_report_for_loader, compile_stage_pack, verify_stage_pack
     from weight_provisioning import provision_assignment
 
-    if len(templates) != len(PLACEMENT_IDS):
+    if not MINIMUM_HOSTS <= len(templates) <= len(PLACEMENT_IDS):
         raise DerivationError("a6_replica_requires_two_hosts")
+    placement_ids = PLACEMENT_IDS[:len(templates)]
     local_root = Path(local_artifact_root)
 
     def local_fetch(model_id, revision, filename, cache_root, *, local_files_only):
@@ -400,14 +408,14 @@ def replica_documents(
                 "primary": index == 0,
             }
             for index, (placement_id, assignment) in enumerate(
-                zip(PLACEMENT_IDS, assignments, strict=True))
+                zip(placement_ids, assignments, strict=True))
         ],
         "forward_edges": [],
         "loopbacks": [],
     }
     graph = build_replicated_execution_graph(
-        dict(zip(PLACEMENT_IDS, assignments, strict=True)),
-        dict(zip(PLACEMENT_IDS, proofs, strict=True)),
+        dict(zip(placement_ids, assignments, strict=True)),
+        dict(zip(placement_ids, proofs, strict=True)),
         route_plan,
         link_scheme="iroh",
         runtime_scheme="iroh",
@@ -420,6 +428,53 @@ def replica_documents(
         "graph": graph,
         "challenge_outputs": outputs,
     }
+
+
+def prepositioned_artifacts(
+    transfer: Mapping[str, Any],
+    packs: Sequence[Mapping[str, Any]],
+    roots: Mapping[str, Mapping[str, str]],
+    node_manifests: dict[str, Any],
+) -> dict[str, Any]:
+    """Bind each node's model shards to the copies already in its proven root.
+
+    Staging then copies every shard on the node itself from ``source_path``
+    (verifying size and content digest against the controller's transfer
+    record) instead of shipping it again; each shard is removed from that
+    node's transfer selection, which the controller requires to be disjoint.
+    """
+
+    base = {record["path"]: record for record in transfer["files"]}
+    members: dict[str, list[dict[str, Any]]] = {}
+    for pack in packs:
+        node_id = pack["node_id"]
+        root = roots[node_id]["artifact_root"]
+        records = []
+        for artifact in pack["artifacts"]:
+            destination = f"deployment/{artifact['upstream_path']}"
+            record = base.get(destination)
+            relative = PurePosixPath(str(artifact.get("relative_path")))
+            if (record is None or relative.is_absolute()
+                    or any(part in {"", ".", ".."} for part in relative.parts)
+                    or record["size_bytes"] != artifact.get("size_bytes")):
+                raise DerivationError("a6_replica_preposition_unbound")
+            records.append({
+                "destination_path": destination,
+                "source_path": str(PurePosixPath(root) / relative),
+                "size_bytes": record["size_bytes"],
+                "content_digest": record["content_digest"],
+            })
+        if not records or node_id in members:
+            raise DerivationError("a6_replica_preposition_unbound")
+        records.sort(key=lambda item: item["destination_path"])
+        members[node_id] = records
+        destinations = {item["destination_path"] for item in records}
+        manifest = node_manifests["manifests"][node_id]
+        manifest["files"] = [item for item in manifest["files"]
+                             if item["path"] not in destinations]
+    if set(members) != set(node_manifests["manifests"]):
+        raise DerivationError("a6_replica_preposition_unbound")
+    return {"protocol": PREPOSITIONED_PROTOCOL, "members": members}
 
 
 def _copy_tree(source: Path, destination: Path) -> None:
@@ -443,6 +498,7 @@ def derive_plan(
     runtime_identities: Mapping[str, Any] | None = None,
     observe_local: Callable[[str, str], dict[str, str]] = observe_local_runtime_identity,
     on_progress: Callable[[str, Mapping[str, Any]], None] = lambda _stage, _fields: None,
+    preposition: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return (unbound derived plan, derivation report); writes ``bundle_out``.
 
@@ -471,7 +527,8 @@ def derive_plan(
     run_plan = controller["run_plan"]
     bundle_in = Path(controller["source_root"])
     nodes = run_plan["nodes"]
-    if len(nodes) != 2 or nodes[0]["node_id"] != run_plan["entry_node_id"]:
+    if (not MINIMUM_HOSTS <= len(nodes) <= len(PLACEMENT_IDS)
+            or nodes[0]["node_id"] != run_plan["entry_node_id"]):
         raise DerivationError("a6_replica_requires_entry_first_two_hosts")
     load_generations = {node["configure"]["load_generation"] for node in nodes}
     if len(load_generations) != 1:
@@ -544,6 +601,9 @@ def derive_plan(
     controller["source_root"] = str(bundle_out)
     controller["transfer_manifest"] = transfer
     controller["node_transfer_manifests"] = _node_transfer_manifests(transfer, documents["packs"])
+    if preposition:
+        controller["prepositioned_artifacts"] = prepositioned_artifacts(
+            transfer, documents["packs"], roots, controller["node_transfer_manifests"])
 
     by_node = {
         assignment["node_id"]: (assignment, pack)
@@ -587,6 +647,10 @@ def derive_plan(
             node_id: len(document["files"])
             for node_id, document in controller["node_transfer_manifests"]["manifests"].items()
         },
+        "prepositioned_file_counts": (
+            None if "prepositioned_artifacts" not in controller else {
+                node_id: len(records) for node_id, records
+                in controller["prepositioned_artifacts"]["members"].items()}),
         "bound": False,
     }
     return plan, report
@@ -625,7 +689,9 @@ def validate(plan_path: Path) -> dict[str, Any]:
         (placement.placement_id, placement.node_id)
         for stage in graph.stages for placement in stage.placements
     ]
-    if len(graph.stages) != 1 or len({node for _, node in placements}) != 2:
+    hosts = {node for _, node in placements}
+    if (len(graph.stages) != 1 or len(hosts) != len(placements)
+            or not MINIMUM_HOSTS <= len(hosts) <= len(PLACEMENT_IDS)):
         raise DerivationError("a6_replica_graph_not_two_disjoint_paths")
     return {
         "deployment_id": projection.deployment_id,
@@ -660,6 +726,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="JSON runtime identity observed on NODE by running RUNTIME_IDENTITY_PROGRAM with "
              "that node's own python_executable (repeatable); required for every node "
              "without local process transport")
+    parser.add_argument(
+        "--preposition-artifacts", action="store_true",
+        help="stage each node's model shards from its proven artifact root on that node "
+             "(controller.prepositioned_artifacts) instead of transferring them")
     binding = parser.add_mutually_exclusive_group(required=True)
     binding.add_argument("--seed-state-root", type=Path)
     binding.add_argument("--unbound", action="store_true",
@@ -696,7 +766,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         plan, report = derive_plan(
             _read_json(args.base_plan), bundle_out=args.bundle_out,
-            artifact_roots=asserted, runtime_identities=observed, on_progress=progress)
+            artifact_roots=asserted, runtime_identities=observed, on_progress=progress,
+            preposition=args.preposition_artifacts)
         if args.seed_state_root is not None:
             plan = bind(plan, args.seed_state_root, now=time.time())
             report["bound"] = True

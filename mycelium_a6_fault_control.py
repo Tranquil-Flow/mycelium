@@ -430,7 +430,15 @@ class ControlledFaultMechanism:
             raise FaultRejected(f"controlled_fault_pre_state_unproven:{case_id}")
         post_state = dict(seam.apply(case_id=case_id))
         if not _satisfies(post_state, point.expected_pre_recovery_state):
-            raise FaultRejected(f"controlled_fault_injection_unproven:{case_id}")
+            rejected = FaultRejected(f"controlled_fault_injection_unproven:{case_id}")
+            # Measured values of the unmet contract keys, for operator logs.
+            rejected.unmet = {
+                key: (post_state.get(key) if isinstance(
+                    post_state.get(key), (bool, int, str, type(None))) else "non_scalar")
+                for key, expected in point.expected_pre_recovery_state.items()
+                if post_state.get(key) != expected
+            }
+            raise rejected
 
         sequence = len(self._records) + 1
         body = _record_body(

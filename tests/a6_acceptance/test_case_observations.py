@@ -127,13 +127,21 @@ def _product_outcomes():
                                               "recovery_failure_reason": "recovery_timeout"},
                                              _gateway("failed", "deadline_exceeded"))),
         "exhausted_recovery_attempts": ({"source_failure_observed": True, "attempts_used": 2,
-                                         "attempts_exhausted": True},
+                                         "attempts_exhausted": True,
+                                         "successor_nodes_failed": [["node-2"], ["node-3"]]},
                                         _settled({**_FAILED_VIEW, "recovery_attempts": 2},
-                                                 _gateway("failed", "recovery_failed"))),
+                                                 _gateway("failed", "recovery_failed"),
+                                                 qualification={
+                                                     "successor_path_attempt": 2})),
+        # Real fleet behaviour (owner ruling): the fenced source's late
+        # publication is refused and the request completes on its successor.
         "stale_source_output_after_fencing": ({"source_failure_observed": True,
                                                "source_fenced": True,
                                                "late_publication_attempted": True,
-                                               "late_publication_rejected": True}, aborted),
+                                               "late_publication_rejected": True},
+                                              _settled(dict(completed_view),
+                                                       _gateway("completed",
+                                                                terminal_attempt=2))),
         "cleanup_reservation_release": ({"request_terminal": True, "release_observed": True,
                                          "release_count_positive": True},
                                         _settled({"retained": False, "request_attempt": 1,
@@ -392,3 +400,194 @@ def test_a_refused_observation_is_logged_with_its_reason(plan: Path, caplog):
     assert logged == [{"case": "no_successor", "error_type": "AttributeError",
                        "event": "a6_case_observation_refused", "reason":
                        status["refused"]["no_successor"], "request_id": "request-x"}]
+
+
+STALE = "stale_source_output_after_fencing"
+
+
+def test_stale_source_output_completes_only_when_the_late_publication_is_refused(plan: Path):
+    authority = observation_authority(operator_plan=plan, repo_root=ROOT)
+    recorder = CaseObservationRecorder(authority=authority, target=SimpleNamespace())
+    post, settled = _product_outcomes()[STALE]
+    observation = derive_observation(STALE, _executed(STALE, post), settled)
+    assert observation["terminal_state"] == "completed"
+    assert observation["fail_closed"] is True and observation["rejection_observed"] is True
+    for mutation in ("accepted", "late", "unattempted"):
+        changed_post, changed = dict(post), _product_outcomes()[STALE][1]
+        if mutation == "accepted":
+            changed_post["late_publication_rejected"] = False
+        elif mutation == "late":
+            changed.gateway = {**changed.gateway, "late_source_publication_count": 1}
+        else:
+            changed_post["late_publication_attempted"] = False
+        with pytest.raises(ObservationRefused, match="unsatisfied"):
+            recorder.write(STALE, _executed(STALE, changed_post), changed)
+
+
+@pytest.mark.parametrize("case_id", [case for case in runner.REQUIRED_CASES if case not in (
+    POSITIVE, STALE, "cleanup_reservation_release", "cleanup_authority_failure")])
+def test_every_other_negative_case_still_refuses_a_completed_terminal(case_id):
+    _post, settled = _product_outcomes()[case_id]
+    observation = {**derive_observation(case_id, _executed(case_id, _post), settled),
+                   "terminal_state": "completed"}
+    with pytest.raises(ValueError, match="physical_observation_invalid"):
+        runner.validate_case_observation(case_id, observation)
+
+
+class _CutoverReleasedTarget:
+    """The 50 ms poller only ever saw the source identity: cutover, COMPLETED
+    and the router release happened between two polls."""
+
+    def __init__(self, committed):
+        self.service = SimpleNamespace()
+        self.qualifier = SimpleNamespace(issued_qualification_facts=lambda _rid: {
+            "controlled_fault": None, "physical_challenge": "passed",
+            "compatibility_matches_source": True})
+        self.calls = 0
+        self._committed = committed
+
+    def view(self, _request_id):
+        self.calls += 1
+        if self.calls < 3:
+            return {"retained": True, "terminal_status": None, "recovery_required": True,
+                    "recovery_phase": "recovery_prefill", "recovery_attempts": 1,
+                    "route_identity": {"request_attempt": 1, "path_id": "path-source",
+                                       "path_attempt": 0}}
+        return {"retained": False, "terminal_status": "COMPLETED", "recovery_attempts": 1,
+                "recovery_failure_reason": None, "source_failure_observed": True}
+
+    def committed_route_identity(self, _request_id):
+        return self._committed
+
+    def coordinator_terminal(self, _request_id):
+        return "completed" if self.calls >= 3 else None
+
+    def gateway_terminal_count(self, _request_id):
+        return 1 if self.calls >= 3 else 0
+
+    def reservation_count(self, _request_id):
+        return 0
+
+
+@pytest.mark.parametrize("committed_attempt", [2, 1])
+def test_positive_cutover_is_read_from_the_coordinator_not_the_last_view(
+        plan: Path, monkeypatch, committed_attempt):
+    import mycelium_a6_case_observations as module
+
+    authority = observation_authority(operator_plan=plan, repo_root=ROOT)
+    target = _CutoverReleasedTarget({"request_id": "request-1",
+                                     "request_attempt": committed_attempt,
+                                     "path_id": "path-successor" if committed_attempt == 2
+                                     else "path-source",
+                                     "path_attempt": committed_attempt - 1})
+    recorder = CaseObservationRecorder(authority=authority, target=target, settle_seconds=5)
+    monkeypatch.setattr(module, "gateway_facts", lambda *_args, **_kwargs: _gateway(
+        "completed", terminal_attempt=2))
+    recorder.observe(_executed(POSITIVE, {"source_failure_observed": True,
+                                          "recovery_required": True}))
+    recorder.join(timeout=10)
+    status = recorder.status()
+    if committed_attempt == 2:
+        assert status["refused"] == {} and POSITIVE in status["written"]
+        envelope = json.loads((authority.evidence_output_dir / "a6-production-observations"
+                               / f"{POSITIVE}.json").read_text())
+        assert envelope["bindings"]["successor_attempt"] == 2
+        assert envelope["observation"]["publication_generation_cas_count"] == 1
+    else:
+        # No cutover committed: the coordinator never names a successor.
+        assert status["written"] == {} and POSITIVE in status["refused"]
+
+
+def test_refused_observation_logs_the_measured_field_values(plan: Path, caplog):
+    import logging
+
+    authority = observation_authority(operator_plan=plan, repo_root=ROOT)
+    recorder = CaseObservationRecorder(authority=authority, target=SimpleNamespace())
+    post, settled = _product_outcomes()["no_successor"]
+    executed = _executed("no_successor", {**post, "truthful_abort_required": False})
+    with pytest.raises(ObservationRefused) as refused:
+        recorder.write("no_successor", executed, settled)
+    recorder._refuse("no_successor", executed, refused.value)
+    logged = [json.loads(record.getMessage()) for record in caplog.records
+              if record.name == "mycelium_a6_case_observations"
+              and record.levelno == logging.WARNING]
+    detail = logged[-1]["detail"]
+    assert detail["observation.rejection_observed"] is False
+    assert detail["observation.terminal_state"] == "aborted"
+    assert detail["bindings.request_id"] == "request-1"
+    assert not any(key.endswith("_digest") for key in detail)
+
+
+def test_cleanup_authority_failure_records_only_the_v2_contract(plan: Path):
+    """The v1 shape is unsatisfiable on the real product; only v2 is attempted."""
+
+    authority = observation_authority(operator_plan=plan, repo_root=ROOT)
+    target = SimpleNamespace(
+        service=SimpleNamespace(), qualifier=None,
+        view=lambda _rid: {"retained": False},
+        coordinator_terminal=lambda _rid: "failed",
+        reservation_count=lambda _rid: 0,
+        gateway_terminal_count=lambda _rid: 1,
+        router=SimpleNamespace(a6_command_authority=lambda _rid: None))
+    recorder = CaseObservationRecorder(authority=authority, target=target, settle_seconds=1)
+    recorder._record(_executed("cleanup_authority_failure",
+                               {"cleanup_authority_refused": True,
+                                "unpublishable_suffix_discarded": True}))
+    status = recorder.status()
+    assert "cleanup_authority_failure" not in status["refused"]
+    assert status["refused"]["cleanup_authority_failure.v2"] == (
+        "a6_cleanup_v2_authority_unavailable")
+
+
+EXHAUSTED = "exhausted_recovery_attempts"
+
+
+@pytest.mark.parametrize("mutation", ["one_successor", "same_node", "no_second_issue"])
+def test_exhausted_attempts_needs_evidence_of_a_second_real_successor(mutation):
+    post, settled = _product_outcomes()[EXHAUSTED]
+    post = dict(post)
+    if mutation == "one_successor":
+        post.update(attempts_used=1, successor_nodes_failed=[["node-2"]])
+    elif mutation == "same_node":
+        post["successor_nodes_failed"] = [["node-2"], ["node-2"]]
+    else:
+        # Two placements: the counter reached 2 but the qualifier only ever
+        # issued a record for the first successor.
+        settled.qualification = {"successor_path_attempt": 1}
+    observation = derive_observation(EXHAUSTED, _executed(EXHAUSTED, post), settled)
+    assert observation["rejection_observed"] is False
+    with pytest.raises(ValueError, match="physical_observation_invalid"):
+        runner.validate_case_observation(EXHAUSTED, observation)
+
+
+def test_a_blocked_request_is_measured_after_its_late_cleanup_proof(plan: Path, monkeypatch):
+    import mycelium_a6_case_observations as module
+
+    class _LateCleanup:
+        service, qualifier, calls = SimpleNamespace(), None, 0
+
+        def view(self, _rid):
+            self.calls += 1
+            return {"retained": True, "terminal_blocked_reason": "command_cleanup_receipt_missing",
+                    "recovery_failure_reason": "recovery_timeout", "recovery_attempts": 1}
+
+        def coordinator_terminal(self, _rid):
+            self.calls += 1  # the late proof lands after a few polls
+            return "failed" if self.calls >= 8 else None
+
+        def reservation_count(self, _rid):
+            return 0 if self.calls >= 8 else 2
+
+        def gateway_terminal_count(self, _rid):
+            return 1
+
+    authority = observation_authority(operator_plan=plan, repo_root=ROOT)
+    recorder = CaseObservationRecorder(authority=authority, target=_LateCleanup(),
+                                       settle_seconds=5)
+    monkeypatch.setattr(module, "gateway_facts", lambda *_a, **_k: _gateway(
+        "failed", "request_cleanup_unproven"))
+    recorder.observe(_executed("timeout_during_recovery", {
+        "source_failure_observed": True, "recovery_deadline_exceeded": True}))
+    recorder.join(timeout=10)
+    status = recorder.status()
+    assert status["refused"] == {} and "timeout_during_recovery" in status["written"]

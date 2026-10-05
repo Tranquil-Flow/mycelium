@@ -58,6 +58,21 @@ def test_the_built_plan_passes_the_gate_validation(tmp_path: Path) -> None:
     )
     assert document["product_origin"] == EXPECTED_ORIGIN
     assert document["expected_placements"] == list(EXPECTED_PLACEMENTS)
+    assert document["expected_placements"] == ["node-0", "node-2", "node-3"]
+
+
+@pytest.mark.parametrize("placements", [("node-0", "node-2"), ("node-0", "node-2", "node-3")])
+def test_two_and_three_node_topologies_are_admissible(tmp_path: Path, placements) -> None:
+    document = _build(tmp_path, placements=placements)
+    assert validate_plan(document)["expected_placements"] == list(placements)
+
+
+@pytest.mark.parametrize("placements", [
+    ("node-0",), ("node-0", "node-3"), ("node-2", "node-0", "node-3"),
+    ("node-0", "node-2", "node-3", "node-4")])
+def test_other_topologies_are_refused(tmp_path: Path, placements) -> None:
+    with pytest.raises(ValueError, match="physical_plan_placements_invalid"):
+        _build(tmp_path, placements=placements)
 
 
 def test_the_digests_are_the_serving_trees_own(tmp_path: Path) -> None:

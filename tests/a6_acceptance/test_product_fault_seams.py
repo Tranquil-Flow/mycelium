@@ -244,7 +244,7 @@ def _scripted_target(views):
         _sessions={"node-0": SimpleNamespace(_process=process),
                    "node-2": SimpleNamespace(_process=process)},
         a4_scoped_runtime_incidents=lambda: list(incidents))
-    service = SimpleNamespace(terminal_event_count=lambda _rid: 0, cancel=lambda _rid: True)
+    service = SimpleNamespace(terminal_event_count=lambda _rid: 0)
     return router, LiveProductFaultTarget(router=router, route=route, service=service,
                                           wait_seconds=0.2, poll_seconds=0.001)
 

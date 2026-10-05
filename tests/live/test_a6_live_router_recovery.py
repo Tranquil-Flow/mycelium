@@ -1023,3 +1023,60 @@ def test_idle_gateway_projection_keeps_recovery_source_current_for_the_product(
         assert recovery[0]["attributes"]["request_count"] == 0
     finally:
         router.close()
+
+
+def test_live_router_times_out_a_stalled_successor_at_the_checkpoint_expiry(tmp_path) -> None:
+    """A successor that stalls in recovery prefill is interrupted when the
+    frozen recovery deadline (the replay checkpoint's expiry) elapses, and the
+    request fails with the bounded recovery_timeout code, not the one-hour
+    command deadline."""
+
+    route = FailingThenRecoveringRoute(block_successor=True)
+    now = [1_200]
+    coordinator, router, service, qualification = _runtime(
+        tmp_path, route, recovery_clock_ms=lambda: now[0])
+    subscription = None
+    try:
+        request_id = service.submit(
+            InferenceSubmission(
+                prompt="live recovery prompt",
+                max_new_tokens=4,
+                qualification=qualification_binding(qualification),
+            )
+        )
+        subscription = service.subscribe(request_id, last_event_id=None)
+        assert route.successor_started.wait(timeout=2)
+        assert router.a6_request_view(request_id)["recovery_deadline_exceeded"] is False
+        assert not route.cancelled.wait(timeout=0.5)
+        now[0] = 1_200 + 30_000  # the checkpoint expiry, 30 s after its creation
+        events = []
+        while True:
+            event = subscription.next_event(timeout=5)
+            if event is None:
+                break
+            events.append(event)
+            subscription.ack(event.sequence)
+        assert route.cancelled.is_set()
+        assert [event.kind for event in events
+                if event.kind in {"completed", "failed", "cancelled"}] == ["failed"]
+        assert router.recovery_failure_reason(request_id) == "recovery_timeout"
+        assert service.terminal_event_count(request_id) == 1
+        projected = next(item for item in coordinator.status()["requests"]
+                         if item["request_id"] == request_id)
+        assert projected["terminal_state"] == "failed"
+        assert projected["reservation_count"] == 0
+    finally:
+        if subscription is not None:
+            subscription.close()
+        service.close()
+
+
+@pytest.mark.parametrize("error, expected", [
+    (ValueError("recovery_qualification_expired"), "recovery_timeout"),
+    (M16AdmissionError("recovery_checkpoint_stale"), "recovery_timeout"),
+    (TimeoutError("recovery_deadline_exceeded"), "recovery_timeout"),
+    (M16AdmissionError("recovery_qualification_stale"), "recovery_qualification_stale"),
+    (ValueError("successor_identity_mismatch"), "recovery_internal_failure"),
+])
+def test_recovery_expiry_maps_to_the_bounded_timeout_code(error, expected) -> None:
+    assert LiveRouterPort._recovery_failure_code(error) == expected

@@ -962,6 +962,16 @@ class ColdRouteRestartOwner:
             deadline_monotonic_s=deadline_monotonic_s,
         )
 
+    def route_for_request(self, request_id: str) -> LiveRoute | None:
+        """The route that executed ``request_id`` until it is released.
+
+        It may be a route already retired by a cold restart: its in-memory
+        cleanup evidence remains the only proof for that request.
+        """
+
+        with self._lock:
+            return self._request_routes.get(request_id)
+
     def release_request(self, request_id: str) -> None:
         with self._lock:
             route = self._request_routes.pop(request_id, None)

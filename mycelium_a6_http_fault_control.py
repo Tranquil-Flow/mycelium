@@ -15,6 +15,8 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import logging
+import re
 import time
 from typing import Any, Callable, Mapping
 
@@ -29,6 +31,9 @@ _ALLOWED_HEADERS = frozenset({
     b"user-agent", _GRANT,
 })
 _MAX_BODY = 512
+_LOGGER = logging.getLogger(__name__)
+#: A FaultRejected code is a bounded identifier; anything else is not echoed.
+_REFUSAL_CODE = re.compile(r"[a-z0-9_:.]{1,128}")
 
 
 class _Refused(Exception):
@@ -182,7 +187,17 @@ class A6LocalFaultReceiver:
                 )
                 try:
                     mechanism.execute(EXECUTE_SOURCE_FAILURE_ACTION, case_id=case_id)
-                except FaultRejected:
+                except FaultRejected as rejected:
+                    code = str(rejected)
+                    # Operator diagnostics only: the bounded refusal code and
+                    # case id; the HTTP response stays non-disclosing.
+                    record = {"event": "a6_controlled_fault_refused", "case_id": case_id,
+                              "code": code if _REFUSAL_CODE.fullmatch(code) else "unbounded"}
+                    unmet = getattr(rejected, "unmet", None)
+                    if isinstance(unmet, Mapping):
+                        record["unmet"] = dict(unmet)
+                    _LOGGER.warning("%s", json.dumps(
+                        record, sort_keys=True, separators=(",", ":"), default=str))
                     raise _Refused(403) from None
                 self._execution_order.append(case_id)
             status = 200

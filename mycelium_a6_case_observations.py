@@ -67,6 +67,37 @@ _TERMINAL_STATUSES = frozenset({"COMPLETED", "FAILED", "CANCELLED"})
 class ObservationRefused(ValueError):
     """Nothing is written when an observation is refused."""
 
+    def __init__(self, code: str, *, detail: Mapping[str, Any] | None = None) -> None:
+        super().__init__(code)
+        #: Privacy-reduced field -> value facts that explain a refusal.
+        self.detail = None if detail is None else dict(detail)
+
+
+#: Scalar observation and binding fields safe to echo in an operator log.
+_DETAIL_SCALARS = (bool, int, str, type(None))
+
+
+def refusal_detail(envelope: Mapping[str, Any]) -> dict[str, Any]:
+    """Observation and binding scalars of a refused envelope, digests excluded.
+
+    Every value is a measured scalar the envelope would have published; no
+    token material, path, or secret can be present (private markers were
+    already refused), and long strings are truncated.
+    """
+
+    detail: dict[str, Any] = {}
+    for section in ("observation", "bindings"):
+        values = envelope.get(section)
+        if not isinstance(values, Mapping):
+            continue
+        for key, value in sorted(values.items()):
+            if key.endswith("_digest") or not isinstance(value, _DETAIL_SCALARS):
+                continue
+            if any(marker in key for marker in _PRIVATE_MARKERS):
+                continue
+            detail[f"{section}.{key}"] = value[:64] if isinstance(value, str) else value
+    return detail
+
 
 @dataclass(frozen=True)
 class ObservationAuthority:
@@ -318,10 +349,37 @@ def derive_observation(case_id: str, executed: Any, settled: SettledFacts) -> di
             "release_observed": post.get("release_observed") is True,
             "release_count": executed.armed_reservation_count,
         }
+    if case_id == "stale_source_output_after_fencing":
+        # Owner ruling: the request may complete on its successor; fail-closed
+        # is about the fenced source's late publication, which the authority
+        # must refuse without advancing the gateway stream.
+        fail_closed = (
+            post.get("late_publication_attempted") is True
+            and post.get("late_publication_rejected") is True
+            and settled.gateway is not None
+            and gateway.get("late_source_publication_count") == 0
+            and gateway.get("duplicated_token_count") == 0)
+    else:
+        fail_closed = not cut_over or view.get("terminal_status") != "COMPLETED"
+    rejection_observed = _rejection_observed(case_id, post)
+    if case_id == "exhausted_recovery_attempts":
+        # The router counts an attempt before reserving its successor, so the
+        # counter alone can reach two with no second successor. Require two
+        # distinct failed successors and the qualifier's own record of the
+        # second one (M16 path attempt = source path attempt + 2).
+        failed = post.get("successor_nodes_failed")
+        facts = settled.qualification or {}
+        rejection_observed = (
+            rejection_observed
+            and post.get("attempts_used") == 2
+            and isinstance(failed, list) and len(failed) == 2
+            and all(isinstance(nodes, list) and nodes for nodes in failed)
+            and not set(failed[0]) & set(failed[1])
+            and facts.get("successor_path_attempt") == executed.binding["path_attempt"] + 2)
     base = {
         **common,
-        "rejection_observed": _rejection_observed(case_id, post),
-        "fail_closed": not cut_over or view.get("terminal_status") != "COMPLETED",
+        "rejection_observed": rejection_observed,
+        "fail_closed": fail_closed,
         "terminal_state": _terminal_state(case_id, settled),
     }
     if case_id == "cleanup_authority_failure":
@@ -437,6 +495,13 @@ class CaseObservationRecorder:
                     self._clock() >= deadline):
                 break
             self._sleep(0.05)
+        committed_identity = getattr(target, "committed_route_identity", None)
+        committed = (committed_identity(executed.request_id)
+                     if callable(committed_identity) else None)
+        if committed is not None:
+            # The coordinator's cutover CAS is the committed identity; the
+            # last polled view can predate a cutover that released at once.
+            view = {**view, "route_identity": committed}
         marker = executed.failure_marker
         return SettledFacts(
             view=view,
@@ -453,31 +518,43 @@ class CaseObservationRecorder:
 
     def _record(self, executed: Any) -> None:
         case_id = executed.case_id
-        settled = None
-        try:
-            settled = self._settle(executed)
-            self.write(case_id, executed, settled)
-        except Exception as error:  # a refused case simply has no observation
-            self._refuse(case_id, executed, error)
         if case_id == "cleanup_authority_failure":
+            # The real product publishes a cleanup failure notice, so the
+            # frozen v1 shape (zero terminal events) can never be satisfied;
+            # the gate admits this case only under the owner-approved v2
+            # contract. A v1 plan for it still fails: no v1 file is written.
             try:
-                released = self._settle_release(
-                    executed, None if settled is None else settled.view)
+                released = self._settle_release(executed, None)
                 self.write_cleanup_authority_v2(
                     executed, released,
                     self._target.router.a6_command_authority(executed.request_id))
             except Exception as error:
                 self._refuse(f"{case_id}.v2", executed, error)
+            return
+        try:
+            settled = self._settle(executed)
+            if (settled.view.get("terminal_blocked_reason") is not None
+                    and not _cleanup_complete(settled)):
+                # A blocked request keeps its reservations until a late exact
+                # cleanup proof (for example once a stalled peer resumes)
+                # releases them; measure cleanup after that, within the bound.
+                settled = self._settle_release(executed, settled.view)
+            self.write(case_id, executed, settled)
+        except Exception as error:  # a refused case simply has no observation
+            self._refuse(case_id, executed, error)
 
     def _refuse(self, key: str, executed: Any, error: BaseException) -> None:
         reason = str(error)[:96] or type(error).__name__
         with self._lock:
             self._refused[key] = reason
-        _LOGGER.warning("%s", json.dumps(
-            {"event": "a6_case_observation_refused", "case": key,
-             "request_id": getattr(executed, "request_id", None),
-             "error_type": type(error).__name__, "reason": reason},
-            sort_keys=True, separators=(",", ":")))
+        record = {"event": "a6_case_observation_refused", "case": key,
+                  "request_id": getattr(executed, "request_id", None),
+                  "error_type": type(error).__name__, "reason": reason}
+        detail = getattr(error, "detail", None)
+        if isinstance(detail, Mapping):
+            record["detail"] = dict(detail)
+        _LOGGER.warning("%s", json.dumps(record, sort_keys=True,
+                                         separators=(",", ":"), default=str))
 
     def _settle_release(self, executed: Any,
                         prior_view: Mapping[str, Any] | None) -> SettledFacts:
@@ -502,7 +579,8 @@ class CaseObservationRecorder:
         try:
             validate_source_owned_observation(envelope, case_id=case_id)
         except ValueError as error:
-            raise ObservationRefused(f"a6_observation_unsatisfied:{error}") from error
+            raise ObservationRefused(f"a6_observation_unsatisfied:{error}",
+                                     detail=refusal_detail(envelope)) from error
         path = self.root / f"{case_id}.json"
         _private_dir(self._authority.evidence_output_dir)
         _write_once(path, envelope)
@@ -527,7 +605,16 @@ class CaseObservationRecorder:
         committed = _cutover_identity(executed, settled.view)
         if (not isinstance(receipt, tuple) or len(receipt) != 4 or command_authority is None
                 or committed is None):
-            raise ObservationRefused("a6_cleanup_v2_authority_unavailable")
+            raise ObservationRefused("a6_cleanup_v2_authority_unavailable", detail={
+                "gateway_receipt_present": isinstance(receipt, tuple) and len(receipt) == 4,
+                "command_authority_present": command_authority is not None,
+                "cutover_committed": committed is not None,
+                "gateway_terminal_kind": gateway.get("terminal_kind"),
+                "gateway_terminal_code": gateway.get("terminal_code"),
+                "terminal_blocked_reason": settled.view.get("terminal_blocked_reason"),
+                "cleanup_authority_refused": executed.post_state.get(
+                    "cleanup_authority_refused"),
+            })
         binding = executed.binding
         bindings = {
             "request_id": executed.request_id,
@@ -590,7 +677,8 @@ class CaseObservationRecorder:
                 },
             )
         except ValueError as error:
-            raise ObservationRefused(f"a6_cleanup_v2_unsatisfied:{error}") from error
+            raise ObservationRefused(f"a6_cleanup_v2_unsatisfied:{error}",
+                                     detail=refusal_detail(body)) from error
         if layers["v2_envelope_authorized"] is not True:
             raise ObservationRefused("a6_cleanup_v2_unauthorized")
         path = self.root / f"{V2_CASE}.v2.json"
@@ -657,5 +745,6 @@ __all__ = [
     "gateway_failure_marker",
     "local_listener_count",
     "observation_authority",
+    "refusal_detail",
     "write_cleanup_observation",
 ]

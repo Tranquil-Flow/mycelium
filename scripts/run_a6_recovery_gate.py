@@ -42,7 +42,11 @@ REQUIRED_CLEANUP_CHECKS = (
     "physical_processes",
     "reservations",
 )
-EXPECTED_PLACEMENTS = ("node-0", "node-2")
+# Owner ruling (2026-10-05): SB2 (node-3) is the third A6 placement, so the
+# exhausted-attempts case has a real second disjoint successor. The two-node
+# topology stays admissible; it can only fail that case.
+EXPECTED_PLACEMENTS = ("node-0", "node-2", "node-3")
+ADMISSIBLE_PLACEMENTS = (("node-0", "node-2"), EXPECTED_PLACEMENTS)
 EXPECTED_ORIGIN = "http://127.0.0.1:8787"
 TRUSTED_CASE_RUNNER = Path(__file__).resolve().with_name("run_a6_recovery_case.py")
 # Owner ruling R6: the cleanup-authority-failure case is admitted under the
@@ -92,7 +96,9 @@ def validate_plan(document: Mapping[str, Any]) -> dict[str, Any]:
     evidence_root = _absolute_path(
         document.get("evidence_root"), "physical_plan_evidence_root_invalid"
     )
-    if document.get("expected_placements") != list(EXPECTED_PLACEMENTS):
+    if document.get("expected_placements") not in [
+        list(placements) for placements in ADMISSIBLE_PLACEMENTS
+    ]:
         _fail("physical_plan_placements_invalid")
 
     raw_cases = document.get("cases")
@@ -192,6 +198,7 @@ def preparation_plan() -> dict[str, Any]:
         "expected_product_origin": EXPECTED_ORIGIN,
         "expected_product_port": 8787,
         "expected_placements": list(EXPECTED_PLACEMENTS),
+        "admissible_placements": [list(item) for item in ADMISSIBLE_PLACEMENTS],
         "required_cases": list(REQUIRED_CASES),
         "v2_admissible_cases": list(V2_CASES),
         "required_cleanup_checks": list(REQUIRED_CLEANUP_CHECKS),
