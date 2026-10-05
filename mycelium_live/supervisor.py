@@ -1902,8 +1902,18 @@ def _product_application(
     public_status = getattr(route, "public_status", None)
     assignments = getattr(route, "product_assignment_records", None)
     internet_native = getattr(route, "product_internet_native_snapshot", None)
+    recovery_projection = getattr(route, "recovery_public_projection", None)
     if not all(callable(value) for value in (membership, salt, public_status)):
         raise ValueError("product_evidence_source_unavailable")
+
+    def _follow(name: str) -> Callable[[], Any]:
+        # A cold-restart owner swaps in a new route and closes the old one, so a
+        # method bound at build time would keep reading the closed route. Look the
+        # reader up again on every call to follow the route that currently serves.
+        def read() -> Any:
+            return getattr(route, name)()
+
+        return read
 
     def qualification_document() -> Mapping[str, Any] | None:
         record = qualification_source.current()
@@ -1912,7 +1922,7 @@ def _product_application(
     def internet_native_document() -> Mapping[str, Any]:
         if not callable(internet_native):
             raise ValueError("product_internet_native_source_unavailable")
-        document = internet_native()
+        document = getattr(route, "product_internet_native_snapshot")()
         if not isinstance(document, Mapping):
             raise ValueError("product_internet_native_source_invalid")
         return document
@@ -1931,9 +1941,11 @@ def _product_application(
     return ProductEvidenceApplication(
         projector=projector,
         coarse_region_source=coarse_region_source,
-        membership_source=membership,
-        assignment_source=assignments if callable(assignments) else None,
-        route_source=public_status,
+        membership_source=_follow("product_membership_records"),
+        assignment_source=(
+            _follow("product_assignment_records") if callable(assignments) else None
+        ),
+        route_source=_follow("public_status"),
         qualification_source=qualification_document,
         internet_native_source=(
             internet_native_document if callable(internet_native) else None
@@ -1941,8 +1953,8 @@ def _product_application(
         recovery_source=(
             recovery_source
             if recovery_source is not None
-            else getattr(route, "recovery_public_projection", None)
-            if callable(getattr(route, "recovery_public_projection", None))
+            else _follow("recovery_public_projection")
+            if callable(recovery_projection)
             else None
         ),
         state_root=state_root,
