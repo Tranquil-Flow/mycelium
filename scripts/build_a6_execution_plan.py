@@ -29,6 +29,7 @@ from mycelium_a6_case_observations import (  # noqa: E402
 )
 from scripts.run_a6_recovery_gate import (  # noqa: E402
     EXPECTED_ORIGIN,
+    ADMISSIBLE_PLACEMENTS,
     EXPECTED_PLACEMENTS,
     REQUIRED_CASES,
     REQUIRED_CLEANUP_CHECKS,
@@ -68,7 +69,13 @@ def _case_argv(case_id: str, operator_plan: str) -> list[str]:
     ]
 
 
-def build_plan(*, repo_root: Path, operator_plan: Path, evidence_root: Path) -> dict[str, Any]:
+def build_plan(
+    *,
+    repo_root: Path,
+    operator_plan: Path,
+    evidence_root: Path,
+    placements: Sequence[str] = EXPECTED_PLACEMENTS,
+) -> dict[str, Any]:
     if not Path(operator_plan).is_absolute():
         raise ValueError("a6_plan_operator_plan_not_absolute")
     if not Path(evidence_root).is_absolute():
@@ -83,7 +90,7 @@ def build_plan(*, repo_root: Path, operator_plan: Path, evidence_root: Path) -> 
         "product_origin": EXPECTED_ORIGIN,
         "operator_plan": plan_path,
         "evidence_root": str(evidence_root),
-        "expected_placements": list(EXPECTED_PLACEMENTS),
+        "expected_placements": list(placements),
         "cases": [
             {
                 "case_id": case_id,
@@ -118,6 +125,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     parser.add_argument(
+        "--placements",
+        choices=[",".join(item) for item in ADMISSIBLE_PLACEMENTS],
+        default=",".join(EXPECTED_PLACEMENTS),
+        help="the A6 placement nodes, in plan order",
+    )
+    parser.add_argument(
         "--create-evidence-root",
         action="store_true",
         help="create the evidence root with mode 0700; refuses an existing root",
@@ -138,6 +151,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             repo_root=args.repo_root,
             operator_plan=args.operator_plan,
             evidence_root=args.evidence_root,
+            placements=tuple(args.placements.split(",")),
         )
     except (OSError, KeyError, ValueError, json.JSONDecodeError) as error:
         print(str(error), file=sys.stderr)
