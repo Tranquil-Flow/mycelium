@@ -248,6 +248,25 @@ class LiveProductFaultTarget:
         coordinator = getattr(self.router, "_coordinator", None)
         return None if coordinator is None else coordinator.terminal_state(request_id)
 
+    def committed_route_identity(self, request_id: str) -> dict[str, Any] | None:
+        """The coordinator's committed route identity for one request.
+
+        The router's retained view swaps its route identity to the successor
+        only at cutover, and a completed request is released immediately
+        after; the coordinator's record survives release and is updated by
+        the cutover compare-and-swap itself, so it is the authority.
+        """
+
+        coordinator = getattr(self.router, "_coordinator", None)
+        reader = getattr(coordinator, "route_identity", None)
+        if not callable(reader):
+            return None
+        try:
+            identity = reader(request_id)
+        except Exception:
+            return None
+        return dict(identity) if isinstance(identity, Mapping) else None
+
     def gateway_committed(self, request_id: str) -> tuple[int, int] | None:
         from mycelium_a6_case_observations import gateway_failure_marker
         return gateway_failure_marker(self.service, request_id)

@@ -106,6 +106,16 @@ _NEGATIVE_FIELDS = frozenset(
         "stale_reservation_count",
     }
 )
+_FAIL_CLOSED_TERMINAL_STATES = frozenset(
+    {"aborted", "cancelled", "timed_out", "shutdown", "TERMINAL_BLOCKED"}
+)
+# Owner ruling (2026-10-05): the late old-attempt output of the fenced source is
+# "rejected without advancing the stream" (spec section 6); the request itself
+# may still complete on its successor. For this case only, ``fail_closed``
+# means the late source publication was refused and ``completed`` is admitted.
+_NEGATIVE_TERMINAL_STATES = {
+    "stale_source_output_after_fencing": _FAIL_CLOSED_TERMINAL_STATES | {"completed"},
+}
 _CLEANUP_RELEASE_FIELDS = frozenset(
     {
         "case_id",
@@ -275,13 +285,9 @@ def validate_case_observation(
         _fail("physical_observation_invalid")
     if value.get("rejection_observed") is not True or value.get("fail_closed") is not True:
         _fail("physical_observation_invalid")
-    if value.get("terminal_state") not in {
-        "aborted",
-        "cancelled",
-        "timed_out",
-        "shutdown",
-        "TERMINAL_BLOCKED",
-    }:
+    if value.get("terminal_state") not in _NEGATIVE_TERMINAL_STATES.get(
+        case_id, _FAIL_CLOSED_TERMINAL_STATES
+    ):
         _fail("physical_observation_invalid")
     if value.get("terminal_event_count") not in {0, 1}:
         _fail("physical_observation_invalid")
