@@ -130,3 +130,27 @@ def test_unobserved_result_records_every_post_kill_refusal() -> None:
     assert poll["reads"] == 0 and poll["last_state"] is None
     assert set(poll["refusals"]) == {"a7_evidence_route_unavailable"}
     assert observations["source_incidents"] == []
+
+
+class _HeldShadowEvidence(_Evidence):
+    """The standby keeps the baseline's shadow chain after the baseline completed."""
+
+    def resources(self) -> dict[str, Any]:
+        document = super().resources()
+        document["nodes"]["node-0"].update(shadow_checkpoint_count=2, shadow_kv_bytes=4096)
+        return document
+
+
+def test_unreleased_baseline_shadow_refusal_records_what_was_held() -> None:
+    fault = _Fault()
+    settings = MeasurementSettings(settle_timeout_s=0.3, poll_s=0.01)
+    with pytest.raises(MeasurementRefused) as caught:
+        measure(driver=_Driver(fault), evidence=_HeldShadowEvidence(fault), fault=fault, settings=settings)
+    assert caught.value.code == "a7_baseline_shadow_not_released"
+    observations = caught.value.observations
+    assert observations is not None
+    assert observations["held"] == {"node-0": {"shadow_checkpoint_count": 2, "shadow_kv_bytes": 4096}}
+    assert observations["resources_before"]["entry_node_id"] == "node-0"
+    assert observations["resources_before"]["nodes"]["node-0"]["shadow_kv_bytes"] == 4096
+    assert observations["baseline"] == {"token_count": 6}
+    assert not fault.killed.is_set()

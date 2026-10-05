@@ -825,15 +825,30 @@ def measure(
     release_deadline = time.monotonic() + settings.settle_timeout_s
     while True:
         before = _stable_resources(evidence, timeout_s=settings.settle_timeout_s, poll_s=settings.poll_s)
-        held = [
-            item
-            for item in (before.get("nodes") or {}).values()
+        held = {
+            node_id: item
+            for node_id, item in (before.get("nodes") or {}).items()
             if isinstance(item, Mapping) and "standby" in (item.get("a7_roles") or ()) and (item.get("shadow_checkpoint_count"), item.get("shadow_kv_bytes")) != (0, 0)
-        ]
+        }
         if not held:
             break
         if time.monotonic() >= release_deadline:
-            raise MeasurementRefused("a7_baseline_shadow_not_released")
+            # Record what was still held: the refusal is otherwise the only trace
+            # of a standby that never released the baseline's shadow chain.
+            raise MeasurementRefused(
+                "a7_baseline_shadow_not_released",
+                observations={
+                    "resources_before": dict(before),
+                    "held": {
+                        node_id: {
+                            "shadow_checkpoint_count": item.get("shadow_checkpoint_count"),
+                            "shadow_kv_bytes": item.get("shadow_kv_bytes"),
+                        }
+                        for node_id, item in held.items()
+                    },
+                    "baseline": {"token_count": len(baseline_tokens)},
+                },
+            )
         time.sleep(max(settings.poll_s, 0.2))
     entry_node = before.get("entry_node_id")
     standby_node = _node_with_role(before, "standby")
