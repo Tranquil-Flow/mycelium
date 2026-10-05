@@ -533,6 +533,12 @@ class CaseObservationRecorder:
             return
         try:
             settled = self._settle(executed)
+            if (settled.view.get("terminal_blocked_reason") is not None
+                    and not _cleanup_complete(settled)):
+                # A blocked request keeps its reservations until a late exact
+                # cleanup proof (for example once a stalled peer resumes)
+                # releases them; measure cleanup after that, within the bound.
+                settled = self._settle_release(executed, settled.view)
             self.write(case_id, executed, settled)
         except Exception as error:  # a refused case simply has no observation
             self._refuse(case_id, executed, error)

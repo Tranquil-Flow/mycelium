@@ -558,3 +558,36 @@ def test_exhausted_attempts_needs_evidence_of_a_second_real_successor(mutation):
     assert observation["rejection_observed"] is False
     with pytest.raises(ValueError, match="physical_observation_invalid"):
         runner.validate_case_observation(EXHAUSTED, observation)
+
+
+def test_a_blocked_request_is_measured_after_its_late_cleanup_proof(plan: Path, monkeypatch):
+    import mycelium_a6_case_observations as module
+
+    class _LateCleanup:
+        service, qualifier, calls = SimpleNamespace(), None, 0
+
+        def view(self, _rid):
+            self.calls += 1
+            return {"retained": True, "terminal_blocked_reason": "command_cleanup_receipt_missing",
+                    "recovery_failure_reason": "recovery_timeout", "recovery_attempts": 1}
+
+        def coordinator_terminal(self, _rid):
+            self.calls += 1  # the late proof lands after a few polls
+            return "failed" if self.calls >= 8 else None
+
+        def reservation_count(self, _rid):
+            return 0 if self.calls >= 8 else 2
+
+        def gateway_terminal_count(self, _rid):
+            return 1
+
+    authority = observation_authority(operator_plan=plan, repo_root=ROOT)
+    recorder = CaseObservationRecorder(authority=authority, target=_LateCleanup(),
+                                       settle_seconds=5)
+    monkeypatch.setattr(module, "gateway_facts", lambda *_a, **_k: _gateway(
+        "failed", "request_cleanup_unproven"))
+    recorder.observe(_executed("timeout_during_recovery", {
+        "source_failure_observed": True, "recovery_deadline_exceeded": True}))
+    recorder.join(timeout=10)
+    status = recorder.status()
+    assert status["refused"] == {} and "timeout_during_recovery" in status["written"]
