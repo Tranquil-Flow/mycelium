@@ -370,15 +370,26 @@ class A7NodeAgent:
    # -- inbound -------------------------------------------------------------------
 
    def receive_shipment(self, shipment: KVCheckpointShipment, sealed: bytes, *, source_node_id: str | None = None) -> bool:
+      # A shipment that lands after its request was released must not rebuild
+      # the shadow chain the release just dropped (a late sequence 0 would).
       with self._lock:
+         released = shipment.request_id in self._released
          standby = self._standby
          session = self._session_digest
+      if released:
+         return self._refuse("shipment_request_released")
       if standby is None or shipment.standby_placement_id != standby.placement_id or source_node_id is None:
          return False
       try:
          signed = standby.receive(sealed, session_digest=session, now_unix_ms=self._clock_ms())
       except (CheckpointChannelError, StandbyShadowError, KVCheckpointError, ValueError):
          return False
+      with self._lock:
+         released = shipment.request_id in self._released
+      if released:
+         # The release raced this shipment: drop what it just stored.
+         standby.store.release_request("sha256:" + request_key(shipment.request_id))
+         return self._refuse("shipment_request_released")
       self._send(
          source_node_id,
          KVCheckpointAck(

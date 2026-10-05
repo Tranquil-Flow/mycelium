@@ -18,6 +18,7 @@ from mycelium_router.contracts import (
    KVCheckpointAck,
    KVCheckpointShipment,
    KVSuccessorCutover,
+   KVShadowRelease,
    KVSuccessorCutoverReceipt,
 )
 from mycelium_router.router import Router
@@ -173,6 +174,53 @@ def test_forged_or_misrouted_messages_are_refused(topology) -> None:
    network.pump()
    (receipt,) = network.agents["node-a"].cutover_receipts(_REQ)
    assert (receipt.installed, receipt.reason) == (False, "a7_cutover_placement_unknown")
+
+
+def _held_shipment(case, network):
+   tokens = [_execute(case.ports, case, _PROMPT, phase="PREFILL", request_id=_REQ, path_id="path:src", path_attempt=0, token_index=-1, position=0)]
+   network.agents["node-b"].ship(_REQ, request_attempt=1, committed_token_count=1, committed_prefix_digest=_prefix(tokens))
+   origin, destination, frame = network.queue.popleft()
+   assert (origin, destination) == ("node-b", "node-s") and not network.queue
+   return origin, decode_frame(frame)
+
+
+def _release() -> KVShadowRelease:
+   return KVShadowRelease(request_id=_REQ, path_id="path:src", path_attempt=0, reason="completed")
+
+
+def test_a_shipment_after_the_release_cannot_rebuild_the_shadow_chain(topology) -> None:
+   case, network, standby = topology
+   origin, decoded = _held_shipment(case, network)
+   # The entry's release overtakes the sequence-0 shipment.
+   assert network.agents["node-s"].receive_release(_release(), source_node_id="node-a") is True
+
+   assert network.agents["node-s"].receive_shipment(decoded.message, decoded.payload, source_node_id=origin) is False
+
+   snapshot = network.agents["node-s"].shadow_snapshot()
+   assert (snapshot["shadow_entry_count"], snapshot["shadow_kv_bytes"], snapshot["shadow_checkpoint_count"]) == (0, 0, 0)
+   assert snapshot["refusals"] == {"shipment_request_released": 1}
+   assert not network.queue  # no ack goes back to the source
+
+
+def test_a_release_racing_a_shipment_drops_what_the_shipment_stored(topology, monkeypatch) -> None:
+   case, network, standby = topology
+   origin, decoded = _held_shipment(case, network)
+   receive = type(standby).receive
+
+   def receive_then_release(self, sealed, **kwargs):
+      signed = receive(self, sealed, **kwargs)
+      assert self.store.checkpoint_snapshot()["shadow_checkpoint_count"] == 1
+      assert network.agents["node-s"].receive_release(_release(), source_node_id="node-a") is True
+      return signed
+
+   monkeypatch.setattr(type(standby), "receive", receive_then_release)
+
+   assert network.agents["node-s"].receive_shipment(decoded.message, decoded.payload, source_node_id=origin) is False
+
+   snapshot = network.agents["node-s"].shadow_snapshot()
+   assert (snapshot["shadow_entry_count"], snapshot["shadow_kv_bytes"], snapshot["shadow_checkpoint_count"]) == (0, 0, 0)
+   assert snapshot["refusals"] == {"shipment_request_released": 1}
+   assert not network.queue
 
 
 @pytest.mark.parametrize(
