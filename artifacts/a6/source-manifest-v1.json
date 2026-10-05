@@ -33,7 +33,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:7c8618ecaacfe193b3f8b1975a18943bc42df091e12529d508b63210f2704111",
+      "sha256": "sha256:bc6e4aba30d52df3b8894a69a753c4a44043e31904afc40153837470b08804bc",
       "size_bytes": 71562
     },
     {
@@ -58,8 +58,8 @@
     },
     {
       "path": "mycelium_a7_checkpoint_channel.py",
-      "sha256": "sha256:8b86b8500ddab03cfb35ca995e0ec64108e1d0b483b1ee9651af113b94df680e",
-      "size_bytes": 14827
+      "sha256": "sha256:7e30888a1aff4d6b3d1bbeb55bbecea41a705c04f3dfe4bfdb7f684eccdac680",
+      "size_bytes": 15643
     },
     {
       "path": "mycelium_a7_entry_controller.py",
@@ -78,8 +78,8 @@
     },
     {
       "path": "mycelium_a7_node_agent.py",
-      "sha256": "sha256:168d633b20ba1c69a5be27ef96876e2ae9e0a5f048c8913de0a7f387ad969bfb",
-      "size_bytes": 21642
+      "sha256": "sha256:64fa69225365fb3f39386a452a9ffca93e96cee6f6ad6416e46c107ed7d3c00b",
+      "size_bytes": 23486
     },
     {
       "path": "mycelium_a7_node_wiring.py",
@@ -103,8 +103,8 @@
     },
     {
       "path": "mycelium_a7_physical_measurement.py",
-      "sha256": "sha256:134a5bb1c9d0766b552dc81563c9bf2054391e53a29cdf6ed110caade34a85bc",
-      "size_bytes": 63850
+      "sha256": "sha256:217ad4ea01e84bd0d87d01fb6ee4751fe43196c4eece9595999a98c018dde51b",
+      "size_bytes": 64571
     },
     {
       "path": "mycelium_a7_standby_plan.py",
@@ -158,8 +158,8 @@
     },
     {
       "path": "mycelium_live/supervisor.py",
-      "sha256": "sha256:3800f7916a4ead46f77ec2558ecf85d9ea658fffea61a48b956bd02b4a284a07",
-      "size_bytes": 196166
+      "sha256": "sha256:cf5b849b4ab8eb745ee35edae6e67d32a417580da56ba6597defc2dfaec1c5fb",
+      "size_bytes": 196709
     },
     {
       "path": "mycelium_m16_runtime.py",
@@ -333,8 +333,8 @@
     },
     {
       "path": "physical_inference_qualification.py",
-      "sha256": "sha256:89dccb5b8de8d0daa4e1fca307531e1968ce81f8b9330319641887eb7c983e53",
-      "size_bytes": 130400
+      "sha256": "sha256:35669ade7c6dc12a2c04d7d7cd365ae566820a6980ba9ab460bf177002316da0",
+      "size_bytes": 130824
     },
     {
       "path": "scripts/a7_physical_parity.py",
@@ -478,8 +478,8 @@
     },
     {
       "path": "tests/a7_acceptance/test_node_agent_messages.py",
-      "sha256": "sha256:1666f1e6e72ba07362682b659d6812371b2b011d64779774ea07f211d33529d6",
-      "size_bytes": 10503
+      "sha256": "sha256:98de3bf05d04f801b519b2590c107125bae7d3c3d105237ca6d42886a2c559a3",
+      "size_bytes": 14953
     },
     {
       "path": "tests/a7_acceptance/test_node_wiring.py",
@@ -618,8 +618,8 @@
     },
     {
       "path": "tests/live/test_a7_measurement_result_poll.py",
-      "sha256": "sha256:d2a4b88a2fe4bdfe0960c0710f673d781a823f1020168514a8104a9c1001066a",
-      "size_bytes": 4392
+      "sha256": "sha256:55f7b46d5f4d6449b5e4737c261871ae9e30d48e9cd28e6dedb60b4af4895f66",
+      "size_bytes": 5557
     },
     {
       "path": "tests/live/test_a7_operator_plan.py",
@@ -672,6 +672,11 @@
       "size_bytes": 16112
     },
     {
+      "path": "tests/live/test_product_application_cold_restart.py",
+      "sha256": "sha256:304578edd45dd75adef2ef2a1266c55d2441664131bdcc1bbdf179d40efe6d28",
+      "size_bytes": 2433
+    },
+    {
       "path": "tests/live/test_qwen_route_builder.py",
       "sha256": "sha256:a911d34910e54ac4836fc9d455878d77346d793220c980947e910d968a1d5e94",
       "size_bytes": 39082
@@ -698,8 +703,8 @@
     },
     {
       "path": "tests/physical_qualification/test_controller.py",
-      "sha256": "sha256:e547478616e4cfccfcd2e9f2dbf7789c0ad3aadcc75d59094956b0aa0d4f742a",
-      "size_bytes": 101177
+      "sha256": "sha256:99af76fb45ff6f5130bb73606d7ef57a8ae9a36c26a9d43ae656f6916df63a59",
+      "size_bytes": 104016
     },
     {
       "path": "tests/seed_coordinator/native_process_harness.py",
@@ -758,5 +763,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:1b82c23a9d6b3082ab4d9ddf6aa05c0de5605ad799886283cd9ddebb4dc48631"
+  "source_digest": "sha256:001cb89b7adb887f83deb43a96682efcda18815f03788199bd82259c7b55b5c0"
 }
