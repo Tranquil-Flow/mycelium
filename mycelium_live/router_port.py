@@ -1874,22 +1874,41 @@ class LiveRouterPort:
             return None
         return candidate if current == candidate else None
 
+    def _recovery_in_flight_locked(self) -> bool:
+        """A visible admitted request is failing over; caller holds ``self._lock``."""
+
+        return any(
+            request_id in self._recovery_current_request_ids
+            and getattr(pending, "terminal_status", None) is None
+            and getattr(pending, "recovery_phase", "active") != "active"
+            for request_id, pending in self._pending.items()
+        )
+
     def _recovery_projection_qualification_digest(self) -> str:
         """Resolve the current qualifier binding for the public projection.
 
         A bound digest may describe an earlier admission epoch. If a source is
         wired, its non-refreshing authority snapshot must agree with the bound
         digest; absent, expired, revoked or foreign authority fails closed.
-        Source-less simulated legacy adapters retain their admitted binding.
+        While an admitted request fails over, the projection stays bound to
+        the digest that request was admitted under. Source-less simulated
+        legacy adapters retain their admitted binding.
         """
 
         with self._lock:
             bound = self._recovery_qualification_digest
+            recovering = bound is not None and self._recovery_in_flight_locked()
         source = self._qualification_source
         if source is None:
             if bound is not None:
                 return bound  # legacy simulated router without a source
             raise M16AdmissionError("recovery_projection_unavailable")
+        if recovering:
+            # A source failure withdraws or replaces the route's qualification
+            # while its admitted request fails over. That request stays bound
+            # to the qualification it was admitted under, and so does the
+            # projection that reports its recovery.
+            return bound
         # A physical owner must not run a model challenge on an HTTP status
         # read. Its snapshot is non-refreshing; the admission path renews.
         reader = getattr(source, "peek_current", None)
