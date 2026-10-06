@@ -3609,12 +3609,45 @@ def _exception_chain_document(exc: BaseException) -> list[dict[str, Any]]:
     return chain
 
 
-def _emit_serve_diagnostic(exc: BaseException, *, stage: str) -> None:
+def _route_node_stderr_tails(route: Any) -> dict[str, str]:
+    """Each route node's bounded stderr tail (nodes with no stderr omitted).
+
+    A startup failure whose exception carries no node diagnostic (a node
+    error code alone, or a stalled decode) is otherwise undiagnosable:
+    the node processes keep their stderr only in memory.
+    """
+    reader = getattr(route, "diagnostic_stderr", None)
+    graph = getattr(route, "execution_graph", None)
+    if not callable(reader) or graph is None:
+        return {}
+    node_ids = sorted(
+        {
+            placement.node_id
+            for stage in getattr(graph, "stages", ())
+            for placement in getattr(stage, "placements", ())
+            if isinstance(getattr(placement, "node_id", None), str)
+        }
+    )
+    tails: dict[str, str] = {}
+    for node_id in node_ids:
+        try:
+            tail = reader(node_id)
+        except Exception:
+            continue
+        if isinstance(tail, str) and tail.strip():
+            tails[node_id] = tail[-_SERVE_DIAGNOSTIC_TAIL_CHARS:]
+    return tails
+
+
+def _emit_serve_diagnostic(
+    exc: BaseException, *, stage: str, route: Any = None
+) -> None:
     """Surface the node-side reason a physical route open was rejected.
 
     Printed BEFORE any failure-path cleanup can replace the exception,
     so the serve log keeps the real rejection (and the rejecting node's
     stderr tail) even when cleanup afterwards reports its own error.
+    With ``route``, every node's bounded stderr tail is printed too.
     """
     document = {
         "protocol": _SERVE_DIAGNOSTIC_PROTOCOL,
@@ -3622,6 +3655,9 @@ def _emit_serve_diagnostic(exc: BaseException, *, stage: str) -> None:
         "cause_chain": _exception_chain_document(exc),
         "emitted_at_unix_ms": int(time.time() * 1_000),
     }
+    tails = {} if route is None else _route_node_stderr_tails(route)
+    if tails:
+        document["node_stderr_tails"] = tails
     print(_json_bytes(document).decode("utf-8"), flush=True)
 
 
@@ -4005,13 +4041,13 @@ def run_physical_server(
             identity = concrete.open()
         except ControllerError as exc:
             safe_code = exc.remote_code or exc.code
-            _emit_serve_diagnostic(exc, stage="route_open")
+            _emit_serve_diagnostic(exc, stage="route_open", route=concrete)
             raise RuntimeError(f"startup_route_open_rejected:{safe_code}") from exc
         except Exception as exc:
             # A node-process rejection (NodeProcessError) is NOT a
             # ControllerError: surface its node stderr before re-raising
             # with the same public shape as the controller path.
-            _emit_serve_diagnostic(exc, stage="route_open")
+            _emit_serve_diagnostic(exc, stage="route_open", route=concrete)
             raise RuntimeError(
                 f"startup_route_open_rejected:{_startup_reason(exc)}"
             ) from exc
@@ -4023,7 +4059,13 @@ def run_physical_server(
         ):
             raise RuntimeError("startup_representation_identity_mismatch")
 
-        qualification = _qualify_open_route(concrete)
+        try:
+            qualification = _qualify_open_route(concrete)
+        except Exception as exc:
+            # The startup challenge failed inside an open route: print every
+            # node's stderr tail before cleanup closes the route.
+            _emit_serve_diagnostic(exc, stage="route_qualify", route=concrete)
+            raise
         concrete.set_deployment_qualification(
             qualification,
             quantization=deployment.quantization,

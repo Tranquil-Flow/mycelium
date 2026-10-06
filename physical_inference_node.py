@@ -104,6 +104,10 @@ MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAXIMUM_PHYSICAL_CLOCK_SKEW_SECONDS = 5.0
 _MAX_IROH_DELIVERY_TIMEOUT_SECONDS = 240.0
 _MAX_INFERENCE_COMPLETION_TIMEOUT_SECONDS = 240.0
+# Upper bound of the legacy qualification path's wait for a remote cancellation
+# receipt; below it the wait is 80% of the command budget, so one slow
+# cross-host round trip does not fail startup qualification.
+_MAX_LEGACY_TERMINAL_CLEANUP_SECONDS = 10.0
 _CANCEL_RECEIPT_POLL_SECONDS = 0.05
 # Reserve one complete parent snapshot attempt inside the immutable two-second
 # owner budget.  If node-local teardown has not sealed by this handoff, the
@@ -3745,7 +3749,7 @@ class PhysicalNodeService:
             topology_version=manifest.topology_version,
         )
         transport.send_path_cancellation_if_entry(cancellation)
-        deadline = time.monotonic() + min(2.0, self.command_timeout * 0.8)
+        deadline = time.monotonic() + min(_MAX_LEGACY_TERMINAL_CLEANUP_SECONDS, self.command_timeout * 0.8)
         while not transport.cancellation_cleanup_complete(
             request_id,
             manifest.path_id,

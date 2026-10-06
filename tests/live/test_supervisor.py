@@ -904,6 +904,95 @@ def test_physical_server_unmasks_cleanup_failure_and_logs_node_stderr(
     assert route.closed is True
 
 
+class _StderrRoute:
+    """A route whose node processes kept stderr only in memory."""
+
+    execution_graph = _graph(("node-a", "node-b", "node-c"))
+    startup_challenge = ((1,), (2,))
+    stderr = {
+        "node-a": "Traceback (most recent call last):\nTimeoutError: prefill_token_timeout\n",
+        "node-b": "x" * 40_000,
+        "node-c": "",
+    }
+
+    def __init__(self) -> None:
+        self.closed = False
+        self.cleaned = False
+
+    def diagnostic_stderr(self, node_id: str) -> str:
+        return self.stderr[node_id]
+
+    def release_request(self, _request_id) -> None:
+        return
+
+    def close(self) -> None:
+        self.closed = True
+
+    def cleanup(self) -> None:
+        self.cleaned = True
+
+
+def _serve_documents(monkeypatch, capsys, route, match: str) -> list[dict]:
+    monkeypatch.setattr(
+        "mycelium_live.supervisor.PhysicalLiveRoute.from_operator_plan",
+        lambda _plan, **_kwargs: route,
+    )
+    with pytest.raises(RuntimeError, match=match):
+        run_physical_server(
+            operator_plan=SimpleNamespace(),
+            host="127.0.0.1",
+            port=8788,
+            seed_state_root=Path("/private/test-seed"),
+        )
+    return [
+        json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+        if line.strip()
+    ]
+
+
+def _assert_node_tails(document: dict) -> None:
+    tails = document["node_stderr_tails"]
+    assert sorted(tails) == ["node-a", "node-b"]
+    assert "prefill_token_timeout" in tails["node-a"]
+    assert len(tails["node-b"]) <= 16_000
+
+
+@pytest.mark.usefixtures("declared_representation")
+def test_failed_startup_challenge_logs_every_node_stderr_tail(
+    monkeypatch, capsys
+) -> None:
+    class StalledRoute(_StderrRoute):
+        def open(self):
+            return _identity(("endpoint-a", "endpoint-b", "endpoint-c"))
+
+        def infer_startup_challenge(self, **_kwargs):
+            raise RuntimeError("route_decode_stalled")
+
+    route = StalledRoute()
+    documents = _serve_documents(monkeypatch, capsys, route, "route_decode_stalled")
+    qualify = [document for document in documents if document["stage"] == "route_qualify"]
+    assert len(qualify) == 1
+    assert qualify[0]["protocol"] == "mycelium.live_serve_diagnostic.v1"
+    assert qualify[0]["cause_chain"][0]["type"] == "RuntimeError"
+    _assert_node_tails(qualify[0])
+    assert route.closed is True
+
+
+@pytest.mark.usefixtures("declared_representation")
+def test_failed_route_open_logs_every_node_stderr_tail(monkeypatch, capsys) -> None:
+    class RejectingRoute(_StderrRoute):
+        def open(self):
+            raise RuntimeError("legacy_terminal_cleanup_timeout")
+
+    route = RejectingRoute()
+    documents = _serve_documents(
+        monkeypatch, capsys, route, "startup_route_open_rejected"
+    )
+    assert documents[0]["stage"] == "route_open"
+    _assert_node_tails(documents[0])
+
+
 def test_exception_chain_document_is_bounded_and_cycle_safe() -> None:
     from mycelium_live.supervisor import _exception_chain_document
 
