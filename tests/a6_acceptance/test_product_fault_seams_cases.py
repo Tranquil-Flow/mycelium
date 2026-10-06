@@ -301,6 +301,40 @@ def test_exhausted_attempts_kills_each_actual_successor_on_three_placements():
         ("node-0", signal.SIGKILL), ("node-2", signal.SIGKILL), ("node-3", signal.SIGKILL)]
 
 
+def test_exhausted_attempts_waits_for_the_recovery_deadline_terminal(monkeypatch):
+    # The second successor's FAILED terminal can come from the router's
+    # recovery deadline, well after the seam's ordinary wait bound.
+    import mycelium_a6_product_fault_seams as seams
+
+    monkeypatch.setattr(seams, "RECOVERY_DEADLINE_WAIT_SECONDS", 5.0)
+    router = _Router(("node-0", "node-2", "node-3"))
+    kills = []
+
+    def on_signal(node_id, signum):
+        if signum != signal.SIGKILL:
+            return
+        kills.append(node_id)
+        if len(kills) == 1:
+            router.state.update(recovery_phase="recovery_prefill", recovery_attempts=1)
+        elif len(kills) == 2:
+            router.state.update(recovery_phase="recovery_prefill", recovery_attempts=2)
+        else:
+            threading.Timer(0.5, lambda: router.state.update(
+                recovery_phase="cleanup", terminal_status="FAILED",
+                recovery_failure_reason="recovery_timeout")).start()
+
+    target, _signals = _target(router, SimpleNamespace(terminal_event_count=lambda _r: 0),
+                               on_signal)
+    target._wait_seconds = 0.2
+    seam = ProductCaseSeam("exhausted_recovery_attempts", target)
+    seam.arm(case_id="exhausted_recovery_attempts")
+    state = seam.apply(case_id="exhausted_recovery_attempts")
+    assert state["attempts_used"] == 2 and state["attempts_exhausted"] is True
+    assert state["terminal_status"] == "FAILED" and state["recovery_attempts"] == 2
+    assert state["recovery_failure_reason"] == "recovery_timeout"
+    assert state["successor_nodes_killed"] == "node-2;node-3"
+
+
 def test_cleanup_authority_failure_stalls_the_successor_once_its_output_is_buffered():
     router = _Router()
 

@@ -774,7 +774,9 @@ class ProductCaseSeam:
             for node in nodes:
                 target.signal_node(node, signal.SIGKILL)
             killed.append((attempt, nodes))
-        view = target.wait_terminal(record)
+        # The last attempt's terminal can come from the router's recovery
+        # deadline, not from the killed successor, so wait that long for it.
+        view = target.wait_terminal(record, seconds=RECOVERY_DEADLINE_WAIT_SECONDS)
         attempts = view.get("recovery_attempts")
         distinct = len(killed) == 2 and not set(killed[0][1]) & set(killed[1][1])
         return {
@@ -783,6 +785,12 @@ class ProductCaseSeam:
             "attempts_exhausted": (distinct and attempts == 2
                                    and view.get("terminal_status") == "FAILED"),
             "successor_nodes_failed": [list(nodes) for _attempt, nodes in killed],
+            # Measured terminal view, so a refusal explains itself.
+            "successor_nodes_killed": ";".join(",".join(nodes) for _attempt, nodes in killed),
+            "recovery_attempts": attempts,
+            "terminal_status": view.get("terminal_status"),
+            "terminal_blocked_reason": view.get("terminal_blocked_reason"),
+            "recovery_failure_reason": view.get("recovery_failure_reason"),
         }
 
     def _apply_stale_source_output_after_fencing(self, record):
