@@ -6,7 +6,8 @@ Three modes, mirroring the A6 coordinator:
 
 ``--plan OUT``
     Network-free preparation.  Writes the gate plan for one exact candidate:
-    the required cases, the owner topology (R7), and the pass thresholds,
+    the required cases, the owner topology (R7), the pass thresholds and the
+    fallback cases' scope (``FALLBACK_SCOPE``: A7 decision and A6 handoff only),
     frozen and digest-bound *before* any candidate measurement (spec section
     11).  The plan digest is bound into every case record.
 
@@ -60,6 +61,33 @@ INCOMPATIBLE = "incompatible_standby_falls_back_to_a6"
 LAGGING = "lagging_standby_falls_back_to_a6"
 ABORT = "no_a6_successor_aborts"
 CASES = (POSITIVE, INCOMPATIBLE, LAGGING, ABORT)
+
+# Owner ruling (option C, 2026-10-06): on the R7 two-Mac fleet the A6 replay
+# that follows an A7 fallback has no successor.  Each host runs one node
+# process with exactly one ACTIVE placement, so both ACTIVE placements are on
+# the source path, which A6 excludes in full.  The two fallback cases therefore
+# judge the A7 part only: the right fallback decision for the case's reason,
+# no continuity claim, no KV-successor work, and the recorded handoff to A6
+# (outcome ``full_context_replay``, which the entry emits only when it hands
+# the request to A6).  Whether A6 then completes the request (reference parity,
+# no missing tokens) is not judged here; the A6 recovery gate proves it.
+FALLBACK_SCOPE: dict[str, Any] = {
+   "cases": [INCOMPATIBLE, LAGGING],
+   "judged": "a7_fallback_decision_and_a6_handoff",
+   "expected_reasons": {
+      INCOMPATIBLE: ["compatibility_incompatible"],
+      # A lagging standby either never acknowledged (no route watermark) or
+      # acknowledged less than the gateway committed.
+      LAGGING: ["route_watermark_unavailable", "watermark_behind_gateway"],
+   },
+   "handoff_outcome": "full_context_replay",
+   "not_judged": ["reference_parity", "missing_tokens"],
+   "a6_recovery": "not_proven_by_this_run; proven by the A6 recovery gate (scripts/run_a6_recovery_gate.py)",
+   "fleet_limit": (
+      "R7 two-Mac fleet: one ACTIVE placement per node and one node per host, so no "
+      "ACTIVE placement exists outside the source path that A6 excludes"
+   ),
+}
 
 # Frozen before candidate measurement.  Changing any value changes the plan
 # digest, so a record measured under one plan can never pass another.
@@ -179,6 +207,7 @@ def build_plan(candidate_commit: str) -> dict[str, Any]:
       "topology": TOPOLOGY,
       "cases": list(CASES),
       "thresholds": THRESHOLDS,
+      "fallback_scope": FALLBACK_SCOPE,
       "claim_boundary": (
          "A7 physical gate plan only: thresholds are frozen before measurement; "
          "no case is simulated and no qualification or promotion claim is made by the plan."
@@ -197,6 +226,9 @@ def _verify_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
    if body.get("thresholds") != json.loads(_canonical(THRESHOLDS)) or body.get("cases") != list(CASES):
       # A plan from another threshold set is not this gate.
       _fail("a7_gate_plan_thresholds_changed")
+   if body.get("fallback_scope") != json.loads(_canonical(FALLBACK_SCOPE)):
+      # A plan frozen under another fallback scope is not this gate either.
+      _fail("a7_gate_plan_scope_changed")
    return dict(plan)
 
 
@@ -385,10 +417,16 @@ def evaluate_case(record: Mapping[str, Any], plan: Mapping[str, Any]) -> list[st
       if record["successor_decode_operations"] != 0 or record["publishers"] > 1:
          failures.append("abort_successor_work")
       return failures
-   if record["reference_parity"] is not True:
-      failures.append("reference_parity")
-   if record["missing_tokens"] > t["max_missing_tokens"]:
-      failures.append("missing_tokens")
+   scope = plan["fallback_scope"]
+   if case in scope["cases"]:
+      # The A7 decision only (FALLBACK_SCOPE): A6's replay is judged by the A6 gate.
+      if record["reason"] not in scope["expected_reasons"][case]:
+         failures.append("fallback_reason")
+   else:
+      if record["reference_parity"] is not True:
+         failures.append("reference_parity")
+      if record["missing_tokens"] > t["max_missing_tokens"]:
+         failures.append("missing_tokens")
    if record["publishers"] != t["exact_publishers"]:
       failures.append("publishers")
    if case == POSITIVE:
@@ -421,6 +459,16 @@ def evaluate_case(record: Mapping[str, Any], plan: Mapping[str, Any]) -> list[st
    return failures
 
 
+def _a6_replay_observed(record: Any) -> dict[str, Any] | None:
+   if not isinstance(record, Mapping):
+      return None
+   return {
+      "judged": False,
+      "reference_parity": record.get("reference_parity"),
+      "missing_tokens": record.get("missing_tokens"),
+   }
+
+
 def evaluate(plan: Mapping[str, Any], records: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
    verified = _verify_plan(plan)
    cases: dict[str, Any] = {}
@@ -436,8 +484,15 @@ def evaluate(plan: Mapping[str, Any], records: Mapping[str, Mapping[str, Any]]) 
       "cases": cases,
       "unexpected_records": unexpected,
       "cleanup_proofs": {case: _cleanup_proof(records.get(case)) for case in CASES},
+      "fallback_scope": verified["fallback_scope"],
+      # Reported, never judged: what the A6 replay delivered after each fallback.
+      "fallback_a6_replay_observed": {case: _a6_replay_observed(records.get(case)) for case in verified["fallback_scope"]["cases"]},
       "passed": passed,
-      "claim_boundary": "verdict over measured records only; promotion requires the owner's ledger step",
+      "claim_boundary": (
+         "verdict over measured records only; promotion requires the owner's ledger step. "
+         "The fallback cases prove the A7 fallback decision and its handoff to A6 only: "
+         "A6 recovery is proven by the A6 recovery gate, not by this run."
+      ),
    }
    return {**verdict, "verdict_digest": _sha(verdict)}
 
