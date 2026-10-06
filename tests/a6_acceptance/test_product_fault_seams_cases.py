@@ -414,3 +414,26 @@ def test_cleanup_authority_failure_stops_waiting_when_the_successor_fails_by_its
     assert state["terminal_status"] is None or state["terminal_status"] == "FAILED"
     assert state["phase_at_stall_wait"] == "recovery_prefill"
     assert [item for item in signals if item[1] == signal.SIGSTOP] == []
+
+
+@pytest.mark.parametrize("terminal", [
+    {"terminal_status": "COMPLETED"},
+    {"terminal_blocked_reason": "command_cleanup_receipt_missing"},
+])
+def test_cleanup_reservation_release_counts_a_blocked_terminal_as_terminal(terminal):
+    router = _Router()
+    reservations = {"count": 2}
+    router._coordinator.status = lambda: {"requests": [
+        {"request_id": REQUEST_ID, "reservation_count": reservations["count"]}]}
+    target, _signals = _target(router, SimpleNamespace(terminal_event_count=lambda _r: 0),
+                               lambda *_: None)
+    seam = ProductCaseSeam("cleanup_reservation_release", target)
+    seam.arm(case_id="cleanup_reservation_release")
+    # The completion cleanup was not proven in budget: the request ends
+    # terminal-blocked (no terminal status) and its reservations are released.
+    router.state.update(terminal)
+    reservations["count"] = 0
+    state = seam.apply(case_id="cleanup_reservation_release")
+    assert state["request_terminal"] is True
+    assert state["release_observed"] is True and state["release_count_positive"] is True
+    assert state["reservations_before"] == 2 and state["reservations_after"] == 0

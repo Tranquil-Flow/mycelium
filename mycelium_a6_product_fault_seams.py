@@ -823,9 +823,18 @@ class ProductCaseSeam:
         after = target.reservation_count(record.request_id)
         before = record.armed_reservation_count
         return {
-            "request_terminal": view.get("terminal_status") in _TERMINAL_STATUSES,
+            # A terminal-blocked or released request is terminal too: a
+            # blocked request has no terminal status, only its blocked reason.
+            "request_terminal": (view.get("terminal_status") in _TERMINAL_STATUSES
+                                 or view.get("terminal_blocked_reason") is not None
+                                 or view.get("retained") is False),
             "release_observed": isinstance(before, int) and after == 0 and before > 0,
             "release_count_positive": isinstance(before, int) and before > 0,
+            # Measured terminal view, so a refusal explains itself.
+            "terminal_status": view.get("terminal_status"),
+            "terminal_blocked_reason": view.get("terminal_blocked_reason"),
+            "reservations_before": before,
+            "reservations_after": after,
         }
 
     def _apply_cleanup_authority_failure(self, record):
