@@ -295,6 +295,9 @@ class _Pending:
     #: counts only, never token material.
     recovery_output_count: int = 0
     recovery_output_limit: int | None = None
+    #: The route finished the successor's generation and asked to start its
+    #: completion cleanup; set only outside an owner cancellation.
+    recovery_output_finished: bool = False
 
 
 #: Upper bound of the A10 candidate collection window (``physical_inference_node``
@@ -1330,6 +1333,7 @@ class LiveRouterPort:
                 "recovery_deadline_exceeded": pending.recovery_deadline_exceeded,
                 "recovery_output_count": pending.recovery_output_count,
                 "recovery_output_limit": pending.recovery_output_limit,
+                "recovery_output_finished": pending.recovery_output_finished,
                 "source_failure_observed": pending.source_failure_identity is not None,
                 "cancellation_requested": pending.cancellation_requested.is_set(),
                 "cancellation_linearized": pending.cancellation_linearized,
@@ -1550,11 +1554,7 @@ class LiveRouterPort:
                     )
                 ),
                 "authorize_cleanup": lambda deadline: (
-                    self._request_command_cancellation(
-                        pending,
-                        deadline_monotonic_s=deadline,
-                        completion_cleanup=True,
-                    )
+                    self._authorize_recovery_cleanup(pending, deadline)
                 ),
             }
             self._release_predecessor_attempt(pending, source_command)
@@ -1562,6 +1562,7 @@ class LiveRouterPort:
                 pending.execution_started = True
                 pending.recovery_output_count = 0
                 pending.recovery_output_limit = successor_request.max_new_tokens
+                pending.recovery_output_finished = False
                 pending.recovery_phase = "recovery_prefill"
             deadline_guard = _RecoveryDeadlineGuard(
                 deadline_unix_ms=checkpoint.expiry_unix_ms,
@@ -2256,6 +2257,24 @@ class LiveRouterPort:
         pending.command_identity = identity
         pending.cleanup_owner_id = cleanup_owner_id
         pending.cleanup_receipt = None
+
+    def _authorize_recovery_cleanup(self, pending: _Pending, deadline: float) -> float:
+        """The successor route's cleanup authorization, recorded for A6 seams.
+
+        The route asks for it once generation has ended (at EOS or at the
+        token bound), so it marks the successor's output as finished.
+        """
+
+        with self._changed:
+            if (not pending.cancellation_requested.is_set()
+                    and not pending.cancellation_linearized):
+                pending.recovery_output_finished = True
+            self._changed.notify_all()
+        return self._request_command_cancellation(
+            pending,
+            deadline_monotonic_s=deadline,
+            completion_cleanup=True,
+        )
 
     def _recovery_awaits_successor_command(self, pending: _Pending) -> bool:
         """A recovery is pending and no nonterminal command exists for it yet."""

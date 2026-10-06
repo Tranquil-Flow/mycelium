@@ -836,8 +836,9 @@ class ProductCaseSeam:
         command terminal and the request release follow each other at once,
         so stalling after the committed cutover is too late: the successor's
         completion cleanup has already been proven. Instead stall the
-        successor's peers in recovery prefill once the router has buffered its
-        complete output, so the completion cleanup cannot be proven. The
+        successor's peers in recovery prefill once the router reports that the
+        successor's generation finished, so the completion cleanup cannot be
+        proven. The
         cleanup authority must refuse to publish a result (TERMINAL_BLOCKED,
         one failure notice); the stalled peers are resumed afterwards so a
         late cleanup proof can release the retained reservations.
@@ -848,35 +849,52 @@ class ProductCaseSeam:
             target.gateway_committed(record.request_id)), seconds=2.0)
         target.fail_source(record)
         stalled = False
+        generated: dict[str, Any] | None = None
         if target.wait_phase(record, "recovery_prefill", attempts=1):
             nodes = target.successor_nodes(record, 1)
 
-            def output_complete() -> dict[str, Any] | None:
+            def output_finished() -> dict[str, Any] | None:
+                # The model may stop at EOS well before its token bound, so
+                # wait for the router's end-of-generation signal, not a count.
+                # A successor that failed or was replaced ends the wait.
                 view = target.view(record.request_id)
-                limit = view.get("recovery_output_limit")
-                if view.get("recovery_phase") != "recovery_prefill":
-                    return {"late": True}
-                if isinstance(limit, int) and (view.get("recovery_output_count") or 0) >= limit:
+                if (view.get("recovery_phase") != "recovery_prefill"
+                        or view.get("terminal_status") in _TERMINAL_STATUSES
+                        or view.get("terminal_blocked_reason") is not None
+                        or view.get("retained") is False):
+                    return {"late": True, **view}
+                if view.get("recovery_output_finished") is True:
                     return view
                 return None
 
-            generated = target.wait(output_complete, seconds=120.0, poll_seconds=0.001)
+            generated = target.wait(output_finished, seconds=120.0, poll_seconds=0.001)
             if generated and not generated.get("late"):
                 for node in nodes:
                     target.signal_node(node, signal.SIGSTOP)
                     stalled = True
-        view = (target.wait(lambda: (lambda v: v if v.get("terminal_blocked_reason")
-                                     else None)(target.view(record.request_id)),
+        view = (target.wait(lambda: (lambda v: v if (
+            v.get("terminal_blocked_reason")
+            or v.get("terminal_status") in _TERMINAL_STATUSES
+            or v.get("retained") is False) else None)(target.view(record.request_id)),
                             seconds=120.0) if stalled else None) or {}
         source_attempt = record.binding["source_attempt"]
         committed = target.committed_route_identity(record.request_id) or {}
         cut_over = (committed.get("request_attempt") or 0) > source_attempt
         refused = view.get("terminal_blocked_reason") is not None and cut_over
+        generated = generated or {}
         return {
             "cleanup_authority_refused": refused,
             # Nothing past the gateway-delivered cursor is ever published.
             "unpublishable_suffix_discarded": (
                 refused and view.get("cursor") == view.get("token_count")),
+            # Measured inputs of the derived facts, so a refusal explains itself.
+            "successor_stalled": stalled,
+            "successor_finished_before_stall": generated.get("recovery_output_finished"),
+            "successor_output_count": generated.get("recovery_output_count"),
+            "phase_at_stall_wait": generated.get("recovery_phase"),
+            "cutover_committed": cut_over,
+            "terminal_status": view.get("terminal_status"),
+            "terminal_blocked_reason": view.get("terminal_blocked_reason"),
         }
 
     def _apply_shutdown_during_recovery(self, record):
