@@ -681,6 +681,72 @@ def test_live_router_cancel_during_successor_prefill_stays_cancelled(tmp_path) -
         service.close()
 
 
+def test_live_router_cancel_before_recovery_never_fences_the_source(tmp_path) -> None:
+    route = FailingThenRecoveringRoute()
+    coordinator, router, service, qualification = _runtime(tmp_path, route)
+    qualifying = threading.Event()
+    release = threading.Event()
+    real_qualification_source = router._recovery_qualification_source
+    fenced: list[str] = []
+    real_fence = coordinator.fence_recovery_source
+
+    def held_qualification(*args):
+        qualifying.set()
+        assert release.wait(timeout=2)
+        return real_qualification_source(*args)
+
+    def observed_fence(request_id, **kwargs):
+        fenced.append(request_id)
+        return real_fence(request_id, **kwargs)
+
+    router._recovery_qualification_source = held_qualification
+    coordinator.fence_recovery_source = observed_fence
+    subscription = None
+    try:
+        request_id = service.submit(
+            InferenceSubmission(
+                prompt="live recovery prompt",
+                max_new_tokens=4,
+                qualification=qualification_binding(qualification),
+            )
+        )
+        subscription = service.subscribe(request_id, last_event_id=None)
+        assert qualifying.wait(timeout=2)
+        # The owner's cancellation lands after the source failed and while
+        # the successor is still being qualified: the failed source command
+        # is already terminal and no successor command exists yet.
+        assert service.cancel(request_id) is True
+        view = router.a6_request_view(request_id)
+        assert view["cancellation_requested"] is True
+        release.set()
+        events = []
+        while True:
+            event = subscription.next_event(timeout=2)
+            if event is None:
+                break
+            events.append(event)
+            subscription.ack(event.sequence)
+        assert [
+            event.kind
+            for event in events
+            if event.kind in {"completed", "failed", "cancelled"}
+        ] == ["cancelled"]
+        assert fenced == []
+        assert len(route.calls) == 1
+        projected = next(
+            item
+            for item in coordinator.status()["requests"]
+            if item["request_id"] == request_id
+        )
+        assert projected["terminal_state"] == "cancelled"
+        assert projected["reservation_count"] == 0
+    finally:
+        release.set()
+        if subscription is not None:
+            subscription.close()
+        service.close()
+
+
 def test_live_router_cancel_after_cutover_cannot_lose_to_completed_command(tmp_path) -> None:
     route = CompletionCleanupRaceRoute()
     coordinator, _router, service, qualification = _runtime(tmp_path, route)

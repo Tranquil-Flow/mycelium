@@ -60,6 +60,8 @@ QUALIFICATION_CASES = {
 }
 _TERMINAL_STATUSES = frozenset({"COMPLETED", "FAILED", "CANCELLED"})
 _FENCED_PHASES = frozenset({"recovery_prefill", "cutover_pending", "recovered_decode"})
+# Recovery phases in which no successor has fenced the source or started work.
+_PRE_RECOVERY_PHASES = frozenset({None, "active", "failure_observed", "successor_pending"})
 
 #: Signals a remote fault may deliver, by the name the remote script accepts.
 _REMOTE_SIGNAL_NAMES = {
@@ -690,12 +692,17 @@ class ProductCaseSeam:
         before = target.view(record.request_id)
         accepted = target.cancel(record)
         after = target.view(record.request_id)
-        not_recovered = all(v.get("recovery_phase") in (None, "active", "successor_pending")
+        not_recovered = all(v.get("recovery_phase") in _PRE_RECOVERY_PHASES
                             for v in (before, after))
         return {
             "source_failure_observed": True,
             "cancellation_observed_before_recovery": (
                 accepted and after.get("cancellation_requested") is True and not_recovered),
+            # Measured inputs of the derived fact, so a refusal explains itself.
+            "before_phase": before.get("recovery_phase"),
+            "after_phase": after.get("recovery_phase"),
+            "cancel_accepted": accepted,
+            "cancellation_requested": after.get("cancellation_requested"),
         }
 
     def _apply_cancellation_during_prefill(self, record):

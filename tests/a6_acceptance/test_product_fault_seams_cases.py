@@ -198,12 +198,38 @@ def test_cancellation_before_recovery_holds_the_source_before_stalling_the_other
         seam.arm(case_id="cancellation_before_recovery")
         state = seam.apply(case_id="cancellation_before_recovery")
         assert state == {"source_failure_observed": True,
-                         "cancellation_observed_before_recovery": True}
+                         "cancellation_observed_before_recovery": True,
+                         "before_phase": "successor_pending",
+                         "after_phase": "successor_pending",
+                         "cancel_accepted": True, "cancellation_requested": True}
         # The source is held before the (slow, remote) stall of the others,
         # so it cannot finish the request first; then it is killed, and the
         # other stalled peers are resumed.
         assert signals == [("node-0", signal.SIGSTOP), ("node-2", signal.SIGSTOP),
                            ("node-0", signal.SIGKILL), ("node-2", signal.SIGCONT)]
+    finally:
+        backend.release.set()
+        service.close()
+
+
+def test_cancellation_before_recovery_accepts_the_live_failure_observed_phase():
+    # The live router enters ``failure_observed`` as soon as the source fails,
+    # before any successor is reserved; that is still before recovery.
+    router = _Router()
+    backend = _Backend(lambda: router.state.update(cancellation_requested=True))
+    service = _owned_service(backend)
+
+    def on_signal(node_id, signum):
+        if node_id == "node-0" and signum == signal.SIGKILL:
+            router.state.update(recovery_phase="failure_observed")
+
+    try:
+        target, _signals = _target(router, service, on_signal)
+        seam = ProductCaseSeam("cancellation_before_recovery", target)
+        seam.arm(case_id="cancellation_before_recovery")
+        state = seam.apply(case_id="cancellation_before_recovery")
+        assert state["cancellation_observed_before_recovery"] is True
+        assert state["before_phase"] == state["after_phase"] == "failure_observed"
     finally:
         backend.release.set()
         service.close()

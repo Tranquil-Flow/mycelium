@@ -438,6 +438,13 @@ class ControlledFaultMechanism:
                 for key, expected in point.expected_pre_recovery_state.items()
                 if post_state.get(key) != expected
             }
+            # The seam's other measured scalars (phases, attempts, ...) that
+            # explain why a contract key was unmet.
+            rejected.measured = {
+                key: value for key, value in post_state.items()
+                if key not in point.expected_pre_recovery_state
+                and isinstance(value, (bool, int, str, type(None)))
+            }
             raise rejected
 
         sequence = len(self._records) + 1

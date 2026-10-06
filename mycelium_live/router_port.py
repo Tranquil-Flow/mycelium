@@ -1511,6 +1511,13 @@ class LiveRouterPort:
                 absolute_deadline_ms=source_command.absolute_deadline_ms,
             )
             successor_registered = True
+            # An owner cancellation accepted while the successor was being
+            # reserved and qualified ends the recovery before the source is
+            # fenced or any successor work starts.
+            with self._changed:
+                if (pending.cancellation_requested.is_set()
+                        or pending.cancellation_linearized):
+                    raise InferenceCancelled("recovery_cancelled_before_fence")
             coordinator.fence_recovery_source(
                 request_id,
                 expected_source_identity=source_identity,
@@ -2035,6 +2042,16 @@ class LiveRouterPort:
                 pending.terminal_status = "CANCELLED"
                 self._changed.notify_all()
                 return True
+            if self._recovery_awaits_successor_command(pending):
+                # Between a source failure and its successor command no live
+                # command exists to cancel: the failed one is already terminal.
+                # The owner's cancellation linearizes on the router, and
+                # recover_full_context refuses to fence the source or start a
+                # successor behind it.
+                pending.cancellation_linearized = True
+                pending.cancellation_requested.set()
+                self._changed.notify_all()
+                return True
             cancellation_deadline = self._request_command_cancellation(
                 pending,
                 deadline_monotonic_s=deadline_monotonic_s,
@@ -2239,6 +2256,22 @@ class LiveRouterPort:
         pending.command_identity = identity
         pending.cleanup_owner_id = cleanup_owner_id
         pending.cleanup_receipt = None
+
+    def _recovery_awaits_successor_command(self, pending: _Pending) -> bool:
+        """A recovery is pending and no nonterminal command exists for it yet."""
+
+        if not pending.recovery_required:
+            return False
+        identity = pending.command_identity
+        if identity is None:
+            return True
+        snapshots = self._commands.snapshot(
+            identity.request_id,
+            request_attempt=identity.request_attempt,
+        )
+        return not snapshots or any(
+            snapshot.terminal is not None for snapshot in snapshots
+        )
 
     def _request_command_cancellation(
         self,
