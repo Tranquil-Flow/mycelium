@@ -767,6 +767,11 @@
       "size_bytes": 6562
     },
     {
+      "path": "tests/router/test_measurement_accuracy.py",
+      "sha256": "sha256:812e844a7981ac15819aaa33c9c31ae4d5e8f70e368a56fc4115c07ea419b21e",
+      "size_bytes": 25801
+    },
+    {
       "path": "tests/seed_coordinator/native_process_harness.py",
       "sha256": "sha256:77319fce1a0d03c4bc4196639a1c7fd490491fd70634fde2c9a64f7d68c2c4af",
       "size_bytes": 51686
@@ -823,5 +828,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:2170473f5c0a4dcbcb17f8bee7650fb4703cd25c7a650cad77c8403d3e3956a2"
+  "source_digest": "sha256:2587a2a79f1a3c17fcf00534895bfd53d896c513e7971d731230d9ce2d6fe29a"
 }
