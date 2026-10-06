@@ -265,12 +265,21 @@ class TrueSocketTimestamps(unittest.TestCase):
                   (hop["deserialize_end_at"] - hop["deserialize_start_at"]) * 1000.0,
                   places=3,
                )
-               # The network span must not be the merged serialize/deserialize blob.
-               self.assertNotEqual(
-                  hop["transport_ms"],
-                  round(hop["serialize_ms"] + hop["deserialize_ms"], 3),
-                  "transport_ms looks merged with serialize/deserialize",
+               # The network span must not be the merged serialize/deserialize
+               # blob.  transport_ms is pinned to its own socket span above; the
+               # not-equal check only applies when that span and the merged sum
+               # differ beyond rounding, so a sub-millisecond coincidence (two
+               # independent spans landing on the same 0.001 ms) is not a failure.
+               socket_span_ms = round(
+                  (hop["socket_read_end_at"] - hop["socket_write_at"]) * 1000.0, 3
                )
+               merged_ms = round(hop["serialize_ms"] + hop["deserialize_ms"], 3)
+               if abs(socket_span_ms - merged_ms) > 0.001:
+                  self.assertNotEqual(
+                     hop["transport_ms"],
+                     merged_ms,
+                     "transport_ms looks merged with serialize/deserialize",
+                  )
                # Ordered, disjoint spans: serialize -> write -> read -> deserialize.
                self.assertLessEqual(hop["serialize_start_at"], hop["serialize_end_at"])
                self.assertLessEqual(hop["serialize_end_at"], hop["socket_write_at"])
