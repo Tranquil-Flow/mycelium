@@ -383,8 +383,8 @@
     },
     {
       "path": "scripts/run_a7_kv_successor_gate.py",
-      "sha256": "sha256:b031f713e668a1b8bcea43052540dbc38681bdb3c4bbd4764b19278f91be6cff",
-      "size_bytes": 20924
+      "sha256": "sha256:94ba47b0d1bfa9a68968bc7ebc7aacf0cf0b3be6270eddfb0b5e27ddadb28f90",
+      "size_bytes": 23753
     },
     {
       "path": "test_router_mlx_persistent_int8.py",
@@ -468,8 +468,8 @@
     },
     {
       "path": "tests/a7_acceptance/test_kv_successor_gate.py",
-      "sha256": "sha256:906c05c1c0b51c4c5af31a95cf3fd90acad355f56f01e9699c89fd219febfe15",
-      "size_bytes": 6242
+      "sha256": "sha256:0cdd19204ded87276974ac5cdcec039d413bc7d9c4347a2499db62dbd3770886",
+      "size_bytes": 10402
     },
     {
       "path": "tests/a7_acceptance/test_last_cutover_persistence.py",
@@ -638,8 +638,8 @@
     },
     {
       "path": "tests/live/test_a7_physical_measurement.py",
-      "sha256": "sha256:85824023c289c34f2280e5a96ac3a70d6aa32bd31b81f96b356ef9f176190356",
-      "size_bytes": 24878
+      "sha256": "sha256:a0c3a1f44b90300367d0212aa08608c28f3db5d93ff9c73f43b784c75ea4509f",
+      "size_bytes": 25022
     },
     {
       "path": "tests/live/test_a7_physical_parity_measurement.py",
@@ -763,5 +763,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:001cb89b7adb887f83deb43a96682efcda18815f03788199bd82259c7b55b5c0"
+  "source_digest": "sha256:c0370cf7fb4cff7a568aac2885258aaaee245e90af8b9350c8a0c5193c54cb7b"
 }
