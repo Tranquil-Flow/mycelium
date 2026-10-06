@@ -984,7 +984,13 @@ def measure(
         if isinstance(state.get("result"), Mapping):
             result_evidence = current
             result_read = f"poll:{result_poll['reads']}"
-            if running.done.is_set() or any(item.get("subject_id") == source_node for item in incidents):
+            # A KV-successor cutover is recorded before the successor decodes:
+            # keep reading until every reference token has streamed, so the
+            # last live counter read follows the successor's decode.
+            successor_streamed = state["result"].get("outcome") != "fenced_kv_successor" or len(
+                {event.index for event in running.snapshot()[0]}
+            ) >= len(reference)
+            if running.done.is_set() or (successor_streamed and any(item.get("subject_id") == source_node for item in incidents)):
                 result_poll["stop"] = "result_observed"
                 break
         time.sleep(settings.poll_s)
