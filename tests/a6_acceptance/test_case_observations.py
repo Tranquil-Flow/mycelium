@@ -591,3 +591,41 @@ def test_a_blocked_request_is_measured_after_its_late_cleanup_proof(plan: Path, 
     recorder.join(timeout=10)
     status = recorder.status()
     assert status["refused"] == {} and "timeout_during_recovery" in status["written"]
+
+
+def test_gateway_facts_keep_committed_count_after_worker_releases_tokens():
+    """A finished worker clears its token material; the committed count survives."""
+    from mycelium_a6_case_observations import gateway_facts
+    from mycelium_request_gateway.service import RequestGatewayService
+    from tests.request_conformance.support import (
+        CountingBackend, MutableQualificationSource, drain, submission,
+        synthetic_qualification)
+
+    qualification = synthetic_qualification()
+
+    def script(_backend, _request_id, _submission, emit_token, _is_cancelled):
+        for index, text in enumerate(("alpha", "beta", "gamma")):
+            emit_token(index, text)
+        return "completed"
+
+    service = RequestGatewayService(
+        qualification_source=MutableQualificationSource(qualification),
+        backend=CountingBackend(script),
+        request_id_source=lambda: "request-released-count",
+        max_buffered_events=8,
+    )
+    try:
+        request_id = service.submit(submission(qualification))
+        events = drain(service, request_id)
+        assert events[-1].kind == "completed"
+        session = service._get_session(request_id)
+        deadline = time.monotonic() + 5
+        while not session.worker_done and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert session.worker_done and session.token_digests == []
+
+        facts = gateway_facts(service, request_id, failure_sequence=None,
+                              committed_at_failure=None)
+        assert facts["committed_count"] == facts["expected_token_index"] == 3
+    finally:
+        service.close()

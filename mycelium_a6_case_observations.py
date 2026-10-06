@@ -204,7 +204,9 @@ def gateway_facts(service: Any, request_id: str, *, failure_sequence: int | None
             "terminal_count": session.terminal_count,
             "terminal_kind": None if terminal is None else terminal.kind,
             "terminal_code": None if terminal is None else terminal.code,
-            "committed_count": len(session.token_digests),
+            "committed_count": (len(session.token_digests)
+                                if session.released_committed_count is None
+                                else session.released_committed_count),
             "expected_token_index": session.expected_token_index,
             "duplicated_token_count": len(indices) - len(set(indices)),
             "late_source_publication_count": late,

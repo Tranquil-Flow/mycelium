@@ -77,6 +77,9 @@ class _Session:
     acknowledged_through: int = -1
     expected_token_index: int = 0
     token_digests: list[bytes] = field(default_factory=list)
+    # Committed token count captured when the worker releases its token
+    # material; ``token_digests`` is cleared then but observers still read it.
+    released_committed_count: int | None = None
     encoded_prompt_token_ids: tuple[int, ...] | None = None
     committed_token_ids: list[int | None] = field(default_factory=list)
     terminal_event: StreamEvent | None = None
@@ -849,6 +852,7 @@ class RequestGatewayService:
                 session.replay_checkpoint_store_identity = None
                 session.submission = None
                 session.captured = None
+                session.released_committed_count = len(session.token_digests)
                 session.token_digests.clear()
                 session.encoded_prompt_token_ids = None
                 session.committed_token_ids.clear()
