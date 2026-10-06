@@ -33,7 +33,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:8406e40c45d80a33d49c1e7363ff51997abffac05a95ba7edb54b0561a46b30b",
+      "sha256": "sha256:51650c0dcb92fdd2f6a1cab73d3dfcaea60971eebf54f308e57ddef3b5e0b25a",
       "size_bytes": 71562
     },
     {
@@ -73,8 +73,8 @@
     },
     {
       "path": "mycelium_a7_entry_controller.py",
-      "sha256": "sha256:9602e54554f48c0f4491ee3e4424f73430be0798d299d8f61d039827aadd9f9b",
-      "size_bytes": 33805
+      "sha256": "sha256:043d9314f420a8322582b1866a3c9a70104722cbc4dbd626010fcc7dafad2044",
+      "size_bytes": 34895
     },
     {
       "path": "mycelium_a7_evidence_control.py",
@@ -253,8 +253,8 @@
     },
     {
       "path": "mycelium_router/transports/iroh.py",
-      "sha256": "sha256:7f4671b012fa14bd6f58ee4c3ecf26a67f0d9e908c09baa1f71721aac533e80b",
-      "size_bytes": 161560
+      "sha256": "sha256:4ece237b4158fe9e9f009856c52aadb474e8669f757838b08fe37f6b57ad7f23",
+      "size_bytes": 162432
     },
     {
       "path": "mycelium_router/validation.py",
@@ -407,6 +407,11 @@
       "size_bytes": 2882
     },
     {
+      "path": "test_router_iroh_transport.py",
+      "sha256": "sha256:b38d1840b0b6696bbbf6f8d38e352fc53b80752ba2e0597cf35e777c9769c3c7",
+      "size_bytes": 107005
+    },
+    {
       "path": "test_router_mlx_persistent_int8.py",
       "sha256": "sha256:614c1cf8c1959e5315a522a449127960f2ff3fbdb23a1cf09d4ce30c9845b4a3",
       "size_bytes": 8038
@@ -488,8 +493,8 @@
     },
     {
       "path": "tests/a7_acceptance/test_entry_cutover.py",
-      "sha256": "sha256:31beb4f2b43ce173269a7e3a00216d728645be42ba0644abc3993c45378c82e9",
-      "size_bytes": 21567
+      "sha256": "sha256:82f2d26a619f0628f6ecbc19c940e2276f4f3bfc2c5fc164c9857cb533c0d44f",
+      "size_bytes": 25218
     },
     {
       "path": "tests/a7_acceptance/test_kv_checkpoint_transfer.py",
@@ -828,5 +833,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:2587a2a79f1a3c17fcf00534895bfd53d896c513e7971d731230d9ce2d6fe29a"
+  "source_digest": "sha256:99b8645a08f07d8beade559dda3a2fb7dffabfa15bb69154f78a3f8b9f0d454d"
 }
