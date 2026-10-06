@@ -60,6 +60,8 @@ TERMINAL_KINDS = frozenset({"completed", "cancelled", "failed"})
 CLEANUP_NOT_MEASURED = "not_measured"
 ENTRY_PROCESS_REPLACED = "entry_process_replaced"
 ENTRY_PROCESS_IDENTITY_UNOBSERVED = "entry_process_identity_unobserved"
+ENTRY_RESOURCES_UNOBSERVED = "entry_resources_unobserved"
+COLD_ROUTE_RESTART_REFUSAL = "cold_route_restart_in_progress"
 PROCESS_EXIT_PROOF = "process_exit"
 CLEANUP_FIELDS = (
     "active_state_count_delta",
@@ -621,21 +623,46 @@ def _stable_resources(evidence: EvidenceSource, *, timeout_s: float, poll_s: flo
         previous = current
 
 
-def _settled_resources(evidence: EvidenceSource, before: Mapping[str, Any], *, timeout_s: float, poll_s: float) -> Mapping[str, Any]:
+# Refusals of a post-kill resources read while the route is being replaced (or
+# its door is briefly unreachable): retried until the settle window ends.
+_SETTLE_RETRYABLE = frozenset({"a7_evidence_route_unavailable", COLD_ROUTE_RESTART_REFUSAL, "a7_evidence_unreachable"})
+_ROUTE_REPLACED_REFUSALS = frozenset({"a7_evidence_route_unavailable", COLD_ROUTE_RESTART_REFUSAL})
+
+
+def _settled_resources(
+    evidence: EvidenceSource,
+    before: Mapping[str, Any],
+    *,
+    timeout_s: float,
+    poll_s: float,
+    reads: dict[str, Any] | None = None,
+) -> Mapping[str, Any] | None:
     """Read the resources until they equal the pre-request values or the window ends.
 
     The last read is returned as observed; the window only waits out
-    asynchronous release, it never chooses a value.
+    asynchronous release, it never chooses a value.  A read refused because
+    the route is being replaced is retried until the window ends; ``None``
+    means no read was answered in the window.  ``reads`` (when given)
+    receives the attempt and refusal counts.
     """
 
+    reads = {} if reads is None else reads
+    reads.update(attempts=0, refusals={})
     deadline = time.monotonic() + timeout_s
-    latest: Mapping[str, Any] = evidence.resources()
-    while time.monotonic() < deadline:
-        if all(value == 0 for value in _cleanup_deltas(before, latest, strict=False).values()):
+    latest: Mapping[str, Any] | None = None
+    while True:
+        reads["attempts"] += 1
+        try:
+            latest = evidence.resources()
+        except MeasurementRefused as exc:
+            if exc.code not in _SETTLE_RETRYABLE:
+                raise
+            reads["refusals"][exc.code] = reads["refusals"].get(exc.code, 0) + 1
+        if latest is not None and all(value == 0 for value in _cleanup_deltas(before, latest, strict=False).values()):
+            return latest
+        if time.monotonic() >= deadline:
             return latest
         time.sleep(max(poll_s, 0.2))
-        latest = evidence.resources()
-    return latest
 
 
 def _entry_process(document: Mapping[str, Any], entry_node: str, *, request: bool = False) -> Any:
@@ -804,9 +831,50 @@ def measure(
 
     The case fields are every ``mycelium.a7_physical_case.v1`` field except the
     plan binding (protocol, case, candidate, plan digest, evidence digest),
-    which the case runner owns.
+    which the case runner owns.  A refusal raised after the kill without its
+    own observations carries what was observed up to it.
     """
 
+    trace: dict[str, Any] = {}
+    try:
+        return _measure(driver=driver, evidence=evidence, fault=fault, settings=settings, trace=trace)
+    except MeasurementRefused as refused:
+        if refused.observations is not None or "fault" not in trace:
+            raise
+        raise MeasurementRefused(refused.code, observations=_post_kill_observations(trace)) from refused
+
+
+def _post_kill_observations(trace: Mapping[str, Any]) -> dict[str, Any]:
+    """The privacy-reduced observations of a measurement refused after the kill."""
+
+    running: RunningRequest = trace["running"]
+    tokens, terminals = running.snapshot()
+    result = trace.get("a7_result")
+    return {
+        "protocol": MEASUREMENT_PROTOCOL,
+        "refused_after_kill": True,
+        "fault": dict(trace["fault"]),
+        "result_poll": trace.get("result_poll"),
+        "evidence_reads": trace.get("evidence_reads"),
+        "settle_reads": trace.get("settle_reads"),
+        "a7_result": None if not isinstance(result, Mapping) else dict(result),
+        "measured": {
+            "token_count": len(tokens),
+            "terminals": [kind for kind, _ in terminals],
+            "stream_error": running.error,
+            "done": running.done.is_set(),
+        },
+    }
+
+
+def _measure(
+    *,
+    driver: RequestDriver,
+    evidence: EvidenceSource,
+    fault: SourceProcessGroupTarget,
+    settings: MeasurementSettings,
+    trace: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     group = fault.discover()
 
     # 1. unfaulted reference request on the same serve, same prompt.
@@ -814,7 +882,16 @@ def measure(
     _wait_done(baseline, settings.terminal_timeout_s)
     baseline_tokens, baseline_terminals = baseline.snapshot()
     if baseline.error is not None or [kind for kind, _ in baseline_terminals] != ["completed"]:
-        raise MeasurementRefused("a7_baseline_not_completed")
+        raise MeasurementRefused(
+            "a7_baseline_not_completed",
+            observations={
+                "baseline": {
+                    "terminals": [kind for kind, _ in baseline_terminals],
+                    "error": baseline.error,
+                    "token_count": len(baseline_tokens),
+                }
+            },
+        )
     reference = _output(baseline_tokens)
     if len(reference) < settings.kill_after_committed + 2:
         raise MeasurementRefused("a7_baseline_too_short")
@@ -924,6 +1001,16 @@ def measure(
         raise MeasurementRefused("a7_checkpoint_counters_unavailable")
     tokens_at_kill = len(running.snapshot()[0])
     killed = fault.kill(group)
+    trace["running"] = running
+    trace["fault"] = {
+        "transport": fault.transport,
+        "pgid": killed.pgid,
+        "pid_count": len(group.pids),
+        "kill_exit_status": killed.kill_exit_status,
+        "tokens_received_at_kill": tokens_at_kill,
+        "pause_attempts": pause_attempts,
+        "kill_condition": kill_condition,
+    }
 
     # 3. the entry's cutover record (captured before any A6 restart replaces it).
     result_evidence: Mapping[str, Any] | None = None
@@ -946,6 +1033,7 @@ def measure(
         "stream_done_at_stop": False,
         "last_state": None,
     }
+    trace["result_poll"] = result_poll
     result_deadline = time.monotonic() + settings.result_timeout_s
     while time.monotonic() < result_deadline:
         try:
@@ -1028,7 +1116,15 @@ def measure(
             incidents = [item for item in final.get("scoped_incidents", ()) if isinstance(item, Mapping)] or incidents
         break
     result_poll["final_reads"] = final_reads
-    after = _settled_resources(evidence, before, timeout_s=settings.settle_timeout_s, poll_s=settings.poll_s)
+    trace["evidence_reads"] = {"result_read": result_read, "counter_read": counter_read}
+    trace["a7_result"] = (_request_state(result_evidence or {}) or {}).get("result")
+    settle_reads: dict[str, Any] = {}
+    trace["settle_reads"] = settle_reads
+    settled = _settled_resources(evidence, before, timeout_s=settings.settle_timeout_s, poll_s=settings.poll_s, reads=settle_reads)
+    settle_reads["observed"] = settled is not None
+    # No resources read was answered in the settle window: the entry's cleanup
+    # is not measured.  A route-restart refusal means the entry was replaced.
+    after: Mapping[str, Any] = {} if settled is None else settled
     fault_confirmed = killed.kill_exit_status == 0 and fault.group_gone(group)
 
     # 4. derive the closed fields from the observations.
@@ -1087,13 +1183,17 @@ def measure(
     # the request was replaced (a restarted entry answered, or the verified
     # process identity changed), no delta is computed across the two
     # processes: cleanup is reported as not measured, with the exit evidence.
-    unmeasured_reason = _entry_process_replaced(
-        entry_node,
-        before,
-        pre_kill,
-        after,
-        restored_seen=result_poll.get("restored_from") is not None,
-    )
+    if settled is None:
+        restarted = result_poll.get("restored_from") is not None or bool(_ROUTE_REPLACED_REFUSALS & set(settle_reads["refusals"]))
+        unmeasured_reason: str | None = ENTRY_PROCESS_REPLACED if restarted else ENTRY_RESOURCES_UNOBSERVED
+    else:
+        unmeasured_reason = _entry_process_replaced(
+            entry_node,
+            before,
+            pre_kill,
+            after,
+            restored_seen=result_poll.get("restored_from") is not None,
+        )
     deltas = None if unmeasured_reason is not None else _cleanup_deltas(before, after)
     # A replaced entry may prove its cleanup only by its verified process exit
     # (the A6 rule); the gate checks every condition of this evidence.
@@ -1135,6 +1235,7 @@ def measure(
         "a7_result": None if result is None else dict(result),
         "a7_result_observed": result is not None,
         "result_poll": result_poll,
+        "settle_reads": settle_reads,
         "evidence_reads": {
             "result_read": result_read,
             "result_restored_from": None if result_evidence is None else _restored_from(_request_state(result_evidence) or {}),
