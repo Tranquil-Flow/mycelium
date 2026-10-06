@@ -2,6 +2,9 @@
 """Real local gateway/router/controller composition; route injection is simulated."""
 
 import json
+import threading
+import time
+
 import pytest
 
 from mycelium_a6_cleanup_observation_v2 import collect_local_authorities
@@ -10,6 +13,7 @@ from mycelium_request_gateway.backend import RouterSessionBackend
 from mycelium_qualification.replica_track_backend import (
     ReplicaTrackDispatcher, ReplicaTrackSessionBackend,
 )
+from mycelium_request_gateway.contracts import InferenceSubmission, qualification_binding
 from tests.live.test_a6_live_router_recovery import (
     MissingCleanupReceiptAfterCutoverRoute, FailingThenRecoveringRoute,
     _runtime, _submit_and_drain,
@@ -38,6 +42,160 @@ class DelayedSuccessorProofRoute(MissingCleanupReceiptAfterCutoverRoute):
         identity = dict(self.source_command)
         self.source_publisher({**identity, "cleanup_owner_id":
                                f"physical-live-route:{identity['deployment_id']}", "node_ids": []})
+
+
+class UnprovenSuccessorCleanupRoute(MissingCleanupReceiptAfterCutoverRoute):
+    """The successor generates, then its completion cleanup cannot be proven.
+
+    Mirrors the physical route when the successor's peers are stalled at the
+    completion-cleanup authorization: ``infer`` raises the route's
+    ``request_terminal_blocked_cleanup_unproven`` and no receipt exists for
+    the successor attempt. Simulated; never physical cleanup evidence.
+    """
+
+    def __init__(self, *, hold_observed=None) -> None:
+        super().__init__()
+        self.hold_observed = hold_observed
+
+    def infer(self, prompt_token_ids, *, sink, command_identity, publish_cleanup_receipt,
+              authorize_cleanup, **kwargs):
+        if command_identity["request_attempt"] == 1:
+            self.source_command = dict(command_identity)
+            return super().infer(prompt_token_ids, sink=sink,
+                                 command_identity=command_identity, **kwargs)
+        self.successor_command = dict(command_identity)
+        self.late_publisher = publish_cleanup_receipt
+        sink.emit(0, 103)
+        sink.emit(1, 104)
+        authorize_cleanup(time.monotonic() + 1.0)
+        if self.hold_observed is not None:
+            self.hold_observed()
+        raise RuntimeError("request_terminal_blocked_cleanup_unproven")
+
+
+def test_unproven_successor_cleanup_aborts_before_cutover_with_one_blocked_notice(tmp_path):
+    # The product's real behaviour for case 15 (owner ruling 2026-10-06).
+    route = UnprovenSuccessorCleanupRoute()
+    coordinator, router, service, qualification = _runtime(tmp_path, route)
+    try:
+        request_id, events = _submit_and_drain(service, qualification)
+        # Only the source's prefix was ever published; the successor's
+        # buffered suffix (<103>, <104>) is discarded, nothing twice.
+        assert [e.text for e in events if e.kind == "token"] == ["<101>", "<102>"]
+        assert [(e.kind, e.code) for e in events if e.kind in {
+            "completed", "failed", "cancelled"}] == [("failed", "request_cleanup_unproven")]
+        assert service.terminal_event_count(request_id) == 1
+        # No cutover: the coordinator keeps the source's route identity.
+        assert coordinator.route_identity(request_id)["request_attempt"] == 1
+        view = router.a6_request_view(request_id)
+        assert router.request_status(request_id) == "TERMINAL_BLOCKED"
+        assert view["terminal_blocked_reason"] == "command_cleanup_receipt_missing"
+        assert view["terminal_status"] is None
+        assert view["request_attempt"] == 2 and view["recovery_attempts"] == 1
+        assert view["token_count"] == view["cursor"] == 2
+        assert view["recovery_output_count"] == 2
+        # No failover: the refused successor cannot be retired without proof.
+        assert len([c for c in route.calls
+                    if c["command_identity"]["request_attempt"] > 1]) == 0
+        # The pre-cutover abort released the reservations and ended the
+        # request failed; the successor command's terminal stays uncommitted.
+        projected = next(x for x in coordinator.status()["requests"]
+                         if x["request_id"] == request_id)
+        assert projected["terminal_state"] == "failed"
+        assert projected["reservation_count"] == 0
+        assert router.a6_command_authority(request_id) == {
+            "request_id": request_id, "request_attempt": 2,
+            "registered_command_count": 1, "terminal_cas_count": 0}
+        assert service.cleanup_notice_provenance(request_id)[1] == 2
+        # A late successor proof cannot rewrite the refused authority.
+        identity = dict(route.successor_command)
+        with pytest.raises(RuntimeError, match="command_cleanup_authority_changed"):
+            route.late_publisher({**identity, "cleanup_owner_id":
+                                  f"physical-live-route:{identity['deployment_id']}",
+                                  "node_ids": []})
+        assert router.a6_command_authority(request_id)["terminal_cas_count"] == 0
+        assert service.terminal_event_count(request_id) == 1
+    finally:
+        service.close()
+
+
+def test_armed_cleanup_hold_holds_the_successor_until_released(tmp_path):
+    held = threading.Event()
+    release_seen = []
+    route = UnprovenSuccessorCleanupRoute(hold_observed=lambda: release_seen.append(True))
+    coordinator, router, service, qualification = _runtime(tmp_path, route)
+    real_authorize = router._authorize_recovery_cleanup
+
+    def observed(pending, deadline):
+        held.set()
+        return real_authorize(pending, deadline)
+
+    router._authorize_recovery_cleanup = observed
+    armed = threading.Event()
+    real_infer = route.infer
+
+    def arm_then_infer(*args, command_identity, **kwargs):
+        if command_identity["request_attempt"] == 1 and not armed.is_set():
+            assert router.a6_arm_completion_cleanup_hold("live-a6-001") is True
+            assert router.a6_arm_completion_cleanup_hold("live-a6-001") is False
+            armed.set()
+        return real_infer(*args, command_identity=command_identity, **kwargs)
+
+    route.infer = arm_then_infer
+    try:
+        request_id = service.submit(InferenceSubmission(
+            prompt="live recovery prompt", max_new_tokens=4,
+            qualification=qualification_binding(qualification)))
+        assert held.wait(timeout=2)
+        deadline = time.monotonic() + 2
+        while (router.a6_request_view(request_id).get("recovery_cleanup_held") is not True
+               and time.monotonic() < deadline):
+            time.sleep(0.005)
+        view = router.a6_request_view(request_id)
+        assert view["recovery_cleanup_held"] is True
+        assert view["recovery_output_finished"] is True
+        # Held: the successor cannot continue to its cleanup proof.
+        time.sleep(0.2)
+        assert release_seen == []
+        assert router.a6_release_completion_cleanup_hold(request_id) is True
+        deadline = time.monotonic() + 2
+        while router.request_status(request_id) != "TERMINAL_BLOCKED" and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert release_seen == [True]
+        assert router.a6_request_view(request_id)["recovery_cleanup_held"] is False
+        assert coordinator.route_identity(request_id)["request_attempt"] == 1
+    finally:
+        router.a6_release_completion_cleanup_hold("live-a6-001")
+        service.close()
+
+
+def test_unarmed_cleanup_hold_never_waits(tmp_path):
+    # The production default: no hold is armed, the authorization proceeds.
+    route = UnprovenSuccessorCleanupRoute()
+    _coordinator, router, service, qualification = _runtime(tmp_path, route)
+    try:
+        started = time.monotonic()
+        request_id, _events = _submit_and_drain(service, qualification)
+        assert time.monotonic() - started < 2.0
+        assert router.a6_request_view(request_id)["recovery_cleanup_held"] is False
+        assert router.a6_release_completion_cleanup_hold(request_id) is False
+        # A finished or unknown request can never be armed.
+        assert router.a6_arm_completion_cleanup_hold(request_id) is False
+        assert router.a6_arm_completion_cleanup_hold("unknown-request") is False
+    finally:
+        service.close()
+
+
+def test_cleanup_hold_is_reachable_only_from_the_a6_fault_seam():
+    # The hold is armed only by the fault seam; no product path arms it.
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    arming = sorted(
+        str(path.relative_to(root)) for path in root.rglob("*.py")
+        if not any(part in {"tests", "runs", ".venv", "node_modules", ".git", "__pycache__"}
+                   for part in path.relative_to(root).parts)
+        and "a6_arm_completion_cleanup_hold" in path.read_text(errors="ignore"))
+    assert arming == ["mycelium_a6_product_fault_seams.py", "mycelium_live/router_port.py"]
 
 
 def test_late_exact_route_proof_finalizes_retained_reservations_without_rewriting_gateway(tmp_path):

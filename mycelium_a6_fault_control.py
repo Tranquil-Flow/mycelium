@@ -264,11 +264,13 @@ INJECTION_POINTS: Mapping[str, InjectionPoint] = {
             "cleanup.authority_receipt",
             {
                 "cleanup_authority_refused": True,
+                "cutover_committed": False,
                 "unpublishable_suffix_discarded": True,
             },
-            "Fail the source, then present a cleanup receipt the cleanup "
-            "authority must refuse, so the product fails closed, publishes no "
-            "request result, and discards the unpublishable suffix.",
+            "Fail the source, then stall the successor at its completion "
+            "cleanup so the cleanup authority must refuse: no cutover is "
+            "committed, the product fails closed, publishes no request result, "
+            "and discards the unpublishable suffix.",
         ),
         _point(
             "shutdown_during_recovery",

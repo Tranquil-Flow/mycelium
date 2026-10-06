@@ -203,6 +203,9 @@ _RECOVERY_EXPIRY_CODES = frozenset({
 #: Longest single wait of the recovery deadline guard; the injected recovery
 #: clock is re-read after every wait.
 _RECOVERY_DEADLINE_POLL_SECONDS = 0.25
+#: Upper bound for which an armed A6 fault hold may delay a successor's
+#: completion cleanup. The hold exists only once the fault control arms it.
+_A6_COMPLETION_CLEANUP_HOLD_SECONDS = 30.0
 
 
 class _RecoveryDeadlineGuard:
@@ -298,6 +301,10 @@ class _Pending:
     #: The route finished the successor's generation and asked to start its
     #: completion cleanup; set only outside an owner cancellation.
     recovery_output_finished: bool = False
+    #: A6 fault control only: an armed hold delays the successor's completion
+    #: cleanup authorization until released (bounded); ``None`` in production.
+    a6_completion_cleanup_hold: threading.Event | None = None
+    a6_completion_cleanup_held: bool = False
 
 
 #: Upper bound of the A10 candidate collection window (``physical_inference_node``
@@ -1334,6 +1341,7 @@ class LiveRouterPort:
                 "recovery_output_count": pending.recovery_output_count,
                 "recovery_output_limit": pending.recovery_output_limit,
                 "recovery_output_finished": pending.recovery_output_finished,
+                "recovery_cleanup_held": pending.a6_completion_cleanup_held,
                 "source_failure_observed": pending.source_failure_identity is not None,
                 "cancellation_requested": pending.cancellation_requested.is_set(),
                 "cancellation_linearized": pending.cancellation_linearized,
@@ -1365,6 +1373,34 @@ class LiveRouterPort:
                 return False
             pending.recovery_excluded_placements.update(placements)
             return True
+
+    def a6_arm_completion_cleanup_hold(self, request_id: str) -> bool:
+        """Hold this request's successor completion cleanup until released.
+
+        Armed only by the A6 cleanup-authority fault seam, before it fails the
+        source, so the seam can stall the successor's peers before their
+        completion cleanup can be proven. Unarmed (the default) the
+        authorization path never waits.
+        """
+        with self._changed:
+            pending = self._pending.get(request_id)
+            if (pending is None or not pending.execution_started
+                    or pending.terminal_status is not None
+                    or pending.terminal_blocked_reason is not None
+                    or pending.recovery_phase != "active"
+                    or pending.a6_completion_cleanup_hold is not None):
+                return False
+            pending.a6_completion_cleanup_hold = threading.Event()
+            return True
+
+    def a6_release_completion_cleanup_hold(self, request_id: str) -> bool:
+        with self._changed:
+            pending = self._pending.get(request_id)
+            hold = None if pending is None else pending.a6_completion_cleanup_hold
+        if hold is None:
+            return False
+        hold.set()
+        return True
 
     def request_error_code(self, request_id: str) -> str | None:
         """Return one bounded terminal failure code without private diagnostics."""
@@ -2281,14 +2317,27 @@ class LiveRouterPort:
         """The successor route's cleanup authorization, recorded for A6 seams.
 
         The route asks for it once generation has ended (at EOS or at the
-        token bound), so it marks the successor's output as finished.
+        token bound), so it marks the successor's output as finished. An A6
+        hold armed by the fault control delays the authorization (bounded)
+        until the fault seam releases it; unarmed it never waits.
         """
 
+        hold = None
         with self._changed:
             if (not pending.cancellation_requested.is_set()
                     and not pending.cancellation_linearized):
                 pending.recovery_output_finished = True
+                hold = pending.a6_completion_cleanup_hold
+                if hold is not None and not hold.is_set():
+                    pending.a6_completion_cleanup_held = True
+                else:
+                    hold = None
             self._changed.notify_all()
+        if hold is not None:
+            hold.wait(timeout=_A6_COMPLETION_CLEANUP_HOLD_SECONDS)
+            with self._changed:
+                pending.a6_completion_cleanup_held = False
+                self._changed.notify_all()
         return self._request_command_cancellation(
             pending,
             deadline_monotonic_s=deadline,

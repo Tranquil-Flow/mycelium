@@ -4,6 +4,15 @@
 A validated envelope is a closed shape, not proof its producer ran. The local
 collector below reads command snapshots and gateway events independently; neither
 an unavailable ledger nor an empty snapshot can be counted as zero.
+
+OWNER RULING 2026-10-06 ("A6 CASE15: THE TEST MATCHES THE PRODUCT"): the case
+no longer requires a committed cutover. The product refuses an unproven
+successor completion cleanup before cutover: the recovery aborts pre-cutover
+(the coordinator releases the reservations and ends the request failed), the
+successor's buffered suffix is discarded unpublished, the successor command's
+terminal is never committed (its cleanup was never proven), and the gateway
+publishes exactly one ``request_cleanup_unproven`` failure notice
+(TERMINAL_BLOCKED). The envelope protocol moved to ``.v3`` for this shape.
 """
 from __future__ import annotations
 
@@ -13,7 +22,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-PROTOCOL = "mycelium.a6_cleanup_authority_observation.v2"
+PROTOCOL = "mycelium.a6_cleanup_authority_observation.v3"
 AUTHORITY = "command_controller_and_request_gateway"
 CASE = "cleanup_authority_failure"
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -28,7 +37,9 @@ COMMAND_FIELDS = {"request_id", "request_attempt", "registered_command_count", "
 GATEWAY_FIELDS = {"request_id", "request_attempt", "terminal_event_count", "terminal_kind", "terminal_code"}
 OBSERVATION_FIELDS = {"case_id", "executed", "ordinary_product_path", "private_material_exposed",
                       "rejection_observed", "fail_closed", "terminal_state", "unpublishable_suffix_discarded",
-                      "process_cleanup_complete", "stale_reservation_count", "command_authority", "gateway_authority"}
+                      "process_cleanup_complete", "stale_reservation_count", "command_authority", "gateway_authority",
+                      "cutover_committed", "committed_route_attempt", "coordinator_terminal",
+                      "duplicated_token_count"}
 PRIVATE_MARKERS = ("encoded_prompt_token_ids", "committed_prefix_tokens", "checkpoint_path", "node_secret",
                    "ssh_identity", "private_key")
 
@@ -79,22 +90,28 @@ def validate_observation(document: Mapping[str, Any]) -> dict[str, Any]:
         or value["terminal_state"] != "TERMINAL_BLOCKED"
         or value["unpublishable_suffix_discarded"] is not True
         or value["process_cleanup_complete"] is not True
-        or not _int(value["stale_reservation_count"], 0) or value["stale_reservation_count"] != 0):
+        or not _int(value["stale_reservation_count"], 0) or value["stale_reservation_count"] != 0
+        or not _int(value["duplicated_token_count"], 0) or value["duplicated_token_count"] != 0
+        or value["coordinator_terminal"] != "failed"):
         raise ValueError("cleanup_v2_case_invalid")
+    # Owner ruling 2026-10-06: the cutover must NOT be committed; the request
+    # keeps the source's route identity, never the refused successor's.
+    if (value["cutover_committed"] is not False
+            or not _int(value["committed_route_attempt"], 1)
+            or value["committed_route_attempt"] != binding["source_attempt"]):
+        raise ValueError("cleanup_v2_cutover_committed")
     for authority in (command, gateway):
         if (authority["request_id"] != binding["request_id"]
             or authority["request_attempt"] != binding["request_attempt"]):
             raise ValueError("cleanup_v2_authority_binding_mismatch")
-    # OWNER RULING 2026-09-27 "A6 CASE15 COUNT-LAYER CLAUSE AMENDED"
-    # (status/decisions.log): FROM terminal_cas_count == 0 TO terminal_cas_count
-    # == 1, together with complete cleanup and zero stale reservations (both
-    # still required above). Releasing the reservations IS the committed command
-    # terminal, so zero was unsatisfiable on every real path. This is a clause
-    # change, not a weakened assertion: the cardinality stays exact, and a claimed
-    # complete cleanup with zero committed CAS (or more than one) stays refused.
+    # OWNER RULING 2026-10-06 (supersedes the 2026-09-27 count clause for this
+    # shape): the refused successor's command terminal is never committed, so
+    # its terminal CAS count is exactly zero. The pre-cutover abort, not that
+    # command, released the reservations (checked as the coordinator terminal
+    # and zero stale reservations above).
     if (not _int(command["registered_command_count"], 1)
         or not _int(command["terminal_cas_count"], 0)
-        or command["terminal_cas_count"] != 1):
+        or command["terminal_cas_count"] != 0):
         raise ValueError("cleanup_v2_command_terminal_invalid")
     if (not _int(gateway["terminal_event_count"], 0)
         or gateway["terminal_event_count"] != 1
@@ -182,9 +199,10 @@ def collect_local_authorities(controller: Any, service: Any, request_id: str,
 # measurement into zero, and never reports a blocked clause as satisfied.
 # ---------------------------------------------------------------------------
 
-COUNT_LAYER_PROTOCOL = "mycelium.a6_cleanup_count_layer_truth.v1"
+COUNT_LAYER_PROTOCOL = "mycelium.a6_cleanup_count_layer_truth.v2"
 LAYER_BLOCKED_UNPROVEN_CLEANUP = "blocked_unproven_cleanup_retains_reservations"
 LAYER_PROVEN_LATE_CLEANUP = "proven_late_cleanup_commits_terminal_cas"
+LAYER_PRE_CUTOVER_ABORT = "pre_cutover_abort_releases_reservations_successor_terminal_uncommitted"
 BLOCKED_CLAUSE_CLEANUP_COMPLETENESS = "process_cleanup_complete_and_zero_stale_reservations"
 # Amended 2026-09-27 by the owner ruling "A6 CASE15 COUNT-LAYER CLAUSE AMENDED":
 # the cardinality clause is now *exactly one* terminal CAS for the releasing
@@ -208,13 +226,18 @@ OPEN_OWNER_DECISION = (
     "never reported as a satisfiable envelope (cleanup_v2_count_layer_conflict_requires_owner_"
     "decision). The blocked retained-reservation state (blocked_unproven_cleanup_retains_"
     "reservations) is unchanged by the ruling and stays BLOCKED: no v2 envelope, gate record, or "
-    "physical claim may be emitted from it."
+    "physical claim may be emitted from it. OWNER RULING 2026-10-06 ('A6 CASE15: THE TEST MATCHES "
+    "THE PRODUCT'): the case proves a refusal BEFORE cutover; with no committed cutover the only "
+    "authorized state is pre_cutover_abort_releases_reservations_successor_terminal_uncommitted -- "
+    "terminal_cas_count == 0 for the refused successor attempt AND complete coordinator cleanup "
+    "with zero stale reservations."
 )
 
 
 def reconcile_count_layers(*, command_authority: Mapping[str, Any],
                            gateway_authority: Mapping[str, Any],
-                           cleanup_authority: Mapping[str, Any]) -> dict[str, Any]:
+                           cleanup_authority: Mapping[str, Any],
+                           cutover_committed: bool = True) -> dict[str, Any]:
     """Reconcile the three measured count layers for `cleanup_authority_failure`.
 
     CommandController terminal CAS, the RequestGateway failure notice, and the
@@ -236,7 +259,15 @@ def reconcile_count_layers(*, command_authority: Mapping[str, Any],
     requirement was unsatisfiable on every real path.  The amendment keeps the
     authority -- a committed command is still required to prove the release --
     and only makes the cardinality achievable and exact.  A declared complete
-    cleanup with zero committed command terminal CAS therefore stays refused.
+    cleanup with zero committed command terminal CAS therefore stays refused
+    after a committed cutover.
+
+    OWNER RULING 2026-10-06: with ``cutover_committed=False`` the successor was
+    refused before cutover. The recovery's pre-cutover abort released the
+    reservations and ended the coordinator's request, and the successor's
+    command terminal stays uncommitted because its cleanup was never proven:
+    exactly zero terminal CAS with complete coordinator cleanup and zero stale
+    reservations is that state, and the only one authorized for it.
     """
     command = _exact(command_authority, COMMAND_FIELDS)
     gateway = _exact(gateway_authority, GATEWAY_FIELDS)
@@ -262,7 +293,13 @@ def reconcile_count_layers(*, command_authority: Mapping[str, Any],
     cas = command["terminal_cas_count"]
     stale = cleanup["stale_reservation_count"]
     complete = cleanup["process_cleanup_complete"]
-    if cas == 0:
+    if cutover_committed not in (True, False):
+        raise ValueError("cleanup_v2_count_layer_cutover_unmeasured")
+    if cutover_committed is False:
+        if cas != 0 or complete is not True or stale != 0:
+            raise ValueError("cleanup_v2_count_layer_inconsistent")
+        state, clause, authorized = LAYER_PRE_CUTOVER_ABORT, None, True
+    elif cas == 0:
         if complete is True and stale == 0:
             # Still refused after the 2026-09-27 amendment -- it is not weakened to
             # reach green.  The amended clause permits EXACTLY ONE terminal CAS for
@@ -299,6 +336,7 @@ def reconcile_count_layers(*, command_authority: Mapping[str, Any],
         "gateway_failure_code": gateway["terminal_code"],
         "stale_reservation_count": stale,
         "process_cleanup_complete": complete,
+        "cutover_committed": cutover_committed,
         "v2_envelope_authorized": authorized,
         "blocked_clause": clause,
         "open_owner_decision": OPEN_OWNER_DECISION,
@@ -317,6 +355,7 @@ __all__ = [
     "CLEANUP_FIELDS",
     "COUNT_LAYER_PROTOCOL",
     "LAYER_BLOCKED_UNPROVEN_CLEANUP",
+    "LAYER_PRE_CUTOVER_ABORT",
     "LAYER_PROVEN_LATE_CLEANUP",
     "OPEN_OWNER_DECISION",
     "PROTOCOL",

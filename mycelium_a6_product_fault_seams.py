@@ -838,49 +838,56 @@ class ProductCaseSeam:
         }
 
     def _apply_cleanup_authority_failure(self, record):
-        """Owner-approved v2 shape: the releasing attempt is the successor.
+        """Owner ruling 2026-10-06: the case proves the product's real shape.
 
-        Fail the source and let the ordinary product start its successor.
-        A successor's output is buffered until cutover, and cutover, the
-        command terminal and the request release follow each other at once,
-        so stalling after the committed cutover is too late: the successor's
-        completion cleanup has already been proven. Instead stall the
-        successor's peers in recovery prefill once the router reports that the
-        successor's generation finished, so the completion cleanup cannot be
-        proven. The
-        cleanup authority must refuse to publish a result (TERMINAL_BLOCKED,
-        one failure notice); the stalled peers are resumed afterwards so a
-        late cleanup proof can release the retained reservations.
+        Fail the source and let the ordinary product start its successor. The
+        router's A6 completion-cleanup hold, armed here before the fault and
+        inert otherwise, holds the successor at its cleanup authorization;
+        the seam stalls the successor's peers there and only then releases
+        the hold, so the stall always lands before cleanup can be proven. The
+        cleanup authority must then refuse: no cutover is committed, the
+        successor's buffered suffix is discarded unpublished, and the request
+        ends TERMINAL_BLOCKED with one failure notice. The stalled peers are
+        resumed afterwards.
         """
 
         target = self._target
+        router = target.router
+        arm = getattr(router, "a6_arm_completion_cleanup_hold", None)
+        release = getattr(router, "a6_release_completion_cleanup_hold", None)
+        if not callable(arm) or not callable(release):
+            raise FaultRejected("a6_fault_cleanup_hold_unavailable")
         target.wait(lambda: (lambda m: m is not None and m[1] >= 1)(
             target.gateway_committed(record.request_id)), seconds=2.0)
-        target.fail_source(record)
+        if not arm(record.request_id):
+            raise FaultRejected("a6_fault_cleanup_hold_unarmed")
         stalled = False
-        generated: dict[str, Any] | None = None
-        if target.wait_phase(record, "recovery_prefill", attempts=1):
-            nodes = target.successor_nodes(record, 1)
+        held: dict[str, Any] = {}
+        try:
+            target.fail_source(record)
+            if target.wait_phase(record, "recovery_prefill", attempts=1):
+                nodes = target.successor_nodes(record, 1)
 
-            def output_finished() -> dict[str, Any] | None:
-                # The model may stop at EOS well before its token bound, so
-                # wait for the router's end-of-generation signal, not a count.
-                # A successor that failed or was replaced ends the wait.
-                view = target.view(record.request_id)
-                if (view.get("recovery_phase") != "recovery_prefill"
-                        or view.get("terminal_status") in _TERMINAL_STATUSES
-                        or view.get("terminal_blocked_reason") is not None
-                        or view.get("retained") is False):
-                    return {"late": True, **view}
-                if view.get("recovery_output_finished") is True:
-                    return view
-                return None
+                def cleanup_held() -> dict[str, Any] | None:
+                    # A successor that failed or was replaced before reaching
+                    # its cleanup authorization ends the wait.
+                    view = target.view(record.request_id)
+                    if view.get("recovery_cleanup_held") is True:
+                        return view
+                    if (view.get("recovery_phase") != "recovery_prefill"
+                            or view.get("terminal_status") in _TERMINAL_STATUSES
+                            or view.get("terminal_blocked_reason") is not None
+                            or view.get("retained") is False):
+                        return {"late": True, **view}
+                    return None
 
-            generated = target.wait(output_finished, seconds=120.0, poll_seconds=0.001)
-            if generated and not generated.get("late"):
-                for node in nodes:
-                    target.signal_node(node, signal.SIGSTOP)
-                    stalled = True
+                held = target.wait(cleanup_held, seconds=120.0, poll_seconds=0.001) or {}
+                if held and not held.get("late"):
+                    for node in nodes:
+                        target.signal_node(node, signal.SIGSTOP)
+                        stalled = True
+        finally:
+            release(record.request_id)
         view = (target.wait(lambda: (lambda v: v if (
             v.get("terminal_blocked_reason")
             or v.get("terminal_status") in _TERMINAL_STATUSES
@@ -889,19 +896,32 @@ class ProductCaseSeam:
         source_attempt = record.binding["source_attempt"]
         committed = target.committed_route_identity(record.request_id) or {}
         cut_over = (committed.get("request_attempt") or 0) > source_attempt
-        refused = view.get("terminal_blocked_reason") is not None and cut_over
-        generated = generated or {}
+        refused = (stalled and not cut_over
+                   and view.get("terminal_blocked_reason") is not None
+                   and view.get("terminal_status") is None)
+        delivered = target.gateway_committed(record.request_id)
+        held_tokens = held.get("token_count")
+        suffix_discarded = (
+            refused
+            and isinstance(held.get("recovery_output_count"), int)
+            and held["recovery_output_count"] >= 1
+            and isinstance(held_tokens, int)
+            # Nothing the successor generated reached the request or the
+            # client: the delivered prefix is exactly the pre-recovery one.
+            and view.get("token_count") == held_tokens
+            and view.get("cursor") == held_tokens
+            and delivered is not None and delivered[1] == held_tokens)
         return {
             "cleanup_authority_refused": refused,
-            # Nothing past the gateway-delivered cursor is ever published.
-            "unpublishable_suffix_discarded": (
-                refused and view.get("cursor") == view.get("token_count")),
+            "cutover_committed": cut_over,
+            "unpublishable_suffix_discarded": suffix_discarded,
             # Measured inputs of the derived facts, so a refusal explains itself.
             "successor_stalled": stalled,
-            "successor_finished_before_stall": generated.get("recovery_output_finished"),
-            "successor_output_count": generated.get("recovery_output_count"),
-            "phase_at_stall_wait": generated.get("recovery_phase"),
-            "cutover_committed": cut_over,
+            "cleanup_held": held.get("recovery_cleanup_held") is True,
+            "successor_output_count": held.get("recovery_output_count"),
+            "phase_at_stall_wait": held.get("recovery_phase"),
+            "prefix_token_count": held_tokens,
+            "delivered_token_count": None if delivered is None else delivered[1],
             "terminal_status": view.get("terminal_status"),
             "terminal_blocked_reason": view.get("terminal_blocked_reason"),
         }

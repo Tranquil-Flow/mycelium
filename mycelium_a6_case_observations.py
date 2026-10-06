@@ -226,7 +226,9 @@ def gateway_failure_marker(service: Any, request_id: str) -> tuple[int, int] | N
     except Exception:
         return None
     with session.condition:
-        return session.latest_sequence, len(session.token_digests)
+        return session.latest_sequence, (
+            len(session.token_digests) if session.released_committed_count is None
+            else session.released_committed_count)
 
 
 @dataclass
@@ -603,17 +605,26 @@ class CaseObservationRecorder:
         )
 
         gateway = settled.gateway or {}
+        view = settled.view
         receipt = gateway.get("cleanup_notice_provenance")
-        committed = _cutover_identity(executed, settled.view)
+        # Owner ruling 2026-10-06: the refused successor is the registered
+        # command attempt the gateway notice belongs to; its cutover is never
+        # committed, so the coordinator keeps the source's route identity.
+        route_identity = view.get("route_identity")
+        committed_route_attempt = (route_identity.get("request_attempt")
+                                   if isinstance(route_identity, Mapping) else None)
+        successor_attempt = view.get("request_attempt")
         if (not isinstance(receipt, tuple) or len(receipt) != 4 or command_authority is None
-                or committed is None):
+                or type(committed_route_attempt) is not int
+                or type(successor_attempt) is not int or successor_attempt != receipt[1]):
             raise ObservationRefused("a6_cleanup_v2_authority_unavailable", detail={
                 "gateway_receipt_present": isinstance(receipt, tuple) and len(receipt) == 4,
                 "command_authority_present": command_authority is not None,
-                "cutover_committed": committed is not None,
+                "committed_route_attempt": committed_route_attempt,
+                "successor_attempt": successor_attempt,
                 "gateway_terminal_kind": gateway.get("terminal_kind"),
                 "gateway_terminal_code": gateway.get("terminal_code"),
-                "terminal_blocked_reason": settled.view.get("terminal_blocked_reason"),
+                "terminal_blocked_reason": view.get("terminal_blocked_reason"),
                 "cleanup_authority_refused": executed.post_state.get(
                     "cleanup_authority_refused"),
             })
@@ -633,10 +644,10 @@ class CaseObservationRecorder:
             "source_attempt": binding["source_attempt"],
             "source_path_attempt": binding["path_attempt"],
             "source_path_generation": binding["source_attempt"],
-            "successor_path_id": committed.get("path_id"),
-            "successor_attempt": committed["request_attempt"],
-            "successor_path_attempt": committed.get("path_attempt"),
-            "successor_path_generation": committed["request_attempt"],
+            "successor_path_id": view.get("path_id"),
+            "successor_attempt": successor_attempt,
+            "successor_path_attempt": view.get("path_attempt"),
+            "successor_path_generation": successor_attempt,
         }
         post = executed.post_state
         observation = {
@@ -650,6 +661,10 @@ class CaseObservationRecorder:
                                if gateway.get("terminal_code") == "request_cleanup_unproven"
                                else _terminal_state(V2_CASE, settled)),
             "unpublishable_suffix_discarded": post.get("unpublishable_suffix_discarded") is True,
+            "cutover_committed": committed_route_attempt != binding["source_attempt"],
+            "committed_route_attempt": committed_route_attempt,
+            "coordinator_terminal": settled.coordinator_terminal,
+            "duplicated_token_count": gateway.get("duplicated_token_count"),
             "process_cleanup_complete": _cleanup_complete(settled),
             "stale_reservation_count": settled.reservation_count,
             "command_authority": dict(command_authority),
@@ -677,6 +692,7 @@ class CaseObservationRecorder:
                     "stale_reservation_count": validated["stale_reservation_count"],
                     "process_cleanup_complete": validated["process_cleanup_complete"],
                 },
+                cutover_committed=validated["cutover_committed"],
             )
         except ValueError as error:
             raise ObservationRefused(f"a6_cleanup_v2_unsatisfied:{error}",
