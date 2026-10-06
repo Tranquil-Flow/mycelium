@@ -104,6 +104,37 @@ def test_missing_recovery_source_degrades_only_recovery_scope() -> None:
     assert not any(entity["kind"] == "recovery" for entity in snapshot["entities"])
 
 
+def test_failing_recovery_source_keeps_the_last_aggregate_as_stale() -> None:
+    projector = ProductProjector(pseudonym_salt=b"d" * 32)
+    current = next(entity for entity in _project(projector)["entities"]
+                   if entity["entity_id"] == "recovery-runtime")
+    failed = projector.project(
+        members=[], route_status=None, qualification=None, recovery_status=None,
+        now_unix_ms=1_600_000,
+        source_errors={"recovery-source": "recovery_source_failed"},
+    )
+    source = next(item for item in failed["source_states"]
+                  if item["source_id"] == "recovery-source")
+    assert source["status"] == "missing"
+    assert source["reason_code"] == "recovery_source_failed"
+    recovery = [entity for entity in failed["entities"] if entity["kind"] == "recovery"]
+    assert recovery == [{**current, "freshness": {
+        "status": "stale",
+        "observed_at_unix_ms": 1_500_000,
+        "valid_until_unix_ms": 1_500_000,
+    }}]
+    assert failed["publication"]["source_mode"] == "degraded"
+
+
+def test_failing_recovery_source_without_an_earlier_aggregate_publishes_none() -> None:
+    snapshot = ProductProjector(pseudonym_salt=b"e" * 32).project(
+        members=[], route_status=None, qualification=None, recovery_status=None,
+        now_unix_ms=1_500_000,
+        source_errors={"recovery-source": "recovery_source_failed"},
+    )
+    assert not any(entity["kind"] == "recovery" for entity in snapshot["entities"])
+
+
 async def _request(app: ProductEvidenceApplication, path: str, cursor: int | None = None):
     sent = []
     async def receive():
