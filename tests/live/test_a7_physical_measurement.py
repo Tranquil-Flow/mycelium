@@ -221,9 +221,11 @@ def test_plug_in_measures_the_truthful_fallback_from_product_evidence(tmp_path: 
     assert observations["measured"]["terminals"] == ["failed"]
     assert len(scoped) == 1 and scoped[0]["reason"] == "node_process_exited"
     failures = gate.evaluate_case(record, plan)
-    # The route harness has no product router port, so no A6 full-context
-    # replay completes the request: the gate rejects the missing output.
-    assert set(failures) == _HARNESS_ONLY | {"reference_parity", "missing_tokens"}, failures
+    # The gate judges the fallback cases' A7 decision only (FALLBACK_SCOPE), so
+    # the missing A6 output (this harness has no product router port) is not a
+    # failure. This harness falls back on an expired qualification, which is
+    # not the incompatible case's reason, so the gate rejects the reason.
+    assert set(failures) == _HARNESS_ONLY | {"fallback_reason"}, failures
 
 
 def _plan_file(tmp_path: Path) -> Path:
