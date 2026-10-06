@@ -21,7 +21,11 @@ from mycelium_qualification.evidence import sha256_bytes
 from mycelium_qualification.qualifier import qualify_route
 
 from mycelium_m16_runtime import M16AdmissionError
-from mycelium_request_gateway.contracts import qualification_digest
+from mycelium_request_gateway.contracts import (
+    InferenceSubmission,
+    qualification_binding,
+    qualification_digest,
+)
 from tests.live.test_a6_live_router_recovery import (
     FailingThenRecoveringRoute,
     _graph,
@@ -299,5 +303,36 @@ def test_rotation_check_and_mutation_are_one_critical_section(tmp_path) -> None:
         assert router._recovery_qualification_digest == qualification_digest(third)
         assert results["b"] == qualification_digest(third)
     finally:
+        service.close()
+        router.close()
+
+
+def test_projection_stays_bound_while_an_admitted_request_fails_over(tmp_path) -> None:
+    # The source kill withdraws the route's qualification while the admitted
+    # request is still recovering; its recovery must stay visible.
+    first = _synthetic_qualification()
+    graph = dataclasses.replace(
+        _graph(), model_id=first.model_id, resolved_commit=first.resolved_commit)
+    source = _PeekableSource(first)
+    route = FailingThenRecoveringRoute(block_successor=True)
+    _coordinator, router, service, _ = _runtime(
+        tmp_path, route, base_graph=graph, qualification=first,
+        port_qualification_source=source)
+    service._gate._source = source
+    try:
+        request_id = service.submit(InferenceSubmission(
+            prompt="live recovery prompt", max_new_tokens=4,
+            qualification=qualification_binding(first)))
+        assert route.successor_started.wait(timeout=2)
+        for withdrawn in (None, _replacement(first)):
+            source.value = withdrawn
+            projection = router.recovery_public_projection({request_id: 2})
+            assert projection["binding"]["qualification_digest"] == (
+                qualification_digest(first))
+            assert [item["phase"] for item in projection["requests"]] == [
+                "recovery_prefill"]
+        assert router._recovery_qualification_digest == qualification_digest(first)
+    finally:
+        route.cancelled.set()
         service.close()
         router.close()

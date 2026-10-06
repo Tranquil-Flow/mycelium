@@ -208,7 +208,8 @@ def test_a_refused_fault_logs_its_bounded_code_and_unmet_measurements(caplog):
         def apply(self, *, case_id):
             self.calls.append(("apply", case_id))
             return {"source_failure_observed": True, "candidate_available": True,
-                    "truthful_abort_required": False}
+                    "truthful_abort_required": False, "after_phase": "active",
+                    "actual_incident": {"subject_id": "node-a"}}
 
     app = receiver(UnprovenSeam())
     with caplog.at_level(logging.WARNING, logger="mycelium_a6_http_fault_control"):
@@ -219,4 +220,5 @@ def test_a_refused_fault_logs_its_bounded_code_and_unmet_measurements(caplog):
     assert logged == [{"event": "a6_controlled_fault_refused", "case_id": CASE,
                        "code": f"controlled_fault_injection_unproven:{CASE}",
                        "unmet": {"candidate_available": True,
-                                 "truthful_abort_required": False}}]
+                                 "truthful_abort_required": False},
+                       "measured": {"after_phase": "active"}}]

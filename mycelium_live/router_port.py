@@ -203,6 +203,9 @@ _RECOVERY_EXPIRY_CODES = frozenset({
 #: Longest single wait of the recovery deadline guard; the injected recovery
 #: clock is re-read after every wait.
 _RECOVERY_DEADLINE_POLL_SECONDS = 0.25
+#: Upper bound for which an armed A6 fault hold may delay a successor's
+#: completion cleanup. The hold exists only once the fault control arms it.
+_A6_COMPLETION_CLEANUP_HOLD_SECONDS = 30.0
 
 
 class _RecoveryDeadlineGuard:
@@ -295,6 +298,13 @@ class _Pending:
     #: counts only, never token material.
     recovery_output_count: int = 0
     recovery_output_limit: int | None = None
+    #: The route finished the successor's generation and asked to start its
+    #: completion cleanup; set only outside an owner cancellation.
+    recovery_output_finished: bool = False
+    #: A6 fault control only: an armed hold delays the successor's completion
+    #: cleanup authorization until released (bounded); ``None`` in production.
+    a6_completion_cleanup_hold: threading.Event | None = None
+    a6_completion_cleanup_held: bool = False
 
 
 #: Upper bound of the A10 candidate collection window (``physical_inference_node``
@@ -1330,6 +1340,8 @@ class LiveRouterPort:
                 "recovery_deadline_exceeded": pending.recovery_deadline_exceeded,
                 "recovery_output_count": pending.recovery_output_count,
                 "recovery_output_limit": pending.recovery_output_limit,
+                "recovery_output_finished": pending.recovery_output_finished,
+                "recovery_cleanup_held": pending.a6_completion_cleanup_held,
                 "source_failure_observed": pending.source_failure_identity is not None,
                 "cancellation_requested": pending.cancellation_requested.is_set(),
                 "cancellation_linearized": pending.cancellation_linearized,
@@ -1361,6 +1373,34 @@ class LiveRouterPort:
                 return False
             pending.recovery_excluded_placements.update(placements)
             return True
+
+    def a6_arm_completion_cleanup_hold(self, request_id: str) -> bool:
+        """Hold this request's successor completion cleanup until released.
+
+        Armed only by the A6 cleanup-authority fault seam, before it fails the
+        source, so the seam can stall the successor's peers before their
+        completion cleanup can be proven. Unarmed (the default) the
+        authorization path never waits.
+        """
+        with self._changed:
+            pending = self._pending.get(request_id)
+            if (pending is None or not pending.execution_started
+                    or pending.terminal_status is not None
+                    or pending.terminal_blocked_reason is not None
+                    or pending.recovery_phase != "active"
+                    or pending.a6_completion_cleanup_hold is not None):
+                return False
+            pending.a6_completion_cleanup_hold = threading.Event()
+            return True
+
+    def a6_release_completion_cleanup_hold(self, request_id: str) -> bool:
+        with self._changed:
+            pending = self._pending.get(request_id)
+            hold = None if pending is None else pending.a6_completion_cleanup_hold
+        if hold is None:
+            return False
+        hold.set()
+        return True
 
     def request_error_code(self, request_id: str) -> str | None:
         """Return one bounded terminal failure code without private diagnostics."""
@@ -1511,6 +1551,13 @@ class LiveRouterPort:
                 absolute_deadline_ms=source_command.absolute_deadline_ms,
             )
             successor_registered = True
+            # An owner cancellation accepted while the successor was being
+            # reserved and qualified ends the recovery before the source is
+            # fenced or any successor work starts.
+            with self._changed:
+                if (pending.cancellation_requested.is_set()
+                        or pending.cancellation_linearized):
+                    raise InferenceCancelled("recovery_cancelled_before_fence")
             coordinator.fence_recovery_source(
                 request_id,
                 expected_source_identity=source_identity,
@@ -1543,11 +1590,7 @@ class LiveRouterPort:
                     )
                 ),
                 "authorize_cleanup": lambda deadline: (
-                    self._request_command_cancellation(
-                        pending,
-                        deadline_monotonic_s=deadline,
-                        completion_cleanup=True,
-                    )
+                    self._authorize_recovery_cleanup(pending, deadline)
                 ),
             }
             self._release_predecessor_attempt(pending, source_command)
@@ -1555,6 +1598,7 @@ class LiveRouterPort:
                 pending.execution_started = True
                 pending.recovery_output_count = 0
                 pending.recovery_output_limit = successor_request.max_new_tokens
+                pending.recovery_output_finished = False
                 pending.recovery_phase = "recovery_prefill"
             deadline_guard = _RecoveryDeadlineGuard(
                 deadline_unix_ms=checkpoint.expiry_unix_ms,
@@ -1866,22 +1910,41 @@ class LiveRouterPort:
             return None
         return candidate if current == candidate else None
 
+    def _recovery_in_flight_locked(self) -> bool:
+        """A visible admitted request is failing over; caller holds ``self._lock``."""
+
+        return any(
+            request_id in self._recovery_current_request_ids
+            and getattr(pending, "terminal_status", None) is None
+            and getattr(pending, "recovery_phase", "active") != "active"
+            for request_id, pending in self._pending.items()
+        )
+
     def _recovery_projection_qualification_digest(self) -> str:
         """Resolve the current qualifier binding for the public projection.
 
         A bound digest may describe an earlier admission epoch. If a source is
         wired, its non-refreshing authority snapshot must agree with the bound
         digest; absent, expired, revoked or foreign authority fails closed.
-        Source-less simulated legacy adapters retain their admitted binding.
+        While an admitted request fails over, the projection stays bound to
+        the digest that request was admitted under. Source-less simulated
+        legacy adapters retain their admitted binding.
         """
 
         with self._lock:
             bound = self._recovery_qualification_digest
+            recovering = bound is not None and self._recovery_in_flight_locked()
         source = self._qualification_source
         if source is None:
             if bound is not None:
                 return bound  # legacy simulated router without a source
             raise M16AdmissionError("recovery_projection_unavailable")
+        if recovering:
+            # A source failure withdraws or replaces the route's qualification
+            # while its admitted request fails over. That request stays bound
+            # to the qualification it was admitted under, and so does the
+            # projection that reports its recovery.
+            return bound
         # A physical owner must not run a model challenge on an HTTP status
         # read. Its snapshot is non-refreshing; the admission path renews.
         reader = getattr(source, "peek_current", None)
@@ -2033,6 +2096,16 @@ class LiveRouterPort:
                 pending.cancellation_requested.set()
                 self._record_command_terminal(pending, "CANCELLED")
                 pending.terminal_status = "CANCELLED"
+                self._changed.notify_all()
+                return True
+            if self._recovery_awaits_successor_command(pending):
+                # Between a source failure and its successor command no live
+                # command exists to cancel: the failed one is already terminal.
+                # The owner's cancellation linearizes on the router, and
+                # recover_full_context refuses to fence the source or start a
+                # successor behind it.
+                pending.cancellation_linearized = True
+                pending.cancellation_requested.set()
                 self._changed.notify_all()
                 return True
             cancellation_deadline = self._request_command_cancellation(
@@ -2239,6 +2312,53 @@ class LiveRouterPort:
         pending.command_identity = identity
         pending.cleanup_owner_id = cleanup_owner_id
         pending.cleanup_receipt = None
+
+    def _authorize_recovery_cleanup(self, pending: _Pending, deadline: float) -> float:
+        """The successor route's cleanup authorization, recorded for A6 seams.
+
+        The route asks for it once generation has ended (at EOS or at the
+        token bound), so it marks the successor's output as finished. An A6
+        hold armed by the fault control delays the authorization (bounded)
+        until the fault seam releases it; unarmed it never waits.
+        """
+
+        hold = None
+        with self._changed:
+            if (not pending.cancellation_requested.is_set()
+                    and not pending.cancellation_linearized):
+                pending.recovery_output_finished = True
+                hold = pending.a6_completion_cleanup_hold
+                if hold is not None and not hold.is_set():
+                    pending.a6_completion_cleanup_held = True
+                else:
+                    hold = None
+            self._changed.notify_all()
+        if hold is not None:
+            hold.wait(timeout=_A6_COMPLETION_CLEANUP_HOLD_SECONDS)
+            with self._changed:
+                pending.a6_completion_cleanup_held = False
+                self._changed.notify_all()
+        return self._request_command_cancellation(
+            pending,
+            deadline_monotonic_s=deadline,
+            completion_cleanup=True,
+        )
+
+    def _recovery_awaits_successor_command(self, pending: _Pending) -> bool:
+        """A recovery is pending and no nonterminal command exists for it yet."""
+
+        if not pending.recovery_required:
+            return False
+        identity = pending.command_identity
+        if identity is None:
+            return True
+        snapshots = self._commands.snapshot(
+            identity.request_id,
+            request_attempt=identity.request_attempt,
+        )
+        return not snapshots or any(
+            snapshot.terminal is not None for snapshot in snapshots
+        )
 
     def _request_command_cancellation(
         self,

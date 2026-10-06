@@ -264,11 +264,13 @@ INJECTION_POINTS: Mapping[str, InjectionPoint] = {
             "cleanup.authority_receipt",
             {
                 "cleanup_authority_refused": True,
+                "cutover_committed": False,
                 "unpublishable_suffix_discarded": True,
             },
-            "Fail the source, then present a cleanup receipt the cleanup "
-            "authority must refuse, so the product fails closed, publishes no "
-            "request result, and discards the unpublishable suffix.",
+            "Fail the source, then stall the successor at its completion "
+            "cleanup so the cleanup authority must refuse: no cutover is "
+            "committed, the product fails closed, publishes no request result, "
+            "and discards the unpublishable suffix.",
         ),
         _point(
             "shutdown_during_recovery",
@@ -437,6 +439,13 @@ class ControlledFaultMechanism:
                     post_state.get(key), (bool, int, str, type(None))) else "non_scalar")
                 for key, expected in point.expected_pre_recovery_state.items()
                 if post_state.get(key) != expected
+            }
+            # The seam's other measured scalars (phases, attempts, ...) that
+            # explain why a contract key was unmet.
+            rejected.measured = {
+                key: value for key, value in post_state.items()
+                if key not in point.expected_pre_recovery_state
+                and isinstance(value, (bool, int, str, type(None)))
             }
             raise rejected
 

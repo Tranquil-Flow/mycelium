@@ -274,6 +274,10 @@ class ProductProjector:
         self._lock = threading.Lock()
         self._generation = 0
         self._cursor = 0
+        # The last current recovery aggregate (binding, attributes, observed
+        # at), kept so a failing recovery source degrades it to stale rather
+        # than removing it while a recovery may be in progress.
+        self._last_recovery: tuple[dict[str, Any], dict[str, Any], int] | None = None
 
     def restore_publication(self, *, generation: int, cursor: int) -> None:
         """Resume a durable publication sequence before the first projection."""
@@ -367,6 +371,14 @@ class ProductProjector:
             validated = validate_product_snapshot(validated)
             self._generation = generation
             self._cursor = cursor
+            for entity in validated["entities"]:
+                if (entity["entity_id"] == "recovery-runtime"
+                        and entity["freshness"]["status"] == "current"):
+                    self._last_recovery = (
+                        dict(entity["binding"]),
+                        dict(entity["attributes"]),
+                        int(entity["freshness"]["observed_at_unix_ms"]),
+                    )
             return validated
 
     def _build(
@@ -583,20 +595,34 @@ class ProductProjector:
                         "attributes": a7_entity[1],
                     }
                 )
-        if recovery_current and recovery_binding is not None and recovery_attributes is not None:
+        recovery_freshness = {
+            "status": "current",
+            "observed_at_unix_ms": now_unix_ms,
+            "valid_until_unix_ms": now_unix_ms,
+        }
+        if (
+            not recovery_current
+            and recovery_error is not None
+            and self._last_recovery is not None
+        ):
+            # A failing recovery source keeps the last aggregate, marked stale,
+            # instead of dropping the recovery from the product.
+            recovery_binding, recovery_attributes, observed_at = self._last_recovery
+            recovery_freshness = {
+                "status": "stale",
+                "observed_at_unix_ms": observed_at,
+                "valid_until_unix_ms": observed_at,
+            }
+        if recovery_binding is not None and recovery_attributes is not None:
             entities.append(
                 {
                     "entity_id": "recovery-runtime",
                     "kind": "recovery",
                     "label": "Full-context replay recovery",
                     "source_id": "recovery-source",
-                    "binding": recovery_binding,
-                    "freshness": {
-                        "status": "current",
-                        "observed_at_unix_ms": now_unix_ms,
-                        "valid_until_unix_ms": now_unix_ms,
-                    },
-                    "attributes": recovery_attributes,
+                    "binding": dict(recovery_binding),
+                    "freshness": recovery_freshness,
+                    "attributes": dict(recovery_attributes),
                 }
             )
         relations: list[dict[str, Any]] = []

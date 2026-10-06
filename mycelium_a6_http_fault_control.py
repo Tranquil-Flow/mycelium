@@ -196,6 +196,9 @@ class A6LocalFaultReceiver:
                     unmet = getattr(rejected, "unmet", None)
                     if isinstance(unmet, Mapping):
                         record["unmet"] = dict(unmet)
+                    measured = getattr(rejected, "measured", None)
+                    if isinstance(measured, Mapping) and measured:
+                        record["measured"] = dict(measured)
                     _LOGGER.warning("%s", json.dumps(
                         record, sort_keys=True, separators=(",", ":"), default=str))
                     raise _Refused(403) from None

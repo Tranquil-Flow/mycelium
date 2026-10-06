@@ -248,3 +248,66 @@ def test_measured_product_authorities_reconcile_the_real_delayed_proof(tmp_path)
         assert truth["blocked_clause"] is None
     finally:
         service.close()
+
+
+# Owner ruling 2026-10-06 ("A6 CASE15: THE TEST MATCHES THE PRODUCT"): the case
+# proves a refusal before cutover. Its only authorized state is the pre-cutover
+# abort: zero terminal CAS for the refused successor attempt, with the
+# coordinator's request ended and no stale reservation.
+
+def test_pre_cutover_refusal_is_the_authorized_state():
+    from mycelium_a6_cleanup_observation_v2 import LAYER_PRE_CUTOVER_ABORT
+
+    command, gateway, cleanup = authorities(cas=0, stale=0, complete=True)
+    truth = reconcile_count_layers(command_authority=command, gateway_authority=gateway,
+                                   cleanup_authority=cleanup, cutover_committed=False)
+    assert truth["layer_state"] == LAYER_PRE_CUTOVER_ABORT
+    assert truth["cutover_committed"] is False
+    assert truth["v2_envelope_authorized"] is True
+    assert truth["blocked_clause"] is None
+
+
+@pytest.mark.parametrize("cas,stale,complete", [
+    (1, 0, True),   # a committed successor terminal is not the refused shape
+    (2, 0, True),
+    (0, 2, False),  # retained reservations are not consistent cleanup
+    (0, 0, False),
+    (0, 1, True),
+])
+def test_pre_cutover_refusal_counts_are_exact(cas, stale, complete):
+    command, gateway, cleanup = authorities(cas=cas, stale=stale, complete=complete)
+    with pytest.raises(ValueError, match="cleanup_v2_count_layer_inconsistent"):
+        reconcile_count_layers(command_authority=command, gateway_authority=gateway,
+                               cleanup_authority=cleanup, cutover_committed=False)
+
+
+def test_unmeasured_cutover_is_never_assumed():
+    command, gateway, cleanup = authorities(cas=0, stale=0, complete=True)
+    with pytest.raises(ValueError, match="cleanup_v2_count_layer_cutover_unmeasured"):
+        reconcile_count_layers(command_authority=command, gateway_authority=gateway,
+                               cleanup_authority=cleanup, cutover_committed=None)
+
+
+def test_measured_product_authorities_reconcile_the_pre_cutover_refusal(tmp_path):
+    from mycelium_a6_cleanup_observation_v2 import LAYER_PRE_CUTOVER_ABORT
+    from tests.live.test_a6_cleanup_observation_v2 import UnprovenSuccessorCleanupRoute
+
+    route = UnprovenSuccessorCleanupRoute()
+    coordinator, router, service, qualification = _runtime(tmp_path, route)
+    try:
+        request_id, _events = _submit_and_drain(service, qualification)
+        measured = collect_local_authorities(router._commands, service, request_id, 2, router)
+        projected = next(item for item in coordinator.status()["requests"]
+                         if item["request_id"] == request_id)
+        truth = reconcile_count_layers(
+            **measured,
+            cleanup_authority={
+                "request_id": request_id, "request_attempt": 2,
+                "stale_reservation_count": projected["reservation_count"],
+                "process_cleanup_complete": (projected["terminal_state"] is not None
+                                             and projected["reservation_count"] == 0)},
+            cutover_committed=coordinator.route_identity(request_id)["request_attempt"] != 1)
+        assert truth["layer_state"] == LAYER_PRE_CUTOVER_ABORT
+        assert truth["v2_envelope_authorized"] is True
+    finally:
+        service.close()

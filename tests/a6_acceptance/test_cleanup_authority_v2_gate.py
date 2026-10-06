@@ -30,7 +30,11 @@ from scripts.run_a6_recovery_gate import (
     validate_plan,
 )
 from tests.a6_acceptance.test_case_observations import ROOT, plan  # noqa: F401
-from tests.live.test_a6_cleanup_observation_v2 import DelayedSuccessorProofRoute
+from mycelium_a6_cleanup_observation_v2 import LAYER_PRE_CUTOVER_ABORT
+from tests.live.test_a6_cleanup_observation_v2 import (
+    DelayedSuccessorProofRoute,
+    UnprovenSuccessorCleanupRoute,
+)
 from tests.live.test_a6_live_router_recovery import (
     FailingThenRecoveringRoute,
     _runtime,
@@ -76,7 +80,7 @@ def _executed_from(route, request_id: str) -> ExecutedCase:
                           deadline_unix_ms=1_800_000_060_000)
     # The physical seam measures these after stalling the successor's peers;
     # in-process the simulated route withholds the successor's cleanup proof.
-    record.post_state = {"cleanup_authority_refused": True,
+    record.post_state = {"cleanup_authority_refused": True, "cutover_committed": False,
                          "unpublishable_suffix_discarded": True}
     record.failure_marker = (0, 1)
     return record
@@ -89,8 +93,55 @@ def _run_v2(plan_path: Path, records: Path, monkeypatch) -> int:
                            "--operator-plan", str(plan_path)])
 
 
-def test_proven_late_cleanup_writes_an_authorized_v2_envelope_the_gate_admits(
+def test_pre_cutover_refusal_writes_an_authorized_v2_envelope_the_gate_admits(
         plan, tmp_path, monkeypatch):  # noqa: F811
+    # Owner ruling 2026-10-06: the successor's unproven completion cleanup is
+    # refused before cutover; the case asserts that real product shape.
+    route = UnprovenSuccessorCleanupRoute()
+    coordinator, router, service, qualification = _runtime(tmp_path / "rt", route)
+    authority = observation_authority(operator_plan=plan, repo_root=ROOT)
+    target = LiveProductFaultTarget(router=router, route=route, service=service)
+    recorder = CaseObservationRecorder(authority=authority, target=target, settle_seconds=5)
+    try:
+        request_id, events = _submit_and_drain(service, qualification)
+        assert [e.text for e in events if e.kind == "token"] == ["<101>", "<102>"]
+        executed = _executed_from(route, request_id)
+        released = recorder._settle_release(executed, None)
+        command = router.a6_command_authority(request_id)
+        assert command == {"request_id": request_id, "request_attempt": 2,
+                           "registered_command_count": 1, "terminal_cas_count": 0}
+        path = recorder.write_cleanup_authority_v2(executed, released, command)
+    finally:
+        service.close()
+    envelope = json.loads(path.read_text())
+    assert envelope["protocol"] == "mycelium.a6_cleanup_authority_observation.v3"
+    assert envelope["bindings"]["request_attempt"] == 2
+    assert envelope["bindings"]["successor_attempt"] == 2
+    observed = envelope["observation"]
+    assert observed["cutover_committed"] is False
+    assert observed["committed_route_attempt"] == 1
+    assert observed["coordinator_terminal"] == "failed"
+    assert observed["duplicated_token_count"] == 0
+    assert observed["terminal_state"] == "TERMINAL_BLOCKED"
+    assert observed["stale_reservation_count"] == 0
+    assert observed["gateway_authority"]["terminal_event_count"] == 1
+    assert observed["gateway_authority"]["terminal_code"] == "request_cleanup_unproven"
+    records = tmp_path / "records"
+    records.mkdir(mode=0o700)
+    assert _run_v2(plan, records, monkeypatch) == 0
+    record = json.loads((records / f"{CASE}.json").read_text())
+    assert record["protocol"] == "mycelium.a6_physical_recovery_case.v2"
+    assert record["count_layer_state"] == LAYER_PRE_CUTOVER_ABORT
+    execution = {"source_digest": authority.source_digest, "spec_digest": authority.spec_digest,
+                 "contract_digest": authority.contract_digest}
+    _verify_case_record(records / f"{CASE}.json", CASE, execution, "v2")
+    with pytest.raises(ValueError, match="contract_mismatch"):
+        _verify_case_record(records / f"{CASE}.json", CASE, execution, "v1")
+
+
+def test_published_suffix_after_a_committed_cutover_is_refused(plan, tmp_path):  # noqa: F811
+    # The old shape: the successor cut over (its suffix became the request's)
+    # and only then was cleanup unproven. No v2 envelope may come from it.
     route = DelayedSuccessorProofRoute()
     coordinator, router, service, qualification = _runtime(tmp_path / "rt", route)
     authority = observation_authority(operator_plan=plan, repo_root=ROOT)
@@ -98,36 +149,41 @@ def test_proven_late_cleanup_writes_an_authorized_v2_envelope_the_gate_admits(
     recorder = CaseObservationRecorder(authority=authority, target=target, settle_seconds=5)
     try:
         request_id, _events = _submit_and_drain(service, qualification)
+        assert coordinator.route_identity(request_id)["request_attempt"] == 2
         executed = _executed_from(route, request_id)
-        blocked = recorder._settle(executed)  # retained view while blocked
-        # Before the late proof the reservations are retained: no v2 envelope.
-        with pytest.raises(ObservationRefused, match="unsatisfied"):
-            recorder.write_cleanup_authority_v2(
-                executed, blocked, router.a6_command_authority(request_id))
+        blocked = recorder._settle(executed)
         route.prove_successor_cleanup()
         released = recorder._settle_release(executed, blocked.view)
-        command = router.a6_command_authority(request_id)
-        # Retired after release, yet still the exact counts, never zero-filled.
-        assert command == {"request_id": request_id, "request_attempt": 2,
-                           "registered_command_count": 1, "terminal_cas_count": 1}
-        path = recorder.write_cleanup_authority_v2(executed, released, command)
+        with pytest.raises(ObservationRefused, match="cleanup_v2_cutover_committed"):
+            recorder.write_cleanup_authority_v2(
+                executed, released, router.a6_command_authority(request_id))
     finally:
         service.close()
-    envelope = json.loads(path.read_text())
-    assert envelope["bindings"]["request_attempt"] == 2
-    assert envelope["observation"]["gateway_authority"]["terminal_code"] == (
-        "request_cleanup_unproven")
-    records = tmp_path / "records"
-    records.mkdir(mode=0o700)
-    assert _run_v2(plan, records, monkeypatch) == 0
-    record = json.loads((records / f"{CASE}.json").read_text())
-    assert record["protocol"] == "mycelium.a6_physical_recovery_case.v2"
-    assert record["count_layer_state"] == "proven_late_cleanup_commits_terminal_cas"
-    execution = {"source_digest": authority.source_digest, "spec_digest": authority.spec_digest,
-                 "contract_digest": authority.contract_digest}
-    _verify_case_record(records / f"{CASE}.json", CASE, execution, "v2")
-    with pytest.raises(ValueError, match="contract_mismatch"):
-        _verify_case_record(records / f"{CASE}.json", CASE, execution, "v1")
+
+
+@pytest.mark.parametrize("post_state", [
+    {"cleanup_authority_refused": True, "cutover_committed": False,
+     "unpublishable_suffix_discarded": False},
+    {"cleanup_authority_refused": False, "cutover_committed": False,
+     "unpublishable_suffix_discarded": True},
+])
+def test_pre_cutover_refusal_without_the_seam_proof_is_refused(
+        plan, tmp_path, post_state):  # noqa: F811
+    route = UnprovenSuccessorCleanupRoute()
+    _coordinator, router, service, qualification = _runtime(tmp_path / "rt", route)
+    authority = observation_authority(operator_plan=plan, repo_root=ROOT)
+    target = LiveProductFaultTarget(router=router, route=route, service=service)
+    recorder = CaseObservationRecorder(authority=authority, target=target, settle_seconds=5)
+    try:
+        request_id, _events = _submit_and_drain(service, qualification)
+        executed = _executed_from(route, request_id)
+        executed.post_state = dict(post_state)
+        released = recorder._settle_release(executed, None)
+        with pytest.raises(ObservationRefused, match="cleanup_v2_case_invalid"):
+            recorder.write_cleanup_authority_v2(
+                executed, released, router.a6_command_authority(request_id))
+    finally:
+        service.close()
 
 
 def test_v2_runner_refuses_without_grant_or_with_a_foreign_plan(plan, tmp_path, monkeypatch):  # noqa: F811

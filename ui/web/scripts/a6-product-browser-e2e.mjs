@@ -262,7 +262,9 @@ async function productRecoveryStatus(page) {
     });
     if (!response.ok) throw new Error(`product_snapshot_${response.status}`);
     const snapshot = await response.json();
-    const recovery = snapshot.entities?.find((entity) => entity.kind === 'recovery');
+    const recovery = snapshot.entities?.find((entity) => (
+      entity.kind === 'recovery' && entity.entity_id === 'recovery-runtime'
+    ));
     if (!recovery || !recovery.attributes) throw new Error('product_recovery_aggregate_missing');
     return { cursor: snapshot.publication?.cursor, ...recovery.attributes };
   });

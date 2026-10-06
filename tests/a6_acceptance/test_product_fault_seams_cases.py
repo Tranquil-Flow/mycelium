@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import signal
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -198,12 +199,38 @@ def test_cancellation_before_recovery_holds_the_source_before_stalling_the_other
         seam.arm(case_id="cancellation_before_recovery")
         state = seam.apply(case_id="cancellation_before_recovery")
         assert state == {"source_failure_observed": True,
-                         "cancellation_observed_before_recovery": True}
+                         "cancellation_observed_before_recovery": True,
+                         "before_phase": "successor_pending",
+                         "after_phase": "successor_pending",
+                         "cancel_accepted": True, "cancellation_requested": True}
         # The source is held before the (slow, remote) stall of the others,
         # so it cannot finish the request first; then it is killed, and the
         # other stalled peers are resumed.
         assert signals == [("node-0", signal.SIGSTOP), ("node-2", signal.SIGSTOP),
                            ("node-0", signal.SIGKILL), ("node-2", signal.SIGCONT)]
+    finally:
+        backend.release.set()
+        service.close()
+
+
+def test_cancellation_before_recovery_accepts_the_live_failure_observed_phase():
+    # The live router enters ``failure_observed`` as soon as the source fails,
+    # before any successor is reserved; that is still before recovery.
+    router = _Router()
+    backend = _Backend(lambda: router.state.update(cancellation_requested=True))
+    service = _owned_service(backend)
+
+    def on_signal(node_id, signum):
+        if node_id == "node-0" and signum == signal.SIGKILL:
+            router.state.update(recovery_phase="failure_observed")
+
+    try:
+        target, _signals = _target(router, service, on_signal)
+        seam = ProductCaseSeam("cancellation_before_recovery", target)
+        seam.arm(case_id="cancellation_before_recovery")
+        state = seam.apply(case_id="cancellation_before_recovery")
+        assert state["cancellation_observed_before_recovery"] is True
+        assert state["before_phase"] == state["after_phase"] == "failure_observed"
     finally:
         backend.release.set()
         service.close()
@@ -275,49 +302,234 @@ def test_exhausted_attempts_kills_each_actual_successor_on_three_placements():
         ("node-0", signal.SIGKILL), ("node-2", signal.SIGKILL), ("node-3", signal.SIGKILL)]
 
 
-def test_cleanup_authority_failure_stalls_the_successor_once_its_output_is_buffered():
-    router = _Router()
+def test_exhausted_attempts_waits_for_the_recovery_deadline_terminal(monkeypatch):
+    # The second successor's FAILED terminal can come from the router's
+    # recovery deadline, well after the seam's ordinary wait bound.
+    import mycelium_a6_product_fault_seams as seams
+
+    monkeypatch.setattr(seams, "RECOVERY_DEADLINE_WAIT_SECONDS", 5.0)
+    router = _Router(("node-0", "node-2", "node-3"))
+    kills = []
+
+    def on_signal(node_id, signum):
+        if signum != signal.SIGKILL:
+            return
+        kills.append(node_id)
+        if len(kills) == 1:
+            router.state.update(recovery_phase="recovery_prefill", recovery_attempts=1)
+        elif len(kills) == 2:
+            router.state.update(recovery_phase="recovery_prefill", recovery_attempts=2)
+        else:
+            threading.Timer(0.5, lambda: router.state.update(
+                recovery_phase="cleanup", terminal_status="FAILED",
+                recovery_failure_reason="recovery_timeout")).start()
+
+    target, _signals = _target(router, SimpleNamespace(terminal_event_count=lambda _r: 0),
+                               on_signal)
+    target._wait_seconds = 0.2
+    seam = ProductCaseSeam("exhausted_recovery_attempts", target)
+    seam.arm(case_id="exhausted_recovery_attempts")
+    state = seam.apply(case_id="exhausted_recovery_attempts")
+    assert state["attempts_used"] == 2 and state["attempts_exhausted"] is True
+    assert state["terminal_status"] == "FAILED" and state["recovery_attempts"] == 2
+    assert state["recovery_failure_reason"] == "recovery_timeout"
+    assert state["successor_nodes_killed"] == "node-2;node-3"
+
+
+class _HoldRouter(_Router):
+    """A router with the A6 completion-cleanup hold the cleanup seam arms."""
+
+    def __init__(self, nodes=("node-0", "node-2"), on_release=None) -> None:
+        super().__init__(nodes)
+        self.hold_calls: list[str] = []
+        self._on_release = on_release
+
+    def a6_arm_completion_cleanup_hold(self, _request_id):
+        self.hold_calls.append("arm")
+        return True
+
+    def a6_release_completion_cleanup_hold(self, _request_id):
+        self.hold_calls.append("release")
+        if self._on_release is not None:
+            self._on_release()
+        return True
+
+
+def _cleanup_case(router, on_signal, *, delivered=(1, 2)):
+    events: list = []
+
+    def recorded(node_id, signum):
+        events.append((node_id, signum))
+        on_signal(node_id, signum)
+
+    target, signals = _target(router, SimpleNamespace(terminal_event_count=lambda _r: 0),
+                              recorded)
+    target.gateway_committed = lambda _rid: delivered
+    seam = ProductCaseSeam("cleanup_authority_failure", target)
+    seam.arm(case_id="cleanup_authority_failure")
+    return seam.apply(case_id="cleanup_authority_failure"), signals
+
+
+def _successor_reaches_its_held_cleanup(router):
+    # The source failed with 2 delivered tokens; the successor generated 12
+    # (EOS far below its bound) and is held at its completion cleanup.
+    router.state.update(recovery_phase="recovery_prefill", recovery_attempts=1,
+                        recovery_output_limit=63, token_count=2, cursor=2)
+    threading.Timer(0.05, lambda: router.state.update(
+        recovery_output_count=12, recovery_output_finished=True,
+        recovery_cleanup_held=True)).start()
+
+
+def _refused_before_cutover(router):
+    # Released after the stall: cleanup cannot be proven, the recovery aborts
+    # before cutover, the request is terminal-blocked, the suffix discarded.
+    router.state.update(recovery_cleanup_held=False,
+                        terminal_blocked_reason="command_cleanup_receipt_missing",
+                        recovery_failure_reason="successor_execution_failed")
+
+
+def test_cleanup_authority_failure_proves_a_refusal_before_cutover():
+    router = _HoldRouter(on_release=lambda: _refused_before_cutover(router))
 
     def on_signal(node_id, signum):
         if node_id == "node-0" and signum == signal.SIGKILL:
-            router.state.update(recovery_phase="recovery_prefill", recovery_attempts=1,
-                                recovery_output_limit=3, recovery_output_count=0)
-            # The successor decodes; its output is buffered by the router.
-            threading.Timer(0.05, lambda: router.state.update(
-                recovery_output_count=3)).start()
-        elif node_id == "node-2" and signum == signal.SIGSTOP:
-            # Completion cleanup cannot be proven; cutover committed, the
-            # terminal is blocked and the suffix was discarded.
-            router.committed_attempt = 2
-            router.state.update(recovery_phase="recovered_decode",
-                                terminal_blocked_reason="command_cleanup_receipt_missing",
-                                token_count=1, cursor=1)
+            assert router.hold_calls == ["arm"]  # armed before the fault
+            _successor_reaches_its_held_cleanup(router)
 
-    target, signals = _target(router, SimpleNamespace(terminal_event_count=lambda _r: 0),
-                              on_signal)
-    target.gateway_committed = lambda _rid: (1, 1)
-    seam = ProductCaseSeam("cleanup_authority_failure", target)
-    seam.arm(case_id="cleanup_authority_failure")
-    assert seam.apply(case_id="cleanup_authority_failure") == {
-        "cleanup_authority_refused": True, "unpublishable_suffix_discarded": True}
+    state, signals = _cleanup_case(router, on_signal)
+    assert state["cleanup_authority_refused"] is True
+    assert state["cutover_committed"] is False
+    assert state["unpublishable_suffix_discarded"] is True
+    assert state["successor_stalled"] is True and state["cleanup_held"] is True
+    assert state["successor_output_count"] == 12
+    assert state["prefix_token_count"] == state["delivered_token_count"] == 2
+    # The stall lands while the cleanup is held, then the hold is released.
+    assert router.hold_calls == ["arm", "release"]
     assert signals == [("node-0", signal.SIGKILL), ("node-2", signal.SIGSTOP),
                        ("node-2", signal.SIGCONT)]
 
 
-def test_cleanup_authority_failure_is_not_claimed_without_a_committed_cutover():
-    router = _Router()
+def test_cleanup_authority_failure_stall_precedes_the_hold_release():
+    order: list[str] = []
+    router = _HoldRouter(on_release=lambda: (order.append("release"),
+                                             _refused_before_cutover(router)))
+
+    def on_signal(node_id, signum):
+        if node_id == "node-0" and signum == signal.SIGKILL:
+            _successor_reaches_its_held_cleanup(router)
+        elif node_id == "node-2" and signum == signal.SIGSTOP:
+            order.append("stall")
+
+    _cleanup_case(router, on_signal)
+    assert order == ["stall", "release"]
+
+
+def test_cleanup_authority_failure_fails_when_the_cutover_committed():
+    def committed_then_blocked():
+        router.committed_attempt = 2
+        router.state.update(recovery_phase="recovered_decode", recovery_cleanup_held=False,
+                            terminal_blocked_reason="command_cleanup_receipt_missing")
+
+    router = _HoldRouter(on_release=committed_then_blocked)
+
+    def on_signal(node_id, signum):
+        if node_id == "node-0" and signum == signal.SIGKILL:
+            _successor_reaches_its_held_cleanup(router)
+
+    state, _signals = _cleanup_case(router, on_signal)
+    assert state["cutover_committed"] is True
+    assert state["cleanup_authority_refused"] is False
+    assert state["unpublishable_suffix_discarded"] is False
+
+
+@pytest.mark.parametrize("published", [
+    {"token_count": 14, "cursor": 14},  # the router took the suffix
+    {"token_count": 2, "cursor": 2},    # the client was delivered it anyway
+])
+def test_cleanup_authority_failure_fails_when_the_suffix_is_published(published):
+    def published_suffix():
+        _refused_before_cutover(router)
+        router.state.update(published)
+
+    router = _HoldRouter(on_release=published_suffix)
+
+    def on_signal(node_id, signum):
+        if node_id == "node-0" and signum == signal.SIGKILL:
+            _successor_reaches_its_held_cleanup(router)
+
+    state, _signals = _cleanup_case(router, on_signal, delivered=(1, 14))
+    assert state["cleanup_authority_refused"] is True
+    assert state["unpublishable_suffix_discarded"] is False
+
+
+def test_cleanup_authority_failure_refuses_without_the_router_hold():
+    from mycelium_a6_fault_control import FaultRejected
+
+    router = _Router()  # no A6 hold: the stall could race the cleanup proof
+    target, signals = _target(router, SimpleNamespace(terminal_event_count=lambda _r: 0),
+                              lambda *_: None)
+    seam = ProductCaseSeam("cleanup_authority_failure", target)
+    seam.arm(case_id="cleanup_authority_failure")
+    with pytest.raises(FaultRejected, match="a6_fault_cleanup_hold_unavailable"):
+        seam.apply(case_id="cleanup_authority_failure")
+    assert signals == []  # no fault was applied
+
+
+def test_cleanup_authority_failure_refuses_when_the_hold_cannot_be_armed():
+    from mycelium_a6_fault_control import FaultRejected
+
+    router = _HoldRouter()
+    router.a6_arm_completion_cleanup_hold = lambda _rid: False
+    target, signals = _target(router, SimpleNamespace(terminal_event_count=lambda _r: 0),
+                              lambda *_: None)
+    target.gateway_committed = lambda _rid: (1, 2)
+    seam = ProductCaseSeam("cleanup_authority_failure", target)
+    seam.arm(case_id="cleanup_authority_failure")
+    with pytest.raises(FaultRejected, match="a6_fault_cleanup_hold_unarmed"):
+        seam.apply(case_id="cleanup_authority_failure")
+    assert signals == []
+
+
+def test_cleanup_authority_failure_stops_waiting_when_the_successor_fails_by_itself():
+    router = _HoldRouter()
 
     def on_signal(node_id, signum):
         if node_id == "node-0" and signum == signal.SIGKILL:
             router.state.update(recovery_phase="recovery_prefill", recovery_attempts=1,
-                                recovery_output_limit=1, recovery_output_count=1)
-        elif node_id == "node-2" and signum == signal.SIGSTOP:
-            router.state.update(terminal_blocked_reason="command_cleanup_receipt_missing",
-                                token_count=1, cursor=1)
+                                recovery_output_limit=63, recovery_output_count=0)
+            # The successor fails before reaching its cleanup authorization;
+            # the router keeps the recovery_prefill phase and fails the request.
+            threading.Timer(0.05, lambda: router.state.update(
+                terminal_status="FAILED",
+                recovery_failure_reason="successor_execution_failed")).start()
 
+    started = time.monotonic()
+    state, signals = _cleanup_case(router, on_signal)
+    assert time.monotonic() - started < 5.0
+    assert state["cleanup_authority_refused"] is False
+    assert state["successor_stalled"] is False
+    assert state["phase_at_stall_wait"] == "recovery_prefill"
+    assert router.hold_calls == ["arm", "release"]  # never left armed
+    assert [item for item in signals if item[1] == signal.SIGSTOP] == []
+
+@pytest.mark.parametrize("terminal", [
+    {"terminal_status": "COMPLETED"},
+    {"terminal_blocked_reason": "command_cleanup_receipt_missing"},
+])
+def test_cleanup_reservation_release_counts_a_blocked_terminal_as_terminal(terminal):
+    router = _Router()
+    reservations = {"count": 2}
+    router._coordinator.status = lambda: {"requests": [
+        {"request_id": REQUEST_ID, "reservation_count": reservations["count"]}]}
     target, _signals = _target(router, SimpleNamespace(terminal_event_count=lambda _r: 0),
-                               on_signal)
-    target.gateway_committed = lambda _rid: (1, 1)
-    seam = ProductCaseSeam("cleanup_authority_failure", target)
-    seam.arm(case_id="cleanup_authority_failure")
-    assert seam.apply(case_id="cleanup_authority_failure")["cleanup_authority_refused"] is False
+                               lambda *_: None)
+    seam = ProductCaseSeam("cleanup_reservation_release", target)
+    seam.arm(case_id="cleanup_reservation_release")
+    # The completion cleanup was not proven in budget: the request ends
+    # terminal-blocked (no terminal status) and its reservations are released.
+    router.state.update(terminal)
+    reservations["count"] = 0
+    state = seam.apply(case_id="cleanup_reservation_release")
+    assert state["request_terminal"] is True
+    assert state["release_observed"] is True and state["release_count_positive"] is True
+    assert state["reservations_before"] == 2 and state["reservations_after"] == 0

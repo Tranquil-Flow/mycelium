@@ -12,8 +12,9 @@ qualification, so this mode never emits pass evidence.
 the v1 trusted runner it takes nothing but the operator plan: it reads the
 product's source-owned v2 envelope below that plan's evidence directory, checks
 the closed shape, the run and operator-plan bindings, and the owner-amended
-count-layer clause (``reconcile_count_layers`` must authorize the envelope), and
-only then derives the privacy-reduced v2 case record the gate consumes.
+count-layer clause (``reconcile_count_layers`` must authorize the envelope; since
+the 2026-10-06 ruling only the pre-cutover refusal is authorized), and only then
+derives the privacy-reduced v2 case record the gate consumes.
 Authorization is checked before any plan or evidence access.
 """
 from __future__ import annotations
@@ -65,6 +66,7 @@ def _gate_record(operator_plan: Path) -> dict:
             "stale_reservation_count": observation["stale_reservation_count"],
             "process_cleanup_complete": observation["process_cleanup_complete"],
         },
+        cutover_committed=observation["cutover_committed"],
     )
     if layers["v2_envelope_authorized"] is not True:
         raise ValueError("cleanup_v2_count_layers_unauthorized")
