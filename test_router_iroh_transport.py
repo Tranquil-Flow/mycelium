@@ -20,6 +20,8 @@ import mycelium_router.transports.iroh as iroh_module
 from mycelium_router.contracts import (
     FailureReport,
     HopHeader,
+    KVCheckpointCommit,
+    KVShadowRelease,
     PathCancellation,
     PathBuildState,
     PathHop,
@@ -3020,3 +3022,92 @@ def test_close_retains_a_delivery_cancel_worker_that_has_not_begun_its_attempt()
     assert pending.cancel_confirmed is False
     assert pending.cancel_started is False
     assert hub.cancels == []
+
+
+class _A7ReleaseRouter(_RecordingRouter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.releases: list[tuple[object, str | None]] = []
+        self.commits: list[object] = []
+
+    def receive_kv_shadow_release(self, release, *, source_node_id=None):
+        self.releases.append((release, source_node_id))
+        return True
+
+    def receive_kv_checkpoint_commit(self, commit, *, source_node_id=None):
+        self.commits.append(commit)
+        return True
+
+
+def _owner_cancelled(transport: IrohTransport, request_id: str, path_id: str) -> None:
+    """The owner's fanned-out infer_cancel landed for this request (ordering injected)."""
+
+    with transport._state_lock:
+        transport._remember_cancellation_locked(
+            PathCancellation(request_id, path_id, 0, "topology-1")
+        )
+        transport._remember_controlled_cancellation_locked(request_id)
+
+
+_RELEASE = KVShadowRelease(
+    request_id="request-1", path_id="path-1", path_attempt=0, reason="completed"
+)
+_COMMIT = KVCheckpointCommit(
+    request_id="request-1",
+    path_id="path-1",
+    path_attempt=0,
+    request_attempt=1,
+    source_placement_id="placement-s",
+    committed_token_count=1,
+    committed_prefix_digest="sha256:" + "a" * 64,
+)
+
+
+def test_shadow_release_to_self_is_delivered_after_owner_cancel() -> None:
+    transport = _transport(_Hub())
+    router = _A7ReleaseRouter()
+    transport.bind_router(router)
+    transport.start()
+    try:
+        _owner_cancelled(transport, "request-1", "path-1")
+        transport.send_a7_message("local-node", _RELEASE)
+        # Request work for the cancelled request is still absorbed.
+        transport.send_a7_message("local-node", _COMMIT)
+    finally:
+        transport.close()
+
+    assert router.releases == [(_RELEASE, "local-node")]
+    assert router.commits == []
+
+
+def test_inbound_shadow_release_is_dispatched_after_owner_cancel() -> None:
+    transport = _transport(_Hub())
+    router = _A7ReleaseRouter()
+    transport.bind_router(router)
+    transport.start()
+    try:
+        _owner_cancelled(transport, "request-1", "path-1")
+        transport._dispatch(decode_frame(encode_frame(_RELEASE)), source_node_id="peer-node")
+        transport._dispatch(decode_frame(encode_frame(_COMMIT)), source_node_id="peer-node")
+    finally:
+        transport.close()
+
+    assert router.releases == [(_RELEASE, "peer-node")]
+    assert router.commits == []
+
+
+def test_remote_shadow_release_is_not_fenced_by_owner_cancel() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_A7ReleaseRouter())
+    transport.start()
+    try:
+        _owner_cancelled(transport, "request-1", "path-1")
+        transport.send_a7_message("peer-node", _RELEASE)
+        with pytest.raises(IrohTransportError) as fenced:
+            transport.send_a7_message("peer-node", _COMMIT)
+    finally:
+        transport.close()
+
+    assert fenced.value.code == "path_cancelled"
+    assert [frame for _id, frame, _timeout, _generation in hub.sent] == [encode_frame(_RELEASE)]

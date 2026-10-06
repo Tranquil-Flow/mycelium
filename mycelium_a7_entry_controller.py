@@ -74,6 +74,11 @@ def committed_prefix_digest(request_id: str, committed_token_ids: Sequence[int])
    return _sha({"request": request_key(request_id), "committed": [int(token) for token in committed_token_ids]})
 
 
+# Remote shadow-release delivery: attempts and linear backoff step (seconds).
+_RELEASE_ATTEMPTS = 3
+_RELEASE_RETRY_SECONDS = 0.05
+
+
 @dataclass(frozen=True)
 class StandbyCoverage:
    """One qualified standby covering one source placement of the deployment."""
@@ -156,6 +161,8 @@ class A7EntryController:
       self._last_cutover_sequence = 0
       self._last_cutover_written = 0
       self._last_cutover_write_lock = threading.Lock()
+      # Shadow releases that never reached a participant, by failure code.
+      self._release_failures: dict[str, int] = {}
 
    # -- coverage ------------------------------------------------------------------
 
@@ -524,18 +531,33 @@ class A7EntryController:
    def _release_participants(self, state: _Coverage, request_id: str, manifest: PathManifest, reason: str) -> None:
       release = KVShadowRelease(request_id=request_id, path_id=manifest.path_id, path_attempt=manifest.path_attempt, reason=reason)
 
-      def deliver(destination: str) -> None:
-         try:
-            self._send(destination, release, b"")
-         except Exception:
-            # An unreachable participant is fenced by authority, not trusted to stop.
-            pass
+      def deliver(destination: str, attempts: int) -> None:
+         for attempt in range(attempts):
+            try:
+               self._send(destination, release, b"")
+               return
+            except Exception as exc:
+               code = str(getattr(exc, "code", None) or type(exc).__name__)[:64]
+            if attempt + 1 < attempts:
+               time.sleep(_RELEASE_RETRY_SECONDS * (attempt + 1))
+         # An unreachable participant is fenced by authority, not trusted to
+         # stop; the undelivered release is still recorded, never silent.
+         with self._lock:
+            if code in self._release_failures or len(self._release_failures) < 32:
+               self._release_failures[code] = self._release_failures.get(code, 0) + 1
 
       for destination in sorted(state.participants):
          if self._release_async and destination != self.node_id:
-            threading.Thread(target=deliver, args=(destination,), name="a7-release", daemon=True).start()
+            # Off the request path: a briefly unreachable peer gets a bounded retry.
+            threading.Thread(target=deliver, args=(destination, _RELEASE_ATTEMPTS), name="a7-release", daemon=True).start()
          else:
-            deliver(destination)
+            deliver(destination, 1)
+
+   def release_failures(self) -> dict[str, int]:
+      """Shadow releases this entry could not deliver, by transport failure code."""
+
+      with self._lock:
+         return dict(self._release_failures)
 
    def _finish_fallback(self, state, request_id, old_manifest, successor_manifest, reason, gateway_tokens, started, watermark) -> dict[str, Any]:
       self._fence_old_path(state, request_id, old_manifest)

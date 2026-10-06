@@ -840,6 +840,26 @@ class IrohTransport:
         finally:
             self._state_lock.release()
 
+    @classmethod
+    def _fence_scope(
+        cls,
+        decoded: DecodedFrame,
+    ) -> tuple[str | None, str | None, int | None]:
+        """The request scope cancellation fences and sweeps apply to.
+
+        A ``KVShadowRelease`` only frees A7 state a node holds for a request
+        that has already ended; it can never create work.  Owner cancellation
+        of the same request routinely lands just before the entry's terminal
+        release, so fencing the release would silently strand the standby's
+        shadow chain.  It is therefore delivered unscoped: no cancellation
+        fence, pending-send sweep or forward-scope drop applies to it.
+        Receipt/failure evidence still uses ``_frame_scope``.
+        """
+
+        if isinstance(decoded.message, KVShadowRelease):
+            return (None, None, None)
+        return cls._frame_scope(decoded)
+
     @staticmethod
     def _frame_scope(
         decoded: DecodedFrame,
@@ -1240,7 +1260,7 @@ class IrohTransport:
 
         message_id = uuid.uuid4().bytes
         deadline = time.monotonic() + self.delivery_timeout_seconds
-        request_id, path_id, path_attempt = self._frame_scope(decoded)
+        request_id, path_id, path_attempt = self._fence_scope(decoded)
         pending = _PendingSend(
             peer.generation,
             request_id,
@@ -2731,7 +2751,7 @@ class IrohTransport:
         if router is None:
             raise IrohTransportError("router_not_bound")
         message = decoded.message
-        request_id, _path_id, _path_attempt = self._frame_scope(decoded)
+        request_id, _path_id, _path_attempt = self._fence_scope(decoded)
         with self._state_lock:
             if (
                 not isinstance(message, PathCancellation)
@@ -3352,7 +3372,7 @@ class IrohTransport:
             with self._state_lock:
                 self._require_running()
                 try:
-                    request_id, path_id, path_attempt = self._frame_scope(decoded)
+                    request_id, path_id, path_attempt = self._fence_scope(decoded)
                     if (
                         request_id is not None
                         and path_id is not None

@@ -454,3 +454,87 @@ def test_standby_dispatch_routes_by_placement_and_merges_evidence(tmp_path: Path
    snapshot = runtime.kv_snapshot()
    assert snapshot["standby_placement_count"] == 1 and snapshot["active_state_count"] == 0
    assert runtime.kv_subject_clean("r", "p", 0) is True
+
+
+def test_owner_cancel_landing_before_the_terminal_release_still_frees_the_standby(tmp_path: Path) -> None:
+   """The owner's controlled cancel can reach the entry/standby node just before
+   the entry's terminal ``KVShadowRelease``.  The release must still be
+   delivered through the real transport and free the standby's shadow chain."""
+
+   from mycelium_router.contracts import PathCancellation
+   from mycelium_router.transports.iroh import IrohTransport, PeerBinding
+   from test_router_iroh_transport import _Hub
+
+   harness = _Harness(tmp_path)
+   transport = IrohTransport(
+      node_id="node-a",
+      socket_path="/unused",
+      bootstrap_secret=b"s" * 32,
+      peer=PeerBinding(node_id="node-b", endpoint_id="peer-endpoint", endpoint_addr={"id": "peer-endpoint", "addrs": ["127.0.0.1:1"]}, generation=7),
+      expected_endpoint_id="local-endpoint",
+      queue_capacity=8,
+      delivery_timeout_seconds=0.5,
+      poll_interval_seconds=0.01,
+      client_factory=_Hub().client,
+   )
+   transport.bind_router(harness.routers["node-a"])
+   net_send = harness.controller._send
+   cancelled: list[str] = []
+
+   def send(destination: str, message, payload: bytes) -> None:
+      if isinstance(message, KVShadowRelease) and destination == "node-a":
+         # Inject the ordering: the owner's fanned-out cancel wins first.
+         with transport._state_lock:
+            transport._remember_cancellation_locked(
+               PathCancellation(message.request_id, message.path_id, message.path_attempt, harness.graph.topology_version)
+            )
+            transport._remember_controlled_cancellation_locked(message.request_id)
+         cancelled.append(message.request_id)
+         transport.send_a7_message(destination, message, payload)
+         return
+      net_send(destination, message, payload)
+
+   harness.controller._send = send
+   harness.net.drop.add("KVShadowRelease")  # node-b's copy is irrelevant here
+   transport.start()
+   try:
+      harness.run("request:a7-cancel-first", kill_after=None)
+      assert harness.entry.request_status("request:a7-cancel-first") == "COMPLETED"
+      assert harness.net.delivered.count("KVCheckpointShipment") >= 1
+      assert cancelled == ["request:a7-cancel-first"]
+      assert harness.shadow.snapshot() == {"shadow_entry_count": 0, "shadow_kv_bytes": 0}
+      assert harness.controller.release_failures() == {}
+   finally:
+      transport.close()
+
+
+def test_undelivered_remote_releases_are_retried_then_recorded(tmp_path: Path) -> None:
+   import time as _time
+
+   harness = _Harness(tmp_path)
+   harness.controller._release_async = True
+   net_send = harness.controller._send
+   attempts: dict[str, int] = {"node-b": 0}
+   done = __import__("threading").Event()
+
+   class _Unreachable(Exception):
+      code = "path_cancelled"
+
+   def send(destination: str, message, payload: bytes) -> None:
+      if isinstance(message, KVShadowRelease) and destination == "node-b":
+         attempts["node-b"] += 1
+         if attempts["node-b"] >= 3:
+            done.set()
+         raise _Unreachable()
+      net_send(destination, message, payload)
+
+   harness.controller._send = send
+   harness.run("request:a7-release-unreachable", kill_after=None)
+   assert done.wait(timeout=2.0)
+   deadline = _time.monotonic() + 2.0
+   while not harness.controller.release_failures() and _time.monotonic() < deadline:
+      _time.sleep(0.01)
+   assert attempts["node-b"] == 3
+   assert harness.controller.release_failures() == {"path_cancelled": 1}
+   # The standby's own copy still arrived: nothing is held locally.
+   assert harness.shadow.snapshot() == {"shadow_entry_count": 0, "shadow_kv_bytes": 0}
