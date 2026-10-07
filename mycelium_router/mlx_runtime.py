@@ -2291,7 +2291,10 @@ class MLXRuntimePort:
             floor, ceiling, offset = window
             if item.position - item.token_index != offset:
                _reject("kv_speculative_offset_mismatch")
-            if not floor <= item.position <= ceiling:
+            # ``ceiling + 1`` is the position after the span: every candidate
+            # matched and the target's own next decision (the bonus token) was
+            # committed too, so the whole span's KV is kept, nothing rewinds.
+            if not floor <= item.position <= ceiling + 1:
                _reject("kv_position_mismatch")
             if item.position < state.next_position:
                past_layers = {

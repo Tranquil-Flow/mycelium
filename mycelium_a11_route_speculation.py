@@ -12,7 +12,10 @@ the client sink.  This controller gives it three things per speculative request:
   over :class:`RouteVerificationPort`, in mode
   ``commit_verified_prefix_plus_target_correction``.  The committed tokens are the
   accepted prefix plus, on a mismatch, the target's own correction; nothing the
-  draft proposed is ever committed without the target having drawn it;
+  draft proposed is ever committed without the target having drawn it.  When
+  every candidate matched, the target's own decision after the last candidate
+  (the **target bonus**, owner-approved 2026-10-07) is committed as well, unless
+  it would complete the request: the last token stays an ordinary DECODE;
 * the **policy**: deadline fallback to an ordinary DECODE round, the frozen circuit
   breaker (``circuit_breaker_decision``), cooldown and revocation.
 
@@ -175,6 +178,8 @@ class RoundCommit:
     correction: int | None
     committed: tuple[int, ...]
     outcome: dict[str, Any]
+    #: The target's own decision after an all-match span (``None`` if not taken).
+    bonus: int | None = None
 
 
 def arbitrate_round(
@@ -185,8 +190,14 @@ def arbitrate_round(
     request_ref: str,
     runtime_incarnation: str,
     cancellation_generation: int = 0,
+    bonus_allowed: bool = False,
 ) -> RoundCommit:
-    """Run the A10 transaction over one returned VERIFY and return what it committed."""
+    """Run the A10 transaction over one returned VERIFY and return what it committed.
+
+    ``bonus_allowed``: after an all-match span, also commit the target's own decision
+    at the position after the last candidate (``decisions[width]``).  It is drawn by
+    the target exactly as an ordinary DECODE would draw it, so output parity holds.
+    """
 
     port = RouteVerificationPort(context=context, candidates=candidates, decisions=decisions)
     width = len(port.candidates)
@@ -212,6 +223,10 @@ def arbitrate_round(
     correction = int(committed[-1]) if outcome.correction_count else None
     if tuple(committed[:accepted]) != port.candidates[:accepted]:
         raise RouteSpeculationError("committed_prefix_not_target_verified")
+    bonus = None
+    if bonus_allowed and accepted == width and correction is None:
+        bonus = int(port.decisions[width])
+        committed = tuple(committed) + (bonus,)
     return RoundCommit(
         accepted=tuple(port.candidates[:accepted]),
         correction=correction,
@@ -221,9 +236,11 @@ def arbitrate_round(
             "verified": int(outcome.verified_count),
             "accepted": accepted,
             "corrected": int(outcome.correction_count),
+            "bonus": 0 if bonus is None else 1,
             "committed": len(committed),
             "commit_state": outcome.commit_state,
         },
+        bonus=bonus,
     )
 
 
@@ -242,6 +259,8 @@ class RouteSpeculationPolicy:
     generation_policy: str = "deterministic_greedy"
     draft_identity_digest: str | None = None
     target_binding_digest: str | None = None
+    #: Commit the target's own decision after an all-match span (owner-approved).
+    target_bonus: bool = True
 
     def __post_init__(self) -> None:
         if isinstance(self.width, bool) or not isinstance(self.width, int) or not 1 <= self.width <= MAXIMUM_WIDTH:
@@ -264,6 +283,7 @@ class _RequestState:
     accepted: int = 0
     rejected: int = 0
     corrected: int = 0
+    bonus: int = 0
     committed: int = 0
     rollbacks: int = 0
     draft_ms: float = 0.0
@@ -437,8 +457,14 @@ class RouteSpeculationController:
         candidates: Sequence[int],
         decisions: Sequence[int],
         cancellation_generation: int = 0,
+        remaining: int | None = None,
     ) -> RoundCommit:
-        """Arbitrate one returned VERIFY.  The returned tokens are target-committed."""
+        """Arbitrate one returned VERIFY.  The returned tokens are target-committed.
+
+        ``remaining`` is the request's output budget left before this round.  The
+        target bonus is taken only when the request still has a token left after
+        it, so the last token of every request remains an ordinary terminal DECODE.
+        """
 
         state = self._states.get(request_id)
         result = arbitrate_round(
@@ -448,6 +474,11 @@ class RouteSpeculationController:
             request_ref=f"{request_id}:{len(context)}",
             runtime_incarnation=self._incarnation,
             cancellation_generation=cancellation_generation,
+            bonus_allowed=(
+                self.policy.target_bonus
+                and remaining is not None
+                and len(tuple(candidates)) + 1 < int(remaining)
+            ),
         )
         if state is None:
             return result
@@ -460,6 +491,7 @@ class RouteSpeculationController:
         state.accepted += result.outcome["accepted"]
         state.rejected += result.outcome["verified"] - result.outcome["accepted"]
         state.corrected += result.outcome["corrected"]
+        state.bonus += result.outcome["bonus"]
         state.committed += result.outcome["committed"]
         state.rollbacks += int(result.outcome["accepted"] < result.outcome["proposed"])
         state.draft_ms += state.pending_draft_ms
@@ -476,7 +508,8 @@ class RouteSpeculationController:
         )
         try:
             reproducible = state.draft.commit_verified_prefix(
-                tokens=result.accepted, correction_token=result.correction
+                tokens=result.accepted,
+                correction_token=result.correction if result.bonus is None else result.bonus,
             )
         except Exception:  # noqa: BLE001
             reproducible = False
@@ -543,6 +576,7 @@ class RouteSpeculationController:
             "accepted_count": state.accepted,
             "rejected_count": state.rejected,
             "target_corrected_count": state.corrected,
+            "target_bonus_count": state.bonus,
             "committed_count": state.committed,
             "rollback_count": state.rollbacks,
             "draft_ms_total": round(state.draft_ms, 3),

@@ -1028,6 +1028,7 @@ class EntryCoordinator:
             context=context,
             candidates=round_[1],
             decisions=event.decisions,
+            remaining=record.request.max_new_tokens - token_index,
          )
          committed = result.committed[: max(0, record.request.max_new_tokens - token_index)]
          record.generated_token_ids.extend(committed)

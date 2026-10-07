@@ -161,6 +161,15 @@ Four artefacts exist at this stage:
   `target_committed_output_tokens == committed_count`
   (`committed_positions_not_target_authoritative`) — every committed position is
   target-verified or target-corrected exactly once and emitted exactly once;
+- **Amendment (owner ruling 2026-10-07, target bonus):** a request may carry an
+  optional `target_bonus_count`, the target's own decision committed after an
+  all-match span (drawn by the target at the position after the last candidate,
+  exactly as an ordinary DECODE would draw it). Then
+  `committed_count == accepted_count + target_corrected_count + target_bonus_count`,
+  `target_bonus_count <= accepted_count` (`impossible_runtime_counts`), and a
+  `target_only` request carries none. A document without the field means zero.
+  The bonus is never taken when it would complete the request, so the last
+  token stays an ordinary terminal DECODE;
 - a `target_only` request carries zero proposals and no deadline/draft timing;
   a `target_only` runtime document cannot contain a speculative request
   (`target_only_mode_carries_proposals`);

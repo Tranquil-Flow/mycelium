@@ -47,8 +47,27 @@ def test_all_match_commits_every_candidate_and_no_correction():
     result = arbitrate_round(context=(1, 2), candidates=(3, 4, 5), decisions=(3, 4, 5, 9),
                              request_ref="r", runtime_incarnation=INCARNATION)
     assert result.committed == (3, 4, 5) and result.correction is None
-    assert result.outcome == {"proposed": 3, "verified": 3, "accepted": 3, "corrected": 0,
+    assert result.outcome == {"proposed": 3, "verified": 3, "accepted": 3, "corrected": 0, "bonus": 0,
                               "committed": 3, "commit_state": "committed"}
+    assert result.bonus is None
+
+
+def test_all_match_with_the_bonus_allowed_also_commits_the_target_next_decision():
+    result = arbitrate_round(context=(1, 2), candidates=(3, 4, 5), decisions=(3, 4, 5, 9),
+                             request_ref="r", runtime_incarnation=INCARNATION, bonus_allowed=True)
+    assert result.committed == (3, 4, 5, 9) and result.bonus == 9 and result.correction is None
+    assert result.outcome["committed"] == result.outcome["accepted"] + result.outcome["corrected"] + result.outcome["bonus"]
+    assert result.outcome["bonus"] == 1
+
+
+@pytest.mark.parametrize("mismatch", [0, 1, 2])
+def test_a_mismatch_never_takes_a_bonus(mismatch):
+    decisions = [3, 4, 5, 9]
+    decisions[mismatch] = 8
+    result = arbitrate_round(context=(1, 2), candidates=(3, 4, 5), decisions=decisions,
+                             request_ref="r", runtime_incarnation=INCARNATION, bonus_allowed=True)
+    assert result.bonus is None and result.outcome["bonus"] == 0
+    assert result.committed == (3, 4, 5)[:mismatch] + (8,)
 
 
 @pytest.mark.parametrize("mismatch", [0, 1, 2])
@@ -273,6 +292,48 @@ def _speculative_mesh(case, draft, *, width=4, policy=None):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("bonus", [True, False])
+def test_all_match_rounds_take_the_target_bonus_and_the_last_token_stays_a_decode(case, bonus):
+    reference = _target_only(case)
+    draft = ScriptedDraft(reference, error_offsets=[4])  # never wrong at width 4
+    mesh, controller = _speculative_mesh(case, draft, policy=_policy(target_bonus=bonus))
+    controller.set_preference("bonus", "speculative_requested")
+    sink = mesh.start("bonus", 14)
+    assert mesh.run("bonus", mesh.entry.speculate_one_distributed) == "COMPLETED"
+    assert sink.token_ids == reference
+    assert sink.token_indexes == list(range(len(reference)))
+    summary = controller.completed[-1]
+    assert summary["rejected_count"] == 0 and summary["target_corrected_count"] == 0
+    assert summary["committed_count"] == summary["accepted_count"] + summary["target_bonus_count"]
+    # 13 tokens after the prefill token, width 4, the last one a DECODE: with the bonus
+    # the rounds commit 5, 5 and then 2 (a bonus there would complete the request).
+    assert summary["rounds"] == 3
+    assert summary["target_bonus_count"] == (2 if bonus else 0)
+    assert summary["accepted_count"] == (10 if bonus else 12)
+    verify_hops = [d for d in mesh.mesh.hop_deliveries if d.header.phase == "VERIFY"]
+    decode_hops = [d for d in mesh.mesh.hop_deliveries if d.header.phase == "DECODE"]
+    # The last committed token is always an ordinary terminal DECODE.
+    last = max(verify_hops + decode_hops, key=lambda d: d.header.token_index)
+    assert last.header.phase == "DECODE" and last.header.token_index == len(reference) - 1
+    assert mesh.active_kv() == [0, 0]
+
+
+def test_the_target_bonus_saves_a_pipeline_pass(case):
+    reference = _target_only(case, 12)
+    passes = {}
+    for bonus in (False, True):
+        draft = ScriptedDraft(reference, error_offsets=[4])
+        mesh, controller = _speculative_mesh(case, draft, policy=_policy(target_bonus=bonus))
+        controller.set_preference("pass", "speculative_requested")
+        sink = mesh.start("pass", 12)
+        assert mesh.run("pass", mesh.entry.speculate_one_distributed) == "COMPLETED"
+        assert sink.token_ids == reference
+        hops = [d for d in mesh.mesh.hop_deliveries if d.header.phase in {"VERIFY", "DECODE"}]
+        passes[bonus] = len(hops) // 2
+    # 11 tokens after the prefill token: 4+4+2 then a DECODE, or 5+5 then a DECODE.
+    assert passes == {False: 4, True: 3}
+
+
 @pytest.mark.parametrize("error_offsets", [[4], [0], [1, 3], [2, 4, 0]])
 def test_speculative_output_equals_target_only_output(case, error_offsets):
     reference = _target_only(case)
@@ -285,7 +346,9 @@ def test_speculative_output_equals_target_only_output(case, error_offsets):
     assert sink.token_indexes == list(range(len(reference)))
     summary = controller.completed[-1]
     assert summary["rounds"] >= 1
-    assert summary["committed_count"] == summary["accepted_count"] + summary["target_corrected_count"]
+    assert summary["committed_count"] == (
+        summary["accepted_count"] + summary["target_corrected_count"] + summary["target_bonus_count"]
+    )
     assert summary["accepted_count"] + summary["rejected_count"] <= summary["verified_count"] <= summary["proposed_count"]
     # Fewer pipeline passes than tokens whenever any candidate is accepted.
     verify_hops = [d for d in mesh.mesh.hop_deliveries if d.header.phase == "VERIFY"]

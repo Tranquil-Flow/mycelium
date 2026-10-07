@@ -227,6 +227,22 @@ def test_all_match_commit_keeps_kv_through_the_last_candidate(case):
     assert _decisions(following) == reference[5:9]
 
 
+def test_all_match_plus_the_target_bonus_keeps_the_whole_span_and_continues_exactly(case):
+    reference = _reference(case)
+    route = Route(case, _ports(case), "verify-bonus")
+    route.prefill(PROMPT)
+    decisions = _decisions(route.verify(reference[0:5], 1))
+    # Every candidate matched: commit them and the target's own next decision.
+    assert decisions[4] == reference[5]
+    committed = reference[:6]
+    following = route.decode(committed[-1], len(committed))
+    assert following.success, following.failure_reason
+    assert following.token_id == reference[6]
+    # The window was consumed: a rewind into the old span is refused afterwards.
+    stale = route.decode(reference[3], 4)
+    assert not stale.success and stale.failure_reason == "kv_position_mismatch"
+
+
 def test_rollback_to_the_unchanged_watermark_reproduces_the_decode(case):
     reference = _reference(case)
     route = Route(case, _ports(case), "verify-rollback")
@@ -243,7 +259,7 @@ def test_positions_outside_the_verify_window_fail_closed_and_change_nothing(case
     route = Route(case, ports, "verify-window")
     route.prefill(PROMPT)
     route.verify(reference[0:5], 1)
-    beyond = route.decode(reference[5], 6)  # would keep the last candidate's KV: no bonus
+    beyond = route.decode(reference[6], 7)  # past the span plus the target's bonus decision
     assert not beyond.success and beyond.failure_reason == "kv_position_mismatch"
     below = route._run((reference[0],), phase="DECODE", token_index=0, position=len(PROMPT) - 2)
     assert not below.success

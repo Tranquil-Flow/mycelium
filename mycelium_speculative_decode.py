@@ -748,7 +748,12 @@ def _validate_runtime_binding(value: Any) -> dict[str, Any]:
 
 
 def _validate_runtime_request(value: Any) -> dict[str, Any]:
-    request = _closed(value, _RUNTIME_REQUEST_FIELDS, "speculative_decode_runtime_invalid")
+    # Owner amendment 2026-10-07: an optional ``target_bonus_count`` -- the target's
+    # own decision committed after an all-match span.  Absent means zero.
+    fields = _RUNTIME_REQUEST_FIELDS
+    if isinstance(value, Mapping) and "target_bonus_count" in value:
+        fields = _RUNTIME_REQUEST_FIELDS | {"target_bonus_count"}
+    request = _closed(value, fields, "speculative_decode_runtime_invalid")
     _text(request["request_id"], "speculative_decode_runtime_invalid")
     if request["mode"] not in {"target_only", "speculative_requested", "speculative_admitted"}:
         raise ValueError("speculative_decode_runtime_invalid")
@@ -764,6 +769,8 @@ def _validate_runtime_request(value: Any) -> dict[str, Any]:
         "target_committed_output_tokens",
     ):
         _integer(request[key], "speculative_decode_runtime_invalid")
+    bonus = request.get("target_bonus_count", 0)
+    _integer(bonus, "speculative_decode_runtime_invalid")
 
     if request["mode"] == "target_only":
         if request["proposal_width"] != 0:
@@ -780,7 +787,7 @@ def _validate_runtime_request(value: Any) -> dict[str, Any]:
                 "committed_count",
                 "target_committed_output_tokens",
             )
-        ):
+        ) or bonus != 0:
             raise ValueError("speculative_decode_runtime_invalid")
         if request["deadline_outcome"] != "none" or request["fallback_reason"] != "none":
             raise ValueError("speculative_decode_runtime_invalid")
@@ -803,7 +810,10 @@ def _validate_runtime_request(value: Any) -> dict[str, Any]:
         raise SpeculativeDecodeContractError("impossible_runtime_counts", request["request_id"])
     if corrected > rejected or rollback > proposed - accepted:
         raise SpeculativeDecodeContractError("impossible_runtime_counts", request["request_id"])
-    if committed != accepted + corrected or request["target_committed_output_tokens"] != committed:
+    # Each bonus follows an all-match span of at least one accepted position.
+    if bonus > accepted:
+        raise SpeculativeDecodeContractError("impossible_runtime_counts", request["request_id"])
+    if committed != accepted + corrected + bonus or request["target_committed_output_tokens"] != committed:
         raise SpeculativeDecodeContractError("committed_positions_not_target_authoritative", request["request_id"])
 
     if request["deadline_outcome"] not in _DEADLINE_OUTCOMES:
