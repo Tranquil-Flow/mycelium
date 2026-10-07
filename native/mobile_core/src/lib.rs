@@ -29,4 +29,6 @@ pub mod route_assignment;
 #[cfg(feature = "net")]
 pub mod transport;
 #[cfg(feature = "net")]
+pub mod artifact_net;
+#[cfg(feature = "net")]
 pub mod node;

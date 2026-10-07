@@ -52,3 +52,7 @@ required-features = ["net"]
 [[example]]
 name = "route_peer"
 required-features = ["net"]
+
+[[example]]
+name = "artifact_source"
+required-features = ["net"]
