@@ -4,13 +4,13 @@
 //! process or Unix socket: the app owns the endpoint directly. Replaces Tailscale:
 //! connectivity comes from iroh hole punching with relay fallback.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
 use iroh::endpoint::presets;
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey};
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{Mutex as AsyncMutex, RwLock, mpsc, oneshot};
 use tokio::time::timeout;
 
 use crate::wire::{self, Frame, RemoteKind};
@@ -19,6 +19,11 @@ pub const IROH_ALPN: &[u8] = b"mycelium.iroh.sidecar.v1";
 const STREAM_IO_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_TRANSFER_BYTES: usize = wire::REMOTE_HEADER_BYTES + wire::REMOTE_MAX_PAYLOAD_BYTES;
 const REJECT_CODE: u32 = 1;
+/// How long a delivery may wait for its dispatch verdict before the sender
+/// is told to retry (the stage run happens inside it).
+pub const DISPATCH_TIMEOUT: Duration = Duration::from_secs(120);
+/// Message ids remembered for duplicate detection (the sidecar's seen table).
+const SEEN_LIMIT: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
@@ -40,8 +45,33 @@ pub enum Reachability {
 #[derive(Debug)]
 pub struct Inbound {
     pub from: EndpointId,
+    /// The Router node id the peer is configured as (its endpoint id when
+    /// configured without one).
+    pub from_node: String,
     pub generation: u64,
     pub frame: Frame,
+    /// With [`NodeTransport::spawn_accept_dispatch`]: the dispatcher's verdict,
+    /// `Ok(())` to acknowledge or `Err(code)` to refuse (the sender retries).
+    pub reply: Option<oneshot::Sender<Result<(), String>>>,
+}
+
+/// One allow-listed peer: its route generation and Router node id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerBinding {
+    pub generation: u64,
+    pub node_id: String,
+    pub addr: EndpointAddr,
+}
+
+/// A dispatched message's frame digest and verdict.
+type SeenEntry = ([u8; 32], Result<(), String>);
+
+/// Remote message ids already dispatched: id -> (frame digest, verdict).
+#[derive(Default)]
+struct Seen {
+    done: HashMap<[u8; 16], SeenEntry>,
+    order: VecDeque<[u8; 16]>,
+    inflight: HashMap<[u8; 16], [u8; 32]>,
 }
 
 /// Which path a connection used: evidence for the `network` gate family.
@@ -55,7 +85,8 @@ pub struct PathReport {
 #[derive(Clone)]
 pub struct NodeTransport {
     endpoint: Endpoint,
-    peers: Arc<RwLock<HashMap<EndpointId, u64>>>,
+    peers: Arc<RwLock<HashMap<EndpointId, PeerBinding>>>,
+    seen: Arc<AsyncMutex<Seen>>,
 }
 
 impl NodeTransport {
@@ -74,7 +105,7 @@ impl NodeTransport {
             .bind()
             .await
             .map_err(|_| err("endpoint_bind_failed"))?;
-        Ok(Self { endpoint, peers: Arc::new(RwLock::new(HashMap::new())) })
+        Ok(Self { endpoint, peers: Arc::new(RwLock::new(HashMap::new())), seen: Arc::default() })
     }
 
     pub fn endpoint_id(&self) -> String {
@@ -110,7 +141,22 @@ impl NodeTransport {
 
     /// Allow-list one peer at an exact generation (ConfigurePeer semantics).
     pub async fn configure_peer(&self, peer: EndpointId, generation: u64) {
-        self.peers.write().await.insert(peer, generation);
+        self.peers.write().await.insert(peer, PeerBinding { generation, node_id: peer.to_string(), addr: EndpointAddr::from(peer) });
+    }
+
+    /// Replace the routed peer set (ConfigurePeers semantics): each Router
+    /// node id with its endpoint (and address hints) at its route generation.
+    pub async fn configure_route_peers(&self, peers: Vec<PeerBinding>) {
+        let mut table = self.peers.write().await;
+        table.clear();
+        for binding in peers {
+            table.insert(binding.addr.id, binding);
+        }
+    }
+
+    /// The configured peer bound to a Router node id.
+    pub async fn peer_for_node(&self, node_id: &str) -> Option<PeerBinding> {
+        self.peers.read().await.values().find(|b| b.node_id == node_id).cloned()
     }
 
     /// Withdraw a peer from the allow-list (its next connection is refused).
@@ -126,16 +172,32 @@ impl NodeTransport {
     /// enqueued. Unknown peers and stale generations are refused with the same
     /// codes the sidecar uses.
     pub fn spawn_accept(&self, inbox: mpsc::Sender<Inbound>) -> tokio::task::JoinHandle<()> {
+        self.accept_loop(inbox, false)
+    }
+
+    /// Accept loop with the Python transport's delivery semantics
+    /// (`transports/iroh.py`): a frame is acknowledged only after the
+    /// dispatcher's verdict (`Inbound::reply`), a refused or timed-out
+    /// dispatch is answered with an error so the sender retries, and a
+    /// repeated message id is answered from the seen table without being
+    /// dispatched again (another frame under the same id: `replay_collision`).
+    pub fn spawn_accept_dispatch(&self, inbox: mpsc::Sender<Inbound>) -> tokio::task::JoinHandle<()> {
+        self.accept_loop(inbox, true)
+    }
+
+    fn accept_loop(&self, inbox: mpsc::Sender<Inbound>, dispatch: bool) -> tokio::task::JoinHandle<()> {
         let endpoint = self.endpoint.clone();
         let peers = self.peers.clone();
+        let seen = self.seen.clone();
         tokio::spawn(async move {
             while let Some(incoming) = endpoint.accept().await {
                 let peers = peers.clone();
                 let inbox = inbox.clone();
+                let seen = seen.clone();
                 tokio::spawn(async move {
                     let Ok(connection) = incoming.await else { return };
                     let remote = connection.remote_id();
-                    let Some(expected) = peers.read().await.get(&remote).copied() else {
+                    let Some(binding) = peers.read().await.get(&remote).cloned() else {
                         connection.close(REJECT_CODE.into(), b"identity");
                         return;
                     };
@@ -148,20 +210,27 @@ impl NodeTransport {
                         if request.kind != RemoteKind::Transfer {
                             continue;
                         }
-                        let (kind, payload): (RemoteKind, &[u8]) = match wire::split_transfer(&request.payload) {
-                            Ok((generation, _)) if generation != expected => (RemoteKind::Error, b"peer_rotated"),
-                            Ok((generation, frame)) => match wire::decode_frame(frame) {
+                        // The binding may have rotated since the connection opened.
+                        let current = peers.read().await.get(&remote).map(|b| b.generation);
+                        let verdict: Result<(), String> = match wire::split_transfer(&request.payload) {
+                            Ok((generation, _)) if Some(generation) != current || generation != binding.generation => Err("peer_rotated".into()),
+                            Ok((generation, raw)) => match wire::decode_frame(raw) {
+                                Ok(frame) if !dispatch => match inbox.try_send(Inbound { from: remote, from_node: binding.node_id.clone(), generation, frame, reply: None }) {
+                                    Ok(()) => Ok(()),
+                                    Err(_) => Err("queue_full".into()),
+                                },
                                 Ok(frame) => {
-                                    match inbox.try_send(Inbound { from: remote, generation, frame }) {
-                                        Ok(()) => (RemoteKind::Ack, b""),
-                                        Err(_) => (RemoteKind::Error, b"queue_full"),
-                                    }
+                                    deliver(&seen, &inbox, request.message_id, raw, Inbound { from: remote, from_node: binding.node_id.clone(), generation, frame, reply: None }).await
                                 }
-                                Err(_) => (RemoteKind::Error, b"invalid_frame"),
+                                Err(_) => Err("invalid_frame".into()),
                             },
-                            Err(_) => (RemoteKind::Error, b"invalid_frame"),
+                            Err(_) => Err("invalid_frame".into()),
                         };
-                        if let Ok(response) = wire::encode_remote(kind, request.message_id, payload) {
+                        let (kind, payload) = match &verdict {
+                            Ok(()) => (RemoteKind::Ack, Vec::new()),
+                            Err(code) => (RemoteKind::Error, code.as_bytes().to_vec()),
+                        };
+                        if let Ok(response) = wire::encode_remote(kind, request.message_id, &payload) {
                             let _ = timeout(STREAM_IO_TIMEOUT, send.write_all(&response)).await;
                             let _ = send.finish();
                         }
@@ -223,6 +292,51 @@ fn path_report(connection: &iroh::endpoint::Connection) -> PathReport {
         }
     }
     PathReport { selected, rtt_ms, path_count: paths.len() }
+}
+
+/// Dispatch one delivery and wait for its verdict, deduplicating by message id.
+async fn deliver(
+    seen: &Arc<AsyncMutex<Seen>>,
+    inbox: &mpsc::Sender<Inbound>,
+    message_id: [u8; 16],
+    raw: &[u8],
+    mut inbound: Inbound,
+) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
+    let digest: [u8; 32] = Sha256::digest(raw).into();
+    {
+        let mut table = seen.lock().await;
+        if let Some((done, verdict)) = table.done.get(&message_id) {
+            return if *done == digest { verdict.clone() } else { Err("replay_collision".into()) };
+        }
+        if let Some(pending) = table.inflight.get(&message_id) {
+            return if *pending == digest { Err("duplicate_inflight".into()) } else { Err("replay_collision".into()) };
+        }
+        table.inflight.insert(message_id, digest);
+    }
+    let (tx, rx) = oneshot::channel();
+    inbound.reply = Some(tx);
+    let verdict = match inbox.try_send(inbound) {
+        Err(_) => Err("queue_full".to_owned()),
+        Ok(()) => match timeout(DISPATCH_TIMEOUT, rx).await {
+            Ok(Ok(verdict)) => verdict,
+            Ok(Err(_)) => Err("dispatch_dropped".to_owned()),
+            Err(_) => Err("dispatch_timeout".to_owned()),
+        },
+    };
+    let mut table = seen.lock().await;
+    table.inflight.remove(&message_id);
+    // Only an acknowledged delivery is final: a refused one may be retried.
+    if verdict.is_ok() {
+        table.done.insert(message_id, (digest, verdict.clone()));
+        table.order.push_back(message_id);
+        while table.order.len() > SEEN_LIMIT {
+            if let Some(old) = table.order.pop_front() {
+                table.done.remove(&old);
+            }
+        }
+    }
+    verdict
 }
 
 pub fn parse_endpoint_id(text: &str) -> Result<EndpointId, TransportError> {
