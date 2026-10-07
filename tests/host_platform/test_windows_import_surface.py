@@ -68,6 +68,7 @@ ENTRY_POINTS = (
     "mycelium_a13_windows.managed_host.app",
     "mycelium_a13_windows.managed_host.member",
     "mycelium_a13_windows.managed_host.resources",
+    "mycelium_a13_windows.managed_host.__main__",
     "mycelium_a13_macos.target_app",
     "mycelium_a13_macos.workflow",
     "stage_pack",

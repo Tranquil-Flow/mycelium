@@ -154,6 +154,25 @@ REGISTERED_MODELS: tuple[ModelContract, ...] = (CANDIDATE_MODEL, A9_ROUTE_MODEL)
 STAGE_RUNTIME_BACKENDS = frozenset({"mlx", "numpy"})
 
 
+RUN_MODEL_ENVIRONMENT = "MYCELIUM_A13_RUN_MODEL"
+_RUN_MODEL_NAMES = {"candidate": CANDIDATE_MODEL, "a9-route": A9_ROUTE_MODEL}
+
+
+def selected_run_model(environ: Mapping[str, str] | None = None) -> ModelContract:
+    """The model this installation's runs pin (default: the A13 candidate).
+
+    ``MYCELIUM_A13_RUN_MODEL=a9-route`` selects the A9 two-host route model.
+    Any other value is refused, never silently defaulted.
+    """
+
+    import os
+
+    value = (os.environ if environ is None else environ).get(RUN_MODEL_ENVIRONMENT, "candidate")
+    if value not in _RUN_MODEL_NAMES:
+        raise ServingPreparationError("run_model_selection_invalid")
+    return _RUN_MODEL_NAMES[value]
+
+
 def registered_model_contract(model_id: object, resolved_commit: object) -> ModelContract:
     """The registered contract for this exact model revision, or refuse."""
 

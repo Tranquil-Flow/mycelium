@@ -2,7 +2,10 @@
 """Private, loopback-only macOS demo application. Never a public admin server."""
 from __future__ import annotations
 
-import fcntl
+try:  # instance lock; win32 goes through mycelium_host_platform
+    import fcntl
+except ImportError:  # pragma: no cover - win32
+    fcntl = None
 import hashlib
 import html
 import http.client
@@ -20,7 +23,7 @@ import threading
 import time
 import urllib.parse
 from dataclasses import asdict
-from .serving import CANDIDATE_MODEL, RESOURCE_PROPOSAL
+from .serving import RESOURCE_PROPOSAL
 
 MAX_BODY = 65536
 # Refusal for a request that cannot be served because every concurrency slot is held. It is a
@@ -36,7 +39,8 @@ BUSY_RESPONSE = (b'HTTP/1.1 503 Service Unavailable\r\n'
 
 
 def model_contract():
-    return asdict(CANDIDATE_MODEL)
+    from .serving import selected_run_model
+    return asdict(selected_run_model())
 
 
 class DemoError(RuntimeError):
@@ -333,9 +337,14 @@ class DemoApp:
         # A target's downloaded weights must be inside the same private cache
         # that its staging consumer confines and re-verifies. Retain old owner
         # cache bytes on role change; never migrate or delete unrelated state.
+        from .serving import CANDIDATE_MODEL as _CANDIDATE, selected_run_model
+        model = selected_run_model()
+        # A non-default run model keeps its own cache and status, never the candidate's.
+        suffix = '' if model == _CANDIDATE else '-' + model.resolved_commit[:12]
+        # A target's cache stays the staging consumer's confined 'serving' root.
         root = (self.authority.peer.state_root / 'serving'
-                if self.installation_role == 'target' else self.root / 'model-source')
-        self.acquisition = SelectedModelAcquisition(root)
+                if self.installation_role == 'target' else self.root / ('model-source' + suffix))
+        self.acquisition = SelectedModelAcquisition(root, model=model)
         self._acquisition_active = False
 
     def make_launch_file(self):

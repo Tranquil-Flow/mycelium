@@ -200,8 +200,8 @@ def _safe_relative_path(value: object) -> PurePosixPath:
     return relative
 
 
-def _model_identity() -> dict[str, Any]:
-    return asdict(CANDIDATE_MODEL)
+def _model_identity(model: ModelContract = CANDIDATE_MODEL) -> dict[str, Any]:
+    return asdict(model)
 
 
 def _validate_model(model: object) -> ModelContract:
@@ -232,7 +232,7 @@ def _validate_consent(consent: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _validate_status(value: object) -> dict[str, Any]:
+def _validate_status(value: object, model: ModelContract = CANDIDATE_MODEL) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != _STATUS_FIELDS:
         _raise("acquisition_state_corrupt")
     state = value.get("state")
@@ -247,7 +247,7 @@ def _validate_status(value: object) -> dict[str, Any]:
         or total < 0
         or downloaded > total
         or (error is not None and (not isinstance(error, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,127}", error)))
-        or value.get("model") != _model_identity()
+        or value.get("model") != _model_identity(model)
     ):
         _raise("acquisition_state_corrupt")
     return copy.deepcopy(value)
@@ -679,7 +679,7 @@ class SelectedModelAcquisition:
                 "downloaded_bytes": 0,
                 "total_bytes": 0,
                 "error_code": None,
-                "model": _model_identity(),
+                "model": _model_identity(self.model),
             }
         try:
             metadata = self._status_path.lstat()
@@ -693,7 +693,7 @@ class SelectedModelAcquisition:
             ):
                 _raise("acquisition_state_corrupt")
             value = json.loads(self._status_path.read_text("utf-8"))
-            status = _validate_status(value)
+            status = _validate_status(value, self.model)
         except AcquisitionError:
             raise
         except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
@@ -710,8 +710,8 @@ class SelectedModelAcquisition:
 
     def _set_status(self, **changes: Any) -> dict[str, Any]:
         with self._guard:
-            status = {**self._status, **changes, "model": _model_identity()}
-            status = _validate_status(status)
+            status = {**self._status, **changes, "model": _model_identity(self.model)}
+            status = _validate_status(status, self.model)
             self._status = status
             _atomic_json(self._status_path, status)
             return copy.deepcopy(status)

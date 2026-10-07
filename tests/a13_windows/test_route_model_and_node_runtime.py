@@ -140,3 +140,22 @@ def test_owner_plan_must_assign_each_node_its_class_runtime(tmp_path):
         serving._validate_operator_plan(plan, prepared, {"node-mac": "mlx"})
     with pytest.raises(ServingPreparationError, match="representation_mismatch"):
         serving._validate_operator_plan(plan, prepared)  # default mlx everywhere
+
+
+def test_run_model_selection_is_explicit_and_closed():
+    from mycelium_a13_macos.serving import selected_run_model
+
+    assert selected_run_model({}) is CANDIDATE_MODEL
+    assert selected_run_model({"MYCELIUM_A13_RUN_MODEL": "a9-route"}) is A9_ROUTE_MODEL
+    with pytest.raises(ServingPreparationError, match="run_model_selection_invalid"):
+        selected_run_model({"MYCELIUM_A13_RUN_MODEL": "something-else"})
+
+
+def test_acquisition_status_is_bound_to_its_own_model(tmp_path):
+    from mycelium_a13_macos.acquisition import SelectedModelAcquisition
+
+    acquisition = SelectedModelAcquisition(tmp_path / "a9", model=A9_ROUTE_MODEL)
+    try:
+        assert acquisition.status()["model"]["model_id"] == A9_ROUTE_MODEL.model_id
+    finally:
+        acquisition.close()
