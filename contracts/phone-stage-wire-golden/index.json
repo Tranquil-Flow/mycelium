@@ -1,0 +1,243 @@
+{
+  "cases": [
+    {
+      "case": "manifest_locked",
+      "expect": {
+        "entry_node_id": "node-mac-entry",
+        "hidden_size": 8,
+        "local_hop_index": 1,
+        "local_node_id": "node-phone",
+        "local_placement_id": "placement-phone",
+        "next_node_id": "node-mac-final",
+        "next_placement_id": "placement-final",
+        "path_attempt": 2,
+        "path_id": "path-phone-golden",
+        "previous_node_id": "node-mac-entry",
+        "previous_placement_id": "placement-entry",
+        "prompt_length": 4,
+        "request_id": "request-phone-golden",
+        "topology_version": 9
+      },
+      "input": "01-manifest-locked.bin"
+    },
+    {
+      "case": "hop_prefill",
+      "duplicate_delivery": "cached_no_reexecution_no_resend",
+      "forward": "03-hop-prefill-forward.bin",
+      "forward_destination_node_id": "node-mac-final",
+      "input": "02-hop-prefill-in.bin",
+      "input_payload_fingerprint": "9e62e58383a00f98a427a4e6fdcf263610bcad39bb6445241114b92c867e11e3",
+      "input_seq": 4,
+      "stage_output_payload_sha256": "94e5243d77311b5649fbd10ca0c8ab7c6e724a6c4ebaef796af80d9a398b7448",
+      "work_item": {
+        "emits_token": false,
+        "hop_index": 1,
+        "idempotency_key": "request-phone-golden:path-phone-golden:2:PREFILL:-1:1",
+        "path_attempt": 2,
+        "path_id": "path-phone-golden",
+        "phase": "PREFILL",
+        "placement_id": "placement-phone",
+        "position": 0,
+        "request_id": "request-phone-golden",
+        "terminal": false,
+        "token_index": -1
+      }
+    },
+    {
+      "case": "hop_decode",
+      "duplicate_delivery": "cached_no_reexecution_no_resend",
+      "forward": "05-hop-decode-forward.bin",
+      "forward_destination_node_id": "node-mac-final",
+      "input": "04-hop-decode-in.bin",
+      "input_payload_fingerprint": "b4abba74a22a510d7fe1f12655146ef7dd767b6c09ceabea79659656c45a0256",
+      "input_seq": 6,
+      "stage_output_payload_sha256": "0dac3f7e1a7f92fe684342dbca6cc35c1895d307d74f4bf5a7900a9e6b4554a2",
+      "work_item": {
+        "emits_token": false,
+        "hop_index": 1,
+        "idempotency_key": "request-phone-golden:path-phone-golden:2:DECODE:2:1",
+        "path_attempt": 2,
+        "path_id": "path-phone-golden",
+        "phase": "DECODE",
+        "placement_id": "placement-phone",
+        "position": 5,
+        "request_id": "request-phone-golden",
+        "terminal": false,
+        "token_index": 2
+      }
+    },
+    {
+      "case": "stage_failure",
+      "input": "06-hop-failure-in.bin",
+      "originate": "07-failure-report.bin",
+      "originate_destination_node_id": "node-mac-entry"
+    },
+    {
+      "accepted_from_node_id": "node-mac-entry",
+      "case": "path_cancellation",
+      "input": "08-path-cancellation.bin",
+      "late_hop": "09-hop-after-cancel-in.bin",
+      "late_hop_disposition": "REJECTED",
+      "late_hop_executed": 0,
+      "late_hop_reason": "unknown_path"
+    },
+    {
+      "case": "rejections",
+      "rejections": [
+        {
+          "frame": "10-reject-invalid_idempotency_key.bin",
+          "reason": "invalid_idempotency_key",
+          "source_node_id": "node-mac-entry"
+        },
+        {
+          "frame": "11-reject-unknown_path.bin",
+          "reason": "unknown_path",
+          "source_node_id": "node-mac-entry"
+        },
+        {
+          "frame": "12-reject-stale_path_attempt.bin",
+          "reason": "stale_path_attempt",
+          "source_node_id": "node-mac-entry"
+        },
+        {
+          "frame": "13-reject-topology_version_mismatch.bin",
+          "reason": "topology_version_mismatch",
+          "source_node_id": "node-mac-entry"
+        },
+        {
+          "frame": "14-reject-invalid_hop_index.bin",
+          "reason": "invalid_hop_index",
+          "source_node_id": "node-mac-entry"
+        },
+        {
+          "frame": "15-reject-manifest_hop_mismatch.bin",
+          "reason": "manifest_hop_mismatch",
+          "source_node_id": "node-mac-entry"
+        },
+        {
+          "frame": "16-reject-source_placement_mismatch.bin",
+          "reason": "source_placement_mismatch",
+          "source_node_id": "node-mac-entry"
+        },
+        {
+          "frame": "17-reject-source_node_mismatch.bin",
+          "reason": "source_node_mismatch",
+          "source_node_id": "node-mac-final"
+        },
+        {
+          "frame": "18-reject-destination_not_local.bin",
+          "reason": "destination_not_local",
+          "source_node_id": "node-phone"
+        }
+      ],
+      "replay_conflict": "20-replay-conflict-in.bin",
+      "replay_conflict_reason": "idempotency_payload_mismatch",
+      "replay_first": "19-replay-first-in.bin"
+    }
+  ],
+  "frames": [
+    {
+      "byte_length": 4474,
+      "file": "01-manifest-locked.bin",
+      "frame_sha256": "5dcdd159255b465ff24be5288b304f8e02f0bb5448c2fe7673fb6f0c35e90592"
+    },
+    {
+      "byte_length": 681,
+      "file": "02-hop-prefill-in.bin",
+      "frame_sha256": "5876960e89709a1ac8fc92977161f13ae7ca2cecc1d42b36918a344a80a1744b"
+    },
+    {
+      "byte_length": 681,
+      "file": "03-hop-prefill-forward.bin",
+      "frame_sha256": "c60efabbde59486ecbd8e9742edb6241e1d827fdc188f3359effe82cd884c324"
+    },
+    {
+      "byte_length": 741,
+      "file": "04-hop-decode-in.bin",
+      "frame_sha256": "93f9fff63a7945b716d13a4b513336afb22e0479d87dacbf83d03122a17b2310"
+    },
+    {
+      "byte_length": 741,
+      "file": "05-hop-decode-forward.bin",
+      "frame_sha256": "1fc47a89bff872b96b97d0569c5be707a17b7c8e78d986ef6960e2bec6b96cc2"
+    },
+    {
+      "byte_length": 773,
+      "file": "06-hop-failure-in.bin",
+      "frame_sha256": "59800b1d4888168d24ea8398a4d4bda704c08b2b456c4d18e09e3d115956447c"
+    },
+    {
+      "byte_length": 405,
+      "file": "07-failure-report.bin",
+      "frame_sha256": "f44d92ee90fca2ff2cd00a81dccfa31cc32a210f83a1194e17cd48bbda74a9df"
+    },
+    {
+      "byte_length": 292,
+      "file": "08-path-cancellation.bin",
+      "frame_sha256": "5f60e8c928b905a9c30ba71a96dd388326a18b86d538f6b072fa8053b15db5c7"
+    },
+    {
+      "byte_length": 805,
+      "file": "09-hop-after-cancel-in.bin",
+      "frame_sha256": "692e2057dda771a4b3c5d6984ec5b264c7c97cc05ced4133b6ccbf867e704eb1"
+    },
+    {
+      "byte_length": 710,
+      "file": "10-reject-invalid_idempotency_key.bin",
+      "frame_sha256": "cd2b3d2f86577285fbeac06f719764216c5c5aa112756eefac160b695482da80"
+    },
+    {
+      "byte_length": 695,
+      "file": "11-reject-unknown_path.bin",
+      "frame_sha256": "e00ed1793577d659a99653da79b3705263d323c48d4eded4c3914b65c403d690"
+    },
+    {
+      "byte_length": 709,
+      "file": "12-reject-stale_path_attempt.bin",
+      "frame_sha256": "e7e23ea205af9243b47fdb092480109c856992afa30a253b216290e48fb82692"
+    },
+    {
+      "byte_length": 709,
+      "file": "13-reject-topology_version_mismatch.bin",
+      "frame_sha256": "c8cac958831b68d71a505ee4ecd853601d5295f34aad36462365130d37a54be8"
+    },
+    {
+      "byte_length": 709,
+      "file": "14-reject-invalid_hop_index.bin",
+      "frame_sha256": "4b24c3ab9fde51ed71248edd7e2d7de579d27a05d4a49a538186c5955a610258"
+    },
+    {
+      "byte_length": 709,
+      "file": "15-reject-manifest_hop_mismatch.bin",
+      "frame_sha256": "5a9fafe1115b87eacb51e444c21cfac3a809c5a5b7da442b11bb1fea7b84e043"
+    },
+    {
+      "byte_length": 709,
+      "file": "16-reject-source_placement_mismatch.bin",
+      "frame_sha256": "c7728b50e4d7bf6aa90adab708cf654a967321ce6e4e7d04b94f22ed63c2deaf"
+    },
+    {
+      "byte_length": 709,
+      "file": "17-reject-source_node_mismatch.bin",
+      "frame_sha256": "ed0eb4f48897bf15274a69957e4bcc2bc46c8ed0b876cb810b379754221658d5"
+    },
+    {
+      "byte_length": 709,
+      "file": "18-reject-destination_not_local.bin",
+      "frame_sha256": "09ce7994c85d8df1f69f98ecf5edae4fa5ebbf861babd7c2e8634a4290d67330"
+    },
+    {
+      "byte_length": 709,
+      "file": "19-replay-first-in.bin",
+      "frame_sha256": "ed0eb4f48897bf15274a69957e4bcc2bc46c8ed0b876cb810b379754221658d5"
+    },
+    {
+      "byte_length": 709,
+      "file": "20-replay-conflict-in.bin",
+      "frame_sha256": "5f78a33f31c4d254db2e3ccd85bf5b52996e358aa260d8a3b6cd5e7802e6f8eb"
+    }
+  ],
+  "hidden_size": 8,
+  "protocol": "mycelium.router_wire.v1",
+  "schema": "mycelium.phone_stage_wire.golden.v1"
+}

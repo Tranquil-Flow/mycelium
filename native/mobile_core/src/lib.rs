@@ -21,6 +21,7 @@ pub mod qwen2;
 pub mod stage_manifest;
 pub mod artifact;
 pub mod wire;
+pub mod stage_wire;
 pub mod membership;
 pub mod evidence;
 pub mod route_assignment;
