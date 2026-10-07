@@ -26,6 +26,8 @@ import time
 from typing import Any, Callable, Mapping
 
 import mycelium_host_platform
+
+from .child_environment import source_mode_environment
 from mycelium_qualification.evidence import canonical_json_bytes
 
 from .resources import observe_policy, policy_violation
@@ -453,6 +455,7 @@ class _ConcurrentNativeSession:
             run_id=run_id,
             deployment_id=deployment_id,
             response_timeout_seconds=timeout_seconds,
+            environment=source_mode_environment(),
         )
         self.node_id = node_id
 

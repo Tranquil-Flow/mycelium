@@ -1642,7 +1642,16 @@ class PhysicalNodeProcess:
         shutdown_timeout_seconds: float = 5.0,
         max_frame_bytes: int = MAX_CONTROL_FRAME_BYTES,
         expected_executables: Sequence[_ExecutableIdentity] = (),
+        environment: Mapping[str, str] | None = None,
     ) -> None:
+        """``environment`` replaces the inherited environment of the node
+        (``None``, the default, inherits the parent's unchanged)."""
+        if environment is not None and (
+            not isinstance(environment, Mapping)
+            or not all(isinstance(k, str) and isinstance(v, str) for k, v in environment.items())
+        ):
+            raise ValueError("environment must map strings to strings")
+        self._environment = None if environment is None else dict(environment)
         if (
             not isinstance(command, Sequence)
             or isinstance(command, (str, bytes))
@@ -1800,6 +1809,7 @@ class PhysicalNodeProcess:
                 close_fds=True,
                 pass_fds=(ready_write, release_read, exec_write),
                 start_new_session=True,
+                env=self._environment,
             )
         except Exception as exc:
             for name in tuple(handshake):
@@ -1937,6 +1947,7 @@ class PhysicalNodeProcess:
                 bufsize=-1,
                 shell=False,
                 close_fds=True,
+                env=self._environment,
             )
         except HostPlatformError as exc:
             self._closed = True

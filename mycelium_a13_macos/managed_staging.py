@@ -196,7 +196,8 @@ class TargetStaging:
         else:
             command=[sys.executable,'-B','-m','mycelium_a13_macos.managed_staging',operation,*args]
         try:
-            result=subprocess.run(command,input=data,capture_output=True,timeout=60)
+            from .child_environment import source_mode_environment
+            result=subprocess.run(command,input=data,capture_output=True,timeout=60,env=source_mode_environment())
         except subprocess.TimeoutExpired: raise StagingError('stage_operation_timeout') from None
         if result.returncode or result.stderr or len(result.stdout)>4096:
             raise StagingError('stage_operation_rejected')
