@@ -576,7 +576,9 @@ class IrohTransport:
             raise ValueError("local generation must be a positive u64")
 
         self.node_id = node_id
-        self.socket_path = Path(socket_path)
+        from mycelium_iroh_sidecar.client import local_sidecar_address
+
+        self.socket_path = local_sidecar_address(socket_path)
         self._bootstrap_secret = bytes(bootstrap_secret)
         self._peer = _canonical_peer_binding(peer)
         self._peers = PeerSet()

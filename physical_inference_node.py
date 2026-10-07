@@ -38,7 +38,7 @@ except ImportError:  # pragma: no cover - exercised by the win32 import tests
 
 import mycelium_deadlines
 import mycelium_host_platform
-from mycelium_iroh_sidecar import SidecarClient
+from mycelium_iroh_sidecar import LoopbackEndpoint, SidecarClient
 from mycelium_node.identity import load_node_signer
 from mycelium_physical_runner.remote_probe import derive_local_run_scoped_identity
 from mycelium_qualification.evidence import canonical_json_bytes, canonical_json_loads
@@ -868,6 +868,7 @@ class NativeSidecarProcess:
         startup_timeout: float,
         endpoint_secret_file: Path | None = None,
         force_relay: bool = False,
+        loopback: bool | None = None,
     ) -> None:
         _require(
             isinstance(local_only, bool)
@@ -875,6 +876,11 @@ class NativeSidecarProcess:
             and not (local_only and force_relay),
             "invalid_sidecar_network_mode",
         )
+        # Windows has no Unix-domain sidecar socket: the sidecar serves the
+        # local Router on an authenticated 127.0.0.1 port instead
+        # (native/iroh_transport/src/local_ipc.rs).
+        self.loopback = mycelium_host_platform.is_win32() if loopback is None else loopback
+        _require(isinstance(self.loopback, bool), "invalid_sidecar_network_mode")
         self.binary = binary
         self.socket_root = socket_root
         self.local_only = local_only
@@ -884,7 +890,7 @@ class NativeSidecarProcess:
         self.endpoint_secret_file = _validated_endpoint_secret_file(
             endpoint_secret_file
         )
-        self.socket_path = socket_root / "i.sock"
+        self.socket_path: Path | LoopbackEndpoint = socket_root / "i.sock"
         self._bootstrap_material: bytes | None = None
         self._socket_root_created = False
         self.process: subprocess.Popen[str] | None = None
@@ -924,12 +930,93 @@ class NativeSidecarProcess:
             command.extend(["--endpoint-secret-file", str(self.endpoint_secret_file)])
         return command
 
+    def _loopback_argv(self) -> list[str]:
+        command = [
+            str(self.binary),
+            "--loopback",
+            "--bootstrap-stdin",
+            "--allowed-client-pid",
+            str(os.getpid()),
+            "--queue-capacity",
+            str(self.queue_capacity),
+        ]
+        if self.local_only:
+            command.append("--local-only")
+        if self.force_relay:
+            command.append("--force-relay")
+        if self.endpoint_secret_file is not None:
+            command.extend(["--endpoint-secret-file", str(self.endpoint_secret_file)])
+        return command
+
+    def _start_loopback(self) -> dict[str, Any]:
+        """Windows: bootstrap bytes on a stdin pipe, Router on a loopback port."""
+
+        material = os.urandom(32)
+        process = subprocess.Popen(
+            self._loopback_argv(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.process = process
+        try:
+            assert process.stdin is not None and process.stdout is not None
+            try:
+                process.stdin.write(material)
+                process.stdin.flush()
+            finally:
+                process.stdin.close()
+            lines: list[bytes] = []
+            reader = threading.Thread(
+                target=lambda: lines.append(process.stdout.readline()),
+                name="sidecar-ready",
+                daemon=True,
+            )
+            reader.start()
+            reader.join(self.startup_timeout)
+            _require(not reader.is_alive(), "sidecar_start_timeout")
+            _require(bool(lines and lines[0]), "sidecar_exited_before_ready")
+            ready = json.loads(lines[0].decode("utf-8"))
+            _require(
+                isinstance(ready, dict)
+                and ready.get("event") == "ready"
+                and ready.get("alpn") == "mycelium.iroh.sidecar.v1"
+                and isinstance(ready.get("endpoint_id"), str)
+                and isinstance(ready.get("endpoint_addr"), dict)
+                and ready["endpoint_addr"].get("id") == ready["endpoint_id"]
+                and type(ready.get("local_port")) is int,
+                "invalid_sidecar_ready_record",
+            )
+            try:
+                endpoint = LoopbackEndpoint(ready["local_port"])
+            except ValueError:
+                _require(False, "invalid_sidecar_ready_record")
+            client = SidecarClient(endpoint, material, timeout=self.startup_timeout)
+            try:
+                client.connect()
+                _require(
+                    client.endpoint_id == ready["endpoint_id"],
+                    "sidecar_endpoint_mismatch",
+                )
+                client.ping()
+            finally:
+                client.close()
+            self.socket_path = endpoint
+            self._bootstrap_material = material
+            self.ready = ready
+            return ready
+        except BaseException:
+            self.close()
+            raise
+
     def start(self) -> dict[str, Any]:
         _require(self.process is None, "sidecar_already_started")
         _require(
             self.binary.is_file() and os.access(self.binary, os.X_OK),
             "sidecar_binary_unavailable",
         )
+        if self.loopback:
+            return self._start_loopback()
         self._prepare_socket_root()
         _require(
             len(os.fsencode(self.socket_path)) < 100, "sidecar_socket_path_too_long"
@@ -1003,7 +1090,11 @@ class NativeSidecarProcess:
         if process is not None:
             try:
                 if process.poll() is None:
-                    process.send_signal(signal.SIGINT)
+                    if self.loopback:
+                        # No console Ctrl+C to a detached child on Windows.
+                        process.terminate()
+                    else:
+                        process.send_signal(signal.SIGINT)
                     try:
                         process.wait(timeout=5)
                     except subprocess.TimeoutExpired:

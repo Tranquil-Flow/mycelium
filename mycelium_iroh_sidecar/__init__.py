@@ -3,6 +3,7 @@
 
 from .client import (
     AuthenticationError,
+    LoopbackEndpoint,
     LOCAL_PROTOCOL,
     OPERATIONAL_MAX_FRAME_BYTES,
     PEER_CONNECT_DEADLINE_REASON,
@@ -23,6 +24,7 @@ __all__ = [
     "PeerConnectDeadlineExceeded",
     "ProtocolError",
     "QueueFull",
+    "LoopbackEndpoint",
     "SidecarClient",
     "SidecarError",
 ]

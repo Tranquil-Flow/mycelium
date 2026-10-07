@@ -107,6 +107,39 @@ class PeerConnectDeadlineExceeded(SidecarError):
         super().__init__(PEER_CONNECT_DEADLINE_REASON)
 
 
+class LoopbackEndpoint:
+    """The authenticated loopback channel of a Windows sidecar (``--loopback``).
+
+    Hosts without Unix-domain sockets reach the sidecar on ``127.0.0.1`` at the
+    ``local_port`` announced in its ready record.  The HMAC bootstrap handshake
+    is unchanged; the sidecar additionally admits only connections owned by
+    the process id it was started with (``--allowed-client-pid``).
+    """
+
+    __slots__ = ("port",)
+    host = "127.0.0.1"
+
+    def __init__(self, port: int) -> None:
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            raise ValueError("loopback port must be an integer in 1..65535")
+        self.port = port
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, LoopbackEndpoint) and other.port == self.port
+
+    def __hash__(self) -> int:
+        return hash(("loopback", self.port))
+
+    def __repr__(self) -> str:
+        return f"LoopbackEndpoint({self.port})"
+
+
+def local_sidecar_address(value: Any) -> "Path | LoopbackEndpoint":
+    """A Unix socket path, or the loopback endpoint of a Windows sidecar."""
+
+    return value if isinstance(value, LoopbackEndpoint) else Path(value)
+
+
 class SidecarClient:
     """One authenticated request/response session over a Unix-domain socket.
 
@@ -126,7 +159,7 @@ class SidecarClient:
             raise ValueError("bootstrap secret must be exactly 32 bytes")
         if timeout <= 0:
             raise ValueError("timeout must be positive")
-        self.socket_path = Path(socket_path)
+        self.socket_path = local_sidecar_address(socket_path)
         self._secret = bytearray(bootstrap_secret)
         self._timeout = timeout
         self._socket: Optional[socket.socket] = None
@@ -150,10 +183,17 @@ class SidecarClient:
         with self._lock:
             if self._socket is not None:
                 raise ProtocolError("already_connected")
-            stream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            loopback = isinstance(self.socket_path, LoopbackEndpoint)
+            stream = socket.socket(
+                socket.AF_INET if loopback else socket.AF_UNIX, socket.SOCK_STREAM
+            )
             _apply_socket_timeout(stream, self._timeout, deadline)
             try:
-                stream.connect(os.fspath(self.socket_path))
+                if loopback:
+                    stream.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    stream.connect((self.socket_path.host, self.socket_path.port))
+                else:
+                    stream.connect(os.fspath(self.socket_path))
                 client_nonce = os.urandom(32)
                 proof = hmac.new(
                     self._secret,
