@@ -276,10 +276,37 @@ class FakeWin32Api:
             raise
         return self._record(_Handle(target, descriptor, access, share, identity, kind))
 
+    def lock_file(self, handle: int, *, blocking: bool) -> None:
+        """LockFileEx on byte 0; contention fails fast (a fake cannot block)."""
+
+        self.calls.append(("lock_file", handle, blocking))
+        self._maybe_fail("lock_file")
+        record = self.handles.get(handle)
+        if record is None or record.kind != "file":
+            raise w.Win32Error(w.ERROR_INVALID_HANDLE, "LockFileEx")
+        locks = self.__dict__.setdefault("file_locks", {})
+        holder = locks.get(record.identity)
+        if holder is not None and holder != handle:
+            raise w.Win32Error(w.ERROR_LOCK_VIOLATION, "LockFileEx")
+        locks[record.identity] = handle
+
+    def unlock_file(self, handle: int) -> None:
+        self.calls.append(("unlock_file", handle))
+        record = self.handles.get(handle)
+        locks = self.__dict__.setdefault("file_locks", {})
+        if record is None or locks.get(record.identity) != handle:
+            raise w.Win32Error(w.ERROR_LOCK_VIOLATION, "UnlockFileEx")
+        del locks[record.identity]
+
     def close(self, handle: int) -> None:
         self.calls.append(("close", handle))
         if self.close_process_or_job(handle):
             return
+        record = self.handles.get(handle)
+        if record is not None:
+            locks = self.__dict__.setdefault("file_locks", {})
+            if locks.get(record.identity) == handle:
+                del locks[record.identity]
         record = self.handles.pop(handle, None)
         if record is None:
             raise w.Win32Error(w.ERROR_INVALID_HANDLE, "CloseHandle")

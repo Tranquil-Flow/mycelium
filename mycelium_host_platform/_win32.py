@@ -28,7 +28,8 @@ from __future__ import annotations
 import os
 from pathlib import PurePath
 import time
-from typing import Any, BinaryIO, Iterable
+from contextlib import contextmanager
+from typing import Any, BinaryIO, Iterable, Iterator
 import uuid
 
 from . import _win32_api as w
@@ -377,6 +378,57 @@ class Win32PrivateDirectory:
             self._api.delete(path)
         except w.Win32Error:
             pass
+
+    @contextmanager
+    def exclusive_lock(self, name: str, *, blocking: bool = True) -> Iterator[None]:
+        """Hold an exclusive ``LockFileEx`` lock on the owner-only file ``name``."""
+
+        self.revalidate()
+        path = self._child(name)
+        handle = None
+        for disposition in (w.CREATE_NEW, w.OPEN_EXISTING):
+            try:
+                handle = self._api.open(
+                    path,
+                    access=w.GENERIC_READ | w.GENERIC_WRITE,
+                    share=w.FILE_SHARE_READ | w.FILE_SHARE_WRITE,
+                    disposition=disposition,
+                    flags=w.FILE_FLAG_OPEN_REPARSE_POINT,
+                    sddl=(
+                        w.owner_only_file_sddl(self._user_sid)
+                        if disposition == w.CREATE_NEW
+                        else None
+                    ),
+                )
+                break
+            except w.Win32Error as exc:
+                if disposition == w.CREATE_NEW and exc.winerror in {
+                    w.ERROR_FILE_EXISTS,
+                    w.ERROR_ALREADY_EXISTS,
+                }:
+                    continue
+                raise HostPlatformError("host_io_failed", "lock_open") from exc
+        assert handle is not None
+        try:
+            information = _information(self._api, handle)
+            _require_plain_file(information)
+            _require_final_path(self._api, handle, path)
+            require_owner_only(self._api, handle, self._user_sid)
+            try:
+                self._api.lock_file(handle, blocking=blocking)
+            except w.Win32Error as exc:
+                if exc.winerror == w.ERROR_LOCK_VIOLATION:
+                    raise HostPlatformError("host_lock_busy") from exc
+                raise HostPlatformError("host_io_failed", "lock") from exc
+            try:
+                yield
+            finally:
+                try:
+                    self._api.unlock_file(handle)
+                except w.Win32Error:
+                    pass
+        finally:
+            _close_quietly(self._api, handle)
 
     def create_file_exclusive(self, name: str, data: bytes) -> None:
         """Create ``name`` once; ``host_file_exists`` when it is already there."""

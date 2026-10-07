@@ -56,6 +56,9 @@ FILE_FLAG_WRITE_THROUGH = 0x80000000
 FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
 FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
 
+LOCKFILE_FAIL_IMMEDIATELY = 0x00000001
+LOCKFILE_EXCLUSIVE_LOCK = 0x00000002
+
 MOVEFILE_REPLACE_EXISTING = 0x00000001
 MOVEFILE_WRITE_THROUGH = 0x00000008
 
@@ -193,6 +196,10 @@ class Win32Api(Protocol):
     def write(self, handle: int, data: bytes) -> int: ...
 
     def flush(self, handle: int) -> None: ...
+
+    def lock_file(self, handle: int, *, blocking: bool) -> None: ...
+
+    def unlock_file(self, handle: int) -> None: ...
 
     def move_replace(self, source: str, target: str) -> None: ...
 
@@ -388,6 +395,29 @@ class RealWin32Api:  # pragma: no cover - exercised only on a Windows device
             BOOL,
         )
         self._FlushFileBuffers = bind(kernel32, "FlushFileBuffers", [HANDLE], BOOL)
+
+        class OVERLAPPED(ctypes.Structure):
+            _fields_ = [
+                ("Internal", ctypes.c_size_t),
+                ("InternalHigh", ctypes.c_size_t),
+                ("Offset", DWORD),
+                ("OffsetHigh", DWORD),
+                ("hEvent", HANDLE),
+            ]
+
+        self.OVERLAPPED = OVERLAPPED
+        self._LockFileEx = bind(
+            kernel32,
+            "LockFileEx",
+            [HANDLE, DWORD, DWORD, DWORD, DWORD, ctypes.POINTER(OVERLAPPED)],
+            BOOL,
+        )
+        self._UnlockFileEx = bind(
+            kernel32,
+            "UnlockFileEx",
+            [HANDLE, DWORD, DWORD, DWORD, ctypes.POINTER(OVERLAPPED)],
+            BOOL,
+        )
         self._MoveFileExW = bind(kernel32, "MoveFileExW", [LPCWSTR, LPCWSTR, DWORD], BOOL)
         self._DeleteFileW = bind(kernel32, "DeleteFileW", [LPCWSTR], BOOL)
         self._LocalFree = bind(kernel32, "LocalFree", [LPVOID], LPVOID)
@@ -647,6 +677,19 @@ class RealWin32Api:  # pragma: no cover - exercised only on a Windows device
     def flush(self, handle: int) -> None:
         if not self._FlushFileBuffers(handle):
             raise self._fail("FlushFileBuffers")
+
+    def lock_file(self, handle: int, *, blocking: bool) -> None:
+        """Exclusive byte-range lock on byte 0 (``LockFileEx``)."""
+
+        flags = LOCKFILE_EXCLUSIVE_LOCK | (0 if blocking else LOCKFILE_FAIL_IMMEDIATELY)
+        overlapped = self.OVERLAPPED()
+        if not self._LockFileEx(handle, flags, 0, 1, 0, self._ctypes.byref(overlapped)):
+            raise self._fail("LockFileEx")
+
+    def unlock_file(self, handle: int) -> None:
+        overlapped = self.OVERLAPPED()
+        if not self._UnlockFileEx(handle, 0, 1, 0, self._ctypes.byref(overlapped)):
+            raise self._fail("UnlockFileEx")
 
     def move_replace(self, source: str, target: str) -> None:
         if not self._MoveFileExW(

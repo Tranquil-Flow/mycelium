@@ -15,7 +15,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import stat
-from typing import BinaryIO
+from contextlib import contextmanager
+from typing import BinaryIO, Iterator
 import uuid
 
 from ._common import ExecutableFingerprint, FileIdentity, HostPlatformError
@@ -180,6 +181,48 @@ class PosixPrivateDirectory:
             os.unlink(name, dir_fd=self._require_fd())
         except (OSError, HostPlatformError):
             pass
+
+    @contextmanager
+    def exclusive_lock(self, name: str, *, blocking: bool = True) -> Iterator[None]:
+        """Hold an exclusive advisory lock on the owner-only file ``name``.
+
+        Non-blocking contention raises ``host_lock_busy``.  The lock file is
+        created ``0600`` beneath this directory and never followed as a link.
+        """
+
+        import fcntl
+
+        descriptor_dir = self._require_fd()
+        self.revalidate()
+        name = _component(name)
+        try:
+            descriptor = os.open(
+                name,
+                os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=descriptor_dir,
+            )
+        except OSError as exc:
+            raise HostPlatformError("host_io_failed", "lock_open") from exc
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.getuid()
+                or stat.S_IMODE(metadata.st_mode) & 0o077
+            ):
+                raise HostPlatformError("host_permissions_invalid", "lock_file")
+            try:
+                fcntl.flock(
+                    descriptor, fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+                )
+            except BlockingIOError as exc:
+                raise HostPlatformError("host_lock_busy") from exc
+            except OSError as exc:
+                raise HostPlatformError("host_io_failed", "lock") from exc
+            yield
+        finally:
+            os.close(descriptor)
 
     def create_file_exclusive(self, name: str, data: bytes) -> None:
         self.revalidate()

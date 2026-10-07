@@ -20,6 +20,7 @@ ERROR_CODES: frozenset[str] = frozenset(
         "host_platform_unavailable",
         "host_job_unavailable",
         "host_process_identity_invalid",
+        "host_lock_busy",
     }
 )
 
