@@ -515,6 +515,17 @@ class FakeWin32Api:
             if self.popen_by_pid[pid].poll() is None
         )
 
+    def job_process_ids(self, job: int) -> list[int]:
+        self.calls.append(("job_process_ids", job))
+        self._maybe_fail("job_process_ids")
+        return [pid for pid in self._job(job)["pids"] if self.popen_by_pid[pid].poll() is None]
+
+    def process_working_set_bytes_of(self, process: int) -> int:
+        self.calls.append(("process_working_set_bytes_of", process))
+        self._maybe_fail("process_working_set_bytes_of")
+        pid = self._pid(process)
+        return int(getattr(self, "working_set_by_pid", {}).get(pid, 10 * 1024 * 1024))
+
     def terminate_job(self, job: int, exit_code: int) -> None:
         self.calls.append(("terminate_job", job, exit_code))
         self._maybe_fail("terminate_job")

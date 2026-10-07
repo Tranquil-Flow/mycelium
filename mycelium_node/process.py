@@ -1972,6 +1972,20 @@ class PhysicalNodeProcess:
                 cleanup_owner=None if cleaned else self,
             ) from exc
 
+    def win32_job_resident_bytes(self) -> int:
+        """Working-set bytes of every process in this node's job (win32 only)."""
+
+        job = getattr(self, "_win32_job", None)
+        if job is None or job.closed:
+            raise NodeProcessError("node_process_job_unavailable")
+        return job.resident_bytes()
+
+    def win32_job_owned(self) -> bool:
+        """The node still runs inside the job this owner created (win32 only)."""
+
+        job = getattr(self, "_win32_job", None)
+        return job is not None and job.state() == "owned"
+
     def _win32_owned_group_state(self, deadline: float) -> str:
         job = getattr(self, "_win32_job", None)
         if job is None or time.monotonic() > deadline:

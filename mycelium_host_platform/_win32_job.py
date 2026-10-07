@@ -184,6 +184,29 @@ class Win32JobProcess:
             return 0
         return int(self._api.job_active_processes(self._job))
 
+    def resident_bytes(self) -> int:
+        """Sum of the working sets of every process currently in the job.
+
+        A process that exits between the listing and its query no longer
+        counts; any other failure raises, so the job is never reported empty.
+        """
+
+        if self._job is None:
+            return 0
+        total = 0
+        for pid in self._api.job_process_ids(self._job):
+            try:
+                handle = self._api.open_process(pid)
+            except w.Win32Error as exc:
+                if exc.winerror == w.ERROR_INVALID_PARAMETER:
+                    continue  # exited since the listing
+                raise
+            try:
+                total += int(self._api.process_working_set_bytes_of(handle))
+            finally:
+                _close_quietly(self._api, handle)
+        return total
+
     def state(self) -> str:
         """``empty`` (reaped, no job members), ``owned`` or ``unsafe``."""
 

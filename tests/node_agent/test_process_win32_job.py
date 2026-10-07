@@ -318,3 +318,19 @@ def test_posix_launch_never_touches_the_job_seam(tmp_path) -> None:
         assert node._win32_job is None
     finally:
         node.close()
+
+
+def test_job_memory_is_the_sum_of_every_process_working_set(launch) -> None:
+    node = launch()
+    child = _only_child(launch.fake)
+    launch.fake.working_set_by_pid = {child.pid: 5_000_000}
+    assert node.win32_job_resident_bytes() == 5_000_000
+    assert node.win32_job_owned() is True
+    launch.fake.fail_next("process_working_set_bytes_of", 5)
+    with pytest.raises(Exception):
+        node.win32_job_resident_bytes()
+    node._command_stop(timeout=30.0)
+    child.wait(timeout=30.0)
+    node.close()
+    assert node.win32_job_owned() is False
+    assert _code(node.win32_job_resident_bytes) == "node_process_job_unavailable"

@@ -70,6 +70,8 @@ ERROR_SHARING_VIOLATION = 32
 ERROR_LOCK_VIOLATION = 33
 ERROR_FILE_EXISTS = 80
 ERROR_ALREADY_EXISTS = 183
+ERROR_MORE_DATA = 234
+ERROR_INVALID_PARAMETER = 87
 
 CREATE_SUSPENDED = 0x00000004
 CREATE_NEW_PROCESS_GROUP = 0x00000200
@@ -234,6 +236,10 @@ class Win32Api(Protocol):
     def is_process_in_job(self, process: int, job: int) -> bool: ...
 
     def job_active_processes(self, job: int) -> int: ...
+
+    def job_process_ids(self, job: int) -> list[int]: ...
+
+    def process_working_set_bytes_of(self, process: int) -> int: ...
 
     def terminate_job(self, job: int, exit_code: int) -> None: ...
 
@@ -925,6 +931,32 @@ class RealWin32Api:  # pragma: no cover - exercised only on a Windows device
             raise self._fail("QueryInformationJobObject")
         return int(info.ActiveProcesses)
 
+    def job_process_ids(self, job: int) -> list[int]:
+        """``JobObjectBasicProcessIdList``: the ids of every process in the job."""
+
+        self._bind_process_api()
+        ctypes = self._ctypes
+        capacity = 256
+
+        class JOBOBJECT_BASIC_PROCESS_ID_LIST(ctypes.Structure):
+            _fields_ = [
+                ("NumberOfAssignedProcesses", self._wintypes.DWORD),
+                ("NumberOfProcessIdsInList", self._wintypes.DWORD),
+                ("ProcessIdList", ctypes.c_size_t * capacity),
+            ]
+
+        info = JOBOBJECT_BASIC_PROCESS_ID_LIST()
+        if not self._QueryInformationJobObject(
+            job, 3, ctypes.byref(info), ctypes.sizeof(info), None
+        ):
+            raise self._fail("QueryInformationJobObject")
+        if info.NumberOfProcessIdsInList != info.NumberOfAssignedProcesses:
+            raise Win32Error(ERROR_MORE_DATA, "QueryInformationJobObject")
+        return [int(info.ProcessIdList[index]) for index in range(info.NumberOfProcessIdsInList)]
+
+    def process_working_set_bytes_of(self, process: int) -> int:
+        return self._working_set(process)
+
     def terminate_job(self, job: int, exit_code: int) -> None:
         self._bind_process_api()
         if not self._TerminateJobObject(job, exit_code):
@@ -933,6 +965,9 @@ class RealWin32Api:  # pragma: no cover - exercised only on a Windows device
     # ------------------------------------------------ memory and events
 
     def process_working_set_bytes(self) -> int:
+        return self._working_set(self._GetCurrentProcess())
+
+    def _working_set(self, process: Any) -> int:
         ctypes = self._ctypes
         wintypes = self._wintypes
 
@@ -959,7 +994,7 @@ class RealWin32Api:  # pragma: no cover - exercised only on a Windows device
         function.restype = wintypes.BOOL
         counters = PROCESS_MEMORY_COUNTERS()
         counters.cb = ctypes.sizeof(counters)
-        if not function(self._GetCurrentProcess(), ctypes.byref(counters), counters.cb):
+        if not function(process, ctypes.byref(counters), counters.cb):
             raise self._fail("K32GetProcessMemoryInfo")
         return int(counters.WorkingSetSize)
 

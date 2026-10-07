@@ -25,6 +25,7 @@ import threading
 import time
 from typing import Any, Callable, Mapping
 
+import mycelium_host_platform
 from mycelium_qualification.evidence import canonical_json_bytes
 
 from .resources import observe_policy, policy_violation
@@ -463,6 +464,12 @@ class _ConcurrentNativeSession:
     def returncode(self) -> int | None:
         return self._process.returncode
 
+    def win32_group_resident_bytes(self) -> int:
+        return int(self._process.win32_job_resident_bytes())
+
+    def win32_group_owned(self) -> bool:
+        return bool(self._process.win32_job_owned())
+
     @property
     def stderr(self) -> bytes:
         return self._process.stderr_tail.encode("utf-8", errors="replace")
@@ -591,7 +598,17 @@ class ManagedWorker:
         self.socket_root = Path(socket_root).absolute()
         self.sidecar_binary = Path(sidecar_binary).absolute()
         self.capacity_root = None if capacity_root is None else Path(capacity_root)
-        if self.capacity_root is not None:
+        if self.capacity_root is not None and mycelium_host_platform.is_win32():
+            try:
+                if (not self.capacity_root.is_absolute()
+                    or self.capacity_root.resolve(strict=True)!=self.capacity_root):
+                    raise WorkerError("worker_capacity_root_invalid")
+                with mycelium_host_platform.private_directory(self.capacity_root, create=False) as lease:
+                    if not lease.exists:
+                        raise WorkerError("worker_capacity_root_invalid")
+            except (OSError, mycelium_host_platform.HostPlatformError):
+                raise WorkerError("worker_capacity_root_invalid") from None
+        elif self.capacity_root is not None:
             try:
                 info=self.capacity_root.stat()
                 if (not self.capacity_root.is_absolute()
@@ -730,6 +747,8 @@ class ManagedWorker:
         # the attempts still refuses (an unobservable host must never look like
         # a worker at zero RSS), and a report we cannot parse is our own
         # assumption breaking, so it refuses instead of under-counting.
+        if mycelium_host_platform.is_win32():
+            return self._win32_group_rss(deadline_monotonic_s)
         attempts = 0
         while attempts < self._OBSERVATION_ATTEMPTS:
             attempts += 1
@@ -780,6 +799,22 @@ class ManagedWorker:
             "deadline_bound": deadline_monotonic_s is not None,
         }
         raise error
+
+    def _win32_group_rss(self, deadline_monotonic_s: float | None = None) -> int:
+        """Windows: the node's process group is its kill-on-close job object.
+
+        Every process in the job is summed by working set; an unobservable job
+        refuses rather than reading as zero.
+        """
+
+        self._deadline_check(deadline_monotonic_s)
+        session = self._session
+        if session is None:
+            raise WorkerError("worker_memory_observation_failed")
+        try:
+            return int(session.win32_group_resident_bytes())
+        except Exception:
+            raise WorkerError("worker_memory_observation_failed") from None
 
     def _native_argv(self) -> tuple[str, ...]:
         """Exact native-node argv, with the derived command budget.
@@ -876,7 +911,11 @@ class ManagedWorker:
                 timeout_seconds=_STARTUP_TIMEOUT_SECONDS,
             )
             pid = self.pid
-            if hello.get("ok") is not True or pid is None or os.getpgid(pid) != pid:
+            if mycelium_host_platform.is_win32():
+                group_owned = pid is not None and self._session.win32_group_owned()
+            else:
+                group_owned = pid is not None and os.getpgid(pid) == pid
+            if hello.get("ok") is not True or not group_owned:
                 raise WorkerError("worker_native_start_failed")
             self._group_owned = True
             if self._budget_owner is self:
@@ -1245,6 +1284,12 @@ class ManagedWorker:
     def process_group_present(self) -> bool:
         if not self._group_owned or self.pid is None:
             return False
+        if mycelium_host_platform.is_win32():
+            session = self._session
+            try:
+                return session is not None and session.win32_group_owned()
+            except Exception:  # noqa: BLE001 - an unobservable job is present
+                return True
         try:
             os.killpg(self.pid, 0)
             return True
@@ -1302,7 +1347,9 @@ def native_main() -> int:
     # PhysicalNodeProcess already launches this fixed entrypoint as a fresh
     # session/process-group leader.  Retain compatibility with direct packaged
     # invocation without attempting a second setsid() as an existing leader.
-    if os.getsid(0) != os.getpid():
+    # On Windows the node is contained by its owner's kill-on-close job object
+    # instead of a session (mycelium_node.process.PhysicalNodeProcess).
+    if not mycelium_host_platform.is_win32() and os.getsid(0) != os.getpid():
         os.setsid()
     from physical_inference_node import main
 
