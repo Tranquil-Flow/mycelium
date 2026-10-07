@@ -207,14 +207,50 @@ const ACQUISITION_CHUNK_BYTES: usize = 1 << 20;
 
 /// Why acquisition must pause now (A12 §8: thermal, battery), from the owner's
 /// invitation quota and the current platform readings.
+/// Fails closed: a missing quota or a reading the gate cannot see pauses too.
 fn acquisition_pause(quota: &Value, metrics: &evidence::Metrics) -> Option<String> {
-    if let Some(code) = thermal_refusal(quota["thermal_ceiling_c"].as_f64(), metrics) {
+    let (Some(ceiling), Some(floor)) = (quota["thermal_ceiling_c"].as_f64(), quota["battery_floor_percent"].as_f64()) else {
+        return Some("acquisition_quota_unknown".into());
+    };
+    let reading = |name: &str| metrics.get(name).copied().flatten().filter(|v| v.is_finite());
+    if reading("thermal_max_celsius").is_none() {
+        return Some("platform_reading_unknown:thermal_max_celsius".into());
+    }
+    if let Some(code) = thermal_refusal(Some(ceiling), metrics) {
         return Some(code);
     }
-    let floor = quota["battery_floor_percent"].as_f64()?;
-    let level = metrics.get("battery_level_percent").copied().flatten()?;
-    let charging = metrics.get("charging").copied().flatten().is_some_and(|c| c >= 1.0);
+    let Some(level) = reading("battery_level_percent") else {
+        return Some("platform_reading_unknown:battery_level_percent".into());
+    };
+    let charging = reading("charging").is_some_and(|c| c >= 1.0);
     (level < floor && !charging).then(|| format!("battery_below_floor:{level}<{floor}"))
+}
+
+/// The applied route already runs this exact assignment and manifest (an
+/// assignment id alone is not enough: the stage must be the signed one).
+fn already_applied(applied: Option<&(String, String)>, assignment: &RouteAssignment) -> bool {
+    applied.is_some_and(|(id, digest)| *id == assignment.assignment_id && *digest == assignment.stage_pack_digest)
+}
+
+/// Stop a running acquisition unless it is for `keep`; its state is cleared
+/// under the same lock its outcome is recorded under.
+fn cancel_acquisition_in(shared: &Arc<Mutex<Shared>>, keep: Option<&str>) {
+    let mut s = shared.lock().unwrap();
+    if s.acquisition.as_ref().is_some_and(|a| Some(a.pack_digest.as_str()) != keep) {
+        let old = s.acquisition.take().unwrap();
+        old.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        s.status.artifact_state = None;
+    }
+}
+
+/// Record an acquisition's outcome unless it was cancelled; the check and
+/// the write happen under the lock cancellation takes, so a late outcome of a
+/// cancelled task can never land.
+fn record_acquisition_outcome(shared: &Arc<Mutex<Shared>>, cancel: &std::sync::atomic::AtomicBool, state: String) {
+    let mut s = shared.lock().unwrap();
+    if !cancel.load(std::sync::atomic::Ordering::SeqCst) {
+        s.status.artifact_state = Some(state);
+    }
 }
 
 /// The seed-delivered assignment currently applied to the stage and transport.
@@ -970,11 +1006,14 @@ impl Supervisor {
     async fn route_exchange(&self) -> Result<bool, String> {
         let (m, applied) = {
             let s = self.shared.lock().unwrap();
-            (s.membership.clone(), s.route.as_ref().map(|r| r.assignment.assignment_id.clone()))
+            (
+                s.membership.clone(),
+                s.route.as_ref().map(|r| (r.assignment.assignment_id.clone(), r.assignment.stage_pack_digest.clone())),
+            )
         };
         let Some(m) = m.filter(|m| !m.needs_resume) else { return Ok(false) };
         let message_id = format!("route-{}", &new_incarnation().map_err(|e| e.0)?[4..]);
-        let env = route_assignment::request(&m.cfg, &self.identity, &message_id, m.generation, applied.as_deref(), now_s())
+        let env = route_assignment::request(&m.cfg, &self.identity, &message_id, m.generation, applied.as_ref().map(|(id, _)| id.as_str()), now_s())
             .map_err(|e| e.0)?;
         let body = json!({"protocol": membership::SEED_MEMBER_HTTP_PROTOCOL, "envelope": env});
         let (code, reply) = self.post("/seed/message", &m.seed_url, &body).await?;
@@ -1002,7 +1041,7 @@ impl Supervisor {
             drop_route(&self.shared, &self.transport).await;
             return Ok(false);
         };
-        if applied.as_deref() == Some(assignment.assignment_id.as_str()) {
+        if already_applied(applied.as_ref(), &assignment) {
             return Ok(false);
         }
         let digest = delivered.pack_digest().to_owned();
@@ -1034,11 +1073,7 @@ impl Supervisor {
 
     /// Stop a running acquisition unless it is for `keep` (a pack digest).
     fn cancel_acquisition(&self, keep: Option<&str>) {
-        let mut s = self.shared.lock().unwrap();
-        if s.acquisition.as_ref().is_some_and(|a| Some(a.pack_digest.as_str()) != keep) {
-            let old = s.acquisition.take().unwrap();
-            old.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
+        cancel_acquisition_in(&self.shared, keep);
     }
 
     /// Start (once per manifest) the background A2-over-iroh acquisition of
@@ -1104,9 +1139,7 @@ impl Supervisor {
                 Ok(_) => "promoted".to_owned(),
                 Err(e) => format!("paused:{}", e.0),
             };
-            if !task_cancel.load(Ordering::SeqCst) {
-                shared.lock().unwrap().status.artifact_state = Some(state);
-            }
+            record_acquisition_outcome(&shared, &task_cancel, state);
             task_done.store(true, Ordering::SeqCst);
         });
         Ok(())
@@ -1142,7 +1175,9 @@ impl Supervisor {
         if let Some(Some(available)) = current_platform_metrics(&self.shared).get("memory_available_bytes").copied() {
             manifest.admit_memory(available as u64).map_err(|e| e.0)?;
         }
-        let stage = store.load_stage(manifest).map_err(|e| e.0)?;
+        // Objects re-verified against this manifest's digests and the golden
+        // run now: nothing cached from another assignment can satisfy it.
+        let stage = store.load_stage_for_serving(manifest).map_err(|e| e.0)?;
         let runtime = Qwen2Runtime::new(&assignment.assignment_id, &manifest.stage_id, stage).map_err(|e| e.0)?;
         self.shared.lock().unwrap().acquisition = None;
         set_state("loaded");
@@ -1321,7 +1356,12 @@ mod tests {
     fn acquisition_pauses_on_the_thermal_ceiling_or_below_the_battery_floor_unless_charging() {
         let quota = serde_json::json!({"thermal_ceiling_c": 45.0, "battery_floor_percent": 30.0});
         let mut m = evidence::Metrics::new();
-        assert_eq!(acquisition_pause(&quota, &m), None, "unknown readings do not pause");
+        // Readings the gate cannot see pause it (fail closed), as does a missing quota.
+        assert_eq!(acquisition_pause(&quota, &m).as_deref(), Some("platform_reading_unknown:thermal_max_celsius"));
+        m.insert("thermal_max_celsius".into(), Some(30.0));
+        assert_eq!(acquisition_pause(&quota, &m).as_deref(), Some("platform_reading_unknown:battery_level_percent"));
+        m.insert("battery_level_percent".into(), Some(80.0));
+        assert_eq!(acquisition_pause(&Value::Null, &m).as_deref(), Some("acquisition_quota_unknown"));
         m.insert("thermal_max_celsius".into(), Some(46.0));
         assert!(acquisition_pause(&quota, &m).unwrap().starts_with("thermal_ceiling_reached"));
         m.insert("thermal_max_celsius".into(), Some(40.0));
@@ -1333,6 +1373,44 @@ mod tests {
         m.insert("charging".into(), Some(0.0));
         m.insert("battery_level_percent".into(), Some(31.0));
         assert_eq!(acquisition_pause(&quota, &m), None);
-        assert_eq!(acquisition_pause(&Value::Null, &m), None);
+    }
+
+    #[test]
+    fn an_applied_route_short_circuits_only_for_the_same_assignment_and_manifest() {
+        let a = RouteAssignment {
+            assignment_id: "route-1".into(),
+            stage_pack_digest: "sha256:aa".into(),
+            peer_endpoint_id: "p".into(),
+            route_generation: 1,
+            forward_to: true,
+            expires_at: 1.0,
+        };
+        assert!(already_applied(Some(&("route-1".into(), "sha256:aa".into())), &a));
+        assert!(!already_applied(Some(&("route-1".into(), "sha256:bb".into())), &a), "same id, other manifest");
+        assert!(!already_applied(Some(&("route-2".into(), "sha256:aa".into())), &a));
+        assert!(!already_applied(None, &a));
+    }
+
+    #[test]
+    fn a_cancelled_acquisition_never_reports_its_outcome() {
+        use std::sync::atomic::AtomicBool;
+        let dir = std::env::temp_dir().join(format!("mycelium-node-acq-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let core = NodeCore::open(&dir, Reachability::LocalOnly).unwrap();
+        let shared = core.shared.clone();
+        let cancel = Arc::new(AtomicBool::new(false));
+        shared.lock().unwrap().acquisition =
+            Some(Acquisition { pack_digest: "sha256:aa".into(), cancel: cancel.clone(), done: Arc::new(AtomicBool::new(false)) });
+        shared.lock().unwrap().status.artifact_state = Some("promoted".into());
+        cancel_acquisition_in(&shared, None);
+        assert!(shared.lock().unwrap().acquisition.is_none());
+        assert_eq!(shared.lock().unwrap().status.artifact_state, None, "a cancelled acquisition leaves no state");
+        record_acquisition_outcome(&shared, &cancel, "promoted".into());
+        assert_eq!(shared.lock().unwrap().status.artifact_state, None, "a late outcome of a cancelled task is dropped");
+        let live = Arc::new(AtomicBool::new(false));
+        record_acquisition_outcome(&shared, &live, "promoted".into());
+        assert_eq!(shared.lock().unwrap().status.artifact_state.as_deref(), Some("promoted"));
+        core.shutdown();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

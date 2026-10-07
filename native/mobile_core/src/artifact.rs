@@ -354,6 +354,16 @@ impl ArtifactStore {
         Ok(stage)
     }
 
+    /// [`load_stage`](Self::load_stage) for a stage that will serve traffic:
+    /// the manifest must carry a golden, so loading proves bit-exact
+    /// agreement with the host build before any frame is accepted.
+    pub fn load_stage_for_serving(&self, manifest: &StageManifest) -> Result<Qwen2Stage, ArtifactError> {
+        if manifest.golden.is_none() {
+            return Err(fail("stage_manifest_golden_required"));
+        }
+        self.load_stage(manifest)
+    }
+
     /// Remove objects, partials and manifests no kept manifest references.
     /// Returns the bytes freed.
     pub fn retain(&self, keep: &[&StageManifest]) -> u64 {
@@ -435,13 +445,16 @@ pub struct NetworkBudget {
 impl NetworkBudget {
     pub fn open(store_root: &Path, limit: u64, day: u64) -> Self {
         let path = store_root.join("network-budget.json");
-        let saved: Option<(u64, u64)> = fs::read(&path)
-            .ok()
-            .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
-            .and_then(|v| Some((v["day"].as_u64()?, v["bytes"].as_u64()?)));
-        let used = match saved {
-            Some((d, bytes)) if d == day => bytes,
-            _ => 0,
+        // Fail closed: a record that exists but cannot be read or parsed
+        // counts as the day's quota spent (a reset never refunds traffic).
+        let used = match fs::read(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(_) => limit,
+            Ok(raw) => match serde_json::from_slice::<Value>(&raw).ok().and_then(|v| Some((v["day"].as_u64()?, v["bytes"].as_u64()?))) {
+                Some((d, bytes)) if d == day => bytes,
+                Some(_) => 0,
+                None => limit,
+            },
         };
         Self { path, limit, day, used }
     }

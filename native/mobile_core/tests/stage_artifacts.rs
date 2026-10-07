@@ -541,3 +541,35 @@ fn free_space_is_reported_for_the_store_volume() {
     assert!(mycelium_mobile_core::artifact::available_bytes(&root.join("missing")).is_none());
     std::fs::remove_dir_all(root).unwrap();
 }
+
+// ---- node review: fail-closed v2 apply state ----
+
+#[test]
+fn a_stage_is_served_only_with_a_golden_that_passed() {
+    let root = scratch("serve-golden");
+    let store = ArtifactStore::open(&root, 1 << 30).unwrap();
+    let mut doc = fixture("qwen2_stage_manifest_v2.json")["manifest"].clone();
+    doc["golden"] = Value::Null;
+    let m = StageManifest::from_document(&redigest(doc)).unwrap();
+    store.acquire(&m, &mut MemorySource::new(&synthetic_bytes()), 1 << 20, None).unwrap();
+    assert_eq!(store.load_stage_for_serving(&m).unwrap_err().0, "stage_manifest_golden_required");
+    let with = manifest();
+    store.acquire(&with, &mut MemorySource::new(&synthetic_bytes()), 1 << 20, None).unwrap();
+    store.load_stage_for_serving(&with).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_corrupt_or_unreadable_network_budget_record_fails_closed() {
+    use mycelium_mobile_core::artifact::NetworkBudget;
+    let root = scratch("budget-corrupt");
+    std::fs::write(root.join("network-budget.json"), b"{not json").unwrap();
+    let mut budget = NetworkBudget::open(&root, 1000, 7);
+    assert_eq!(budget.used(), 1000, "an unreadable count is treated as the day's quota spent");
+    assert_eq!(budget.admit(7, 1).unwrap_err().0, "network_budget_exhausted");
+    // The next day starts afresh, and a clean record from another day is not trusted for today.
+    assert!(budget.admit(8, 1).is_ok());
+    std::fs::write(root.join("network-budget.json"), br#"{"day":6,"bytes":999}"#).unwrap();
+    assert_eq!(NetworkBudget::open(&root, 1000, 7).used(), 0);
+    std::fs::remove_dir_all(root).unwrap();
+}
