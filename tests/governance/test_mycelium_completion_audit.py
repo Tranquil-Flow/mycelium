@@ -719,3 +719,120 @@ def test_a_slice_of_a_non_primary_gate_may_not_be_in_progress(tmp_path: Path) ->
 
     assert result["ok"] is False
     assert "non_primary_gate_in_progress:A14b" in result["findings"]
+
+
+# Lead ruling (2026-10-07, owner intent: all A tasks done): a gate row with slices
+# is complete only when every one of its slices is complete.
+
+
+def _complete_slice(root: Path, checklist: dict, slice_id: str) -> None:
+    row = next(item for item in _a14(checklist)["slices"] if item["slice_id"] == slice_id)
+    requirements = list(checklist["closure_requirements"])
+    specification = next(
+        evidence for evidence in row["evidence_bindings"] if evidence["requirement"] == "specification"
+    )
+    row.update(
+        {
+            "state": "complete",
+            "completed_requirements": requirements,
+            "partial_requirements": [],
+            "pending_requirements": [],
+            "evidence_bindings": [specification]
+            + [_evidence(root, slice_id, requirement) for requirement in requirements[1:]],
+        }
+    )
+
+
+def _completed_a14_repo(tmp_path: Path) -> dict:
+    checklist = _slice_repo(tmp_path)
+    # A14 depends on A8 only; A12 (depends on A4) can be the primary gate.
+    checklist["primary_gate"] = "A12"
+    _complete_gate(tmp_path, checklist, "A14")
+    return checklist
+
+
+def test_live_checklist_records_the_slice_completion_policy() -> None:
+    checklist = json.loads((ROOT / DEFAULT_CHECKLIST).read_text("utf-8"))
+    assert "every slice of that row is complete" in checklist["claim_boundary"]
+
+
+def test_a_gate_row_is_not_complete_while_a_slice_is_design_only(tmp_path: Path) -> None:
+    checklist = _completed_a14_repo(tmp_path)
+    assert _a14(checklist)["slices"][0]["state"] == "design_only"
+    _write_checklist(tmp_path, checklist)
+
+    result = audit(tmp_path)
+
+    assert result["ok"] is False
+    assert result["findings"] == ["completed_gate_slice_incomplete:A14:A14b"]
+
+
+@pytest.mark.parametrize(
+    "state", ["implemented_unintegrated", "integrated_unqualified", "physically_qualified"]
+)
+def test_a_gate_row_is_not_complete_while_a_slice_is_unfinished(tmp_path: Path, state: str) -> None:
+    checklist = _completed_a14_repo(tmp_path)
+    _complete_slice(tmp_path, checklist, "A14b")
+    _a14(checklist)["slices"][0]["state"] = state
+    _write_checklist(tmp_path, checklist)
+
+    result = audit(tmp_path)
+
+    assert result["ok"] is False
+    assert "completed_gate_slice_incomplete:A14:A14b" in result["findings"]
+
+
+def test_a_gate_row_is_complete_once_every_slice_is_complete(tmp_path: Path) -> None:
+    checklist = _completed_a14_repo(tmp_path)
+    _complete_slice(tmp_path, checklist, "A14b")
+    _write_checklist(tmp_path, checklist)
+
+    result = audit(tmp_path)
+
+    assert result["findings"] == []
+    assert result["ok"] is True
+
+
+def test_every_slice_must_be_complete_not_only_the_first(tmp_path: Path) -> None:
+    checklist = _completed_a14_repo(tmp_path)
+    _complete_slice(tmp_path, checklist, "A14b")
+    gate = _a14(checklist)
+    second = json.loads(json.dumps(gate["slices"][0]))
+    second["slice_id"] = "A14c"
+    second["name"] = second["name"] + " (second slice)"
+    second["specification"] = second["specification"].replace("A14b", "A14c").replace("a14b", "a14c")
+    assert second["specification"] != gate["slices"][0]["specification"]
+    for evidence in second["evidence_bindings"]:
+        evidence["subject"] = evidence["subject"].replace("A14b", "A14c")
+        evidence["artifact_reference"] = evidence["artifact_reference"].replace("a14b", "a14c")
+    gate["slices"].append(second)
+    _write_slice_specification(tmp_path, gate, second)
+    second.update(
+        {
+            "state": "design_only",
+            "completed_requirements": ["specification"],
+            "partial_requirements": [],
+            "pending_requirements": list(checklist["closure_requirements"])[1:],
+            "evidence_bindings": [
+                evidence for evidence in second["evidence_bindings"] if evidence["requirement"] == "specification"
+            ],
+        }
+    )
+    _write_checklist(tmp_path, checklist)
+
+    result = audit(tmp_path)
+
+    assert result["ok"] is False
+    assert result["findings"] == ["completed_gate_slice_incomplete:A14:A14c"]
+
+
+def test_an_unfinished_slice_of_an_unfinished_row_is_not_a_slice_completion_finding(
+    tmp_path: Path,
+) -> None:
+    checklist = _slice_repo(tmp_path)
+    _write_checklist(tmp_path, checklist)
+
+    result = audit(tmp_path)
+
+    assert result["ok"] is True
+    assert not any(item.startswith("completed_gate_slice_incomplete") for item in result["findings"])

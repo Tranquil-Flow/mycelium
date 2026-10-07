@@ -1,7 +1,7 @@
 {
  "protocol": "mycelium.completion_checklist.v1",
- "claim_boundary": "progress navigation only; completion requires each gate's executed product, physical, browser, audit, handover, and atomic commit evidence",
- "updated_on": "2026-10-07T12:07:36Z",
+ "claim_boundary": "progress navigation only; completion requires each gate's executed product, physical, browser, audit, handover, and atomic commit evidence; a gate row with slices is complete only when every slice of that row is complete",
+ "updated_on": "2026-10-07T15:30:00Z",
  "primary_gate": "A6",
  "workspace_ids": [
   "inference",

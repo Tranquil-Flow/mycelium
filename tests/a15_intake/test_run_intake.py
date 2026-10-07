@@ -84,11 +84,15 @@ REQUIRE_REAL = os.environ.get("MYCELIUM_A15_REQUIRE_REAL", "1") == "1"
 #   R5      78c92f16…  lead ruling R5: A14b tracked as a ``slices`` entry of the A14
 #                       row (A14b:specification bound to the A14b spec bytes), no new
 #                       gate id; bumped the checklist's own `updated_on`.
+#   slices  8711e7d4…  lead ruling (owner intent, all A tasks done): a gate row with
+#                       slices is complete only when every slice is complete, stated
+#                       in the checklist's claim boundary and enforced by the
+#                       completion audit; bumped the checklist's own `updated_on`.
 READINESS_GATE_DIGEST = "sha256:a9983be6aeed2c8c99f214aa034e6f201759156e0a41546d06996abbf4af95d5"
 PACKAGE_DIGEST = "sha256:79adcfaf9355ff140873b571d121f137681eed56ed070c1e5ecfe098417ca22c"
 GATE_EXECUTION_DIGEST = "sha256:d9e3b6fcd302ba9428556801a2469dfb645b5823bf41e73980c7cd8a28ed3d0a"
 HYPOTHESIS_DIGEST = "sha256:2a76aa59a83c0c6a0a5d1ce5a438a52987af80a00534fd9bb215f1418bba5bff"
-CHECKLIST_DIGEST = "sha256:78c92f16bfe755219068964f331d66637d9bac007ed42231ffab89393e327f73"  # R5 A14b slice of the A14 row
+CHECKLIST_DIGEST = "sha256:8711e7d47029ab900a082dc7424f44f7704236c3e22e3b557c104fe5c7caef7d"  # every slice complete before its row
 A3_RECORD_DIGEST = "sha256:462d7232ab006ba7bbde12f578d948e766f45b9a60b10f79764935c05e65333d"
 A4_RECORD_DIGEST = "sha256:1423354a43a4d85680a7c9a319649709d9c42c2f8a8856311deafb52785a28bd"
 A5_RECORD_DIGEST = "sha256:9aa287d2c7e35a1db36c01e4f2326891747b497d77b43285e8b3fbc2a2ea1628"

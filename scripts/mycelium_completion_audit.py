@@ -208,6 +208,9 @@ GATE_FIELDS = {
 # dependencies are the parent's, and it is audited like a gate row (state,
 # requirement partition, executed evidence, blockers, workspaces) against its own
 # specification, which must name the slice and its parent specification.
+# A gate row with slices is complete only when every one of its slices is
+# complete (lead ruling, 2026-10-07: the owner wants all A tasks done, so a
+# parent row never closes over an unfinished slice).
 SLICES_FIELD = "slices"
 SLICE_FIELDS = (GATE_FIELDS - {"gate_id", "dependencies"}) | {"slice_id"}
 SLICE_SUFFIX = re.compile(r"[b-z]\Z")
@@ -876,6 +879,10 @@ def audit(repo_root: str | Path, checklist: str = DEFAULT_CHECKLIST) -> dict[str
             findings.append(f"gate:{gate_id}:dependency_missing:{dependency}")
         for dependency in sorted(actual - expected):
             findings.append(f"gate:{gate_id}:dependency_extra:{dependency}")
+
+    for slice_id, (parent_id, state) in slice_states.items():
+        if gate_states.get(parent_id) == "complete" and state != "complete":
+            findings.append(f"completed_gate_slice_incomplete:{parent_id}:{slice_id}")
 
     for gate_id, state in gate_states.items():
         if state == "complete":
