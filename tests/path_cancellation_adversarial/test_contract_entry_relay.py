@@ -579,7 +579,9 @@ def test_terminal_path_metadata_is_bounded() -> None:
    # mark that keeps refusing its path (it never reopens).
    from mycelium_router import relay as relay_module
 
-   assert len(relay._cancelled_path_attempts) <= relay_module._MAX_TOMBSTONE_RECORDS
+   assert len(relay._cancelled_path_attempts) <= (
+      relay_module._TOMBSTONE_QUOTA_PER_CREATOR * relay_module._MAX_TOMBSTONE_CREATORS
+   )
    assert all(
       len(records) <= relay_module._TOMBSTONE_QUOTA_PER_CREATOR
       for records in relay._tombstones_by_creator.values()

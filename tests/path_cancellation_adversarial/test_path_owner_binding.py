@@ -140,20 +140,6 @@ def test_another_owners_cancellation_never_weakens_an_owners_tombstone() -> None
    assert relay.register_path(request, replace(manifest, path_attempt=8), graph, entry_node_id=entry)
 
 
-def test_tombstones_from_many_owners_stay_bounded() -> None:
-   from mycelium_router import relay as relay_module
-
-   router, graph, request, manifest, nodes = _middle_router()
-   relay = router.relay
-   for index in range(relay_module._MAX_TOMBSTONE_RECORDS + 50):
-      relay._record_cancelled_attempt_locked(manifest.path_id, 1, (f"node-{index}", "request"))
-   # Never past the absolute bound; evicted owners stay refused by their marks.
-   assert len(relay._cancelled_path_attempts) <= relay_module._MAX_TOMBSTONE_RECORDS
-   assert len(relay._cancelled_path_owners[manifest.path_id]) <= relay_module._MAX_TOMBSTONE_RECORDS
-   assert len(relay._cancelled_recorded_at) == len(relay._cancelled_path_attempts)
-   assert relay._history_evicted_locked(manifest.path_id, ("node-0", "request"))
-
-
 # ---- review 2: sender authentication, owner inheritance, key collisions ----
 
 def test_a_final_placement_cannot_create_a_path_in_another_entrys_name() -> None:
@@ -236,64 +222,6 @@ def _churn(relay, graph, request, manifest, count: int, prefix: str) -> int:
    return accepted
 
 
-def test_one_creators_tombstone_churn_never_blocks_another_entry() -> None:
-   from mycelium_router import relay as relay_module
-
-   router, graph, request, manifest, nodes = _middle_router()
-   entry = nodes[0]
-   relay = router.relay
-   # Entry A: attempt 5 registered and cancelled (attempt 3 is refused only by
-   # the high-water mark).
-   assert relay.register_path(request, replace(manifest, path_attempt=5), graph, entry_node_id=entry)
-   assert router.receive_path_cancellation(
-      PathCancellation(request.request_id, manifest.path_id, 5, graph.topology_version), source_node_id=entry
-   )
-   churn_graph = _with_entry(graph, manifest, "node-churn")
-   quota = relay_module._TOMBSTONE_QUOTA_PER_CREATOR
-   accepted = _churn(relay, churn_graph, request, manifest, quota + 50, "churn")
-   # The churning creator is refused at its own quota...
-   assert accepted == quota
-   # ...while entry A keeps registering new paths and its mark still holds.
-   assert relay.register_path(request, replace(manifest, path_id="a-fresh"), graph, entry_node_id=entry)
-   assert not relay.register_path(request, replace(manifest, path_attempt=3), graph, entry_node_id=entry)
-
-
-def test_an_evicted_tombstone_refuses_instead_of_reopening() -> None:
-   from mycelium_router import relay as relay_module
-
-   router, graph, request, manifest, nodes = _middle_router()
-   relay = router.relay
-   churn_graph = _with_entry(graph, manifest, "node-churn")
-   quota = relay_module._TOMBSTONE_QUOTA_PER_CREATOR
-   assert _churn(relay, churn_graph, request, manifest, quota, "churn") == quota
-   # Past the retention horizon the creator's oldest records may be evicted
-   # to admit new paths; each eviction leaves a mark that refuses the old
-   # path id for every attempt, including ones below its old high-water mark.
-   relay.clock.advance(relay_module._TOMBSTONE_RETENTION_SECONDS + 1)
-   assert _churn(relay, churn_graph, request, manifest, 10, "later") == 10
-   evicted = replace(manifest, request_id="churn-request-0", path_id="churn-0")
-   evicted_request = replace(request, request_id="churn-request-0")
-   assert ("churn-0", ("node-churn", "churn-request-0")) not in relay._cancelled_path_attempts
-   for attempt in (evicted.path_attempt, evicted.path_attempt + 1):
-      assert not relay.register_path(
-         evicted_request, replace(evicted, path_attempt=attempt), churn_graph, entry_node_id="node-churn"
-      ), attempt
-
-
-def test_the_absolute_bound_evicts_only_with_marks() -> None:
-   from mycelium_router import relay as relay_module
-
-   router, graph, request, manifest, nodes = _middle_router()
-   relay = router.relay
-   total = relay_module._MAX_TOMBSTONE_RECORDS
-   for index in range(total + 5):
-      owner = (f"node-{index % 16}", f"request-{index}")
-      relay._record_cancelled_attempt_locked(f"bound-{index}", 1, owner, creator=f"node-{index % 16}")
-   assert len(relay._cancelled_path_attempts) <= total
-   # The first records were evicted with marks: their paths stay refused.
-   assert relay._history_evicted_locked("bound-0", ("node-0", "request-0"))
-
-
 def test_a_peer_flooding_pending_cancellations_cannot_evict_the_entrys() -> None:
    from mycelium_router import relay as relay_module
 
@@ -327,3 +255,123 @@ def test_a_full_pending_table_refuses_new_cancellations() -> None:
    assert not router.receive_path_cancellation(
       PathCancellation(request.request_id, manifest.path_id, 1, graph.topology_version), source_node_id="node-new"
    )
+
+
+
+# ---- review 4: the path-table model (RELAY-PATH-TABLES.md) ----
+
+def _register(relay, graph, request, manifest, *, path_id, request_id, attempt=0, entry):
+   req = replace(request, request_id=request_id)
+   man = replace(manifest, request_id=request_id, path_id=path_id, path_attempt=attempt)
+   return req, man, relay.register_path(req, man, graph, entry_node_id=entry)
+
+
+def _cancel(router, graph, req, man, entry) -> bool:
+   return router.receive_path_cancellation(
+      PathCancellation(req.request_id, man.path_id, man.path_attempt, graph.topology_version), source_node_id=entry
+   )
+
+
+def test_one_churner_and_two_honest_entries_through_a6_and_a7_reattempts(monkeypatch) -> None:
+   """Churner C fills its quota and plants a provisional path in honest entry
+   A's name; A and B keep registering, re-attempting (A6) and cutting over to
+   a newer attempt (A7), and A's own tombstones keep binding A."""
+   from mycelium_router import relay as relay_module
+
+   monkeypatch.setattr(relay_module, "_TOMBSTONE_QUOTA_PER_CREATOR", 8)
+   monkeypatch.setattr(relay_module, "_MAX_TOMBSTONE_RECORDS", 12, raising=False)
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   a, b, c = nodes[0], "node-b-entry", "node-churn"
+   graph_a, graph_b, graph_c = graph, _with_entry(graph, manifest, b), _with_entry(graph, manifest, c)
+   # A: one path cancelled at attempt 4 (its high-water mark).
+   req_a, man_a, ok = _register(relay, graph_a, request, manifest, path_id="pa", request_id="ra", attempt=4, entry=a)
+   assert ok and _cancel(router, graph_a, req_a, man_a, a)
+   # C churns its own paths to its quota, then is refused, alone.
+   accepted = 0
+   for index in range(20):
+      req_c, man_c, ok = _register(relay, graph_c, request, manifest, path_id=f"pc-{index}", request_id=f"rc-{index}", entry=c)
+      if ok:
+         accepted += 1
+         assert _cancel(router, graph_c, req_c, man_c, c)
+   assert accepted == 8
+   # C plants a provisional path naming A, then it is released: the record is
+   # C's and binds only C's own registrations.
+   assert relay._register_provisional_path(
+      request_id="ra2", path_id="pa2", path_attempt=1, topology_version=graph.topology_version,
+      entry_node_id=a, source_node_id=c,
+   ) is None  # C is at its quota: even this is refused
+   monkeypatch.setattr(relay_module, "_TOMBSTONE_QUOTA_PER_CREATOR", 64)
+   assert relay._register_provisional_path(
+      request_id="ra2", path_id="pa2", path_attempt=1, topology_version=graph.topology_version,
+      entry_node_id=a, source_node_id=c,
+   ) is not None
+   relay.release_path("pa2", path_attempt=1)
+   # A and B: fresh paths, an A6 re-attempt and an A7 cutover all register.
+   req_a2, man_a2, ok = _register(relay, graph_a, request, manifest, path_id="pa2", request_id="ra2", attempt=1, entry=a)
+   assert ok, "a churner's record never binds the entry it named"
+   for entry, g, name in ((a, graph_a, "a"), (b, graph_b, "b")):
+      req, man, ok = _register(relay, g, request, manifest, path_id=f"live-{name}", request_id=f"live-{name}", attempt=0, entry=entry)
+      assert ok
+      assert _cancel(router, g, req, man, entry)  # failure detected: A6 replays
+      assert relay.register_path(req, replace(man, path_attempt=1), g, entry_node_id=entry)  # A6 re-attempt
+      assert relay.register_path(req, replace(man, path_attempt=2), g, entry_node_id=entry)  # A7 cutover
+   # A's own mark still binds A: an attempt under its high-water mark is refused.
+   assert not relay.register_path(req_a, replace(man_a, path_attempt=3), graph_a, entry_node_id=a)
+   # No peer cancellation writes the shared replay filter (no peer-driven rotation).
+   assert relay._cancelled_path_filter._current_insertions == 0
+
+
+def test_a_new_creator_past_the_cap_is_refused_and_no_one_is_evicted() -> None:
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   known = {}
+   cap = getattr(relay_module, "_MAX_TOMBSTONE_CREATORS", 64)
+   for entry in [f"node-{index}" for index in range(cap)]:
+      g = _with_entry(graph, manifest, entry)
+      req, man, ok = _register(relay, g, request, manifest, path_id=f"p-{entry}", request_id=f"r-{entry}", entry=entry)
+      assert ok and _cancel(router, g, req, man, entry)
+      known[entry] = (g, req, man)
+   records_before = dict(relay._cancelled_path_attempts)
+   g = _with_entry(graph, manifest, "node-z")
+   assert not _register(relay, g, request, manifest, path_id="p-z", request_id="r-z", entry="node-z")[2]
+   assert dict(relay._cancelled_path_attempts) == records_before, "nothing was evicted to make room"
+   for entry, (g, req, man) in known.items():
+      assert _register(relay, g, request, manifest, path_id=f"q-{entry}", request_id=f"s-{entry}", entry=entry)[2]
+      assert not relay.register_path(req, man, g, entry_node_id=entry)  # its tombstone still binds
+
+
+def test_an_evicted_creators_new_attempts_are_admitted_on_the_relay_clock(monkeypatch) -> None:
+   from mycelium_router import relay as relay_module
+
+   monkeypatch.setattr(relay_module, "_TOMBSTONE_QUOTA_PER_CREATOR", 4)
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   entry = nodes[0]
+   live_req, live_man, ok = _register(relay, graph, request, manifest, path_id="live", request_id="live", attempt=0, entry=entry)
+   assert ok
+   for index in range(4):
+      req, man, ok = _register(relay, graph, request, manifest, path_id=f"old-{index}", request_id=f"old-{index}", entry=entry)
+      assert ok and _cancel(router, graph, req, man, entry)
+   assert not _register(relay, graph, request, manifest, path_id="fresh-0", request_id="fresh-0", entry=entry)[2]
+   # The horizon is the relay's own clock; self-asserted request times move nothing.
+   assert not _register(relay, replace(graph), replace(request, admitted_at=1e12), manifest,
+                        path_id="fresh-1", request_id="fresh-1", entry=entry)[2]
+   relay.clock.advance(relay_module._TOMBSTONE_RETENTION_SECONDS + 1)
+   assert _register(relay, graph, request, manifest, path_id="fresh-2", request_id="fresh-2", entry=entry)[2]
+   # A6/A7: a higher attempt for the live request registers, and so does the
+   # creator's own re-attempt of a path whose aged record was evicted (no
+   # eviction mark refuses legitimate work).
+   assert relay.register_path(live_req, replace(live_man, path_attempt=1), graph, entry_node_id=entry)
+   assert ("old-0", (entry, "old-0"), "") not in relay._cancelled_path_attempts
+   assert _register(relay, graph, request, manifest, path_id="old-0", request_id="old-0", attempt=1, entry=entry)[2]
+
+
+def test_only_participants_of_the_path_are_creators() -> None:
+   router, graph, request, manifest, nodes = _middle_router()
+   # An entry that is not placed on the manifest's route: never a creator.
+   assert not router.relay.register_path(request, manifest, graph, entry_node_id="node-outsider")
+   assert "node-outsider" not in router.relay._tombstones_by_creator
+   assert router.relay.register_path(request, manifest, graph, entry_node_id=nodes[0])
