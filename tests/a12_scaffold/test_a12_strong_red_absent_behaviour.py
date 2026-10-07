@@ -9,7 +9,7 @@ same failures with or without the scaffold present.
 
 Reproduce against the untouched base (no scaffold, no A12 production module):
 
-    git -C /Users/evinova-self/Documents/playground/mycelium-core-pilot \
+    git -C <repository root> \
         archive c573e0f | tar -x -C /tmp/a12-base
     mkdir -p /tmp/a12-base/tests/a12_scaffold
     cp tests/a12_scaffold/__init__.py \

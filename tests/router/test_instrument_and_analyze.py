@@ -16,7 +16,7 @@ import time
 import unittest
 from pathlib import Path
 
-ROOT = Path("/Users/evinova-self/Documents/playground/mycelium-core-pilot")
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from mycelium_router import instrument  # noqa: E402

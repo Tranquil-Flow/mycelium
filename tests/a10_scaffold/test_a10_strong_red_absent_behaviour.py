@@ -9,7 +9,7 @@ to do it.
 
 Reproduce against the untouched base (no scaffold, no A10 production module):
 
-    git -C /Users/evinova-self/Documents/playground/mycelium-core-pilot \
+    git -C <repository root> \
         archive a7b412a | tar -x -C /tmp/a10-base
     mkdir -p /tmp/a10-base/tests/a10_scaffold
     cp tests/a10_scaffold/__init__.py \
