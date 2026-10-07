@@ -1135,6 +1135,12 @@ def test_join_rejection_requires_complete_canonical_status_code_matrix() -> None
             "membership_message_from_future",
             "membership_message_invalid",
             "membership_peer_class_invalid",
+            "membership_peer_profile_binding_mismatch",
+            "membership_peer_profile_invalid",
+            "membership_v2_before_cutover",
+            "membership_v2_peer_profile_invalid",
+            "membership_v2_profile_generation_mismatch",
+            "membership_v2_profile_has_no_consumer_projection",
             "membership_protocol_invalid",
             "membership_runtime_capability_invalid",
             "membership_runtime_capability_mismatch",
@@ -1157,6 +1163,7 @@ def test_join_rejection_requires_complete_canonical_status_code_matrix() -> None
             "invite_replayed",
             "seed_node_key_conflict",
         },
+        426: {"membership_contract_upgrade_required"},
     }
     explicitly_allowed = frozenset(seed_http.JOIN_ROUTE_ERROR_STATUSES)
     assert explicitly_allowed == frozenset().union(*canonical_codes.values())
@@ -2164,6 +2171,12 @@ def test_join_route_uses_one_exact_immutable_error_status_vocabulary(
             "membership_message_from_future",
             "membership_message_invalid",
             "membership_peer_class_invalid",
+            "membership_peer_profile_binding_mismatch",
+            "membership_peer_profile_invalid",
+            "membership_v2_before_cutover",
+            "membership_v2_peer_profile_invalid",
+            "membership_v2_profile_generation_mismatch",
+            "membership_v2_profile_has_no_consumer_projection",
             "membership_protocol_invalid",
             "membership_runtime_capability_invalid",
             "membership_runtime_capability_mismatch",
@@ -2186,6 +2199,7 @@ def test_join_route_uses_one_exact_immutable_error_status_vocabulary(
             "invite_replayed",
             "seed_node_key_conflict",
         },
+        426: {"membership_contract_upgrade_required"},
     }
     expected = {
         code: status

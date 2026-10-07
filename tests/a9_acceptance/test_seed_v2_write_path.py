@@ -298,3 +298,36 @@ def test_replaying_a_pre_cutover_v1_resume_is_refused_not_answered(migrated):
     after = _coordinator(migrated["database"], migrated["seed_signer"], migrated["clock"], "replay")
     with pytest.raises(SeedCoordinatorError, match="membership_contract_upgrade_required"):
         after.accept_resume(resume_envelope=request)
+
+
+def test_http_join_route_exposes_the_cutover_codes(migrated):
+    from mycelium_seed.http import SeedHTTPClient, SeedHTTPError, SeedHTTPServer
+
+    _cut_over(migrated)
+    coordinator = SeedCoordinator(
+        swarm_id="swarm-a", seed_node_id="seed-node", seed_url=None, signer=migrated["seed_signer"],
+        invite_registry=SqliteInviteRegistry(migrated["database"]), state=SqliteSeedState(migrated["database"]),
+        incarnation="seed-http", clock=migrated["clock"], id_source=_ids("http"), lease_seconds=300.0)
+    with SeedHTTPServer(coordinator, host="127.0.0.1", port=0):
+        for nonce, use_profile in (("http-v1", False), ("http-v2", True)):
+            bundle = coordinator.mint_invite(nonce=nonce, ttl_seconds=120)
+            verified = verify_invite_bundle(bundle, now=NOW)
+            client = SeedHTTPClient.from_invite_bundle(bundle, now=NOW, timeout=5.0)
+            session = _session(migrated["tmp"], f"node-{nonce}", migrated["clock"], "h1")
+            profile = None
+            if use_profile:
+                profile = v2_profile_for_session(
+                    template={"profile": dict(migrated["profiles"][0]["profile"], node_id=session.node_id)},
+                    signer=session.signer, incarnation="h1", membership_generation=1,
+                    issued_at=NOW, validity_seconds=60.0)
+            request = session.join_request(invite_nonce=verified["payload"]["nonce"], endpoint_addrs=ADDR,
+                                           peer_profile=profile)
+            if not use_profile:
+                with pytest.raises(SeedHTTPError) as refused:
+                    client.join(invite_token=bundle["token"], join_envelope=request)
+                assert refused.value.code == "membership_contract_upgrade_required"
+                assert int(refused.value.status) == 426
+            else:
+                acceptance = client.join(invite_token=bundle["token"], join_envelope=request)
+                session.accept_join(acceptance, seed_key_digest=verified["seed_key_digest"])
+                assert session.generation == 1
