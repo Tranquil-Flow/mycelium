@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from conftest import (
+from ui_gateway_support import (
     OBSERVATORY_TOKEN,
     REQUEST_TOKEN,
     json_body,

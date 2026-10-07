@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from conftest import json_body, request, session_headers
+from ui_gateway_support import json_body, request, session_headers
 
 
 def post(app, bootstrap, path: str, document: dict):

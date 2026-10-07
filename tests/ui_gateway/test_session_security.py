@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from conftest import (
+from ui_gateway_support import (
     ASGIResult,
     REQUEST_TOKEN,
     cookie_pair,

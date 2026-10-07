@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from conftest import (
+from ui_gateway_support import (
     REQUEST_TOKEN,
     request,
     session_headers,

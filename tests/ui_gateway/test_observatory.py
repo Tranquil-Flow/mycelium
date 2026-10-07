@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from conftest import (
+from ui_gateway_support import (
     OBSERVATORY_TOKEN,
     FakeUpstream,
     json_body,

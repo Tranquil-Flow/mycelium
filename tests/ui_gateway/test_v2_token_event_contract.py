@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from conftest import (
+from ui_gateway_support import (
     FakeUpstream,
     default_request,
     json_body,

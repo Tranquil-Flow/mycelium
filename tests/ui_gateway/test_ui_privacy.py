@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import (
+from ui_gateway_support import (
     ERROR_CANARY,
     REQUEST_TOKEN,
     FakeUpstream,
