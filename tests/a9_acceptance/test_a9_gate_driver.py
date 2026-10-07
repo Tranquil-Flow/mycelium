@@ -189,3 +189,62 @@ def test_windows_commands_refuse_non_windows_hosts_unless_conformance(kernel, tm
     assert receipt["result"]["token_parity_mismatches"] == []
     assert receipt["windows_host"] is False
     assert receipt["profile_binding"] == "unsigned_local_declaration"
+
+
+def test_live_cutover_adoption_and_v2_resume_through_the_driver(swarm, tmp_path, capsys):
+    import time
+
+    from mycelium_node.durable_membership import load_membership_state, load_v2_profile_template
+    from mycelium_node.__main__ import _v2_peer_profile
+    from mycelium_qualification.signing import generate_ed25519_signer
+
+    seed_home, database, data_dirs = swarm
+    gate = tmp_path / "gate"
+    seed_key = seed_home / "identity" / "seed.key"
+    assert _run("seed-export", "--gate-dir", gate, "--seed-db", database, "--seed-key", seed_key,
+                "--swarm-id", "swarm-a", "--build-digest", BUILD, "--software-version", "1.0") == 0
+    profiles = tmp_path / "profiles"
+    for node_id, data_dir in data_dirs.items():
+        assert _run("member-sign", "--request", gate / "requests" / f"{node_id}.json", "--data-dir", data_dir,
+                    "--new-incarnation", "incarnation-v2", "--out", profiles / f"{node_id}.json") == 0
+    assert _run("migrate", "--gate-dir", gate, "--profiles", profiles) == 0
+    assert _run("seed-commit", "--gate-dir", gate, "--seed-db", database, "--seed-key", seed_key,
+                "--swarm-id", "swarm-a") == 2  # refuses without --seed-stopped
+    assert _run("seed-commit", "--gate-dir", gate, "--seed-db", database, "--seed-key", seed_key,
+                "--swarm-id", "swarm-a", "--seed-stopped") == 0
+    assert SqliteSeedState(database).membership_contract()["version"] == "v2"
+    assert (gate / "seed-incumbent" / "state-before-cutover.sqlite3").exists()
+    # A foreign adoption (node-b's) is refused on node-a.
+    with pytest.raises(ValueError, match="not_for_this_member"):
+        _run("member-adopt", "--adoption", gate / "adoptions" / "node-b.json",
+             "--profile", profiles / "node-a.json", "--data-dir", data_dirs["node-a"])
+    for node_id, data_dir in data_dirs.items():
+        assert _run("member-adopt", "--adoption", gate / "adoptions" / f"{node_id}.json",
+                    "--profile", profiles / f"{node_id}.json", "--data-dir", data_dir) == 0
+    state = load_membership_state(data_dirs["node-a"])
+    assert (state["membership_generation"], state["incarnation"]) == (2, "incarnation-v2")
+    # The restarted node resumes with its re-signed v2 declaration.
+    now = time.time()
+    seed_signer = load_or_create_node_signer(seed_key)
+    coordinator = SeedCoordinator(
+        swarm_id="swarm-a", seed_node_id="seed-node", seed_url="http://127.0.0.1:8788",
+        signer=seed_signer, invite_registry=SqliteInviteRegistry(database), state=SqliteSeedState(database),
+        incarnation="seed-incarnation-2", clock=lambda: now, id_source=_ids("restarted"), lease_seconds=900.0)
+    node_signer = load_or_create_node_signer(data_dirs["node-a"] / "identity" / "node.key")
+    session = NodeMembershipSession(
+        node_id="node-a", swarm_id="swarm-a", seed_node_id="seed-node", signer=node_signer,
+        incarnation="incarnation-v3", software_version="mycelium-test", peer_class="mac_mlx_iroh",
+        runtime_capability=CAPABILITY, clock=lambda: now, id_source=_ids("node-a-v3"))
+    profile = _v2_peer_profile(load_v2_profile_template(data_dirs["node-a"]), signer=node_signer,
+                               incarnation="incarnation-v3", membership_generation=3)
+    request = session.resume_request(previous_generation=2, previous_incarnation="incarnation-v2",
+                                     endpoint_addrs=["https://100.117.33.124:9443/control"], peer_profile=profile)
+    session.accept_resume(coordinator.accept_resume(resume_envelope=request),
+                          seed_key_digest=seed_signer.verification_key_digest)
+    assert session.generation == 3
+    # A post-cutover newcomer declares a v2 profile and has no v1 history.
+    newcomer = tmp_path / "node-new"
+    assert _run("member-declare", "--data-dir", newcomer, "--node-id", "node-new", "--swarm-id", "swarm-a",
+                "--software-version", "1.0", "--build-digest", BUILD, "--runtime", "mlx") == 0
+    assert load_v2_profile_template(newcomer)["profile"]["runtimes"][0]["backend_id"] == "mlx"
+    del generate_ed25519_signer

@@ -380,6 +380,103 @@ def cmd_negatives(args: argparse.Namespace) -> int:
     return 0 if passed else 1
 
 
+def cmd_seed_commit(args: argparse.Namespace) -> int:
+    """Live cutover on the seed's own database (the seed process must be stopped)."""
+
+    from mycelium_node.identity import load_node_signer
+    from mycelium_platform_neutral.migration_executor import FileMembershipState
+    from mycelium_platform_neutral.seed_migration import (
+        executor_cutover_inputs,
+        prepare_seed_cutover,
+        sign_member_adoptions,
+    )
+    from mycelium_seed.state import SqliteSeedState
+
+    if not args.seed_stopped:
+        raise GateError("stop the seed process first and pass --seed-stopped (its in-memory members must reload)")
+    gate = Path(args.gate_dir).resolve()
+    live = Path(args.seed_db).resolve()
+    signer = load_node_signer(Path(args.seed_key).resolve())
+    state = SqliteSeedState(live)
+    binding = state.identity_binding()
+    if binding["seed_key_digest"] != signer.verification_key_digest or binding["swarm_id"] != args.swarm_id:
+        raise GateError("the live seed database is not bound to this seed key and swarm")
+    inputs = executor_cutover_inputs(FileMembershipState(gate / "private"))
+    prepared = prepare_seed_cutover(**inputs, seed_state=state)
+    incumbent = _private_dir(gate / "seed-incumbent") / "state-before-cutover.sqlite3"
+    _backup_sqlite(live, incumbent)  # the recoverable pre-cutover incumbent
+    state.commit_membership_cutover(**prepared)
+    adoptions = sign_member_adoptions(prepared, signer=signer, swarm_id=args.swarm_id)
+    for node, envelope in adoptions.items():
+        _write(gate / "adoptions" / f"{node}.json", envelope)
+    contract = state.membership_contract()
+    _write(gate / "05-seed-cutover.json", _receipt(
+        "seed_live_cutover",
+        "the live seed database committed generation n+1 for every member and records membership contract v2; members must adopt and restart, the seed must restart",
+        source=_source_identity(), contract=contract, members=sorted(adoptions),
+        incumbent_backup_digest=_sha256_file(incumbent), record_digest=prepared["record_digest"]))
+    print(json.dumps({"contract": contract, "members": sorted(adoptions)}))
+    return 0
+
+
+def cmd_member_adopt(args: argparse.Namespace) -> int:
+    from mycelium_node.durable_membership import (
+        load_membership_state,
+        save_membership_state,
+        save_v2_profile_template,
+    )
+    from mycelium_platform_neutral.seed_migration import verify_member_adoption
+
+    data_dir = Path(args.data_dir).resolve()
+    member_state = load_membership_state(data_dir)
+    if member_state is None:
+        raise GateError("this host has no durable membership state")
+    profile = _read(Path(args.profile))
+    statement = verify_member_adoption(_read(Path(args.adoption)), member_state=member_state, own_profile=profile)
+    save_v2_profile_template(data_dir, profile["profile"])
+    save_membership_state(data_dir, {
+        **member_state,
+        "incarnation": statement["incarnation"],
+        "membership_generation": statement["generation"],
+    })
+    print(json.dumps({"node_id": statement["node_id"], "generation": statement["generation"],
+                      "next": "restart the node service; it resumes with its v2 profile"}))
+    return 0
+
+
+def cmd_member_declare(args: argparse.Namespace) -> int:
+    """v2 declaration for a member that first joins after the cutover (no v1 history)."""
+
+    from mycelium_node.durable_membership import load_membership_state, save_v2_profile_template
+    from mycelium_platform_neutral.peer_profile import PeerProfile
+    from mycelium_platform_neutral.seed_migration import _runtime, observe_host_platform
+
+    data_dir = Path(args.data_dir).resolve()
+    if load_membership_state(data_dir) is not None:
+        raise GateError("this host is already a member; v1 members migrate, they are not re-declared")
+    platform_family, architecture = observe_host_platform()
+    now = time.time()
+    profile = PeerProfile.from_mapping({
+        "protocol": "mycelium.membership.peer_profile.v2",
+        "profile_id": f"profile-{args.node_id}-g1",
+        "swarm_id": args.swarm_id, "node_id": args.node_id, "incarnation": "declared",
+        "membership_generation": 1, "identity_kind": "native_peer",
+        "platform_family": platform_family, "platform_variant": None, "architecture": architecture,
+        "software_build": {"version": args.software_version, "digest": args.build_digest},
+        "transports": [],
+        "runtimes": [_runtime(backend, build=args.build_digest) for backend in args.runtime],
+        "lease_expires_at": now + 60.0, "issued_at": now, "expires_at": now + 60.0,
+    })
+    import mycelium_host_platform
+
+    with mycelium_host_platform.private_directory(data_dir, create=True):
+        pass
+    save_v2_profile_template(data_dir, profile.to_mapping())
+    print(json.dumps({"node_id": args.node_id, "platform": [platform_family, architecture],
+                      "runtimes": list(args.runtime)}))
+    return 0
+
+
 # -- windows host ------------------------------------------------------------------
 
 
@@ -546,6 +643,7 @@ def cmd_summary(args: argparse.Namespace) -> int:
     required = {
         "01-seed-export.json": "seed export",
         "03-migration.json": "migration + cutover + reader removal",
+        "05-seed-cutover.json": "live seed cutover (v2 contract)",
         "04-negatives.json": "deterministic negatives",
         "10-windows-probe.json": "windows provider probe",
         "12-windows-benchmark.json": "windows stage benchmark",
@@ -591,6 +689,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--migration-id", default="a9-v2-migration")
     p.add_argument("--stop-after", choices=("profiles_signed", "profiles_verified", "commit_pending", "committed"))
     p.set_defaults(func=cmd_migrate)
+
+    p = sub.add_parser("seed-commit")
+    p.add_argument("--gate-dir", required=True)
+    p.add_argument("--seed-db", required=True, help="the LIVE seed state.sqlite3 (written; backed up first)")
+    p.add_argument("--seed-key", required=True)
+    p.add_argument("--swarm-id", required=True)
+    p.add_argument("--seed-stopped", action="store_true", help="confirm the seed process is stopped")
+    p.set_defaults(func=cmd_seed_commit)
+
+    p = sub.add_parser("member-adopt")
+    p.add_argument("--adoption", required=True, help="seed-signed adoptions/<node>.json")
+    p.add_argument("--profile", required=True, help="this member's signed profile from member-sign")
+    p.add_argument("--data-dir", required=True)
+    p.set_defaults(func=cmd_member_adopt)
+
+    p = sub.add_parser("member-declare")
+    p.add_argument("--data-dir", required=True)
+    p.add_argument("--node-id", required=True)
+    p.add_argument("--swarm-id", required=True)
+    p.add_argument("--software-version", required=True)
+    p.add_argument("--build-digest", required=True)
+    p.add_argument("--runtime", action="append", default=[], help="registered backend id, repeatable")
+    p.set_defaults(func=cmd_member_declare)
 
     p = sub.add_parser("negatives")
     p.add_argument("--gate-dir", required=True)

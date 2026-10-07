@@ -519,6 +519,75 @@ def v2_profile_for_session(
     return sign_peer_profile(signer=signer, profile=PeerProfile.from_mapping(base))
 
 
+ADOPTION_PROTOCOL = "mycelium.a9_member_adoption.v1"
+ADOPTION_FIELDS = frozenset(
+    {"protocol", "swarm_id", "node_id", "generation", "incarnation", "profile_digest", "cutover_generation"}
+)
+
+
+def sign_member_adoptions(
+    prepared: Mapping[str, Any], *, signer: Any, swarm_id: str
+) -> dict[str, dict[str, Any]]:
+    """Seed-signed per-member statements of the committed v2 identity."""
+
+    adoptions = {}
+    for item in prepared["updates"]:
+        statement = {
+            "protocol": ADOPTION_PROTOCOL,
+            "swarm_id": segment(swarm_id, "migration_swarm_id_invalid"),
+            "node_id": item["node_id"],
+            "generation": int(item["post_generation"]),
+            "incarnation": item["post_incarnation"],
+            "profile_digest": item["profile_digest"],
+            "cutover_generation": int(prepared["cutover_generation"]),
+        }
+        adoptions[item["node_id"]] = {
+            "protocol": ADOPTION_PROTOCOL,
+            "statement": statement,
+            "signature": signer.sign(statement),
+            "verification_key": signer.public_key_record(),
+        }
+    return adoptions
+
+
+def verify_member_adoption(
+    envelope: Mapping[str, Any],
+    *,
+    member_state: Mapping[str, Any],
+    own_profile: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Member-side: the seed (pinned key) committed exactly the profile this member signed."""
+
+    from .primitives import record_digest
+
+    pinned = digest(member_state.get("seed_key_digest"), "migration_seed_key_invalid")
+    record = closed_fields(envelope, REQUEST_ENVELOPE_FIELDS - {"request"} | {"statement"},
+                           "migration_adoption_invalid")
+    require(record["protocol"] == ADOPTION_PROTOCOL, "migration_adoption_invalid")
+    signature = closed_fields(record["signature"], REQUEST_SIGNATURE_FIELDS, "migration_adoption_invalid")
+    key = detached(record["verification_key"], "migration_adoption_invalid")
+    require(
+        signature["verification_key_digest"] == pinned and key.get("verification_key_digest") == pinned,
+        "migration_adoption_not_seed_signed",
+    )
+    statement = detached(record["statement"], "migration_adoption_invalid")
+    require(set(statement) == ADOPTION_FIELDS, "migration_adoption_invalid")
+    require(
+        build_ed25519_verifier([key])(canonical_bytes(statement, "migration_adoption_noncanonical"), dict(signature)),
+        "migration_adoption_signature_invalid",
+    )
+    profile = PeerProfile.from_mapping(own_profile["profile"])
+    if (
+        statement["node_id"] != member_state.get("node_id")
+        or statement["swarm_id"] != member_state.get("swarm_id")
+        or statement["generation"] != profile.membership_generation
+        or statement["incarnation"] != profile.incarnation
+        or statement["profile_digest"] != record_digest(profile.to_mapping(), "migration_profile_noncanonical")
+    ):
+        raise PlatformNeutralMigrationError("migration_adoption_not_for_this_member")
+    return statement
+
+
 #: Legacy consumer projection for members that join after the cutover.  The
 #: compound class is not authority (spec §6.7); it only feeds the consumers that
 #: still read it until the A9 consumer adaptation lands.  Platform plus runtime
@@ -592,4 +661,6 @@ __all__ = [
     "executor_cutover_inputs",
     "v2_profile_for_session",
     "consumer_projection_class",
+    "sign_member_adoptions",
+    "verify_member_adoption",
 ]

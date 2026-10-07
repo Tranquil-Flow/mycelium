@@ -42,6 +42,33 @@ from .durable_membership import (
     save_membership_state,
 )
 from .membership import NodeMembershipSession
+from .durable_membership import load_v2_profile_template
+
+#: Validity of the v2 declaration re-signed for one join or resume.
+V2_PROFILE_VALIDITY_SECONDS = 300.0
+
+
+def _v2_peer_profile(
+    template: dict[str, Any] | None,
+    *,
+    signer: Any,
+    incarnation: str,
+    membership_generation: int,
+) -> dict[str, Any] | None:
+    """Re-sign the member's v2 declaration once it has migrated (A9 cutover)."""
+
+    if template is None:
+        return None
+    from mycelium_platform_neutral.seed_migration import v2_profile_for_session
+
+    return v2_profile_for_session(
+        template=template,
+        signer=signer,
+        incarnation=incarnation,
+        membership_generation=membership_generation,
+        issued_at=time.time(),
+        validity_seconds=V2_PROFILE_VALIDITY_SECONDS,
+    )
 from .reconnect import RenewalRetryPolicy, transient_renewal_failure
 from .process import (
     _ExecutableIdentity,
@@ -604,16 +631,29 @@ def _preflight(
             peer_class=args.peer_class,
             runtime_capability=_PEER_CAPABILITIES[args.peer_class],
         )
+        profile_template = load_v2_profile_template(state_root.path)
         if persisted is None:
             validation_session.join_request(
                 invite_nonce=verified["payload"]["nonce"],
                 endpoint_addrs=advertised_endpoints,
+                peer_profile=None if profile_template is None else _v2_peer_profile(
+                    profile_template,
+                    signer=validation_signer,
+                    incarnation=validation_session.incarnation,
+                    membership_generation=1,
+                ),
             )
         else:
             validation_session.resume_request(
                 previous_generation=int(persisted["membership_generation"]),
                 previous_incarnation=persisted["incarnation"],
                 endpoint_addrs=advertised_endpoints,
+                peer_profile=None if profile_template is None else _v2_peer_profile(
+                    profile_template,
+                    signer=validation_signer,
+                    incarnation=validation_session.incarnation,
+                    membership_generation=int(persisted["membership_generation"]) + 1,
+                ),
             )
         membership_module.validate_heartbeat_shape(
             lifecycle_state="NEW",
@@ -892,10 +932,17 @@ def _run_bound(
 
         try:
             rotation = client.rotation(now=time.time())
+            profile_template = load_v2_profile_template(state_root.path)
             if persisted is None:
                 request = session.join_request(
                     invite_nonce=verified["payload"]["nonce"],
                     endpoint_addrs=args.advertise,
+                    peer_profile=None if profile_template is None else _v2_peer_profile(
+                        profile_template,
+                        signer=signer,
+                        incarnation=runtime_incarnation,
+                        membership_generation=1,
+                    ),
                 )
                 acceptance = client.join(
                     invite_token=bundle["token"],
@@ -915,6 +962,12 @@ def _run_bound(
                     previous_generation=int(persisted["membership_generation"]),
                     previous_incarnation=persisted["incarnation"],
                     endpoint_addrs=args.advertise,
+                    peer_profile=None if profile_template is None else _v2_peer_profile(
+                        profile_template,
+                        signer=signer,
+                        incarnation=runtime_incarnation,
+                        membership_generation=int(persisted["membership_generation"]) + 1,
+                    ),
                 )
                 acceptance = client.resume(resume_envelope=request)
                 accepted_digest = client.accepted_seed_key_digest(
