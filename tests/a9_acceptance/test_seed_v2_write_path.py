@@ -282,3 +282,19 @@ def test_online_cutover_updates_the_running_coordinator(migrated):
     assert session.generation == 3
     with pytest.raises(SeedCoordinatorError, match="membership_cutover_already_recorded|upgrade_required"):
         coordinator.commit_membership_cutover(prepared)
+
+
+def test_replaying_a_pre_cutover_v1_resume_is_refused_not_answered(migrated):
+    coordinator = migrated["coordinator"]
+    session = _session(migrated["tmp"], "node-b", migrated["clock"], "incarnation-r")
+    request = session.resume_request(previous_generation=1, previous_incarnation="incarnation-a", endpoint_addrs=ADDR)
+    acceptance = coordinator.accept_resume(resume_envelope=request)
+    assert coordinator.accept_resume(resume_envelope=request) == acceptance  # v1 idempotent replay
+    # The migration inventory now disagrees with node-b, so cut over from node-a's view only:
+    with sqlite3.connect(migrated["database"]) as connection:
+        connection.execute("INSERT INTO seed_metadata (key, value) VALUES ('membership_contract_version', 'v2')")
+        connection.execute("INSERT INTO seed_metadata (key, value) VALUES ('membership_cutover_generation', '2')")
+        connection.execute("INSERT INTO seed_metadata (key, value) VALUES ('membership_migration_record_digest', 'x')")
+    after = _coordinator(migrated["database"], migrated["seed_signer"], migrated["clock"], "replay")
+    with pytest.raises(SeedCoordinatorError, match="membership_contract_upgrade_required"):
+        after.accept_resume(resume_envelope=request)

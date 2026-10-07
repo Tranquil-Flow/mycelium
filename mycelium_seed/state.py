@@ -1973,6 +1973,7 @@ class SqliteSeedState:
             CREATE TABLE IF NOT EXISTS seed_member_profiles_v2 (
                 node_id TEXT PRIMARY KEY NOT NULL,
                 generation INTEGER NOT NULL CHECK (generation >= 1),
+                first_v2_generation INTEGER NOT NULL CHECK (first_v2_generation >= 1),
                 incarnation TEXT NOT NULL,
                 profile_digest TEXT NOT NULL,
                 envelope_json TEXT NOT NULL,
@@ -2029,8 +2030,9 @@ class SqliteSeedState:
         connection.execute(
             """
             INSERT INTO seed_member_profiles_v2 (
-                node_id, generation, incarnation, profile_digest, envelope_json
-            ) VALUES (?, ?, ?, ?, ?)
+                node_id, generation, first_v2_generation, incarnation,
+                profile_digest, envelope_json
+            ) VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(node_id) DO UPDATE SET
                 generation = excluded.generation,
                 incarnation = excluded.incarnation,
@@ -2040,6 +2042,7 @@ class SqliteSeedState:
             (
                 profile["node_id"],
                 profile["generation"],
+                profile.get("first_v2_generation", profile["generation"]),
                 profile["incarnation"],
                 profile["profile_digest"],
                 canonical_json_bytes(dict(profile["envelope"])).decode("utf-8"),
@@ -2061,7 +2064,9 @@ class SqliteSeedState:
             self._ensure_membership_v2_schema(connection)
             return {
                 str(row["node_id"]): {
+                    "node_id": str(row["node_id"]),
                     "generation": int(row["generation"]),
+                    "first_v2_generation": int(row["first_v2_generation"]),
                     "incarnation": str(row["incarnation"]),
                     "profile_digest": str(row["profile_digest"]),
                     "envelope": json.loads(row["envelope_json"]),
