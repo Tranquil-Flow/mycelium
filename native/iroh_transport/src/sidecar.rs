@@ -2527,14 +2527,18 @@ async fn incoming_worker(endpoint: Endpoint, state: Arc<RuntimeState>, artifacts
         let connection_state = state.clone();
         let artifacts = artifacts.clone();
         tokio::spawn(async move {
-            let _permit = permit;
+            let permit = permit;
             let Ok(connection) = incoming.await else {
                 return;
             };
             // Artifact chunks are authorized per request by the seed grant and
             // the recipient's endpoint, never by the Router peer allow-list;
-            // Router frames are never accepted on the artifact ALPN.
+            // Router frames are never accepted on the artifact ALPN. An
+            // artifact connection gives its Router connection slot back at
+            // once and is bounded by the artifact source's own limits, so
+            // artifact load can never hold the slots Router peers need.
             if connection.alpn() == ARTIFACT_CHUNK_ALPN {
+                drop(permit);
                 match artifacts {
                     Some(source) => source.serve_connection(connection).await,
                     None => connection.close(REJECT_CODE, b"alpn"),
@@ -2569,6 +2573,7 @@ async fn incoming_worker(endpoint: Endpoint, state: Arc<RuntimeState>, artifacts
                     }
                 }
             };
+            let _permit = permit;
             let generation_changes = connection_state.peer_generation.subscribe();
             handle_remote_connection(
                 connection,
@@ -3433,6 +3438,63 @@ mod tests {
         let refused = acquire(vec![plain.addr()], scratch.join("store2"), grant, member, manifest).await.unwrap_err();
         assert_eq!(refused, "artifact_source_unreachable");
         plain.close().await;
+        let _ = fs::remove_dir_all(&scratch);
+    }
+
+
+    /// DoS: artifact clients holding many idle connections (more than the
+    /// sidecar's connection slots, from several peers) and saturating the
+    /// source with requests must not delay the Router ALPN: a Router
+    /// connection is still handled promptly (here: closed as `unconfigured`,
+    /// the sidecar's answer when no route peers are set).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn artifact_load_never_starves_router_connections() {
+        use mycelium_mobile_core::artifact_grant::ARTIFACT_CHUNK_ALPN;
+        let scratch = std::env::temp_dir().join(format!("mycelium-sidecar-dos-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&scratch);
+        fs::create_dir_all(scratch.join("objects")).unwrap();
+        let seed = mycelium_mobile_core::identity::Identity::from_secret("seed-endpoint", &[0x22; 32]).unwrap();
+        let endpoint = bind_endpoint(true, false, Some(&[0x81; 32]), true).await.unwrap();
+        let source = ArtifactSource::with_endpoint(endpoint.clone(), &[0x82; 32], seed.public_key_record(), scratch.join("objects"), &scratch.join("state")).unwrap();
+        // Two connection slots in total.
+        tokio::spawn(incoming_worker(endpoint.clone(), RuntimeState::new(2, true), Some(source)));
+        let client = |byte: u8| async move {
+            Endpoint::builder(presets::Minimal)
+                .relay_mode(RelayMode::Disabled)
+                .clear_ip_transports()
+                .bind_addr(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+                .unwrap()
+                .secret_key(SecretKey::from_bytes(&[byte; 32]))
+                .bind()
+                .await
+                .unwrap()
+        };
+        // Six peers each hold two idle artifact connections, and each keeps
+        // one half-open stream (a request that never finishes).
+        let mut held = Vec::new();
+        for peer in 0..6u8 {
+            let c = client(0x90 + peer).await;
+            for _ in 0..2 {
+                if let Ok(Ok(conn)) = timeout(Duration::from_secs(1), c.connect(endpoint.addr(), ARTIFACT_CHUNK_ALPN)).await {
+                    if let Ok((mut send, recv)) = conn.open_bi().await {
+                        let _ = send.write_all(b"{\"partial\":").await;
+                        held.push((conn, send, recv));
+                    }
+                }
+            }
+        }
+        let router = client(0xA0).await;
+        let started = Instant::now();
+        let outcome = timeout(Duration::from_secs(3), async {
+            let conn = router.connect(endpoint.addr(), IROH_ALPN).await.unwrap();
+            conn.closed().await
+        })
+        .await;
+        let waited = started.elapsed();
+        assert!(outcome.is_ok(), "the Router connection was not handled within 3 s under artifact load");
+        assert!(waited < Duration::from_secs(2), "Router handling took {waited:?}");
+        drop(held);
+        endpoint.close().await;
         let _ = fs::remove_dir_all(&scratch);
     }
 
