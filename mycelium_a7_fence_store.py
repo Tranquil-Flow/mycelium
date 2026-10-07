@@ -18,7 +18,10 @@ Raw request identifiers are never written: records are keyed by a digest.
 
 from __future__ import annotations
 
-import fcntl
+try:  # POSIX lock; win32 goes through mycelium_host_platform
+   import fcntl
+except ImportError:  # pragma: no cover - win32
+   fcntl = None
 import hashlib
 import json
 import os
@@ -28,6 +31,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+
+import mycelium_host_platform
+from mycelium_host_platform import HostPlatformError
 
 DURABLE_FENCE_RECORD_PROTOCOL = "mycelium.a7_durable_fence_record.v1"
 DURABLE_FENCE_RECEIPT_PROTOCOL = "mycelium.a7_durable_fence_receipt.v1"
@@ -96,6 +102,16 @@ class DurableFenceStore:
    def __init__(self, root: Path | str) -> None:
       self._root = Path(root)
       self._lock = threading.RLock()
+      self._win32 = mycelium_host_platform.is_win32()
+      if self._win32:
+         # Owner-only protected DACL inherited by every record and directory
+         # below; the lock is LockFileEx (A7 successors on Windows NumPy nodes).
+         try:
+            with mycelium_host_platform.private_directory(self._root, create=True) as lease:
+               lease.subdirectory("quarantine").close()
+         except HostPlatformError as exc:
+            raise FenceStoreError("fence_store_root_invalid") from exc
+         return
       self._root.mkdir(mode=0o700, parents=True, exist_ok=True)
       info = os.lstat(self._root)
       if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
@@ -112,6 +128,17 @@ class DurableFenceStore:
 
    @contextmanager
    def _exclusive(self) -> Iterator[None]:
+      if self._win32:
+         with self._lock:
+            try:
+               held = mycelium_host_platform.hold_exclusive_lock(self._root, "fence.lock")
+            except HostPlatformError as exc:
+               raise FenceStoreError("fence_store_lock_invalid") from exc
+            try:
+               yield
+            finally:
+               held.release()
+         return
       with self._lock:
          descriptor = os.open(self._root / ".lock", os.O_RDWR | os.O_CREAT, 0o600)
          try:
@@ -121,8 +148,38 @@ class DurableFenceStore:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
 
+   def _win32_read_owner_file(self, directory: Path, name: str, max_bytes: int) -> bytes | None:
+      try:
+         with mycelium_host_platform.private_directory(directory, create=False) as lease:
+            return lease.read_file(name, max_bytes=max_bytes)
+      except HostPlatformError as exc:
+         if exc.code == "host_file_missing":
+            return None
+         raise FenceStoreError("fence_record_permissions_invalid") from exc
+
+   def _win32_replace(self, directory: Path, name: str, data: bytes) -> None:
+      try:
+         with mycelium_host_platform.private_directory(directory, create=False) as lease:
+            lease.atomic_replace(name, data)
+      except HostPlatformError as exc:
+         raise FenceStoreError("fence_store_write_failed") from exc
+
    def _read(self, key: str) -> dict[str, Any] | None:
       path = self._path(key)
+      if self._win32:
+         try:
+            raw = self._win32_read_owner_file(self._root, path.name, 1 << 20)
+            if raw is None:
+               return None
+            record = json.loads(raw.decode("utf-8"))
+            self._validate(record, key)
+            if _canonical(record) != raw:
+               raise FenceStoreError("fence_record_not_canonical")
+            return record
+         except (FenceStoreError, ValueError, UnicodeDecodeError) as exc:
+            self._quarantine(path)
+            code = exc.code if isinstance(exc, FenceStoreError) else "fence_record_invalid"
+            raise FenceStoreError(code) from exc
       try:
          info = os.lstat(path)
       except FileNotFoundError:
@@ -153,6 +210,8 @@ class DurableFenceStore:
 
    @staticmethod
    def _fsync_dir(directory: Path) -> None:
+      if mycelium_host_platform.is_win32():
+         return  # win32 has no directory handles to fsync; replaces are write-through
       descriptor = os.open(directory, os.O_RDONLY)
       try:
          os.fsync(descriptor)
@@ -162,6 +221,9 @@ class DurableFenceStore:
    def _write(self, key: str, record: dict[str, Any]) -> None:
       self._validate(record, key)
       data = _canonical(record)
+      if self._win32:
+         self._win32_replace(self._root, self._path(key).name, data)
+         return
       temporary = self._root / f".{key}.{os.getpid()}.tmp"
       descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
       try:
@@ -338,6 +400,13 @@ class DurableFenceStore:
 
    def _last_cutover_dir(self) -> Path:
       directory = self._root / LAST_CUTOVER_DIRECTORY
+      if self._win32:
+         try:
+            with mycelium_host_platform.private_directory(self._root, create=False) as lease:
+               lease.subdirectory(LAST_CUTOVER_DIRECTORY).close()
+         except HostPlatformError as exc:
+            raise FenceStoreError("last_cutover_directory_invalid") from exc
+         return directory
       directory.mkdir(mode=0o700, exist_ok=True)
       info = os.lstat(directory)
       if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
@@ -369,6 +438,9 @@ class DurableFenceStore:
          raise FenceStoreError("last_cutover_too_large")
       with self._exclusive():
          directory = self._last_cutover_dir()
+         if self._win32:
+            self._win32_replace(directory, LAST_CUTOVER_FILE, data)
+            return
          temporary = directory / f".{LAST_CUTOVER_FILE}.{os.getpid()}.{threading.get_ident()}.tmp"
          descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
          try:
@@ -392,19 +464,27 @@ class DurableFenceStore:
       key = request_key(request_id)
       with self._exclusive():
          path = self._root / LAST_CUTOVER_DIRECTORY / LAST_CUTOVER_FILE
-         try:
-            info = os.lstat(path)
-         except FileNotFoundError:
-            return None
-         if (
-            stat.S_ISLNK(info.st_mode)
-            or not stat.S_ISREG(info.st_mode)
-            or info.st_uid != os.geteuid()
-            or stat.S_IMODE(info.st_mode) != 0o600
-            or info.st_size > LAST_CUTOVER_MAX_BYTES
-         ):
-            return None
-         raw = path.read_bytes()
+         if self._win32:
+            try:
+               raw = self._win32_read_owner_file(path.parent, path.name, LAST_CUTOVER_MAX_BYTES)
+            except FenceStoreError:
+               return None
+            if raw is None:
+               return None
+         else:
+            try:
+               info = os.lstat(path)
+            except FileNotFoundError:
+               return None
+            if (
+               stat.S_ISLNK(info.st_mode)
+               or not stat.S_ISREG(info.st_mode)
+               or info.st_uid != os.geteuid()
+               or stat.S_IMODE(info.st_mode) != 0o600
+               or info.st_size > LAST_CUTOVER_MAX_BYTES
+            ):
+               return None
+            raw = path.read_bytes()
       if len(raw) > LAST_CUTOVER_MAX_BYTES:
          return None
       try:
