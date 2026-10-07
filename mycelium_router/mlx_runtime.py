@@ -43,13 +43,14 @@ from mycelium_router.contracts import (
    RuntimeResult,
    Stage,
 )
-from mycelium_router.decoding import quantized_greedy_token_id
+from mycelium_router.decoding import quantized_greedy_token_ids
 from mycelium_router.layer_builder import layer_load_proof_digest
 from mycelium_router.payloads import (
    PayloadError,
    decode_activation,
    decode_token_ids,
    encode_activation,
+   encode_token_ids,
 )
 from mycelium_router.stage_signatures import stage_signature_for_backend
 from mycelium_router.terminal_kv_retention import TerminalKVRetention
@@ -158,6 +159,10 @@ class _KVState:
    next_sequence: int
    cached_context_tokens: int
    layers: dict[int, tuple[mx.array, mx.array]]
+   # A11: ``(floor, ceiling, offset)`` after a VERIFY -- the next operation may
+   # rewind the tentative KV to any committed position in ``floor..ceiling``
+   # whose ``position - token_index`` equals ``offset``; ``None`` otherwise.
+   speculative_window: tuple[int, int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -1436,6 +1441,10 @@ class MLXRuntimePort:
 
       from mycelium_router.kv_checkpoint import export_port_kv_checkpoint
 
+      state = self._kv_states.get(path_id)
+      if state is not None and state.speculative_window is not None:
+         # A11 tentative KV past the committed watermark is never exported.
+         _reject("kv_speculative_window_open")
       return export_port_kv_checkpoint(
          self,
          path_id,
@@ -1998,6 +2007,7 @@ class MLXRuntimePort:
       output: mx.array,
       *,
       produce_token: bool = True,
+      all_positions: bool = False,
    ) -> RuntimeResult:
       if stage.stage_id == self.graph.final_stage_id:
          if not produce_token:
@@ -2005,9 +2015,16 @@ class MLXRuntimePort:
          expected = (1, int(output.shape[1]), runtime["model_config"]["vocab_size"])
          if tuple(int(value) for value in output.shape) != expected:
             _reject("invalid_final_stage_output")
+         if all_positions:
+            # A11 VERIFY: the target's greedy decision after every fed position,
+            # returned on the private path as token ids (never a token event).
+            return RuntimeResult(
+               success=True,
+               payload=encode_token_ids(quantized_greedy_token_ids(output[0])),
+            )
          return RuntimeResult(
             success=True,
-            token_id=quantized_greedy_token_id(output[0, -1, :].tolist()),
+            token_id=quantized_greedy_token_ids(output[0, -1:, :])[0],
          )
 
       expected = (1, int(output.shape[1]), self.graph.hidden_size)
@@ -2127,8 +2144,11 @@ class MLXRuntimePort:
          "PREFILL_CHUNK",
          "RECOVERY_PREFILL",
          "DECODE",
+         "VERIFY",
       }:
          _reject("unsupported_runtime_phase")
+      if item.phase == "VERIFY" and item.terminal:
+         _reject("verify_is_never_terminal")
       if not isinstance(item.payload, bytes):
          _reject("runtime_payload_must_be_bytes")
       if not isinstance(item.idempotency_key, str) or not item.idempotency_key:
@@ -2257,9 +2277,32 @@ class MLXRuntimePort:
             _reject("kv_path_attempt_mismatch")
          if item.placement_id != state.placement_id:
             _reject("kv_placement_id_mismatch")
-         if item.position != state.next_position:
+         expected_position = state.next_position
+         expected_sequence = state.next_sequence
+         past_layers = state.layers
+         window = state.speculative_window
+         if window is not None:
+            # A11 piggybacked rollback: the operation after a VERIFY names the
+            # committed watermark, bound to the committed count, inside the
+            # window that VERIFY opened.  Nothing mutates until the output is
+            # validated below.
+            if item.phase not in {"DECODE", "VERIFY"}:
+               _reject("kv_speculative_window_open")
+            floor, ceiling, offset = window
+            if item.position - item.token_index != offset:
+               _reject("kv_speculative_offset_mismatch")
+            if not floor <= item.position <= ceiling:
+               _reject("kv_position_mismatch")
+            if item.position < state.next_position:
+               past_layers = {
+                  layer: (key[:, :, : item.position, :], value[:, :, : item.position, :])
+                  for layer, (key, value) in state.layers.items()
+               }
+            expected_position = item.position
+            expected_sequence = item.token_index
+         if item.position != expected_position:
             _reject("kv_position_mismatch")
-         if not continues_prefill and item.token_index != state.next_sequence:
+         if not continues_prefill and item.token_index != expected_sequence:
             _reject("kv_sequence_mismatch")
          if continues_prefill and item.token_index < 1:
             _reject("kv_prefill_chunk_sequence_mismatch")
@@ -2268,6 +2311,7 @@ class MLXRuntimePort:
          if float(self._clock()) >= state.lease_expires_at:
             self._release_state(item.path_id, "lease_expired")
             _reject("kv_lease_expired")
+         verify = item.phase == "VERIFY"
          output, layers = self._execute_stage_with_kv(
             stage=stage,
             loaded=loaded,
@@ -2275,21 +2319,29 @@ class MLXRuntimePort:
             token_ids=token_ids,
             hidden_states=hidden_states,
             position=item.position,
-            past_layers=state.layers,
+            past_layers=past_layers,
             path_id=item.path_id,
             produce_logits=produce_token,
+            all_positions=verify,
          )
          result = self._runtime_result(
             stage,
             runtime,
             output,
             produce_token=produce_token,
+            all_positions=verify,
          )
+         rewound = state.next_position - expected_position
          state.layers = layers
-         state.next_position += sequence
+         state.next_position = expected_position + sequence
          if not continues_prefill:
-            state.next_sequence += 1
-         state.cached_context_tokens += sequence
+            state.next_sequence = expected_sequence + 1
+         state.cached_context_tokens += sequence - rewound
+         state.speculative_window = (
+            (item.position, item.position + sequence - 1, item.position - item.token_index)
+            if verify
+            else None
+         )
          self._update_kv_watermark()
 
       self._applied_operation_count += 1
@@ -2326,8 +2378,7 @@ class MLXRuntimePort:
          "phase": item.phase,
          "hidden_size": self.graph.hidden_size,
          "activation_bytes": self.graph.activation_bytes,
-         "speculative_role": "NONE",
-         "speculative_width": 0,
+         "speculative_role": "TARGET_VERIFY" if item.phase == "VERIFY" else "NONE",
       }
       for field, value in expected.items():
          if getattr(key, field) != value:
@@ -2338,6 +2389,13 @@ class MLXRuntimePort:
          or key.token_span <= 0
       ):
          _reject("invalid_batch_key_token_span")
+      expected_width = key.token_span - 1 if item.phase == "VERIFY" else 0
+      if (
+         not isinstance(key.speculative_width, int)
+         or isinstance(key.speculative_width, bool)
+         or key.speculative_width != expected_width
+      ):
+         _reject("batch_key_speculative_width_mismatch")
 
    def _validate_sequence_span(
       self,
@@ -2354,6 +2412,13 @@ class MLXRuntimePort:
          _reject("batch_key_token_span_mismatch")
       if phase == "DECODE" and key.token_span != 1:
          _reject("batch_key_token_span_mismatch")
+      if phase == "VERIFY":
+         if key.token_span != sequence:
+            _reject("batch_key_token_span_mismatch")
+         if sequence < 2:
+            _reject("verify_requires_candidates")
+         if self.decode_mode != "stage_local_kv":
+            _reject("verify_requires_stage_local_kv")
       if (
          phase == "DECODE"
          and self.decode_mode == "stage_local_kv"
@@ -2496,6 +2561,9 @@ class MLXRuntimePort:
       """True only when the incumbent continuation path would accept this member."""
 
       continues_prefill = item.phase == "PREFILL_CHUNK" and item.token_index > 0
+      if state.speculative_window is not None or item.phase == "VERIFY":
+         # A11 tentative KV: only the per-item path may rewind it.
+         return False
       if item.request_id != state.request_id or item.path_attempt != state.path_attempt:
          return False
       if item.placement_id != state.placement_id:

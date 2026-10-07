@@ -109,6 +109,56 @@ def quantized_greedy_token_id(
     return max(range(len(buckets)), key=buckets.__getitem__)
 
 
+def quantized_greedy_token_ids(
+   rows: object,
+   *,
+   quantum: float = LOGIT_QUANTUM,
+) -> tuple[int, ...]:
+   """:func:`quantized_greedy_token_id` for every row of a 2-D logit array, at once.
+
+   Exactly the scalar rule per row: each logit is widened to a binary64 value
+   (``float32``/``float16``/``bfloat16`` widen exactly), divided by ``quantum`` in
+   binary64, rounded half-to-even (``numpy.rint`` is Python's ``round`` on a
+   binary64), and the lowest index of the highest bucket wins (``numpy.argmax``
+   returns the first maximum).  It exists because the scalar rule materialises a
+   Python list per position, which costs more than the stage forward on a large
+   vocabulary; multi-position verification reads several positions per call.
+   """
+
+   import numpy as np
+
+   if (
+      not isinstance(quantum, (int, float))
+      or isinstance(quantum, bool)
+      or not math.isfinite(float(quantum))
+      or float(quantum) <= 0.0
+   ):
+      raise GreedySelectionError("invalid_logit_quantum")
+   if hasattr(rows, "astype") and not isinstance(rows, np.ndarray):
+      # An MLX array: widen on device first (bfloat16 has no NumPy dtype).
+      try:
+         import mlx.core as mx
+
+         if isinstance(rows, mx.array):
+            rows = rows.astype(mx.float32)
+      except ImportError:  # pragma: no cover - MLX-free hosts never pass MLX arrays
+         pass
+   try:
+      array = np.asarray(rows, dtype=np.float64)
+   except (TypeError, ValueError) as exc:
+      raise GreedySelectionError("invalid_logits") from exc
+   if array.ndim != 2 or array.shape[0] == 0:
+      raise GreedySelectionError("invalid_logits")
+   if array.shape[1] == 0:
+      raise GreedySelectionError("empty_logits")
+   if not bool(np.isfinite(array).all()):
+      raise GreedySelectionError("invalid_logit")
+   buckets = np.rint(array / float(quantum))
+   if not bool(np.isfinite(buckets).all()):
+      raise GreedySelectionError("invalid_logit")
+   return tuple(int(index) for index in np.argmax(buckets, axis=1))
+
+
 # ---------------------------------------------------------------------------
 # The router decode seam: one decode cycle, authoritative execution first
 # ---------------------------------------------------------------------------
@@ -334,5 +384,6 @@ __all__ = [
     "SPECULATIVE_DECODE_SEAM_PROTOCOL",
     "TARGET_ONLY_AUTHORITY",
     "quantized_greedy_token_id",
+   "quantized_greedy_token_ids",
     "resolve_speculative_decode",
 ]
