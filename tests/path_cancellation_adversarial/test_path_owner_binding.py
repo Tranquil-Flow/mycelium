@@ -537,6 +537,23 @@ def test_the_retention_horizon_outlasts_the_delivery_and_dedupe_budgets() -> Non
    assert relay_module._TOMBSTONE_RETENTION_SECONDS > RouterConfig().idempotency_retention_seconds
 
 
+def test_the_sidecar_outbound_deadline_is_below_the_retention_horizon() -> None:
+   """A lost Python cancellation never lets the sidecar deliver a frame past
+   its own outbound deadline, and that deadline ends well inside the horizon,
+   so no honest delivery of a retired attempt outlives its tombstone."""
+   import re
+   from pathlib import Path
+
+   from mycelium_router import relay as relay_module
+
+   source = (Path(__file__).resolve().parents[2] / "native/iroh_transport/src/sidecar.rs").read_text()
+   match = re.search(r"pub const OUTBOUND_DELIVERY_DEADLINE: Duration = Duration::from_secs\((\d+)\);", source)
+   assert match, "sidecar.rs defines OUTBOUND_DELIVERY_DEADLINE in whole seconds"
+   deadline = int(match.group(1))
+   assert deadline * 2 <= relay_module._TOMBSTONE_RETENTION_SECONDS
+   assert re.search(r"timeout_at\(\s*deadline,\s*send_outbound_once\(", source), "every send attempt is bounded by it"
+
+
 def test_making_room_never_evicts_the_record_refusing_the_same_registration(monkeypatch) -> None:
    """An entry at its quota past the horizon: its stale ManifestLocked for a
    cancelled attempt is refused, not admitted by evicting its own record to

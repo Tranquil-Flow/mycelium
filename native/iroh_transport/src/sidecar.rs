@@ -28,7 +28,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 #[cfg(unix)]
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, Notify, OwnedSemaphorePermit, RwLock, Semaphore, watch};
-use tokio::time::{Instant, sleep, timeout};
+use tokio::time::{Instant, sleep, sleep_until, timeout, timeout_at};
 use tokio_util::sync::CancellationToken;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -66,6 +66,20 @@ const PEER_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const LOCAL_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(2);
 const INITIAL_RETRY_DELAY: Duration = Duration::from_millis(100);
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
+/// Hard lifetime of one outbound send inside the sidecar, from enqueue.
+///
+/// The outbound worker retries until the frame is delivered or Python cancels
+/// it. Python cancels when its own delivery budget runs out (default 5 s, the
+/// largest configured anywhere is 30 s), but a cancellation can be lost (a
+/// wedged or disconnected client). Without a bound of its own a queued frame
+/// could then be delivered arbitrarily late, past the relay's 600 s
+/// tombstone retention horizon (`relay.py` `_TOMBSTONE_RETENTION_SECONDS`),
+/// after which a retired attempt's ManifestLocked could be admitted again.
+/// 120 s is four times the largest delivery budget and a fifth of that
+/// horizon; past it the send ends as `cancelled` whether or not Python's
+/// cancellation arrived. `tests/path_cancellation_adversarial` pins it below
+/// the horizon.
+pub const OUTBOUND_DELIVERY_DEADLINE: Duration = Duration::from_secs(120);
 const CANCEL_CODE: VarInt = VarInt::from_u32(7);
 const REJECT_CODE: VarInt = VarInt::from_u32(8);
 const MAX_LOCAL_SESSIONS: usize = 16;
@@ -1285,6 +1299,7 @@ struct RuntimeState {
     inbound_slots: Arc<Semaphore>,
     inbound_ready: Notify,
     seen_limit: usize,
+    outbound_deadline: Duration,
     outbound: Mutex<VecDeque<OutboundItem>>,
     outbound_ready: Notify,
     outbound_slots: Arc<Semaphore>,
@@ -1431,6 +1446,8 @@ struct OutboundControl {
     generation: AtomicU64,
     terminal: std::sync::atomic::AtomicU8,
     completed: Notify,
+    /// Enqueue time plus `OUTBOUND_DELIVERY_DEADLINE`: never sent after it.
+    deadline: Instant,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1517,6 +1534,14 @@ impl InboundState {
 
 impl RuntimeState {
     fn new(capacity: usize, local_only: bool) -> Arc<Self> {
+        Self::with_outbound_deadline(capacity, local_only, OUTBOUND_DELIVERY_DEADLINE)
+    }
+
+    fn with_outbound_deadline(
+        capacity: usize,
+        local_only: bool,
+        outbound_deadline: Duration,
+    ) -> Arc<Self> {
         let seen_limit = capacity.saturating_mul(8).max(64);
         let (peer_generation, _) = watch::channel(0);
         Arc::new(Self {
@@ -1536,6 +1561,7 @@ impl RuntimeState {
             inbound_slots: Arc::new(Semaphore::new(capacity)),
             inbound_ready: Notify::new(),
             seen_limit,
+            outbound_deadline,
             outbound: Mutex::new(VecDeque::with_capacity(capacity)),
             outbound_ready: Notify::new(),
             outbound_slots: Arc::new(Semaphore::new(capacity)),
@@ -1907,6 +1933,7 @@ impl RuntimeState {
             generation: AtomicU64::new(target.as_ref().map_or(0, |binding| binding.generation)),
             terminal: std::sync::atomic::AtomicU8::new(0),
             completed: Notify::new(),
+            deadline: Instant::now() + self.outbound_deadline,
         });
         let item = OutboundItem {
             message_id,
@@ -2262,12 +2289,18 @@ async fn outbound_worker(endpoint: Endpoint, state: Arc<RuntimeState>) {
         let item = state.next_outbound().await;
         let mut retry_delay = INITIAL_RETRY_DELAY;
         let mut bound_peer = item.target.clone();
+        let deadline = item.control.deadline;
         let terminal = loop {
             if item.control.cancellation.is_cancelled() {
                 break item
                     .control
                     .terminal()
                     .unwrap_or(OutboundTerminal::Cancelled);
+            }
+            if Instant::now() >= deadline {
+                // The sidecar's own bound: a lost Python cancellation never
+                // lets a frame go out past OUTBOUND_DELIVERY_DEADLINE.
+                break OutboundTerminal::Cancelled;
             }
             let peer = match bound_peer.clone() {
                 Some(peer) => peer,
@@ -2281,6 +2314,7 @@ async fn outbound_worker(endpoint: Endpoint, state: Arc<RuntimeState>) {
                             () = item.control.cancellation.cancelled() => {},
                             () = state.peer_changed.notified() => {},
                             () = sleep(INITIAL_RETRY_DELAY) => {},
+                            () = sleep_until(deadline) => {},
                         }
                         continue;
                     }
@@ -2289,7 +2323,15 @@ async fn outbound_worker(endpoint: Endpoint, state: Arc<RuntimeState>) {
             if !state.peer_matches(peer.address.id, peer.generation).await {
                 break OutboundTerminal::PeerRotated;
             }
-            match send_outbound_once(&endpoint, &state, &peer, &item).await {
+            let Ok(attempt) = timeout_at(
+                deadline,
+                send_outbound_once(&endpoint, &state, &peer, &item),
+            )
+            .await
+            else {
+                break OutboundTerminal::Cancelled;
+            };
+            match attempt {
                 SendAttempt::Delivered => break OutboundTerminal::Delivered,
                 SendAttempt::Cancelled => {
                     break item
@@ -2304,6 +2346,7 @@ async fn outbound_worker(endpoint: Endpoint, state: Arc<RuntimeState>) {
                         () = item.control.cancellation.cancelled() => {},
                         () = state.peer_changed.notified() => {},
                         () = sleep(retry_delay) => {},
+                        () = sleep_until(deadline) => {},
                     }
                     retry_delay = retry_delay.saturating_mul(2).min(MAX_RETRY_DELAY);
                 }
@@ -2744,6 +2787,53 @@ mod tests {
             state.admit_inbound([2; 16], valid_frame()).await,
             AdmissionOutcome::Full
         ));
+    }
+
+    #[test]
+    fn outbound_deadline_is_bounded_below_the_relay_retention_horizon() {
+        // relay.py _TOMBSTONE_RETENTION_SECONDS; the Python side pins the same
+        // relation from the source of this constant.
+        assert!(OUTBOUND_DELIVERY_DEADLINE < Duration::from_secs(600));
+        assert!(OUTBOUND_DELIVERY_DEADLINE >= Duration::from_secs(30));
+    }
+
+    #[tokio::test]
+    async fn a_send_whose_cancellation_is_lost_still_ends_at_the_deadline() {
+        // An unreachable peer (TEST-NET-3) keeps the worker retrying; nobody
+        // ever calls cancel_outbound. The sidecar ends the send by itself.
+        let state = RuntimeState::with_outbound_deadline(1, false, Duration::from_millis(400));
+        state
+            .configure_peers(vec![routable_peer(1, 1)])
+            .await
+            .expect("peer set is accepted");
+        let endpoint = bind_endpoint(true, false, None).await.unwrap();
+        let worker = tokio::spawn(outbound_worker(endpoint.clone(), state.clone()));
+        let EnqueueOutcome::Queued(control) = state
+            .enqueue_outbound([5; 16], valid_frame(), None, None, None)
+            .await
+        else {
+            panic!("send is queued");
+        };
+        let started = Instant::now();
+        let terminal = timeout(Duration::from_secs(10), control.wait_for_terminal())
+            .await
+            .expect("the send ends without any cancellation");
+        assert_eq!(terminal, OutboundTerminal::Cancelled);
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "ended at the deadline, not a dial timeout"
+        );
+        // Its queue slot is released and its id is forgotten.
+        timeout(Duration::from_secs(2), async {
+            while state.outbound_slots.available_permits() != 1 {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("slot released");
+        assert!(!state.cancel_outbound([5; 16]).await);
+        worker.abort();
+        endpoint.close().await;
     }
 
     #[tokio::test]

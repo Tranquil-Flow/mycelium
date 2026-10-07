@@ -1985,8 +1985,8 @@
         },
         {
           "path": "native/iroh_transport/src/sidecar.rs",
-          "sha256": "e9b0de6dfd157fdd60cdc02b01b9496c9de9d2e66e91cff45bca4fd1af3157d5",
-          "size_bytes": 115195
+          "sha256": "de1bc57f256cbb9a677ea3ea66bcac87783b2f8c1657616d9b3eeb5ff23c61f0",
+          "size_bytes": 119283
         }
       ],
       "protocol": "mycelium.transport_path_observation.v1"
