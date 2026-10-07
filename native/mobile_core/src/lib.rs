@@ -26,9 +26,9 @@ pub mod stage_wire;
 pub mod membership;
 pub mod evidence;
 pub mod route_assignment;
-#[cfg(feature = "net")]
+#[cfg(feature = "artifact-source")]
 pub mod transport;
-#[cfg(feature = "net")]
+#[cfg(feature = "artifact-source")]
 pub mod artifact_net;
 #[cfg(feature = "net")]
 pub mod node;

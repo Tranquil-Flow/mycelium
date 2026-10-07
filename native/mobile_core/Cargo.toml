@@ -15,7 +15,10 @@ crate-type = ["rlib"]
 default = []
 # Networking: seed HTTP client, embedded iroh endpoint and the node supervisor.
 # Everything outside this feature stays wasm32-compatible for the browser page.
-net = ["dep:tokio", "dep:iroh", "dep:reqwest"]
+net = ["artifact-source", "dep:reqwest"]
+# The embedded iroh transport and the A2-over-iroh artifact carrier only (no
+# HTTP client): what the native iroh sidecar links to serve phone objects.
+artifact-source = ["dep:tokio", "dep:iroh"]
 # In-process transport tests need tokio test macros.
 
 [dependencies]

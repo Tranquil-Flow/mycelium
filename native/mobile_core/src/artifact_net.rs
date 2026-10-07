@@ -255,10 +255,17 @@ impl ArtifactSource {
     /// endpoint id, which is what grants authorize.
     /// `state_dir` holds the durable admission journal (fence + budgets).
     pub async fn bind(secret: &[u8; 32], signing_secret: &[u8; 32], seed_key: Value, root: PathBuf, state_dir: &std::path::Path, reach: Reachability) -> Result<Self, ArtifactError> {
+        let endpoint = bind(secret, reach, ARTIFACT_CHUNK_ALPN).await?;
+        Self::with_endpoint(endpoint, signing_secret, seed_key, root, state_dir)
+    }
+
+    /// Over an endpoint someone else accepts on (the iroh sidecar): that
+    /// endpoint must list [`ARTIFACT_CHUNK_ALPN`] and hand each such
+    /// connection to [`serve_connection`](Self::serve_connection).
+    pub fn with_endpoint(endpoint: Endpoint, signing_secret: &[u8; 32], seed_key: Value, root: PathBuf, state_dir: &std::path::Path) -> Result<Self, ArtifactError> {
         let mut state = SourceState::default();
         let journal = Journal::open(state_dir, &mut state, now_ms())?;
         state.journal = Some(journal);
-        let endpoint = bind(secret, reach, ARTIFACT_CHUNK_ALPN).await?;
         let signer = Identity::from_secret(&endpoint.id().to_string(), signing_secret).map_err(|_| ArtifactError("source_identity_invalid".into()))?;
         Ok(Self { endpoint, signer: Arc::new(signer), seed_key: Arc::new(seed_key), root, state: Arc::new(Mutex::new(state)) })
     }
@@ -341,27 +348,39 @@ impl ArtifactSource {
             while let Some(incoming) = source.endpoint.accept().await {
                 let source = source.clone();
                 tokio::spawn(async move {
-                    let Ok(connection) = incoming.await else { return };
-                    let remote = connection.remote_id();
-                    while let Ok((mut send, mut recv)) = connection.accept_bi().await {
-                        let Ok(Ok(raw)) = timeout(IO_TIMEOUT, recv.read_to_end(MAX_REQUEST_BYTES)).await else { continue };
-                        let reply = match source.serve(remote, &raw) {
-                            Ok((receipt, data, pace_ms)) => {
-                                if pace_ms > 0 {
-                                    tokio::time::sleep(Duration::from_millis(pace_ms)).await;
-                                }
-                                let mut out = frame_header(&json!({"protocol": RESPONSE_PROTOCOL, "status": "ok", "receipt": receipt}));
-                                out.extend_from_slice(&data);
-                                out
-                            }
-                            Err(code) => refused(&code),
-                        };
-                        let _ = timeout(IO_TIMEOUT, send.write_all(&reply)).await;
-                        let _ = send.finish();
+                    if let Ok(connection) = incoming.await {
+                        source.serve_connection(connection).await;
                     }
                 });
             }
         })
+    }
+
+    /// Serve one accepted connection: one chunk per bidirectional stream,
+    /// until the peer closes it. A connection negotiated for another ALPN is
+    /// closed unserved.
+    pub async fn serve_connection(&self, connection: iroh::endpoint::Connection) {
+        if connection.alpn() != ARTIFACT_CHUNK_ALPN {
+            connection.close(1u32.into(), b"alpn");
+            return;
+        }
+        let remote = connection.remote_id();
+        while let Ok((mut send, mut recv)) = connection.accept_bi().await {
+            let Ok(Ok(raw)) = timeout(IO_TIMEOUT, recv.read_to_end(MAX_REQUEST_BYTES)).await else { continue };
+            let reply = match self.serve(remote, &raw) {
+                Ok((receipt, data, pace_ms)) => {
+                    if pace_ms > 0 {
+                        tokio::time::sleep(Duration::from_millis(pace_ms)).await;
+                    }
+                    let mut out = frame_header(&json!({"protocol": RESPONSE_PROTOCOL, "status": "ok", "receipt": receipt}));
+                    out.extend_from_slice(&data);
+                    out
+                }
+                Err(code) => refused(&code),
+            };
+            let _ = timeout(IO_TIMEOUT, send.write_all(&reply)).await;
+            let _ = send.finish();
+        }
     }
 }
 
