@@ -33,6 +33,10 @@ def test_regenerating_reproduces_the_committed_scripts() -> None:
         "lifecycle", "pending_cancellation", "pending_cancellation_other_source",
         "manifest_sources", "next_attempt", "failures",
         "cross_owner_replacement", "foreign_tombstone", "owner_high_water", "separator_ids",
+        "stale_manifest_after_horizon", "creator_slots", "pending_without_slot",
+    }
+    assert index["phone_bounds"] == {
+        "quota_per_creator": 512, "max_creators": 16, "pending_per_source": 256, "pending_total": 4096, "max_paths": 256,
     }
     steps = [step for scenario in index["scenarios"] for step in scenario["steps"]]
     # A refused registration is the only frame the transport does not acknowledge.

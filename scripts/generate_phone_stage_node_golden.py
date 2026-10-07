@@ -23,6 +23,11 @@ from authenticated peers:
 Stage failures are injected as the runtime result (``runtime_failure``); the
 thermal case uses the phone's refusal reason ``thermal_ceiling_reached``.
 
+Every scenario runs with the phone's path-table bounds (``PHONE_BOUNDS``,
+patched into ``relay.py``; a scenario may shrink them to reach a bound in a
+few frames), records them, and records the relay clock of every step
+(``at``), so the phone replays the same horizon decisions.
+
 Run from the repository root:
     python3 -B scripts/generate_phone_stage_node_golden.py [--check]
 """
@@ -55,6 +60,16 @@ OUTPUT_DIR = ROOT / "contracts" / "phone-stage-node-golden"
 INDEX_SCHEMA = "mycelium.phone_stage_node.golden.v1"
 ENTRY, PHONE, FINAL, STRANGER, EVIL = "node-mac-entry", wg.PHONE_NODE, "node-mac-final", "node-stranger", "node-evil"
 THERMAL_REASON = "thermal_ceiling_reached"
+#: stage_node.rs PHONE_BOUNDS. ``max_paths`` has no relay counterpart (the
+#: relay's live paths are bounded by capacity reservations); no scenario
+#: reaches it.
+PHONE_BOUNDS = {"quota_per_creator": 512, "max_creators": 16, "pending_per_source": 256, "pending_total": 4096, "max_paths": 256}
+_RELAY_BOUND_NAMES = {
+   "quota_per_creator": "_TOMBSTONE_QUOTA_PER_CREATOR",
+   "max_creators": "_MAX_TOMBSTONE_CREATORS",
+   "pending_per_source": "_MAX_PENDING_PER_SOURCE",
+   "pending_total": "_MAX_PENDING_TOTAL",
+}
 
 
 class Runtime(wg._StageRuntime):
@@ -72,7 +87,7 @@ class Runtime(wg._StageRuntime):
 
 
 class Scenario:
-    def __init__(self, name: str, frames: dict[str, bytes]) -> None:
+    def __init__(self, name: str, frames: dict[str, bytes], **bounds: int) -> None:
         from mycelium_router.contracts import RouterConfig
         from mycelium_router.fakes import (
             FakeCapacityPort,
@@ -84,8 +99,16 @@ class Scenario:
         )
         from mycelium_router.router import Router
 
+        from mycelium_router import relay as relay_module
+
         self.name = name
         self.frames = frames
+        self.bounds = {**PHONE_BOUNDS, **bounds}
+        self._relay_module = relay_module
+        self._saved = {name: getattr(relay_module, name) for name in _RELAY_BOUND_NAMES.values()}
+        for key, name in _RELAY_BOUND_NAMES.items():
+            setattr(relay_module, name, self.bounds[key])
+        self.clock = ManualClock()
         self.graph, self.request, self.build, self.manifest = wg._route()
         self.runtime = Runtime()
         self.transport = FakeTransportPort()
@@ -96,7 +119,7 @@ class Scenario:
             capacity=FakeCapacityPort(),
             runtime=self.runtime,
             transport=self.transport,
-            clock=ManualClock(),
+            clock=self.clock,
             id_source=SequenceIdSource(),
             config=RouterConfig(),
         )
@@ -120,6 +143,22 @@ class Scenario:
             sends.append({"kind": "FailureReport", "to": ENTRY, "frame": self._file(encode_frame(report))})
         return sends
 
+    def advance(self, seconds: float) -> None:
+        self.clock.advance(seconds)
+
+    def with_entry(self, node: str):
+        """The same route with its entry placement on ``node``."""
+        first = self.manifest.ordered_hops[0].placement_id
+        stages = tuple(
+            replace(stage, placements=tuple(replace(p, node_id=node) if p.placement_id == first else p for p in stage.placements))
+            for stage in self.graph.stages
+        )
+        return replace(self.graph, stages=stages)
+
+    def path(self, path_id: str, request_id: str):
+        """Another path id (and request) on the same route."""
+        return replace(self.manifest, path_id=path_id, request_id=request_id), replace(self.request, request_id=request_id)
+
     def manifest_locked(self, source: str, manifest=None, request=None, graph=None) -> None:
         manifest = manifest or self.manifest
         request = request or self.request
@@ -138,6 +177,7 @@ class Scenario:
         )
         self.steps.append(
             {
+                "at": self.clock.now(),
                 "from": source,
                 "frame": self._file(encode_frame(locked)),
                 "accepted": bool(accepted),
@@ -159,6 +199,7 @@ class Scenario:
         self.runtime.failure = None
         self.steps.append(
             {
+                "at": self.clock.now(),
                 "from": source,
                 "frame": self._file(encode_frame(header, payload)),
                 "disposition": result.disposition,
@@ -169,20 +210,22 @@ class Scenario:
             }
         )
 
-    def cancel(self, source: str, *, attempt=None, topology=None, request_id=None) -> None:
+    def cancel(self, source: str, *, attempt=None, topology=None, request_id=None, path_id=None) -> None:
         cancellation = PathCancellation(
             request_id or self.request.request_id,
-            self.manifest.path_id,
+            path_id or self.manifest.path_id,
             self.manifest.path_attempt if attempt is None else attempt,
             self.manifest.topology_version if topology is None else topology,
         )
         accepted = self.router.receive_path_cancellation(cancellation, source_node_id=source)
         self.steps.append(
-            {"from": source, "frame": self._file(encode_frame(cancellation)), "accepted": bool(accepted), "transport_ack": True, "sends": []}
+            {"at": self.clock.now(), "from": source, "frame": self._file(encode_frame(cancellation)), "accepted": bool(accepted), "transport_ack": True, "sends": []}
         )
 
     def record(self) -> dict[str, Any]:
-        return {"name": self.name, "steps": self.steps}
+        for name, value in self._saved.items():
+            setattr(self._relay_module, name, value)
+        return {"name": self.name, "bounds": self.bounds, "steps": self.steps}
 
 
 def _scenarios(frames: dict[str, bytes]) -> list[dict[str, Any]]:
@@ -283,6 +326,53 @@ def _scenarios(frames: dict[str, bytes]) -> list[dict[str, Any]]:
     s.cancel(ENTRY, request_id="r:x")  # targets path-phone-golden, unknown here: pending
     out.append(s.record())
 
+    # Round 5 (RELAY-PATH-TABLES.md I5): past the horizon, the stale manifest
+    # of a cancelled attempt is refused rather than admitted by evicting its
+    # own record to make room; a fresh path evicts the entry's oldest record,
+    # after which only that entry's own aged attempt reopens.
+    s = Scenario("stale_manifest_after_horizon", frames, quota_per_creator=2)
+    for index in range(2):
+        manifest, request = s.path(f"old-{index}", f"request-old-{index}")
+        s.manifest_locked(ENTRY, manifest=manifest, request=request)
+        s.cancel(ENTRY, path_id=manifest.path_id, request_id=request.request_id)
+    s.advance(601.0)
+    stale, stale_request = s.path("old-0", "request-old-0")
+    s.manifest_locked(ENTRY, manifest=stale, request=stale_request)
+    fresh, fresh_request = s.path("fresh", "request-fresh")
+    s.manifest_locked(ENTRY, manifest=fresh, request=fresh_request)
+    s.manifest_locked(ENTRY, manifest=stale, request=stale_request)
+    out.append(s.record())
+
+    # I7: a live entry holds its slot; all slots busy refuses the newcomer;
+    # past the horizon the idle slot is reclaimed, a busy one never.
+    s = Scenario("creator_slots", frames, max_creators=2)
+    s.manifest_locked(ENTRY)
+    b_graph = s.with_entry("node-b")
+    b_manifest, b_request = s.path("path-b", "request-b")
+    s.manifest_locked("node-b", manifest=b_manifest, request=b_request, graph=b_graph)
+    s.cancel("node-b", path_id="path-b", request_id="request-b")
+    c_graph = s.with_entry("node-c")
+    c_manifest, c_request = s.path("path-c", "request-c")
+    s.manifest_locked("node-c", manifest=c_manifest, request=c_request, graph=c_graph)
+    s.hop(ENTRY, "DECODE", 1)
+    s.advance(601.0)
+    s.manifest_locked("node-c", manifest=c_manifest, request=c_request, graph=c_graph)
+    b2_manifest, b2_request = s.path("path-b2", "request-b2")
+    s.manifest_locked("node-b", manifest=b2_manifest, request=b2_request, graph=b_graph)
+    s.hop(ENTRY, "DECODE", 2)
+    out.append(s.record())
+
+    # I7: an entry's pending cancellation it has no slot to charge stays
+    # pending and keeps refusing its attempt.
+    s = Scenario("pending_without_slot", frames, max_creators=1)
+    late_graph = s.with_entry("node-late")
+    late_manifest, late_request = s.path("path-late", "request-late")
+    s.cancel("node-late", path_id="path-late", request_id="request-late")
+    s.manifest_locked(ENTRY)
+    s.manifest_locked("node-late", manifest=late_manifest, request=late_request, graph=late_graph)
+    s.manifest_locked("node-late", manifest=late_manifest, request=late_request, graph=late_graph)
+    out.append(s.record())
+
     s = Scenario("failures", frames)
     s.manifest_locked(ENTRY)
     s.hop(ENTRY, "DECODE", 1, failure=THERMAL_REASON)
@@ -300,6 +390,7 @@ def generate(check: bool = False) -> dict[str, Any]:
         "schema": INDEX_SCHEMA,
         "protocol": ROUTER_WIRE_PROTOCOL,
         "local_node_id": PHONE,
+        "phone_bounds": PHONE_BOUNDS,
         "scenarios": scenarios,
         "frames": {name: hashlib.sha256(data).hexdigest() for name, data in sorted(frames.items())},
     }

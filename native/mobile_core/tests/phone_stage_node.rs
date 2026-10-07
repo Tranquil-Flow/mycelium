@@ -5,7 +5,7 @@
 //! and every byte sent must match what the real Python Router did as the same
 //! middle placement.
 
-use mycelium_mobile_core::stage_node::StageNode;
+use mycelium_mobile_core::stage_node::{Bounds, PHONE_BOUNDS, StageNode};
 use mycelium_mobile_core::wire::{self, Activation};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -15,6 +15,17 @@ fn dir() -> std::path::PathBuf {
     std::env::var_os("MYCELIUM_PHONE_NODE_GOLDEN")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../contracts/phone-stage-node-golden"))
+}
+
+fn bounds(v: &Value) -> Bounds {
+    let n = |k: &str| v[k].as_u64().unwrap() as usize;
+    Bounds {
+        quota_per_creator: n("quota_per_creator"),
+        max_creators: n("max_creators"),
+        pending_per_source: n("pending_per_source"),
+        pending_total: n("pending_total"),
+        max_paths: n("max_paths"),
+    }
 }
 
 /// The golden runtime's output: `0.5 * ((i % 17) - 8) / 8` as f32, shape (1, seq, 8).
@@ -30,17 +41,20 @@ fn every_python_router_decision_and_sent_byte_is_reproduced() {
         assert_eq!(hex::encode(Sha256::digest(std::fs::read(dir().join(name)).unwrap())), digest.as_str().unwrap());
     }
     let local = index["local_node_id"].as_str().unwrap();
+    // The scripts were generated with the phone's own bounds.
+    assert_eq!(bounds(&index["phone_bounds"]), PHONE_BOUNDS);
     let mut steps_checked = 0;
     for scenario in index["scenarios"].as_array().unwrap() {
         let name = scenario["name"].as_str().unwrap();
-        let mut node = StageNode::new(local);
+        let mut node = StageNode::with_bounds(local, bounds(&scenario["bounds"]));
         for (i, expected) in scenario["steps"].as_array().unwrap().iter().enumerate() {
             let bytes = std::fs::read(dir().join(expected["frame"].as_str().unwrap())).unwrap();
             let frame = wire::decode_frame(&bytes).unwrap();
             // The injected stage failure of this step, if Python's runtime failed.
             let failure = (expected["disposition"] == "FAILED" && expected["executed"] == 1).then(|| expected["reason"].as_str().unwrap().to_owned());
             let mut ran = 0;
-            let step = node.on_frame(expected["from"].as_str().unwrap(), &frame, &mut |path, hop, input| {
+            let at = expected["at"].as_f64().unwrap();
+            let step = node.on_frame_at(at, expected["from"].as_str().unwrap(), &frame, &mut |path, hop, input| {
                 ran += 1;
                 assert_eq!(Activation::decode(input).unwrap().shape[2] as usize, path.hidden_size);
                 match &failure {
@@ -48,7 +62,7 @@ fn every_python_router_decision_and_sent_byte_is_reproduced() {
                     None => Ok(stage_output(if hop.phase == "PREFILL" { path.prompt_length } else { hop.position + 1 })),
                 }
             });
-            let at = format!("{name}[{i}]");
+            let at = format!("{name}[{i}] t={at}");
             assert_eq!(step.ack, expected["transport_ack"].as_bool().unwrap(), "{at} ack");
             if let Some(accepted) = expected.get("accepted") {
                 assert_eq!(step.accepted, accepted.as_bool(), "{at} accepted");
@@ -78,5 +92,5 @@ fn every_python_router_decision_and_sent_byte_is_reproduced() {
             steps_checked += 1;
         }
     }
-    assert!(steps_checked >= 30, "{steps_checked}");
+    assert!(steps_checked >= 45, "{steps_checked}");
 }
