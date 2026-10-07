@@ -1891,6 +1891,37 @@ class PhysicalNodeService:
                 document["product"] = product
         return self._signed_result("a7_snapshot", document)
 
+    def _a11_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Signed, read-only A11 gate evidence: KV release log and request history.
+
+        Every node answers with its runtime's ordered KV release log (window
+        residue); the entry node with a staged draft also answers with its
+        speculation request history (proposal, acceptance, correction and
+        fallback coverage).  Counts, closed reasons and request ids only.
+        """
+
+        _require(isinstance(payload, dict) and not payload, "invalid_a11_snapshot_fields")
+        _require(self.state == "RUNNING" and self.runtime is not None, "invalid_state_for_a11_snapshot")
+        release_log = getattr(self.runtime, "kv_release_log", None)
+        _require(callable(release_log), "a11_kv_release_log_unavailable")
+        wiring = getattr(self, "_a11_wiring", None)
+        details = {
+            "protocol": "mycelium.a11_node_evidence.v1",
+            "kv": release_log(),
+            "speculation": (
+                None
+                if wiring is None
+                else {
+                    "draft_identity_digest": wiring.model.identity_digest(),
+                    "width": wiring.config["policy"]["width"],
+                    "baseline_samples": wiring.baseline.count(),
+                    "baseline_measured": wiring.baseline.measured() is not None,
+                    **wiring.controller.evidence(),
+                }
+            ),
+        }
+        return self._signed_result("a11_snapshot", details)
+
     def _defer_after_response(self, action: Callable[[], Any], *, name: str) -> None:
         pending = getattr(self._after_response, "actions", None)
         if pending is None:
@@ -4512,6 +4543,7 @@ class PhysicalNodeService:
             "a10_batch_policy": self._a10_batch_policy,
             "a7_snapshot": self._a7_snapshot,
             "a7_source_lost": self._a7_source_lost,
+            "a11_snapshot": self._a11_snapshot,
         }
         handler = handlers.get(document["command"])
         _require(handler is not None, "unsupported_command")

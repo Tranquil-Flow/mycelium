@@ -14,7 +14,7 @@ import math
 import re
 import sys
 import time
-from collections import Counter, OrderedDict
+from collections import Counter, OrderedDict, deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from threading import Condition, RLock, Thread
@@ -74,6 +74,8 @@ _MLX_DTYPES = {
 }
 _SUPPORTED_COMPONENTS = {"input_embedding", "decoder", "final_norm", "lm_head"}
 _MAX_RETAINED_OPERATIONS = 4096
+#: A11: KV releases kept for window residue evidence (>= the R9 run's requests per stage).
+KV_RELEASE_LOG_LIMIT = 1024
 _BASE_LOAD_PROOF_FIELDS = frozenset({
    "protocol",
    "deployment_id",
@@ -904,6 +906,10 @@ class MLXRuntimePort:
       self._released_paths: OrderedDict[str, str] = OrderedDict()
       self._replays: OrderedDict[tuple[str, str], _ReplayResult] = OrderedDict()
       self._release_counts: Counter[str] = Counter()
+      # A11 gate evidence: a bounded, ordered log of KV releases (identities and
+      # counts only) so a window's KV residue is observable after the fact.
+      self._release_log: deque[dict[str, Any]] = deque(maxlen=KV_RELEASE_LOG_LIMIT)
+      self._release_sequence = 0
       self._peak_kv_bytes = 0
       self._last_release_reason: str | None = None
       self._applied_operation_count = 0
@@ -1381,6 +1387,17 @@ class MLXRuntimePort:
          self._remember_path_marker(self._released_paths, path_id, reason)
       self._release_counts[reason] += 1
       self._last_release_reason = reason
+      self._release_sequence += 1
+      self._release_log.append(
+         {
+            "sequence": self._release_sequence,
+            "request_id": state.request_id,
+            "path_id": path_id,
+            "placement_id": state.placement_id,
+            "reason": reason,
+            "active_state_count_after": len(self._kv_states),
+         }
+      )
       state.layers.clear()
       self._purge_path_replays(path_id)
       return True
@@ -1587,6 +1604,16 @@ class MLXRuntimePort:
                if self._retention().enabled
                else {}
             ),
+         }
+
+   def kv_release_log(self) -> dict[str, Any]:
+      """The ordered KV release log (A11 window residue evidence; no tensor data)."""
+
+      with self._state_lock:
+         return {
+            "release_sequence": self._release_sequence,
+            "active_state_count": len(self._kv_states),
+            "releases": [dict(record) for record in self._release_log],
          }
 
    def kv_snapshot_nonblocking(self) -> dict[str, Any] | None:

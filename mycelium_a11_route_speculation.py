@@ -28,6 +28,7 @@ and timings, no token ids).  Nothing here qualifies a deployment or claims benef
 
 from __future__ import annotations
 
+import collections
 import hashlib
 import json
 import threading
@@ -48,6 +49,13 @@ from mycelium_router.a10_verifier_execution import (
 PROTOCOL = "mycelium.a11_route_speculation.v1"
 TRANSACTION_MODE = "commit_verified_prefix_plus_target_correction"
 MAXIMUM_WIDTH = 16
+#: Completed requests kept for gate evidence (the R9 run is 8 x 12 plus a smoke).
+HISTORY_LIMIT = 512
+_HISTORY_COUNTERS = (
+    "rounds", "decode_rounds", "deadline_fallbacks", "proposed_count", "verified_count",
+    "accepted_count", "rejected_count", "target_corrected_count", "target_bonus_count",
+    "committed_count", "rollback_count",
+)
 
 #: Closed reasons a request runs target-only (admission) or stops speculating.
 TARGET_ONLY_REASONS = frozenset(
@@ -318,6 +326,11 @@ class RouteSpeculationController:
         self._revoked = False
         self._cooldown_until = 0.0
         self.completed: list[dict[str, Any]] = []
+        #: Every released request, speculative or not, in completion order: counts
+        #: and closed reasons only (no token ids).  Read by the node's signed
+        #: ``a11_snapshot`` for the R9 coverage and window evidence.
+        self.history: collections.deque[dict[str, Any]] = collections.deque(maxlen=HISTORY_LIMIT)
+        self._history_sequence = 0
 
     # -- admission ---------------------------------------------------------------
     def set_preference(self, request_id: str, preference: str) -> None:
@@ -544,13 +557,36 @@ class RouteSpeculationController:
         with self._lock:
             state = self._states.pop(request_id, None)
             admission = self._admissions.pop(request_id, None)
-            self._preferences.pop(request_id, None)
-        if state is None:
+            preference = self._preferences.pop(request_id, None)
+        summary = None if state is None else self._summary(state, admission)
+        with self._lock:
+            self._history_sequence += 1
+            self.history.append(
+                {
+                    "sequence": self._history_sequence,
+                    "request_id": request_id,
+                    "preference": preference if admission is None else admission["preference"],
+                    "mode": "not_evaluated" if admission is None else admission["mode"],
+                    "fallback_reason": None if admission is None else admission["fallback_reason"],
+                    "stop_reason": None if state is None else state.stop_reason,
+                    **{key: 0 if summary is None else summary[key] for key in _HISTORY_COUNTERS},
+                }
+            )
+        if summary is None:
             return None
-        summary = self._summary(state, admission)
         self.completed.append(summary)
         del self.completed[:-256]
         return summary
+
+    def evidence(self) -> dict[str, Any]:
+        """The ordered request history (counts and closed reasons only)."""
+
+        with self._lock:
+            return {
+                "protocol": PROTOCOL,
+                "history_sequence": self._history_sequence,
+                "requests": [dict(record) for record in self.history],
+            }
 
     def snapshot(self, request_id: str) -> dict[str, Any] | None:
         with self._lock:
