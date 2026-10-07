@@ -24,7 +24,7 @@ from mycelium_router.decoding import (
     quantized_greedy_token_ids,
 )
 from mycelium_router.payloads import decode_token_ids, encode_token_ids
-from tests.speculation.a11_route_fixtures import fresh_ports, varied_two_stage_case
+from a11_route_fixtures import fresh_ports, varied_two_stage_case
 
 PROMPT = (6, 5, 4, 3, 2)
 LEASE = 1_000_000_000_000.0

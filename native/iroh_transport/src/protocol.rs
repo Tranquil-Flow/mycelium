@@ -34,6 +34,8 @@ pub enum MessageType {
     KVSuccessorCutoverReceipt,
     KVCheckpointCommit,
     KVShadowRelease,
+    // A11 target verification result (entry-bound).
+    VerifyEvent,
 }
 
 impl MessageType {
@@ -56,6 +58,7 @@ impl MessageType {
             Self::KVSuccessorCutoverReceipt => "KVSuccessorCutoverReceipt",
             Self::KVCheckpointCommit => "KVCheckpointCommit",
             Self::KVShadowRelease => "KVShadowRelease",
+            Self::VerifyEvent => "VerifyEvent",
         }
     }
 
@@ -78,6 +81,7 @@ impl MessageType {
             "KVSuccessorCutoverReceipt" => Ok(Self::KVSuccessorCutoverReceipt),
             "KVCheckpointCommit" => Ok(Self::KVCheckpointCommit),
             "KVShadowRelease" => Ok(Self::KVShadowRelease),
+            "VerifyEvent" => Ok(Self::VerifyEvent),
             _ => Err(WireError::UnknownMessageType),
         }
     }
@@ -194,6 +198,13 @@ impl MessageType {
                 "path_id",
                 "path_attempt",
                 "reason",
+            ],
+            Self::VerifyEvent => &[
+                "request_id",
+                "path_id",
+                "path_attempt",
+                "token_index",
+                "decisions",
             ],
         }
     }

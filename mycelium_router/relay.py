@@ -28,7 +28,9 @@ from mycelium_router.contracts import (
    RuntimeBatchKey,
    RuntimeResult,
    TokenEvent,
+   VerifyEvent,
 )
+from mycelium_router.payloads import PayloadError, decode_token_ids
 from mycelium_router.hop_join import HopArrivalTracker
 from mycelium_router.idempotency import (
    hop_identity,
@@ -173,6 +175,10 @@ class _RotatingReplayFilter:
          self._previous,
          positions,
       )
+
+
+#: A11: one VERIFY feeds the pending token plus at most 16 candidates.
+MAX_VERIFY_SPAN = 17
 
 
 class RelayEngine:
@@ -722,9 +728,21 @@ class RelayEngine:
       if phase == "PREFILL_CHUNK":
          size = self.scheduler.config.prefill_chunk_size_tokens
          return 0 if size <= 0 else token_index * size
-      if phase == "DECODE":
+      if phase in {"DECODE", "VERIFY"}:
+         # A11 VERIFY feeds the pending token first, at the DECODE position.
          return len(request.prompt_token_ids) + token_index - 1
       return 0
+
+   def _verify_span_admissible(self, header: HopHeader) -> bool:
+      """A VERIFY carries its span (pending + candidates) in the chunk-count field."""
+
+      span = header.prefill_chunk_token_count
+      return (
+         self.decode_mode == "stage_local_kv"
+         and type(span) is int
+         and 2 <= span <= MAX_VERIFY_SPAN
+         and header.token_index >= 1
+      )
 
    def _is_terminal(
       self,
@@ -1381,6 +1399,8 @@ class RelayEngine:
       )
       if header.idempotency_key != expected_key:
          return HopReceiveResult("REJECTED", "invalid_idempotency_key")
+      if header.phase == "VERIFY" and not self._verify_span_admissible(header):
+         return HopReceiveResult("REJECTED", "invalid_verify_span")
       with self._path_lock:
          registration = self._paths.get(header.path_id)
          generation = self._path_generations.get(header.path_id, 0)
@@ -1401,7 +1421,7 @@ class RelayEngine:
          return HopReceiveResult("REJECTED", "manifest_hop_mismatch")
       if header.hop_index == 0:
          valid_sources = {""}
-         if header.phase == "DECODE":
+         if header.phase in {"DECODE", "VERIFY"}:
             valid_sources.add(manifest.ordered_hops[-1].placement_id)
       else:
          valid_sources = {
@@ -1588,6 +1608,23 @@ class RelayEngine:
          self._remember_hop(header, result, payload_digest, generation)
          return result
 
+      if header.phase == "VERIFY":
+         result = self._complete_verify_hop(
+            header,
+            request,
+            manifest,
+            hop,
+            placement,
+            runtime_result,
+            payload_digest,
+            generation,
+         )
+         if result.disposition == "FAILED":
+            state.transition("FAILED", path_attempt=header.path_attempt)
+         elif result.disposition == "COMPLETED":
+            state.transition("FORWARDED", path_attempt=header.path_attempt)
+         return result
+
       final_prefill_chunk = (
          self.decode_mode == "stage_local_kv"
          and header.phase == "PREFILL_CHUNK"
@@ -1715,6 +1752,8 @@ class RelayEngine:
       )
       if header.idempotency_key != expected_key:
          return HopReceiveResult("REJECTED", "invalid_idempotency_key")
+      if header.phase == "VERIFY" and not self._verify_span_admissible(header):
+         return HopReceiveResult("REJECTED", "invalid_verify_span")
       with self._path_lock:
          registration = self._paths.get(header.path_id)
          generation = self._path_generations.get(header.path_id, 0)
@@ -1735,7 +1774,7 @@ class RelayEngine:
          return HopReceiveResult("REJECTED", "manifest_hop_mismatch")
       if header.hop_index == 0:
          valid_sources = {""}
-         if header.phase == "DECODE":
+         if header.phase in {"DECODE", "VERIFY"}:
             valid_sources.add(manifest.ordered_hops[-1].placement_id)
       else:
          valid_sources = {
@@ -2135,6 +2174,18 @@ class RelayEngine:
          self._remember_hop(header, result, payload_digest, generation)
          return result
 
+      if header.phase == "VERIFY":
+         return self._complete_verify_hop(
+            header,
+            request,
+            manifest,
+            hop,
+            placement,
+            runtime_result,
+            payload_digest,
+            generation,
+         )
+
       final_prefill_chunk = (
          self.decode_mode == "stage_local_kv"
          and header.phase == "PREFILL_CHUNK"
@@ -2232,6 +2283,64 @@ class RelayEngine:
       self._remember_hop(header, result, payload_digest, generation)
       return result
 
+   def _complete_verify_hop(
+      self,
+      header: HopHeader,
+      request: RequestContext,
+      manifest: PathManifest,
+      hop,
+      placement,
+      runtime_result: RuntimeResult,
+      payload_digest: str,
+      generation: int,
+   ) -> HopReceiveResult:
+      """Final stage of an A11 VERIFY: return every position's decision to the entry."""
+
+      decisions: tuple[int, ...] | None = None
+      if runtime_result.token_id is None and isinstance(runtime_result.payload, bytes):
+         try:
+            decisions = decode_token_ids(runtime_result.payload)
+         except PayloadError:
+            decisions = None
+      if decisions is None or len(decisions) != header.prefill_chunk_token_count:
+         report = FailureReport(
+            request_id=request.request_id,
+            path_id=manifest.path_id,
+            path_attempt=manifest.path_attempt,
+            token_index=header.token_index,
+            scope="PLACEMENT",
+            reason="final_stage_missing_verify_decisions",
+            placement_id=hop.placement_id,
+            node_id=placement.node_id,
+         )
+         if not self._send_if_path_current(
+            header.path_id,
+            header.path_attempt,
+            generation,
+            lambda: self.transport.send_failure_report(report),
+         ):
+            return HopReceiveResult("REJECTED", "path_cancelled")
+         result = HopReceiveResult("FAILED", reason=report.reason, failure_report=report)
+         self._remember_hop(header, result, payload_digest, generation)
+         return result
+      event = VerifyEvent(
+         request_id=request.request_id,
+         path_id=manifest.path_id,
+         path_attempt=manifest.path_attempt,
+         token_index=header.token_index,
+         decisions=tuple(int(item) for item in decisions),
+      )
+      if not self._send_if_path_current(
+         header.path_id,
+         header.path_attempt,
+         generation,
+         lambda: self.transport.send_verify_event(event),
+      ):
+         return HopReceiveResult("REJECTED", "path_cancelled")
+      result = HopReceiveResult("COMPLETED", verify_event=event)
+      self._remember_hop(header, result, payload_digest, generation)
+      return result
+
    @staticmethod
    def _hop_deadline(
       request: RequestContext,
@@ -2241,7 +2350,7 @@ class RelayEngine:
    ) -> float:
       if phase in {"PREFILL", "PREFILL_CHUNK"}:
          return request.admitted_at + max(0.0, request.target_ttft_ms) / 1_000.0
-      if phase == "DECODE":
+      if phase in {"DECODE", "VERIFY"}:
          return now + max(0.0, request.target_tpot_ms) / 1_000.0
       return float("inf")
 
@@ -2253,10 +2362,11 @@ class RelayEngine:
       phase: str,
       token_span: int,
    ) -> RuntimeBatchKey | None:
-      if phase not in {"PREFILL", "PREFILL_CHUNK", "RECOVERY_PREFILL", "DECODE"}:
+      if phase not in {"PREFILL", "PREFILL_CHUNK", "RECOVERY_PREFILL", "DECODE", "VERIFY"}:
          return None
       if token_span <= 0:
          return None
+      verify = phase == "VERIFY"
       return RuntimeBatchKey(
          deployment_id=graph.deployment_id,
          deployment_epoch=graph.deployment_epoch,
@@ -2271,6 +2381,8 @@ class RelayEngine:
          hidden_size=graph.hidden_size,
          activation_bytes=graph.activation_bytes,
          token_span=token_span,
+         speculative_role="TARGET_VERIFY" if verify else "NONE",
+         speculative_width=token_span - 1 if verify else 0,
       )
 
    def execute_manifest(

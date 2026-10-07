@@ -22,6 +22,7 @@ from mycelium_router.contracts import (
    ProgressivePrefillContext,
    ProgressivePrefillMessage,
    TokenEvent,
+   VerifyEvent,
 )
 from mycelium_router.rtt_measurement import (
    SOURCE_SOCKET_ROUND_TRIP,
@@ -43,6 +44,7 @@ _ACTION_TOKEN_EVENT = 5
 _ACTION_FAILURE_REPORT = 6
 _ACTION_PREFILL_CHUNK_COMPLETED = 7
 _ACTION_PATH_CANCELLATION = 8
+_ACTION_VERIFY_EVENT = 9
 _MAX_PACKET_BYTES = 285_212_672
 _PACKET_LENGTH = struct.Struct(">I")
 _RESPONSE = struct.Struct(">BI")
@@ -162,6 +164,18 @@ class LoopbackSocketTransport:
          self.source_node_id,
          event.request_id,
          _ACTION_TOKEN_EVENT,
+         frame,
+         span=span,
+      )
+
+   def send_verify_event(self, event: VerifyEvent) -> None:
+      frame, span = _encode_with_span(
+         encode_frame, event, request_id=event.request_id
+      )
+      self.mesh._send_to_entry(
+         self.source_node_id,
+         event.request_id,
+         _ACTION_VERIFY_EVENT,
          frame,
          span=span,
       )
@@ -462,6 +476,18 @@ class LoopbackSocketMesh:
          if not isinstance(message, TokenEvent):
             raise SocketTransportError("invalid_token_event_message")
          router.receive_token_event(
+            message,
+            source_node_id=getattr(
+               self._dispatch_context,
+               "source_node_id",
+               None,
+            ),
+         )
+         return
+      if action == _ACTION_VERIFY_EVENT:
+         if not isinstance(message, VerifyEvent):
+            raise SocketTransportError("invalid_verify_event_message")
+         router.receive_verify_event(
             message,
             source_node_id=getattr(
                self._dispatch_context,

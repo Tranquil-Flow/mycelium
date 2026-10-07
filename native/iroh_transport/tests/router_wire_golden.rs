@@ -443,6 +443,39 @@ fn required_body_fields(message_type: MessageType) -> &'static [&'static str] {
             "path_attempt",
             "reason",
         ],
+        MessageType::VerifyEvent => &[
+            "request_id",
+            "path_id",
+            "path_attempt",
+            "token_index",
+            "decisions",
+        ],
+    }
+}
+
+#[test]
+fn verify_event_frames_round_trip_and_fail_closed_without_required_fields() {
+    let body = json!({
+        "request_id": "r",
+        "path_id": "p",
+        "path_attempt": 0,
+        "token_index": 3,
+        "decisions": [1, 2, 3],
+    });
+    let body = body.as_object().expect("object body").clone();
+    let frame = encode_frame(&MessageType::VerifyEvent, &body, b"").expect("encode verify event");
+    let decoded = decode_frame(&frame).expect("decode verify event");
+    assert_eq!(decoded.message_type, MessageType::VerifyEvent);
+    assert_eq!(decoded.message_type.as_str(), "VerifyEvent");
+    for field in required_body_fields(MessageType::VerifyEvent) {
+        let changed = mutate_header(&frame, |envelope| {
+            envelope
+                .get_mut("body")
+                .and_then(Value::as_object_mut)
+                .expect("object body")
+                .remove(*field);
+        });
+        assert!(decode_frame(&changed).is_err(), "{field}");
     }
 }
 

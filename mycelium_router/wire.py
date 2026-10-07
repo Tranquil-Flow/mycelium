@@ -30,6 +30,7 @@ from mycelium_router.contracts import (
    ReservationRequest,
    ReservationResult,
    TokenEvent,
+   VerifyEvent,
 )
 from mycelium_router.serialization import (
    execution_graph_from_dict,
@@ -76,8 +77,12 @@ _MESSAGE_TYPES = {
       KVSuccessorCutoverReceipt,
       KVCheckpointCommit,
       KVShadowRelease,
+      VerifyEvent,
    )
 }
+
+#: A11 bound on one VERIFY: the pending token plus at most 16 candidates.
+MAX_VERIFY_DECISIONS = 17
 
 #: A7 bounds: a sealed checkpoint and a signed acknowledgement stay small and exact.
 A7_MAX_SEALED_CHECKPOINT_BYTES = 64 * 1024 * 1024
@@ -265,6 +270,11 @@ def _decode_message(cls, body: dict[str, Any]) -> object:
          )
       if cls is ManifestDelta:
          values["hop"] = _path_hop_from_dict(_required(values, "hop"))
+      if cls is VerifyEvent:
+         decisions = _required(values, "decisions")
+         if not isinstance(decisions, list):
+            raise WireError("invalid_verify_event")
+         values["decisions"] = tuple(decisions)
       return cls(**values)
    except WireError:
       raise
@@ -472,6 +482,7 @@ def _validate_message(message: object) -> None:
          TokenEvent,
          PrefillChunkCompleted,
          FailureReport,
+         VerifyEvent,
       ),
    ):
       if not message.request_id or not message.path_id:
@@ -503,6 +514,16 @@ def _validate_message(message: object) -> None:
    elif isinstance(message, TokenEvent):
       if message.token_index < 0 or message.sampling_counter < 1:
          raise WireError("invalid_token_event")
+   elif isinstance(message, VerifyEvent):
+      decisions = message.decisions
+      if (
+         type(message.token_index) is not int
+         or message.token_index < 1
+         or not isinstance(decisions, tuple)
+         or not 2 <= len(decisions) <= MAX_VERIFY_DECISIONS
+         or any(type(item) is not int or item < 0 for item in decisions)
+      ):
+         raise WireError("invalid_verify_event")
    elif isinstance(message, PrefillChunkCompleted):
       # Locked-path stage-local KV starts with chunk zero. Progressive route
       # discovery starts completion reporting at chunk one because its first

@@ -105,6 +105,9 @@ class Router:
    def decode_one_distributed(self, request_id):
       return self.entry.decode_one_distributed(request_id)
 
+   def speculate_one_distributed(self, request_id):
+      return self.entry.speculate_one_distributed(request_id)
+
    def cancel(self, request_id):
       return self.entry.cancel(request_id)
 
@@ -204,6 +207,12 @@ class Router:
 
    def receive_token_event(self, event, *, source_node_id=None):
       return self.entry.receive_token_event(
+         event,
+         source_node_id=source_node_id,
+      )
+
+   def receive_verify_event(self, event, *, source_node_id=None):
+      return self.entry.receive_verify_event(
          event,
          source_node_id=source_node_id,
       )

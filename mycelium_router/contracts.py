@@ -376,6 +376,22 @@ class TokenEvent:
 
 
 @dataclass(frozen=True)
+class VerifyEvent:
+   """A11: the target final stage's greedy decision after every position of one VERIFY.
+
+   Private-path material like ``TokenEvent.token_id``: it travels only to the
+   request's entry, which arbitrates the target-authoritative commit.  It is never
+   output by itself.
+   """
+
+   request_id: str
+   path_id: str
+   path_attempt: int
+   token_index: int
+   decisions: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class PrefillChunkCompleted:
    request_id: str
    path_id: str
@@ -500,6 +516,7 @@ class HopReceiveResult:
    token_event: TokenEvent | None = None
    failure_report: FailureReport | None = None
    prefill_chunk_completed: PrefillChunkCompleted | None = None
+   verify_event: VerifyEvent | None = None
 
 
 @dataclass(frozen=True)

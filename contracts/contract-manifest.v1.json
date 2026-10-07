@@ -335,8 +335,8 @@
       "owner_sources": [
         {
           "path": "mycelium_router/contracts.py",
-          "sha256": "dc113ce6f71559f2b6aa392f6c5830470f6714ddff967b50aa79092838668793",
-          "size_bytes": 13150
+          "sha256": "c67deb1d8c8aa9938dd227ea634808e61491fbafca31ee0069dc386147cfd911",
+          "size_bytes": 13623
         },
         {
           "path": "mycelium_router/layer_builder.py",
@@ -1280,8 +1280,8 @@
       "owner_sources": [
         {
           "path": "mycelium_router/contracts.py",
-          "sha256": "dc113ce6f71559f2b6aa392f6c5830470f6714ddff967b50aa79092838668793",
-          "size_bytes": 13150
+          "sha256": "c67deb1d8c8aa9938dd227ea634808e61491fbafca31ee0069dc386147cfd911",
+          "size_bytes": 13623
         },
         {
           "path": "mycelium_router/serialization.py",
@@ -1765,8 +1765,8 @@
       "owner_sources": [
         {
           "path": "mycelium_router/wire.py",
-          "sha256": "0bc16eb13251b2c55d7dd906a68826d928af1102a83522689431f6843e185578",
-          "size_bytes": 18629
+          "sha256": "5caacad55af2b7d7ec2c74b658c7b36ef3d9c06c1bd357933fa1dddb47d82bc3",
+          "size_bytes": 19420
         },
         {
           "path": "scripts/generate_router_wire_golden.py",
@@ -1960,8 +1960,8 @@
         },
         {
           "path": "mycelium_router/transports/iroh.py",
-          "sha256": "4ece237b4158fe9e9f009856c52aadb474e8669f757838b08fe37f6b57ad7f23",
-          "size_bytes": 162432
+          "sha256": "2c136a6593700125eaea95d23292f456548667c1bab1663a381518960c666c58",
+          "size_bytes": 162840
         }
       ],
       "protocol": "mycelium.traffic_liveness.v1"
@@ -1980,8 +1980,8 @@
         },
         {
           "path": "mycelium_router/transports/iroh.py",
-          "sha256": "4ece237b4158fe9e9f009856c52aadb474e8669f757838b08fe37f6b57ad7f23",
-          "size_bytes": 162432
+          "sha256": "2c136a6593700125eaea95d23292f456548667c1bab1663a381518960c666c58",
+          "size_bytes": 162840
         },
         {
           "path": "native/iroh_transport/src/sidecar.rs",

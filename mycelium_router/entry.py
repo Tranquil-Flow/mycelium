@@ -197,6 +197,8 @@ class RequestRecord:
    # (path_id, path_attempt, path_generation, token_index) of the last decode
    # hop this entry dispatched for the request.
    decode_dispatched: tuple[str, int, int, int] | None = None
+   # A11: the outstanding VERIFY round -- (dispatch key, private candidate ids).
+   verify_round: tuple[tuple[str, int, int, int], tuple[int, ...]] | None = None
    lock: Any = field(default_factory=RLock, repr=False, compare=False)
 
    @property
@@ -219,6 +221,10 @@ class EntryCoordinator:
    #: A7 entry controller (``mycelium_a7_entry_controller.A7EntryController``);
    #: ``None`` keeps every request on the qualified A6 path unchanged.
    a7_controller = None
+   #: A11 speculation controller
+   #: (``mycelium_a11_route_speculation.RouteSpeculationController``); ``None``
+   #: keeps every request target-only.
+   a11_controller = None
 
    def __init__(
       self,
@@ -876,6 +882,195 @@ class EntryCoordinator:
                record.decode_dispatched = dispatch_key
       return dispatched
 
+   def speculate_one_distributed(self, request_id: str) -> bool:
+      """One A11 round: a target-verified span when admitted, else an ordinary DECODE.
+
+      The draft proposes from the target-committed context; the proposal travels in
+      one VERIFY hop through the locked path; the final stage's decisions return in
+      a ``VerifyEvent`` and :meth:`receive_verify_event` commits the target-
+      authoritative tokens.  Every refusal, deadline or draft loss is an ordinary
+      DECODE from the same committed watermark.
+      """
+
+      controller = self.a11_controller
+      if controller is None or request_id in self._pending_prefills:
+         return self.decode_one_distributed(request_id)
+      record = self.get_request(request_id)
+      self._a7_await_acknowledged(record)
+      with record.lock:
+         if (
+            record.status != "DECODING"
+            or self.relay.decode_mode != "stage_local_kv"
+            or not record.generated_token_ids
+         ):
+            ready = False
+         else:
+            ready = True
+            token_index = len(record.generated_token_ids)
+            remaining = record.request.max_new_tokens - token_index
+            context = record.request.prompt_token_ids + tuple(record.generated_token_ids)
+            manifest = record.manifest
+            generation = record.path_generation
+            dispatch_key = (manifest.path_id, manifest.path_attempt, generation, token_index)
+            in_flight = record.decode_dispatched == dispatch_key
+      if not ready or in_flight:
+         return self.decode_one_distributed(request_id)
+      admission = controller.admit(
+         request_id,
+         backends=self._path_backends(record),
+         kv_successor_covered=self.a7_controller is not None,
+         remaining_deadline_ms=self._remaining_request_budget_ms(record),
+      )
+      proposal = None
+      if admission["mode"] == "speculative_admitted" and remaining > 1:
+         # The last token of a request is always an ordinary terminal DECODE, so a
+         # VERIFY never has to release KV and never overshoots ``max_new_tokens``.
+         proposal = controller.propose(request_id, context, min(remaining - 1, controller.policy.width))
+      if proposal is None:
+         controller.note_decode_round(request_id)
+         return self.decode_one_distributed(request_id)
+      first = manifest.ordered_hops[0]
+      final = manifest.ordered_hops[-1]
+      with record.lock:
+         current = (
+            record.manifest.path_id,
+            record.manifest.path_attempt,
+            record.path_generation,
+            len(record.generated_token_ids),
+         )
+         if record.status != "DECODING" or current != dispatch_key or record.decode_dispatched == dispatch_key:
+            stale = True
+         else:
+            stale = False
+            record.decode_dispatched = dispatch_key
+            record.verify_round = (dispatch_key, proposal)
+      if stale:
+         controller.abandon(request_id, len(proposal))
+         return self.decode_one_distributed(request_id)
+      header = HopHeader(
+         request_id=record.request.request_id,
+         path_id=manifest.path_id,
+         path_attempt=manifest.path_attempt,
+         phase="VERIFY",
+         token_index=token_index,
+         hop_index=0,
+         source_placement_id=final.placement_id,
+         destination_placement_id=first.placement_id,
+         topology_version=manifest.topology_version,
+         idempotency_key=hop_idempotency_key(
+            request_id=record.request.request_id,
+            path_id=manifest.path_id,
+            path_attempt=manifest.path_attempt,
+            phase="VERIFY",
+            token_index=token_index,
+            hop_index=0,
+         ),
+         # A VERIFY carries its span (pending token + candidates) in this field.
+         prefill_chunk_token_count=1 + len(proposal),
+      )
+      dispatched = self.relay.dispatch_if_current(
+         path_id=manifest.path_id,
+         path_attempt=manifest.path_attempt,
+         generation=generation,
+         sender=lambda: self.transport.send_hop(
+            header,
+            encode_token_ids((context[-1], *proposal)),
+         ),
+      )
+      if not dispatched:
+         with record.lock:
+            if record.verify_round is not None and record.verify_round[0] == dispatch_key:
+               record.verify_round = None
+            if record.decode_dispatched == dispatch_key:
+               record.decode_dispatched = None
+         controller.abandon(request_id, len(proposal))
+      return dispatched
+
+   def receive_verify_event(
+      self,
+      event: Any,
+      *,
+      source_node_id: str | None = None,
+   ) -> bool:
+      """Commit the target-authoritative result of the outstanding VERIFY, exactly once.
+
+      A late, stale, duplicate or foreign event is refused without effect: it must
+      match the outstanding round's path, attempt, generation and committed count.
+      """
+
+      record = self._requests.get(event.request_id)
+      controller = self.a11_controller
+      if record is None or controller is None:
+         return False
+      with record.lock:
+         round_ = record.verify_round
+         manifest = record.manifest
+         token_index = len(record.generated_token_ids)
+         if (
+            record.status != "DECODING"
+            or round_ is None
+            or event.path_id != manifest.path_id
+            or event.path_attempt != manifest.path_attempt
+            or event.token_index != token_index
+            or round_[0] != (manifest.path_id, manifest.path_attempt, record.path_generation, token_index)
+            or len(event.decisions) != len(round_[1]) + 1
+         ):
+            return False
+         if source_node_id is not None and not self._final_hop_origin_matches_locked_path(
+            record,
+            source_node_id,
+         ):
+            return False
+         record.verify_round = None
+         context = record.request.prompt_token_ids + tuple(record.generated_token_ids)
+         result = controller.complete_round(
+            record.request.request_id,
+            context=context,
+            candidates=round_[1],
+            decisions=event.decisions,
+         )
+         committed = result.committed[: max(0, record.request.max_new_tokens - token_index)]
+         record.generated_token_ids.extend(committed)
+      for offset, token_id in enumerate(committed):
+         record.client_sink.emit(token_index + offset, token_id)
+      should_cleanup = False
+      with record.lock:
+         if record.status != "DECODING":
+            return True
+         if len(record.generated_token_ids) >= record.request.max_new_tokens:
+            record.state_machine.transition(
+               "COMPLETED",
+               path_attempt=record.manifest.path_attempt,
+            )
+            should_cleanup = True
+      if should_cleanup:
+         self._cleanup_record(record)
+      else:
+         self._a7_committed(record)
+      return True
+
+   def _path_backends(self, record: RequestRecord) -> tuple[str, ...]:
+      placements = {
+         placement.placement_id: placement
+         for stage in record.graph.stages
+         for placement in stage.placements
+      }
+      return tuple(
+         placements[hop.placement_id].runtime_backend
+         for hop in record.manifest.ordered_hops
+         if hop.placement_id in placements
+      )
+
+   def _remaining_request_budget_ms(self, record: RequestRecord) -> float:
+      """The request's own SLO budget left: TTFT plus TPOT for every output token."""
+
+      request = record.request
+      budget = max(0.0, request.target_ttft_ms) + request.max_new_tokens * max(
+         0.0, request.target_tpot_ms
+      )
+      elapsed = max(0.0, (self.clock.now() - request.admitted_at) * 1000.0)
+      return budget - elapsed
+
    @staticmethod
    def _await_decode_progress(
       record: RequestRecord,
@@ -1329,8 +1524,12 @@ class EntryCoordinator:
          if record.cleaned_up:
             return
          record.cleaned_up = True
+         record.verify_round = None
          manifest = record.manifest
          status = record.status
+      speculation = self.a11_controller
+      if speculation is not None:
+         speculation.release(record.request.request_id)
       self.capacity.release(
          tuple(hop.reservation_id for hop in manifest.ordered_hops)
       )

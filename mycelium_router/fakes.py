@@ -18,6 +18,7 @@ from mycelium_router.contracts import (
    RuntimeBatch,
    RuntimeResult,
    TokenEvent,
+   VerifyEvent,
 )
 
 
@@ -153,6 +154,7 @@ class FakeTransportPort:
       self.failure_reports: list[FailureReport] = []
       self.token_events: list[TokenEvent] = []
       self.prefill_chunk_completions: list[PrefillChunkCompleted] = []
+      self.verify_events: list[VerifyEvent] = []
 
    def remember_entry(self, request_id: str, node_id: str) -> None:
       existing = self.entry_nodes.setdefault(request_id, node_id)
@@ -176,6 +178,9 @@ class FakeTransportPort:
 
    def send_token_event(self, event: TokenEvent) -> None:
       self.token_events.append(event)
+
+   def send_verify_event(self, event: VerifyEvent) -> None:
+      self.verify_events.append(event)
 
    def send_prefill_chunk_completed(
       self,
@@ -219,6 +224,9 @@ class InProcessMeshTransport:
    def send_token_event(self, event: TokenEvent) -> None:
       self.mesh.send_token_event(self.node_id, event)
 
+   def send_verify_event(self, event: VerifyEvent) -> None:
+      self.mesh.send_verify_event(self.node_id, event)
+
    def send_prefill_chunk_completed(
       self,
       event: PrefillChunkCompleted,
@@ -242,6 +250,7 @@ class InProcessMesh:
       self.path_cancellations: list[tuple[str, PathCancellation]] = []
       self.failure_reports: list[tuple[str, FailureReport]] = []
       self.token_events: list[tuple[str, TokenEvent]] = []
+      self.verify_events: list[tuple[str, VerifyEvent]] = []
       self.prefill_chunk_completions: list[
          tuple[str, PrefillChunkCompleted]
       ] = []
@@ -409,6 +418,17 @@ class InProcessMesh:
       self.token_events.append((source_node_id, event))
       entry = self._entry_router(event.request_id)
       entry.receive_token_event(event, source_node_id=source_node_id)
+
+   def send_verify_event(
+      self,
+      source_node_id: str,
+      event: VerifyEvent,
+   ) -> None:
+      if source_node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_source:{source_node_id}")
+      self.verify_events.append((source_node_id, event))
+      entry = self._entry_router(event.request_id)
+      entry.receive_verify_event(event, source_node_id=source_node_id)
 
    def send_prefill_chunk_completed(
       self,

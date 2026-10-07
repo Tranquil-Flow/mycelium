@@ -44,6 +44,7 @@ from mycelium_router.contracts import (
     ProgressivePrefillContext,
     ProgressivePrefillMessage,
     TokenEvent,
+    VerifyEvent,
 )
 from mycelium_router.wire import (
     ROUTER_WIRE_PROTOCOL,
@@ -2888,6 +2889,9 @@ class IrohTransport:
         if isinstance(message, TokenEvent):
             router.receive_token_event(message, source_node_id=source_node_id)
             return
+        if isinstance(message, VerifyEvent):
+            router.receive_verify_event(message, source_node_id=source_node_id)
+            return
         if isinstance(message, PrefillChunkCompleted):
             router.receive_prefill_chunk_completed(
                 message,
@@ -3284,6 +3288,12 @@ class IrohTransport:
             encode_frame(event),
         )
 
+    def send_verify_event(self, event: VerifyEvent) -> None:
+        self._send_or_dispatch(
+            self._entry_node(event.request_id),
+            encode_frame(event),
+        )
+
     def send_prefill_chunk_completed(self, event: PrefillChunkCompleted) -> None:
         self._send_or_dispatch(
             self._entry_node(event.request_id),
@@ -3350,13 +3360,14 @@ class IrohTransport:
                 message.build.ordered_hops[0].placement_id,
             )
             defer_remote_forward = destination != entry_node
-        if isinstance(message, TokenEvent):
+        if isinstance(message, (TokenEvent, VerifyEvent)):
             with self._forward_queue.all_tasks_done:
                 ordered_forward_pending = self._forward_queue.unfinished_tasks > 0
             with self._state_lock:
                 response_would_cycle = self._dispatcher_phase in {
                     "dispatching:HopHeader",
                     "dispatching:TokenEvent",
+                    "dispatching:VerifyEvent",
                 }
             # A dispatcher draining runtime batches between frames must not wait
             # for a peer's dispatch ACK either: the peer may be waiting on it.
