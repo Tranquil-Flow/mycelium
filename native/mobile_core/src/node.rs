@@ -114,6 +114,13 @@ pub fn now_s() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
 }
 
+/// Seconds on this process's monotonic clock: the stage node's relay clock
+/// (a wall-clock step never ages or revives a tombstone).
+pub fn monotonic_s() -> f64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_secs_f64()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
 pub struct NodeError(pub String);
@@ -193,6 +200,10 @@ struct Shared {
     shell_metrics: Option<(evidence::Metrics, f64)>,
     /// The background A2 acquisition of a v2 manifest's objects, if running.
     acquisition: Option<Acquisition>,
+    /// Router participation of a v2 (Qwen2) stage: locked paths, hop ledger
+    /// and path tables. A route change forgets the live paths and the ledger
+    /// but keeps the tables (fail closed: no cancelled attempt revives).
+    stage_node: Option<crate::stage_node::StageNode>,
 }
 
 /// One background acquisition: which manifest, and how to stop it.
@@ -337,6 +348,7 @@ impl NodeCore {
                 route: None,
                 shell_metrics: None,
                 acquisition: None,
+                stage_node: None,
             })),
             http,
             incarnation: new_incarnation()?,
@@ -370,7 +382,8 @@ impl NodeCore {
         self.rt.spawn({
             let t = self.transport.clone();
             async move {
-                let _ = t.spawn_accept(tx).await;
+                // Python transport semantics: acknowledge after dispatch.
+                let _ = t.spawn_accept_dispatch(tx).await;
             }
         });
         self.rt.spawn(serve_inbox(rx, self.shared.clone(), self.transport.clone()));
@@ -911,6 +924,9 @@ async fn drop_expired_route(shared: &Arc<Mutex<Shared>>, transport: &NodeTranspo
 /// Forget the applied route: stage unloaded, nothing forwarded.
 fn clear_route(s: &mut Shared) -> Option<AppliedRoute> {
     let old = s.route.take();
+    if let Some(stage_node) = s.stage_node.as_mut() {
+        stage_node.clear();
+    }
     if old.is_some() {
         s.stage = None;
         s.forward = None;
@@ -1264,11 +1280,38 @@ impl Supervisor {
     }
 }
 
-/// Execute admitted HopHeader frames carrying MYAC float32 activations on the
-/// loaded stage and forward the result to the configured next peer.
+/// Dispatch admitted Router frames. A v2 (Qwen2) stage is a stage-only
+/// Router participant ([`crate::stage_node::StageNode`]): every frame is
+/// decided by the node, the verdict acknowledges (or refuses) the delivery,
+/// and the frames it sends go to the peers its locked path names. A v1 (GPT-2
+/// reference) stage keeps the device-checkpoint demo forwarding.
 async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>, transport: NodeTransport) {
-    while let Some(inbound) = rx.recv().await {
+    while let Some(mut inbound) = rx.recv().await {
         drop_expired_route(&shared, &transport).await;
+        let v2 = shared.lock().unwrap().stage.as_ref().is_some_and(|stage| stage.backend() == crate::qwen2::QWEN2_BACKEND);
+        if v2 {
+            let reply = inbound.reply.take();
+            let shared_task = shared.clone();
+            let step = tokio::task::spawn_blocking(move || stage_step(&shared_task, &inbound)).await;
+            let verdict = match step {
+                Ok(Ok(step)) => {
+                    for send in step.sends {
+                        tokio::spawn(send_with_retry(transport.clone(), shared.clone(), send));
+                    }
+                    if step.ack { Ok(()) } else { Err(if step.reason.is_empty() { "refused".to_owned() } else { step.reason }) }
+                }
+                Ok(Err(code)) => Err(code),
+                Err(_) => Err("router_dispatch_failed".to_owned()),
+            };
+            if let Some(reply) = reply {
+                let _ = reply.send(verdict);
+            }
+            continue;
+        }
+        if let Some(reply) = inbound.reply.take() {
+            // The demo path acknowledges on receipt, as before.
+            let _ = reply.send(Ok(()));
+        }
         // The owner's quota bounds how hot the device may run while serving.
         let ceiling = {
             let s = shared.lock().unwrap();
@@ -1333,6 +1376,86 @@ async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>
                 shared.lock().unwrap().status.last_error = Some(format!("forward_failed:{}", e.0));
             }
         }
+    }
+}
+
+/// One Router frame through the stage node, under the shared lock, on the
+/// blocking pool (the stage run is CPU work). The owner's thermal ceiling
+/// turns an admitted hop into a `thermal_ceiling_reached` FailureReport.
+fn stage_step(shared: &Arc<Mutex<Shared>>, inbound: &Inbound) -> Result<crate::stage_node::Step, String> {
+    let ceiling = {
+        let s = shared.lock().unwrap();
+        s.invitation.as_ref().and_then(|inv| inv["quota"]["thermal_ceiling_c"].as_f64())
+    };
+    let hot = thermal_refusal(ceiling, &current_platform_metrics(shared));
+    let mut guard = shared.lock().unwrap();
+    let s = &mut *guard;
+    s.status.frames_received += 1;
+    if s.stage_node.is_none() {
+        let local = s.membership.as_ref().map(|m| m.cfg.node_id.clone()).ok_or("not_a_member")?;
+        s.stage_node = Some(crate::stage_node::StageNode::new(&local));
+    }
+    let stage_node = s.stage_node.as_mut().expect("installed above");
+    let stage = s.stage.as_mut().ok_or("stage_not_loaded")?;
+    let started = std::time::Instant::now();
+    let mut executed = false;
+    let step = stage_node.on_frame_at(monotonic_s(), &inbound.from_node, &inbound.frame, &mut |path, hop, payload| {
+        executed = true;
+        if hot.is_some() {
+            return Err("thermal_ceiling_reached".into());
+        }
+        let activation = wire::Activation::decode(payload).map_err(|e| e.0.to_string())?;
+        let (sequence, hidden_size, hidden) = activation.to_flat_f32().map_err(|e| e.0.to_string())?;
+        if hidden_size != path.hidden_size {
+            return Err("request_hidden_shape_invalid".into());
+        }
+        let call = StageCall {
+            request_id: &hop.request_id,
+            path_id: &hop.path_id,
+            path_attempt: hop.path_attempt.max(0) as u64,
+            phase: StagePhase::parse(&hop.phase).map_err(|e| e.0)?,
+            token_index: hop.token_index,
+            position: hop.position as u64,
+            sequence,
+            hidden: &hidden,
+        };
+        let out = stage.execute(&call).map_err(|e| e.0)?;
+        wire::Activation::from_flat_f32(out.sequence, out.hidden_size, &out.values).encode().map_err(|e| e.0.to_string())
+    });
+    if let Some((request_id, path_id)) = &step.released {
+        stage.release_path(request_id, path_id);
+    }
+    if executed {
+        if step.disposition == Some("FORWARDED") {
+            s.status.frames_executed += 1;
+            s.status.last_execute_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
+        } else if !step.reason.is_empty() {
+            s.status.last_error = Some(step.reason.clone());
+        }
+    }
+    Ok(step)
+}
+
+/// Deliver one frame the stage node sent to its peer node, retrying like the
+/// sidecar's outbound worker until acknowledged, refused for rotation or
+/// replay collision, or out of attempts.
+async fn send_with_retry(transport: NodeTransport, shared: Arc<Mutex<Shared>>, send: crate::stage_node::Send) {
+    let mut delay = Duration::from_millis(250);
+    for _ in 0..5 {
+        let Some(peer) = transport.peer_for_node(&send.to).await else {
+            shared.lock().unwrap().status.last_error = Some(format!("route_peer_unknown:{}", send.to));
+            return;
+        };
+        match transport.send(peer.addr.clone(), peer.generation, &send.frame).await {
+            Ok(_) => return,
+            Err(e) if e.0 == "peer_rotated" || e.0 == "replay_collision" => {
+                shared.lock().unwrap().status.last_error = Some(format!("forward_refused:{}", e.0));
+                return;
+            }
+            Err(e) => shared.lock().unwrap().status.last_error = Some(format!("forward_failed:{}", e.0)),
+        }
+        tokio::time::sleep(delay).await;
+        delay = (delay * 2).min(Duration::from_secs(4));
     }
 }
 
@@ -1412,5 +1535,135 @@ mod tests {
         assert_eq!(shared.lock().unwrap().status.artifact_state.as_deref(), Some("promoted"));
         core.shutdown();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The golden stage's output: `0.5 * ((i % 17) - 8) / 8` per value.
+    struct GoldenStage {
+        released: Arc<Mutex<Vec<(String, String)>>>,
+    }
+
+    impl StageRuntime for GoldenStage {
+        fn backend(&self) -> &'static str {
+            crate::qwen2::QWEN2_BACKEND
+        }
+        fn assignment_id(&self) -> &str {
+            "assignment-golden"
+        }
+        fn stage_id(&self) -> &str {
+            "stage-golden"
+        }
+        fn hidden_size(&self) -> usize {
+            8
+        }
+        fn execute(&mut self, call: &StageCall<'_>) -> Result<crate::runtime::StageOutput, crate::runtime::RuntimeError> {
+            let values = (0..call.sequence * 8).map(|i| 0.5 * (((i % 17) as f32) - 8.0) / 8.0).collect();
+            Ok(crate::runtime::StageOutput { sequence: call.sequence, hidden_size: 8, values })
+        }
+        fn release_all(&mut self) -> usize {
+            0
+        }
+        fn release_path(&mut self, request_id: &str, path_id: &str) -> usize {
+            self.released.lock().unwrap().push((request_id.to_owned(), path_id.to_owned()));
+            1
+        }
+    }
+
+    fn golden(name: &str) -> Vec<u8> {
+        std::fs::read(format!("{}/../../contracts/phone-stage-wire-golden/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
+    }
+
+    /// A v2 stage served end to end over real loopback iroh endpoints: the
+    /// entry's frames reach `serve_inbox` through the dispatch transport, the
+    /// stage node's verdict is the transport acknowledgement (a refused
+    /// registration is returned to the sender), the forwarded hop reaches the
+    /// final node byte for byte, a hot device answers with a
+    /// `thermal_ceiling_reached` FailureReport to the entry, a cancellation
+    /// releases the runtime's replay results, and a route change keeps the
+    /// path tables.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn serve_inbox_runs_the_stage_node_over_the_transport() {
+        use crate::transport::{PeerBinding, Reachability, parse_endpoint_id};
+        let phone = NodeTransport::bind(&[21; 32], Reachability::LocalOnly).await.unwrap();
+        let entry = NodeTransport::bind(&[22; 32], Reachability::LocalOnly).await.unwrap();
+        let last = NodeTransport::bind(&[23; 32], Reachability::LocalOnly).await.unwrap();
+        let id = |t: &NodeTransport| parse_endpoint_id(&t.endpoint_id()).unwrap();
+        phone
+            .configure_route_peers(vec![
+                PeerBinding { generation: 1, node_id: "node-mac-entry".into(), addr: entry.addr() },
+                PeerBinding { generation: 1, node_id: "node-mac-final".into(), addr: last.addr() },
+            ])
+            .await;
+        entry.configure_peer(id(&phone), 1).await;
+        last.configure_peer(id(&phone), 1).await;
+        let (entry_tx, mut entry_rx) = mpsc::channel(8);
+        let (last_tx, mut last_rx) = mpsc::channel(8);
+        let _entry_accept = entry.spawn_accept(entry_tx);
+        let _last_accept = last.spawn_accept(last_tx);
+
+        let released = Arc::new(Mutex::new(Vec::new()));
+        let shared = Arc::new(Mutex::new(Shared {
+            observation: ObservationCursor { window_started_at: now_s(), frames_at_window_start: 0, evidence_generation: 0 },
+            membership: None,
+            supervisor_running: false,
+            status: NodeStatus::default(),
+            session: None,
+            invitation: Some(json!({"quota": {"thermal_ceiling_c": 45.0}})),
+            stage: Some(Box::new(GoldenStage { released: released.clone() })),
+            forward: None,
+            route: None,
+            shell_metrics: None,
+            acquisition: None,
+            stage_node: Some(crate::stage_node::StageNode::new("node-phone")),
+        }));
+        let (tx, rx) = mpsc::channel(8);
+        let _accept = phone.spawn_accept_dispatch(tx);
+        tokio::spawn(serve_inbox(rx, shared.clone(), phone.clone()));
+        let quiet = |rx: &mut mpsc::Receiver<crate::transport::Inbound>| rx.try_recv().is_err();
+
+        // Registration: accepted from the entry; a manifest the final node
+        // relays for a path the phone does not hold is refused to the sender.
+        entry.send(phone.addr(), 1, &golden("01-manifest-locked.bin")).await.unwrap();
+        let mut other = wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap();
+        other.body["path_id"] = json!("path-other");
+        other.body["manifest"]["path_id"] = json!("path-other");
+        other.body["build"]["path_id"] = json!("path-other");
+        let other = wire::encode_frame("ManifestLocked", &other.body, &other.payload).unwrap();
+        assert_eq!(last.send(phone.addr(), 1, &other).await.unwrap_err().0, "manifest_registration_rejected");
+
+        // A hop runs and its forward reaches the final node byte for byte.
+        entry.send(phone.addr(), 1, &golden("02-hop-prefill-in.bin")).await.unwrap();
+        let forwarded = tokio::time::timeout(Duration::from_secs(10), last_rx.recv()).await.unwrap().unwrap();
+        assert_eq!(forwarded.from_node, id(&phone).to_string());
+        assert_eq!(forwarded.frame, wire::decode_frame(&golden("03-hop-prefill-forward.bin")).unwrap());
+        // A redelivery is answered from the ledger: nothing runs or is resent.
+        entry.send(phone.addr(), 1, &golden("02-hop-prefill-in.bin")).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(quiet(&mut last_rx));
+        assert_eq!(shared.lock().unwrap().status.frames_executed, 1);
+
+        // Hot device: the admitted hop becomes a FailureReport to the entry.
+        let mut hot = evidence::Metrics::new();
+        hot.insert("battery_temperature_celsius".into(), Some(50.0));
+        shared.lock().unwrap().shell_metrics = Some((hot, now_s()));
+        entry.send(phone.addr(), 1, &golden("04-hop-decode-in.bin")).await.unwrap();
+        let report = tokio::time::timeout(Duration::from_secs(10), entry_rx.recv())
+            .await
+            .unwrap_or_else(|_| {
+                let hot = thermal_refusal(Some(45.0), &current_platform_metrics(&shared));
+                let s = shared.lock().unwrap();
+                panic!("no FailureReport; last_error={:?} received={} executed={} hot={hot:?}", s.status.last_error, s.status.frames_received, s.status.frames_executed)
+            })
+            .unwrap();
+        assert_eq!(report.frame.message_type, "FailureReport");
+        assert_eq!(report.frame.body["reason"], "thermal_ceiling_reached");
+        assert_eq!(report.frame.body["node_id"], "node-phone");
+        assert!(quiet(&mut last_rx));
+
+        // The entry's cancellation releases the runtime's replay results.
+        entry.send(phone.addr(), 1, &golden("08-path-cancellation.bin")).await.unwrap();
+        assert_eq!(*released.lock().unwrap(), vec![("request-phone-golden".to_owned(), "path-phone-golden".to_owned())]);
+        // A route change forgets live paths but never revives the cancelled attempt.
+        clear_route(&mut shared.lock().unwrap());
+        assert_eq!(entry.send(phone.addr(), 1, &golden("01-manifest-locked.bin")).await.unwrap_err().0, "manifest_registration_rejected");
     }
 }
