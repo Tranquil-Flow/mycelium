@@ -122,7 +122,7 @@ def _source_target(state: Any) -> SourceProcessGroupTarget:
     )
 
 
-def _measure_with_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, qualification_expired: bool) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], Any]:
+def _measure_with_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, qualification_expired: bool, kill_after_committed: int = 2) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], Any]:
     # Long enough that the measured request is still decoding when the
     # measurement (HTTP evidence reads, freeze, kill) acts on the ~ms local model.
     monkeypatch.setattr(harness, "_MAX_NEW", _MAX_NEW)
@@ -138,7 +138,7 @@ def _measure_with_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, qu
             driver=_RouteDriver(state),
             evidence=evidence,
             fault=_source_target(state),
-            settings=MeasurementSettings(kill_after_committed=2, settle_timeout_s=10.0, result_timeout_s=20.0, terminal_timeout_s=120.0),
+            settings=MeasurementSettings(kill_after_committed=kill_after_committed, settle_timeout_s=10.0, result_timeout_s=20.0, terminal_timeout_s=120.0),
         )
         plan = gate.build_plan(CANDIDATE)
         case = gate.INCOMPATIBLE if qualification_expired else gate.POSITIVE
@@ -194,6 +194,29 @@ def test_plug_in_measures_the_positive_cutover_from_product_evidence(tmp_path: P
     assert observations["fault"]["kill_condition"] == "acknowledged_equals_committed"
     assert observations["detection_latency_ms"] is not None
     assert -50 <= observations["detection_latency_ms"] < 1_000
+    assert len(scoped) == 1
+
+
+@needs_sidecar
+def test_plug_in_measures_a_final_decode_step_cutover_from_product_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The source is killed with only the final decode step left (11 of 12 committed)."""
+
+    record, observations, plan, scoped = _measure_with_harness(tmp_path, monkeypatch, qualification_expired=False, kill_after_committed=_MAX_NEW - 1)
+    failures = gate.evaluate_case(record, plan)
+    assert set(failures) - _HARNESS_ONLY <= {"added_tpot"}, failures
+    assert record["outcome"] == "fenced_kv_successor", record
+    assert record["kv_continuity_claimed"] is True
+    assert record["committed_before_failure"] == record["acknowledged_before_failure"] == _MAX_NEW - 1
+    assert record["successor_recovery_prefill_operations"] == 0
+    assert record["prefix_tokens_sent_to_successor"] == 0
+    assert record["successor_decode_operations"] == 1
+    assert record["reference_parity"] is True
+    assert record["duplicate_tokens"] == record["missing_tokens"] == 0
+    assert record["publishers"] == record["terminal_results"] == 1
+    assert record["cleanup"] == {
+        harness._ENTRY_NODE_ID: {name: 0 for name in gate._CLEANUP_FIELDS}
+    }
+    assert observations["fault"]["kill_condition"] == "acknowledged_equals_committed"
     assert len(scoped) == 1
 
 

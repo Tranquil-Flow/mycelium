@@ -214,13 +214,23 @@ def test_a_token_and_its_acknowledgement_landing_under_the_freeze_settle_without
     assert fields["outcome"] == "fenced_kv_successor"
 
 
-def test_the_final_decode_step_is_never_killed() -> None:
-    """Every stage releases its KV on the terminal hop, so the final step is not a cutover point."""
+def test_the_final_decode_step_is_killed_and_cut_over() -> None:
+    """Surviving stages retain their terminal-hop KV, so the final step is a cutover point."""
 
     source = _Source()
-    fault = _Fault(source)
+    fields, observations = measure(driver=_Driver(source, first_settled=_TOKENS - 1), evidence=_Evidence(source), fault=_Fault(source), settings=_SETTINGS)
+    assert observations["fault"]["kill_condition"] == "acknowledged_equals_committed"
+    assert source.kill_watermark == (_TOKENS - 1, _TOKENS - 1)
+    assert fields["outcome"] == "fenced_kv_successor"
+    assert fields["committed_before_failure"] == fields["acknowledged_before_failure"] == _TOKENS - 1
+    assert source.decoded == 1
+
+
+def test_a_request_with_every_token_committed_is_never_killed() -> None:
+    """Nothing is left to decode: there is no source loss to measure."""
+
+    source = _Source()
     with pytest.raises(MeasurementRefused) as caught:
-        measure(driver=_Driver(source, first_settled=_TOKENS - 1), evidence=_Evidence(source), fault=fault, settings=_SETTINGS)
-    # Unsettled until the request ends (or the freeze budget runs out): no kill.
+        measure(driver=_Driver(source, first_settled=_TOKENS), evidence=_Evidence(source), fault=_Fault(source), settings=_SETTINGS)
     assert caught.value.code in {"a7_request_ended_before_fault", "a7_watermark_not_settled"}
     assert source.kill_watermark is None

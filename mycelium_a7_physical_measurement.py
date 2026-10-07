@@ -930,7 +930,8 @@ def _measure(
             },
         )
     reference = _output(baseline_tokens)
-    if len(reference) < settings.kill_after_committed + 2:
+    # At least the final decode step must remain for the successor.
+    if len(reference) < settings.kill_after_committed + 1:
         raise MeasurementRefused("a7_baseline_too_short")
     baseline_tpot = _tpot_ms(baseline_tokens)
 
@@ -1007,11 +1008,11 @@ def _measure(
     kill_condition: str | None = None
     pause_attempts = 0
     paused_ms = 0.0
-    # The last killable watermark leaves at least two reference tokens to the
-    # successor.  On the final decode step every stage has already executed
-    # the terminal hop and released its KV (normal completion), so a source
-    # loss there can never be a fenced KV-successor cutover.
-    last_killable = len(reference) - 2
+    # The last killable watermark leaves one reference token to the successor:
+    # the final decode step.  Every stage that already executed its terminal
+    # hop retains that KV until the entry's terminal release, so a source lost
+    # there is still a fenced KV-successor cutover.
+    last_killable = len(reference) - 1
     while pause_attempts < settings.max_pause_attempts and not running.done.is_set():
         # Freeze right after an unfrozen read shows a settled watermark: a
         # freeze that lands while an acknowledgement still waits on the
