@@ -808,7 +808,17 @@ class EntryCoordinator:
       self._a7_await_acknowledged(record)
       with record.lock:
          if record.status != "DECODING":
-            return False
+            # A recovery (fenced A7 KV-successor cutover or A6 replay) that a
+            # liveness report began between two driver decode commands owns
+            # the pending step: the successor re-sends it, or the replay
+            # prefill produces it.  Report it in flight so the driver waits
+            # for that token or a terminal status instead of reading a
+            # non-terminal recovery state as a stalled decode.
+            # Only a request that already decoded can be in recovery here;
+            # an initial prefill has committed no token yet.
+            return record.status in {"PREFILL", "LOCKED"} and bool(
+               record.generated_token_ids
+            )
          token_index = len(record.generated_token_ids)
          manifest = record.manifest
          first = manifest.ordered_hops[0]

@@ -154,3 +154,58 @@ def test_report_lost_source_needs_a_decoding_request_through_that_placement(tmp_
    assert harness.entry.request_status(request_id) == "DECODING"
    _finish(harness, request_id)
    assert harness.entry.entry.report_lost_source(request_id, harness.source_id) is False
+
+
+def test_a_driver_decode_landing_mid_cutover_waits_for_the_successor_token(tmp_path: Path) -> None:
+   """A liveness-reported cutover can begin between two driver decode commands.
+
+   The decode the driver sends while the entry is mid-cutover (request in
+   recovery, not DECODING) must report the step in flight: the successor
+   re-sends it.  Reading the recovery state as "nothing dispatched" made the
+   physical route raise ``route_decode_stalled`` after a successful cutover.
+   """
+
+   harness = _Harness(tmp_path)
+   request_id = "request:a7-driver-mid-cutover"
+   sink = InMemoryClientSink()
+   _decode_until(harness, request_id, sink, 2)
+   harness.source_port.killed = True
+   observed: list[tuple[str, bool, int]] = []
+   real_cutover = harness.controller.cutover
+
+   def cutover(**kwargs):
+      status = harness.entry.request_status(request_id)
+      in_flight = harness.entry.decode_one_distributed(request_id)
+      observed.append((status, in_flight, len(sink.token_ids)))
+      return real_cutover(**kwargs)
+
+   harness.controller.cutover = cutover
+   assert harness.controller.accept_source_lost(request_id, "node-b")["accepted"] is True
+   assert _wiring(harness).cut_over_lost_source(harness.entry, request_id, "node-b") is True
+
+   # The mid-cutover decode dispatched nothing on the dead path and reported
+   # the step in flight; the successor's re-sent step produced its token.
+   assert observed == [("PREFILL", True, 2)]
+   assert len(sink.token_ids) == 3
+   _finish(harness, request_id)
+   record = harness.entry.entry.get_request(request_id)
+   assert record.kv_successor_cutover["outcome"] == "fenced_kv_successor"
+   assert harness.entry.request_status(request_id) == "COMPLETED"
+   assert sink.token_ids == _reference_tokens(harness.case)
+   assert sink.token_indexes == list(range(_MAX_NEW))
+
+
+def test_a_decode_before_the_first_token_is_not_reported_in_flight(tmp_path: Path) -> None:
+   harness = _Harness(tmp_path)
+   request_id = "request:a7-no-token-yet"
+   record_type = harness.entry.entry
+   sink = InMemoryClientSink()
+   _decode_until(harness, request_id, sink, 1)
+   record = record_type.get_request(request_id)
+   saved = list(record.generated_token_ids)
+   with record.lock:
+      record.generated_token_ids.clear()
+      record.state_machine.begin_recovery(path_attempt=record.state_machine.path_attempt + 1)
+   assert harness.entry.decode_one_distributed(request_id) is False
+   with record.lock:
+      record.generated_token_ids.extend(saved)
