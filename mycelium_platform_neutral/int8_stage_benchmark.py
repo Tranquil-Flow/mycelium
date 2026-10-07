@@ -372,6 +372,13 @@ def run_paired_benchmark(
         },
         "packed_state_unchanged": packed_before == packed_after,
         "candidate_rate_drift": (last / first) if first else 0.0,
+        # Component-sum prediction of each candidate request's decode time versus
+        # the observed end-to-end decode time, per generated token.
+        "component_reconciliation_error_ms": statistics.fmean(
+            abs(sum(r["components_ms"]["decode"].values()) - r["decode_ms"]) / r["decode_tokens"]
+            for r in modes["candidate"]
+            if r["decode_tokens"]
+        ) if any(r["decode_tokens"] for r in modes["candidate"]) else 0.0,
         "component_means_ms": {mode: component_means(mode) for mode in modes},
     }
 
