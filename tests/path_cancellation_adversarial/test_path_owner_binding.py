@@ -524,9 +524,26 @@ def test_a_pending_cancellation_without_a_slot_stays_pending() -> None:
    assert len(relay._tombstones_by_creator) <= relay_module._MAX_TOMBSTONE_CREATORS
 
 
+def _physical_delivery_budget_seconds() -> float:
+   """physical_inference_node.py: the iroh delivery budget of physical nodes,
+   min(command_timeout, _MAX_IROH_DELIVERY_TIMEOUT_SECONDS), with the route's
+   NODE_COMMAND_TIMEOUT_SECONDS as the command timeout."""
+   import re
+   from pathlib import Path
+
+   from mycelium_live.route import NODE_COMMAND_TIMEOUT_SECONDS
+
+   source = (Path(__file__).resolve().parents[2] / "physical_inference_node.py").read_text()
+   match = re.search(r"^_MAX_IROH_DELIVERY_TIMEOUT_SECONDS = ([0-9.]+)$", source, re.MULTILINE)
+   assert match, "physical_inference_node.py defines _MAX_IROH_DELIVERY_TIMEOUT_SECONDS"
+   assert re.search(r"delivery_timeout_seconds=min\(\s*self\.command_timeout,\s*_MAX_IROH_DELIVERY_TIMEOUT_SECONDS", source)
+   return min(float(NODE_COMMAND_TIMEOUT_SECONDS), float(match.group(1)))
+
+
 def test_the_retention_horizon_outlasts_the_delivery_and_dedupe_budgets() -> None:
-   """Records are evicted only past the retention horizon; it must outlast a
-   default delivery budget and the scheduler's idempotency retention."""
+   """Records are evicted only past the retention horizon; it must outlast
+   the default and the physical-route delivery budgets and the scheduler's
+   idempotency retention."""
    import inspect
 
    from mycelium_router import relay as relay_module
@@ -534,13 +551,16 @@ def test_the_retention_horizon_outlasts_the_delivery_and_dedupe_budgets() -> Non
 
    delivery = inspect.signature(IrohTransport.__init__).parameters["delivery_timeout_seconds"].default
    assert relay_module._TOMBSTONE_RETENTION_SECONDS > delivery
+   assert relay_module._TOMBSTONE_RETENTION_SECONDS > _physical_delivery_budget_seconds()
    assert relay_module._TOMBSTONE_RETENTION_SECONDS > RouterConfig().idempotency_retention_seconds
 
 
 def test_the_sidecar_outbound_deadline_is_below_the_retention_horizon() -> None:
    """A lost Python cancellation never lets the sidecar deliver a frame past
-   its own outbound deadline, and that deadline ends well inside the horizon,
-   so no honest delivery of a retired attempt outlives its tombstone."""
+   its own outbound deadline; that deadline outlasts the physical-route
+   delivery budget (the sidecar never ends a send Python still waits for) and
+   ends well inside the horizon, so no honest delivery of a retired attempt
+   outlives its tombstone."""
    import re
    from pathlib import Path
 
@@ -550,6 +570,7 @@ def test_the_sidecar_outbound_deadline_is_below_the_retention_horizon() -> None:
    match = re.search(r"pub const OUTBOUND_DELIVERY_DEADLINE: Duration = Duration::from_secs\((\d+)\);", source)
    assert match, "sidecar.rs defines OUTBOUND_DELIVERY_DEADLINE in whole seconds"
    deadline = int(match.group(1))
+   assert deadline > _physical_delivery_budget_seconds()
    assert deadline * 2 <= relay_module._TOMBSTONE_RETENTION_SECONDS
    assert re.search(r"timeout_at\(\s*deadline,\s*send_outbound_once\(", source), "every send attempt is bounded by it"
 

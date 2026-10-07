@@ -69,17 +69,21 @@ const MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 /// Hard lifetime of one outbound send inside the sidecar, from enqueue.
 ///
 /// The outbound worker retries until the frame is delivered or Python cancels
-/// it. Python cancels when its own delivery budget runs out (default 5 s, the
-/// largest configured anywhere is 30 s), but a cancellation can be lost (a
-/// wedged or disconnected client). Without a bound of its own a queued frame
-/// could then be delivered arbitrarily late, past the relay's 600 s
-/// tombstone retention horizon (`relay.py` `_TOMBSTONE_RETENTION_SECONDS`),
-/// after which a retired attempt's ManifestLocked could be admitted again.
-/// 120 s is four times the largest delivery budget and a fifth of that
-/// horizon; past it the send ends as `cancelled` whether or not Python's
-/// cancellation arrived. `tests/path_cancellation_adversarial` pins it below
-/// the horizon.
-pub const OUTBOUND_DELIVERY_DEADLINE: Duration = Duration::from_secs(120);
+/// it. Python cancels when its own delivery budget runs out. That budget is
+/// `min(command_timeout, _MAX_IROH_DELIVERY_TIMEOUT_SECONDS)` =
+/// `min(900, 240)` = 240 s on physical routes (`physical_inference_node.py`):
+/// a confirmed delivery acknowledges only after the receiver's dispatch,
+/// which for progressive prefill can run through slower downstream stages.
+/// A cancellation can be lost (a wedged or disconnected client), and without
+/// a bound of its own a queued frame could then be delivered arbitrarily
+/// late, past the relay's 600 s tombstone retention horizon
+/// (`relay.py` `_TOMBSTONE_RETENTION_SECONDS`), after which a retired
+/// attempt's ManifestLocked could be admitted again. 300 s is that 240 s
+/// budget plus a 60 s margin (the sidecar never ends a send Python is still
+/// waiting for) and half of the horizon; past it the send ends as
+/// `cancelled` whether or not Python's cancellation arrived.
+/// `tests/path_cancellation_adversarial` pins both relations.
+pub const OUTBOUND_DELIVERY_DEADLINE: Duration = Duration::from_secs(300);
 const CANCEL_CODE: VarInt = VarInt::from_u32(7);
 const REJECT_CODE: VarInt = VarInt::from_u32(8);
 const MAX_LOCAL_SESSIONS: usize = 16;
@@ -2793,8 +2797,10 @@ mod tests {
     fn outbound_deadline_is_bounded_below_the_relay_retention_horizon() {
         // relay.py _TOMBSTONE_RETENTION_SECONDS; the Python side pins the same
         // relation from the source of this constant.
-        assert!(OUTBOUND_DELIVERY_DEADLINE < Duration::from_secs(600));
-        assert!(OUTBOUND_DELIVERY_DEADLINE >= Duration::from_secs(30));
+        // physical_inference_node.py _MAX_IROH_DELIVERY_TIMEOUT_SECONDS is
+        // 240 s: never end a send Python is still waiting for.
+        assert!(OUTBOUND_DELIVERY_DEADLINE > Duration::from_secs(240));
+        assert!(OUTBOUND_DELIVERY_DEADLINE * 2 <= Duration::from_secs(600));
     }
 
     #[tokio::test]
