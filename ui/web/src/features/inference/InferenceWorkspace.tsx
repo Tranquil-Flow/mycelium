@@ -336,6 +336,9 @@ export function InferenceWorkspace({
             planner_policy_id: candidate.policy_id,
             attribution_scope: 'client_visible_planner_intent',
           },
+      // A11: the local preference is offered only for a qualified draft overlay
+      // (Settings); unstated otherwise, so the request stays target-only.
+      loadProductSettings().preferSpeculativeDecoding ? 'speculative_requested' : undefined,
     );
   };
 

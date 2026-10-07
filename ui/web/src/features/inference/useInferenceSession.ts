@@ -8,6 +8,7 @@ import {
   type InferenceSubmission,
   type ProductQualification,
   type QualificationBinding,
+  type SpeculationPreference,
 } from '../../app/contracts';
 import {
   InferenceClientError,
@@ -427,6 +428,7 @@ export interface InferenceSessionController extends InferenceSessionState {
     prompt: string,
     maxNewTokens: number,
     workloadAttribution?: WorkloadAttribution,
+    speculationPreference?: SpeculationPreference,
   ) => Promise<void>;
   readonly resume: () => Promise<void>;
   readonly cancel: () => Promise<void>;
@@ -556,6 +558,7 @@ export function useInferenceSession({
       prompt: string,
       maxNewTokens: number,
       workloadAttribution?: WorkloadAttribution,
+      speculationPreference?: SpeculationPreference,
     ): Promise<void> => {
       if (startPromiseRef.current !== null) return startPromiseRef.current;
       const operation = (async () => {
@@ -577,6 +580,7 @@ export function useInferenceSession({
           try {
             buildInferenceSubmission(
               prompt, maxNewTokens, before.qualification, now(), workloadAttribution,
+              speculationPreference,
             );
           } catch (error) {
             dispatch({ type: 'form_failed', reason: formReason(error) });
@@ -613,6 +617,7 @@ export function useInferenceSession({
             current,
             now(),
             workloadAttribution,
+            speculationPreference,
           );
         } catch (error) {
           dispatch({ type: 'form_failed', reason: formReason(error) });

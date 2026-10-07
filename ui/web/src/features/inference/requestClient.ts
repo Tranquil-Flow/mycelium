@@ -206,6 +206,16 @@ function decodeFrame(frame: SseFrame, requestId: string): InferenceEvent {
   return decoded;
 }
 
+/**
+ * A gateway that does not advertise the A11 preference never receives it: the
+ * request is then the same ordinary target-only request.
+ */
+function withoutSpeculationPreference(submission: InferenceSubmission): InferenceSubmission {
+  if (submission.speculation_preference === undefined) return submission;
+  const { speculation_preference: _omitted, ...rest } = submission;
+  return rest;
+}
+
 export class ProductInferenceClient implements InferenceClient {
   private readonly fetchImplementation: InferenceFetch;
   private readonly now: () => number;
@@ -327,7 +337,9 @@ export class ProductInferenceClient implements InferenceClient {
               max_new_tokens: submission.max_new_tokens,
               qualification: submission.qualification,
             }
-          : submission),
+          : bootstrap.features?.speculation_preference === true
+            ? submission
+            : withoutSpeculationPreference(submission)),
       },
       signal,
     );

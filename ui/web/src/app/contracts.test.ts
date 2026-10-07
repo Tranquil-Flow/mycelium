@@ -170,6 +170,36 @@ describe('frozen product UI wire contracts', () => {
     }
   });
 
+  it('accepts only the closed optional A11 feature advertisement on bootstrap', () => {
+    const advertised = { ...bootstrap, features: { speculation_preference: true } };
+    expect(schemaValidator(bootstrapSchema)(advertised)).toBe(true);
+    expect(decodeProductBootstrap(advertised)).toEqual(advertised);
+    expect(decodeProductBootstrap(bootstrap)).not.toHaveProperty('features');
+    for (const features of [
+      { speculation_preference: false },
+      { speculation_preference: true, other: true },
+      {},
+      null,
+    ]) {
+      expect(schemaValidator(bootstrapSchema)({ ...bootstrap, features })).toBe(false);
+      expect(() => decodeProductBootstrap({ ...bootstrap, features })).toThrow(ProductContractError);
+    }
+  });
+
+  it('states a speculation preference only when given, from the closed set', () => {
+    const ready = decodeProductQualification(acceptedQualification);
+    const now = 1_800_000_000_001;
+    const plain = buildInferenceSubmission('moon', 4, ready, now);
+    expect(plain).not.toHaveProperty('speculation_preference');
+    for (const preference of ['target_only', 'speculative_requested'] as const) {
+      expect(buildInferenceSubmission('moon', 4, ready, now, undefined, preference).speculation_preference)
+        .toBe(preference);
+    }
+    expect(() => buildInferenceSubmission(
+      'moon', 4, ready, now, undefined, 'always' as unknown as 'target_only',
+    )).toThrow(ProductContractError);
+  });
+
   it('freezes same-origin endpoint paths and exposes no upstream credential', () => {
     expect(decodeProductBootstrap(bootstrap)).toEqual(bootstrap);
     expect(decodeProductBootstrap(structuredClone(canonicalBootstrap))).toEqual(canonicalBootstrap);

@@ -160,6 +160,43 @@ describe('ProductInferenceClient', () => {
     expect(JSON.parse(String(init?.body))).toEqual(submission);
   });
 
+  it.each([
+    [true, 'speculative_requested'],
+    [false, undefined],
+  ] as const)('forwards the A11 preference only to a gateway that advertises it (advertised=%s)', async (advertised, expected) => {
+    const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
+    const fetch: InferenceFetch = vi.fn(async (input, init) => {
+      calls.push([input, init]);
+      if (calls.length === 1) {
+        return jsonResponse(advertised ? { ...bootstrap(), features: { speculation_preference: true } } : bootstrap());
+      }
+      if (calls.length === 2) return jsonResponse(qualification());
+      return jsonResponse(
+        {
+          protocol: PRODUCT_INFERENCE_PROTOCOL,
+          request_id: 'request-a',
+          accepted: true,
+          event_path: '/api/v1/inference/request-a/events',
+          cancel_path: '/api/v1/inference/request-a/cancel',
+        },
+        202,
+      );
+    });
+    const client = new ProductInferenceClient({ fetch });
+    const qualified = await client.loadQualification();
+    const submission = buildInferenceSubmission(
+      'private synthetic input', 32, qualified, NOW + 1, undefined, 'speculative_requested',
+    );
+    expect(submission.speculation_preference).toBe('speculative_requested');
+
+    await client.submit(submission);
+
+    const body = JSON.parse(String(calls[2][1]?.body)) as Record<string, unknown>;
+    expect(body.speculation_preference).toBe(expected);
+    expect(Object.prototype.hasOwnProperty.call(body, 'speculation_preference')).toBe(advertised);
+    expect(body.workload_profile_id).toBe(submission.workload_profile_id);
+  });
+
   it('decodes bounded SSE frames and resumes after the last fully applied event ID', async () => {
     const sse = [
       'id: 2:0',

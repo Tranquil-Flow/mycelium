@@ -385,6 +385,29 @@ describe('InferenceWorkspace', () => {
     expect(window.sessionStorage.getItem('mycelium.inference.tab-session.v1')).toContain('sustained_batch_v1');
   });
 
+  it.each([
+    [true, 'speculative_requested'],
+    [false, undefined],
+  ] as const)('states the local speculative-decoding preference on future requests only when set (%s)', async (prefer, expected) => {
+    window.localStorage.setItem('mycelium.product-ui.preferences.v1', JSON.stringify({ preferSpeculativeDecoding: prefer }));
+    try {
+      const client = new WorkspaceClient(qualification(true));
+      client.streams.push([
+        { protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL, request_id: accepted.request_id, sequence: 0, publisher_generation: 1, type: 'accepted' },
+        { protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL, request_id: accepted.request_id, sequence: 1, publisher_generation: 1, type: 'completed' },
+      ]);
+      render(<InferenceWorkspace client={client} now={() => NOW + 1} />);
+      fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'speculation preference prompt' } });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start inference' })).toBeEnabled());
+      fireEvent.click(screen.getByRole('button', { name: 'Start inference' }));
+      await waitFor(() => expect(client.submitted).toHaveLength(1));
+      expect(client.submitted[0].speculation_preference).toBe(expected);
+      expect(Object.prototype.hasOwnProperty.call(client.submitted[0], 'speculation_preference')).toBe(prefer);
+    } finally {
+      window.localStorage.removeItem('mycelium.product-ui.preferences.v1');
+    }
+  });
+
   it('restores completed output and history after the workspace is remounted', async () => {
     const client = new WorkspaceClient(qualification(true));
     client.streams.push([

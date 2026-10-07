@@ -86,6 +86,15 @@ function exactRecord(
   return candidate;
 }
 
+function isRecordWithOwn(value: unknown, key: string): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  try {
+    return Object.prototype.hasOwnProperty.call(value, key);
+  } catch {
+    return false;
+  }
+}
+
 function readOwn(candidate: Record<string, unknown>, key: string, field: string): unknown {
   try {
     return candidate[key];
@@ -190,6 +199,8 @@ export interface ProductBootstrap {
     readonly max_new_tokens: typeof MAX_NEW_TOKENS;
   };
   readonly qualification_authority: typeof PRODUCT_QUALIFIER_AUTHORITY;
+  /** Present only when the gateway forwards an explicit A11 speculation preference. */
+  readonly features?: { readonly speculation_preference: true };
 }
 
 export interface ProductObservatorySource {
@@ -242,7 +253,11 @@ export interface InferenceSubmission {
   readonly qualification: QualificationBinding;
   readonly workload_profile_id: string;
   readonly qos_class: 'interactive' | 'batch';
+  /** A11: an explicit future-request preference; omitted when not stated. */
+  readonly speculation_preference?: SpeculationPreference;
 }
+
+export type SpeculationPreference = 'target_only' | 'speculative_requested';
 
 export interface InferenceWorkloadBinding {
   readonly profile_id: string;
@@ -424,11 +439,25 @@ function decodeBinding(value: unknown, field = 'qualification.binding'): Qualifi
 }
 
 export function decodeProductBootstrap(value: unknown): ProductBootstrap {
+  const bootstrapFields = ['protocol', 'source_mode', 'session', 'api', 'limits', 'qualification_authority'];
+  const hasFeatures = isRecordWithOwn(value, 'features');
   const candidate = exactRecord(
     value,
-    ['protocol', 'source_mode', 'session', 'api', 'limits', 'qualification_authority'],
+    hasFeatures ? [...bootstrapFields, 'features'] : bootstrapFields,
     'bootstrap',
   );
+  let features: { readonly speculation_preference: true } | undefined;
+  if (hasFeatures) {
+    const featureRecord = exactRecord(
+      readOwn(candidate, 'features', 'bootstrap.features'),
+      ['speculation_preference'],
+      'bootstrap.features',
+    );
+    if (readOwn(featureRecord, 'speculation_preference', 'bootstrap.features.speculation_preference') !== true) {
+      return fail('bootstrap.features.speculation_preference', 'unsupported feature');
+    }
+    features = Object.freeze({ speculation_preference: true as const });
+  }
   if (readOwn(candidate, 'protocol', 'bootstrap.protocol') !== PRODUCT_BOOTSTRAP_PROTOCOL) {
     return fail('bootstrap.protocol', 'unsupported protocol');
   }
@@ -493,6 +522,7 @@ export function decodeProductBootstrap(value: unknown): ProductBootstrap {
       max_new_tokens: MAX_NEW_TOKENS,
     }),
     qualification_authority: PRODUCT_QUALIFIER_AUTHORITY,
+    ...(features === undefined ? {} : { features }),
   });
 }
 
@@ -656,6 +686,7 @@ export function buildInferenceSubmission(
     profile_id: 'interactive_chat_v1',
     qos_class: 'interactive',
   },
+  speculationPreference?: SpeculationPreference,
 ): InferenceSubmission {
   const blocked = inferenceBlockReason(qualification, nowUnixMs);
   if (blocked !== null) throw new ProductContractError('submission.qualification', blocked);
@@ -672,6 +703,13 @@ export function buildInferenceSubmission(
     ['interactive', 'batch'] as const,
     'submission.qos_class',
   );
+  const speculation = speculationPreference === undefined
+    ? undefined
+    : enumValue(
+        speculationPreference,
+        ['target_only', 'speculative_requested'] as const,
+        'submission.speculation_preference',
+      );
   return Object.freeze({
     protocol: PRODUCT_INFERENCE_SUBMISSION_PROTOCOL,
     prompt,
@@ -679,6 +717,7 @@ export function buildInferenceSubmission(
     qualification: qualification!.binding,
     workload_profile_id: workloadProfileId,
     qos_class: qosClass,
+    ...(speculation === undefined ? {} : { speculation_preference: speculation }),
   });
 }
 
