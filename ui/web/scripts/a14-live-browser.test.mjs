@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   ENGINES,
   PROTOCOL,
+  assertGlobeCounts,
   assertLiveTransitionHistory,
   assertPrivacy,
   assertRegionRows,
@@ -134,4 +135,21 @@ test('privacy refuses raw addresses, coordinates and private canaries', () => {
   assert.throws(() => assertPrivacy('peer 192.0.2.23', []), /raw_address_exposed/);
   assert.throws(() => assertPrivacy('{"latitude": 1}', []), /forbidden_field_exposed:latitude/);
   assert.throws(() => assertPrivacy('member node-0 in table', ['node-0']), /private_canary_exposed/);
+});
+
+test('the A14b globe check is opt-in and its counts must equal the published regions', () => {
+  const ok = { A14_LIVE_ORIGIN: 'http://127.0.0.1:8080', A14_LIVE_EVIDENCE: '/tmp/a14-live' };
+  assert.equal(validateLiveConfig(ok, 'chromium').globe, false);
+  assert.equal(validateLiveConfig({ ...ok, A14_LIVE_GLOBE: '0' }, 'chromium').globe, false);
+  assert.equal(validateLiveConfig({ ...ok, A14_LIVE_GLOBE: '1' }, 'chromium').globe, true);
+  assert.throws(() => validateLiveConfig({ ...ok, A14_LIVE_GLOBE: 'yes' }, 'chromium'), /globe_flag_invalid/);
+  const node = (id, region) => ({ id: hash(id), kind: 'member', region,
+    region_source: region === 'unknown' ? 'unavailable' : 'owner_declared' });
+  const explorer = { nodes: [node('a', 'europe'), node('b', 'europe'), node('c', 'unknown')] };
+  const shown = { africa: 0, americas_north: 0, americas_south: 0, asia: 0, europe: 2, oceania: 0, polar: 0, unknown: 1 };
+  assert.equal(assertGlobeCounts(explorer, shown).europe, 2);
+  assert.throws(() => assertGlobeCounts(explorer, { ...shown, europe: 3 }), /globe_count_mismatch:europe/);
+  assert.throws(() => assertGlobeCounts(explorer, { ...shown, unknown: 0, asia: 1 }), /globe_count_mismatch/);
+  assert.throws(() => assertGlobeCounts(explorer, { ...shown, unknown_cell: 1 }), /unknown_region_on_globe/);
+  assert.throws(() => assertGlobeCounts({ nodes: [node('d', 'us-east-1')] }, shown), /region_outside_vocabulary/);
 });

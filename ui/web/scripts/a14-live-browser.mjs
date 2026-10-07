@@ -14,7 +14,11 @@
 //     refresh, Back/Forward, all eight workspaces and a clean second session;
 //   * optional owner-declared regions render as owner_declared rows while
 //     undeclared peers stay unknown, and no coordinate or raw identity appears;
-//   * every request is same-origin GET; no third-party request is made.
+//   * every request is same-origin GET; no third-party request is made;
+//   * with A14_LIVE_GLOBE=1 (A14b, opt-in), the schematic region globe is off
+//     by default, shows exactly the published per-region counts with unknown
+//     peers off-globe, is keyboard-operable, loses no table/graph fact, and
+//     leaks no coordinate, identity or canary.
 //
 // It never authors route evidence and records live_evidence only when every
 // check passed. Run one engine per invocation: --engine=chromium|firefox|webkit.
@@ -55,7 +59,9 @@ export function validateLiveConfig(env, engine) {
   if (canaries.length > 64 || canaries.some((item) => item.length < 3 || item.length > 256)) {
     fail('private_canaries_invalid');
   }
-  return Object.freeze({ engine, origin, evidence: path.join(evidence, engine), declared, canaries });
+  const globe = env.A14_LIVE_GLOBE === undefined || env.A14_LIVE_GLOBE === '0' ? false
+    : env.A14_LIVE_GLOBE === '1' ? true : fail('globe_flag_invalid');
+  return Object.freeze({ engine, origin, evidence: path.join(evidence, engine), declared, canaries, globe });
 }
 
 export function transportSegments(explorer) {
@@ -133,6 +139,24 @@ export function assertRegionRows(explorer, declared) {
   return owner;
 }
 
+const GLOBE_REGIONS = Object.freeze(['africa', 'americas_north', 'americas_south', 'asia', 'europe', 'oceania', 'polar']);
+
+// A14b: the globe's per-region counts must equal the published node regions,
+// with every unknown-region peer off-globe and no cell for `unknown`.
+export function assertGlobeCounts(explorer, shown) {
+  const expected = { unknown: 0 };
+  for (const region of GLOBE_REGIONS) expected[region] = 0;
+  for (const node of explorer.nodes) {
+    if (!REGIONS.has(node.region)) fail('region_outside_vocabulary');
+    expected[node.region] += 1;
+  }
+  if (Object.hasOwn(shown, 'unknown_cell')) fail('unknown_region_on_globe');
+  for (const key of [...GLOBE_REGIONS, 'unknown']) {
+    if (shown[key] !== expected[key]) fail(`globe_count_mismatch:${key}`);
+  }
+  return expected;
+}
+
 export function assertPrivacy(text, canaries) {
   if (typeof text !== 'string') fail('privacy_input_invalid');
   if (IPV4.test(text)) fail('raw_address_exposed');
@@ -149,7 +173,7 @@ export function harnessPlan() {
     engines: [...ENGINES],
     workspaces: [...WORKSPACES],
     required_environment: ['A14_LIVE_ORIGIN', 'A14_LIVE_EVIDENCE'],
-    optional_environment: ['A14_LIVE_DECLARED_REGIONS', 'A14_LIVE_PRIVATE_CANARIES'],
+    optional_environment: ['A14_LIVE_DECLARED_REGIONS', 'A14_LIVE_PRIVATE_CANARIES', 'A14_LIVE_GLOBE'],
     browser_contact_attempted: false,
     live_evidence: false,
     qualification_claim: false,
@@ -246,6 +270,51 @@ export async function runLive(config) {
     await second.close();
     await writeFile(path.join(config.evidence, 'network-dom.txt'), await page.locator('body').innerText());
     await page.screenshot({ path: path.join(config.evidence, 'network.png'), fullPage: true });
+    if (config.globe) {
+      const facts = async () => ({ rows: await equivalent(),
+        peers: await page.getByRole('region', { name: 'Peer regions and unknown-region peers', exact: true }).innerText() });
+      const toggle = page.getByRole('checkbox', { name: /Show schematic region globe/ });
+      const globeRegion = page.getByRole('region', { name: 'Schematic region globe', exact: true });
+      await expect(toggle).not.toBeChecked();
+      await expect(globeRegion).toHaveCount(0);
+      const before = await facts();
+      const current = await snapshotFrom(page);
+      await toggle.focus();
+      await page.keyboard.press('Space');
+      await expect(globeRegion).toBeVisible();
+      const shown = await globeRegion.evaluate((root) => {
+        const out = {};
+        for (const cell of root.querySelectorAll('button[data-globe-region]')) {
+          const key = cell.getAttribute('data-globe-region');
+          out[key === 'unknown' ? 'unknown_cell' : key] = Number(cell.querySelector('[data-globe-count]')?.textContent);
+        }
+        out.unknown = Number(root.querySelector('[data-globe-row="unknown"] td')?.textContent);
+        return out;
+      });
+      const expected = assertGlobeCounts(current.route_explorer, shown);
+      assert.deepEqual(await facts(), before);
+      const occupied = GLOBE_REGIONS.find((region) => expected[region] > 0);
+      if (occupied !== undefined) {
+        const cell = globeRegion.locator(`button[data-globe-region="${occupied}"]`);
+        await cell.focus();
+        await page.keyboard.press('Enter');
+        await expect(cell).toHaveAttribute('aria-pressed', 'true');
+        const marked = await page.locator('.route-peers [data-region-marked]').count();
+        const pageNodes = current.route_explorer.nodes.slice(0, 64).filter((node) => node.region === occupied).length;
+        if (marked !== pageNodes) fail('globe_selection_unsynchronized');
+      }
+      assertPrivacy(await page.locator('body').innerText(), config.canaries);
+      const globeHtml = await globeRegion.evaluate((root) => root.outerHTML);
+      assertPrivacy(globeHtml, config.canaries);
+      for (const node of current.route_explorer.nodes) if (globeHtml.includes(node.id)) fail('globe_identity_exposed');
+      if (/cell_/.test(globeHtml)) fail('globe_cell_id_exposed');
+      await page.screenshot({ path: path.join(config.evidence, 'network-globe.png'), fullPage: true });
+      await toggle.focus();
+      await page.keyboard.press('Space');
+      await expect(globeRegion).toHaveCount(0);
+      assert.deepEqual(await facts(), before);
+      checks.push('a14b_globe_default_off_equivalent_keyboard_privacy');
+    }
     await context.close();
     if (!requests.every((request) => request.same_origin && request.method === 'GET')) fail('non_same_origin_or_mutating_request');
     checks.push('same_origin_read_only');
@@ -254,7 +323,7 @@ export async function runLive(config) {
   } finally {
     await browser?.close();
   }
-  const passed = failures.length === 0 && checks.length === 6;
+  const passed = failures.length === 0 && checks.length === (config.globe ? 7 : 6);
   const report = { protocol: PROTOCOL, engine: config.engine, origin: config.origin, checks, failures,
     transitions, request_count: requests.length, live_evidence: passed, qualification_claim: false,
     physical_claim: false };
