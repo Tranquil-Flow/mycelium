@@ -84,6 +84,7 @@ ENTRY_POINTS = (
     "mycelium_a13_packaging.manifest",
     "mycelium_a13_packaging.install_source",
     "mycelium_a13_packaging.build",
+    "mycelium_a13_packaging.installer_core",
     "stage_pack",
     "runtime_loader",
 )

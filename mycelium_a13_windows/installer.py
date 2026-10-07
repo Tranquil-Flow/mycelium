@@ -38,21 +38,18 @@ version) run for the first time on the device.
 
 from __future__ import annotations
 
-import argparse
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 import sys
 import time
 from typing import Any
 
-import mycelium_host_platform
-from mycelium_a13_packaging import build as _build
+from mycelium_a13_packaging import installer_core as _core
 
 from .install_source import (
     AUTHENTICODE_UNSIGNED_SUBJECT,
@@ -71,35 +68,10 @@ _ARTIFACT_VERSION = re.compile(r"^mycelium-(\d+\.\d+\.\d+(?:-[a-z0-9.]+)?)-windo
 _VERSIONS = "versions.json"
 
 
-class InstallerError(RuntimeError):
-    def __init__(self, code: str) -> None:
-        self.code = code
-        super().__init__(code)
-
-
-def _refuse(code: str) -> None:
-    raise InstallerError(code)
-
-
-# ----------------------------------------------------------------- payload digest
-
-
-def payload_tree(root: Path) -> dict[str, str]:
-    """``{posix relative path: sha256}`` of every regular file; links are refused."""
-
-    try:
-        return _build.payload_tree(root)
-    except _build.PayloadError as exc:
-        raise InstallerError(exc.code) from None
-
-
-def payload_digest(root: Path) -> str:
-    """The digest the manifest's ``package_digest`` binds: canonical JSON of the tree."""
-
-    try:
-        return _build.payload_digest(root)
-    except _build.PayloadError as exc:
-        raise InstallerError(exc.code) from None
+InstallerError = _core.InstallerError
+_refuse = _core.refuse
+payload_tree = _core.payload_tree
+payload_digest = _core.payload_digest
 
 
 # ----------------------------------------------------------------- host seams
@@ -174,270 +146,142 @@ class HostSeams:
     now: Callable[[], float] = time.time
 
 
-# ----------------------------------------------------------------- versions record
+# ----------------------------------------------------------------- platform adapter
 
 
-def _versions(seams: HostSeams) -> dict[str, Any] | None:
-    if not seams.programs_root.exists() and not seams.programs_root.is_symlink():
-        return None
-    try:
-        with mycelium_host_platform.private_directory(seams.programs_root, create=False) as lease:
-            raw = lease.read_file(_VERSIONS, max_bytes=64 * 1024)
-    except mycelium_host_platform.HostPlatformError as exc:
-        if exc.code == "host_file_missing":
-            return None
-        _refuse("installation_record_untrusted")
-    value = json.loads(raw)
-    if not isinstance(value, dict) or value.get("protocol") != PROTOCOL:
-        _refuse("installation_record_invalid")
-    return value
+class _WindowsPlatform:
+    """The Windows side of :mod:`mycelium_a13_packaging.installer_core`."""
 
+    protocol = PROTOCOL
+    payload_directory = PAYLOAD_DIRECTORY
+    payload_executable = PAYLOAD_EXECUTABLE
 
-def _write_versions(seams: HostSeams, record: Mapping[str, Any]) -> None:
-    with mycelium_host_platform.private_directory(seams.programs_root, create=True) as lease:
-        lease.atomic_replace(_VERSIONS, json.dumps(record, sort_keys=True, indent=2).encode())
+    def __init__(self, seams: HostSeams) -> None:
+        self.seams = seams
+        self.programs_root = seams.programs_root
+        self.state_root = seams.state_root
 
+    def now(self) -> float:
+        return self.seams.now()
 
-def _numeric(version: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in version.split("-", 1)[0].split("."))
+    def verify_documents(self, bundle: Path, installed: Mapping[str, Any] | None) -> dict[str, Any]:
+        def read(name: str) -> dict[str, Any]:
+            path = bundle / name
+            if path.is_symlink() or not path.is_file():
+                _refuse("bundle_incomplete")
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                _refuse("bundle_incomplete")
+            if not isinstance(value, dict):
+                _refuse("bundle_incomplete")
+            return value
 
+        manifest = read("installation-package-manifest.json")
+        source = read("install-source.json")
+        observed = self.seams.observe_platform()
+        declared = ADMITTED_RELEASES["windows"]
+        if (observed.get("machine") not in ADMITTED_ARCHITECTURES
+                or not str(observed.get("windows_build", "")).isdigit()
+                or int(observed["windows_build"]) < int(declared["minimum_build"])):
+            _refuse("platform_unsupported")
+        publisher = manifest.get("publisher_identity") if isinstance(manifest.get("publisher_identity"), dict) else {}
+        record = publisher.get("verification_key_record") if isinstance(publisher.get("verification_key_record"), dict) else {}
+        key_pin, pin_source, floor_pin = _core.publisher_pin(installed, record.get("verification_key_digest"))
+        authenticode = publisher.get("authenticode_subject", AUTHENTICODE_UNSIGNED_SUBJECT)
+        common = dict(expected_publisher=PUBLISHER_ID, expected_authenticode_subject=authenticode,
+                      expected_architecture="x86_64", expected_windows_version=declared["minimum_version"],
+                      expected_windows_build=declared["minimum_build"], rollback_floor_pin=floor_pin,
+                      now=self.seams.now())
+        try:
+            floor = manifest.get("rollback_floor", "0.0.0")
+            checked = verify_windows_package(manifest, publisher_key_digest_pin=key_pin,
+                                             installed_version=str(floor), **common)
+            checked_source = verify_windows_install_source(source, installed_version=str(floor), **common)
+        except (PackageManifestError, InstallSourceError) as exc:
+            _refuse(getattr(exc, "code", None) or str(exc).split(":")[0] or "package_invalid")
+        if checked_source["install_mode"] != "windows_service_per_user":
+            _refuse("install_mode_unsupported")
+        match = _ARTIFACT_VERSION.fullmatch(checked_source["artifact_name"])
+        if match is None:
+            _refuse("artifact_name_invalid")
+        return {"version": match.group(1),
+                "expected_digests": (checked["package_digest"], checked_source["artifact_digest"]),
+                "rollback_floor": checked["rollback_floor"], "publisher_key_digest": key_pin,
+                "publisher_pin_source": pin_source, "source_revision": checked["source_revision"],
+                "authenticode_subject": authenticode, "report": {"authenticode_subject": authenticode}}
 
-# ----------------------------------------------------------------- verify
+    def register(self, version: str, version_directory: Path) -> dict[str, Any]:
+        executable = version_directory / PAYLOAD_DIRECTORY / PAYLOAD_EXECUTABLE
+        self.seams.create_shortcut(self.seams.shortcut, executable, version_directory / PAYLOAD_DIRECTORY)
+        self.seams.set_uninstall_entry({
+            "DisplayName": "Mycelium", "DisplayVersion": version, "Publisher": PUBLISHER_ID,
+            "InstallLocation": str(version_directory), "DisplayIcon": str(executable),
+            "UninstallString": f'"{executable}" --uninstall', "NoModify": 1, "NoRepair": 1,
+            "EstimatedSize": 0,
+        })
+        return {}
+
+    def unregister(self, installed: Mapping[str, Any] | None) -> dict[str, Any]:
+        self.seams.remove_shortcut(self.seams.shortcut)
+        self.seams.delete_uninstall_entry()
+        return {}
+
+    def remove_unattended(self) -> str:
+        if not self.seams.service_package_root.exists():
+            return "absent"
+        from .service_install import ServiceInstallError, execute
+
+        try:
+            execute("unregister", self.seams.service_package_root, runner=self.seams.run)
+            return "removed"
+        except ServiceInstallError as exc:
+            return exc.code  # recorded, never blocks removing the program
+
+    def running_executable(self) -> Path:
+        return self.seams.running_executable()
+
+    def remove_directory_after_exit(self, path: Path) -> None:
+        self.seams.remove_directory_after_exit(path)
 
 
 def verify_bundle(bundle: Path, seams: HostSeams, *, installed: Mapping[str, Any] | None) -> dict[str, Any]:
     """Every check, no writes.  Returns what install needs."""
 
-    def read(name: str) -> dict[str, Any]:
-        path = bundle / name
-        if path.is_symlink() or not path.is_file():
-            _refuse("bundle_incomplete")
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            _refuse("bundle_incomplete")
-        if not isinstance(value, dict):
-            _refuse("bundle_incomplete")
-        return value
-
-    manifest = read("installation-package-manifest.json")
-    source = read("install-source.json")
-    observed = seams.observe_platform()
-    declared = ADMITTED_RELEASES["windows"]
-    if (observed.get("machine") not in ADMITTED_ARCHITECTURES
-            or not str(observed.get("windows_build", "")).isdigit()
-            or int(observed["windows_build"]) < int(declared["minimum_build"])):
-        _refuse("platform_unsupported")
-    publisher = manifest.get("publisher_identity") if isinstance(manifest.get("publisher_identity"), dict) else {}
-    record = publisher.get("verification_key_record") if isinstance(publisher.get("verification_key_record"), dict) else {}
-    offered_key = record.get("verification_key_digest")
-    if installed is not None:
-        key_pin, pin_source = installed["publisher_key_digest"], installed["publisher_pin_source"]
-        floor_pin, current_version = installed["rollback_floor"], installed["current"]["version"]
-    else:
-        key_pin, pin_source = offered_key, "first_use_owner_private_media"
-        floor_pin, current_version = "0.0.0", None
-    if not isinstance(key_pin, str):
-        _refuse("package_publisher_invalid")
-    authenticode = publisher.get("authenticode_subject", AUTHENTICODE_UNSIGNED_SUBJECT)
-    common = dict(expected_publisher=PUBLISHER_ID, expected_authenticode_subject=authenticode,
-                  expected_architecture="x86_64", expected_windows_version=declared["minimum_version"],
-                  expected_windows_build=declared["minimum_build"], rollback_floor_pin=floor_pin,
-                  now=seams.now())
-    try:
-        floor = manifest.get("rollback_floor", "0.0.0")
-        checked = verify_windows_package(manifest, publisher_key_digest_pin=key_pin,
-                                         installed_version=str(floor), **common)
-        checked_source = verify_windows_install_source(source, installed_version=str(floor), **common)
-    except (PackageManifestError, InstallSourceError) as exc:
-        _refuse(getattr(exc, "code", None) or str(exc).split(":")[0] or "package_invalid")
-    if checked_source["install_mode"] != "windows_service_per_user":
-        _refuse("install_mode_unsupported")
-    match = _ARTIFACT_VERSION.fullmatch(checked_source["artifact_name"])
-    if match is None:
-        _refuse("artifact_name_invalid")
-    version = match.group(1)
-    if current_version is not None and _numeric(version) < _numeric(installed["rollback_floor"]):
-        _refuse("package_downgrade_rejected")
-    payload = bundle / PAYLOAD_DIRECTORY
-    if payload.is_symlink() or not (payload / PAYLOAD_EXECUTABLE).is_file():
-        _refuse("bundle_incomplete")
-    digest = payload_digest(payload)
-    if digest != checked["package_digest"] or digest != checked_source["artifact_digest"]:
-        _refuse("package_digest_mismatch")
-    return {"version": version, "payload_digest": digest, "rollback_floor": checked["rollback_floor"],
-            "publisher_key_digest": key_pin, "publisher_pin_source": pin_source,
-            "authenticode_subject": authenticode, "source_revision": checked["source_revision"]}
-
-
-# ----------------------------------------------------------------- install
-
-
-def _copy_payload(source: Path, target: Path, expected: str) -> None:
-    partial = target.with_name(target.name + ".partial")
-    if partial.exists():
-        shutil.rmtree(partial)
-    with mycelium_host_platform.private_directory(partial, create=True):
-        pass
-    for current, _directories, files in os.walk(source, followlinks=False):
-        relative = Path(current).relative_to(source)
-        for name in files:
-            destination = partial / relative / name
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(Path(current) / name, destination)
-    if payload_digest(partial) != expected:
-        shutil.rmtree(partial, ignore_errors=True)
-        _refuse("payload_copy_mismatch")
-    os.replace(partial, target)
-
-
-def _register(seams: HostSeams, version: str, record: Mapping[str, Any]) -> None:
-    directory = seams.programs_root / version
-    executable = directory / PAYLOAD_DIRECTORY / PAYLOAD_EXECUTABLE
-    seams.create_shortcut(seams.shortcut, executable, directory / PAYLOAD_DIRECTORY)
-    seams.set_uninstall_entry({
-        "DisplayName": "Mycelium", "DisplayVersion": version, "Publisher": PUBLISHER_ID,
-        "InstallLocation": str(directory), "DisplayIcon": str(executable),
-        "UninstallString": f'"{executable}" --uninstall', "NoModify": 1, "NoRepair": 1,
-        "EstimatedSize": 0,
-    })
+    return _core.verify_bundle(bundle, _WindowsPlatform(seams), installed=installed)
 
 
 def install(bundle: str | os.PathLike[str], *, seams: HostSeams | None = None) -> dict[str, Any]:
-    seams = seams or HostSeams()
-    bundle_path = Path(bundle).absolute()
-    installed = _versions(seams)
-    checked = verify_bundle(bundle_path, seams, installed=installed)  # nothing written before this
-    version = checked["version"]
-    with mycelium_host_platform.private_directory(seams.programs_root, create=True):
-        pass
-    target = seams.programs_root / version
-    if target.exists():
-        if payload_digest(target / PAYLOAD_DIRECTORY) != checked["payload_digest"]:
-            _refuse("installed_version_conflict")
-    else:
-        target_payload = target / PAYLOAD_DIRECTORY
-        with mycelium_host_platform.private_directory(target, create=True):
-            pass
-        _copy_payload(bundle_path / PAYLOAD_DIRECTORY, target_payload, checked["payload_digest"])
-    previous = None
-    if installed is not None and installed["current"]["version"] != version:
-        previous = installed["current"]
-    entry = {"version": version, "payload_digest": checked["payload_digest"],
-             "rollback_floor": checked["rollback_floor"], "source_revision": checked["source_revision"]}
-    record = {"protocol": PROTOCOL, "current": entry, "previous": previous,
-              "publisher_key_digest": checked["publisher_key_digest"],
-              "publisher_pin_source": checked["publisher_pin_source"],
-              "rollback_floor": checked["rollback_floor"], "installed_at": seams.now()}
-    _write_versions(seams, record)
-    keep = {version} | ({previous["version"]} if previous else set())
-    for child in seams.programs_root.iterdir():
-        if child.is_dir() and not child.is_symlink() and child.name not in keep:
-            shutil.rmtree(child, ignore_errors=True)  # at most current + previous are retained
-    _register(seams, version, record)
-    with mycelium_host_platform.private_directory(seams.state_root, create=True):
-        pass  # owner-only; identity is created later by the app, never here
-    return {"protocol": PROTOCOL, "action": "install", "version": version,
-            "previous": previous["version"] if previous else None,
-            "publisher_key_digest": checked["publisher_key_digest"],
-            "publisher_pin_source": checked["publisher_pin_source"],
-            "authenticode_subject": checked["authenticode_subject"],
-            "identity_created": False, "unattended_task_registered": False}
+    return _core.install(bundle, _WindowsPlatform(seams or HostSeams()))
 
 
 def rollback(*, seams: HostSeams | None = None) -> dict[str, Any]:
-    seams = seams or HostSeams()
-    installed = _versions(seams)
-    if installed is None or not installed.get("previous"):
-        _refuse("no_previous_version")
-    previous = installed["previous"]
-    if _numeric(previous["version"]) < _numeric(installed["rollback_floor"]):
-        _refuse("package_downgrade_rejected")
-    if payload_digest(seams.programs_root / previous["version"] / PAYLOAD_DIRECTORY) != previous["payload_digest"]:
-        _refuse("previous_version_tampered")
-    record = {**installed, "current": previous, "previous": installed["current"], "installed_at": seams.now()}
-    _write_versions(seams, record)
-    _register(seams, previous["version"], record)
-    return {"protocol": PROTOCOL, "action": "rollback", "version": previous["version"],
-            "previous": installed["current"]["version"]}
+    return _core.rollback(_WindowsPlatform(seams or HostSeams()))
 
 
 def uninstall(*, delete_identity_and_state: bool = False, seams: HostSeams | None = None) -> dict[str, Any]:
-    seams = seams or HostSeams()
-    installed = _versions(seams)
-    task = "absent"
-    if seams.service_package_root.exists():
-        from .service_install import ServiceInstallError, execute
-
-        try:
-            execute("unregister", seams.service_package_root, runner=seams.run)
-            task = "removed"
-        except ServiceInstallError as exc:
-            task = exc.code  # recorded, never blocks removing the program
-    seams.remove_shortcut(seams.shortcut)
-    seams.delete_uninstall_entry()
-    deferred = None
-    running = seams.running_executable()
-    if seams.programs_root.exists():
-        for child in sorted(seams.programs_root.iterdir()):
-            if child.is_dir() and running.is_relative_to(child.resolve()):
-                deferred = child  # the running Mycelium.exe; removed after this process exits
-                continue
-            if child.is_dir():
-                shutil.rmtree(child, ignore_errors=True)
-            else:
-                child.unlink(missing_ok=True)
-        if deferred is None:
-            shutil.rmtree(seams.programs_root, ignore_errors=True)
-        else:
-            seams.remove_directory_after_exit(seams.programs_root)
-    state = "retained"
-    if delete_identity_and_state:
-        shutil.rmtree(seams.state_root, ignore_errors=True)
-        state = "deleted"
-    return {"protocol": PROTOCOL, "action": "uninstall",
-            "version": installed["current"]["version"] if installed else None,
-            "unattended_task": task, "state": state, "state_root": str(seams.state_root),
-            "running_version_removed_after_exit": deferred is not None,
-            "coordinator_revocation_claimed": False}
+    return _core.uninstall(_WindowsPlatform(seams or HostSeams()),
+                           delete_identity_and_state=delete_identity_and_state)
 
 
 def status(*, seams: HostSeams | None = None) -> dict[str, Any]:
-    seams = seams or HostSeams()
-    installed = _versions(seams)
-    return {"protocol": PROTOCOL, "installed": installed is not None,
-            "current": installed["current"]["version"] if installed else None,
-            "previous": (installed.get("previous") or {}).get("version") if installed else None,
-            "publisher_key_digest": installed["publisher_key_digest"] if installed else None}
+    return _core.status(_WindowsPlatform(seams or HostSeams()))
 
 
 def main(argv: list[str] | None = None, *, seams: HostSeams | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="Mycelium.exe", description=__doc__.split("\n\n")[0])
-    action = parser.add_mutually_exclusive_group(required=True)
-    action.add_argument("--install", action="store_true")
-    action.add_argument("--uninstall", action="store_true")
-    action.add_argument("--rollback", action="store_true")
-    action.add_argument("--install-status", action="store_true")
-    parser.add_argument("--bundle", type=Path, default=None,
-                        help="the extracted bundle (default: the folder above this Mycelium.exe)")
-    parser.add_argument("--delete-identity-and-state", action="store_true",
-                        help="uninstall also deletes identity and membership state (not recoverable)")
-    args = parser.parse_args(argv)
-    try:
+    args = _core.cli_parser("Mycelium.exe", __doc__.split("\n\n")[0]).parse_args(argv)
+
+    def run() -> dict[str, Any]:
         if args.install:
             bundle = args.bundle or Path(sys.executable).resolve().parent.parent
-            result = install(bundle, seams=seams)
-        elif args.uninstall:
-            result = uninstall(delete_identity_and_state=args.delete_identity_and_state, seams=seams)
-        elif args.rollback:
-            result = rollback(seams=seams)
-        else:
-            result = status(seams=seams)
-    except InstallerError as exc:
-        print(json.dumps({"protocol": PROTOCOL, "refused": exc.code}), file=sys.stderr)
-        return 2
-    print(json.dumps(result, indent=2, sort_keys=True))
-    return 0
+            return install(bundle, seams=seams)
+        if args.uninstall:
+            return uninstall(delete_identity_and_state=args.delete_identity_and_state, seams=seams)
+        if args.rollback:
+            return rollback(seams=seams)
+        return status(seams=seams)
+
+    return _core.emit(PROTOCOL, run)
 
 
 __all__ = ["HostSeams", "InstallerError", "install", "main", "payload_digest", "payload_tree",
