@@ -481,3 +481,26 @@ fn real_qwen05_objects_resume_reject_and_match_the_host_golden() {
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn a_policy_gate_pauses_acquisition_and_a_later_call_resumes() {
+    let root = scratch("gate");
+    let store = ArtifactStore::open(&root, 1 << 30).unwrap();
+    let m = manifest();
+    let file = synthetic_bytes();
+    let mut calls = 0;
+    let mut gate = || {
+        calls += 1;
+        if calls > 10 { Err(ArtifactError("thermal_ceiling_reached".into())) } else { Ok(()) }
+    };
+    let mut src = MemorySource::new(&file);
+    let err = store.acquire_with(&m, &mut src, 1000, None, &mut gate).unwrap_err();
+    assert_eq!(err.0, "thermal_ceiling_reached");
+    assert_eq!(calls, 11, "the gate is asked before every chunk and stops at once");
+    let missing = store.missing_bytes(&m);
+    assert_eq!(missing, m.total_bytes() - src.served, "every admitted chunk was kept");
+    let report = store.acquire(&m, &mut MemorySource::new(&file), 1000, None).unwrap();
+    assert_eq!(report.fetched_bytes, missing);
+    store.load_stage(&m).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}

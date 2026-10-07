@@ -220,6 +220,20 @@ impl ArtifactStore {
         chunk_bytes: usize,
         available_bytes: Option<u64>,
     ) -> Result<AcquireReport, ArtifactError> {
+        self.acquire_with(manifest, source, chunk_bytes, available_bytes, &mut || Ok(()))
+    }
+
+    /// [`acquire`](Self::acquire) with a policy gate asked before every chunk
+    /// (thermal, battery, budget, cancellation): an `Err` pauses acquisition
+    /// at once, keeping the durable partial for the next call to resume.
+    pub fn acquire_with(
+        &self,
+        manifest: &StageManifest,
+        source: &mut dyn ChunkSource,
+        chunk_bytes: usize,
+        available_bytes: Option<u64>,
+        gate: &mut dyn FnMut() -> Result<(), ArtifactError>,
+    ) -> Result<AcquireReport, ArtifactError> {
         if chunk_bytes == 0 || chunk_bytes > MAX_CHUNK_BYTES {
             return Err(fail("artifact_chunk_size_invalid"));
         }
@@ -230,7 +244,7 @@ impl ArtifactStore {
                 report.reused_objects += 1;
                 continue;
             }
-            self.acquire_object(spec, source, chunk_bytes, &mut report)?;
+            self.acquire_object(spec, source, chunk_bytes, &mut report, gate)?;
             report.promoted_objects += 1;
         }
         Ok(report)
@@ -242,6 +256,7 @@ impl ArtifactStore {
         source: &mut dyn ChunkSource,
         chunk_bytes: usize,
         report: &mut AcquireReport,
+        gate: &mut dyn FnMut() -> Result<(), ArtifactError>,
     ) -> Result<(), ArtifactError> {
         let partial = self.partial_path(spec.hex());
         let mut file = OpenOptions::new().create(true).append(true).open(&partial).map_err(io("artifact_partial_unwritable"))?;
@@ -255,6 +270,10 @@ impl ArtifactStore {
         let mut since_sync = 0u64;
         while offset < spec.size_bytes {
             let want = (spec.size_bytes - offset).min(chunk_bytes as u64) as usize;
+            if let Err(paused) = gate() {
+                file.sync_data().map_err(io("artifact_sync_failed"))?;
+                return Err(paused);
+            }
             let chunk = source.fetch(&spec.sha256, offset, want)?;
             if chunk.is_empty() {
                 file.sync_data().map_err(io("artifact_sync_failed"))?;

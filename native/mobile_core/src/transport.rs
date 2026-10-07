@@ -81,6 +81,12 @@ impl NodeTransport {
         self.endpoint.id().to_string()
     }
 
+    /// The node's endpoint (artifact acquisition dials sources with it, so the
+    /// source authenticates the same iroh identity the grant names).
+    pub fn endpoint(&self) -> Endpoint {
+        self.endpoint.clone()
+    }
+
     pub fn addr(&self) -> EndpointAddr {
         self.endpoint.addr()
     }

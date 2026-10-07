@@ -191,6 +191,30 @@ struct Shared {
     route: Option<AppliedRoute>,
     /// The latest OS readings the app shell sampled, and when.
     shell_metrics: Option<(evidence::Metrics, f64)>,
+    /// The background A2 acquisition of a v2 manifest's objects, if running.
+    acquisition: Option<Acquisition>,
+}
+
+/// One background acquisition: which manifest, and how to stop it.
+struct Acquisition {
+    pack_digest: String,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+    done: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Ranges per A2 chunk request from the phone.
+const ACQUISITION_CHUNK_BYTES: usize = 1 << 20;
+
+/// Why acquisition must pause now (A12 §8: thermal, battery), from the owner's
+/// invitation quota and the current platform readings.
+fn acquisition_pause(quota: &Value, metrics: &evidence::Metrics) -> Option<String> {
+    if let Some(code) = thermal_refusal(quota["thermal_ceiling_c"].as_f64(), metrics) {
+        return Some(code);
+    }
+    let floor = quota["battery_floor_percent"].as_f64()?;
+    let level = metrics.get("battery_level_percent").copied().flatten()?;
+    let charging = metrics.get("charging").copied().flatten().is_some_and(|c| c >= 1.0);
+    (level < floor && !charging).then(|| format!("battery_below_floor:{level}<{floor}"))
 }
 
 /// The seed-delivered assignment currently applied to the stage and transport.
@@ -276,6 +300,7 @@ impl NodeCore {
                 forward: None,
                 route: None,
                 shell_metrics: None,
+                acquisition: None,
             })),
             http,
             incarnation: new_incarnation()?,
@@ -973,6 +998,7 @@ impl Supervisor {
         .map_err(|e| e.0)?;
         self.shared.lock().unwrap().status.route_assignment_error = None;
         let Some((assignment, delivered)) = verified else {
+            self.cancel_acquisition(None);
             drop_route(&self.shared, &self.transport).await;
             return Ok(false);
         };
@@ -984,8 +1010,8 @@ impl Supervisor {
         // pinned tensor promoted in the artifact store (digest-verified).
         let stage: Box<dyn StageRuntime> = match delivered {
             DeliveredStage::Gpt2(stage) => stage,
-            DeliveredStage::Qwen2 { manifest, envelope, grant: _ } => {
-                Box::new(self.load_v2_stage(&assignment, &manifest, &envelope, &m.pinned)?)
+            DeliveredStage::Qwen2 { manifest, envelope, grant } => {
+                Box::new(self.load_v2_stage(&assignment, &manifest, &envelope, &grant, &m.pinned)?)
             }
         };
         let peer = crate::transport::parse_endpoint_id(&assignment.peer_endpoint_id).map_err(|e| e.0)?;
@@ -1006,14 +1032,78 @@ impl Supervisor {
         Ok(true)
     }
 
+    /// Stop a running acquisition unless it is for `keep` (a pack digest).
+    fn cancel_acquisition(&self, keep: Option<&str>) {
+        let mut s = self.shared.lock().unwrap();
+        if s.acquisition.as_ref().is_some_and(|a| Some(a.pack_digest.as_str()) != keep) {
+            let old = s.acquisition.take().unwrap();
+            old.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    /// Start (once per manifest) the background A2-over-iroh acquisition of
+    /// the manifest's objects from the grant's sources, with the node's own
+    /// endpoint and member key. It pauses on the owner's thermal ceiling and
+    /// battery floor, stops when cancelled, and reports `artifact_state`; the
+    /// next route sync applies the assignment once every object is promoted.
+    fn ensure_acquisition(&self, manifest: &crate::stage_manifest::StageManifest, grant: &crate::artifact_grant::Grant, quota: u64) -> Result<(), String> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        self.cancel_acquisition(Some(&manifest.pack_digest));
+        {
+            let s = self.shared.lock().unwrap();
+            if s.acquisition.as_ref().is_some_and(|a| !a.done.load(Ordering::SeqCst)) {
+                return Ok(());
+            }
+        }
+        let sources: Vec<iroh::EndpointAddr> = grant
+            .sources
+            .keys()
+            .map(|id| crate::transport::parse_endpoint_id(id).map(iroh::EndpointAddr::from).map_err(|e| e.0))
+            .collect::<Result<_, _>>()?;
+        let mut client = crate::artifact_net::IrohChunkSource::new(self.transport.endpoint(), self.identity.clone(), grant.clone(), sources).map_err(|e| e.0)?;
+        let (cancel, done) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        let (shared, root, manifest) = (self.shared.clone(), self.data_dir.join("artifacts"), manifest.clone());
+        let (task_cancel, task_done) = (cancel.clone(), done.clone());
+        {
+            let mut s = self.shared.lock().unwrap();
+            s.acquisition = Some(Acquisition { pack_digest: manifest.pack_digest.clone(), cancel, done });
+            s.status.artifact_state = Some("acquiring".into());
+        }
+        tokio::task::spawn_blocking(move || {
+            let mut gate = || {
+                if task_cancel.load(Ordering::SeqCst) {
+                    return Err(crate::artifact::ArtifactError("artifact_acquisition_cancelled".into()));
+                }
+                let quota = shared.lock().unwrap().invitation.as_ref().map(|inv| inv["quota"].clone()).unwrap_or(Value::Null);
+                match acquisition_pause(&quota, &current_platform_metrics(&shared)) {
+                    Some(code) => Err(crate::artifact::ArtifactError(code)),
+                    None => Ok(()),
+                }
+            };
+            let outcome = ArtifactStore::open(&root, quota)
+                .and_then(|store| store.acquire_with(&manifest, &mut client, ACQUISITION_CHUNK_BYTES, None, &mut gate));
+            let state = match outcome {
+                Ok(_) => "promoted".to_owned(),
+                Err(e) => format!("paused:{}", e.0),
+            };
+            if !task_cancel.load(Ordering::SeqCst) {
+                shared.lock().unwrap().status.artifact_state = Some(state);
+            }
+            task_done.store(true, Ordering::SeqCst);
+        });
+        Ok(())
+    }
+
     /// Persist the seed-signed v2 manifest, then load the stage from the store
     /// once every tensor is promoted (each object re-verified, golden checked).
-    /// Until then the assignment is not applied (`acquisition_pending`).
+    /// Until then the assignment is not applied: acquisition runs in the
+    /// background under the seed's grant.
     fn load_v2_stage(
         &self,
         assignment: &RouteAssignment,
         manifest: &crate::stage_manifest::StageManifest,
         envelope: &Value,
+        grant: &crate::artifact_grant::Grant,
         pinned: &Value,
     ) -> Result<Qwen2Runtime, String> {
         let quota = {
@@ -1026,9 +1116,9 @@ impl Supervisor {
         let set_state = |state: &str| self.shared.lock().unwrap().status.artifact_state = Some(state.into());
         if !store.is_complete(manifest) {
             // Admission is checked now so an assignment that can never fit is
-            // reported at once; acquisition itself is the artifact client's job.
+            // reported at once, then the objects are fetched in the background.
             store.admit(manifest, None).map_err(|e| e.0)?;
-            set_state("acquisition_pending");
+            self.ensure_acquisition(manifest, grant, quota)?;
             return Err("route_assignment_stage_artifacts_pending".into());
         }
         if let Some(Some(available)) = current_platform_metrics(&self.shared).get("memory_available_bytes").copied() {
@@ -1036,6 +1126,7 @@ impl Supervisor {
         }
         let stage = store.load_stage(manifest).map_err(|e| e.0)?;
         let runtime = Qwen2Runtime::new(&assignment.assignment_id, &manifest.stage_id, stage).map_err(|e| e.0)?;
+        self.shared.lock().unwrap().acquisition = None;
         set_state("loaded");
         Ok(runtime)
     }
@@ -1206,5 +1297,24 @@ mod tests {
         assert_eq!(thermal_refusal(None, &m), None);
         m.insert("thermal_max_celsius".into(), None);
         assert_eq!(thermal_refusal(Some(45.0), &m), None);
+    }
+
+    #[test]
+    fn acquisition_pauses_on_the_thermal_ceiling_or_below_the_battery_floor_unless_charging() {
+        let quota = serde_json::json!({"thermal_ceiling_c": 45.0, "battery_floor_percent": 30.0});
+        let mut m = evidence::Metrics::new();
+        assert_eq!(acquisition_pause(&quota, &m), None, "unknown readings do not pause");
+        m.insert("thermal_max_celsius".into(), Some(46.0));
+        assert!(acquisition_pause(&quota, &m).unwrap().starts_with("thermal_ceiling_reached"));
+        m.insert("thermal_max_celsius".into(), Some(40.0));
+        m.insert("battery_level_percent".into(), Some(25.0));
+        m.insert("charging".into(), Some(0.0));
+        assert_eq!(acquisition_pause(&quota, &m).as_deref(), Some("battery_below_floor:25<30"));
+        m.insert("charging".into(), Some(1.0));
+        assert_eq!(acquisition_pause(&quota, &m), None);
+        m.insert("charging".into(), Some(0.0));
+        m.insert("battery_level_percent".into(), Some(31.0));
+        assert_eq!(acquisition_pause(&quota, &m), None);
+        assert_eq!(acquisition_pause(&Value::Null, &m), None);
     }
 }

@@ -230,8 +230,14 @@ impl IrohChunkSource {
     /// `sources`: dialable addresses of the grant's authorized sources (with
     /// production reachability an endpoint id alone resolves via discovery).
     pub async fn bind(secret: &[u8; 32], member: Arc<Identity>, grant: Grant, sources: Vec<EndpointAddr>, reach: Reachability) -> Result<Self, ArtifactError> {
-        let endpoint = bind(secret, reach, ARTIFACT_CHUNK_ALPN).await?;
-        if sources.iter().any(|a| !grant.sources.contains_key(&a.id.to_string())) {
+        Self::new(bind(secret, reach, ARTIFACT_CHUNK_ALPN).await?, member, grant, sources)
+    }
+
+    /// Over an existing endpoint (the node's own: its iroh id is what the
+    /// grant names). Dialing needs no local ALPN registration. Must be called
+    /// inside the tokio runtime the fetches will be driven on.
+    pub fn new(endpoint: Endpoint, member: Arc<Identity>, grant: Grant, sources: Vec<EndpointAddr>) -> Result<Self, ArtifactError> {
+        if sources.is_empty() || sources.iter().any(|a| !grant.sources.contains_key(&a.id.to_string())) {
             return Err(ArtifactError("artifact_source_not_authorized".into()));
         }
         Ok(Self { endpoint, runtime: tokio::runtime::Handle::current(), member, grant, sources, connections: BTreeMap::new(), failed: BTreeSet::new(), requests: 0 })
