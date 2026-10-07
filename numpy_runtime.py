@@ -28,6 +28,27 @@ from weight_quantization import Int8RowwiseWeight
 _CANCELLABLE_SEQUENCE_CHUNK = 32
 _CANCELLABLE_OUTPUT_CHUNK = 1024
 
+# A9 int8 linear provider (opt-in).  When installed, every row-wise int8
+# projection is executed by ``provider(hidden, int8_values, float32_scales)``
+# without materializing a float copy of the weight; with no provider the
+# qualified per-call path below is unchanged byte for byte.
+_INT8_LINEAR_PROVIDER: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray] | None = None
+
+
+def install_int8_linear_provider(
+    provider: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray] | None,
+) -> None:
+    """Install (or with ``None`` remove) the process-wide int8 linear provider."""
+
+    global _INT8_LINEAR_PROVIDER
+    if provider is not None and not callable(provider):
+        raise NumpyRuntimeError("int8_linear_provider_invalid")
+    _INT8_LINEAR_PROVIDER = provider
+
+
+def installed_int8_linear_provider() -> Any:
+    return _INT8_LINEAR_PROVIDER
+
 
 class NumpyRuntimeError(ValueError):
     """Fail-closed NumPy runtime validation or execution error."""
@@ -132,6 +153,8 @@ def quantize_qwen2_numpy_tensors(
 
 def _qwen2_linear(hidden: np.ndarray, weight: Any) -> np.ndarray:
     if isinstance(weight, Int8RowwiseWeight):
+        if _INT8_LINEAR_PROVIDER is not None:
+            return _INT8_LINEAR_PROVIDER(hidden, weight.values, weight.scales)
         projected = np.matmul(hidden, weight.values.astype(np.float32).T)
         return projected * weight.scales
     return np.matmul(hidden, weight.T)
@@ -162,6 +185,20 @@ def _qwen2_linear_checkpointed(
             output_start + _CANCELLABLE_OUTPUT_CHUNK,
             output_features,
         )
+        if isinstance(weight, Int8RowwiseWeight) and _INT8_LINEAR_PROVIDER is not None:
+            values = weight.values[output_start:output_end]
+            scales = weight.scales[output_start:output_end]
+            sequence_chunks = []
+            for sequence_start in range(0, sequence, _CANCELLABLE_SEQUENCE_CHUNK):
+                sequence_end = min(sequence_start + _CANCELLABLE_SEQUENCE_CHUNK, sequence)
+                sequence_chunks.append(
+                    _INT8_LINEAR_PROVIDER(
+                        hidden[..., sequence_start:sequence_end, :], values, scales
+                    )
+                )
+                checkpoint()
+            output_chunks.append(np.concatenate(sequence_chunks, axis=-2))
+            continue
         if isinstance(weight, Int8RowwiseWeight):
             matrix = weight.values[output_start:output_end].astype(np.float32)
             scales = weight.scales[output_start:output_end]
@@ -358,7 +395,13 @@ def _qwen2_block_with_kv(
         sequence = int(value.shape[-2])
         if checkpoint is None or sequence <= _CANCELLABLE_SEQUENCE_CHUNK:
             return _qwen2_linear(value, weight)
-        if isinstance(weight, Int8RowwiseWeight):
+        if isinstance(weight, Int8RowwiseWeight) and _INT8_LINEAR_PROVIDER is not None:
+            provider = _INT8_LINEAR_PROVIDER
+
+            def project(chunk: np.ndarray) -> np.ndarray:
+                return provider(chunk, weight.values, weight.scales)
+
+        elif isinstance(weight, Int8RowwiseWeight):
             matrix = weight.values.astype(np.float32).T
 
             def project(chunk: np.ndarray) -> np.ndarray:
