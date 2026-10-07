@@ -1900,13 +1900,38 @@ class PhysicalNodeService:
         fallback coverage).  Counts, closed reasons and request ids only.
         """
 
-        _require(isinstance(payload, dict) and not payload, "invalid_a11_snapshot_fields")
+        # The collector's binding (window, phase, plan, prereg and, after the
+        # benchmark, its document digest) is echoed into the signed details, so
+        # a record cannot be replayed into another window or run.
+        _require(isinstance(payload, dict) and set(payload) == {"binding"}, "invalid_a11_snapshot_fields")
+        binding = _exact_fields(
+            payload["binding"],
+            {"window_id", "phase", "plan_digest", "prereg_digest", "benchmark_digest"},
+            "invalid_a11_snapshot_binding",
+        )
+        _require(
+            isinstance(binding["window_id"], str)
+            and re.fullmatch(r"[A-Za-z0-9._-]{16,128}", binding["window_id"]) is not None
+            and binding["phase"] in {"before", "after"}
+            and all(
+                isinstance(binding[key], str) and re.fullmatch(r"sha256:[0-9a-f]{64}", binding[key]) is not None
+                for key in ("plan_digest", "prereg_digest")
+            )
+            and (
+                binding["benchmark_digest"] is None
+                if binding["phase"] == "before"
+                else isinstance(binding["benchmark_digest"], str)
+                and re.fullmatch(r"sha256:[0-9a-f]{64}", binding["benchmark_digest"]) is not None
+            ),
+            "invalid_a11_snapshot_binding",
+        )
         _require(self.state == "RUNNING" and self.runtime is not None, "invalid_state_for_a11_snapshot")
         release_log = getattr(self.runtime, "kv_release_log", None)
         _require(callable(release_log), "a11_kv_release_log_unavailable")
         wiring = getattr(self, "_a11_wiring", None)
         details = {
             "protocol": "mycelium.a11_node_evidence.v1",
+            "binding": dict(binding),
             "kv": release_log(),
             "speculation": (
                 None

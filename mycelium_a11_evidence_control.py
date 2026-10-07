@@ -14,9 +14,18 @@ the product gateway.  This door reads them without touching the route:
   the record stays verifiable offline against the bound plan's endpoint ids
   (``mycelium_a11_node_evidence.verify_node_evidence``) and cannot be forged by
   the serve, the door or the collector;
-* it exists only while the serve holds the exact A11 fleet grant, every request
-  must present it again, it listens on its own direct IPv4 loopback socket,
-  refuses forwarding headers, answers ``GET`` only and never mutates anything.
+* every read names its binding (window id, phase, bound-plan digest, prereg
+  digest and, after the benchmark, the benchmark document digest); the nodes sign
+  it into their observations, so evidence cannot be replayed into another window;
+* it exists only while the serve holds the exact A11 fleet grant (a consent
+  marker, not a secret) and every request must present it again together with
+  the door's per-lifetime 256-bit token, which exists only in an owner-only file
+  the door creates (``token_file``) and is compared in constant time; neither is
+  ever logged or accepted from the query string;
+* it listens on its own direct IPv4 loopback socket, requires ``Host`` to be
+  exactly ``127.0.0.1:<port>`` (DNS rebinding), refuses any browser context
+  (``Origin``, ``Sec-Fetch-*``) and forwarding headers, answers ``GET`` only and
+  never mutates anything.
 
 A refusal carries only a stable code.  The door is a measurement surface, never
 a qualification or an A11 result.
@@ -24,20 +33,24 @@ a qualification or an A11 result.
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import re
 import secrets
+import stat
 import threading
 import time
 import urllib.parse
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 EXACT_FLEET_GRANT = "FLEET GRANTED TO A11"
 GRANT_ENV = "MYCELIUM_A11_FLEET_GRANT"
 GRANT_HEADER = "x-mycelium-a11-fleet-grant"
+TOKEN_HEADER = "x-mycelium-a11-evidence-token"
 CONTROL_PATH = "/a11/evidence"
 STATUS_PROTOCOL = "mycelium.a11_evidence_control.v1"
 EVIDENCE_PROTOCOL = "mycelium.a11_route_node_evidence.v1"
@@ -45,6 +58,9 @@ SNAPSHOT_COMMAND = "a11_snapshot"
 _FORWARDING_HEADERS = frozenset({"forwarded", "via", "x-real-ip", "x-client-ip"})
 _CODE = re.compile(r"[a-z][a-z0-9_:]{0,80}\Z")
 _COMMAND_TIMEOUT_S = 5.0
+_WINDOW_ID = re.compile(r"[A-Za-z0-9._-]{16,128}\Z")
+_SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
+BINDING_FIELDS = ("window_id", "phase", "plan_digest", "prereg_digest", "benchmark_digest")
 
 
 class A11EvidenceControlRefused(ValueError):
@@ -64,7 +80,24 @@ def grant_from_environment() -> str | None:
 
 
 def exact_grant(value: Any) -> bool:
-    return isinstance(value, str) and secrets.compare_digest(value, EXACT_FLEET_GRANT)
+    return isinstance(value, str) and hmac.compare_digest(value.encode("utf-8"), EXACT_FLEET_GRANT.encode("utf-8"))
+
+
+def validated_binding(value: Any) -> dict[str, Any]:
+    """The closed per-read binding the nodes sign into their observations."""
+
+    if not isinstance(value, Mapping) or set(value) != set(BINDING_FIELDS):
+        raise A11EvidenceUnavailable("a11_evidence_binding_invalid")
+    phase, benchmark = value["phase"], value["benchmark_digest"]
+    if (
+        not isinstance(value["window_id"], str)
+        or not _WINDOW_ID.fullmatch(value["window_id"])
+        or phase not in {"before", "after"}
+        or not all(isinstance(value[key], str) and _SHA256.fullmatch(value[key]) for key in ("plan_digest", "prereg_digest"))
+        or (benchmark is not None if phase == "before" else not (isinstance(benchmark, str) and _SHA256.fullmatch(benchmark)))
+    ):
+        raise A11EvidenceUnavailable("a11_evidence_binding_invalid")
+    return {key: value[key] for key in BINDING_FIELDS}
 
 
 def _stable_code(error: BaseException) -> str | None:
@@ -109,7 +142,8 @@ class RouteA11Evidence:
                 raise A11EvidenceUnavailable("a11_evidence_route_unsupported")
         return current
 
-    def collect(self) -> dict[str, Any]:
+    def collect(self, binding: Mapping[str, Any]) -> dict[str, Any]:
+        binding = validated_binding(binding)
         concrete = self._concrete()
         plan = concrete._plan
         nodes: dict[str, Any] = {}
@@ -124,7 +158,7 @@ class RouteA11Evidence:
                     node_id,
                     command_id=concrete._command_id(node_id, SNAPSHOT_COMMAND),
                     command=SNAPSHOT_COMMAND,
-                    payload={},
+                    payload={"binding": dict(binding)},
                     deadline_monotonic_s=time.monotonic() + self._timeout,
                 )
                 concrete._verify_observation(node_id, response, event=SNAPSHOT_COMMAND)
@@ -137,6 +171,7 @@ class RouteA11Evidence:
             "run_id": plan.get("run_id"),
             "deployment_id": plan.get("deployment_id"),
             "entry_node_id": plan.get("entry_node_id"),
+            "binding": binding,
             "nodes": nodes,
         }
 
@@ -167,15 +202,24 @@ class _Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlsplit(self.path)
         if (
             self.client_address[0] != "127.0.0.1"
+            or len(self.headers.get_all("host") or []) != 1
+            or headers.get("host") != f"127.0.0.1:{control.port}"
             or parsed.path != CONTROL_PATH
-            or parsed.query
+            or "origin" in headers
+            or any(key.startswith("sec-fetch-") for key in headers)
             or any(key in _FORWARDING_HEADERS or key.startswith("x-forwarded-") for key in headers)
             or not exact_grant(headers.get(GRANT_HEADER))
+            or not control.token_matches(headers.get(TOKEN_HEADER))
         ):
             self._refuse()
             return
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True, strict_parsing=False)
+        if set(query) - set(BINDING_FIELDS) or any(len(values) != 1 for values in query.values()):
+            self._reply(400, {"code": "a11_evidence_binding_invalid"})
+            return
+        binding = {key: query[key][0] if key in query else None for key in BINDING_FIELDS}
         try:
-            document = control.source.collect()
+            document = control.source.collect(binding)
         except Exception as error:  # noqa: BLE001 - only a stable code leaves
             code = _stable_code(error)
             self._reply(409 if code else 500, {"code": code or "a11_evidence_failed"})
@@ -202,6 +246,7 @@ class A11EvidenceControl:
         *,
         grant: str | None,
         source: RouteA11Evidence,
+        token_file: Path,
         product_port: int,
         port: int = 0,
         public_origin: str | None = None,
@@ -219,7 +264,21 @@ class A11EvidenceControl:
             raise A11EvidenceControlRefused("a11_evidence_control_port_is_product_origin")
         if not isinstance(source, RouteA11Evidence):
             raise A11EvidenceControlRefused("a11_evidence_control_source_required")
+        token_path = Path(token_file)
+        parent = token_path.parent
+        try:
+            parent_mode = parent.lstat()
+        except OSError:
+            raise A11EvidenceControlRefused("a11_evidence_control_token_dir_invalid") from None
+        if (
+            not stat.S_ISDIR(parent_mode.st_mode)
+            or parent_mode.st_uid != os.getuid()
+            or stat.S_IMODE(parent_mode.st_mode) & 0o077
+        ):
+            raise A11EvidenceControlRefused("a11_evidence_control_token_dir_invalid")
         self.source = source
+        self._token_path = token_path
+        self._token: bytes | None = None
         self._port = port
         self._server: _Server | None = None
         self._thread: threading.Thread | None = None
@@ -237,6 +296,16 @@ class A11EvidenceControl:
     def start(self) -> None:
         if self._server is not None or self._closed:
             raise A11EvidenceControlRefused("a11_evidence_control_lifecycle_invalid")
+        token = secrets.token_hex(32)
+        try:
+            descriptor = os.open(
+                self._token_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
+            )
+        except OSError:
+            raise A11EvidenceControlRefused("a11_evidence_control_token_file_invalid") from None
+        with os.fdopen(descriptor, "w", encoding="ascii") as handle:
+            handle.write(token + "\n")
+        self._token = token.encode("ascii")
         server = _Server(("127.0.0.1", self._port), _Handler)
         server.control = self
         self._lifetime_id = secrets.token_hex(32)
@@ -250,7 +319,22 @@ class A11EvidenceControl:
             self._server.server_close()
             assert self._thread is not None
             self._thread.join(timeout=3)
+        if self._token is not None:
+            try:
+                self._token_path.unlink()
+            except OSError:
+                pass
+        self._token = None
         self._closed = True
+
+    def token_matches(self, value: Any) -> bool:
+        token = self._token
+        return (
+            token is not None
+            and isinstance(value, str)
+            and len(value) == len(token)
+            and hmac.compare_digest(value.encode("ascii", "replace"), token)
+        )
 
     def record_read(self) -> None:
         with self._lock:
@@ -279,6 +363,8 @@ __all__ = (
     "EXACT_FLEET_GRANT",
     "GRANT_HEADER",
     "RouteA11Evidence",
+    "TOKEN_HEADER",
+    "validated_binding",
     "exact_grant",
     "grant_from_environment",
 )
