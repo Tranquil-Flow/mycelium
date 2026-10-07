@@ -4,6 +4,7 @@
 Run from the repository root:
     python3 -B native/mobile_core/tests/fixtures/generate_fixtures.py
     python3 -B native/mobile_core/tests/fixtures/generate_fixtures.py route_assignment
+    python3 -B native/mobile_core/tests/fixtures/generate_fixtures.py stage_manifest_v2
 
 Every fixture is produced by the repository's own Python implementations
 (signing, invite bundles, A12 Android onboarding), so the Rust tests prove byte
@@ -212,7 +213,7 @@ def stage_fixture() -> None:
     write("gpt2_stage.json", {"pack": pack, "hidden": rows, "output": output})
 
 
-def route_assignment_fixture() -> None:
+def route_assignment_fixture(pack: dict | None = None, name: str = "route_assignment.json") -> dict:
     """A real seed's answer to a member's signed route-assignment request."""
 
     import sqlite3
@@ -228,7 +229,8 @@ def route_assignment_fixture() -> None:
     seed = signer(0x22, "seed-endpoint-1")
     member = signer(0x11, "a" * 64)
     peer = "0d7550754e0800a5d237eef5826035766b9b3e5a15868a940ab289958788e3b0"
-    pack = json.loads((OUT / "gpt2_stage.json").read_text())["pack"]
+    if pack is None:
+        pack = json.loads((OUT / "gpt2_stage.json").read_text())["pack"]
     capability = {
         "runtime_backend": "mobile-rust-reference",
         "transport": "iroh",
@@ -255,6 +257,7 @@ def route_assignment_fixture() -> None:
             route_generation=7,
             now=lambda: NOW,
             id_source=lambda: "route-fixture-1",
+            seed_key_record=seed.public_key_record(),
         )
         request = {
             "protocol": ROUTE_ASSIGNMENT_REQUEST_PROTOCOL,
@@ -284,9 +287,7 @@ def route_assignment_fixture() -> None:
             clock=lambda: NOW + 2,
             id_source=lambda: "route-delivery-fixture-1",
         ).answer(envelope)
-    write(
-        "route_assignment.json",
-        {
+    document = {
             "seed_key": seed.public_key_record(),
             "delivery": delivery,
             "expected": {
@@ -299,14 +300,75 @@ def route_assignment_fixture() -> None:
                 "peer_endpoint_id": peer,
                 "now": NOW + 3,
             },
+        }
+    write(name, document)
+    return document
+
+
+#: Host golden of the synthetic 2-layer stage over splitmix64_unit_f32_v1
+#: (seed 42, seq 3), from `cargo run --release --example qwen2_stage_golden --
+#: <synthetic snapshot> 0 2 42 3` (debug and release builds agree).
+SYNTHETIC_GOLDEN_DIGEST = "sha256:7029985567357ec911c682d2e01d49a3111648e7a4b49770378dbcb804327603"
+
+
+def stage_manifest_v2_fixture() -> None:
+    """A seed-signed v2 manifest for the synthetic Qwen2 stage, its objects'
+    source, a golden input vector, and a real seed's v2 route-assignment answer."""
+
+    import base64
+    import hashlib
+    import tempfile
+
+    from mycelium_mobile import qwen_stage_manifest as qm
+
+    synthetic = json.loads((OUT / "qwen2_synthetic.json").read_text())
+    seed = signer(0x22, "seed-endpoint-1")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "model.safetensors"
+        path.write_bytes(base64.b64decode(synthetic["safetensors_b64"]))
+        manifest = qm.build_stage_manifest_from_safetensors(
+            path,
+            {"model_type": "qwen2", "hidden_act": "silu", **synthetic["config"]},
+            stage_id="stage-synthetic-0-2",
+            model_id="synthetic/qwen2-tiny",
+            resolved_commit="7ae557604adf67be50417f59c2c2f167def9a775",
+            start_layer=0,
+            end_layer_exclusive=2,
+            golden={
+                "protocol": qm.GOLDEN_PROTOCOL,
+                "generator": qm.GOLDEN_GENERATOR,
+                "seed": 42,
+                "seq": 3,
+                "output_digest": SYNTHETIC_GOLDEN_DIGEST,
+            },
+        )
+    signed = qm.sign_stage_manifest(manifest, seed)
+    golden_input = qm.golden_input_f32(42, 2, 8)
+    write(
+        "qwen2_stage_manifest_v2.json",
+        {
+            "manifest": manifest,
+            "signed": signed,
+            "seed_key": seed.public_key_record(),
+            "canonical_ascii_sha256": "sha256:" + hashlib.sha256(qm.canonical_ascii(manifest)).hexdigest(),
+            "golden_input": {
+                "seed": 42,
+                "seq": 2,
+                "hidden": 8,
+                "f32_le_b64": base64.b64encode(golden_input).decode("ascii"),
+            },
         },
     )
+    route_assignment_fixture(signed, "route_assignment_v2.json")
 
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["route_assignment"]:
         route_assignment_fixture()
+    elif sys.argv[1:] == ["stage_manifest_v2"]:
+        stage_manifest_v2_fixture()
     else:
         stage_fixture()
         main()
         route_assignment_fixture()
+        stage_manifest_v2_fixture()

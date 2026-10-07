@@ -33,6 +33,7 @@ import time
 from typing import Any, Callable, Mapping, Sequence
 
 from mycelium_membership import peer_runtime_is_activation_eligible
+from mycelium_mobile import qwen_stage_manifest as v2_manifest
 from mycelium_mobile.pixel_stage import PixelStage, PixelStageError
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import build_ed25519_verifier
@@ -184,8 +185,14 @@ def _record_projection(row: sqlite3.Row, *, now: float) -> dict[str, Any]:
     }
 
 
-def load_stage_pack(path: Path) -> dict[str, Any]:
-    """Read a stage pack (or a fixture carrying one under ``pack``) and verify it."""
+def load_stage_pack(path: Path, *, seed_signer: Any | None = None) -> dict[str, Any]:
+    """Read a stage pack (or a fixture carrying one under ``pack``) and verify it.
+
+    A v1 pack (``mycelium.pixel_stage_pack.v1``) carries its weights inline. A
+    v2 manifest (``mycelium.mobile_stage_pack.v2``) only pins weights by digest;
+    an unsigned one is signed here with the seed's key (the owner command runs
+    with the seed state root), and a signed one must verify under that key.
+    """
 
     raw = Path(path).read_bytes()
     if len(raw) > 16 * MAX_STAGE_PACK_BYTES:
@@ -193,17 +200,47 @@ def load_stage_pack(path: Path) -> dict[str, Any]:
     document = json.loads(raw)
     if isinstance(document, dict) and "pack" in document and "protocol" not in document:
         document = document["pack"]
-    return verify_stage_pack(document)
+    key_record = None
+    if seed_signer is not None:
+        key_record = seed_signer.public_key_record()
+        if isinstance(document, dict) and document.get("protocol") == v2_manifest.MANIFEST_PROTOCOL:
+            try:
+                document = v2_manifest.sign_stage_manifest(document, seed_signer)
+            except v2_manifest.StageManifestError as exc:
+                raise _fail(f"seed_route_assignment_stage_pack_invalid:{exc.code}") from exc
+    return verify_stage_pack(document, seed_key_record=key_record)
 
 
-def verify_stage_pack(document: Any) -> dict[str, Any]:
-    try:
-        PixelStage.from_document(document)
-    except PixelStageError as exc:
-        raise _fail(f"seed_route_assignment_stage_pack_invalid:{exc}") from exc
+def verify_stage_pack(
+    document: Any, *, seed_key_record: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """Dispatch on the pack version: v1 inline pack or seed-signed v2 manifest."""
+
+    if v2_manifest.is_signed_stage_manifest(document):
+        if seed_key_record is None:
+            raise _fail("seed_route_assignment_stage_manifest_signer_unknown")
+        try:
+            v2_manifest.verify_signed_stage_manifest(document, seed_key_record)
+        except v2_manifest.StageManifestError as exc:
+            raise _fail(f"seed_route_assignment_stage_pack_invalid:{exc.code}") from exc
+    elif isinstance(document, Mapping) and document.get("protocol") == v2_manifest.MANIFEST_PROTOCOL:
+        raise _fail("seed_route_assignment_stage_manifest_unsigned")
+    else:
+        try:
+            PixelStage.from_document(document)
+        except PixelStageError as exc:
+            raise _fail(f"seed_route_assignment_stage_pack_invalid:{exc}") from exc
     if len(canonical_json_bytes(document)) > MAX_STAGE_PACK_BYTES:
         raise _fail("seed_route_assignment_stage_pack_too_large")
     return json.loads(canonical_json_bytes(document))
+
+
+def stage_pack_digest(pack: Mapping[str, Any]) -> str:
+    """The digest the seed-signed assignment binds: a v1 pack's or a v2 manifest's."""
+
+    if v2_manifest.is_signed_stage_manifest(pack):
+        return str(pack["message"]["pack_digest"])
+    return str(pack["pack_digest"])
 
 
 def issue_route_assignment(
@@ -217,12 +254,14 @@ def issue_route_assignment(
     ttl_seconds: float = DEFAULT_ASSIGNMENT_TTL_SECONDS,
     now: Callable[[], float] = time.time,
     id_source: Callable[[], str] | None = None,
+    seed_key_record: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Record (or replace) the one route assignment of an enrolled native member.
 
     Only a current, activation-eligible ``android_native_iroh`` member that has not
     been revoked can be assigned; the assignment is bound to its enrolled endpoint
-    and member key so a re-enrolled device never inherits it.
+    and member key so a re-enrolled device never inherits it. A v2 manifest must
+    be signed by ``seed_key_record`` (the seed's own key).
     """
 
     if not _segment(node_id):
@@ -236,7 +275,7 @@ def issue_route_assignment(
     ttl = _number(ttl_seconds)
     if ttl is None or not 0 < ttl <= MAX_ASSIGNMENT_TTL_SECONDS:
         raise _fail("seed_route_assignment_ttl_invalid")
-    pack = verify_stage_pack(stage_pack)
+    pack = verify_stage_pack(stage_pack, seed_key_record=seed_key_record)
     issued_at = float(now())
     assignment_id = (id_source or (lambda: f"route-{secrets.token_hex(8)}"))()
     if not _segment(assignment_id):
@@ -270,7 +309,7 @@ def issue_route_assignment(
                     member["endpoint_id"],
                     member["verification_key_digest"],
                     canonical_json_bytes(pack).decode("utf-8"),
-                    pack["pack_digest"],
+                    stage_pack_digest(pack),
                     peer_endpoint_id,
                     route_generation,
                     1 if forward_to else 0,
@@ -612,7 +651,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args = _parser().parse_args(argv)
     try:
-        lease, _coordinator, _binding = _load_authority(
+        lease, coordinator, _binding = _load_authority(
             args.state_root, incarnation="seed-operator-route-assignment"
         )
     except SeedOperatorError as exc:
@@ -626,11 +665,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = issue_route_assignment(
                 database,
                 node_id=node_id,
-                stage_pack=load_stage_pack(args.stage_pack),
+                stage_pack=load_stage_pack(args.stage_pack, seed_signer=coordinator.signer),
                 peer_endpoint_id=args.peer_endpoint_id,
                 route_generation=args.route_generation,
                 forward_to=not args.no_forward,
                 ttl_seconds=args.ttl_seconds,
+                seed_key_record=coordinator.signer.public_key_record(),
             )
         elif args.command == "withdraw":
             result = withdraw_route_assignment(database, node_id=node_id)

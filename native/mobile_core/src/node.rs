@@ -17,7 +17,9 @@ use crate::evidence;
 use crate::identity::Identity;
 use crate::membership::{self, MemberConfig};
 use crate::onboarding::{self, PairingSession};
-use crate::route_assignment::{self, RouteAssignment};
+use crate::artifact::ArtifactStore;
+use crate::qwen2::Qwen2Runtime;
+use crate::route_assignment::{self, DeliveredStage, RouteAssignment};
 use crate::runtime::{Gpt2BlockStage, REFERENCE_BACKEND, StageCall, StagePhase, StageRuntime};
 use crate::transport::{Inbound, NodeTransport, Reachability};
 use crate::wire;
@@ -145,6 +147,10 @@ pub struct NodeStatus {
     /// loaded and route peer allow-listed), if any.
     pub route_assignment: Option<String>,
     pub route_assignment_error: Option<String>,
+    /// v2 (digest-pinned) stage artifacts: `acquisition_pending` while the
+    /// assigned tensors are not all promoted in the local store, `loaded` once
+    /// the stage was loaded from verified objects and passed its golden.
+    pub artifact_state: Option<String>,
     /// The owner of this device chose to serve (persisted across restarts, so a
     /// restarted app restores serving instead of silently dropping it).
     pub serving_intent: bool,
@@ -848,6 +854,9 @@ fn clear_route(s: &mut Shared) -> Option<AppliedRoute> {
         s.stage = None;
         s.forward = None;
         s.status.stage_loaded = None;
+        if s.status.artifact_state.as_deref() == Some("loaded") {
+            s.status.artifact_state = None;
+        }
         s.status.route_assignment = None;
     }
     old
@@ -962,19 +971,28 @@ impl Supervisor {
         )
         .map_err(|e| e.0)?;
         self.shared.lock().unwrap().status.route_assignment_error = None;
-        let Some((assignment, stage)) = verified else {
+        let Some((assignment, delivered)) = verified else {
             drop_route(&self.shared, &self.transport).await;
             return Ok(false);
         };
         if applied.as_deref() == Some(assignment.assignment_id.as_str()) {
             return Ok(false);
         }
+        let digest = delivered.pack_digest().to_owned();
+        // Apply only a stage that is loaded: a v2 manifest first needs every
+        // pinned tensor promoted in the artifact store (digest-verified).
+        let stage: Box<dyn StageRuntime> = match delivered {
+            DeliveredStage::Gpt2(stage) => stage,
+            DeliveredStage::Qwen2 { manifest, envelope } => {
+                Box::new(self.load_v2_stage(&assignment, &manifest, &envelope, &m.pinned)?)
+            }
+        };
         let peer = crate::transport::parse_endpoint_id(&assignment.peer_endpoint_id).map_err(|e| e.0)?;
         self.transport.configure_peer(peer, assignment.route_generation).await;
         let old = {
             let mut s = self.shared.lock().unwrap();
-            s.status.stage_loaded = Some(stage.pack_digest().to_owned());
-            s.stage = Some(Box::new(stage));
+            s.status.stage_loaded = Some(digest);
+            s.stage = Some(stage);
             s.forward = assignment.forward_to.then(|| (iroh::EndpointAddr::from(peer), assignment.route_generation));
             s.status.route_assignment = Some(assignment.assignment_id.clone());
             s.route.replace(AppliedRoute { assignment, peer })
@@ -985,6 +1003,40 @@ impl Supervisor {
             self.transport.remove_peer(old.peer).await;
         }
         Ok(true)
+    }
+
+    /// Persist the seed-signed v2 manifest, then load the stage from the store
+    /// once every tensor is promoted (each object re-verified, golden checked).
+    /// Until then the assignment is not applied (`acquisition_pending`).
+    fn load_v2_stage(
+        &self,
+        assignment: &RouteAssignment,
+        manifest: &crate::stage_manifest::StageManifest,
+        envelope: &Value,
+        pinned: &Value,
+    ) -> Result<Qwen2Runtime, String> {
+        let quota = {
+            let s = self.shared.lock().unwrap();
+            s.invitation.as_ref().and_then(|inv| inv["quota"]["storage_bytes"].as_u64())
+        }
+        .ok_or("artifact_storage_quota_unknown")?;
+        let store = ArtifactStore::open(&self.data_dir.join("artifacts"), quota).map_err(|e| e.0)?;
+        store.store_manifest(envelope, pinned).map_err(|e| e.0)?;
+        let set_state = |state: &str| self.shared.lock().unwrap().status.artifact_state = Some(state.into());
+        if !store.is_complete(manifest) {
+            // Admission is checked now so an assignment that can never fit is
+            // reported at once; acquisition itself is the artifact client's job.
+            store.admit(manifest, None).map_err(|e| e.0)?;
+            set_state("acquisition_pending");
+            return Err("route_assignment_stage_artifacts_pending".into());
+        }
+        if let Some(Some(available)) = current_platform_metrics(&self.shared).get("memory_available_bytes").copied() {
+            manifest.admit_memory(available as u64).map_err(|e| e.0)?;
+        }
+        let stage = store.load_stage(manifest).map_err(|e| e.0)?;
+        let runtime = Qwen2Runtime::new(&assignment.assignment_id, &manifest.stage_id, stage).map_err(|e| e.0)?;
+        set_state("loaded");
+        Ok(runtime)
     }
 
     async fn resume_once(&self, m: ActiveMembership) -> Step {

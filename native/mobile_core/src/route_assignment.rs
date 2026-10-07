@@ -7,12 +7,18 @@
 //! key its invitation pinned, addressed to this node id, endpoint id and
 //! generation, answering this exact request. The stage pack travels beside the
 //! statement and must recompute to the signed digest before it is loaded.
+//!
+//! Two pack versions are dispatched on their protocol: a v1 GPT-2 pack with
+//! inline weights (`mycelium.pixel_stage_pack.v1`), or a seed-signed v2 Qwen2
+//! manifest (`mycelium.mobile_stage_pack.v2`) that pins its weights by digest;
+//! the node fetches those into its artifact store before it loads the stage.
 
 use serde_json::{Value, json};
 
 use crate::identity::Identity;
 use crate::membership::{self, MemberConfig};
 use crate::runtime::Gpt2BlockStage;
+use crate::stage_manifest::{self, StageManifest};
 
 pub const REQUEST_PROTOCOL: &str = "mycelium.seed.route_assignment_request.v1";
 pub const ASSIGNMENT_PROTOCOL: &str = "mycelium.seed.route_assignment.v1";
@@ -38,6 +44,38 @@ pub struct RouteAssignment {
     pub route_generation: u64,
     pub forward_to: bool,
     pub expires_at: f64,
+}
+
+/// The verified stage that came with an assignment.
+pub enum DeliveredStage {
+    /// v1: weights inline, loadable at once.
+    Gpt2(Box<Gpt2BlockStage>),
+    /// v2: a seed-signed manifest; `envelope` is kept so the node can persist
+    /// it and re-verify it at boot against the pinned seed key.
+    Qwen2 { manifest: Box<StageManifest>, envelope: Value },
+}
+
+impl DeliveredStage {
+    pub fn pack_digest(&self) -> &str {
+        match self {
+            Self::Gpt2(stage) => stage.pack_digest(),
+            Self::Qwen2 { manifest, .. } => &manifest.pack_digest,
+        }
+    }
+}
+
+/// Verify the pack that travelled beside a seed-signed assignment.
+pub fn verify_stage_pack(pack: &Value, pinned_seed_key: &Value) -> Result<DeliveredStage, RouteAssignmentError> {
+    let signed_v2 = pack.get("protocol").and_then(Value::as_str) == Some(membership::SIGNED_MESSAGE_PROTOCOL)
+        && pack["message"]["protocol"] == stage_manifest::MANIFEST_PROTOCOL;
+    if signed_v2 {
+        let manifest = StageManifest::verify_signed(pack, pinned_seed_key).map_err(|e| fail(&e.0))?;
+        return Ok(DeliveredStage::Qwen2 { manifest: Box::new(manifest), envelope: pack.clone() });
+    }
+    if pack.get("protocol").and_then(Value::as_str) == Some(stage_manifest::MANIFEST_PROTOCOL) {
+        return Err(fail("route_assignment_stage_manifest_unsigned"));
+    }
+    Gpt2BlockStage::from_document(pack).map(|s| DeliveredStage::Gpt2(Box::new(s))).map_err(|e| fail(&e.0))
 }
 
 /// What this node expects the seed's answer to be bound to.
@@ -93,7 +131,7 @@ fn finite(v: &Value, code: &str) -> Result<f64, RouteAssignmentError> {
 pub fn verify_delivery(
     reply: &Value,
     expected: &Expected<'_>,
-) -> Result<Option<(RouteAssignment, Gpt2BlockStage)>, RouteAssignmentError> {
+) -> Result<Option<(RouteAssignment, DeliveredStage)>, RouteAssignmentError> {
     let map = reply.as_object().ok_or_else(|| fail("route_assignment_delivery_invalid"))?;
     if map.len() != 3
         || map.get("protocol").and_then(Value::as_str) != Some(DELIVERY_PROTOCOL)
@@ -153,7 +191,7 @@ pub fn verify_delivery(
     }
     // The pack's own digest is recomputed over its content by the runtime, then
     // must equal the digest the seed signed.
-    let stage = Gpt2BlockStage::from_document(&map["stage_pack"]).map_err(|e| fail(&e.0))?;
+    let stage = verify_stage_pack(&map["stage_pack"], expected.pinned_seed_key)?;
     if stage.pack_digest() != assignment.stage_pack_digest {
         return Err(fail("route_assignment_stage_digest_mismatch"));
     }
@@ -238,7 +276,7 @@ mod tests {
         })
     }
 
-    fn check(w: &World, reply: &Value) -> Result<Option<(RouteAssignment, Gpt2BlockStage)>, RouteAssignmentError> {
+    fn check(w: &World, reply: &Value) -> Result<Option<(RouteAssignment, DeliveredStage)>, RouteAssignmentError> {
         let pinned = w.seed.public_key_record();
         verify_delivery(
             reply,
@@ -272,7 +310,8 @@ mod tests {
     #[test]
     fn a_bound_seed_signed_assignment_yields_a_digest_verified_stage() {
         let w = world();
-        let (a, mut stage) = check(&w, &delivery(&w, assignment(&w), pack(), |_| {})).unwrap().unwrap();
+        let (a, stage) = check(&w, &delivery(&w, assignment(&w), pack(), |_| {})).unwrap().unwrap();
+        let DeliveredStage::Gpt2(mut stage) = stage else { panic!("v1 pack") };
         assert_eq!(a.assignment_id, "route-1");
         assert_eq!(a.peer_endpoint_id, w.peer);
         assert_eq!(a.route_generation, 7);
@@ -341,5 +380,73 @@ mod tests {
         .unwrap();
         assert_eq!(got.0.peer_endpoint_id, e["peer_endpoint_id"].as_str().unwrap());
         assert_eq!(got.0.route_generation, 7);
+    }
+}
+
+#[cfg(test)]
+mod v2_tests {
+    use super::*;
+
+    fn fixture(name: &str) -> Value {
+        let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn expected(f: &Value) -> (Value, Value) {
+        (f["seed_key"].clone(), f["expected"].clone())
+    }
+
+    fn verify(f: &Value, delivery: &Value) -> Result<Option<(RouteAssignment, DeliveredStage)>, RouteAssignmentError> {
+        let (key, e) = expected(f);
+        verify_delivery(
+            delivery,
+            &Expected {
+                pinned_seed_key: &key,
+                swarm_id: e["swarm_id"].as_str().unwrap(),
+                seed_node_id: e["seed_node_id"].as_str().unwrap(),
+                node_id: e["node_id"].as_str().unwrap(),
+                endpoint_id: e["endpoint_id"].as_str().unwrap(),
+                generation: e["generation"].as_u64().unwrap(),
+                request_message_id: e["request_message_id"].as_str().unwrap(),
+                now: e["now"].as_f64().unwrap(),
+            },
+        )
+    }
+
+    #[test]
+    fn the_python_seed_v2_delivery_yields_a_signed_manifest() {
+        let f = fixture("route_assignment_v2.json");
+        let (a, stage) = verify(&f, &f["delivery"]).unwrap().unwrap();
+        let DeliveredStage::Qwen2 { manifest, envelope } = stage else { panic!("v2 manifest") };
+        assert_eq!(a.stage_pack_digest, manifest.pack_digest);
+        assert_eq!(manifest.start_layer, 0);
+        assert_eq!(manifest.end_layer_exclusive, 2);
+        assert_eq!(manifest.tensors.len(), 24);
+        assert_eq!(envelope, f["delivery"]["stage_pack"]);
+    }
+
+    #[test]
+    fn a_v2_pack_that_is_unsigned_resigned_or_swapped_is_refused() {
+        let f = fixture("route_assignment_v2.json");
+        let code = |d: &Value| verify(&f, d).err().expect("refused").0;
+        // Manifest stripped of its seed signature.
+        let mut unsigned = f["delivery"].clone();
+        unsigned["stage_pack"] = f["delivery"]["stage_pack"]["message"].clone();
+        assert_eq!(code(&unsigned), "route_assignment_stage_manifest_unsigned");
+        // Manifest signed by a key other than the pinned seed.
+        let other = Identity::from_secret("seed-endpoint-1", &[0x33; 32]).unwrap();
+        let message = f["delivery"]["stage_pack"]["message"].clone();
+        let mut foreign = f["delivery"].clone();
+        foreign["stage_pack"] = json!({
+            "protocol": membership::SIGNED_MESSAGE_PROTOCOL,
+            "signature": other.sign(&message).unwrap(),
+            "verification_key": other.public_key_record(),
+            "message": message,
+        });
+        assert_eq!(code(&foreign), "stage_manifest_membership_seed_key_mismatch");
+        // Tampered manifest content under the original signature.
+        let mut tampered = f["delivery"].clone();
+        tampered["stage_pack"]["message"]["golden"]["seed"] = json!(43);
+        assert_eq!(code(&tampered), "stage_manifest_membership_signature_invalid");
     }
 }

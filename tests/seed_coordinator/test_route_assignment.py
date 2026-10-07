@@ -507,3 +507,65 @@ def test_operator_writes_are_safe_next_to_a_live_seed_serving_the_member(swarm: 
     assert seen and seen <= {None, *issued}
     code, out = _cli(["--state-root", str(root), "status", "--node-id", "node-phone"], capsys)
     assert code == 0 and out["assignment_id"] == issued[-1] and out["state"] == "withdrawn"  # the last round withdrew it
+
+
+# --- v2: seed-signed Qwen2 stage manifests (weights pinned by digest) -------
+
+V2 = json.loads((ROOT / "native/mobile_core/tests/fixtures/qwen2_stage_manifest_v2.json").read_text())
+
+
+def test_a_v2_manifest_is_issued_only_seed_signed_and_delivered_beside_the_statement(swarm: Swarm) -> None:
+    from mycelium_mobile import qwen_stage_manifest as qm
+
+    seed = swarm.coordinator.signer
+    signed = qm.sign_stage_manifest(V2["manifest"], seed)
+    for pack, code in [
+        (V2["manifest"], "seed_route_assignment_stage_manifest_unsigned"),
+        (signed, "seed_route_assignment_stage_manifest_signer_unknown"),
+    ]:
+        with pytest.raises(SeedCoordinatorError) as caught:
+            swarm.issue("node-phone", stage_pack=pack)
+        assert caught.value.code == code
+    # Signed by a key that is not this seed's.
+    with pytest.raises(SeedCoordinatorError) as caught:
+        swarm.issue("node-phone", stage_pack=V2["signed"], seed_key_record=seed.public_key_record())
+    assert caught.value.code == "seed_route_assignment_stage_pack_invalid:stage_manifest_signer_mismatch"
+    tampered = json.loads(json.dumps(signed))
+    tampered["message"]["golden"]["seed"] = 43
+    with pytest.raises(SeedCoordinatorError) as caught:
+        swarm.issue("node-phone", stage_pack=tampered, seed_key_record=seed.public_key_record())
+    assert caught.value.code == "seed_route_assignment_stage_pack_invalid:stage_manifest_digest_mismatch"
+
+    record = swarm.issue("node-phone", stage_pack=signed, seed_key_record=seed.public_key_record())
+    assert record["stage_pack_digest"] == V2["manifest"]["pack_digest"]
+    delivery = swarm.service().answer(swarm.request("node-phone"))
+    message = _verify(swarm, delivery)
+    assert message["assignment"]["stage_pack_digest"] == V2["manifest"]["pack_digest"]
+    assert delivery["stage_pack"] == signed
+    assert qm.verify_signed_stage_manifest(delivery["stage_pack"], seed.public_key_record()) == V2["manifest"]
+
+
+def test_operator_command_signs_an_unsigned_v2_manifest_with_the_seed_key(swarm: Swarm, tmp_path: Path, capsys) -> None:
+    from mycelium_mobile import qwen_stage_manifest as qm
+    import sqlite3
+    import time
+
+    manifest_file = tmp_path / "manifest.json"
+    manifest_file.write_bytes(qm.canonical_ascii(V2["manifest"]))
+    with sqlite3.connect(swarm.database) as connection:
+        connection.execute("UPDATE seed_members SET lease_expires_at = ?", (time.time() + 300.0,))
+    argv = ["--state-root", str(swarm.database.parent)]
+    assert ra.main([*argv, "issue", "--stage-pack", str(manifest_file), "--peer-endpoint-id", PEER,
+                    "--route-generation", "7"]) == 0
+    issued = json.loads(capsys.readouterr().out)
+    assert issued["stage_pack_digest"] == V2["manifest"]["pack_digest"]
+    with sqlite3.connect(swarm.database) as connection:
+        (stored,) = connection.execute("SELECT stage_pack_json FROM seed_route_assignments").fetchone()
+    envelope = json.loads(stored)
+    assert qm.verify_signed_stage_manifest(envelope, swarm.coordinator.signer.public_key_record()) == V2["manifest"]
+    # A v2 manifest signed by another key is refused by the command.
+    foreign = tmp_path / "foreign.json"
+    foreign.write_text(json.dumps(V2["signed"]))
+    assert ra.main([*argv, "issue", "--stage-pack", str(foreign), "--peer-endpoint-id", PEER,
+                    "--route-generation", "8"]) == 1
+    assert "stage_manifest_signer_mismatch" in capsys.readouterr().err

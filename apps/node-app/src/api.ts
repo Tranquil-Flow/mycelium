@@ -26,6 +26,8 @@ export type NodeStatus = {
   /** The owner-issued, seed-signed route assignment this node runs, if any. */
   route_assignment: string | null;
   route_assignment_error: string | null;
+  /** v2 (digest-pinned) stage artifacts: `acquisition_pending` or `loaded`. */
+  artifact_state?: string | null;
   /** The user chose to serve; a restarted app restores serving from it. */
   serving_intent: boolean;
 };
