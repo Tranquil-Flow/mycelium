@@ -554,6 +554,10 @@ class MeasurementSettings:
     terminal_timeout_s: float = 900.0
     settle_timeout_s: float = 30.0
     poll_s: float = 0.05
+    # SIGSTOP freezes the source process, not a token or checkpoint it already
+    # handed to its transport.  Under the freeze the watermark is re-read at
+    # this interval until two consecutive reads agree.
+    pause_quiescence_s: float = 0.15
 
     def __post_init__(self) -> None:
         if type(self.kill_after_committed) is not int or self.kill_after_committed < 1:
@@ -564,6 +568,39 @@ def _request_state(evidence: Mapping[str, Any]) -> Mapping[str, Any] | None:
     a7 = evidence.get("a7")
     request = a7.get("request") if isinstance(a7, Mapping) else None
     return request if isinstance(request, Mapping) else None
+
+
+def _watermark(state: Mapping[str, Any]) -> tuple[Any, ...]:
+    return tuple(state.get(key) for key in ("committed", "acknowledged", "commits_sent", "ack_lag_events"))
+
+
+def _quiescent_request(
+    evidence: Any, request_id: str, current: Mapping[str, Any], settings: MeasurementSettings, *, reads: int = 3
+) -> Mapping[str, Any] | None:
+    """Re-read a frozen source's request until two consecutive reads agree; ``None`` if it never settles."""
+
+    for _ in range(reads):
+        time.sleep(settings.pause_quiescence_s)
+        again = evidence.request(request_id)
+        previous, state = _request_state(current), _request_state(again)
+        if previous is not None and state is not None and _watermark(state) == _watermark(previous):
+            return again
+        current = again
+    return None
+
+
+def _await_unfrozen_settle(evidence: Any, request_id: str, running: RunningRequest, settings: MeasurementSettings) -> None:
+    """Wait (bounded) until an unfrozen read shows every commit acknowledged or recorded ack lag."""
+
+    deadline = time.monotonic() + settings.ack_timeout_s
+    while time.monotonic() < deadline and not running.done.is_set():
+        state = _request_state(evidence.request(request_id))
+        if state is None or state.get("result") is not None:
+            return
+        lag = _int(state.get("ack_lag_events"))
+        if state.get("acknowledged") == state.get("committed") or (lag is not None and lag > 0):
+            return
+        time.sleep(settings.poll_s / 5)
 
 
 def _restored_from(state: Mapping[str, Any]) -> str | None:
@@ -970,7 +1007,16 @@ def _measure(
     kill_condition: str | None = None
     pause_attempts = 0
     paused_ms = 0.0
+    # The last killable watermark leaves at least two reference tokens to the
+    # successor.  On the final decode step every stage has already executed
+    # the terminal hop and released its KV (normal completion), so a source
+    # loss there can never be a fenced KV-successor cutover.
+    last_killable = len(reference) - 2
     while pause_attempts < settings.max_pause_attempts and not running.done.is_set():
+        # Freeze right after an unfrozen read shows a settled watermark: a
+        # freeze that lands while an acknowledgement still waits on the
+        # source's own checkpoint can never settle.
+        _await_unfrozen_settle(evidence, request_id, running, settings)
         pause_attempts += 1
         paused_at = time.monotonic()
         if fault.pause(group) != 0:
@@ -978,13 +1024,31 @@ def _measure(
         current = evidence.request(request_id)
         state = _request_state(current)
         committed_now = None if state is None else _int(state.get("committed"))
-        if committed_now is not None and committed_now >= settings.kill_after_committed and state.get("result") is None:
-            if state.get("acknowledged") == committed_now:
-                pre_kill, kill_condition = current, "acknowledged_equals_committed"
-                break
+        if (
+            committed_now is not None
+            and settings.kill_after_committed <= committed_now <= last_killable
+            and state.get("result") is None
+        ):
             lag = _int(state.get("ack_lag_events"))
-            if lag is not None and lag > 0:
+            if state.get("acknowledged") != committed_now and lag is not None and lag > 0:
                 pre_kill, kill_condition = current, "entry_recorded_ack_lag"
+                break
+            # A token or checkpoint the source sent just before the freeze may
+            # still be in flight.  A token that commits without its
+            # acknowledgement makes the entry truthfully refuse the fenced
+            # cutover (watermark_behind_gateway); a checkpoint that lands
+            # completes the pending acknowledgement.  Judge only the
+            # watermark that stays put under the freeze.
+            settled = _quiescent_request(evidence, request_id, current, settings)
+            settled_state = None if settled is None else _request_state(settled)
+            if (
+                settled_state is not None
+                and settled_state.get("result") is None
+                and _int(settled_state.get("committed")) is not None
+                and settings.kill_after_committed <= settled_state["committed"] <= last_killable
+                and settled_state.get("acknowledged") == settled_state["committed"]
+            ):
+                pre_kill, kill_condition = settled, "acknowledged_equals_committed"
                 break
         fault.resume(group)
         paused_ms += (time.monotonic() - paused_at) * 1000.0
