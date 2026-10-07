@@ -59,7 +59,8 @@ fn qwen2_runtime_executes_complete_context_calls() {
     let decode = StageCall { phase: StagePhase::Decode, token_index: 0, position: seq as u64 - 1, ..StageCall::prefill("req-1", seq, &input) };
     assert_eq!(rt.execute(&decode).unwrap().values, expected);
     assert_eq!(rt.request_count, 2);
-    assert_eq!(rt.release_all(), 0);
+    // Both calls are in the M3a replay ledger (prefill and decode differ).
+    assert_eq!(rt.release_all(), 2);
 }
 
 #[test]

@@ -1098,6 +1098,11 @@ impl Supervisor {
             return Step::Retry(e.0);
         }
         let mut s = self.shared.lock().unwrap();
+        // A new generation fences everything the previous one computed: no
+        // cached replay result may answer a frame of the new generation.
+        if let Some(stage) = s.stage.as_mut() {
+            stage.release_all();
+        }
         s.status.phase = "joined".into();
         s.status.member_generation = Some(generation);
         s.status.lease_expires_at = acceptance["lease_expires_at"].as_f64();

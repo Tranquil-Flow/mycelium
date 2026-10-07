@@ -32,6 +32,11 @@ pub const MAX_QWEN2_SEQUENCE: usize = 1024;
 pub const MAX_QWEN2_HIDDEN: usize = 8192;
 pub const MAX_QWEN2_INNER: usize = 32768;
 pub const MAX_QWEN2_LAYERS_PER_STAGE: usize = 64;
+/// Replay ledger bounds (M3a): entries and cached output bytes; the oldest
+/// entry is evicted first. A retry of an evicted call recomputes the same
+/// output (the stage is deterministic), so eviction only costs compute.
+pub const MAX_QWEN2_REPLAY_RESULTS: usize = 64;
+pub const MAX_QWEN2_REPLAY_BYTES: usize = 64 << 20;
 
 /// The seven row-wise int8 matrices of one decoder layer.
 pub const MATRIX_SUFFIXES: [&str; 7] = [
@@ -317,13 +322,46 @@ impl Qwen2Stage {
 }
 
 /// A loaded Qwen2 stage behind the [`StageRuntime`] trait. Complete-context
-/// replay only: every call carries the full context from position 0, nothing
-/// is kept between calls (the replay ledger and stage-local KV are M3).
+/// replay only: every call carries the full context from position 0; no KV is
+/// kept between calls (stage-local KV is M3b).
+///
+/// Replay ledger (M3a): a call is identified by
+/// `request:path:attempt:phase:token` (the router idempotency key without the
+/// hop index; one stage is one hop) and fingerprinted over its position,
+/// sequence and exact f32 input bytes. A retry returns the cached output
+/// without recomputing; the same identity with another input is refused
+/// (`request_replay_conflict`). Bounded by count and bytes, oldest first;
+/// released per path (cancellation) or entirely (drain, new generation).
 pub struct Qwen2Runtime {
     assignment_id: String,
     stage_id: String,
     stage: Qwen2Stage,
     pub request_count: u64,
+    ledger: std::collections::HashMap<String, ([u8; 32], StageOutput)>,
+    ledger_order: std::collections::VecDeque<String>,
+    ledger_bytes: usize,
+    ledger_byte_cap: usize,
+}
+
+fn call_identity(call: &StageCall<'_>) -> String {
+    let phase = match call.phase {
+        crate::runtime::StagePhase::Prefill => "PREFILL",
+        crate::runtime::StagePhase::RecoveryPrefill => "RECOVERY_PREFILL",
+        crate::runtime::StagePhase::Decode => "DECODE",
+    };
+    format!("{}:{}:{}:{phase}:{}", call.request_id, call.path_id, call.path_attempt, call.token_index)
+}
+
+fn call_fingerprint(call: &StageCall<'_>) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(b"mycelium.qwen2_stage_call.v1\0");
+    h.update(call.position.to_be_bytes());
+    h.update((call.sequence as u64).to_be_bytes());
+    for v in call.hidden {
+        h.update(v.to_le_bytes());
+    }
+    h.finalize().into()
 }
 
 impl Qwen2Runtime {
@@ -333,11 +371,61 @@ impl Qwen2Runtime {
                 return reject(code);
             }
         }
-        Ok(Self { assignment_id: assignment_id.to_owned(), stage_id: stage_id.to_owned(), stage, request_count: 0 })
+        Ok(Self {
+            assignment_id: assignment_id.to_owned(),
+            stage_id: stage_id.to_owned(),
+            stage,
+            request_count: 0,
+            ledger: std::collections::HashMap::new(),
+            ledger_order: std::collections::VecDeque::new(),
+            ledger_bytes: 0,
+            ledger_byte_cap: MAX_QWEN2_REPLAY_BYTES,
+        })
     }
 
     pub fn stage(&self) -> &Qwen2Stage {
         &self.stage
+    }
+
+    pub fn ledger_len(&self) -> usize {
+        self.ledger.len()
+    }
+
+    /// Cached output bytes (f32 values) held by the ledger.
+    pub fn ledger_bytes(&self) -> usize {
+        self.ledger_bytes
+    }
+
+    /// Lower the byte bound (memory pressure); evicts down to it at once.
+    pub fn set_ledger_byte_cap(&mut self, cap: usize) {
+        self.ledger_byte_cap = cap.min(MAX_QWEN2_REPLAY_BYTES);
+        self.evict_to(MAX_QWEN2_REPLAY_RESULTS, self.ledger_byte_cap);
+    }
+
+    /// Forget every call of one request path (its cancellation or completion).
+    pub fn release_path(&mut self, request_id: &str, path_id: &str) -> usize {
+        let prefix = format!("{request_id}:{path_id}:");
+        let gone: Vec<String> = self.ledger_order.iter().filter(|k| k.starts_with(&prefix)).cloned().collect();
+        for key in &gone {
+            self.remove(key);
+        }
+        gone.len()
+    }
+
+    fn remove(&mut self, key: &str) {
+        if let Some((_, out)) = self.ledger.remove(key) {
+            self.ledger_bytes -= out.values.len() * 4;
+            self.ledger_order.retain(|k| k != key);
+        }
+    }
+
+    fn evict_to(&mut self, count: usize, bytes: usize) {
+        while self.ledger.len() > count || self.ledger_bytes > bytes {
+            let Some(oldest) = self.ledger_order.pop_front() else { break };
+            if let Some((_, out)) = self.ledger.remove(&oldest) {
+                self.ledger_bytes -= out.values.len() * 4;
+            }
+        }
     }
 }
 
@@ -357,13 +445,37 @@ impl StageRuntime for Qwen2Runtime {
 
     fn execute(&mut self, call: &StageCall<'_>) -> Result<StageOutput, RuntimeError> {
         call.check_complete_context()?;
+        let identity = call_identity(call);
+        let fingerprint = call_fingerprint(call);
+        if let Some((fp, out)) = self.ledger.get(&identity) {
+            if *fp != fingerprint {
+                return reject("request_replay_conflict");
+            }
+            return Ok(out.clone());
+        }
         let values = self.stage.forward(call.sequence, call.hidden)?;
         self.request_count += 1;
-        Ok(StageOutput { sequence: call.sequence, hidden_size: self.stage.config.hidden_size, values })
+        let out = StageOutput { sequence: call.sequence, hidden_size: self.stage.config.hidden_size, values };
+        let size = out.values.len() * 4;
+        if size <= self.ledger_byte_cap {
+            self.evict_to(MAX_QWEN2_REPLAY_RESULTS - 1, self.ledger_byte_cap - size);
+            self.ledger.insert(identity.clone(), (fingerprint, out.clone()));
+            self.ledger_order.push_back(identity);
+            self.ledger_bytes += size;
+        }
+        Ok(out)
+    }
+
+    fn release_path(&mut self, request_id: &str, path_id: &str) -> usize {
+        Qwen2Runtime::release_path(self, request_id, path_id)
     }
 
     fn release_all(&mut self) -> usize {
-        0
+        let n = self.ledger.len();
+        self.ledger.clear();
+        self.ledger_order.clear();
+        self.ledger_bytes = 0;
+        n
     }
 }
 

@@ -108,7 +108,12 @@ pub trait StageRuntime: Send {
     fn stage_id(&self) -> &str;
     fn hidden_size(&self) -> usize;
     fn execute(&mut self, call: &StageCall<'_>) -> Result<StageOutput, RuntimeError>;
+    /// Drop every replay result (drain, new membership generation); returns how many.
     fn release_all(&mut self) -> usize;
+    /// Drop the replay results of one request path (its cancellation).
+    fn release_path(&mut self, _request_id: &str, _path_id: &str) -> usize {
+        0
+    }
 }
 
 struct BlockTensors {
