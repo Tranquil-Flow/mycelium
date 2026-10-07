@@ -4,8 +4,11 @@
 //! acquisition resumes and promotes atomically, every corruption fails closed,
 //! and a stage loaded from the store passes its host golden self-check.
 //!
-//! The real-weight test runs when `MYCELIUM_QWEN05_SNAPSHOT` names a local
-//! Qwen2.5-0.5B snapshot directory.
+//! The real-weight tests run when `MYCELIUM_QWEN05_SNAPSHOT` names a local
+//! Qwen2.5-0.5B snapshot directory, or (on a device) when
+//! `MYCELIUM_QWEN05_OBJECTS` names a directory holding a v2 `manifest.json`
+//! and its exported `objects/<sha256 hex>` (`qwen_stage_manifest.py export`).
+//! `MYCELIUM_MOBILE_FIXTURES` points a cross-compiled binary at pushed fixtures.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -21,7 +24,8 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 fn fixture(name: &str) -> Value {
-    let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+    let dir = std::env::var("MYCELIUM_MOBILE_FIXTURES").unwrap_or_else(|_| format!("{}/tests/fixtures", env!("CARGO_MANIFEST_DIR")));
+    let path = format!("{dir}/{name}");
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
@@ -393,5 +397,87 @@ fn real_qwen05_two_layers_through_the_store() {
     let stage = store.load_stage(&m).unwrap(); // includes the golden self-check
     assert_eq!(stage.resident_bytes() as u64, m.resident_bytes());
     eprintln!("real 2-layer stage: {} raw bytes, {} resident bytes", m.total_bytes(), m.resident_bytes());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// Serves object ranges from a directory of exported objects (the stand-in
+/// for an artifact source on the device), optionally failing after a budget.
+struct DirSource {
+    dir: PathBuf,
+    fail_after_bytes: Option<u64>,
+    served: u64,
+}
+
+impl ChunkSource for DirSource {
+    fn fetch(&mut self, sha256: &str, offset: u64, max_len: usize) -> Result<Vec<u8>, ArtifactError> {
+        use std::io::{Read, Seek, SeekFrom};
+        if self.fail_after_bytes.is_some_and(|limit| self.served >= limit) {
+            return Err(ArtifactError("source_unreachable".into()));
+        }
+        let mut f = std::fs::File::open(self.dir.join(&sha256[7..])).map_err(|_| ArtifactError("artifact_chunk_not_advertised".into()))?;
+        f.seek(SeekFrom::Start(offset)).unwrap();
+        let mut buf = vec![0u8; max_len];
+        let mut n = 0;
+        while n < max_len {
+            let r = f.read(&mut buf[n..]).unwrap();
+            if r == 0 {
+                break;
+            }
+            n += r;
+        }
+        buf.truncate(n);
+        self.served += n as u64;
+        Ok(buf)
+    }
+}
+
+/// Device path: the layers 12..14 manifest (built by the Python builder with
+/// the host golden) and its exported objects were pushed; acquire with an
+/// interruption, resume, promote, reject a corrupted object, refetch it, then
+/// load from the store and pass the host golden on this device.
+#[test]
+fn real_qwen05_objects_resume_reject_and_match_the_host_golden() {
+    let Some(dir) = std::env::var_os("MYCELIUM_QWEN05_OBJECTS").map(PathBuf::from) else {
+        eprintln!("MYCELIUM_QWEN05_OBJECTS not set; skipping");
+        return;
+    };
+    let doc: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
+    let m = StageManifest::from_document(&doc).unwrap();
+    assert_eq!(m.golden.as_ref().unwrap().output_digest, "sha256:71de5cfde1c7046c4371ca6a47052b4070ff3effeb5ce8d967841ef9890c0e80");
+    let root = scratch("device");
+    let store = ArtifactStore::open(&root, 1 << 30).unwrap();
+    let t = std::time::Instant::now();
+    let mut src = DirSource { dir: dir.join("objects"), fail_after_bytes: Some(25_000_000), served: 0 };
+    assert_eq!(store.acquire(&m, &mut src, 4 << 20, None).unwrap_err().0, "source_unreachable");
+    let served = src.served;
+    let partial: u64 = std::fs::read_dir(root.join("partial")).unwrap().flatten().map(|e| e.metadata().unwrap().len()).sum();
+    let promoted: u64 = m.tensors.iter().filter(|t| store.has_object(t)).map(|t| t.size_bytes).sum();
+    assert_eq!(promoted + partial, served);
+    assert!(partial > 0, "the interruption left a partial to resume");
+    let store = ArtifactStore::open(&root, 1 << 30).unwrap(); // "reboot"
+    let mut src = DirSource { dir: dir.join("objects"), fail_after_bytes: None, served: 0 };
+    let report = store.acquire(&m, &mut src, 4 << 20, None).unwrap();
+    assert_eq!(report.resumed_bytes, partial);
+    assert_eq!(report.fetched_bytes, m.total_bytes() - served);
+    assert!(store.is_complete(&m));
+    let acquire_ms = t.elapsed().as_secs_f64() * 1e3;
+    // Corrupt one promoted object on disk: refused at load, dropped, refetched.
+    let victim = root.join("objects").join(m.tensors[3].hex());
+    let mut bytes = std::fs::read(&victim).unwrap();
+    bytes[100] ^= 0x10;
+    std::fs::write(&victim, &bytes).unwrap();
+    assert_eq!(store.load_stage(&m).unwrap_err().0, "artifact_object_digest_mismatch");
+    assert!(!store.is_complete(&m));
+    let again = store.acquire(&m, &mut DirSource { dir: dir.join("objects"), fail_after_bytes: None, served: 0 }, 4 << 20, None).unwrap();
+    assert_eq!(again.promoted_objects, 1);
+    let t = std::time::Instant::now();
+    let stage = store.load_stage(&m).unwrap(); // includes the golden self-check
+    let load_ms = t.elapsed().as_secs_f64() * 1e3;
+    assert_eq!(stage.resident_bytes() as u64, m.resident_bytes());
+    eprintln!(
+        "device v2: {} bytes acquired (interrupted at {served}, resumed {partial}) in {acquire_ms:.0} ms; load+quantize+golden {load_ms:.0} ms; resident {}",
+        m.total_bytes(),
+        m.resident_bytes()
+    );
     std::fs::remove_dir_all(root).unwrap();
 }

@@ -12,8 +12,11 @@ use sha2::{Digest, Sha256};
 
 const PHONE: &str = "node-phone";
 
+/// `MYCELIUM_PHONE_WIRE_GOLDEN` points a cross-compiled binary at a pushed copy.
 fn dir() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../contracts/phone-stage-wire-golden")
+    std::env::var_os("MYCELIUM_PHONE_WIRE_GOLDEN")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../contracts/phone-stage-wire-golden"))
 }
 
 fn index() -> Value {
