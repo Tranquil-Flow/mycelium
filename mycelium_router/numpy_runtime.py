@@ -731,6 +731,14 @@ class NumpyRuntimePort:
 
    # -- A7 terminal KV retention ---------------------------------------------------
 
+   def _retention(self) -> TerminalKVRetention:
+      # Created in __init__; a port assembled without it (tests build bare
+      # ports) gets a disabled store on first use.
+      retention = self.__dict__.get("_terminal_retention")
+      if retention is None:
+         retention = self.__dict__["_terminal_retention"] = TerminalKVRetention()
+      return retention
+
    def enable_terminal_kv_retention(self, *, seconds: float, max_entries: int) -> None:
       """Keep the KV a terminal hop releases until the request's terminal release (bounded).
 
@@ -739,7 +747,7 @@ class NumpyRuntimePort:
       """
 
       with self._state_lock:
-         self._terminal_retention.enable(seconds=seconds, max_entries=max_entries)
+         self._retention().enable(seconds=seconds, max_entries=max_entries)
 
    def _discard_retained(self, displaced: Any) -> None:
       for path_id, state, reason in displaced:
@@ -747,13 +755,13 @@ class NumpyRuntimePort:
             with self._resource_index_lock:
                self._kv_subjects.pop(path_id, None)
          state.layers.clear()
-         self._terminal_retention.release_counts[reason] += 1
+         self._retention().release_counts[reason] += 1
 
    def _release_terminal_state(self, path_id: str) -> bool:
       """Normal completion; with retention the KV is set aside, not discarded."""
 
       state = self._kv_states.get(path_id)
-      if state is None or not self._terminal_retention.enabled:
+      if state is None or not self._retention().enabled:
          return self._release_state(path_id, "normal_completion")
       del self._kv_states[path_id]
       if path_id not in self._released_paths:
@@ -763,7 +771,7 @@ class NumpyRuntimePort:
       self._purge_path_replays(path_id)
       # The KV subject stays indexed while the KV is held: exact-path cleanup
       # proof reports it until the request's terminal release discards it.
-      self._discard_retained(self._terminal_retention.hold(path_id, state, now=float(self._clock())))
+      self._discard_retained(self._retention().hold(path_id, state, now=float(self._clock())))
       return True
 
    def _take_terminal_retained(self, path_id: str, *, request_id: str, placement_id: str) -> Any:
@@ -778,7 +786,7 @@ class NumpyRuntimePort:
          if path_id in self._cancelled_paths or path_id in self._deferred_cancellation_cleanup:
             return None
       now = float(self._clock())
-      state, displaced = self._terminal_retention.take(
+      state, displaced = self._retention().take(
          path_id,
          now=now,
          accept=lambda held: held.request_id == request_id
@@ -791,10 +799,10 @@ class NumpyRuntimePort:
    def _restore_terminal_retained(self, path_id: str, state: Any) -> None:
       """A refused rekey returns the KV it took to retention, unchanged."""
 
-      self._discard_retained(self._terminal_retention.hold(path_id, state, now=float(self._clock())))
+      self._discard_retained(self._retention().hold(path_id, state, now=float(self._clock())))
 
    def _release_state(self, path_id: str, reason: str) -> bool:
-      held = self._terminal_retention.drop(path_id)
+      held = self._retention().drop(path_id)
       if held is not None:
          self._discard_retained([(path_id, held, reason)])
       state = self._kv_states.pop(path_id, None)
@@ -826,7 +834,7 @@ class NumpyRuntimePort:
             if float(current) >= state.lease_expires_at:
                if self._release_state(path_id, "lease_expired"):
                   expired.append(path_id)
-         self._discard_retained(self._terminal_retention.expire(now=float(current)))
+         self._discard_retained(self._retention().expire(now=float(current)))
       return tuple(sorted(expired))
 
    def close(self, *, reason: str = "worker_shutdown") -> None:
@@ -841,7 +849,7 @@ class NumpyRuntimePort:
          for path_id in tuple(self._kv_states):
             self._release_state(path_id, reason)
          self._discard_retained(
-            [(path_id, state, reason) for path_id, state in self._terminal_retention.clear()]
+            [(path_id, state, reason) for path_id, state in self._retention().clear()]
          )
          self._replays.clear()
          self._closed = True
@@ -859,7 +867,7 @@ class NumpyRuntimePort:
 
    def _update_kv_watermark(self) -> None:
       active_bytes = sum(self._kv_bytes(state) for state in self._kv_states.values())
-      active_bytes += self._terminal_retention.kv_bytes(self._kv_bytes)
+      active_bytes += self._retention().kv_bytes(self._kv_bytes)
       self._peak_kv_bytes = max(self._peak_kv_bytes, active_bytes)
 
    def export_kv_checkpoint(self, path_id: str, *, from_position: int = 0) -> bytes:
@@ -1009,8 +1017,8 @@ class NumpyRuntimePort:
             "cancelled_path_count": len(self._cancelled_paths),
             "release_counts": dict(sorted(self._release_counts.items())),
             **(
-               {"terminal_kv_retention": self._terminal_retention.snapshot(self._kv_bytes)}
-               if self._terminal_retention.enabled
+               {"terminal_kv_retention": self._retention().snapshot(self._kv_bytes)}
+               if self._retention().enabled
                else {}
             ),
          }
