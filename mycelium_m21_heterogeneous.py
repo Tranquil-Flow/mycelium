@@ -156,6 +156,9 @@ _FIELDS = frozenset(
 _CLASS_RUNTIME = {
     "mac_mlx_iroh": ("mlx", True),
     "linux_numpy_iroh": ("numpy", True),
+    # Windows parity (owner ruling 2026-10-07): the native Windows node runs
+    # the NumPy stage runtime and is activation-eligible.
+    "windows_native_iroh": ("numpy", True),
     "browser_http": ("browser", False),
     "pixel_http": ("android", False),
     "android_termux_iroh": ("pixel-stdlib", False),

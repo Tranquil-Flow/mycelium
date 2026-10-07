@@ -52,7 +52,7 @@ def test_windows_member_enrols_with_its_own_class_and_runtime(tmp_path, seed):  
         member = authority.coordinator.member(request["node_id"])
         assert member["peer_class"] == "windows_native_iroh"
         assert member["runtime_capability"]["runtime_backend"] == "numpy"
-        # Activation eligibility is the separately droppable owner-ruling commit.
+        # Owner parity ruling 2026-10-07: full activation eligibility.
         assert member["activation_eligible"] is True
         assert app.status()["membership_state"] == "current"
     finally:

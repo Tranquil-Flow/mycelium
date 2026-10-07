@@ -72,8 +72,8 @@ def test_android_native_iroh_is_activation_eligible_without_a_refusal() -> None:
     assert peer_runtime_activation_refusal("android_native_iroh") is None
 
 
-def test_windows_native_iroh_is_activation_eligible_pending_owner_ruling() -> None:
-    # 2026-10-07: admitted with the native Windows node runtime (droppable commit).
+def test_windows_native_iroh_is_activation_eligible() -> None:
+    # Owner parity ruling 2026-10-07: the native Windows node is activation-eligible.
     assert peer_runtime_is_activation_eligible("windows_native_iroh", WINDOWS_NATIVE)
     assert peer_runtime_activation_refusal("windows_native_iroh") is None
     assert PEER_CLASS_ACTIVATION_REFUSALS == {

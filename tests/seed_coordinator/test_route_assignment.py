@@ -33,8 +33,8 @@ ANDROID = {
     "transport": "iroh",
     "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
 }
-# A still-ineligible class for the refusal case (windows_native_iroh became
-# activation-eligible 2026-10-07, pending owner ruling).
+# A still-ineligible class for the refusal case (windows_native_iroh is
+# activation-eligible since the 2026-10-07 owner parity ruling).
 WINDOWS = {"runtime_backend": "tbd", "transport": "iroh", "activation_protocol": None}
 
 

@@ -79,12 +79,10 @@ _PEER_RUNTIME_CAPABILITIES = {
         "transport": "iroh",
         "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
     },
-    # [2026-09-27 OWNER RULING, superseded pending owner confirmation
-    # 2026-10-07] Windows was joinable but activation-ineligible until a
-    # Windows member runtime existed.  The native Windows node (host-platform
-    # seam, Job Object service runner, loopback iroh sidecar) now runs the
-    # NumPy stage runtime, so the class declares it and is activation-eligible.
-    # This change is isolated so it can be dropped if the owner keeps the ruling.
+    # [OWNER RULING 2026-10-07, superseding 2026-09-27] Windows has full
+    # parity with macOS and Linux: the native Windows node (host-platform
+    # seam, Job Object service runner, loopback iroh sidecar) runs the NumPy
+    # stage runtime and is activation-eligible for every stage position.
     "windows_native_iroh": {
         "runtime_backend": "numpy",
         "transport": "iroh",

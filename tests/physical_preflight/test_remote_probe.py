@@ -293,3 +293,16 @@ def test_route_builder_identity_program_matches_local_preflight() -> None:
     )
 
     assert tuple(json.loads(completed.stdout)) == derive_local_run_scoped_identity(run_id)
+
+
+def test_numpy_windows_runtime_is_supported_only_on_windows_x86_64(monkeypatch) -> None:
+    from mycelium_physical_runner import remote_probe
+
+    monkeypatch.setattr(remote_probe.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(remote_probe.platform, "machine", lambda: "AMD64")
+    assert remote_probe._runtime_supported("numpy-windows-x86_64") is True
+    monkeypatch.setattr(remote_probe.platform, "machine", lambda: "ARM64")
+    assert remote_probe._runtime_supported("numpy-windows-x86_64") is False
+    monkeypatch.setattr(remote_probe.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(remote_probe.platform, "machine", lambda: "x86_64")
+    assert remote_probe._runtime_supported("numpy-windows-x86_64") is False

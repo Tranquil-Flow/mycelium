@@ -251,6 +251,12 @@ def _runtime_supported(runtime: str) -> bool:
             and platform.machine() == "x86_64"
             and _module_available("numpy")
         )
+    if runtime == "numpy-windows-x86_64":
+        return (
+            platform.system() == "Windows"
+            and platform.machine() in {"AMD64", "x86_64"}
+            and _module_available("numpy")
+        )
     return False
 
 

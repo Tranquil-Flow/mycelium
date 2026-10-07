@@ -1,9 +1,9 @@
-"""Seed assignment admission for the native peer classes (owner rulings 2026-09-27).
+"""Seed assignment admission for the native peer classes.
 
-An ``android_native_iroh`` member may receive an assignment offer and be named
-as a peer; a ``windows_native_iroh`` member joins but is refused at the shared
-choke point with the named ``windows_member_runtime_absent`` reason, as target
-and as peer.  Classes without a named refusal keep the unchanged code.
+An ``android_native_iroh`` member and (owner parity ruling 2026-10-07) a
+``windows_native_iroh`` member may receive assignment offers and be named as
+peers; ``linux_native_iroh`` is still refused at the shared choke point with
+its named reason.  Classes without a named refusal keep the unchanged code.
 """
 
 from __future__ import annotations
@@ -138,8 +138,8 @@ def test_android_native_member_and_peer_receive_offers(swarm) -> None:
     ]
 
 
-def test_windows_member_and_peer_receive_offers_pending_owner_ruling(swarm) -> None:
-    # 2026-10-07: windows_native_iroh admitted to activation (droppable commit).
+def test_windows_member_and_peer_receive_offers(swarm) -> None:
+    # Owner parity ruling 2026-10-07: windows_native_iroh receives activation.
     coordinator, ids = swarm
     offer = _offer(coordinator, ids["windows_native_iroh"], [ids["mac_mlx_iroh"]], "windows")
     assert offer["message"]["recipient_node_id"] == ids["windows_native_iroh"]

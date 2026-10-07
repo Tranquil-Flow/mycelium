@@ -7,9 +7,8 @@ handoff, canonical HTTPS seed client, durable resume) declaring the
 ``windows_native_iroh`` class and the NumPy stage runtime.  All of its private
 state goes through ``mycelium_host_platform`` owner-only directories on win32.
 
-Activation of this class is pending the owner ruling carried by the droppable
-commit that admits ``windows_native_iroh`` to activation; this module only
-declares the class.
+Under the 2026-10-07 owner parity ruling ``windows_native_iroh`` is
+activation-eligible exactly like the macOS and Linux classes.
 """
 
 from __future__ import annotations
