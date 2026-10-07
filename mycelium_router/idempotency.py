@@ -95,6 +95,22 @@ def payload_fingerprint(payload: object) -> str:
    return sha256(_canonical_payload(payload, set())).hexdigest()
 
 
+def hop_identity(message: object) -> tuple[str, str, int, str, int, int]:
+   """The structured identity a hop's idempotency key joins with ':'.
+
+   Ids may contain ':', so two different hops can share the joined key
+   string; keep per-hop state under this tuple instead.
+   """
+   return (
+      message.request_id,
+      message.path_id,
+      message.path_attempt,
+      message.phase,
+      message.token_index,
+      message.hop_index,
+   )
+
+
 def hop_idempotency_key(
    *,
    request_id: str,

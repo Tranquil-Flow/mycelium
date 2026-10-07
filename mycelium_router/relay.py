@@ -3,8 +3,9 @@
 from collections import OrderedDict
 from contextlib import contextmanager
 import hashlib
+import json
 from threading import Lock, RLock
-from typing import Iterator
+from typing import Any, Iterator
 
 from mycelium_router import a10_batch_producer
 from mycelium_router.batching import PhaseAwareBatchController
@@ -31,6 +32,7 @@ from mycelium_router.contracts import (
 )
 from mycelium_router.hop_join import HopArrivalTracker
 from mycelium_router.idempotency import (
+   hop_identity,
    hop_idempotency_key,
    payload_fingerprint,
    snapshot_payload,
@@ -60,15 +62,23 @@ PathOwner = tuple["str | None", str]
 
 
 def _owner_suffix(owner: "PathOwner | None") -> str:
+   """An unambiguous encoding of the owner for the tombstone filter key
+   (JSON, so no id containing a separator can collide with another)."""
    if owner is None:
       return ""
-   return f"\x00owner\x00{owner[0] or ''}\x00{owner[1]}"
+   return "\x00owner" + json.dumps([owner[0], owner[1]], ensure_ascii=True)
 
 
 def _same_owner(left: "PathOwner", right: "PathOwner") -> bool:
-   return left[1] == right[1] and (
-      left[0] is None or right[0] is None or left[0] == right[0]
-   )
+   """Exact owner equality: a registration without a known entry inherits
+   the recorded owner explicitly (``_resolve_owner_locked``), never by a
+   wildcard that would let any entry match an entry-less owner."""
+   return left == right
+
+
+def _hop_key(message: Any) -> tuple[str, str, int, str, int, int]:
+   """Structured cache key of a hop (``hop_identity``)."""
+   return hop_identity(message)
 _CANCELLED_PATH_FILTER_BYTES = 1 << 20
 _CANCELLED_PATH_FILTER_HASHES = 5
 _CANCELLED_PATH_FILTER_ROTATION_CAPACITY = 100_000
@@ -194,15 +204,15 @@ class RelayEngine:
       ] = {}
       self._entry_node_by_path: dict[str, str] = {}
       self._hop_results: dict[
-         str,
+         tuple[str, str, int, str, int, int],
          tuple[HopReceiveResult, float, str, str],
       ] = {}
       self._prefill_results: dict[
-         str,
+         tuple[str, str, int, str, int, int],
          tuple[ProgressivePrefillResult, float, str, str],
       ] = {}
       self._pending_hops: dict[
-         str,
+         tuple[str, str, int, str, int, int],
          tuple[HopHeader, HopWorkItem, str, int, str | None],
       ] = {}
       # One drainer at a time: a drain owns runtime dispatch and forwarding for
@@ -298,7 +308,14 @@ class RelayEngine:
       unknown owner binds everyone; another owner's record binds no one else."""
       highest: int | None = None
       for recorded in self._cancelled_path_owners.get(path_id, ()):
-         if recorded is None or owner is None or _same_owner(recorded, owner):
+         # Unknown owner: binds everyone. An owner recorded before its entry
+         # was known binds every entry of that request. Otherwise exact.
+         if (
+            recorded is None
+            or owner is None
+            or recorded == owner
+            or (recorded[0] is None and recorded[1] == owner[1])
+         ):
             attempt = self._cancelled_path_attempts.get((path_id, recorded))
             if attempt is not None and (highest is None or attempt > highest):
                highest = attempt
@@ -601,12 +618,20 @@ class RelayEngine:
                return None
             if not entry_node_id:
                return None
+         if entry_node_id is not None and not entry_node_id:
+            return None
          with self._path_lock:
             owner = self._resolve_owner_locked(
                manifest.path_id, request.request_id, entry_node_id
             )
             existing = self._paths.get(manifest.path_id)
             provisional = self._provisional_paths.get(manifest.path_id)
+            if source_node_id is not None and existing is None and provisional is None:
+               # A manifest relayed by the final placement (progressive
+               # discovery) only confirms a path this node already holds from
+               # the authenticated entry chain; it never creates one, so a
+               # peer cannot register a path in another entry's name.
+               return None
             recorded_owner = self._path_owners.get(manifest.path_id)
             if (
                (existing is not None or provisional is not None)
@@ -714,6 +739,8 @@ class RelayEngine:
          topology_version,
          entry_node_id,
       )
+      if entry_node_id is not None and not entry_node_id:
+         return None
       with self._path_operation_lock(path_id):
          with self._path_lock:
             if self._consume_pending_cancellation_locked(
@@ -834,7 +861,7 @@ class RelayEngine:
          payload_digest = payload_fingerprint(accepted_payload)
       except TypeError:
          return ProgressivePrefillResult("REJECTED", "unsupported_payload_type")
-      cached = self._prefill_results.get(header.idempotency_key)
+      cached = self._prefill_results.get(_hop_key(header))
       if cached is not None:
          if cached[3] != payload_digest:
             return ProgressivePrefillResult(
@@ -1203,12 +1230,12 @@ class RelayEngine:
          payload_digest = payload_fingerprint(accepted_payload)
       except TypeError:
          return HopReceiveResult("REJECTED", "unsupported_payload_type")
-      cached = self._hop_results.get(header.idempotency_key)
+      cached = self._hop_results.get(_hop_key(header))
       if cached is not None:
          if cached[3] != payload_digest:
             return HopReceiveResult("REJECTED", "idempotency_payload_mismatch")
          return cached[0]
-      pending = self._pending_hops.get(header.idempotency_key)
+      pending = self._pending_hops.get(_hop_key(header))
       if pending is not None:
          if pending[2] != payload_digest:
             return HopReceiveResult("REJECTED", "idempotency_payload_mismatch")
@@ -1537,12 +1564,12 @@ class RelayEngine:
          payload_digest = payload_fingerprint(accepted_payload)
       except TypeError:
          return HopReceiveResult("REJECTED", "unsupported_payload_type")
-      cached = self._hop_results.get(header.idempotency_key)
+      cached = self._hop_results.get(_hop_key(header))
       if cached is not None:
          if cached[3] != payload_digest:
             return HopReceiveResult("REJECTED", "idempotency_payload_mismatch")
          return cached[0]
-      pending = self._pending_hops.get(header.idempotency_key)
+      pending = self._pending_hops.get(_hop_key(header))
       if pending is not None:
          if pending[2] != payload_digest:
             return HopReceiveResult("REJECTED", "idempotency_payload_mismatch")
@@ -1607,7 +1634,7 @@ class RelayEngine:
          ):
             cancelled = True
          else:
-            self._pending_hops[header.idempotency_key] = (
+            self._pending_hops[_hop_key(header)] = (
                header,
                work,
                payload_digest,
@@ -1712,11 +1739,11 @@ class RelayEngine:
          started_at = self.clock.now()
          with self._path_lock:
             active = tuple(
-               item.idempotency_key in self._pending_hops
+               _hop_key(item) in self._pending_hops
                and self._path_is_current_locked(
                   item.path_id,
                   item.path_attempt,
-                  self._pending_hops[item.idempotency_key][3],
+                  self._pending_hops[_hop_key(item)][3],
                )
                for item in batch.items
             )
@@ -1754,7 +1781,7 @@ class RelayEngine:
          unhandled: BaseException | None = None
          for item, runtime_result in zip(batch.items, runtime_results):
             with self._path_lock:
-               pending = self._pending_hops.pop(item.idempotency_key, None)
+               pending = self._pending_hops.pop(_hop_key(item), None)
             if pending is None:
                continue
             header, _, payload_digest, generation, source_node_id = pending
@@ -2671,7 +2698,7 @@ class RelayEngine:
             generation,
          ):
             return
-         self._prefill_results[header.idempotency_key] = (
+         self._prefill_results[_hop_key(header)] = (
             result,
             self.clock.now(),
             header.path_id,
@@ -2713,7 +2740,7 @@ class RelayEngine:
             expected_generation,
          ):
             return
-         self._hop_results[header.idempotency_key] = (
+         self._hop_results[_hop_key(header)] = (
             result,
             self.clock.now(),
             header.path_id,

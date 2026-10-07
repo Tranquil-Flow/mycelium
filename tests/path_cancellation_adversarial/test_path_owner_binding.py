@@ -149,3 +149,69 @@ def test_tombstones_from_many_owners_stay_bounded() -> None:
       relay._record_cancelled_attempt_locked(manifest.path_id, 1, (f"node-{index}", "request"))
    assert len(relay._cancelled_path_attempts) <= relay_module._MAX_TERMINAL_PATH_METADATA
    assert len(relay._cancelled_path_owners[manifest.path_id]) <= relay_module._MAX_TERMINAL_PATH_METADATA
+
+
+# ---- review 2: sender authentication, owner inheritance, key collisions ----
+
+def test_a_final_placement_cannot_create_a_path_in_another_entrys_name() -> None:
+   router, graph, request, manifest, nodes = _middle_router()
+   entry, final = nodes[0], nodes[-1]
+   # No provisional or registered path here: a final-relayed manifest that
+   # claims the entry is refused (it only confirms an entry-chain path).
+   assert not router.relay.register_path(request, manifest, graph, source_node_id=final, entry_node_id=entry)
+   assert manifest.path_id not in router.relay._paths
+   # The entry's own manifest registers.
+   assert router.relay.register_path(request, manifest, graph, entry_node_id=entry)
+
+
+def test_an_entryless_owner_is_no_wildcard_and_an_empty_entry_is_refused() -> None:
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   # A local registration without a known entry records (None, request).
+   assert relay.register_path(request, manifest, graph)
+   # Another entry claiming the same request cannot take it over.
+   newer = replace(manifest, path_attempt=manifest.path_attempt + 1)
+   evil = _with_entry(graph, manifest, "node-evil")
+   assert not relay.register_path(request, newer, evil, entry_node_id="node-evil")
+   assert relay._paths[manifest.path_id][1].path_attempt == manifest.path_attempt
+   # An empty entry never registers.
+   router2, graph2, request2, manifest2, _ = _middle_router()
+   assert not router2.relay.register_path(request2, manifest2, graph2, entry_node_id="")
+
+
+def test_ids_containing_the_key_separator_never_share_a_hop_result() -> None:
+   """``r:x`` / ``p`` and ``r`` / ``x:p`` join to the same idempotency key
+   string; each path's hop must still run on its own."""
+   from mycelium_router.idempotency import hop_idempotency_key
+   from mycelium_router.contracts import HopHeader
+
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   runtime = relay.runtime
+   placements = {p.placement_id: p for stage in graph.stages for p in stage.placements}
+
+   def register(request_id: str, path_id: str):
+      req = replace(request, request_id=request_id)
+      man = replace(manifest, request_id=request_id, path_id=path_id)
+      assert relay.register_path(req, man, graph, entry_node_id=nodes[0])
+      return req, man
+
+   def hop(req, man):
+      fields = dict(request_id=req.request_id, path_id=man.path_id, path_attempt=man.path_attempt,
+                    phase="DECODE", token_index=0, hop_index=1)
+      header = HopHeader(
+         **fields,
+         source_placement_id=man.ordered_hops[0].placement_id,
+         destination_placement_id=man.ordered_hops[1].placement_id,
+         topology_version=man.topology_version,
+         idempotency_key=hop_idempotency_key(**fields),
+      )
+      return header, relay.receive_hop(header, (1, 2), source_node_id=placements[man.ordered_hops[0].placement_id].node_id)
+
+   first = register("r:x", "p")
+   second = register("r", "x:p")
+   header_one, result_one = hop(*first)
+   header_two, result_two = hop(*second)
+   assert header_one.idempotency_key == header_two.idempotency_key
+   assert result_one.disposition == result_two.disposition == "FORWARDED"
+   assert len(runtime.executed) == 2, "the second path's hop ran instead of reusing the first's result"

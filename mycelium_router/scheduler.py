@@ -4,6 +4,7 @@ from collections import Counter
 from functools import wraps
 from threading import RLock
 
+from mycelium_router.idempotency import hop_identity
 from mycelium_router.contracts import (
    BatchDecision,
    HopWorkItem,
@@ -41,12 +42,12 @@ class HopScheduler:
       self._lock = RLock()
       self._queue: list[HopWorkItem] = []
       self._queued_payload_bytes = 0
-      self._seen_keys: dict[str, tuple[float, str]] = {}
+      self._seen_keys: dict[tuple[str, str, int, str, int, int], tuple[float, str]] = {}
 
    @_locked
    def enqueue(self, item: HopWorkItem) -> None:
       self._evict_seen(now=item.enqueued_at)
-      if item.idempotency_key in self._seen_keys:
+      if hop_identity(item) in self._seen_keys:
          raise DuplicateHopError(item.idempotency_key)
       retry_after = max(0.001, self.config.backpressure_retry_after_seconds)
       if len(self._queue) >= max(0, self.config.maximum_pending_hops):
@@ -57,7 +58,7 @@ class HopScheduler:
          > max(0, self.config.maximum_pending_bytes)
       ):
          raise BackpressureError("byte_limit", retry_after)
-      self._seen_keys[item.idempotency_key] = (
+      self._seen_keys[hop_identity(item)] = (
          item.enqueued_at,
          item.path_id,
       )
@@ -96,7 +97,7 @@ class HopScheduler:
       """
 
       for offset, queued in enumerate(self._queue):
-         if queued is item or queued.idempotency_key == item.idempotency_key:
+         if queued is item or hop_identity(queued) == hop_identity(item):
             self._queue.pop(offset)
             self._queued_payload_bytes -= self._payload_size(queued.payload)
             return queued
@@ -114,10 +115,10 @@ class HopScheduler:
       """
 
       for offset, queued in enumerate(self._queue):
-         if queued is item or queued.idempotency_key == item.idempotency_key:
+         if queued is item or hop_identity(queued) == hop_identity(item):
             self._queue.pop(offset)
             self._queued_payload_bytes -= self._payload_size(queued.payload)
-            self._seen_keys.pop(item.idempotency_key, None)
+            self._seen_keys.pop(hop_identity(item), None)
             return True
       return False
 
@@ -278,7 +279,7 @@ class HopScheduler:
       return len(self._seen_keys)
 
    def _evict_seen(self, *, now: float) -> None:
-      active_keys = {item.idempotency_key for item in self._queue}
+      active_keys = {hop_identity(item) for item in self._queue}
       retention = max(0.0, self.config.idempotency_retention_seconds)
       expired = [
          key
