@@ -224,8 +224,222 @@ async fn the_replay_fence_and_budget_survive_a_source_restart() {
     std::fs::OpenOptions::new().append(true).open(&journal).and_then(|mut f| std::io::Write::write_all(&mut f, b"{\"g\":\"grant-net-1\",\"e\":")).unwrap();
     restarted.close().await;
     let again = ArtifactSource::bind(&[0x54; 32], &[0x36; 32], seed.public_key_record(), objects.clone(), &state, Reachability::LocalOnly).await.unwrap();
-    assert_eq!(std::fs::read_to_string(&journal).unwrap().lines().count(), 2, "compacted to the two admissions");
+    assert_eq!(std::fs::read_to_string(&journal).unwrap().lines().count(), 3, "compacted to the genesis header and the two admissions");
     again.close().await;
     std::fs::remove_dir_all(objects).unwrap();
     std::fs::remove_dir_all(state).unwrap();
+}
+
+// ---- fail-closed ledger state (security review: "fail-open state drift") ----
+
+struct Bed {
+    seed: Identity,
+    member: Identity,
+    phone_secret: [u8; 32],
+    manifest: StageManifest,
+    objects: PathBuf,
+    state: PathBuf,
+    phone: iroh::Endpoint,
+}
+
+async fn bed(tag: &str, phone_byte: u8) -> Bed {
+    let seed = Identity::from_secret("seed-endpoint", &[0x22; 32]).unwrap();
+    let phone_secret = [phone_byte; 32];
+    let member = Identity::from_secret(&iroh_id(phone_secret), &[0x11; 32]).unwrap();
+    let manifest = StageManifest::from_document(&fixture("qwen2_stage_manifest_v2.json")["manifest"]).unwrap();
+    let objects = scratch(&format!("{tag}-objects"));
+    export_objects(&objects);
+    let state = scratch(&format!("{tag}-state"));
+    let phone = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+        .relay_mode(iroh::RelayMode::Disabled)
+        .clear_ip_transports()
+        .bind_addr(std::net::SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0))
+        .unwrap()
+        .secret_key(iroh::SecretKey::from_bytes(&phone_secret))
+        .bind()
+        .await
+        .unwrap();
+    Bed { seed, member, phone_secret, manifest, objects, state, phone }
+}
+
+impl Bed {
+    async fn source(&self, key: u8) -> Result<ArtifactSource, String> {
+        ArtifactSource::bind(&[key; 32], &[key ^ 0x80; 32], self.seed.public_key_record(), self.objects.clone(), &self.state, Reachability::LocalOnly)
+            .await
+            .map_err(|e| e.0)
+    }
+
+    fn request(&self, g: &Grant, source: &ArtifactSource, id: &str) -> Value {
+        ag::sign_chunk_request(&self.member, g, id, &format!("nonce-{id}"), &source.endpoint_id(), &self.manifest.tensors[0].sha256, 0, 16, now_ms()).unwrap()
+    }
+
+    fn cleanup(&self) {
+        let _ = std::fs::remove_dir_all(&self.objects);
+        let _ = std::fs::remove_dir_all(&self.state);
+    }
+}
+
+/// (3) A cleared ledger (new process, emptied dir) must not reopen old grants:
+/// a grant that predates the ledger's genesis is refused, not started fresh.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cleared_ledger_refuses_grants_that_predate_it() {
+    let b = bed("cleared", 0x61).await;
+    let source = b.source(0x62).await.unwrap();
+    drop(source.spawn_accept()); // detached accept loop
+    let g = grant(&b.seed, &iroh_id(b.phone_secret), &b.member, &b.manifest, &source, None);
+    let first = b.request(&g, &source, "r1");
+    assert_eq!(raw_request(&b.phone, source.addr(), &first).await["status"], "ok");
+    source.close().await;
+    std::fs::remove_dir_all(&b.state).unwrap(); // the fence and budget are gone
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let reborn = b.source(0x62).await.unwrap();
+    drop(reborn.spawn_accept()); // detached accept loop
+    assert_eq!(raw_request(&b.phone, reborn.addr(), &first).await["code"], "artifact_source_ledger_reset");
+    assert_eq!(raw_request(&b.phone, reborn.addr(), &b.request(&g, &reborn, "r2")).await["code"], "artifact_source_ledger_reset");
+    // A grant issued after the new genesis is served.
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let fresh = grant(&b.seed, &iroh_id(b.phone_secret), &b.member, &b.manifest, &reborn, None);
+    assert_eq!(raw_request(&b.phone, reborn.addr(), &b.request(&fresh, &reborn, "r3")).await["status"], "ok");
+    reborn.close().await;
+    b.cleanup();
+}
+
+/// (3) An unreadable or corrupt ledger fails the bind instead of being
+/// silently replaced by an empty one.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_or_corrupt_ledger_fails_closed() {
+    use std::os::unix::fs::PermissionsExt;
+    let b = bed("corrupt", 0x63).await;
+    let source = b.source(0x64).await.unwrap();
+    let journal = source.journal_path().unwrap();
+    source.close().await;
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o000)).unwrap();
+    assert_eq!(b.source(0x64).await.err().unwrap(), "artifact_source_ledger_unavailable");
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let mut text = std::fs::read_to_string(&journal).unwrap();
+    text.push_str("{not json\n{\"g\":\"grant-net-1\",\"e\":1,\"f\":\"x\",\"n\":1,\"x\":1}\n");
+    std::fs::write(&journal, &text).unwrap();
+    assert_eq!(b.source(0x64).await.err().unwrap(), "artifact_source_ledger_corrupt");
+    std::fs::write(&journal, b"").unwrap(); // header gone
+    assert_eq!(b.source(0x64).await.err().unwrap(), "artifact_source_ledger_corrupt");
+    b.cleanup();
+}
+
+/// (1) The fence is never evicted while a fenced request could still be
+/// replayed: at capacity the source refuses new requests instead.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_full_fence_refuses_rather_than_forgetting_live_requests() {
+    let b = bed("fence", 0x65).await;
+    let source = b.source(0x66).await.unwrap();
+    source.set_fence_capacity(2);
+    drop(source.spawn_accept()); // detached accept loop
+    let g = grant(&b.seed, &iroh_id(b.phone_secret), &b.member, &b.manifest, &source, None);
+    let first = b.request(&g, &source, "r1");
+    assert_eq!(raw_request(&b.phone, source.addr(), &first).await["status"], "ok");
+    assert_eq!(raw_request(&b.phone, source.addr(), &b.request(&g, &source, "r2")).await["status"], "ok");
+    assert_eq!(raw_request(&b.phone, source.addr(), &b.request(&g, &source, "r3")).await["code"], "artifact_source_busy");
+    assert_eq!(raw_request(&b.phone, source.addr(), &first).await["code"], "artifact_chunk_request_replay");
+    source.close().await;
+    b.cleanup();
+}
+
+/// (2) Concurrent requests for one grant cannot race past its budget.
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_requests_cannot_overspend_a_grant() {
+    let b = bed("race", 0x67).await;
+    let source = b.source(0x68).await.unwrap();
+    drop(source.spawn_accept()); // detached accept loop
+    let g = grant(&b.seed, &iroh_id(b.phone_secret), &b.member, &b.manifest, &source, Some(48));
+    let mut tasks = Vec::new();
+    for i in 0..8 {
+        let (phone, addr, env) = (b.phone.clone(), source.addr(), b.request(&g, &source, &format!("c{i}")));
+        tasks.push(tokio::spawn(async move { raw_request(&phone, addr, &env).await }));
+    }
+    let mut ok = 0;
+    for t in tasks {
+        let h = t.await.unwrap();
+        if h["status"] == "ok" {
+            ok += 1;
+        } else {
+            assert_eq!(h["code"], "artifact_grant_budget_exhausted");
+        }
+    }
+    assert_eq!(ok, 3, "exactly 48 / 16 requests are served");
+    let lines = std::fs::read_to_string(source.journal_path().unwrap()).unwrap().lines().count();
+    assert_eq!(lines, 1 + 3, "genesis + one durable admission per served request");
+    source.close().await;
+    b.cleanup();
+}
+
+/// (4) A receipt that does not cover the bytes received never lets those
+/// bytes into the store: the partial stays empty and nothing is promoted.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bad_receipt_leaves_no_trusted_bytes_on_the_phone() {
+    let b = bed("receipt", 0x69).await;
+    // A rogue "source" holding the authorized source keys that flips one byte
+    // after signing an honest receipt.
+    let source_secret = [0x6a; 32];
+    let signer = Identity::from_secret(&iroh_id(source_secret), &[0x6a ^ 0x80; 32]).unwrap();
+    let rogue = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+        .relay_mode(iroh::RelayMode::Disabled)
+        .clear_ip_transports()
+        .bind_addr(std::net::SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0))
+        .unwrap()
+        .secret_key(iroh::SecretKey::from_bytes(&source_secret))
+        .alpns(vec![ag::ARTIFACT_CHUNK_ALPN.to_vec()])
+        .bind()
+        .await
+        .unwrap();
+    let honest = b.source(0x6b).await.unwrap(); // only used to shape the grant
+    let mut g = grant(&b.seed, &iroh_id(b.phone_secret), &b.member, &b.manifest, &honest, None);
+    g.sources = [(iroh_id(source_secret), signer.verification_key_digest())].into_iter().collect();
+    let objects = b.objects.clone();
+    let rogue_task = rogue.clone();
+    let grant_for_rogue = g.clone();
+    tokio::spawn(async move {
+        while let Some(incoming) = rogue_task.accept().await {
+            let Ok(conn) = incoming.await else { continue };
+            while let Ok((mut send, mut recv)) = conn.accept_bi().await {
+                let raw = recv.read_to_end(1 << 20).await.unwrap();
+                let env: Value = serde_json::from_slice(&raw).unwrap();
+                let m = &env["message"];
+                let req = ag::ChunkRequest {
+                    request_id: m["request_id"].as_str().unwrap().into(),
+                    source_endpoint_id: m["source_endpoint_id"].as_str().unwrap().into(),
+                    object_digest: m["object_digest"].as_str().unwrap().into(),
+                    offset_bytes: m["offset_bytes"].as_u64().unwrap(),
+                    length_bytes: m["length_bytes"].as_u64().unwrap(),
+                };
+                let all = std::fs::read(objects.join(&req.object_digest[7..])).unwrap();
+                let mut data = all[req.offset_bytes as usize..(req.offset_bytes + req.length_bytes) as usize].to_vec();
+                let receipt = ag::sign_chunk_receipt(&signer, &req, &grant_for_rogue, &data, now_ms()).unwrap();
+                data[0] ^= 1; // the bytes sent differ from the bytes receipted
+                let header = serde_json::to_vec(&json!({"protocol": "mycelium.mobile_artifact_chunk_response.v1", "status": "ok", "receipt": receipt})).unwrap();
+                let mut out = (header.len() as u32).to_be_bytes().to_vec();
+                out.extend_from_slice(&header);
+                out.extend_from_slice(&data);
+                send.write_all(&out).await.unwrap();
+                send.finish().unwrap();
+            }
+        }
+    });
+    let client = IrohChunkSource::new(b.phone.clone(), Arc::new(Identity::from_secret(&iroh_id(b.phone_secret), &[0x11; 32]).unwrap()), g, vec![rogue.addr()]).unwrap();
+    let manifest = b.manifest.clone();
+    let root = scratch("receipt-store");
+    let store_root = root.clone();
+    let err = tokio::task::spawn_blocking(move || {
+        let mut client = client;
+        let store = ArtifactStore::open(&store_root, 1 << 30).unwrap();
+        store.acquire(&manifest, &mut client, 1024, None).unwrap_err().0
+    })
+    .await
+    .unwrap();
+    assert_eq!(err, "artifact_chunk_receipt_mismatch");
+    let partial_bytes: u64 = std::fs::read_dir(root.join("partial")).unwrap().flatten().map(|e| e.metadata().unwrap().len()).sum();
+    assert_eq!(partial_bytes, 0, "no unverified byte was written");
+    assert_eq!(std::fs::read_dir(root.join("objects")).unwrap().count(), 0);
+    honest.close().await;
+    std::fs::remove_dir_all(root).unwrap();
+    b.cleanup();
 }

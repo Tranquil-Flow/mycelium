@@ -16,14 +16,29 @@
 //! the grant's total byte budget is not exceeded, and the object file is the
 //! content its name says (re-hashed once, A2 `artifact_source_chunk_unverified`).
 //! It paces each grant to `maximum_bytes_per_second` and signs a receipt over
-//! the bytes it serves. The replay fence and per-grant byte budget are durable
-//! (A2 keeps both durably): every admission is appended and fsynced to
-//! `<state>/source-ledger.jsonl` before any byte is sent, replayed at bind,
-//! and compacted to the grants still inside their window (+ skew). The phone ([`IrohChunkSource`]) checks every receipt
+//! the bytes it serves.
+//!
+//! The replay fence and per-grant byte budget are durable and fail closed:
+//! - every admission is appended and fsynced to `<state>/source-ledger.jsonl`
+//!   under the same lock as the fence and budget check, before any byte is
+//!   read or sent; a request whose bytes then fail to leave stays fenced and
+//!   charged;
+//! - a failed append poisons the journal: the source refuses everything until
+//!   it is rebound (no later line can be glued onto a torn one);
+//! - the journal starts with a genesis time; a grant whose window began before
+//!   genesis is refused (`artifact_source_ledger_reset`), so a cleared or new
+//!   ledger never re-serves a grant it cannot account for;
+//! - a missing header, an unreadable file or a malformed line anywhere but a
+//!   torn final line fails the bind (`artifact_source_ledger_corrupt` /
+//!   `_unavailable`) instead of starting empty;
+//! - fence entries live until their request window has passed; at capacity the
+//!   source refuses new requests (`artifact_source_busy`) rather than evict.
+//!
+//! The phone ([`IrohChunkSource`]) checks every receipt
 //! (`verify_chunk_receipt`) before the bytes reach the artifact store, which
 //! then digest-verifies whole objects before promotion.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -45,9 +60,9 @@ const MAX_REQUEST_BYTES: usize = 256 * 1024;
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-/// Replay fence size per source (oldest forgotten first; a forgotten id is
-/// also past its 2-minute request window long before).
+/// Live fence entries per source (requests still inside their window).
 const MAX_FENCE: usize = 65_536;
+const LEDGER_PROTOCOL: &str = "mycelium.artifact_source_ledger.v1";
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
@@ -70,77 +85,147 @@ async fn bind(secret: &[u8; 32], reach: Reachability, alpn: &[u8]) -> Result<End
         .map_err(|_| ArtifactError("endpoint_bind_failed".into()))
 }
 
-/// The durable admission journal: one JSON line per admitted request.
+/// The durable admission journal: a genesis header, then one JSON line per
+/// admitted request.
 struct Journal {
     path: PathBuf,
     file: std::fs::File,
 }
 
+fn ledger_err(code: &str) -> ArtifactError {
+    ArtifactError(code.to_owned())
+}
+
 impl Journal {
-    /// Replay `<dir>/source-ledger.jsonl` into `state`, keeping the entries of
-    /// grants not yet expired, and rewrite it compacted (tmp, fsync, rename).
+    /// Replay `<dir>/source-ledger.jsonl` into `state` (a new ledger gets
+    /// genesis = now), keep the entries of grants still inside their window,
+    /// and rewrite it compacted (tmp, fsync, rename, dir fsync).
     fn open(dir: &std::path::Path, state: &mut SourceState, now: u64) -> Result<Self, ArtifactError> {
         use std::io::Write;
-        let io = |_| ArtifactError("artifact_source_ledger_unavailable".into());
-        std::fs::create_dir_all(dir).map_err(io)?;
+        let unavailable = |_| ledger_err("artifact_source_ledger_unavailable");
+        std::fs::create_dir_all(dir).map_err(unavailable)?;
         let path = dir.join("source-ledger.jsonl");
         let mut kept = Vec::new();
-        if let Ok(raw) = std::fs::read_to_string(&path) {
-            for line in raw.lines() {
-                // A torn final line (crash mid-append) is not an admission.
-                let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-                let (Some(g), Some(e), Some(f), Some(n)) = (v["g"].as_str(), v["e"].as_u64(), v["f"].as_str(), v["n"].as_u64()) else { continue };
-                if e + ag::CLOCK_SKEW_MS < now {
-                    continue;
+        let genesis = match std::fs::symlink_metadata(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => now,
+            Err(_) => return Err(ledger_err("artifact_source_ledger_unavailable")),
+            Ok(meta) if !meta.file_type().is_file() => return Err(ledger_err("artifact_source_ledger_corrupt")),
+            Ok(_) => {
+                let raw = std::fs::read_to_string(&path).map_err(unavailable)?;
+                let complete = raw.ends_with('\n');
+                let lines: Vec<&str> = raw.lines().collect();
+                let header: Value = lines.first().and_then(|l| serde_json::from_str(l).ok()).ok_or_else(|| ledger_err("artifact_source_ledger_corrupt"))?;
+                let genesis = match (header["protocol"].as_str(), header["genesis_unix_ms"].as_u64()) {
+                    (Some(LEDGER_PROTOCOL), Some(g)) if lines.len() > 1 || complete => g,
+                    _ => return Err(ledger_err("artifact_source_ledger_corrupt")),
+                };
+                for (i, line) in lines.iter().enumerate().skip(1) {
+                    let parsed = serde_json::from_str::<Value>(line).ok().and_then(|v| {
+                        Some((v["g"].as_str()?.to_owned(), v["e"].as_u64()?, v["f"].as_str()?.to_owned(), v["n"].as_u64()?, v["x"].as_u64()?))
+                    });
+                    let Some((g, e, f, n, x)) = parsed else {
+                        // Only a torn final line (crash mid-append) is not an admission.
+                        if i + 1 == lines.len() && !complete {
+                            continue;
+                        }
+                        return Err(ledger_err("artifact_source_ledger_corrupt"));
+                    };
+                    if e + ag::CLOCK_SKEW_MS < now {
+                        continue; // the grant can no longer be presented
+                    }
+                    state.admit(f, x, &g, n, now);
+                    kept.push((*line).to_owned());
                 }
-                state.admit(f.to_owned(), g, n);
-                kept.push(line.to_owned());
+                genesis
             }
-        }
+        };
+        state.genesis_unix_ms = genesis;
         let tmp = dir.join("source-ledger.jsonl.tmp");
-        let mut f = std::fs::File::create(&tmp).map_err(io)?;
+        let mut f = std::fs::File::create(&tmp).map_err(unavailable)?;
+        writeln!(f, "{}", json!({"protocol": LEDGER_PROTOCOL, "genesis_unix_ms": genesis})).map_err(unavailable)?;
         for line in &kept {
-            writeln!(f, "{line}").map_err(io)?;
+            writeln!(f, "{line}").map_err(unavailable)?;
         }
-        f.sync_all().map_err(io)?;
-        std::fs::rename(&tmp, &path).map_err(io)?;
+        f.sync_all().map_err(unavailable)?;
+        std::fs::rename(&tmp, &path).map_err(unavailable)?;
         #[cfg(unix)]
-        std::fs::File::open(dir).and_then(|d| d.sync_all()).map_err(io)?;
-        let file = std::fs::OpenOptions::new().append(true).open(&path).map_err(io)?;
+        std::fs::File::open(dir).and_then(|d| d.sync_all()).map_err(unavailable)?;
+        let file = std::fs::OpenOptions::new().append(true).open(&path).map_err(unavailable)?;
         Ok(Self { path, file })
     }
 
-    fn append(&mut self, grant: &Grant, fence: &str, bytes: u64) -> Result<(), ()> {
+    /// One whole line per write, then fsync.
+    fn append(&mut self, grant: &Grant, fence: &str, request_expires: u64, bytes: u64) -> std::io::Result<()> {
         use std::io::Write;
-        let line = json!({"g": grant.grant_id, "e": grant.expires_at_unix_ms, "f": fence, "n": bytes});
-        writeln!(self.file, "{line}").map_err(|_| ())?;
-        self.file.sync_data().map_err(|_| ())
+        let mut line = serde_json::to_vec(&json!({"g": grant.grant_id, "e": grant.expires_at_unix_ms, "f": fence, "n": bytes, "x": request_expires}))?;
+        line.push(b'\n');
+        self.file.write_all(&line)?;
+        self.file.sync_data()
     }
 }
 
-#[derive(Default)]
 struct SourceState {
-    fence: BTreeSet<String>,
-    fence_order: VecDeque<String>,
+    /// Fence key -> the request's expiry (kept until it cannot be replayed).
+    fence: BTreeMap<String, u64>,
+    fence_capacity: usize,
     /// grant id -> (bytes served, first serve instant) for budget and pacing.
     grants: BTreeMap<String, (u64, Instant)>,
     /// object hex -> verified length.
     verified: BTreeMap<String, u64>,
+    /// `None` once an append failed: everything is refused until rebind.
     journal: Option<Journal>,
+    genesis_unix_ms: u64,
+}
+
+impl Default for SourceState {
+    fn default() -> Self {
+        Self { fence: BTreeMap::new(), fence_capacity: MAX_FENCE, grants: BTreeMap::new(), verified: BTreeMap::new(), journal: None, genesis_unix_ms: u64::MAX }
+    }
 }
 
 impl SourceState {
-    fn admit(&mut self, fence: String, grant_id: &str, bytes: u64) {
-        if self.fence.insert(fence.clone()) {
-            self.fence_order.push_back(fence);
-        }
-        while self.fence_order.len() > MAX_FENCE {
-            if let Some(old) = self.fence_order.pop_front() {
-                self.fence.remove(&old);
-            }
-        }
+    fn admit(&mut self, fence: String, request_expires: u64, grant_id: &str, bytes: u64, now: u64) {
+        self.prune(now);
+        self.fence.insert(fence, request_expires);
         let entry = self.grants.entry(grant_id.to_owned()).or_insert((0, Instant::now()));
         entry.0 += bytes;
+    }
+
+    /// The whole admission decision for one request, under the caller's lock:
+    /// refuse, or journal durably and charge; returns the pacing delay (ms).
+    fn admit_request(&mut self, grant: &Grant, fence_key: String, request_expires: u64, length: u64, now: u64) -> Result<u64, String> {
+        if self.journal.is_none() {
+            return Err("artifact_source_ledger_unavailable".into());
+        }
+        if grant.not_before_unix_ms < self.genesis_unix_ms {
+            return Err("artifact_source_ledger_reset".into());
+        }
+        self.prune(now);
+        if self.fence.contains_key(&fence_key) {
+            return Err("artifact_chunk_request_replay".into());
+        }
+        if self.fence.len() >= self.fence_capacity {
+            return Err("artifact_source_busy".into());
+        }
+        let (served, since) = *self.grants.entry(grant.grant_id.clone()).or_insert((0, Instant::now()));
+        if served + length > grant.maximum_total_bytes {
+            return Err("artifact_grant_budget_exhausted".into());
+        }
+        if self.journal.as_mut().is_some_and(|j| j.append(grant, &fence_key, request_expires, length).is_err()) {
+            // Possibly a partial line on disk: poison the journal so no later
+            // admission is glued onto it and lost at replay.
+            self.journal = None;
+            return Err("artifact_source_ledger_unavailable".into());
+        }
+        self.admit(fence_key, request_expires, &grant.grant_id, length, now);
+        // Pacing: the grant's served bytes may not run ahead of its rate.
+        let due_ms = (served + length).saturating_mul(1000) / grant.maximum_bytes_per_second;
+        Ok(due_ms.saturating_sub(since.elapsed().as_millis() as u64))
+    }
+
+    /// Forget fence entries whose request can no longer be presented.
+    fn prune(&mut self, now: u64) {
+        self.fence.retain(|_, expires| *expires + ag::CLOCK_SKEW_MS >= now);
     }
 }
 
@@ -176,6 +261,11 @@ impl ArtifactSource {
         let endpoint = bind(secret, reach, ARTIFACT_CHUNK_ALPN).await?;
         let signer = Identity::from_secret(&endpoint.id().to_string(), signing_secret).map_err(|_| ArtifactError("source_identity_invalid".into()))?;
         Ok(Self { endpoint, signer: Arc::new(signer), seed_key: Arc::new(seed_key), root, state: Arc::new(Mutex::new(state)) })
+    }
+
+    /// Bound the live fence (default 65 536); at capacity new requests are refused.
+    pub fn set_fence_capacity(&self, capacity: usize) {
+        self.state.lock().unwrap().fence_capacity = capacity.max(1);
     }
 
     /// Where the admission journal lives (for operators and tests).
@@ -227,26 +317,12 @@ impl ArtifactSource {
         let fence_key = hex::encode(Sha256::digest(
             format!("{}\0{}\0{}", grant.grant_id, request.request_id, env["message"]["request_nonce"].as_str().unwrap_or("")).as_bytes(),
         ));
-        let pace = {
-            let mut st = self.state.lock().unwrap();
-            if st.fence.contains(&fence_key) {
-                return Err("artifact_chunk_request_replay".into());
-            }
-            let (served, since) = *st.grants.entry(grant.grant_id.clone()).or_insert((0, Instant::now()));
-            if served + request.length_bytes > grant.maximum_total_bytes {
-                return Err("artifact_grant_budget_exhausted".into());
-            }
-            // Durable before any byte leaves: a crash cannot reopen the fence
-            // or refund the budget.
-            let journaled = st.journal.as_mut().is_some_and(|j| j.append(&grant, &fence_key, request.length_bytes).is_ok());
-            if !journaled {
-                return Err("artifact_source_ledger_unavailable".into());
-            }
-            st.admit(fence_key, &grant.grant_id, request.length_bytes);
-            // Pacing: the grant's served bytes may not run ahead of its rate.
-            let due_ms = (served + request.length_bytes).saturating_mul(1000) / grant.maximum_bytes_per_second;
-            due_ms.saturating_sub(since.elapsed().as_millis() as u64)
-        };
+        let request_expires = env["message"]["expires_at_unix_ms"].as_u64().unwrap_or(u64::MAX);
+        let now = now_ms();
+        // Check, journal and charge under one lock: concurrent streams for the
+        // same grant serialize here, and nothing is read or sent before the
+        // admission is durable.
+        let pace = self.state.lock().unwrap().admit_request(&grant, fence_key, request_expires, request.length_bytes, now)?;
         let hex = &request.object_digest[7..];
         let mut file = std::fs::File::open(self.root.join(hex)).map_err(|_| "artifact_object_unavailable".to_owned())?;
         use std::io::{Read, Seek, SeekFrom};
@@ -391,5 +467,69 @@ impl ChunkSource for IrohChunkSource {
             }
         }
         Err(last)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn grant(not_before: u64) -> Grant {
+        Grant {
+            grant_id: "grant-1".into(),
+            recipient_node_id: "node".into(),
+            recipient_endpoint_id: "a".repeat(64),
+            recipient_key_digest: format!("sha256:{}", "1".repeat(64)),
+            assignment_id: "route-1".into(),
+            manifest_pack_digest: format!("sha256:{}", "2".repeat(64)),
+            allowed_object_digests: vec![],
+            sources: BTreeMap::new(),
+            maximum_total_bytes: 100,
+            maximum_bytes_per_second: 1 << 30,
+            maximum_chunk_bytes: 64,
+            not_before_unix_ms: not_before,
+            expires_at_unix_ms: not_before + 900_000,
+            envelope: Value::Null,
+        }
+    }
+
+    fn dir(tag: &str) -> PathBuf {
+        let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        std::env::temp_dir().join(format!("mycelium-ledger-{tag}-{}-{n}", std::process::id()))
+    }
+
+    #[test]
+    fn a_failed_append_poisons_the_journal_and_refuses_everything_after() {
+        let d = dir("poison");
+        let mut st = SourceState::default();
+        st.journal = Some(Journal::open(&d, &mut st, 1_000).unwrap());
+        let g = grant(1_000);
+        assert!(st.admit_request(&g, "f1".into(), 60_000, 10, 2_000).is_ok());
+        // The append handle can no longer write (as on a full or failing disk).
+        let path = st.journal.as_ref().unwrap().path.clone();
+        st.journal.as_mut().unwrap().file = std::fs::File::open(&path).unwrap();
+        assert_eq!(st.admit_request(&g, "f2".into(), 60_000, 10, 2_000).unwrap_err(), "artifact_source_ledger_unavailable");
+        assert!(st.journal.is_none());
+        assert_eq!(st.admit_request(&g, "f3".into(), 60_000, 10, 2_000).unwrap_err(), "artifact_source_ledger_unavailable");
+        assert!(!st.fence.contains_key("f2") && st.grants["grant-1"].0 == 10, "a refused request is neither fenced nor charged");
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn fence_entries_outlive_their_window_only_and_never_evict_live_ones() {
+        let d = dir("fence");
+        let mut st = SourceState::default();
+        st.journal = Some(Journal::open(&d, &mut st, 1_000).unwrap());
+        st.fence_capacity = 1;
+        let g = grant(1_000);
+        st.admit_request(&g, "f1".into(), 10_000, 1, 2_000).unwrap();
+        assert_eq!(st.admit_request(&g, "f2".into(), 10_000, 1, 2_000).unwrap_err(), "artifact_source_busy");
+        // Once f1's request window (+ skew) has passed it is pruned and a new
+        // request fits; f1 itself can no longer be presented by then.
+        st.admit_request(&g, "f2".into(), 200_000, 1, 10_000 + ag::CLOCK_SKEW_MS + 1).unwrap();
+        assert!(!st.fence.contains_key("f1"));
+        // A grant from before genesis is refused.
+        assert_eq!(st.admit_request(&grant(999), "f9".into(), 200_000, 1, 2_000).unwrap_err(), "artifact_source_ledger_reset");
+        std::fs::remove_dir_all(d).unwrap();
     }
 }
