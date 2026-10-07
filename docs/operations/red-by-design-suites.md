@@ -1,6 +1,6 @@
 # RED-by-design suites: default collection policy and operator opt-in
 
-**Scope.** Six lane paths use the historical `scaffold_red` opt-in policy. A10/A11/A12/A14b
+**Scope.** Five lane paths use the historical `scaffold_red` opt-in policy. A10/A11/A12
 exercise unimplemented behaviour; A7's in-memory contract core now passes, but its runtime and
 physical gates remain unimplemented; A9's migration-executor seams are unimplemented while its
 contract and migration *decision* suites are GREEN. A marker is not a verdict. This
@@ -41,7 +41,6 @@ Two operational consequences:
 | `tests/a10_scaffold` | both modules | 79 |
 | `tests/a11_scaffold` | all three modules | 57 |
 | `tests/a12_scaffold` | all three modules | 59 |
-| `tests/a14b_acceptance` | both modules | 88 |
 | `tests/a7_acceptance` | `test_kv_successor_contract.py`, `test_kv_successor_boundaries.py` — deterministic core GREEN, not runtime closure | 41 of 51 |
 | `tests/a9_migration_scaffold` | `test_migration_executor_red.py` — the migration executor seams; the A9 contract and migration decision suites in `tests/a9_acceptance` are GREEN | 15 |
 
@@ -56,16 +55,22 @@ are RED until the executor lands. Parent logs: `runs/20260921-closure-train/a7/p
 under the external program root. Earlier 40/50 and 323/333 snapshots remain historical,
 before the terminal-state regression was added. No A7 runtime seam is wired.
 
+`tests/a14b_acceptance` (88 items in those snapshots) was promoted out of this policy on 2026-10-07:
+its contract, reduction, projection widening, operator-declared publication and optional globe
+renderer all exist, so its conftest no longer applies `scaffold_red` and it runs in default and L2
+collection. That is deterministic evidence only; A14b's browser, physical, live-privacy and
+completion-checklist acceptance (spec §8) is still pending.
+
 ## Operator invocation
 
-Run the six suites, and only them:
+Run the five suites, and only them:
 
 ```sh
 cd /Users/evinova-self/Documents/playground/mycelium-core-pilot   # or your worktree of this branch
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. /opt/homebrew/bin/python3.14 \
   -m pytest -q -p no:cacheprovider -m scaffold_red \
   tests/a10_scaffold tests/a11_scaffold tests/a12_scaffold \
-  tests/a14b_acceptance tests/a7_acceptance tests/a9_migration_scaffold
+  tests/a7_acceptance tests/a9_migration_scaffold
 ```
 
 `pytest --markers` also lists `scaffold_red`, so the opt-in is discoverable from the tool itself. A
@@ -75,7 +80,7 @@ aborts collection of the whole tree (pre-existing, unrelated to this policy).
 
 ## What this policy does NOT prove
 
-- **Excluding a suite does not make it pass.** Four suites still describe missing functionality.
+- **Excluding a suite does not make it pass.** Three suites still describe missing functionality.
   A7's deterministic core passes explicitly; its boundary tests also check intentional unimplemented
   exceptions. Those exceptions are weak evidence of absent runtime behavior, not executed recovery.
 - **A green default run no longer implies the scaffolding suites ran.** It implies the authoritative

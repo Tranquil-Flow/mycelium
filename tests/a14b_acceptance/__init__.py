@@ -1,1 +1,1 @@
-"""Machine-checked A14b coarse-region design suite (RED until A14b executes)."""
+"""Machine-checked A14b coarse-region acceptance suite (deterministic slice, default collection)."""
