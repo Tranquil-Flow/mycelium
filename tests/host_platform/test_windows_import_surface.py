@@ -81,6 +81,9 @@ ENTRY_POINTS = (
     "mycelium_a13_windows.import_model",
     "mycelium_a13_windows.service_install",
     "mycelium_a13_windows.installer",
+    "mycelium_a13_packaging.manifest",
+    "mycelium_a13_packaging.install_source",
+    "mycelium_a13_packaging.build",
     "stage_pack",
     "runtime_loader",
 )

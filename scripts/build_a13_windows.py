@@ -26,18 +26,17 @@ private-key bytes).  Tests use a throwaway generated key, never a real one.
 from __future__ import annotations
 
 import argparse
-import ast
 import hashlib
 import json
-import subprocess
 import sys
-import zipfile
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from mycelium_a13_packaging import build as _build  # noqa: E402
 
 # THIS REPOSITORY IS THE APP'S SOURCE OF TRUTH (see build_a13_macos.py's own
 # ERRATA-6 note on why this check exists at all).
@@ -70,129 +69,38 @@ _PUBLISHER_ID = "mycelium-release"
 
 def require_app_tree_root(root: Path = ROOT) -> dict[str, str]:
     """Fail before packaging if this checkout does not look like the app's own tree."""
-    missing = [relative for relative in _APP_TREE_MARKERS if not (root / relative).is_file()]
-    if missing:
-        raise SystemExit("build_root_not_the_app_tree:" + ",".join(missing))
-    return {"root": str(root)}
-
+    return _build.require_app_tree_root(root, _APP_TREE_MARKERS)
 
 def runtime_source_closure(root: Path = ROOT, seeds: tuple[str, ...] = _CLOSURE_SEEDS) -> tuple[str, ...]:
     """Static transitive Python-import closure, seeded at the Windows tranche.
 
-    Never imports or executes a single discovered module: a package import
-    stages the whole package (matching real ``__init__.py`` execution
-    semantics), a plain top-level module import stages that one file. This is
-    a from-scratch implementation for this tranche -- it deliberately does not
-    import scripts/build_qwen_live_route.py's own closure helper, which is
-    owned by the macOS build lane and seeded for a different (mac/live-route)
-    runtime.
+    Never imports or executes a single discovered module (shared helper:
+    ``mycelium_a13_packaging.build.runtime_source_closure``).  It deliberately
+    does not reuse scripts/build_qwen_live_route.py's closure, which is owned by
+    the macOS build lane and seeded for a different (mac/live-route) runtime.
     """
-    selected: set[str] = set()
-    for seed in seeds:
-        path = root / seed
-        if path.is_file():
-            selected.add(seed)
-        elif path.is_dir():
-            selected.update(
-                str(item.relative_to(root)) for item in path.rglob("*.py") if item.is_file()
-            )
-        else:
-            raise SystemExit(f"windows_runtime_closure_seed_missing:{seed}")
-    inspected: set[str] = set()
-    while selected - inspected:
-        relative = min(selected - inspected)
-        source = root / relative
-        if not source.is_file() or not source.resolve().is_relative_to(root):
-            raise SystemExit(f"windows_runtime_closure_file_missing:{relative}")
-        tree = ast.parse(source.read_text(encoding="utf-8"), filename=relative)
-        inspected.add(relative)
-        modules: list[str] = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                modules.extend(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                modules.append(node.module)
-        for module in modules:
-            head = module.split(".")[0]
-            if head == "tests" or head.startswith("test_"):
-                continue
-            module_path = root / (head + ".py")
-            folder = root / head
-            if module_path.is_file():
-                selected.add(str(module_path.relative_to(root)))
-            elif folder.is_dir():
-                selected.update(
-                    str(item.relative_to(root))
-                    for item in folder.rglob("*.py")
-                    if item.is_file() and "__pycache__" not in item.parts
-                )
-    return tuple(sorted(selected))
-
+    return _build.runtime_source_closure(root, seeds, label="windows")
 
 def stage_runtime_source(
     root: Path, destination: Path, seeds: tuple[str, ...] = _CLOSURE_SEEDS
 ) -> dict[str, Any]:
     """Copy the closure's bytes into ``destination``; never a symlink, never outside root."""
-    files = runtime_source_closure(root, seeds)
-    destination.mkdir(parents=True, exist_ok=False)
-    digests: dict[str, str] = {}
-    for relative in files:
-        source = root / relative
-        if source.is_symlink() or not source.resolve().is_relative_to(root):
-            raise SystemExit("runtime_source_unsafe")
-        target = destination / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        raw = source.read_bytes()
-        target.write_bytes(raw)
-        digests[relative] = hashlib.sha256(raw).hexdigest()
-    return {"files": len(files), "sha256": digests}
-
+    return _build.stage_files(root, destination, runtime_source_closure(root, seeds))
 
 def git_head(root: Path = ROOT) -> str | None:
-    result = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True
-    )
-    head = result.stdout.strip()
-    return head or None
-
+    return _build.git_head(root)
 
 def zip_runtime_source(source_dir: Path, zip_path: Path) -> bytes:
     """Deterministic zip: sorted entries, fixed timestamp, no host-dependent metadata."""
-    files = sorted(p for p in source_dir.rglob("*") if p.is_file())
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
-        for path in files:
-            info = zipfile.ZipInfo(
-                str(path.relative_to(source_dir)).replace("\\", "/"), date_time=(1980, 1, 1, 0, 0, 0)
-            )
-            info.external_attr = 0o600 << 16
-            archive.writestr(info, path.read_bytes())
-    return zip_path.read_bytes()
-
+    return _build.deterministic_zip(source_dir, zip_path)
 
 def load_pinned_signer(key_path: Path, *, endpoint_id: str = _SIGNER_ENDPOINT_ID):
-    """Load the pilot's pinned Ed25519 signing key.
+    """Load the pilot's pinned Ed25519 signing key (32 raw private-key bytes).
 
-    ``key_path`` must hold exactly 32 raw private-key bytes.  The raw bytes are
-    never logged, printed, or placed in any returned/written structure -- only
-    the resulting signer (whose public API exposes no private-key material,
-    see mycelium_qualification.signing.Ed25519EvidenceSigner) is returned.
+    The raw bytes are never logged, printed, or placed in any returned/written
+    structure (shared helper: ``mycelium_a13_packaging.build.load_pinned_signer``).
     """
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
-    from mycelium_qualification.signing import Ed25519EvidenceSigner
-
-    raw = key_path.read_bytes()
-    try:
-        if len(raw) != 32:
-            raise SystemExit("signing_key_file_must_hold_32_raw_private_bytes")
-        private_key = Ed25519PrivateKey.from_private_bytes(raw)
-        public_key_bytes = private_key.public_key().public_bytes_raw()
-    finally:
-        raw = b"\x00" * 32  # best-effort: drop the reference to the real secret
-    return Ed25519EvidenceSigner(
-        endpoint_id=endpoint_id, _private_key=private_key, _public_key_bytes=public_key_bytes
-    )
-
+    return _build.load_pinned_signer(key_path, endpoint_id=endpoint_id)
 
 def render_windows_service_member(work_root: Path) -> dict[str, Any]:
     """Render the declared least-privilege Windows service through the shared renderer.
@@ -504,16 +412,7 @@ def build_frozen_input(*, output_root: Path, root: Path = ROOT) -> dict[str, Any
     source = output_root / "source"
     identity = stage_runtime_source(root, source, _FROZEN_SEEDS)
     for relative in _FROZEN_DATA:
-        folder = root / relative
-        for path in sorted(folder.rglob("*")):
-            if path.is_symlink():
-                raise SystemExit("runtime_source_unsafe")
-            if path.is_file():
-                target = source / path.relative_to(root)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                raw = path.read_bytes()
-                target.write_bytes(raw)
-                identity["sha256"][str(path.relative_to(root))] = hashlib.sha256(raw).hexdigest()
+        _build.stage_data_tree(root, relative, source, identity["sha256"])
     (output_root / "native").mkdir()
     spec = _SPEC.format(pyinstaller=PYINSTALLER_PIN, python=WINDOWS_PYTHON, hidden=list(_HIDDEN_IMPORTS))
     (output_root / "mycelium-windows.spec").write_text(spec, encoding="utf-8")

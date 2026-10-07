@@ -41,7 +41,6 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -53,6 +52,7 @@ import time
 from typing import Any
 
 import mycelium_host_platform
+from mycelium_a13_packaging import build as _build
 
 from .install_source import (
     AUTHENTICODE_UNSIGNED_SUBJECT,
@@ -87,28 +87,19 @@ def _refuse(code: str) -> None:
 def payload_tree(root: Path) -> dict[str, str]:
     """``{posix relative path: sha256}`` of every regular file; links are refused."""
 
-    tree: dict[str, str] = {}
-    for current, directories, files in os.walk(root, followlinks=False):
-        for name in directories:
-            if (Path(current) / name).is_symlink():
-                _refuse("payload_link_refused")
-        for name in files:
-            path = Path(current) / name
-            if path.is_symlink() or not path.is_file():
-                _refuse("payload_link_refused")
-            digest = hashlib.sha256()
-            with open(path, "rb") as handle:
-                while block := handle.read(1 << 20):
-                    digest.update(block)
-            tree[path.relative_to(root).as_posix()] = digest.hexdigest()
-    return dict(sorted(tree.items()))
+    try:
+        return _build.payload_tree(root)
+    except _build.PayloadError as exc:
+        raise InstallerError(exc.code) from None
 
 
 def payload_digest(root: Path) -> str:
     """The digest the manifest's ``package_digest`` binds: canonical JSON of the tree."""
 
-    raw = json.dumps(payload_tree(root), sort_keys=True, separators=(",", ":")).encode()
-    return "sha256:" + hashlib.sha256(raw).hexdigest()
+    try:
+        return _build.payload_digest(root)
+    except _build.PayloadError as exc:
+        raise InstallerError(exc.code) from None
 
 
 # ----------------------------------------------------------------- host seams
