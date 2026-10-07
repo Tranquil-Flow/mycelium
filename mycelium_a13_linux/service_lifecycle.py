@@ -142,7 +142,9 @@ def build_linux_service_package(
     if install_mode not in _INSTALL_MODES:
         raise ServiceLifecycleError("service_install_mode_invalid")
     try:
-        package = build_service_package(config, package_root=package_root)
+        # A systemd *user* unit must not order on the system-only network-online.target.
+        package = build_service_package(config, package_root=package_root,
+                                        systemd_user_unit=install_mode == "systemd_user")
     except ServicePackageError as error:  # shared renderer refusal, same vocabulary
         raise ServiceLifecycleError(str(error)) from None
     unit_name = f"mycelium-{package['service_id']}.service"

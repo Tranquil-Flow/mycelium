@@ -209,7 +209,10 @@ def _systemd_path(value: str) -> str:
     return "".join(encoded)
 
 
-def _systemd(config: Mapping[str, Any], config_path: Path) -> bytes:
+def _systemd(config: Mapping[str, Any], config_path: Path, *, user_unit: bool = False) -> bytes:
+    """One hardened unit.  ``user_unit`` renders for the per-user manager
+    (``systemctl --user``): ``network-online.target`` is a system-manager target
+    a user manager does not have, so a user unit must not order on it."""
     environment = "\n".join(
         f"Environment={_systemd_escape(f'{key}={value}')}"
         for key, value in config["environment"].items()
@@ -220,8 +223,7 @@ def _systemd(config: Mapping[str, Any], config_path: Path) -> bytes:
     lines = [
         "[Unit]",
         f"Description=Mycelium {config['role']} ({config['service_id']})",
-        "After=network-online.target",
-        "Wants=network-online.target",
+        *(() if user_unit else ("After=network-online.target", "Wants=network-online.target")),
         f"StartLimitIntervalSec={config['restart_window_seconds']}",
         f"StartLimitBurst={config['restart_limit']}",
         "",
@@ -584,7 +586,8 @@ def build_windows_member_package(
 
 
 def build_service_package(
-    value: Mapping[str, Any], *, package_root: Path, include_windows_member: bool = False
+    value: Mapping[str, Any], *, package_root: Path, include_windows_member: bool = False,
+    systemd_user_unit: bool = False,
 ) -> dict[str, Any]:
     config = validate_service_config(value)
     if not package_root.is_absolute():
@@ -592,7 +595,7 @@ def build_service_package(
     config_path = package_root / "service-config.json"
     config_raw = canonical_json_bytes(config)
     launchd_raw = _launchd(config, config_path)
-    systemd_raw = _systemd(config, config_path)
+    systemd_raw = _systemd(config, config_path, user_unit=systemd_user_unit)
     files = {
         "service-config.json": {"mode": "0600", "sha256": _digest(config_raw), "bytes": len(config_raw)},
         f"org.mycelium.{config['service_id']}.plist": {"mode": "0600", "sha256": _digest(launchd_raw), "bytes": len(launchd_raw)},

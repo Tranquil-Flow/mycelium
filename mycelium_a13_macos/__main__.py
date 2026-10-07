@@ -19,16 +19,51 @@ def default_state_root(*, platform=None, environ=None):
         local=environ.get('LOCALAPPDATA')
         base=Path(local) if local else Path.home()/'AppData'/'Local'
         return base/'Mycelium'/'A13'
+    if platform.startswith('linux'):
+        # XDG Base Directory: state belongs in XDG_STATE_HOME (a relative value is ignored).
+        state=environ.get('XDG_STATE_HOME')
+        base=Path(state) if state and os.path.isabs(state) else Path.home()/'.local'/'state'
+        return base/'mycelium'/'A13'
     return Path.home()/'Library'/'Application Support'/'Mycelium A13 macOS Demo'
 
 
 _INSTALLER_ACTIONS=('--install','--uninstall','--rollback','--install-status')
 
+#: ``python -m`` entry points a *frozen* app answers for, so the shared service
+#: renderer's ``<exe> -B -m mycelium_service_runner ...`` and the host's
+#: ``<exe> -m <host> ...`` work with the frozen executable as argv[0].  A closed
+#: allow-list: never an arbitrary module, never caller-supplied source.
+_FROZEN_MODULES={
+    'mycelium_service_runner':'mycelium_service_runner',
+    'mycelium_a13_windows.managed_host':'mycelium_a13_windows.managed_host.__main__',
+}
+
+
+def _frozen_module_main(argv):
+    rest=argv[1:]
+    if rest[:1]==['-B']: rest=rest[1:]
+    if len(rest)<2 or rest[0]!='-m' or rest[1] not in _FROZEN_MODULES: return None
+    import importlib
+    module=importlib.import_module(_FROZEN_MODULES[rest[1]])
+    sys.argv=[rest[1],*rest[2:]]
+    return module.main(rest[2:])
+
 
 def main():
+    if sys.argv[1:2] in (['-B'],['-m']):
+        result=_frozen_module_main(sys.argv)
+        if result is not None: return result
+        print(json.dumps({'event':'launcher_refused','code':'frozen_module_not_allowed'}),file=sys.stderr)
+        return 2
     if sys.argv[1:2] and sys.argv[1] in _INSTALLER_ACTIONS:
-        # Per-user Windows installer of the frozen app (mycelium_a13_windows.installer).
-        from mycelium_a13_windows.installer import main as installer_main
+        # Per-user installer of the frozen app for this platform.
+        if sys.platform=='win32':
+            from mycelium_a13_windows.installer import main as installer_main
+        elif sys.platform.startswith('linux'):
+            from mycelium_a13_linux.installer import main as installer_main
+        else:
+            print(json.dumps({'event':'launcher_refused','code':'installer_unsupported_platform'}),file=sys.stderr)
+            return 2
         return installer_main(sys.argv[1:])
     if sys.argv[1:2]==['--node-process-launcher']:
         # Fixed packaged trampoline, never caller-supplied Python source.

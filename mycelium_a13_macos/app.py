@@ -53,6 +53,8 @@ def preflight(*, system=None, machine=None, os_version=None):
     machine = platform.machine() if machine is None else machine
     if system == 'Windows':
         return _windows_preflight(machine=machine, os_version=os_version)
+    if system == 'Linux':
+        return _linux_preflight(machine=machine, os_version=os_version)
     os_version = platform.mac_ver()[0] if os_version is None else os_version
     # Exact two-device compatibility targets. Admitting a target here is not
     # evidence that the final package or physical serving was exercised on it.
@@ -83,6 +85,33 @@ def _windows_preflight(*, machine, os_version):
         error.observed_platform={'system':'Windows','machine':machine,'os_version':version}
         raise error
     return {'platform': 'windows', 'architecture': 'x86_64', 'os_version': version,
+            'model_contract':model_contract(),
+            'distribution': 'unsigned_development_demo'}
+
+
+def _linux_preflight(*, machine, os_version):
+    """Linux floor: the A13 Linux platform admission (Ubuntu 24.04+, x86_64/aarch64).
+
+    ``os_version`` is ``<distribution_id>-<version>`` (e.g. ``ubuntu-24.04``);
+    by default it is read from /etc/os-release.
+    """
+    from mycelium_a13_linux.platform_admission import ADMITTED_ARCHITECTURES, ADMITTED_DISTRIBUTIONS
+    if os_version is None:
+        from mycelium_a13_linux.installer import read_os_release
+        release = read_os_release()
+        os_version = f"{release.get('ID', '')}-{release.get('VERSION_ID', '')}"
+    distribution, _, version = str(os_version).partition('-')
+    declared = ADMITTED_DISTRIBUTIONS.get(distribution)
+    try:
+        admitted = declared is not None and tuple(int(p) for p in version.split('.')) >= tuple(
+            int(p) for p in declared['minimum_version'].split('.'))
+    except ValueError:
+        admitted = False
+    if machine not in ADMITTED_ARCHITECTURES or not admitted:
+        error=DemoError('unsupported_platform')
+        error.observed_platform={'system':'Linux','machine':machine,'os_version':os_version}
+        raise error
+    return {'platform': 'linux', 'architecture': machine, 'os_version': os_version,
             'model_contract':model_contract(),
             'distribution': 'unsigned_development_demo'}
 
