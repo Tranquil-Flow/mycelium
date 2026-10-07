@@ -21,7 +21,7 @@ import os
 from pathlib import Path
 import stat
 import sys
-from typing import Any
+from typing import Any, Mapping
 
 import numpy as np
 
@@ -164,7 +164,53 @@ class NativeInt8LinearProvider:
         }
 
 
+ENV_LIBRARY = "MYCELIUM_A9_INT8_PROVIDER_LIBRARY"
+ENV_DIGEST = "MYCELIUM_A9_INT8_PROVIDER_DIGEST"
+ENV_THREADS = "MYCELIUM_A9_INT8_PROVIDER_THREADS"
+ENV_REPORT = "MYCELIUM_A9_INT8_PROVIDER_REPORT"
+
+
+def provider_from_environment(environ: Mapping[str, str] | None = None) -> NativeInt8LinearProvider | None:
+    """The opt-in provider a gate host selects with environment variables.
+
+    Unset library -> ``None`` (the qualified default path).  A set library
+    without a digest, or one that fails pinning, raises: a requested provider is
+    never silently replaced by the default path.  With ``ENV_REPORT`` set, the
+    provider report (build digest, dispatch, call count) is written there at
+    process exit as gate evidence.
+    """
+
+    env = os.environ if environ is None else environ
+    location = env.get(ENV_LIBRARY)
+    if not location:
+        return None
+    expected = env.get(ENV_DIGEST)
+    if not expected:
+        raise NativeInt8Unavailable("provider_library_digest_missing")
+    try:
+        threads = int(env.get(ENV_THREADS, "1"))
+    except ValueError:
+        raise NativeInt8Unavailable("provider_threads_invalid") from None
+    provider = NativeInt8LinearProvider(NativeInt8Library(location, expected_digest=expected), threads=threads)
+    report_path = env.get(ENV_REPORT)
+    if report_path:
+        import atexit
+        import json
+
+        def _write_report() -> None:
+            target = Path(report_path)
+            target.write_text(json.dumps(provider.report(), sort_keys=True) + "\n", encoding="utf-8")
+
+        atexit.register(_write_report)
+    return provider
+
+
 __all__ = [
+    "ENV_DIGEST",
+    "ENV_LIBRARY",
+    "ENV_REPORT",
+    "ENV_THREADS",
+    "provider_from_environment",
     "NativeInt8Library",
     "NativeInt8LinearProvider",
     "NativeInt8Unavailable",

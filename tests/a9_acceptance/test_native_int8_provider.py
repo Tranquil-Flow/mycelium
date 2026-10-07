@@ -168,3 +168,34 @@ def test_paired_lower_bound_is_conservative():
     assert bench.paired_lower_bound([1.2, 3.0, 2.0]) < 1.5
     assert bench.paired_lower_bound([2.0]) == 0.0
     assert bench.paired_lower_bound([2.0, 0.0, 2.0]) == 0.0
+
+
+def _import_in_child(env_extra):
+    env = {**os.environ, "PYTHONPATH": str(ROOT), "PYTHONDONTWRITEBYTECODE": "1", **env_extra}
+    code = (
+        "import numpy_runtime, json;"
+        "p = numpy_runtime.installed_int8_linear_provider();"
+        "print(json.dumps(None if p is None else p.report()['build_digest']))"
+    )
+    return subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, cwd=ROOT)
+
+
+def test_environment_opt_in_is_digest_pinned_and_fails_closed(library_path, tmp_path):
+    digest = file_digest(library_path)
+    assert _import_in_child({}).stdout.strip() == "null"
+    report = tmp_path / "provider-report.json"
+    ok = _import_in_child({
+        "MYCELIUM_A9_INT8_PROVIDER_LIBRARY": str(library_path),
+        "MYCELIUM_A9_INT8_PROVIDER_DIGEST": digest,
+        "MYCELIUM_A9_INT8_PROVIDER_REPORT": str(report),
+    })
+    assert ok.returncode == 0, ok.stderr
+    assert ok.stdout.strip() == f'"{digest}"'
+    assert '"calls": 0' in report.read_text()
+    for broken in (
+        {"MYCELIUM_A9_INT8_PROVIDER_LIBRARY": str(library_path)},
+        {"MYCELIUM_A9_INT8_PROVIDER_LIBRARY": str(library_path), "MYCELIUM_A9_INT8_PROVIDER_DIGEST": "sha256:" + "0" * 64},
+    ):
+        failed = _import_in_child(broken)
+        assert failed.returncode != 0
+        assert "provider_library_digest" in failed.stderr

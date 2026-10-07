@@ -50,6 +50,21 @@ def installed_int8_linear_provider() -> Any:
     return _INT8_LINEAR_PROVIDER
 
 
+def _install_int8_linear_provider_from_environment() -> None:
+    """Gate hosts opt in with MYCELIUM_A9_INT8_PROVIDER_LIBRARY (+ digest); fail closed."""
+
+    import os
+
+    if not os.environ.get("MYCELIUM_A9_INT8_PROVIDER_LIBRARY"):
+        return
+    from mycelium_platform_neutral.native_int8 import provider_from_environment
+
+    install_int8_linear_provider(provider_from_environment())
+
+
+_install_int8_linear_provider_from_environment()
+
+
 class NumpyRuntimeError(ValueError):
     """Fail-closed NumPy runtime validation or execution error."""
 
