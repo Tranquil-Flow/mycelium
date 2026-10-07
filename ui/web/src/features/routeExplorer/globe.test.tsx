@@ -31,7 +31,8 @@ describe('A14b display cells', () => {
 
   it('places each cell at a fixed slot that no input can move, and keeps unknown off-globe', () => {
     const slots = globeRegions.map(cellSlot);
-    expect(new Set(slots.map(s => s.join())).size).toBe(globeRegions.length);
+    expect(new Set(slots.map(s => `${s.hemisphere}:${s.x}:${s.y}`)).size).toBe(globeRegions.length);
+    for (const slot of slots) expect(Math.hypot(slot.x - 50, slot.y - 50)).toBeLessThan(48);
     const counts = globeCells([node(h('1'), 'europe'), node(h('2'), 'unknown'), node(h('3'), 'unknown', 'latency_distance_class')]);
     expect(counts.onGlobe.europe).toBe(1);
     expect(counts.offGlobe).toBe(2);
@@ -39,9 +40,36 @@ describe('A14b display cells', () => {
     expect(globeRegions.map(cellSlot)).toEqual(slots);
   });
 
-  it('draws the same decorative frame for every input', () => {
-    expect(GLOBE_FRAME.sphere.length).toBeGreaterThan(0);
-    expect(GLOBE_FRAME.graticule.length).toBeGreaterThan(0);
+  it('anchors each cell over its continent on a fixed hemisphere', () => {
+    const at = (region: Parameters<typeof cellSlot>[0]) => cellSlot(region);
+    expect(at('americas_north').hemisphere).toBe('west');
+    expect(at('americas_south').hemisphere).toBe('west');
+    for (const region of ['europe', 'africa', 'asia', 'oceania'] as const) expect(at(region).hemisphere).toBe('east');
+    expect(at('americas_south').y).toBeGreaterThan(at('americas_north').y);
+    expect(at('africa').y).toBeGreaterThan(at('europe').y);
+    expect(at('asia').x).toBeGreaterThan(at('europe').x);
+    expect(at('oceania').y).toBeGreaterThan(at('asia').y);
+    expect(at('polar').y).toBeLessThan(at('americas_north').y);
+  });
+
+  it('draws the same decorative frame, land outlines included, for every input', () => {
+    for (const hemisphere of ['west', 'east'] as const) {
+      expect(GLOBE_FRAME[hemisphere].sphere.length).toBeGreaterThan(0);
+      expect(GLOBE_FRAME[hemisphere].graticule.length).toBeGreaterThan(0);
+      expect(GLOBE_FRAME[hemisphere].land.length).toBeGreaterThan(1000);
+    }
+    expect(GLOBE_FRAME.west.land).not.toBe(GLOBE_FRAME.east.land);
+    const frame = (projection: RouteExplorer) => {
+      const {container, unmount} = render(<RouteExplorerView projection={projection} connected now={1} />);
+      fireEvent.click(globeToggle());
+      const svgs = [...container.querySelectorAll('[aria-label="Schematic region globe"] svg')].map(svg => svg.outerHTML);
+      unmount();
+      return svgs;
+    };
+    const allUnknown: RouteExplorer = {...published(), regions: undefined, nodes: published().nodes.map(n => ({...n, region: 'unknown' as const, region_source: 'unavailable' as const}))};
+    const drawn = frame(published());
+    expect(drawn).toHaveLength(2);
+    expect(frame(allUnknown)).toEqual(drawn);
   });
 });
 

@@ -50,6 +50,20 @@ def test_renderer_reads_only_the_published_node_region():
     assert used == {"region"}
 
 
+def test_renderer_imports_only_the_static_land_asset_and_projection_code():
+    # The only geography the globe may carry is the bundled, decorative Natural
+    # Earth 1:110m land outline, imported statically (never fetched at runtime).
+    allowed = {
+        GLOBE_TS: {"d3-geo", "topojson-client", "topojson-specification", "world-atlas/land-110m.json", "./contracts"},
+        GLOBE_TSX: {"./contracts", "./globe"},
+    }
+    for path, expected in allowed.items():
+        source = path.read_text(encoding="utf-8")
+        assert set(re.findall(r"^import [^;]*? from '([^']+)';", source, re.M)) == expected, path.name
+        assert "import(" not in source
+        assert "world-atlas" not in source or "world-atlas/land-110m.json" in source
+
+
 def test_renderer_never_puts_a_cell_id_or_peer_identity_into_the_dom():
     source = GLOBE_TSX.read_text(encoding="utf-8")
     assert "DISPLAY_CELLS" not in source
