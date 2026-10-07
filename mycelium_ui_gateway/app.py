@@ -457,6 +457,8 @@ class ProductGatewayASGIApplication:
                 "mycelium_qualification" + ".qualifier:RouteQualificationV1"
             ),
         }
+        if self._config.speculation_preference:
+            document["features"] = {"speculation_preference": True}
         await self._send_json(
             send,
             200,

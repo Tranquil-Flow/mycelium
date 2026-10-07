@@ -262,6 +262,15 @@ class RouterSessionBackend:
                 and getattr(self._router, "supports_workload_profiles", False)
             ):
                 admission_kwargs["workload_profile_id"] = submission.workload_profile_id
+            # A11: forward an explicit preference only to a router that takes
+            # it; anywhere else the request is the same target-only request.
+            if (
+                submission.speculation_preference is not None
+                and getattr(self._router, "supports_speculation_preference", False)
+            ):
+                admission_kwargs["speculation_preference"] = (
+                    submission.speculation_preference
+                )
             if admission.graph is None:
                 admitted_id = self._router.admit(
                     request,

@@ -63,6 +63,10 @@ class GatewayConfig:
     stream_buffer_chunks: int = 2
     max_stream_seconds: int = 3_600
     upstream_timeout_seconds: int = 30
+    #: A11: advertise (``features.speculation_preference``) that a submission's
+    #: optional speculation preference reaches a router that takes it.  It is a
+    #: request path only; the entry node still admits or refuses speculation.
+    speculation_preference: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.bind_host, str) or not self.bind_host or len(self.bind_host) > 255:
@@ -73,6 +77,8 @@ class GatewayConfig:
             raise ValueError("invalid_trusted_https_proxy")
         if self.source_mode not in {"fixture", "live", "replay"}:
             raise ValueError("invalid_source_mode")
+        if type(self.speculation_preference) is not bool:
+            raise ValueError("invalid_speculation_preference")
         _positive_integer("session_ttl_seconds", self.session_ttl_seconds, maximum=86_400)
         _positive_integer("max_sessions", self.max_sessions, maximum=4_096)
         _positive_integer(

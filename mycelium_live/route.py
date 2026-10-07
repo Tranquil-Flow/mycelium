@@ -4239,6 +4239,7 @@ class PhysicalLiveRoute:
         authorize_cleanup: Callable[[float], float] | None = None,
         publish_cleanup_receipt: Callable[[Mapping[str, Any]], None] | None = None,
         _stop_token_ids_override: frozenset[int] | None = None,
+        speculation_preference: str | None = None,
     ) -> InferenceResult:
         # This lock is request-scoped. No route-global mutex spans physical
         # prefill, decode, cancellation, cleanup, or browser streaming.
@@ -4269,6 +4270,13 @@ class PhysicalLiveRoute:
                 )
             ):
                 raise ValueError("invalid_stop_token_ids_override")
+            # A11: an explicit future-request preference only.  The route never
+            # infers or defaults it; the entry node admits or refuses it against
+            # its staged draft binding and measured baseline, and any refusal is
+            # an ordinary target-only request.  Recoveries (A6 replay, A7
+            # successor) re-enter infer without it and run target-only.
+            if speculation_preference not in (None, "target_only", "speculative_requested"):
+                raise ValueError("invalid_speculation_preference")
             request_stop_token_ids = (
                 self._stop_token_ids
                 if _stop_token_ids_override is None
@@ -4633,6 +4641,8 @@ class PhysicalLiveRoute:
                     start_payload["path_manifest"] = dict(locked_path_manifest)
                 if excluded_placement_ids:
                     start_payload["excluded_placement_ids"] = excluded_placement_ids
+                if speculation_preference is not None:
+                    start_payload["speculation"] = {"preference": speculation_preference}
                 if cancelled_before_start:
                     # Bind generation 0 on every participant, then let the
                     # already-authorized generation-1 infer_cancel_wait fanout

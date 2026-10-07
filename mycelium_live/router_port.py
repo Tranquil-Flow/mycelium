@@ -274,6 +274,8 @@ class _Pending:
     route_identity: dict[str, Any] | None = None
     path_manifest: dict[str, Any] | None = None
     command_identity: CommandIdentity | None = None
+    #: A11 preference for the first attempt only (``None`` = not stated).
+    speculation_preference: str | None = None
     cleanup_owner_id: str | None = None
     cleanup_receipt: dict[str, Any] | None = None
     tokens: list[tuple[int, int]] = field(default_factory=list)
@@ -318,6 +320,9 @@ class LiveRouterPort:
     requires_qualification_binding = True
     supports_workload_profiles = True
     supports_publisher_generation = True
+    #: A11: an explicit future-request speculation preference reaches the
+    #: request's first route attempt only; recoveries run target-only.
+    supports_speculation_preference = True
 
     def __init__(
         self,
@@ -603,7 +608,13 @@ class LiveRouterPort:
         if not self._route.is_alive():
             raise RuntimeError("route_not_open")
 
-        pending = _Pending(request=request)
+        speculation_preference = kwargs.get("speculation_preference")
+        if speculation_preference is not None and (
+            not isinstance(speculation_preference, str)
+            or speculation_preference not in {"target_only", "speculative_requested"}
+        ):
+            raise M16AdmissionError("invalid_speculation_preference")
+        pending = _Pending(request=request, speculation_preference=speculation_preference)
         coordinator = self._coordinator
         if coordinator is not None:
             profile = kwargs.get("workload_profile_id")
@@ -880,7 +891,12 @@ class LiveRouterPort:
                     else dict(pending.path_manifest)
                 )
                 identity = pending.command_identity
+                speculation_preference = pending.speculation_preference
             route_options: dict[str, object] = {}
+            if speculation_preference is not None:
+                # Only when stated, so a route without A11 keeps its plain
+                # signature.  The recovery attempts below never carry it.
+                route_options["speculation_preference"] = speculation_preference
             if placement_ids is not None and path_manifest is None:
                 route_options["selected_placement_ids"] = placement_ids
             if route_identity is not None:

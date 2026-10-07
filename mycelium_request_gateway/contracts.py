@@ -18,6 +18,8 @@ class TokenEmitter(Protocol):
 
 REQUEST_GATEWAY_PROTOCOL = "mycelium.request_gateway.v1"
 REQUEST_GATEWAY_PROTOCOL_V2 = "mycelium.request_gateway.v2"
+#: A11: the closed set of explicit speculation preferences (``None`` = not stated).
+SPECULATION_PREFERENCES = frozenset({None, "target_only", "speculative_requested"})
 REQUEST_EVENT_PROTOCOL = "mycelium.request_event.v1"
 REQUEST_EVENT_PROTOCOL_V2 = "mycelium.request_event.v2"
 MAX_PROMPT_UTF8_BYTES = 131_072
@@ -200,6 +202,10 @@ class InferenceSubmission:
     protocol: str = REQUEST_GATEWAY_PROTOCOL
     workload_profile_id: str | None = None
     qos_class: str | None = None
+    #: A11: an optional explicit future-request preference (v2 only).  It is a
+    #: request, never a grant: the entry node admits or refuses it, and any
+    #: refusal is an ordinary target-only request with the same output.
+    speculation_preference: str | None = None
 
     def __post_init__(self) -> None:
         _require(
@@ -218,6 +224,20 @@ class InferenceSubmission:
             "invalid_max_new_tokens",
         )
         _require(isinstance(self.qualification, QualificationBinding), "invalid_qualification_binding")
+        _require(
+            (
+                self.speculation_preference is None
+                or (
+                    isinstance(self.speculation_preference, str)
+                    and self.speculation_preference in SPECULATION_PREFERENCES
+                )
+            )
+            and (
+                self.speculation_preference is None
+                or self.protocol == REQUEST_GATEWAY_PROTOCOL_V2
+            ),
+            "invalid_speculation_preference",
+        )
         if self.protocol == REQUEST_GATEWAY_PROTOCOL:
             _require(
                 self.workload_profile_id is None and self.qos_class is None,
@@ -241,6 +261,8 @@ class InferenceSubmission:
         if self.protocol == REQUEST_GATEWAY_PROTOCOL_V2:
             document["workload_profile_id"] = self.workload_profile_id
             document["qos_class"] = self.qos_class
+            if self.speculation_preference is not None:
+                document["speculation_preference"] = self.speculation_preference
         return document
 
     @classmethod
@@ -250,6 +272,13 @@ class InferenceSubmission:
         expected = {"protocol", "prompt", "max_new_tokens", "qualification"}
         if protocol == REQUEST_GATEWAY_PROTOCOL_V2:
             expected.update({"workload_profile_id", "qos_class"})
+            if "speculation_preference" in document:
+                # Stated or absent: an explicit null is not a canonical form.
+                _require(
+                    document["speculation_preference"] is not None,
+                    "invalid_speculation_preference",
+                )
+                expected.add("speculation_preference")
         _require(set(document) == expected, "invalid_submission")
         _require(
             protocol in {REQUEST_GATEWAY_PROTOCOL, REQUEST_GATEWAY_PROTOCOL_V2},
@@ -264,6 +293,7 @@ class InferenceSubmission:
             protocol=protocol,
             workload_profile_id=document.get("workload_profile_id"),
             qos_class=document.get("qos_class"),
+            speculation_preference=document.get("speculation_preference"),
         )
 
 

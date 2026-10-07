@@ -48,6 +48,14 @@
     },
     "qualification_authority": {
       "const": "mycelium_qualification.qualifier:RouteQualificationV1"
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["speculation_preference"],
+      "properties": {
+        "speculation_preference": { "const": true }
+      }
     }
   }
 }

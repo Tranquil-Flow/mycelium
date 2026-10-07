@@ -73,6 +73,7 @@ class LiveDeploymentRegistry:
     requires_qualification_binding = True
     supports_workload_profiles = True
     supports_publisher_generation = True
+    supports_speculation_preference = True
 
     def __init__(
         self,

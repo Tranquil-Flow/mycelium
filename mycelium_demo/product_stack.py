@@ -91,6 +91,9 @@ def build_loopback_product_stack(
             tls_enabled=trusted_https_proxy,
             public_origin=public_origin,
             trusted_https_proxy=trusted_https_proxy,
+            speculation_preference=(
+                getattr(router, "supports_speculation_preference", False) is True
+            ),
         ),
         observatory_app=observatory_app,
         product_app=product_app,

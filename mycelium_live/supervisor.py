@@ -859,6 +859,7 @@ class ColdRouteRestartOwner:
         authorize_cleanup: Callable[[float], float] | None = None,
         publish_cleanup_receipt: Callable[[Mapping[str, Any]], None] | None = None,
         _stop_token_ids_override: frozenset[int] | None = None,
+        speculation_preference: str | None = None,
     ) -> Any:
         route, generation = self._ready_route_or_raise()
         if not self._route_alive(route) and not self._route_survives_peer_loss(route):
@@ -875,6 +876,11 @@ class ColdRouteRestartOwner:
         extra: dict[str, Any] = {}
         if _stop_token_ids_override is not None:
             extra["_stop_token_ids_override"] = _stop_token_ids_override
+        # A11: an explicit preference is a plain passthrough, forwarded only
+        # when stated; the route validates it and the entry node admits or
+        # refuses it (a refusal is an ordinary target-only request).
+        if speculation_preference is not None:
+            extra["speculation_preference"] = speculation_preference
         with self._lock:
             self._request_routes[request_id] = route
         try:

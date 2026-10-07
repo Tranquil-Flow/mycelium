@@ -223,6 +223,9 @@ def validate_submission(document: Mapping[str, Any]) -> None:
     expected = {"protocol", "prompt", "max_new_tokens", "qualification"}
     if protocol == REQUEST_PROTOCOL_V2:
         expected.update({"workload_profile_id", "qos_class"})
+        # A11: an optional explicit preference; absent means not stated.
+        if "speculation_preference" in document:
+            expected.add("speculation_preference")
     if not _exact(document, expected):
         raise GatewayValidationError("invalid_inference_request")
     prompt = document["prompt"]
@@ -241,6 +244,11 @@ def validate_submission(document: Mapping[str, Any]) -> None:
     if protocol == REQUEST_PROTOCOL_V2 and (
         not _public_identifier(document["workload_profile_id"])
         or document["qos_class"] not in {"interactive", "batch"}
+    ):
+        raise GatewayValidationError("invalid_inference_request")
+    if "speculation_preference" in document and document["speculation_preference"] not in (
+        "target_only",
+        "speculative_requested",
     ):
         raise GatewayValidationError("invalid_inference_request")
 
