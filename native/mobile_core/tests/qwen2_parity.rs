@@ -11,6 +11,9 @@
 //!   tests print a skip line and pass.
 //! - `cargo test --release --test qwen2_parity -- --ignored --nocapture`:
 //!   single-thread timing of one real layer.
+//! - On a phone: build with `--target aarch64-linux-android --no-run`, push the
+//!   binary and `tests/fixtures`, set `MYCELIUM_MOBILE_FIXTURES`; the golden
+//!   digests must then match the host's (plan R1a).
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -28,8 +31,11 @@ const SYNTHETIC_GOLDEN: &str = "sha256:6b8cd240399d0b831c6eca3be09f6b34f1caea4b6
 /// Same for the real Qwen2.5-0.5B layer-12 fixture.
 const REAL_LAYER12_GOLDEN: &str = "sha256:0e6115d549d4e8f2f83529b937c595ea435e1151302bde3b453296f14694d3be";
 
+/// Fixtures live in `tests/fixtures`; `MYCELIUM_MOBILE_FIXTURES` points a
+/// cross-compiled test binary at a copy on the device (`adb push`).
 fn fixture(name: &str) -> Value {
-    let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+    let dir = std::env::var("MYCELIUM_MOBILE_FIXTURES").unwrap_or_else(|_| format!("{}/tests/fixtures", env!("CARGO_MANIFEST_DIR")));
+    let path = format!("{dir}/{name}");
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
