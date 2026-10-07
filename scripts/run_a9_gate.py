@@ -561,14 +561,21 @@ def cmd_windows_benchmark(args: argparse.Namespace) -> int:
     )
     _write(gate / "11-benchmark-manifest.json", {**manifest, "model_files": files, "kernel_digest": library.build_digest,
                                                  "threads": args.threads, "frozen_at": time.time()})
+    from mycelium_platform_neutral import thermal as thermal_module
+
+    thermal_samples = [thermal_module.observe()]
     log_path = gate / "11-benchmark.log"
     with log_path.open("a", encoding="utf-8") as log:
         result = bench.run_paired_benchmark(
             tensors, config, manifest, candidate_provider=provider,
             log=lambda line: (log.write(line + "\n"), log.flush()),
         )
+    thermal_samples.append(thermal_module.observe())
     drift = result["candidate_rate_drift"]
-    thermal = args.thermal_state if drift >= 0.85 else "serious"
+    thermal_evidence = thermal_module.decide(
+        thermal_samples, declared=args.thermal_state, rate_drift=drift
+    )
+    thermal = thermal_evidence["state"]
     driver_digest = "sha256:" + hashlib.sha256(json.dumps({
         "python": platform.python_version(), "numpy": np.__version__, "system": platform.platform(),
         "kernel_threading": library.threading,
@@ -626,8 +633,8 @@ def cmd_windows_benchmark(args: argparse.Namespace) -> int:
     _write(gate / "12-windows-benchmark.json", _receipt(
         "windows_stage_benchmark",
         "single-host Qwen2.5-0.5B int8 stage pre-qualification on the exact provider build; the product-route two-host gate through the browser is still required for A9",
-        windows_host=windows, profile_binding=profile_binding, load_ms=load_ms, thermal_state_declared=args.thermal_state,
-        thermal_source="operator_declared", candidate_rate_drift=drift, result=result,
+        windows_host=windows, profile_binding=profile_binding, load_ms=load_ms, thermal=thermal_evidence,
+        candidate_rate_drift=drift, result=result,
         provider=provider.report(), efficiency_qualification=decision))
     state = decision["decision"]["state"] if isinstance(decision, dict) else None
     print(json.dumps({"decision": state, "blockers": decision["decision"]["blockers"],
@@ -731,7 +738,8 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--snapshot", required=True, help=".../snapshots/7ae557604adf67be50417f59c2c2f167def9a775")
             p.add_argument("--profile-digest", required=True,
                            help="the Windows member's v2 profile digest (member-sign), or 'local-declaration' before enrolment")
-            p.add_argument("--thermal-state", required=True, choices=("nominal", "fair", "serious", "critical", "unknown"))
+            p.add_argument("--thermal-state", choices=("nominal", "fair", "serious", "critical", "unknown"),
+                           help="operator declaration, used only when no native thermal zone is readable")
             p.add_argument("--paired-windows", type=int, default=3)
             p.add_argument("--prompt-lengths", type=int, nargs=2, default=[16, 128])
             p.add_argument("--output-lengths", type=int, nargs=2, default=[16, 48])

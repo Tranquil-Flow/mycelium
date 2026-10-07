@@ -597,6 +597,7 @@ V2_CONSUMER_PROJECTION = {
     ("linux", ("numpy",)): "linux_numpy_iroh",
     ("linux", ()): "linux_native_iroh",
     ("windows", ()): "windows_native_iroh",
+    ("windows", ("numpy",)): "windows_native_iroh",
     ("windows", ("windows_native_provider",)): "windows_native_iroh",
     ("android", ()): "android_native_iroh",
 }

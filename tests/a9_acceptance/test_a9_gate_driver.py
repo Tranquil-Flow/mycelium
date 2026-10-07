@@ -189,6 +189,8 @@ def test_windows_commands_refuse_non_windows_hosts_unless_conformance(kernel, tm
     assert receipt["result"]["token_parity_mismatches"] == []
     assert receipt["windows_host"] is False
     assert receipt["profile_binding"] == "unsigned_local_declaration"
+    assert receipt["thermal"]["source_kind"] == "operator_declared"
+    assert receipt["thermal"]["native_unavailable"] is True
 
 
 def test_live_cutover_adoption_and_v2_resume_through_the_driver(swarm, tmp_path, capsys):
