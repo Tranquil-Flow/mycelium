@@ -348,7 +348,9 @@ async fn a_full_fence_refuses_rather_than_forgetting_live_requests() {
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_requests_cannot_overspend_a_grant() {
     let b = bed("race", 0x67).await;
-    let source = b.source(0x68).await.unwrap();
+    // Allow eight connections from the one peer so the budget check itself is raced.
+    let limits = mycelium_mobile_core::artifact_net::ArtifactLimits { connections_per_peer: 8, ..Default::default() };
+    let source = b.source(0x68).await.unwrap().with_limits(limits);
     drop(source.spawn_accept()); // detached accept loop
     let g = grant(&b.seed, &iroh_id(b.phone_secret), &b.member, &b.manifest, &source, Some(48));
     let mut tasks = Vec::new();
@@ -441,5 +443,62 @@ async fn a_bad_receipt_leaves_no_trusted_bytes_on_the_phone() {
     assert_eq!(std::fs::read_dir(root.join("objects")).unwrap().count(), 0);
     honest.close().await;
     std::fs::remove_dir_all(root).unwrap();
+    b.cleanup();
+}
+
+// ---- denial of service: bounded serving (the sidecar also carries Router traffic) ----
+
+async fn closed_within(conn: &iroh::endpoint::Connection, within: std::time::Duration) -> bool {
+    tokio::time::timeout(within, conn.closed()).await.is_ok()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connections_are_bounded_per_peer_and_in_total_and_half_open_streams_are_dropped() {
+    use mycelium_mobile_core::artifact_net::ArtifactLimits;
+    let b = bed("dos", 0x6c).await;
+    let limits = ArtifactLimits { connections: 3, connections_per_peer: 2, read_timeout: std::time::Duration::from_millis(300), idle_timeout: std::time::Duration::from_secs(20) };
+    let source = b.source(0x6d).await.unwrap().with_limits(limits);
+    drop(source.spawn_accept()); // detached accept loop
+    let short = std::time::Duration::from_millis(1500);
+    // Per peer: the third connection from one peer is closed at once.
+    let first = b.phone.connect(source.addr(), ag::ARTIFACT_CHUNK_ALPN).await.unwrap();
+    let second = b.phone.connect(source.addr(), ag::ARTIFACT_CHUNK_ALPN).await.unwrap();
+    let third = b.phone.connect(source.addr(), ag::ARTIFACT_CHUNK_ALPN).await.unwrap();
+    assert!(closed_within(&third, short).await, "a peer's third connection is refused");
+    assert!(!closed_within(&first, std::time::Duration::from_millis(300)).await);
+    // In total: one more peer fits (3), the next is refused.
+    let other = bed("dos2", 0x6e).await;
+    let fourth = other.phone.connect(source.addr(), ag::ARTIFACT_CHUNK_ALPN).await.unwrap();
+    assert!(!closed_within(&fourth, std::time::Duration::from_millis(300)).await);
+    let third_peer = bed("dos3", 0x6f).await;
+    let fifth = third_peer.phone.connect(source.addr(), ag::ARTIFACT_CHUNK_ALPN).await.unwrap();
+    assert!(closed_within(&fifth, short).await, "over the total the connection is refused");
+    // A half-open request (never finished) loses its connection after the
+    // read deadline, which frees the peer's slot for a new connection.
+    let (mut send, _recv) = second.open_bi().await.unwrap();
+    send.write_all(b"{\"partial\":").await.unwrap();
+    assert!(closed_within(&second, std::time::Duration::from_secs(3)).await, "a slow request is dropped");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let again = b.phone.connect(source.addr(), ag::ARTIFACT_CHUNK_ALPN).await.unwrap();
+    assert!(!closed_within(&again, std::time::Duration::from_millis(300)).await, "the freed slot is reusable");
+    source.close().await;
+    for bed in [&b, &other, &third_peer] {
+        bed.cleanup();
+    }
+}
+
+/// A request naming another recipient is refused before any signature check
+/// or disk IO: even with a broken signature the answer is the transport
+/// mismatch, not the signature failure that full verification would give.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_for_another_recipient_is_refused_before_crypto_or_disk() {
+    let b = bed("pre", 0x75).await;
+    let source = b.source(0x76).await.unwrap();
+    drop(source.spawn_accept()); // detached accept loop
+    let g = grant(&b.seed, &"f".repeat(64), &b.member, &b.manifest, &source, None);
+    let mut env = b.request(&g, &source, "r1");
+    env["signature"]["signature"] = json!("A".repeat(86) + "==");
+    assert_eq!(raw_request(&b.phone, source.addr(), &env).await["code"], "artifact_recipient_transport_mismatch");
+    source.close().await;
     b.cleanup();
 }

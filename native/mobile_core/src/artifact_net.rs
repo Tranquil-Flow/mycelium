@@ -59,6 +59,36 @@ pub const RESPONSE_PROTOCOL: &str = "mycelium.mobile_artifact_chunk_response.v1"
 const MAX_REQUEST_BYTES: usize = 256 * 1024;
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
+/// Serving bounds (the sidecar also carries live Router traffic, so a source
+/// must never take more than these, and refuses before any heavy work):
+/// concurrent artifact connections in total and per peer, one stream at a
+/// time per connection, a read deadline per request, an idle deadline per
+/// connection, and a small pool for the blocking work (disk reads, hashing,
+/// signature checks, journal fsync), which never runs on the async executor.
+pub const MAX_ARTIFACT_CONNECTIONS: usize = 16;
+pub const MAX_ARTIFACT_CONNECTIONS_PER_PEER: usize = 2;
+const MAX_BLOCKING_WORK: usize = 4;
+const MAX_PACE: Duration = Duration::from_secs(10);
+
+/// Serving bounds; [`ArtifactLimits::default`] is the product setting.
+#[derive(Debug, Clone, Copy)]
+pub struct ArtifactLimits {
+    pub connections: usize,
+    pub connections_per_peer: usize,
+    pub read_timeout: Duration,
+    pub idle_timeout: Duration,
+}
+
+impl Default for ArtifactLimits {
+    fn default() -> Self {
+        Self {
+            connections: MAX_ARTIFACT_CONNECTIONS,
+            connections_per_peer: MAX_ARTIFACT_CONNECTIONS_PER_PEER,
+            read_timeout: Duration::from_secs(10),
+            idle_timeout: Duration::from_secs(20),
+        }
+    }
+}
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Live fence entries per source (requests still inside their window).
 const MAX_FENCE: usize = 65_536;
@@ -229,6 +259,46 @@ impl SourceState {
     }
 }
 
+/// Releases a peer's connection count when its connection ends.
+struct PeerSlot {
+    peers: Arc<Mutex<BTreeMap<EndpointId, usize>>>,
+    id: EndpointId,
+}
+
+impl PeerSlot {
+    fn enter(peers: &Arc<Mutex<BTreeMap<EndpointId, usize>>>, id: EndpointId, limit: usize) -> Option<Self> {
+        let mut map = peers.lock().unwrap();
+        let count = map.entry(id).or_insert(0);
+        if *count >= limit {
+            return None;
+        }
+        *count += 1;
+        Some(Self { peers: peers.clone(), id })
+    }
+}
+
+impl Drop for PeerSlot {
+    fn drop(&mut self) {
+        let mut map = self.peers.lock().unwrap();
+        if let Some(count) = map.get_mut(&self.id) {
+            *count -= 1;
+            if *count == 0 {
+                map.remove(&self.id);
+            }
+        }
+    }
+}
+
+/// Cheap admission before any signature check or disk IO: the request names
+/// a grant whose recipient is the transport-authenticated peer.
+fn precheck(remote: EndpointId, raw: &[u8]) -> Result<(), String> {
+    let env: Value = serde_json::from_slice(raw).map_err(|_| "artifact_chunk_request_invalid".to_owned())?;
+    if env["message"]["grant"]["message"]["recipient_endpoint_id"].as_str() != Some(remote.to_string().as_str()) {
+        return Err("artifact_recipient_transport_mismatch".into());
+    }
+    Ok(())
+}
+
 /// An artifact source serving content-addressed objects (`<root>/<sha256 hex>`).
 #[derive(Clone)]
 pub struct ArtifactSource {
@@ -237,6 +307,10 @@ pub struct ArtifactSource {
     seed_key: Arc<Value>,
     root: PathBuf,
     state: Arc<Mutex<SourceState>>,
+    connections: Arc<tokio::sync::Semaphore>,
+    peers: Arc<Mutex<BTreeMap<EndpointId, usize>>>,
+    work: Arc<tokio::sync::Semaphore>,
+    limits: ArtifactLimits,
 }
 
 fn refused(code: &str) -> Vec<u8> {
@@ -267,7 +341,24 @@ impl ArtifactSource {
         let journal = Journal::open(state_dir, &mut state, now_ms())?;
         state.journal = Some(journal);
         let signer = Identity::from_secret(&endpoint.id().to_string(), signing_secret).map_err(|_| ArtifactError("source_identity_invalid".into()))?;
-        Ok(Self { endpoint, signer: Arc::new(signer), seed_key: Arc::new(seed_key), root, state: Arc::new(Mutex::new(state)) })
+        Ok(Self {
+            endpoint,
+            signer: Arc::new(signer),
+            seed_key: Arc::new(seed_key),
+            root,
+            state: Arc::new(Mutex::new(state)),
+            connections: Arc::new(tokio::sync::Semaphore::new(MAX_ARTIFACT_CONNECTIONS)),
+            peers: Arc::default(),
+            work: Arc::new(tokio::sync::Semaphore::new(MAX_BLOCKING_WORK)),
+            limits: ArtifactLimits::default(),
+        })
+    }
+
+    /// Replace the serving bounds (before serving starts).
+    pub fn with_limits(mut self, limits: ArtifactLimits) -> Self {
+        self.connections = Arc::new(tokio::sync::Semaphore::new(limits.connections.max(1)));
+        self.limits = limits;
+        self
     }
 
     /// Bound the live fence (default 65 536); at capacity new requests are refused.
@@ -360,27 +451,56 @@ impl ArtifactSource {
     /// until the peer closes it. A connection negotiated for another ALPN is
     /// closed unserved.
     pub async fn serve_connection(&self, connection: iroh::endpoint::Connection) {
+        let busy = |c: &iroh::endpoint::Connection| c.close(2u32.into(), b"busy");
         if connection.alpn() != ARTIFACT_CHUNK_ALPN {
             connection.close(1u32.into(), b"alpn");
             return;
         }
+        // Bounded before anything is read: total, then per peer.
+        let Ok(_slot) = self.connections.clone().try_acquire_owned() else { return busy(&connection) };
         let remote = connection.remote_id();
-        while let Ok((mut send, mut recv)) = connection.accept_bi().await {
-            let Ok(Ok(raw)) = timeout(IO_TIMEOUT, recv.read_to_end(MAX_REQUEST_BYTES)).await else { continue };
-            let reply = match self.serve(remote, &raw) {
-                Ok((receipt, data, pace_ms)) => {
-                    if pace_ms > 0 {
-                        tokio::time::sleep(Duration::from_millis(pace_ms)).await;
-                    }
-                    let mut out = frame_header(&json!({"protocol": RESPONSE_PROTOCOL, "status": "ok", "receipt": receipt}));
-                    out.extend_from_slice(&data);
-                    out
-                }
+        let Some(_peer) = PeerSlot::enter(&self.peers, remote, self.limits.connections_per_peer) else { return busy(&connection) };
+        // One request stream at a time per connection.
+        connection.set_max_concurrent_bi_streams(1u32.into());
+        loop {
+            let Ok(Ok((mut send, mut recv))) = timeout(self.limits.idle_timeout, connection.accept_bi()).await else { break };
+            // A slow or half-open request loses the whole connection.
+            let Ok(Ok(raw)) = timeout(self.limits.read_timeout, recv.read_to_end(MAX_REQUEST_BYTES)).await else { break };
+            let reply = match precheck(remote, &raw) {
                 Err(code) => refused(&code),
+                Ok(()) => match self.serve_blocking(remote, raw).await {
+                    Ok((receipt, data, pace_ms)) => {
+                        // No lock is held here; pacing is capped.
+                        let pace = Duration::from_millis(pace_ms).min(MAX_PACE);
+                        if !pace.is_zero() {
+                            tokio::time::sleep(pace).await;
+                        }
+                        let mut out = frame_header(&json!({"protocol": RESPONSE_PROTOCOL, "status": "ok", "receipt": receipt}));
+                        out.extend_from_slice(&data);
+                        out
+                    }
+                    Err(code) => refused(&code),
+                },
             };
-            let _ = timeout(IO_TIMEOUT, send.write_all(&reply)).await;
+            if timeout(IO_TIMEOUT, send.write_all(&reply)).await.is_err() {
+                break;
+            }
             let _ = send.finish();
         }
+        connection.close(0u32.into(), b"done");
+    }
+
+    /// Verification, disk reads, hashing and the journal fsync run on the
+    /// blocking pool, at most `MAX_BLOCKING_WORK` at once.
+    async fn serve_blocking(&self, remote: EndpointId, raw: Vec<u8>) -> Result<(Value, Vec<u8>, u64), String> {
+        let permit = self.work.clone().acquire_owned().await.map_err(|_| "artifact_source_closed".to_owned())?;
+        let source = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            source.serve(remote, &raw)
+        })
+        .await
+        .unwrap_or_else(|_| Err("artifact_source_internal".into()))
     }
 }
 
