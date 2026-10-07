@@ -521,6 +521,9 @@ def rekey_port_kv_path(
    new_path_attempt: int,
    lease_expires_at: float,
    truncate_to_position: int | None = None,
+   request_id: str | None = None,
+   placement_id: str | None = None,
+   allow_terminal_retained: bool = False,
 ) -> dict[str, Any]:
    """Move a surviving stage's KV from a fenced path to its successor path.
 
@@ -555,13 +558,21 @@ def rekey_port_kv_path(
       if state is None:
          # A stage that already executed the request's terminal hop (the
          # source was lost during the final decode step) set its KV aside for
-         # exactly this rekey; nothing else can resume it.
+         # exactly this rekey.  Only an authenticated A7 cutover from the
+         # path's entry, naming the same request and placement, may take it;
+         # its own deadline and lease, and any cancellation or terminal
+         # release of the path, are enforced at take time.
          take = getattr(port, "_take_terminal_retained", None)
-         retained = take(old_path_id) if callable(take) else None
+         if allow_terminal_retained is True and _text(request_id) and _text(placement_id) and callable(take):
+            retained = take(old_path_id, request_id=request_id, placement_id=placement_id)
          if retained is None:
             _refuse("kv_checkpoint_state_missing")
          state = retained
          port._kv_states[old_path_id] = state
+      elif (request_id is not None and request_id != state.request_id) or (
+         placement_id is not None and placement_id != state.placement_id
+      ):
+         _refuse("kv_checkpoint_subject_mismatch")
       try:
          return _rekey_locked(
             port,

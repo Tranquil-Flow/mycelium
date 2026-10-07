@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from mycelium_a7_node_agent import A7NodeAgent
-from mycelium_router.contracts import KVShadowRelease
+from mycelium_router.contracts import KVShadowRelease, KVSuccessorCutover
 from mycelium_router.kv_checkpoint import KVCheckpointError
 from mycelium_router.payloads import encode_token_ids
 from test_router_numpy_qwen_kv import _case, _reference
@@ -39,7 +39,7 @@ class _Clock:
       return self.now
 
 
-def _stage(port, case, stage_index, payload, *, phase, request_id, path_id, path_attempt, token_index, position, terminal=False):
+def _stage(port, case, stage_index, payload, *, phase, request_id, path_id, path_attempt, token_index, position, terminal=False, lease=_LEASE):
    item = replace(
       _work_item(
          case,
@@ -52,7 +52,7 @@ def _stage(port, case, stage_index, payload, *, phase, request_id, path_id, path
          token_index=token_index,
          position=position,
          terminal=terminal,
-         lease_expires_at=_LEASE,
+         lease_expires_at=lease,
       ),
       path_attempt=path_attempt,
    )
@@ -89,6 +89,16 @@ def _final_step_on_surviving_stage(case, request_id, path_id, second):
    assert result.success, result.failure_reason
 
 
+def _auth(case, request_id, stage_index=0):
+   """What an authenticated A7 cutover from the path's entry passes for a surviving stage."""
+
+   return {
+      "request_id": request_id,
+      "placement_id": case.graph.stages[stage_index].placements[0].placement_id,
+      "allow_terminal_retained": True,
+   }
+
+
 def _enable(*ports, seconds=30.0, max_entries=64):
    for port in ports:
       port.enable_terminal_kv_retention(seconds=seconds, max_entries=max_entries)
@@ -123,6 +133,7 @@ def test_final_step_source_loss_rekeys_the_retained_surviving_kv_bit_identically
       new_path_attempt=1,
       lease_expires_at=_LEASE,
       truncate_to_position=len(_PROMPT) + 1,
+      **_auth(case, request_id),
    )
    assert receipt["next_position"] == len(_PROMPT) + 1
    assert _retention(surviving)["retained_count"] == 0
@@ -154,7 +165,7 @@ def test_without_retention_the_terminal_hop_releases_immediately(tmp_path: Path)
    assert "terminal_kv_retention" not in snapshot
    assert case.ports[0].kv_subject_clean(request_id, old_path, 0) is True
    with pytest.raises(KVCheckpointError) as refused:
-      case.ports[0].rekey_kv_path(old_path, new_path_id="path:successor", new_path_attempt=1, lease_expires_at=_LEASE, truncate_to_position=len(_PROMPT) + 1)
+      case.ports[0].rekey_kv_path(old_path, new_path_id="path:successor", new_path_attempt=1, lease_expires_at=_LEASE, truncate_to_position=len(_PROMPT) + 1, **_auth(case, request_id))
    assert refused.value.code == "kv_checkpoint_state_missing"
 
 
@@ -183,11 +194,11 @@ def test_a_refused_rekey_returns_the_retained_kv_unchanged(tmp_path: Path) -> No
    _final_step_on_surviving_stage(case, request_id, old_path, second)
    port = case.ports[0]
    with pytest.raises(KVCheckpointError) as refused:
-      port.rekey_kv_path(old_path, new_path_id="path:successor", new_path_attempt=1, lease_expires_at=_LEASE, truncate_to_position=len(_PROMPT) - 1)
+      port.rekey_kv_path(old_path, new_path_id="path:successor", new_path_attempt=1, lease_expires_at=_LEASE, truncate_to_position=len(_PROMPT) - 1, **_auth(case, request_id))
    assert refused.value.code == "kv_checkpoint_position_mismatch"
    assert port.kv_snapshot()["active_state_count"] == 0
    assert _retention(port)["retained_count"] == 1
-   port.rekey_kv_path(old_path, new_path_id="path:successor", new_path_attempt=1, lease_expires_at=_LEASE, truncate_to_position=len(_PROMPT) + 1)
+   port.rekey_kv_path(old_path, new_path_id="path:successor", new_path_attempt=1, lease_expires_at=_LEASE, truncate_to_position=len(_PROMPT) + 1, **_auth(case, request_id))
    assert port.kv_snapshot()["states"]["path:successor"]["next_position"] == len(_PROMPT) + 1
 
 
@@ -256,7 +267,7 @@ def test_retained_kv_expires_and_is_bounded(tmp_path: Path) -> None:
       assert retention["release_counts"] == {"evicted": 2, "expired": 3}
       assert all(port.kv_subject_clean(f"request:{index}", f"path:{index}", 0) for index in range(5))
    with pytest.raises(KVCheckpointError) as refused:
-      case.ports[0].rekey_kv_path("path:4", new_path_id="path:late", new_path_attempt=1, lease_expires_at=_LEASE, truncate_to_position=len(_PROMPT) + 1)
+      case.ports[0].rekey_kv_path("path:4", new_path_id="path:late", new_path_attempt=1, lease_expires_at=_LEASE, truncate_to_position=len(_PROMPT) + 1, **_auth(case, "request:4"))
    assert refused.value.code == "kv_checkpoint_state_missing"
 
 
@@ -268,7 +279,7 @@ def test_a_cancelled_retained_path_is_never_rekeyed(tmp_path: Path) -> None:
    _final_step_on_surviving_stage(case, request_id, old_path, second)
    case.ports[0].cancel(old_path)
    with pytest.raises(KVCheckpointError) as refused:
-      case.ports[0].rekey_kv_path(old_path, new_path_id="path:successor", new_path_attempt=1, lease_expires_at=_LEASE, truncate_to_position=len(_PROMPT) + 1)
+      case.ports[0].rekey_kv_path(old_path, new_path_id="path:successor", new_path_attempt=1, lease_expires_at=_LEASE, truncate_to_position=len(_PROMPT) + 1, **_auth(case, request_id))
    assert refused.value.code == "kv_checkpoint_state_missing"
    assert _retention(case.ports[0])["retained_count"] == 0
 
@@ -323,3 +334,207 @@ def test_retention_settings_are_validated(tmp_path: Path) -> None:
    for seconds, entries in ((0.0, 4), (float("inf"), 4), (5.0, 0), (True, 4)):
       with pytest.raises(ValueError):
          case.ports[0].enable_terminal_kv_retention(seconds=seconds, max_entries=entries)
+
+
+# -- authority and lifecycle of the retained KV (security hardening) -------------------
+
+_ENTRY = "node-entry"
+_STAGE0 = 0
+
+
+class _Receipts:
+   def __init__(self) -> None:
+      self.sent: list = []
+
+   def __call__(self, destination, message, payload) -> None:
+      self.sent.append(message)
+
+
+def _surviving_agent(case, *, port=None):
+   receipts = _Receipts()
+   agent = A7NodeAgent("node-surviving", send=receipts)
+   agent.register_port(case.graph.stages[_STAGE0].placements[0].placement_id, port or case.ports[0])
+   return agent, receipts
+
+
+def _cutover(case, request_id, old_path, *, successor="path:successor", placement_index=_STAGE0):
+   return KVSuccessorCutover(
+      request_id=request_id,
+      old_path_id=old_path,
+      old_path_attempt=0,
+      successor_path_id=successor,
+      successor_path_attempt=1,
+      fencing_generation=2,
+      placement_id=case.graph.stages[placement_index].placements[0].placement_id,
+      role="surviving_rekey",
+      expected_next_position=len(_PROMPT) + 1,
+      lease_expires_at=_LEASE,
+   )
+
+
+def _retained_case(tmp_path, request_id="request:sec", old_path="path:old", clock=None):
+   case = _case(tmp_path, "qwen2", clock=clock) if clock is not None else _case(tmp_path, "qwen2")
+   _enable(*case.ports)
+   _first, second = _until_final_step(case, request_id, old_path)
+   _final_step_on_surviving_stage(case, request_id, old_path, second)
+   assert _retention(case.ports[0])["retained_count"] == 1
+   return case
+
+
+@pytest.mark.parametrize(
+   "kwargs",
+   [
+      pytest.param({}, id="unauthenticated_default"),
+      pytest.param({"request_id": "request:other", "allow_terminal_retained": True}, id="other_request"),
+      pytest.param({"placement_id": "placement:other", "allow_terminal_retained": True}, id="other_placement"),
+      pytest.param({"allow_terminal_retained": False}, id="not_authorised"),
+   ],
+)
+def test_retained_kv_is_taken_only_by_an_authorised_rekey_for_the_same_request_and_placement(tmp_path: Path, kwargs) -> None:
+   case = _retained_case(tmp_path)
+   rekey = {**_auth(case, "request:sec"), **kwargs} if kwargs else {}
+   with pytest.raises(KVCheckpointError) as refused:
+      case.ports[0].rekey_kv_path("path:old", new_path_id="path:successor", new_path_attempt=1, lease_expires_at=_LEASE, truncate_to_position=len(_PROMPT) + 1, **rekey)
+   assert refused.value.code == "kv_checkpoint_state_missing"
+   # A refused take leaves the retained entry exactly where it was.
+   assert _retention(case.ports[0])["retained_count"] == 1
+   assert case.ports[0].kv_snapshot()["active_state_count"] == 0
+
+
+def test_an_active_rekey_naming_another_request_is_refused(tmp_path: Path) -> None:
+   case = _case(tmp_path, "qwen2")
+   _until_final_step(case, "request:live", "path:live")
+   with pytest.raises(KVCheckpointError) as refused:
+      case.ports[0].rekey_kv_path("path:live", new_path_id="path:successor", new_path_attempt=1, lease_expires_at=_LEASE, truncate_to_position=len(_PROMPT) + 1, request_id="request:other")
+   assert refused.value.code == "kv_checkpoint_subject_mismatch"
+   assert set(case.ports[0].kv_snapshot()["states"]) == {"path:live"}
+
+
+@pytest.mark.parametrize(
+   ("path_entry", "sender", "reason"),
+   [
+      pytest.param("node-entry", "node-intruder", "a7_cutover_sender_not_entry", id="sender_is_not_the_path_entry"),
+      pytest.param(None, "node-entry", "kv_checkpoint_state_missing", id="path_entry_unknown"),
+   ],
+)
+def test_a_cutover_not_from_the_paths_entry_never_revives_retained_kv(tmp_path: Path, path_entry, sender, reason) -> None:
+   case = _retained_case(tmp_path)
+   agent, receipts = _surviving_agent(case)
+   assert agent.receive_cutover(_cutover(case, "request:sec", "path:old"), source_node_id=sender, path_entry_node_id=path_entry)
+   receipt = receipts.sent[-1]
+   assert receipt.installed is False and receipt.reason == reason
+   assert case.ports[0].kv_snapshot()["active_state_count"] == 0
+   assert _retention(case.ports[0])["retained_count"] == 1
+
+
+def test_the_paths_entry_cutover_takes_the_retained_kv(tmp_path: Path) -> None:
+   case = _retained_case(tmp_path)
+   agent, receipts = _surviving_agent(case)
+   agent.receive_cutover(_cutover(case, "request:sec", "path:old"), source_node_id=_ENTRY, path_entry_node_id=_ENTRY)
+   assert receipts.sent[-1].installed is True, receipts.sent[-1].reason
+   assert set(case.ports[0].kv_snapshot()["states"]) == {"path:successor"}
+
+
+def test_no_cutover_after_the_requests_terminal_release(tmp_path: Path) -> None:
+   case = _retained_case(tmp_path)
+   agent, receipts = _surviving_agent(case)
+   assert agent.receive_release(KVShadowRelease(request_id="request:sec", path_id="path:old", path_attempt=0, reason="completed"), source_node_id=_ENTRY)
+   agent.receive_cutover(_cutover(case, "request:sec", "path:old"), source_node_id=_ENTRY, path_entry_node_id=_ENTRY)
+   assert receipts.sent[-1].installed is False
+   assert receipts.sent[-1].reason == "a7_cutover_request_released"
+   snapshot = case.ports[0].kv_snapshot()
+   assert snapshot["active_state_count"] == 0 and snapshot["terminal_kv_retention"]["retained_count"] == 0
+
+
+def test_a_terminal_release_naming_the_old_path_frees_a_successor_a_stale_cutover_installed(tmp_path: Path) -> None:
+   case = _retained_case(tmp_path)
+   agent, receipts = _surviving_agent(case)
+   agent.receive_cutover(_cutover(case, "request:sec", "path:old"), source_node_id=_ENTRY, path_entry_node_id=_ENTRY)
+   assert receipts.sent[-1].installed is True
+   # A post-cutover "fenced" release retires only the old attempt ...
+   agent.receive_release(KVShadowRelease(request_id="request:sec", path_id="path:old", path_attempt=0, reason="fenced"), source_node_id=_ENTRY)
+   assert set(case.ports[0].kv_snapshot()["states"]) == {"path:successor"}
+   # ... while the terminal release frees the successor even when it names the old path.
+   agent.receive_release(KVShadowRelease(request_id="request:sec", path_id="path:old", path_attempt=0, reason="completed"), source_node_id=_ENTRY)
+   assert case.ports[0].kv_snapshot()["active_state_count"] == 0
+   assert case.ports[0].kv_subject_clean("request:sec", "path:successor", 1) is True
+
+
+def test_the_retained_entrys_own_lease_is_enforced_at_take_time(tmp_path: Path) -> None:
+   clock = _Clock()
+   case = _case(tmp_path, "qwen2", clock=clock)
+   _enable(*case.ports, seconds=30.0)
+   request_id, old_path = "request:lease", "path:old"
+   lease = clock.now + 5.0
+   prompt_payload = encode_token_ids(_PROMPT)
+   payload = prompt_payload
+   tokens = []
+   for stage_index, port in enumerate(case.ports):
+      result = _stage(port, case, stage_index, payload, phase="PREFILL", request_id=request_id, path_id=old_path, path_attempt=0, token_index=-1, position=0, lease=lease)
+      assert result.success, result.failure_reason
+      payload = result.payload if result.payload is not None else payload
+      tokens.append(result.token_id)
+   result = _stage(case.ports[0], case, 0, encode_token_ids((tokens[-1],)), phase="DECODE", request_id=request_id, path_id=old_path, path_attempt=0, token_index=1, position=len(_PROMPT), terminal=True, lease=lease)
+   assert result.success, result.failure_reason
+   assert _retention(case.ports[0])["retained_count"] == 1
+   clock.now = lease  # within the 30 s retention, past the path's own lease
+   with pytest.raises(KVCheckpointError) as refused:
+      case.ports[0].rekey_kv_path(old_path, new_path_id="path:successor", new_path_attempt=1, lease_expires_at=clock.now + 60.0, truncate_to_position=len(_PROMPT), **_auth(case, request_id))
+   assert refused.value.code == "kv_checkpoint_state_missing"
+   assert len(case.ports[0]._terminal_retention) == 0
+   assert case.ports[0].kv_subject_clean(request_id, old_path, 0) is True
+
+
+def test_retained_kv_is_never_read_by_another_path_and_its_subject_is_scoped(tmp_path: Path) -> None:
+   case = _retained_case(tmp_path)
+   port = case.ports[0]
+   with pytest.raises(KVCheckpointError):
+      port.export_kv_checkpoint("path:old")
+   # A frame for another path (even of the same request) never sees it.
+   other = _stage(port, case, 0, encode_token_ids((3,)), phase="DECODE", request_id="request:sec", path_id="path:other", path_attempt=1, token_index=2, position=len(_PROMPT) + 1)
+   assert other.success is False
+   assert port.kv_snapshot()["active_state_count"] == 0
+   # Only the retained path's own subject is reported held.
+   assert port.kv_subject_clean("request:sec", "path:old", 0) is False
+   assert port.kv_subject_clean("request:sec", "path:other", 1) is True
+   assert port.kv_subject_clean("request:x", "path:x", 0) is True
+   assert set(port._kv_subjects) == {"path:old"}
+
+
+def test_release_racing_a_cutover_never_leaves_kv_behind(tmp_path: Path) -> None:
+   case = _case(tmp_path, "qwen2")
+   _enable(*case.ports, max_entries=64)
+   port = case.ports[0]
+   outcomes = {"installed": 0, "refused": 0}
+   for index in range(30):
+      request_id, old_path = f"request:race:{index}", f"path:race:{index}"
+      _first, second = _until_final_step(case, request_id, old_path)
+      _final_step_on_surviving_stage(case, request_id, old_path, second)
+      agent, receipts = _surviving_agent(case)
+      start = threading.Barrier(2)
+
+      def release() -> None:
+         start.wait()
+         agent.receive_release(KVShadowRelease(request_id=request_id, path_id=old_path, path_attempt=0, reason="completed"), source_node_id=_ENTRY)
+
+      def cutover() -> None:
+         start.wait()
+         agent.receive_cutover(_cutover(case, request_id, old_path, successor=f"path:race:{index}:s"), source_node_id=_ENTRY, path_entry_node_id=_ENTRY)
+
+      threads = [threading.Thread(target=release), threading.Thread(target=cutover)]
+      for thread in threads:
+         thread.start()
+      for thread in threads:
+         thread.join(timeout=30)
+      outcomes["installed" if receipts.sent[-1].installed else "refused"] += 1
+      # Cancellation may finish on a deferred worker; wait for it (bounded).
+      with port._cancellation_condition:
+         port._cancellation_condition.wait_for(lambda: not port._deferred_cancellation_cleanup, timeout=5)
+      snapshot = port.kv_snapshot()
+      assert snapshot["active_state_count"] == 0, (index, snapshot["states"])
+      assert snapshot["terminal_kv_retention"]["retained_count"] == 0
+      assert port.kv_subject_clean(request_id, old_path, 0) is True
+      assert port.kv_subject_clean(request_id, f"path:race:{index}:s", 1) is True
+      # The other stage completed normally; its own release is the entry's too.
+      case.ports[1].cancel(old_path)
+   assert port._kv_subjects == {}

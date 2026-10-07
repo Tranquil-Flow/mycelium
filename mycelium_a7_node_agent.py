@@ -141,6 +141,9 @@ class A7NodeAgent:
       self._released: OrderedDict[str, str | None] = OrderedDict()
       self._released_keys: set[str] = set()
       self._refusals: Counter[str] = Counter()
+      # Request id -> successor paths a cutover installed on this node: a
+      # terminal release frees them even when it names the old path.
+      self._successor_paths: OrderedDict[str, set[str]] = OrderedDict()
 
    # -- registration ------------------------------------------------------------
 
@@ -302,15 +305,36 @@ class A7NodeAgent:
          for port in self._ports.values():
             if all(port is not seen for seen in ports):
                ports.append(port)
+         # A "fenced" release retires only the old attempt after a successful
+         # cutover; every terminal or fallback release also frees the
+         # successor KV a cutover installed here.
+         successors = () if release.reason == "fenced" else tuple(self._successor_paths.pop(release.request_id, ()))
       if standby is not None:
          standby.store.release_request("sha256:" + request_key(release.request_id))
+      for path_id in (release.path_id, *sorted(set(successors) - {release.path_id})):
+         for port in ports:
+            try:
+               # Fences the released path on this node: its KV can never resume.
+               port.cancel(path_id)
+            except Exception:
+               continue
+      return True
+
+   def _release_raced(self, request_id: str) -> bool:
+      with self._lock:
+         return request_id in self._released
+
+   def _cancel_everywhere(self, path_id: str) -> None:
+      with self._lock:
+         ports: list[Any] = []
+         for port in self._ports.values():
+            if all(port is not seen for seen in ports):
+               ports.append(port)
       for port in ports:
          try:
-            # Fences the released path on this node: its KV can never resume.
-            port.cancel(release.path_id)
+            port.cancel(path_id)
          except Exception:
             continue
-      return True
 
    def _refuse(self, code: str) -> bool:
       with self._lock:
@@ -489,13 +513,33 @@ class A7NodeAgent:
          standby = self._standby
       return None if standby is None else standby.store.last_stored()
 
-   def receive_cutover(self, cutover: KVSuccessorCutover, *, source_node_id: str | None = None) -> bool:
+   def receive_cutover(
+      self,
+      cutover: KVSuccessorCutover,
+      *,
+      source_node_id: str | None = None,
+      path_entry_node_id: str | None = None,
+   ) -> bool:
+      """Install a fenced successor (standby import or surviving-stage rekey).
+
+      ``path_entry_node_id`` is the entry this node's relay registered for the
+      old path.  A cutover from any other node is refused; KV a stage retained
+      after the request's terminal hop is handed over only to a cutover from
+      that authenticated entry, and never after this node processed the
+      request's release.
+      """
+
       if source_node_id is None:
          return False
       with self._lock:
          port = self._ports.get(cutover.placement_id)
          standby = self._standby
+         released = cutover.request_id in self._released
       installed, reason, digest = False, "a7_cutover_placement_unknown", ""
+      if released:
+         port, reason = None, "a7_cutover_request_released"
+      elif path_entry_node_id is not None and path_entry_node_id != source_node_id:
+         port, reason = None, "a7_cutover_sender_not_entry"
       if port is not None:
          try:
             if cutover.role == "standby_import":
@@ -524,11 +568,24 @@ class A7NodeAgent:
                   new_path_attempt=cutover.successor_path_attempt,
                   lease_expires_at=cutover.lease_expires_at,
                   truncate_to_position=cutover.expected_next_position,
+                  request_id=cutover.request_id,
+                  placement_id=cutover.placement_id,
+                  allow_terminal_retained=path_entry_node_id is not None and path_entry_node_id == source_node_id,
                )
                if receipt["next_position"] != cutover.expected_next_position:
                   port.cancel(cutover.successor_path_id)
                   raise KVCheckpointError("kv_checkpoint_position_mismatch")
             installed, reason = True, "installed"
+            with self._lock:
+               self._successor_paths.setdefault(cutover.request_id, set()).add(cutover.successor_path_id)
+               self._successor_paths.move_to_end(cutover.request_id)
+               while len(self._successor_paths) > _MAX_RELEASED_HISTORY:
+                  self._successor_paths.popitem(last=False)
+            if self._release_raced(cutover.request_id):
+               # The request's release landed while this cutover installed:
+               # free what it just installed.
+               self._cancel_everywhere(cutover.successor_path_id)
+               installed, reason = False, "a7_cutover_request_released"
          except (KVCheckpointError, StandbyShadowError) as exc:
             installed, reason = False, exc.code
       self._send(

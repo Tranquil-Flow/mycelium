@@ -766,13 +766,25 @@ class NumpyRuntimePort:
       self._discard_retained(self._terminal_retention.hold(path_id, state, now=float(self._clock())))
       return True
 
-   def _take_terminal_retained(self, path_id: str) -> Any:
-      """Hand a retained terminal KV state to a fenced successor rekey (``None`` if gone)."""
+   def _take_terminal_retained(self, path_id: str, *, request_id: str, placement_id: str) -> Any:
+      """Hand a retained terminal KV state to a fenced successor rekey (``None`` if refused).
+
+      Refused for a cancelled or released path, an expired entry (its own
+      deadline is ``min(lease, retention)``), or a different request or
+      placement; a refused take leaves the entry where it was.
+      """
 
       with self._cancellation_lock:
          if path_id in self._cancelled_paths or path_id in self._deferred_cancellation_cleanup:
             return None
-      state, displaced = self._terminal_retention.take(path_id, now=float(self._clock()))
+      now = float(self._clock())
+      state, displaced = self._terminal_retention.take(
+         path_id,
+         now=now,
+         accept=lambda held: held.request_id == request_id
+         and held.placement_id == placement_id
+         and now < float(held.lease_expires_at),
+      )
       self._discard_retained(displaced)
       return state
 
@@ -908,6 +920,9 @@ class NumpyRuntimePort:
       new_path_attempt: int,
       lease_expires_at: float,
       truncate_to_position: int | None = None,
+      request_id: str | None = None,
+      placement_id: str | None = None,
+      allow_terminal_retained: bool = False,
    ) -> dict[str, Any]:
       """Move this stage's KV to a fenced successor path (A7 cutover)."""
 
@@ -920,6 +935,9 @@ class NumpyRuntimePort:
          new_path_attempt=new_path_attempt,
          lease_expires_at=lease_expires_at,
          truncate_to_position=truncate_to_position,
+         request_id=request_id,
+         placement_id=placement_id,
+         allow_terminal_retained=allow_terminal_retained,
       )
 
    def kv_snapshot(self) -> dict[str, Any]:

@@ -81,13 +81,16 @@ class TerminalKVRetention:
          displaced.append((evicted_path, evicted, "evicted"))
       return displaced
 
-   def take(self, path_id: str, *, now: float) -> tuple[Any | None, list[tuple[str, Any, str]]]:
-      """Remove and return a live retained state (a rekey); expired ones are displaced."""
+   def take(
+      self, path_id: str, *, now: float, accept: Callable[[Any], bool] = lambda _state: True
+   ) -> tuple[Any | None, list[tuple[str, Any, str]]]:
+      """Remove and return a live retained state ``accept`` approves; expired ones are displaced."""
 
       displaced = self.expire(now=now)
-      held = self._held.pop(path_id, None)
-      if held is None:
+      held = self._held.get(path_id)
+      if held is None or not accept(held[0]):
          return None, displaced
+      del self._held[path_id]
       self.reclaimed_total += 1
       return held[0], displaced
 

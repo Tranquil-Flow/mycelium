@@ -190,6 +190,11 @@ class RelayEngine:
          )
       )
 
+   def entry_node_for_path(self, path_id: str) -> str | None:
+      """The entry node that registered ``path_id`` here (``None`` once released or unknown)."""
+      with self._path_lock:
+         return self._entry_node_by_path.get(path_id)
+
    def path_generation(self, path_id: str) -> int:
       """Return the generation used to fence entry-side dispatches."""
       with self._path_lock:

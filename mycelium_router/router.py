@@ -233,7 +233,10 @@ class Router:
       agent = self.a7_agent
       if agent is None:
          return False
-      return agent.receive_cutover(cutover, source_node_id=source_node_id)
+      lookup = getattr(self.relay, "entry_node_for_path", None)
+      old_path_id = getattr(cutover, "old_path_id", None)
+      path_entry = lookup(old_path_id) if callable(lookup) and isinstance(old_path_id, str) else None
+      return agent.receive_cutover(cutover, source_node_id=source_node_id, path_entry_node_id=path_entry)
 
    def receive_kv_successor_cutover_receipt(self, receipt, *, source_node_id=None):
       agent = self.a7_agent
