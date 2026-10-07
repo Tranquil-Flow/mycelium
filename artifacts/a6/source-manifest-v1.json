@@ -113,8 +113,8 @@
     },
     {
       "path": "mycelium_a7_physical_measurement.py",
-      "sha256": "sha256:15927e7e5dfa01e99c9c89e5c01468232817922f6a23c2e6a6ae3efb27b7b786",
-      "size_bytes": 69308
+      "sha256": "sha256:8725c39f99dc7260f115d37e68dfa66072f9250bf5e11a9634e158ef9f3078f5",
+      "size_bytes": 72684
     },
     {
       "path": "mycelium_a7_standby_plan.py",
@@ -223,8 +223,8 @@
     },
     {
       "path": "mycelium_router/entry.py",
-      "sha256": "sha256:743e03ab40e002874c2d3963e835c61e4b018f067a8c19c93c6b4d411a5729d4",
-      "size_bytes": 61548
+      "sha256": "sha256:107656a442d9c4a7cc3a2e7b9c137055e65fb9ca26eb33c2a0390fd6e34e77e0",
+      "size_bytes": 62220
     },
     {
       "path": "mycelium_router/kv_checkpoint.py",
@@ -533,8 +533,8 @@
     },
     {
       "path": "tests/a7_acceptance/test_source_lost_claim.py",
-      "sha256": "sha256:ab186c2e328d10c34583f4dfe39c8f277571655b9fa6c2c31f78df17acfc193f",
-      "size_bytes": 6849
+      "sha256": "sha256:95ee55703f9443e04bae5adadab36677c7a131def2f41cc45b2b87025c0a8a93",
+      "size_bytes": 9342
     },
     {
       "path": "tests/a7_acceptance/test_source_lost_command.py",
@@ -657,6 +657,11 @@
       "size_bytes": 5945
     },
     {
+      "path": "tests/live/test_a7_measurement_pause_quiescence.py",
+      "sha256": "sha256:554a957bcb9c3545ff3aa7587c192ac26e329d7c6c7e55c52a462ffc66611bb3",
+      "size_bytes": 9577
+    },
+    {
       "path": "tests/live/test_a7_measurement_post_kill_refusals.py",
       "sha256": "sha256:5429ef8056840885fda67b7c80f861ff325abda6436d0ab6ca7d68548e41fb40",
       "size_bytes": 6292
@@ -678,8 +683,8 @@
     },
     {
       "path": "tests/live/test_a7_operator_plan.py",
-      "sha256": "sha256:1c651e46e57a50b1b9c981649141521ce5f6df3f5d6a5080dda7c8b71a86d94e",
-      "size_bytes": 24338
+      "sha256": "sha256:00e65a113b090fe49359ff270bcf765b26af57e37b9f217797b8c625d0b2b285",
+      "size_bytes": 24973
     },
     {
       "path": "tests/live/test_a7_operator_plan_ssh.py",
@@ -833,5 +838,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:99b8645a08f07d8beade559dda3a2fb7dffabfa15bb69154f78a3f8b9f0d454d"
+  "source_digest": "sha256:726dbb5a50d33fcf30b816bbda4bf3a7a7400ae662477826e18d3f15d111b912"
 }
