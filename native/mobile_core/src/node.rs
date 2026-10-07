@@ -206,6 +206,9 @@ struct Shared {
     stage_node: Option<crate::stage_node::StageNode>,
     /// The route controller's session (`mycelium.node_control.v1`).
     control: Option<crate::node_control::ControlNode>,
+    /// The transport's route peer set was installed by the control session
+    /// (`start`): it lives exactly as long as that session's authority.
+    control_peers: bool,
 }
 
 /// One background acquisition: which manifest, and how to stop it.
@@ -352,6 +355,7 @@ impl NodeCore {
                 acquisition: None,
                 stage_node: None,
                 control: None,
+                control_peers: false,
             })),
             http,
             incarnation: new_incarnation()?,
@@ -766,7 +770,12 @@ impl NodeCore {
     /// (M4-host proposal); an empty set refuses all control.
     pub fn set_route_controllers(&self, endpoint_ids: &[String]) -> Result<(), NodeError> {
         let ids = endpoint_ids.iter().map(|e| crate::transport::parse_endpoint_id(e).map_err(|e| nerr(e.0))).collect::<Result<Vec<_>, _>>()?;
-        self.rt.block_on(self.transport.configure_controllers(ids));
+        self.rt.block_on(async {
+            self.transport.configure_controllers(ids).await;
+            // The transport's set is the single source of truth; the session
+            // and what it installed follow it before this call returns.
+            reconcile_control(&self.shared, &self.transport).await;
+        });
         Ok(())
     }
 
@@ -925,9 +934,16 @@ async fn supervise_membership(sv: Supervisor) {
 
 /// Drop the applied route and withdraw its peer from the allow-list.
 async fn drop_route(shared: &Arc<Mutex<Shared>>, transport: &NodeTransport) {
-    let old = clear_route(&mut shared.lock().unwrap());
+    let (old, control_peers) = {
+        let mut s = shared.lock().unwrap();
+        let old = clear_route(&mut s);
+        (old, std::mem::take(&mut s.control_peers))
+    };
     if let Some(old) = old {
         transport.remove_peer(old.peer).await;
+    }
+    if control_peers {
+        transport.configure_route_peers(Vec::new()).await;
     }
 }
 
@@ -945,6 +961,9 @@ async fn drop_expired_route(shared: &Arc<Mutex<Shared>>, transport: &NodeTranspo
 /// Forget the applied route: stage unloaded, nothing forwarded.
 fn clear_route(s: &mut Shared) -> Option<AppliedRoute> {
     let old = s.route.take();
+    // A new or dropped assignment ends the control session (its request
+    // controls with it); a new controller starts afresh.
+    s.control = None;
     if let Some(stage_node) = s.stage_node.as_mut() {
         stage_node.clear();
     }
@@ -1459,10 +1478,44 @@ impl crate::node_control::ControlEnv for NodeControlEnv<'_> {
     }
 }
 
+/// End the control session and everything it installed: its request
+/// controls, the stage node's live paths, and the route peers `start` set.
+/// Called when its controller loses authority, on `stop`, and on a new
+/// assignment (`drop_route`).
+async fn teardown_control(shared: &Arc<Mutex<Shared>>, transport: &NodeTransport) {
+    let control_peers = {
+        let mut s = shared.lock().unwrap();
+        s.control = None;
+        if let Some(stage_node) = s.stage_node.as_mut() {
+            stage_node.clear();
+        }
+        std::mem::take(&mut s.control_peers)
+    };
+    if control_peers {
+        transport.configure_route_peers(Vec::new()).await;
+    }
+}
+
+/// The session's controller is no longer in the transport's controller set
+/// (the single source of truth): tear the session down.
+async fn reconcile_control(shared: &Arc<Mutex<Shared>>, transport: &NodeTransport) {
+    let bound = shared.lock().unwrap().control.as_ref().and_then(|c| c.controller().map(str::to_owned));
+    let Some(bound) = bound else { return };
+    let allowed = match crate::transport::parse_endpoint_id(&bound) {
+        Ok(id) => transport.is_controller(&id).await,
+        Err(_) => false,
+    };
+    if !allowed {
+        teardown_control(shared, transport).await;
+    }
+}
+
 /// Answer the route controller's commands. Each command runs on the blocking
 /// pool under the shared lock (never behind a stage run: the stage step takes
 /// the same lock only around its own decision), then its transport effect
-/// (route peers, drain) is applied.
+/// (route peers, drain) is applied. Every controller-set change reconciles
+/// the session at once, and every command is re-checked against the current
+/// set before and after it runs.
 async fn serve_control(
     mut rx: mpsc::Receiver<crate::transport::ControlRequest>,
     shared: Arc<Mutex<Shared>>,
@@ -1470,7 +1523,26 @@ async fn serve_control(
     identity: Arc<Identity>,
     incarnation: String,
 ) {
-    while let Some(request) = rx.recv().await {
+    let mut changes = transport.subscribe_controller_changes();
+    loop {
+        let request = tokio::select! {
+            changed = changes.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+                reconcile_control(&shared, &transport).await;
+                continue;
+            }
+            request = rx.recv() => match request {
+                Some(request) => request,
+                None => return,
+            },
+        };
+        // A command queued before its controller was withdrawn never runs.
+        if !transport.is_controller(&request.from).await {
+            continue;
+        }
+        reconcile_control(&shared, &transport).await;
         let (shared_task, identity_task, incarnation_task) = (shared.clone(), identity.clone(), incarnation.clone());
         let endpoint_addr = serde_json::to_value(transport.addr()).unwrap_or(Value::Null);
         let endpoint_id = transport.endpoint_id();
@@ -1505,12 +1577,15 @@ async fn serve_control(
                 })
                 .collect();
             transport.configure_route_peers(bindings).await;
+            shared.lock().unwrap().control_peers = true;
         }
         if stop {
-            let mut s = shared.lock().unwrap();
-            if let Some(stage_node) = s.stage_node.as_mut() {
-                stage_node.clear();
-            }
+            teardown_control(&shared, &transport).await;
+        }
+        // Withdrawn while the command ran: what it installed goes with it.
+        if !transport.is_controller(&request.from).await {
+            teardown_control(&shared, &transport).await;
+            continue;
         }
         let _ = request.reply.send(response);
     }
@@ -1752,6 +1827,7 @@ mod tests {
             acquisition: None,
             stage_node: Some(crate::stage_node::StageNode::new("node-phone")),
             control: None,
+            control_peers: false,
         }));
         let (tx, rx) = mpsc::channel(8);
         let _accept = phone.spawn_accept_dispatch(tx);
@@ -1845,6 +1921,7 @@ mod tests {
                 endpoint_id: phone.endpoint_id(),
                 boot_id: "boot-1".into(),
             })),
+            control_peers: false,
         }));
         let (dispatch_tx, _dispatch_rx) = mpsc::channel(8);
         let _accept = phone.spawn_accept_dispatch(dispatch_tx);
@@ -1877,5 +1954,87 @@ mod tests {
         assert_eq!(phone.peer_for_node("node-mac-entry").await.unwrap().generation, 4);
         let refused = call(command("infer_start", json!({}))).await;
         assert_eq!(refused["error"]["code"], "stage_only_node");
+    }
+
+    /// Revoking the session's controller mid-session tears the session down:
+    /// the stage node's live paths and the route peers `start` installed are
+    /// gone, the old controller cannot resume, and a newly allowed controller
+    /// opens a fresh session with `hello`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn revoking_the_controller_tears_its_session_down() {
+        use crate::transport::{Reachability, parse_endpoint_id};
+        let phone = NodeTransport::bind(&[51; 32], Reachability::LocalOnly).await.unwrap();
+        let first = NodeTransport::bind(&[52; 32], Reachability::LocalOnly).await.unwrap();
+        let second = NodeTransport::bind(&[53; 32], Reachability::LocalOnly).await.unwrap();
+        let entry = NodeTransport::bind(&[54; 32], Reachability::LocalOnly).await.unwrap();
+        let identity = Arc::new(Identity::from_secret(&phone.endpoint_id(), &[55; 32]).unwrap());
+        let assignment = RouteAssignment {
+            assignment_id: "assignment-1".into(),
+            stage_pack_digest: "sha256:pack".into(),
+            peer_endpoint_id: entry.endpoint_id(),
+            route_generation: 1,
+            forward_to: false,
+            expires_at: now_s() + 3600.0,
+        };
+        let mut stage_node = crate::stage_node::StageNode::new("node-phone");
+        let mut never = |_: &crate::stage_wire::LockedPath, _: &crate::stage_wire::AdmittedHop, _: &[u8]| -> Result<Vec<u8>, String> { unreachable!() };
+        let locked = wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap();
+        assert_eq!(stage_node.on_frame("node-mac-entry", &locked, &mut never).accepted, Some(true));
+        let shared = Arc::new(Mutex::new(Shared {
+            observation: ObservationCursor { window_started_at: now_s(), frames_at_window_start: 0, evidence_generation: 0 },
+            membership: None,
+            supervisor_running: false,
+            status: NodeStatus::default(),
+            session: None,
+            invitation: None,
+            stage: Some(Box::new(GoldenStage { released: Arc::default() })),
+            forward: None,
+            route: Some(AppliedRoute { assignment, peer: parse_endpoint_id(&entry.endpoint_id()).unwrap() }),
+            shell_metrics: None,
+            acquisition: None,
+            stage_node: Some(stage_node),
+            control: None,
+            control_peers: false,
+        }));
+        let (dispatch_tx, _dispatch_rx) = mpsc::channel(8);
+        let _accept = phone.spawn_accept_dispatch(dispatch_tx);
+        let (control_tx, control_rx) = mpsc::channel(8);
+        phone.set_control_handler(Some(control_tx)).await;
+        let (first_id, second_id) = (parse_endpoint_id(&first.endpoint_id()).unwrap(), parse_endpoint_id(&second.endpoint_id()).unwrap());
+        phone.configure_controllers([first_id, second_id]).await;
+        tokio::spawn(serve_control(control_rx, shared.clone(), phone.clone(), identity, "inc-1".into()));
+        let command = |command: &str, payload: Value| {
+            serde_json::to_vec(&json!({"protocol": crate::node_control::NODE_CONTROL_PROTOCOL, "command_id": format!("c-{command}"), "run_id": "run-1", "deployment_id": "dep-1", "command": command, "payload": payload})).unwrap()
+        };
+        let call = |from: &NodeTransport, bytes: Vec<u8>| {
+            let (from, addr) = (from.clone(), phone.addr());
+            async move { from.control_call(addr, &bytes).await.map(|r| serde_json::from_slice::<Value>(&r).unwrap()) }
+        };
+        assert_eq!(call(&first, command("hello", json!({}))).await.unwrap()["ok"], true);
+        let configure = json!({"assignment_id": "assignment-1", "stage_id": "stage-golden", "pack_digest": "sha256:pack", "manifest_digest": "sha256:graph", "load_generation": 1});
+        assert_eq!(call(&first, command("configure", configure)).await.unwrap()["ok"], true);
+        let entry_addr = serde_json::to_value(entry.addr()).unwrap();
+        let start = json!({"peer": {"node_id": "node-mac-entry", "endpoint_id": entry.endpoint_id(), "endpoint_addr": entry_addr, "generation": 4}, "local_generation": 2});
+        assert_eq!(call(&first, command("start", start)).await.unwrap()["ok"], true);
+        assert!(phone.peer_for_node("node-mac-entry").await.is_some());
+        // While bound, the other allowed controller cannot drive the session.
+        assert_eq!(call(&second, command("hello", json!({}))).await.unwrap()["error"]["code"], "controller_mismatch");
+
+        // Revoke the session's controller.
+        phone.configure_controllers([second_id]).await;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while shared.lock().unwrap().control.is_some() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        {
+            let s = shared.lock().unwrap();
+            assert!(s.control.is_none(), "the session is torn down");
+            assert!(s.stage_node.as_ref().unwrap().path("path-phone-golden").is_none(), "its live paths are released");
+        }
+        assert!(phone.peer_for_node("node-mac-entry").await.is_none(), "the route peers it installed are cleared");
+        // The old controller cannot come back; the newly allowed one starts afresh.
+        assert!(call(&first, command("hello", json!({}))).await.is_err());
+        let hello = call(&second, command("hello", json!({}))).await.unwrap();
+        assert_eq!((hello["ok"].clone(), hello["result"]["state"].clone()), (json!(true), json!("NEW")));
     }
 }

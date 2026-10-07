@@ -148,6 +148,9 @@ pub struct NodeTransport {
     /// Live data-plane and control connections (closed on revocation).
     peer_live: Live,
     control_live: Live,
+    /// Bumped on every controller-set change: the node reconciles the
+    /// control session and what it installed against the new set.
+    controller_epoch: Arc<tokio::sync::watch::Sender<u64>>,
 }
 
 impl NodeTransport {
@@ -171,6 +174,7 @@ impl NodeTransport {
             control: Arc::default(),
             peer_live: Live::default(),
             control_live: Live::default(),
+            controller_epoch: Arc::new(tokio::sync::watch::channel(0).0),
         })
     }
 
@@ -264,6 +268,17 @@ impl NodeTransport {
         let allowed: std::collections::HashSet<EndpointId> = controllers.into_iter().collect();
         *self.controllers.write().await = allowed.clone();
         self.control_live.lock().unwrap().close_revoked(|remote| allowed.contains(remote));
+        self.controller_epoch.send_modify(|epoch| *epoch += 1);
+    }
+
+    /// Whether `controller` is in the (single, transport-owned) controller set.
+    pub async fn is_controller(&self, controller: &EndpointId) -> bool {
+        self.controllers.read().await.contains(controller)
+    }
+
+    /// Notified on every controller-set change.
+    pub fn subscribe_controller_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.controller_epoch.subscribe()
     }
 
     /// Route control commands to `handler` (none: control connections refused).

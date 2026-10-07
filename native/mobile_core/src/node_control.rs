@@ -178,6 +178,11 @@ impl ControlNode {
         self.state.name()
     }
 
+    /// The controller (iroh endpoint id) this session is bound to, if any.
+    pub fn controller(&self) -> Option<&str> {
+        self.controller.as_deref()
+    }
+
     /// Whether this session has ended (`stop`): the node starts a new one.
     pub fn stopped(&self) -> bool {
         self.state == State::Stopping
