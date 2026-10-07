@@ -2,7 +2,7 @@
 //! Native parity of `mobile-rust-reference` against the `pixel-stdlib` executor
 //! (`mycelium_mobile/pixel_stage.py`), on a fixture it produced.
 
-use mycelium_mobile_core::runtime::{Gpt2BlockStage, StageRuntime};
+use mycelium_mobile_core::runtime::Gpt2BlockStage;
 use serde_json::Value;
 
 fn fixture() -> Value {

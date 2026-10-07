@@ -18,7 +18,7 @@ use crate::identity::Identity;
 use crate::membership::{self, MemberConfig};
 use crate::onboarding::{self, PairingSession};
 use crate::route_assignment::{self, RouteAssignment};
-use crate::runtime::{Gpt2BlockStage, REFERENCE_BACKEND, StageRuntime};
+use crate::runtime::{Gpt2BlockStage, REFERENCE_BACKEND, StageCall, StagePhase, StageRuntime};
 use crate::transport::{Inbound, NodeTransport, Reachability};
 use crate::wire;
 
@@ -1083,13 +1083,29 @@ async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>
             } else if inbound.frame.message_type != "HopHeader" {
                 None
             } else {
-                let request_id = inbound.frame.body["request_id"].as_str().unwrap_or("").to_owned();
+                let body = &inbound.frame.body;
                 let result = wire::Activation::decode(&inbound.frame.payload)
                     .map_err(|e| e.0.to_string())
-                    .and_then(|a| a.to_rows_f64().map_err(|e| e.0.to_string()))
-                    .and_then(|rows| match s.stage.as_mut() {
-                        Some(stage) => stage.execute(&request_id, &rows).map_err(|e| e.0),
-                        None => Err("stage_not_loaded".into()),
+                    .and_then(|a| a.to_flat_f32().map_err(|e| e.0.to_string()))
+                    .and_then(|(sequence, _, hidden)| {
+                        let phase = match body["phase"].as_str() {
+                            Some(p) => StagePhase::parse(p).map_err(|e| e.0)?,
+                            None => StagePhase::Prefill,
+                        };
+                        let call = StageCall {
+                            request_id: body["request_id"].as_str().unwrap_or(""),
+                            path_id: body["path_id"].as_str().unwrap_or(""),
+                            path_attempt: body["path_attempt"].as_u64().unwrap_or(0),
+                            phase,
+                            token_index: body["token_index"].as_i64().unwrap_or(-1),
+                            position: body["position"].as_u64().unwrap_or(0),
+                            sequence,
+                            hidden: &hidden,
+                        };
+                        match s.stage.as_mut() {
+                            Some(stage) => stage.execute(&call).map_err(|e| e.0),
+                            None => Err("stage_not_loaded".into()),
+                        }
                     });
                 match result {
                     Ok(out) => {
@@ -1108,7 +1124,7 @@ async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>
             if let Some(h) = body["hop_index"].as_u64() {
                 body["hop_index"] = json!(h + 1);
             }
-            let payload = wire::Activation::from_rows_f32(&out).encode().unwrap_or_default();
+            let payload = wire::Activation::from_flat_f32(out.sequence, out.hidden_size, &out.values).encode().unwrap_or_default();
             if let Ok(frame) = wire::encode_frame("HopHeader", &body, &payload)
                 && let Err(e) = transport.send(addr, generation, &frame).await
             {

@@ -24,7 +24,7 @@ use serde_json::Value;
 
 use crate::bf16::{SourceDType, decode_into};
 use crate::quant::Int8Rowwise;
-use crate::runtime::RuntimeError;
+use crate::runtime::{RuntimeError, StageCall, StageOutput, StageRuntime};
 
 pub const QWEN2_BACKEND: &str = "mobile-rust-qwen2";
 /// Complete-context replay bound (tokens per call).
@@ -313,6 +313,57 @@ impl Qwen2Stage {
         self.check_input(seq, hidden)?;
         let layer = self.layers.get(offset).ok_or_else(|| RuntimeError("qwen2_layer_range_invalid".into()))?;
         Ok(layer_forward(&self.config, &Rope::new(&self.config, seq), layer, seq, hidden))
+    }
+}
+
+/// A loaded Qwen2 stage behind the [`StageRuntime`] trait. Complete-context
+/// replay only: every call carries the full context from position 0, nothing
+/// is kept between calls (the replay ledger and stage-local KV are M3).
+pub struct Qwen2Runtime {
+    assignment_id: String,
+    stage_id: String,
+    stage: Qwen2Stage,
+    pub request_count: u64,
+}
+
+impl Qwen2Runtime {
+    pub fn new(assignment_id: &str, stage_id: &str, stage: Qwen2Stage) -> Result<Self, RuntimeError> {
+        for (v, code) in [(assignment_id, "qwen2_assignment_id_invalid"), (stage_id, "qwen2_stage_id_invalid")] {
+            if v.is_empty() || v.chars().count() > 512 {
+                return reject(code);
+            }
+        }
+        Ok(Self { assignment_id: assignment_id.to_owned(), stage_id: stage_id.to_owned(), stage, request_count: 0 })
+    }
+
+    pub fn stage(&self) -> &Qwen2Stage {
+        &self.stage
+    }
+}
+
+impl StageRuntime for Qwen2Runtime {
+    fn backend(&self) -> &'static str {
+        QWEN2_BACKEND
+    }
+    fn assignment_id(&self) -> &str {
+        &self.assignment_id
+    }
+    fn stage_id(&self) -> &str {
+        &self.stage_id
+    }
+    fn hidden_size(&self) -> usize {
+        self.stage.config.hidden_size
+    }
+
+    fn execute(&mut self, call: &StageCall<'_>) -> Result<StageOutput, RuntimeError> {
+        call.check_complete_context()?;
+        let values = self.stage.forward(call.sequence, call.hidden)?;
+        self.request_count += 1;
+        Ok(StageOutput { sequence: call.sequence, hidden_size: self.stage.config.hidden_size, values })
+    }
+
+    fn release_all(&mut self) -> usize {
+        0
     }
 }
 

@@ -155,6 +155,28 @@ impl Activation {
         Ok(values.chunks(hidden.max(1)).map(<[f64]>::to_vec).collect())
     }
 
+    /// `(1, seq, hidden)` float32 from flat row-major values.
+    pub fn from_flat_f32(sequence: usize, hidden: usize, values: &[f32]) -> Self {
+        let data = values.iter().flat_map(|v| v.to_le_bytes()).collect();
+        Self { dtype: DType::F32, shape: vec![1, sequence as u32, hidden as u32], data }
+    }
+
+    /// `(seq, hidden, flat row-major values)` of a `(1, seq, hidden)` float32 payload.
+    pub fn to_flat_f32(&self) -> Result<(usize, usize, Vec<f32>), WireError> {
+        if self.dtype != DType::F32 {
+            return Err(WireError("activation_dtype_mismatch"));
+        }
+        if self.shape.len() != 3 || self.shape[0] != 1 {
+            return Err(WireError("activation_rank_mismatch"));
+        }
+        let (seq, hidden) = (self.shape[1] as usize, self.shape[2] as usize);
+        if seq.checked_mul(hidden).and_then(|n| n.checked_mul(4)) != Some(self.data.len()) {
+            return Err(WireError("activation_data_length_mismatch"));
+        }
+        let values = self.data.chunks_exact(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
+        Ok((seq, hidden, values))
+    }
+
     pub fn encode(&self) -> Result<Vec<u8>, WireError> {
         self.validate()?;
         let mut out = Vec::with_capacity(MYAC_HEADER + 4 * self.shape.len() + self.data.len());

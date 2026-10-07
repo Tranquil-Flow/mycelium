@@ -10,7 +10,7 @@
 
 use std::time::{Duration, Instant};
 
-use mycelium_mobile_core::runtime::{Gpt2BlockStage, StageRuntime};
+use mycelium_mobile_core::runtime::Gpt2BlockStage;
 use mycelium_mobile_core::transport::{NodeTransport, Reachability, parse_endpoint_id};
 use mycelium_mobile_core::wire::{self, Activation};
 use serde_json::{Value, json};

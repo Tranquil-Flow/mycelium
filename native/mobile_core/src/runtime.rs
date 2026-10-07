@@ -31,13 +31,83 @@ fn reject<T>(code: &str) -> Result<T, RuntimeError> {
 
 pub type Rows = Vec<Vec<f64>>;
 
+/// Router phase of one stage call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StagePhase {
+    Prefill,
+    RecoveryPrefill,
+    Decode,
+}
+
+impl StagePhase {
+    /// Router wire names. `PREFILL_CHUNK` is refused: chunked prefill needs
+    /// stage-local KV continuity, which no mobile runtime keeps yet.
+    pub fn parse(name: &str) -> Result<Self, RuntimeError> {
+        match name {
+            "PREFILL" => Ok(Self::Prefill),
+            "RECOVERY_PREFILL" => Ok(Self::RecoveryPrefill),
+            "DECODE" => Ok(Self::Decode),
+            "PREFILL_CHUNK" => reject("prefill_chunk_requires_kv_continuity"),
+            _ => reject("stage_call_phase_invalid"),
+        }
+    }
+}
+
+/// One execution request as the router describes it: identity, phase and
+/// position, plus `sequence` row-major f32 hidden rows (the MYAC payload).
+#[derive(Debug, Clone, Copy)]
+pub struct StageCall<'a> {
+    pub request_id: &'a str,
+    pub path_id: &'a str,
+    pub path_attempt: u64,
+    pub phase: StagePhase,
+    /// -1 for a fresh prefill, otherwise the token being decoded.
+    pub token_index: i64,
+    /// Absolute position of the first row (0 for complete-context replay prefill).
+    pub position: u64,
+    pub sequence: usize,
+    pub hidden: &'a [f32],
+}
+
+impl<'a> StageCall<'a> {
+    /// A plain prefill of `sequence` rows at position 0.
+    pub fn prefill(request_id: &'a str, sequence: usize, hidden: &'a [f32]) -> Self {
+        Self { request_id, path_id: "", path_attempt: 0, phase: StagePhase::Prefill, token_index: -1, position: 0, sequence, hidden }
+    }
+
+    /// The router's complete-context admission rules
+    /// (`NumpyRuntimePort._execute_complete_context`).
+    pub fn check_complete_context(&self) -> Result<(), RuntimeError> {
+        if self.request_id.is_empty() || self.request_id.chars().count() > 512 {
+            return reject("request_id_invalid");
+        }
+        match self.phase {
+            StagePhase::Prefill if self.token_index != -1 => reject("prefill_sequence_mismatch"),
+            StagePhase::RecoveryPrefill if self.token_index < 0 => reject("recovery_prefill_sequence_mismatch"),
+            StagePhase::Prefill | StagePhase::RecoveryPrefill if self.position != 0 => reject("prefill_position_mismatch"),
+            StagePhase::Decode if self.position == 0 => reject("decode_position_mismatch"),
+            StagePhase::Decode if self.sequence as u64 != self.position + 1 => reject("decode_context_position_mismatch"),
+            StagePhase::Decode if self.token_index < 0 => reject("decode_sequence_mismatch"),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// `sequence` x `hidden_size` row-major f32 output rows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StageOutput {
+    pub sequence: usize,
+    pub hidden_size: usize,
+    pub values: Vec<f32>,
+}
+
 /// One loaded stage. Implementations own their KV (if any) locally.
 pub trait StageRuntime: Send {
     fn backend(&self) -> &'static str;
     fn assignment_id(&self) -> &str;
     fn stage_id(&self) -> &str;
     fn hidden_size(&self) -> usize;
-    fn execute(&mut self, request_id: &str, hidden: &[Vec<f64>]) -> Result<Rows, RuntimeError>;
+    fn execute(&mut self, call: &StageCall<'_>) -> Result<StageOutput, RuntimeError>;
     fn release_all(&mut self) -> usize;
 }
 
@@ -313,22 +383,9 @@ impl Gpt2BlockStage {
     }
 }
 
-impl StageRuntime for Gpt2BlockStage {
-    fn backend(&self) -> &'static str {
-        REFERENCE_BACKEND
-    }
-    fn assignment_id(&self) -> &str {
-        &self.assignment_id
-    }
-    fn stage_id(&self) -> &str {
-        &self.stage_id
-    }
-    fn hidden_size(&self) -> usize {
-        self.hidden_size
-    }
-
+impl Gpt2BlockStage {
     /// `PixelStage.execute`: replay-safe by request id and input fingerprint.
-    fn execute(&mut self, request_id: &str, hidden: &[Vec<f64>]) -> Result<Rows, RuntimeError> {
+    pub fn execute(&mut self, request_id: &str, hidden: &[Vec<f64>]) -> Result<Rows, RuntimeError> {
         if request_id.is_empty() || request_id.chars().count() > 512 {
             return reject("request_id_invalid");
         }
@@ -362,6 +419,35 @@ impl StageRuntime for Gpt2BlockStage {
         self.replay_order.push_back(request_id.to_owned());
         self.request_count += 1;
         Ok(out)
+    }
+}
+
+/// Adapter: the GPT-2 reference keeps its f64 math and request-id ledger; a
+/// call's f32 rows widen exactly to f64 and the result narrows to f32, which
+/// is what the MYAC hop carried before (`Activation::from_rows_f32`).
+impl StageRuntime for Gpt2BlockStage {
+    fn backend(&self) -> &'static str {
+        REFERENCE_BACKEND
+    }
+    fn assignment_id(&self) -> &str {
+        &self.assignment_id
+    }
+    fn stage_id(&self) -> &str {
+        &self.stage_id
+    }
+    fn hidden_size(&self) -> usize {
+        self.hidden_size
+    }
+
+    fn execute(&mut self, call: &StageCall<'_>) -> Result<StageOutput, RuntimeError> {
+        let width = self.hidden_size;
+        if call.sequence == 0 || call.sequence.checked_mul(width) != Some(call.hidden.len()) {
+            return reject("request_hidden_shape_invalid");
+        }
+        let rows: Rows = call.hidden.chunks_exact(width).map(|r| r.iter().map(|v| f64::from(*v)).collect()).collect();
+        let out = Gpt2BlockStage::execute(self, call.request_id, &rows)?;
+        let values = out.iter().flatten().map(|v| *v as f32).collect();
+        Ok(StageOutput { sequence: out.len(), hidden_size: width, values })
     }
 
     fn release_all(&mut self) -> usize {

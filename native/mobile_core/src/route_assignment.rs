@@ -163,7 +163,6 @@ pub fn verify_delivery(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::StageRuntime;
 
     fn cfg() -> MemberConfig {
         MemberConfig {
