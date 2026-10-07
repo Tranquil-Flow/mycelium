@@ -12,7 +12,7 @@ from pathlib import Path
 import time
 from typing import Any, Callable, Mapping
 
-from .serving import CANDIDATE_MODEL, PreparedSource
+from .serving import REGISTERED_MODELS, PreparedSource, node_runtime
 
 
 class AssignmentProvisioningError(ValueError):
@@ -30,7 +30,8 @@ def _digest(value):
 
 def provision_selected_assignment(*, prepared:PreparedSource, assignment:Mapping[str,Any],
         expected_assignment_digest:str, member_binding:Mapping[str,Any],
-        current_member:Callable, authorize:Callable, max_artifact_bytes:int):
+        current_member:Callable, authorize:Callable, max_artifact_bytes:int,
+        runtime_backend:str='mlx'):
     """Verify one locally acquired assignment and produce native pack/reports.
 
     The expected digest and member binding come from admitted owner intent, not
@@ -42,7 +43,7 @@ def provision_selected_assignment(*, prepared:PreparedSource, assignment:Mapping
     import model_manifest as mm
     from .managed_control import _binding_from_member
     try:
-        if (not isinstance(prepared,PreparedSource) or prepared.model!=CANDIDATE_MODEL
+        if (not isinstance(prepared,PreparedSource) or prepared.model not in REGISTERED_MODELS
             or type(max_artifact_bytes) is not int or max_artifact_bytes<=0
             or not callable(current_member) or not callable(authorize)):
             raise ValueError()
@@ -53,12 +54,12 @@ def provision_selected_assignment(*, prepared:PreparedSource, assignment:Mapping
         if (not mm.verify_manifest_digest(manifest)
             or mm.manifest_digest_ref(manifest)!=prepared.manifest_digest
             or assignment['manifest_digest']!=prepared.manifest_digest
-            or assignment['model_id']!=CANDIDATE_MODEL.model_id
-            or manifest['model_id']!=CANDIDATE_MODEL.model_id
-            or manifest['resolved_commit']!=CANDIDATE_MODEL.resolved_commit
-            or assignment['resolved_commit']!=CANDIDATE_MODEL.resolved_commit
+            or assignment['model_id']!=prepared.model.model_id
+            or manifest['model_id']!=prepared.model.model_id
+            or manifest['resolved_commit']!=prepared.model.resolved_commit
+            or assignment['resolved_commit']!=prepared.model.resolved_commit
             or any(assignment['runtime'].get(key)!=value for key,value in
-                {'backend':'mlx','dtype':'float32','quantization':'int8-weight-only'}.items())):
+                node_runtime(prepared.model,runtime_backend).items())):
             raise ValueError()
         source=Path(prepared.source_root)
         if (not source.is_absolute() or source.resolve(strict=True)!=source
@@ -95,8 +96,8 @@ def provision_selected_assignment(*, prepared:PreparedSource, assignment:Mapping
     from weight_provisioning import provision_assignment, artifact_report_errors
     from stage_pack import compile_stage_pack, verify_stage_pack, artifact_report_for_loader
     try:
-        fetcher=_IdentityAwareLocalFetcher(source,model_id=CANDIDATE_MODEL.model_id,
-            resolved_commit=CANDIDATE_MODEL.resolved_commit)
+        fetcher=_IdentityAwareLocalFetcher(source,model_id=prepared.model.model_id,
+            resolved_commit=prepared.model.resolved_commit)
         def guarded_fetch(*args,**kwargs):
             admit()
             return fetcher(*args,**kwargs)

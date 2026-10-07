@@ -3,6 +3,7 @@
 import time
 from .peer import RemoteMacMember
 from .capability import observe_mac
+from .managed_classes import managed_runtime_backend
 
 CONSENT = {'cooperative_peer_visibility_acknowledged': True,
            'resource_use_acknowledged': True, 'contribution_enabled': False}
@@ -203,7 +204,8 @@ class TargetApplication:
             expected_assignment_digest=expected_assignment_digest,
             member_binding=self.peer.managed_control_snapshot(),
             current_member=self.peer.managed_control_snapshot,authorize=authorize,
-            max_artifact_bytes=max_artifact_bytes)
+            max_artifact_bytes=max_artifact_bytes,
+            runtime_backend=managed_runtime_backend(self.peer.PEER_CLASS))
 
     def prepare_runtime(self, *, run_id, deployment_id, staging, archive, archive_digest,
                         resource_policy, limits, sidecar_binary, authorize_load,

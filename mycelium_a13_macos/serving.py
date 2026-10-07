@@ -135,6 +135,46 @@ EXECUTED_NATIVE_MODEL = ModelContract(
     runtime_quantization="int8-weight-only",
 )
 
+# A9 two-host M4 Pro + Windows route (A9 spec section 3.4): the exact 0.5B
+# revision in int8-weight-only.  ``runtime_backend`` is only the default; each
+# node runs the stage runtime of its managed peer class (mlx on macOS, numpy
+# on Windows), carried per node by ``node_runtime_backends``.
+A9_ROUTE_MODEL = ModelContract(
+    model_id="Qwen/Qwen2.5-0.5B-Instruct",
+    resolved_commit="7ae557604adf67be50417f59c2c2f167def9a775",
+    source_representation="bfloat16-safetensors",
+    runtime_backend="mlx",
+    runtime_dtype="float32",
+    runtime_quantization="int8-weight-only",
+)
+
+#: Every model a run may pin.  A run selects exactly one; nothing else loads.
+REGISTERED_MODELS: tuple[ModelContract, ...] = (CANDIDATE_MODEL, A9_ROUTE_MODEL)
+#: Stage runtimes a node may run for a registered model.
+STAGE_RUNTIME_BACKENDS = frozenset({"mlx", "numpy"})
+
+
+def registered_model_contract(model_id: object, resolved_commit: object) -> ModelContract:
+    """The registered contract for this exact model revision, or refuse."""
+
+    for model in REGISTERED_MODELS:
+        if model.model_id == model_id and model.resolved_commit == resolved_commit:
+            return model
+    raise ServingPreparationError("model_contract_unregistered")
+
+
+def node_runtime(model: ModelContract, backend: str) -> dict[str, str]:
+    """The exact assignment runtime of one node for a registered model."""
+
+    if model not in REGISTERED_MODELS or backend not in STAGE_RUNTIME_BACKENDS:
+        raise ServingPreparationError("node_runtime_invalid")
+    return {
+        "backend": backend,
+        "dtype": model.runtime_dtype,
+        "quantization": model.runtime_quantization,
+    }
+
+
 _PROTECTED_PORTS = frozenset({8791, 8876, 8877, 4350, 4351, 4352})
 _MIN_DYNAMIC_PORT = 49_152
 _MAX_JSON_BYTES = 16 * 1024 * 1024
@@ -395,7 +435,11 @@ def _resolve_bundle_file(bundle: Path, relative: object) -> Path:
     return path
 
 
-def _validate_operator_plan(plan_path: Path, prepared: PreparedSource) -> None:
+def _validate_operator_plan(
+    plan_path: Path,
+    prepared: PreparedSource,
+    node_runtime_backends: Mapping[str, str] | None = None,
+) -> None:
     plan = _read_json_object(plan_path, reason="operator_plan_invalid")
     controller = plan.get("controller")
     run_plan = controller.get("run_plan") if isinstance(controller, Mapping) else None
@@ -440,19 +484,28 @@ def _validate_operator_plan(plan_path: Path, prepared: PreparedSource) -> None:
             reason="operator_plan_assignment_invalid",
         )
         runtime = assignment.get("runtime")
+        backend = (
+            prepared.model.runtime_backend
+            if node_runtime_backends is None
+            else node_runtime_backends.get(node_id)
+        )
+        try:
+            expected_runtime = node_runtime(prepared.model, backend)  # type: ignore[arg-type]
+        except ServingPreparationError:
+            raise ServingPreparationError("operator_plan_representation_mismatch") from None
         if (
             assignment.get("model_id") != prepared.model.model_id
             or assignment.get("resolved_commit") != prepared.model.resolved_commit
             or assignment.get("manifest_digest") != prepared.manifest_digest
             or assignment.get("node_id") != node_id
             or not isinstance(runtime, Mapping)
-            or runtime.get("backend") != prepared.model.runtime_backend
-            or runtime.get("dtype") != prepared.model.runtime_dtype
-            or runtime.get("quantization") != prepared.model.runtime_quantization
+            or {key: runtime.get(key) for key in expected_runtime} != expected_runtime
         ):
             raise ServingPreparationError("operator_plan_representation_mismatch")
     if len(node_ids) != len(nodes):
         raise ServingPreparationError("operator_plan_duplicate_node")
+    if node_runtime_backends is not None and set(node_runtime_backends) != node_ids:
+        raise ServingPreparationError("operator_plan_representation_mismatch")
     expected = (
         prepared.model.model_id,
         prepared.model.resolved_commit,
@@ -573,6 +626,7 @@ def prepare_registry_launch(
     seed_state_root: str | Path | None = None,
     runner: RegistryRunner | None = None,
     session_factory=None,
+    node_runtime_backends: Mapping[str, str] | None = None,
 ) -> RegistryLaunch:
     """Validate a built route and compose the real single-deployment registry.
 
@@ -587,7 +641,9 @@ def prepare_registry_launch(
         plan = plan_candidate.resolve(strict=True)
     except OSError as exc:
         raise ServingPreparationError("operator_plan_invalid") from exc
-    _validate_operator_plan(plan, prepared)
+    if prepared.model not in REGISTERED_MODELS:
+        raise ServingPreparationError("model_contract_unregistered")
+    _validate_operator_plan(plan, prepared, node_runtime_backends)
     plan_digest = _plan_digest(plan)
     host_ids = _canonical_host_ids(plan)
     seed, seed_binding = _bind_existing_seed(plan, seed_state_root)
@@ -654,7 +710,12 @@ def _assert_loopback_port_free(port: int) -> None:
 
 
 __all__ = [
+    "A9_ROUTE_MODEL",
     "CANDIDATE_MODEL",
+    "REGISTERED_MODELS",
+    "STAGE_RUNTIME_BACKENDS",
+    "node_runtime",
+    "registered_model_contract",
     "EXECUTED_NATIVE_MODEL",
     "ExecutionApproval",
     "ModelContract",

@@ -358,8 +358,14 @@ def prepare_serving_workflow(*, authority, channel, prepared, operator_plan,
     path=root/'operator-plan.json'
     if path.exists() or path.is_symlink():raise ValueError('managed_workflow_plan_already_exists')
     _atomic_private_json(path,bound)
+    # Each managed node runs its own class's stage runtime (mlx on macOS, numpy
+    # on Windows); the plan must assign exactly that runtime per node.
+    from .managed_classes import managed_runtime_backend
+    node_runtime_backends={member['node_id']:managed_runtime_backend(member['peer_class'])
+        for member in members}
     launch=prepare_registry_launch(prepared=prepared,operator_plan=path,
-        private_state_root=root/'registry',seed_state_root=authority._seed_root,session_factory=factory)
+        private_state_root=root/'registry',seed_state_root=authority._seed_root,session_factory=factory,
+        node_runtime_backends=node_runtime_backends)
     controller=QualificationController(mode='physical',
         peers=[PeerIdentity(**peer) for peer in c['peers']],source_root=Path(c['source_root']),
         transfer_manifest=c['transfer_manifest'],node_transfer_manifests=c.get('node_transfer_manifests'),

@@ -60,7 +60,7 @@ import re
 from typing import Any, TYPE_CHECKING
 
 from .serving import (
-    CANDIDATE_MODEL,
+    REGISTERED_MODELS,
     ModelContract,
     PreparedSource,
     RESOURCE_PROPOSAL,
@@ -507,9 +507,9 @@ def admit_run_profile(
         raise ProvisioningAdmissionError("admission_profile_invalid")
 
     _validate_run_mode(profile.run_mode)
-    if profile.expected_model_id != CANDIDATE_MODEL.model_id:
+    if profile.expected_model_id != prepared.model.model_id or prepared.model not in REGISTERED_MODELS:
         raise ProvisioningAdmissionError("admission_model_id_mismatch")
-    if profile.expected_resolved_commit != CANDIDATE_MODEL.resolved_commit:
+    if profile.expected_resolved_commit != prepared.model.resolved_commit:
         raise ProvisioningAdmissionError("admission_resolved_commit_mismatch")
     _validate_digest(
         profile.expected_manifest_digest, field="expected_manifest_digest"

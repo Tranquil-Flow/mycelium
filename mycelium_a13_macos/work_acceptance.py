@@ -32,7 +32,9 @@ def _prepare(app,offer,*,stage_acknowledged,limits,resource_policy,authorize_sta
     node=offer['target_node_id']
     assignment=_selected_assignment(root,offer)
     manifest=_staged_document(root,'control/model-manifest.json')
-    grant=authorize_work_consent(offer=offer,acknowledged=True,limits=limits,staged_root=root,
+    from .managed_classes import managed_runtime_backend
+    grant=authorize_work_consent(runtime_backend=managed_runtime_backend(app.peer.PEER_CLASS),
+        offer=offer,acknowledged=True,limits=limits,staged_root=root,
         assignment=assignment,expected_assignment_digest=_digest(assignment),manifest=manifest)
     # This is only a proposed grant until the exact digest is acknowledged.
     facts={'protocol':'mycelium.a13.work_preview.v1','offer_id':offer['offer_id'],

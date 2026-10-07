@@ -205,9 +205,11 @@ def _model_identity() -> dict[str, Any]:
 
 
 def _validate_model(model: object) -> ModelContract:
-    if model != CANDIDATE_MODEL:
+    from .serving import REGISTERED_MODELS
+
+    if not isinstance(model, ModelContract) or model not in REGISTERED_MODELS:
         _raise("selected_model_identity_invalid")
-    return CANDIDATE_MODEL
+    return model
 
 
 def _validate_consent(consent: Mapping[str, Any]) -> dict[str, Any]:

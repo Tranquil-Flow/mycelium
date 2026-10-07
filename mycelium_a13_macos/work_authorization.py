@@ -32,7 +32,13 @@ import time
 from pathlib import PurePosixPath
 from typing import Any, Callable, Mapping
 
-from .serving import CANDIDATE_MODEL, RESOURCE_PROPOSAL
+from .serving import (
+    CANDIDATE_MODEL,
+    RESOURCE_PROPOSAL,
+    ServingPreparationError,
+    node_runtime,
+    registered_model_contract,
+)
 
 
 class WorkAuthorizationError(ValueError):
@@ -58,11 +64,6 @@ _CONFIGURE_FILE_FIELDS = (
 _ENVELOPE_FIELDS = frozenset(
     {"protocol", "command_id", "run_id", "deployment_id", "command", "payload"}
 )
-_EXPECTED_RUNTIME: dict[str, str] = {
-    "backend": CANDIDATE_MODEL.runtime_backend,
-    "dtype": CANDIDATE_MODEL.runtime_dtype,
-    "quantization": CANDIDATE_MODEL.runtime_quantization,
-}
 
 
 @dataclass(frozen=True)
@@ -178,6 +179,7 @@ def authorize_work_consent(
     assignment: Mapping[str, Any],
     expected_assignment_digest: str,
     manifest: Mapping[str, Any],
+    runtime_backend: str = CANDIDATE_MODEL.runtime_backend,
 ) -> WorkAuthorization:
     """Admit one exact work consent and return its bounded authorization.
 
@@ -232,14 +234,15 @@ def authorize_work_consent(
     import model_manifest as mm
 
     manifest_document = _copy(dict(manifest))
+    model = CANDIDATE_MODEL
     try:
-        manifest_ok = (
-            mm.verify_manifest_digest(manifest_document)
-            and manifest_document.get("model_id") == CANDIDATE_MODEL.model_id
-            and manifest_document.get("resolved_commit")
-            == CANDIDATE_MODEL.resolved_commit
+        # The run's pinned model must be a registered contract; this target
+        # runs its own class's stage runtime for it.
+        model = registered_model_contract(
+            manifest_document.get("model_id"), manifest_document.get("resolved_commit")
         )
-    except Exception:
+        manifest_ok = mm.verify_manifest_digest(manifest_document)
+    except (ServingPreparationError, Exception):
         manifest_ok = False
     _require(manifest_ok is True, "work_manifest_invalid")
     manifest_digest = mm.manifest_digest_ref(manifest_document)
@@ -256,16 +259,17 @@ def authorize_work_consent(
     try:
         validate_assignment_identity(assignment_document)
         runtime = assignment_document.get("runtime")
-        from runtime_contracts import validate_normalized_mlx_runtime
-        expected_runtime=validate_normalized_mlx_runtime({**manifest_document['runtime_model'],**_EXPECTED_RUNTIME})
+        from runtime_contracts import validate_normalized_mlx_runtime, validate_normalized_numpy_runtime
+        validator={'mlx':validate_normalized_mlx_runtime,'numpy':validate_normalized_numpy_runtime}[runtime_backend]
+        expected_runtime=validator({**manifest_document['runtime_model'],**node_runtime(model,runtime_backend)})
         assignment_ok = (
             assignment_document.get("deployment_id")
             == offer_document["deployment_id"]
             and assignment_document.get("node_id")
             == offer_document["target_node_id"]
-            and assignment_document.get("model_id") == CANDIDATE_MODEL.model_id
+            and assignment_document.get("model_id") == model.model_id
             and assignment_document.get("resolved_commit")
-            == CANDIDATE_MODEL.resolved_commit
+            == model.resolved_commit
             and assignment_document.get("manifest_digest") == manifest_digest
             and _mapping(runtime)
             and expected_runtime["architecture"] == "qwen2"
@@ -278,8 +282,8 @@ def authorize_work_consent(
     run_id = offer_document["run_id"]
     deployment_id = offer_document["deployment_id"]
     node_id = offer_document["target_node_id"]
-    model_id = CANDIDATE_MODEL.model_id
-    resolved_commit = CANDIDATE_MODEL.resolved_commit
+    model_id = model.model_id
+    resolved_commit = model.resolved_commit
     assignment_id = assignment_document["assignment_id"]
     try:
         graph_document=_staged_document(staged,'control/execution-graph.json')
