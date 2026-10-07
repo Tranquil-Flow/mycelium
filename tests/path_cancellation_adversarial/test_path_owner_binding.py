@@ -147,11 +147,11 @@ def test_tombstones_from_many_owners_stay_bounded() -> None:
    relay = router.relay
    for index in range(relay_module._MAX_TOMBSTONE_RECORDS + 50):
       relay._record_cancelled_attempt_locked(manifest.path_id, 1, (f"node-{index}", "request"))
-   # Young records are kept (fail closed) up to the absolute bound, never past it.
+   # Never past the absolute bound; evicted owners stay refused by their marks.
    assert len(relay._cancelled_path_attempts) <= relay_module._MAX_TOMBSTONE_RECORDS
    assert len(relay._cancelled_path_owners[manifest.path_id]) <= relay_module._MAX_TOMBSTONE_RECORDS
    assert len(relay._cancelled_recorded_at) == len(relay._cancelled_path_attempts)
-   assert relay._tombstones_saturated
+   assert relay._history_evicted_locked(manifest.path_id, ("node-0", "request"))
 
 
 # ---- review 2: sender authentication, owner inheritance, key collisions ----
@@ -236,27 +236,62 @@ def _churn(relay, graph, request, manifest, count: int, prefix: str) -> int:
    return accepted
 
 
-def test_a_full_tombstone_table_never_forgets_a_high_water_mark() -> None:
+def test_one_creators_tombstone_churn_never_blocks_another_entry() -> None:
    from mycelium_router import relay as relay_module
 
    router, graph, request, manifest, nodes = _middle_router()
    entry = nodes[0]
    relay = router.relay
-   # Attempt 5 registered and cancelled: attempts <= 5 are refused, and
-   # attempt 3 is known only through the high-water mark.
+   # Entry A: attempt 5 registered and cancelled (attempt 3 is refused only by
+   # the high-water mark).
    assert relay.register_path(request, replace(manifest, path_attempt=5), graph, entry_node_id=entry)
    assert router.receive_path_cancellation(
       PathCancellation(request.request_id, manifest.path_id, 5, graph.topology_version), source_node_id=entry
    )
    churn_graph = _with_entry(graph, manifest, "node-churn")
-   accepted = _churn(relay, churn_graph, request, manifest, relay_module._MAX_TERMINAL_PATH_METADATA + 200, "churn")
-   # Fail closed: the table saturates instead of forgetting the mark.
-   assert accepted < relay_module._MAX_TERMINAL_PATH_METADATA + 200
+   quota = relay_module._TOMBSTONE_QUOTA_PER_CREATOR
+   accepted = _churn(relay, churn_graph, request, manifest, quota + 50, "churn")
+   # The churning creator is refused at its own quota...
+   assert accepted == quota
+   # ...while entry A keeps registering new paths and its mark still holds.
+   assert relay.register_path(request, replace(manifest, path_id="a-fresh"), graph, entry_node_id=entry)
    assert not relay.register_path(request, replace(manifest, path_attempt=3), graph, entry_node_id=entry)
-   # After the retention horizon old records may go, and new paths register again.
+
+
+def test_an_evicted_tombstone_refuses_instead_of_reopening() -> None:
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   churn_graph = _with_entry(graph, manifest, "node-churn")
+   quota = relay_module._TOMBSTONE_QUOTA_PER_CREATOR
+   assert _churn(relay, churn_graph, request, manifest, quota, "churn") == quota
+   # Past the retention horizon the creator's oldest records may be evicted
+   # to admit new paths; each eviction leaves a mark that refuses the old
+   # path id for every attempt, including ones below its old high-water mark.
    relay.clock.advance(relay_module._TOMBSTONE_RETENTION_SECONDS + 1)
-   fresh = replace(manifest, path_id="fresh-path")
-   assert relay.register_path(request, fresh, graph, entry_node_id=entry)
+   assert _churn(relay, churn_graph, request, manifest, 10, "later") == 10
+   evicted = replace(manifest, request_id="churn-request-0", path_id="churn-0")
+   evicted_request = replace(request, request_id="churn-request-0")
+   assert ("churn-0", ("node-churn", "churn-request-0")) not in relay._cancelled_path_attempts
+   for attempt in (evicted.path_attempt, evicted.path_attempt + 1):
+      assert not relay.register_path(
+         evicted_request, replace(evicted, path_attempt=attempt), churn_graph, entry_node_id="node-churn"
+      ), attempt
+
+
+def test_the_absolute_bound_evicts_only_with_marks() -> None:
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   total = relay_module._MAX_TOMBSTONE_RECORDS
+   for index in range(total + 5):
+      owner = (f"node-{index % 16}", f"request-{index}")
+      relay._record_cancelled_attempt_locked(f"bound-{index}", 1, owner, creator=f"node-{index % 16}")
+   assert len(relay._cancelled_path_attempts) <= total
+   # The first records were evicted with marks: their paths stay refused.
+   assert relay._history_evicted_locked("bound-0", ("node-0", "request-0"))
 
 
 def test_a_peer_flooding_pending_cancellations_cannot_evict_the_entrys() -> None:

@@ -51,13 +51,21 @@ _MAX_TERMINAL_PATH_METADATA = 4096
 _MAX_PENDING_PATH_CANCELLATIONS = 4096
 #: Owners remembered per path id (live and tombstoned paths).
 _MAX_PATH_OWNERS = 2 * _MAX_TERMINAL_PATH_METADATA
-#: A tombstone is kept at least this long. While the table holds more than
-#: ``_MAX_TERMINAL_PATH_METADATA`` records none of which is this old, the relay
-#: fails closed: it registers no new path id (live paths keep running), so an
-#: evicted high-water mark can never let a cancelled attempt back in.
+#: Cancellation tombstones are charged to the authenticated node that created
+#: the path (its entry, or the progressive-discovery sender). A creator holds
+#: at most ``_TOMBSTONE_QUOTA_PER_CREATOR`` records; at its quota it registers
+#: no new path id until its own records older than
+#: ``_TOMBSTONE_RETENTION_SECONDS`` can be evicted, so one tenant's churn never
+#: blocks another's. An evicted record leaves an owner-scoped "history
+#: evicted" mark in the replay filter, which refuses every further attempt of
+#: that (path id, owner) for the filter's horizon (``_CANCELLED_PATH_FILTER_*``):
+#: eviction refuses, it never reopens. Past ``_MAX_TOMBSTONE_RECORDS`` in
+#: total (several creators at quota) the relay registers no new path id.
 _TOMBSTONE_RETENTION_SECONDS = 600.0
-#: Absolute bound; reachable only by cancelling live paths while saturated.
-_MAX_TOMBSTONE_RECORDS = 4 * _MAX_TERMINAL_PATH_METADATA
+_TOMBSTONE_QUOTA_PER_CREATOR = 8192
+_MAX_TOMBSTONE_RECORDS = 8 * _TOMBSTONE_QUOTA_PER_CREATOR
+#: Replay-filter attempt marking "this (path id, owner)'s history was evicted".
+_EVICTED_HISTORY_ATTEMPT = -(1 << 62)
 #: Pending tombstones per authenticated source. A source over its quota
 #: displaces only its own oldest entry, so no peer can push out another
 #: source's pending tombstone; past the absolute bound the relay fails closed
@@ -202,7 +210,9 @@ class RelayEngine:
       ] = OrderedDict()
       self._cancelled_path_owners: dict[str, set[PathOwner | None]] = {}
       self._cancelled_recorded_at: dict[tuple[str, PathOwner | None], float] = {}
-      self._tombstones_saturated = False
+      self._cancelled_creator: dict[tuple[str, PathOwner | None], str] = {}
+      self._tombstones_by_creator: dict[str, OrderedDict[tuple[str, PathOwner | None], None]] = {}
+      self._path_creators: OrderedDict[str, str] = OrderedDict()
       self._pending_by_source: dict[str, int] = {}
       self._path_owners: OrderedDict[str, PathOwner] = OrderedDict()
       self._cancelled_path_filter = _RotatingReplayFilter(
@@ -258,33 +268,76 @@ class RelayEngine:
    def _path_generation(self, path_id: str) -> int:
       return self.path_generation(path_id)
 
-   def _prune_terminal_path_metadata_locked(self) -> None:
+   def _evict_tombstone_locked(self, key: tuple[str, "PathOwner | None"]) -> None:
+      """Drop one record, leaving its "history evicted" mark (fail closed)."""
+      path_id, owner = key
+      self._cancelled_path_filter.add(path_id + _owner_suffix(owner), _EVICTED_HISTORY_ATTEMPT)
+      self._cancelled_path_attempts.pop(key, None)
+      self._cancelled_recorded_at.pop(key, None)
+      creator = self._cancelled_creator.pop(key, "")
+      records = self._tombstones_by_creator.get(creator)
+      if records is not None:
+         records.pop(key, None)
+         if not records:
+            self._tombstones_by_creator.pop(creator, None)
+      owners = self._cancelled_path_owners.get(path_id)
+      if owners is not None:
+         owners.discard(owner)
+         if owners:
+            return
+         self._cancelled_path_owners.pop(path_id, None)
+      if path_id not in self._paths and path_id not in self._provisional_paths:
+         self._path_generations.pop(path_id, None)
+
+   def _prune_creator_tombstones_locked(
+      self, creator: str, limit: int = _TOMBSTONE_QUOTA_PER_CREATOR
+   ) -> None:
+      """Evict a creator's own records past the retention horizon while it
+      holds more than ``limit``; never another creator's, never a young one."""
+      records = self._tombstones_by_creator.get(creator)
       now = self.clock.now()
-      while len(self._cancelled_path_attempts) > _MAX_TERMINAL_PATH_METADATA:
-         key = next(iter(self._cancelled_path_attempts))
-         if (
-            len(self._cancelled_path_attempts) <= _MAX_TOMBSTONE_RECORDS
-            and now - self._cancelled_recorded_at.get(key, now) < _TOMBSTONE_RETENTION_SECONDS
-         ):
+      while records and len(records) > limit:
+         oldest = next(iter(records))
+         if now - self._cancelled_recorded_at.get(oldest, now) < _TOMBSTONE_RETENTION_SECONDS:
             break
-         (path_id, owner), _ = self._cancelled_path_attempts.popitem(last=False)
-         self._cancelled_recorded_at.pop((path_id, owner), None)
-         owners = self._cancelled_path_owners.get(path_id)
-         if owners is not None:
-            owners.discard(owner)
-            if owners:
-               continue
-            self._cancelled_path_owners.pop(path_id, None)
-         if path_id not in self._paths and path_id not in self._provisional_paths:
-            self._path_generations.pop(path_id, None)
-      self._tombstones_saturated = (
-         len(self._cancelled_path_attempts) > _MAX_TERMINAL_PATH_METADATA
+         self._evict_tombstone_locked(oldest)
+
+   def _creator_may_register_locked(self, creator: str) -> bool:
+      """Fail closed per creator (and globally past the absolute bound)."""
+      records = self._tombstones_by_creator.get(creator)
+      if records is not None and len(records) >= _TOMBSTONE_QUOTA_PER_CREATOR:
+         # Make room for the new path's eventual record from its own oldest.
+         self._prune_creator_tombstones_locked(creator, _TOMBSTONE_QUOTA_PER_CREATOR - 1)
+         records = self._tombstones_by_creator.get(creator)
+         if records is not None and len(records) >= _TOMBSTONE_QUOTA_PER_CREATOR:
+            return False
+      return len(self._cancelled_path_attempts) < _MAX_TOMBSTONE_RECORDS
+
+   def _history_evicted_locked(self, path_id: str, owner: "PathOwner | None") -> bool:
+      """An evicted record's mark binds as the record did: an unknown-owner
+      mark binds everyone, an entry-less owner's binds its request."""
+      contains = self._cancelled_path_filter.contains
+      if contains(path_id, _EVICTED_HISTORY_ATTEMPT):
+         return True
+      if owner is None:
+         return False
+      if contains(path_id + _owner_suffix(owner), _EVICTED_HISTORY_ATTEMPT):
+         return True
+      return owner[0] is not None and contains(
+         path_id + _owner_suffix((None, owner[1])), _EVICTED_HISTORY_ATTEMPT
       )
+
+   def _prune_terminal_path_metadata_locked(self) -> None:
       while len(self._path_owners) > _MAX_PATH_OWNERS:
          path_id, owner = self._path_owners.popitem(last=False)
          if path_id in self._paths or path_id in self._provisional_paths:
             # Never forget a live path's owner; keep it, newest last.
             self._path_owners[path_id] = owner
+            break
+      while len(self._path_creators) > _MAX_PATH_OWNERS:
+         path_id, creator = self._path_creators.popitem(last=False)
+         if path_id in self._paths or path_id in self._provisional_paths:
+            self._path_creators[path_id] = creator
             break
 
    def _resolve_owner_locked(
@@ -313,6 +366,7 @@ class RelayEngine:
       path_id: str,
       path_attempt: int,
       owner: "PathOwner | None | object" = _RECORDED_OWNER,
+      creator: str | None = None,
    ) -> None:
       if owner is _RECORDED_OWNER:
          owner = self._path_owners.get(path_id)
@@ -325,6 +379,18 @@ class RelayEngine:
       self._cancelled_path_attempts.move_to_end(key)
       self._cancelled_recorded_at[key] = self.clock.now()
       self._cancelled_path_owners.setdefault(path_id, set()).add(owner)
+      charged = self._cancelled_creator.get(key)
+      if charged is None:
+         charged = creator if creator is not None else self._path_creators.get(path_id, "")
+         self._cancelled_creator[key] = charged
+      records = self._tombstones_by_creator.setdefault(charged, OrderedDict())
+      records[key] = None
+      records.move_to_end(key)
+      self._prune_creator_tombstones_locked(charged)
+      # Absolute memory bound: evict the oldest records, each leaving its
+      # "history evicted" mark, so even this never reopens a path.
+      while len(self._cancelled_path_attempts) > _MAX_TOMBSTONE_RECORDS:
+         self._evict_tombstone_locked(next(iter(self._cancelled_path_attempts)))
       self._prune_terminal_path_metadata_locked()
 
    def _cancelled_attempt_for_locked(
@@ -487,7 +553,7 @@ class RelayEngine:
       if not matched:
          return False
       self._record_cancelled_attempt_locked(
-         path_id, path_attempt, (entry_node_id, request_id)
+         path_id, path_attempt, (entry_node_id, request_id), creator=entry_node_id
       )
       self._path_generations[path_id] = self._path_generations.get(path_id, 0) + 1
       self._path_generations.move_to_end(path_id)
@@ -673,11 +739,12 @@ class RelayEngine:
             )
             existing = self._paths.get(manifest.path_id)
             provisional = self._provisional_paths.get(manifest.path_id)
-            if self._tombstones_saturated and existing is None and provisional is None:
-               self._prune_terminal_path_metadata_locked()
-               if self._tombstones_saturated:
-                  # Fail closed rather than forget a high-water mark.
-                  return None
+            creator = source_node_id or entry_node_id or self.node_id
+            if existing is None and provisional is None and not self._creator_may_register_locked(creator):
+               # The creator is at its tombstone quota: fail closed for it alone.
+               return None
+            if self._history_evicted_locked(manifest.path_id, owner):
+               return None
             if source_node_id is not None and existing is None and provisional is None:
                # A manifest relayed by the final placement (progressive
                # discovery) only confirms a path this node already holds from
@@ -761,6 +828,9 @@ class RelayEngine:
                )
             self._paths[manifest.path_id] = (graph, manifest, request)
             self._record_owner_locked(manifest.path_id, owner)
+            if existing is None and provisional is None:
+               self._path_creators[manifest.path_id] = creator
+               self._path_creators.move_to_end(manifest.path_id)
             self._hop_arrivals.record_registration(
                manifest.path_id, at=self.clock.now()
             )
@@ -784,6 +854,7 @@ class RelayEngine:
       path_attempt: int,
       topology_version: int,
       entry_node_id: str | None,
+      source_node_id: str | None = None,
    ) -> int | None:
       identity = (
          request_id,
@@ -804,14 +875,12 @@ class RelayEngine:
             ):
                return None
             owner = self._resolve_owner_locked(path_id, request_id, entry_node_id)
-            if (
-               self._tombstones_saturated
-               and path_id not in self._paths
-               and path_id not in self._provisional_paths
-            ):
-               self._prune_terminal_path_metadata_locked()
-               if self._tombstones_saturated:
-                  return None
+            creator = source_node_id or entry_node_id or self.node_id
+            live = path_id in self._paths or path_id in self._provisional_paths
+            if not live and not self._creator_may_register_locked(creator):
+               return None
+            if self._history_evicted_locked(path_id, owner):
+               return None
             recorded_owner = self._path_owners.get(path_id)
             if (
                (path_id in self._paths or path_id in self._provisional_paths)
@@ -837,6 +906,9 @@ class RelayEngine:
                return self._path_generations[path_id]
             self._provisional_paths[path_id] = identity
             self._record_owner_locked(path_id, owner)
+            if not live:
+               self._path_creators[path_id] = creator
+               self._path_creators.move_to_end(path_id)
             self._path_generations[path_id] = (
                self._path_generations.get(path_id, 0) + 1
             )
@@ -913,6 +985,7 @@ class RelayEngine:
          path_attempt=build.path_attempt,
          topology_version=context.graph.topology_version,
          entry_node_id=provisional_entry,
+         source_node_id=source_node_id,
       )
       if generation is None:
          return ProgressivePrefillResult("REJECTED", "cancelled_path")
