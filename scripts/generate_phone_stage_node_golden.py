@@ -124,7 +124,7 @@ class Scenario:
         manifest = manifest or self.manifest
         request = request or self.request
         graph = graph or self.graph
-        build = replace(self.build, request=request, graph=graph, path_attempt=manifest.path_attempt)
+        build = replace(self.build, request=request, graph=graph, path_id=manifest.path_id, path_attempt=manifest.path_attempt)
         locked = ManifestLocked(request.request_id, manifest.path_id, manifest.path_attempt, manifest, build)
         # transports/iroh.py: the entry is the first ordered hop's node.
         placements = {p.placement_id: p for stage in graph.stages for p in stage.placements}
@@ -146,9 +146,10 @@ class Scenario:
             }
         )
 
-    def hop(self, source: str, phase: str, token_index: int, *, attempt=None, failure=None, payload_scale=1.0) -> None:
-        manifest = self.manifest if attempt is None else replace(self.manifest, path_attempt=attempt)
-        header = wg._header(manifest, self.request, phase, token_index)
+    def hop(self, source: str, phase: str, token_index: int, *, attempt=None, failure=None, payload_scale=1.0, manifest=None, request=None) -> None:
+        manifest = manifest or self.manifest
+        manifest = manifest if attempt is None else replace(manifest, path_attempt=attempt)
+        header = wg._header(manifest, request or self.request, phase, token_index)
         seq = len(wg.PROMPT) if phase == "PREFILL" else len(wg.PROMPT) + token_index
         payload = wg._activation(seq, payload_scale)
         self.runtime.failure = failure
@@ -267,6 +268,19 @@ def _scenarios(frames: dict[str, bytes]) -> list[dict[str, Any]]:
     s.cancel(EVIL, attempt=1, request_id="request-evil")
     s.manifest_locked(ENTRY, manifest=replace(s.manifest, path_attempt=5))  # under A's high-water mark
     s.manifest_locked(ENTRY, manifest=replace(s.manifest, path_attempt=8))
+    out.append(s.record())
+
+    s = Scenario("separator_ids", frames)
+    # Two paths whose ':'-joined hop keys are equal: each hop still runs.
+    first_request = replace(s.request, request_id="r:x")
+    first = replace(s.manifest, request_id="r:x", path_id="p")
+    second_request = replace(s.request, request_id="r")
+    second = replace(s.manifest, request_id="r", path_id="x:p")
+    s.manifest_locked(ENTRY, manifest=first, request=first_request)
+    s.manifest_locked(ENTRY, manifest=second, request=second_request)
+    s.hop(ENTRY, "DECODE", 1, manifest=first, request=first_request)
+    s.hop(ENTRY, "DECODE", 1, manifest=second, request=second_request)
+    s.cancel(ENTRY, request_id="r:x")  # targets path-phone-golden, unknown here: pending
     out.append(s.record())
 
     s = Scenario("failures", frames)

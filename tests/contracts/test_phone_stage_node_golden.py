@@ -32,7 +32,7 @@ def test_regenerating_reproduces_the_committed_scripts() -> None:
     assert names == {
         "lifecycle", "pending_cancellation", "pending_cancellation_other_source",
         "manifest_sources", "next_attempt", "failures",
-        "cross_owner_replacement", "foreign_tombstone", "owner_high_water",
+        "cross_owner_replacement", "foreign_tombstone", "owner_high_water", "separator_ids",
     }
     steps = [step for scenario in index["scenarios"] for step in scenario["steps"]]
     # A refused registration is the only frame the transport does not acknowledge.

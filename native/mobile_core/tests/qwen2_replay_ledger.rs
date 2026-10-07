@@ -129,3 +129,14 @@ fn the_trait_object_releases_by_path() {
     assert_eq!(boxed.release_path("req-1", "path-b"), 1);
     assert_eq!(boxed.release_all(), 1);
 }
+
+#[test]
+fn ids_containing_the_separator_never_share_or_release_each_others_results() {
+    let (mut rt, seq, input) = runtime();
+    rt.execute(&call("r:x", "p", 0, seq, &input)).unwrap();
+    rt.execute(&call("r", "x:p", 0, seq, &input)).unwrap();
+    assert_eq!(rt.request_count, 2, "the second call ran instead of reusing the first's result");
+    assert_eq!(rt.release_path("r", "x"), 0, "no path is released by a prefix of another's ids");
+    assert_eq!(rt.release_path("r", "x:p"), 1);
+    assert_eq!(rt.ledger_len(), 1);
+}

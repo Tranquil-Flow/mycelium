@@ -59,9 +59,17 @@ pub struct LockedPath {
     pub hidden_size: usize,
 }
 
+/// A hop's structured identity (`idempotency.hop_identity`): the fields its
+/// idempotency key joins with ':'. Ids may contain ':', so per-hop state is
+/// never keyed by the joined string.
+pub type HopIdentity = (String, String, i64, String, i64, usize);
+
 /// A hop the node admitted: what to run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdmittedHop {
+    pub request_id: String,
+    pub path_id: String,
+    pub path_attempt: i64,
     pub phase: String,
     pub token_index: i64,
     pub hop_index: usize,
@@ -193,6 +201,9 @@ impl LockedPath {
             _ => return fail("phase_unsupported_by_stage"),
         };
         Ok(AdmittedHop {
+            request_id: request_id.to_owned(),
+            path_id: path_id.to_owned(),
+            path_attempt: attempt,
             phase: phase.to_owned(),
             token_index,
             hop_index: h,
@@ -259,10 +270,16 @@ pub enum LedgerHit<T> {
 
 /// Bounded idempotency ledger keyed by idempotency key, remembering the
 /// payload fingerprint and the outcome (e.g. the forwarded frame bytes).
+impl AdmittedHop {
+    pub fn identity(&self) -> HopIdentity {
+        (self.request_id.clone(), self.path_id.clone(), self.path_attempt, self.phase.clone(), self.token_index, self.hop_index)
+    }
+}
+
 pub struct HopLedger<T> {
     capacity: usize,
-    order: VecDeque<String>,
-    entries: BTreeMap<String, (String, T)>,
+    order: VecDeque<HopIdentity>,
+    entries: BTreeMap<HopIdentity, (String, T)>,
 }
 
 impl<T: Clone> HopLedger<T> {
@@ -271,14 +288,15 @@ impl<T: Clone> HopLedger<T> {
     }
 
     pub fn check(&self, hop: &AdmittedHop) -> Option<LedgerHit<T>> {
-        self.entries.get(&hop.idempotency_key).map(|(fp, outcome)| {
+        self.entries.get(&hop.identity()).map(|(fp, outcome)| {
             if *fp == hop.payload_fingerprint { LedgerHit::Cached(outcome.clone()) } else { LedgerHit::Conflict }
         })
     }
 
     pub fn record(&mut self, hop: &AdmittedHop, outcome: T) {
-        if self.entries.insert(hop.idempotency_key.clone(), (hop.payload_fingerprint.clone(), outcome)).is_none() {
-            self.order.push_back(hop.idempotency_key.clone());
+        let key = hop.identity();
+        if self.entries.insert(key.clone(), (hop.payload_fingerprint.clone(), outcome)).is_none() {
+            self.order.push_back(key);
         }
         while self.order.len() > self.capacity {
             if let Some(old) = self.order.pop_front() {
@@ -289,9 +307,9 @@ impl<T: Clone> HopLedger<T> {
 
     /// Forget a path's hops (cancellation, new assignment, route drop).
     pub fn forget_path(&mut self, request_id: &str, path_id: &str) {
-        let prefix = format!("{request_id}:{path_id}:");
-        self.entries.retain(|k, _| !k.starts_with(&prefix));
-        self.order.retain(|k| !k.starts_with(&prefix));
+        let of_path = |k: &HopIdentity| k.0 == request_id && k.1 == path_id;
+        self.entries.retain(|k, _| !of_path(k));
+        self.order.retain(|k| !of_path(k));
     }
 
     pub fn len(&self) -> usize {

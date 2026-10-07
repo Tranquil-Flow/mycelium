@@ -337,19 +337,23 @@ pub struct Qwen2Runtime {
     stage_id: String,
     stage: Qwen2Stage,
     pub request_count: u64,
-    ledger: std::collections::HashMap<String, ([u8; 32], StageOutput)>,
-    ledger_order: std::collections::VecDeque<String>,
+    ledger: std::collections::HashMap<CallIdentity, ([u8; 32], StageOutput)>,
+    ledger_order: std::collections::VecDeque<CallIdentity>,
     ledger_bytes: usize,
     ledger_byte_cap: usize,
 }
 
-fn call_identity(call: &StageCall<'_>) -> String {
+/// (request, path, attempt, phase, token): structured, so ids containing ':'
+/// can never share a replay result.
+type CallIdentity = (String, String, u64, &'static str, i64);
+
+fn call_identity(call: &StageCall<'_>) -> CallIdentity {
     let phase = match call.phase {
         crate::runtime::StagePhase::Prefill => "PREFILL",
         crate::runtime::StagePhase::RecoveryPrefill => "RECOVERY_PREFILL",
         crate::runtime::StagePhase::Decode => "DECODE",
     };
-    format!("{}:{}:{}:{phase}:{}", call.request_id, call.path_id, call.path_attempt, call.token_index)
+    (call.request_id.to_owned(), call.path_id.to_owned(), call.path_attempt, phase, call.token_index)
 }
 
 fn call_fingerprint(call: &StageCall<'_>) -> [u8; 32] {
@@ -404,15 +408,14 @@ impl Qwen2Runtime {
 
     /// Forget every call of one request path (its cancellation or completion).
     pub fn release_path(&mut self, request_id: &str, path_id: &str) -> usize {
-        let prefix = format!("{request_id}:{path_id}:");
-        let gone: Vec<String> = self.ledger_order.iter().filter(|k| k.starts_with(&prefix)).cloned().collect();
+        let gone: Vec<CallIdentity> = self.ledger_order.iter().filter(|k| k.0 == request_id && k.1 == path_id).cloned().collect();
         for key in &gone {
             self.remove(key);
         }
         gone.len()
     }
 
-    fn remove(&mut self, key: &str) {
+    fn remove(&mut self, key: &CallIdentity) {
         if let Some((_, out)) = self.ledger.remove(key) {
             self.ledger_bytes -= out.values.len() * 4;
             self.ledger_order.retain(|k| k != key);

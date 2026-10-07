@@ -176,7 +176,13 @@ impl StageNode {
         // transports/iroh.py: a manifest from the entry registers without a
         // source; any other source must be the final placement's node.
         let final_node = &path.hops[path.hops.len() - 1].node_id;
-        if from != path.entry_node_id && from != final_node {
+        if path.entry_node_id.is_empty() || (from != path.entry_node_id && from != final_node) {
+            return refused("manifest_registration_rejected");
+        }
+        // A manifest relayed by the final placement only confirms a path this
+        // node already holds from the entry; it never creates one, so no peer
+        // registers a path in another entry's name (relay.py).
+        if from != path.entry_node_id && !self.paths.contains_key(&path.path_id) {
             return refused("manifest_registration_rejected");
         }
         if path.local_hop(&self.local).is_err() {
