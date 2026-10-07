@@ -12,7 +12,6 @@ from collections.abc import Callable, Mapping
 import copy
 from dataclasses import asdict
 import errno
-import fcntl
 import hashlib
 import http.client
 import json
@@ -29,6 +28,13 @@ import urllib.error
 import urllib.request
 from urllib.parse import quote, urlsplit
 import uuid
+
+try:
+    import fcntl
+except ImportError:  # win32: LockFileEx through mycelium_host_platform
+    fcntl = None  # type: ignore[assignment]
+
+import mycelium_host_platform
 
 from .serving import (
     CANDIDATE_MODEL,
@@ -101,7 +107,40 @@ def _canonical(value: object) -> bytes:
     ).encode("utf-8")
 
 
+# --------------------------------------------------------------- platform
+#
+# POSIX keeps the original checks: owned by this euid, no group/other mode bits.
+# win32 (owner parity ruling): every directory this module creates or trusts is an
+# owner-only *protected* DACL directory checked through mycelium_host_platform
+# (``_secure_directory``/``_private_root``); a file is trusted through the
+# directory that contains it, so here it only has to be a single-link, non-reparse
+# regular file.  Small state (status.json) is written with an explicit owner-only
+# file DACL and read back through the owner-only check.
+
+_REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+
+
+def _win32() -> bool:
+    return mycelium_host_platform.is_win32()
+
+
+def _is_link(metadata: os.stat_result) -> bool:
+    """A symlink, or on Windows any reparse point (junction, mount point)."""
+
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        getattr(metadata, "st_file_attributes", 0) & _REPARSE_POINT
+    )
+
+
+def _owned(metadata: os.stat_result, *, mask: int) -> bool:
+    if _win32():
+        return not _is_link(metadata)
+    return metadata.st_uid == os.geteuid() and not stat.S_IMODE(metadata.st_mode) & mask
+
+
 def _fsync_directory(path: Path) -> None:
+    if _win32():
+        return  # no directory handle fsync on Windows; MoveFileEx metadata is journaled
     descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
     try:
         os.fsync(descriptor)
@@ -110,6 +149,13 @@ def _fsync_directory(path: Path) -> None:
 
 
 def _atomic_json(path: Path, value: object) -> None:
+    if _win32():
+        try:
+            with mycelium_host_platform.private_directory(path.parent, create=False) as lease:
+                lease.atomic_replace(path.name, _canonical(value))
+        except mycelium_host_platform.HostPlatformError as exc:
+            _raise("artifact_storage_failure", exc)
+        return
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     descriptor: int | None = None
     try:
@@ -144,6 +190,16 @@ def _private_root(value: str | Path) -> Path:
         _raise("acquisition_state_root_unsafe", exc)
     if not candidate.is_absolute() or candidate.is_symlink():
         _raise("acquisition_state_root_unsafe")
+    if _win32():
+        try:
+            with mycelium_host_platform.private_directory(candidate, create=True):
+                pass
+            resolved = candidate.resolve(strict=True)
+        except (mycelium_host_platform.HostPlatformError, OSError) as exc:
+            _raise("acquisition_state_root_unsafe", exc)
+        if resolved != candidate:
+            _raise("acquisition_state_root_unsafe")
+        return resolved
     try:
         candidate.mkdir(parents=True, mode=0o700, exist_ok=True)
         resolved = candidate.resolve(strict=True)
@@ -163,6 +219,20 @@ def _private_root(value: str | Path) -> Path:
 
 
 def _secure_directory(path: Path, *, create: bool = True) -> Path:
+    if _win32():
+        try:
+            if path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()):
+                _raise("artifact_storage_unsafe")
+            with mycelium_host_platform.private_directory(path, create=create):
+                pass
+            resolved = path.resolve(strict=True)
+        except AcquisitionError:
+            raise
+        except (mycelium_host_platform.HostPlatformError, OSError) as exc:
+            _raise("artifact_storage_unsafe", exc)
+        if resolved != path:
+            _raise("artifact_storage_unsafe")
+        return path
     try:
         if create:
             path.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -555,18 +625,21 @@ def _validate_manifest(value: object, *, model: ModelContract) -> dict[str, Any]
 
 def _digest_file(path: Path, record: Mapping[str, Any]) -> bool:
     try:
+        if _win32() and _is_link(path.lstat()):
+            return False  # no O_NOFOLLOW on Windows: refuse the reparse point first
         descriptor = os.open(
             path,
             os.O_RDONLY
             | getattr(os, "O_CLOEXEC", 0)
-            | getattr(os, "O_NOFOLLOW", 0),
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_BINARY", 0),
         )
         with os.fdopen(descriptor, "rb") as handle:
             metadata = os.fstat(handle.fileno())
             if (
                 not stat.S_ISREG(metadata.st_mode)
                 or metadata.st_nlink != 1
-                or metadata.st_uid != os.geteuid()
+                or not _owned(metadata, mask=0)
                 or metadata.st_size != record["size_bytes"]
             ):
                 return False
@@ -590,11 +663,10 @@ def _secure_file_size(path: Path, *, maximum: int) -> int:
     except OSError as exc:
         _raise("artifact_storage_unsafe", exc)
     if (
-        stat.S_ISLNK(metadata.st_mode)
+        _is_link(metadata)
         or not stat.S_ISREG(metadata.st_mode)
         or metadata.st_nlink != 1
-        or metadata.st_uid != os.geteuid()
-        or stat.S_IMODE(metadata.st_mode) & 0o077
+        or not _owned(metadata, mask=0o077)
         or not 0 <= metadata.st_size <= maximum
     ):
         _raise("artifact_storage_unsafe")
@@ -630,6 +702,7 @@ class SelectedModelAcquisition:
         self._network_bytes = 0
         self._status_path = self.state_root / "status.json"
         self._lock_fd: int | None = None
+        self._win32_lock: Any | None = None
         self._acquire_lock()
         try:
             self._status = self._recover_status()
@@ -638,6 +711,16 @@ class SelectedModelAcquisition:
             raise
 
     def _acquire_lock(self) -> None:
+        if _win32():
+            try:
+                self._win32_lock = mycelium_host_platform.hold_exclusive_lock(
+                    self.state_root, "acquisition.lock", blocking=False
+                )
+            except mycelium_host_platform.HostPlatformError as exc:
+                if exc.code == "host_lock_busy":
+                    _raise("acquisition_in_progress", exc)
+                _raise("acquisition_state_root_unsafe", exc)
+            return
         descriptor: int | None = None
         try:
             descriptor = os.open(
@@ -673,6 +756,8 @@ class SelectedModelAcquisition:
         self._lock_fd = descriptor
 
     def _recover_status(self) -> dict[str, Any]:
+        if _win32():
+            return self._recover_status_win32()
         if not self._status_path.exists():
             return {
                 "state": "idle",
@@ -698,6 +783,31 @@ class SelectedModelAcquisition:
             raise
         except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
             _raise("acquisition_state_corrupt", exc)
+        return self._settle_recovered(status)
+
+    def _recover_status_win32(self) -> dict[str, Any]:
+        try:
+            with mycelium_host_platform.private_directory(self.state_root, create=False) as lease:
+                raw = lease.read_file(self._status_path.name, max_bytes=16 * 1024)
+        except mycelium_host_platform.HostPlatformError as exc:
+            if exc.code == "host_file_missing":
+                return {
+                    "state": "idle",
+                    "downloaded_bytes": 0,
+                    "total_bytes": 0,
+                    "error_code": None,
+                    "model": _model_identity(self.model),
+                }
+            _raise("acquisition_state_corrupt", exc)
+        try:
+            status = _validate_status(json.loads(raw.decode("utf-8")), self.model)
+        except AcquisitionError:
+            raise
+        except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+            _raise("acquisition_state_corrupt", exc)
+        return self._settle_recovered(status)
+
+    def _settle_recovered(self, status: dict[str, Any]) -> dict[str, Any]:
         if status["state"] in _ACTIVE_STATES:
             status["state"] = "failed"
             status["error_code"] = "interrupted_transfer"
@@ -910,7 +1020,7 @@ class SelectedModelAcquisition:
                     candidate = root_path / directory
                     metadata = candidate.lstat()
                     relative = candidate.relative_to(stage).as_posix()
-                    if stat.S_ISLNK(metadata.st_mode) or relative not in expected_dirs:
+                    if _is_link(metadata) or relative not in expected_dirs:
                         _raise("artifact_storage_unsafe")
                 for filename in filenames:
                     candidate = root_path / filename
@@ -1079,20 +1189,22 @@ class SelectedModelAcquisition:
 
     def _open_partial(self, path: Path) -> int:
         try:
+            if _win32() and (path.is_symlink() or (path.exists() and _is_link(path.lstat()))):
+                _raise("artifact_storage_unsafe")
             descriptor = os.open(
                 path,
                 os.O_RDWR
                 | os.O_CREAT
                 | getattr(os, "O_CLOEXEC", 0)
-                | getattr(os, "O_NOFOLLOW", 0),
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_BINARY", 0),
                 0o600,
             )
             metadata = os.fstat(descriptor)
             if (
                 not stat.S_ISREG(metadata.st_mode)
                 or metadata.st_nlink != 1
-                or metadata.st_uid != os.geteuid()
-                or stat.S_IMODE(metadata.st_mode) & 0o077
+                or not _owned(metadata, mask=0o077)
             ):
                 os.close(descriptor)
                 _raise("artifact_storage_unsafe")
@@ -1165,12 +1277,13 @@ class SelectedModelAcquisition:
                 for directory in directories:
                     metadata = (walk_path / directory).lstat()
                     if (
-                        stat.S_ISLNK(metadata.st_mode)
+                        _is_link(metadata)
                         or not stat.S_ISDIR(metadata.st_mode)
-                        or metadata.st_uid != os.geteuid()
-                        or stat.S_IMODE(metadata.st_mode) & 0o022
+                        or not _owned(metadata, mask=0o022)
                     ):
                         _raise("artifact_storage_unsafe")
+                    if _win32():
+                        _secure_directory(walk_path / directory, create=False)
                 for filename in files:
                     path = walk_path / filename
                     relative = path.relative_to(root).as_posix()
@@ -1239,6 +1352,10 @@ class SelectedModelAcquisition:
                 self._release_lock()
 
     def _release_lock(self) -> None:
+        held = getattr(self, "_win32_lock", None)
+        if held is not None:
+            self._win32_lock = None
+            held.release()
         descriptor = self._lock_fd
         if descriptor is None:
             return
