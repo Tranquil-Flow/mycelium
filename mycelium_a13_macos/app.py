@@ -23,6 +23,7 @@ import threading
 import time
 import urllib.parse
 from dataclasses import asdict
+import mycelium_host_platform
 from .serving import RESOURCE_PROPOSAL
 
 MAX_BODY = 65536
@@ -50,6 +51,8 @@ class DemoError(RuntimeError):
 def preflight(*, system=None, machine=None, os_version=None):
     system = platform.system() if system is None else system
     machine = platform.machine() if machine is None else machine
+    if system == 'Windows':
+        return _windows_preflight(machine=machine, os_version=os_version)
     os_version = platform.mac_ver()[0] if os_version is None else os_version
     # Exact two-device compatibility targets. Admitting a target here is not
     # evidence that the final package or physical serving was exercised on it.
@@ -62,10 +65,50 @@ def preflight(*, system=None, machine=None, os_version=None):
             'distribution': 'unsigned_development_demo'}
 
 
+#: Windows owner/target app floor (full-parity ruling): the A13 Windows platform
+#: admission's declared minimum build on x86_64 (Windows 10 22H2, build 19045).
+def _windows_min_build():
+    from mycelium_a13_windows.platform_admission import ADMITTED_RELEASES
+    return int(ADMITTED_RELEASES['windows']['minimum_build'])
+
+
+def _windows_preflight(*, machine, os_version):
+    version = platform.version() if os_version is None else os_version
+    try:
+        build = int(str(version).split('.')[2])
+    except (IndexError, ValueError):
+        build = 0
+    if machine not in {'AMD64', 'x86_64'} or build < _windows_min_build():
+        error=DemoError('unsupported_platform')
+        error.observed_platform={'system':'Windows','machine':machine,'os_version':version}
+        raise error
+    return {'platform': 'windows', 'architecture': 'x86_64', 'os_version': version,
+            'model_contract':model_contract(),
+            'distribution': 'unsigned_development_demo'}
+
+
+def _win32_private_file(path, *, max_bytes):
+    """Owner-only, single-link, reparse-refusing read; None when absent (win32)."""
+    try:
+        with mycelium_host_platform.private_directory(Path(path).parent, create=False) as lease:
+            return lease.read_file(Path(path).name, max_bytes=max_bytes)
+    except mycelium_host_platform.HostPlatformError as exc:
+        if exc.code == 'host_file_missing':
+            return None
+        raise DemoError('unsafe_state_permissions') from exc
+
+
 def private_dir(path):
     path = Path(path).absolute()
     if path.is_symlink() or path.resolve() != path:
         raise DemoError('unsafe_state_path')
+    if mycelium_host_platform.is_win32():
+        try:
+            with mycelium_host_platform.private_directory(path, create=True):
+                pass
+        except mycelium_host_platform.HostPlatformError as exc:
+            raise DemoError('unsafe_state_permissions') from exc
+        return path
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
     info = path.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
@@ -74,6 +117,13 @@ def private_dir(path):
 
 
 def private_write(path, raw):
+    if mycelium_host_platform.is_win32():
+        try:
+            with mycelium_host_platform.private_directory(Path(path).parent, create=False) as lease:
+                lease.atomic_replace(Path(path).name, raw)
+        except mycelium_host_platform.HostPlatformError as exc:
+            raise DemoError('unsafe_state_permissions') from exc
+        return
     temp = path.with_name('.'+path.name+'.'+secrets.token_hex(8))
     fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
@@ -105,6 +155,12 @@ def consent_valid(c):
 
 def read_resource_policy(root):
     path=root/'resource-policy.json'
+    if mycelium_host_platform.is_win32():
+        raw=_win32_private_file(path,max_bytes=4096)
+        if raw is None: return None
+        value=json.loads(raw)
+        if not consent_valid(value): raise DemoError('resource_policy_invalid')
+        return value
     try: fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
     except FileNotFoundError: return None
     try:
@@ -121,14 +177,19 @@ def read_resource_policy(root):
 def reopen_native(root):
     """Explicit native-owner reauthorization; never an unauthenticated web grant."""
     root = private_dir(Path(root).expanduser())
-    fd = os.open(root / 'native-control.json', os.O_RDONLY | os.O_NOFOLLOW)
-    try:
-        info = os.fstat(fd)
-        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or
-            info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > 4096):
-            raise DemoError('native_control_unavailable')
-        control = json.loads(os.read(fd,4097))
-    finally: os.close(fd)
+    if mycelium_host_platform.is_win32():
+        raw = _win32_private_file(root / 'native-control.json', max_bytes=4096)
+        if raw is None: raise DemoError('native_control_unavailable')
+        control = json.loads(raw)
+    else:
+        fd = os.open(root / 'native-control.json', os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            info = os.fstat(fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or
+                info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > 4096):
+                raise DemoError('native_control_unavailable')
+            control = json.loads(os.read(fd,4097))
+        finally: os.close(fd)
     if set(control) != {'port','credential'} or type(control['port']) is not int or not 1 <= control['port'] <= 65535:
         raise DemoError('native_control_unavailable')
     connection = http.client.HTTPConnection('127.0.0.1',control['port'],timeout=3)
@@ -270,16 +331,23 @@ class DemoApp:
     def start(self):
         if self.check_platform: preflight()
         private_dir(self.root)
-        self.lock_fd = os.open(self.root / 'application.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-        info=os.fstat(self.lock_fd)
-        if (not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_uid!=os.getuid()
-            or stat.S_IMODE(info.st_mode)!=0o600):
-            os.close(self.lock_fd); self.lock_fd=None
-            raise DemoError('unsafe_lock_file')
-        try: fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            os.close(self.lock_fd); self.lock_fd = None
-            raise DemoError('already_running') from None
+        if mycelium_host_platform.is_win32():
+            try:
+                self._win32_instance_lock = mycelium_host_platform.hold_exclusive_lock(
+                    self.root, 'application.lock', blocking=False)
+            except mycelium_host_platform.HostPlatformError as exc:
+                raise DemoError('already_running' if exc.code == 'host_lock_busy' else 'unsafe_lock_file') from None
+        else:
+            self.lock_fd = os.open(self.root / 'application.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+            info=os.fstat(self.lock_fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_uid!=os.getuid()
+                or stat.S_IMODE(info.st_mode)!=0o600):
+                os.close(self.lock_fd); self.lock_fd=None
+                raise DemoError('unsafe_lock_file')
+            try: fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                os.close(self.lock_fd); self.lock_fd = None
+                raise DemoError('already_running') from None
         try:
             if self.authority_factory is None:
                 from .authority import DemoAuthority
@@ -803,6 +871,9 @@ class DemoApp:
             (self.root / 'native-control.json').unlink(missing_ok=True)
             if self.lock_fd is not None:
                 fcntl.flock(self.lock_fd,fcntl.LOCK_UN); os.close(self.lock_fd); self.lock_fd=None
+            lock = getattr(self, '_win32_instance_lock', None)
+            if lock is not None:
+                lock.release(); self._win32_instance_lock = None
 
 
 class _Handler(BaseHTTPRequestHandler):

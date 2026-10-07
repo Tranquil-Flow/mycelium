@@ -67,6 +67,17 @@ class _NoRedirect(HTTPRedirectHandler):
 
 def _private_directory(path: Path, *, create: bool) -> Path:
     absolute = Path(os.path.abspath(path.expanduser()))
+    import mycelium_host_platform
+
+    if mycelium_host_platform.is_win32():
+        # Owner-only protected DACL (inherited by the key material below).
+        try:
+            with mycelium_host_platform.private_directory(absolute, create=create) as lease:
+                if not lease.exists:
+                    raise LocalTLSError("local_tls_path_invalid")
+        except mycelium_host_platform.HostPlatformError as exc:
+            raise LocalTLSError("local_tls_path_invalid") from exc
+        return absolute
     try:
         if create and not absolute.exists() and not absolute.is_symlink():
             absolute.mkdir(parents=True, mode=0o700)
@@ -85,6 +96,16 @@ def _private_directory(path: Path, *, create: bool) -> Path:
 
 
 def _owner_file(path: Path) -> None:
+    import mycelium_host_platform
+
+    if mycelium_host_platform.is_win32():
+        try:
+            with mycelium_host_platform.private_directory(path.parent, create=False) as lease:
+                lease.read_file(path.name, max_bytes=1 << 20)  # owner-only, single link, no reparse
+        except mycelium_host_platform.HostPlatformError as exc:
+            code = "local_tls_material_incomplete" if exc.code == "host_file_missing" else "local_tls_material_invalid"
+            raise LocalTLSError(code) from exc
+        return
     try:
         metadata = path.lstat()
     except OSError as exc:
@@ -112,7 +133,8 @@ def _write_temporary(path: Path, body: bytes) -> Path:
             | getattr(os, "O_NOFOLLOW", 0),
             0o600,
         )
-        os.fchmod(descriptor, 0o600)
+        if hasattr(os, "fchmod") and os.name != "nt":
+            os.fchmod(descriptor, 0o600)  # win32: the directory's owner-only DACL is inherited
         view = memoryview(body)
         while view:
             written = os.write(descriptor, view)
@@ -258,6 +280,32 @@ def _validate_material(material: LocalTLSMaterial) -> None:
         raise LocalTLSError("local_tls_material_invalid") from exc
 
 
+def _install_material_win32(directory: Path, paths, bodies) -> None:
+    """Install each file with an explicit owner-only protected DACL (no inheritance trust)."""
+
+    import mycelium_host_platform
+
+    installed: list[str] = []
+    try:
+        with mycelium_host_platform.private_directory(directory, create=False) as lease:
+            for path, body in zip(paths, bodies, strict=True):
+                try:
+                    lease.create_file_exclusive(path.name, body)
+                except mycelium_host_platform.HostPlatformError as exc:
+                    if exc.code == "host_file_exists":
+                        raise LocalTLSError("local_tls_material_incomplete") from None
+                    raise
+                installed.append(path.name)
+    except BaseException as exc:
+        for name in installed:
+            (directory / name).unlink(missing_ok=True)
+        if isinstance(exc, LocalTLSError):
+            raise
+        if isinstance(exc, mycelium_host_platform.HostPlatformError):
+            raise LocalTLSError("local_tls_material_write_failed") from exc
+        raise
+
+
 def ensure_local_tls_material(root: Path) -> LocalTLSMaterial:
     """Load one complete local TLS identity or atomically create its first generation."""
 
@@ -280,6 +328,12 @@ def ensure_local_tls_material(root: Path) -> LocalTLSMaterial:
         return material
 
     bodies = _generate_material()
+    import mycelium_host_platform
+
+    if mycelium_host_platform.is_win32():
+        _install_material_win32(directory, paths, bodies)
+        _validate_material(material)
+        return material
     temporaries: list[Path] = []
     installed: list[Path] = []
     try:
@@ -291,14 +345,15 @@ def ensure_local_tls_material(root: Path) -> LocalTLSMaterial:
         for temporary, path in zip(temporaries, paths, strict=True):
             os.replace(temporary, path)
             installed.append(path)
-        descriptor = os.open(
-            directory,
-            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
-        )
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        if os.name != "nt":  # win32: MoveFileEx metadata is journaled; no directory handle fsync
+            descriptor = os.open(
+                directory,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+            )
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
     except LocalTLSError:
         for path in installed:
             path.unlink(missing_ok=True)

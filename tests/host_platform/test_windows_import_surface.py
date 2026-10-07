@@ -72,6 +72,10 @@ ENTRY_POINTS = (
     "mycelium_a7_fence_store",
     "mycelium_a13_macos.target_app",
     "mycelium_a13_macos.workflow",
+    # Browser-facing owner/gateway on Windows: app shell, local TLS, owner journal.
+    "mycelium_a13_macos.app",
+    "mycelium_a13_macos.tls",
+    "mycelium_a13_macos.control_session",
     "stage_pack",
     "runtime_loader",
 )

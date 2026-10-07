@@ -157,16 +157,26 @@ class ManagedControlOwner:
                      'key_digest': client.signer.verification_key_digest}
         if authority['key_digest'] != client.trusted_owner_key_record['verification_key_digest']:
             raise ControllerError('managed_owner_signer_invalid')
+        self._win32_lock = None
         try:
-            self._fd = os.open(root/'owner.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-            info = os.fstat(self._fd)
-            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid()
-                    or stat.S_IMODE(info.st_mode) != 0o600):
-                raise ControllerError('managed_owner_state_invalid')
-            try:
-                fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                raise ControllerError('managed_owner_already_running') from None
+            import mycelium_host_platform
+            if mycelium_host_platform.is_win32():
+                try:
+                    self._win32_lock = mycelium_host_platform.hold_exclusive_lock(root, 'owner.lock', blocking=False)
+                except mycelium_host_platform.HostPlatformError as exc:
+                    if exc.code == 'host_lock_busy':
+                        raise ControllerError('managed_owner_already_running') from None
+                    raise ControllerError('managed_owner_state_invalid') from None
+            else:
+                self._fd = os.open(root/'owner.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+                info = os.fstat(self._fd)
+                if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid()
+                        or stat.S_IMODE(info.st_mode) != 0o600):
+                    raise ControllerError('managed_owner_state_invalid')
+                try:
+                    fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise ControllerError('managed_owner_already_running') from None
             value = _load_private_json(self.path, max_bytes=MAX_OWNER_JOURNAL_BYTES)
             if value is None:
                 value = {'protocol': _PROTOCOL, 'authority': authority, 'sequence': 0,
@@ -218,6 +228,9 @@ class ManagedControlOwner:
             if self._fd >= 0:
                 os.close(self._fd)
                 self._fd = -1
+            if self._win32_lock is not None:
+                self._win32_lock.release()
+                self._win32_lock = None
             raise
 
     def _save(self):
@@ -539,6 +552,9 @@ class ManagedControlOwner:
                 fcntl.flock(self._fd, fcntl.LOCK_UN)
                 os.close(self._fd)
                 self._fd = -1
+            if getattr(self, '_win32_lock', None) is not None:
+                self._win32_lock.release()
+                self._win32_lock = None
 
 
 class ManagedNodeSession:
