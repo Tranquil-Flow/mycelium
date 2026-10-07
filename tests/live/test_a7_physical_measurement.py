@@ -201,7 +201,18 @@ def test_plug_in_measures_the_positive_cutover_from_product_evidence(tmp_path: P
 def test_plug_in_measures_a_final_decode_step_cutover_from_product_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The source is killed with only the final decode step left (11 of 12 committed)."""
 
-    record, observations, plan, scoped = _measure_with_harness(tmp_path, monkeypatch, qualification_expired=False, kill_after_committed=_MAX_NEW - 1)
+    # Only one decode step is killable, so under host load the request can
+    # finish before the freeze lands.  That refusal injects no fault and makes
+    # no claim; a fresh route measures again (bounded).
+    for attempt in range(3):
+        root = tmp_path / f"attempt-{attempt}"
+        root.mkdir()
+        try:
+            record, observations, plan, scoped = _measure_with_harness(root, monkeypatch, qualification_expired=False, kill_after_committed=_MAX_NEW - 1)
+            break
+        except MeasurementRefused as exc:
+            if exc.code != "a7_request_ended_before_fault" or attempt == 2:
+                raise
     failures = gate.evaluate_case(record, plan)
     assert set(failures) - _HARNESS_ONLY <= {"added_tpot"}, failures
     assert record["outcome"] == "fenced_kv_successor", record
