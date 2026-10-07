@@ -76,14 +76,14 @@ def test_windows_native_iroh_is_activation_eligible() -> None:
     # Owner parity ruling 2026-10-07: the native Windows node is activation-eligible.
     assert peer_runtime_is_activation_eligible("windows_native_iroh", WINDOWS_NATIVE)
     assert peer_runtime_activation_refusal("windows_native_iroh") is None
-    assert PEER_CLASS_ACTIVATION_REFUSALS == {
-        "linux_native_iroh": "linux_native_member_runtime_unbound",
-    }
+    # With Linux parity applied too (2026-10-07), no known class carries a named refusal.
+    assert PEER_CLASS_ACTIVATION_REFUSALS == {}
 
 
 def test_activation_allow_set_is_closed_and_exact() -> None:
     assert _ACTIVATION_ELIGIBLE_PEER_CLASSES == frozenset(
-        {"mac_mlx_iroh", "linux_numpy_iroh", "android_native_iroh", "windows_native_iroh"}
+        {"mac_mlx_iroh", "linux_numpy_iroh", "android_native_iroh", "windows_native_iroh",
+         "linux_native_iroh"}
     )
     # Negative controls: every other class stays ineligible even when it
     # declares its own exact capability, and a refusal never names an

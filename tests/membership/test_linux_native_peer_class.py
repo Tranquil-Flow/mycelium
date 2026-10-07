@@ -1,12 +1,11 @@
 """The A13 Linux product peer class ``linux_native_iroh``.
 
-The A13 Linux target onboarding speaks this class.  It is registered so a seed
-admits its join, but it is NOT the ``linux_numpy_iroh`` stage runtime: the Linux
-product package binds no member runtime (its service argv is caller supplied and
-``mycelium_node`` does not accept this class), so it stays activation-ineligible
-with the named ``linux_native_member_runtime_unbound`` refusal until that binding
-exists.  The declaration is exact: it cannot borrow the numpy runtime or promote
-itself by declaring the activation protocol.
+The A13 Linux target onboarding speaks this class.  Under the owner parity ruling
+(2026-10-07: Windows, macOS and Linux devices can all do everything; A13 covers
+all three platforms) the packaged Linux app binds the NumPy stage runtime, so the
+class declares exactly that runtime with the router activation protocol and is
+activation-eligible, like ``windows_native_iroh``.  The declaration stays exact:
+any other runtime, transport or protocol under this label is refused.
 """
 
 from __future__ import annotations
@@ -26,9 +25,9 @@ from mycelium_membership import (
 from mycelium_membership.contracts import _ACTIVATION_ELIGIBLE_PEER_CLASSES
 
 LINUX_NATIVE = {
-    "runtime_backend": "tbd",
+    "runtime_backend": "numpy",
     "transport": "iroh",
-    "activation_protocol": None,
+    "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
 }
 LINUX_NUMPY = {
     "runtime_backend": "numpy",
@@ -68,13 +67,10 @@ def test_linux_native_iroh_is_a_registered_member_class() -> None:
     validate_membership_message(_join_request("linux_native_iroh", LINUX_NATIVE))
 
 
-def test_linux_native_iroh_is_refused_activation_with_a_named_reason() -> None:
-    assert "linux_native_iroh" not in _ACTIVATION_ELIGIBLE_PEER_CLASSES
-    assert not peer_runtime_is_activation_eligible("linux_native_iroh", LINUX_NATIVE)
-    assert (
-        peer_runtime_activation_refusal("linux_native_iroh")
-        == "linux_native_member_runtime_unbound"
-    )
+def test_linux_native_iroh_is_activation_eligible_under_the_parity_ruling() -> None:
+    assert "linux_native_iroh" in _ACTIVATION_ELIGIBLE_PEER_CLASSES
+    assert peer_runtime_is_activation_eligible("linux_native_iroh", LINUX_NATIVE)
+    assert peer_runtime_activation_refusal("linux_native_iroh") is None
 
 
 def test_linux_numpy_iroh_keeps_its_eligibility_without_a_refusal() -> None:
@@ -87,11 +83,10 @@ def test_linux_numpy_iroh_keeps_its_eligibility_without_a_refusal() -> None:
 @pytest.mark.parametrize(
     "capability",
     [
-        # Cannot borrow the numpy stage runtime under the product label.
-        LINUX_NUMPY,
-        {**LINUX_NATIVE, "runtime_backend": "numpy"},
-        # Cannot promote itself by declaring the activation protocol.
-        {**LINUX_NATIVE, "activation_protocol": ROUTER_ACTIVATION_PROTOCOL},
+        # Exactly the NumPy runtime over iroh with the router protocol: nothing else.
+        {**LINUX_NATIVE, "runtime_backend": "tbd"},
+        {**LINUX_NATIVE, "runtime_backend": "mlx"},
+        {**LINUX_NATIVE, "activation_protocol": None},
         {**LINUX_NATIVE, "transport": "none"},
     ],
 )

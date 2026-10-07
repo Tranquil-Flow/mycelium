@@ -176,14 +176,14 @@ LEGACY_PEER_CLASS_DECOMPOSITION = {
         "runtimes": ["numpy"],
         "declared_ineligible": True,
     },
-    # The A13 Linux product class declares no bound runtime yet, so none is
-    # guessed (in particular not ``linux_numpy_iroh``'s numpy runtime).
+    # The A13 Linux product class binds the NumPy runtime (owner parity ruling
+    # 2026-10-07); v2 eligibility still needs class qualification.
     "linux_native_iroh": {
         "identity_kind": "native_peer",
         "platform_family": "linux",
         "architecture": "unknown",
         "transports": ["iroh"],
-        "runtimes": [],
+        "runtimes": ["numpy"],
         "declared_ineligible": True,
     },
 }

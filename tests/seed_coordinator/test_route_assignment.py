@@ -202,7 +202,9 @@ def test_no_assignment_withdrawal_and_expiry_answer_a_signed_none(swarm: Swarm) 
 
 
 def test_issue_refuses_ineligible_unknown_or_malformed_assignments(swarm: Swarm) -> None:
-    swarm.join("node-windows", "linux_native_iroh", WINDOWS)
+    # An ineligible class: the undeclared Linux placeholder (every native product
+    # class, including linux_native_iroh, is eligible since the 2026-10-07 parity ruling).
+    swarm.join("node-windows", "linux_tbd", {"runtime_backend": "tbd", "transport": "none", "activation_protocol": None})
     swarm.join("node-mac", "mac_mlx_iroh", {**ANDROID, "runtime_backend": "mlx"})
 
     def code(**kwargs) -> str:

@@ -88,28 +88,27 @@ _PEER_RUNTIME_CAPABILITIES = {
         "transport": "iroh",
         "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
     },
-    # The A13 Linux product onboarding's class.  It is joinable, but the Linux
-    # product package binds no member stage runtime (its service argv is caller
-    # supplied and ``mycelium_node`` does not accept this class), so it is not
-    # the ``linux_numpy_iroh`` runtime by construction and stays declared
-    # activation-ineligible, with no runtime guessed from the label, until that
-    # binding exists.
+    # The A13 Linux product class.  [OWNER PARITY RULING 2026-10-07, applied
+    # to Linux] Windows, macOS and Linux devices can all do everything (full
+    # nodes, every stage position, managed hosts) and A13 covers all three
+    # platforms.  The packaged Linux app now binds the NumPy stage runtime
+    # (``mycelium_a13_linux.managed_host``), so the class declares it and is
+    # activation-eligible exactly like ``windows_native_iroh``.
     "linux_native_iroh": {
-        "runtime_backend": "tbd",
+        "runtime_backend": "numpy",
         "transport": "iroh",
-        "activation_protocol": None,
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
     },
 }
 PEER_CLASSES = frozenset(_PEER_RUNTIME_CAPABILITIES)
 #: Closed allow-set of peer classes that may receive activation work.
 _ACTIVATION_ELIGIBLE_PEER_CLASSES = frozenset(
-    {"mac_mlx_iroh", "linux_numpy_iroh", "android_native_iroh", "windows_native_iroh"}
+    {"mac_mlx_iroh", "linux_numpy_iroh", "android_native_iroh", "windows_native_iroh",
+     "linux_native_iroh"}
 )
 #: Named, stable refusal reasons for known peer classes that are admitted to
 #: membership but may not receive activation work yet.
-PEER_CLASS_ACTIVATION_REFUSALS = {
-    "linux_native_iroh": "linux_native_member_runtime_unbound",
-}
+PEER_CLASS_ACTIVATION_REFUSALS: dict[str, str] = {}
 
 _COMMON_FIELDS = frozenset(
     {

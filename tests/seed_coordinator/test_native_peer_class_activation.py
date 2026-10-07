@@ -2,8 +2,8 @@
 
 An ``android_native_iroh`` member and (owner parity ruling 2026-10-07) a
 ``windows_native_iroh`` member may receive assignment offers and be named as
-peers; ``linux_native_iroh`` is still refused at the shared choke point with
-its named reason.  Classes without a named refusal keep the unchanged code.
+peers, and so (the same ruling applied to Linux) may the A13 Linux product
+class ``linux_native_iroh``.  Ineligible classes keep the unchanged code.
 """
 
 from __future__ import annotations
@@ -37,9 +37,9 @@ CAPABILITIES = {
         "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
     },
     "linux_native_iroh": {
-        "runtime_backend": "tbd",
+        "runtime_backend": "numpy",
         "transport": "iroh",
-        "activation_protocol": None,
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
     },
     "linux_numpy_iroh": {
         "runtime_backend": "numpy",
@@ -149,23 +149,17 @@ def test_windows_member_and_peer_receive_offers(swarm) -> None:
     ]
 
 
-def test_linux_native_member_joins_but_is_refused_with_the_named_reason(swarm) -> None:
-    """The A13 Linux product class is admitted to membership, never to activation."""
+def test_linux_native_member_and_peer_receive_offers(swarm) -> None:
+    """Owner parity ruling 2026-10-07 applied to Linux: the product class serves."""
 
     coordinator, ids = swarm
-    assert coordinator.member(ids["linux_native_iroh"])["activation_eligible"] is False
-    with pytest.raises(SeedCoordinatorError) as refused:
-        _offer(coordinator, ids["linux_native_iroh"], [], "linux-native")
-    assert (
-        refused.value.code
-        == "seed_member_activation_ineligible:linux_native_member_runtime_unbound"
-    )
-    with pytest.raises(SeedCoordinatorError) as refused_peer:
-        _offer(coordinator, ids["mac_mlx_iroh"], [ids["linux_native_iroh"]], "mac-linux")
-    assert (
-        refused_peer.value.code
-        == "seed_peer_activation_ineligible:linux_native_member_runtime_unbound"
-    )
+    assert coordinator.member(ids["linux_native_iroh"])["activation_eligible"] is True
+    offer = _offer(coordinator, ids["linux_native_iroh"], [ids["mac_mlx_iroh"]], "linux-native")
+    assert offer["message"]["recipient_node_id"] == ids["linux_native_iroh"]
+    as_peer = _offer(coordinator, ids["mac_mlx_iroh"], [ids["linux_native_iroh"]], "mac-linux")
+    assert [record["node_id"] for record in as_peer["message"]["peer_endpoint_records"]] == [
+        ids["linux_native_iroh"]
+    ]
 
 
 def test_linux_numpy_member_still_receives_offers(swarm) -> None:
