@@ -70,7 +70,7 @@ fn grant(seed: &Identity, recipient: &str, member: &Identity, manifest: &StageMa
         "assignment_id": "route-1",
         "manifest_pack_digest": manifest.pack_digest,
         "allowed_object_digests": objects,
-        "authorized_sources": [{"endpoint_id": source.endpoint_id(), "verification_key_digest": source.key_digest()}],
+        "authorized_sources": [{"endpoint_id": source.endpoint_id(), "verification_key_digest": source.key_digest(), "direct_addrs": []}],
         "maximum_total_bytes": total.unwrap_or(manifest.total_bytes()),
         "maximum_bytes_per_second": 64u64 << 20,
         "maximum_chunk_bytes": 4u64 << 20,

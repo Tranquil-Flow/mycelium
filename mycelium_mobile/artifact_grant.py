@@ -66,7 +66,10 @@ _GRANT_FIELDS = frozenset(
         "expires_at_unix_ms",
     }
 )
-_SOURCE_FIELDS = frozenset({"endpoint_id", "verification_key_digest"})
+_SOURCE_FIELDS = frozenset({"endpoint_id", "verification_key_digest", "direct_addrs"})
+#: Direct-address hints per source (``ip:port``; iroh still authenticates the
+#: endpoint id, so a wrong hint only fails to connect).
+MAX_DIRECT_ADDRS = 8
 _REQUEST_FIELDS = frozenset(
     {
         "protocol",
@@ -169,6 +172,23 @@ def _verify_signature(message: Mapping[str, Any], signature: Mapping[str, Any], 
         _fail(code)
 
 
+def canonical_socket_addr(value: Any) -> str | None:
+    """``ip:port`` / ``[ipv6]:port`` in Rust's ``SocketAddr`` display form."""
+
+    import ipaddress  # noqa: PLC0415
+
+    if not isinstance(value, str) or ":" not in value:
+        return None
+    host, _, port = value.rpartition(":")
+    if not port.isdigit() or not 0 < int(port) < 65536 or str(int(port)) != port:
+        return None
+    try:
+        ip = ipaddress.ip_address(host[1:-1] if host.startswith("[") and host.endswith("]") else host)
+    except ValueError:
+        return None
+    return f"[{ip}]:{port}" if ip.version == 6 else f"{ip}:{port}"
+
+
 def range_digest(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
@@ -207,7 +227,9 @@ def issue_grant(
         "assignment_id": assignment_id,
         "manifest_pack_digest": verified["pack_digest"],
         "allowed_object_digests": digests,
-        "authorized_sources": sorted((dict(s) for s in sources), key=lambda s: s["endpoint_id"]),
+        "authorized_sources": sorted(
+            ({"direct_addrs": [], **dict(s)} for s in sources), key=lambda s: s["endpoint_id"]
+        ),
         # Each object once; a resumed range is not counted twice by an honest
         # source, so the exact sum is the budget.
         "maximum_total_bytes": sum({t["sha256"]: t["size_bytes"] for t in verified["tensors"]}.values()),
@@ -241,6 +263,12 @@ def _check_grant_shape(g: Mapping[str, Any]) -> None:
         _closed(source, _SOURCE_FIELDS, code)
         _match(source["endpoint_id"], _ENDPOINT_RE, code)
         _match(source["verification_key_digest"], _DIGEST_RE, code)
+        addrs = source["direct_addrs"]
+        if not isinstance(addrs, list) or len(addrs) > MAX_DIRECT_ADDRS:
+            _fail(code)
+        for addr in addrs:
+            if canonical_socket_addr(addr) != addr:
+                _fail(code)
     ids = [s["endpoint_id"] for s in sources]
     if ids != sorted(set(ids)) or g["recipient_endpoint_id"] in ids:
         _fail(code)

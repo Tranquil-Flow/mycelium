@@ -1060,10 +1060,18 @@ impl Supervisor {
                 return Ok(());
             }
         }
+        // Endpoint ids resolve through discovery; the grant's signed direct
+        // addresses are hints (LAN or loopback sources).
         let sources: Vec<iroh::EndpointAddr> = grant
             .sources
             .keys()
-            .map(|id| crate::transport::parse_endpoint_id(id).map(iroh::EndpointAddr::from).map_err(|e| e.0))
+            .map(|id| {
+                let mut addr = iroh::EndpointAddr::from(crate::transport::parse_endpoint_id(id).map_err(|e| e.0)?);
+                for hint in grant.source_addrs.get(id).into_iter().flatten() {
+                    addr = addr.with_ip_addr(*hint);
+                }
+                Ok::<_, String>(addr)
+            })
             .collect::<Result<_, _>>()?;
         let mut client = crate::artifact_net::IrohChunkSource::new(self.transport.endpoint(), self.identity.clone(), grant.clone(), sources).map_err(|e| e.0)?;
         let (cancel, done) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));

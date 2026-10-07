@@ -564,7 +564,15 @@ def test_a_v2_manifest_is_issued_only_seed_signed_and_delivered_beside_the_state
     assert grant["recipient_key_digest"] == swarm.nodes["node-phone"].signer.verification_key_digest
     assert grant["assignment_id"] == "route-1" and grant["manifest_pack_digest"] == V2["manifest"]["pack_digest"]
     assert grant["allowed_object_digests"] == sorted({t["sha256"] for t in V2["manifest"]["tensors"]})
-    assert grant["authorized_sources"] == [SOURCE]
+    assert grant["authorized_sources"] == [{**SOURCE, "direct_addrs": []}]
+    assert ra.parse_artifact_source(f"{'c' * 64}:sha256:{'d' * 64}@127.0.0.1:4433,[::1]:9") == {
+        "endpoint_id": "c" * 64, "verification_key_digest": "sha256:" + "d" * 64,
+        "direct_addrs": ["127.0.0.1:4433", "[::1]:9"],
+    }
+    with pytest.raises(SeedCoordinatorError) as caught:
+        swarm.issue("node-phone", stage_pack=signed, seed_key_record=seed.public_key_record(),
+                    artifact_sources=[{**SOURCE, "direct_addrs": ["localhost:1"]}], id_source=lambda: "route-x")
+    assert caught.value.code == "seed_route_assignment_artifact_sources_invalid"
     assert grant["expires_at_unix_ms"] == int(NOW * 1000) + ag.DEFAULT_GRANT_TTL_MS
     # A v1 delivery carries no grant.
     swarm.issue("node-phone", id_source=lambda: "route-2")

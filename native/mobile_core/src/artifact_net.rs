@@ -484,6 +484,7 @@ mod tests {
             manifest_pack_digest: format!("sha256:{}", "2".repeat(64)),
             allowed_object_digests: vec![],
             sources: BTreeMap::new(),
+            source_addrs: BTreeMap::new(),
             maximum_total_bytes: 100,
             maximum_bytes_per_second: 1 << 30,
             maximum_chunk_bytes: 64,

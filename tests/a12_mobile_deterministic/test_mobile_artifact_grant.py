@@ -79,8 +79,20 @@ def test_the_grant_covers_exactly_the_manifest_objects_and_its_window() -> None:
     assert _code(ag.verify_grant, tampered, seed_key_record=seed, now_unix_ms=NOW) == "artifact_grant_signature_invalid"
     for bad in [dict(ttl_ms=0), dict(ttl_ms=ag.MAX_GRANT_TTL_MS + 1), dict(recipient_endpoint_id="phone id"),
                 dict(sources=[{"endpoint_id": PHONE, "verification_key_digest": SOURCE_KEY.verification_key_digest}]),
-                dict(maximum_chunk_bytes=ag.MAX_CHUNK_BYTES + 1)]:
+                dict(maximum_chunk_bytes=ag.MAX_CHUNK_BYTES + 1),
+                dict(sources=[{"endpoint_id": SOURCE, "verification_key_digest": SOURCE_KEY.verification_key_digest,
+                               "direct_addrs": ["127.0.0.01:80"]}])]:
         assert _code(_grant, **bad) == "artifact_grant_invalid", bad
+
+
+def test_direct_address_hints_are_canonical_socket_addresses() -> None:
+    assert ag.canonical_socket_addr("10.0.0.2:4433") == "10.0.0.2:4433"
+    assert ag.canonical_socket_addr("[fe80::1]:9") == "[fe80::1]:9"
+    for bad in ["10.0.0.2", "host:1", "10.0.0.2:0", "10.0.0.2:65536", "10.0.0.2:080", "fe80::1:9", 7]:
+        assert ag.canonical_socket_addr(bad) != bad, bad  # not a canonical hint
+    grant = _grant(sources=[{"endpoint_id": SOURCE, "verification_key_digest": SOURCE_KEY.verification_key_digest,
+                             "direct_addrs": ["10.0.0.2:4433"]}])
+    assert ag.verify_grant(grant, seed_key_record=SEED.public_key_record(), now_unix_ms=NOW)["authorized_sources"][0]["direct_addrs"] == ["10.0.0.2:4433"]
 
 
 def test_a_source_serves_only_the_granted_recipient_and_ranges() -> None:

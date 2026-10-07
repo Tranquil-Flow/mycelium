@@ -49,6 +49,9 @@ pub struct Grant {
     pub allowed_object_digests: Vec<String>,
     /// Source iroh endpoint id -> its signing key digest.
     pub sources: BTreeMap<String, String>,
+    /// Source iroh endpoint id -> direct-address hints (`ip:port`); iroh still
+    /// authenticates the endpoint, so a wrong hint only fails to connect.
+    pub source_addrs: BTreeMap<String, Vec<std::net::SocketAddr>>,
     pub maximum_total_bytes: u64,
     pub maximum_bytes_per_second: u64,
     pub maximum_chunk_bytes: u64,
@@ -165,15 +168,27 @@ fn grant_shape(g: &Value, env: &Value) -> Result<Grant, GrantError> {
     }
     let list = g["authorized_sources"].as_array().filter(|a| !a.is_empty() && a.len() <= MAX_SOURCES).ok_or(GrantError(c))?;
     let mut sources = BTreeMap::new();
+    let mut source_addrs = BTreeMap::new();
     let mut previous = String::new();
     for src in list {
-        exact(src, &["endpoint_id", "verification_key_digest"], c)?;
+        exact(src, &["endpoint_id", "verification_key_digest", "direct_addrs"], c)?;
         let id = endpoint(&src["endpoint_id"], c)?;
         if id <= previous.as_str() {
             return fail(c);
         }
         previous = id.to_owned();
         sources.insert(id.to_owned(), digest(&src["verification_key_digest"], c)?.to_owned());
+        let hints = src["direct_addrs"].as_array().filter(|a| a.len() <= 8).ok_or(GrantError(c))?;
+        let mut addrs = Vec::with_capacity(hints.len());
+        for hint in hints {
+            let text = s(hint, c)?;
+            let addr: std::net::SocketAddr = text.parse().map_err(|_| GrantError(c))?;
+            if addr.to_string() != text {
+                return fail(c);
+            }
+            addrs.push(addr);
+        }
+        source_addrs.insert(id.to_owned(), addrs);
     }
     // The member's enrolled endpoint id (an iroh id on a phone; any seed
     // segment in general); sources are iroh endpoints this node dials.
@@ -196,6 +211,7 @@ fn grant_shape(g: &Value, env: &Value) -> Result<Grant, GrantError> {
         manifest_pack_digest: digest(&g["manifest_pack_digest"], c)?.to_owned(),
         allowed_object_digests: objects,
         sources,
+        source_addrs,
         maximum_total_bytes: int(&g["maximum_total_bytes"], c, 1, MAX_SAFE_INTEGER)?,
         maximum_bytes_per_second: int(&g["maximum_bytes_per_second"], c, 1, MAX_SAFE_INTEGER)?,
         maximum_chunk_bytes: int(&g["maximum_chunk_bytes"], c, 1, MAX_CHUNK_BYTES)?,

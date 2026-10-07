@@ -31,6 +31,7 @@
         "assignment_id": "route-fixture-1",
         "authorized_sources": [
           {
+            "direct_addrs": [],
             "endpoint_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
             "verification_key_digest": "sha256:6c8f8607dbe87077a62a2990ce07d94aaf749df76f87b98eb786a6d10f030765"
           }
@@ -53,8 +54,8 @@
       "protocol": "mycelium.membership.signed_message.v1",
       "signature": {
         "algorithm": "ed25519",
-        "signature": "scJ/omb+AZ5w5l62RCjwK/RAoSHvsjyG61Nc/vbEV/vU+wUnukiSLXEa1JyRwTDSJB5QZuOS2WPC+FCvup5eBg==",
-        "signed_statement_digest": "sha256:e6585de1b34975a9fa8cf35b2f73463d23ab48b05dcc93be8a3644247e744605",
+        "signature": "M3i+Yi0SaOw3RVn3nvUjCDpGbORPUCI3v6ifuqiem4+6HkWishRnDqV4DCFqLgMYR0Nq4VIiITRSSDoaInzVBg==",
+        "signed_statement_digest": "sha256:8ce2e0ff21281f14032d7f117978d7ed43ea98ca441dfec206326906f6bdc0ac",
         "signer_endpoint_id": "seed-endpoint-1",
         "verification_key_digest": "sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6"
       },

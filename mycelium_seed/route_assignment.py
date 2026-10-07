@@ -358,17 +358,36 @@ def _artifact_sources(values: Sequence[Mapping[str, str]], *, required: bool) ->
         raise _fail("seed_route_assignment_artifact_sources_required")
     if not required and sources:
         raise _fail("seed_route_assignment_artifact_sources_invalid")
+    from mycelium_mobile.artifact_grant import MAX_DIRECT_ADDRS, canonical_socket_addr  # noqa: PLC0415
+
     seen = set()
     for source in sources:
+        source.setdefault("direct_addrs", [])
+        addrs = source["direct_addrs"]
         if (
-            set(source) != {"endpoint_id", "verification_key_digest"}
+            set(source) != {"endpoint_id", "verification_key_digest", "direct_addrs"}
             or _ENDPOINT_RE.fullmatch(str(source["endpoint_id"])) is None
             or _DIGEST_RE.fullmatch(str(source["verification_key_digest"])) is None
             or source["endpoint_id"] in seen
+            or not isinstance(addrs, list)
+            or len(addrs) > MAX_DIRECT_ADDRS
+            or any(canonical_socket_addr(a) != a for a in addrs)
         ):
             raise _fail("seed_route_assignment_artifact_sources_invalid")
         seen.add(source["endpoint_id"])
     return sources
+
+
+def parse_artifact_source(text: str) -> dict[str, Any]:
+    """``ENDPOINT_ID:KEY_DIGEST[@ip:port,...]`` (the owner command's form)."""
+
+    spec, _, hints = text.partition("@")
+    endpoint, _, key = spec.partition(":")
+    return {
+        "endpoint_id": endpoint,
+        "verification_key_digest": key,
+        "direct_addrs": [h for h in hints.split(",") if h] if hints else [],
+    }
 
 
 def withdraw_route_assignment(
@@ -712,8 +731,8 @@ def _parser() -> argparse.ArgumentParser:
         "--artifact-source",
         action="append",
         default=[],
-        metavar="ENDPOINT_ID:KEY_DIGEST",
-        help="v2 only: an artifact source the grant authorizes (repeatable)",
+        metavar="ENDPOINT_ID:KEY_DIGEST[@IP:PORT,...]",
+        help="v2 only: an artifact source the grant authorizes, with optional direct-address hints (repeatable)",
     )
     for name in ("status", "withdraw"):
         command = sub.add_parser(name)
@@ -761,10 +780,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 route_generation=args.route_generation,
                 forward_to=not args.no_forward,
                 ttl_seconds=args.ttl_seconds,
-                artifact_sources=[
-                    dict(zip(("endpoint_id", "verification_key_digest"), item.split(":", 1)))
-                    for item in args.artifact_source
-                ],
+                artifact_sources=[parse_artifact_source(item) for item in args.artifact_source],
                 seed_key_record=coordinator.signer.public_key_record(),
             )
         elif args.command == "withdraw":
