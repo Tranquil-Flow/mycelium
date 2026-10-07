@@ -13,6 +13,7 @@ use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey};
 use tokio::sync::{Mutex as AsyncMutex, RwLock, mpsc, oneshot};
 use tokio::time::timeout;
 
+use crate::node_control::{CONTROL_ALPN, MAX_COMMAND_BYTES};
 use crate::wire::{self, Frame, RemoteKind};
 
 pub const IROH_ALPN: &[u8] = b"mycelium.iroh.sidecar.v1";
@@ -24,6 +25,60 @@ const REJECT_CODE: u32 = 1;
 pub const DISPATCH_TIMEOUT: Duration = Duration::from_secs(120);
 /// Message ids remembered for duplicate detection (the sidecar's seen table).
 const SEEN_LIMIT: usize = 4096;
+/// How long one control command may take to answer (`health` must answer
+/// while the stage computes: the handler never runs on the compute path).
+pub const CONTROL_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
+/// Concurrent control streams per connection (one controller session).
+const CONTROL_STREAMS: usize = 4;
+
+/// Live inbound connections per remote endpoint, so withdrawing an endpoint
+/// from an allow-list also closes what it already has open.
+#[derive(Default)]
+struct LiveConnections {
+    next: u64,
+    by_remote: HashMap<EndpointId, Vec<(u64, iroh::endpoint::Connection)>>,
+}
+
+impl LiveConnections {
+    fn add(&mut self, remote: EndpointId, connection: iroh::endpoint::Connection) -> u64 {
+        self.next += 1;
+        self.by_remote.entry(remote).or_default().push((self.next, connection));
+        self.next
+    }
+
+    fn remove(&mut self, remote: EndpointId, id: u64) {
+        if let Some(list) = self.by_remote.get_mut(&remote) {
+            list.retain(|(i, _)| *i != id);
+            if list.is_empty() {
+                self.by_remote.remove(&remote);
+            }
+        }
+    }
+
+    /// Close every live connection whose remote is no longer `allowed`.
+    fn close_revoked(&mut self, allowed: impl Fn(&EndpointId) -> bool) {
+        self.by_remote.retain(|remote, list| {
+            if allowed(remote) {
+                return true;
+            }
+            for (_, connection) in list.drain(..) {
+                connection.close(REJECT_CODE.into(), b"revoked");
+            }
+            false
+        });
+    }
+}
+
+type Live = Arc<std::sync::Mutex<LiveConnections>>;
+
+/// One control command from an allow-listed controller (plan §4.2): the
+/// command document and where to send the canonical response document.
+#[derive(Debug)]
+pub struct ControlRequest {
+    pub from: EndpointId,
+    pub command: Vec<u8>,
+    pub reply: oneshot::Sender<Vec<u8>>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
@@ -87,6 +142,12 @@ pub struct NodeTransport {
     endpoint: Endpoint,
     peers: Arc<RwLock<HashMap<EndpointId, PeerBinding>>>,
     seen: Arc<AsyncMutex<Seen>>,
+    /// Endpoints allowed to open the control ALPN, and where commands go.
+    controllers: Arc<RwLock<std::collections::HashSet<EndpointId>>>,
+    control: Arc<RwLock<Option<mpsc::Sender<ControlRequest>>>>,
+    /// Live data-plane and control connections (closed on revocation).
+    peer_live: Live,
+    control_live: Live,
 }
 
 impl NodeTransport {
@@ -101,11 +162,16 @@ impl NodeTransport {
         };
         let endpoint = builder
             .secret_key(SecretKey::from_bytes(secret))
-            .alpns(vec![IROH_ALPN.to_vec()])
+            .alpns(vec![IROH_ALPN.to_vec(), CONTROL_ALPN.to_vec()])
             .bind()
             .await
             .map_err(|_| err("endpoint_bind_failed"))?;
-        Ok(Self { endpoint, peers: Arc::new(RwLock::new(HashMap::new())), seen: Arc::default() })
+        Ok(Self { endpoint, peers: Arc::new(RwLock::new(HashMap::new())), seen: Arc::default(),
+            controllers: Arc::default(),
+            control: Arc::default(),
+            peer_live: Live::default(),
+            control_live: Live::default(),
+        })
     }
 
     pub fn endpoint_id(&self) -> String {
@@ -152,6 +218,8 @@ impl NodeTransport {
         for binding in peers {
             table.insert(binding.addr.id, binding);
         }
+        // A peer that left the route keeps no live connection.
+        self.peer_live.lock().unwrap().close_revoked(|remote| table.contains_key(remote));
     }
 
     /// The configured peer bound to a Router node id.
@@ -161,7 +229,12 @@ impl NodeTransport {
 
     /// Withdraw a peer from the allow-list (its next connection is refused).
     pub async fn remove_peer(&self, peer: EndpointId) {
-        self.peers.write().await.remove(&peer);
+        let table = {
+            let mut table = self.peers.write().await;
+            table.remove(&peer);
+            table.keys().copied().collect::<std::collections::HashSet<_>>()
+        };
+        self.peer_live.lock().unwrap().close_revoked(|remote| table.contains(remote));
     }
 
     pub async fn close(&self) {
@@ -185,23 +258,76 @@ impl NodeTransport {
         self.accept_loop(inbox, true)
     }
 
+    /// Replace the controllers allowed to open the control ALPN.
+    /// A controller withdrawn here loses its live control connections too.
+    pub async fn configure_controllers(&self, controllers: impl IntoIterator<Item = EndpointId>) {
+        let allowed: std::collections::HashSet<EndpointId> = controllers.into_iter().collect();
+        *self.controllers.write().await = allowed.clone();
+        self.control_live.lock().unwrap().close_revoked(|remote| allowed.contains(remote));
+    }
+
+    /// Route control commands to `handler` (none: control connections refused).
+    pub async fn set_control_handler(&self, handler: Option<mpsc::Sender<ControlRequest>>) {
+        *self.control.write().await = handler;
+    }
+
+    /// Controller side: send one control command document, return the response.
+    pub async fn control_call(&self, peer: EndpointAddr, command: &[u8]) -> Result<Vec<u8>, TransportError> {
+        let connection = timeout(Duration::from_secs(30), self.endpoint.connect(peer, CONTROL_ALPN))
+            .await
+            .map_err(|_| err("connect_timeout"))?
+            .map_err(|e| TransportError(format!("connect_failed:{e}")))?;
+        let (mut send, mut recv) = timeout(STREAM_IO_TIMEOUT, connection.open_bi()).await.map_err(|_| err("open_timeout"))?.map_err(|_| err("open_failed"))?;
+        timeout(STREAM_IO_TIMEOUT, send.write_all(command)).await.map_err(|_| err("write_timeout"))?.map_err(|_| err("write_failed"))?;
+        send.finish().map_err(|_| err("write_failed"))?;
+        timeout(CONTROL_COMMAND_TIMEOUT + STREAM_IO_TIMEOUT, recv.read_to_end(MAX_COMMAND_BYTES))
+            .await
+            .map_err(|_| err("read_timeout"))?
+            .map_err(|_| err("read_failed"))
+    }
+
     fn accept_loop(&self, inbox: mpsc::Sender<Inbound>, dispatch: bool) -> tokio::task::JoinHandle<()> {
         let endpoint = self.endpoint.clone();
         let peers = self.peers.clone();
         let seen = self.seen.clone();
+        let controllers = self.controllers.clone();
+        let control = self.control.clone();
+        let (peer_live, control_live) = (self.peer_live.clone(), self.control_live.clone());
         tokio::spawn(async move {
             while let Some(incoming) = endpoint.accept().await {
                 let peers = peers.clone();
                 let inbox = inbox.clone();
                 let seen = seen.clone();
+                let (controllers, control) = (controllers.clone(), control.clone());
+                let (peer_live, control_live) = (peer_live.clone(), control_live.clone());
                 tokio::spawn(async move {
                     let Ok(connection) = incoming.await else { return };
                     let remote = connection.remote_id();
+                    if connection.alpn() == CONTROL_ALPN {
+                        serve_control(connection, remote, controllers, control, control_live).await;
+                        return;
+                    }
                     let Some(binding) = peers.read().await.get(&remote).cloned() else {
                         connection.close(REJECT_CODE.into(), b"identity");
                         return;
                     };
+                    // Registered before the re-check, so a removal racing this
+                    // accept either sees the connection or is seen by it.
+                    let live_id = peer_live.lock().unwrap().add(remote, connection.clone());
+                    if !peers.read().await.contains_key(&remote) {
+                        connection.close(REJECT_CODE.into(), b"revoked");
+                        peer_live.lock().unwrap().remove(remote, live_id);
+                        return;
+                    }
+                    let _live = LiveGuard { live: peer_live.clone(), remote, id: live_id };
                     while let Ok((mut send, mut recv)) = connection.accept_bi().await {
+                        // Re-checked for every stream: a peer removed from the
+                        // route loses this connection (its generation check
+                        // below would also refuse the frame).
+                        if !peers.read().await.contains_key(&remote) {
+                            connection.close(REJECT_CODE.into(), b"revoked");
+                            return;
+                        }
                         let Ok(Ok(bytes)) = timeout(STREAM_IO_TIMEOUT, recv.read_to_end(MAX_TRANSFER_BYTES)).await
                         else {
                             continue;
@@ -277,6 +403,71 @@ impl NodeTransport {
             RemoteKind::Ack => Ok(report),
             RemoteKind::Error => Err(TransportError(String::from_utf8_lossy(&response.payload).into_owned())),
             RemoteKind::Transfer => Err(err("unexpected_transfer")),
+        }
+    }
+}
+
+/// One controller connection: only an allow-listed controller, a bounded
+/// command per stream, a bounded number of streams in flight, and every
+/// answer within [`CONTROL_COMMAND_TIMEOUT`].
+async fn serve_control(
+    connection: iroh::endpoint::Connection,
+    remote: EndpointId,
+    controllers: Arc<RwLock<std::collections::HashSet<EndpointId>>>,
+    control: Arc<RwLock<Option<mpsc::Sender<ControlRequest>>>>,
+    live: Live,
+) {
+    let handler = control.read().await.clone();
+    let (true, Some(handler)) = (controllers.read().await.contains(&remote), handler) else {
+        connection.close(REJECT_CODE.into(), b"identity");
+        return;
+    };
+    let live_id = live.lock().unwrap().add(remote, connection.clone());
+    let _live = LiveGuard { live: live.clone(), remote, id: live_id };
+    let slots = Arc::new(tokio::sync::Semaphore::new(CONTROL_STREAMS));
+    while let Ok((mut send, mut recv)) = connection.accept_bi().await {
+        // Membership is re-checked for every stream: a withdrawn controller's
+        // connection is closed, never served.
+        if !controllers.read().await.contains(&remote) {
+            connection.close(REJECT_CODE.into(), b"revoked");
+            return;
+        }
+        let Ok(permit) = slots.clone().try_acquire_owned() else {
+            let _ = send.finish();
+            continue;
+        };
+        let (handler, controllers, connection) = (handler.clone(), controllers.clone(), connection.clone());
+        tokio::spawn(async move {
+            let _permit = permit;
+            let Ok(Ok(command)) = timeout(STREAM_IO_TIMEOUT, recv.read_to_end(MAX_COMMAND_BYTES)).await else { return };
+            // And again right before the command reaches the node.
+            if !controllers.read().await.contains(&remote) {
+                connection.close(REJECT_CODE.into(), b"revoked");
+                return;
+            }
+            let (reply, answer) = oneshot::channel();
+            if handler.send(ControlRequest { from: remote, command, reply }).await.is_err() {
+                return;
+            }
+            if let Ok(Ok(response)) = timeout(CONTROL_COMMAND_TIMEOUT, answer).await {
+                let _ = timeout(STREAM_IO_TIMEOUT, send.write_all(&response)).await;
+                let _ = send.finish();
+            }
+        });
+    }
+}
+
+/// Unregisters a live connection when its serving task ends.
+struct LiveGuard {
+    live: Live,
+    remote: EndpointId,
+    id: u64,
+}
+
+impl Drop for LiveGuard {
+    fn drop(&mut self) {
+        if let Ok(mut live) = self.live.lock() {
+            live.remove(self.remote, self.id);
         }
     }
 }

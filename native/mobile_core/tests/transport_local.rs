@@ -87,3 +87,72 @@ async fn dispatch_mode_acks_after_the_verdict_and_dedupes_message_ids() {
     // A stale generation never reaches the dispatcher.
     assert_eq!(mac.send(phone.addr(), 2, &frame(3)).await.unwrap_err().0, "peer_rotated");
 }
+
+/// Open a raw connection on `alpn` and run one request/response stream on it.
+async fn stream_once(connection: &iroh::endpoint::Connection, request: &[u8]) -> Result<Vec<u8>, String> {
+    let (mut send, mut recv) = connection.open_bi().await.map_err(|e| format!("open:{e}"))?;
+    send.write_all(request).await.map_err(|e| format!("write:{e}"))?;
+    send.finish().map_err(|e| format!("finish:{e}"))?;
+    tokio::time::timeout(std::time::Duration::from_secs(10), recv.read_to_end(1 << 20))
+        .await
+        .map_err(|_| "timeout".to_owned())?
+        .map_err(|e| format!("read:{e}"))
+}
+
+/// Revoking a controller closes its live control connection: the next stream
+/// on it is refused and nothing more reaches the handler.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_revoked_controller_loses_its_live_control_connection() {
+    use mycelium_mobile_core::node_control::CONTROL_ALPN;
+    use mycelium_mobile_core::transport::parse_endpoint_id;
+    let phone = NodeTransport::bind(&[41; 32], Reachability::LocalOnly).await.unwrap();
+    let controller = NodeTransport::bind(&[42; 32], Reachability::LocalOnly).await.unwrap();
+    let (tx, _rx) = mpsc::channel(8);
+    let _accept = phone.spawn_accept_dispatch(tx);
+    let (control_tx, mut control_rx) = mpsc::channel(8);
+    phone.set_control_handler(Some(control_tx)).await;
+    let controller_id = parse_endpoint_id(&controller.endpoint_id()).unwrap();
+    phone.configure_controllers([controller_id]).await;
+    let answered = tokio::spawn(async move {
+        let mut seen = Vec::new();
+        while let Some(request) = control_rx.recv().await {
+            seen.push((request.from, request.command.clone()));
+            let _ = request.reply.send(b"answer".to_vec());
+        }
+        seen
+    });
+    let connection = controller.endpoint().connect(phone.addr(), CONTROL_ALPN).await.unwrap();
+    assert_eq!(stream_once(&connection, b"first").await.unwrap(), b"answer");
+    phone.configure_controllers([]).await;
+    // The same live connection: closed, so the next stream is refused.
+    assert!(stream_once(&connection, b"second").await.is_err());
+    assert!(tokio::time::timeout(std::time::Duration::from_secs(5), connection.closed()).await.is_ok(), "connection closed by the phone");
+    phone.set_control_handler(None).await;
+    let seen = tokio::time::timeout(std::time::Duration::from_secs(5), answered).await.unwrap().unwrap();
+    // Only the first command was handled, and `from` is the authenticated remote.
+    assert_eq!(seen, vec![(controller_id, b"first".to_vec())]);
+}
+
+/// A route peer removed from the allow-list cannot keep delivering Router
+/// frames over a connection it opened before the removal.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_route_peer_cannot_deliver_on_its_live_connection() {
+    use mycelium_mobile_core::transport::{IROH_ALPN, PeerBinding, parse_endpoint_id};
+    let phone = NodeTransport::bind(&[43; 32], Reachability::LocalOnly).await.unwrap();
+    let mac = NodeTransport::bind(&[44; 32], Reachability::LocalOnly).await.unwrap();
+    let (tx, mut rx) = mpsc::channel(8);
+    let _accept = phone.spawn_accept(tx);
+    let mac_id = parse_endpoint_id(&mac.endpoint_id()).unwrap();
+    phone.configure_route_peers(vec![PeerBinding { generation: 2, node_id: "node-mac".into(), addr: iroh::EndpointAddr::from(mac_id) }]).await;
+    let frame = wire::encode_frame("HopHeader", &json!({"n": 1}), b"").unwrap();
+    let transfer = |id: u8| wire::encode_remote(wire::RemoteKind::Transfer, [id; 16], &wire::transfer_payload(2, &frame)).unwrap();
+    let connection = mac.endpoint().connect(phone.addr(), IROH_ALPN).await.unwrap();
+    let ack = wire::decode_remote(&stream_once(&connection, &transfer(1)).await.unwrap()).unwrap();
+    assert_eq!(ack.kind, wire::RemoteKind::Ack);
+    assert!(rx.recv().await.is_some());
+    // The route changes and node-mac is no longer on it.
+    phone.configure_route_peers(vec![]).await;
+    assert!(stream_once(&connection, &transfer(2)).await.is_err());
+    assert!(tokio::time::timeout(std::time::Duration::from_secs(5), connection.closed()).await.is_ok());
+    assert!(rx.try_recv().is_err(), "nothing delivered after the removal");
+}

@@ -1,0 +1,123 @@
+{
+  "endpoint_addr": {
+    "addrs": [],
+    "id": "endpoint-phone"
+  },
+  "identity": {
+    "boot_id": "boot-1",
+    "endpoint_id": "endpoint-phone",
+    "host_id": "host-phone",
+    "node_id": "node-phone",
+    "process_id": "process-1"
+  },
+  "monotonic_ns": 7,
+  "schema": "mycelium.phone_node_control.golden.v1",
+  "seed_hex": "0909090909090909090909090909090909090909090909090909090909090909",
+  "stage": {
+    "assignment_id": "assignment-1",
+    "backend": "mobile-rust-qwen2",
+    "pack_digest": "sha256:pack",
+    "stage_id": "stage-phone"
+  },
+  "steps": [
+    {
+      "command": {
+        "command": "hello",
+        "command_id": "c-hello",
+        "deployment_id": "dep-1",
+        "payload": {},
+        "protocol": "mycelium.physical_node_control.v1",
+        "run_id": "run-1"
+      },
+      "response_canonical": "{\"command_id\":\"c-hello\",\"node_id\":\"node-phone\",\"ok\":true,\"protocol\":\"mycelium.physical_node_control.v1\",\"result\":{\"boot_id\":\"boot-1\",\"deployment_id\":\"dep-1\",\"endpoint_id\":\"endpoint-phone\",\"host_id\":\"host-phone\",\"node_id\":\"node-phone\",\"peer_generation\":0,\"process_id\":\"process-1\",\"protocol\":\"mycelium.physical_node_control.v1\",\"route_ready\":false,\"run_id\":\"run-1\",\"state\":\"NEW\"},\"route_ready\":false}"
+    },
+    {
+      "command": {
+        "command": "configure",
+        "command_id": "c-configure",
+        "deployment_id": "dep-1",
+        "payload": {
+          "assignment_id": "assignment-1",
+          "load_generation": 1,
+          "manifest_digest": "sha256:graph",
+          "pack_digest": "sha256:pack",
+          "stage_id": "stage-phone"
+        },
+        "protocol": "mycelium.physical_node_control.v1",
+        "run_id": "run-1"
+      },
+      "response_canonical": "{\"command_id\":\"c-configure\",\"node_id\":\"node-phone\",\"ok\":true,\"protocol\":\"mycelium.physical_node_control.v1\",\"result\":{\"observation\":{\"deployment_id\":\"dep-1\",\"details\":{\"assignment_id\":\"assignment-1\",\"endpoint_addr\":{\"addrs\":[],\"id\":\"endpoint-phone\"},\"load_generation\":1,\"manifest_digest\":\"sha256:graph\",\"phone_stage_pack_digest\":\"sha256:pack\",\"runtime_mode\":\"complete_context_replay\",\"stage_id\":\"stage-phone\"},\"endpoint_id\":\"endpoint-phone\",\"event\":\"configured\",\"host_id\":\"host-phone\",\"monotonic_ns\":7,\"node_id\":\"node-phone\",\"peer_generation\":0,\"process_id\":\"process-1\",\"protocol\":\"mycelium.physical_node_observation.v1\",\"route_ready\":false,\"run_id\":\"run-1\",\"state\":\"CONFIGURED\"},\"signature\":{\"algorithm\":\"ed25519\",\"signature\":\"YJihoO68M892C9HWDJ/GF51m6OeUWyQpHMkRH4AyLum1bhxsP/0CJO3UKKLTnqGDuwbDqi5LaAOlnQsC/bNiBA==\",\"signed_statement_digest\":\"sha256:5891880c145ec852e648bf36dffd1d55af843b250c673c3700793fe0a26bf86b\",\"signer_endpoint_id\":\"endpoint-phone\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"},\"verification_key\":{\"algorithm\":\"ed25519\",\"encoding\":\"base64\",\"verification_key\":\"/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"}},\"route_ready\":false}"
+    },
+    {
+      "command": {
+        "command": "start",
+        "command_id": "c-start",
+        "deployment_id": "dep-1",
+        "payload": {
+          "local_generation": 5,
+          "peer": {
+            "endpoint_addr": {
+              "addrs": [],
+              "id": "endpoint-final"
+            },
+            "endpoint_id": "endpoint-final",
+            "generation": 3,
+            "node_id": "node-mac-final"
+          }
+        },
+        "protocol": "mycelium.physical_node_control.v1",
+        "run_id": "run-1"
+      },
+      "response_canonical": "{\"command_id\":\"c-start\",\"node_id\":\"node-phone\",\"ok\":true,\"protocol\":\"mycelium.physical_node_control.v1\",\"result\":{\"observation\":{\"deployment_id\":\"dep-1\",\"details\":{\"local_generation\":5,\"peer_node_id\":\"node-mac-final\",\"peer_node_ids\":[\"node-mac-final\"]},\"endpoint_id\":\"endpoint-phone\",\"event\":\"started\",\"host_id\":\"host-phone\",\"monotonic_ns\":7,\"node_id\":\"node-phone\",\"peer_generation\":5,\"process_id\":\"process-1\",\"protocol\":\"mycelium.physical_node_observation.v1\",\"route_ready\":false,\"run_id\":\"run-1\",\"state\":\"RUNNING\"},\"signature\":{\"algorithm\":\"ed25519\",\"signature\":\"RjOYQ7LM7t1WVvLriHYU/cK46zEB6zRuCjRGTAP/+JsTrm8FKXBr+sgTdKfFBD1+o2nFvhmGPmCavdxw1u7hCQ==\",\"signed_statement_digest\":\"sha256:a29a23e711c08c7bc06c049f7720c2c4f980cf3de2c771041e69f53e1d96bc40\",\"signer_endpoint_id\":\"endpoint-phone\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"},\"verification_key\":{\"algorithm\":\"ed25519\",\"encoding\":\"base64\",\"verification_key\":\"/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"}},\"route_ready\":false}"
+    },
+    {
+      "command": {
+        "command": "bind_request_control",
+        "command_id": "c-bind_request_control",
+        "deployment_id": "dep-1",
+        "payload": {
+          "control": {
+            "absolute_deadline_ms": 10,
+            "cancellation_generation": 0,
+            "command_id": "cmd",
+            "deployment_epoch": 1,
+            "deployment_id": "dep-1",
+            "path_attempt": 0,
+            "path_digest": "sha256:p",
+            "path_id": "p",
+            "publisher_generation": 0,
+            "qualification_digest": "sha256:q",
+            "request_attempt": 0,
+            "topology_generation": 1
+          },
+          "request_id": "r"
+        },
+        "protocol": "mycelium.physical_node_control.v1",
+        "run_id": "run-1"
+      },
+      "response_canonical": "{\"command_id\":\"c-bind_request_control\",\"node_id\":\"node-phone\",\"ok\":true,\"protocol\":\"mycelium.physical_node_control.v1\",\"result\":{\"observation\":{\"deployment_id\":\"dep-1\",\"details\":{\"control_digest\":\"sha256:8f7da4ea221d5c151c978800eaf884d1fb9e53d5df0443e93e779a881f157db1\",\"request_id\":\"r\"},\"endpoint_id\":\"endpoint-phone\",\"event\":\"request_control_bound\",\"host_id\":\"host-phone\",\"monotonic_ns\":7,\"node_id\":\"node-phone\",\"peer_generation\":5,\"process_id\":\"process-1\",\"protocol\":\"mycelium.physical_node_observation.v1\",\"route_ready\":false,\"run_id\":\"run-1\",\"state\":\"RUNNING\"},\"signature\":{\"algorithm\":\"ed25519\",\"signature\":\"RuklomEMyu9pMn6Lvc5Ha2Ch+ECha2T+IjltYYjMyb9BpEkT7kvRBgwQ3yvS1C/oEGoI2Zmp7UAlCkkZvpr5Bw==\",\"signed_statement_digest\":\"sha256:d79c65c56fa72312f0f24125c651d8906af5dbe1370017f1ed5416d6b3374986\",\"signer_endpoint_id\":\"endpoint-phone\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"},\"verification_key\":{\"algorithm\":\"ed25519\",\"encoding\":\"base64\",\"verification_key\":\"/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"}},\"route_ready\":false}"
+    },
+    {
+      "command": {
+        "command": "infer_start",
+        "command_id": "c-infer_start",
+        "deployment_id": "dep-1",
+        "payload": {},
+        "protocol": "mycelium.physical_node_control.v1",
+        "run_id": "run-1"
+      },
+      "response_canonical": "{\"command_id\":\"c-infer_start\",\"error\":{\"code\":\"stage_only_node\"},\"node_id\":\"node-phone\",\"ok\":false,\"protocol\":\"mycelium.physical_node_control.v1\",\"route_ready\":false}"
+    },
+    {
+      "command": {
+        "command": "stop",
+        "command_id": "c-stop",
+        "deployment_id": "dep-1",
+        "payload": {},
+        "protocol": "mycelium.physical_node_control.v1",
+        "run_id": "run-1"
+      },
+      "response_canonical": "{\"command_id\":\"c-stop\",\"node_id\":\"node-phone\",\"ok\":true,\"protocol\":\"mycelium.physical_node_control.v1\",\"result\":{\"final_observation\":{\"observation\":{\"deployment_id\":\"dep-1\",\"details\":{},\"endpoint_id\":\"endpoint-phone\",\"event\":\"stopping\",\"host_id\":\"host-phone\",\"monotonic_ns\":7,\"node_id\":\"node-phone\",\"peer_generation\":5,\"process_id\":\"process-1\",\"protocol\":\"mycelium.physical_node_observation.v1\",\"route_ready\":false,\"run_id\":\"run-1\",\"state\":\"STOPPING\"},\"signature\":{\"algorithm\":\"ed25519\",\"signature\":\"kt8xD3h2PAa0v7AAELNFcPshaznDtkf2hhLnx/FKqJ6kwEiVDmCiOeTJPLySD9kncs9bT3pcuaeVBnddhZCcDg==\",\"signed_statement_digest\":\"sha256:543cf25adaf1b4fca6922fb1a6ee21ee103db12013210f6d394ab883b5117ba6\",\"signer_endpoint_id\":\"endpoint-phone\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"},\"verification_key\":{\"algorithm\":\"ed25519\",\"encoding\":\"base64\",\"verification_key\":\"/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"}},\"state\":\"STOPPING\"},\"route_ready\":false}"
+    }
+  ]
+}

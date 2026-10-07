@@ -24,6 +24,7 @@ pub mod artifact_grant;
 pub mod wire;
 pub mod stage_wire;
 pub mod stage_node;
+pub mod node_control;
 pub mod membership;
 pub mod evidence;
 pub mod route_assignment;

@@ -204,6 +204,8 @@ struct Shared {
     /// and path tables. A route change forgets the live paths and the ledger
     /// but keeps the tables (fail closed: no cancelled attempt revives).
     stage_node: Option<crate::stage_node::StageNode>,
+    /// The route controller's session (`mycelium.node_control.v1`).
+    control: Option<crate::node_control::ControlNode>,
 }
 
 /// One background acquisition: which manifest, and how to stop it.
@@ -349,6 +351,7 @@ impl NodeCore {
                 shell_metrics: None,
                 acquisition: None,
                 stage_node: None,
+                control: None,
             })),
             http,
             incarnation: new_incarnation()?,
@@ -387,6 +390,14 @@ impl NodeCore {
             }
         });
         self.rt.spawn(serve_inbox(rx, self.shared.clone(), self.transport.clone()));
+        // The route controller's commands (plan §4.2), answered off the
+        // compute path so `health` answers while a stage runs.
+        let (control_tx, control_rx) = mpsc::channel(8);
+        self.rt.spawn({
+            let t = self.transport.clone();
+            async move { t.set_control_handler(Some(control_tx)).await }
+        });
+        self.rt.spawn(serve_control(control_rx, self.shared.clone(), self.transport.clone(), self.identity.clone(), self.incarnation.clone()));
         // Seal native runtime observations into app-private evidence/ on a fixed
         // cadence for the lifetime of the node (the app owns one core).
         let (data_dir, shared, identity) = (self.data_dir.clone(), self.shared.clone(), self.identity.clone());
@@ -746,6 +757,16 @@ impl NodeCore {
         if forward_to {
             self.shared.lock().unwrap().forward = Some((iroh::EndpointAddr::from(id), generation));
         }
+        Ok(())
+    }
+
+    /// Allow exactly these route controllers (iroh endpoint ids) on the
+    /// control ALPN; every other endpoint is refused before any command is
+    /// read. The controller set comes from the seed-signed assignment
+    /// (M4-host proposal); an empty set refuses all control.
+    pub fn set_route_controllers(&self, endpoint_ids: &[String]) -> Result<(), NodeError> {
+        let ids = endpoint_ids.iter().map(|e| crate::transport::parse_endpoint_id(e).map_err(|e| nerr(e.0))).collect::<Result<Vec<_>, _>>()?;
+        self.rt.block_on(self.transport.configure_controllers(ids));
         Ok(())
     }
 
@@ -1379,6 +1400,122 @@ async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>
     }
 }
 
+/// The node as the control channel sees it, for one command.
+struct NodeControlEnv<'a> {
+    s: &'a mut Shared,
+    endpoint_addr: Value,
+    install: Option<(Vec<crate::node_control::PeerSpec>, u64)>,
+    stop: bool,
+}
+
+impl crate::node_control::ControlEnv for NodeControlEnv<'_> {
+    fn endpoint_addr(&self) -> Value {
+        self.endpoint_addr.clone()
+    }
+    fn stage(&self) -> Option<crate::node_control::StageView> {
+        let route = self.s.route.as_ref()?;
+        let stage = self.s.stage.as_ref()?;
+        Some(crate::node_control::StageView {
+            assignment_id: route.assignment.assignment_id.clone(),
+            stage_id: stage.stage_id().to_owned(),
+            pack_digest: route.assignment.stage_pack_digest.clone(),
+            backend: stage.backend().to_owned(),
+        })
+    }
+    fn install_peers(&mut self, peers: &[crate::node_control::PeerSpec], local_generation: u64) -> Result<(), String> {
+        for p in peers {
+            serde_json::from_value::<iroh::EndpointAddr>(p.endpoint_addr.clone()).map_err(|_| "invalid_peer_binding".to_owned())?;
+        }
+        self.install = Some((peers.to_vec(), local_generation));
+        Ok(())
+    }
+    fn health(&self) -> Value {
+        json!({
+            "stage_loaded": self.s.stage.is_some(),
+            "frames_received": self.s.status.frames_received,
+            "frames_executed": self.s.status.frames_executed,
+            "last_error": self.s.status.last_error,
+        })
+    }
+    fn host_resources(&self) -> Value {
+        let backend = self.s.stage.as_ref().map(|stage| stage.backend()).unwrap_or(crate::qwen2::QWEN2_BACKEND);
+        let now_ms = (now_s() * 1000.0) as u64;
+        json!({
+            "protocol": "mycelium.host_resource_snapshot.v1",
+            "observed_at_unix_ms": now_ms,
+            "valid_until_unix_ms": now_ms + 120_000,
+            "backend": backend,
+            "supported_architectures": ["qwen2"],
+            "supported_dtypes": ["float32"],
+            "supported_quantizations": ["int8-weight-only"],
+            "decode_modes_by_architecture": {"qwen2": [crate::node_control::REPLAY_DECODE_MODE]},
+        })
+    }
+    fn monotonic_ns(&self) -> u64 {
+        (monotonic_s() * 1e9) as u64
+    }
+    fn stop(&mut self) {
+        self.stop = true;
+    }
+}
+
+/// Answer the route controller's commands. Each command runs on the blocking
+/// pool under the shared lock (never behind a stage run: the stage step takes
+/// the same lock only around its own decision), then its transport effect
+/// (route peers, drain) is applied.
+async fn serve_control(
+    mut rx: mpsc::Receiver<crate::transport::ControlRequest>,
+    shared: Arc<Mutex<Shared>>,
+    transport: NodeTransport,
+    identity: Arc<Identity>,
+    incarnation: String,
+) {
+    while let Some(request) = rx.recv().await {
+        let (shared_task, identity_task, incarnation_task) = (shared.clone(), identity.clone(), incarnation.clone());
+        let endpoint_addr = serde_json::to_value(transport.addr()).unwrap_or(Value::Null);
+        let endpoint_id = transport.endpoint_id();
+        let outcome = tokio::task::spawn_blocking(move || {
+            let mut guard = shared_task.lock().unwrap();
+            let s = &mut *guard;
+            let node_id = s.membership.as_ref().map(|m| m.cfg.node_id.clone()).unwrap_or_default();
+            // A stopped session ends; the next controller opens a new one.
+            let mut control = s.control.take().filter(|c| !c.stopped()).unwrap_or_else(|| {
+                crate::node_control::ControlNode::new(crate::node_control::ControlIdentity {
+                    node_id: node_id.clone(),
+                    host_id: node_id.clone(),
+                    process_id: incarnation_task.clone(),
+                    endpoint_id: endpoint_id.clone(),
+                    boot_id: incarnation_task.clone(),
+                })
+            });
+            let mut env = NodeControlEnv { s, endpoint_addr, install: None, stop: false };
+            let response = control.handle(&request.from.to_string(), &request.command, &identity_task, &mut env);
+            let (install, stop) = (env.install.take(), env.stop);
+            s.control = Some(control);
+            (response, install, stop)
+        })
+        .await;
+        let Ok((response, install, stop)) = outcome else { continue };
+        if let Some((peers, _local_generation)) = install {
+            let bindings = peers
+                .into_iter()
+                .filter_map(|p| {
+                    let addr = serde_json::from_value::<iroh::EndpointAddr>(p.endpoint_addr).ok()?;
+                    Some(crate::transport::PeerBinding { generation: p.generation, node_id: p.node_id, addr })
+                })
+                .collect();
+            transport.configure_route_peers(bindings).await;
+        }
+        if stop {
+            let mut s = shared.lock().unwrap();
+            if let Some(stage_node) = s.stage_node.as_mut() {
+                stage_node.clear();
+            }
+        }
+        let _ = request.reply.send(response);
+    }
+}
+
 /// One Router frame through the stage node, under the shared lock, on the
 /// blocking pool (the stage run is CPU work). The owner's thermal ceiling
 /// turns an admitted hop into a `thermal_ceiling_reached` FailureReport.
@@ -1614,6 +1751,7 @@ mod tests {
             shell_metrics: None,
             acquisition: None,
             stage_node: Some(crate::stage_node::StageNode::new("node-phone")),
+            control: None,
         }));
         let (tx, rx) = mpsc::channel(8);
         let _accept = phone.spawn_accept_dispatch(tx);
@@ -1665,5 +1803,79 @@ mod tests {
         // A route change forgets live paths but never revives the cancelled attempt.
         clear_route(&mut shared.lock().unwrap());
         assert_eq!(entry.send(phone.addr(), 1, &golden("01-manifest-locked.bin")).await.unwrap_err().0, "manifest_registration_rejected");
+    }
+
+    /// The control channel over a real loopback iroh connection: only an
+    /// allow-listed controller is answered; `hello`, `configure` (bound to the
+    /// phone's applied stage) and `start` return phone-signed observations,
+    /// and `start` installs the route peers the stage node forwards to.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_control_channel_answers_only_the_route_controller() {
+        use crate::transport::{Reachability, parse_endpoint_id};
+        let phone = NodeTransport::bind(&[31; 32], Reachability::LocalOnly).await.unwrap();
+        let controller = NodeTransport::bind(&[32; 32], Reachability::LocalOnly).await.unwrap();
+        let stranger = NodeTransport::bind(&[33; 32], Reachability::LocalOnly).await.unwrap();
+        let entry = NodeTransport::bind(&[34; 32], Reachability::LocalOnly).await.unwrap();
+        let identity = Arc::new(Identity::from_secret(&phone.endpoint_id(), &[35; 32]).unwrap());
+        let assignment = RouteAssignment {
+            assignment_id: "assignment-1".into(),
+            stage_pack_digest: "sha256:pack".into(),
+            peer_endpoint_id: entry.endpoint_id(),
+            route_generation: 1,
+            forward_to: false,
+            expires_at: now_s() + 3600.0,
+        };
+        let shared = Arc::new(Mutex::new(Shared {
+            observation: ObservationCursor { window_started_at: now_s(), frames_at_window_start: 0, evidence_generation: 0 },
+            membership: None,
+            supervisor_running: false,
+            status: NodeStatus::default(),
+            session: None,
+            invitation: None,
+            stage: Some(Box::new(GoldenStage { released: Arc::default() })),
+            forward: None,
+            route: Some(AppliedRoute { assignment, peer: parse_endpoint_id(&entry.endpoint_id()).unwrap() }),
+            shell_metrics: None,
+            acquisition: None,
+            stage_node: None,
+            control: Some(crate::node_control::ControlNode::new(crate::node_control::ControlIdentity {
+                node_id: "node-phone".into(),
+                host_id: "host-phone".into(),
+                process_id: "process-1".into(),
+                endpoint_id: phone.endpoint_id(),
+                boot_id: "boot-1".into(),
+            })),
+        }));
+        let (dispatch_tx, _dispatch_rx) = mpsc::channel(8);
+        let _accept = phone.spawn_accept_dispatch(dispatch_tx);
+        let (control_tx, control_rx) = mpsc::channel(8);
+        phone.set_control_handler(Some(control_tx)).await;
+        phone.configure_controllers([parse_endpoint_id(&controller.endpoint_id()).unwrap()]).await;
+        tokio::spawn(serve_control(control_rx, shared.clone(), phone.clone(), identity.clone(), "inc-1".into()));
+
+        let command = |command: &str, payload: Value| {
+            serde_json::to_vec(&json!({"protocol": crate::node_control::NODE_CONTROL_PROTOCOL, "command_id": format!("c-{command}"), "run_id": "run-1", "deployment_id": "dep-1", "command": command, "payload": payload})).unwrap()
+        };
+        // Not the route controller: refused before any command is read.
+        assert!(stranger.control_call(phone.addr(), &command("hello", json!({}))).await.is_err());
+        let call = |bytes: Vec<u8>| {
+            let (controller, addr) = (controller.clone(), phone.addr());
+            async move { serde_json::from_slice::<Value>(&controller.control_call(addr, &bytes).await.unwrap()).unwrap() }
+        };
+        let hello = call(command("hello", json!({}))).await;
+        assert_eq!((hello["ok"].clone(), hello["result"]["endpoint_id"].clone()), (json!(true), json!(phone.endpoint_id())));
+        let configure = json!({"assignment_id": "assignment-1", "stage_id": "stage-golden", "pack_digest": "sha256:pack", "manifest_digest": "sha256:graph", "load_generation": 1});
+        let configured = call(command("configure", configure)).await;
+        assert_eq!(configured["ok"], true, "{configured}");
+        let result = &configured["result"];
+        crate::identity::verify(&result["observation"], &result["signature"], &result["verification_key"]).unwrap();
+        assert_eq!(result["observation"]["details"]["endpoint_addr"]["id"], phone.endpoint_id());
+        let entry_addr = serde_json::to_value(entry.addr()).unwrap();
+        let start = json!({"peer": {"node_id": "node-mac-entry", "endpoint_id": entry.endpoint_id(), "endpoint_addr": entry_addr, "generation": 4}, "local_generation": 2});
+        let started = call(command("start", start)).await;
+        assert_eq!(started["result"]["observation"]["event"], "started", "{started}");
+        assert_eq!(phone.peer_for_node("node-mac-entry").await.unwrap().generation, 4);
+        let refused = call(command("infer_start", json!({}))).await;
+        assert_eq!(refused["error"]["code"], "stage_only_node");
     }
 }
