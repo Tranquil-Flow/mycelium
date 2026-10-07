@@ -15,6 +15,7 @@ import re
 import shutil
 import ssl
 import subprocess
+import sys
 import threading
 from urllib.parse import urlsplit
 
@@ -117,7 +118,8 @@ def provider_event(provider,line):
 
 
 def installed_relay_binary():
-    bundled=Path(__file__).resolve().parent/'native/cloudflared'
+    name='cloudflared.exe' if sys.platform=='win32' else 'cloudflared'
+    bundled=Path(__file__).resolve().parent/'native'/name
     if bundled.is_file() and os.access(bundled,os.X_OK):return str(bundled)
     return shutil.which('cloudflared')
 
@@ -142,6 +144,9 @@ class TemporaryHttpsRelay:
         home=_private_directory(self.root/'isolated-home',create=True)
         env={k:v for k,v in os.environ.items() if not k.startswith(('TUNNEL_','CLOUDFLARE_','CF_')) and k!='NO_TLS_VERIFY'}
         env['HOME']=str(home)
+        if sys.platform=='win32':
+            # cloudflared resolves ~/.cloudflared from USERPROFILE on Windows: isolate it too.
+            env['USERPROFILE']=str(home)
         self.proxy=SeedRelayProxy().start()
         try:
             command=[binary,'--no-autoupdate','tunnel','--url',self.proxy.origin,
@@ -198,5 +203,5 @@ class TemporaryHttpsRelay:
             if self.proxy is not None:self.proxy.close()
             if self.root.exists():
                 path=self.root/'relay-tail.log'
-                fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_TRUNC|os.O_NOFOLLOW,0o600)
+                fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_TRUNC|getattr(os,'O_NOFOLLOW',0),0o600)
                 with os.fdopen(fd,'w') as stream:stream.write(''.join(self._lines))

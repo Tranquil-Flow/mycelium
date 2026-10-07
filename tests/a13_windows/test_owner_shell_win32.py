@@ -138,3 +138,53 @@ def test_owner_journal_lock_is_exclusive_on_win32(fake, tmp_path, monkeypatch):
             sender.close()
         assert sender._win32_lock is None
         owner(tmp_path / "sender", world).close()
+
+
+# ------------------------------------------------------------------ public relay (cloudflared)
+
+
+def test_relay_isolates_userprofile_and_closes_without_o_nofollow(fake, tmp_path, monkeypatch):
+    import io
+    import os
+
+    from mycelium_a13_macos import public_relay as relay
+
+    launched = {}
+
+    class Process:
+        def __init__(self, command, **kwargs):
+            launched.update(command=command, **kwargs)
+            self.stdout = io.BytesIO(b"INF https://one.trycloudflare.com\n")
+            self.code = None
+
+        def poll(self):
+            return self.code
+
+        def terminate(self):
+            self.code = 0
+
+        def wait(self, timeout=None):
+            return self.code
+
+    class Proxy:
+        origin = "http://127.0.0.1:1"
+
+        def start(self):
+            return self
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("USERPROFILE", r"C:\Users\owner")
+    monkeypatch.setattr(relay, "installed_relay_binary", lambda: "cloudflared.exe")
+    monkeypatch.setattr(relay, "SeedRelayProxy", Proxy)
+    monkeypatch.setattr(relay.subprocess, "Popen", Process)
+    monkeypatch.delattr(os, "O_NOFOLLOW")  # absent on Windows
+    tunnel = relay.TemporaryHttpsRelay(tmp_path / "relay")
+    tunnel.start(acknowledged=True, max_seconds=30)
+    assert tunnel.public_origin == "https://one.trycloudflare.com"
+    home = str(tmp_path / "relay" / "isolated-home")
+    assert launched["env"]["HOME"] == home and launched["env"]["USERPROFILE"] == home
+    tunnel.close()
+    assert (tmp_path / "relay" / "relay-tail.log").exists()
+    assert fake.security_of(tmp_path / "relay" / "isolated-home").dacl_protected
