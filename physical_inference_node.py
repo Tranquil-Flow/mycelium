@@ -1169,6 +1169,8 @@ class PhysicalNodeService:
         self.runtime_identity: dict[str, str] | None = None
         # A7: staged KV-successor roles (``a7/node.json``); ``None`` = A6 only.
         self._a7_wiring: Any = None
+        # A11: staged draft binding (``a11/node.json``); ``None`` = target-only.
+        self._a11_wiring: Any = None
         self.sidecar: NativeSidecarProcess | None = None
         self.transport: IrohTransport | None = None
         self.router: Router | None = None
@@ -1794,6 +1796,43 @@ class PhysicalNodeService:
         )
         return loaded
 
+    def _a11_configure(self, runtime: Any) -> Any:
+        """Load the staged A11 draft binding; absent configuration stays target-only."""
+
+        from mycelium_a11_node_wiring import (
+            NODE_CONFIG_PATH as A11_NODE_CONFIG_PATH,
+            A11WiringError,
+            load_node_wiring,
+            node_config_path_for,
+            validate_node_config,
+        )
+
+        try:
+            candidates: tuple[str, ...] = (node_config_path_for(self.node_id), A11_NODE_CONFIG_PATH)
+        except A11WiringError:
+            candidates = (A11_NODE_CONFIG_PATH,)
+        staged = [
+            relative
+            for relative in candidates
+            if os.path.lexists(self.artifact_root / relative)
+        ]
+        if not staged:
+            return None
+        _require(len(staged) == 1, "a11_node_config_ambiguous")
+        _require(
+            getattr(runtime, "decode_mode", None) == "stage_local_kv",
+            "a11_requires_stage_local_kv",
+        )
+        try:
+            config = validate_node_config(
+                self._safe_document(staged[0], "invalid_a11_node_config"),
+                deployment_id=self.deployment_id,
+                node_id=self.node_id,
+            )
+            return load_node_wiring(self.artifact_root, config)
+        except A11WiringError as exc:
+            raise NodeCommandError(exc.code) from None
+
     def _a7_attach(self, router: Router, transport: Any) -> None:
         wiring = self._a7_wiring
         if wiring is None:
@@ -2145,6 +2184,7 @@ class PhysicalNodeService:
         self._bind_router_config_to_runtime(runtime)
         try:
             runtime, a7_wiring = self._a7_configure(graph, runtime)
+            a11_wiring = self._a11_configure(runtime)
         except BaseException:
             runtime.close(reason="configure_failed")
             raise
@@ -2155,6 +2195,7 @@ class PhysicalNodeService:
             runtime.close(reason="configure_failed")
             raise
         self._a7_wiring = a7_wiring
+        self._a11_wiring = a11_wiring
         self.graph = graph
         self.topology = topology
         self.device_states = device_provider
@@ -2293,6 +2334,8 @@ class PhysicalNodeService:
         try:
             transport.bind_router(router)
             self._a7_attach(router, transport)
+            if self._a11_wiring is not None:
+                self._a11_wiring.attach(router)
             transport.start()
         except BaseException:
             transport.close()
@@ -3230,6 +3273,10 @@ class PhysicalNodeService:
         )
 
     def _infer_start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        # A11: an optional explicit future-request speculation preference rides
+        # beside any of the existing field sets; it never changes those sets.
+        speculation = payload.get("speculation")
+        payload = {key: value for key, value in payload.items() if key != "speculation"}
         _require(
             set(payload)
             in (
@@ -3288,6 +3335,19 @@ class PhysicalNodeService:
             "invalid_excluded_placement_ids",
         )
         _require(request.request_id not in self._sinks, "duplicate_request_id")
+        if speculation is not None:
+            speculation = _exact_fields(
+                speculation, {"preference"}, "invalid_infer_start_speculation"
+            )
+            _require(
+                speculation["preference"] in {"target_only", "speculative_requested"},
+                "invalid_infer_start_speculation",
+            )
+            a11_wiring = getattr(self, "_a11_wiring", None)
+            if a11_wiring is not None:
+                # Without a staged draft the request simply runs target-only: a
+                # client cannot force an unavailable overlay.
+                a11_wiring.set_preference(request.request_id, speculation["preference"])
         control_data = data.get("control")
         if control_data is not None:
             control = self._validated_request_control(
@@ -3633,12 +3693,17 @@ class PhysicalNodeService:
 
         assert sink is not None
         dispatched = 0
+        a11_wiring = getattr(self, "_a11_wiring", None)
+        decode_step = (
+            self.router.decode_one_distributed
+            if a11_wiring is None
+            else self.router.speculate_one_distributed
+        )
         for _ in range(data["count"]):
             output_count = len(sink.token_ids)
+            round_started = time.monotonic()
             try:
-                decode_dispatched = self.router.decode_one_distributed(
-                    data["request_id"]
-                )
+                decode_dispatched = decode_step(data["request_id"])
             except IrohTransportError as exc:
                 if exc.code != "path_cancelled" or command_control is None:
                     raise
@@ -3697,6 +3762,12 @@ class PhysicalNodeService:
                 or status in {"COMPLETED", "CANCELLED", "FAILED"},
                 "decode_completion_timeout",
             )
+            if a11_wiring is not None and len(sink.token_ids) > output_count:
+                a11_wiring.note_decode_round(
+                    request_id,
+                    elapsed_ms=(time.monotonic() - round_started) * 1000.0,
+                    tokens=len(sink.token_ids) - output_count,
+                )
         terminal_status = self.router.request_status(data["request_id"])
         if command_control is None and terminal_status in {
             "COMPLETED",

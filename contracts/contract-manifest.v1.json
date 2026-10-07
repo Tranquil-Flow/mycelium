@@ -675,8 +675,8 @@
         },
         {
           "path": "physical_inference_node.py",
-          "sha256": "771b54ddfb94a1f12b6291e64fcda1143412530f766be0aaf50538264faaf10a",
-          "size_bytes": 209399
+          "sha256": "3837adea70ec1a911a11d50f84306757f28af68466634e64b7cc5bcf361ced7a",
+          "size_bytes": 212563
         }
       ],
       "protocol": "mycelium.interruptible_stage_command.v1"

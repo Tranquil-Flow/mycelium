@@ -187,6 +187,8 @@ class Qwen2DraftModel:
         """
 
         base = Path(root)
+        if not (base / "config.json").is_file():
+            _reject("draft_artifact_missing", "config.json")
         config = json.loads((base / "config.json").read_text())
         index = base / "model.safetensors.index.json"
         if index.is_file():

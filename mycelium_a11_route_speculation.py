@@ -253,6 +253,7 @@ class _RequestState:
     request_id: str
     draft: Any
     deadline: dict[str, Any]
+    warm_target_tpot_p50_ms: float | None = None
     active: bool = True
     stop_reason: str | None = None
     rounds: int = 0
@@ -283,8 +284,10 @@ class RouteSpeculationController:
         draft_factory: Callable[[str], Any] | None,
         runtime_incarnation: str,
         clock: Callable[[], float] = time.monotonic,
+        baseline: Callable[[], tuple[float, float] | None] | None = None,
     ) -> None:
         self.policy = policy
+        self._baseline = baseline
         self._draft_factory = draft_factory
         self._incarnation = runtime_incarnation
         self._clock = clock
@@ -326,8 +329,15 @@ class RouteSpeculationController:
                 return dict(existing)
             preference = self._preferences.get(request_id, "target_only")
             reason: str | None = None
+            warm_p50, warm_p95 = self.policy.warm_target_tpot_p50_ms, self.policy.warm_target_tpot_p95_ms
+            if warm_p95 is None and self._baseline is not None:
+                # The baseline measured on this exact route (target-only rounds),
+                # frozen for this request at admission.
+                measured = self._baseline()
+                if measured is not None:
+                    warm_p50, warm_p95 = measured
             deadline = sd.admit_proposal_deadline(
-                warm_target_only_p95_tpot_ms=self.policy.warm_target_tpot_p95_ms,
+                warm_target_only_p95_tpot_ms=warm_p95,
                 remaining_request_deadline_ms=remaining_deadline_ms,
             )
             if preference != "speculative_requested":
@@ -357,6 +367,7 @@ class RouteSpeculationController:
                 "fallback_reason": reason,
                 "deadline": dict(deadline),
                 "width": self.policy.width,
+                "warm_target_tpot_ms": None if warm_p95 is None else {"p50": warm_p50, "p95": warm_p95},
             }
             self._admissions[request_id] = record
             if reason is None:
@@ -364,6 +375,7 @@ class RouteSpeculationController:
                     request_id=request_id,
                     draft=self._draft_factory(request_id),
                     deadline=dict(deadline),
+                    warm_target_tpot_p50_ms=warm_p50,
                 )
             return dict(record)
 
@@ -453,7 +465,7 @@ class RouteSpeculationController:
         state.draft_ms += state.pending_draft_ms
         if round_ms is not None:
             state.round_ms += round_ms
-        tpot = self.policy.warm_target_tpot_p50_ms
+        tpot = state.warm_target_tpot_p50_ms
         self._record_cycle(
             state,
             {
