@@ -65,6 +65,11 @@ ENTRY_POINTS = (
     "mycelium_a13_macos.managed_runtime",
     "mycelium_a13_macos.worker",
     "mycelium_a13_windows.managed_host.staging",
+    "mycelium_a13_windows.managed_host.app",
+    "mycelium_a13_windows.managed_host.member",
+    "mycelium_a13_windows.managed_host.resources",
+    "mycelium_a13_macos.target_app",
+    "mycelium_a13_macos.workflow",
     "stage_pack",
     "runtime_loader",
 )

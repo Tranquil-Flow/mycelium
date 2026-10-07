@@ -125,7 +125,13 @@ class ManagedTargetRuntime:
         # Darwin limits Unix socket paths; installed private state paths can
         # exceed that limit. Only sockets are transient: capacity/journals stay
         # in the original durable run root, never the temporary directory.
-        temp_base=Path('/private/tmp') if Path('/private/tmp').is_dir() else Path('/tmp')
+        import mycelium_host_platform
+        if mycelium_host_platform.is_win32():
+            # Windows sidecars use the loopback channel; the directory is unused
+            # by the transport and only needs to be a private temporary path.
+            temp_base=Path(tempfile.gettempdir())
+        else:
+            temp_base=Path('/private/tmp') if Path('/private/tmp').is_dir() else Path('/tmp')
         self._socket_parent=Path(tempfile.mkdtemp(prefix='myc-a13-',dir=temp_base))
         # Retain construction inputs for bounded pre-load process replacement.
         # A configured worker instead requires a fresh run and re-qualification.

@@ -566,6 +566,10 @@ class FakeWin32Api:
         self._maybe_fail("process_working_set_bytes")
         return self.working_set_bytes
 
+    def total_physical_bytes(self) -> int:
+        self.calls.append(("total_physical_bytes",))
+        return int(getattr(self, "total_bytes", 16 * 1024 ** 3))
+
     def available_physical_bytes(self) -> int:
         self.calls.append(("available_physical_bytes",))
         self._maybe_fail("available_physical_bytes")

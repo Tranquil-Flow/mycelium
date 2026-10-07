@@ -249,6 +249,8 @@ class Win32Api(Protocol):
 
     def available_physical_bytes(self) -> int: ...
 
+    def total_physical_bytes(self) -> int: ...
+
     def open_event(self, name: str) -> int: ...
 
     def wait_event(self, event: int, timeout_ms: int) -> bool: ...
@@ -999,6 +1001,12 @@ class RealWin32Api:  # pragma: no cover - exercised only on a Windows device
         return int(counters.WorkingSetSize)
 
     def available_physical_bytes(self) -> int:
+        return int(self._memory_status().ullAvailPhys)
+
+    def total_physical_bytes(self) -> int:
+        return int(self._memory_status().ullTotalPhys)
+
+    def _memory_status(self) -> Any:
         ctypes = self._ctypes
         wintypes = self._wintypes
 
@@ -1022,7 +1030,7 @@ class RealWin32Api:  # pragma: no cover - exercised only on a Windows device
         status.dwLength = ctypes.sizeof(status)
         if not function(ctypes.byref(status)):
             raise self._fail("GlobalMemoryStatusEx")
-        return int(status.ullAvailPhys)
+        return status
 
     def _bind_event_api(self) -> None:
         if getattr(self, "_event_api_bound", False):

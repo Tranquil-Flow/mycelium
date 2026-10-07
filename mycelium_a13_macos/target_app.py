@@ -18,6 +18,27 @@ class TargetApplication:
     def member(self):
         return self.peer.member
 
+    # -- platform hooks (the Windows managed host overrides these) -------------
+
+    def _new_staging(self, run_id, *, node_id, max_archive_bytes, max_disk_bytes,
+                     current_member, authorize, artifact_cache_root=None):
+        from .managed_staging import TargetStaging
+        return TargetStaging(self.peer.state_root/'managed'/run_id,node_id=node_id,
+            max_archive_bytes=max_archive_bytes,max_disk_bytes=max_disk_bytes,
+            current_member=current_member,authorize=authorize,
+            artifact_cache_root=artifact_cache_root)
+
+    def _installed_sidecar(self):
+        from .native_runtime import installed_sidecar
+        return installed_sidecar()
+
+    def _observe_policy(self):
+        from .resources import observe_policy
+        return observe_policy()
+
+    def _observe_capability(self):
+        return observe_mac(self.peer.state_root)
+
     def _preposition_cache_root(self, offer):
         return self.peer.state_root/'serving' if offer.get('preposition') is not None else None
 
@@ -35,7 +56,7 @@ class TargetApplication:
         """Target-local consent consumes exact signed bytes; never starts work."""
         from .managed_offers import ManagedOfferClient, _offer_valid
         from .managed_control import _binding_from_member, _BINDING_FIELDS
-        from .managed_staging import TargetStaging, StagingError
+        from .managed_staging import StagingError
         if self._runtime is not None:
             raise StagingError('stage_runtime_active')
         _offer_valid(offer)
@@ -56,7 +77,7 @@ class TargetApplication:
             raise StagingError('stage_not_authorized')
         client=ManagedOfferClient(self.peer.staging_control_client(_test_ca_certificate=_test_ca_certificate))
         archive=client.fetch(member,offer,max_bytes=max_bytes,authorize=lambda:current() and admitted({}))
-        staging=TargetStaging(self.peer.state_root/'managed'/offer['run_id'],
+        staging=self._new_staging(offer['run_id'],
             node_id=member['node_id'],max_archive_bytes=max_bytes,max_disk_bytes=max_disk_bytes,
             current_member=current,authorize=admitted,
             artifact_cache_root=self._preposition_cache_root(offer))
@@ -73,7 +94,7 @@ class TargetApplication:
     def cleanup_offer(self,offer,*,acknowledged,_test_ca_certificate=None):
         """Explicit target-local cleanup of one run; identity/evidence survive."""
         from .managed_offers import ManagedOfferClient,MAX_ARCHIVE,_offer_valid
-        from .managed_staging import TargetStaging,StagingError
+        from .managed_staging import StagingError
         from .managed_control import _binding_from_member,_BINDING_FIELDS
         if acknowledged is not True:raise StagingError('stage_not_authorized')
         if self._runtime is not None:raise StagingError('stage_runtime_active')
@@ -84,7 +105,7 @@ class TargetApplication:
         client=ManagedOfferClient(self.peer.staging_control_client(_test_ca_certificate=_test_ca_certificate))
         state=client.cleanup_status(member,offer)
         if state['ack'] is not None:return state['ack']
-        staging=TargetStaging(self.peer.state_root/'managed'/offer['run_id'],node_id=member['node_id'],
+        staging=self._new_staging(offer['run_id'],node_id=member['node_id'],
             max_archive_bytes=MAX_ARCHIVE,max_disk_bytes=MAX_ARCHIVE,
             current_member=lambda:False,authorize=lambda intent:acknowledged is True and
                 intent['operation']=='cleanup' and intent['archive_digest']==offer['archive_digest'])
@@ -140,15 +161,13 @@ class TargetApplication:
         if acknowledged is not True:raise ValueError('control_consent_required')
         if self._runtime is not None:raise ValueError('runtime_already_attached')
         from .managed_offers import ManagedOfferClient,MAX_ARCHIVE
-        from .managed_staging import TargetStaging
-        from .native_runtime import installed_sidecar
         from .worker import WorkerLimits
         from .managed_control import _binding_from_member
-        from .resources import observe_policy,policy_violation
+        from .resources import policy_violation
         member=self.peer.staging_control_snapshot()
         endpoint_secret_file=self._endpoint_identity_file(member)
         binding=_binding_from_member(member,offer['run_id'],offer['deployment_id'])
-        observe=_test_observer or observe_policy
+        observe=_test_observer or self._observe_policy
         def admitted(intent):
             return (policy_violation(resource_policy,observe()) is None and
                 intent.get('archive_digest')==offer['archive_digest'])
@@ -158,12 +177,12 @@ class TargetApplication:
         client=ManagedOfferClient(self.peer.staging_control_client(_test_ca_certificate=_test_ca_certificate))
         archive=client.fetch(member,offer,max_bytes=MAX_ARCHIVE,
             authorize=lambda:admitted({'archive_digest':offer['archive_digest']}))
-        sidecar=installed_sidecar()
+        sidecar=self._installed_sidecar()
         self.peer.set_contribution_enabled(enabled=True,expected_generation=member['generation'])
         def current():
             try:return _binding_from_member(self.peer.managed_control_snapshot(),offer['run_id'],offer['deployment_id'])==binding
             except Exception:return False
-        staging=TargetStaging(self.peer.state_root/'managed'/offer['run_id'],node_id=member['node_id'],
+        staging=self._new_staging(offer['run_id'],node_id=member['node_id'],
             max_archive_bytes=MAX_ARCHIVE,max_disk_bytes=max_disk_bytes,current_member=current,authorize=admitted,
             artifact_cache_root=self._preposition_cache_root(offer))
         runtime=self.prepare_runtime(run_id=offer['run_id'],deployment_id=offer['deployment_id'],
@@ -257,7 +276,7 @@ class TargetApplication:
         status = self.peer.status()
         if status['membership_state'] != 'current' or status['lease_state'] != 'fresh':
             raise ValueError('membership_required')
-        observation = observe_mac(self.peer.state_root)
+        observation = self._observe_capability()
         if not observation['backends'] or not observation['precisions']:
             raise ValueError('capability_backend_unavailable')
         result = self.peer.capability_report(**{key: observation[key] for key in (

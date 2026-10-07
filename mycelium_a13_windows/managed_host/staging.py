@@ -43,6 +43,7 @@ import mycelium_host_platform
 from mycelium_host_platform import HostPlatformError
 
 from mycelium_a13_macos.authority import DemoAuthorityError, _private_directory
+from mycelium_a13_macos.managed_staging import StagingError as _TargetStagingError
 
 STAGE_ACK = "mycelium.controller_remote_stage_ack.v1"
 CLEANUP_ACK = "mycelium.controller_remote_cleanup_ack.v1"
@@ -55,8 +56,8 @@ _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _CHUNK = 1024 * 1024
 
 
-class StagingError(ValueError):
-    pass
+class StagingError(_TargetStagingError):
+    """Same type the macOS target raises, so shared callers handle both."""
 
 
 def _digest(data: bytes) -> str:

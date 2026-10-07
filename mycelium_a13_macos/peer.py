@@ -98,6 +98,12 @@ class RemoteMacMember:
     Web-PKI trust store and its no-redirect canonical JSON transport.
     """
 
+    #: The registered peer class and runtime this member declares.  A managed
+    #: host for another platform subclasses and overrides these three.
+    PEER_CLASS = _PEER_CLASS
+    RUNTIME_CAPABILITY = _RUNTIME_CAPABILITY
+    SOFTWARE_VERSION = _SOFTWARE_VERSION
+
     def __init__(
         self,
         state_root: Path | str,
@@ -484,7 +490,7 @@ class RemoteMacMember:
                 request, private_key = new_pairing_request(
                     signer=self._signer,
                     node_id=self._node_id(),
-                    peer_class=_PEER_CLASS,
+                    peer_class=self.PEER_CLASS,
                     now=self._clock(),
                     ttl_seconds=ttl_seconds,
                     nonce="pairing-" + secrets.token_hex(24),
@@ -667,9 +673,9 @@ class RemoteMacMember:
             seed_node_id=seed_node_id,
             signer=self._signer,
             incarnation=incarnation,
-            software_version=_SOFTWARE_VERSION,
-            peer_class=_PEER_CLASS,
-            runtime_capability=_RUNTIME_CAPABILITY,
+            software_version=self.SOFTWARE_VERSION,
+            peer_class=self.PEER_CLASS,
+            runtime_capability=dict(self.RUNTIME_CAPABILITY),
             clock=clock,
             id_source=identifiers,
         )

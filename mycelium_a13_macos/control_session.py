@@ -7,7 +7,10 @@ Use ONE owner journal/client for all target sessions of a signing identity.
 """
 from __future__ import annotations
 
-import fcntl
+try:  # owner-side POSIX lock; guarded so shared workflow imports on Windows
+    import fcntl
+except ImportError:  # pragma: no cover - win32
+    fcntl = None
 from contextlib import contextmanager
 import math
 import os
