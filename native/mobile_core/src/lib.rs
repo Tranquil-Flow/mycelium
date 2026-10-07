@@ -3,7 +3,8 @@
 //!
 //! Pure modules (no I/O, wasm32-compatible): [`canonical`], [`identity`],
 //! [`onboarding`], [`membership`], [`wire`], [`runtime`], [`evidence`],
-//! [`route_assignment`].
+//! [`route_assignment`], and the Qwen2 stage runtime [`qwen2`] with its exact
+//! weight plumbing [`bf16`], [`quant`] and [`safetensors`].
 //! The `net` feature adds the seed HTTP client, the embedded iroh endpoint and
 //! the node supervisor used by the Android and iOS apps.
 
@@ -11,6 +12,10 @@ pub mod canonical;
 pub mod identity;
 pub mod onboarding;
 pub mod runtime;
+pub mod bf16;
+pub mod quant;
+pub mod safetensors;
+pub mod qwen2;
 pub mod wire;
 pub mod membership;
 pub mod evidence;

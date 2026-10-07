@@ -25,6 +25,9 @@ ed25519-dalek = "2"
 getrandom = "0.2"
 hex = "0.4"
 hkdf = "0.12"
+# Pure-Rust (musl port) transcendental functions: identical results on the
+# phone and on the host, unlike the platform libm behind f32::exp/sin/cos.
+libm = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip", "arbitrary_precision"] }
 sha2 = "0.10"
