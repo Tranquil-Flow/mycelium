@@ -42,8 +42,70 @@ use crate::wire::{self, Frame};
 
 /// Registered paths kept at once (oldest registration evicted first).
 pub const MAX_PATHS: usize = 256;
-/// Pending tombstones and cancelled attempts remembered.
-pub const MAX_TOMBSTONES: usize = 4096;
+/// Tombstone bounds (as `relay.py`): a tombstone is charged to the node that
+/// created the path (its entry); a creator holds at most
+/// [`TOMBSTONE_QUOTA_PER_CREATOR`] and, at its quota, registers no new path id
+/// until its own records older than [`TOMBSTONE_RETENTION_S`] can be evicted
+/// (one tenant never blocks another). Every eviction, including past
+/// [`MAX_TOMBSTONE_RECORDS`] in total, leaves a "history evicted" mark that
+/// refuses every further attempt of that (path id, owner): eviction refuses,
+/// it never reopens. Marks live in a rotating filter ([`MarkFilter`]).
+pub const TOMBSTONE_QUOTA_PER_CREATOR: usize = 8192;
+pub const MAX_TOMBSTONE_RECORDS: usize = 8 * TOMBSTONE_QUOTA_PER_CREATOR;
+pub const TOMBSTONE_RETENTION_S: f64 = 600.0;
+/// Mark filter: two 1 MiB windows, rotated every 100 000 insertions.
+const MARK_FILTER_BYTES: usize = 1 << 20;
+const MARK_FILTER_HASHES: usize = 5;
+const MARK_FILTER_ROTATION: usize = 100_000;
+
+/// A two-window Bloom filter of evicted (path id, owner) histories (the
+/// relay's `_RotatingReplayFilter`): a mark survives at least
+/// `MARK_FILTER_ROTATION` further marks.
+struct MarkFilter {
+    current: Vec<u8>,
+    previous: Vec<u8>,
+    inserted: usize,
+}
+
+impl MarkFilter {
+    fn new() -> Self {
+        Self { current: vec![0; MARK_FILTER_BYTES], previous: vec![0; MARK_FILTER_BYTES], inserted: 0 }
+    }
+
+    fn positions(path_id: &str, owner: &Owner) -> [usize; MARK_FILTER_HASHES] {
+        let mut h = Sha256::new();
+        for part in [path_id, &owner.0, &owner.1] {
+            h.update((part.len() as u64).to_be_bytes());
+            h.update(part.as_bytes());
+        }
+        let d = h.finalize();
+        let first = u64::from_be_bytes(d[..8].try_into().unwrap());
+        let second = u64::from_be_bytes(d[8..16].try_into().unwrap()) | 1;
+        let bits = (MARK_FILTER_BYTES * 8) as u64;
+        std::array::from_fn(|i| (first.wrapping_add((i as u64).wrapping_mul(second)) % bits) as usize)
+    }
+
+    fn add(&mut self, path_id: &str, owner: &Owner) {
+        if self.inserted >= MARK_FILTER_ROTATION {
+            self.previous = std::mem::replace(&mut self.current, vec![0; MARK_FILTER_BYTES]);
+            self.inserted = 0;
+        }
+        for p in Self::positions(path_id, owner) {
+            self.current[p / 8] |= 1 << (p % 8);
+        }
+        self.inserted += 1;
+    }
+
+    fn contains(&self, path_id: &str, owner: &Owner) -> bool {
+        let positions = Self::positions(path_id, owner);
+        let has = |w: &Vec<u8>| positions.iter().all(|p| w[p / 8] & (1 << (p % 8)) != 0);
+        has(&self.current) || has(&self.previous)
+    }
+}
+/// Pending tombstones per authenticated source (a source displaces only its
+/// own oldest) and in total (full: refused).
+pub const MAX_PENDING_PER_SOURCE: usize = 4096;
+pub const MAX_PENDING_TOTAL: usize = 16 * MAX_PENDING_PER_SOURCE;
 pub const LEDGER_CAPACITY: usize = 4096;
 
 /// One frame to send to a peer node.
@@ -93,9 +155,17 @@ pub struct StageNode {
     local: String,
     paths: BTreeMap<String, Registered>,
     order: VecDeque<String>,
-    /// (path_id, owner) -> highest cancelled attempt; bounded, oldest first.
-    tombstones: BTreeMap<(String, Owner), i64>,
+    /// (path_id, owner) -> (highest cancelled attempt, recorded at, creator); oldest first.
+    tombstones: BTreeMap<(String, Owner), (i64, f64, String)>,
     tombstone_order: VecDeque<(String, Owner)>,
+    /// creator -> its records, oldest first.
+    by_creator: BTreeMap<String, VecDeque<(String, Owner)>>,
+    /// path_id -> the node that created it (registered paths).
+    creators: BTreeMap<String, String>,
+    marks: Box<MarkFilter>,
+    pending_by_source: BTreeMap<String, usize>,
+    /// Seconds clock of the frame being handled (set by `on_frame_at`).
+    now: f64,
     /// (request, path, attempt, topology, source) of a cancellation that
     /// arrived before its path.
     pending: BTreeSet<(String, String, i64, i64, String)>,
@@ -115,6 +185,11 @@ impl StageNode {
             order: VecDeque::new(),
             tombstones: BTreeMap::new(),
             tombstone_order: VecDeque::new(),
+            by_creator: BTreeMap::new(),
+            creators: BTreeMap::new(),
+            marks: Box::new(MarkFilter::new()),
+            pending_by_source: BTreeMap::new(),
+            now: 0.0,
             pending: BTreeSet::new(),
             pending_order: VecDeque::new(),
             ledger: HopLedger::new(LEDGER_CAPACITY),
@@ -127,21 +202,94 @@ impl StageNode {
 
     /// The highest attempt this owner cancelled under this path id.
     fn tombstone(&self, path_id: &str, owner: &Owner) -> Option<i64> {
-        self.tombstones.get(&(path_id.to_owned(), owner.clone())).copied()
+        self.tombstones.get(&(path_id.to_owned(), owner.clone())).map(|(attempt, _, _)| *attempt)
     }
 
-    fn record_tombstone(&mut self, path_id: &str, owner: Owner, attempt: i64) {
+    fn record_tombstone(&mut self, path_id: &str, owner: Owner, attempt: i64, creator: &str) {
         let key = (path_id.to_owned(), owner);
-        match self.tombstones.get_mut(&key) {
-            Some(max) => *max = (*max).max(attempt),
-            None => {
-                self.tombstones.insert(key.clone(), attempt);
-                self.tombstone_order.push_back(key);
-                while self.tombstone_order.len() > MAX_TOMBSTONES {
-                    if let Some(old) = self.tombstone_order.pop_front() {
-                        self.tombstones.remove(&old);
-                    }
+        let now = self.now;
+        let charged = match self.tombstones.get_mut(&key) {
+            Some((max, at, charged)) => {
+                *max = (*max).max(attempt);
+                *at = now;
+                let charged = charged.clone();
+                self.tombstone_order.retain(|k| *k != key);
+                if let Some(q) = self.by_creator.get_mut(&charged) {
+                    q.retain(|k| *k != key);
                 }
+                charged
+            }
+            None => {
+                self.tombstones.insert(key.clone(), (attempt, now, creator.to_owned()));
+                creator.to_owned()
+            }
+        };
+        self.tombstone_order.push_back(key.clone());
+        self.by_creator.entry(charged.clone()).or_default().push_back(key);
+        self.prune_creator(&charged, TOMBSTONE_QUOTA_PER_CREATOR);
+        // Absolute bound: evict the oldest, each leaving its mark.
+        while self.tombstone_order.len() > MAX_TOMBSTONE_RECORDS {
+            let Some(oldest) = self.tombstone_order.front().cloned() else { break };
+            self.evict(&oldest);
+        }
+    }
+
+    /// Drop one record, leaving its "history evicted" mark (fail closed).
+    fn evict(&mut self, key: &(String, Owner)) {
+        self.marks.add(&key.0, &key.1);
+        if let Some((_, _, creator)) = self.tombstones.remove(key)
+            && let Some(q) = self.by_creator.get_mut(&creator)
+        {
+            q.retain(|k| k != key);
+            if q.is_empty() {
+                self.by_creator.remove(&creator);
+            }
+        }
+        self.tombstone_order.retain(|k| k != key);
+    }
+
+    /// Evict a creator's own records older than the retention horizon while it
+    /// holds more than `limit`; never another creator's, never a young one.
+    fn prune_creator(&mut self, creator: &str, limit: usize) {
+        loop {
+            let Some(q) = self.by_creator.get(creator) else { return };
+            if q.len() <= limit {
+                return;
+            }
+            let oldest = q.front().cloned().unwrap();
+            let at = self.tombstones.get(&oldest).map_or(self.now, |(_, at, _)| *at);
+            if self.now - at < TOMBSTONE_RETENTION_S {
+                return;
+            }
+            self.evict(&oldest);
+        }
+    }
+
+    /// Fail closed per creator, and in total past the absolute bound.
+    fn creator_may_register(&mut self, creator: &str) -> bool {
+        if self.by_creator.get(creator).is_some_and(|q| q.len() >= TOMBSTONE_QUOTA_PER_CREATOR) {
+            self.prune_creator(creator, TOMBSTONE_QUOTA_PER_CREATOR - 1);
+            if self.by_creator.get(creator).is_some_and(|q| q.len() >= TOMBSTONE_QUOTA_PER_CREATOR) {
+                return false;
+            }
+        }
+        self.tombstone_order.len() < MAX_TOMBSTONE_RECORDS
+    }
+
+    /// [`on_frame`](Self::on_frame) at a wall-clock time in seconds (the
+    /// tombstone retention horizon is measured with it).
+    pub fn on_frame_at(&mut self, now: f64, from: &str, frame: &Frame, compute: &mut Compute<'_>) -> Step {
+        self.now = self.now.max(now);
+        self.on_frame(from, frame, compute)
+    }
+
+    fn forget_pending(&mut self, key: &(String, String, i64, i64, String)) {
+        if self.pending.remove(key)
+            && let Some(count) = self.pending_by_source.get_mut(&key.4)
+        {
+            *count -= 1;
+            if *count == 0 {
+                self.pending_by_source.remove(&key.4);
             }
         }
     }
@@ -189,13 +337,34 @@ impl StageNode {
             return refused("manifest_registration_rejected");
         }
         let owner = Self::owner(&path);
+        // The creator of a new path is the authenticated sender (its entry; a
+        // final-relayed manifest is refused below unless the path exists).
+        if !self.paths.contains_key(&path.path_id) && !self.creator_may_register(from) {
+            return refused("manifest_registration_rejected");
+        }
+        if self.marks.contains(&path.path_id, &owner) {
+            return refused("manifest_registration_rejected");
+        }
         // A live path id stays bound to its owner whatever the attempt.
         if self.paths.get(&path.path_id).is_some_and(|existing| Self::owner(&existing.path) != owner) {
             return refused("manifest_registration_rejected");
         }
         let key = (path.request_id.clone(), path.path_id.clone(), path.path_attempt, path.topology_version, path.entry_node_id.clone());
-        if self.pending.remove(&key) {
-            self.pending_order.retain(|k| *k != key);
+        // As relay.py: registration consumes every pending tombstone of the
+        // path id, and is refused when one of them is the entry's.
+        let matched = self.pending.contains(&key);
+        let of_path: Vec<_> = self.pending_order.iter().filter(|k| k.1 == path.path_id).cloned().collect();
+        if !of_path.is_empty() {
+            self.pending_order.retain(|k| k.1 != path.path_id);
+            for old in &of_path {
+                self.forget_pending(old);
+            }
+        }
+        if matched {
+            // As relay.py: the consumed pending cancellation becomes the
+            // entry's tombstone for this attempt.
+            let entry = path.entry_node_id.clone();
+            self.record_tombstone(&path.path_id, owner, path.path_attempt, &entry);
             return refused("manifest_registration_rejected");
         }
         if self.tombstone(&path.path_id, &owner).is_some_and(|max| path.path_attempt <= max) {
@@ -216,13 +385,16 @@ impl StageNode {
         // A newer attempt of the same owner retires the older one.
         let replaced = self.paths.get(&path_id).filter(|e| e.path.path_attempt < path.path_attempt).map(|e| e.path.path_attempt);
         if let Some(old_attempt) = replaced {
-            self.record_tombstone(&path_id, owner.clone(), old_attempt);
+            let creator = self.creators.get(&path_id).cloned().unwrap_or_else(|| from.to_owned());
+            self.record_tombstone(&path_id, owner.clone(), old_attempt, &creator);
         }
         if self.paths.insert(path_id.clone(), Registered { path, body_digest: combined }).is_none() {
+            self.creators.insert(path_id.clone(), from.to_owned());
             self.order.push_back(path_id);
             while self.order.len() > MAX_PATHS {
                 if let Some(old) = self.order.pop_front() {
                     self.paths.remove(&old);
+                    self.creators.remove(&old);
                 }
             }
         }
@@ -293,14 +465,21 @@ impl StageNode {
                 return answer(false);
             }
             let key = (request_id.to_owned(), path_id.to_owned(), attempt, topology, from.to_owned());
-            if self.pending.insert(key.clone()) {
-                self.pending_order.push_back(key);
-                while self.pending_order.len() > MAX_TOMBSTONES {
-                    if let Some(old) = self.pending_order.pop_front() {
-                        self.pending.remove(&old);
-                    }
-                }
+            if self.pending.contains(&key) {
+                return answer(true);
             }
+            if self.pending_by_source.get(from).copied().unwrap_or(0) >= MAX_PENDING_PER_SOURCE {
+                // A source displaces only its own oldest pending tombstone.
+                if let Some(index) = self.pending_order.iter().position(|k| k.4 == from) {
+                    let old = self.pending_order.remove(index).unwrap();
+                    self.forget_pending(&old);
+                }
+            } else if self.pending.len() >= MAX_PENDING_TOTAL {
+                return answer(false);
+            }
+            self.pending.insert(key.clone());
+            self.pending_order.push_back(key);
+            *self.pending_by_source.entry(from.to_owned()).or_insert(0) += 1;
             return answer(true);
         };
         if !registered.path.cancellation_matches(body, from) {
@@ -309,7 +488,8 @@ impl StageNode {
         let owner = Self::owner(&registered.path);
         self.paths.remove(path_id);
         self.order.retain(|p| p != path_id);
-        self.record_tombstone(path_id, owner, attempt);
+        let creator = self.creators.remove(path_id).unwrap_or_else(|| owner.0.clone());
+        self.record_tombstone(path_id, owner, attempt, &creator);
         self.ledger.forget_path(request_id, path_id);
         Step { ack: true, accepted: Some(true), released: Some((request_id.to_owned(), path_id.to_owned())), ..Step::default() }
     }
@@ -344,19 +524,99 @@ mod tests {
     }
 
     #[test]
-    fn tombstones_from_many_owners_stay_bounded_and_never_lower_another_owner() {
+    fn tombstones_stay_bounded_and_never_lower_another_owner() {
         let mut node = StageNode::new("node-phone");
-        node.record_tombstone("path-1", ("node-a".into(), "r".into()), 7);
-        for i in 0..(MAX_TOMBSTONES as i64 - 1) {
-            node.record_tombstone("path-1", (format!("node-{i}"), "r".into()), 1);
+        node.record_tombstone("path-1", ("node-a".into(), "r".into()), 7, "node-a");
+        node.record_tombstone("path-1", ("node-b".into(), "r".into()), 1, "node-b");
+        node.record_tombstone("path-1", ("node-a".into(), "r".into()), 3, "node-a");
+        assert_eq!(node.tombstone("path-1", &("node-a".into(), "r".into())), Some(7), "only rises, never lowered by another owner");
+        for i in 0..(MAX_TOMBSTONE_RECORDS + 20) {
+            node.record_tombstone(&format!("b-{i}"), (format!("node-{}", i % 16), "r".into()), 1, &format!("node-{}", i % 16));
         }
-        assert_eq!(node.tombstone("path-1", &("node-a".into(), "r".into())), Some(7), "another owner's record never lowers A's");
-        node.record_tombstone("path-1", ("node-a".into(), "r".into()), 3);
-        assert_eq!(node.tombstone("path-1", &("node-a".into(), "r".into())), Some(7), "the high-water mark only rises");
-        for i in 0..100 {
-            node.record_tombstone("path-2", (format!("node-x{i}"), "r".into()), 1);
+        assert!(node.tombstone_order.len() <= MAX_TOMBSTONE_RECORDS && node.tombstones.len() <= MAX_TOMBSTONE_RECORDS);
+        // The oldest were evicted with marks: they still refuse.
+        assert!(node.marks.contains("path-1", &("node-a".into(), "r".into())));
+    }
+
+    fn locked_for(path_id: &str, request_id: &str, attempt: i64, entry: &str) -> Frame {
+        let mut frame = golden_frame("01-manifest-locked.bin");
+        let b = &mut frame.body;
+        b["path_id"] = serde_json::json!(path_id);
+        b["manifest"]["path_id"] = serde_json::json!(path_id);
+        b["build"]["path_id"] = serde_json::json!(path_id);
+        b["request_id"] = serde_json::json!(request_id);
+        b["manifest"]["request_id"] = serde_json::json!(request_id);
+        b["build"]["request"]["request_id"] = serde_json::json!(request_id);
+        b["path_attempt"] = serde_json::json!(attempt);
+        b["manifest"]["path_attempt"] = serde_json::json!(attempt);
+        b["build"]["path_attempt"] = serde_json::json!(attempt);
+        for stage in b["build"]["graph"]["stages"].as_array_mut().unwrap() {
+            for p in stage["placements"].as_array_mut().unwrap() {
+                if p["placement_id"] == "placement-entry" {
+                    p["node_id"] = serde_json::json!(entry);
+                }
+            }
         }
-        assert!(node.tombstones.len() <= MAX_TOMBSTONES && node.tombstone_order.len() <= MAX_TOMBSTONES);
+        frame
+    }
+
+    fn cancel_for(path_id: &str, request_id: &str, attempt: i64) -> Frame {
+        let mut frame = golden_frame("08-path-cancellation.bin");
+        frame.body["path_id"] = serde_json::json!(path_id);
+        frame.body["request_id"] = serde_json::json!(request_id);
+        frame.body["path_attempt"] = serde_json::json!(attempt);
+        frame
+    }
+
+    #[test]
+    fn one_creators_churn_never_blocks_another_entry_and_eviction_refuses() {
+        let mut compute = |_: &LockedPath, _: &AdmittedHop, _: &[u8]| -> Result<Vec<u8>, String> { unreachable!() };
+        let mut node = StageNode::new("node-phone");
+        let entry = "node-mac-entry";
+        assert_eq!(node.on_frame_at(1.0, entry, &locked_for("victim", "rv", 5, entry), &mut compute).accepted, Some(true));
+        assert_eq!(node.on_frame_at(1.0, entry, &cancel_for("victim", "rv", 5), &mut compute).accepted, Some(true));
+        let mut accepted = 0;
+        for i in 0..(TOMBSTONE_QUOTA_PER_CREATOR + 50) {
+            let (p, r) = (format!("churn-{i}"), format!("rc-{i}"));
+            if node.on_frame_at(2.0, "node-churn", &locked_for(&p, &r, 1, "node-churn"), &mut compute).accepted == Some(true) {
+                accepted += 1;
+                assert_eq!(node.on_frame_at(2.0, "node-churn", &cancel_for(&p, &r, 1), &mut compute).accepted, Some(true));
+            }
+        }
+        assert_eq!(accepted, TOMBSTONE_QUOTA_PER_CREATOR, "the churner is refused at its own quota");
+        // The other entry still registers, and its high-water mark still holds.
+        assert_eq!(node.on_frame_at(3.0, entry, &locked_for("a-fresh", "ra", 1, entry), &mut compute).accepted, Some(true));
+        assert_eq!(node.on_frame_at(3.0, entry, &locked_for("victim", "rv", 3, entry), &mut compute).accepted, Some(false));
+        // Past the horizon the churner's oldest are evicted to admit new paths;
+        // an evicted path id stays refused for any attempt.
+        let later = 3.0 + TOMBSTONE_RETENTION_S;
+        assert_eq!(node.on_frame_at(later, "node-churn", &locked_for("new", "rn", 1, "node-churn"), &mut compute).accepted, Some(true));
+        assert!(node.tombstone("churn-0", &("node-churn".into(), "rc-0".into())).is_none());
+        for attempt in [1, 2] {
+            assert_eq!(node.on_frame_at(later, "node-churn", &locked_for("churn-0", "rc-0", attempt, "node-churn"), &mut compute).accepted, Some(false));
+        }
+    }
+
+    #[test]
+    fn a_flooding_peer_cannot_evict_the_entrys_pending_tombstone_and_a_full_table_refuses() {
+        let mut compute = |_: &LockedPath, _: &AdmittedHop, _: &[u8]| -> Result<Vec<u8>, String> { unreachable!() };
+        let mut node = StageNode::new("node-phone");
+        let entry = "node-mac-entry";
+        assert_eq!(node.on_frame_at(1.0, entry, &cancel_for("victim", "rv", 2), &mut compute).accepted, Some(true));
+        for i in 0..(MAX_PENDING_PER_SOURCE + 100) {
+            node.on_frame_at(1.0, "node-flood", &cancel_for(&format!("f-{i}"), "flood", 1), &mut compute);
+        }
+        assert_eq!(node.pending_by_source["node-flood"], MAX_PENDING_PER_SOURCE);
+        assert_eq!(node.on_frame_at(1.0, entry, &locked_for("victim", "rv", 2, entry), &mut compute).accepted, Some(false));
+        // Fill the whole table: then a new pending cancellation is refused.
+        let mut node = StageNode::new("node-phone");
+        for s in 0..(MAX_PENDING_TOTAL / MAX_PENDING_PER_SOURCE) {
+            for i in 0..MAX_PENDING_PER_SOURCE {
+                node.on_frame_at(1.0, &format!("node-{s}"), &cancel_for(&format!("p-{s}-{i}"), "r", 1), &mut compute);
+            }
+        }
+        assert_eq!(node.pending.len(), MAX_PENDING_TOTAL);
+        assert_eq!(node.on_frame_at(1.0, "node-new", &cancel_for("x", "r", 1), &mut compute).accepted, Some(false));
     }
 
 }
