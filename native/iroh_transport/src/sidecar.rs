@@ -3442,11 +3442,10 @@ mod tests {
     }
 
 
-    /// DoS: artifact clients holding many idle connections (more than the
-    /// sidecar's connection slots, from several peers) and saturating the
-    /// source with requests must not delay the Router ALPN: a Router
-    /// connection is still handled promptly (here: closed as `unconfigured`,
-    /// the sidecar's answer when no route peers are set).
+    /// DoS: artifact clients holding many connections (more than the
+    /// sidecar's connection slots, from several peers), each with a half-open
+    /// request stream, must not delay Router traffic: a configured Router
+    /// peer's frame is still admitted promptly.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn artifact_load_never_starves_router_connections() {
         use mycelium_mobile_core::artifact_grant::ARTIFACT_CHUNK_ALPN;
@@ -3457,7 +3456,8 @@ mod tests {
         let endpoint = bind_endpoint(true, false, Some(&[0x81; 32]), true).await.unwrap();
         let source = ArtifactSource::with_endpoint(endpoint.clone(), &[0x82; 32], seed.public_key_record(), scratch.join("objects"), &scratch.join("state")).unwrap();
         // Two connection slots in total.
-        tokio::spawn(incoming_worker(endpoint.clone(), RuntimeState::new(2, true), Some(source)));
+        let state = RuntimeState::new(2, true);
+        tokio::spawn(incoming_worker(endpoint.clone(), state.clone(), Some(source)));
         let client = |byte: u8| async move {
             Endpoint::builder(presets::Minimal)
                 .relay_mode(RelayMode::Disabled)
@@ -3483,16 +3483,30 @@ mod tests {
                 }
             }
         }
+        // A configured Router peer sends one frame: it must be admitted fast.
         let router = client(0xA0).await;
+        state
+            .configure_peer(ConfigurePeerPayload { endpoint_id: router.id().to_string(), endpoint_addr: router.addr(), generation: 3 })
+            .await
+            .unwrap();
+        let mut payload = 3u64.to_be_bytes().to_vec();
+        payload.extend_from_slice(&valid_frame());
+        let transfer = encode_remote_frame(RemoteKind::Transfer, [7; 16], &payload).unwrap();
         let started = Instant::now();
-        let outcome = timeout(Duration::from_secs(3), async {
+        let sent = timeout(Duration::from_secs(3), async {
             let conn = router.connect(endpoint.addr(), IROH_ALPN).await.unwrap();
-            conn.closed().await
+            let (mut send, _recv) = conn.open_bi().await.unwrap();
+            send.write_all(&transfer).await.unwrap();
+            send.finish().unwrap();
+            while state.inbound_frames_admitted.load(Ordering::Acquire) == 0 {
+                sleep(Duration::from_millis(5)).await;
+            }
+            conn
         })
         .await;
         let waited = started.elapsed();
-        assert!(outcome.is_ok(), "the Router connection was not handled within 3 s under artifact load");
-        assert!(waited < Duration::from_secs(2), "Router handling took {waited:?}");
+        assert!(sent.is_ok(), "the Router frame was not admitted within 3 s under artifact load");
+        assert!(waited < Duration::from_secs(2), "Router frame admission took {waited:?}");
         drop(held);
         endpoint.close().await;
         let _ = fs::remove_dir_all(&scratch);
