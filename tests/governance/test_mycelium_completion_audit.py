@@ -4,6 +4,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.mycelium_completion_audit import (
     DEFAULT_CHECKLIST,
     EXPECTED_DEPENDENCIES,
@@ -102,6 +104,8 @@ def _minimal_repo(root: Path, checklist: dict) -> None:
         plan_lines.extend(
             [f"### {gate['gate_id']} — {gate['name']}", gate["specification"]]
         )
+        for slice_row in gate.get("slices", ()):
+            _write_slice_specification(root, gate, slice_row)
         if gate["handover"] is not None:
             handover = root / gate["handover"]
             handover.parent.mkdir(parents=True, exist_ok=True)
@@ -116,6 +120,23 @@ def _minimal_repo(root: Path, checklist: dict) -> None:
             gate["completed_requirements"]
         ) == set(checklist["closure_requirements"]):
             _conclude_gate_design_only(root, checklist, gate["gate_id"])
+
+
+def _write_slice_specification(root: Path, gate: dict, slice_row: dict) -> None:
+    specification = root / slice_row["specification"]
+    specification.parent.mkdir(parents=True, exist_ok=True)
+    content = "\n".join(
+        [
+            f"**Gate:** {slice_row['slice_id']}, a later slice of {gate['gate_id']}",
+            f"**Parent:** `{Path(gate['specification']).name}`",
+            "## Outcome and claim boundary",
+            "`design_only`",
+        ]
+    ).encode("utf-8")
+    specification.write_bytes(content)
+    for evidence in slice_row["evidence_bindings"]:
+        if evidence["requirement"] == "specification":
+            evidence["artifact_digest"] = _digest(content)
 
 
 def _evidence(root: Path, gate_id: str, requirement: str) -> dict:
@@ -555,3 +576,146 @@ def test_audit_rejects_a_narrowing_that_drops_a_named_a9_part(tmp_path: Path) ->
         "gate:A12:narrowed_dependency_unrecorded:A9.signed_capability_binding"
         in result["findings"]
     )
+
+
+# Lead ruling R5 (2026-10-07): A14b is a slice of the A14 row, not a new gate id.
+
+
+def _a14(checklist: dict) -> dict:
+    return next(gate for gate in checklist["gates"] if gate["gate_id"] == "A14")
+
+
+def _slice_repo(tmp_path: Path) -> dict:
+    checklist = json.loads((ROOT / DEFAULT_CHECKLIST).read_text("utf-8"))
+    _minimal_repo(tmp_path, checklist)
+    return checklist
+
+
+def test_live_checklist_tracks_a14b_as_a_slice_of_the_a14_row() -> None:
+    checklist = json.loads((ROOT / DEFAULT_CHECKLIST).read_text("utf-8"))
+    assert [gate["gate_id"] for gate in checklist["gates"]] == [
+        f"A{index}" for index in range(3, 16)
+    ]
+    assert all("slices" not in gate for gate in checklist["gates"] if gate["gate_id"] != "A14")
+    (a14b,) = _a14(checklist)["slices"]
+    assert a14b["slice_id"] == "A14b"
+    assert a14b["state"] == "design_only"
+    assert a14b["completed_requirements"] == ["specification"]
+    assert [item["subject"] for item in a14b["evidence_bindings"]] == ["A14b:specification"]
+    assert "dependencies" not in a14b and "gate_id" not in a14b
+
+
+def test_audit_accepts_a_well_formed_slice(tmp_path: Path) -> None:
+    checklist = _slice_repo(tmp_path)
+    _write_checklist(tmp_path, checklist)
+
+    result = audit(tmp_path)
+
+    assert result["findings"] == []
+    assert result["ok"] is True and result["checked_gates"] == 13
+
+
+def test_a_slice_is_never_a_gate_id(tmp_path: Path) -> None:
+    checklist = _slice_repo(tmp_path)
+    row = dict(_a14(checklist)["slices"][0])
+    row["gate_id"] = row.pop("slice_id")
+    row["dependencies"] = ["A14"]
+    checklist["gates"].insert(12, row)
+    _write_checklist(tmp_path, checklist)
+
+    result = audit(tmp_path)
+
+    assert result["ok"] is False
+    assert "gate:12:id_invalid" in result["findings"]
+
+
+@pytest.mark.parametrize(
+    ("mutate", "finding"),
+    [
+        (lambda gate, row: gate.update(slices=[]), "gate:A14:slices_invalid"),
+        (lambda gate, row: gate.update(slices={"A14b": row}), "gate:A14:slices_invalid"),
+        (lambda gate, row: row.update(dependencies=["A14"]), "gate:A14:slice:0:shape_invalid"),
+        (lambda gate, row: row.pop("handover"), "gate:A14:slice:0:shape_invalid"),
+        (lambda gate, row: row.update(slice_id="A14a"), "gate:A14:slice:0:id_invalid"),
+        (lambda gate, row: row.update(slice_id="A13b"), "gate:A14:slice:0:id_invalid"),
+        (lambda gate, row: row.update(slice_id="A14bb"), "gate:A14:slice:0:id_invalid"),
+        (lambda gate, row: row.update(state="shipped"), "gate:A14b:state_invalid"),
+        (lambda gate, row: row.update(name=""), "gate:A14b:name_invalid"),
+        (
+            lambda gate, row: row.update(completed_requirements=["specification", "implementation"]),
+            "gate:A14b:design_only_completion_invalid",
+        ),
+        (
+            lambda gate, row: row.update(pending_requirements=row["pending_requirements"][1:]),
+            "gate:A14b:requirement_partition_invalid",
+        ),
+        (
+            lambda gate, row: row["evidence_bindings"][0].update(subject="A14:specification"),
+            "gate:A14b:evidence_subject_invalid:specification",
+        ),
+        (lambda gate, row: row.update(ui_workspaces=["inference"]), "gate:A14b:ui_workspace_set_invalid"),
+        (
+            lambda gate, row: row.update(specification="docs/missing-a14b.md"),
+            "gate:A14b:specification_unavailable",
+        ),
+    ],
+)
+def test_audit_rejects_a_malformed_slice(tmp_path: Path, mutate, finding: str) -> None:
+    checklist = _slice_repo(tmp_path)
+    gate = _a14(checklist)
+    mutate(gate, gate["slices"][0])
+    _write_checklist(tmp_path, checklist)
+
+    result = audit(tmp_path)
+
+    assert result["ok"] is False
+    assert finding in result["findings"]
+
+
+def test_audit_rejects_duplicate_or_unordered_slices(tmp_path: Path) -> None:
+    checklist = _slice_repo(tmp_path)
+    gate = _a14(checklist)
+    gate["slices"].append(json.loads(json.dumps(gate["slices"][0])))
+    _write_checklist(tmp_path, checklist)
+
+    result = audit(tmp_path)
+
+    assert result["ok"] is False
+    assert "gate:A14:slice:1:order_invalid:A14b" in result["findings"]
+
+
+@pytest.mark.parametrize(
+    ("replace_text", "finding"),
+    [
+        (("**Gate:** A14b", "**Gate:** A14"), "gate:A14b:specification_gate_unbound"),
+        (("**Parent:**", "**Origin:**"), "gate:A14b:specification_parent_unbound"),
+        (("`design_only`", "draft"), "gate:A14b:specification_design_boundary_missing"),
+        (("claim boundary", "outcome"), "gate:A14b:specification_claim_boundary_missing"),
+    ],
+)
+def test_slice_specification_must_name_the_slice_and_its_parent(
+    tmp_path: Path, replace_text: tuple[str, str], finding: str
+) -> None:
+    checklist = _slice_repo(tmp_path)
+    row = _a14(checklist)["slices"][0]
+    path = tmp_path / row["specification"]
+    content = path.read_text("utf-8").replace(*replace_text).encode("utf-8")
+    path.write_bytes(content)
+    row["evidence_bindings"][0]["artifact_digest"] = _digest(content)
+    _write_checklist(tmp_path, checklist)
+
+    result = audit(tmp_path)
+
+    assert result["ok"] is False
+    assert finding in result["findings"]
+
+
+def test_a_slice_of_a_non_primary_gate_may_not_be_in_progress(tmp_path: Path) -> None:
+    checklist = _slice_repo(tmp_path)
+    _a14(checklist)["slices"][0]["state"] = "implemented_unintegrated"
+    _write_checklist(tmp_path, checklist)
+
+    result = audit(tmp_path)
+
+    assert result["ok"] is False
+    assert "non_primary_gate_in_progress:A14b" in result["findings"]

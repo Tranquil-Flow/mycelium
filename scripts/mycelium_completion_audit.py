@@ -201,6 +201,16 @@ GATE_FIELDS = {
     "ui_workspaces",
     "handover",
 }
+# A gate row may carry an optional closed ``slices`` list (lead ruling R5,
+# 2026-10-07): a later slice of the same gate (``A14b`` of A14) is tracked under
+# its parent row instead of as a new gate id.  Its id is the parent id plus one
+# lowercase letter from ``b`` (the row itself is the first slice), its
+# dependencies are the parent's, and it is audited like a gate row (state,
+# requirement partition, executed evidence, blockers, workspaces) against its own
+# specification, which must name the slice and its parent specification.
+SLICES_FIELD = "slices"
+SLICE_FIELDS = (GATE_FIELDS - {"gate_id", "dependencies"}) | {"slice_id"}
+SLICE_SUFFIX = re.compile(r"[b-z]\Z")
 BLOCKER_CLAIM_MARKER = "[[claim:"
 BLOCKER_CLAIM_SPAN = re.compile(r"\[\[claim:([^\[\]]*)\]\]")
 BLOCKER_CLAIM_ARITY = {
@@ -582,6 +592,146 @@ def _audit_completed_evidence(
         findings.append(f"{prefix}:evidence_for_uncompleted_requirement:{requirement}")
 
 
+def _audit_row(
+    root: Path,
+    row_id: str,
+    row: dict[str, Any],
+    git_state: dict[str, object],
+    findings: list[str],
+) -> None:
+    """Handover, blockers, requirement partition, evidence and workspaces of one row."""
+
+    prefix = f"gate:{row_id}"
+    handover = row.get("handover")
+    if handover is not None:
+        try:
+            _relative_file(root, handover)
+        except (OSError, ValueError):
+            findings.append(f"{prefix}:handover_unavailable")
+    try:
+        blockers = _string_list(
+            row.get("blockers"),
+            allow_empty=row.get("state") == "complete",
+        )
+    except ValueError:
+        findings.append(f"{prefix}:blockers_invalid")
+    else:
+        findings.extend(
+            audit_blocker_claims(root, row_id, blockers, git_state)
+        )
+    try:
+        completed = set(
+            _string_list(row.get("completed_requirements"), allow_empty=True)
+        )
+        partial = set(
+            _string_list(row.get("partial_requirements"), allow_empty=True)
+        )
+        pending = set(
+            _string_list(row.get("pending_requirements"), allow_empty=True)
+        )
+    except ValueError:
+        findings.append(f"{prefix}:requirement_partition_invalid")
+        completed, partial, pending = set(), set(), set()
+    if (
+        completed & partial
+        or completed & pending
+        or partial & pending
+        or completed | partial | pending != REQUIREMENTS
+    ):
+        findings.append(f"{prefix}:requirement_partition_invalid")
+    _audit_completed_evidence(
+        root,
+        row_id,
+        str(row.get("state")),
+        completed,
+        row.get("evidence_bindings"),
+        findings,
+    )
+    if row.get("state") == "design_only" and completed not in (
+        {"specification"},
+        REQUIREMENTS,
+    ):
+        findings.append(f"{prefix}:design_only_completion_invalid")
+    if row.get("state") == "complete" and completed != REQUIREMENTS:
+        findings.append(f"{prefix}:complete_requirements_invalid")
+    if "atomic_feature_commit" in completed and completed != REQUIREMENTS:
+        findings.append(f"{prefix}:premature_commit_completion")
+    try:
+        ui_workspaces = set(_string_list(row.get("ui_workspaces")))
+    except ValueError:
+        ui_workspaces = set()
+        findings.append(f"{prefix}:ui_workspaces_invalid")
+    if ui_workspaces != WORKSPACES:
+        findings.append(f"{prefix}:ui_workspace_set_invalid")
+
+
+def _audit_slices(
+    root: Path,
+    gate_id: str,
+    gate: dict[str, Any],
+    git_state: dict[str, object],
+    findings: list[str],
+) -> list[tuple[str, str]]:
+    """Audit a gate row's optional ``slices``; returns ``(slice_id, state)`` pairs."""
+
+    if SLICES_FIELD not in gate:
+        return []
+    value = gate[SLICES_FIELD]
+    if not isinstance(value, list) or not value:
+        findings.append(f"gate:{gate_id}:slices_invalid")
+        return []
+    parent_specification = gate.get("specification")
+    parent_name = (
+        PurePosixPath(parent_specification).name
+        if isinstance(parent_specification, str)
+        else None
+    )
+    audited: list[tuple[str, str]] = []
+    previous = ""
+    for index, row in enumerate(value):
+        prefix = f"gate:{gate_id}:slice:{index}"
+        if not isinstance(row, dict) or set(row) != SLICE_FIELDS:
+            findings.append(f"{prefix}:shape_invalid")
+            continue
+        slice_id = row.get("slice_id")
+        if (
+            not isinstance(slice_id, str)
+            or not slice_id.startswith(gate_id)
+            or not SLICE_SUFFIX.fullmatch(slice_id[len(gate_id) :])
+        ):
+            findings.append(f"{prefix}:id_invalid")
+            continue
+        if slice_id <= previous:
+            findings.append(f"{prefix}:order_invalid:{slice_id}")
+            continue
+        previous = slice_id
+        prefix = f"gate:{slice_id}"
+        state = row.get("state")
+        if state not in STATES:
+            findings.append(f"{prefix}:state_invalid")
+        else:
+            audited.append((slice_id, state))
+        if not isinstance(row.get("name"), str) or not row["name"]:
+            findings.append(f"{prefix}:name_invalid")
+        try:
+            specification_text = _relative_file(root, row.get("specification")).read_text(
+                "utf-8"
+            )
+        except (OSError, UnicodeError, ValueError):
+            findings.append(f"{prefix}:specification_unavailable")
+        else:
+            if f"**Gate:** {slice_id}" not in specification_text:
+                findings.append(f"{prefix}:specification_gate_unbound")
+            if parent_name is None or f"**Parent:** `{parent_name}`" not in specification_text:
+                findings.append(f"{prefix}:specification_parent_unbound")
+            if "claim boundary" not in specification_text.lower():
+                findings.append(f"{prefix}:specification_claim_boundary_missing")
+            if "`design_only`" not in specification_text:
+                findings.append(f"{prefix}:specification_design_boundary_missing")
+        _audit_row(root, slice_id, row, git_state, findings)
+    return audited
+
+
 def audit(repo_root: str | Path, checklist: str = DEFAULT_CHECKLIST) -> dict[str, Any]:
     root = Path(repo_root).resolve(strict=True)
     findings: list[str] = []
@@ -637,10 +787,14 @@ def audit(repo_root: str | Path, checklist: str = DEFAULT_CHECKLIST) -> dict[str
     gate_ids: list[str] = []
     gate_states: dict[str, str] = {}
     gate_dependencies: dict[str, set[str]] = {}
+    slice_states: dict[str, tuple[str, str]] = {}
     git_state: dict[str, object] = {}
     for index, gate in enumerate(gates_value):
         prefix = f"gate:{index}"
-        if not isinstance(gate, dict) or set(gate) != GATE_FIELDS:
+        if not isinstance(gate, dict) or set(gate) not in (
+            GATE_FIELDS,
+            GATE_FIELDS | {SLICES_FIELD},
+        ):
             findings.append(f"{prefix}:shape_invalid")
             continue
         gate_id = gate.get("gate_id")
@@ -709,67 +863,9 @@ def audit(repo_root: str | Path, checklist: str = DEFAULT_CHECKLIST) -> dict[str
                             f"{prefix}:narrowed_dependency_unrecorded:"
                             f"{narrowed_gate}.{part}"
                         )
-        handover = gate.get("handover")
-        if handover is not None:
-            try:
-                _relative_file(root, handover)
-            except (OSError, ValueError):
-                findings.append(f"{prefix}:handover_unavailable")
-        try:
-            blockers = _string_list(
-                gate.get("blockers"),
-                allow_empty=gate.get("state") == "complete",
-            )
-        except ValueError:
-            findings.append(f"{prefix}:blockers_invalid")
-        else:
-            findings.extend(
-                audit_blocker_claims(root, gate_id, blockers, git_state)
-            )
-        try:
-            completed = set(
-                _string_list(gate.get("completed_requirements"), allow_empty=True)
-            )
-            partial = set(
-                _string_list(gate.get("partial_requirements"), allow_empty=True)
-            )
-            pending = set(
-                _string_list(gate.get("pending_requirements"), allow_empty=True)
-            )
-        except ValueError:
-            findings.append(f"{prefix}:requirement_partition_invalid")
-            completed, partial, pending = set(), set(), set()
-        if (
-            completed & partial
-            or completed & pending
-            or partial & pending
-            or completed | partial | pending != REQUIREMENTS
-        ):
-            findings.append(f"{prefix}:requirement_partition_invalid")
-        _audit_completed_evidence(
-            root,
-            gate_id,
-            str(gate.get("state")),
-            completed,
-            gate.get("evidence_bindings"),
-            findings,
-        )
-        if gate.get("state") == "design_only" and completed not in (
-            {"specification"},
-            REQUIREMENTS,
-        ):
-            findings.append(f"{prefix}:design_only_completion_invalid")
-        if gate.get("state") == "complete" and completed != REQUIREMENTS:
-            findings.append(f"{prefix}:complete_requirements_invalid")
-        if "atomic_feature_commit" in completed and completed != REQUIREMENTS:
-            findings.append(f"{prefix}:premature_commit_completion")
-        try:
-            ui_workspaces = set(_string_list(gate.get("ui_workspaces")))
-        except ValueError:
-            ui_workspaces = set()
-            findings.append(f"{prefix}:ui_workspaces_invalid")
-        if ui_workspaces != WORKSPACES:
-            findings.append(f"{prefix}:ui_workspace_set_invalid")
+        _audit_row(root, gate_id, gate, git_state, findings)
+        for slice_id, slice_state in _audit_slices(root, gate_id, gate, git_state, findings):
+            slice_states[slice_id] = (gate_id, slice_state)
 
     if tuple(gate_ids) != EXPECTED_GATES:
         findings.append("gate_sequence_invalid")
@@ -815,6 +911,9 @@ def audit(repo_root: str | Path, checklist: str = DEFAULT_CHECKLIST) -> dict[str
         for gate_id, state in gate_states.items():
             if gate_id != primary_gate and state not in {"design_only", "complete"}:
                 findings.append(f"non_primary_gate_in_progress:{gate_id}")
+        for slice_id, (parent_id, state) in slice_states.items():
+            if parent_id != primary_gate and state not in {"design_only", "complete"}:
+                findings.append(f"non_primary_gate_in_progress:{slice_id}")
 
     return {
         "checked_gates": len(gate_ids),

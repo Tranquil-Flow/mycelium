@@ -1,7 +1,7 @@
 {
  "protocol": "mycelium.completion_checklist.v1",
  "claim_boundary": "progress navigation only; completion requires each gate's executed product, physical, browser, audit, handover, and atomic commit evidence",
- "updated_on": "2026-09-27T11:55:32Z",
+ "updated_on": "2026-10-07T12:07:36Z",
  "primary_gate": "A6",
  "workspace_ids": [
   "inference",
@@ -1684,7 +1684,71 @@
     "incidents",
     "settings"
    ],
-   "handover": null
+   "handover": null,
+   "slices": [
+    {
+     "slice_id": "A14b",
+     "name": "Coarse region and optional globe",
+     "specification": "docs/superpowers/specs/2026-08-18-mycelium-a14b-coarse-region-globe.md",
+     "state": "design_only",
+     "blockers": [
+      "A14a live acceptance on the final candidate",
+      "A14b browser, physical-positive/negative, live privacy and accessibility checks in an A14 window (A14_LIVE_GLOBE=1)",
+      "no signed region authority: operator declarations stay declared_unverified by design"
+     ],
+     "completed_requirements": [
+      "specification"
+     ],
+     "evidence_bindings": [
+      {
+       "protocol": "mycelium.executed_requirement_evidence.v1",
+       "requirement": "specification",
+       "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a14b-coarse-region-globe.md",
+       "artifact_digest": "sha256:394bcf87ac58776daac4818b71577e510534e860c73ab91e4d8666106a25a976",
+       "provenance": "source",
+       "subject": "A14b:specification",
+       "observed_at": "2026-08-18T00:00:00Z",
+       "fresh_until": null,
+       "binding_scope": "source",
+       "bindings": {
+        "contract_digest": null,
+        "model_digest": null,
+        "representation_digest": null,
+        "runtime_digest": null,
+        "environment_digest": null,
+        "authority_generation": null
+       }
+      }
+     ],
+     "partial_requirements": [
+      "implementation",
+      "product_integration",
+      "deterministic_positive",
+      "deterministic_negative"
+     ],
+     "pending_requirements": [
+      "physical_positive",
+      "physical_negative",
+      "ui_live_all_eight",
+      "browser_navigation_reconnect",
+      "browser_second_session",
+      "full_regressions_audits",
+      "architecture_handover",
+      "atomic_feature_commit"
+     ],
+     "ui_workspaces": [
+      "inference",
+      "device_lab",
+      "network",
+      "nodes",
+      "plans",
+      "readiness",
+      "incidents",
+      "settings"
+     ],
+     "handover": null
+    }
+   ]
   },
   {
    "gate_id": "A15",

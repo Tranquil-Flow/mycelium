@@ -87,11 +87,12 @@ def _materialize(root: Path, checklist: dict) -> None:
 
     relative_paths = {PLAN_PATH}
     for gate in checklist["gates"]:
-        relative_paths.add(gate["specification"])
-        if gate["handover"] is not None:
-            relative_paths.add(gate["handover"])
-        for evidence in gate["evidence_bindings"]:
-            relative_paths.add(evidence["artifact_reference"])
+        for row in (gate, *gate.get("slices", ())):
+            relative_paths.add(row["specification"])
+            if row["handover"] is not None:
+                relative_paths.add(row["handover"])
+            for evidence in row["evidence_bindings"]:
+                relative_paths.add(evidence["artifact_reference"])
     for relative in sorted(relative_paths):
         destination = root / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -114,8 +115,8 @@ def _fixture(
     """Write a checklist whose only delta from the live one is the gate's blockers.
 
     With ``pre_r1_dependencies`` the fixture also restores the pre-R1 A10/A12
-    dependency rows, because the pinned pre-change audit it is run against
-    predates that ruling.
+    dependency rows and drops the gate-row ``slices`` (lead ruling R5), because
+    the pinned pre-change audit it is run against predates both rulings.
     """
 
     checklist = _real_checklist()
@@ -123,6 +124,8 @@ def _fixture(
     if pre_r1_dependencies:
         for gate_id, dependencies in PRE_R1_DEPENDENCIES.items():
             _gate(checklist, gate_id)["dependencies"] = list(dependencies)
+        for gate in checklist["gates"]:
+            gate.pop("slices", None)
     _materialize(tmp_path, checklist)
     if probe:
         artifact = tmp_path / PROBE
