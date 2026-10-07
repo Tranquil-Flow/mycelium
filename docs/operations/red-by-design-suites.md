@@ -1,9 +1,11 @@
 # RED-by-design suites: default collection policy and operator opt-in
 
-**Scope.** Five lane paths use the historical `scaffold_red` opt-in policy. A10/A11/A12
-exercise unimplemented behaviour; A7's in-memory contract core now passes, but its runtime and
-physical gates remain unimplemented; A9's migration-executor seams are unimplemented while its
-contract and migration *decision* suites are GREEN. A marker is not a verdict. This
+**Scope.** Four lane paths retain the historical `scaffold_red` opt-in policy:
+A10/A11/A12 and part of A7. Marker status alone does not establish the current implementation
+or physical qualification state. The former sixth path, `tests/a9_migration_scaffold`, was promoted
+on 2026-10-07 (lane `lane/pm-a9`): the migration executor, restart, rollback, serialized resume,
+cutover record and migration-only reader removal are implemented and the suite is GREEN in
+default collection. A marker is not a verdict. This
 note is the single place that says how they are kept out of ordinary runs and how an operator runs them
 deliberately.
 
@@ -21,14 +23,14 @@ core, including the terminal-state refusal; it does not change the marker mechan
 | Marker applied to each suite | `tests/<suite>/conftest.py` (`pytest_collection_modifyitems`, `tryfirst`) |
 
 Default runs therefore **collect and then deselect** every item carrying `scaffold_red`, so an ordinary
-full-suite run stays green with respect to these five suites. An explicit `-m` on the command line
+full-suite run stays green with respect to these four suites. An explicit `-m` on the command line
 overrides the `addopts` default, which is what makes the opt-in below work.
 
 Two operational consequences:
 
 - **A CLI `-m` replaces the default filter.** `addopts` is a default only, so a `-m <expr>` you pass is used
   *instead* of it. If you filter a full run by marker yourself, carry the policy term along
-  (`-m "not slow and not scaffold_red"`) or the five suites come back into that run. `-k`, `--ignore=`,
+  (`-m "not slow and not scaffold_red"`) or the four suites come back into that run. `-k`, `--ignore=`,
   `--deselect=` and plain path arguments do not have this effect: the default filter stays in force.
 - **Deselection happens after collection.** The scaffolding modules are still imported on a default run
   (collecting them is what the marker then filters), so this policy removes their failures from the result,
@@ -42,7 +44,7 @@ Two operational consequences:
 | `tests/a11_scaffold` | all three modules | 57 |
 | `tests/a12_scaffold` | all three modules | 59 |
 | `tests/a7_acceptance` | `test_kv_successor_contract.py`, `test_kv_successor_boundaries.py` — deterministic core GREEN, not runtime closure | 41 of 51 |
-| `tests/a9_migration_scaffold` | `test_migration_executor_red.py` — the migration executor seams; the A9 contract and migration decision suites in `tests/a9_acceptance` are GREEN | 15 |
+| ~~`tests/a9_migration_scaffold`~~ | promoted 2026-10-07: `test_migration_lifecycle.py` is GREEN and no longer marked | 0 |
 
 `tests/a7_acceptance/test_inventory.py` (10 items) is the already-landed frozen inventory and stays in
 default collection: only the two KV-successor modules are marked. In the 2026-09-21
@@ -53,7 +55,7 @@ not a fixed contract. The A9 path added 2026-09-23 collected 15 marked items (si
 of 349); its 10 boundary items pin the honest `MigrationUnavailable` seams and its 5 remaining items
 are RED until the executor lands. Parent logs: `runs/20260921-closure-train/a7/parent-final-verification/`
 under the external program root. Earlier 40/50 and 323/333 snapshots remain historical,
-before the terminal-state regression was added. No A7 runtime seam is wired.
+before the terminal-state regression was added; their runtime statements are historical, not a verdict on the current candidate.
 
 `tests/a14b_acceptance` (88 items in those snapshots) was promoted out of this policy on 2026-10-07:
 its contract, reduction, projection widening, operator-declared publication and optional globe
@@ -63,14 +65,14 @@ completion-checklist acceptance (spec §8) is still pending.
 
 ## Operator invocation
 
-Run the five suites, and only them:
+Run the four remaining marked suites, and only them:
 
 ```sh
 cd /Users/evinova-self/Documents/playground/mycelium-core-pilot   # or your worktree of this branch
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. /opt/homebrew/bin/python3.14 \
   -m pytest -q -p no:cacheprovider -m scaffold_red \
   tests/a10_scaffold tests/a11_scaffold tests/a12_scaffold \
-  tests/a7_acceptance tests/a9_migration_scaffold
+  tests/a7_acceptance
 ```
 
 `pytest --markers` also lists `scaffold_red`, so the opt-in is discoverable from the tool itself. A

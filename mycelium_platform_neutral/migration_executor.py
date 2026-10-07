@@ -1,8 +1,16 @@
-"""Private, restartable local A9 migration transaction. NOT a seed/node cutover.
+"""Private, restartable local A9 migration transaction, cutover and reader removal.
 
 The storage root is owned by a trusted caller; initialize is a deliberate adapter
 operation, not a path for accepting self-declared migration authority. Profiles
 are always reverified against the durable pinned keys, including after restart.
+
+After the journal reaches ``committed`` the caller may record the cutover. The
+cutover file carries the ``mycelium.membership_contract_migration.v1`` record
+(pre/post generations, continuity proof digests, profile digests) and gates
+every later v1 write with ``membership_contract_upgrade_required``. Removing
+the migration-only reader is the terminal step: afterwards the v1 transition
+input can no longer be read at all. None of this is a live seed cutover; the
+seed consults the same cutover file through ``mycelium_seed`` wiring.
 """
 from __future__ import annotations
 
@@ -55,13 +63,16 @@ class FileMembershipState:
         return path
 
     @contextmanager
-    def lock(self):
+    def lock(self, *, blocking: bool = True):
         path = self._path('transaction.lock')
         fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise MigrationError('unsafe_storage_lock')
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise MigrationUnavailable('concurrent_resume_serialized') from None
             yield
         finally:
             os.close(fd)
@@ -234,7 +245,8 @@ class MigrationExecutor:
             found = self.storage._read('journal.json')
             return found[0]['checkpoint'] if found else None
 
-    def execute(self, request: MigrationRequest, *, now: float, stop_after: str | None = None) -> str:
+    def execute(self, request: MigrationRequest, *, now: float, stop_after: str | None = None,
+                blocking: bool = True) -> str:
         if not isinstance(request, MigrationRequest):
             raise MigrationUnavailable('verified_migration_request_required')
         if stop_after is not None and stop_after not in STAGES:
@@ -242,7 +254,7 @@ class MigrationExecutor:
         payload = request.payload()
         request_digest = _hash(_bytes(payload))
         finite(now, 'peer_profile_now_invalid', minimum=0.0)
-        with self.storage.lock():
+        with self.storage.lock(blocking=blocking):
             baseline, raw = self.storage._snapshot()
             existing = self.storage._read('journal.json')
             if existing:
@@ -325,3 +337,162 @@ class MigrationExecutor:
             journal['checkpoint'] = 'rolled_back'
             self.storage._write('journal.json', journal)
             return 'rolled_back'
+
+    def restart(self, request: MigrationRequest, *, now: float, blocking: bool = True) -> dict:
+        """Resume an interrupted migration from its fsynced checkpoint only."""
+        if not isinstance(request, MigrationRequest):
+            raise MigrationUnavailable('verified_migration_request_required')
+        with self.storage.lock(blocking=blocking):
+            found = self.storage._read('journal.json')
+            before = found[0].get('checkpoint') if found else None
+        if before is None:
+            raise MigrationUnavailable('migration_checkpoint_absent')
+        if before == 'rolled_back':
+            raise MigrationUnavailable('migration_rolled_back')
+        state = self.execute(request, now=now, blocking=blocking)
+        return {'migration_id': request.migration_id, 'checkpoint_before': before,
+                'checkpoint': state, 'resumed': True}
+
+    # -- cutover and migration-only reader removal ---------------------------------
+
+    def _committed_journal(self) -> tuple[dict, dict]:
+        found = self.storage._read('journal.json')
+        if not found or found[0].get('checkpoint') != 'committed':
+            raise MigrationUnavailable('migration_not_committed')
+        journal = found[0]
+        state, raw = self.storage._snapshot()
+        if _hash(raw) != journal.get('target_digest'):
+            raise MigrationError('published_state_mismatch')
+        if 'source_state' not in journal or 'validated_at' not in journal:
+            raise MigrationError('migration_source_proof_missing')
+        return journal, state
+
+    def _record(self, journal: dict, state: dict, *, contract_digests, inventory_digest,
+                qualification_digests, cutover_at: float, status: str) -> dict:
+        from .migration import PROTOCOL as RECORD_PROTOCOL, ContractMigrationRecord
+        from .primitives import record_digest
+
+        source = journal['source_state']['members']
+        validated_at = finite(journal['validated_at'], 'journal_validation_time_invalid', minimum=0.0)
+        continuity: list[str] = []
+        profiles: list[str] = []
+        for envelope in journal['request']['profiles']:
+            node = segment(envelope['profile'].get('node_id'), 'migration_node_id_invalid')
+            if node not in source or node not in state['members']:
+                raise MigrationError('duplicate_or_unknown_identity')
+            before, after = source[node], state['members'][node]
+            profile = verify_peer_profile(envelope, now=validated_at,
+                                          expected_key_digest=before['verification_key_digest'],
+                                          expected_node_id=node)
+            profile_digest = record_digest(profile.to_mapping(), 'migration_profile_noncanonical')
+            profiles.append(profile_digest)
+            continuity.append(record_digest({
+                'node_id': node,
+                'verification_key_digest': before['verification_key_digest'],
+                'pre_generation': before['generation'],
+                'post_generation': after['generation'],
+                'pre_incarnation': before['incarnation'],
+                'post_incarnation': after['incarnation'],
+                'profile_digest': profile_digest,
+            }, 'migration_continuity_noncanonical'))
+        post = {node: value['generation'] for node, value in state['members'].items()}
+        record = ContractMigrationRecord.from_mapping({
+            'protocol': RECORD_PROTOCOL,
+            'migration_id': journal['request']['migration_id'],
+            'contract_digests': list(contract_digests),
+            'inventory_digest': inventory_digest,
+            'pre_generations': {node: value['generation'] for node, value in source.items()},
+            'post_generations': post,
+            'continuity_proof_digests': continuity,
+            'profile_digests': profiles,
+            'qualification_digests': list(qualification_digests),
+            # The public product generation rotates to the highest committed member generation.
+            'cutover_generation': max(post.values()),
+            'cutover_at': cutover_at,
+            'status': status,
+        })
+        record.assert_monotonic_generations()
+        if not record.contract_digests:
+            raise MigrationError('migration_contract_digests_required')
+        return record.to_mapping()
+
+    def _load_cutover(self) -> dict | None:
+        """Read and re-verify the recorded cutover against the published state."""
+        from .migration import ContractMigrationRecord
+
+        found = self.storage._read('cutover.json')
+        if found is None:
+            return None
+        document = found[0]
+        if (set(document) != {'protocol', 'migration_id', 'journal_target_digest', 'record', 'v1_reader_removed'}
+                or document['protocol'] != CUTOVER_PROTOCOL
+                or type(document['v1_reader_removed']) is not bool):
+            raise MigrationError('cutover_record_invalid')
+        record = ContractMigrationRecord.from_mapping(document['record'])
+        record.assert_monotonic_generations()
+        if record.status not in ('cutover_recorded', 'complete') or (
+                (record.status == 'complete') != document['v1_reader_removed']):
+            raise MigrationError('cutover_record_invalid')
+        state, raw = self.storage._snapshot()
+        if (_hash(raw) != document['journal_target_digest']
+                or record.migration_id != document['migration_id']
+                or dict(record.post_generations)
+                != {node: value['generation'] for node, value in state['members'].items()}):
+            raise MigrationError('cutover_state_mismatch')
+        return document
+
+    def record_cutover(self, *, contract_digests, inventory_digest, qualification_digests, now: float) -> dict:
+        finite(now, 'migration_cutover_at_invalid', minimum=0.0)
+        with self.storage.lock():
+            journal, state = self._committed_journal()
+            record = self._record(journal, state, contract_digests=contract_digests,
+                                  inventory_digest=inventory_digest,
+                                  qualification_digests=qualification_digests,
+                                  cutover_at=now, status='cutover_recorded')
+            existing = self._load_cutover()
+            if existing is not None:
+                prior = dict(existing['record'])
+                if (existing['v1_reader_removed'] is False
+                        and {k: v for k, v in prior.items() if k != 'cutover_at'}
+                        == {k: v for k, v in record.items() if k != 'cutover_at'}):
+                    return prior
+                raise MigrationError('cutover_already_recorded')
+            self.storage._write('cutover.json', {
+                'protocol': CUTOVER_PROTOCOL,
+                'migration_id': record['migration_id'],
+                'journal_target_digest': journal['target_digest'],
+                'record': record,
+                'v1_reader_removed': False,
+            })
+            return record
+
+    def cutover_state(self) -> dict | None:
+        with self.storage.lock():
+            return self._load_cutover()
+
+    def remove_migration_only_reader(self, *, now: float) -> dict:
+        finite(now, 'migration_now_invalid', minimum=0.0)
+        with self.storage.lock():
+            document = self._load_cutover()
+            if document is None:
+                raise MigrationUnavailable('migration_cutover_not_recorded')
+            if not document['v1_reader_removed']:
+                document['record'] = {**document['record'], 'status': 'complete'}
+                document['v1_reader_removed'] = True
+                self.storage._write('cutover.json', document)
+            from .migration import UPGRADE_REQUIRED
+            return {'migration_id': document['migration_id'], 'v1_reader_removed': True,
+                    'v1_write_after_cutover': UPGRADE_REQUIRED, 'record': dict(document['record'])}
+
+    def read_v1_transition_input(self) -> dict:
+        """The migration-only v1 reader. Refused once the reader has been removed."""
+        from .migration import MembershipContractUpgradeRequired
+
+        with self.storage.lock():
+            document = self._load_cutover()
+            if document is not None and document['v1_reader_removed']:
+                raise MembershipContractUpgradeRequired()
+            return self.storage._snapshot()[0]['members']
+
+
+CUTOVER_PROTOCOL = 'mycelium.private_migration_cutover.v1'

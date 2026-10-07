@@ -9,10 +9,11 @@ forbidden pattern).
 
 What is GREEN here: the migration *decision core* (protocol enumeration,
 cryptographic identity continuity, generation monotonicity, carry-over
-rejection, cutover write gate).  What is not: the migration *executor* (journal,
-checkpoint/restart, atomic commit, node/seed write paths, migration-reader
-removal) — its seams are pinned RED in ``tests/a9_migration_scaffold``.  The
-three physical cases among the four remain physical rounds owned by later lanes.
+rejection, cutover write gate).  The migration *executor* (journal,
+checkpoint/restart, atomic commit, cutover record, migration-reader removal) is
+covered by ``tests/a9_acceptance/test_migration_executor.py`` and the promoted
+``tests/a9_migration_scaffold`` lifecycle suite.  The three physical cases among
+the four remain physical rounds driven by ``scripts/run_a9_gate.py``.
 """
 
 from __future__ import annotations

@@ -1,41 +1,12 @@
-"""A9 migration-executor scaffold suite: RED by design.
+"""A9 migration-executor lifecycle suite (promoted from RED-by-design).
 
-This suite pins the migration *executor* seams the A9 re-derivation plan's S3
-lane must land (journal, checkpoint/restart, atomic commit, exact and changed
-retry, duplicate identity, concurrent resume, rollback before commit,
-migration-only reader removal, node/seed write-path integration).  None of them
-is implemented by this lane, so every test here fails on purpose with a
-``MigrationUnavailable`` code raised by this lane's own boundary functions.
+This directory used to pin the unimplemented migration executor seams with
+``scaffold_red`` placeholders.  The executor, checkpoint restart, rollback
+before commit, serialized concurrent resume, the recorded cutover, the v1
+write gate and migration-only reader removal now run real private filesystem
+transactions, so the suite is GREEN and collected by default.
 
-Weak-RED discipline: a failure here is evidence of an *honest boundary*, not
-evidence that the product lacked the behaviour at the base tip.  The GREEN
-deterministic half of the same four frozen cases lives in
-``tests/a9_acceptance/test_identity_preserving_migration.py``.
-
-Every test in this directory is marked ``scaffold_red``, which the repository's
-pytest.ini deselects from default collection.  Opt in with::
-
-    PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. /opt/homebrew/bin/python3.14 \\
-      -m pytest -q -p no:cacheprovider -m scaffold_red tests/a9_migration_scaffold
-
-See docs/operations/red-by-design-suites.md.
+It still proves only the local private transaction.  It does not prove a live
+seed cutover, a physical member migration or A9 closure; those are the A9 gate
+driver's physical steps (``scripts/run_a9_gate.py``).
 """
-
-from __future__ import annotations
-
-from pathlib import Path
-
-import pytest
-
-from mycelium_platform_neutral import migration
-
-_SUITE_ROOT = Path(__file__).resolve().parent
-
-
-@pytest.hookimpl(tryfirst=True)
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    marker = pytest.mark.scaffold_red
-    for item in items:
-        item_path = Path(str(item.path)).resolve()
-        if item_path == _SUITE_ROOT or _SUITE_ROOT in item_path.parents:
-            item.add_marker(marker)

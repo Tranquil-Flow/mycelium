@@ -20,8 +20,10 @@ rewrite blocker B1 named:
   ``membership_contract_upgrade_required``.
 
 The local private filesystem executor is available only with an explicit typed
-storage/request pair and verified signed profiles. Node/seed write paths and
-migration-reader removal remain unavailable; no live cutover is implied.
+storage/request pair and verified signed profiles. It journals, restarts from
+each checkpoint, serializes concurrent resume, rolls back before commit,
+records the cutover (the migration record below) and removes the
+migration-only reader. A live cutover is a physical A9 gate step.
 """
 
 from __future__ import annotations
@@ -207,7 +209,7 @@ RECORD_FIELDS = frozenset(
 
 
 class MigrationUnavailable(RuntimeError):
-    """The migration executor is not implemented in this lane (honest seam)."""
+    """A migration step is unavailable: untyped input, absent checkpoint or wrong stage."""
 
     def __init__(self, code: str) -> None:
         self.code = code
@@ -582,32 +584,101 @@ class PlatformNeutralMigrationError(ValueError):
         super().__init__(code)
 
 
+def _typed(storage: Any, untrusted: Mapping[str, Any]) -> Any:
+    from .migration_executor import FileMembershipState, MigrationExecutor
+
+    if untrusted or not isinstance(storage, FileMembershipState):
+        raise MigrationUnavailable("verified_migration_request_required")
+    return MigrationExecutor(storage)
+
+
+def _typed_request(request: Any, now: Any) -> None:
+    from .migration_executor import MigrationRequest
+
+    if not isinstance(request, MigrationRequest) or now is None:
+        raise MigrationUnavailable("verified_migration_request_required")
+
+
 def execute_identity_preserving_migration(*, storage: Any = None, request: Any = None, now: float | None = None, stop_after: str | None = None, **untrusted: Any) -> str:
     """Run only the local transaction with a typed adapter and signed inputs.
 
     Raw declared_members/record/booleans are not migration authority.
     """
-    from .migration_executor import FileMembershipState, MigrationExecutor, MigrationRequest
 
-    if untrusted or not isinstance(storage, FileMembershipState) or not isinstance(request, MigrationRequest) or now is None:
-        raise MigrationUnavailable("migration_executor_not_implemented")
-    return MigrationExecutor(storage).execute(request, now=now, stop_after=stop_after)
-
-
-def restart_from_checkpoint(*args: Any, **kwargs: Any) -> Any:
-    raise MigrationUnavailable("migration_checkpoint_not_implemented")
+    executor = _typed(storage, untrusted)
+    _typed_request(request, now)
+    return executor.execute(request, now=now, stop_after=stop_after)
 
 
-def rollback_before_commit(*args: Any, **kwargs: Any) -> Any:
-    raise MigrationUnavailable("migration_rollback_not_implemented")
+def restart_from_checkpoint(*, storage: Any = None, request: Any = None, now: float | None = None, **untrusted: Any) -> dict[str, Any]:
+    """Resume an interrupted migration from its private fsynced checkpoint."""
+
+    executor = _typed(storage, untrusted)
+    _typed_request(request, now)
+    return executor.restart(request, now=now)
 
 
-def resume_concurrent_migration(*args: Any, **kwargs: Any) -> Any:
-    raise MigrationUnavailable("concurrent_resume_not_implemented")
+def rollback_before_commit(*, storage: Any = None, now: float | None = None, **untrusted: Any) -> dict[str, Any]:
+    """Abandon an uncommitted migration; the prior durable database is untouched."""
+
+    executor = _typed(storage, untrusted)
+    finite(now, "migration_now_invalid", minimum=0.0)
+    source = executor.storage._snapshot()[1]
+    state = executor.rollback()
+    preserved = executor.storage._snapshot()[1] == source
+    return {"checkpoint": state, "prior_database_preserved": preserved}
 
 
-def remove_migration_only_reader(*args: Any, **kwargs: Any) -> Any:
-    raise MigrationUnavailable("migration_reader_removal_not_implemented")
+def resume_concurrent_migration(*, storage: Any = None, request: Any = None, now: float | None = None, **untrusted: Any) -> dict[str, Any]:
+    """Resume without waiting: a concurrently held transaction is reported, never interleaved."""
+
+    executor = _typed(storage, untrusted)
+    _typed_request(request, now)
+    return executor.restart(request, now=now, blocking=False)
+
+
+def record_cutover(*, storage: Any = None, contract_digests: Any = None, inventory_digest: Any = None, qualification_digests: Any = (), now: float | None = None, **untrusted: Any) -> dict[str, Any]:
+    """Record the cutover after a committed migration; returns the migration record."""
+
+    executor = _typed(storage, untrusted)
+    if contract_digests is None or inventory_digest is None or now is None:
+        raise MigrationUnavailable("verified_migration_request_required")
+    return executor.record_cutover(
+        contract_digests=tuple(contract_digests),
+        inventory_digest=inventory_digest,
+        qualification_digests=tuple(qualification_digests),
+        now=now,
+    )
+
+
+def gate_v1_write(*, storage: Any = None, operation: str, **untrusted: Any) -> None:
+    """Admit a v1 transition write before cutover; raise upgrade-required after it."""
+
+    executor = _typed(storage, untrusted)
+    document = executor.cutover_state()
+    if document is None:
+        cutover = MigrationCutover.before_cutover(migration_id="pending-cutover")
+    else:
+        record = document["record"]
+        cutover = MigrationCutover.before_cutover(
+            migration_id=document["migration_id"]
+        ).at_cutover(generation=record["cutover_generation"], at=record["cutover_at"])
+    admit_v1_write(cutover, operation=operation)
+
+
+def remove_migration_only_reader(*, storage: Any = None, now: float | None = None, **untrusted: Any) -> dict[str, Any]:
+    """Terminal step: after removal the v1 transition input cannot be read."""
+
+    executor = _typed(storage, untrusted)
+    if now is None:
+        raise MigrationUnavailable("verified_migration_request_required")
+    return executor.remove_migration_only_reader(now=now)
+
+
+def read_v1_transition_input(*, storage: Any = None, **untrusted: Any) -> dict[str, Any]:
+    """The bounded migration-only reader of the v1 member inventory."""
+
+    return _typed(storage, untrusted).read_v1_transition_input()
 
 
 def _generation_map(value: Any) -> dict[str, int]:
