@@ -64,6 +64,7 @@ ENTRY_POINTS = (
     "mycelium_a13_macos.concurrent_pump",
     "mycelium_a13_macos.managed_runtime",
     "mycelium_a13_macos.worker",
+    "mycelium_a13_windows.managed_host.staging",
     "stage_pack",
     "runtime_loader",
 )
