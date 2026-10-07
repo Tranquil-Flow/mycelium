@@ -16,8 +16,10 @@ import time
 import unittest
 from pathlib import Path
 
+# The repository under test, never a foreign checkout.
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from mycelium_router import instrument  # noqa: E402
 
