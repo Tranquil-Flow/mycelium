@@ -275,3 +275,13 @@ def test_install_plan_requires_a_verified_source_and_needs_no_expert_tools() -> 
     )
     assert _code(lambda: install_plan({"verified": False})) == "install_source_not_verified"
     assert _code(lambda: install_plan(None)) == "install_source_not_verified"
+
+
+def test_per_user_install_plan_registers_an_opt_in_logon_task_not_an_scm_service() -> None:
+    plan = install_plan(_verify(_source(install_mode="windows_service_per_user")))
+    actions = [step["action"] for step in plan["steps"]]
+    assert "register_per_user_logon_task_opt_in" in actions
+    assert "register_least_privilege_windows_service" not in actions
+    assert "open_app_and_check_loopback_ui" in actions
+    assert actions.index("create_target_identity") > actions.index("verify_publisher_signature")
+    assert plan["expert_tools_required"] == [] and plan["public_listener"] is False

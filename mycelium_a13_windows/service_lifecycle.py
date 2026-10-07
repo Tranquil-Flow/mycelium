@@ -96,8 +96,10 @@ _RESTART_POLICY_FIELDS = frozenset(
 
 #: The least-privilege account classes this tranche declares.
 ACCOUNT_CLASSES: frozenset[str] = frozenset(
-    {"least_privilege_service_account", "virtual_service_account"}
+    {"least_privilege_service_account", "virtual_service_account", "signed_in_user_least_privilege"}
 )
+#: An SCM service never runs as "the signed-in user"; only the per-user task does.
+_PER_USER_ONLY_ACCOUNT_CLASSES: frozenset[str] = frozenset({"signed_in_user_least_privilege"})
 START_TYPES: frozenset[str] = frozenset({"automatic", "manual"})
 _LAUNCH_PRIVILEGE = "as_invoker_least_privilege"
 _INSTALL_MODES = frozenset({"windows_service", "windows_service_per_user"})
@@ -165,6 +167,8 @@ def validate_least_privilege_windows_service(descriptor: object) -> dict:
             raise ServiceLifecycleError("windows_service_environment_secret")
     if value["install_mode"] not in _INSTALL_MODES:
         raise ServiceLifecycleError("windows_service_install_mode_invalid")
+    if value["install_mode"] == "windows_service" and value["account_class"] in _PER_USER_ONLY_ACCOUNT_CLASSES:
+        raise ServiceLifecycleError("windows_service_privilege_escalation")
     if value["start_type"] not in START_TYPES:
         raise ServiceLifecycleError("windows_service_hardening_incomplete")
     policy = value["restart_policy"]

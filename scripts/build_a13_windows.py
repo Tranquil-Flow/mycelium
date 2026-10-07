@@ -208,12 +208,16 @@ def render_windows_service_member(work_root: Path) -> dict[str, Any]:
         "service_name": _WINDOWS_SERVICE_NAME,
         "display_name": "Mycelium Agent",
         "start_type": "automatic",
-        "account_class": "least_privilege_service_account",
+        # Per-user logon task, not an SCM service (lane pm-a9 finding): python.exe
+        # has no SCM control handler and an NT SERVICE SID cannot open the
+        # owner-only host state the signed-in user paired.  The SCM mode stays
+        # validated in service_lifecycle so an owner ruling can bring it back.
+        "account_class": "signed_in_user_least_privilege",
         "launch_privilege": "as_invoker_least_privilege",
         "restricted_token": True,
         "public_listener": False,
         "environment": {"MYCELIUM_ROLE": "node"},
-        "install_mode": "windows_service",
+        "install_mode": "windows_service_per_user",
         "restart_policy": {
             "restart_limit": 5,
             "restart_delay_seconds": 5,
@@ -257,7 +261,7 @@ def build_windows_install_source(
         "windows_version": declared["minimum_version"],
         "windows_build": declared["minimum_build"],
         "service_manager": declared["service_manager"],
-        "install_mode": "windows_service",
+        "install_mode": "windows_service_per_user",
         "rollback_floor": rollback_floor,
         "lifecycle_support": True,
         "expert_tools_required": [],

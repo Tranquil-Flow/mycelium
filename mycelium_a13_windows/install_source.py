@@ -295,6 +295,17 @@ def install_plan(verified: object) -> dict:
         or not isinstance(verified.get("artifact_digest"), str)
     ):
         _fail("install_source_not_verified")
+    per_user = verified.get("install_mode") == "windows_service_per_user"
+    register = (
+        {"action": "register_per_user_logon_task_opt_in", "requires": "windows_service_per_user_member"}
+        if per_user
+        else {"action": "register_least_privilege_windows_service", "requires": "windows_service_descriptor"}
+    )
+    start = (
+        {"action": "open_app_and_check_loopback_ui", "requires": "per_user_installation"}
+        if per_user
+        else {"action": "start_service_and_check_loopback_health", "requires": "service_lifecycle"}
+    )
     steps = [
         {
             "index": 1,
@@ -311,16 +322,8 @@ def install_plan(verified: object) -> dict:
             "action": "install_windows_installer_package",
             "requires": "signed_windows_installer",
         },
-        {
-            "index": 4,
-            "action": "register_least_privilege_windows_service",
-            "requires": "windows_service_descriptor",
-        },
-        {
-            "index": 5,
-            "action": "start_service_and_check_loopback_health",
-            "requires": "service_lifecycle",
-        },
+        {"index": 4, **register},
+        {"index": 5, **start},
         {
             "index": 6,
             "action": "create_target_identity",

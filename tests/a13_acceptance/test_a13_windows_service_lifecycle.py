@@ -252,3 +252,12 @@ def test_uninstall_never_claims_a_coordinator_revocation() -> None:
     assert _code(lambda: uninstall_plan(
         retain_identity="yes", reachable=True, generation_valid=True, lease_valid=True
     )) == "windows_service_uninstall_plan_invalid"
+
+
+def test_signed_in_user_account_is_per_user_only() -> None:
+    per_user = validate_least_privilege_windows_service(
+        _descriptor(install_mode="windows_service_per_user", account_class="signed_in_user_least_privilege"))
+    assert per_user["account_class"] == "signed_in_user_least_privilege"
+    assert _code(lambda: validate_least_privilege_windows_service(
+        _descriptor(install_mode="windows_service", account_class="signed_in_user_least_privilege"))
+    ) == "windows_service_privilege_escalation"

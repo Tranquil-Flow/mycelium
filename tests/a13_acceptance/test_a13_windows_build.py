@@ -92,7 +92,8 @@ def test_render_windows_service_member_produces_a_real_digest(tmp_path: Path) ->
     member = build_a13_windows.render_windows_service_member(tmp_path / "work")
     assert member["windows_member_rendered"] is True
     assert member["windows_member_sha256"].startswith("sha256:")
-    assert member["windows_install_mode"] == "windows_service"
+    # Per-user logon task, not SCM (see build_a13_windows.render_windows_service_member).
+    assert member["windows_install_mode"] == "windows_service_per_user"
 
 
 def test_build_windows_bundle_end_to_end_produces_a_verifiable_signed_bundle(
