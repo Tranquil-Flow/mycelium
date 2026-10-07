@@ -40,6 +40,8 @@ use crate::local_ipc::{
     ConnectionOwnerTable, LoopbackListener, authorize_loopback_client, loopback_ready_record,
 };
 use crate::protocol::{WireError, decode_frame};
+use mycelium_mobile_core::artifact_grant::ARTIFACT_CHUNK_ALPN;
+use mycelium_mobile_core::artifact_net::ArtifactSource;
 use crate::ready_address::{
     READY_ADDRESS_WINDOW, StdoutSink, await_advertised_address, republish_address_changes,
 };
@@ -152,6 +154,20 @@ pub struct SidecarConfig {
     pub local_only: bool,
     pub force_relay: bool,
     pub endpoint_secret: Option<Zeroizing<[u8; 32]>>,
+    /// Also serve phone stage objects on `mycelium.artifact_chunk.v1`.
+    pub artifact: Option<ArtifactSourceConfig>,
+}
+
+/// The A2-over-iroh artifact source the sidecar serves beside the Router
+/// ALPN (`mycelium_mobile_core::artifact_net`): content-addressed objects,
+/// the seed key grants must verify under, the durable admission journal and
+/// the source's receipt-signing key. Its grant identity is this sidecar's
+/// iroh endpoint id.
+pub struct ArtifactSourceConfig {
+    pub objects: PathBuf,
+    pub seed_key: serde_json::Value,
+    pub state_dir: PathBuf,
+    pub signing_secret: Zeroizing<[u8; 32]>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -167,6 +183,7 @@ pub enum SidecarError {
     InvalidNetworkMode,
     ReadyOutput,
     Runtime,
+    ArtifactSource,
 }
 
 impl SidecarError {
@@ -183,6 +200,7 @@ impl SidecarError {
             Self::InvalidNetworkMode => "invalid_network_mode",
             Self::ReadyOutput => "ready_output_error",
             Self::Runtime => "runtime_error",
+            Self::ArtifactSource => "artifact_source_invalid",
         }
     }
 }
@@ -548,8 +566,22 @@ pub async fn run_sidecar(
         config.local_only,
         config.force_relay,
         config.endpoint_secret.as_deref(),
+        config.artifact.is_some(),
     )
     .await?;
+    let artifact_source = match config.artifact {
+        Some(artifact) => Some(
+            ArtifactSource::with_endpoint(
+                endpoint.clone(),
+                &artifact.signing_secret,
+                artifact.seed_key,
+                artifact.objects,
+                &artifact.state_dir,
+            )
+            .map_err(|_| SidecarError::ArtifactSource)?,
+        ),
+        None => None,
+    };
     // The advertised address is a live value, not the bind-time snapshot the
     // WP2 probe caught with `relay_addrs=0` (wp2-6 defect 1): it is read from a
     // watcher, waited for until it is usable, and re-advertised on change.
@@ -570,7 +602,16 @@ pub async fn run_sidecar(
 
     let state = RuntimeState::new(config.queue_capacity.get(), config.local_only);
     let outbound_task = tokio::spawn(outbound_worker(endpoint.clone(), state.clone()));
-    let incoming_task = tokio::spawn(incoming_worker(endpoint.clone(), state.clone()));
+    if let Some(source) = &artifact_source {
+        // What the owner names when issuing a v2 assignment
+        // (`--artifact-source ENDPOINT_ID:KEY_DIGEST`); the ready record itself
+        // keeps its fixed shape.
+        eprintln!(
+            "{}",
+            serde_json::json!({"event": "artifact_source_ready", "endpoint_id": source.endpoint_id(), "verification_key_digest": source.key_digest()})
+        );
+    }
+    let incoming_task = tokio::spawn(incoming_worker(endpoint.clone(), state.clone(), artifact_source));
 
     let ready_json = channel.ready_record(
         &endpoint_id,
@@ -771,6 +812,7 @@ async fn bind_endpoint(
     local_only: bool,
     force_relay: bool,
     endpoint_secret: Option<&[u8; 32]>,
+    serve_artifacts: bool,
 ) -> Result<Endpoint, SidecarError> {
     let mut builder = if local_only {
         Endpoint::builder(presets::Minimal)
@@ -789,8 +831,12 @@ async fn bind_endpoint(
     if let Some(secret) = endpoint_secret {
         builder = builder.secret_key(SecretKey::from_bytes(secret));
     }
+    let mut alpns = vec![IROH_ALPN.to_vec()];
+    if serve_artifacts {
+        alpns.push(ARTIFACT_CHUNK_ALPN.to_vec());
+    }
     builder
-        .alpns(vec![IROH_ALPN.to_vec()])
+        .alpns(alpns)
         .bind()
         .await
         .map_err(|_| SidecarError::EndpointBind)
@@ -2467,7 +2513,7 @@ fn cancel_streams(send: &mut SendStream, receive: &mut RecvStream) {
     let _ = receive.stop(CANCEL_CODE);
 }
 
-async fn incoming_worker(endpoint: Endpoint, state: Arc<RuntimeState>) {
+async fn incoming_worker(endpoint: Endpoint, state: Arc<RuntimeState>, artifacts: Option<ArtifactSource>) {
     let connection_slots = Arc::new(Semaphore::new(
         state.inbound_slots.available_permits().max(1),
     ));
@@ -2479,11 +2525,22 @@ async fn incoming_worker(endpoint: Endpoint, state: Arc<RuntimeState>) {
             return;
         };
         let connection_state = state.clone();
+        let artifacts = artifacts.clone();
         tokio::spawn(async move {
             let _permit = permit;
             let Ok(connection) = incoming.await else {
                 return;
             };
+            // Artifact chunks are authorized per request by the seed grant and
+            // the recipient's endpoint, never by the Router peer allow-list;
+            // Router frames are never accepted on the artifact ALPN.
+            if connection.alpn() == ARTIFACT_CHUNK_ALPN {
+                match artifacts {
+                    Some(source) => source.serve_connection(connection).await,
+                    None => connection.close(REJECT_CODE, b"alpn"),
+                }
+                return;
+            }
             // Admit against the binding for this specific remote so every peer
             // in a routed set can open a connection, not just the primary.
             let expected = {
@@ -2737,10 +2794,10 @@ mod tests {
     #[tokio::test]
     async fn explicit_endpoint_secret_stabilizes_endpoint_identity() {
         let secret = Zeroizing::new([9_u8; 32]);
-        let first = bind_endpoint(true, false, Some(&*secret)).await.unwrap();
+        let first = bind_endpoint(true, false, Some(&*secret), false).await.unwrap();
         let first_id = first.id();
         first.close().await;
-        let second = bind_endpoint(true, false, Some(&*secret)).await.unwrap();
+        let second = bind_endpoint(true, false, Some(&*secret), false).await.unwrap();
         assert_eq!(second.id(), first_id);
         second.close().await;
     }
@@ -3294,4 +3351,89 @@ mod tests {
             Err(SessionError::Protocol)
         );
     }
+
+    /// The sidecar serves phone stage objects on the artifact ALPN under a
+    /// seed grant: a phone acquires the synthetic v2 stage end to end and the
+    /// store-loaded stage passes its golden. Without the artifact
+    /// configuration the ALPN is not offered at all.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_sidecar_serves_artifact_chunks_only_when_configured() {
+        use base64::Engine as _;
+        use mycelium_mobile_core::artifact::ArtifactStore;
+        use mycelium_mobile_core::artifact_grant as ag;
+        use mycelium_mobile_core::artifact_net::IrohChunkSource;
+        use mycelium_mobile_core::identity::Identity;
+        use mycelium_mobile_core::stage_manifest::StageManifest;
+        use mycelium_mobile_core::transport::Reachability;
+
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../mobile_core/tests/fixtures");
+        let read = |name: &str| -> serde_json::Value {
+            serde_json::from_str(&fs::read_to_string(fixtures.join(name)).unwrap()).unwrap()
+        };
+        let scratch = std::env::temp_dir().join(format!("mycelium-sidecar-artifacts-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&scratch);
+        let objects = scratch.join("objects");
+        fs::create_dir_all(&objects).unwrap();
+        let file = base64::engine::general_purpose::STANDARD
+            .decode(read("qwen2_synthetic.json")["safetensors_b64"].as_str().unwrap())
+            .unwrap();
+        let header = mycelium_mobile_core::safetensors::parse_file(&file).unwrap();
+        for name in header.tensors.keys() {
+            let (start, end) = header.range(name).unwrap();
+            let bytes = &file[start as usize..end as usize];
+            fs::write(objects.join(hex::encode(Sha256::digest(bytes))), bytes).unwrap();
+        }
+        let manifest = StageManifest::from_document(&read("qwen2_stage_manifest_v2.json")["manifest"]).unwrap();
+        let seed = Identity::from_secret("seed-endpoint", &[0x22; 32]).unwrap();
+
+        let endpoint = bind_endpoint(true, false, Some(&[0x71; 32]), true).await.unwrap();
+        let source = ArtifactSource::with_endpoint(endpoint.clone(), &[0x72; 32], seed.public_key_record(), objects.clone(), &scratch.join("state")).unwrap();
+        let (source_id, source_digest) = (source.endpoint_id(), source.key_digest());
+        assert_eq!(source_id, endpoint.id().to_string(), "the grant names the sidecar's own endpoint");
+        tokio::spawn(incoming_worker(endpoint.clone(), RuntimeState::new(4, true), Some(source)));
+
+        let phone_secret = [0x73_u8; 32];
+        let phone_id = SecretKey::from_bytes(&phone_secret).public().to_string();
+        let member = Arc::new(Identity::from_secret(&phone_id, &[0x11; 32]).unwrap());
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let mut objects_list: Vec<String> = manifest.tensors.iter().map(|t| t.sha256.clone()).collect();
+        objects_list.sort();
+        objects_list.dedup();
+        let message = json!({
+            "protocol": ag::GRANT_PROTOCOL, "grant_id": "grant-sidecar-1", "swarm_id": "swarm-a",
+            "seed_node_id": "seed-node", "recipient_node_id": "node-phone", "recipient_endpoint_id": phone_id,
+            "recipient_key_digest": member.verification_key_digest(), "assignment_id": "route-1",
+            "manifest_pack_digest": manifest.pack_digest, "allowed_object_digests": objects_list,
+            "authorized_sources": [{"endpoint_id": source_id, "verification_key_digest": source_digest, "direct_addrs": []}],
+            "maximum_total_bytes": manifest.total_bytes(), "maximum_bytes_per_second": 64_u64 << 20,
+            "maximum_chunk_bytes": 4_u64 << 20, "issued_at_unix_ms": now, "not_before_unix_ms": now,
+            "expires_at_unix_ms": now + 900_000,
+        });
+        let envelope = json!({"protocol": "mycelium.membership.signed_message.v1", "signature": seed.sign(&message).unwrap(),
+                              "verification_key": seed.public_key_record(), "message": message});
+        let grant = ag::verify_grant(&envelope, &seed.public_key_record(), now).unwrap();
+
+        let acquire = |sources: Vec<EndpointAddr>, store_dir: PathBuf, grant: ag::Grant, member: Arc<Identity>, manifest: StageManifest| async move {
+            let client = IrohChunkSource::bind(&phone_secret, member, grant, sources, Reachability::LocalOnly).await.unwrap();
+            tokio::task::spawn_blocking(move || {
+                let mut client = client;
+                let store = ArtifactStore::open(&store_dir, 1 << 30).map_err(|e| e.0)?;
+                store.acquire(&manifest, &mut client, 1024, None).map_err(|e| e.0)?;
+                store.load_stage_for_serving(&manifest).map(|_| ()).map_err(|e| e.0)
+            })
+            .await
+            .unwrap()
+        };
+        acquire(vec![endpoint.addr()], scratch.join("store"), grant.clone(), member.clone(), manifest.clone()).await.unwrap();
+
+        // A sidecar started without the artifact configuration does not offer the ALPN.
+        endpoint.close().await;
+        let plain = bind_endpoint(true, false, Some(&[0x71; 32]), false).await.unwrap();
+        tokio::spawn(incoming_worker(plain.clone(), RuntimeState::new(4, true), None));
+        let refused = acquire(vec![plain.addr()], scratch.join("store2"), grant, member, manifest).await.unwrap_err();
+        assert_eq!(refused, "artifact_source_unreachable");
+        plain.close().await;
+        let _ = fs::remove_dir_all(&scratch);
+    }
+
 }

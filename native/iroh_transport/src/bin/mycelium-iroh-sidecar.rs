@@ -14,8 +14,8 @@ use mycelium_iroh_transport::local_ipc::{SystemConnectionTable, read_bootstrap_s
 #[cfg(unix)]
 use mycelium_iroh_transport::sidecar::read_bootstrap_secret;
 use mycelium_iroh_transport::sidecar::{
-    DEFAULT_QUEUE_CAPACITY, LocalChannel, SidecarConfig, SidecarError, log_event,
-    read_endpoint_secret, run_sidecar,
+    ArtifactSourceConfig, DEFAULT_QUEUE_CAPACITY, LocalChannel, SidecarConfig, SidecarError,
+    log_event, read_endpoint_secret, run_sidecar,
 };
 use zeroize::Zeroizing;
 
@@ -174,6 +174,36 @@ struct CommonArguments {
     /// Independent capacity of the inbound and outbound message queues.
     #[arg(long, default_value_t = NonZeroUsize::new(DEFAULT_QUEUE_CAPACITY).unwrap())]
     queue_capacity: NonZeroUsize,
+
+    /// Also serve phone stage objects (`<sha256 hex>` files in this directory)
+    /// on the ALPN `mycelium.artifact_chunk.v1` under seed grants.
+    #[arg(long, value_name = "DIR", requires_all = ["artifact_seed_key", "artifact_state", "artifact_signing_key_file"])]
+    artifact_objects: Option<PathBuf>,
+
+    /// The seed's public key record (JSON); grants must verify under it.
+    #[arg(long, value_name = "PATH", requires = "artifact_objects")]
+    artifact_seed_key: Option<PathBuf>,
+
+    /// Directory of the durable artifact admission journal.
+    #[arg(long, value_name = "DIR", requires = "artifact_objects")]
+    artifact_state: Option<PathBuf>,
+
+    /// Host-local raw 32-byte receipt-signing key (0600, like the endpoint key).
+    #[arg(long, value_name = "PATH", requires = "artifact_objects")]
+    artifact_signing_key_file: Option<PathBuf>,
+}
+
+fn artifact_config(common: &CommonArguments) -> Result<Option<ArtifactSourceConfig>, ()> {
+    let Some(objects) = common.artifact_objects.clone() else { return Ok(None) };
+    let (Some(seed_key), Some(state_dir), Some(key_file)) =
+        (common.artifact_seed_key.as_deref(), common.artifact_state.clone(), common.artifact_signing_key_file.as_deref())
+    else {
+        return Err(());
+    };
+    let seed_key = std::fs::read(seed_key).map_err(|_| ())?;
+    let seed_key: serde_json::Value = serde_json::from_slice(&seed_key).map_err(|_| ())?;
+    let signing_secret = read_endpoint_secret(key_file).map_err(|_| ())?;
+    Ok(Some(ArtifactSourceConfig { objects, seed_key, state_dir, signing_secret }))
 }
 
 #[tokio::main]
@@ -197,12 +227,20 @@ async fn main() -> ExitCode {
         },
         None => None,
     };
+    let artifact = match artifact_config(&common) {
+        Ok(artifact) => artifact,
+        Err(()) => {
+            log_event("artifact_source_rejected");
+            return ExitCode::FAILURE;
+        }
+    };
     let config = SidecarConfig {
         channel,
         queue_capacity: common.queue_capacity,
         local_only: common.local_only,
         force_relay: common.force_relay,
         endpoint_secret,
+        artifact,
     };
     match run_sidecar(config, secret).await {
         Ok(()) => ExitCode::SUCCESS,

@@ -22,6 +22,10 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 zeroize = { version = "1", features = ["derive"] }
 
+# The A2-over-iroh artifact source (ALPN mycelium.artifact_chunk.v1) the
+# sidecar can serve beside the Router ALPN; no HTTP client is linked.
+mycelium-mobile-core = { path = "../mobile_core", default-features = false, features = ["artifact-source"] }
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
@@ -35,6 +39,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_NetworkManagement_IpHelper",
     "Win32_Networking_WinSock",
 ] }
+
+[dev-dependencies]
+base64 = "0.22"
 
 [features]
 # Exposes the loopback channel CLI on non-Windows hosts so its authentication
