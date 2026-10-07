@@ -358,6 +358,7 @@ class NodeMembershipSession:
         *,
         invite_nonce: str,
         endpoint_addrs: Sequence[str],
+        peer_profile: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             if self._generation is not None:
@@ -378,13 +379,17 @@ class NodeMembershipSession:
                 "expires_at": now + self._ttl,
                 "invite_nonce": invite_nonce,
                 "software_version": self.software_version,
-                "peer_class": self.peer_class,
-                "runtime_capability": dict(self.runtime_capability),
                 "endpoint_addr": {
                     "id": self.signer.endpoint_id,
                     "addrs": list(endpoint_addrs),
                 },
             }
+            if peer_profile is None:
+                message["peer_class"] = self.peer_class
+                message["runtime_capability"] = dict(self.runtime_capability)
+            else:
+                # A9 v2 declaration: a seed past the cutover accepts only this form.
+                message["peer_profile"] = dict(peer_profile)
             envelope = sign_membership_message(signer=self.signer, message=message)
             self._pending_join_message_id = message["message_id"]
             return envelope
@@ -438,6 +443,7 @@ class NodeMembershipSession:
         previous_generation: int,
         previous_incarnation: str,
         endpoint_addrs: Sequence[str],
+        peer_profile: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Sign a restart request under the existing durable device identity."""
 
@@ -472,13 +478,17 @@ class NodeMembershipSession:
                 "expires_at": now + self._ttl,
                 "previous_incarnation": previous_incarnation,
                 "software_version": self.software_version,
-                "peer_class": self.peer_class,
-                "runtime_capability": dict(self.runtime_capability),
                 "endpoint_addr": {
                     "id": self.signer.endpoint_id,
                     "addrs": list(endpoint_addrs),
                 },
             }
+            if peer_profile is None:
+                message["peer_class"] = self.peer_class
+                message["runtime_capability"] = dict(self.runtime_capability)
+            else:
+                # A9 v2 declaration: a seed past the cutover accepts only this form.
+                message["peer_profile"] = dict(peer_profile)
             envelope = sign_membership_message(signer=self.signer, message=message)
             self._pending_resume = (
                 message["message_id"],

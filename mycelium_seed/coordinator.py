@@ -40,6 +40,10 @@ from mycelium_membership import (
     verify_join_request,
     verify_membership_message,
 )
+from mycelium_membership.contracts import (
+    _PEER_RUNTIME_CAPABILITIES,
+    declaration_form,
+)
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import Ed25519EvidenceSigner
 
@@ -188,6 +192,7 @@ class SeedCoordinator:
         # A9 one-time v1 -> v2 migration: once the cutover is recorded every v1
         # write fails closed with membership_contract_upgrade_required.
         self._membership_cutover = membership_cutover
+        self._membership_contract = "v1"
         if state is None:
             state = SqliteSeedState(invite_registry.database)
         if state.database.resolve() != invite_registry.database.resolve():
@@ -273,6 +278,7 @@ class SeedCoordinator:
                     record["assignment_id"]: record
                     for record in state.load_assignments()
                 }
+                self._membership_contract = state.membership_contract()["version"]
             except (SeedStateError, TypeError, ValueError) as exc:
                 code = getattr(exc, "code", "seed_state_corrupt")
                 raise SeedCoordinatorError(code) from exc
@@ -298,6 +304,80 @@ class SeedCoordinator:
             yield
         finally:
             admission.__exit__(None, None, None)
+
+    @property
+    def membership_contract(self) -> str:
+        return self._membership_contract
+
+    def _require_declaration_form(self, message: Any) -> str:
+        """Join/resume declaration form must match the seed's recorded contract."""
+
+        form = (
+            declaration_form(message) if isinstance(message, Mapping) else "v1"
+        )
+        if form == self._membership_contract:
+            return form
+        if self._membership_contract == "v2":
+            raise SeedCoordinatorError("membership_contract_upgrade_required")
+        raise SeedCoordinatorError("membership_v2_before_cutover")
+
+    def _verified_v2_profile(
+        self,
+        request: Mapping[str, Any],
+        *,
+        key_digest: str,
+        generation: int,
+        now: float,
+    ) -> tuple[Any, dict[str, Any]]:
+        """Verify the signed v2 profile a join/resume carries after the cutover."""
+
+        from mycelium_platform_neutral.peer_profile import verify_peer_profile
+        from mycelium_platform_neutral.primitives import record_digest
+
+        envelope = request["peer_profile"]
+        try:
+            profile = verify_peer_profile(
+                envelope,
+                now=now,
+                expected_key_digest=key_digest,
+                expected_node_id=request["sender_node_id"],
+            )
+        except ValueError as exc:
+            raise SeedCoordinatorError(
+                "membership_v2_peer_profile_invalid"
+            ) from exc
+        if (
+            profile.swarm_id != self.swarm_id
+            or profile.incarnation != request["incarnation"]
+            or profile.issued_at > now
+        ):
+            raise SeedCoordinatorError("membership_v2_peer_profile_invalid")
+        if profile.membership_generation != generation:
+            raise SeedCoordinatorError("membership_v2_profile_generation_mismatch")
+        stored = {
+            "node_id": request["sender_node_id"],
+            "generation": generation,
+            "incarnation": request["incarnation"],
+            "profile_digest": record_digest(
+                profile.to_mapping(), "peer_profile_noncanonical"
+            ),
+            "envelope": dict(envelope),
+        }
+        return profile, stored
+
+    def commit_membership_cutover(self, prepared: Mapping[str, Any]) -> None:
+        """Online live cutover: one CAS transaction, then the in-memory members follow."""
+
+        with self._lock:
+            try:
+                self._state.commit_membership_cutover(**prepared)
+            except SeedStateError as exc:
+                raise SeedCoordinatorError(exc.code) from exc
+            for item in prepared["updates"]:
+                member = self._members[item["node_id"]]
+                member.generation = int(item["post_generation"])
+                member.incarnation = item["post_incarnation"]
+            self._membership_contract = "v2"
 
     def _persist(self, method: str, *args: Any, **kwargs: Any) -> None:
         if self._state is None:
@@ -471,6 +551,10 @@ class SeedCoordinator:
                 verifier_key_records=[self.signer.public_key_record()],
                 now=now,
             )
+            untrusted_join = (
+                join_envelope.get("message") if isinstance(join_envelope, Mapping) else None
+            )
+            form = self._require_declaration_form(untrusted_join)
             request = verify_join_request(join_envelope, now=now)
             if (
                 invite["swarm_id"] != self.swarm_id
@@ -506,6 +590,25 @@ class SeedCoordinator:
                 raise SeedCoordinatorError("seed_node_endpoint_conflict")
 
             generation = 1 if previous is None else previous.generation + 1
+            profile_v2 = None
+            if form == "v2":
+                profile, profile_v2 = self._verified_v2_profile(
+                    request, key_digest=key_digest, generation=generation, now=now
+                )
+                from mycelium_platform_neutral.seed_migration import (
+                    consumer_projection_class,
+                )
+
+                try:
+                    peer_class = consumer_projection_class(profile)
+                except ValueError as exc:
+                    raise SeedCoordinatorError(
+                        "membership_v2_profile_has_no_consumer_projection"
+                    ) from exc
+                runtime_capability = dict(_PEER_RUNTIME_CAPABILITIES[peer_class])
+            else:
+                peer_class = request["peer_class"]
+                runtime_capability = dict(request["runtime_capability"])
             lease_expires_at = self._bounded_deadline(
                 issued_at=now,
                 ttl_seconds=self._lease_seconds,
@@ -516,8 +619,8 @@ class SeedCoordinator:
                 node_id=node_id,
                 endpoint_id=request["sender_endpoint_id"],
                 endpoint_addrs=tuple(endpoint["addrs"]),
-                peer_class=request["peer_class"],
-                runtime_capability=dict(request["runtime_capability"]),
+                peer_class=peer_class,
+                runtime_capability=runtime_capability,
                 verification_key_digest=key_digest,
                 incarnation=request["incarnation"],
                 generation=generation,
@@ -564,6 +667,8 @@ class SeedCoordinator:
                     message_id=message_id,
                     member=member.projection(),
                     acceptance=acceptance,
+                    expected_contract=self._membership_contract,
+                    profile_v2=profile_v2,
                 )
             except SeedStateError as exc:
                 if exc.code == "seed_join_invite_replayed":
@@ -623,6 +728,7 @@ class SeedCoordinator:
             previous = self._members.get(node_id)
             if previous is None:
                 raise SeedCoordinatorError("seed_member_unknown")
+            form = self._require_declaration_form(untrusted)
             now = self._now()
             try:
                 request = verify_membership_message(
@@ -645,9 +751,14 @@ class SeedCoordinator:
             if (
                 request["sender_endpoint_id"] != previous.endpoint_id
                 or key_digest != previous.verification_key_digest
-                or request["peer_class"] != previous.peer_class
-                or dict(request["runtime_capability"])
-                != previous.runtime_capability
+                or (
+                    form == "v1"
+                    and (
+                        request["peer_class"] != previous.peer_class
+                        or dict(request["runtime_capability"])
+                        != previous.runtime_capability
+                    )
+                )
             ):
                 raise SeedCoordinatorError("seed_resume_identity_mismatch")
             if previous.lifecycle_state in {"STOPPING", "STOPPED"}:
@@ -663,6 +774,11 @@ class SeedCoordinator:
             ):
                 raise SeedCoordinatorError("seed_resume_generation_stale")
             generation = request["generation"] + 1
+            profile_v2 = None
+            if form == "v2":
+                _, profile_v2 = self._verified_v2_profile(
+                    request, key_digest=key_digest, generation=generation, now=now
+                )
             lease_expires_at = self._bounded_deadline(
                 issued_at=now,
                 ttl_seconds=self._lease_seconds,
@@ -720,6 +836,8 @@ class SeedCoordinator:
                     member=member.projection(),
                     acceptance=acceptance,
                     already_advanced=already_advanced,
+                    expected_contract=self._membership_contract,
+                    profile_v2=profile_v2,
                 )
             except SeedStateError as exc:
                 raise SeedCoordinatorError(exc.code) from exc
@@ -1115,6 +1233,12 @@ class SeedCoordinator:
             member = self._members.get(node_id)
             if member is None:
                 raise SeedCoordinatorError("seed_member_unknown")
+            if self._membership_contract == "v2" and (
+                untrusted_message.get("generation") != member.generation
+                or untrusted_message.get("incarnation") != member.incarnation
+            ):
+                # A process still running under its pre-migration identity.
+                raise SeedCoordinatorError("membership_contract_upgrade_required")
             now = self._now()
             if (
                 expected_protocol != HEARTBEAT_PROTOCOL
@@ -1254,6 +1378,7 @@ class SeedCoordinator:
                         renewal=renewal,
                         now=now,
                         capacity=_MAX_REPLAY_IDS,
+                        expected_contract=self._membership_contract,
                     )
                 except SeedStateError as exc:
                     raise SeedCoordinatorError(exc.code) from exc

@@ -367,8 +367,63 @@ def peer_runtime_activation_refusal(peer_class: Any) -> str | None:
     return PEER_CLASS_ACTIVATION_REFUSALS.get(peer_class)
 
 
-def _validate_common(message: Mapping[str, Any], protocol: str) -> None:
+#: A9 one-time migration (spec §6.4): join and resume keep their envelope
+#: protocol, but after the recorded cutover the compound ``peer_class`` and
+#: ``runtime_capability`` declaration is replaced by one signed
+#: ``mycelium.membership.peer_profile.v2`` envelope.  Exactly one of the two
+#: declaration forms is accepted per message; which one a seed admits is the
+#: seed's recorded membership contract, never the sender's choice.
+V1_DECLARATION_FIELDS = frozenset({"peer_class", "runtime_capability"})
+V2_DECLARATION_FIELDS = frozenset({"peer_profile"})
+PEER_PROFILE_V2_PROTOCOL = "mycelium.membership.peer_profile.v2"
+_DECLARATION_PROTOCOLS = frozenset({JOIN_REQUEST_PROTOCOL, RESUME_REQUEST_PROTOCOL})
+
+
+def declaration_form(message: Mapping[str, Any]) -> str:
+    """``"v1"`` (compound class) or ``"v2"`` (signed peer profile) for join/resume."""
+
+    return "v2" if "peer_profile" in message else "v1"
+
+
+def _expected_fields(message: Mapping[str, Any], protocol: str) -> frozenset[str]:
     expected = _COMMON_FIELDS | _SPECIFIC_FIELDS[protocol]
+    if protocol in _DECLARATION_PROTOCOLS and declaration_form(message) == "v2":
+        expected = (expected - V1_DECLARATION_FIELDS) | V2_DECLARATION_FIELDS
+    return expected
+
+
+def _validate_peer_profile_shape(message: Mapping[str, Any]) -> None:
+    """Shape and binding only; the seed verifies the signature against the member key."""
+
+    envelope = message["peer_profile"]
+    _require(
+        isinstance(envelope, Mapping)
+        and set(envelope) == {"protocol", "profile", "signature", "verification_key"}
+        and envelope["protocol"] == PEER_PROFILE_V2_PROTOCOL
+        and isinstance(envelope["profile"], Mapping),
+        "membership_peer_profile_invalid",
+    )
+    profile = envelope["profile"]
+    _require(
+        profile.get("node_id") == message["sender_node_id"]
+        and profile.get("swarm_id") == message["swarm_id"]
+        and profile.get("incarnation") == message["incarnation"],
+        "membership_peer_profile_binding_mismatch",
+    )
+
+
+def _validate_declaration(message: Mapping[str, Any]) -> None:
+    if declaration_form(message) == "v2":
+        _validate_peer_profile_shape(message)
+    else:
+        validate_peer_runtime_capability(
+            message["peer_class"],
+            message["runtime_capability"],
+        )
+
+
+def _validate_common(message: Mapping[str, Any], protocol: str) -> None:
+    expected = _expected_fields(message, protocol)
     _require(set(message) == expected, "membership_fields_invalid")
     for field in (
         "message_id",
@@ -397,10 +452,7 @@ def _validate_common(message: Mapping[str, Any], protocol: str) -> None:
 def _validate_join_request(message: Mapping[str, Any]) -> None:
     _require(_segment(message["invite_nonce"]), "membership_identifier_invalid")
     _require(_text(message["software_version"], maximum=128), "membership_text_invalid")
-    validate_peer_runtime_capability(
-        message["peer_class"],
-        message["runtime_capability"],
-    )
+    _validate_declaration(message)
     _validate_membership_endpoint(message)
 
 
@@ -434,10 +486,7 @@ def _validate_resume_request(message: Mapping[str, Any]) -> None:
         "membership_resume_incarnation_invalid",
     )
     _require(_text(message["software_version"], maximum=128), "membership_text_invalid")
-    validate_peer_runtime_capability(
-        message["peer_class"],
-        message["runtime_capability"],
-    )
+    _validate_declaration(message)
     _validate_membership_endpoint(message)
 
 

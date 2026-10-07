@@ -32,7 +32,7 @@ qualification and eligibility stay separate authorities.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 import hashlib
 from pathlib import Path
@@ -378,6 +378,168 @@ def sign_migration_profile(
     return sign_peer_profile(signer=signer, profile=profile)
 
 
+def executor_cutover_inputs(storage: FileMembershipState) -> dict[str, Any]:
+    """The recorded cutover, its signed profiles and the pre-migration members.
+
+    Read from the private executor store under its lock: the migration record
+    from the recorded cutover, the profiles and source members from the
+    committed journal.  Nothing here is caller-supplied.
+    """
+
+    executor = MigrationExecutor(storage)
+    with storage.lock():
+        document = executor._load_cutover()  # noqa: SLF001 - lock held
+        if document is None:
+            raise PlatformNeutralMigrationError("migration_cutover_not_recorded")
+        journal, _state = executor._committed_journal()  # noqa: SLF001 - lock held
+    return {
+        "record": dict(document["record"]),
+        "profiles": list(journal["request"]["profiles"]),
+        "source_members": {
+            node: {
+                "generation": value["generation"],
+                "incarnation": value["incarnation"],
+                "verification_key_digest": value["verification_key_digest"],
+            }
+            for node, value in journal["source_state"]["members"].items()
+        },
+    }
+
+
+def prepare_seed_cutover(
+    *,
+    record: Mapping[str, Any],
+    profiles: Sequence[Mapping[str, Any]],
+    source_members: Mapping[str, Mapping[str, Any]],
+    seed_state: Any,
+) -> dict[str, Any]:
+    """Verify the executed migration against the live seed rows; return CAS updates.
+
+    Every seed member must carry exactly one signed v2 profile that verifies under
+    its pinned durable key and binds generation n+1 with a new incarnation, and
+    the migration record must state the same pre and post generations.  The
+    result feeds :meth:`SqliteSeedState.commit_membership_cutover`, which
+    compare-and-swaps every row in one transaction.
+    """
+
+    from .migration import ContractMigrationRecord
+    from .peer_profile import verify_peer_profile
+    from .primitives import record_digest
+
+    if seed_state.membership_contract()["version"] != "v1":
+        raise PlatformNeutralMigrationError("membership_cutover_already_recorded")
+    parsed = ContractMigrationRecord.from_mapping(record)
+    parsed.assert_monotonic_generations()
+    if parsed.status not in ("cutover_recorded", "complete") or parsed.cutover_generation is None:
+        raise PlatformNeutralMigrationError("migration_cutover_not_recorded")
+    rows = {row["node_id"]: row for row in seed_state.load_members()}
+    by_node: dict[str, Mapping[str, Any]] = {}
+    for envelope in profiles:
+        node = envelope.get("profile", {}).get("node_id") if isinstance(envelope, Mapping) else None
+        if not isinstance(node, str) or node in by_node:
+            raise PlatformNeutralMigrationError("duplicate_identity_rejected")
+        by_node[node] = envelope
+    if (
+        set(by_node) != set(rows)
+        or set(rows) != set(parsed.pre_generations)
+        or set(rows) != set(source_members)
+    ):
+        raise PlatformNeutralMigrationError("membership_cutover_inventory_mismatch")
+    updates = []
+    for node, envelope in sorted(by_node.items()):
+        row = rows[node]
+        source = source_members[node]
+        if (
+            row["generation"] != source["generation"]
+            or row["incarnation"] != source["incarnation"]
+            or row["verification_key_digest"] != source["verification_key_digest"]
+        ):
+            # The live member moved since the seed copy was taken.
+            raise PlatformNeutralMigrationError("membership_cutover_member_conflict")
+        issued = finite(envelope["profile"].get("issued_at"), "peer_profile_invalid", minimum=0.0)
+        profile = verify_peer_profile(
+            envelope, now=issued, expected_key_digest=row["verification_key_digest"], expected_node_id=node
+        )
+        if (
+            row["generation"] != parsed.pre_generations[node]
+            or profile.membership_generation != parsed.post_generations[node]
+            or profile.membership_generation != row["generation"] + 1
+            or profile.incarnation == row["incarnation"]
+            or row["lifecycle_state"] in REVOKED_LIFECYCLE_STATES
+        ):
+            raise PlatformNeutralMigrationError("membership_cutover_member_conflict")
+        updates.append(
+            {
+                "node_id": node,
+                "verification_key_digest": row["verification_key_digest"],
+                "pre_generation": row["generation"],
+                "pre_incarnation": source["incarnation"],
+                "post_generation": profile.membership_generation,
+                "post_incarnation": profile.incarnation,
+                "profile_digest": record_digest(profile.to_mapping(), "migration_profile_noncanonical"),
+                "envelope": dict(envelope),
+            }
+        )
+    return {
+        "updates": updates,
+        "cutover_generation": parsed.cutover_generation,
+        "record_digest": parsed.digest,
+    }
+
+
+def v2_profile_for_session(
+    *,
+    template: Mapping[str, Any],
+    signer: Any,
+    incarnation: str,
+    membership_generation: int,
+    issued_at: float,
+    validity_seconds: float,
+) -> dict[str, Any]:
+    """Re-sign the member's v2 declaration for one join or resume.
+
+    ``template`` is the member's migrated profile envelope (only its ``profile``
+    declaration is reused).  Incarnation, generation and validity are fresh; the
+    seed still owns the lease, so the profile's lease never exceeds its expiry.
+    """
+
+    base = dict(template["profile"])
+    expires = finite(issued_at, "migration_issued_at_invalid", minimum=0.0) + finite(
+        validity_seconds, "migration_validity_invalid", minimum=1.0, maximum=3600.0
+    )
+    base.update(
+        protocol=PEER_PROFILE_PROTOCOL,
+        profile_id=f"profile-{base['node_id']}-g{int(membership_generation)}",
+        incarnation=segment(incarnation, "migration_incarnation_invalid"),
+        membership_generation=int(membership_generation),
+        issued_at=float(issued_at),
+        lease_expires_at=expires,
+        expires_at=expires,
+    )
+    return sign_peer_profile(signer=signer, profile=PeerProfile.from_mapping(base))
+
+
+#: Legacy consumer projection for members that join after the cutover.  The
+#: compound class is not authority (spec §6.7); it only feeds the consumers that
+#: still read it until the A9 consumer adaptation lands.  Platform plus runtime
+#: must determine the class exactly, otherwise the join is refused.
+V2_CONSUMER_PROJECTION = {
+    ("macos", ("mlx",)): "mac_mlx_iroh",
+    ("linux", ("numpy",)): "linux_numpy_iroh",
+    ("linux", ()): "linux_native_iroh",
+    ("windows", ()): "windows_native_iroh",
+    ("windows", ("windows_native_provider",)): "windows_native_iroh",
+    ("android", ()): "android_native_iroh",
+}
+
+
+def consumer_projection_class(profile: PeerProfile) -> str:
+    key = (profile.platform_family, tuple(sorted(item.backend_id for item in profile.runtimes)))
+    if key not in V2_CONSUMER_PROJECTION:
+        raise PlatformNeutralMigrationError("membership_v2_profile_has_no_consumer_projection")
+    return V2_CONSUMER_PROJECTION[key]
+
+
 class SeedMembershipCutover:
     """Seed-side v1 write gate bound to one private migration storage root.
 
@@ -426,4 +588,8 @@ __all__ = [
     "profile_requests",
     "sign_migration_profile",
     "verify_profile_request",
+    "prepare_seed_cutover",
+    "executor_cutover_inputs",
+    "v2_profile_for_session",
+    "consumer_projection_class",
 ]

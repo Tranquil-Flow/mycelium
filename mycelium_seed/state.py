@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 import hashlib
 import json
@@ -1368,6 +1368,7 @@ class SqliteSeedState:
         renewal: Mapping[str, Any],
         now: float,
         capacity: int,
+        expected_contract: str = "v1",
     ) -> dict[str, Any]:
         """Atomically accept a heartbeat and persist its exact signed response."""
 
@@ -1394,6 +1395,7 @@ class SqliteSeedState:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self._require_membership_contract(connection, expected_contract)
             current = connection.execute(
                 """
                 SELECT endpoint_id, verification_key_digest, incarnation,
@@ -1643,6 +1645,8 @@ class SqliteSeedState:
         message_id: str,
         member: Mapping[str, Any],
         acceptance: Mapping[str, Any],
+        expected_contract: str = "v1",
+        profile_v2: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Atomically consume invite, persist member, and store exact acceptance."""
 
@@ -1654,6 +1658,7 @@ class SqliteSeedState:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self._require_membership_contract(connection, expected_contract)
             existing = connection.execute(
                 """
                 SELECT invite_token_digest, request_envelope_digest,
@@ -1764,6 +1769,8 @@ class SqliteSeedState:
                     acceptance_json,
                 ),
             )
+            if profile_v2 is not None:
+                self._store_member_profile_v2(connection, profile_v2)
             connection.commit()
             return dict(acceptance)
         except SeedStateError:
@@ -1818,6 +1825,8 @@ class SqliteSeedState:
         member: Mapping[str, Any],
         acceptance: Mapping[str, Any],
         already_advanced: bool = False,
+        expected_contract: str = "v1",
+        profile_v2: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Atomically advance one durable member and store its resume response."""
 
@@ -1829,6 +1838,7 @@ class SqliteSeedState:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self._require_membership_contract(connection, expected_contract)
             existing = connection.execute(
                 """
                 SELECT request_envelope_digest, acceptance_json
@@ -1939,6 +1949,8 @@ class SqliteSeedState:
                     acceptance_json,
                 ),
             )
+            if profile_v2 is not None:
+                self._store_member_profile_v2(connection, profile_v2)
             connection.commit()
             return dict(acceptance)
         except SeedStateError:
@@ -1947,6 +1959,189 @@ class SqliteSeedState:
         except sqlite3.IntegrityError as exc:
             connection.rollback()
             raise SeedStateError("seed_resume_conflict") from exc
+        except sqlite3.Error as exc:
+            connection.rollback()
+            raise SeedStateError(_sqlite_state_error_code(exc)) from exc
+        finally:
+            connection.close()
+
+    # -- A9 membership contract (v1 -> v2 one-time migration) -------------------
+
+    def _ensure_membership_v2_schema(self, connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS seed_member_profiles_v2 (
+                node_id TEXT PRIMARY KEY NOT NULL,
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                incarnation TEXT NOT NULL,
+                profile_digest TEXT NOT NULL,
+                envelope_json TEXT NOT NULL,
+                FOREIGN KEY (node_id) REFERENCES seed_members(node_id)
+                    ON DELETE CASCADE
+            ) WITHOUT ROWID
+            """
+        )
+
+    def _membership_contract_row(self, connection: sqlite3.Connection) -> dict[str, Any]:
+        rows = {
+            str(row["key"]): str(row["value"])
+            for row in connection.execute(
+                "SELECT key, value FROM seed_metadata WHERE key IN ("
+                "'membership_contract_version', 'membership_cutover_generation', "
+                "'membership_migration_record_digest')"
+            ).fetchall()
+        }
+        version = rows.get("membership_contract_version", "v1")
+        if version not in {"v1", "v2"}:
+            raise SeedStateError("seed_state_corrupt")
+        if version == "v1":
+            if len(rows) != 0:
+                raise SeedStateError("seed_state_corrupt")
+            return {"version": "v1", "cutover_generation": None, "record_digest": None}
+        if set(rows) != {
+            "membership_contract_version",
+            "membership_cutover_generation",
+            "membership_migration_record_digest",
+        }:
+            raise SeedStateError("seed_state_corrupt")
+        return {
+            "version": "v2",
+            "cutover_generation": int(rows["membership_cutover_generation"]),
+            "record_digest": rows["membership_migration_record_digest"],
+        }
+
+    def _require_membership_contract(
+        self, connection: sqlite3.Connection, expected: str
+    ) -> None:
+        """Checked inside the write transaction: a cutover can never race a write."""
+
+        actual = self._membership_contract_row(connection)["version"]
+        if actual == expected:
+            return
+        if actual == "v2":
+            raise SeedStateError("membership_contract_upgrade_required")
+        raise SeedStateError("membership_v2_before_cutover")
+
+    def _store_member_profile_v2(
+        self, connection: sqlite3.Connection, profile: Mapping[str, Any]
+    ) -> None:
+        self._ensure_membership_v2_schema(connection)
+        connection.execute(
+            """
+            INSERT INTO seed_member_profiles_v2 (
+                node_id, generation, incarnation, profile_digest, envelope_json
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(node_id) DO UPDATE SET
+                generation = excluded.generation,
+                incarnation = excluded.incarnation,
+                profile_digest = excluded.profile_digest,
+                envelope_json = excluded.envelope_json
+            """,
+            (
+                profile["node_id"],
+                profile["generation"],
+                profile["incarnation"],
+                profile["profile_digest"],
+                canonical_json_bytes(dict(profile["envelope"])).decode("utf-8"),
+            ),
+        )
+
+    def membership_contract(self) -> dict[str, Any]:
+        connection = self._connect()
+        try:
+            return self._membership_contract_row(connection)
+        except sqlite3.Error as exc:
+            raise SeedStateError(_sqlite_state_error_code(exc)) from exc
+        finally:
+            connection.close()
+
+    def member_profiles_v2(self) -> dict[str, dict[str, Any]]:
+        connection = self._connect()
+        try:
+            self._ensure_membership_v2_schema(connection)
+            return {
+                str(row["node_id"]): {
+                    "generation": int(row["generation"]),
+                    "incarnation": str(row["incarnation"]),
+                    "profile_digest": str(row["profile_digest"]),
+                    "envelope": json.loads(row["envelope_json"]),
+                }
+                for row in connection.execute(
+                    "SELECT * FROM seed_member_profiles_v2 ORDER BY node_id"
+                ).fetchall()
+            }
+        except sqlite3.Error as exc:
+            raise SeedStateError(_sqlite_state_error_code(exc)) from exc
+        finally:
+            connection.close()
+
+    def commit_membership_cutover(
+        self,
+        *,
+        updates: Sequence[Mapping[str, Any]],
+        cutover_generation: int,
+        record_digest: str,
+    ) -> None:
+        """Atomically advance every member to its verified v2 generation and cut over.
+
+        Every durable member must be in ``updates``; each row is compare-and-swapped
+        on node ID, key, pre-migration generation and incarnation.  Any mismatch
+        (a member resumed, was revoked or joined meanwhile) aborts the whole
+        cutover and leaves the v1 database unchanged.
+        """
+
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._require_membership_contract(connection, "v1")
+            self._ensure_membership_v2_schema(connection)
+            members = {
+                str(row["node_id"])
+                for row in connection.execute("SELECT node_id FROM seed_members").fetchall()
+            }
+            if members != {str(item["node_id"]) for item in updates} or len(updates) != len(members):
+                raise SeedStateError("membership_cutover_inventory_mismatch")
+            for item in updates:
+                cursor = connection.execute(
+                    """
+                    UPDATE seed_members SET incarnation = ?, generation = ?
+                    WHERE node_id = ? AND verification_key_digest = ?
+                      AND incarnation = ? AND generation = ?
+                      AND lifecycle_state NOT IN ('STOPPING', 'STOPPED')
+                    """,
+                    (
+                        item["post_incarnation"],
+                        item["post_generation"],
+                        item["node_id"],
+                        item["verification_key_digest"],
+                        item["pre_incarnation"],
+                        item["pre_generation"],
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise SeedStateError("membership_cutover_member_conflict")
+                self._store_member_profile_v2(
+                    connection,
+                    {
+                        "node_id": item["node_id"],
+                        "generation": item["post_generation"],
+                        "incarnation": item["post_incarnation"],
+                        "profile_digest": item["profile_digest"],
+                        "envelope": item["envelope"],
+                    },
+                )
+            for key, value in (
+                ("membership_contract_version", "v2"),
+                ("membership_cutover_generation", str(int(cutover_generation))),
+                ("membership_migration_record_digest", record_digest),
+            ):
+                connection.execute(
+                    "INSERT INTO seed_metadata (key, value) VALUES (?, ?)", (key, value)
+                )
+            connection.commit()
+        except SeedStateError:
+            connection.rollback()
+            raise
         except sqlite3.Error as exc:
             connection.rollback()
             raise SeedStateError(_sqlite_state_error_code(exc)) from exc
