@@ -551,48 +551,84 @@ def rekey_port_kv_path(
       if port._closed:
          _refuse("kv_checkpoint_runtime_closed")
       state = port._kv_states.get(old_path_id)
+      retained = None
       if state is None:
-         _refuse("kv_checkpoint_state_missing")
-      if new_path_id == old_path_id or new_path_attempt <= state.path_attempt:
-         _refuse("kv_checkpoint_successor_not_newer")
-      if new_path_id in port._kv_states or port._released_paths.get(new_path_id) is not None:
-         _refuse("kv_checkpoint_state_already_exists")
-      if float(port._clock()) >= float(lease_expires_at):
-         _refuse("kv_checkpoint_lease_expired")
-      if truncate_to_position is not None:
-         if not _non_negative_int(truncate_to_position) or truncate_to_position < 1:
-            _refuse("kv_checkpoint_position_mismatch")
-         rollback = state.next_position - truncate_to_position
-         if rollback not in (0, 1) or state.next_sequence - rollback < 1:
-            _refuse("kv_checkpoint_position_mismatch")
-         if rollback:
-            def _prefix(array: Any) -> Any:
-               sliced = array[:, :, :truncate_to_position, :]
-               return np.ascontiguousarray(sliced) if isinstance(array, np.ndarray) else sliced
+         # A stage that already executed the request's terminal hop (the
+         # source was lost during the final decode step) set its KV aside for
+         # exactly this rekey; nothing else can resume it.
+         take = getattr(port, "_take_terminal_retained", None)
+         retained = take(old_path_id) if callable(take) else None
+         if retained is None:
+            _refuse("kv_checkpoint_state_missing")
+         state = retained
+         port._kv_states[old_path_id] = state
+      try:
+         return _rekey_locked(
+            port,
+            state,
+            old_path_id,
+            new_path_id=new_path_id,
+            new_path_attempt=new_path_attempt,
+            lease_expires_at=lease_expires_at,
+            truncate_to_position=truncate_to_position,
+         )
+      except KVCheckpointError:
+         if retained is not None and port._kv_states.get(old_path_id) is retained:
+            del port._kv_states[old_path_id]
+            port._restore_terminal_retained(old_path_id, retained)
+         raise
 
-            state.layers = {
-               layer: (_prefix(pair[0]), _prefix(pair[1])) for layer, pair in state.layers.items()
-            }
-            state.next_position -= rollback
-            state.next_sequence -= rollback
-            state.cached_context_tokens -= rollback
-      del port._kv_states[old_path_id]
-      state.path_id = new_path_id
-      state.path_attempt = new_path_attempt
-      state.lease_expires_at = float(lease_expires_at)
-      port._kv_states[new_path_id] = state
-      with port._resource_index_lock:
-         port._kv_subjects.pop(old_path_id, None)
-         port._kv_subjects[new_path_id] = (state.request_id, new_path_attempt)
-      port._remember_path_marker(port._released_paths, old_path_id, "fenced_successor_rekey")
-      port._purge_path_replays(old_path_id)
-      return {
-         "protocol": KV_CHECKPOINT_RECEIPT_PROTOCOL,
-         "checkpoint_digest": None,
-         "identity_digest": _sha256_ref(_canonical(_stage_identity(port, state.placement_id))),
-         "layer_count": len(state.layers),
-         "kv_bytes": int(port._kv_bytes(state)),
-         "next_position": state.next_position,
-         "next_sequence": state.next_sequence,
-         "successor_path_attempt": new_path_attempt,
-      }
+
+def _rekey_locked(
+   port: Any,
+   state: Any,
+   old_path_id: str,
+   *,
+   new_path_id: str,
+   new_path_attempt: int,
+   lease_expires_at: float,
+   truncate_to_position: int | None,
+) -> dict[str, Any]:
+   if new_path_id == old_path_id or new_path_attempt <= state.path_attempt:
+      _refuse("kv_checkpoint_successor_not_newer")
+   if new_path_id in port._kv_states or port._released_paths.get(new_path_id) is not None:
+      _refuse("kv_checkpoint_state_already_exists")
+   if float(port._clock()) >= float(lease_expires_at):
+      _refuse("kv_checkpoint_lease_expired")
+   if truncate_to_position is not None:
+      if not _non_negative_int(truncate_to_position) or truncate_to_position < 1:
+         _refuse("kv_checkpoint_position_mismatch")
+      rollback = state.next_position - truncate_to_position
+      if rollback not in (0, 1) or state.next_sequence - rollback < 1:
+         _refuse("kv_checkpoint_position_mismatch")
+      if rollback:
+         def _prefix(array: Any) -> Any:
+            sliced = array[:, :, :truncate_to_position, :]
+            return np.ascontiguousarray(sliced) if isinstance(array, np.ndarray) else sliced
+
+         state.layers = {
+            layer: (_prefix(pair[0]), _prefix(pair[1])) for layer, pair in state.layers.items()
+         }
+         state.next_position -= rollback
+         state.next_sequence -= rollback
+         state.cached_context_tokens -= rollback
+   del port._kv_states[old_path_id]
+   state.path_id = new_path_id
+   state.path_attempt = new_path_attempt
+   state.lease_expires_at = float(lease_expires_at)
+   port._kv_states[new_path_id] = state
+   with port._resource_index_lock:
+      port._kv_subjects.pop(old_path_id, None)
+      port._kv_subjects[new_path_id] = (state.request_id, new_path_attempt)
+   port._remember_path_marker(port._released_paths, old_path_id, "fenced_successor_rekey")
+   port._purge_path_replays(old_path_id)
+   return {
+      "protocol": KV_CHECKPOINT_RECEIPT_PROTOCOL,
+      "checkpoint_digest": None,
+      "identity_digest": _sha256_ref(_canonical(_stage_identity(port, state.placement_id))),
+      "layer_count": len(state.layers),
+      "kv_bytes": int(port._kv_bytes(state)),
+      "next_position": state.next_position,
+      "next_sequence": state.next_sequence,
+      "successor_path_attempt": new_path_attempt,
+   }

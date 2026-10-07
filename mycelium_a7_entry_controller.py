@@ -204,8 +204,21 @@ class A7EntryController:
       self._requests[request_id] = state
       return state
 
-   def on_committed(self, request_id: str, manifest: PathManifest, committed_token_ids: Sequence[int]) -> bool:
-      """Output through ``len(committed_token_ids)`` was handed to the gateway."""
+   def on_committed(
+      self,
+      request_id: str,
+      manifest: PathManifest,
+      committed_token_ids: Sequence[int],
+      *,
+      path_node_ids: Sequence[str] = (),
+   ) -> bool:
+      """Output through ``len(committed_token_ids)`` was handed to the gateway.
+
+      ``path_node_ids`` are the nodes of the locked path: each one retains the
+      KV of the request's terminal hop until the terminal release, so each one
+      is a release participant (a surviving stage need be neither source nor
+      standby).
+      """
 
       count = len(committed_token_ids)
       with self._lock:
@@ -214,6 +227,7 @@ class A7EntryController:
             state = self._begin(request_id, manifest)
             if state is None:
                return False
+            state.participants.update(node for node in path_node_ids if isinstance(node, str) and node)
          if state.finished or state.path_id != manifest.path_id or state.path_attempt != manifest.path_attempt:
             # A successor path has no further standby: coverage ended at cutover.
             return False

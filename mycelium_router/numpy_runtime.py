@@ -41,6 +41,7 @@ from mycelium_router.payloads import (
    encode_activation,
 )
 from mycelium_router.stage_signatures import stage_signature_for_backend
+from mycelium_router.terminal_kv_retention import TerminalKVRetention
 from mycelium_router.validation import ContractError, validate_execution_graph
 from numpy_runtime import (
    NumpyRuntimeError as _StageNumpyRuntimeError,
@@ -307,6 +308,7 @@ class NumpyRuntimePort:
       self._cancelled_paths: OrderedDict[str, None] = OrderedDict()
       self._deferred_cancellation_cleanup: set[str] = set()
       self._kv_states: dict[str, _KVState] = {}
+      self._terminal_retention = TerminalKVRetention()
       self._released_paths: OrderedDict[str, str] = OrderedDict()
       self._replays: OrderedDict[tuple[str, str], _ReplayResult] = OrderedDict()
       self._release_counts: Counter[str] = Counter()
@@ -727,7 +729,62 @@ class NumpyRuntimePort:
       while len(self._replays) > _MAX_RETAINED_OPERATIONS:
          self._replays.popitem(last=False)
 
+   # -- A7 terminal KV retention ---------------------------------------------------
+
+   def enable_terminal_kv_retention(self, *, seconds: float, max_entries: int) -> None:
+      """Keep the KV a terminal hop releases until the request's terminal release (bounded).
+
+      Enabled only on nodes wired for A7: a fenced successor cutover for a
+      source lost during the final decode step rekeys exactly this KV.
+      """
+
+      with self._state_lock:
+         self._terminal_retention.enable(seconds=seconds, max_entries=max_entries)
+
+   def _discard_retained(self, displaced: Any) -> None:
+      for path_id, state, reason in displaced:
+         if path_id not in self._kv_states:
+            with self._resource_index_lock:
+               self._kv_subjects.pop(path_id, None)
+         state.layers.clear()
+         self._terminal_retention.release_counts[reason] += 1
+
+   def _release_terminal_state(self, path_id: str) -> bool:
+      """Normal completion; with retention the KV is set aside, not discarded."""
+
+      state = self._kv_states.get(path_id)
+      if state is None or not self._terminal_retention.enabled:
+         return self._release_state(path_id, "normal_completion")
+      del self._kv_states[path_id]
+      if path_id not in self._released_paths:
+         self._remember_path_marker(self._released_paths, path_id, "normal_completion")
+      self._release_counts["normal_completion"] += 1
+      self._last_release_reason = "normal_completion"
+      self._purge_path_replays(path_id)
+      # The KV subject stays indexed while the KV is held: exact-path cleanup
+      # proof reports it until the request's terminal release discards it.
+      self._discard_retained(self._terminal_retention.hold(path_id, state, now=float(self._clock())))
+      return True
+
+   def _take_terminal_retained(self, path_id: str) -> Any:
+      """Hand a retained terminal KV state to a fenced successor rekey (``None`` if gone)."""
+
+      with self._cancellation_lock:
+         if path_id in self._cancelled_paths or path_id in self._deferred_cancellation_cleanup:
+            return None
+      state, displaced = self._terminal_retention.take(path_id, now=float(self._clock()))
+      self._discard_retained(displaced)
+      return state
+
+   def _restore_terminal_retained(self, path_id: str, state: Any) -> None:
+      """A refused rekey returns the KV it took to retention, unchanged."""
+
+      self._discard_retained(self._terminal_retention.hold(path_id, state, now=float(self._clock())))
+
    def _release_state(self, path_id: str, reason: str) -> bool:
+      held = self._terminal_retention.drop(path_id)
+      if held is not None:
+         self._discard_retained([(path_id, held, reason)])
       state = self._kv_states.pop(path_id, None)
       if state is None:
          return False
@@ -757,6 +814,7 @@ class NumpyRuntimePort:
             if float(current) >= state.lease_expires_at:
                if self._release_state(path_id, "lease_expired"):
                   expired.append(path_id)
+         self._discard_retained(self._terminal_retention.expire(now=float(current)))
       return tuple(sorted(expired))
 
    def close(self, *, reason: str = "worker_shutdown") -> None:
@@ -770,6 +828,9 @@ class NumpyRuntimePort:
          released_any = bool(self._kv_states)
          for path_id in tuple(self._kv_states):
             self._release_state(path_id, reason)
+         self._discard_retained(
+            [(path_id, state, reason) for path_id, state in self._terminal_retention.clear()]
+         )
          self._replays.clear()
          self._closed = True
          if not released_any:
@@ -786,6 +847,7 @@ class NumpyRuntimePort:
 
    def _update_kv_watermark(self) -> None:
       active_bytes = sum(self._kv_bytes(state) for state in self._kv_states.values())
+      active_bytes += self._terminal_retention.kv_bytes(self._kv_bytes)
       self._peak_kv_bytes = max(self._peak_kv_bytes, active_bytes)
 
    def export_kv_checkpoint(self, path_id: str, *, from_position: int = 0) -> bytes:
@@ -928,6 +990,11 @@ class NumpyRuntimePort:
             "observed_work_unit_count": self._observed_work_unit_count,
             "cancelled_path_count": len(self._cancelled_paths),
             "release_counts": dict(sorted(self._release_counts.items())),
+            **(
+               {"terminal_kv_retention": self._terminal_retention.snapshot(self._kv_bytes)}
+               if self._terminal_retention.enabled
+               else {}
+            ),
          }
 
    def kv_snapshot_nonblocking(self) -> dict[str, Any] | None:
@@ -1589,7 +1656,7 @@ class NumpyRuntimePort:
          self._decode_input_token_count += sequence
       self._remember_result(item, fingerprint, result)
       if item.terminal:
-         self._release_state(item.path_id, "normal_completion")
+         self._release_terminal_state(item.path_id)
       return result
 
    def _validate_batch_key(self, item: HopWorkItem, placement: Any) -> None:

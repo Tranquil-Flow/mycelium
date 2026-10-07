@@ -83,18 +83,21 @@ class _RecordingSink:
         self.tokens.append((token_index, token_id))
 
 
-class _KillAfterTwoCommittedTokens(_RecordingSink):
-    def __init__(self, state: "_RouteState", request_id: str) -> None:
+class _KillAfterCommittedTokens(_RecordingSink):
+    """SIGKILL the source once ``kill_after`` tokens are committed and acknowledged."""
+
+    def __init__(self, state: "_RouteState", request_id: str, *, kill_after: int = 2) -> None:
         super().__init__()
         self._state = state
         self._request_id = request_id
+        self._kill_after = kill_after
         self.kill_at_monotonic_s: float | None = None
         self.killed = False
 
     def emit(self, token_index: int, token_id: int) -> None:
         super().emit(token_index, token_id)
-        if token_index == 1 and not self.killed:
-            _wait_for_a7_acknowledged(self._state.route, self._request_id, acknowledged=2)
+        if token_index == self._kill_after - 1 and not self.killed:
+            _wait_for_a7_acknowledged(self._state.route, self._request_id, acknowledged=self._kill_after)
             source = self._state.session_factory.sessions[_SOURCE_NODE_ID]
             pid = source._process.pid
             self.kill_at_monotonic_s = time.monotonic()
@@ -852,10 +855,10 @@ def _router_port_has_a6_incident(route: PhysicalLiveRoute, request_id: str | Non
     return LiveRouterPort._route_has_scoped_incident_for(port, request)  # type: ignore[arg-type]
 
 
-def _run_infer_with_source_kill(state: _RouteState, request_id: str, *, expect_success: bool):
+def _run_infer_with_source_kill(state: _RouteState, request_id: str, *, expect_success: bool, kill_after: int = 2):
     manifest, route_identity, command_identity = _product_identity(state.graph, request_id)
     receipts: list[dict[str, Any]] = []
-    sink = _KillAfterTwoCommittedTokens(state, request_id)
+    sink = _KillAfterCommittedTokens(state, request_id, kill_after=kill_after)
     cancel_calls: list[dict[str, Any]] = []
     real_cancel = state.route.cancel_request
 
@@ -900,8 +903,18 @@ def _run_infer_with_source_kill(state: _RouteState, request_id: str, *, expect_s
     )
 
 
+@pytest.mark.parametrize(
+    "kill_after",
+    [
+        pytest.param(2, id="mid_request"),
+        # The source is lost while the final decode step is outstanding: the
+        # surviving stage has already executed the terminal hop, and its KV
+        # must still be there for the fenced rekey.
+        pytest.param(_MAX_NEW - 1, id="final_decode_step"),
+    ],
+)
 def test_two_node_physical_live_route_cuts_over_after_source_kill(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kill_after: int
 ) -> None:
     state = _build_r7_staged_route(tmp_path, monkeypatch, dtype_mismatch=False)
     try:
@@ -910,7 +923,7 @@ def test_two_node_physical_live_route_cuts_over_after_source_kill(
         state.route._deployment_qualification = SimpleNamespace(route_ready=True)
         request_id = "a7ok" + uuid.uuid4().hex[:24]
 
-        run = _run_infer_with_source_kill(state, request_id, expect_success=True)
+        run = _run_infer_with_source_kill(state, request_id, expect_success=True, kill_after=kill_after)
 
         assert run.result.token_ids == state.reference_tokens
         assert tuple(token for _index, token in run.sink.tokens) == state.reference_tokens
@@ -919,7 +932,7 @@ def test_two_node_physical_live_route_cuts_over_after_source_kill(
         outcome = final["request"]["result"]
         assert outcome["outcome"] == "fenced_kv_successor", outcome
         assert final["standby_runtime"]["prefill_operation_count"] == 0
-        assert final["standby_runtime"]["decode_operation_count"] == _MAX_NEW - 2
+        assert final["standby_runtime"]["decode_operation_count"] == _MAX_NEW - kill_after
 
         scoped = _scoped_node_exit_incidents(state.route, request_id)
         assert len(scoped) == 1

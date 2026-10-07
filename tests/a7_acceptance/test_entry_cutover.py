@@ -29,6 +29,7 @@ from mycelium_a7_checkpoint_channel import StandbyCheckpointKey
 from mycelium_a7_entry_controller import A7EntryController, StandbyCoverage, stage_digest
 from mycelium_a7_fence_store import DurableFenceStore
 from mycelium_a7_node_agent import A7NodeAgent, SourceCoverage
+from mycelium_a7_node_wiring import enable_terminal_kv_retention
 from mycelium_a7_standby_qualification import parity_challenge_result, port_placement_identity, qualify_standby
 from mycelium_a7_standby_store import StandbyShadowStore
 from mycelium_a7_successor_coordinator import StandbySide
@@ -137,7 +138,7 @@ def _request(request_id: str) -> RequestContext:
 
 
 class _Harness:
-   def __init__(self, tmp_path: Path, *, qualification_ttl_ms=600_000, a6_available=True, standby_dtype=None) -> None:
+   def __init__(self, tmp_path: Path, *, qualification_ttl_ms=600_000, a6_available=True, standby_dtype=None, retain_terminal_kv=True) -> None:
       case = standby_case(tmp_path, "qwen2")
       graph = standby_graph(case)
       self.case, self.graph = case, graph
@@ -149,6 +150,9 @@ class _Harness:
       self.source_port = _Killable(NumpyRuntimePort("node-b", graph, {self.source_id: case.loaded[1]}, decode_mode="stage_local_kv", clock=clock.now))
       self.standby_port = NumpyRuntimePort("node-a", graph, {STANDBY_ID: case.standby_loaded}, decode_mode="stage_local_kv", clock=clock.now)
       node_a_runtime = StandbyDispatchRuntime(self.entry_port, {STANDBY_ID: self.standby_port})
+      if retain_terminal_kv:
+         # As A7NodeWiring.attach does on every A7-wired node.
+         assert enable_terminal_kv_retention((self.entry_port, self.source_port.port, self.standby_port)) == 3
 
       mesh = InProcessMesh()
       self.capacity = FakeCapacityPort()
@@ -320,6 +324,59 @@ def test_source_failure_cuts_over_to_the_standby_without_replay(tmp_path: Path) 
    assert harness.fences.current("request:a7-cutover") is None
    assert harness.standby_port.kv_snapshot()["active_state_count"] == 0
    assert harness.entry_port.kv_snapshot()["active_state_count"] == 0
+
+
+def _retained(port) -> int:
+   return len(port._terminal_retention)
+
+
+def test_source_lost_during_the_final_decode_step_still_cuts_over(tmp_path: Path) -> None:
+   """The surviving stage already executed the terminal hop: its retained KV is rekeyed."""
+
+   harness = _Harness(tmp_path)
+   request_id = "request:a7-final-step"
+   sink = harness.run(request_id, kill_after=_MAX_NEW - 1)
+   record = harness.entry.entry.get_request(request_id)
+   assert harness.entry.request_status(request_id) == "COMPLETED"
+   result = record.kv_successor_cutover
+   assert result is not None and result["outcome"] == "fenced_kv_successor", result
+   assert result["gateway_committed_token_count"] == _MAX_NEW - 1 == result["acknowledged_token_count"]
+   assert sink.token_ids == _reference_tokens(harness.case)
+   assert sink.token_indexes == list(range(_MAX_NEW))
+   standby = harness.standby_port.kv_snapshot()
+   assert standby["prefill_operation_count"] == 0 and standby["decode_operation_count"] == 1
+   assert record.kv_successor_recovery is None
+   # The terminal release freed everything, the retained terminal KV included.
+   assert harness.shadow.snapshot() == {"shadow_entry_count": 0, "shadow_kv_bytes": 0}
+   assert harness.fences.current(request_id) is None
+   for port in (harness.entry_port, harness.standby_port):
+      assert port.kv_snapshot()["active_state_count"] == 0
+      assert _retained(port) == 0
+
+
+def test_without_terminal_retention_a_final_step_loss_falls_back_to_a6(tmp_path: Path) -> None:
+   """The pre-fix behaviour, kept as the contrast: the rekey finds no KV."""
+
+   harness = _Harness(tmp_path, retain_terminal_kv=False)
+   request_id = "request:a7-final-step-off"
+   harness.run(request_id, kill_after=_MAX_NEW - 1)
+   result = harness.entry.entry.get_request(request_id).kv_successor_cutover
+   outcome = result if result is not None else harness.controller.snapshot(request_id)["result"]
+   assert outcome["outcome"] == "full_context_replay", outcome
+   assert outcome["reason"] == "compatibility_incompatible"
+
+
+def test_completed_requests_release_every_retained_terminal_kv(tmp_path: Path) -> None:
+   harness = _Harness(tmp_path)
+   for index in range(3):
+      harness.run(f"request:a7-retain-{index}", kill_after=None)
+   for port in (harness.entry_port, harness.source_port.port, harness.standby_port):
+      snapshot = port.kv_snapshot()
+      assert snapshot["active_state_count"] == 0
+      assert snapshot["terminal_kv_retention"]["retained_count"] == 0
+      assert snapshot["terminal_kv_retention"]["retained_kv_bytes"] == 0
+   assert harness.entry_port.kv_snapshot()["terminal_kv_retention"]["retained_total"] == 3
+   assert harness.source_port.port.kv_snapshot()["terminal_kv_retention"]["retained_total"] == 3
 
 
 def test_without_failure_coverage_ships_every_commit_and_releases(tmp_path: Path) -> None:

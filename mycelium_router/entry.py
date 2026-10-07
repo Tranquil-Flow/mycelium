@@ -1357,7 +1357,23 @@ class EntryCoordinator:
             return
          manifest = record.manifest
          committed = tuple(record.generated_token_ids)
-      controller.on_committed(record.request.request_id, manifest, committed)
+         graph = record.graph
+      node_by_placement = {
+         placement.placement_id: placement.node_id
+         for stage in graph.stages
+         for placement in stage.placements
+      }
+      controller.on_committed(
+         record.request.request_id,
+         manifest,
+         committed,
+         # Every node on the path holds KV the terminal release must free.
+         path_node_ids=tuple(
+            node_by_placement[hop.placement_id]
+            for hop in manifest.ordered_hops
+            if hop.placement_id in node_by_placement
+         ),
+      )
 
    def _a7_await_acknowledged(self, record: RequestRecord) -> None:
       """Synchronous-ack policy: the next decode waits (bounded) for the standby ack."""

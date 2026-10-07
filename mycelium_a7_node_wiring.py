@@ -39,6 +39,10 @@ from mycelium_a7_standby_qualification import (
 from mycelium_a7_standby_store import StandbyShadowStore
 from mycelium_a7_successor_coordinator import StandbySide
 from mycelium_qualification.signing import Ed25519EvidenceSigner, build_ed25519_verifier
+from mycelium_router.terminal_kv_retention import (
+   DEFAULT_TERMINAL_KV_RETENTION_ENTRIES as TERMINAL_KV_RETENTION_ENTRIES,
+   DEFAULT_TERMINAL_KV_RETENTION_SECONDS as TERMINAL_KV_RETENTION_SECONDS,
+)
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -218,6 +222,24 @@ def validate_against_graph(config: Mapping[str, Any], graph: Any, *, node_id: st
          )
 
 
+def enable_terminal_kv_retention(ports: Any) -> int:
+   """Every stage port of an A7-wired node retains its terminal-hop KV (bounded).
+
+   A stage keeps the KV it releases on a request's terminal hop until the
+   entry's terminal release: a covered source lost during the final decode
+   step still leaves every surviving stage's KV for the fenced rekey.  Returns
+   the number of distinct ports enabled.
+   """
+
+   enabled: list[Any] = []
+   for port in ports:
+      enable = getattr(port, "enable_terminal_kv_retention", None)
+      if callable(enable) and all(port is not seen for seen in enabled):
+         enable(seconds=TERMINAL_KV_RETENTION_SECONDS, max_entries=TERMINAL_KV_RETENTION_ENTRIES)
+         enabled.append(port)
+   return len(enabled)
+
+
 class A7NodeWiring:
    """Per-node A7 roles built from a validated configuration."""
 
@@ -286,6 +308,7 @@ class A7NodeWiring:
       self.primary_port = primary_port
       for placement_id, port in ports_by_placement.items():
          agent.register_port(placement_id, port)
+      enable_terminal_kv_retention((primary_port, *ports_by_placement.values(), self.standby_port))
       if self.standby_side is not None:
          agent.register_standby(self.standby_side, session_digest="sha256:" + hashlib.sha256(f"a7-session:{self.node_id}".encode()).hexdigest())
       source = self.config["source"]
