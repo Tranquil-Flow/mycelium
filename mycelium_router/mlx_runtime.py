@@ -1387,19 +1387,24 @@ class MLXRuntimePort:
          self._remember_path_marker(self._released_paths, path_id, reason)
       self._release_counts[reason] += 1
       self._last_release_reason = reason
-      self._release_sequence += 1
-      self._release_log.append(
-         {
-            "sequence": self._release_sequence,
-            "request_id": state.request_id,
-            "path_id": path_id,
-            "placement_id": state.placement_id,
-            "reason": reason,
-            "active_state_count_after": len(self._kv_states),
-         }
-      )
       state.layers.clear()
       self._purge_path_replays(path_id)
+      # Evidence only, after the release itself: a runtime assembled without
+      # the log (test doubles) still releases; the A11 verifier then finds the
+      # release missing and refuses the evidence.
+      release_log = getattr(self, "_release_log", None)
+      if release_log is not None:
+         self._release_sequence += 1
+         release_log.append(
+            {
+               "sequence": self._release_sequence,
+               "request_id": getattr(state, "request_id", None),
+               "path_id": path_id,
+               "placement_id": getattr(state, "placement_id", None),
+               "reason": reason,
+               "active_state_count_after": len(self._kv_states),
+            }
+         )
       return True
 
    def expire_leases(self, *, now: float | None = None) -> tuple[str, ...]:
