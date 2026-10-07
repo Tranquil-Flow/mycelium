@@ -10,7 +10,26 @@ import webbrowser
 from mycelium_a13_macos.app import DemoApp, DemoError, bounded_failure_locus, preflight, reopen_native, model_contract, public_failure_code
 
 
+def default_state_root(*, platform=None, environ=None):
+    """macOS keeps its historical folder; Windows uses the per-user installer's state root."""
+    import os
+    platform=sys.platform if platform is None else platform
+    environ=os.environ if environ is None else environ
+    if platform=='win32':
+        local=environ.get('LOCALAPPDATA')
+        base=Path(local) if local else Path.home()/'AppData'/'Local'
+        return base/'Mycelium'/'A13'
+    return Path.home()/'Library'/'Application Support'/'Mycelium A13 macOS Demo'
+
+
+_INSTALLER_ACTIONS=('--install','--uninstall','--rollback','--install-status')
+
+
 def main():
+    if sys.argv[1:2] and sys.argv[1] in _INSTALLER_ACTIONS:
+        # Per-user Windows installer of the frozen app (mycelium_a13_windows.installer).
+        from mycelium_a13_windows.installer import main as installer_main
+        return installer_main(sys.argv[1:])
     if sys.argv[1:2]==['--node-process-launcher']:
         # Fixed packaged trampoline, never caller-supplied Python source.
         from mycelium_node.process import _LAUNCHER_SOURCE
@@ -30,7 +49,7 @@ def main():
         from mycelium_a13_macos.worker import native_main
         return native_main()
     parser=argparse.ArgumentParser(description='macOS A13 hackathon demo — unsigned development software')
-    parser.add_argument('--state-root',type=Path,default=Path.home()/'Library'/'Application Support'/'Mycelium A13 macOS Demo')
+    parser.add_argument('--state-root',type=Path,default=default_state_root())
     parser.add_argument('--headless',action='store_true',help='Do not open a browser (local integration tests)')
     probes=parser.add_mutually_exclusive_group()
     probes.add_argument('--preflight',action='store_true',help='Check platform without creating identity or state')
