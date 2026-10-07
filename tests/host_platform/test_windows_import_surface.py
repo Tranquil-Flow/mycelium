@@ -78,6 +78,7 @@ ENTRY_POINTS = (
     "mycelium_a13_macos.control_session",
     "mycelium_a13_macos.public_relay",
     "mycelium_a13_macos.acquisition",
+    "mycelium_a13_windows.import_model",
     "stage_pack",
     "runtime_loader",
 )
