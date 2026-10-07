@@ -1,0 +1,298 @@
+"""Seed and node halves of the one-time A9 v1 -> v2 membership migration.
+
+Spec §6.  The private executor (:mod:`.migration_executor`) owns the journal,
+restart, cutover and reader removal.  This module connects it to the product:
+
+* :func:`export_seed_baseline` reads the seed's durable v1 member rows (a copy of
+  the seed SQLite database) into the executor's owner-private baseline.  It is
+  the migration-only v1 reader on the seed side; it never writes the seed.
+* :func:`profile_requests` turns each v1 member into an unsigned request that
+  tells the member which generation and lease it must bind.  The request
+  carries the legacy compound class only as a decomposition hint.
+* :func:`build_migration_profile` runs on the member host.  The platform family
+  and architecture come from the host's own observation, never from the request
+  or the legacy label; a conflict with the decomposed legacy class is refused.
+* :class:`SeedMembershipCutover` is the seed-side v1 write gate: once the
+  cutover is recorded every v1 join, resume, member message and assignment
+  offer fails with ``membership_contract_upgrade_required``.
+
+Declarations made here are declarations only.  They earn no role; class
+qualification and eligibility stay separate authorities.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+import hashlib
+from pathlib import Path
+import platform as _platform
+from typing import Any
+
+from .migration import (
+    MembershipContractUpgradeRequired,
+    PlatformNeutralMigrationError,
+    decompose_legacy_peer_class,
+)
+from .migration_executor import FileMembershipState, MigrationExecutor
+from .peer_profile import PeerProfile, sign_peer_profile
+from .primitives import (
+    PEER_PROFILE_PROTOCOL,
+    RUNTIME_BACKEND_STAGES,
+    bounded_int,
+    digest,
+    finite,
+    segment,
+    text,
+)
+
+PROFILE_REQUEST_PROTOCOL = "mycelium.a9_migration_profile_request.v1"
+ROUTER_WIRE_PROTOCOL = "mycelium.router_wire.v1"
+#: v1 lifecycle states the seed treats as revoked for resume (coordinator.accept_resume).
+REVOKED_LIFECYCLE_STATES = frozenset({"STOPPING", "STOPPED"})
+#: Declared transport bounds.  Declarations, not observations.
+DECLARED_MAX_FRAME_BYTES = 16 * 1024 * 1024
+DECLARED_MAX_CONCURRENCY = 1
+
+SYSTEM_TO_PLATFORM = {"Darwin": "macos", "Linux": "linux", "Windows": "windows"}
+MACHINE_TO_ARCHITECTURE = {
+    "arm64": "arm64",
+    "aarch64": "arm64",
+    "ARM64": "arm64",
+    "x86_64": "x86_64",
+    "AMD64": "x86_64",
+    "amd64": "x86_64",
+}
+
+REQUEST_FIELDS = frozenset(
+    {
+        "protocol",
+        "swarm_id",
+        "node_id",
+        "legacy_peer_class",
+        "current_incarnation",
+        "membership_generation",
+        "lease_expires_at",
+        "software_build",
+        "transports",
+        "runtimes",
+    }
+)
+
+
+def _sha256_text(value: str) -> str:
+    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def export_seed_baseline(
+    state: Any, *, software_build_digest: str
+) -> dict[str, dict[str, Any]]:
+    """Owner-private executor baseline from the seed's durable v1 member rows.
+
+    ``state`` is a :class:`mycelium_seed.state.SqliteSeedState` opened on a copy
+    of the live seed database.  The seed does not record a software build, so
+    the caller binds the exact candidate build digest every member runs.
+    """
+
+    build = digest(software_build_digest, "migration_build_digest_invalid")
+    baseline: dict[str, dict[str, Any]] = {}
+    for row in state.load_members():
+        node = segment(row["node_id"], "migration_node_id_invalid")
+        if node in baseline:
+            raise PlatformNeutralMigrationError("duplicate_identity_rejected")
+        baseline[node] = {
+            "generation": bounded_int(row["generation"], "membership_generation_invalid", minimum=1),
+            "verification_key_digest": digest(
+                row["verification_key_digest"], "membership_key_invalid"
+            ),
+            "incarnation": segment(row["incarnation"], "membership_incarnation_invalid"),
+            "lease_expires_at": finite(row["lease_expires_at"], "membership_lease_invalid"),
+            "revoked": row["lifecycle_state"] in REVOKED_LIFECYCLE_STATES,
+            "software_build_digest": build,
+        }
+    if not baseline:
+        raise PlatformNeutralMigrationError("membership_inventory_invalid")
+    return baseline
+
+
+def _transport(family: str, *, build: str, endpoint_id: str) -> dict[str, Any]:
+    return {
+        "family": family,
+        "build_digest": build,
+        "wire_protocol_versions": [ROUTER_WIRE_PROTOCOL],
+        # Digest only: raw EndpointIDs never enter a closed contract.
+        "endpoint_id_digest": _sha256_text(endpoint_id),
+        "connection_roles": ["initiator", "responder"],
+        "direct_observed": None,
+        "relay_observed": None,
+        "persistent_reuse": None,
+        "lifecycle_availability": "unknown",
+        "max_frame_bytes": DECLARED_MAX_FRAME_BYTES,
+        "max_concurrency": DECLARED_MAX_CONCURRENCY,
+    }
+
+
+def _runtime(backend_id: str, *, build: str) -> dict[str, Any]:
+    return {
+        "backend_id": backend_id,
+        "build_digest": build,
+        "model_families": ["qwen2"],
+        "representations": ["int8-weight-only"],
+        "precisions": ["float32"],
+        "decode_operations": ["prefill", "decode"],
+        "max_context_tokens": 4096,
+        "max_concurrent_requests": 1,
+        "kv_schema": "stage_local_kv",
+        "artifact_formats": ["safetensors"],
+        "cancellation_supported": True,
+        "cleanup_supported": True,
+    }
+
+
+def profile_requests(
+    state: Any,
+    *,
+    swarm_id: str,
+    software_build_digest: str,
+    software_version: str,
+) -> list[dict[str, Any]]:
+    """One unsigned v2 profile request per durable v1 member (generation n+1)."""
+
+    build = digest(software_build_digest, "migration_build_digest_invalid")
+    requests = []
+    for row in state.load_members():
+        decomposition = decompose_legacy_peer_class(row["peer_class"])
+        transports = [
+            _transport(family, build=build, endpoint_id=row["endpoint_id"])
+            for family in decomposition.transports
+            if family in ("iroh", "https", "browser_https")
+        ]
+        runtimes = [
+            _runtime(backend, build=build)
+            for backend in decomposition.runtimes
+            if backend in RUNTIME_BACKEND_STAGES
+        ]
+        requests.append(
+            {
+                "protocol": PROFILE_REQUEST_PROTOCOL,
+                "swarm_id": segment(swarm_id, "migration_swarm_id_invalid"),
+                "node_id": segment(row["node_id"], "migration_node_id_invalid"),
+                "legacy_peer_class": row["peer_class"],
+                "current_incarnation": row["incarnation"],
+                "membership_generation": int(row["generation"]) + 1,
+                "lease_expires_at": float(row["lease_expires_at"]),
+                "software_build": {
+                    "version": text(software_version, "migration_build_version_invalid"),
+                    "digest": build,
+                },
+                "transports": transports,
+                "runtimes": runtimes,
+            }
+        )
+    return requests
+
+
+def observe_host_platform(
+    *, system: str | None = None, machine: str | None = None
+) -> tuple[str, str]:
+    """The member host's own platform family and architecture observation."""
+
+    observed_system = _platform.system() if system is None else system
+    observed_machine = _platform.machine() if machine is None else machine
+    return (
+        SYSTEM_TO_PLATFORM.get(observed_system, "unknown"),
+        MACHINE_TO_ARCHITECTURE.get(observed_machine, "unknown"),
+    )
+
+
+def build_migration_profile(
+    request: Mapping[str, Any],
+    *,
+    new_incarnation: str,
+    issued_at: float,
+    observed_platform: tuple[str, str] | None = None,
+) -> PeerProfile:
+    """Build the member's v2 profile from its request and its own host observation."""
+
+    if not isinstance(request, Mapping) or set(request) != REQUEST_FIELDS:
+        raise PlatformNeutralMigrationError("migration_profile_request_invalid")
+    if request["protocol"] != PROFILE_REQUEST_PROTOCOL:
+        raise PlatformNeutralMigrationError("migration_profile_request_invalid")
+    platform_family, architecture = (
+        observe_host_platform() if observed_platform is None else observed_platform
+    )
+    decomposition = decompose_legacy_peer_class(request["legacy_peer_class"])
+    if decomposition.platform_family not in ("unknown", platform_family):
+        raise PlatformNeutralMigrationError("platform_observation_conflicts_legacy_class")
+    if segment(new_incarnation, "migration_incarnation_invalid") == request["current_incarnation"]:
+        raise PlatformNeutralMigrationError("incarnation_not_renewed")
+    lease = finite(request["lease_expires_at"], "migration_lease_invalid")
+    issued = finite(issued_at, "migration_issued_at_invalid", minimum=0.0)
+    if issued > lease:
+        raise PlatformNeutralMigrationError("legacy_generation_stale")
+    return PeerProfile.from_mapping(
+        {
+            "protocol": PEER_PROFILE_PROTOCOL,
+            "profile_id": f"profile-{request['node_id']}-g{request['membership_generation']}",
+            "swarm_id": request["swarm_id"],
+            "node_id": request["node_id"],
+            "incarnation": new_incarnation,
+            "membership_generation": request["membership_generation"],
+            "identity_kind": decomposition.identity_kind,
+            "platform_family": platform_family,
+            "platform_variant": None,
+            "architecture": architecture,
+            "software_build": dict(request["software_build"]),
+            "transports": list(request["transports"]),
+            "runtimes": list(request["runtimes"]),
+            "lease_expires_at": lease,
+            "issued_at": issued,
+            "expires_at": lease,
+        }
+    )
+
+
+def sign_migration_profile(
+    request: Mapping[str, Any],
+    *,
+    signer: Any,
+    new_incarnation: str,
+    issued_at: float,
+    observed_platform: tuple[str, str] | None = None,
+) -> dict[str, Any]:
+    """Sign the v2 profile with the member's existing durable node key."""
+
+    profile = build_migration_profile(
+        request,
+        new_incarnation=new_incarnation,
+        issued_at=issued_at,
+        observed_platform=observed_platform,
+    )
+    return sign_peer_profile(signer=signer, profile=profile)
+
+
+class SeedMembershipCutover:
+    """Seed-side v1 write gate bound to one private migration storage root."""
+
+    def __init__(self, storage_root: str | Path) -> None:
+        self._executor = MigrationExecutor(FileMembershipState(Path(storage_root)))
+
+    def recorded(self) -> bool:
+        return self._executor.cutover_state() is not None
+
+    def check(self, operation: str) -> None:
+        """Raise ``membership_contract_upgrade_required`` once cutover is recorded."""
+
+        text(operation, "v1_operation_invalid")
+        if self.recorded():
+            raise MembershipContractUpgradeRequired()
+
+
+__all__ = [
+    "PROFILE_REQUEST_PROTOCOL",
+    "SeedMembershipCutover",
+    "build_migration_profile",
+    "export_seed_baseline",
+    "observe_host_platform",
+    "profile_requests",
+    "sign_migration_profile",
+]

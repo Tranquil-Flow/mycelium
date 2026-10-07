@@ -160,6 +160,7 @@ class SeedCoordinator:
         message_ttl_seconds: float = 60.0,
         keepalive_interval_seconds: float = 30.0,
         evidence_freshness_seconds: float = 90.0,
+        membership_cutover: Any | None = None,
     ) -> None:
         self.swarm_id = _segment(swarm_id, "swarm_id")
         self.seed_node_id = _segment(seed_node_id, "seed_node_id")
@@ -180,6 +181,13 @@ class SeedCoordinator:
             getattr(placement_source, "compile", None)
         ):
             raise ValueError("placement_source is invalid")
+        if membership_cutover is not None and not callable(
+            getattr(membership_cutover, "check", None)
+        ):
+            raise ValueError("membership_cutover is invalid")
+        # A9 one-time v1 -> v2 migration: once the cutover is recorded every v1
+        # write fails closed with membership_contract_upgrade_required.
+        self._membership_cutover = membership_cutover
         if state is None:
             state = SqliteSeedState(invite_registry.database)
         if state.database.resolve() != invite_registry.database.resolve():
@@ -268,6 +276,18 @@ class SeedCoordinator:
             except (SeedStateError, TypeError, ValueError) as exc:
                 code = getattr(exc, "code", "seed_state_corrupt")
                 raise SeedCoordinatorError(code) from exc
+
+    def _require_v1_write_admitted(self, operation: str) -> None:
+        if self._membership_cutover is None:
+            return
+        try:
+            self._membership_cutover.check(operation)
+        except Exception as exc:  # noqa: BLE001 - the gate fails closed
+            if getattr(exc, "code", None) == "membership_contract_upgrade_required":
+                raise SeedCoordinatorError(
+                    "membership_contract_upgrade_required"
+                ) from exc
+            raise SeedCoordinatorError("membership_cutover_unreadable") from exc
 
     def _persist(self, method: str, *args: Any, **kwargs: Any) -> None:
         if self._state is None:
@@ -388,6 +408,7 @@ class SeedCoordinator:
         invite_token: str,
         join_envelope: Mapping[str, Any],
     ) -> dict[str, Any]:
+        self._require_v1_write_admitted("join_request")
         with self._lock:
             invite_token_digest: str | None = None
             request_envelope_digest: str | None = None
@@ -539,6 +560,7 @@ class SeedCoordinator:
     ) -> dict[str, Any]:
         """Resume one enrolled durable principal without consuming an invite."""
 
+        self._require_v1_write_admitted("resume_request")
         with self._lock:
             request_digest: str | None = None
             request_message_id: str | None = None
@@ -1044,6 +1066,7 @@ class SeedCoordinator:
     ) -> dict[str, Any]:
         if expected_protocol not in _MEMBER_PROTOCOLS:
             raise ValueError("expected_protocol is invalid")
+        self._require_v1_write_admitted(expected_protocol)
         try:
             untrusted_message = envelope["message"]
             node_id = untrusted_message["sender_node_id"]
@@ -1297,6 +1320,7 @@ class SeedCoordinator:
     ) -> dict[str, Any]:
         node_id = _segment(node_id, "node_id")
         assignment_id = _segment(assignment_id, "assignment_id")
+        self._require_v1_write_admitted("assignment_request")
         with self._lock:
             member = self._members.get(node_id)
             if member is None:
