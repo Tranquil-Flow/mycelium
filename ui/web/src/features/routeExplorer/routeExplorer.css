@@ -24,3 +24,18 @@ section.panel.route-explorer { padding: 1rem; }
 .route-explorer details { max-width: 36rem; }
 .route-explorer *, .route-explorer *::before, .route-explorer *::after { animation: none !important; transition: none !important; }
 @media (forced-colors: active) { .route-explorer button, .route-explorer select { color: ButtonText; background: ButtonFace; } .route-explorer :focus-visible { outline-color: Highlight; } }
+.route-globe-toggle { margin-block: 1rem; }
+.route-globe-toggle > label { display: inline-flex; gap: .5rem; align-items: center; min-height: 44px; }
+.region-globe-frame { position: relative; width: min(100%, 22rem); aspect-ratio: 1; margin-block: 1rem; }
+.region-globe-frame svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.region-globe-sphere { fill: none; stroke: currentColor; stroke-width: 1.5; }
+.region-globe-graticule { fill: none; stroke: currentColor; stroke-width: .5; opacity: .35; }
+.route-explorer .region-globe-cell { position: absolute; transform: translate(-50%, -50%); min-width: 44px; min-height: 44px; padding: .2rem .45rem; border-radius: .9rem; border-style: dashed; font-weight: bold; line-height: 1.1; }
+.route-explorer .region-globe-cell > span { display: grid; justify-items: center; }
+.route-explorer .region-globe-cell small { font-size: .72rem; font-weight: normal; white-space: nowrap; }
+.route-explorer .region-globe-cell[data-occupied=true] { border-style: solid; background: #2f5d50; }
+.route-explorer .region-globe-cell[aria-pressed=true] { outline: 3px solid #f8dc8b; outline-offset: 2px; }
+.route-explorer .region-globe-table { min-width: 0; width: auto; max-width: 100%; table-layout: auto; }
+.route-explorer .region-globe-table th, .route-explorer .region-globe-table td { min-width: 0; padding: .5rem; }
+.route-peers li[data-region-marked] { outline: 3px solid #f8dc8b; outline-offset: 2px; }
+@media (forced-colors: active) { .region-globe-sphere, .region-globe-graticule { stroke: CanvasText; } .route-explorer .region-globe-cell[data-occupied=true] { background: Highlight; color: HighlightText; } }

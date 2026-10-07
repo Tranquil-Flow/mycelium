@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useProductEvidence } from '../productEvidence/ProductEvidenceContext';
 import { dimensions, effectiveFreshness, type Dimension, type RouteExplorer, type RouteSegment } from './contracts';
+import { RegionGlobe } from './RegionGlobe';
+import type { GlobeRegion } from './globe';
 import './routeExplorer.css';
 const labels: Record<Dimension, string> = {edge_kind:'Edge kind',phase:'Phase',path_status:'Path status',role:'Path role',transport:'Transport',freshness:'Freshness'};
 const text = (v: unknown) => v === null ? 'unknown' : String(v).replaceAll('_', ' ');
@@ -35,6 +37,8 @@ export function RouteExplorerView({projection, connected, now}: {readonly projec
   const [selected, setSelected] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [peerPage, setPeerPage] = useState(0);
+  const [globe, setGlobe] = useState(false);
+  const [markedRegion, setMarkedRegion] = useState<GlobeRegion | null>(null);
   const safePeerPage = Math.min(peerPage, Math.max(0, Math.ceil(projection.nodes.length / 64) - 1));
   const nodes = useMemo(() => new Map(projection.nodes.map(n => [n.id, n])), [projection.nodes]);
   const peerName = (id: string | null) => id === null ? 'Unknown source' : `${nodes.get(id)?.kind === 'member' ? 'Member' : 'Endpoint'} ${id.slice(7, 19)}`;
@@ -87,8 +91,11 @@ export function RouteExplorerView({projection, connected, now}: {readonly projec
         <dt>Source region</dt><dd>{regionLabel(detail.source)}</dd><dt>Destination region</dt><dd>{regionLabel(detail.destination)}</dd><dt>Source authority</dt><dd>{detail.authority_digest}</dd><dt>Segment identity</dt><dd>{detail.id}</dd></dl>
     </> : <p>No retained segment selected. Selection only changes this view.</p>}</section>
     <section aria-label="Peer regions and unknown-region peers"><h3>Peer regions and unknown-region peers</h3><p>All {projection.nodes.length} public peers remain inspectable, including unknown-region peers, regardless of route filters. Endpoint and member namespaces are intentionally separate. A declared region does not verify physical location; a reviewed relay region locates only its relay.</p>
-      <ul className="route-peers">{projection.nodes.slice(safePeerPage*64,(safePeerPage+1)*64).map(n => <li key={n.id}><details><summary>{peerName(n.id)} · {text(n.region)}</summary><p>{n.id}</p><p>Region source {text(n.region_source)} · {text(n.region)}. No location inferred from transport or network identity.</p></details></li>)}</ul>
+      <ul className="route-peers">{projection.nodes.slice(safePeerPage*64,(safePeerPage+1)*64).map(n => <li key={n.id} {...(markedRegion !== null && n.region === markedRegion ? {'data-region-marked': true} : {})}><details><summary>{peerName(n.id)} · {text(n.region)}{markedRegion !== null && n.region === markedRegion ? ' · marked on globe' : ''}</summary><p>{n.id}</p><p>Region source {text(n.region_source)} · {text(n.region)}. No location inferred from transport or network identity.</p></details></li>)}</ul>
       <div className="route-controls"><button disabled={safePeerPage===0} onClick={() => setPeerPage(safePeerPage-1)}>Previous peers</button><span>Peer page {safePeerPage+1}</span><button disabled={(safePeerPage+1)*64>=projection.nodes.length} onClick={() => setPeerPage(safePeerPage+1)}>Next peers</button></div>
+    </section>
+    <section aria-label="Optional region globe" className="route-globe-toggle"><label><input type="checkbox" checked={globe} onChange={e => { setGlobe(e.target.checked); setMarkedRegion(null); }} /> Show schematic region globe (optional; the peer list stays normative)</label>
+      {globe ? <RegionGlobe nodes={projection.nodes} selected={markedRegion} onSelect={setMarkedRegion} /> : null}
     </section>
     <details><summary>Projection provenance and retention</summary><p>Source {projection.source_digest}</p><p>Projection {projection.digest}</p><p>Up to 4096 peers and segments; upstream activation history retains up to 64 observations. Retention is bounded, not a complete lifetime traffic log. Digests bind public bytes; they are not signatures or qualifications. No raw workload export.</p></details>
   </div>;
