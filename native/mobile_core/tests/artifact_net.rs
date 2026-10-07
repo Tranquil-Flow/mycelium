@@ -20,8 +20,10 @@ use mycelium_mobile_core::transport::Reachability;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+/// `MYCELIUM_MOBILE_FIXTURES` points a cross-compiled binary at pushed fixtures.
 fn fixture(name: &str) -> Value {
-    let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+    let dir = std::env::var("MYCELIUM_MOBILE_FIXTURES").unwrap_or_else(|_| format!("{}/tests/fixtures", env!("CARGO_MANIFEST_DIR")));
+    let path = format!("{dir}/{name}");
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
