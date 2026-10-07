@@ -131,7 +131,12 @@ def main(argv=None) -> int:
             accept_work(app, _read(args.preview), work_acknowledged=True, **options)
             offer = app.pending_stage()
             stop = threading.Event()
-            print("serving; Ctrl+C drains and keeps staging", flush=True)
+            # Under the service runner (Task Scheduler member), the runner's named
+            # stop event is the graceful stop: it drains exactly like Ctrl+C.
+            import mycelium_host_platform
+
+            watcher = mycelium_host_platform.start_stop_event_watcher(stop.set)
+            print("serving; Ctrl+C or the supervisor's stop event drains and keeps staging", flush=True)
             try:
                 while not stop.wait(0.5):
                     if not args.keep_staging_on_cleanup_request:
@@ -146,9 +151,13 @@ def main(argv=None) -> int:
                         print(json.dumps({"state": "stopped", "native_control": state}, default=str))
                         return 1
             except KeyboardInterrupt:
-                print("draining (staging kept)", flush=True)
+                stop.set()
             finally:
+                if watcher is not None:
+                    watcher.set()
                 app.stop_control()
+            if stop.is_set():
+                print("draining (staging kept)", flush=True)
             del offer
         return 0
     finally:

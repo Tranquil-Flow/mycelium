@@ -523,9 +523,13 @@ def _windows_member_plan(
         "uninstall_argv": ["sc.exe", "delete", name],
         # A plain ``python.exe`` never calls StartServiceCtrlDispatcher, so the
         # SCM would kill it (error 1053) -- this plan is not registrable as is.
+        # The restricted NT SERVICE account is also a different SID from the
+        # user who paired the host, so it cannot open owner-only host state.
+        # (The runner's stop path is no longer POSIX-only: on win32 it uses a
+        # named stop event and a Job Object.)
         "known_blockers": [
             "python_runner_implements_no_scm_control_handler",
-            "service_runner_stop_path_uses_posix_killpg",
+            "virtual_service_account_cannot_open_owner_only_host_state",
         ],
     }
 
