@@ -1,0 +1,151 @@
+"""A path id is bound to its owner (entry node, request) while it is live,
+and its tombstones bind only that owner.
+
+Before this, a peer that is a route's final placement could re-register a
+live path id with a higher attempt for another request (same claimed entry),
+and any node that registered and cancelled a path under some path id left
+tombstones that refused another entry's later registration of that id.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+
+from mycelium_router.contracts import PathCancellation, RouterConfig
+from mycelium_router.fakes import (
+   FakeCapacityPort,
+   FakeDeviceStateProvider,
+   FakeRuntimePort,
+   FakeTopologyProvider,
+   FakeTransportPort,
+   ManualClock,
+   SequenceIdSource,
+)
+from mycelium_router.router import Router
+from test_router_receive_hop import locked_path
+
+
+def _middle_router():
+   graph, request, manifest = locked_path()
+   placements = {p.placement_id: p for stage in graph.stages for p in stage.placements}
+   nodes = [placements[hop.placement_id].node_id for hop in manifest.ordered_hops]
+   router = Router(
+      node_id=nodes[1],
+      topology=FakeTopologyProvider(graph),
+      device_states=FakeDeviceStateProvider({}),
+      capacity=FakeCapacityPort(),
+      runtime=FakeRuntimePort(),
+      transport=FakeTransportPort(),
+      clock=ManualClock(),
+      id_source=SequenceIdSource(),
+      config=RouterConfig(),
+   )
+   return router, graph, request, manifest, nodes
+
+
+def _with_entry(graph, manifest, node_id: str):
+   """The same route, but with its entry placement on ``node_id``."""
+   first = manifest.ordered_hops[0].placement_id
+   stages = tuple(
+      replace(stage, placements=tuple(
+         replace(p, node_id=node_id) if p.placement_id == first else p for p in stage.placements
+      ))
+      for stage in graph.stages
+   )
+   return replace(graph, stages=stages)
+
+
+def test_a_live_path_is_never_replaced_by_another_request_or_entry() -> None:
+   router, graph, request, manifest, nodes = _middle_router()
+   entry, final = nodes[0], nodes[-1]
+   relay = router.relay
+   assert relay.register_path(request, manifest, graph, entry_node_id=entry)
+   other_request = replace(request, request_id="request-other")
+   higher = replace(manifest, path_attempt=manifest.path_attempt + 1, request_id="request-other")
+   # The final placement claims the same entry for another request: refused.
+   assert not relay.register_path(other_request, higher, graph, source_node_id=final, entry_node_id=entry)
+   # Another entry, any attempt: refused.
+   evil = _with_entry(graph, manifest, "node-evil")
+   assert not relay.register_path(request, replace(manifest, path_attempt=manifest.path_attempt + 5), evil, entry_node_id="node-evil")
+   assert relay._paths[manifest.path_id][2].request_id == request.request_id
+   # The owner itself still moves to a newer attempt (A6 replay).
+   newer = replace(manifest, path_attempt=manifest.path_attempt + 1)
+   assert relay.register_path(request, newer, graph, entry_node_id=entry)
+   assert relay._paths[manifest.path_id][1].path_attempt == newer.path_attempt
+
+
+def test_another_owners_tombstones_never_block_a_registration() -> None:
+   router, graph, request, manifest, nodes = _middle_router()
+   entry = nodes[0]
+   relay = router.relay
+   evil_graph = _with_entry(graph, manifest, "node-evil")
+   evil_request = replace(request, request_id="request-evil")
+   evil_manifest = replace(manifest, path_attempt=manifest.path_attempt + 5, request_id="request-evil")
+   assert relay.register_path(evil_request, evil_manifest, evil_graph, entry_node_id="node-evil")
+   assert router.receive_path_cancellation(
+      PathCancellation("request-evil", manifest.path_id, evil_manifest.path_attempt, graph.topology_version),
+      source_node_id="node-evil",
+   )
+   # The victim's own registration of the same path id is not poisoned.
+   assert relay.register_path(request, manifest, graph, entry_node_id=entry)
+   # The evil owner's own tombstone still binds it.
+   assert not relay.register_path(evil_request, evil_manifest, evil_graph, entry_node_id="node-evil")
+
+
+def test_an_owners_own_tombstones_and_pending_cancellations_still_bind() -> None:
+   router, graph, request, manifest, nodes = _middle_router()
+   entry = nodes[0]
+   relay = router.relay
+   assert relay.register_path(request, manifest, graph, entry_node_id=entry)
+   cancel = PathCancellation(request.request_id, manifest.path_id, manifest.path_attempt, graph.topology_version)
+   assert router.receive_path_cancellation(cancel, source_node_id=entry)
+   assert not relay.register_path(request, manifest, graph, entry_node_id=entry)
+   # A registration without a known entry inherits the recorded owner: still bound.
+   assert not relay.register_path(request, manifest, graph)
+   # A pending cancellation from the entry blocks a not-yet-registered path.
+   router2, graph2, request2, manifest2, nodes2 = _middle_router()
+   pending = PathCancellation(request2.request_id, manifest2.path_id, manifest2.path_attempt, graph2.topology_version)
+   assert router2.receive_path_cancellation(pending, source_node_id=nodes2[0])
+   assert not router2.relay.register_path(request2, manifest2, graph2, entry_node_id=nodes2[0])
+
+
+def test_an_owner_controlled_tombstone_of_an_unknown_path_binds_everyone() -> None:
+   router, graph, request, manifest, nodes = _middle_router()
+   cancel = PathCancellation(request.request_id, manifest.path_id, manifest.path_attempt, graph.topology_version)
+   assert router.relay.apply_controlled_path_cancellation(cancel)
+   assert not router.relay.register_path(request, manifest, graph, entry_node_id=nodes[0])
+
+
+def test_another_owners_cancellation_never_weakens_an_owners_tombstone() -> None:
+   router, graph, request, manifest, nodes = _middle_router()
+   entry = nodes[0]
+   relay = router.relay
+   # Owner A: attempt 7 registered, then cancelled (high-water mark 7).
+   high = replace(manifest, path_attempt=7)
+   assert relay.register_path(request, high, graph, entry_node_id=entry)
+   assert router.receive_path_cancellation(
+      PathCancellation(request.request_id, manifest.path_id, 7, graph.topology_version), source_node_id=entry
+   )
+   # Owner B registers the same path id at attempt 1 and cancels it.
+   evil_graph = _with_entry(graph, manifest, "node-evil")
+   evil_request = replace(request, request_id="request-evil")
+   low = replace(manifest, path_attempt=1, request_id="request-evil")
+   assert relay.register_path(evil_request, low, evil_graph, entry_node_id="node-evil")
+   assert router.receive_path_cancellation(
+      PathCancellation("request-evil", manifest.path_id, 1, graph.topology_version), source_node_id="node-evil"
+   )
+   # A's mark still refuses every A attempt up to 7 (5 was never registered).
+   for attempt in (5, 7):
+      assert not relay.register_path(request, replace(manifest, path_attempt=attempt), graph, entry_node_id=entry), attempt
+   assert relay.register_path(request, replace(manifest, path_attempt=8), graph, entry_node_id=entry)
+
+
+def test_tombstones_from_many_owners_stay_bounded() -> None:
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   for index in range(relay_module._MAX_TERMINAL_PATH_METADATA + 50):
+      relay._record_cancelled_attempt_locked(manifest.path_id, 1, (f"node-{index}", "request"))
+   assert len(relay._cancelled_path_attempts) <= relay_module._MAX_TERMINAL_PATH_METADATA
+   assert len(relay._cancelled_path_owners[manifest.path_id]) <= relay_module._MAX_TERMINAL_PATH_METADATA

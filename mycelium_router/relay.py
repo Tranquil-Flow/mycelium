@@ -47,6 +47,28 @@ from mycelium_router.validation import validate_manifest
 
 _MAX_TERMINAL_PATH_METADATA = 4096
 _MAX_PENDING_PATH_CANCELLATIONS = 4096
+#: Owners remembered per path id (live and tombstoned paths).
+_MAX_PATH_OWNERS = 2 * _MAX_TERMINAL_PATH_METADATA
+#: ``_mark``/``_was_cancelled_attempt_locked`` default: the path's recorded owner.
+_RECORDED_OWNER = object()
+
+#: A path id's owner: (entry node id or None, request id). A path id is bound
+#: to the owner of its first registration while it is live, and its
+#: tombstones apply only to that owner: another entry or request can neither
+#: replace a live registration nor be blocked by tombstones it did not cause.
+PathOwner = tuple["str | None", str]
+
+
+def _owner_suffix(owner: "PathOwner | None") -> str:
+   if owner is None:
+      return ""
+   return f"\x00owner\x00{owner[0] or ''}\x00{owner[1]}"
+
+
+def _same_owner(left: "PathOwner", right: "PathOwner") -> bool:
+   return left[1] == right[1] and (
+      left[0] is None or right[0] is None or left[0] == right[0]
+   )
 _CANCELLED_PATH_FILTER_BYTES = 1 << 20
 _CANCELLED_PATH_FILTER_HASHES = 5
 _CANCELLED_PATH_FILTER_ROTATION_CAPACITY = 100_000
@@ -149,7 +171,14 @@ class RelayEngine:
       self._path_operation_registry_lock = Lock()
       self._path_operation_locks: dict[str, tuple[Lock, int]] = {}
       self._path_generations: OrderedDict[str, int] = OrderedDict()
-      self._cancelled_path_attempts: OrderedDict[str, int] = OrderedDict()
+      # Highest cancelled attempt per (path id, owner); owner None is a
+      # tombstone of an unknown owner, which binds every owner. One owner's
+      # cancellation never lowers or replaces another owner's record.
+      self._cancelled_path_attempts: OrderedDict[
+         tuple[str, PathOwner | None], int
+      ] = OrderedDict()
+      self._cancelled_path_owners: dict[str, set[PathOwner | None]] = {}
+      self._path_owners: OrderedDict[str, PathOwner] = OrderedDict()
       self._cancelled_path_filter = _RotatingReplayFilter(
          byte_count=_CANCELLED_PATH_FILTER_BYTES,
          hashes=_CANCELLED_PATH_FILTER_HASHES,
@@ -205,9 +234,75 @@ class RelayEngine:
 
    def _prune_terminal_path_metadata_locked(self) -> None:
       while len(self._cancelled_path_attempts) > _MAX_TERMINAL_PATH_METADATA:
-         path_id, _ = self._cancelled_path_attempts.popitem(last=False)
+         (path_id, owner), _ = self._cancelled_path_attempts.popitem(last=False)
+         owners = self._cancelled_path_owners.get(path_id)
+         if owners is not None:
+            owners.discard(owner)
+            if owners:
+               continue
+            self._cancelled_path_owners.pop(path_id, None)
          if path_id not in self._paths and path_id not in self._provisional_paths:
             self._path_generations.pop(path_id, None)
+      while len(self._path_owners) > _MAX_PATH_OWNERS:
+         path_id, owner = self._path_owners.popitem(last=False)
+         if path_id in self._paths or path_id in self._provisional_paths:
+            # Never forget a live path's owner; keep it, newest last.
+            self._path_owners[path_id] = owner
+            break
+
+   def _resolve_owner_locked(
+      self,
+      path_id: str,
+      request_id: str,
+      entry_node_id: str | None,
+   ) -> PathOwner:
+      """The owner a registration claims; without an entry it inherits the
+      recorded entry of the same request."""
+      if entry_node_id is None:
+         recorded = self._path_owners.get(path_id)
+         if recorded is not None and recorded[1] == request_id:
+            return recorded
+      return (entry_node_id, request_id)
+
+   def _record_owner_locked(self, path_id: str, owner: PathOwner) -> None:
+      recorded = self._path_owners.get(path_id)
+      if recorded is not None and recorded[0] is not None and owner[0] is None:
+         owner = recorded
+      self._path_owners[path_id] = owner
+      self._path_owners.move_to_end(path_id)
+
+   def _record_cancelled_attempt_locked(
+      self,
+      path_id: str,
+      path_attempt: int,
+      owner: "PathOwner | None | object" = _RECORDED_OWNER,
+   ) -> None:
+      if owner is _RECORDED_OWNER:
+         owner = self._path_owners.get(path_id)
+      self._mark_cancelled_attempt_locked(path_id, path_attempt, owner)
+      key = (path_id, owner)
+      previous = self._cancelled_path_attempts.get(key)
+      if previous is not None:
+         path_attempt = max(path_attempt, previous)
+      self._cancelled_path_attempts[key] = path_attempt
+      self._cancelled_path_attempts.move_to_end(key)
+      self._cancelled_path_owners.setdefault(path_id, set()).add(owner)
+      self._prune_terminal_path_metadata_locked()
+
+   def _cancelled_attempt_for_locked(
+      self,
+      path_id: str,
+      owner: "PathOwner | None",
+   ) -> int | None:
+      """The highest cancelled attempt that binds ``owner``: a record of an
+      unknown owner binds everyone; another owner's record binds no one else."""
+      highest: int | None = None
+      for recorded in self._cancelled_path_owners.get(path_id, ()):
+         if recorded is None or owner is None or _same_owner(recorded, owner):
+            attempt = self._cancelled_path_attempts.get((path_id, recorded))
+            if attempt is not None and (highest is None or attempt > highest):
+               highest = attempt
+      return highest
 
    @contextmanager
    def _path_operation_lock(self, path_id: str) -> Iterator[None]:
@@ -234,11 +329,38 @@ class RelayEngine:
                   current_references - 1,
                )
 
-   def _mark_cancelled_attempt_locked(self, path_id: str, path_attempt: int) -> None:
-      self._cancelled_path_filter.add(path_id, path_attempt)
+   def _mark_cancelled_attempt_locked(
+      self,
+      path_id: str,
+      path_attempt: int,
+      owner: "PathOwner | None | object" = _RECORDED_OWNER,
+   ) -> None:
+      if owner is _RECORDED_OWNER:
+         owner = self._path_owners.get(path_id)
+      # Owner-scoped when the owner is known; an unknown owner's tombstone
+      # keeps the legacy key, which binds every owner.
+      self._cancelled_path_filter.add(path_id + _owner_suffix(owner), path_attempt)
 
-   def _was_cancelled_attempt_locked(self, path_id: str, path_attempt: int) -> bool:
-      return self._cancelled_path_filter.contains(path_id, path_attempt)
+   def _was_cancelled_attempt_locked(
+      self,
+      path_id: str,
+      path_attempt: int,
+      owner: "PathOwner | None | object" = _RECORDED_OWNER,
+   ) -> bool:
+      if owner is _RECORDED_OWNER:
+         owner = self._path_owners.get(path_id)
+      if self._cancelled_path_filter.contains(path_id, path_attempt):
+         return True
+      if owner is None:
+         return False
+      if self._cancelled_path_filter.contains(path_id + _owner_suffix(owner), path_attempt):
+         return True
+      # A tombstone recorded before the entry was known binds the same request.
+      if owner[0] is not None:
+         return self._cancelled_path_filter.contains(
+            path_id + _owner_suffix((None, owner[1])), path_attempt
+         )
+      return False
 
    @staticmethod
    def _pending_cancellation_key(
@@ -300,12 +422,9 @@ class RelayEngine:
          self._pending_path_cancellations.pop(key, None)
       if not matched:
          return False
-      self._mark_cancelled_attempt_locked(path_id, path_attempt)
-      self._cancelled_path_attempts[path_id] = max(
-         path_attempt,
-         self._cancelled_path_attempts.get(path_id, path_attempt),
+      self._record_cancelled_attempt_locked(
+         path_id, path_attempt, (entry_node_id, request_id)
       )
-      self._cancelled_path_attempts.move_to_end(path_id)
       self._path_generations[path_id] = self._path_generations.get(path_id, 0) + 1
       self._path_generations.move_to_end(path_id)
       self._prune_terminal_path_metadata_locked()
@@ -321,7 +440,9 @@ class RelayEngine:
          return False
       if self._was_cancelled_attempt_locked(path_id, path_attempt):
          return False
-      cancelled_attempt = self._cancelled_path_attempts.get(path_id)
+      cancelled_attempt = self._cancelled_attempt_for_locked(
+         path_id, self._path_owners.get(path_id)
+      )
       return cancelled_attempt is None or path_attempt > cancelled_attempt
 
    def _send_if_path_current(
@@ -481,6 +602,20 @@ class RelayEngine:
             if not entry_node_id:
                return None
          with self._path_lock:
+            owner = self._resolve_owner_locked(
+               manifest.path_id, request.request_id, entry_node_id
+            )
+            existing = self._paths.get(manifest.path_id)
+            provisional = self._provisional_paths.get(manifest.path_id)
+            recorded_owner = self._path_owners.get(manifest.path_id)
+            if (
+               (existing is not None or provisional is not None)
+               and recorded_owner is not None
+               and not _same_owner(recorded_owner, owner)
+            ):
+               # A live path id stays bound to its owner whatever the attempt:
+               # another entry or request never replaces it.
+               return None
             if self._consume_pending_cancellation_locked(
                request_id=request.request_id,
                path_id=manifest.path_id,
@@ -492,16 +627,17 @@ class RelayEngine:
             if self._was_cancelled_attempt_locked(
                manifest.path_id,
                manifest.path_attempt,
+               owner,
             ):
                return None
-            cancelled_attempt = self._cancelled_path_attempts.get(manifest.path_id)
+            cancelled_attempt = self._cancelled_attempt_for_locked(
+               manifest.path_id, owner
+            )
             if (
                cancelled_attempt is not None
                and manifest.path_attempt <= cancelled_attempt
             ):
                return None
-            existing = self._paths.get(manifest.path_id)
-            provisional = self._provisional_paths.get(manifest.path_id)
             if provisional is not None:
                if provisional[:3] != (
                   request.request_id,
@@ -542,18 +678,12 @@ class RelayEngine:
                   and entry_node_id != existing_entry
                ):
                   return None
-               self._mark_cancelled_attempt_locked(
+               self._record_cancelled_attempt_locked(
                   manifest.path_id,
                   existing_manifest.path_attempt,
                )
-               self._cancelled_path_attempts[manifest.path_id] = max(
-                  existing_manifest.path_attempt,
-                  self._cancelled_path_attempts.get(
-                     manifest.path_id,
-                     existing_manifest.path_attempt,
-                  ),
-               )
             self._paths[manifest.path_id] = (graph, manifest, request)
+            self._record_owner_locked(manifest.path_id, owner)
             self._hop_arrivals.record_registration(
                manifest.path_id, at=self.clock.now()
             )
@@ -562,8 +692,8 @@ class RelayEngine:
                self._path_generations.get(manifest.path_id, 0) + 1
             )
             self._path_generations.move_to_end(manifest.path_id)
-            if manifest.path_id in self._cancelled_path_attempts:
-               self._cancelled_path_attempts.move_to_end(manifest.path_id)
+            for recorded in self._cancelled_path_owners.get(manifest.path_id, ()):
+               self._cancelled_path_attempts.move_to_end((manifest.path_id, recorded))
             self._prune_terminal_path_metadata_locked()
             if entry_node_id is not None:
                self._entry_node_by_path[manifest.path_id] = entry_node_id
@@ -594,9 +724,17 @@ class RelayEngine:
                entry_node_id=entry_node_id,
             ):
                return None
-            if self._was_cancelled_attempt_locked(path_id, path_attempt):
+            owner = self._resolve_owner_locked(path_id, request_id, entry_node_id)
+            recorded_owner = self._path_owners.get(path_id)
+            if (
+               (path_id in self._paths or path_id in self._provisional_paths)
+               and recorded_owner is not None
+               and not _same_owner(recorded_owner, owner)
+            ):
                return None
-            cancelled_attempt = self._cancelled_path_attempts.get(path_id)
+            if self._was_cancelled_attempt_locked(path_id, path_attempt, owner):
+               return None
+            cancelled_attempt = self._cancelled_attempt_for_locked(path_id, owner)
             if cancelled_attempt is not None and path_attempt <= cancelled_attempt:
                return None
             existing = self._provisional_paths.get(path_id)
@@ -611,6 +749,7 @@ class RelayEngine:
                   return None
                return self._path_generations[path_id]
             self._provisional_paths[path_id] = identity
+            self._record_owner_locked(path_id, owner)
             self._path_generations[path_id] = (
                self._path_generations.get(path_id, 0) + 1
             )
@@ -2279,13 +2418,15 @@ class RelayEngine:
             registered = self._paths.get(cancellation.path_id)
             provisional = self._provisional_paths.get(cancellation.path_id)
             if registered is None and provisional is None:
-               cancelled_attempt = self._cancelled_path_attempts.get(
-                  cancellation.path_id
+               claimed_owner = (source_node_id, cancellation.request_id)
+               cancelled_attempt = self._cancelled_attempt_for_locked(
+                  cancellation.path_id, claimed_owner
                )
                if (
                   self._was_cancelled_attempt_locked(
                      cancellation.path_id,
                      cancellation.path_attempt,
+                     claimed_owner,
                   )
                   or (
                      cancelled_attempt is not None
@@ -2447,12 +2588,7 @@ class RelayEngine:
          or path_id in self._path_generations
       )
       if path_attempt is not None:
-         self._mark_cancelled_attempt_locked(path_id, path_attempt)
-         self._cancelled_path_attempts[path_id] = max(
-            path_attempt,
-            self._cancelled_path_attempts.get(path_id, path_attempt),
-         )
-         self._cancelled_path_attempts.move_to_end(path_id)
+         self._record_cancelled_attempt_locked(path_id, path_attempt)
       if known_path:
          self._path_generations[path_id] = (
             self._path_generations.get(path_id, 0) + 1
