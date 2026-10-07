@@ -36,6 +36,7 @@ _INSTALLER_ACTIONS=('--install','--uninstall','--rollback','--install-status')
 _FROZEN_MODULES={
     'mycelium_service_runner':'mycelium_service_runner',
     'mycelium_a13_windows.managed_host':'mycelium_a13_windows.managed_host.__main__',
+    'mycelium_a13_linux.managed_host':'mycelium_a13_linux.managed_host.__main__',
 }
 
 

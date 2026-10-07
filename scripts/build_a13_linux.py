@@ -66,6 +66,7 @@ _HIDDEN_IMPORTS = (
     "mycelium_a13_macos.managed_observations",
     "mycelium_a13_linux.installer",
     "mycelium_a13_linux.service_install",
+    "mycelium_a13_linux.managed_host.__main__",
     "mycelium_service_runner",
 )
 

@@ -13,7 +13,8 @@ from mycelium_membership.contracts import _PEER_RUNTIME_CAPABILITIES
 
 
 def test_managed_classes_are_exact_and_match_the_membership_capability():
-    assert MANAGED_PEER_RUNTIMES == {"mac_mlx_iroh": "mlx", "windows_native_iroh": "numpy"}
+    assert MANAGED_PEER_RUNTIMES == {"mac_mlx_iroh": "mlx", "windows_native_iroh": "numpy",
+                                     "linux_native_iroh": "numpy"}
     for peer_class, backend in MANAGED_PEER_RUNTIMES.items():
         assert _PEER_RUNTIME_CAPABILITIES[peer_class]["runtime_backend"] == backend
         assert managed_runtime_backend(peer_class) == backend

@@ -2,8 +2,8 @@
 
 A managed host is admitted by its exact registered peer class.  The macOS app
 runs the MLX stage runtime; the native Windows host runs the NumPy stage
-runtime (with the optional pinned A9 int8 provider).  Any other class is not a
-managed host.
+runtime (with the optional pinned A9 int8 provider), and so does the native
+Linux host.  Any other class is not a managed host.
 """
 
 from __future__ import annotations
@@ -11,6 +11,8 @@ from __future__ import annotations
 MANAGED_PEER_RUNTIMES = {
     "mac_mlx_iroh": "mlx",
     "windows_native_iroh": "numpy",
+    # Owner parity ruling 2026-10-07 applied to Linux: the packaged Linux host.
+    "linux_native_iroh": "numpy",
 }
 
 

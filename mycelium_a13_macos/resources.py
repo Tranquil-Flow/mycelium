@@ -111,6 +111,11 @@ def observe_policy() -> dict[str, str]:
     Windows observer (power, network and ACPI thermal via PowerShell/CIM), so a
     Windows owner that also contributes is judged on real readings, not unknowns.
     """
+    if sys.platform.startswith("linux"):
+        from mycelium_a13_linux.managed_host.resources import observe_policy as observe_linux
+
+        observation = observe_linux()
+        return observation if _valid_observation(observation) else _unknown_observation()
     if sys.platform == "win32":
         from mycelium_a13_windows.managed_host.resources import observe_policy as observe_windows
 

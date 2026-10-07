@@ -71,8 +71,11 @@ def _work_options(app, policy, limits):
     return {"limits": limits, "resource_policy": policy, "authorize_stage": admitted}
 
 
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+def main(argv=None, *, app_factory=None, descriptor=None, description=None) -> int:
+    """The managed host CLI.  The Linux host reuses it with its own app and descriptor."""
+
+    parser = argparse.ArgumentParser(description=description or __doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--root", required=True, help="this host's private state root")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status")
@@ -98,7 +101,7 @@ def main(argv=None) -> int:
             p.add_argument("--keep-staging-on-cleanup-request", action="store_true")
     args = parser.parse_args(argv)
 
-    app = WindowsTargetApplication(Path(args.root))
+    app = (app_factory or WindowsTargetApplication)(Path(args.root))
     app.start()
     try:
         if args.command == "status":
@@ -111,7 +114,7 @@ def main(argv=None) -> int:
         elif args.command == "report-capability":
             print(json.dumps(app.report_capability(), indent=2, sort_keys=True, default=str))
         elif args.command == "descriptor":
-            _write(args.out, windows_installation_descriptor(
+            _write(args.out, (descriptor or windows_installation_descriptor)(
                 app, run_id=args.run_id, deployment_id=args.deployment_id,
                 manifest_digest=args.manifest_digest, acknowledged=args.acknowledge))
         elif args.command == "preview":
