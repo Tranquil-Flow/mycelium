@@ -188,3 +188,48 @@ def test_relay_isolates_userprofile_and_closes_without_o_nofollow(fake, tmp_path
     tunnel.close()
     assert (tmp_path / "relay" / "relay-tail.log").exists()
     assert fake.security_of(tmp_path / "relay" / "isolated-home").dacl_protected
+
+
+# ------------------------------------------------------------------ resource observation (gap 2)
+
+
+def _windows_reading(monkeypatch, document):
+    import types
+
+    from mycelium_a13_windows.managed_host import resources as windows_resources
+
+    calls = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        return types.SimpleNamespace(stdout=document, returncode=0)
+
+    monkeypatch.setattr(windows_resources.subprocess, "run", run)
+    return calls
+
+
+def test_owner_observation_uses_the_windows_observer(fake, tmp_path, monkeypatch):
+    from mycelium_a13_macos.resources import observe_policy
+
+    calls = _windows_reading(
+        monkeypatch, json.dumps({"power": "external", "network": "unmetered", "kelvin": [318.15]})
+    )
+    observation = observe_policy()
+    assert observation == {"power": "external", "network": "unmetered", "thermal": "nominal"}
+    assert calls and calls[0][0] == "powershell"
+
+
+def test_owner_app_resource_check_reads_windows_and_fails_closed(fake, tmp_path, monkeypatch):
+    import ssl
+
+    monkeypatch.setattr(ssl.SSLContext, "load_default_certs", lambda self, purpose=None: None)
+    app = DemoApp(tmp_path / "private", authority_factory=Authority, check_platform=False).start()
+    try:
+        _windows_reading(monkeypatch, json.dumps({"power": "external", "network": "unmetered", "kelvin": 318.15}))
+        app._resource_check()
+        assert app.resource_observation == {"power": "external", "network": "unmetered", "thermal": "nominal"}
+        _windows_reading(monkeypatch, "not json")
+        app._resource_check()
+        assert app.resource_observation == {"power": "unknown", "network": "unknown", "thermal": "unknown"}
+    finally:
+        app.close()

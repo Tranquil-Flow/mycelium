@@ -105,7 +105,17 @@ def _invoke_resource_probe(path: Path) -> subprocess.CompletedProcess[bytes]:
 
 
 def observe_policy() -> dict[str, str]:
-    """Return one current read-only observation, failing closed to unknowns."""
+    """Return one current read-only observation, failing closed to unknowns.
+
+    On win32 the owner app, target app and worker all observe through the
+    Windows observer (power, network and ACPI thermal via PowerShell/CIM), so a
+    Windows owner that also contributes is judged on real readings, not unknowns.
+    """
+    if sys.platform == "win32":
+        from mycelium_a13_windows.managed_host.resources import observe_policy as observe_windows
+
+        observation = observe_windows()
+        return observation if _valid_observation(observation) else _unknown_observation()
     for candidate in _resource_probe_candidates():
         if not _is_safe_executable(candidate):
             continue
