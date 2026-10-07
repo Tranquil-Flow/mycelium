@@ -137,6 +137,41 @@ def deterministic_zip(source_dir: Path, zip_path: Path) -> bytes:
     return zip_path.read_bytes()
 
 
+def deterministic_zip_with_links(source_dir: Path, zip_path: Path, *, prefix: str) -> bytes:
+    """A deterministic zip that keeps symbolic links and executable bits (macOS bundles).
+
+    Links are stored as Unix ``S_IFLNK`` entries whose data is the target, which
+    ``ditto -x -k`` and Archive Utility restore as links; regular files keep
+    0755/0644 by their executable bit; fixed timestamps, sorted entries.
+    """
+    import stat as _stat
+
+    entries = sorted(source_dir.rglob("*"))
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in entries:
+            name = f"{prefix}/{path.relative_to(source_dir).as_posix()}"
+            if path.is_symlink():
+                info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+                info.create_system = 3
+                info.external_attr = (_stat.S_IFLNK | 0o755) << 16
+                archive.writestr(info, os.readlink(path))
+            elif path.is_dir():
+                info = zipfile.ZipInfo(name + "/", date_time=(1980, 1, 1, 0, 0, 0))
+                info.create_system = 3
+                info.external_attr = (_stat.S_IFDIR | 0o755) << 16
+                archive.writestr(info, b"")
+            elif path.is_file():
+                info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+                info.create_system = 3
+                mode = 0o755 if os.access(path, os.X_OK) else 0o644
+                info.external_attr = (_stat.S_IFREG | mode) << 16
+                info.compress_type = zipfile.ZIP_DEFLATED
+                archive.writestr(info, path.read_bytes())
+            else:
+                raise PayloadError("payload_special_file")
+    return zip_path.read_bytes()
+
+
 def deterministic_tar_gz(source_dir: Path, tar_path: Path, *, prefix: str) -> bytes:
     """tar.gz with sorted entries under ``prefix/``, mtime 0, uid/gid 0, no names.
 
@@ -195,6 +230,53 @@ def payload_digest(root: Path) -> str:
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
+def bundle_tree(root: Path) -> dict[str, str]:
+    """Link-aware tree for a macOS ``.app``: ``sha256:<hex>`` per regular file,
+    ``link:<target>`` per symbolic link.
+
+    A link must be relative and must resolve inside the bundle; an absolute
+    target or one that escapes the bundle (directly or through another link)
+    is refused, as is any special file (fifo, socket, device).
+    """
+    base = root.resolve(strict=True)
+    tree: dict[str, str] = {}
+    for current, directories, files in os.walk(root, followlinks=False):
+        for name in [*directories, *files]:
+            path = Path(current) / name
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                target = os.readlink(path)
+                if os.path.isabs(target):
+                    raise PayloadError("payload_link_absolute")
+                lexical = Path(os.path.normpath(base / path.parent.relative_to(root) / target))
+                if lexical != base and not lexical.is_relative_to(base):
+                    raise PayloadError("payload_link_escapes_bundle")  # even if it points nowhere
+                try:
+                    resolved = path.resolve(strict=True)
+                except (OSError, RuntimeError):
+                    raise PayloadError("payload_link_dangling") from None
+                if resolved != base and not resolved.is_relative_to(base):
+                    raise PayloadError("payload_link_escapes_bundle")
+                tree[relative] = "link:" + target
+            elif name in files:
+                if not path.is_file():
+                    raise PayloadError("payload_special_file")
+                digest = hashlib.sha256()
+                with open(path, "rb") as handle:
+                    while block := handle.read(1 << 20):
+                        digest.update(block)
+                tree[relative] = "sha256:" + digest.hexdigest()
+            elif not path.is_dir():
+                raise PayloadError("payload_special_file")
+    return dict(sorted(tree.items()))
+
+
+def bundle_digest(root: Path) -> str:
+    """The digest a macOS manifest's ``package_digest`` binds (links included)."""
+    raw = json.dumps(bundle_tree(root), sort_keys=True, separators=(",", ":")).encode()
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
 def load_pinned_signer(key_path: Path, *, endpoint_id: str):
     """Load the pinned Ed25519 release key (exactly 32 raw private bytes).
 
@@ -221,8 +303,11 @@ def load_pinned_signer(key_path: Path, *, endpoint_id: str):
 
 __all__ = [
     "PayloadError",
+    "bundle_digest",
+    "bundle_tree",
     "deterministic_tar_gz",
     "deterministic_zip",
+    "deterministic_zip_with_links",
     "git_head",
     "load_pinned_signer",
     "payload_digest",

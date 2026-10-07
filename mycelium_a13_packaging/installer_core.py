@@ -124,6 +124,17 @@ def publisher_pin(installed: Mapping[str, Any] | None, offered_key: object) -> t
     return offered_key, FIRST_USE_PIN, "0.0.0"
 
 
+def _digest(platform: InstallerPlatform, path: Path) -> str:
+    """The platform's payload digest (macOS bundles carry links); default: link-free tree."""
+    custom = getattr(platform, "payload_digest", None)
+    if custom is None:
+        return payload_digest(path)
+    try:
+        return custom(path)
+    except _build.PayloadError as exc:
+        raise InstallerError(exc.code) from None
+
+
 def verify_bundle(bundle: Path, platform: InstallerPlatform, *, installed: Mapping[str, Any] | None) -> dict[str, Any]:
     """Every check, no writes.  Returns what install needs."""
 
@@ -134,25 +145,29 @@ def verify_bundle(bundle: Path, platform: InstallerPlatform, *, installed: Mappi
     payload = bundle / platform.payload_directory
     if payload.is_symlink() or not (payload / platform.payload_executable).is_file():
         refuse("bundle_incomplete")
-    digest = payload_digest(payload)
+    digest = _digest(platform, payload)
     if any(digest != expected for expected in checked["expected_digests"]):
         refuse("package_digest_mismatch")
     return {**checked, "payload_digest": digest}
 
 
-def _copy_payload(source: Path, target: Path, expected: str) -> None:
+def _copy_payload(source: Path, target: Path, expected: str, platform: InstallerPlatform | None = None) -> None:
     partial = target.with_name(target.name + ".partial")
     if partial.exists():
         shutil.rmtree(partial)
-    with mycelium_host_platform.private_directory(partial, create=True):
-        pass
-    for current, _directories, files in os.walk(source, followlinks=False):
-        relative = Path(current).relative_to(source)
-        for name in files:
-            destination = partial / relative / name
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(Path(current) / name, destination)  # keeps the executable bit on POSIX
-    if payload_digest(partial) != expected:
+    custom_copy = getattr(platform, "copy_payload", None)
+    if custom_copy is not None:
+        custom_copy(source, partial)  # e.g. macOS ditto: links and extended attributes kept
+    else:
+        with mycelium_host_platform.private_directory(partial, create=True):
+            pass
+        for current, _directories, files in os.walk(source, followlinks=False):
+            relative = Path(current).relative_to(source)
+            for name in files:
+                destination = partial / relative / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(Path(current) / name, destination)  # keeps the executable bit on POSIX
+    if (_digest(platform, partial) if platform is not None else payload_digest(partial)) != expected:
         shutil.rmtree(partial, ignore_errors=True)
         refuse("payload_copy_mismatch")
     os.replace(partial, target)
@@ -167,13 +182,13 @@ def install(bundle: str | os.PathLike[str], platform: InstallerPlatform) -> dict
         pass
     target = platform.programs_root / version
     if target.exists():
-        if payload_digest(target / platform.payload_directory) != checked["payload_digest"]:
+        if _digest(platform, target / platform.payload_directory) != checked["payload_digest"]:
             refuse("installed_version_conflict")
     else:
         with mycelium_host_platform.private_directory(target, create=True):
             pass
         _copy_payload(bundle_path / platform.payload_directory, target / platform.payload_directory,
-                      checked["payload_digest"])
+                      checked["payload_digest"], platform)
     previous = None
     if installed is not None and installed["current"]["version"] != version:
         previous = installed["current"]
@@ -221,7 +236,7 @@ def rollback(platform: InstallerPlatform) -> dict[str, Any]:
     if numeric(previous["version"]) < numeric(installed["rollback_floor"]):
         refuse("package_downgrade_rejected")
     directory = platform.programs_root / previous["version"]
-    if payload_digest(directory / platform.payload_directory) != previous["payload_digest"]:
+    if _digest(platform, directory / platform.payload_directory) != previous["payload_digest"]:
         refuse("previous_version_tampered")
     record = {**installed, "current": previous, "previous": installed["current"], "installed_at": platform.now()}
     _write_versions(platform, record)

@@ -62,6 +62,8 @@ def main():
             from mycelium_a13_windows.installer import main as installer_main
         elif sys.platform.startswith('linux'):
             from mycelium_a13_linux.installer import main as installer_main
+        elif sys.platform=='darwin':
+            from mycelium_a13_macos.installer import main as installer_main
         else:
             print(json.dumps({'event':'launcher_refused','code':'installer_unsupported_platform'}),file=sys.stderr)
             return 2
