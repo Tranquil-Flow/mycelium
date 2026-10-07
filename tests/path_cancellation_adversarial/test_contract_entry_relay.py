@@ -575,6 +575,14 @@ def test_terminal_path_metadata_is_bounded() -> None:
    for index in range(4_200):
       relay.release_path(f"synthetic-terminal-path-{index}", path_attempt=0)
 
+   # Tombstones younger than the retention horizon are never dropped (the
+   # relay fails closed instead); the table stays under its absolute bound.
+   from mycelium_router import relay as relay_module
+
+   assert len(relay._cancelled_path_attempts) <= relay_module._MAX_TOMBSTONE_RECORDS
+   relay.clock.advance(relay_module._TOMBSTONE_RETENTION_SECONDS + 1)
+   with relay._path_lock:
+      relay._prune_terminal_path_metadata_locked()
    assert len(relay._cancelled_path_attempts) <= 4_096
    assert len(relay._path_generations) <= 4_097
    replay = replace(

@@ -51,6 +51,19 @@ _MAX_TERMINAL_PATH_METADATA = 4096
 _MAX_PENDING_PATH_CANCELLATIONS = 4096
 #: Owners remembered per path id (live and tombstoned paths).
 _MAX_PATH_OWNERS = 2 * _MAX_TERMINAL_PATH_METADATA
+#: A tombstone is kept at least this long. While the table holds more than
+#: ``_MAX_TERMINAL_PATH_METADATA`` records none of which is this old, the relay
+#: fails closed: it registers no new path id (live paths keep running), so an
+#: evicted high-water mark can never let a cancelled attempt back in.
+_TOMBSTONE_RETENTION_SECONDS = 600.0
+#: Absolute bound; reachable only by cancelling live paths while saturated.
+_MAX_TOMBSTONE_RECORDS = 4 * _MAX_TERMINAL_PATH_METADATA
+#: Pending tombstones per authenticated source. A source over its quota
+#: displaces only its own oldest entry, so no peer can push out another
+#: source's pending tombstone; past the absolute bound the relay fails closed
+#: and refuses new pending cancellations.
+_MAX_PENDING_PER_SOURCE = _MAX_PENDING_PATH_CANCELLATIONS
+_MAX_PENDING_TOTAL = 16 * _MAX_PENDING_PATH_CANCELLATIONS
 #: ``_mark``/``_was_cancelled_attempt_locked`` default: the path's recorded owner.
 _RECORDED_OWNER = object()
 
@@ -188,6 +201,9 @@ class RelayEngine:
          tuple[str, PathOwner | None], int
       ] = OrderedDict()
       self._cancelled_path_owners: dict[str, set[PathOwner | None]] = {}
+      self._cancelled_recorded_at: dict[tuple[str, PathOwner | None], float] = {}
+      self._tombstones_saturated = False
+      self._pending_by_source: dict[str, int] = {}
       self._path_owners: OrderedDict[str, PathOwner] = OrderedDict()
       self._cancelled_path_filter = _RotatingReplayFilter(
          byte_count=_CANCELLED_PATH_FILTER_BYTES,
@@ -243,8 +259,16 @@ class RelayEngine:
       return self.path_generation(path_id)
 
    def _prune_terminal_path_metadata_locked(self) -> None:
+      now = self.clock.now()
       while len(self._cancelled_path_attempts) > _MAX_TERMINAL_PATH_METADATA:
+         key = next(iter(self._cancelled_path_attempts))
+         if (
+            len(self._cancelled_path_attempts) <= _MAX_TOMBSTONE_RECORDS
+            and now - self._cancelled_recorded_at.get(key, now) < _TOMBSTONE_RETENTION_SECONDS
+         ):
+            break
          (path_id, owner), _ = self._cancelled_path_attempts.popitem(last=False)
+         self._cancelled_recorded_at.pop((path_id, owner), None)
          owners = self._cancelled_path_owners.get(path_id)
          if owners is not None:
             owners.discard(owner)
@@ -253,6 +277,9 @@ class RelayEngine:
             self._cancelled_path_owners.pop(path_id, None)
          if path_id not in self._paths and path_id not in self._provisional_paths:
             self._path_generations.pop(path_id, None)
+      self._tombstones_saturated = (
+         len(self._cancelled_path_attempts) > _MAX_TERMINAL_PATH_METADATA
+      )
       while len(self._path_owners) > _MAX_PATH_OWNERS:
          path_id, owner = self._path_owners.popitem(last=False)
          if path_id in self._paths or path_id in self._provisional_paths:
@@ -296,6 +323,7 @@ class RelayEngine:
          path_attempt = max(path_attempt, previous)
       self._cancelled_path_attempts[key] = path_attempt
       self._cancelled_path_attempts.move_to_end(key)
+      self._cancelled_recorded_at[key] = self.clock.now()
       self._cancelled_path_owners.setdefault(path_id, set()).add(owner)
       self._prune_terminal_path_metadata_locked()
 
@@ -400,7 +428,10 @@ class RelayEngine:
       self,
       cancellation: PathCancellation,
       source_node_id: str,
-   ) -> None:
+   ) -> bool:
+      """Record a cancellation of a path not seen yet. A source over its
+      quota displaces only its own oldest pending entry; a full table refuses
+      (fail closed). No peer can push out another source's pending tombstone."""
       key = self._pending_cancellation_key(
          request_id=cancellation.request_id,
          path_id=cancellation.path_id,
@@ -408,10 +439,26 @@ class RelayEngine:
          topology_version=cancellation.topology_version,
          entry_node_id=source_node_id,
       )
+      if key in self._pending_path_cancellations:
+         self._pending_path_cancellations.move_to_end(key)
+         return True
+      if self._pending_by_source.get(source_node_id, 0) >= _MAX_PENDING_PER_SOURCE:
+         oldest = next(k for k in self._pending_path_cancellations if k[4] == source_node_id)
+         self._forget_pending_locked(oldest)
+      elif len(self._pending_path_cancellations) >= _MAX_PENDING_TOTAL:
+         return False
       self._pending_path_cancellations[key] = None
-      self._pending_path_cancellations.move_to_end(key)
-      while len(self._pending_path_cancellations) > _MAX_PENDING_PATH_CANCELLATIONS:
-         self._pending_path_cancellations.popitem(last=False)
+      self._pending_by_source[source_node_id] = self._pending_by_source.get(source_node_id, 0) + 1
+      return True
+
+   def _forget_pending_locked(self, key: tuple[str, str, int, int, str]) -> None:
+      if self._pending_path_cancellations.pop(key, False) is None:
+         source = key[4]
+         remaining = self._pending_by_source.get(source, 0) - 1
+         if remaining > 0:
+            self._pending_by_source[source] = remaining
+         else:
+            self._pending_by_source.pop(source, None)
 
    def _consume_pending_cancellation_locked(
       self,
@@ -436,7 +483,7 @@ class RelayEngine:
       )
       matched = expected in self._pending_path_cancellations
       for key in path_keys:
-         self._pending_path_cancellations.pop(key, None)
+         self._forget_pending_locked(key)
       if not matched:
          return False
       self._record_cancelled_attempt_locked(
@@ -626,6 +673,11 @@ class RelayEngine:
             )
             existing = self._paths.get(manifest.path_id)
             provisional = self._provisional_paths.get(manifest.path_id)
+            if self._tombstones_saturated and existing is None and provisional is None:
+               self._prune_terminal_path_metadata_locked()
+               if self._tombstones_saturated:
+                  # Fail closed rather than forget a high-water mark.
+                  return None
             if source_node_id is not None and existing is None and provisional is None:
                # A manifest relayed by the final placement (progressive
                # discovery) only confirms a path this node already holds from
@@ -752,6 +804,14 @@ class RelayEngine:
             ):
                return None
             owner = self._resolve_owner_locked(path_id, request_id, entry_node_id)
+            if (
+               self._tombstones_saturated
+               and path_id not in self._paths
+               and path_id not in self._provisional_paths
+            ):
+               self._prune_terminal_path_metadata_locked()
+               if self._tombstones_saturated:
+                  return None
             recorded_owner = self._path_owners.get(path_id)
             if (
                (path_id in self._paths or path_id in self._provisional_paths)
@@ -2461,11 +2521,10 @@ class RelayEngine:
                   )
                ):
                   return False
-               self._remember_pending_cancellation_locked(
+               return self._remember_pending_cancellation_locked(
                   cancellation,
                   source_node_id,
                )
-               return True
             if registered is not None:
                graph, manifest, request = registered
                expected = (

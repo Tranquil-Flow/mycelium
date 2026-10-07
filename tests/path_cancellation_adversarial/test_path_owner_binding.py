@@ -145,10 +145,13 @@ def test_tombstones_from_many_owners_stay_bounded() -> None:
 
    router, graph, request, manifest, nodes = _middle_router()
    relay = router.relay
-   for index in range(relay_module._MAX_TERMINAL_PATH_METADATA + 50):
+   for index in range(relay_module._MAX_TOMBSTONE_RECORDS + 50):
       relay._record_cancelled_attempt_locked(manifest.path_id, 1, (f"node-{index}", "request"))
-   assert len(relay._cancelled_path_attempts) <= relay_module._MAX_TERMINAL_PATH_METADATA
-   assert len(relay._cancelled_path_owners[manifest.path_id]) <= relay_module._MAX_TERMINAL_PATH_METADATA
+   # Young records are kept (fail closed) up to the absolute bound, never past it.
+   assert len(relay._cancelled_path_attempts) <= relay_module._MAX_TOMBSTONE_RECORDS
+   assert len(relay._cancelled_path_owners[manifest.path_id]) <= relay_module._MAX_TOMBSTONE_RECORDS
+   assert len(relay._cancelled_recorded_at) == len(relay._cancelled_path_attempts)
+   assert relay._tombstones_saturated
 
 
 # ---- review 2: sender authentication, owner inheritance, key collisions ----
@@ -215,3 +218,77 @@ def test_ids_containing_the_key_separator_never_share_a_hop_result() -> None:
    assert header_one.idempotency_key == header_two.idempotency_key
    assert result_one.disposition == result_two.disposition == "FORWARDED"
    assert len(runtime.executed) == 2, "the second path's hop ran instead of reusing the first's result"
+
+
+# ---- review 3: eviction fails closed ----
+
+def _churn(relay, graph, request, manifest, count: int, prefix: str) -> int:
+   """Register and cancel ``count`` fresh paths of the same owner; returns how
+   many registrations the relay accepted."""
+   accepted = 0
+   for index in range(count):
+      path_id = f"{prefix}-{index}"
+      req = replace(request, request_id=f"{prefix}-request-{index}")
+      man = replace(manifest, request_id=req.request_id, path_id=path_id)
+      if relay.register_path(req, man, graph, entry_node_id="node-churn"):
+         accepted += 1
+         relay._release_path_state_locked(path_id, path_attempt=man.path_attempt)
+   return accepted
+
+
+def test_a_full_tombstone_table_never_forgets_a_high_water_mark() -> None:
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   entry = nodes[0]
+   relay = router.relay
+   # Attempt 5 registered and cancelled: attempts <= 5 are refused, and
+   # attempt 3 is known only through the high-water mark.
+   assert relay.register_path(request, replace(manifest, path_attempt=5), graph, entry_node_id=entry)
+   assert router.receive_path_cancellation(
+      PathCancellation(request.request_id, manifest.path_id, 5, graph.topology_version), source_node_id=entry
+   )
+   churn_graph = _with_entry(graph, manifest, "node-churn")
+   accepted = _churn(relay, churn_graph, request, manifest, relay_module._MAX_TERMINAL_PATH_METADATA + 200, "churn")
+   # Fail closed: the table saturates instead of forgetting the mark.
+   assert accepted < relay_module._MAX_TERMINAL_PATH_METADATA + 200
+   assert not relay.register_path(request, replace(manifest, path_attempt=3), graph, entry_node_id=entry)
+   # After the retention horizon old records may go, and new paths register again.
+   relay.clock.advance(relay_module._TOMBSTONE_RETENTION_SECONDS + 1)
+   fresh = replace(manifest, path_id="fresh-path")
+   assert relay.register_path(request, fresh, graph, entry_node_id=entry)
+
+
+def test_a_peer_flooding_pending_cancellations_cannot_evict_the_entrys() -> None:
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   entry = nodes[0]
+   assert router.receive_path_cancellation(
+      PathCancellation(request.request_id, manifest.path_id, manifest.path_attempt, graph.topology_version),
+      source_node_id=entry,
+   )
+   for index in range(relay_module._MAX_PENDING_PER_SOURCE + 100):
+      router.receive_path_cancellation(
+         PathCancellation("flood", f"flood-{index}", 1, graph.topology_version), source_node_id="node-flood"
+      )
+   # The flooder only displaced its own entries.
+   assert router.relay._pending_by_source["node-flood"] == relay_module._MAX_PENDING_PER_SOURCE
+   # The entry's pending tombstone is still there: its path never registers.
+   assert not router.relay.register_path(request, manifest, graph, entry_node_id=entry)
+
+
+def test_a_full_pending_table_refuses_new_cancellations() -> None:
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   for source in range(relay_module._MAX_PENDING_TOTAL // relay_module._MAX_PENDING_PER_SOURCE):
+      for index in range(relay_module._MAX_PENDING_PER_SOURCE):
+         relay._remember_pending_cancellation_locked(
+            PathCancellation("r", f"p-{source}-{index}", 1, graph.topology_version), f"node-{source}"
+         )
+   assert len(relay._pending_path_cancellations) == relay_module._MAX_PENDING_TOTAL
+   assert not router.receive_path_cancellation(
+      PathCancellation(request.request_id, manifest.path_id, 1, graph.topology_version), source_node_id="node-new"
+   )
