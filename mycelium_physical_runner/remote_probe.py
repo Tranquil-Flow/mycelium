@@ -10,7 +10,8 @@ import socket
 import stat
 import subprocess
 import sys
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -76,7 +77,57 @@ def _digest(path: Path) -> str | None:
         return None
 
 
+_WINDOWS_MACHINE_GUID = (r"SOFTWARE\Microsoft\Cryptography", "MachineGuid")
+#: Incremented by Windows on every boot; stable for the life of a boot and not
+#: moved by wall-clock steps (unlike a boot time derived from the tick count).
+_WINDOWS_BOOT_ID = (
+    r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters",
+    "BootId",
+)
+
+
+def _windows_registry_value(key: str, name: str) -> str | None:
+    """Read one HKEY_LOCAL_MACHINE value with the stdlib ``winreg`` (win32 only)."""
+
+    try:
+        import winreg  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as handle:
+            value, _kind = winreg.QueryValueEx(handle, name)
+    except OSError:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _windows_boot_source(
+    registry: Callable[[str, str], str | None] = _windows_registry_value,
+    tick_count_ms: Callable[[], int] | None = None,
+    clock: Callable[[], float] = time.time,
+) -> str:
+    boot_id = registry(*_WINDOWS_BOOT_ID)
+    if boot_id is not None:
+        return "windows-boot-id:" + boot_id
+    if tick_count_ms is None:
+        try:
+            import ctypes
+
+            kernel32 = ctypes.WinDLL("kernel32")  # type: ignore[attr-defined]
+            kernel32.GetTickCount64.restype = ctypes.c_ulonglong
+            tick_count_ms = kernel32.GetTickCount64
+        except (AttributeError, OSError):
+            return ""
+    # Weaker fallback: boot epoch rounded to a minute (moves if the clock steps).
+    return "windows-boot-epoch:" + str(int((clock() - tick_count_ms() / 1000.0) // 60))
+
+
 def _host_identity() -> str:
+    if platform.system() == "Windows":
+        guid = _windows_registry_value(*_WINDOWS_MACHINE_GUID)
+        if guid is not None:
+            return guid.lower()
     if platform.system() == "Darwin":
         try:
             completed = subprocess.run(
@@ -122,6 +173,8 @@ def _boot_identity(host_id: str) -> str:
             if completed.returncode == 0 and completed.stdout.strip():
                 source = completed.stdout.strip()
                 break
+    elif platform.system() == "Windows":
+        source = _windows_boot_source()
     else:
         try:
             source = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
