@@ -438,6 +438,20 @@ def cmd_windows_benchmark(args: argparse.Namespace) -> int:
         windows = False
     library = NativeInt8Library(Path(args.kernel).resolve(), expected_digest=args.kernel_digest)
     provider = NativeInt8LinearProvider(library, threads=args.threads)
+    profile_binding = "signed_member_profile"
+    profile_digest = args.profile_digest
+    if profile_digest == "local-declaration":
+        # No enrolled Windows member yet: bind an unsigned local declaration of this
+        # host and kernel instead.  The receipt says so; it cannot satisfy the
+        # product-route gate, which needs the migrated member's signed profile.
+        from mycelium_platform_neutral.primitives import record_digest
+        from mycelium_platform_neutral.seed_migration import observe_host_platform
+
+        profile_binding = "unsigned_local_declaration"
+        profile_digest = record_digest({
+            "platform": list(observe_host_platform()), "kernel_digest": library.build_digest,
+            "processor": platform.processor(), "cpu_count": os.cpu_count(),
+        }, "local_declaration_noncanonical")
     loaded = time.perf_counter()
     tensors, config, files = bench.load_qwen2_int8_model(Path(args.snapshot).resolve())
     load_ms = (time.perf_counter() - loaded) * 1000.0
@@ -479,7 +493,7 @@ def cmd_windows_benchmark(args: argparse.Namespace) -> int:
         },
         "model_binding": {
             "model_id": bench.MODEL_ID, "revision": bench.MODEL_REVISION,
-            "representation": bench.REPRESENTATION, "profile_digest": args.profile_digest,
+            "representation": bench.REPRESENTATION, "profile_digest": profile_digest,
         },
         "benchmark": {
             "manifest_digest": manifest["manifest_digest"],
@@ -515,7 +529,7 @@ def cmd_windows_benchmark(args: argparse.Namespace) -> int:
     _write(gate / "12-windows-benchmark.json", _receipt(
         "windows_stage_benchmark",
         "single-host Qwen2.5-0.5B int8 stage pre-qualification on the exact provider build; the product-route two-host gate through the browser is still required for A9",
-        windows_host=windows, load_ms=load_ms, thermal_state_declared=args.thermal_state,
+        windows_host=windows, profile_binding=profile_binding, load_ms=load_ms, thermal_state_declared=args.thermal_state,
         thermal_source="operator_declared", candidate_rate_drift=drift, result=result,
         provider=provider.report(), efficiency_qualification=decision))
     state = decision["decision"]["state"] if isinstance(decision, dict) else None
@@ -594,7 +608,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.set_defaults(func=func)
         if name == "windows-benchmark":
             p.add_argument("--snapshot", required=True, help=".../snapshots/7ae557604adf67be50417f59c2c2f167def9a775")
-            p.add_argument("--profile-digest", required=True, help="the Windows member's v2 profile digest (member-sign)")
+            p.add_argument("--profile-digest", required=True,
+                           help="the Windows member's v2 profile digest (member-sign), or 'local-declaration' before enrolment")
             p.add_argument("--thermal-state", required=True, choices=("nominal", "fair", "serious", "critical", "unknown"))
             p.add_argument("--paired-windows", type=int, default=3)
             p.add_argument("--prompt-lengths", type=int, nargs=2, default=[16, 128])

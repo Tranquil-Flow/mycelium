@@ -179,7 +179,7 @@ def test_windows_commands_refuse_non_windows_hosts_unless_conformance(kernel, tm
     capsys.readouterr()
     assert _run("windows-benchmark", "--gate-dir", gate, "--kernel", library, "--kernel-digest", digest,
                 "--threads", "1", "--conformance-host", "--snapshot", snapshot,
-                "--profile-digest", "sha256:" + "f" * 64, "--thermal-state", "nominal",
+                "--profile-digest", "local-declaration", "--thermal-state", "nominal",
                 "--prompt-lengths", "4", "9", "--output-lengths", "3", "5", "--repeats-per-cell", "2") == 0
     receipt = json.loads((gate / "12-windows-benchmark.json").read_text())
     decision = receipt["efficiency_qualification"]["decision"]
@@ -188,3 +188,4 @@ def test_windows_commands_refuse_non_windows_hosts_unless_conformance(kernel, tm
     assert "short_output_insufficient_tokens" in decision["blockers"]
     assert receipt["result"]["token_parity_mismatches"] == []
     assert receipt["windows_host"] is False
+    assert receipt["profile_binding"] == "unsigned_local_declaration"
