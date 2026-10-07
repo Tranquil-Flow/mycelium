@@ -840,11 +840,18 @@ class ManagedControlMailbox:
     @contextmanager
     def _member_guard(self, statement: Mapping[str, Any]) -> Iterator[dict[str, Any]]:
         _validate_binding(statement)
+        from .managed_classes import is_managed_peer_class
+
         try:
+            # The guard re-checks the class and generation under its own lock;
+            # a class cannot change without a generation change.
+            peer_class = self.coordinator.member(statement["target_node_id"])["peer_class"]
+            if not is_managed_peer_class(peer_class):
+                raise ManagedControlError("managed_control_member_stale")
             with self.coordinator.member_authority_guard(
                 node_id=statement["target_node_id"],
                 expected_generation=statement["membership_generation"],
-                expected_peer_class="mac_mlx_iroh",
+                expected_peer_class=peer_class,
                 eligible_lifecycle_states=_MEMBER_STATES,
             ) as member:
                 if any(

@@ -2,6 +2,7 @@
 import base64,json
 from pathlib import Path
 import sys,time
+from .managed_classes import managed_runtime_backend
 from .managed_control import (_binding_from_member,_segment,sign_managed_statement,
                               _verify_signed,ManagedControlError)
 from .native_runtime import installed_sidecar
@@ -34,7 +35,8 @@ def installation_descriptor(app,*,run_id,deployment_id,acknowledged):
         'sidecar_binary':str(installed_sidecar()),
         'endpoint_secret_file':str(actor._endpoint_identity_file(member)),
         'process_transport':'managed_https','ssh_target':None,'ssh_identity_file':None,
-        'runtime_backend':'mlx','source_root':str(prepared.source_root),
+        'runtime_backend':managed_runtime_backend(member.get('peer_class','mac_mlx_iroh')),
+        'source_root':str(prepared.source_root),
         'manifest_digest':prepared.manifest_digest,'route_ready':False}
     now=time.time()
     return sign_managed_statement(actor.peer._signer,{'protocol':PROTOCOL,**binding,
@@ -57,7 +59,7 @@ def verify_installation_descriptor(card,*,member,swarm_id,run_id,deployment_id,n
         f=s['facts']
         if set(f)!=_FACT_FIELDS:raise ValueError()
         if (f['node_id']!=member['node_id'] or f['endpoint_id']!=member['endpoint_id']
-            or f['membership_generation']!=member['generation'] or f['runtime_backend']!='mlx'
+            or f['membership_generation']!=member['generation'] or f['runtime_backend']!=managed_runtime_backend(member.get('peer_class','mac_mlx_iroh'))
             or f['process_transport']!='managed_https' or f['ssh_target'] is not None
             or f['ssh_identity_file'] is not None or f['route_ready'] is not False):raise ValueError()
         for field in ('staging_root','python_executable','sidecar_binary','endpoint_secret_file','source_root'):

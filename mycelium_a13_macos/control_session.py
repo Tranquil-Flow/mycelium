@@ -20,6 +20,7 @@ import time
 from typing import Any, Callable, Mapping
 
 from physical_inference_qualification import ControllerError
+from .managed_classes import is_managed_peer_class
 from .authority import _private_directory, _atomic_private_json, _load_private_json
 from .managed_control import (
     ManagedControlClient, ManagedControlError, CONTROL_COMMAND_PROTOCOL,
@@ -300,7 +301,7 @@ class ManagedControlOwner:
             member = self.current_member(node_id)
             binding = _binding_from_member(member, run_id, deployment_id)
             lease = member.get('lease_expires_at')
-            if (binding['target_node_id'] != node_id or member.get('peer_class') != 'mac_mlx_iroh'
+            if (binding['target_node_id'] != node_id or not is_managed_peer_class(member.get('peer_class'))
                     or isinstance(lease, bool) or not isinstance(lease, (int, float))
                     or not math.isfinite(lease) or time.time() >= lease):
                 raise ValueError()

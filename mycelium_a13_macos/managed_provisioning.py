@@ -86,7 +86,9 @@ ADMITTED_RUN_MODES: frozenset[str] = frozenset({"managed_local"})
 #: Required peer class for every grant member, matching the lane's
 #: ``_PEER_CLASS``.  Refusing any other class keeps the admission
 #: contract identical to ``DemoAuthority.plan_assignments``.
-_REQUIRED_PEER_CLASS = "mac_mlx_iroh"
+from .managed_classes import MANAGED_PEER_RUNTIMES as _MANAGED_PEER_RUNTIMES
+
+_REQUIRED_PEER_CLASSES = frozenset(_MANAGED_PEER_RUNTIMES)
 
 #: Maximum profile json size.  Kept conservative so the recorded admission
 #: fits in the same private state envelope as the rest of the lane.
@@ -444,7 +446,7 @@ def _admit_against_authority(
         record = members.get(member)
         if record is None:
             raise ProvisioningAdmissionError("admission_grant_member_not_enrolled")
-        if record.get("peer_class") != _REQUIRED_PEER_CLASS:
+        if record.get("peer_class") not in _REQUIRED_PEER_CLASSES:
             raise ProvisioningAdmissionError("admission_grant_member_class_invalid")
         if record.get("lifecycle_state") not in {"NEW", "CONFIGURED", "RUNNING"}:
             raise ProvisioningAdmissionError("admission_grant_member_lifecycle_invalid")
