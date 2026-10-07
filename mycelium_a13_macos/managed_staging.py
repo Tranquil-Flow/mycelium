@@ -7,7 +7,10 @@ These operations do not load tensors, launch a worker, or qualify a route.
 """
 from __future__ import annotations
 from contextlib import contextmanager
-import fcntl
+try:  # POSIX target staging; Windows uses mycelium_a13_windows.managed_host.
+    import fcntl
+except ImportError:  # pragma: no cover - win32
+    fcntl = None
 import hashlib
 import io
 import json

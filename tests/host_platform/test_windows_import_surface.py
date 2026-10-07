@@ -55,6 +55,15 @@ ENTRY_POINTS = (
     "mycelium_service_runner",
     "mycelium_service_package",
     "mycelium_a13_windows.onboarding",
+    # The A13 managed host modules a Windows host agent reuses (M1).
+    "mycelium_a13_macos.authority",
+    "mycelium_a13_macos.managed_offers",
+    "mycelium_a13_macos.managed_control",
+    "mycelium_a13_macos.control_sequence",
+    "mycelium_a13_macos.control_pump",
+    "mycelium_a13_macos.concurrent_pump",
+    "mycelium_a13_macos.managed_runtime",
+    "mycelium_a13_macos.worker",
     "stage_pack",
     "runtime_loader",
 )

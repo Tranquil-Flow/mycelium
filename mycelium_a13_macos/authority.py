@@ -108,8 +108,25 @@ def _digest(document: Mapping[str, Any]) -> str:
     return "sha256:" + hashlib.sha256(canonical_json_bytes(dict(document))).hexdigest()
 
 
+def _win32_private_directory(absolute: Path, *, create: bool) -> Path:
+    import mycelium_host_platform
+    from mycelium_host_platform import HostPlatformError
+
+    try:
+        with mycelium_host_platform.private_directory(absolute, create=create) as root:
+            if not root.exists:
+                raise DemoAuthorityError("authority_state_path_invalid")
+    except HostPlatformError as exc:
+        raise DemoAuthorityError("authority_state_path_invalid") from exc
+    return absolute
+
+
 def _private_directory(path: Path, *, create: bool) -> Path:
     absolute = Path(os.path.abspath(path.expanduser()))
+    import mycelium_host_platform
+
+    if mycelium_host_platform.is_win32():
+        return _win32_private_directory(absolute, create=create)
     try:
         if create and not absolute.exists() and not absolute.is_symlink():
             absolute.mkdir(parents=True, mode=0o700)
@@ -133,6 +150,17 @@ def _atomic_private_json(path: Path, document: Mapping[str, Any], *, max_bytes: 
     raw = canonical_json_bytes(dict(document))
     if not raw or len(raw) > max_bytes:
         raise DemoAuthorityError("authority_state_write_failed")
+    import mycelium_host_platform
+
+    if mycelium_host_platform.is_win32():
+        from mycelium_host_platform import HostPlatformError
+
+        try:
+            with mycelium_host_platform.private_directory(path.parent, create=False) as root:
+                root.atomic_replace(path.name, raw)
+        except HostPlatformError as exc:
+            raise DemoAuthorityError("authority_state_write_failed") from exc
+        return
     temporary = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
     descriptor = -1
     try:
@@ -172,9 +200,35 @@ def _atomic_private_json(path: Path, document: Mapping[str, Any], *, max_bytes: 
         temporary.unlink(missing_ok=True)
 
 
+def _win32_load_private_json(path: Path, *, max_bytes: int) -> dict[str, Any] | None:
+    import mycelium_host_platform
+    from mycelium_host_platform import HostPlatformError
+
+    try:
+        with mycelium_host_platform.private_directory(path.parent, create=False) as root:
+            raw = root.read_file(path.name, max_bytes=max_bytes)
+    except HostPlatformError as exc:
+        if exc.code == "host_file_missing":
+            return None
+        raise DemoAuthorityError("authority_state_invalid") from exc
+    if not raw:
+        raise DemoAuthorityError("authority_state_invalid")
+    try:
+        value = json.loads(raw.decode("utf-8"))
+        if not isinstance(value, dict) or canonical_json_bytes(value) != raw:
+            raise ValueError("noncanonical")
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise DemoAuthorityError("authority_state_invalid") from exc
+    return value
+
+
 def _load_private_json(path: Path, *, max_bytes: int = _MAX_PRIVATE_JSON_BYTES) -> dict[str, Any] | None:
     if type(max_bytes) is not int or not 0 < max_bytes <= 4*1024*1024:
         raise DemoAuthorityError("authority_state_size_limit_invalid")
+    import mycelium_host_platform
+
+    if mycelium_host_platform.is_win32():
+        return _win32_load_private_json(path, max_bytes=max_bytes)
     try:
         metadata = path.lstat()
     except FileNotFoundError:

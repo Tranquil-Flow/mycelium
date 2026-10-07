@@ -6,13 +6,19 @@ this adapter never retries model work merely to recover a missing receipt.
 Private state contains claim capabilities and MUST NOT be exported as evidence.
 """
 from __future__ import annotations
-import fcntl
+try:  # POSIX lock; win32 goes through mycelium_host_platform.
+    import fcntl
+except ImportError:  # pragma: no cover - win32
+    fcntl = None
 import os
 from pathlib import Path
 import secrets
 import stat
 import threading
 from typing import Callable, Mapping, Any
+
+import mycelium_host_platform
+from mycelium_host_platform import HostPlatformError
 
 from .authority import _private_directory, _atomic_private_json, _load_private_json
 from .managed_control import ManagedControlClient, _binding_from_member, _binding_advanced
@@ -120,7 +126,7 @@ class TargetControlPump:
         self.root=_private_directory(Path(state_root),create=True)
         self.client=client;self.worker=worker;self.current_member=current_member
         self._sequence_root=sequence_root
-        self._mutex=threading.RLock();self._closed=False;self._fd=-1
+        self._mutex=threading.RLock();self._closed=False;self._fd=-1;self._win32_lock=None
         # Delivery wake-up for the control loop (see `wake` / `wait_for_wake`).  The loop
         # may not be claim-latency-bound by its own interval: the ack that frees this
         # peer's next delivery slot, and the enqueue that fills it, must be able to end
@@ -133,12 +139,19 @@ class TargetControlPump:
         self._binding=_binding_from_member(current_member(),worker.run_id,worker.deployment_id)
         if self._binding['target_node_id']!=worker.node_id:raise ControlPumpError('control_worker_identity_mismatch')
         try:
-            self._fd=os.open(self.root/'owner.lock',os.O_CREAT|os.O_RDWR|getattr(os,'O_NOFOLLOW',0),0o600)
-            info=os.fstat(self._fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_uid!=os.getuid() or stat.S_IMODE(info.st_mode)!=0o600:
-                raise ControlPumpError('control_state_invalid')
-            try:fcntl.flock(self._fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
-            except BlockingIOError:raise ControlPumpError('control_pump_already_running') from None
+            if mycelium_host_platform.is_win32():
+                try:
+                    self._win32_lock=mycelium_host_platform.hold_exclusive_lock(self.root,'owner.lock',blocking=False)
+                except HostPlatformError as exc:
+                    if exc.code=='host_lock_busy':raise ControlPumpError('control_pump_already_running') from None
+                    raise ControlPumpError('control_state_invalid') from None
+            else:
+                self._fd=os.open(self.root/'owner.lock',os.O_CREAT|os.O_RDWR|getattr(os,'O_NOFOLLOW',0),0o600)
+                info=os.fstat(self._fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_uid!=os.getuid() or stat.S_IMODE(info.st_mode)!=0o600:
+                    raise ControlPumpError('control_state_invalid')
+                try:fcntl.flock(self._fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                except BlockingIOError:raise ControlPumpError('control_pump_already_running') from None
             if not getattr(self,'_concurrent',False) and os.path.lexists(self.root/'concurrent.json'):
                 raise ControlPumpError('concurrent_state_requires_concurrent_pump')
             value=_load_private_json(self.path)
@@ -167,6 +180,7 @@ class TargetControlPump:
             if legacy:self._save()
         except BaseException:
             if self._fd>=0:os.close(self._fd);self._fd=-1
+            if self._win32_lock is not None:self._win32_lock.release();self._win32_lock=None
             raise
 
     def _save(self):
@@ -371,5 +385,7 @@ class TargetControlPump:
             self._closed=True
             if self._fd>=0:
                 fcntl.flock(self._fd,fcntl.LOCK_UN);os.close(self._fd);self._fd=-1
+            if self._win32_lock is not None:
+                self._win32_lock.release();self._win32_lock=None
         # Release a loop parked in wait_for_wake so closing never waits out an interval.
         self.wake()

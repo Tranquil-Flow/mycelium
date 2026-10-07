@@ -199,7 +199,47 @@ def executable_fingerprint(
     return _posix.executable_fingerprint(path, require_private_owner=require_private_owner)
 
 
+class HeldLock:
+    """A long-lived exclusive lock on ``root/name`` held until :meth:`release`.
+
+    ``root`` must already be an owner-only directory; the lease on it stays
+    open while the lock is held.  Non-blocking contention raises
+    ``host_lock_busy``.
+    """
+
+    def __init__(self, root: str | os.PathLike[str], name: str, *, blocking: bool = True) -> None:
+        from contextlib import ExitStack
+
+        self._stack = ExitStack()
+        try:
+            directory = self._stack.enter_context(private_directory(root, create=False))
+            self._stack.enter_context(directory.exclusive_lock(name, blocking=blocking))
+        except BaseException:
+            self._stack.close()
+            raise
+        self.held = True
+
+    def release(self) -> None:
+        if self.held:
+            self.held = False
+            self._stack.close()
+
+    def __enter__(self) -> "HeldLock":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.release()
+
+
+def hold_exclusive_lock(
+    root: str | os.PathLike[str], name: str, *, blocking: bool = True
+) -> HeldLock:
+    return HeldLock(root, name, blocking=blocking)
+
+
 __all__ = [
+    "HeldLock",
+    "hold_exclusive_lock",
     "ERROR_CODES",
     "available_memory_bytes",
     "ExecutableFingerprint",
