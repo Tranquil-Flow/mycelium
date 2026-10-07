@@ -16,6 +16,8 @@ import sqlite3
 
 import pytest
 
+from mycelium_platform_neutral.migration_executor import MigrationExecutor
+
 from mycelium_invite import SqliteInviteRegistry, verify_invite_bundle
 from mycelium_membership import HEARTBEAT_PROTOCOL
 from mycelium_node import NodeMembershipSession, load_or_create_node_signer
@@ -114,21 +116,48 @@ def swarm(tmp_path):
     return database, signer, coordinator, nodes, copy
 
 
-def _migrate(tmp_path, copy):
-    state = SqliteSeedState(copy)
-    baseline = export_seed_baseline(state, software_build_digest=BUILD)
+def _member_state(seed_signer, node_id, incarnation="incarnation-a", generation=1):
+    return {
+        "node_id": node_id,
+        "swarm_id": "swarm-a",
+        "incarnation": incarnation,
+        "membership_generation": generation,
+        "seed_key_digest": seed_signer.verification_key_digest,
+    }
+
+
+def _baseline(copy, seed_signer):
+    return export_seed_baseline(
+        SqliteSeedState(copy),
+        software_build_digest=BUILD,
+        swarm_id="swarm-a",
+        seed_key_digest=seed_signer.verification_key_digest,
+    )
+
+
+def _requests(copy, seed_signer):
+    return profile_requests(
+        SqliteSeedState(copy),
+        signer=seed_signer,
+        swarm_id="swarm-a",
+        software_build_digest=BUILD,
+        software_version="1.0",
+    )
+
+
+def _migrate(tmp_path, copy, seed_signer):
+    baseline = _baseline(copy, seed_signer)
     store = FileMembershipState(tmp_path / "gate" / "private")
     store.initialize(baseline)
     envelopes = []
-    for request in profile_requests(
-        state, swarm_id="swarm-a", software_build_digest=BUILD, software_version="1.0"
-    ):
-        node = request["node_id"]
+    for envelope in _requests(copy, seed_signer):
+        node = envelope["request"]["node_id"]
         signer = load_or_create_node_signer(tmp_path / "nodes" / f"{node}.key")
         envelopes.append(
             sign_migration_profile(
-                request,
+                envelope,
                 signer=signer,
+                member_state=_member_state(seed_signer, node),
                 new_incarnation="incarnation-v2",
                 issued_at=NOW,
                 observed_platform=HOSTS[node],
@@ -140,8 +169,8 @@ def _migrate(tmp_path, copy):
 
 
 def test_seed_export_is_the_executor_baseline(swarm):
-    _, _, coordinator, nodes, copy = swarm
-    baseline = export_seed_baseline(SqliteSeedState(copy), software_build_digest=BUILD)
+    _, signer, coordinator, nodes, copy = swarm
+    baseline = _baseline(copy, signer)
     assert set(baseline) == {"node-mac", "node-linux"}
     for node_id, record in baseline.items():
         assert record["generation"] == 1
@@ -151,10 +180,8 @@ def test_seed_export_is_the_executor_baseline(swarm):
 
 
 def test_profile_requests_decompose_legacy_classes_without_raw_endpoint_ids(swarm):
-    _, _, coordinator, _, copy = swarm
-    requests = {item["node_id"]: item for item in profile_requests(
-        SqliteSeedState(copy), swarm_id="swarm-a", software_build_digest=BUILD, software_version="1.0"
-    )}
+    _, signer, coordinator, _, copy = swarm
+    requests = {item["request"]["node_id"]: item["request"] for item in _requests(copy, signer)}
     assert requests["node-mac"]["membership_generation"] == 2
     assert [runtime["backend_id"] for runtime in requests["node-mac"]["runtimes"]] == ["mlx"]
     assert [runtime["backend_id"] for runtime in requests["node-linux"]["runtimes"]] == ["numpy"]
@@ -163,33 +190,33 @@ def test_profile_requests_decompose_legacy_classes_without_raw_endpoint_ids(swar
 
 
 def test_member_platform_comes_from_the_host_not_the_label(swarm):
-    _, _, _, _, copy = swarm
-    request = next(item for item in profile_requests(
-        SqliteSeedState(copy), swarm_id="swarm-a", software_build_digest=BUILD, software_version="1.0"
-    ) if item["node_id"] == "node-mac")
+    _, signer, _, _, copy = swarm
+    request = next(item for item in _requests(copy, signer) if item["request"]["node_id"] == "node-mac")
+    member = _member_state(signer, "node-mac")
     with pytest.raises(ValueError, match="platform_observation_conflicts_legacy_class"):
-        build_migration_profile(request, new_incarnation="i2", issued_at=NOW, observed_platform=("linux", "x86_64"))
+        build_migration_profile(request, member_state=member, new_incarnation="i2", issued_at=NOW, observed_platform=("linux", "x86_64"))
     with pytest.raises(ValueError, match="incarnation_not_renewed"):
-        build_migration_profile(request, new_incarnation="incarnation-a", issued_at=NOW, observed_platform=("macos", "arm64"))
+        build_migration_profile(request, member_state=member, new_incarnation="incarnation-a", issued_at=NOW, observed_platform=("macos", "arm64"))
     with pytest.raises(ValueError, match="legacy_generation_stale"):
-        build_migration_profile(request, new_incarnation="i2", issued_at=NOW + 301, observed_platform=("macos", "arm64"))
-    profile = build_migration_profile(request, new_incarnation="i2", issued_at=NOW, observed_platform=("macos", "arm64"))
+        build_migration_profile(request, member_state=member, new_incarnation="i2", issued_at=NOW + 301, observed_platform=("macos", "arm64"))
+    profile = build_migration_profile(request, member_state=member, new_incarnation="i2", issued_at=NOW, observed_platform=("macos", "arm64"))
     assert (profile.platform_family, profile.architecture) == ("macos", "arm64")
     assert observe_host_platform(system="Windows", machine="AMD64") == ("windows", "x86_64")
     assert observe_host_platform(system="Plan9", machine="mips") == ("unknown", "unknown")
 
 
 def test_changed_key_member_cannot_migrate(swarm, tmp_path):
-    _, _, _, _, copy = swarm
-    state = SqliteSeedState(copy)
+    _, seed_signer, _, _, copy = swarm
     store = FileMembershipState(tmp_path / "gate" / "private")
-    store.initialize(export_seed_baseline(state, software_build_digest=BUILD))
+    store.initialize(_baseline(copy, seed_signer))
     before = (store.root / "members.json").read_bytes()
     envelopes = []
-    for request in profile_requests(state, swarm_id="swarm-a", software_build_digest=BUILD, software_version="1.0"):
+    for request in _requests(copy, seed_signer):
+        node = request["request"]["node_id"]
         envelopes.append(sign_migration_profile(
             request, signer=generate_ed25519_signer(endpoint_id="changed"),
-            new_incarnation="incarnation-v2", issued_at=NOW, observed_platform=HOSTS[request["node_id"]],
+            member_state=_member_state(seed_signer, node),
+            new_incarnation="incarnation-v2", issued_at=NOW, observed_platform=HOSTS[node],
         ))
     with pytest.raises(ValueError):
         migration.execute_identity_preserving_migration(
@@ -200,7 +227,7 @@ def test_changed_key_member_cannot_migrate(swarm, tmp_path):
 
 def test_seed_refuses_every_v1_write_after_the_recorded_cutover(swarm, tmp_path):
     database, signer, _, nodes, copy = swarm
-    store, _, _ = _migrate(tmp_path, copy)
+    store, _, _ = _migrate(tmp_path, copy, signer)
     gate = SeedMembershipCutover(store.root)
     gated = _coordinator(database, signer, cutover=gate, prefix="gated")
     accepted = gated.receive_member_message(
@@ -248,3 +275,104 @@ def test_coordinator_rejects_an_invalid_cutover_gate(swarm):
     database, signer, _, _, _ = swarm
     with pytest.raises(ValueError, match="membership_cutover"):
         _coordinator(database, signer, cutover=object())
+
+
+# -- trust boundary (security review 2026-10-07) ---------------------------------
+
+
+def test_seed_copy_bound_to_another_seed_or_swarm_is_refused(swarm):
+    _, signer, _, _, copy = swarm
+    other = generate_ed25519_signer(endpoint_id="other-seed")
+    state = SqliteSeedState(copy)
+    with pytest.raises(ValueError, match="seed_identity_binding_mismatch"):
+        export_seed_baseline(state, software_build_digest=BUILD, swarm_id="swarm-a",
+                             seed_key_digest=other.verification_key_digest)
+    with pytest.raises(ValueError, match="seed_identity_binding_mismatch"):
+        export_seed_baseline(state, software_build_digest=BUILD, swarm_id="swarm-b",
+                             seed_key_digest=signer.verification_key_digest)
+    with pytest.raises(ValueError, match="seed_identity_binding_mismatch"):
+        profile_requests(state, signer=other, swarm_id="swarm-a",
+                         software_build_digest=BUILD, software_version="1.0")
+
+
+def test_member_refuses_unsigned_forged_tampered_or_foreign_requests(swarm, tmp_path):
+    _, signer, _, _, copy = swarm
+    good = next(item for item in _requests(copy, signer) if item["request"]["node_id"] == "node-mac")
+    member = _member_state(signer, "node-mac")
+    node_key = load_or_create_node_signer(tmp_path / "nodes" / "node-mac.key")
+
+    def attempt(envelope, state=member):
+        return sign_migration_profile(envelope, signer=node_key, member_state=state,
+                                      new_incarnation="incarnation-v2", issued_at=NOW,
+                                      observed_platform=("macos", "arm64"))
+
+    with pytest.raises(ValueError):
+        attempt(good["request"])  # bare unsigned request
+    forger = generate_ed25519_signer(endpoint_id="forger")
+    forged = {**good, "signature": forger.sign(good["request"]),
+              "verification_key": forger.public_key_record()}
+    with pytest.raises(ValueError, match="migration_profile_request_not_seed_signed"):
+        attempt(forged)
+    tampered = {**good, "request": {**good["request"], "membership_generation": 9}}
+    with pytest.raises(ValueError, match="migration_profile_request_signature_invalid"):
+        attempt(tampered)
+    tampered = {**good, "request": {**good["request"], "runtimes": []}}
+    with pytest.raises(ValueError, match="migration_profile_request_signature_invalid"):
+        attempt(tampered)
+    for foreign in (
+        _member_state(signer, "node-linux"),
+        _member_state(signer, "node-mac", incarnation="incarnation-z"),
+        _member_state(signer, "node-mac", generation=4),
+        {**member, "swarm_id": "swarm-b"},
+    ):
+        with pytest.raises(ValueError, match="migration_profile_request_not_for_this_member"):
+            attempt(good, foreign)
+    with pytest.raises(ValueError, match="migration_profile_request_not_seed_signed"):
+        attempt(good, {**member, "seed_key_digest": forger.verification_key_digest})
+    with pytest.raises(ValueError, match="migration_member_state_invalid"):
+        attempt(good, {"node_id": "node-mac"})
+    assert attempt(good)["profile"]["node_id"] == "node-mac"
+
+
+def test_cutover_cannot_be_recorded_between_the_gate_check_and_the_seed_write(swarm, tmp_path, monkeypatch):
+    database, signer, _, nodes, copy = swarm
+    store, _, _ = _migrate(tmp_path, copy, signer)
+    gated = _coordinator(database, signer, cutover=SeedMembershipCutover(store.root), prefix="toctou")
+    observed = []
+    original = SqliteSeedState.commit_heartbeat_renewal
+
+    def racing_commit(self, *args, **kwargs):
+        # A concurrent migration operator tries to record the cutover mid-write.
+        try:
+            with MigrationExecutor(FileMembershipState(store.root)).storage.lock(blocking=False):
+                observed.append("cutover_lock_free_during_write")
+        except migration.MigrationUnavailable as busy:
+            observed.append(busy.code)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(SqliteSeedState, "commit_heartbeat_renewal", racing_commit)
+    gated.receive_member_message(
+        nodes["node-mac"].heartbeat(lifecycle_state="CONFIGURED", active_requests=0),
+        expected_protocol=HEARTBEAT_PROTOCOL,
+    )
+    assert observed == ["concurrent_resume_serialized"]
+    monkeypatch.setattr(SqliteSeedState, "commit_heartbeat_renewal", original)
+    migration.record_cutover(storage=store, contract_digests=(CONTRACT,), inventory_digest=INVENTORY, now=NOW)
+    with pytest.raises(SeedCoordinatorError, match="membership_contract_upgrade_required"):
+        gated.receive_member_message(
+            nodes["node-mac"].heartbeat(lifecycle_state="CONFIGURED", active_requests=0),
+            expected_protocol=HEARTBEAT_PROTOCOL,
+        )
+
+
+def test_an_unreadable_cutover_gate_fails_closed(swarm, tmp_path):
+    database, signer, _, nodes, copy = swarm
+    store, _, _ = _migrate(tmp_path, copy, signer)
+    migration.record_cutover(storage=store, contract_digests=(CONTRACT,), inventory_digest=INVENTORY, now=NOW)
+    gated = _coordinator(database, signer, cutover=SeedMembershipCutover(store.root), prefix="corrupt")
+    (store.root / "cutover.json").write_bytes(b"{}")
+    with pytest.raises(SeedCoordinatorError, match="membership_cutover_unreadable"):
+        gated.receive_member_message(
+            nodes["node-mac"].heartbeat(lifecycle_state="CONFIGURED", active_requests=0),
+            expected_protocol=HEARTBEAT_PROTOCOL,
+        )

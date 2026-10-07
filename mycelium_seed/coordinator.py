@@ -182,7 +182,7 @@ class SeedCoordinator:
         ):
             raise ValueError("placement_source is invalid")
         if membership_cutover is not None and not callable(
-            getattr(membership_cutover, "check", None)
+            getattr(membership_cutover, "admit", None)
         ):
             raise ValueError("membership_cutover is invalid")
         # A9 one-time v1 -> v2 migration: once the cutover is recorded every v1
@@ -277,17 +277,27 @@ class SeedCoordinator:
                 code = getattr(exc, "code", "seed_state_corrupt")
                 raise SeedCoordinatorError(code) from exc
 
-    def _require_v1_write_admitted(self, operation: str) -> None:
+    @contextmanager
+    def _v1_write_admission(self, operation: str) -> Iterator[None]:
+        """Hold the cutover gate across the whole v1 write (check and act atomic)."""
+
         if self._membership_cutover is None:
+            yield
             return
+        admission = None
         try:
-            self._membership_cutover.check(operation)
+            admission = self._membership_cutover.admit(operation)
+            admission.__enter__()
         except Exception as exc:  # noqa: BLE001 - the gate fails closed
             if getattr(exc, "code", None) == "membership_contract_upgrade_required":
                 raise SeedCoordinatorError(
                     "membership_contract_upgrade_required"
                 ) from exc
             raise SeedCoordinatorError("membership_cutover_unreadable") from exc
+        try:
+            yield
+        finally:
+            admission.__exit__(None, None, None)
 
     def _persist(self, method: str, *args: Any, **kwargs: Any) -> None:
         if self._state is None:
@@ -408,7 +418,17 @@ class SeedCoordinator:
         invite_token: str,
         join_envelope: Mapping[str, Any],
     ) -> dict[str, Any]:
-        self._require_v1_write_admitted("join_request")
+        with self._v1_write_admission("join_request"):
+            return self._accept_join(
+                invite_token=invite_token, join_envelope=join_envelope
+            )
+
+    def _accept_join(
+        self,
+        *,
+        invite_token: str,
+        join_envelope: Mapping[str, Any],
+    ) -> dict[str, Any]:
         with self._lock:
             invite_token_digest: str | None = None
             request_envelope_digest: str | None = None
@@ -560,7 +580,14 @@ class SeedCoordinator:
     ) -> dict[str, Any]:
         """Resume one enrolled durable principal without consuming an invite."""
 
-        self._require_v1_write_admitted("resume_request")
+        with self._v1_write_admission("resume_request"):
+            return self._accept_resume(resume_envelope=resume_envelope)
+
+    def _accept_resume(
+        self,
+        *,
+        resume_envelope: Mapping[str, Any],
+    ) -> dict[str, Any]:
         with self._lock:
             request_digest: str | None = None
             request_message_id: str | None = None
@@ -1066,7 +1093,17 @@ class SeedCoordinator:
     ) -> dict[str, Any]:
         if expected_protocol not in _MEMBER_PROTOCOLS:
             raise ValueError("expected_protocol is invalid")
-        self._require_v1_write_admitted(expected_protocol)
+        with self._v1_write_admission(expected_protocol):
+            return self._receive_member_message(
+                envelope, expected_protocol=expected_protocol
+            )
+
+    def _receive_member_message(
+        self,
+        envelope: Mapping[str, Any],
+        *,
+        expected_protocol: str,
+    ) -> dict[str, Any]:
         try:
             untrusted_message = envelope["message"]
             node_id = untrusted_message["sender_node_id"]
@@ -1320,8 +1357,7 @@ class SeedCoordinator:
     ) -> dict[str, Any]:
         node_id = _segment(node_id, "node_id")
         assignment_id = _segment(assignment_id, "assignment_id")
-        self._require_v1_write_admitted("assignment_request")
-        with self._lock:
+        with self._v1_write_admission("assignment_request"), self._lock:
             member = self._members.get(node_id)
             if member is None:
                 raise SeedCoordinatorError("seed_member_unknown")

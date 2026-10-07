@@ -6,12 +6,22 @@ restart, cutover and reader removal.  This module connects it to the product:
 * :func:`export_seed_baseline` reads the seed's durable v1 member rows (a copy of
   the seed SQLite database) into the executor's owner-private baseline.  It is
   the migration-only v1 reader on the seed side; it never writes the seed.
-* :func:`profile_requests` turns each v1 member into an unsigned request that
-  tells the member which generation and lease it must bind.  The request
-  carries the legacy compound class only as a decomposition hint.
-* :func:`build_migration_profile` runs on the member host.  The platform family
-  and architecture come from the host's own observation, never from the request
-  or the legacy label; a conflict with the decomposed legacy class is refused.
+* :func:`profile_requests` turns each v1 member into a request, signed by the
+  seed's own bound key, that tells the member which generation and lease it
+  must bind.  The request carries the legacy compound class only as a
+  decomposition hint.
+* :func:`build_migration_profile` runs on the member host.  It first verifies
+  the request against the seed key the member pinned at join and against the
+  member's own durable membership state (node ID, swarm, incarnation,
+  generation n+1); an unsigned, forged or foreign request is refused.  The
+  platform family and architecture come from the host's own observation, never
+  from the request or the legacy label; a conflict with the decomposed legacy
+  class is refused.
+
+Trust boundary: the seed database copy is accepted only when its durable
+identity binding names the expected swarm and seed key; requests are accepted
+by a member only under that seed key; and the executor accepts a profile only
+under the member's pinned durable key (:mod:`.migration_executor`).
 * :class:`SeedMembershipCutover` is the seed-side v1 write gate: once the
   cutover is recorded every v1 join, resume, member message and assignment
   offer fails with ``membership_contract_upgrade_required``.
@@ -22,10 +32,12 @@ qualification and eligibility stay separate authorities.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 import hashlib
 from pathlib import Path
 import platform as _platform
+import threading
 from typing import Any
 
 from .migration import (
@@ -34,13 +46,19 @@ from .migration import (
     decompose_legacy_peer_class,
 )
 from .migration_executor import FileMembershipState, MigrationExecutor
+from mycelium_qualification.signing import build_ed25519_verifier
+
 from .peer_profile import PeerProfile, sign_peer_profile
 from .primitives import (
     PEER_PROFILE_PROTOCOL,
     RUNTIME_BACKEND_STAGES,
     bounded_int,
+    canonical_bytes,
+    closed_fields,
+    detached,
     digest,
     finite,
+    require,
     segment,
     text,
 )
@@ -63,6 +81,18 @@ MACHINE_TO_ARCHITECTURE = {
     "amd64": "x86_64",
 }
 
+REQUEST_ENVELOPE_FIELDS = frozenset({"protocol", "request", "signature", "verification_key"})
+REQUEST_SIGNATURE_FIELDS = frozenset(
+    {
+        "algorithm",
+        "signer_endpoint_id",
+        "verification_key_digest",
+        "signed_statement_digest",
+        "signature",
+    }
+)
+MEMBER_STATE_FIELDS = ("node_id", "swarm_id", "incarnation", "membership_generation", "seed_key_digest")
+
 REQUEST_FIELDS = frozenset(
     {
         "protocol",
@@ -83,16 +113,32 @@ def _sha256_text(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _require_seed_binding(state: Any, *, swarm_id: str, seed_key_digest: str) -> None:
+    """The seed database copy must be the expected seed's own durable state."""
+
+    expected_key = digest(seed_key_digest, "migration_seed_key_invalid")
+    expected_swarm = segment(swarm_id, "migration_swarm_id_invalid")
+    try:
+        binding = state.identity_binding()
+    except Exception as exc:  # noqa: BLE001 - any unreadable binding fails closed
+        raise PlatformNeutralMigrationError("seed_identity_binding_missing") from exc
+    if binding.get("seed_key_digest") != expected_key or binding.get("swarm_id") != expected_swarm:
+        raise PlatformNeutralMigrationError("seed_identity_binding_mismatch")
+
+
 def export_seed_baseline(
-    state: Any, *, software_build_digest: str
+    state: Any, *, software_build_digest: str, swarm_id: str, seed_key_digest: str
 ) -> dict[str, dict[str, Any]]:
     """Owner-private executor baseline from the seed's durable v1 member rows.
 
     ``state`` is a :class:`mycelium_seed.state.SqliteSeedState` opened on a copy
-    of the live seed database.  The seed does not record a software build, so
-    the caller binds the exact candidate build digest every member runs.
+    of the live seed database; the copy is refused unless its durable identity
+    binding names ``swarm_id`` and ``seed_key_digest``.  The seed does not record
+    a software build, so the caller binds the exact candidate build digest every
+    member runs.
     """
 
+    _require_seed_binding(state, swarm_id=swarm_id, seed_key_digest=seed_key_digest)
     build = digest(software_build_digest, "migration_build_digest_invalid")
     baseline: dict[str, dict[str, Any]] = {}
     for row in state.load_members():
@@ -151,12 +197,19 @@ def _runtime(backend_id: str, *, build: str) -> dict[str, Any]:
 def profile_requests(
     state: Any,
     *,
+    signer: Any,
     swarm_id: str,
     software_build_digest: str,
     software_version: str,
 ) -> list[dict[str, Any]]:
-    """One unsigned v2 profile request per durable v1 member (generation n+1)."""
+    """One seed-signed v2 profile request per durable v1 member (generation n+1).
 
+    ``signer`` must be the seed key the database copy is bound to.
+    """
+
+    _require_seed_binding(
+        state, swarm_id=swarm_id, seed_key_digest=getattr(signer, "verification_key_digest", None)
+    )
     build = digest(software_build_digest, "migration_build_digest_invalid")
     requests = []
     for row in state.load_members():
@@ -171,8 +224,7 @@ def profile_requests(
             for backend in decomposition.runtimes
             if backend in RUNTIME_BACKEND_STAGES
         ]
-        requests.append(
-            {
+        statement = {
                 "protocol": PROFILE_REQUEST_PROTOCOL,
                 "swarm_id": segment(swarm_id, "migration_swarm_id_invalid"),
                 "node_id": segment(row["node_id"], "migration_node_id_invalid"),
@@ -187,8 +239,64 @@ def profile_requests(
                 "transports": transports,
                 "runtimes": runtimes,
             }
+        requests.append(
+            {
+                "protocol": PROFILE_REQUEST_PROTOCOL,
+                "request": statement,
+                "signature": signer.sign(statement),
+                "verification_key": signer.public_key_record(),
+            }
         )
     return requests
+
+
+def verify_profile_request(
+    envelope: Mapping[str, Any], *, member_state: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Member-side check: seed-signed, and addressed to exactly this durable member.
+
+    ``member_state`` is the member's own durable membership state
+    (``mycelium_node.durable_membership``); its pinned ``seed_key_digest`` is the
+    only key a request is accepted under.
+    """
+
+    if not isinstance(member_state, Mapping) or any(
+        field not in member_state for field in MEMBER_STATE_FIELDS
+    ):
+        raise PlatformNeutralMigrationError("migration_member_state_invalid")
+    pinned = digest(member_state["seed_key_digest"], "migration_seed_key_invalid")
+    if not isinstance(envelope, Mapping):
+        raise PlatformNeutralMigrationError("migration_profile_request_invalid")
+    record = closed_fields(envelope, REQUEST_ENVELOPE_FIELDS, "migration_profile_request_invalid")
+    require(record["protocol"] == PROFILE_REQUEST_PROTOCOL, "migration_profile_request_invalid")
+    signature = closed_fields(
+        record["signature"], REQUEST_SIGNATURE_FIELDS, "migration_profile_request_signature_invalid"
+    )
+    key = detached(record["verification_key"], "migration_profile_request_key_invalid")
+    require(
+        signature["verification_key_digest"] == pinned
+        and key.get("verification_key_digest") == pinned,
+        "migration_profile_request_not_seed_signed",
+    )
+    request = detached(record["request"], "migration_profile_request_invalid")
+    if set(request) != REQUEST_FIELDS or request["protocol"] != PROFILE_REQUEST_PROTOCOL:
+        raise PlatformNeutralMigrationError("migration_profile_request_invalid")
+    verify = build_ed25519_verifier([key])
+    require(
+        verify(canonical_bytes(request, "migration_profile_request_noncanonical"), dict(signature)),
+        "migration_profile_request_signature_invalid",
+    )
+    generation = member_state["membership_generation"]
+    if (
+        request["node_id"] != member_state["node_id"]
+        or request["swarm_id"] != member_state["swarm_id"]
+        or request["current_incarnation"] != member_state["incarnation"]
+        or isinstance(generation, bool)
+        or not isinstance(generation, int)
+        or request["membership_generation"] != generation + 1
+    ):
+        raise PlatformNeutralMigrationError("migration_profile_request_not_for_this_member")
+    return request
 
 
 def observe_host_platform(
@@ -205,18 +313,16 @@ def observe_host_platform(
 
 
 def build_migration_profile(
-    request: Mapping[str, Any],
+    envelope: Mapping[str, Any],
     *,
+    member_state: Mapping[str, Any],
     new_incarnation: str,
     issued_at: float,
     observed_platform: tuple[str, str] | None = None,
 ) -> PeerProfile:
-    """Build the member's v2 profile from its request and its own host observation."""
+    """Build the member's v2 profile from a verified request and its own host observation."""
 
-    if not isinstance(request, Mapping) or set(request) != REQUEST_FIELDS:
-        raise PlatformNeutralMigrationError("migration_profile_request_invalid")
-    if request["protocol"] != PROFILE_REQUEST_PROTOCOL:
-        raise PlatformNeutralMigrationError("migration_profile_request_invalid")
+    request = verify_profile_request(envelope, member_state=member_state)
     platform_family, architecture = (
         observe_host_platform() if observed_platform is None else observed_platform
     )
@@ -252,9 +358,10 @@ def build_migration_profile(
 
 
 def sign_migration_profile(
-    request: Mapping[str, Any],
+    envelope: Mapping[str, Any],
     *,
     signer: Any,
+    member_state: Mapping[str, Any],
     new_incarnation: str,
     issued_at: float,
     observed_platform: tuple[str, str] | None = None,
@@ -262,7 +369,8 @@ def sign_migration_profile(
     """Sign the v2 profile with the member's existing durable node key."""
 
     profile = build_migration_profile(
-        request,
+        envelope,
+        member_state=member_state,
         new_incarnation=new_incarnation,
         issued_at=issued_at,
         observed_platform=observed_platform,
@@ -271,20 +379,42 @@ def sign_migration_profile(
 
 
 class SeedMembershipCutover:
-    """Seed-side v1 write gate bound to one private migration storage root."""
+    """Seed-side v1 write gate bound to one private migration storage root.
+
+    :meth:`admit` holds the migration transaction lock for the whole seed write,
+    so the cutover check and the v1 mutation are atomic with respect to
+    ``record_cutover`` (which takes the same lock): a cutover can never be
+    recorded between the check and the write.
+    """
 
     def __init__(self, storage_root: str | Path) -> None:
         self._executor = MigrationExecutor(FileMembershipState(Path(storage_root)))
+        self._held = threading.local()
 
     def recorded(self) -> bool:
         return self._executor.cutover_state() is not None
 
-    def check(self, operation: str) -> None:
-        """Raise ``membership_contract_upgrade_required`` once cutover is recorded."""
+    @contextmanager
+    def admit(self, operation: str) -> Iterator[None]:
+        """Admit one v1 write while holding the migration lock; refuse after cutover."""
 
         text(operation, "v1_operation_invalid")
-        if self.recorded():
-            raise MembershipContractUpgradeRequired()
+        if getattr(self._held, "depth", 0):
+            # Re-entrant admission on the same thread: the lock is already held.
+            self._held.depth += 1
+            try:
+                yield
+            finally:
+                self._held.depth -= 1
+            return
+        with self._executor.storage.lock():
+            if self._executor._load_cutover() is not None:  # noqa: SLF001 - same lock held
+                raise MembershipContractUpgradeRequired()
+            self._held.depth = 1
+            try:
+                yield
+            finally:
+                self._held.depth = 0
 
 
 __all__ = [
@@ -295,4 +425,5 @@ __all__ = [
     "observe_host_platform",
     "profile_requests",
     "sign_migration_profile",
+    "verify_profile_request",
 ]
