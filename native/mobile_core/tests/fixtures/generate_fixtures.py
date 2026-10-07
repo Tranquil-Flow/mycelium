@@ -214,7 +214,9 @@ def stage_fixture() -> None:
     write("gpt2_stage.json", {"pack": pack, "hidden": rows, "output": output})
 
 
-def route_assignment_fixture(pack: dict | None = None, name: str = "route_assignment.json") -> dict:
+def route_assignment_fixture(
+    pack: dict | None = None, name: str = "route_assignment.json", artifact_sources: list | None = None
+) -> dict:
     """A real seed's answer to a member's signed route-assignment request."""
 
     import sqlite3
@@ -259,6 +261,7 @@ def route_assignment_fixture(pack: dict | None = None, name: str = "route_assign
             now=lambda: NOW,
             id_source=lambda: "route-fixture-1",
             seed_key_record=seed.public_key_record(),
+            artifact_sources=artifact_sources or (),
         )
         request = {
             "protocol": ROUTE_ASSIGNMENT_REQUEST_PROTOCOL,
@@ -287,6 +290,7 @@ def route_assignment_fixture(pack: dict | None = None, name: str = "route_assign
             incarnation="seed-inc-fixture",
             clock=lambda: NOW + 2,
             id_source=lambda: "route-delivery-fixture-1",
+            grant_id_source=lambda: "grant-delivery-fixture-1",
         ).answer(envelope)
     document = {
             "seed_key": seed.public_key_record(),
@@ -360,7 +364,12 @@ def stage_manifest_v2_fixture() -> None:
             },
         },
     )
-    route_assignment_fixture(signed, "route_assignment_v2.json")
+    source = signer(0x33, "c" * 64)
+    route_assignment_fixture(
+        signed,
+        "route_assignment_v2.json",
+        [{"endpoint_id": source.endpoint_id, "verification_key_digest": source.verification_key_digest}],
+    )
 
 
 def artifact_grant_fixture() -> None:

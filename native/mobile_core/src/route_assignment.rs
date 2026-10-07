@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 use crate::identity::Identity;
 use crate::membership::{self, MemberConfig};
 use crate::runtime::Gpt2BlockStage;
+use crate::artifact_grant::{self, Grant};
 use crate::stage_manifest::{self, StageManifest};
 
 pub const REQUEST_PROTOCOL: &str = "mycelium.seed.route_assignment_request.v1";
@@ -51,8 +52,9 @@ pub enum DeliveredStage {
     /// v1: weights inline, loadable at once.
     Gpt2(Box<Gpt2BlockStage>),
     /// v2: a seed-signed manifest; `envelope` is kept so the node can persist
-    /// it and re-verify it at boot against the pinned seed key.
-    Qwen2 { manifest: Box<StageManifest>, envelope: Value },
+    /// it and re-verify it at boot against the pinned seed key. `grant` is the
+    /// seed's A2 grant for the manifest's objects, bound to this node.
+    Qwen2 { manifest: Box<StageManifest>, envelope: Value, grant: Box<Grant> },
 }
 
 impl DeliveredStage {
@@ -64,18 +66,23 @@ impl DeliveredStage {
     }
 }
 
+enum VerifiedPack {
+    Gpt2(Box<Gpt2BlockStage>),
+    Qwen2(Box<StageManifest>),
+}
+
 /// Verify the pack that travelled beside a seed-signed assignment.
-pub fn verify_stage_pack(pack: &Value, pinned_seed_key: &Value) -> Result<DeliveredStage, RouteAssignmentError> {
+fn verify_stage_pack(pack: &Value, pinned_seed_key: &Value) -> Result<VerifiedPack, RouteAssignmentError> {
     let signed_v2 = pack.get("protocol").and_then(Value::as_str) == Some(membership::SIGNED_MESSAGE_PROTOCOL)
         && pack["message"]["protocol"] == stage_manifest::MANIFEST_PROTOCOL;
     if signed_v2 {
         let manifest = StageManifest::verify_signed(pack, pinned_seed_key).map_err(|e| fail(&e.0))?;
-        return Ok(DeliveredStage::Qwen2 { manifest: Box::new(manifest), envelope: pack.clone() });
+        return Ok(VerifiedPack::Qwen2(Box::new(manifest)));
     }
     if pack.get("protocol").and_then(Value::as_str) == Some(stage_manifest::MANIFEST_PROTOCOL) {
         return Err(fail("route_assignment_stage_manifest_unsigned"));
     }
-    Gpt2BlockStage::from_document(pack).map(|s| DeliveredStage::Gpt2(Box::new(s))).map_err(|e| fail(&e.0))
+    Gpt2BlockStage::from_document(pack).map(|s| VerifiedPack::Gpt2(Box::new(s))).map_err(|e| fail(&e.0))
 }
 
 /// What this node expects the seed's answer to be bound to.
@@ -85,6 +92,8 @@ pub struct Expected<'a> {
     pub seed_node_id: &'a str,
     pub node_id: &'a str,
     pub endpoint_id: &'a str,
+    /// This member's enrolled key digest (a v2 grant must name it).
+    pub member_key_digest: &'a str,
     pub generation: u64,
     pub request_message_id: &'a str,
     pub now: f64,
@@ -133,7 +142,8 @@ pub fn verify_delivery(
     expected: &Expected<'_>,
 ) -> Result<Option<(RouteAssignment, DeliveredStage)>, RouteAssignmentError> {
     let map = reply.as_object().ok_or_else(|| fail("route_assignment_delivery_invalid"))?;
-    if map.len() != 3
+    let with_grant = map.contains_key("artifact_grant");
+    if map.len() != 3 + usize::from(with_grant)
         || map.get("protocol").and_then(Value::as_str) != Some(DELIVERY_PROTOCOL)
         || !map.contains_key("envelope")
         || !map.contains_key("stage_pack")
@@ -168,7 +178,7 @@ pub fn verify_delivery(
     }
     let a = &m["assignment"];
     if a.is_null() {
-        return if map["stage_pack"].is_null() { Ok(None) } else { Err(fail("route_assignment_delivery_invalid")) };
+        return if map["stage_pack"].is_null() && !with_grant { Ok(None) } else { Err(fail("route_assignment_delivery_invalid")) };
     }
     let fields = a.as_object().ok_or_else(|| fail("route_assignment_invalid"))?;
     if fields.len() != 6 {
@@ -191,7 +201,23 @@ pub fn verify_delivery(
     }
     // The pack's own digest is recomputed over its content by the runtime, then
     // must equal the digest the seed signed.
-    let stage = verify_stage_pack(&map["stage_pack"], expected.pinned_seed_key)?;
+    let stage = match verify_stage_pack(&map["stage_pack"], expected.pinned_seed_key)? {
+        VerifiedPack::Gpt2(stage) if !with_grant => DeliveredStage::Gpt2(stage),
+        VerifiedPack::Qwen2(manifest) if with_grant => {
+            // The A2 grant: seed-signed, current, for this node and this manifest.
+            let now_ms = (expected.now * 1000.0) as u64;
+            let grant = artifact_grant::verify_grant(&map["artifact_grant"], expected.pinned_seed_key, now_ms).map_err(|e| fail(e.0))?;
+            grant
+                .check_binding(expected.node_id, expected.endpoint_id, expected.member_key_digest, &manifest.pack_digest)
+                .map_err(|e| fail(e.0))?;
+            if grant.assignment_id != assignment.assignment_id {
+                return Err(fail("artifact_grant_assignment_mismatch"));
+            }
+            DeliveredStage::Qwen2 { envelope: map["stage_pack"].clone(), manifest, grant: Box::new(grant) }
+        }
+        VerifiedPack::Gpt2(_) => return Err(fail("route_assignment_delivery_invalid")),
+        VerifiedPack::Qwen2(_) => return Err(fail("route_assignment_artifact_grant_missing")),
+    };
     if stage.pack_digest() != assignment.stage_pack_digest {
         return Err(fail("route_assignment_stage_digest_mismatch"));
     }
@@ -286,6 +312,7 @@ mod tests {
                 seed_node_id: "seed-node",
                 node_id: "node-a",
                 endpoint_id: w.member.endpoint_id(),
+                member_key_digest: &w.member.verification_key_digest(),
                 generation: 3,
                 request_message_id: "req-1",
                 now: 1010.0,
@@ -371,6 +398,7 @@ mod tests {
                 seed_node_id: e["seed_node_id"].as_str().unwrap(),
                 node_id: e["node_id"].as_str().unwrap(),
                 endpoint_id: e["endpoint_id"].as_str().unwrap(),
+                member_key_digest: &Identity::from_secret(&"a".repeat(64), &[0x11; 32]).unwrap().verification_key_digest(),
                 generation: e["generation"].as_u64().unwrap(),
                 request_message_id: e["request_message_id"].as_str().unwrap(),
                 now: e["now"].as_f64().unwrap(),
@@ -406,6 +434,7 @@ mod v2_tests {
                 seed_node_id: e["seed_node_id"].as_str().unwrap(),
                 node_id: e["node_id"].as_str().unwrap(),
                 endpoint_id: e["endpoint_id"].as_str().unwrap(),
+                member_key_digest: &Identity::from_secret(&"a".repeat(64), &[0x11; 32]).unwrap().verification_key_digest(),
                 generation: e["generation"].as_u64().unwrap(),
                 request_message_id: e["request_message_id"].as_str().unwrap(),
                 now: e["now"].as_f64().unwrap(),
@@ -417,7 +446,10 @@ mod v2_tests {
     fn the_python_seed_v2_delivery_yields_a_signed_manifest() {
         let f = fixture("route_assignment_v2.json");
         let (a, stage) = verify(&f, &f["delivery"]).unwrap().unwrap();
-        let DeliveredStage::Qwen2 { manifest, envelope } = stage else { panic!("v2 manifest") };
+        let DeliveredStage::Qwen2 { manifest, envelope, grant } = stage else { panic!("v2 manifest") };
+        assert_eq!(grant.manifest_pack_digest, manifest.pack_digest);
+        assert_eq!(grant.assignment_id, a.assignment_id);
+        assert_eq!(grant.grant_id, "grant-delivery-fixture-1");
         assert_eq!(a.stage_pack_digest, manifest.pack_digest);
         assert_eq!(manifest.start_layer, 0);
         assert_eq!(manifest.end_layer_exclusive, 2);
@@ -448,5 +480,35 @@ mod v2_tests {
         let mut tampered = f["delivery"].clone();
         tampered["stage_pack"]["message"]["golden"]["seed"] = json!(43);
         assert_eq!(code(&tampered), "stage_manifest_membership_signature_invalid");
+    }
+
+    #[test]
+    fn a_v2_delivery_needs_its_seed_grant_bound_to_this_node() {
+        let f = fixture("route_assignment_v2.json");
+        let code = |d: &Value| verify(&f, d).err().expect("refused").0;
+        let mut missing = f["delivery"].clone();
+        missing.as_object_mut().unwrap().remove("artifact_grant");
+        assert_eq!(code(&missing), "route_assignment_artifact_grant_missing");
+        let mut tampered = f["delivery"].clone();
+        tampered["artifact_grant"]["message"]["maximum_chunk_bytes"] = json!(1);
+        assert_eq!(code(&tampered), "artifact_grant_signature_invalid");
+        // A grant for another node, re-signed by the real seed key, is still refused.
+        let seed = Identity::from_secret("seed-endpoint-1", &[0x22; 32]).unwrap();
+        let mut message = f["delivery"]["artifact_grant"]["message"].clone();
+        message["recipient_node_id"] = json!("node-other");
+        let mut foreign = f["delivery"].clone();
+        foreign["artifact_grant"] = json!({
+            "protocol": membership::SIGNED_MESSAGE_PROTOCOL,
+            "signature": seed.sign(&message).unwrap(),
+            "verification_key": seed.public_key_record(),
+            "message": message,
+        });
+        assert_eq!(foreign["artifact_grant"]["verification_key"], f["seed_key"]);
+        assert_eq!(code(&foreign), "artifact_grant_recipient_mismatch");
+        // A v1 pack never carries a grant.
+        let v1 = fixture("route_assignment.json");
+        let mut smuggled = v1["delivery"].clone();
+        smuggled["artifact_grant"] = f["delivery"]["artifact_grant"].clone();
+        assert_eq!(verify(&v1, &smuggled).err().unwrap().0, "route_assignment_delivery_invalid");
     }
 }

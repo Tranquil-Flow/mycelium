@@ -226,7 +226,9 @@ def _check_grant_shape(g: Mapping[str, Any]) -> None:
     _closed(g, _GRANT_FIELDS, code)
     for field in ("grant_id", "swarm_id", "seed_node_id", "recipient_node_id", "assignment_id"):
         _match(g[field], _ID_RE, code)
-    _match(g["recipient_endpoint_id"], _ENDPOINT_RE, code)
+    # The member's enrolled endpoint id (an iroh id on a phone; any seed
+    # segment in general); sources are iroh endpoints this node dials.
+    _match(g["recipient_endpoint_id"], _ID_RE, code)
     _match(g["recipient_key_digest"], _DIGEST_RE, code)
     _match(g["manifest_pack_digest"], _DIGEST_RE, code)
     objects = _sorted_unique(g["allowed_object_digests"], code, maximum=MAX_OBJECTS)

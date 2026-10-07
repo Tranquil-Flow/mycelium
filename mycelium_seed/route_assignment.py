@@ -124,10 +124,21 @@ CREATE TABLE IF NOT EXISTS seed_route_assignments (
 """
 
 
+#: v2 assignments: the artifact sources the seed's grant authorizes.
+_ARTIFACT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS seed_route_assignment_artifacts (
+    node_id TEXT PRIMARY KEY NOT NULL,
+    assignment_id TEXT NOT NULL,
+    sources_json TEXT NOT NULL
+) WITHOUT ROWID
+"""
+
+
 def _ensure_schema(database: Path) -> None:
     connection = _connect(database)
     try:
         connection.execute(_SCHEMA)
+        connection.execute(_ARTIFACT_SCHEMA)
     except sqlite3.Error as exc:
         raise _fail("seed_route_assignment_store_unavailable") from exc
     finally:
@@ -255,13 +266,16 @@ def issue_route_assignment(
     now: Callable[[], float] = time.time,
     id_source: Callable[[], str] | None = None,
     seed_key_record: Mapping[str, Any] | None = None,
+    artifact_sources: Sequence[Mapping[str, str]] = (),
 ) -> dict[str, Any]:
     """Record (or replace) the one route assignment of an enrolled native member.
 
     Only a current, activation-eligible ``android_native_iroh`` member that has not
     been revoked can be assigned; the assignment is bound to its enrolled endpoint
     and member key so a re-enrolled device never inherits it. A v2 manifest must
-    be signed by ``seed_key_record`` (the seed's own key).
+    be signed by ``seed_key_record`` (the seed's own key) and name at least one
+    artifact source (``{endpoint_id, verification_key_digest}``) the seed's
+    per-delivery A2 grant will authorize; a v1 pack names none.
     """
 
     if not _segment(node_id):
@@ -276,6 +290,7 @@ def issue_route_assignment(
     if ttl is None or not 0 < ttl <= MAX_ASSIGNMENT_TTL_SECONDS:
         raise _fail("seed_route_assignment_ttl_invalid")
     pack = verify_stage_pack(stage_pack, seed_key_record=seed_key_record)
+    sources = _artifact_sources(artifact_sources, required=v2_manifest.is_signed_stage_manifest(pack))
     issued_at = float(now())
     assignment_id = (id_source or (lambda: f"route-{secrets.token_hex(8)}"))()
     if not _segment(assignment_id):
@@ -317,6 +332,12 @@ def issue_route_assignment(
                     issued_at + ttl,
                 ),
             )
+            connection.execute("DELETE FROM seed_route_assignment_artifacts WHERE node_id = ?", (node_id,))
+            if sources:
+                connection.execute(
+                    "INSERT INTO seed_route_assignment_artifacts (node_id, assignment_id, sources_json) VALUES (?, ?, ?)",
+                    (node_id, assignment_id, canonical_json_bytes(sources).decode("utf-8")),
+                )
             row = connection.execute(
                 "SELECT * FROM seed_route_assignments WHERE node_id = ?", (node_id,)
             ).fetchone()
@@ -329,6 +350,25 @@ def issue_route_assignment(
         raise _fail("seed_route_assignment_store_unavailable") from exc
     finally:
         connection.close()
+
+
+def _artifact_sources(values: Sequence[Mapping[str, str]], *, required: bool) -> list[dict[str, str]]:
+    sources = sorted((dict(v) for v in values), key=lambda v: v.get("endpoint_id", ""))
+    if required and not sources:
+        raise _fail("seed_route_assignment_artifact_sources_required")
+    if not required and sources:
+        raise _fail("seed_route_assignment_artifact_sources_invalid")
+    seen = set()
+    for source in sources:
+        if (
+            set(source) != {"endpoint_id", "verification_key_digest"}
+            or _ENDPOINT_RE.fullmatch(str(source["endpoint_id"])) is None
+            or _DIGEST_RE.fullmatch(str(source["verification_key_digest"])) is None
+            or source["endpoint_id"] in seen
+        ):
+            raise _fail("seed_route_assignment_artifact_sources_invalid")
+        seen.add(source["endpoint_id"])
+    return sources
 
 
 def withdraw_route_assignment(
@@ -409,6 +449,7 @@ class RouteAssignmentService:
     incarnation: str
     clock: Callable[[], float] = time.time
     id_source: Callable[[], str] | None = None
+    grant_id_source: Callable[[], str] | None = None
 
     def __post_init__(self) -> None:
         _ensure_schema(self.database)
@@ -562,6 +603,9 @@ class RouteAssignmentService:
             }
             stage_pack = json.loads(row["stage_pack_json"])
             statement_expires = min(statement_expires, float(row["expires_at"]))
+        artifact_grant = None
+        if row is not None and v2_manifest.is_signed_stage_manifest(stage_pack):
+            artifact_grant = self._artifact_grant(row, member, stage_pack["message"], now)
         statement = {
             "protocol": ROUTE_ASSIGNMENT_PROTOCOL,
             "message_id": (
@@ -587,11 +631,51 @@ class RouteAssignmentService:
             "signature": self.signer.sign(statement),
             "verification_key": self.signer.public_key_record(),
         }
-        return {
+        delivery = {
             "protocol": ROUTE_ASSIGNMENT_DELIVERY_PROTOCOL,
             "envelope": signed,
             "stage_pack": stage_pack,
         }
+        if artifact_grant is not None:
+            # v2: the A2 grant for the manifest's objects travels beside the
+            # pack, seed-signed and bound to this member's node, endpoint and key.
+            delivery["artifact_grant"] = artifact_grant
+        return delivery
+
+    def _artifact_grant(self, row: Any, member: Any, manifest: Mapping[str, Any], now: float) -> dict[str, Any]:
+        from mycelium_mobile import artifact_grant  # noqa: PLC0415
+
+        connection = _connect(self.database)
+        try:
+            record = connection.execute(
+                "SELECT sources_json FROM seed_route_assignment_artifacts WHERE node_id = ? AND assignment_id = ?",
+                (row["node_id"], row["assignment_id"]),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise _fail("seed_route_assignment_store_unavailable") from exc
+        finally:
+            connection.close()
+        if record is None:
+            raise _fail("seed_route_assignment_artifact_sources_required")
+        now_ms = int(now * 1000)
+        ttl_ms = min(artifact_grant.DEFAULT_GRANT_TTL_MS, int(float(row["expires_at"]) * 1000) - now_ms)
+        try:
+            return artifact_grant.issue_grant(
+                self.signer,
+                grant_id=(self.grant_id_source or (lambda: f"grant-{secrets.token_hex(8)}"))(),
+                swarm_id=self.swarm_id,
+                seed_node_id=self.seed_node_id,
+                recipient_node_id=row["node_id"],
+                recipient_endpoint_id=member["endpoint_id"],
+                recipient_key_digest=member["verification_key_digest"],
+                assignment_id=row["assignment_id"],
+                manifest=manifest,
+                sources=json.loads(record["sources_json"]),
+                now_unix_ms=now_ms,
+                ttl_ms=ttl_ms,
+            )
+        except artifact_grant.ArtifactGrantError as exc:
+            raise _fail(f"seed_route_assignment_grant_invalid:{exc.code}") from exc
 
 
 def service_for(coordinator: Any) -> RouteAssignmentService:
@@ -624,6 +708,13 @@ def _parser() -> argparse.ArgumentParser:
     issue.add_argument("--route-generation", required=True, type=int)
     issue.add_argument("--no-forward", action="store_true")
     issue.add_argument("--ttl-seconds", type=float, default=DEFAULT_ASSIGNMENT_TTL_SECONDS)
+    issue.add_argument(
+        "--artifact-source",
+        action="append",
+        default=[],
+        metavar="ENDPOINT_ID:KEY_DIGEST",
+        help="v2 only: an artifact source the grant authorizes (repeatable)",
+    )
     for name in ("status", "withdraw"):
         command = sub.add_parser(name)
         command.add_argument("--node-id")
@@ -670,6 +761,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 route_generation=args.route_generation,
                 forward_to=not args.no_forward,
                 ttl_seconds=args.ttl_seconds,
+                artifact_sources=[
+                    dict(zip(("endpoint_id", "verification_key_digest"), item.split(":", 1)))
+                    for item in args.artifact_source
+                ],
                 seed_key_record=coordinator.signer.public_key_record(),
             )
         elif args.command == "withdraw":

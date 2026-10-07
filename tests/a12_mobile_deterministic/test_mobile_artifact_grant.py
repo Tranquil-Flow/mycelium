@@ -77,7 +77,7 @@ def test_the_grant_covers_exactly_the_manifest_objects_and_its_window() -> None:
     tampered = copy.deepcopy(grant)
     tampered["message"]["allowed_object_digests"].append("sha256:" + "f" * 64)
     assert _code(ag.verify_grant, tampered, seed_key_record=seed, now_unix_ms=NOW) == "artifact_grant_signature_invalid"
-    for bad in [dict(ttl_ms=0), dict(ttl_ms=ag.MAX_GRANT_TTL_MS + 1), dict(recipient_endpoint_id="phone"),
+    for bad in [dict(ttl_ms=0), dict(ttl_ms=ag.MAX_GRANT_TTL_MS + 1), dict(recipient_endpoint_id="phone id"),
                 dict(sources=[{"endpoint_id": PHONE, "verification_key_digest": SOURCE_KEY.verification_key_digest}]),
                 dict(maximum_chunk_bytes=ag.MAX_CHUNK_BYTES + 1)]:
         assert _code(_grant, **bad) == "artifact_grant_invalid", bad

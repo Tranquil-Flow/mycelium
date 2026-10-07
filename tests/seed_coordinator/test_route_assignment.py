@@ -144,7 +144,11 @@ def swarm(tmp_path: Path) -> Swarm:
 
 
 def _verify(swarm: Swarm, delivery: dict, node_id: str = "node-phone") -> dict:
-    assert set(delivery) == {"protocol", "envelope", "stage_pack"}
+    # A v2 manifest also carries its seed-signed A2 grant; a v1 pack never does.
+    assert set(delivery) - {"artifact_grant"} == {"protocol", "envelope", "stage_pack"}
+    assert ("artifact_grant" in delivery) == (
+        isinstance(delivery["stage_pack"], dict) and delivery["stage_pack"].get("protocol") == ra.SIGNED_MESSAGE_PROTOCOL
+    )
     assert delivery["protocol"] == ra.ROUTE_ASSIGNMENT_DELIVERY_PROTOCOL
     envelope = delivery["envelope"]
     assert envelope["verification_key"] == swarm.coordinator.signer.public_key_record()
@@ -512,6 +516,7 @@ def test_operator_writes_are_safe_next_to_a_live_seed_serving_the_member(swarm: 
 # --- v2: seed-signed Qwen2 stage manifests (weights pinned by digest) -------
 
 V2 = json.loads((ROOT / "native/mobile_core/tests/fixtures/qwen2_stage_manifest_v2.json").read_text())
+SOURCE = {"endpoint_id": "c" * 64, "verification_key_digest": "sha256:" + "d" * 64}
 
 
 def test_a_v2_manifest_is_issued_only_seed_signed_and_delivered_beside_the_statement(swarm: Swarm) -> None:
@@ -536,13 +541,34 @@ def test_a_v2_manifest_is_issued_only_seed_signed_and_delivered_beside_the_state
         swarm.issue("node-phone", stage_pack=tampered, seed_key_record=seed.public_key_record())
     assert caught.value.code == "seed_route_assignment_stage_pack_invalid:stage_manifest_digest_mismatch"
 
-    record = swarm.issue("node-phone", stage_pack=signed, seed_key_record=seed.public_key_record())
+    with pytest.raises(SeedCoordinatorError) as caught:
+        swarm.issue("node-phone", stage_pack=signed, seed_key_record=seed.public_key_record())
+    assert caught.value.code == "seed_route_assignment_artifact_sources_required"
+    with pytest.raises(SeedCoordinatorError) as caught:
+        swarm.issue("node-phone", artifact_sources=[SOURCE])  # a v1 pack names none
+    assert caught.value.code == "seed_route_assignment_artifact_sources_invalid"
+    record = swarm.issue("node-phone", stage_pack=signed, seed_key_record=seed.public_key_record(), artifact_sources=[SOURCE])
     assert record["stage_pack_digest"] == V2["manifest"]["pack_digest"]
     delivery = swarm.service().answer(swarm.request("node-phone"))
     message = _verify(swarm, delivery)
     assert message["assignment"]["stage_pack_digest"] == V2["manifest"]["pack_digest"]
     assert delivery["stage_pack"] == signed
     assert qm.verify_signed_stage_manifest(delivery["stage_pack"], seed.public_key_record()) == V2["manifest"]
+    # The A2 grant: seed-signed, for exactly the manifest's objects, bound to
+    # this member's node, endpoint and key, authorizing the named source.
+    from mycelium_mobile import artifact_grant as ag
+
+    grant = ag.verify_grant(delivery["artifact_grant"], seed_key_record=seed.public_key_record(), now_unix_ms=int(NOW * 1000))
+    member = swarm.coordinator.member("node-phone")
+    assert (grant["recipient_node_id"], grant["recipient_endpoint_id"]) == ("node-phone", member["endpoint_id"])
+    assert grant["recipient_key_digest"] == swarm.nodes["node-phone"].signer.verification_key_digest
+    assert grant["assignment_id"] == "route-1" and grant["manifest_pack_digest"] == V2["manifest"]["pack_digest"]
+    assert grant["allowed_object_digests"] == sorted({t["sha256"] for t in V2["manifest"]["tensors"]})
+    assert grant["authorized_sources"] == [SOURCE]
+    assert grant["expires_at_unix_ms"] == int(NOW * 1000) + ag.DEFAULT_GRANT_TTL_MS
+    # A v1 delivery carries no grant.
+    swarm.issue("node-phone", id_source=lambda: "route-2")
+    assert "artifact_grant" not in swarm.service().answer(swarm.request("node-phone"))
 
 
 def test_operator_command_signs_an_unsigned_v2_manifest_with_the_seed_key(swarm: Swarm, tmp_path: Path, capsys) -> None:
@@ -555,8 +581,9 @@ def test_operator_command_signs_an_unsigned_v2_manifest_with_the_seed_key(swarm:
     with sqlite3.connect(swarm.database) as connection:
         connection.execute("UPDATE seed_members SET lease_expires_at = ?", (time.time() + 300.0,))
     argv = ["--state-root", str(swarm.database.parent)]
+    source = f"{SOURCE['endpoint_id']}:{SOURCE['verification_key_digest']}"
     assert ra.main([*argv, "issue", "--stage-pack", str(manifest_file), "--peer-endpoint-id", PEER,
-                    "--route-generation", "7"]) == 0
+                    "--route-generation", "7", "--artifact-source", source]) == 0
     issued = json.loads(capsys.readouterr().out)
     assert issued["stage_pack_digest"] == V2["manifest"]["pack_digest"]
     with sqlite3.connect(swarm.database) as connection:

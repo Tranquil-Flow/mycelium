@@ -175,7 +175,9 @@ fn grant_shape(g: &Value, env: &Value) -> Result<Grant, GrantError> {
         previous = id.to_owned();
         sources.insert(id.to_owned(), digest(&src["verification_key_digest"], c)?.to_owned());
     }
-    let recipient_endpoint_id = endpoint(&g["recipient_endpoint_id"], c)?.to_owned();
+    // The member's enrolled endpoint id (an iroh id on a phone; any seed
+    // segment in general); sources are iroh endpoints this node dials.
+    let recipient_endpoint_id = ident(&g["recipient_endpoint_id"], c)?.to_owned();
     if sources.contains_key(&recipient_endpoint_id) {
         return fail(c);
     }

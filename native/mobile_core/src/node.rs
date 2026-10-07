@@ -964,6 +964,7 @@ impl Supervisor {
                 seed_node_id: &m.cfg.seed_node_id,
                 node_id: &m.cfg.node_id,
                 endpoint_id: self.identity.endpoint_id(),
+                member_key_digest: &self.identity.verification_key_digest(),
                 generation: m.generation,
                 request_message_id: &message_id,
                 now: now_s(),
@@ -983,7 +984,7 @@ impl Supervisor {
         // pinned tensor promoted in the artifact store (digest-verified).
         let stage: Box<dyn StageRuntime> = match delivered {
             DeliveredStage::Gpt2(stage) => stage,
-            DeliveredStage::Qwen2 { manifest, envelope } => {
+            DeliveredStage::Qwen2 { manifest, envelope, grant: _ } => {
                 Box::new(self.load_v2_stage(&assignment, &manifest, &envelope, &m.pinned)?)
             }
         };
