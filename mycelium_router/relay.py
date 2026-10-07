@@ -63,11 +63,17 @@ _MAX_PATH_OWNERS = 2 * _MAX_TERMINAL_PATH_METADATA
 #: creator's records are never evicted, aged or marked for it. An evicted
 #: record can only ever be re-registered by its own creator (records by any
 #: other creator never bound by it, and only an entry can register in its own
-#: name), so eviction never reopens anything for anyone else. At most
-#: ``_MAX_TOMBSTONE_CREATORS`` creators hold records; a new creator beyond
-#: that is refused and no existing creator is evicted for it. The shared
-#: replay filter is written only by local authority (unknown-owner
-#: tombstones), so no peer drives its rotation.
+#: name), so eviction never reopens anything for anyone else. A release
+#: decided by this node or the authenticated entry binds the owner: the
+#: entry's (or local) release binds every attempt up to it, and a local
+#: release of a path another participant created also retires that exact
+#: attempt for the owner (never a high-water mark: the attempt number was
+#: the creator's claim). At most ``_MAX_TOMBSTONE_CREATORS`` creators hold a
+#: slot (records or live paths; this node never needs one). A new creator
+#: past the cap reclaims the least recently active idle slot -- no live path
+#: and every record past the retention horizon -- and is refused when none
+#: is idle. The shared replay filter is written only by local authority
+#: (unknown-owner tombstones), so no peer drives its rotation.
 _TOMBSTONE_RETENTION_SECONDS = 600.0
 _TOMBSTONE_QUOTA_PER_CREATOR = 8192
 _MAX_TOMBSTONE_CREATORS = 64
@@ -91,9 +97,11 @@ PathOwner = tuple["str | None", str]
 
 
 #: A tombstone's binding class: ``""`` for the owner's entry or local
-#: authority (binds every registration of the owner by them), otherwise the
+#: authority (binds every registration of the owner by them), ``("=", n)``
+#: for a local release of exactly attempt ``n`` of a path another
+#: participant created (binds the owner for that attempt only), otherwise the
 #: non-authoritative creator itself (binds only its own registrations).
-TombstoneKey = tuple[str, "PathOwner | None", str]
+TombstoneKey = tuple[str, "PathOwner | None", "str | tuple[str, int]"]
 
 
 def _same_owner(left: "PathOwner", right: "PathOwner") -> bool:
@@ -314,22 +322,59 @@ class RelayEngine:
             break
          self._evict_tombstone_locked(oldest)
 
+   def _live_creators_locked(self) -> set[str]:
+      return {
+         creator
+         for path_id in (*self._paths, *self._provisional_paths)
+         if (creator := self._path_creators.get(path_id)) is not None
+      }
+
+   def _creator_slots_locked(self) -> set[str]:
+      """Creators holding a slot: records or a live path (never this node)."""
+      slots = set(self._tombstones_by_creator) | self._live_creators_locked()
+      slots.discard(self.node_id)
+      return slots
+
+   def _reclaim_idle_creator_slot_locked(self) -> bool:
+      """Free the least recently active idle slot: a creator with no live
+      path whose every record is past the retention horizon. Its records are
+      evicted as its own quota would evict them (they bound others only for
+      deliveries older than the horizon)."""
+      now = self.clock.now()
+      live = self._live_creators_locked()
+      idle: tuple[float, str] | None = None
+      for creator, records in self._tombstones_by_creator.items():
+         if creator == self.node_id or creator in live or not records:
+            continue
+         newest = max(self._cancelled_recorded_at.get(key, now) for key in records)
+         if now - newest < _TOMBSTONE_RETENTION_SECONDS:
+            continue
+         if idle is None or newest < idle[0]:
+            idle = (newest, creator)
+      if idle is None:
+         return False
+      for key in tuple(self._tombstones_by_creator.get(idle[1], ())):
+         self._evict_tombstone_locked(key)
+      return True
+
    def _creator_may_register_locked(self, creator: str) -> bool:
       """Fail closed for this creator only: at its quota (after evicting its
       own records older than the retention horizon), or as a new creator past
-      the creator cap (no existing creator is evicted to make room)."""
+      the creator cap when no idle slot can be reclaimed (a slot with a live
+      path or a record younger than the horizon is never taken). This node
+      never needs a slot."""
       records = self._tombstones_by_creator.get(creator)
       if records is not None and len(records) >= _TOMBSTONE_QUOTA_PER_CREATOR:
          self._prune_creator_tombstones_locked(creator, _TOMBSTONE_QUOTA_PER_CREATOR - 1)
          records = self._tombstones_by_creator.get(creator)
          if records is not None and len(records) >= _TOMBSTONE_QUOTA_PER_CREATOR:
             return False
-      if (
-         creator not in self._tombstones_by_creator
-         and len(self._tombstones_by_creator) >= _MAX_TOMBSTONE_CREATORS
-      ):
-         return False
-      return True
+      if creator == self.node_id:
+         return True
+      slots = self._creator_slots_locked()
+      if creator in slots or len(slots) < _MAX_TOMBSTONE_CREATORS:
+         return True
+      return self._reclaim_idle_creator_slot_locked()
 
    def _prune_terminal_path_metadata_locked(self) -> None:
       for table in (self._path_owners, self._path_creators):
@@ -367,9 +412,14 @@ class RelayEngine:
       path_attempt: int,
       owner: "PathOwner | None | object" = _RECORDED_OWNER,
       creator: str | None = None,
+      *,
+      authority: str | None = None,
+      exact: bool = False,
    ) -> None:
       """Record a tombstone charged to ``creator`` (default: the path's
-      authenticated creator, else local authority)."""
+      authenticated creator, else local authority). Its binding class is
+      decided by ``authority`` (who released it; default: the creator), or
+      is the exact-attempt class when ``exact``."""
       if owner is _RECORDED_OWNER:
          owner = self._path_owners.get(path_id)
       if creator is None:
@@ -377,7 +427,11 @@ class RelayEngine:
       if owner is None:
          # Local unknown-owner tombstone: the legacy key, binds everyone.
          self._mark_cancelled_attempt_locked(path_id, path_attempt)
-      key = (path_id, owner, self._binding_class(owner, creator))
+      if exact:
+         binding: "str | tuple[str, int]" = ("=", path_attempt)
+      else:
+         binding = self._binding_class(owner, creator if authority is None else authority)
+      key = (path_id, owner, binding)
       previous = self._cancelled_path_attempts.get(key)
       if previous is not None:
          path_attempt = max(path_attempt, previous)
@@ -409,6 +463,8 @@ class RelayEngine:
             applies = True
          elif owner is None:
             applies = True
+         elif isinstance(binding, tuple):
+            applies = False  # exact-attempt records: see _exactly_released_locked
          else:
             same = recorded == owner or (recorded[0] is None and recorded[1] == owner[1])
             applies = same and (binding == "" or binding == creator)
@@ -417,6 +473,24 @@ class RelayEngine:
             if attempt is not None and (highest is None or attempt > highest):
                highest = attempt
       return highest
+
+   def _exactly_released_locked(
+      self,
+      path_id: str,
+      owner: "PathOwner | None",
+      path_attempt: int,
+   ) -> bool:
+      """Whether this node released exactly ``path_attempt`` of the owner's
+      path (a path another participant created): that attempt never
+      registers again, for anyone registering in the owner's name."""
+      for recorded, binding in self._cancelled_path_owners.get(path_id, ()):
+         if binding != ("=", path_attempt) or recorded is None:
+            continue
+         if owner is None or recorded == owner or (
+            recorded[0] is None and recorded[1] == owner[1]
+         ):
+            return True
+      return False
 
    @contextmanager
    def _path_operation_lock(self, path_id: str) -> Iterator[None]:
@@ -528,6 +602,10 @@ class RelayEngine:
          key for key in self._pending_path_cancellations if key[0] == path_id
       )
       matched = expected in self._pending_path_cancellations
+      if matched and not self._creator_may_register_locked(entry_node_id):
+         # The entry has no slot for the record: keep its pending
+         # cancellation (bounded per source) so the attempt stays refused.
+         return True
       for key in path_keys:
          self._forget_pending_locked(key)
       if not matched:
@@ -729,9 +807,6 @@ class RelayEngine:
                # Only a participant of the path (an authenticated route peer
                # placed on it) can create, and be charged for, its state.
                return None
-            if existing is None and provisional is None and not self._creator_may_register_locked(creator):
-               # The creator is at its tombstone quota: fail closed for it alone.
-               return None
             if source_node_id is not None and existing is None and provisional is None:
                # A manifest relayed by the final placement (progressive
                # discovery) only confirms a path this node already holds from
@@ -768,6 +843,14 @@ class RelayEngine:
                cancelled_attempt is not None
                and manifest.path_attempt <= cancelled_attempt
             ):
+               return None
+            if self._exactly_released_locked(manifest.path_id, owner, manifest.path_attempt):
+               return None
+            if existing is None and provisional is None and not self._creator_may_register_locked(creator):
+               # The creator is at its tombstone quota (or past the creator
+               # cap): fail closed for it alone. Checked after the tombstones,
+               # so making room never evicts the record refusing this very
+               # registration.
                return None
             if provisional is not None:
                if provisional[:3] != (
@@ -864,8 +947,6 @@ class RelayEngine:
             owner = self._resolve_owner_locked(path_id, request_id, entry_node_id)
             creator = source_node_id or entry_node_id or self.node_id
             live = path_id in self._paths or path_id in self._provisional_paths
-            if not live and not self._creator_may_register_locked(creator):
-               return None
             recorded_owner = self._path_owners.get(path_id)
             if (
                (path_id in self._paths or path_id in self._provisional_paths)
@@ -877,6 +958,10 @@ class RelayEngine:
                return None
             cancelled_attempt = self._cancelled_attempt_for_locked(path_id, owner, creator)
             if cancelled_attempt is not None and path_attempt <= cancelled_attempt:
+               return None
+            if self._exactly_released_locked(path_id, owner, path_attempt):
+               return None
+            if not live and not self._creator_may_register_locked(creator):
                return None
             existing = self._provisional_paths.get(path_id)
             if existing is not None:
@@ -2613,6 +2698,7 @@ class RelayEngine:
             if not self._release_path_state_locked(
                cancellation.path_id,
                path_attempt=cancellation.path_attempt,
+               authority=source_node_id,
             ):
                return False
          self._release_synchronized_capacity(registered_for_release)
@@ -2672,6 +2758,7 @@ class RelayEngine:
          self._release_path_state_locked(
             cancellation.path_id,
             path_attempt=cancellation.path_attempt,
+            authority=self.node_id,
          )
       self._release_synchronized_capacity(registered)
       self._release_path_resources(cancellation.path_id)
@@ -2712,7 +2799,11 @@ class RelayEngine:
       path_id: str,
       *,
       path_attempt: int | None = None,
+      authority: str | None = None,
    ) -> bool:
+      """Retire the path. ``authority`` is who decided it: the authenticated
+      entry, or this node (``None``: a local release, e.g. a runtime
+      failure)."""
       registered = self._paths.get(path_id)
       if registered is not None:
          registered_attempt = registered[1].path_attempt
@@ -2732,7 +2823,20 @@ class RelayEngine:
          or path_id in self._path_generations
       )
       if path_attempt is not None:
-         self._record_cancelled_attempt_locked(path_id, path_attempt)
+         self._record_cancelled_attempt_locked(path_id, path_attempt, authority=authority)
+         owner = self._path_owners.get(path_id)
+         creator = self._path_creators.get(path_id, self.node_id)
+         if (
+            authority is None
+            and owner is not None
+            and self._binding_class(owner, creator) != ""
+         ):
+            # A local release of a path another participant created: the
+            # owner's own registrations of this exact attempt stay refused
+            # (its in-flight ManifestLocked never revives a failed attempt).
+            self._record_cancelled_attempt_locked(
+               path_id, path_attempt, owner, creator=creator, exact=True
+            )
       if known_path:
          self._path_generations[path_id] = (
             self._path_generations.get(path_id, 0) + 1
@@ -2785,8 +2889,12 @@ class RelayEngine:
                retired = self._cancelled_attempt_for_locked(
                   path_id, self._path_owners.get(path_id), self._path_creators.get(path_id)
                )
-               if self._was_cancelled_attempt_locked(path_id, path_attempt) or (
-                  retired is not None and path_attempt <= retired
+               if (
+                  self._was_cancelled_attempt_locked(path_id, path_attempt)
+                  or (retired is not None and path_attempt <= retired)
+                  or self._exactly_released_locked(
+                     path_id, self._path_owners.get(path_id), path_attempt
+                  )
                ):
                   return
       with self._path_operation_lock(path_id):

@@ -308,8 +308,11 @@ def test_one_churner_and_two_honest_entries_through_a6_and_a7_reattempts(monkeyp
    ) is not None
    relay.release_path("pa2", path_attempt=1)
    # A and B: fresh paths, an A6 re-attempt and an A7 cutover all register.
-   req_a2, man_a2, ok = _register(relay, graph_a, request, manifest, path_id="pa2", request_id="ra2", attempt=1, entry=a)
-   assert ok, "a churner's record never binds the entry it named"
+   # The local release retired exactly attempt 1 of the path C created in
+   # A's name (review 5); C's claimed attempt is no high-water mark for A.
+   assert not _register(relay, graph_a, request, manifest, path_id="pa2", request_id="ra2", attempt=1, entry=a)[2]
+   req_a2, man_a2, ok = _register(relay, graph_a, request, manifest, path_id="pa2", request_id="ra2", attempt=2, entry=a)
+   assert ok, "a churner's record never binds the entry it named beyond the exact released attempt"
    for entry, g, name in ((a, graph_a, "a"), (b, graph_b, "b")):
       req, man, ok = _register(relay, g, request, manifest, path_id=f"live-{name}", request_id=f"live-{name}", attempt=0, entry=entry)
       assert ok
@@ -375,3 +378,185 @@ def test_only_participants_of_the_path_are_creators() -> None:
    assert not router.relay.register_path(request, manifest, graph, entry_node_id="node-outsider")
    assert "node-outsider" not in router.relay._tombstones_by_creator
    assert router.relay.register_path(request, manifest, graph, entry_node_id=nodes[0])
+
+
+# ---- review 5: release authority and creator slots ----
+
+def _provisional(relay, graph, *, path_id, request_id, attempt, entry, source):
+   return relay._register_provisional_path(
+      request_id=request_id, path_id=path_id, path_attempt=attempt,
+      topology_version=graph.topology_version, entry_node_id=entry, source_node_id=source,
+   )
+
+
+def test_a_local_release_of_a_participants_path_retires_that_attempt_for_the_owner() -> None:
+   """P (the previous hop) created the provisional path in entry E's name;
+   this node fails it. E's in-flight ManifestLocked for that attempt never
+   revives it, while E's next attempt (A6) registers and P's claimed attempt
+   number is no high-water mark for E."""
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   entry, previous = "node-e", "node-hop"
+   graph = _with_entry(graph, manifest, entry)
+   assert _provisional(relay, graph, path_id="pp", request_id="rp", attempt=1, entry=entry, source=previous)
+   relay.release_path("pp", path_attempt=1)
+   assert not _register(relay, graph, request, manifest, path_id="pp", request_id="rp", attempt=1, entry=entry)[2]
+   assert not relay.register_path(  # entryless re-registration of the same owner: refused too
+      replace(request, request_id="rp"), replace(manifest, request_id="rp", path_id="pp", path_attempt=1), graph
+   )
+   assert _register(relay, graph, request, manifest, path_id="pp", request_id="rp", attempt=2, entry=entry)[2]
+   # A far-future attempt P claims and gets released retires only itself.
+   assert _provisional(relay, graph, path_id="pq", request_id="rq", attempt=50, entry=entry, source=previous)
+   relay.release_path("pq", path_attempt=50)
+   assert _register(relay, graph, request, manifest, path_id="pq", request_id="rq", attempt=2, entry=entry)[2]
+   # Another owner of the same path id is not bound by it.
+   assert ("pp", (entry, "rp"), ("=", 1)) in relay._cancelled_path_attempts
+   assert relay._cancelled_creator[("pp", (entry, "rp"), ("=", 1))] == previous
+
+
+def test_an_entry_cancellation_of_a_participants_provisional_binds_the_owner() -> None:
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   entry = "node-e"
+   graph = _with_entry(graph, manifest, entry)
+   assert _provisional(relay, graph, path_id="pp", request_id="rp", attempt=3, entry=entry, source="node-hop")
+   assert router.receive_path_cancellation(
+      PathCancellation("rp", "pp", 3, graph.topology_version), source_node_id=entry
+   )
+   for attempt in (1, 3):
+      assert not _register(relay, graph, request, manifest, path_id="pp", request_id="rp", attempt=attempt, entry=entry)[2]
+   assert _register(relay, graph, request, manifest, path_id="pp", request_id="rp", attempt=4, entry=entry)[2]
+
+
+def _fill_creator_slots(router, graph, request, manifest, count, prefix="node"):
+   relay = router.relay
+   admitted = []
+   for index in range(count):
+      creator = f"{prefix}-{index}"
+      g = _with_entry(graph, manifest, creator)
+      req, man, ok = _register(relay, g, request, manifest, path_id=f"p-{creator}", request_id=f"r-{creator}", entry=creator)
+      if not ok:
+         break
+      assert _cancel(router, g, req, man, creator)
+      admitted.append(creator)
+      relay.clock.advance(1)
+   return admitted
+
+
+def test_this_node_never_needs_a_creator_slot() -> None:
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   assert len(_fill_creator_slots(router, graph, request, manifest, relay_module._MAX_TOMBSTONE_CREATORS)) == relay_module._MAX_TOMBSTONE_CREATORS
+   assert not _register(relay, _with_entry(graph, manifest, "node-z"), request, manifest, path_id="pz", request_id="rz", entry="node-z")[2]
+   # Local authority (no entry, no source) still registers and releases.
+   req, man = replace(request, request_id="r-local"), replace(manifest, request_id="r-local", path_id="p-local")
+   assert relay.register_path(req, man, graph)
+   relay.release_path("p-local", path_attempt=man.path_attempt)
+   assert not relay.register_path(req, man, graph)
+
+
+def test_a_live_entry_holds_its_slot() -> None:
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   entry = "node-e"
+   graph = _with_entry(graph, manifest, entry)
+   live_req, live_man, ok = _register(relay, graph, request, manifest, path_id="live", request_id="live", entry=entry)
+   assert ok
+   admitted = _fill_creator_slots(router, graph, request, manifest, relay_module._MAX_TOMBSTONE_CREATORS)
+   assert len(admitted) == relay_module._MAX_TOMBSTONE_CREATORS - 1, "the live entry's slot is counted"
+   # The entry with a live path (and no records) keeps registering new paths,
+   # releasing, and re-attempting while every other slot is busy.
+   assert _register(relay, graph, request, manifest, path_id="second", request_id="second", entry=entry)[2]
+   assert _cancel(router, graph, live_req, live_man, entry)
+   assert relay.register_path(live_req, replace(live_man, path_attempt=1), graph, entry_node_id=entry)
+   assert len(relay._creator_slots_locked()) <= relay_module._MAX_TOMBSTONE_CREATORS
+
+
+def test_an_idle_slot_is_reclaimed_after_the_horizon_and_a_busy_one_never() -> None:
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   cap = relay_module._MAX_TOMBSTONE_CREATORS
+   admitted = _fill_creator_slots(router, graph, request, manifest, cap)
+   assert len(admitted) == cap
+   # One creator stays busy: a live path keeps its slot whatever its records' age.
+   busy = admitted[0]
+   g_busy = _with_entry(graph, manifest, busy)
+   assert _register(relay, g_busy, request, manifest, path_id="busy-live", request_id="busy-live", entry=busy)[2]
+   relay.clock.advance(relay_module._TOMBSTONE_RETENTION_SECONDS + cap + 1)
+   # Another one is recently active: its young record keeps its slot.
+   fresh = admitted[-1]
+   g_fresh = _with_entry(graph, manifest, fresh)
+   req, man, ok = _register(relay, g_fresh, request, manifest, path_id="fresh-again", request_id="fresh-again", entry=fresh)
+   assert ok and _cancel(router, g_fresh, req, man, fresh)
+   before = dict(relay._cancelled_path_attempts)
+   assert _register(relay, _with_entry(graph, manifest, "node-new"), request, manifest, path_id="pn", request_id="rn", entry="node-new")[2]
+   # Exactly the least recently active idle creator was reclaimed.
+   reclaimed = [c for c in admitted if c not in relay._tombstones_by_creator]
+   assert reclaimed == [admitted[1]]
+   assert all(key in relay._cancelled_path_attempts for key in before if key[0] != f"p-{admitted[1]}")
+   assert busy in relay._creator_slots_locked() and fresh in relay._tombstones_by_creator
+   assert len(relay._creator_slots_locked()) <= cap
+
+
+def test_a_pending_cancellation_without_a_slot_stays_pending() -> None:
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   g = _with_entry(graph, manifest, "node-late")
+   assert router.receive_path_cancellation(
+      PathCancellation("r-late", "p-late", 0, graph.topology_version), source_node_id="node-late"
+   )
+   _fill_creator_slots(router, graph, request, manifest, relay_module._MAX_TOMBSTONE_CREATORS)
+   # A progressive prefill consumes pending cancellations before any slot
+   # check; with every slot busy the record cannot be charged, so the
+   # pending cancellation stays and keeps refusing the attempt.
+   for _ in range(2):
+      assert _provisional(relay, graph, path_id="p-late", request_id="r-late", attempt=0, entry="node-late", source="node-late") is None
+      assert not _register(relay, g, request, manifest, path_id="p-late", request_id="r-late", attempt=0, entry="node-late")[2]
+   assert "node-late" not in relay._tombstones_by_creator
+   assert len(relay._tombstones_by_creator) <= relay_module._MAX_TOMBSTONE_CREATORS
+
+
+def test_the_retention_horizon_outlasts_the_delivery_and_dedupe_budgets() -> None:
+   """Records are evicted only past the retention horizon; it must outlast a
+   default delivery budget and the scheduler's idempotency retention."""
+   import inspect
+
+   from mycelium_router import relay as relay_module
+   from mycelium_router.transports.iroh import IrohTransport
+
+   delivery = inspect.signature(IrohTransport.__init__).parameters["delivery_timeout_seconds"].default
+   assert relay_module._TOMBSTONE_RETENTION_SECONDS > delivery
+   assert relay_module._TOMBSTONE_RETENTION_SECONDS > RouterConfig().idempotency_retention_seconds
+
+
+def test_making_room_never_evicts_the_record_refusing_the_same_registration(monkeypatch) -> None:
+   """An entry at its quota past the horizon: its stale ManifestLocked for a
+   cancelled attempt is refused, not admitted by evicting its own record to
+   make room for it."""
+   from mycelium_router import relay as relay_module
+
+   monkeypatch.setattr(relay_module, "_TOMBSTONE_QUOTA_PER_CREATOR", 4)
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   entry = "node-e"
+   graph = _with_entry(graph, manifest, entry)
+   stale_req, stale_man, ok = _register(relay, graph, request, manifest, path_id="old", request_id="old", entry=entry)
+   assert ok and _cancel(router, graph, stale_req, stale_man, entry)
+   for index in range(3):
+      req, man, ok = _register(relay, graph, request, manifest, path_id=f"e-{index}", request_id=f"e-{index}", entry=entry)
+      assert ok and _cancel(router, graph, req, man, entry)
+   relay.clock.advance(relay_module._TOMBSTONE_RETENTION_SECONDS + 1)
+   assert not relay.register_path(stale_req, stale_man, graph, entry_node_id=entry)
+   assert ("old", (entry, "old"), "") in relay._cancelled_path_attempts
+   assert not relay._register_provisional_path(
+      request_id="old", path_id="old", path_attempt=stale_man.path_attempt,
+      topology_version=graph.topology_version, entry_node_id=entry, source_node_id=entry,
+   )
