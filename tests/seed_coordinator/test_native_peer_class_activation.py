@@ -32,9 +32,9 @@ CAPABILITIES = {
         "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
     },
     "windows_native_iroh": {
-        "runtime_backend": "tbd",
+        "runtime_backend": "numpy",
         "transport": "iroh",
-        "activation_protocol": None,
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
     },
     "linux_native_iroh": {
         "runtime_backend": "tbd",
@@ -125,7 +125,7 @@ def swarm(tmp_path: Path):
 def test_membership_projection_marks_native_eligibility(swarm) -> None:
     coordinator, ids = swarm
     assert coordinator.member(ids["android_native_iroh"])["activation_eligible"] is True
-    assert coordinator.member(ids["windows_native_iroh"])["activation_eligible"] is False
+    assert coordinator.member(ids["windows_native_iroh"])["activation_eligible"] is True
 
 
 def test_android_native_member_and_peer_receive_offers(swarm) -> None:
@@ -138,20 +138,15 @@ def test_android_native_member_and_peer_receive_offers(swarm) -> None:
     ]
 
 
-def test_windows_member_is_refused_with_the_named_reason(swarm) -> None:
+def test_windows_member_and_peer_receive_offers_pending_owner_ruling(swarm) -> None:
+    # 2026-10-07: windows_native_iroh admitted to activation (droppable commit).
     coordinator, ids = swarm
-    with pytest.raises(SeedCoordinatorError) as refused:
-        _offer(coordinator, ids["windows_native_iroh"], [], "windows")
-    assert (
-        refused.value.code
-        == "seed_member_activation_ineligible:windows_member_runtime_absent"
-    )
-    with pytest.raises(SeedCoordinatorError) as refused_peer:
-        _offer(coordinator, ids["mac_mlx_iroh"], [ids["windows_native_iroh"]], "mac-win")
-    assert (
-        refused_peer.value.code
-        == "seed_peer_activation_ineligible:windows_member_runtime_absent"
-    )
+    offer = _offer(coordinator, ids["windows_native_iroh"], [ids["mac_mlx_iroh"]], "windows")
+    assert offer["message"]["recipient_node_id"] == ids["windows_native_iroh"]
+    as_peer = _offer(coordinator, ids["mac_mlx_iroh"], [ids["windows_native_iroh"]], "mac-win")
+    assert [record["node_id"] for record in as_peer["message"]["peer_endpoint_records"]] == [
+        ids["windows_native_iroh"]
+    ]
 
 
 def test_linux_native_member_joins_but_is_refused_with_the_named_reason(swarm) -> None:

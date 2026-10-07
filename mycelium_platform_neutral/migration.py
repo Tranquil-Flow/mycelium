@@ -173,7 +173,7 @@ LEGACY_PEER_CLASS_DECOMPOSITION = {
         "platform_family": "windows",
         "architecture": "unknown",
         "transports": ["iroh"],
-        "runtimes": [],
+        "runtimes": ["numpy"],
         "declared_ineligible": True,
     },
     # The A13 Linux product class declares no bound runtime yet, so none is

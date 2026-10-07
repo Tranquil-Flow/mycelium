@@ -33,6 +33,8 @@ ANDROID = {
     "transport": "iroh",
     "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
 }
+# A still-ineligible class for the refusal case (windows_native_iroh became
+# activation-eligible 2026-10-07, pending owner ruling).
 WINDOWS = {"runtime_backend": "tbd", "transport": "iroh", "activation_protocol": None}
 
 
@@ -200,7 +202,7 @@ def test_no_assignment_withdrawal_and_expiry_answer_a_signed_none(swarm: Swarm) 
 
 
 def test_issue_refuses_ineligible_unknown_or_malformed_assignments(swarm: Swarm) -> None:
-    swarm.join("node-windows", "windows_native_iroh", WINDOWS)
+    swarm.join("node-windows", "linux_native_iroh", WINDOWS)
     swarm.join("node-mac", "mac_mlx_iroh", {**ANDROID, "runtime_backend": "mlx"})
 
     def code(**kwargs) -> str:

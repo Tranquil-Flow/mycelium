@@ -31,7 +31,7 @@ def test_native_classes_decompose_without_guessing() -> None:
         "platform_family": "windows",
         "architecture": "unknown",
         "transports": ["iroh"],
-        "runtimes": [],
+        "runtimes": ["numpy"],
         "declared_ineligible": True,
     }
 

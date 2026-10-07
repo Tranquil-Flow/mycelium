@@ -79,12 +79,16 @@ _PEER_RUNTIME_CAPABILITIES = {
         "transport": "iroh",
         "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
     },
-    # [2026-09-27 OWNER RULING] Windows is admitted as a joinable, declared
-    # activation-ineligible peer until a Windows member runtime exists.
+    # [2026-09-27 OWNER RULING, superseded pending owner confirmation
+    # 2026-10-07] Windows was joinable but activation-ineligible until a
+    # Windows member runtime existed.  The native Windows node (host-platform
+    # seam, Job Object service runner, loopback iroh sidecar) now runs the
+    # NumPy stage runtime, so the class declares it and is activation-eligible.
+    # This change is isolated so it can be dropped if the owner keeps the ruling.
     "windows_native_iroh": {
-        "runtime_backend": "tbd",
+        "runtime_backend": "numpy",
         "transport": "iroh",
-        "activation_protocol": None,
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
     },
     # The A13 Linux product onboarding's class.  It is joinable, but the Linux
     # product package binds no member stage runtime (its service argv is caller
@@ -101,12 +105,11 @@ _PEER_RUNTIME_CAPABILITIES = {
 PEER_CLASSES = frozenset(_PEER_RUNTIME_CAPABILITIES)
 #: Closed allow-set of peer classes that may receive activation work.
 _ACTIVATION_ELIGIBLE_PEER_CLASSES = frozenset(
-    {"mac_mlx_iroh", "linux_numpy_iroh", "android_native_iroh"}
+    {"mac_mlx_iroh", "linux_numpy_iroh", "android_native_iroh", "windows_native_iroh"}
 )
 #: Named, stable refusal reasons for known peer classes that are admitted to
 #: membership but may not receive activation work yet.
 PEER_CLASS_ACTIVATION_REFUSALS = {
-    "windows_native_iroh": "windows_member_runtime_absent",
     "linux_native_iroh": "linux_native_member_runtime_unbound",
 }
 

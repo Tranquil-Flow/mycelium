@@ -29,9 +29,9 @@ ANDROID_NATIVE = {
     "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
 }
 WINDOWS_NATIVE = {
-    "runtime_backend": "tbd",
+    "runtime_backend": "numpy",
     "transport": "iroh",
-    "activation_protocol": None,
+    "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
 }
 
 
@@ -72,21 +72,18 @@ def test_android_native_iroh_is_activation_eligible_without_a_refusal() -> None:
     assert peer_runtime_activation_refusal("android_native_iroh") is None
 
 
-def test_windows_native_iroh_is_ineligible_with_a_named_refusal() -> None:
-    assert not peer_runtime_is_activation_eligible("windows_native_iroh", WINDOWS_NATIVE)
-    assert (
-        peer_runtime_activation_refusal("windows_native_iroh")
-        == "windows_member_runtime_absent"
-    )
+def test_windows_native_iroh_is_activation_eligible_pending_owner_ruling() -> None:
+    # 2026-10-07: admitted with the native Windows node runtime (droppable commit).
+    assert peer_runtime_is_activation_eligible("windows_native_iroh", WINDOWS_NATIVE)
+    assert peer_runtime_activation_refusal("windows_native_iroh") is None
     assert PEER_CLASS_ACTIVATION_REFUSALS == {
-        "windows_native_iroh": "windows_member_runtime_absent",
         "linux_native_iroh": "linux_native_member_runtime_unbound",
     }
 
 
 def test_activation_allow_set_is_closed_and_exact() -> None:
     assert _ACTIVATION_ELIGIBLE_PEER_CLASSES == frozenset(
-        {"mac_mlx_iroh", "linux_numpy_iroh", "android_native_iroh"}
+        {"mac_mlx_iroh", "linux_numpy_iroh", "android_native_iroh", "windows_native_iroh"}
     )
     # Negative controls: every other class stays ineligible even when it
     # declares its own exact capability, and a refusal never names an
@@ -104,11 +101,8 @@ def test_refusal_lookup_is_total_and_never_guesses(peer_class: object) -> None:
 @pytest.mark.parametrize(
     ("peer_class", "capability"),
     [
-        # Windows cannot promote itself by declaring the activation protocol.
-        (
-            "windows_native_iroh",
-            {**WINDOWS_NATIVE, "activation_protocol": ROUTER_ACTIVATION_PROTOCOL},
-        ),
+        # The Windows class is bound to its exact runtime and protocol.
+        ("windows_native_iroh", {**WINDOWS_NATIVE, "activation_protocol": None}),
         ("windows_native_iroh", {**WINDOWS_NATIVE, "runtime_backend": "mlx"}),
         # The Android class is bound to its exact runtime, not to Termux's.
         ("android_native_iroh", {**ANDROID_NATIVE, "runtime_backend": "pixel-stdlib"}),

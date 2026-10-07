@@ -101,6 +101,12 @@ _PEER_CAPABILITIES = {
         "transport": "iroh",
         "activation_protocol": "mycelium.router_wire.v1",
     },
+    # Windows activation eligibility (pending owner confirmation 2026-10-07).
+    "windows_native_iroh": {
+        "runtime_backend": "numpy",
+        "transport": "iroh",
+        "activation_protocol": "mycelium.router_wire.v1",
+    },
     "linux_tbd": {
         "runtime_backend": "tbd",
         "transport": "none",
