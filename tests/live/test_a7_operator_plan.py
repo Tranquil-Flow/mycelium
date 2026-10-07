@@ -47,6 +47,7 @@ from physical_inference_qualification import PeerIdentity, QualificationControll
 from runtime_loader import load_assignment_stage
 from scripts.build_qwen_live_route import _bytes, _digest, _physical_graph_document, _transfer_manifest, _write_document
 from tests.live import test_a7_product_path as harness
+from tests.live.test_a7_physical_measurement import _MAX_NEW as _MEASURED_MAX_NEW
 from tests.live.test_a7_physical_measurement import _RouteDriver, gate
 from tests.physical_qualification.test_node_service import NODE_SCRIPT, ROOT, SIDECAR_BINARY
 
@@ -251,6 +252,14 @@ _EXPECTED = {
 def test_extension_stages_measures_and_serves_each_case_variant(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant: str) -> None:
     from mycelium_a7_parity_measurement import measure_identity_qualification
 
+    # The measurement kills the source only on a settled watermark under the
+    # freeze; an unsettled freeze is resumed and the request advances.  A
+    # 5-token request leaves about three freezes after the second commit, so
+    # under load it often completed before one settled
+    # (a7_request_ended_before_fault).  Give the measured request the same
+    # headroom as the physical measurement tests (the plan's reference tokens
+    # and startup decode count follow ``_MAX_NEW``).
+    monkeypatch.setattr(harness, "_MAX_NEW", _MEASURED_MAX_NEW)
     root = Path(tempfile.mkdtemp(prefix="mycelium-a7-plan-", dir="/tmp")).resolve()
     root.chmod(0o700)
     state = None
