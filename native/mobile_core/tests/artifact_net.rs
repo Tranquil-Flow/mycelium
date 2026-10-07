@@ -103,7 +103,7 @@ async fn world(tag: &str) -> World {
     let manifest = StageManifest::from_document(&fixture("qwen2_stage_manifest_v2.json")["manifest"]).unwrap();
     let objects = scratch(&format!("{tag}-objects"));
     export_objects(&objects);
-    let source = ArtifactSource::bind(&[0x51; 32], &[0x33; 32], seed.public_key_record(), objects.clone(), Reachability::LocalOnly).await.unwrap();
+    let source = ArtifactSource::bind(&[0x51; 32], &[0x33; 32], seed.public_key_record(), objects.clone(), &scratch("state"), Reachability::LocalOnly).await.unwrap();
     drop(source.spawn_accept()); // detached accept loop
     World { seed, member, phone_secret, manifest, source, objects }
 }
@@ -154,7 +154,7 @@ async fn a_source_refuses_another_peer_a_spent_budget_and_unverified_objects() {
     let mut bytes = std::fs::read(&victim).unwrap();
     bytes[0] ^= 1;
     std::fs::write(&victim, &bytes).unwrap();
-    let source2 = ArtifactSource::bind(&[0x52; 32], &[0x34; 32], w.seed.public_key_record(), w.objects.clone(), Reachability::LocalOnly).await.unwrap();
+    let source2 = ArtifactSource::bind(&[0x52; 32], &[0x34; 32], w.seed.public_key_record(), w.objects.clone(), &scratch("state"), Reachability::LocalOnly).await.unwrap();
     drop(source2.spawn_accept()); // detached accept loop
     let w2 = World { source: source2, ..w };
     let g = grant(&w2.seed, &phone, &w2.member, &w2.manifest, &w2.source, None);
@@ -168,8 +168,64 @@ async fn a_source_refuses_another_peer_a_spent_budget_and_unverified_objects() {
 async fn a_client_only_dials_sources_the_grant_authorizes() {
     let w = world("auth").await;
     let g = grant(&w.seed, &iroh_id(w.phone_secret), &w.member, &w.manifest, &w.source, None);
-    let other = ArtifactSource::bind(&[0x53; 32], &[0x35; 32], w.seed.public_key_record(), w.objects.clone(), Reachability::LocalOnly).await.unwrap();
+    let other = ArtifactSource::bind(&[0x53; 32], &[0x35; 32], w.seed.public_key_record(), w.objects.clone(), &scratch("state"), Reachability::LocalOnly).await.unwrap();
     let err = IrohChunkSource::bind(&[0x43; 32], w.member.clone(), g, vec![other.addr()], Reachability::LocalOnly).await.err().unwrap();
     assert_eq!(err.0, "artifact_source_not_authorized");
     std::fs::remove_dir_all(&w.objects).unwrap();
+}
+
+/// One raw request over the artifact ALPN; returns the response header.
+async fn raw_request(endpoint: &iroh::Endpoint, to: iroh::EndpointAddr, env: &Value) -> Value {
+    let connection = endpoint.connect(to, ag::ARTIFACT_CHUNK_ALPN).await.unwrap();
+    let (mut send, mut recv) = connection.open_bi().await.unwrap();
+    send.write_all(&serde_json::to_vec(env).unwrap()).await.unwrap();
+    send.finish().unwrap();
+    let raw = recv.read_to_end(1 << 20).await.unwrap();
+    let n = u32::from_be_bytes(raw[..4].try_into().unwrap()) as usize;
+    serde_json::from_slice(&raw[4..4 + n]).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_replay_fence_and_budget_survive_a_source_restart() {
+    let seed = Identity::from_secret("seed-endpoint", &[0x22; 32]).unwrap();
+    let phone_secret = [0x44; 32];
+    let member = Identity::from_secret(&iroh_id(phone_secret), &[0x11; 32]).unwrap();
+    let manifest = StageManifest::from_document(&fixture("qwen2_stage_manifest_v2.json")["manifest"]).unwrap();
+    let objects = scratch("durable-objects");
+    export_objects(&objects);
+    let state = scratch("durable-state");
+    let source = ArtifactSource::bind(&[0x54; 32], &[0x36; 32], seed.public_key_record(), objects.clone(), &state, Reachability::LocalOnly).await.unwrap();
+    drop(source.spawn_accept()); // detached accept loop
+    let g = grant(&seed, &iroh_id(phone_secret), &member, &manifest, &source, Some(40));
+    let phone = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+        .relay_mode(iroh::RelayMode::Disabled)
+        .clear_ip_transports()
+        .bind_addr(std::net::SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0))
+        .unwrap()
+        .secret_key(iroh::SecretKey::from_bytes(&phone_secret))
+        .bind()
+        .await
+        .unwrap();
+    let digest = manifest.tensors[0].sha256.clone();
+    let req = |id: &str| ag::sign_chunk_request(&member, &g, id, &format!("nonce-{id}"), &source.endpoint_id(), &digest, 0, 16, now_ms()).unwrap();
+    let first = req("r1");
+    assert_eq!(raw_request(&phone, source.addr(), &first).await["status"], "ok");
+    assert_eq!(raw_request(&phone, source.addr(), &first).await["code"], "artifact_chunk_request_replay");
+    assert_eq!(raw_request(&phone, source.addr(), &req("r2")).await["status"], "ok");
+    source.close().await;
+
+    // Same keys and state dir: the fence and the 32 of 40 budget bytes persist.
+    let restarted = ArtifactSource::bind(&[0x54; 32], &[0x36; 32], seed.public_key_record(), objects.clone(), &state, Reachability::LocalOnly).await.unwrap();
+    drop(restarted.spawn_accept()); // detached accept loop
+    assert_eq!(raw_request(&phone, restarted.addr(), &first).await["code"], "artifact_chunk_request_replay");
+    assert_eq!(raw_request(&phone, restarted.addr(), &req("r3")).await["code"], "artifact_grant_budget_exhausted");
+    // A torn final line is not an admission and does not break the replay.
+    let journal = restarted.journal_path().unwrap();
+    std::fs::OpenOptions::new().append(true).open(&journal).and_then(|mut f| std::io::Write::write_all(&mut f, b"{\"g\":\"grant-net-1\",\"e\":")).unwrap();
+    restarted.close().await;
+    let again = ArtifactSource::bind(&[0x54; 32], &[0x36; 32], seed.public_key_record(), objects.clone(), &state, Reachability::LocalOnly).await.unwrap();
+    assert_eq!(std::fs::read_to_string(&journal).unwrap().lines().count(), 2, "compacted to the two admissions");
+    again.close().await;
+    std::fs::remove_dir_all(objects).unwrap();
+    std::fs::remove_dir_all(state).unwrap();
 }

@@ -16,7 +16,10 @@
 //! the grant's total byte budget is not exceeded, and the object file is the
 //! content its name says (re-hashed once, A2 `artifact_source_chunk_unverified`).
 //! It paces each grant to `maximum_bytes_per_second` and signs a receipt over
-//! the bytes it serves. The phone ([`IrohChunkSource`]) checks every receipt
+//! the bytes it serves. The replay fence and per-grant byte budget are durable
+//! (A2 keeps both durably): every admission is appended and fsynced to
+//! `<state>/source-ledger.jsonl` before any byte is sent, replayed at bind,
+//! and compacted to the grants still inside their window (+ skew). The phone ([`IrohChunkSource`]) checks every receipt
 //! (`verify_chunk_receipt`) before the bytes reach the artifact store, which
 //! then digest-verifies whole objects before promotion.
 
@@ -67,6 +70,54 @@ async fn bind(secret: &[u8; 32], reach: Reachability, alpn: &[u8]) -> Result<End
         .map_err(|_| ArtifactError("endpoint_bind_failed".into()))
 }
 
+/// The durable admission journal: one JSON line per admitted request.
+struct Journal {
+    path: PathBuf,
+    file: std::fs::File,
+}
+
+impl Journal {
+    /// Replay `<dir>/source-ledger.jsonl` into `state`, keeping the entries of
+    /// grants not yet expired, and rewrite it compacted (tmp, fsync, rename).
+    fn open(dir: &std::path::Path, state: &mut SourceState, now: u64) -> Result<Self, ArtifactError> {
+        use std::io::Write;
+        let io = |_| ArtifactError("artifact_source_ledger_unavailable".into());
+        std::fs::create_dir_all(dir).map_err(io)?;
+        let path = dir.join("source-ledger.jsonl");
+        let mut kept = Vec::new();
+        if let Ok(raw) = std::fs::read_to_string(&path) {
+            for line in raw.lines() {
+                // A torn final line (crash mid-append) is not an admission.
+                let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+                let (Some(g), Some(e), Some(f), Some(n)) = (v["g"].as_str(), v["e"].as_u64(), v["f"].as_str(), v["n"].as_u64()) else { continue };
+                if e + ag::CLOCK_SKEW_MS < now {
+                    continue;
+                }
+                state.admit(f.to_owned(), g, n);
+                kept.push(line.to_owned());
+            }
+        }
+        let tmp = dir.join("source-ledger.jsonl.tmp");
+        let mut f = std::fs::File::create(&tmp).map_err(io)?;
+        for line in &kept {
+            writeln!(f, "{line}").map_err(io)?;
+        }
+        f.sync_all().map_err(io)?;
+        std::fs::rename(&tmp, &path).map_err(io)?;
+        #[cfg(unix)]
+        std::fs::File::open(dir).and_then(|d| d.sync_all()).map_err(io)?;
+        let file = std::fs::OpenOptions::new().append(true).open(&path).map_err(io)?;
+        Ok(Self { path, file })
+    }
+
+    fn append(&mut self, grant: &Grant, fence: &str, bytes: u64) -> Result<(), ()> {
+        use std::io::Write;
+        let line = json!({"g": grant.grant_id, "e": grant.expires_at_unix_ms, "f": fence, "n": bytes});
+        writeln!(self.file, "{line}").map_err(|_| ())?;
+        self.file.sync_data().map_err(|_| ())
+    }
+}
+
 #[derive(Default)]
 struct SourceState {
     fence: BTreeSet<String>,
@@ -75,6 +126,22 @@ struct SourceState {
     grants: BTreeMap<String, (u64, Instant)>,
     /// object hex -> verified length.
     verified: BTreeMap<String, u64>,
+    journal: Option<Journal>,
+}
+
+impl SourceState {
+    fn admit(&mut self, fence: String, grant_id: &str, bytes: u64) {
+        if self.fence.insert(fence.clone()) {
+            self.fence_order.push_back(fence);
+        }
+        while self.fence_order.len() > MAX_FENCE {
+            if let Some(old) = self.fence_order.pop_front() {
+                self.fence.remove(&old);
+            }
+        }
+        let entry = self.grants.entry(grant_id.to_owned()).or_insert((0, Instant::now()));
+        entry.0 += bytes;
+    }
 }
 
 /// An artifact source serving content-addressed objects (`<root>/<sha256 hex>`).
@@ -101,10 +168,19 @@ fn frame_header(header: &Value) -> Vec<u8> {
 impl ArtifactSource {
     /// Bind the source endpoint. Its signing identity is bound to its iroh
     /// endpoint id, which is what grants authorize.
-    pub async fn bind(secret: &[u8; 32], signing_secret: &[u8; 32], seed_key: Value, root: PathBuf, reach: Reachability) -> Result<Self, ArtifactError> {
+    /// `state_dir` holds the durable admission journal (fence + budgets).
+    pub async fn bind(secret: &[u8; 32], signing_secret: &[u8; 32], seed_key: Value, root: PathBuf, state_dir: &std::path::Path, reach: Reachability) -> Result<Self, ArtifactError> {
+        let mut state = SourceState::default();
+        let journal = Journal::open(state_dir, &mut state, now_ms())?;
+        state.journal = Some(journal);
         let endpoint = bind(secret, reach, ARTIFACT_CHUNK_ALPN).await?;
         let signer = Identity::from_secret(&endpoint.id().to_string(), signing_secret).map_err(|_| ArtifactError("source_identity_invalid".into()))?;
-        Ok(Self { endpoint, signer: Arc::new(signer), seed_key: Arc::new(seed_key), root, state: Arc::default() })
+        Ok(Self { endpoint, signer: Arc::new(signer), seed_key: Arc::new(seed_key), root, state: Arc::new(Mutex::new(state)) })
+    }
+
+    /// Where the admission journal lives (for operators and tests).
+    pub fn journal_path(&self) -> Option<PathBuf> {
+        self.state.lock().unwrap().journal.as_ref().map(|j| j.path.clone())
     }
 
     pub fn endpoint_id(&self) -> String {
@@ -147,7 +223,10 @@ impl ArtifactSource {
         if grant.recipient_endpoint_id != remote.to_string() {
             return Err("artifact_recipient_transport_mismatch".into());
         }
-        let fence_key = format!("{}\0{}\0{}", grant.grant_id, request.request_id, env["message"]["request_nonce"].as_str().unwrap_or(""));
+        // A2's fence key: sha256(grant_id \0 request_id \0 nonce).
+        let fence_key = hex::encode(Sha256::digest(
+            format!("{}\0{}\0{}", grant.grant_id, request.request_id, env["message"]["request_nonce"].as_str().unwrap_or("")).as_bytes(),
+        ));
         let pace = {
             let mut st = self.state.lock().unwrap();
             if st.fence.contains(&fence_key) {
@@ -157,14 +236,13 @@ impl ArtifactSource {
             if served + request.length_bytes > grant.maximum_total_bytes {
                 return Err("artifact_grant_budget_exhausted".into());
             }
-            st.fence.insert(fence_key.clone());
-            st.fence_order.push_back(fence_key);
-            while st.fence_order.len() > MAX_FENCE {
-                if let Some(old) = st.fence_order.pop_front() {
-                    st.fence.remove(&old);
-                }
+            // Durable before any byte leaves: a crash cannot reopen the fence
+            // or refund the budget.
+            let journaled = st.journal.as_mut().is_some_and(|j| j.append(&grant, &fence_key, request.length_bytes).is_ok());
+            if !journaled {
+                return Err("artifact_source_ledger_unavailable".into());
             }
-            st.grants.insert(grant.grant_id.clone(), (served + request.length_bytes, since));
+            st.admit(fence_key, &grant.grant_id, request.length_bytes);
             // Pacing: the grant's served bytes may not run ahead of its rate.
             let due_ms = (served + request.length_bytes).saturating_mul(1000) / grant.maximum_bytes_per_second;
             due_ms.saturating_sub(since.elapsed().as_millis() as u64)

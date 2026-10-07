@@ -12,7 +12,8 @@
 //! the seed's public key record (grants must verify under it). `<key-dir>`
 //! keeps this source's iroh and signing secrets (created 0600 on first run),
 //! so its endpoint id and key digest stay stable for the owner's
-//! `route_assignment issue --artifact-source ENDPOINT_ID:KEY_DIGEST`.
+//! `route_assignment issue --artifact-source ENDPOINT_ID:KEY_DIGEST`; it also
+//! holds the durable admission journal (replay fence and grant budgets).
 //! Prints one ready line with both, then serves until killed.
 
 use std::io::Write;
@@ -47,7 +48,7 @@ async fn main() {
     let key_dir = PathBuf::from(&args[3]);
     std::fs::create_dir_all(&key_dir).expect("key dir");
     let reach = if args.iter().any(|a| a == "--local") { Reachability::LocalOnly } else { Reachability::Production };
-    let source = ArtifactSource::bind(&secret(&key_dir.join("iroh.key")), &secret(&key_dir.join("signing.key")), seed_key, PathBuf::from(&args[1]), reach)
+    let source = ArtifactSource::bind(&secret(&key_dir.join("iroh.key")), &secret(&key_dir.join("signing.key")), seed_key, PathBuf::from(&args[1]), &key_dir, reach)
         .await
         .expect("bind");
     let accept = source.spawn_accept();
