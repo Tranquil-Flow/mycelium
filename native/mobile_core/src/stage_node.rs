@@ -57,7 +57,7 @@
 //! running the real Python Router as this node (with these bounds), pins
 //! every decision and every sent byte (`tests/phone_stage_node.rs`).
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -141,6 +141,69 @@ struct Tomb {
     attempt: i64,
     recorded_at: f64,
     creator: String,
+    /// Position in its creator's record order (newest highest).
+    seq: u64,
+}
+
+/// One creator's records: first-seen sequence and its records by sequence
+/// (oldest first). Every lookup is a tree operation, never a scan.
+struct Records {
+    first_seen: u64,
+    by_seq: BTreeMap<u64, TombKey>,
+}
+
+/// Pending cancellations, indexed so no frame scans the table.
+#[derive(Default)]
+struct Pending {
+    by_key: BTreeMap<PendingKey, u64>,
+    /// Oldest first (a repeated cancellation moves to the end).
+    by_seq: BTreeMap<u64, PendingKey>,
+    by_source: BTreeMap<String, BTreeSet<u64>>,
+    by_path: BTreeMap<String, BTreeSet<u64>>,
+}
+
+impl Pending {
+    fn len(&self) -> usize {
+        self.by_key.len()
+    }
+
+    fn contains(&self, key: &PendingKey) -> bool {
+        self.by_key.contains_key(key)
+    }
+
+    fn of_source(&self, source: &str) -> usize {
+        self.by_source.get(source).map_or(0, BTreeSet::len)
+    }
+
+    fn insert(&mut self, key: PendingKey, seq: u64) {
+        self.forget(&key);
+        self.by_source.entry(key.4.clone()).or_default().insert(seq);
+        self.by_path.entry(key.1.clone()).or_default().insert(seq);
+        self.by_seq.insert(seq, key.clone());
+        self.by_key.insert(key, seq);
+    }
+
+    fn forget(&mut self, key: &PendingKey) {
+        let Some(seq) = self.by_key.remove(key) else { return };
+        self.by_seq.remove(&seq);
+        for (index, name) in [(&mut self.by_source, &key.4), (&mut self.by_path, &key.1)] {
+            if let Some(set) = index.get_mut(name) {
+                set.remove(&seq);
+                if set.is_empty() {
+                    index.remove(name);
+                }
+            }
+        }
+    }
+
+    fn oldest_of_source(&self, source: &str) -> Option<PendingKey> {
+        let seq = self.by_source.get(source)?.first()?;
+        self.by_seq.get(seq).cloned()
+    }
+
+    fn of_path(&self, path_id: &str) -> Vec<PendingKey> {
+        self.by_path.get(path_id).map(|seqs| seqs.iter().filter_map(|s| self.by_seq.get(s).cloned()).collect()).unwrap_or_default()
+    }
 }
 
 pub struct StageNode {
@@ -148,13 +211,12 @@ pub struct StageNode {
     bounds: Bounds,
     paths: BTreeMap<String, Registered>,
     tombstones: BTreeMap<TombKey, Tomb>,
-    /// creator -> (first-seen sequence, its records oldest first).
-    by_creator: BTreeMap<String, (u64, VecDeque<TombKey>)>,
-    creator_seq: u64,
-    pending: BTreeSet<PendingKey>,
-    /// Oldest first (a repeated cancellation moves to the end).
-    pending_order: VecDeque<PendingKey>,
-    pending_by_source: BTreeMap<String, usize>,
+    by_creator: BTreeMap<String, Records>,
+    /// Live paths per creator (slots and the per-creator share).
+    live: BTreeMap<String, usize>,
+    /// Monotonic sequence for records, creators and pending entries.
+    seq: u64,
+    pending: Pending,
     /// Relay clock: the caller's monotonic seconds (never moves back).
     now: f64,
     ledger: HopLedger<Outcome>,
@@ -176,10 +238,9 @@ impl StageNode {
             paths: BTreeMap::new(),
             tombstones: BTreeMap::new(),
             by_creator: BTreeMap::new(),
-            creator_seq: 0,
-            pending: BTreeSet::new(),
-            pending_order: VecDeque::new(),
-            pending_by_source: BTreeMap::new(),
+            live: BTreeMap::new(),
+            seq: 0,
+            pending: Pending::default(),
             now: 0.0,
             ledger: HopLedger::new(LEDGER_CAPACITY),
         }
@@ -197,53 +258,56 @@ impl StageNode {
     /// Record (or raise) the owner's tombstone, charged to `creator` (an
     /// existing record keeps its creator), then trim that creator's own
     /// records past the horizon down to its quota.
+    fn next_seq(&mut self) -> u64 {
+        self.seq += 1;
+        self.seq
+    }
+
     fn record_tombstone(&mut self, path_id: &str, owner: Owner, attempt: i64, creator: &str) {
         let key = (path_id.to_owned(), owner);
         let now = self.now;
-        let charged = match self.tombstones.get_mut(&key) {
+        let seq = self.next_seq();
+        let (charged, old_seq) = match self.tombstones.get_mut(&key) {
             Some(t) => {
                 t.attempt = t.attempt.max(attempt);
                 t.recorded_at = now;
-                t.creator.clone()
+                let old = std::mem::replace(&mut t.seq, seq);
+                (t.creator.clone(), Some(old))
             }
             None => {
-                self.tombstones.insert(key.clone(), Tomb { attempt, recorded_at: now, creator: creator.to_owned() });
-                creator.to_owned()
+                self.tombstones.insert(key.clone(), Tomb { attempt, recorded_at: now, creator: creator.to_owned(), seq });
+                (creator.to_owned(), None)
             }
         };
-        if !self.by_creator.contains_key(&charged) {
-            self.creator_seq += 1;
-            self.by_creator.insert(charged.clone(), (self.creator_seq, VecDeque::new()));
+        let records = self.by_creator.entry(charged.clone()).or_insert_with(|| Records { first_seen: seq, by_seq: BTreeMap::new() });
+        if let Some(old) = old_seq {
+            records.by_seq.remove(&old);
         }
-        let records = &mut self.by_creator.get_mut(&charged).unwrap().1;
-        records.retain(|k| *k != key);
-        records.push_back(key);
+        records.by_seq.insert(seq, key);
         self.prune_creator(&charged, self.bounds.quota_per_creator);
     }
 
     /// Drop one record (it bound only its owner, and is past the horizon).
     fn evict(&mut self, key: &TombKey) {
         if let Some(t) = self.tombstones.remove(key)
-            && let Some((_, records)) = self.by_creator.get_mut(&t.creator)
+            && let Some(records) = self.by_creator.get_mut(&t.creator)
         {
-            records.retain(|k| k != key);
-            if records.is_empty() {
+            records.by_seq.remove(&t.seq);
+            if records.by_seq.is_empty() {
                 self.by_creator.remove(&t.creator);
             }
         }
     }
 
+    fn record_count(&self, creator: &str) -> usize {
+        self.by_creator.get(creator).map_or(0, |r| r.by_seq.len())
+    }
+
     /// Evict a creator's own records past the horizon while it holds more
     /// than `limit`; never another creator's, never a young one.
     fn prune_creator(&mut self, creator: &str, limit: usize) {
-        loop {
-            let Some((_, records)) = self.by_creator.get(creator) else {
-                return;
-            };
-            if records.len() <= limit {
-                return;
-            }
-            let oldest = records.front().cloned().unwrap();
+        while self.record_count(creator) > limit {
+            let oldest = self.by_creator[creator].by_seq.first_key_value().map(|(_, k)| k.clone()).unwrap();
             let at = self.tombstones.get(&oldest).map_or(self.now, |t| t.recorded_at);
             if self.now - at < TOMBSTONE_RETENTION_S {
                 return;
@@ -252,39 +316,41 @@ impl StageNode {
         }
     }
 
-    fn live_creators(&self) -> BTreeSet<&str> {
-        self.paths.values().map(|r| r.creator.as_str()).collect()
+    /// Creators holding a slot: records or a live path (never this node).
+    /// At most `max_creators` (+ the ones a cancellation charges while live),
+    /// so this walk is bounded by the cap, not by any table.
+    fn creator_slot_count(&self) -> usize {
+        let with_records = self.by_creator.keys().filter(|c| **c != self.local).count();
+        let live_only = self.live.keys().filter(|c| **c != self.local && !self.by_creator.contains_key(*c)).count();
+        with_records + live_only
     }
 
-    /// Creators holding a slot: records or a live path (never this node).
-    fn creator_slots(&self) -> BTreeSet<String> {
-        let mut slots: BTreeSet<String> = self.by_creator.keys().cloned().collect();
-        slots.extend(self.live_creators().into_iter().map(str::to_owned));
-        slots.remove(&self.local);
-        slots
+    fn holds_slot(&self, creator: &str) -> bool {
+        self.by_creator.contains_key(creator) || self.live.contains_key(creator)
     }
 
     /// Free the least recently active idle slot: a creator with no live path
     /// whose newest record is past the horizon (ties: the earliest creator).
+    /// One step per creator holding records (bounded by the cap).
     fn reclaim_idle_slot(&mut self) -> bool {
-        let live = self.live_creators();
         let mut idle: Option<(f64, u64, String)> = None;
-        for (creator, (seq, records)) in &self.by_creator {
-            if *creator == self.local || live.contains(creator.as_str()) || records.is_empty() {
+        for (creator, records) in &self.by_creator {
+            if *creator == self.local || self.live.contains_key(creator) {
                 continue;
             }
-            let newest = records.iter().map(|k| self.tombstones.get(k).map_or(self.now, |t| t.recorded_at)).fold(f64::NEG_INFINITY, f64::max);
+            let Some((_, newest_key)) = records.by_seq.last_key_value() else { continue };
+            let newest = self.tombstones.get(newest_key).map_or(self.now, |t| t.recorded_at);
             if self.now - newest < TOMBSTONE_RETENTION_S {
                 continue;
             }
-            if idle.as_ref().is_none_or(|(at, s, _)| newest < *at || (newest == *at && seq < s)) {
-                idle = Some((newest, *seq, creator.clone()));
+            if idle.as_ref().is_none_or(|(at, first, _)| newest < *at || (newest == *at && records.first_seen < *first)) {
+                idle = Some((newest, records.first_seen, creator.clone()));
             }
         }
         let Some((_, _, creator)) = idle else {
             return false;
         };
-        let records: Vec<TombKey> = self.by_creator.get(&creator).map(|(_, r)| r.iter().cloned().collect()).unwrap_or_default();
+        let records: Vec<TombKey> = self.by_creator.get(&creator).map(|r| r.by_seq.values().cloned().collect()).unwrap_or_default();
         for key in records {
             self.evict(&key);
         }
@@ -293,20 +359,16 @@ impl StageNode {
 
     /// Fail closed for this creator only: at its quota (after evicting its
     /// own records past the horizon), or as a new creator past the cap when
-    /// no idle slot can be reclaimed.
+    /// no idle slot can be reclaimed. This node never needs a slot.
     fn creator_may_register(&mut self, creator: &str) -> bool {
         let quota = self.bounds.quota_per_creator;
-        if self.by_creator.get(creator).is_some_and(|(_, r)| r.len() >= quota) {
+        if self.record_count(creator) >= quota {
             self.prune_creator(creator, quota - 1);
-            if self.by_creator.get(creator).is_some_and(|(_, r)| r.len() >= quota) {
+            if self.record_count(creator) >= quota {
                 return false;
             }
         }
-        if creator == self.local {
-            return true;
-        }
-        let slots = self.creator_slots();
-        if slots.contains(creator) || slots.len() < self.bounds.max_creators {
+        if creator == self.local || self.holds_slot(creator) || self.creator_slot_count() < self.bounds.max_creators {
             return true;
         }
         self.reclaim_idle_slot()
@@ -316,7 +378,23 @@ impl StageNode {
     /// share; no live path is ever evicted for it.
     fn creator_may_hold_another_path(&self, creator: &str) -> bool {
         let share = (self.bounds.max_paths / self.bounds.max_creators.max(1)).max(1);
-        self.paths.len() < self.bounds.max_paths && self.paths.values().filter(|r| r.creator == creator).count() < share
+        self.paths.len() < self.bounds.max_paths && self.live.get(creator).copied().unwrap_or(0) < share
+    }
+
+    fn insert_live(&mut self, path_id: String, registered: Registered) {
+        *self.live.entry(registered.creator.clone()).or_insert(0) += 1;
+        self.paths.insert(path_id, registered);
+    }
+
+    fn remove_live(&mut self, path_id: &str) -> Option<Registered> {
+        let removed = self.paths.remove(path_id)?;
+        if let Some(count) = self.live.get_mut(&removed.creator) {
+            *count -= 1;
+            if *count == 0 {
+                self.live.remove(&removed.creator);
+            }
+        }
+        Some(removed)
     }
 
     /// [`on_frame`](Self::on_frame) at the caller's monotonic clock in seconds
@@ -324,18 +402,6 @@ impl StageNode {
     pub fn on_frame_at(&mut self, now: f64, from: &str, frame: &Frame, compute: &mut Compute<'_>) -> Step {
         self.now = self.now.max(now);
         self.on_frame(from, frame, compute)
-    }
-
-    fn forget_pending(&mut self, key: &PendingKey) {
-        if self.pending.remove(key) {
-            self.pending_order.retain(|k| k != key);
-            if let Some(count) = self.pending_by_source.get_mut(&key.4) {
-                *count -= 1;
-                if *count == 0 {
-                    self.pending_by_source.remove(&key.4);
-                }
-            }
-        }
     }
 
     pub fn path(&self, path_id: &str) -> Option<&LockedPath> {
@@ -352,6 +418,7 @@ impl StageNode {
     /// revives a cancelled attempt.
     pub fn clear(&mut self) {
         self.paths.clear();
+        self.live.clear();
         self.ledger = HopLedger::new(LEDGER_CAPACITY);
     }
 
@@ -375,9 +442,8 @@ impl StageNode {
             // cancellation (bounded per source) so the attempt stays refused.
             return true;
         }
-        let of_path: Vec<PendingKey> = self.pending_order.iter().filter(|k| k.1 == path.path_id).cloned().collect();
-        for old in &of_path {
-            self.forget_pending(old);
+        for old in self.pending.of_path(&path.path_id) {
+            self.pending.forget(&old);
         }
         if matched {
             let entry = path.entry_node_id.clone();
@@ -445,14 +511,14 @@ impl StageNode {
         let path_id = path.path_id.clone();
         // A newer attempt of the same owner retires the older one, charged to
         // the path's creator.
-        let creator = match self.paths.remove(&path_id) {
+        let creator = match self.remove_live(&path_id) {
             Some(old) => {
                 self.record_tombstone(&path_id, owner, old.path.path_attempt, &old.creator);
                 old.creator
             }
             None => creator,
         };
-        self.paths.insert(path_id, Registered { path, body_digest: combined, creator });
+        self.insert_live(path_id, Registered { path, body_digest: combined, creator });
         Step { ack: true, accepted: Some(true), ..Step::default() }
     }
 
@@ -523,28 +589,28 @@ impl StageNode {
             }
             let key = (request_id.to_owned(), path_id.to_owned(), attempt, topology, from.to_owned());
             if self.pending.contains(&key) {
-                self.pending_order.retain(|k| *k != key);
-                self.pending_order.push_back(key);
+                // A repeat moves to the end (relay.py move_to_end).
+                let seq = self.next_seq();
+                self.pending.insert(key, seq);
                 return answer(true);
             }
-            if self.pending_by_source.get(from).copied().unwrap_or(0) >= self.bounds.pending_per_source {
+            if self.pending.of_source(from) >= self.bounds.pending_per_source {
                 // A source displaces only its own oldest pending tombstone.
-                if let Some(old) = self.pending_order.iter().find(|k| k.4 == from).cloned() {
-                    self.forget_pending(&old);
+                if let Some(old) = self.pending.oldest_of_source(from) {
+                    self.pending.forget(&old);
                 }
             } else if self.pending.len() >= self.bounds.pending_total {
                 return answer(false);
             }
-            self.pending.insert(key.clone());
-            self.pending_order.push_back(key);
-            *self.pending_by_source.entry(from.to_owned()).or_insert(0) += 1;
+            let seq = self.next_seq();
+            self.pending.insert(key, seq);
             return answer(true);
         };
         if !registered.path.cancellation_matches(body, from) {
             return answer(false);
         }
         let owner = Self::owner(&registered.path);
-        let removed = self.paths.remove(path_id).unwrap();
+        let removed = self.remove_live(path_id).unwrap();
         // The entry's own release: binds its owner up to this attempt (I3),
         // charged to the path's creator.
         self.record_tombstone(path_id, owner, attempt, &removed.creator);
@@ -653,14 +719,14 @@ mod tests {
         let mut node = StageNode::new("node-phone");
         // The final placement never creates a path, nor claims one for the entry.
         assert!(!register(&mut node, 1.0, FINAL, "p", "r", 1, ENTRY));
-        assert!(node.creator_slots().is_empty() && node.tombstones.is_empty());
+        assert!(node.creator_slot_count() == 0 && node.tombstones.is_empty());
         // A sender that is neither the entry nor the final placement: refused.
         assert!(!register(&mut node, 1.0, "node-stranger", "p", "r", 1, ENTRY));
         assert!(register(&mut node, 1.0, ENTRY, "p", "r", 1, ENTRY));
         assert!(register(&mut node, 1.0, FINAL, "p", "r", 1, ENTRY), "a confirmation of the held path");
         // A pending cancellation is charged to the peer that sent it.
         assert!(cancel(&mut node, 1.0, "node-flood", "q", "r", 1));
-        assert_eq!(node.pending_by_source.get("node-flood"), Some(&1));
+        assert_eq!(node.pending.of_source("node-flood"), 1);
         assert!(!node.by_creator.contains_key("node-flood"));
         // The entry's cancellation is charged to the path's creator.
         assert!(cancel(&mut node, 1.0, ENTRY, "p", "r", 1));
@@ -694,7 +760,7 @@ mod tests {
         assert_eq!(accepted, 4, "refused at exactly its own quota");
         assert!(churn(&mut node, 3.0, ENTRY, "a-fresh"), "another entry is untouched");
         assert!(!register(&mut node, 3.0, ENTRY, "victim", "rv", 3, ENTRY), "its high-water mark still holds");
-        assert_eq!(node.by_creator[ENTRY].1.len(), 2);
+        assert_eq!(node.record_count(ENTRY), 2);
     }
 
     #[test]
@@ -749,8 +815,8 @@ mod tests {
         assert!(churn(&mut node, later, "node-c", "c2"));
         assert!(churn(&mut node, later, "node-d", "d"), "the idle slot is reclaimed");
         assert!(!node.by_creator.contains_key("node-b") && node.by_creator.contains_key("node-c"));
-        assert!(node.creator_slots().contains(ENTRY));
-        assert!(node.creator_slots().len() <= 3);
+        assert!(node.holds_slot(ENTRY));
+        assert!(node.creator_slot_count() <= 3);
     }
 
     #[test]
@@ -761,7 +827,7 @@ mod tests {
         for _ in 0..2 {
             assert!(!register(&mut node, 2.0, "node-late", "p-late", "r-late", 1, "node-late"));
         }
-        assert!(node.pending_by_source.contains_key("node-late") && !node.by_creator.contains_key("node-late"));
+        assert!(node.pending.of_source("node-late") == 1 && !node.by_creator.contains_key("node-late"));
     }
 
     #[test]
@@ -771,7 +837,7 @@ mod tests {
         for i in 0..20 {
             cancel(&mut node, 1.0, "node-flood", &format!("f-{i}"), "flood", 1);
         }
-        assert_eq!(node.pending_by_source["node-flood"], 4, "the flooder displaces only its own");
+        assert_eq!(node.pending.of_source("node-flood"), 4, "the flooder displaces only its own");
         assert!(!register(&mut node, 1.0, ENTRY, "victim", "rv", 2, ENTRY), "the entry's pending tombstone holds");
         for s in 0..4 {
             cancel(&mut node, 1.0, &format!("node-{s}"), &format!("q-{s}"), "r", 1);
@@ -802,7 +868,7 @@ mod tests {
                 churn(&mut node, 1.0, &format!("node-{c}"), &format!("p-{c}-{i}"));
             }
         }
-        assert!(node.creator_slots().len() <= 2 && node.tombstones.len() <= 3 * 2);
+        assert!(node.creator_slot_count() <= 2 && node.tombstones.len() <= 3 * 2);
     }
 
     #[test]
