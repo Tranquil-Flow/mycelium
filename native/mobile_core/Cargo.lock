@@ -1785,6 +1785,7 @@ dependencies = [
  "hex",
  "hkdf",
  "iroh",
+ "libc",
  "libm",
  "reqwest 0.12.28",
  "serde",

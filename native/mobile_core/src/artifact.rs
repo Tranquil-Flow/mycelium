@@ -397,3 +397,108 @@ impl TensorSource for StoreTensorSource<'_> {
         Ok(RawTensor { dtype: spec.dtype, shape: spec.shape.clone(), bytes })
     }
 }
+
+/// Bytes available to an unprivileged writer on the volume holding `path`
+/// (`statvfs` `f_bavail * f_frsize`), for storage admission.
+#[cfg(unix)]
+pub fn available_bytes(path: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut st = std::mem::MaybeUninit::<libc::statvfs>::zeroed();
+    // SAFETY: `c` is a valid NUL-terminated path and `st` is a properly sized,
+    // writable statvfs buffer; it is only read after statvfs reports success.
+    let rc = unsafe { libc::statvfs(c.as_ptr(), st.as_mut_ptr()) };
+    if rc != 0 {
+        return None;
+    }
+    // SAFETY: statvfs returned 0, so it initialised the buffer.
+    let st = unsafe { st.assume_init() };
+    #[allow(clippy::unnecessary_cast)] // field widths differ by platform
+    Some((st.f_bavail as u64).saturating_mul(st.f_frsize as u64))
+}
+
+#[cfg(not(unix))]
+pub fn available_bytes(_path: &Path) -> Option<u64> {
+    None
+}
+
+/// The owner's daily network quota for artifact traffic
+/// (`quota.network_bytes_per_day`), counted per UTC day and persisted in
+/// `<store>/network-budget.json` so a restart cannot reset it.
+pub struct NetworkBudget {
+    path: PathBuf,
+    limit: u64,
+    day: u64,
+    used: u64,
+}
+
+impl NetworkBudget {
+    pub fn open(store_root: &Path, limit: u64, day: u64) -> Self {
+        let path = store_root.join("network-budget.json");
+        let saved: Option<(u64, u64)> = fs::read(&path)
+            .ok()
+            .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
+            .and_then(|v| Some((v["day"].as_u64()?, v["bytes"].as_u64()?)));
+        let used = match saved {
+            Some((d, bytes)) if d == day => bytes,
+            _ => 0,
+        };
+        Self { path, limit, day, used }
+    }
+
+    pub fn used(&self) -> u64 {
+        self.used
+    }
+
+    fn roll(&mut self, day: u64) {
+        if day != self.day {
+            self.day = day;
+            self.used = 0;
+        }
+    }
+
+    /// May `bytes` more be fetched today?
+    pub fn admit(&mut self, day: u64, bytes: u64) -> Result<(), ArtifactError> {
+        self.roll(day);
+        if self.used.saturating_add(bytes) > self.limit {
+            return Err(fail("network_budget_exhausted"));
+        }
+        Ok(())
+    }
+
+    /// Count fetched bytes and persist (tmp + rename, so a crash keeps either
+    /// the old or the new count, never a torn one).
+    pub fn record(&mut self, day: u64, bytes: u64) -> Result<(), ArtifactError> {
+        self.roll(day);
+        self.used = self.used.saturating_add(bytes);
+        let tmp = self.path.with_extension("json.tmp");
+        fs::write(&tmp, serde_json::to_vec(&serde_json::json!({"day": self.day, "bytes": self.used})).unwrap_or_default())
+            .and_then(|_| fs::rename(&tmp, &self.path))
+            .map_err(io("artifact_network_budget_unwritable"))
+    }
+}
+
+/// A [`ChunkSource`] that spends a [`NetworkBudget`]: a range is fetched only
+/// if the day's quota covers its full requested length, then the bytes
+/// actually received are counted.
+pub struct MeteredSource<'a> {
+    pub inner: &'a mut dyn ChunkSource,
+    pub budget: &'a mut NetworkBudget,
+    /// UTC day number (`unix_seconds / 86400`); injectable for tests.
+    pub day: &'a dyn Fn() -> u64,
+}
+
+impl ChunkSource for MeteredSource<'_> {
+    fn fetch(&mut self, sha256: &str, offset: u64, max_len: usize) -> Result<Vec<u8>, ArtifactError> {
+        let day = (self.day)();
+        self.budget.admit(day, max_len as u64)?;
+        let data = self.inner.fetch(sha256, offset, max_len)?;
+        self.budget.record(day, data.len() as u64)?;
+        Ok(data)
+    }
+}
+
+/// Today's UTC day number.
+pub fn utc_day() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() / 86_400).unwrap_or(0)
+}

@@ -1048,6 +1048,11 @@ impl Supervisor {
     /// next route sync applies the assignment once every object is promoted.
     fn ensure_acquisition(&self, manifest: &crate::stage_manifest::StageManifest, grant: &crate::artifact_grant::Grant, quota: u64) -> Result<(), String> {
         use std::sync::atomic::{AtomicBool, Ordering};
+        let network_per_day = {
+            let s = self.shared.lock().unwrap();
+            s.invitation.as_ref().and_then(|inv| inv["quota"]["network_bytes_per_day"].as_u64())
+        }
+        .ok_or("artifact_network_quota_unknown")?;
         self.cancel_acquisition(Some(&manifest.pack_digest));
         {
             let s = self.shared.lock().unwrap();
@@ -1080,8 +1085,13 @@ impl Supervisor {
                     None => Ok(()),
                 }
             };
-            let outcome = ArtifactStore::open(&root, quota)
-                .and_then(|store| store.acquire_with(&manifest, &mut client, ACQUISITION_CHUNK_BYTES, None, &mut gate));
+            // The owner's daily network quota is spent per received byte and
+            // persisted; free space on the store volume bounds admission.
+            let outcome = ArtifactStore::open(&root, quota).and_then(|store| {
+                let mut budget = crate::artifact::NetworkBudget::open(&root, network_per_day, crate::artifact::utc_day());
+                let mut metered = crate::artifact::MeteredSource { inner: &mut client, budget: &mut budget, day: &crate::artifact::utc_day };
+                store.acquire_with(&manifest, &mut metered, ACQUISITION_CHUNK_BYTES, crate::artifact::available_bytes(&root), &mut gate)
+            });
             let state = match outcome {
                 Ok(_) => "promoted".to_owned(),
                 Err(e) => format!("paused:{}", e.0),
@@ -1117,7 +1127,7 @@ impl Supervisor {
         if !store.is_complete(manifest) {
             // Admission is checked now so an assignment that can never fit is
             // reported at once, then the objects are fetched in the background.
-            store.admit(manifest, None).map_err(|e| e.0)?;
+            store.admit(manifest, crate::artifact::available_bytes(store.root())).map_err(|e| e.0)?;
             self.ensure_acquisition(manifest, grant, quota)?;
             return Err("route_assignment_stage_artifacts_pending".into());
         }

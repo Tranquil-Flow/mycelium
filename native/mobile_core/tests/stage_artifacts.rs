@@ -504,3 +504,40 @@ fn a_policy_gate_pauses_acquisition_and_a_later_call_resumes() {
     store.load_stage(&m).unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn the_daily_network_budget_stops_acquisition_and_survives_a_restart() {
+    use mycelium_mobile_core::artifact::{MeteredSource, NetworkBudget};
+    let root = scratch("budget");
+    let store = ArtifactStore::open(&root, 1 << 30).unwrap();
+    let m = manifest();
+    let file = synthetic_bytes();
+    let day = || 20_000u64;
+    let mut budget = NetworkBudget::open(&root, 50_000, day());
+    let mut inner = MemorySource::new(&file);
+    let err = store.acquire(&m, &mut MeteredSource { inner: &mut inner, budget: &mut budget, day: &day }, 1000, None).unwrap_err();
+    assert_eq!(err.0, "network_budget_exhausted");
+    assert!(budget.used() <= 50_000 && budget.used() > 49_000);
+    assert_eq!(budget.used(), inner.served);
+    // A restart the same day keeps the count; the next day starts afresh.
+    let mut same_day = NetworkBudget::open(&root, 50_000, day());
+    assert_eq!(same_day.used(), inner.served);
+    assert!(same_day.admit(day(), 1000).is_err());
+    let next = || 20_001u64;
+    let mut budget = NetworkBudget::open(&root, 1 << 30, next());
+    assert_eq!(budget.used(), 0);
+    let mut inner = MemorySource::new(&file);
+    store.acquire(&m, &mut MeteredSource { inner: &mut inner, budget: &mut budget, day: &next }, 1000, None).unwrap();
+    store.load_stage(&m).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn free_space_is_reported_for_the_store_volume() {
+    let root = scratch("free");
+    let free = mycelium_mobile_core::artifact::available_bytes(&root).unwrap();
+    assert!(free > 0);
+    assert!(mycelium_mobile_core::artifact::available_bytes(&root.join("missing")).is_none());
+    std::fs::remove_dir_all(root).unwrap();
+}
