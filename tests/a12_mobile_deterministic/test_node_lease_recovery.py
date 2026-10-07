@@ -169,9 +169,9 @@ class Seed:
 class Node:
     """One node_cli process; status lines arrive on a queue."""
 
-    def __init__(self, binary: Path, data_dir: Path, mode: str) -> None:
+    def __init__(self, binary: Path, data_dir: Path, mode: str, extra: tuple[str, ...] = ()) -> None:
         self.process = subprocess.Popen(
-            [str(binary), str(data_dir), mode, "local", "--fast", "--watch", "60"],
+            [str(binary), str(data_dir), mode, "local", "--fast", "--watch", "60", *extra],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,

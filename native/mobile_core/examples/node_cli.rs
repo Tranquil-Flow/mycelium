@@ -4,7 +4,10 @@
 //!
 //! `--fast` shortens the membership timing for short-lease test seeds; `--watch`
 //! keeps the node alive for that many seconds, printing one `status` line per
-//! change (the lease-recovery tests read them).
+//! change (the lease-recovery tests read them). `--platform-sample k=v,...`
+//! stands in for the app shell's readings (battery, charging, temperatures),
+//! re-sent on every status tick, for hosts without them (the artifact gate fails
+//! closed on unknown readings).
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -31,7 +34,20 @@ fn main() {
         .position(|a| a == "--watch")
         .and_then(|i| args.get(i + 1))
         .and_then(|v| v.parse::<f64>().ok());
+    let sample: Option<mycelium_mobile_core::evidence::Metrics> = args
+        .iter()
+        .position(|a| a == "--platform-sample")
+        .and_then(|i| args.get(i + 1))
+        .map(|spec| {
+            spec.split(',')
+                .filter_map(|kv| kv.split_once('='))
+                .map(|(k, v)| (k.to_owned(), v.parse::<f64>().ok()))
+                .collect()
+        });
     let core = NodeCore::open_with_timing(Path::new(&args[1]), reach, timing).expect("open");
+    if let Some(sample) = &sample {
+        core.set_platform_metrics(sample.clone());
+    }
     let show = |label: &str, core: &NodeCore| {
         println!("{label} {}", serde_json::to_string(&core.status()).unwrap());
     };
@@ -57,14 +73,19 @@ fn main() {
             let mut last = String::new();
             while Instant::now() < until {
                 let status = core.status();
+                if let Some(sample) = &sample {
+                    core.set_platform_metrics(sample.clone());
+                }
                 let key = format!(
-                    "{}|{}|{:?}|{:?}|{:?}|{:?}",
+                    "{}|{}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
                     status.phase,
                     status.lease_fresh,
                     status.member_generation,
                     status.last_error,
                     status.route_assignment,
-                    status.route_assignment_error
+                    status.route_assignment_error,
+                    status.artifact_state,
+                    status.stage_loaded
                 );
                 if key != last {
                     last = key;

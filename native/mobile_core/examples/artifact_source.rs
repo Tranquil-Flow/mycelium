@@ -55,7 +55,8 @@ async fn main() {
     println!(
         "{}",
         json!({"ready": true, "alpn": "mycelium.artifact_chunk.v1", "endpoint_id": source.endpoint_id(), "verification_key_digest": source.key_digest(),
-               "addrs": source.addr().addrs.iter().map(|a| format!("{a:?}")).collect::<Vec<_>>()})
+               // Direct addresses as grant hints (`ip:port`).
+               "direct_addrs": source.addr().addrs.iter().filter_map(|a| match a { iroh::TransportAddr::Ip(ip) => Some(ip.to_string()), _ => None }).collect::<Vec<_>>()})
     );
     let _ = accept.await;
 }
