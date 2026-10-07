@@ -33,7 +33,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:50423255911e54b41df30e9a1a7dc7f6a28c0851975390ff9e10d80bd26bead2",
+      "sha256": "sha256:b4f4a4f08f0f80dc1283ea83b772bd4df216a4e0c1b45a2473f56b4e248dde98",
       "size_bytes": 71562
     },
     {
@@ -388,8 +388,8 @@
     },
     {
       "path": "native/iroh_transport/src/sidecar.rs",
-      "sha256": "sha256:de1bc57f256cbb9a677ea3ea66bcac87783b2f8c1657616d9b3eeb5ff23c61f0",
-      "size_bytes": 119283
+      "sha256": "sha256:292d238d334d6bea5fa130f9206cdd3c02398948e6b31caee2127d4ba44782e7",
+      "size_bytes": 119730
     },
     {
       "path": "native/iroh_transport/tests/router_wire_golden.rs",
@@ -948,8 +948,8 @@
     },
     {
       "path": "tests/path_cancellation_adversarial/test_path_owner_binding.py",
-      "sha256": "sha256:4395d088f647ddbcfefc0e27d30d29f7b275c398d797f937d859b6eeb0bfd288",
-      "size_bytes": 31158
+      "sha256": "sha256:6c585b3f4a477615153c00e4d85aa6da4b47475d2bc52b18e6a292cb0e8b5d37",
+      "size_bytes": 32290
     },
     {
       "path": "tests/physical_preflight/test_live_plan_bridge.py",
@@ -1223,5 +1223,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:a3243cc1cc9d379462b0942242db09f537d7d2ebb675abeaf51ac799ce886977"
+  "source_digest": "sha256:3537779ef3de3aa14d3a5280615a0a332af45e20740ed8330af28f27a4379625"
 }
