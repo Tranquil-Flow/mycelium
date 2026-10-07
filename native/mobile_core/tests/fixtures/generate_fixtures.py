@@ -5,6 +5,7 @@ Run from the repository root:
     python3 -B native/mobile_core/tests/fixtures/generate_fixtures.py
     python3 -B native/mobile_core/tests/fixtures/generate_fixtures.py route_assignment
     python3 -B native/mobile_core/tests/fixtures/generate_fixtures.py stage_manifest_v2
+    python3 -B native/mobile_core/tests/fixtures/generate_fixtures.py artifact_grant
 
 Every fixture is produced by the repository's own Python implementations
 (signing, invite bundles, A12 Android onboarding), so the Rust tests prove byte
@@ -362,13 +363,79 @@ def stage_manifest_v2_fixture() -> None:
     route_assignment_fixture(signed, "route_assignment_v2.json")
 
 
+def artifact_grant_fixture() -> None:
+    """A seed-signed artifact grant for the synthetic v2 manifest, the phone's
+    signed chunk request for one range and the source's signed receipt."""
+
+    import base64
+
+    from mycelium_mobile import artifact_grant as ag
+
+    seed = signer(0x22, "seed-endpoint-1")
+    member = signer(0x11, "a" * 64)
+    source = signer(0x33, "c" * 64)
+    manifest = json.loads((OUT / "qwen2_stage_manifest_v2.json").read_text())["manifest"]
+    now = 1_790_000_000_000
+    grant = ag.issue_grant(
+        seed,
+        grant_id="grant-fixture-1",
+        swarm_id="swarm-fixture",
+        seed_node_id="seed-node-1",
+        recipient_node_id="node-phone-1",
+        recipient_endpoint_id=member.endpoint_id,
+        recipient_key_digest=member.verification_key_digest,
+        assignment_id="route-fixture-1",
+        manifest=manifest,
+        sources=[{"endpoint_id": source.endpoint_id, "verification_key_digest": source.verification_key_digest}],
+        now_unix_ms=now,
+    )
+    tensor = manifest["tensors"][0]
+    request = ag.sign_chunk_request(
+        member,
+        grant=grant,
+        request_id="chunk-request-1",
+        request_nonce="nonce-1",
+        source_endpoint_id=source.endpoint_id,
+        object_digest=tensor["sha256"],
+        offset_bytes=16,
+        length_bytes=32,
+        now_unix_ms=now + 1_000,
+    )
+    message, checked = ag.verify_chunk_request(
+        request,
+        seed_key_record=seed.public_key_record(),
+        source_endpoint_id=source.endpoint_id,
+        source_key_digest=source.verification_key_digest,
+        object_sizes={tensor["sha256"]: tensor["size_bytes"]},
+        now_unix_ms=now + 1_000,
+    )
+    data = bytes((i * 7) % 256 for i in range(32))
+    receipt = ag.sign_chunk_receipt(source, request=message, grant=checked, data=data, now_unix_ms=now + 2_000)
+    write(
+        "artifact_grant.json",
+        {
+            "seed_key": seed.public_key_record(),
+            "member_key": member.public_key_record(),
+            "source_key": source.public_key_record(),
+            "now_unix_ms": now,
+            "grant": grant,
+            "request": request,
+            "receipt": receipt,
+            "data_b64": base64.b64encode(data).decode("ascii"),
+        },
+    )
+
+
 if __name__ == "__main__":
     if sys.argv[1:] == ["route_assignment"]:
         route_assignment_fixture()
     elif sys.argv[1:] == ["stage_manifest_v2"]:
         stage_manifest_v2_fixture()
+    elif sys.argv[1:] == ["artifact_grant"]:
+        artifact_grant_fixture()
     else:
         stage_fixture()
         main()
         route_assignment_fixture()
         stage_manifest_v2_fixture()
+        artifact_grant_fixture()

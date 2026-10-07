@@ -20,6 +20,7 @@ pub mod safetensors;
 pub mod qwen2;
 pub mod stage_manifest;
 pub mod artifact;
+pub mod artifact_grant;
 pub mod wire;
 pub mod stage_wire;
 pub mod membership;
