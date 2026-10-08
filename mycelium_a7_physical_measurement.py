@@ -38,6 +38,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import threading
 import time
@@ -54,6 +55,7 @@ CONFIG_ENV = "MYCELIUM_A7_PHYSICAL_CONFIG"
 MEASUREMENT_PROTOCOL = "mycelium.a7_physical_measurement.v1"
 EXACT_FLEET_GRANT = "FLEET GRANTED TO A7"
 GRANT_HEADER = "X-Mycelium-A7-Fleet-Grant"
+TOKEN_HEADER = "X-Mycelium-A7-Evidence-Token"
 FAULT = "source_process_kill"
 FAULT_UNCONFIRMED = "source_process_kill_unconfirmed"
 TERMINAL_KINDS = frozenset({"completed", "cancelled", "failed"})
@@ -496,10 +498,40 @@ class EvidenceSource(Protocol):
     def resources(self) -> Mapping[str, Any]: ...
 
 
-class HttpEvidence:
-    """Client of the serve's grant-gated ``/a7/evidence`` door."""
+TOKEN_HEX = re.compile(r"[0-9a-f]{64}\Z")
 
-    def __init__(self, url: str, *, grant: str, timeout_s: float = 10.0) -> None:
+
+def _read_evidence_token(path: Path) -> str:
+    """The door's current per-lifetime token, read from its owner-only file.
+
+    Read fresh for every client so a case that runs against a restarted serve
+    picks up the new lifetime's token, and refused (never guessed) when the
+    file is missing, not a regular file, or not exactly one 256-bit hex value.
+    """
+
+    try:
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode):
+            raise OSError("not a regular file")
+        value = path.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise MeasurementRefused("a7_evidence_token_unreadable") from exc
+    if TOKEN_HEX.fullmatch(value) is None:
+        raise MeasurementRefused("a7_evidence_token_invalid")
+    return value
+
+
+class HttpEvidence:
+    """Client of the serve's grant-gated ``/a7/evidence`` door.
+
+    The door's per-lifetime token is read from the owner-only file the serve
+    published the path of (in its ``live_server_started`` line) and is sent in
+    a header only: never in the URL, never in a query parameter, never in a
+    refusal.  ``http.client`` sends ``Host: 127.0.0.1:<port>``, which is
+    exactly what the door requires.
+    """
+
+    def __init__(self, url: str, *, grant: str, token_file: str | Path, timeout_s: float = 10.0) -> None:
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or not parsed.port:
             raise MeasurementRefused("a7_evidence_url_invalid")
@@ -507,6 +539,7 @@ class HttpEvidence:
         self._port = parsed.port
         self._path = parsed.path or "/a7/evidence"
         self._grant = grant
+        self._token = _read_evidence_token(Path(token_file))
         self._timeout = float(timeout_s)
 
     def _get(self, query: Mapping[str, str]) -> Mapping[str, Any]:
@@ -515,6 +548,7 @@ class HttpEvidence:
             connection.putrequest("GET", self._path + "?" + urllib.parse.urlencode(query), skip_accept_encoding=True)
             connection.putheader("Accept", "application/json")
             connection.putheader(GRANT_HEADER, self._grant)
+            connection.putheader(TOKEN_HEADER, self._token)
             connection.endheaders()
             response = connection.getresponse()
             body = response.read()
@@ -1472,8 +1506,36 @@ def load_config(path: Path) -> dict[str, Any]:
     return document
 
 
-def measure_case(*, plan: Mapping[str, Any], case: str, grant: str | None, config_path: str | None) -> tuple[dict[str, Any], dict[str, Any]]:
-    """The case-runner plug-in: measure ``case`` under ``plan`` from the configured fleet."""
+def _serve_evidence_token_file(started: Mapping[str, Any] | None) -> str:
+    """The evidence token file the case's own serve published when it started.
+
+    Read from that serve's ``live_server_started`` line, never assumed: a
+    serve that mounted no door, or published no path, refuses the case rather
+    than reading some other file's token.
+    """
+
+    door = started.get("a7_evidence_control") if isinstance(started, Mapping) else None
+    token_file = door.get("token_file") if isinstance(door, Mapping) else None
+    if not isinstance(token_file, str) or not token_file:
+        raise MeasurementRefused("a7_evidence_token_file_unpublished")
+    return token_file
+
+
+def measure_case(
+    *,
+    plan: Mapping[str, Any],
+    case: str,
+    grant: str | None,
+    config_path: str | None,
+    evidence_token_file: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The case-runner plug-in: measure ``case`` under ``plan`` from the configured fleet.
+
+    ``evidence_token_file`` is only needed when the caller drives the door
+    itself (no per-case serve): with a serve, the token file is the one the
+    serve published in its own ``live_server_started`` line, read after the
+    serve is ready so a restarted serve's new lifetime is always the one used.
+    """
 
     if grant != EXACT_FLEET_GRANT:
         raise MeasurementRefused("fleet_grant_missing")
@@ -1496,7 +1558,6 @@ def measure_case(*, plan: Mapping[str, Any], case: str, grant: str | None, confi
         ssh_identity_file=fault_config["ssh_identity_file"],
     )
     driver = ProductHttpDriver(config["origin"], prompt=config["prompt"], max_new_tokens=config["max_new_tokens"])
-    evidence = HttpEvidence(config["evidence_url"], grant=grant)
     serve: ServeProcess | None = None
     serve_config = config["serve"]
     if serve_config is not None:
@@ -1510,9 +1571,13 @@ def measure_case(*, plan: Mapping[str, Any], case: str, grant: str | None, confi
             ready_timeout_s=float(serve_config["ready_timeout_s"]),
             stop_timeout_s=float(serve_config["stop_timeout_s"]),
         )
+    token_file = evidence_token_file
     serve_exit: int | None = None
     try:
         started = serve.start() if serve is not None else None
+        if token_file is None:
+            token_file = _serve_evidence_token_file(started)
+        evidence = HttpEvidence(config["evidence_url"], grant=grant, token_file=token_file)
         fields, observations = measure(driver=driver, evidence=evidence, fault=fault, settings=settings)
     finally:
         if serve is not None:

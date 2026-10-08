@@ -8,10 +8,17 @@ of that is reachable from outside the serve process, so this module mounts one
 small read-only door beside the product origin, and only that:
 
 * it exists only while the serve process holds the exact A7 fleet grant in its
-  own environment, and every request must present the same grant again;
+  own environment, and every request must present the same grant again.  The
+  grant is a consent marker, never a secret: the per-lifetime 256-bit token is
+  the secret, it exists only in an owner-only file the door creates
+  (``token_file``), it is compared in constant time, and neither the token nor
+  its file content is ever logged, returned in a status or an error, or accepted
+  from the query string;
 * it listens on its own direct IPv4 loopback socket, refuses a non-loopback
-  peer and any forwarding header, and refuses to start behind a public origin
-  or a trusted HTTPS proxy;
+  peer and any forwarding header, requires ``Host`` to be exactly
+  ``127.0.0.1:<port>`` (DNS rebinding), refuses any browser context
+  (``Origin``, ``Sec-Fetch-*``), rejects duplicated ``Host``, grant and token
+  headers, and refuses to start behind a public origin or a trusted HTTPS proxy;
 * it answers ``GET`` only, with two closed kinds: ``request`` (the entry's
   verified A7 request evidence plus this request's scoped incidents) and
   ``resources`` (per live node counters used for the terminal resource delta);
@@ -26,20 +33,25 @@ qualification: its status never claims an A7 result.
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
+import platform
 import re
 import secrets
+import stat
 import threading
 import time
 import urllib.parse
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 EXACT_FLEET_GRANT = "FLEET GRANTED TO A7"
 GRANT_ENV = "MYCELIUM_A7_FLEET_GRANT"
 GRANT_HEADER = "x-mycelium-a7-fleet-grant"
+TOKEN_HEADER = "x-mycelium-a7-evidence-token"
 CONTROL_PATH = "/a7/evidence"
 STATUS_PROTOCOL = "mycelium.a7_evidence_control.v1"
 EVIDENCE_PROTOCOL = "mycelium.a7_physical_evidence.v1"
@@ -69,7 +81,7 @@ def grant_from_environment() -> str | None:
 
 
 def exact_grant(value: Any) -> bool:
-    return isinstance(value, str) and secrets.compare_digest(value, EXACT_FLEET_GRANT)
+    return isinstance(value, str) and hmac.compare_digest(value.encode("utf-8"), EXACT_FLEET_GRANT.encode("utf-8"))
 
 
 def _stable_code(error: BaseException) -> str | None:
@@ -77,6 +89,113 @@ def _stable_code(error: BaseException) -> str | None:
         if isinstance(candidate, str) and _CODE.fullmatch(candidate):
             return candidate
     return None
+
+
+def _require_posix_host() -> None:
+    """Refuse on a host that cannot hold this door's secret safely.
+
+    The token contract is a POSIX owner-only contract: ``os.getuid``, an
+    ``O_EXCL | O_NOFOLLOW`` create and ``(st_dev, st_ino)`` identity.  On a host
+    with no POSIX owner/mode (Windows) those checks do not exist, so the door
+    would silently fall back to weaker semantics while claiming the same
+    guarantees.  It refuses instead, with one stable code, until
+    ``mycelium_host_platform`` grows owner-only create/read/unlink primitives
+    that cover both hosts.  The door is therefore **POSIX-only today**.
+    """
+
+    if platform.system() == "Windows" or os.name != "posix":  # pragma: no cover - platform branch
+        raise A7EvidenceControlRefused("a7_evidence_control_requires_posix_host")
+
+
+def _owner_only_token_path(token_file: Any) -> Path:
+    """The token path, accepted only under a private directory this owner owns.
+
+    A world- or group-readable parent (or a parent owned by someone else) can
+    never hold a secret, so the door refuses rather than writing into it.
+    """
+
+    _require_posix_host()
+    path = Path(token_file)
+    parent = path.parent
+    try:
+        parent_mode = parent.lstat()
+    except OSError:
+        raise A7EvidenceControlRefused("a7_evidence_control_token_dir_invalid") from None
+    if (
+        not stat.S_ISDIR(parent_mode.st_mode)
+        or parent_mode.st_uid != os.getuid()
+        or stat.S_IMODE(parent_mode.st_mode) & 0o077
+    ):
+        raise A7EvidenceControlRefused("a7_evidence_control_token_dir_invalid")
+    return path
+
+
+def _write_owner_only_token(path: Path) -> tuple[bytes, tuple[int, int]]:
+    """Create this lifetime's token in an owner-only file, or refuse.
+
+    ``O_EXCL`` and ``O_NOFOLLOW`` mean a stale file, a symlink or a directory
+    left by an earlier life can never be silently overwritten or followed:
+    such a file fails closed instead of handing our new token to whoever left
+    it.  The returned identity is ``(st_dev, st_ino)`` of the file we created,
+    taken with ``os.fstat`` on the *still-open* descriptor - never a fresh
+    ``lstat`` of the path after the descriptor is closed, which can name a file
+    that a concurrent actor swapped in between the write and the close.
+    """
+
+    token = secrets.token_hex(32).encode("ascii")
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    except OSError:
+        raise A7EvidenceControlRefused("a7_evidence_control_token_file_invalid") from None
+    identity: tuple[int, int] | None = None
+    try:
+        metadata = os.fstat(descriptor)
+        identity = (metadata.st_dev, metadata.st_ino)
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = -1  # the handle owns it now
+            handle.write(token + b"\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        written = os.lstat(path)
+        if (written.st_dev, written.st_ino) != identity or not stat.S_ISREG(written.st_mode):
+            # The path no longer names the file we created; refuse rather than
+            # report an identity we cannot later prove.
+            raise OSError("token file replaced during creation")
+    except OSError:
+        if descriptor >= 0:
+            os.close(descriptor)
+        # Clean up only the exact file we created: a replacement that appeared
+        # under the path belongs to someone else and must survive.
+        _safe_unlink(path, identity)
+        raise A7EvidenceControlRefused("a7_evidence_control_token_file_invalid") from None
+    return token, identity  # type: ignore[return-value]
+
+
+def _safe_unlink(path: Path, identity: tuple[int, int] | None) -> bool:
+    """Unlink ``path`` only while it is still the file ``identity`` names.
+
+    ``None`` means "the file we just created", checked by non-symlink regular
+    file.  A file that was replaced under us is left alone: it is not ours to
+    delete, and the token inside it is not ours to have leaked.
+    """
+
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return False
+    if not stat.S_ISREG(metadata.st_mode):
+        return False
+    if identity is not None and (metadata.st_dev, metadata.st_ino) != identity:
+        return False
+    try:
+        path.unlink()
+    except OSError:
+        return False
+    return True
+
+
+def _unlink_own_token(path: Path, identity: tuple[int, int] | None) -> bool:
+    return _safe_unlink(path, identity)
 
 
 def _process_identity(observation: Any) -> dict[str, Any] | None:
@@ -376,13 +495,22 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - http.server API
         control = self.server.control
+        # A duplicated Host/grant/token header is a smuggling attempt, never a
+        # request; only a request that presents each exactly once is read.
+        if any(len(self.headers.get_all(name) or []) != 1 for name in ("Host", GRANT_HEADER, TOKEN_HEADER)):
+            self._refuse()
+            return
         headers = {key.lower(): value for key, value in self.headers.items()}
         parsed = urllib.parse.urlsplit(self.path)
         if (
             self.client_address[0] != "127.0.0.1"
+            or headers.get("host") != f"127.0.0.1:{control.port}"
             or parsed.path != CONTROL_PATH
+            or "origin" in headers
+            or any(key.startswith("sec-fetch-") for key in headers)
             or any(key in _FORWARDING_HEADERS or key.startswith("x-forwarded-") for key in headers)
             or not exact_grant(headers.get(GRANT_HEADER))
+            or not control.token_matches(headers.get(TOKEN_HEADER))
         ):
             self._refuse()
             return
@@ -429,6 +557,7 @@ class A7EvidenceControl:
         *,
         grant: str | None,
         source: RouteA7Evidence,
+        token_file: Path,
         product_port: int,
         port: int = 0,
         public_origin: str | None = None,
@@ -446,11 +575,14 @@ class A7EvidenceControl:
             raise A7EvidenceControlRefused("a7_evidence_control_port_is_product_origin")
         if not isinstance(source, RouteA7Evidence):
             raise A7EvidenceControlRefused("a7_evidence_control_source_required")
+        self._token_path = _owner_only_token_path(token_file)
         self.source = source
         self._port = port
         self._server: _Server | None = None
         self._thread: threading.Thread | None = None
         self._lifetime_id: str | None = None
+        self._token: bytes | None = None
+        self._token_identity: tuple[int, int] | None = None
         self._closed = False
         self._lock = threading.Lock()
         self._reads: dict[str, int] = {kind: 0 for kind in KINDS}
@@ -461,15 +593,46 @@ class A7EvidenceControl:
             raise A7EvidenceControlRefused("a7_evidence_control_not_started")
         return int(self._server.server_address[1])
 
+    @property
+    def token_file(self) -> Path:
+        """Where this lifetime's token lives; the token itself never leaves here."""
+        return self._token_path
+
     def start(self) -> None:
         if self._server is not None or self._closed:
             raise A7EvidenceControlRefused("a7_evidence_control_lifecycle_invalid")
+        # Bind first: a bind failure must leave no token file behind, and a
+        # token that outlives a door that never opened would be a live secret
+        # with no listener and no known owner.
         server = _Server(("127.0.0.1", self._port), _Handler)
         server.control = self
+        try:
+            token, identity = _write_owner_only_token(self._token_path)
+        except BaseException:
+            server.server_close()
+            raise
+        self._token = token
+        self._token_identity = identity
         self._lifetime_id = secrets.token_hex(32)
         self._server = server
-        self._thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
-        self._thread.start()
+        try:
+            self._thread = threading.Thread(
+                target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+            )
+            self._thread.start()
+        except BaseException:
+            # The thread never ran: release the listener and the secret token
+            # this lifetime created, and leave nothing half-started behind.
+            self._server = None
+            self._thread = None
+            self._lifetime_id = None
+            self._token = None
+            self._token_identity = None
+            try:
+                server.server_close()
+            finally:
+                _unlink_own_token(self._token_path, identity)
+            raise
 
     def close(self) -> None:
         if self._server is not None and not self._closed:
@@ -477,7 +640,24 @@ class A7EvidenceControl:
             self._server.server_close()
             assert self._thread is not None
             self._thread.join(timeout=3)
+        if self._token is not None:
+            # Only unlink the exact file this lifetime created: a token file
+            # that was replaced (or re-pointed by a symlink) belongs to someone
+            # else now and must survive this close.
+            _unlink_own_token(self._token_path, self._token_identity)
+            self._token = None
+            self._token_identity = None
         self._closed = True
+
+    def token_matches(self, value: Any) -> bool:
+        token = self._token
+        return (
+            token is not None
+            and not self._closed
+            and isinstance(value, str)
+            and len(value) == len(token)
+            and hmac.compare_digest(value.encode("utf-8", "replace"), token)
+        )
 
     def record_read(self, kind: str) -> None:
         with self._lock:
@@ -492,6 +672,7 @@ class A7EvidenceControl:
             "path": CONTROL_PATH,
             "port": None if self._server is None else int(self._server.server_address[1]),
             "lifetime_id": self._lifetime_id,
+            "token_file": str(self._token_path),
             "reads": reads,
             "claim_boundary": "read-only A7 measurement door; never a qualification or an A7 result",
         }
@@ -506,6 +687,7 @@ __all__ = (
     "EXACT_FLEET_GRANT",
     "GRANT_HEADER",
     "RouteA7Evidence",
+    "TOKEN_HEADER",
     "exact_grant",
     "grant_from_environment",
 )

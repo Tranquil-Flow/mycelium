@@ -114,6 +114,13 @@ class _RouteDriver:
         return []
 
 
+def _token_file(tmp_path: Path) -> Path:
+    """A private per-test token file for the door under test."""
+    directory = tmp_path / "a7-evidence-token"
+    directory.mkdir(mode=0o700, exist_ok=True)
+    return directory / "a7-evidence.token"
+
+
 def _source_target(state: Any) -> SourceProcessGroupTarget:
     run_id = state.route._plan["run_id"]
     return SourceProcessGroupTarget(
@@ -131,9 +138,9 @@ def _measure_with_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, qu
     try:
         harness._open_with_a7_authority(state)
         state.route._deployment_qualification = type("Qualified", (), {"route_ready": True})()
-        control = A7EvidenceControl(grant=EXACT_FLEET_GRANT, source=RouteA7Evidence(state.route), product_port=8787, port=0)
+        control = A7EvidenceControl(grant=EXACT_FLEET_GRANT, source=RouteA7Evidence(state.route), token_file=_token_file(tmp_path), product_port=8787, port=0)
         control.start()
-        evidence = HttpEvidence(f"http://127.0.0.1:{control.port}/a7/evidence", grant=EXACT_FLEET_GRANT)
+        evidence = HttpEvidence(f"http://127.0.0.1:{control.port}/a7/evidence", grant=EXACT_FLEET_GRANT, token_file=control.token_file)
         fields, observations = measure(
             driver=_RouteDriver(state),
             evidence=evidence,

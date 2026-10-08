@@ -4450,12 +4450,17 @@ def _mount_a7_evidence_control(
     control_port: int,
     public_origin: str | None,
     trusted_https_proxy: bool,
+    token_dir: Path | None = None,
 ) -> Any:
     """Mount the grant-gated, read-only A7 evidence door on its own loopback listener.
 
     The door reads only the entry's signed ``a7_snapshot`` observation, the
     route's request-scoped incidents and resource counters; it never mutates
-    the route, the router or a node.
+    the route, the router or a node.  Its per-lifetime secret token lives only
+    in an owner-only file inside ``token_dir`` (a fresh private directory by
+    default); the path is published in the serve's ``live_server_started`` line
+    so the measurement client can read the token, and the token itself is never
+    printed, logged or returned by any status.
     """
 
     from mycelium_a7_evidence_control import (
@@ -4465,10 +4470,19 @@ def _mount_a7_evidence_control(
         grant_from_environment,
     )
 
+    directory = Path(tempfile.mkdtemp(prefix="mycelium-a7-evidence-", dir=token_dir)) if token_dir else Path(
+        tempfile.mkdtemp(prefix="mycelium-a7-evidence-")
+    )
+    # The identity of the directory mkdtemp just made, so teardown can prove it
+    # is still ours before removing anything.  Without it, a teardown that
+    # removes a *replaced* directory would destroy another life's token - the
+    # recursive removal destroyed whatever was standing there.
+    directory_identity = _directory_identity(directory)
     try:
         control = A7EvidenceControl(
             grant=grant_from_environment(),
             source=RouteA7Evidence(route, router=getattr(stack, "router", None)),
+            token_file=directory / "a7-evidence.token",
             product_port=product_port,
             port=control_port,
             public_origin=public_origin,
@@ -4476,9 +4490,18 @@ def _mount_a7_evidence_control(
         )
         control.start()
     except A7EvidenceControlRefused as exc:
+        _remove_own_empty_directory(directory, directory_identity)
         raise RuntimeError(f"startup_a7_evidence_control_refused:{exc}") from exc
     except OSError as exc:
+        _remove_own_empty_directory(directory, directory_identity)
         raise RuntimeError("startup_a7_evidence_control_bind_failed") from exc
+    except BaseException:
+        # A thread or listener that died mid-start must not leave either behind.
+        _remove_own_empty_directory(directory, directory_identity)
+        raise
+    # The token directory exists only for this lifetime; the door removes its
+    # own token file, and this removes the now-empty private directory with it.
+    control.close = _closing_with(control.close, directory, directory_identity)
     return control
 
 
@@ -4526,6 +4549,55 @@ def _mount_a11_evidence_control(
     except OSError as exc:
         raise RuntimeError("startup_a11_evidence_control_bind_failed") from exc
     return control
+
+
+def _directory_identity(directory: Path) -> tuple[int, int] | None:
+    """``(st_dev, st_ino)`` of the private directory this mount created."""
+
+    try:
+        metadata = directory.lstat()
+    except OSError:
+        return None
+    return (metadata.st_dev, metadata.st_ino)
+
+
+def _remove_own_empty_directory(directory: Path, identity: tuple[int, int] | None) -> bool:
+    """Remove ``directory`` only while it is still our empty private directory.
+
+    Never recursive: this directory holds one token file that the door itself
+    unlinks by identity, so anything left in it is something else's and is left
+    standing.  A replaced, re-pointed or no-longer-empty directory is refused.
+    """
+
+    if identity is None:
+        return False
+    try:
+        metadata = directory.lstat()
+    except OSError:
+        return False
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or (metadata.st_dev, metadata.st_ino) != identity
+        or metadata.st_uid != os.getuid()
+        or stat.S_IMODE(metadata.st_mode) & 0o077
+    ):
+        return False
+    try:
+        directory.rmdir()
+    except OSError:
+        return False
+    return True
+
+
+def _closing_with(close: Any, directory: Path, identity: tuple[int, int] | None) -> Any:
+    def _close() -> None:
+        try:
+            close()
+        finally:
+            _remove_own_empty_directory(directory, identity)
+
+    return _close
+
 
 
 A6_FAULT_CONTROL_TEARDOWN_PROTOCOL = "mycelium.live_server_a6_fault_control_stopped.v1"
