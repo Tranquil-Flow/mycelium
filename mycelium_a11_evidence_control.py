@@ -208,6 +208,8 @@ class _Handler(BaseHTTPRequestHandler):
             or "origin" in headers
             or any(key.startswith("sec-fetch-") for key in headers)
             or any(key in _FORWARDING_HEADERS or key.startswith("x-forwarded-") for key in headers)
+            or len(self.headers.get_all(GRANT_HEADER) or []) != 1
+            or len(self.headers.get_all(TOKEN_HEADER) or []) != 1
             or not exact_grant(headers.get(GRANT_HEADER))
             or not control.token_matches(headers.get(TOKEN_HEADER))
         ):
@@ -279,6 +281,9 @@ class A11EvidenceControl:
         self.source = source
         self._token_path = token_path
         self._token: bytes | None = None
+        # Keep the original inode open until cleanup; a replaced pathname must
+        # never acquire the old identity through inode reuse.
+        self._token_descriptor: int | None = None
         self._port = port
         self._server: _Server | None = None
         self._thread: threading.Thread | None = None
@@ -296,36 +301,69 @@ class A11EvidenceControl:
     def start(self) -> None:
         if self._server is not None or self._closed:
             raise A11EvidenceControlRefused("a11_evidence_control_lifecycle_invalid")
-        token = secrets.token_hex(32)
-        try:
-            descriptor = os.open(
-                self._token_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
-            )
-        except OSError:
-            raise A11EvidenceControlRefused("a11_evidence_control_token_file_invalid") from None
-        with os.fdopen(descriptor, "w", encoding="ascii") as handle:
-            handle.write(token + "\n")
-        self._token = token.encode("ascii")
+        # Bind first: a port conflict cannot strand a newly written secret.
         server = _Server(("127.0.0.1", self._port), _Handler)
-        server.control = self
-        self._lifetime_id = secrets.token_hex(32)
-        self._server = server
-        self._thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
-        self._thread.start()
+        try:
+            try:
+                descriptor = os.open(
+                    self._token_path,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                )
+            except OSError:
+                raise A11EvidenceControlRefused("a11_evidence_control_token_file_invalid") from None
+            self._token_descriptor = descriptor
+            token = secrets.token_hex(32)
+            with os.fdopen(descriptor, "w", encoding="ascii", closefd=False) as handle:
+                handle.write(token + "\n")
+            self._token = token.encode("ascii")
+            server.control = self
+            self._lifetime_id = secrets.token_hex(32)
+            self._server = server
+            self._thread = threading.Thread(
+                target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+            )
+            self._thread.start()
+        except BaseException:
+            if self._thread is not None and self._thread.is_alive():
+                server.shutdown()
+                self._thread.join(timeout=3)
+            server.server_close()
+            self._server = None
+            self._thread = None
+            self._lifetime_id = None
+            self._clear_token()
+            raise
+
+    def _clear_token(self) -> None:
+        self._token = None
+        descriptor = self._token_descriptor
+        self._token_descriptor = None
+        if descriptor is None:
+            return
+        try:
+            original = os.fstat(descriptor)
+            current = self._token_path.lstat()
+            if stat.S_ISREG(current.st_mode) and (
+                current.st_dev, current.st_ino
+            ) == (original.st_dev, original.st_ino):
+                self._token_path.unlink()
+        except OSError:
+            pass
+        finally:
+            os.close(descriptor)
 
     def close(self) -> None:
-        if self._server is not None and not self._closed:
-            self._server.shutdown()
-            self._server.server_close()
-            assert self._thread is not None
-            self._thread.join(timeout=3)
-        if self._token is not None:
-            try:
-                self._token_path.unlink()
-            except OSError:
-                pass
         self._token = None
-        self._closed = True
+        try:
+            if self._server is not None and not self._closed:
+                if self._thread is not None and self._thread.is_alive():
+                    self._server.shutdown()
+                    self._thread.join(timeout=3)
+                self._server.server_close()
+        finally:
+            self._clear_token()
+            self._closed = True
 
     def token_matches(self, value: Any) -> bool:
         token = self._token
