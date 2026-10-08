@@ -224,6 +224,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="grant-gated, read-only A7 evidence loopback port for the A7 physical gate",
     )
+    serve.add_argument(
+        "--a11-evidence-control-port",
+        type=int,
+        help="grant-gated, read-only A11 node evidence loopback port for the A11 benchmark",
+    )
     return parser
 
 
@@ -337,6 +342,8 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
         result.append("--persist-transport-history")
     if args.a7_evidence_control_port is not None:
         result.extend(("--a7-evidence-control-port", str(args.a7_evidence_control_port)))
+    if args.a11_evidence_control_port is not None:
+        result.extend(("--a11-evidence-control-port", str(args.a11_evidence_control_port)))
     return result
 
 
@@ -381,6 +388,7 @@ def _fixture_has_live_only_arguments(args: argparse.Namespace) -> bool:
             args.a10_verify_control_port,
             args.a10_batch_policy_control_port,
             args.a7_evidence_control_port,
+            args.a11_evidence_control_port,
         )
     )
 
