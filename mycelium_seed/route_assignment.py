@@ -30,7 +30,7 @@ import secrets
 import sqlite3
 import sys
 import time
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Final, Mapping, Sequence
 
 from mycelium_membership import peer_runtime_is_activation_eligible
 from mycelium_mobile import qwen_stage_manifest as v2_manifest
@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS seed_route_assignments (
     issued_at REAL NOT NULL,
     expires_at REAL NOT NULL,
     withdrawn INTEGER NOT NULL DEFAULT 0 CHECK (withdrawn IN (0, 1)),
+    controller_endpoint_ids_json TEXT NOT NULL DEFAULT '[]',
     delivered_at REAL,
     delivered_generation INTEGER,
     applied_at REAL,
@@ -137,9 +138,21 @@ CREATE TABLE IF NOT EXISTS seed_route_assignment_artifacts (
 def _ensure_schema(database: Path) -> None:
     connection = _connect(database)
     try:
+        # Serialize first-open migration across operator and member processes.
+        connection.execute("BEGIN IMMEDIATE")
         connection.execute(_SCHEMA)
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(seed_route_assignments)")}
+        if "controller_endpoint_ids_json" not in columns:
+            # Old assignments gain no implicit control authority.
+            connection.execute(
+                "ALTER TABLE seed_route_assignments ADD COLUMN "
+                "controller_endpoint_ids_json TEXT NOT NULL DEFAULT '[]'"
+            )
         connection.execute(_ARTIFACT_SCHEMA)
+        connection.execute("COMMIT")
     except sqlite3.Error as exc:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK")
         raise _fail("seed_route_assignment_store_unavailable") from exc
     finally:
         connection.close()
@@ -165,6 +178,45 @@ def _member_eligible(row: sqlite3.Row) -> bool:
         return False
 
 
+#: At most 16 distinct controllers, each an iroh endpoint id.
+MAX_ASSIGNMENT_CONTROLLERS: Final[int] = 16
+
+
+def _controller_ids(raw: str | None) -> list[str]:
+    """Validate persisted authority as strictly as the issuing boundary."""
+
+    if not isinstance(raw, str):
+        raise _fail("seed_route_assignment_controller_invalid")
+    try:
+        ids = json.loads(raw)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise _fail("seed_route_assignment_controller_invalid") from exc
+    return json.loads(_controller_ids_argument(ids))
+
+
+def _controller_ids_argument(controller_endpoint_ids: Sequence[str]) -> str:
+    """Validate the seed-issued controller set: distinct endpoint ids only.
+
+    This is authority, not a request: the seed signs the set it names, and a
+    member or controller can never extend it afterwards.
+    """
+
+    if isinstance(controller_endpoint_ids, (str, bytes)) or not isinstance(
+        controller_endpoint_ids, Sequence
+    ):
+        raise _fail("seed_route_assignment_controller_invalid")
+    if len(controller_endpoint_ids) > MAX_ASSIGNMENT_CONTROLLERS:
+        raise _fail("seed_route_assignment_controller_invalid")
+    ids: list[str] = []
+    for endpoint_id in controller_endpoint_ids:
+        if not isinstance(endpoint_id, str) or _ENDPOINT_RE.fullmatch(endpoint_id) is None:
+            raise _fail("seed_route_assignment_controller_invalid")
+        if endpoint_id in ids:
+            raise _fail("seed_route_assignment_controller_invalid")
+        ids.append(endpoint_id)
+    return canonical_json_bytes(sorted(ids)).decode("utf-8")
+
+
 def _record_projection(row: sqlite3.Row, *, now: float) -> dict[str, Any]:
     return {
         "protocol": ROUTE_ASSIGNMENT_RECORD_PROTOCOL,
@@ -176,6 +228,7 @@ def _record_projection(row: sqlite3.Row, *, now: float) -> dict[str, Any]:
         "route_generation": int(row["route_generation"]),
         "forward_to": bool(row["forward_to"]),
         "issued_at": float(row["issued_at"]),
+        "controller_endpoint_ids": _controller_ids(row["controller_endpoint_ids_json"]),
         "expires_at": float(row["expires_at"]),
         "state": (
             "withdrawn"
@@ -262,6 +315,7 @@ def issue_route_assignment(
     peer_endpoint_id: str,
     route_generation: int,
     forward_to: bool = True,
+    controller_endpoint_ids: Sequence[str] = (),
     ttl_seconds: float = DEFAULT_ASSIGNMENT_TTL_SECONDS,
     now: Callable[[], float] = time.time,
     id_source: Callable[[], str] | None = None,
@@ -286,6 +340,7 @@ def issue_route_assignment(
         raise _fail("seed_route_assignment_generation_invalid")
     if not isinstance(forward_to, bool):
         raise _fail("seed_route_assignment_forward_invalid")
+    controllers_json = _controller_ids_argument(controller_endpoint_ids)
     ttl = _number(ttl_seconds)
     if ttl is None or not 0 < ttl <= MAX_ASSIGNMENT_TTL_SECONDS:
         raise _fail("seed_route_assignment_ttl_invalid")
@@ -315,8 +370,9 @@ def issue_route_assignment(
                     node_id, assignment_id, endpoint_id, verification_key_digest,
                     stage_pack_json, stage_pack_digest, peer_endpoint_id,
                     route_generation, forward_to, issued_at, expires_at, withdrawn,
+                    controller_endpoint_ids_json,
                     delivered_at, delivered_generation, applied_at, applied_generation
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, NULL, NULL, NULL)
                 """,
                 (
                     node_id,
@@ -330,6 +386,7 @@ def issue_route_assignment(
                     1 if forward_to else 0,
                     issued_at,
                     issued_at + ttl,
+                    controllers_json,
                 ),
             )
             connection.execute("DELETE FROM seed_route_assignment_artifacts WHERE node_id = ?", (node_id,))
@@ -619,6 +676,9 @@ class RouteAssignmentService:
                 "route_generation": int(row["route_generation"]),
                 "forward_to": bool(row["forward_to"]),
                 "expires_at": float(row["expires_at"]),
+                # The controller set the phone may answer on its control
+                # ALPN. Signed with the statement: authority, never a request.
+                "controller_endpoint_ids": _controller_ids(row["controller_endpoint_ids_json"]),
             }
             stage_pack = json.loads(row["stage_pack_json"])
             statement_expires = min(statement_expires, float(row["expires_at"]))
@@ -726,6 +786,13 @@ def _parser() -> argparse.ArgumentParser:
     issue.add_argument("--peer-endpoint-id", required=True)
     issue.add_argument("--route-generation", required=True, type=int)
     issue.add_argument("--no-forward", action="store_true")
+    issue.add_argument(
+        "--controller-endpoint-id",
+        action="append",
+        default=[],
+        metavar="ENDPOINT_ID",
+        help="route controller (sidecar endpoint) the member may answer on its control ALPN",
+    )
     issue.add_argument("--ttl-seconds", type=float, default=DEFAULT_ASSIGNMENT_TTL_SECONDS)
     issue.add_argument(
         "--artifact-source",
@@ -779,6 +846,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 peer_endpoint_id=args.peer_endpoint_id,
                 route_generation=args.route_generation,
                 forward_to=not args.no_forward,
+                controller_endpoint_ids=list(args.controller_endpoint_id),
                 ttl_seconds=args.ttl_seconds,
                 artifact_sources=[parse_artifact_source(item) for item in args.artifact_source],
                 seed_key_record=coordinator.signer.public_key_record(),

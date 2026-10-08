@@ -179,6 +179,7 @@ def test_the_member_receives_its_signed_assignment_and_pack(swarm: Swarm) -> Non
         "route_generation": 7,
         "forward_to": True,
         "expires_at": NOW + ra.DEFAULT_ASSIGNMENT_TTL_SECONDS,
+        "controller_endpoint_ids": [],
     }
     assert delivery["stage_pack"] == PACK
     status = ra.route_assignment_status(swarm.database, node_id="node-phone", now=lambda: NOW)
@@ -302,6 +303,78 @@ def test_the_seed_http_member_channel_carries_the_request(swarm: Swarm) -> None:
         response = connection.getresponse()
         assert response.status == 401
         assert json.loads(response.read())["error"]["code"] == "membership_key_pin_mismatch"
+
+
+def test_the_controller_set_is_seed_authority_and_never_a_member_request(swarm: Swarm) -> None:
+    """The seed signs the controller set the phone answers on its control ALPN.
+
+    It is authority, not a request: the set is validated at issue, carried in
+    the signed statement, sorted and deduplicated, and a duplicate or malformed
+    endpoint id is refused rather than normalized into an allow-list.
+    """
+
+    controllers = ["b" * 64, "a" * 64]
+    record = swarm.issue("node-phone", controller_endpoint_ids=controllers)
+    assert record["controller_endpoint_ids"] == sorted(controllers)
+
+    message = _verify(swarm, swarm.service().answer(swarm.request("node-phone")))
+    assert message["assignment"]["controller_endpoint_ids"] == sorted(controllers)
+
+    # Duplicate authority is refused, not silently normalized or installed.
+    with pytest.raises(SeedCoordinatorError) as duplicate:
+        swarm.issue("node-phone", controller_endpoint_ids=["a" * 64, "a" * 64, "b" * 64], id_source=lambda: "route-2")
+    assert duplicate.value.code == "seed_route_assignment_controller_invalid"
+    again = _verify(swarm, swarm.service().answer(swarm.request("node-phone")))
+    assert again["assignment"]["assignment_id"] == "route-1"
+    assert again["assignment"]["controller_endpoint_ids"] == ["a" * 64, "b" * 64]
+
+    def refused(**overrides) -> str:
+        arguments = dict(controller_endpoint_ids=["not-hex"])
+        arguments.update(overrides)
+        with pytest.raises(SeedCoordinatorError) as caught:
+            swarm.issue("node-phone", id_source=lambda: "route-x", **arguments)
+        return caught.value.code
+
+    assert refused() == "seed_route_assignment_controller_invalid"
+    assert refused(controller_endpoint_ids=["a" * 63]) == "seed_route_assignment_controller_invalid"
+    assert refused(controller_endpoint_ids=["a" * 64, "a" * 64]) == "seed_route_assignment_controller_invalid"
+    assert refused(controller_endpoint_ids=[7]) == "seed_route_assignment_controller_invalid"
+    assert refused(controller_endpoint_ids="a" * 64) == "seed_route_assignment_controller_invalid"
+    assert refused(controller_endpoint_ids=[f"{index:064x}" for index in range(17)]) == "seed_route_assignment_controller_invalid"
+
+    # A withdrawal stops authorizing anything: the next signed answer is null.
+    assert ra.withdraw_route_assignment(swarm.database, node_id="node-phone")["state"] == "withdrawn"
+    assert _verify(swarm, swarm.service().answer(swarm.request("node-phone")))["assignment"] is None
+
+
+def test_existing_assignment_database_gains_empty_controller_authority(swarm: Swarm) -> None:
+    import sqlite3
+
+    original = swarm.issue("node-phone")
+    # Exercise the exact prior table shape while retaining an actual assignment.
+    with sqlite3.connect(swarm.database) as database:
+        database.execute("ALTER TABLE seed_route_assignments DROP COLUMN controller_endpoint_ids_json")
+    record = ra.route_assignment_status(swarm.database, node_id="node-phone", now=lambda: NOW)
+    assert record["controller_endpoint_ids"] == []
+    assert record["assignment_id"] == original["assignment_id"]
+    assert record["stage_pack_digest"] == original["stage_pack_digest"]
+    delivery = _verify(swarm, swarm.service().answer(swarm.request("node-phone")))
+    assert delivery["assignment"]["controller_endpoint_ids"] == []
+    # Reopening is idempotent, and explicit new authority can then be issued.
+    replacement = swarm.issue("node-phone", controller_endpoint_ids=["a" * 64], id_source=lambda: "route-migrated")
+    assert replacement["controller_endpoint_ids"] == ["a" * 64]
+
+
+@pytest.mark.parametrize("encoded", ['null', '{}', '"abc"', '[1]', '["not-hex"]', '["' + 'a' * 64 + '","' + 'a' * 64 + '"]'])
+def test_invalid_stored_controllers_are_never_signed(swarm: Swarm, encoded: str) -> None:
+    import sqlite3
+
+    swarm.issue("node-phone")
+    with sqlite3.connect(swarm.database) as database:
+        database.execute("UPDATE seed_route_assignments SET controller_endpoint_ids_json = ?", (encoded,))
+    with pytest.raises(SeedCoordinatorError) as caught:
+        swarm.service().answer(swarm.request("node-phone"))
+    assert caught.value.code == "seed_route_assignment_controller_invalid"
 
 
 def test_operator_command_issues_and_reports_status(swarm: Swarm, tmp_path: Path, capsys) -> None:
