@@ -49,3 +49,7 @@ npm run check
 ```
 
 The MVP is not complete until a physical multi-peer qualification demonstrates real stage computation and deterministic token parity with a monolithic reference.
+
+## License
+
+Mycelium is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See [LICENSE](LICENSE).
