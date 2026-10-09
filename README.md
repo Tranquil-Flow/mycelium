@@ -1,12 +1,29 @@
 # Mycelium
 
-Mycelium is a privacy-first distributed-inference system for assigning model stages to heterogeneous peers, provisioning assignment-specific artifacts, routing activations, and qualifying physical execution with explicit evidence.
+Mycelium is a distributed-inference system for assigning model stages to heterogeneous peers, provisioning assignment-specific artifacts, routing activations, and qualifying physical execution with explicit evidence. It is the infer## Current status (updated 2026-10-09)
 
-## Current claim boundary
+Mycelium is a research prototype. It currently assumes trusted, operator-controlled devices. It is not a public network, and it does not hide prompts or activations from the devices that run model stages.
 
-The repository contains working Planner, provisioning, Gossip, Router, batching, transport-spike integration surfaces, tests, and a read-only Network Observatory UI.
+`main` contains the Planner, provisioning, Gossip, Router, batching, transport, and read-only Network Observatory surfaces. The physical multi-device results below were produced on integration branches that are not yet merged into `main`. The canonical status record is `docs/handover/CURRENT_AND_PLANNED_ARCHITECTURE.md` on branch `w6-27b-native-adapter`.
 
-The strongest completed multi-host claim is two-peer, assignment-specific artifact provisioning. An offline local qualification now also demonstrates two independent spawned Python processes loading and probing disjoint, assignment-bound MLX stages from a generated sharded GPT-2 checkpoint. All of this evidence retains `route_ready: false`; Layer Builder integration, activation transfer, physical distributed prefill/decode, and route qualification remain under construction.
+Physical results (all models int8 weight-only, pipeline-split across the operator's own devices):
+
+- **Qwen2.5-0.5B-Instruct:** distributed requests served through the browser product across two physical hosts (Apple M4 Pro / MLX -> Microsoft Surface / NumPy), and across three hosts with stage replicas. An earlier three-device route measured about 0.75-0.82 tokens/s.
+- **Qwen2.5-3B-Instruct:** a three-host physical route completed browser inference.
+- **Qwen2.5-7B:** qualified over the M4 Pro / MLX -> Surface / NumPy route, streaming a real browser answer; retained as a qualified standby.
+- **Across networks:** internet-native control and activation transport completed ordinary inference over direct and forced-relay paths with an external peer on an unrelated network, without Tailscale (`docs/handover/A8_STATUS_2026-08-21.md` on branch `codex/a8-internet-native`).
+
+Limitations:
+
+- The runs above are retained, evidence-sealed observations, not current live health. Deployments must be freshly qualified before admitting new requests.
+- Pipeline (contiguous stage) parallelism only; no tensor parallelism.
+- Model adapters cover GPT-2, Qwen2, Qwen3, and Qwen3.5 architectures, and each model must be qualified before use. Qwen2.5-1.5B timed out during decode and must be requalified.
+- Request-level stage replicas worked end to end, but the speed-up benchmark was inconclusive (+16.7% point estimate, 95% lower bound -42%), so the feature was not promoted.
+- Throughput is early and has not been optimised.
+
+Next: running a ~27B-class model, starting with Qwen3.8-27B. A native 4-bit route for the Qwen3.5 27B architecture is on branch `w6-27b-native-adapter`; it is unit-tested but not yet run on physical hardware.
+
+nd route qualification remain under construction.
 
 ## Architecture direction
 
