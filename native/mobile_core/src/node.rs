@@ -1973,6 +1973,10 @@ async fn send_with_retry(transport: NodeTransport, shared: Arc<Mutex<Shared>>, s
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    mod real_phone_composition {
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/node_real_composition.rs"));
+    }
 
     fn lifecycle_shared(stage: Box<dyn StageRuntime>) -> Arc<Mutex<Shared>> {
         Arc::new(Mutex::new(Shared {
