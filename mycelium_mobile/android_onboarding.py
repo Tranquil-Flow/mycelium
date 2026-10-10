@@ -81,10 +81,11 @@ ENCRYPTED_HANDOFF_PROTOCOL = "mycelium.encrypted_invitation_handoff.v1"
 _HANDOFF_PAYLOAD_PROTOCOL = "mycelium.encrypted_invitation_payload.v1"
 JOIN_PROTOCOL = "mycelium.a12_android_local_member.v1"
 
-#: One registered native Android peer class: platform android, native runtime,
-#: embedded Iroh transport.  Never a brand, model or device name.
+#: Registered native Android profiles. The producer default remains reference;
+#: accepting an explicitly signed Qwen profile never relabels a legacy request.
 ANDROID_PEER_CLASS = "android_native_iroh"
-SUPPORTED_PEER_CLASSES: frozenset[str] = frozenset({ANDROID_PEER_CLASS})
+ANDROID_QWEN2_PEER_CLASS = "android_native_qwen2_iroh"
+SUPPORTED_PEER_CLASSES: frozenset[str] = frozenset({ANDROID_PEER_CLASS, ANDROID_QWEN2_PEER_CLASS})
 
 #: The only carrier an Android onboarding request may travel over: the ordinary
 #: signed native application path of inventory decision
@@ -350,7 +351,10 @@ def verify_android_pairing_request(request: object, *, now: float) -> dict[str, 
     ):
         raise AndroidOnboardingError("android_onboarding_request_signature_invalid")
 
-    if value.get("peer_class") not in SUPPORTED_PEER_CLASSES:
+    if (
+        not isinstance(value.get("peer_class"), str)
+        or value["peer_class"] not in SUPPORTED_PEER_CLASSES
+    ):
         raise AndroidOnboardingError("android_onboarding_peer_class_unsupported")
     if value.get("invite_protocol") != INVITE_BUNDLE_PROTOCOL:
         raise AndroidOnboardingError("android_onboarding_request_invalid")
@@ -673,7 +677,7 @@ def join_android_member(
 
     state = {
         "protocol": JOIN_PROTOCOL,
-        "peer_class": ANDROID_PEER_CLASS,
+        "peer_class": payload["peer_class"],
         "device_ref": payload["device_ref"],
         "identity_key_digest": payload["identity_key_digest"],
         "seed_key_digest": payload["seed_key_digest"],

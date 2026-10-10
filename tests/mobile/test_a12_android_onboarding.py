@@ -110,6 +110,54 @@ def _code(call):
     return caught.value.code
 
 
+def _native_profile_case(peer_class="android_native_qwen2_iroh"):
+    # Synthetic native-shaped request; no device/runtime qualification claim.
+    case = _case()
+    statement = {k: v for k, v in case["request"].items() if k != "signature"}
+    statement["peer_class"] = peer_class
+    case["request"] = {**statement, "signature": case["target"].sign(statement)}
+    return case
+
+
+def test_qwen_native_profile_survives_approved_handoff_and_local_join(tmp_path):
+    case = _native_profile_case()
+    assert verify_android_pairing_request(case["request"], now=NOW)["peer_class"] == "android_native_qwen2_iroh"
+    case["handoff"] = approve_android_pairing_request(
+        request=case["request"], invite_bundle=case["bundle"], quota=QUOTA, now=NOW
+    )
+    payload = decrypt_android_invitation_handoff(
+        request=case["request"], handoff=case["handoff"],
+        recipient_private_key=case["private_key"], now=NOW + 1,
+    )
+    assert payload["peer_class"] == "android_native_qwen2_iroh"
+    root = _state_root(tmp_path)
+    joined = _join(case, root, _identity(root))
+    assert joined["peer_class"] == "android_native_qwen2_iroh"
+    assert joined["route_ready"] is False
+    # Existing callers retain the reference profile; acceptance is not promotion.
+    assert _case()["request"]["peer_class"] == ANDROID_PEER_CLASS
+
+
+def test_qwen_profile_cannot_reuse_reference_profile_approval():
+    case = _native_profile_case()
+    assert _code(lambda: decrypt_android_invitation_handoff(
+        request=case["request"], handoff=case["handoff"],
+        recipient_private_key=case["private_key"], now=NOW + 1,
+    )) == "android_onboarding_request_mismatch"
+
+
+@pytest.mark.parametrize("peer_class", ["android_native_qwen3_iroh", "linux_numpy_iroh", [], None])
+def test_native_profile_allowlist_remains_closed_and_typed(peer_class):
+    case = _native_profile_case(peer_class)
+    assert _code(lambda: verify_android_pairing_request(case["request"], now=NOW)) == "android_onboarding_peer_class_unsupported"
+
+
+def test_unsigned_reference_profile_relabel_is_refused():
+    case = _case()
+    request = {**case["request"], "peer_class": "android_native_qwen2_iroh"}
+    assert _code(lambda: verify_android_pairing_request(request, now=NOW)) == "android_onboarding_request_signature_invalid"
+
+
 def test_android_target_speaks_the_exact_protocols_the_mac_slice_froze() -> None:
     from mycelium_a13_macos import pairing as mac_pairing
 
