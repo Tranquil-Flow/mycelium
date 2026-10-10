@@ -34,6 +34,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scripts.qwen_phone_builder import (
+    BACKEND as PHONE_BACKEND, PhoneEvidence, RustStageExecutor, validate_build_receipt,
+    authorized_membership_snapshot, bind_phone_graph, external_control_descriptor, preparation_proof_digest,
+)
+
 from layer_assignment import compile_layer_assignments
 from mycelium_assignment_cache import ArtifactObjectKey, AssignmentArtifactCache
 from mycelium_live.codec import Qwen2PromptCodec
@@ -604,6 +609,7 @@ def _local_challenge_checkpoint(
     runtime_backends: Mapping[str, str],
     preparation_authorization: Mapping[str, Any] | None,
     stage_sharding: Mapping[str, Any] | None,
+    phone_challenges: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Bind the completed local decode to its exact model and assignment inputs."""
 
@@ -634,10 +640,11 @@ def _local_challenge_checkpoint(
             {
                 "node_id": assignment["node_id"],
                 "assignment_digest": _digest(_bytes(assignment)),
-                "load_proof_digest": layer_load_proof_digest(proof),
+                "load_proof_digest": preparation_proof_digest(proof),
             }
             for assignment, proof in zip(assignments, proofs, strict=True)
         ],
+        **({"phone_challenges": dict(phone_challenges)} if phone_challenges else {}),
         "runtime_backends": dict(runtime_backends),
         "challenge_prompt_token_ids": list(challenge_prompt),
         "challenge_output_token_ids": list(challenge_output),
@@ -731,8 +738,44 @@ def _copy_runtime_closure(repo: Path, bundle: Path, template: dict[str, Any]) ->
         if Path(relative).is_absolute() or '..' in Path(relative).parts or not source.resolve().is_relative_to(repo.resolve()):
             raise RuntimeError('runtime_closure_path_invalid')
         if not source.is_file():raise RuntimeError(f'runtime_closure_file_missing:{relative}')
+    if len(paths) > 220:
+        # Preserve the bounded 256-file transfer contract, but run a verified
+        # extracted filesystem tree rather than breaking __file__ with zipimport.
+        import zipfile
+        bundle.mkdir(parents=True, exist_ok=True)
+        members = {}
+        with zipfile.ZipFile(bundle / 'mycelium-runtime.zip', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+            for relative in sorted(paths):
+                source = repo / relative
+                raw = source.read_bytes()
+                mode = 0o700 if source.stat().st_mode & 0o111 else 0o600
+                members[relative] = dict(size=len(raw),sha256=hashlib.sha256(raw).hexdigest(),mode=mode)
+                info = zipfile.ZipInfo(relative, date_time=(1980, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.external_attr = (0o100000 | mode) << 16
+                archive.writestr(info, raw)
+        # Explicit command-line resource paths remain reachable, too. The copy
+        # inside the archive serves module-relative native resource consumers.
+        for relative in sorted(p for p in paths if not p.endswith('.py')):
+            target = bundle / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(repo / relative, target)
+        for relative in sorted(p for p in paths if p.endswith('.py') and p != 'physical_inference_node.py'):
+            stale = bundle / relative
+            if stale.exists() or stale.is_symlink():
+                if stale.is_symlink() or not stale.resolve().is_relative_to(bundle.resolve()):
+                    raise RuntimeError('runtime_closure_path_invalid')
+                stale.unlink()
+        bootstrap = (repo/'scripts/runtime_archive_bootstrap.py').read_text(encoding='utf-8')
+        archive_hash = hashlib.sha256((bundle/'mycelium-runtime.zip').read_bytes()).hexdigest()
+        (bundle / 'physical_inference_node.py').write_text(bootstrap +
+            '\nRUNTIME_ARCHIVE_SHA256 = ' + repr(archive_hash) +
+            '\nRUNTIME_MEMBERS = ' + repr(members) +
+            '\nif __name__ == "__main__":\n    main()\n', encoding='utf-8')
+        return
+    for relative in sorted(paths):
         target=bundle/relative;target.parent.mkdir(parents=True,exist_ok=True)
-        shutil.copyfile(source,target)
+        shutil.copyfile(repo/relative,target)
 
 
 def _transfer_manifest(bundle: Path) -> dict[str, Any]:
@@ -845,12 +888,15 @@ def _topology_nodes(
             nodes.append(
                 {
                     **peer,
-                    "python_executable": runtime["python_executable"],
-                    "sidecar_binary": runtime["sidecar_binary"],
-                    "endpoint_secret_file": runtime["endpoint_secret_file"],
+                    **({} if peer["process_transport"] == "external_iroh" else {
+                        "python_executable": runtime["python_executable"],
+                        "sidecar_binary": runtime["sidecar_binary"],
+                        "endpoint_secret_file": runtime["endpoint_secret_file"],
+                    }),
                     "endpoint_id": endpoint_ids[node_id],
                     "membership_generation": membership_generations[node_id],
-                    "runtime_backend": "mlx" if index == 0 else "numpy",
+                    "runtime_backend": (PHONE_BACKEND if peer["process_transport"] == "external_iroh"
+                                        else "mlx" if index == 0 else "numpy"),
                 }
             )
     else:
@@ -866,7 +912,10 @@ def _topology_nodes(
     if any(not isinstance(node, dict) for node in nodes):
         raise RuntimeError("topology_node_invalid")
     for node in nodes:
-        missing = [field for field in _TOPOLOGY_FIELDS if field not in node]
+        optional = ({"python_executable", "sidecar_binary", "endpoint_secret_file",
+                     "ssh_target", "ssh_identity_file"}
+                    if node.get("process_transport") == "external_iroh" else set())
+        missing = [field for field in _TOPOLOGY_FIELDS if field not in node and field not in optional]
         if missing:
             raise RuntimeError(f"topology_node_field_missing:{missing[0]}")
     node_ids = [node["node_id"] for node in nodes]
@@ -893,8 +942,18 @@ def _topology_nodes(
     ):
         raise RuntimeError("topology_membership_generation_invalid")
     backends = [node["runtime_backend"] for node in nodes]
-    if any(backend not in {"mlx", "numpy"} for backend in backends):
+    if any(backend not in {"mlx", "numpy", PHONE_BACKEND} for backend in backends):
         raise RuntimeError("topology_runtime_backend_unsupported")
+    for index, node in enumerate(nodes):
+        phone = node["process_transport"] == "external_iroh"
+        if phone != (node["runtime_backend"] == PHONE_BACKEND):
+            raise RuntimeError("phone_backend_transport_mismatch")
+        if phone:
+            if index in (0, len(nodes) - 1):
+                raise RuntimeError("external_node_stage_only")
+            if any(node.get(k) is not None for k in
+                   ("ssh_target", "ssh_identity_file", "python_executable", "sidecar_binary", "endpoint_secret_file")):
+                raise RuntimeError("phone_process_authority_invalid")
     transports = [node["process_transport"] for node in nodes]
     if managed_transport:
         # The managed plan is all-managed, mirroring the runner's peer rule:
@@ -908,10 +967,10 @@ def _topology_nodes(
             ):
                 raise RuntimeError("managed_peer_ssh_authority_invalid")
     else:
-        if any(transport not in {"local", "ssh"} for transport in transports):
+        if any(transport not in {"local", "ssh", "external_iroh"} for transport in transports):
             raise RuntimeError("topology_process_transport_invalid")
     if any(
-        node["process_transport"] not in {"local", "ssh", "managed_https"}
+        node["process_transport"] not in {"local", "ssh", "managed_https", "external_iroh"}
         for node in nodes
     ):
         raise RuntimeError("topology_process_transport_invalid")
@@ -1034,6 +1093,7 @@ def refresh_peer_identities(
     *,
     python_executables_by_node: dict[str, str] | None = None,
     managed_observations: Mapping[str, tuple[str, str]] | None = None,
+    phone_evidence: Mapping[str, PhoneEvidence] | None = None,
 ) -> list[dict[str, Any]]:
     """Measure and bind the run-scoped host identities used by node hello.
 
@@ -1046,6 +1106,11 @@ def refresh_peer_identities(
     for peer in refreshed:
         if peer["process_transport"] == "local":
             host_id, boot_id = derive_local_run_scoped_identity(run_id)
+        elif peer["process_transport"] == "external_iroh":
+            evidence = (phone_evidence or {}).get(peer["node_id"])
+            if evidence is None:
+                raise RuntimeError("phone_authorized_evidence_required")
+            host_id, boot_id = evidence.peer.host_id, evidence.peer.boot_id
         elif peer["process_transport"] == "managed_https":
             if managed_observations is None:
                 raise RuntimeError("managed_peer_observations_missing")
@@ -1114,7 +1179,7 @@ def preflight_remote_peers(topology: list[dict[str, Any]]) -> None:
     """
 
     for peer in topology:
-        if peer["process_transport"] in {"local", "managed_https"}:
+        if peer["process_transport"] in {"local", "managed_https", "external_iroh"}:
             continue
         command = ["ssh"]
         identity = peer.get("ssh_identity_file")
@@ -1265,6 +1330,10 @@ def _challenge(
                         hidden_states=np.asarray(stage_output),
                     )
                 )
+            elif backend == PHONE_BACKEND:
+                if index in (0, len(loaded) - 1):
+                    raise RuntimeError("external_node_stage_only")
+                stage_output = stage.execute(stage_output)
             else:
                 raise RuntimeError("challenge_runtime_backend_unsupported")
         logits = stage_output
@@ -1288,6 +1357,7 @@ def _streaming_challenge(
     runtime_backends: list[str],
     *,
     generated_token_count: int = 2,
+    phone_executors: Mapping[str, RustStageExecutor] | None = None,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """Challenge a large candidate with at most one stage's weights resident."""
 
@@ -1308,6 +1378,14 @@ def _streaming_challenge(
         for index, (assignment, report, backend) in enumerate(
             zip(assignments, reports, runtime_backends, strict=True)
         ):
+            if backend == PHONE_BACKEND:
+                if index in (0, len(assignments) - 1):
+                    raise RuntimeError("external_node_stage_only")
+                executor = (phone_executors or {}).get(assignment["node_id"])
+                if executor is None:
+                    raise RuntimeError("phone_challenge_executor_required")
+                stage_output = executor.execute(stage_output)
+                continue
             loaded = load_assignment_stage(
                 assignment,
                 report,
@@ -1351,6 +1429,12 @@ def _streaming_challenge(
 
 
 def build(args: argparse.Namespace) -> dict[str, Any]:
+    # Native helpers must be reaped even if later preparation or serialization fails.
+    with contextlib.ExitStack() as resources:
+        return _build(args, resources)
+
+
+def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[str, Any]:
     repo = ((Path(sys._MEIPASS)/'a13-runtime-source').resolve()
             if getattr(sys,'frozen',False) else Path(__file__).resolve().parents[1])
     route_label = _route_label(args)
@@ -1377,6 +1461,35 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             raise ValueError
     except (AttributeError, TypeError, ValueError) as exc:
         raise RuntimeError("deployment_id_invalid") from exc
+    phone_evidence = {}
+    phone_executors = {}
+    phone_run_id = None
+    phone_document = None
+    prepare_only = bool(getattr(args, "phone_prepare_only", False))
+    has_phone = PHONE_BACKEND in runtime_backends.values()
+    if prepare_only and not has_phone:
+        raise RuntimeError("phone_preparation_requires_phone")
+    if has_phone and not prepare_only:
+        path = getattr(args, "phone_evidence", None)
+        seed_digest = getattr(args, "phone_seed_key_digest", None)
+        if path is None or not seed_digest:
+            raise RuntimeError("phone_authorized_evidence_required")
+        phone_document = json.loads(Path(path).read_text("utf-8"))
+        if phone_document.get("protocol") != "mycelium.phone_builder_evidence.v1":
+            raise RuntimeError("phone_evidence_protocol_invalid")
+        if any(getattr(args, field, None) is None for field in
+               ("phone_executor", "phone_apk", "phone_source_root")):
+            raise RuntimeError("phone_build_provenance_required")
+        phone_run_id = phone_document["run_id"]
+        phone_nodes = [n for n in topology if n["runtime_backend"] == PHONE_BACKEND]
+        if set(phone_document["nodes"]) != {n["node_id"] for n in phone_nodes}:
+            raise RuntimeError("phone_evidence_node_set_mismatch")
+        for node in phone_nodes:
+            evidence = PhoneEvidence(phone_document["nodes"][node["node_id"]],
+                seed_key_digest=seed_digest, node=node, run_id=phone_run_id, deployment_id=deployment_id)
+            validate_build_receipt(evidence.receipt, expected_digest=evidence.statement["build_receipt_digest"],
+                binary=args.phone_executor, apk=args.phone_apk, source_root=args.phone_source_root)
+            phone_evidence[node["node_id"]] = evidence
     managed_observations = None
     managed_run_id = None
     if getattr(args, "managed_transport", False):
@@ -1412,6 +1525,8 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         if preparation_authorization is None
         else preparation_authorization["serving_quantization"]
     )
+    if phone_evidence and (runtime_dtype != "float32" or runtime_quantization != "int8-weight-only"):
+        raise RuntimeError("phone_runtime_representation_invalid")
     m13_document, planned_ranges = _m13_control_plane(
         getattr(args, "m18_control_plane", None)
         or getattr(args, "m14_control_plane", None)
@@ -1423,6 +1538,8 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         m13_document is not None
         and m13_document["protocol"] == "mycelium.m18_physical_candidate.v1"
     )
+    if is_m18 and phone_evidence:
+        raise RuntimeError("phone_replica_plan_unsupported")
     if is_m18:
         primary_track = m13_document["route_plan"]["legal_tracks"][0]["placement_ids"]
         placement_intent = {
@@ -1575,6 +1692,10 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         }
         for node in topology
     ]
+    for peer in peers:
+        if peer["process_transport"] == "external_iroh":
+            peer["ssh_target"] = None
+            peer["ssh_identity_file"] = None
     staging_roots = {node["node_id"]: node["staging_root"] for node in topology}
     cache_roots = {
         node_id: f"{root}/deployment" for node_id, root in staging_roots.items()
@@ -1611,7 +1732,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         )
         required_mode = (
             "complete_context_replay"
-            if "numpy" in runtime_backends.values()
+            if {"numpy", PHONE_BACKEND} & set(runtime_backends.values())
             else "stage_local_kv"
         )
         accepted_modes = {required_mode}
@@ -1679,6 +1800,34 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 cache_roots=cache_roots,
                 runtime_by_node=runtime_by_node,
             )
+    if prepare_only:
+        preparation = dict(protocol="mycelium.phone_assignment_preparation.v1",
+            deployment_id=deployment_id, assignments=assignments, manifest=prepared.manifest,
+            route_ready=False, claim_boundary="Assignment inputs only; no load, seed offer, or route authority.")
+        _write_document(output_root / "phone-preparation.json", preparation)
+        return preparation
+    if phone_evidence:
+        external_control = external_control_descriptor(template["controller"].get("external_control"))
+        if any(e.statement["controller_endpoint_id"] != external_control["controller_endpoint_id"]
+               for e in phone_evidence.values()):
+            raise RuntimeError("phone_controller_not_authorized")
+    phone_proofs = {}
+    for index, assignment in enumerate(assignments):
+        evidence = phone_evidence.get(assignment["node_id"])
+        if evidence is not None:
+            phone_proofs[assignment["node_id"]] = evidence.bind_assignment(assignment,
+                stage_id=f"stage-{index:03d}", snapshot_root=args.model_root)
+            executor = resources.enter_context(RustStageExecutor(args.phone_executor, args.model_root,
+                evidence.manifest["start_layer"], evidence.manifest["end_layer_exclusive"],
+                hidden_size=evidence.manifest["architecture"]["hidden_size"]))
+            from mycelium_mobile.qwen_stage_manifest import golden_input_f32
+            golden = evidence.manifest["golden"]
+            hidden = evidence.manifest["architecture"]["hidden_size"]
+            probe = np.frombuffer(golden_input_f32(golden["seed"], golden["seq"], hidden), dtype="<f4")
+            output = executor.execute(probe.reshape(1, golden["seq"], hidden))
+            if _digest(output.astype("<f4").tobytes()) != golden["output_digest"]:
+                raise RuntimeError("phone_host_golden_mismatch")
+            phone_executors[assignment["node_id"]] = executor
     if is_m18:
 
         def local_fetch(
@@ -1739,6 +1888,9 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         for assignment, report in zip(
             prepared.assignments, prepared.reports, strict=True
         ):
+            if assignment["node_id"] in phone_proofs:
+                base_proof_documents.append(phone_proofs[assignment["node_id"]])
+                continue
             loaded = load_assignment_stage(
                 assignment,
                 report,
@@ -1750,7 +1902,8 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         report_sources = prepared.reports
     else:
         base_loaded = [
-            load_assignment_stage(assignment, report, load_generation=LOAD_GENERATION)
+            (phone_executors[assignment["node_id"]] if assignment["node_id"] in phone_executors
+             else load_assignment_stage(assignment, report, load_generation=LOAD_GENERATION))
             for assignment, report in zip(
                 prepared.assignments, prepared.reports, strict=True
             )
@@ -1782,10 +1935,12 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     proof_documents = (
         base_proof_documents
         if preparation_authorization is not None
-        else [json.loads(canonical_json(loaded.proof)) for loaded in base_loaded]
+        else [phone_proofs[a["node_id"]] if a["node_id"] in phone_proofs
+              else json.loads(canonical_json(loaded.proof))
+              for a, loaded in zip(assignments, base_loaded, strict=True)]
     )
     proofs = [
-        _target_proof(
+        phone_proofs[assignment["node_id"]] if assignment["node_id"] in phone_proofs else _target_proof(
             proof_document,
             assignment,
             pack,
@@ -1810,6 +1965,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         graph = build_execution_graph(
             assignments, proofs, link_scheme="iroh", runtime_scheme="iroh"
         )
+    graph = bind_phone_graph(graph, phone_evidence)
     graph_document = _physical_graph_document(graph)
     device_states = {
         node_id: asdict(state)
@@ -1845,6 +2001,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             list(prepared.assignments),
             list(prepared.reports),
             challenge_backends,
+            phone_executors=phone_executors,
         )
     else:
         challenge_prompt, challenge_output = _challenge(
@@ -1892,6 +2049,9 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             runtime_backends=runtime_backends,
             preparation_authorization=preparation_authorization,
             stage_sharding=stage_sharding,
+            phone_challenges={node: {"build_receipt": phone_evidence[node].receipt,
+                                     "steps": executor.records}
+                              for node, executor in phone_executors.items()},
         ),
     )
 
@@ -1983,7 +2143,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 assignments=assignments,
                 materializations_by_node=materializations,
                 load_proof_digests_by_node={
-                    assignment["node_id"]: layer_load_proof_digest(proof)
+                    assignment["node_id"]: preparation_proof_digest(proof)
                     for assignment, proof in zip(assignments, proofs, strict=True)
                 },
                 promotion_report=None,
@@ -2009,7 +2169,22 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     _copy_runtime_closure(repo, bundle, template)
 
     now = time.time()
-    membership = _membership_snapshot(
+    if any(now >= e.statement["expires_at"] for e in phone_evidence.values()):
+        raise RuntimeError("phone_authority_stale")
+    if phone_evidence and getattr(args, "phone_seed_state_root", None) is not None:
+        from mycelium_seed.phone_preparation import preparation_membership_snapshot
+        phone_document["membership_snapshot"] = preparation_membership_snapshot(
+            args.phone_seed_state_root, seed_key_digest=args.phone_seed_key_digest,
+            assignments=assignments, packs=packs, graph_document=graph_document,
+            topology=topology, phone_evidence=phone_evidence,
+            controller_endpoint_id=external_control["controller_endpoint_id"],
+            placement_provenance=_placement_provenance(m13_document=m13_document,
+                preparation_authorization=preparation_authorization))
+    membership = authorized_membership_snapshot(
+        phone_document["membership_snapshot"], seed_key_digest=args.phone_seed_key_digest,
+        assignments=assignments, packs=packs, graph_document=graph_document,
+        topology=topology, phone_evidence=phone_evidence, now=time.time(),
+    ) if phone_evidence else _membership_snapshot(
         assignments=assignments,
         packs=packs,
         graph_document=graph_document,
@@ -2030,6 +2205,9 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     for index, assignment in enumerate(assignments):
         node_id = assignment["node_id"]
         topology_node = topology_by_node[node_id]
+        if node_id in phone_evidence:
+            nodes.append({"node_id": node_id, "configure": phone_evidence[node_id].profile})
+            continue
         nodes.append(
             {
                 "node_id": node_id,
@@ -2048,17 +2226,18 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             }
         )
     run_id = (
-        managed_run_id
-        if managed_run_id is not None
-        else f"{route_label}-qwen-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(now))
+        phone_run_id or managed_run_id
+        or f"{route_label}-qwen-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(now))
     )
     peers = refresh_peer_identities(
         peers,
         run_id,
         python_executables_by_node={
             node["node_id"]: node["python_executable"] for node in topology
+            if node["runtime_backend"] != PHONE_BACKEND
         },
         managed_observations=managed_observations,
+        phone_evidence=phone_evidence,
     )
     run_plan = {
         "protocol": "mycelium.controller_run_plan.v1",
@@ -2069,6 +2248,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "request": request,
         "decode_count": len(challenge_output) - 1,
         "expected_token_ids": list(challenge_output),
+        **({"decode_mode": "complete_context_replay"} if phone_evidence else {}),
     }
     transfer_manifest = _transfer_manifest(bundle)
     node_transfer_manifests = _node_transfer_manifests(transfer_manifest, packs)
@@ -2248,6 +2428,13 @@ def main() -> int:
             "directory instead of a temporary one; an existing target is refused"
         ),
     )
+    parser.add_argument("--phone-prepare-only", action="store_true", help="Compile assignment inputs only, without load/route authority")
+    parser.add_argument("--phone-seed-state-root", type=Path, help="Existing owner-local seed authority; revalidate and project final graph offers")
+    parser.add_argument("--phone-evidence", type=Path)
+    parser.add_argument("--phone-seed-key-digest")
+    parser.add_argument("--phone-executor", type=Path)
+    parser.add_argument("--phone-apk", type=Path)
+    parser.add_argument("--phone-source-root", type=Path)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument(
         "--temporary-root",

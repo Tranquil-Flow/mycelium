@@ -40,6 +40,7 @@ _PATH_FIELDS = frozenset({"evidence_output_dir", "lock_path", "state_path", "log
 _CONTROLLER_FIELDS = frozenset(
     {
         "mode",
+        "external_control",
         "now",
         "source_root",
         "peers",
@@ -242,6 +243,7 @@ def _controller(value: Any) -> Mapping[str, Any]:
     unknown = set(snapshot) - _CONTROLLER_FIELDS
     _require(not unknown, "plan_unknown_field", "controller." + ",".join(sorted(unknown)))
     required = _CONTROLLER_FIELDS - {
+        "external_control",
         "authority_documents",
         "authority_profile",
         "node_transfer_manifests",
@@ -292,11 +294,11 @@ def _controller(value: Any) -> Mapping[str, Any]:
         peers_by_node[node_id] = peer
         process_transport = peer.get("process_transport")
         _require(
-            process_transport in {"local", "ssh", "managed_https"},
+            process_transport in {"local", "ssh", "managed_https", "external_iroh"},
             "plan_field_invalid",
             "controller.peers.process_transport",
         )
-        if process_transport == "managed_https":
+        if process_transport in {"managed_https", "external_iroh"}:
             _require(peer.get("ssh_target") is None, "plan_field_invalid", "controller.peers.ssh_target")
         ssh_identity_file = peer.get("ssh_identity_file")
         if process_transport == "ssh":
@@ -391,9 +393,26 @@ def _controller(value: Any) -> Mapping[str, Any]:
         "plan_field_invalid",
         "controller.run_plan.entry_node_id",
     )
+    external = {n for n,p in peers_by_node.items() if p.get("process_transport") == "external_iroh"}
+    if external:
+        from mycelium_live.phone_stage_session import PhoneStageSessionFactory, validate_phone_configure
+        try:
+            PhoneStageSessionFactory.from_descriptor(snapshot.get("external_control"))
+            nodes = snapshot["run_plan"]["nodes"]
+            for i,node in enumerate(nodes):
+                if node["node_id"] in external:
+                    _require(0 < i < len(nodes)-1 and set(node) == {"node_id", "configure"},
+                             "plan_field_invalid", "controller.run_plan.phone")
+                    validate_phone_configure(node["configure"])
+            _require(external <= {n["node_id"] for n in nodes}, "plan_field_invalid", "controller.run_plan.phone")
+        except (ValueError, TypeError, KeyError, RuntimeError) as exc:
+            _fail("plan_field_invalid", "controller.external_control:" + str(exc))
+    elif "external_control" in snapshot:
+        _fail("plan_field_invalid", "controller.external_control")
     managed = any(peer.get("process_transport") == "managed_https" for peer in peers_by_node.values())
     for node_id, peer in peers_by_node.items():
-        expected_transport = "managed_https" if managed else ("local" if node_id == entry_node_id else "ssh")
+        expected_transport = "managed_https" if managed else ("local" if node_id == entry_node_id
+            else "external_iroh" if node_id in external else "ssh")
         _require(
             peer.get("process_transport") == expected_transport,
             "plan_field_invalid",

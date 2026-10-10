@@ -26,6 +26,7 @@ from runtime_contracts import (
     MLX_RUNTIME_BASE_FIELDS,
     validate_normalized_mlx_runtime,
     validate_normalized_numpy_runtime,
+    validate_normalized_runtime,
 )
 from weight_provisioning import artifact_report_errors
 
@@ -983,6 +984,8 @@ def _normalize_runtime(runtime: Any) -> dict[str, Any]:
         return validate_normalized_mlx_runtime(runtime)
     if backend == "numpy":
         return validate_normalized_numpy_runtime(runtime)
+    if backend == "mobile-rust-qwen2":
+        return validate_normalized_runtime(runtime, expected_backend="mobile-rust-qwen2")
     if backend == "artifact_verifier":
         if set(runtime) != MLX_RUNTIME_BASE_FIELDS:
             raise ValueError("artifact_verifier runtime fields are invalid")

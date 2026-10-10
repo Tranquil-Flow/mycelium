@@ -75,7 +75,7 @@ _ENVELOPE_FIELDS = frozenset({"protocol", "message", "signature", "verification_
 _SEGMENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _ENDPOINT_RE = re.compile(r"[0-9a-f]{64}\Z")
 _DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
-_ANDROID_PEER_CLASS = "android_native_iroh"
+_ANDROID_PEER_CLASSES = frozenset({"android_native_iroh", "android_native_qwen2_iroh"})
 
 
 def _fail(code: str) -> SeedCoordinatorError:
@@ -149,6 +149,7 @@ def _ensure_schema(database: Path) -> None:
                 "controller_endpoint_ids_json TEXT NOT NULL DEFAULT '[]'"
             )
         connection.execute(_ARTIFACT_SCHEMA)
+        connection.execute("CREATE TABLE IF NOT EXISTS seed_route_preparations (node_id TEXT PRIMARY KEY NOT NULL, assignment_id TEXT NOT NULL, assignment_json TEXT NOT NULL) WITHOUT ROWID")
         connection.execute("COMMIT")
     except sqlite3.Error as exc:
         if connection.in_transaction:
@@ -307,6 +308,34 @@ def stage_pack_digest(pack: Mapping[str, Any]) -> str:
     return str(pack["pack_digest"])
 
 
+def validate_preparation_assignment(assignment, pack, node_id):
+    """Bind owner-issued route authority to a compiled deterministic assignment.
+
+    The native manifest independently binds the stage bytes. The compiled ID
+    binds the host manifest identity; neither an observed native graph digest
+    nor an independently observed native load counter is claimed here.
+    """
+    from layer_assignment import validate_assignment_identity
+    from runtime_contracts import validate_normalized_runtime
+    try:
+        validate_assignment_identity(assignment)
+        validate_normalized_runtime(assignment['runtime'], expected_backend='mobile-rust-qwen2')
+        m = pack['message']
+        if not v2_manifest.is_signed_stage_manifest(pack) or not (
+            assignment['protocol'] == 'mycelium.layer_assignment.v2'
+            and assignment['node_id'] == node_id
+            and assignment['model_id'] == m['model_id']
+            and assignment['resolved_commit'] == m['resolved_commit']
+            and assignment['range']['start_layer'] == m['start_layer']
+            and assignment['range']['end_layer_exclusive'] == m['end_layer_exclusive']
+            and assignment['expected_tensor_keys'] == [t['name'] for t in m['tensors']]
+            and _DIGEST_RE.fullmatch(assignment['manifest_digest'])
+        ):
+            raise ValueError('preparation mismatch')
+    except (KeyError, TypeError, ValueError) as exc:
+        raise _fail('phone_preparation_assignment_invalid') from exc
+
+
 def issue_route_assignment(
     database: Path,
     *,
@@ -321,6 +350,7 @@ def issue_route_assignment(
     id_source: Callable[[], str] | None = None,
     seed_key_record: Mapping[str, Any] | None = None,
     artifact_sources: Sequence[Mapping[str, str]] = (),
+    preparation_assignment: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Record (or replace) the one route assignment of an enrolled native member.
 
@@ -346,8 +376,14 @@ def issue_route_assignment(
         raise _fail("seed_route_assignment_ttl_invalid")
     pack = verify_stage_pack(stage_pack, seed_key_record=seed_key_record)
     sources = _artifact_sources(artifact_sources, required=v2_manifest.is_signed_stage_manifest(pack))
+    if preparation_assignment is not None:
+        validate_preparation_assignment(preparation_assignment, pack, node_id)
+        if id_source is not None:
+            raise _fail("phone_preparation_id_source_conflict")
+        assignment_id = preparation_assignment["assignment_id"]
+    else:
+        assignment_id = (id_source or (lambda: f"route-{secrets.token_hex(8)}"))()
     issued_at = float(now())
-    assignment_id = (id_source or (lambda: f"route-{secrets.token_hex(8)}"))()
     if not _segment(assignment_id):
         raise _fail("seed_route_assignment_id_invalid")
     _ensure_schema(database)
@@ -358,7 +394,7 @@ def issue_route_assignment(
             member = _member_row(connection, node_id)
             if member is None:
                 raise _fail("seed_member_unknown")
-            if member["peer_class"] != _ANDROID_PEER_CLASS or not _member_eligible(member):
+            if member["peer_class"] not in _ANDROID_PEER_CLASSES or not _member_eligible(member):
                 raise _fail("seed_member_activation_ineligible")
             if member["lifecycle_state"] == "STOPPED":
                 raise _fail("seed_member_revoked")
@@ -389,6 +425,10 @@ def issue_route_assignment(
                     controllers_json,
                 ),
             )
+            connection.execute("DELETE FROM seed_route_preparations WHERE node_id = ?", (node_id,))
+            if preparation_assignment is not None:
+                connection.execute("INSERT INTO seed_route_preparations VALUES (?, ?, ?)",
+                    (node_id, assignment_id, canonical_json_bytes(preparation_assignment).decode("utf-8")))
             connection.execute("DELETE FROM seed_route_assignment_artifacts WHERE node_id = ?", (node_id,))
             if sources:
                 connection.execute(
@@ -500,10 +540,10 @@ def newest_android_member(database: Path, *, now: Callable[[], float] = time.tim
         rows = connection.execute(
             """
             SELECT node_id FROM seed_members
-            WHERE peer_class = ? AND lifecycle_state != 'STOPPED' AND lease_expires_at > ?
+            WHERE peer_class IN (?, ?) AND lifecycle_state != 'STOPPED' AND lease_expires_at > ?
             ORDER BY generation DESC, node_id
             """,
-            (_ANDROID_PEER_CLASS, float(now())),
+            (*sorted(_ANDROID_PEER_CLASSES), float(now())),
         ).fetchall()
     except sqlite3.Error as exc:
         raise _fail("seed_route_assignment_store_unavailable") from exc
@@ -783,6 +823,7 @@ def _parser() -> argparse.ArgumentParser:
     issue = sub.add_parser("issue")
     issue.add_argument("--node-id", help="default: the single lease-fresh Android member")
     issue.add_argument("--stage-pack", required=True, type=Path)
+    issue.add_argument("--preparation-assignment", type=Path, help="Compiled layer assignment JSON; validates and binds its deterministic ID")
     issue.add_argument("--peer-endpoint-id", required=True)
     issue.add_argument("--route-generation", required=True, type=int)
     issue.add_argument("--no-forward", action="store_true")
@@ -849,6 +890,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 controller_endpoint_ids=list(args.controller_endpoint_id),
                 ttl_seconds=args.ttl_seconds,
                 artifact_sources=[parse_artifact_source(item) for item in args.artifact_source],
+                preparation_assignment=(json.loads(args.preparation_assignment.read_text()) if args.preparation_assignment else None),
                 seed_key_record=coordinator.signer.public_key_record(),
             )
         elif args.command == "withdraw":

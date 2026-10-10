@@ -635,8 +635,8 @@ def _runtime_build_digest(backend: str) -> str:
         digest.update(name.encode("utf-8"))
         try:
             digest.update(path.read_bytes())
-        except OSError:
-            digest.update(b"missing")
+        except OSError as exc:
+            raise NodeCommandError("runtime_build_source_unavailable") from exc
     return "sha256:" + digest.hexdigest()
 
 
