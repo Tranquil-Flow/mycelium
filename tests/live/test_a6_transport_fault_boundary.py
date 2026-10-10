@@ -53,7 +53,9 @@ def make_route(monkeypatch, *, bound=None, session=None, fault=True):
         deadline_monotonic_ms=int(time.monotonic() * 1000) + 10_000,
     ) if fault else None)
     options: dict[str, Any] = dict(
-        controller=SimpleNamespace(peers=()), endpoints={},
+        controller=SimpleNamespace(peers=tuple(
+            SimpleNamespace(node_id=n, process_transport="local") for n in ("node-a", "node-b")
+        )), endpoints={},
         run_plan={"run_id": "local-fixture", "deployment_id": "deployment-a", "request": {},
                   "nodes": [{"node_id": "node-a", "configure": {"graph": {}}}]},
     )

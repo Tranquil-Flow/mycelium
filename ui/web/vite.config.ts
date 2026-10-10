@@ -6,6 +6,10 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.{ts,tsx}'],
     environment: 'jsdom',
+    // Node 25's file-backed Web Storage must not replace jsdom's per-window
+    // browser storage. Disable only the host implementation in test workers.
+    execArgv: process.allowedNodeEnvironmentFlags.has('--no-experimental-webstorage')
+      ? ['--no-experimental-webstorage'] : [],
     setupFiles: './src/setupTests.ts',
     css: true,
   },

@@ -192,7 +192,7 @@ def governed(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(gateway_contracts, "qualification_digest", lambda _: DIGEST)
     route = route_module.PhysicalLiveRoute(
         controller=SimpleNamespace(
-            peers=tuple(SimpleNamespace(node_id=node_id) for node_id in NODES)
+            peers=tuple(SimpleNamespace(node_id=node_id, process_transport="local") for node_id in NODES)
         ),
         endpoints={},
         run_plan={

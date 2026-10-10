@@ -78,6 +78,8 @@ def stack(monkeypatch, tmp_path):
     node = route._graph.stages[0].placements[0].node_id
     route._sessions = {node: source, **{p.node_id: Session() for stage in route._graph.stages
                                           for p in stage.placements if p.node_id != node}}
+    # Match the local session transport contract exercised by infer().
+    route._peers = {n: SimpleNamespace(node_id=n, process_transport="local") for n in route._sessions}
     route._liveness_subjects[node] = subject
     seam = MeasuredSourceFailureSeam(service=service, router=router, route=route,
                                      expected_request_id="live-a6-001", clock_monotonic=time.monotonic,
