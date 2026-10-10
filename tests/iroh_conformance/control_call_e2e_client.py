@@ -40,6 +40,11 @@ def main():
                     assert result == {'peer_endpoint_id': address['id'], 'response_json': '{"ok":true}'}
                 client.ping()  # ControlCall did not desynchronize authenticated IPC.
                 print(json.dumps({'controller_endpoint_id': client.endpoint_id, 'calls': 2}), flush=True)
+                # Keep the endpoint alive until the Rust peer witnesses both
+                # per-call closes. Killing the sidecar here can discard the
+                # final QUIC close datagram before the peer has observed it.
+                assert select.select([sys.stdin], [], [], 10)[0], 'peer cleanup witness timeout'
+                assert sys.stdin.buffer.read(1) == b'd', 'peer cleanup was not witnessed'
         finally:
             if child.poll() is None:
                 child.terminate()
