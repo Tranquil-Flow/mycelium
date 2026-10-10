@@ -77,6 +77,37 @@ _MAX_PATH_OWNERS = 2 * _MAX_TERMINAL_PATH_METADATA
 #: is idle. The shared replay filter is written only by local authority
 #: (unknown-owner tombstones), so no peer drives its rotation.
 _TOMBSTONE_RETENTION_SECONDS = 600.0
+#: A live (registered or provisional) path with no traffic and no work in
+#: flight for this long (relay clock) is retired as a local release, which
+#: binds its owner: that attempt never registers again. The longest legitimate
+#: idle gap at a relay is one decode cycle (two 240 s confirmed-delivery
+#: budgets plus the A7 ack wait, ~482 s) or a sequential ManifestLocked chain
+#: before prefill, and the controller's overhead between commands is bounded
+#: only by the 930 s route session timeout: so the horizon is that session
+#: timeout plus one 240 s delivery budget plus a 30 s margin
+#: (``tests/path_cancellation_adversarial`` derives and pins it).
+_LIVE_PATH_IDLE_SECONDS = 1200.0
+#: The absolute request deadline the route stamps on every physical command:
+#: ``issued_at_ms + 3_600_000`` at ``mycelium_live/router_port.py:694`` (and the
+#: legacy fallback at ``mycelium_live/route.py:4541``). It is the only
+#: machine-enforced wall-clock bound on one command's life: the node's command
+#: controller retires a command at it (``command_controller._expire_if_due``),
+#: and an A6/A7 recovery successor inherits the same deadline rather than
+#: minting a new one (``router_port.py:1551``).
+_REQUEST_ABSOLUTE_DEADLINE_SECONDS = 3_600.0
+#: An absolute per-registration lifetime ceiling, measured on the relay clock
+#: from a path id's *first* registration and never refreshed by traffic, in
+#: flight work, or queued work.  Idle expiry alone is a resource-cap defeat: a
+#: creator that keeps a path warm (valid hops, queued work, or replayed
+#: admitted frames) defeats it and holds its live-path slot and creator slot
+#: forever.  The ceiling is the composition of the two enforced bounds above:
+#: the command's absolute deadline plus one idle horizon, i.e. the longest a
+#: legitimate path may stay quiet and still be inside its command's life.
+#: ``tests/path_cancellation_adversarial`` pins both the derivation and the
+#: ``3_600_000`` literal it is read from.
+_LIVE_PATH_MAX_LIFETIME_SECONDS = (
+   _REQUEST_ABSOLUTE_DEADLINE_SECONDS + _LIVE_PATH_IDLE_SECONDS
+)
 _TOMBSTONE_QUOTA_PER_CREATOR = 8192
 _MAX_TOMBSTONE_CREATORS = 64
 #: Pending tombstones per authenticated source. A source over its quota
@@ -222,6 +253,8 @@ class RelayEngine:
       self._path_operation_registry_lock = Lock()
       self._path_operation_locks: dict[str, tuple[Lock, int]] = {}
       self._path_generations: OrderedDict[str, int] = OrderedDict()
+      # Never reuse a permit after bounded tombstone metadata is evicted.
+      self._generation_sequence = 0
       # Highest cancelled attempt per (path id, owner, binding class); owner
       # None is a local unknown-owner tombstone, which binds everyone. One
       # record never lowers, replaces or evicts another's.
@@ -273,6 +306,131 @@ class RelayEngine:
             1e-3, float(scheduler.config.live_hop_join_horizon_seconds)
          )
       )
+      # Idle live-path expiry: last traffic per live path (oldest first) and
+      # operations in flight per path (an executing path is never idle).
+      self._path_activity: OrderedDict[str, float] = OrderedDict()
+      self._path_busy: dict[str, int] = {}
+      # Absolute lifetime: a path id's *first* registration on this node.  It
+      # is never refreshed, not by traffic, not by queued or in-flight work,
+      # and not by a later attempt under the same path id, so no amount of
+      # activity can hold a path (and its creator slot) past the ceiling.
+      self._path_registered_at: dict[str, float] = {}
+      # No successor may publish while old path-id cleanup is in progress.
+      self._retiring_paths: set[str] = set()
+
+   def _touch_path_locked(self, path_id: str) -> None:
+      """Record traffic for a live path (no-op for an unknown one)."""
+      if path_id in self._paths or path_id in self._provisional_paths:
+         self._path_activity[path_id] = self.clock.now()
+         self._path_activity.move_to_end(path_id)
+
+   @contextmanager
+   def _path_in_flight(self, path_id: str) -> Iterator[None]:
+      """Locally admitted work, fenced to the generation at entry."""
+      with self._admitted_path_activity(path_id) as admit:
+         admit()
+         yield
+
+   @contextmanager
+   def _admitted_path_activity(self, path_id: str):
+      """Yield a marker called after scheduler admission and generation check.
+
+      Refusals never refresh or hold busy state. Old finalizers cannot touch
+      newer registrations or decrement their busy counts.
+      """
+      with self._path_lock:
+         generation = self._path_generations.get(path_id, 0)
+      admitted = False
+      def admit():
+         nonlocal admitted
+         with self._path_lock:
+            if admitted or self._path_generations.get(path_id, 0) != generation:
+               return
+            admitted = True
+            self._path_busy[path_id] = self._path_busy.get(path_id, 0) + 1
+            self._refresh_path_locked(path_id)
+      try:
+         yield admit
+      finally:
+         with self._path_lock:
+            first = self._path_registered_at.get(path_id)
+            absolute_due = first is not None and self.clock.now() - first >= _LIVE_PATH_MAX_LIFETIME_SECONDS
+            if admitted and self._path_generations.get(path_id, 0) == generation:
+               remaining = self._path_busy.get(path_id, 1) - 1
+               if remaining > 0:
+                  self._path_busy[path_id] = remaining
+               else:
+                  self._path_busy.pop(path_id, None)
+               self._refresh_path_locked(path_id)
+         if absolute_due:
+            self.expire_idle_paths()
+
+   def _refresh_path_locked(self, path_id: str) -> None:
+      """``_touch_path_locked`` that a lifetime ceiling can veto."""
+      first = self._path_registered_at.get(path_id)
+      if first is not None and self.clock.now() - first >= _LIVE_PATH_MAX_LIFETIME_SECONDS:
+         return
+      self._touch_path_locked(path_id)
+
+   def expire_idle_paths(self) -> tuple[str, ...]:
+      """Retire every live path past either bound, as a local release.
+
+      Two independent retirements, and each owner stays bound for that exact
+      attempt (exactly what a local release does):
+
+      * **idle** — no traffic, no operation in flight and no queued hop for
+        ``_LIVE_PATH_IDLE_SECONDS``;
+      * **absolute** — older than ``_LIVE_PATH_MAX_LIFETIME_SECONDS`` since its
+        first registration on this node, whatever it is doing.  This one is not
+        deferred by queued or in-flight work, and it is not refreshed by a
+        later attempt under the same path id, so nothing an authorized
+        participant does can hold a live-path or creator slot past the bound.
+      """
+      now = self.clock.now()
+      expired: list[tuple[str, Any]] = []
+      with self._path_lock:
+         queued = {value[1].path_id for value in self._pending_hops.values()}
+         if self._path_activity:
+            for path_id, last in tuple(self._path_activity.items()):
+               # ``_path_activity`` is ordered oldest first, so the first
+               # still-warm path ends the idle sweep.
+               if now - last < _LIVE_PATH_IDLE_SECONDS:
+                  break
+               if path_id not in self._paths and path_id not in self._provisional_paths:
+                  self._path_activity.pop(path_id, None)
+                  continue
+               if self._path_busy.get(path_id) or path_id in queued:
+                  self._touch_path_locked(path_id)
+                  continue
+               registered = self._paths.get(path_id)
+               self._release_path_state_locked(path_id)
+               self._path_activity.pop(path_id, None)
+               expired.append((path_id, registered))
+         # The ceiling sweep is not ordered by last activity (a path past the
+         # ceiling may have been touched seconds ago), so it scans every live
+         # path.  Already-expired ids are absent from the tables and skipped.
+         for path_id, first in tuple(self._path_registered_at.items()):
+            if now - first < _LIVE_PATH_MAX_LIFETIME_SECONDS:
+               continue
+            if path_id not in self._paths and path_id not in self._provisional_paths:
+               self._path_registered_at.pop(path_id, None)
+               continue
+            if any(seen == path_id for seen, _ in expired):
+               continue
+            registered = self._paths.get(path_id)
+            self._release_path_state_locked(path_id)
+            self._path_activity.pop(path_id, None)
+            self._path_registered_at.pop(path_id, None)
+            expired.append((path_id, registered))
+         self._retiring_paths.update(path_id for path_id, _ in expired)
+      for path_id, registered in expired:
+         try:
+            self._release_synchronized_capacity(registered)
+            self._release_path_resources(path_id)
+         finally:
+            with self._path_lock:
+               self._retiring_paths.discard(path_id)
+      return tuple(path_id for path_id, _ in expired)
 
    def entry_node_for_path(self, path_id: str) -> str | None:
       """The entry node that registered ``path_id`` here (``None`` once released or unknown)."""
@@ -283,6 +441,11 @@ class RelayEngine:
       """Return the generation used to fence entry-side dispatches."""
       with self._path_lock:
          return self._path_generations.get(path_id, 0)
+
+   def _advance_generation_locked(self, path_id: str) -> None:
+      self._generation_sequence += 1
+      self._path_generations[path_id] = self._generation_sequence
+      self._path_generations.move_to_end(path_id)
 
    def _path_generation(self, path_id: str) -> int:
       return self.path_generation(path_id)
@@ -619,8 +782,7 @@ class RelayEngine:
       self._record_cancelled_attempt_locked(
          path_id, path_attempt, (entry_node_id, request_id), creator=entry_node_id
       )
-      self._path_generations[path_id] = self._path_generations.get(path_id, 0) + 1
-      self._path_generations.move_to_end(path_id)
+      self._advance_generation_locked(path_id)
       self._prune_terminal_path_metadata_locked()
       return True
 
@@ -630,6 +792,9 @@ class RelayEngine:
       path_attempt: int,
       generation: int,
    ) -> bool:
+      first = self._path_registered_at.get(path_id)
+      if first is not None and self.clock.now() - first >= _LIVE_PATH_MAX_LIFETIME_SECONDS:
+         return False
       if self._path_generations.get(path_id, 0) != generation:
          return False
       if self._was_cancelled_attempt_locked(path_id, path_attempt):
@@ -646,18 +811,14 @@ class RelayEngine:
       generation: int,
       sender,
    ) -> bool:
-      with self._path_lock:
-         if not self._path_is_current_locked(
-            path_id,
-            path_attempt,
-            generation,
-         ):
-            return False
-      # Acquiring this generation-checked permit is the dispatch linearization
-      # point. Cancellation invalidates the generation, preventing every
-      # dispatch that has not acquired a permit yet. Already-permitted work is
-      # in flight and cannot be retracted from an arbitrary transport.
-      sender()
+      with self._admitted_path_activity(path_id) as admit:
+         with self._path_lock:
+            if not self._path_is_current_locked(path_id, path_attempt, generation):
+               return False
+            admit()
+         # Permit acquisition is the dispatch linearization point. An already
+         # permitted send cannot be retracted from an arbitrary transport.
+         sender()
       return True
 
    def dispatch_if_current(
@@ -792,6 +953,7 @@ class RelayEngine:
       source_node_id: str | None = None,
       entry_node_id: str | None = None,
    ) -> int | None:
+      self.expire_idle_paths()
       with self._path_operation_lock(manifest.path_id):
          validate_manifest(manifest, graph)
          if request.request_id != manifest.request_id:
@@ -810,6 +972,11 @@ class RelayEngine:
          if entry_node_id is not None and not entry_node_id:
             return None
          with self._path_lock:
+            if manifest.path_id in self._retiring_paths:
+               return None
+            first = self._path_registered_at.get(manifest.path_id)
+            if first is not None and self.clock.now() - first >= _LIVE_PATH_MAX_LIFETIME_SECONDS:
+               return None
             owner = self._resolve_owner_locked(
                manifest.path_id, request.request_id, entry_node_id
             )
@@ -902,6 +1069,7 @@ class RelayEngine:
                      return None
                   if entry_node_id is not None:
                      self._entry_node_by_path[manifest.path_id] = entry_node_id
+                  self._touch_path_locked(manifest.path_id)
                   return self._path_generations[manifest.path_id]
                existing_entry = self._entry_node_by_path.get(manifest.path_id)
                if (
@@ -919,19 +1087,24 @@ class RelayEngine:
             if existing is None and provisional is None:
                self._path_creators[manifest.path_id] = creator
                self._path_creators.move_to_end(manifest.path_id)
+               # A6 replays and A7 successors reuse the path id; the ceiling
+               # runs from the *first* registration here, never from the
+               # attempt that is being registered now.
+               self._path_registered_at.setdefault(
+                  manifest.path_id, self.clock.now()
+               )
             self._hop_arrivals.record_registration(
                manifest.path_id, at=self.clock.now()
             )
             self._provisional_paths.pop(manifest.path_id, None)
-            self._path_generations[manifest.path_id] = (
-               self._path_generations.get(manifest.path_id, 0) + 1
-            )
-            self._path_generations.move_to_end(manifest.path_id)
+            self._path_busy.pop(manifest.path_id, None)
+            self._advance_generation_locked(manifest.path_id)
             for recorded, binding in self._cancelled_path_owners.get(manifest.path_id, ()):
                self._cancelled_path_attempts.move_to_end((manifest.path_id, recorded, binding))
             self._prune_terminal_path_metadata_locked()
             if entry_node_id is not None:
                self._entry_node_by_path[manifest.path_id] = entry_node_id
+            self._touch_path_locked(manifest.path_id)
             return self._path_generations[manifest.path_id]
 
    def _register_provisional_path(
@@ -954,6 +1127,11 @@ class RelayEngine:
          return None
       with self._path_operation_lock(path_id):
          with self._path_lock:
+            if path_id in self._retiring_paths:
+               return None
+            first = self._path_registered_at.get(path_id)
+            if first is not None and self.clock.now() - first >= _LIVE_PATH_MAX_LIFETIME_SECONDS:
+               return None
             if self._consume_pending_cancellation_locked(
                request_id=request_id,
                path_id=path_id,
@@ -997,13 +1175,26 @@ class RelayEngine:
             if not live:
                self._path_creators[path_id] = creator
                self._path_creators.move_to_end(path_id)
-            self._path_generations[path_id] = (
-               self._path_generations.get(path_id, 0) + 1
-            )
-            self._path_generations.move_to_end(path_id)
+               self._path_registered_at.setdefault(path_id, self.clock.now())
+            self._advance_generation_locked(path_id)
+            self._path_busy.pop(path_id, None)
+            self._path_activity.setdefault(path_id, self.clock.now())
             return self._path_generations[path_id]
 
    def receive_progressive_prefill(
+      self,
+      header: HopHeader,
+      context: ProgressivePrefillContext,
+      *,
+      source_node_id: str | None = None,
+      entry_node_id: str | None = None,
+   ) -> ProgressivePrefillResult:
+      self.expire_idle_paths()
+      return self._receive_progressive_prefill_inner(
+         header, context, source_node_id=source_node_id, entry_node_id=entry_node_id
+      )
+
+   def _receive_progressive_prefill_inner(
       self,
       header: HopHeader,
       context: ProgressivePrefillContext,
@@ -1064,6 +1255,11 @@ class RelayEngine:
       placement = placement_map[hop.placement_id]
       if placement.node_id != self.node_id:
          return ProgressivePrefillResult("REJECTED", "destination_not_local")
+      try:
+         accepted_payload = snapshot_payload(context.payload)
+         payload_digest = payload_fingerprint(accepted_payload)
+      except TypeError:
+         return ProgressivePrefillResult("REJECTED", "unsupported_payload_type")
       provisional_entry = entry_node_id
       if provisional_entry is None and header.hop_index == 0:
          provisional_entry = source_node_id
@@ -1077,11 +1273,6 @@ class RelayEngine:
       )
       if generation is None:
          return ProgressivePrefillResult("REJECTED", "cancelled_path")
-      try:
-         accepted_payload = snapshot_payload(context.payload)
-         payload_digest = payload_fingerprint(accepted_payload)
-      except TypeError:
-         return ProgressivePrefillResult("REJECTED", "unsupported_payload_type")
       cached = self._prefill_results.get(_hop_key(header))
       if cached is not None:
          if cached[3] != payload_digest:
@@ -1093,6 +1284,41 @@ class RelayEngine:
 
       state = HopStateMachine(path_attempt=header.path_attempt)
       state.transition("QUEUED", path_attempt=header.path_attempt)
+      # Admission point.  Everything above this line may still reject the
+      # frame, and a frame that is rejected is not traffic: only an admitted
+      # frame refreshes the path or holds it busy (review 7, part a).
+      with self._admitted_path_activity(build.path_id) as admit:
+         return self._admitted_progressive_prefill(
+            header,
+            context,
+            build=build,
+            hop=hop,
+            placement=placement,
+            generation=int(generation or 0),
+            provisional_entry=provisional_entry,
+            accepted_payload=accepted_payload,
+            payload_digest=payload_digest,
+            state=state,
+            now=now,
+            admit=admit,
+         )
+
+   def _admitted_progressive_prefill(
+      self,
+      header: HopHeader,
+      context: ProgressivePrefillContext,
+      *,
+      build,
+      hop,
+      placement,
+      generation: int,
+      provisional_entry: str | None,
+      accepted_payload,
+      payload_digest: str,
+      state: HopStateMachine,
+      now: float,
+      admit,
+   ) -> ProgressivePrefillResult:
       work = HopWorkItem(
          request_id=context.request.request_id,
          path_id=build.path_id,
@@ -1133,6 +1359,7 @@ class RelayEngine:
          ):
             self.scheduler.withdraw(work)
             return ProgressivePrefillResult("REJECTED", "cancelled_path")
+         admit()
       selected = self.scheduler.take(work)
       if selected is None:
          # This identity's item is not this dispatch's to execute any more (it was
@@ -1387,6 +1614,16 @@ class RelayEngine:
       *,
       source_node_id: str | None = None,
    ) -> HopReceiveResult:
+      self.expire_idle_paths()
+      return self._receive_hop_inner(header, payload, source_node_id=source_node_id)
+
+   def _receive_hop_inner(
+      self,
+      header: HopHeader,
+      payload: object,
+      *,
+      source_node_id: str | None = None,
+   ) -> HopReceiveResult:
       now = self.clock.now()
       self._evict_hop_results(now=now)
       expected_key = hop_idempotency_key(
@@ -1466,6 +1703,44 @@ class RelayEngine:
 
       state = HopStateMachine(path_attempt=header.path_attempt)
       state.transition("QUEUED", path_attempt=header.path_attempt)
+      # Admission point (review 7, part a): everything above this line may
+      # still reject the frame.  A frame from a non-participant, with a bad
+      # idempotency key, or naming the wrong attempt/hop/source is refused
+      # here, and a refused frame must not refresh or hold the path: otherwise
+      # any configured route peer keeps a path (and its creator's slot) alive
+      # forever with traffic this relay rejects.
+      with self._admitted_path_activity(header.path_id) as admit:
+         return self._admitted_receive_hop(
+            header,
+            graph=graph,
+            manifest=manifest,
+            request=request,
+            hop=hop,
+            placement=placement,
+            generation=generation,
+            state=state,
+            now=now,
+            accepted_payload=accepted_payload,
+            payload_digest=payload_digest,
+            admit=admit,
+         )
+
+   def _admitted_receive_hop(
+      self,
+      header: HopHeader,
+      *,
+      graph,
+      manifest: PathManifest,
+      request: RequestContext,
+      hop,
+      placement,
+      generation: int,
+      state: HopStateMachine,
+      now: float,
+      accepted_payload,
+      payload_digest: str,
+      admit,
+   ) -> HopReceiveResult:
       work = HopWorkItem(
          request_id=request.request_id,
          path_id=manifest.path_id,
@@ -1521,6 +1796,7 @@ class RelayEngine:
          ):
             self.scheduler.withdraw(work)
             return HopReceiveResult("REJECTED", "path_cancelled")
+         admit()
       selected = self.scheduler.take(work)
       if selected is None:
          # The item this dispatch enqueued is gone (withdrawn with a release, or
@@ -1733,6 +2009,18 @@ class RelayEngine:
       *,
       source_node_id: str | None = None,
    ) -> HopReceiveResult:
+      """Validate and queue one hop (see ``_enqueue_hop_inner``); a queued hop
+      keeps its path busy until it completes."""
+      self.expire_idle_paths()
+      return self._enqueue_hop_inner(header, payload, source_node_id=source_node_id)
+
+   def _enqueue_hop_inner(
+      self,
+      header: HopHeader,
+      payload: object,
+      *,
+      source_node_id: str | None = None,
+   ) -> HopReceiveResult:
       """Validate and queue one hop without blocking for runtime execution.
 
       Production event loops should call this method for ingress, then call
@@ -1857,6 +2145,42 @@ class RelayEngine:
          ),
          deadline_at=self._hop_deadline(request, header.phase, now=now),
       )
+      # Admission point (review 7, part a): a frame that is refused above is
+      # not traffic, so it never refreshes or holds this path.
+      with self._admitted_path_activity(header.path_id) as admit:
+         return self._admitted_enqueue_hop(
+            header,
+            graph=graph,
+            manifest=manifest,
+            request=request,
+            hop=hop,
+            placement=placement,
+            generation=generation,
+            now=now,
+            accepted_payload=accepted_payload,
+            payload_digest=payload_digest,
+            work=work,
+            source_node_id=source_node_id,
+            admit=admit,
+         )
+
+   def _admitted_enqueue_hop(
+      self,
+      header: HopHeader,
+      *,
+      graph,
+      manifest: PathManifest,
+      request: RequestContext,
+      hop,
+      placement,
+      generation: int,
+      now: float,
+      accepted_payload,
+      payload_digest: str,
+      work: HopWorkItem,
+      source_node_id: str | None,
+      admit,
+   ) -> HopReceiveResult:
       try:
          self.batch_scheduler.enqueue(work)
       except BackpressureError as error:
@@ -1876,6 +2200,7 @@ class RelayEngine:
          ):
             cancelled = True
          else:
+            admit()
             self._pending_hops[_hop_key(header)] = (
                header,
                work,
@@ -1885,7 +2210,7 @@ class RelayEngine:
             )
             self._enqueue_sequence += 1
       if cancelled:
-         self.batch_scheduler.release_path(header.path_id)
+         self.batch_scheduler.withdraw(work)
          return HopReceiveResult("REJECTED", "path_cancelled")
       self._hop_arrivals.record(header.path_id, at=now, terminal=bool(work.terminal))
       return HopReceiveResult("QUEUED")
@@ -1958,6 +2283,7 @@ class RelayEngine:
       maximum_batches: int | None,
       on_item_error,
    ) -> tuple[HopReceiveResult, ...]:
+      self.expire_idle_paths()
       completed: list[HopReceiveResult] = []
       drained = 0
       while self.batch_scheduler.queue_depth():
@@ -1999,6 +2325,7 @@ class RelayEngine:
                for item, is_active in zip(batch.items, active)
             )
          execution_ms = max(0.0, self.clock.now() - started_at) * 1_000.0
+         self.expire_idle_paths()
          if len(runtime_results) != len(batch.items):
             runtime_results = tuple(
                RuntimeResult(
@@ -2023,9 +2350,13 @@ class RelayEngine:
          unhandled: BaseException | None = None
          for item, runtime_result in zip(batch.items, runtime_results):
             with self._path_lock:
-               pending = self._pending_hops.pop(_hop_key(item), None)
-            if pending is None:
-               continue
+               pending = self._pending_hops.get(_hop_key(item))
+               # A retired batch may finish after replay metadata eviction and
+               # re-registration of the same wire identity. Claim only the
+               # precise queued object this batch took, never its successor.
+               if pending is None or pending[1] is not item:
+                  continue
+               self._pending_hops.pop(_hop_key(item))
             header, _, payload_digest, generation, source_node_id = pending
             try:
                completed.append(
@@ -2107,6 +2438,7 @@ class RelayEngine:
             generation,
          ):
             return HopReceiveResult("REJECTED", "path_cancelled")
+         self._refresh_path_locked(item.path_id)
          graph, manifest, request = registration
       hop = manifest.ordered_hops[header.hop_index]
       placement = next(
@@ -2396,6 +2728,30 @@ class RelayEngine:
       payload: object,
       expected_generation: int | None = None,
    ) -> RelayOutcome:
+      with self._admitted_path_activity(manifest.path_id) as admit:
+         return self._execute_manifest_inner(
+            graph=graph,
+            manifest=manifest,
+            request=request,
+            phase=phase,
+            token_index=token_index,
+            payload=payload,
+            expected_generation=expected_generation,
+            admit=admit,
+         )
+
+   def _execute_manifest_inner(
+      self,
+      *,
+      graph: ExecutionGraph,
+      manifest: PathManifest,
+      request: RequestContext,
+      phase: str,
+      token_index: int,
+      payload: object,
+      expected_generation: int | None = None,
+      admit,
+   ) -> RelayOutcome:
       generation = (
          self._path_generation(manifest.path_id)
          if expected_generation is None
@@ -2506,6 +2862,7 @@ class RelayEngine:
                   manifest,
                   token_index,
                )
+            admit()
          selected = self.scheduler.take(work)
          if selected is None:
             # The item is no longer this dispatch's to execute: fail closed by
@@ -2950,10 +3307,7 @@ class RelayEngine:
                path_id, path_attempt, owner, creator=creator, exact=True
             )
       if known_path:
-         self._path_generations[path_id] = (
-            self._path_generations.get(path_id, 0) + 1
-         )
-         self._path_generations.move_to_end(path_id)
+         self._advance_generation_locked(path_id)
       self._outcomes = {
          key: value
          for key, value in self._outcomes.items()
@@ -2971,6 +3325,9 @@ class RelayEngine:
       }
       self._paths.pop(path_id, None)
       self._provisional_paths.pop(path_id, None)
+      self._path_activity.pop(path_id, None)
+      self._path_registered_at.pop(path_id, None)
+      self._path_busy.pop(path_id, None)
       self._entry_node_by_path.pop(path_id, None)
       self._pending_hops = {
          key: value

@@ -598,3 +598,186 @@ def test_making_room_never_evicts_the_record_refusing_the_same_registration(monk
       request_id="old", path_id="old", path_attempt=stale_man.path_attempt,
       topology_version=graph.topology_version, entry_node_id=entry, source_node_id=entry,
    )
+
+
+# ---- review 6: idle live-path expiry ----
+
+def test_the_idle_horizon_outlasts_every_legitimate_idle_gap() -> None:
+   """The longest legitimate idle gap of a live path at a relay is bounded by
+   the route session timeout (controller overhead between commands) plus one
+   physical delivery budget; a decode cycle is two delivery budgets plus the
+   A7 ack wait (at most 30 s)."""
+   import mycelium_deadlines
+
+   from mycelium_router import relay as relay_module
+
+   budget = _physical_delivery_budget_seconds()
+   horizon = relay_module._LIVE_PATH_IDLE_SECONDS
+   assert horizon >= mycelium_deadlines.NODE_SESSION_TIMEOUT_SECONDS + budget + 30.0
+   assert horizon > 2 * budget + 30.0
+
+
+def _hop_router():
+   """The route's first placement as a local (entryless) registration."""
+   from test_router_receive_hop import first_header
+
+   graph, request, manifest = locked_path()
+   placements = {p.placement_id: p for stage in graph.stages for p in stage.placements}
+   router = Router(
+      node_id=placements[manifest.ordered_hops[0].placement_id].node_id,
+      topology=FakeTopologyProvider(graph),
+      device_states=FakeDeviceStateProvider({}),
+      capacity=FakeCapacityPort(),
+      runtime=FakeRuntimePort(),
+      transport=FakeTransportPort(),
+      clock=ManualClock(),
+      id_source=SequenceIdSource(),
+      config=RouterConfig(),
+   )
+   assert router.register_path(request, manifest, graph)
+   return router, graph, request, manifest, first_header
+
+
+def test_a_path_refreshed_by_traffic_is_never_retired() -> None:
+   """Under the absolute-lifetime policy a path refreshed by admitted traffic
+   is never retired *by the idle horizon*, for as long as the path is inside
+   its absolute lifetime ceiling.  Past that ceiling the same admitted
+   traffic is refused (the cutoff oracle lives in
+   ``test_path_admission_expiry.py``; the explicit cutoff is asserted here
+   too so this test cannot silently weaken into a no-bound check)."""
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, first_header = _hop_router()
+   relay = router.relay
+   ceiling = getattr(
+      relay_module,
+      "_LIVE_PATH_MAX_LIFETIME_SECONDS",
+      3_600.0 + relay_module._LIVE_PATH_IDLE_SECONDS,
+   )
+   step = relay_module._LIVE_PATH_IDLE_SECONDS - 1
+   # Stay strictly under the absolute ceiling: 4 hops x 1199 s = 4796 s.
+   assert 4 * step < ceiling
+   for token in range(4):
+      relay.clock.advance(step)
+      result = router.receive_hop(first_header(request, manifest, token_index=token), request.prompt_token_ids)
+      assert result.disposition != "REJECTED", result
+      assert relay.expire_idle_paths() == ()
+      assert manifest.path_id in relay._paths
+   # The explicit cutoff: past the absolute ceiling the same admitted traffic
+   # is refused and the path is retired, warm or not.
+   relay.clock.advance(ceiling - 4 * step + 1.0)
+   result = router.receive_hop(first_header(request, manifest, token_index=4), request.prompt_token_ids)
+   assert (result.disposition, result.reason) == ("REJECTED", "unknown_path")
+   assert manifest.path_id not in relay._paths
+
+
+def test_a_path_with_work_in_flight_is_never_retired() -> None:
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, _ = _hop_router()
+   relay = router.relay
+   with relay._path_in_flight(manifest.path_id):
+      relay.clock.advance(3 * relay_module._LIVE_PATH_IDLE_SECONDS)
+      assert relay.expire_idle_paths() == ()
+   # Finishing the work is traffic: a fresh horizon starts there.
+   relay.clock.advance(relay_module._LIVE_PATH_IDLE_SECONDS - 1)
+   assert relay.expire_idle_paths() == ()
+   assert manifest.path_id in relay._paths
+
+
+def test_an_idle_path_is_retired_and_binds_its_owner() -> None:
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   entry = "node-e"
+   graph = _with_entry(graph, manifest, entry)
+   req, man, ok = _register(relay, graph, request, manifest, path_id="idle", request_id="r-idle", attempt=2, entry=entry)
+   assert ok
+   relay.clock.advance(relay_module._LIVE_PATH_IDLE_SECONDS)
+   assert relay.expire_idle_paths() == ("idle",)
+   assert "idle" not in relay._paths
+   # The entry's own (stale) manifest of that attempt, or an older one, never
+   # revives it; its next attempt (A6) registers.
+   assert not relay.register_path(req, man, graph, entry_node_id=entry)
+   assert not relay.register_path(req, replace(man, path_attempt=1), graph, entry_node_id=entry)
+   assert relay.register_path(req, replace(man, path_attempt=3), graph, entry_node_id=entry)
+
+
+def test_an_idle_participant_provisional_path_retires_only_its_exact_attempt() -> None:
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   entry = "node-e"
+   graph = _with_entry(graph, manifest, entry)
+   assert _provisional(relay, graph, path_id="pp", request_id="rp", attempt=50, entry=entry, source="node-hop")
+   relay.clock.advance(relay_module._LIVE_PATH_IDLE_SECONDS)
+   assert relay.expire_idle_paths() == ("pp",)
+   assert not _register(relay, graph, request, manifest, path_id="pp", request_id="rp", attempt=50, entry=entry)[2]
+   assert _register(relay, graph, request, manifest, path_id="pp", request_id="rp", attempt=2, entry=entry)[2]
+
+
+def test_slots_held_only_by_abandoned_live_paths_free_up() -> None:
+   """Creators that each keep one live path open hold every slot; once their
+   paths go idle past the horizon and their records age past retention, a
+   new creator is admitted."""
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   cap = relay_module._MAX_TOMBSTONE_CREATORS
+   for index in range(cap):
+      creator = f"node-{index}"
+      assert _register(relay, _with_entry(graph, manifest, creator), request, manifest, path_id=f"p-{creator}", request_id=f"r-{creator}", entry=creator)[2]
+   newcomer = _with_entry(graph, manifest, "node-new")
+   assert not _register(relay, newcomer, request, manifest, path_id="pn", request_id="rn", entry="node-new")[2]
+   relay.clock.advance(relay_module._LIVE_PATH_IDLE_SECONDS)
+   relay.expire_idle_paths()
+   relay.clock.advance(relay_module._TOMBSTONE_RETENTION_SECONDS)
+   assert _register(relay, newcomer, request, manifest, path_id="pn", request_id="rn", entry="node-new")[2]
+
+
+def test_expiry_cleans_an_a6_old_attempt_at_a_relay_off_the_new_attempt() -> None:
+   """In-Router A6 releases the old attempt only at the entry; a relay that
+   was on the old attempt but is not on the new one never hears of it again.
+   Expiry retires it (binding its owner) while the entry's other paths at
+   that relay keep their traffic."""
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   entry = "node-e"
+   graph = _with_entry(graph, manifest, entry)
+   old_req, old_man, ok = _register(relay, graph, request, manifest, path_id="a6-old", request_id="r-a6", attempt=0, entry=entry)
+   assert ok
+   live_req, live_man, ok = _register(relay, graph, request, manifest, path_id="busy", request_id="r-busy", attempt=0, entry=entry)
+   assert ok
+   for _ in range(3):
+      relay.clock.advance(relay_module._LIVE_PATH_IDLE_SECONDS / 2)
+      with relay._path_in_flight("busy"):  # the other path's traffic
+         pass
+   assert relay.expire_idle_paths() == ("a6-old",)
+   assert "busy" in relay._paths and "a6-old" not in relay._paths
+   assert not relay.register_path(old_req, old_man, graph, entry_node_id=entry)
+
+
+def test_expiry_cleans_an_a7_old_path_id_at_a_surviving_relay() -> None:
+   """A7 cuts over to a successor with a new path id; if the old path's
+   cancellation never reaches a surviving relay, the old registration expires
+   there while the successor, carrying traffic, stays live."""
+   from mycelium_router import relay as relay_module
+
+   router, graph, request, manifest, nodes = _middle_router()
+   relay = router.relay
+   entry = "node-e"
+   graph = _with_entry(graph, manifest, entry)
+   assert _register(relay, graph, request, manifest, path_id="a7-old", request_id="r-a7", attempt=0, entry=entry)[2]
+   successor_req, successor_man, ok = _register(relay, graph, request, manifest, path_id="a7-successor", request_id="r-a7", attempt=1, entry=entry)
+   assert ok
+   for _ in range(4):
+      relay.clock.advance(relay_module._LIVE_PATH_IDLE_SECONDS / 3)
+      with relay._path_in_flight("a7-successor"):
+         pass
+   assert relay.expire_idle_paths() == ("a7-old",)
+   assert "a7-successor" in relay._paths and "a7-old" not in relay._paths
