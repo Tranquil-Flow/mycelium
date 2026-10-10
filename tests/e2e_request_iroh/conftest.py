@@ -35,6 +35,9 @@ def native_iroh_sidecar_binary() -> Path:
         if key in os.environ
     }
     environment["CARGO_NET_OFFLINE"] = "true"
+    # Use one target identity for the checked build and returned executable,
+    # even if a test or plugin changed the environment after module import.
+    environment["CARGO_TARGET_DIR"] = str(IROH_TARGET)
     subprocess.run(
         ["cargo", "build", "--locked", "--bin", "mycelium-iroh-sidecar"],
         cwd=IROH_CRATE,
