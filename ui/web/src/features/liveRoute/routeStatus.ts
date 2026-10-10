@@ -76,14 +76,19 @@ export interface LiveRoutePeer {
   readonly interruptibility: null | Readonly<{
     runtime_backend: string | null;
     decode_mode: string | null;
-    work_unit: 'transformer_layer';
     maximum_observed_work_unit_ms: number | null;
     observed_work_unit_count: number;
-    maximum_total_cleanup_ms: typeof PEER_MAXIMUM_TOTAL_CLEANUP_MS;
     physical_proof_required: true;
     backend_candidate: boolean;
+  } & ({
+    work_unit: 'transformer_layer';
+    maximum_total_cleanup_ms: typeof PEER_MAXIMUM_TOTAL_CLEANUP_MS;
     cooperative_bound_candidate: boolean;
-  }>;
+  } | {
+    work_unit: 'bounded_qwen2_replay_chunk';
+    maximum_total_cleanup_ms: null;
+    cooperative_bound_candidate: false;
+  })>;
 }
 
 export interface A4QualificationStatus {
@@ -498,22 +503,32 @@ function peer(value: unknown, path: string): LiveRoutePeer {
       'observed_work_unit_count', 'maximum_total_cleanup_ms',
       'physical_proof_required', 'backend_candidate', 'cooperative_bound_candidate',
     ], `${path}.interruptibility`);
+    const nativeReplay = control.work_unit === 'bounded_qwen2_replay_chunk';
     if (
-      control.work_unit !== 'transformer_layer'
-      || control.maximum_total_cleanup_ms !== PEER_MAXIMUM_TOTAL_CLEANUP_MS
+      (!nativeReplay && (control.work_unit !== 'transformer_layer'
+        || control.runtime_backend === 'mobile-rust-qwen2'
+        || control.maximum_total_cleanup_ms !== PEER_MAXIMUM_TOTAL_CLEANUP_MS))
+      || (nativeReplay && (control.maximum_total_cleanup_ms !== null
+        || control.cooperative_bound_candidate !== false
+        || control.runtime_backend !== 'mobile-rust-qwen2'
+        || control.decode_mode !== 'complete_context_replay'))
       || control.physical_proof_required !== true
       || typeof control.backend_candidate !== 'boolean'
       || typeof control.cooperative_bound_candidate !== 'boolean'
     ) throw new TypeError(`${path}.interruptibility is invalid`);
-    interruptibility = Object.freeze({
+    const common = {
       runtime_backend: control.runtime_backend === null ? null : identifier(control.runtime_backend, `${path}.interruptibility.runtime_backend`),
       decode_mode: control.decode_mode === null ? null : identifier(control.decode_mode, `${path}.interruptibility.decode_mode`),
       maximum_observed_work_unit_ms: optionalFinite(control.maximum_observed_work_unit_ms, `${path}.interruptibility.maximum_observed_work_unit_ms`),
       observed_work_unit_count: integer(control.observed_work_unit_count, `${path}.interruptibility.observed_work_unit_count`),
-      work_unit: 'transformer_layer', maximum_total_cleanup_ms: PEER_MAXIMUM_TOTAL_CLEANUP_MS,
-      physical_proof_required: true, backend_candidate: control.backend_candidate,
-      cooperative_bound_candidate: control.cooperative_bound_candidate,
-    });
+      physical_proof_required: true as const, backend_candidate: control.backend_candidate,
+    };
+    interruptibility = nativeReplay
+      ? Object.freeze({ ...common, work_unit: 'bounded_qwen2_replay_chunk',
+        maximum_total_cleanup_ms: null, cooperative_bound_candidate: false })
+      : Object.freeze({ ...common, work_unit: 'transformer_layer',
+        maximum_total_cleanup_ms: PEER_MAXIMUM_TOTAL_CLEANUP_MS,
+        cooperative_bound_candidate: control.cooperative_bound_candidate });
   }
   const base = counters(
     {

@@ -5,6 +5,39 @@ import {
 } from './routeStatus';
 import { a5QualificationFixture, liveRouteStatusFixture, m13PlacementFixture, m14TopologyFixture } from './routeStatusTestFixture';
 import canonicalRuntimeStatus from '../../../../../contracts/compatibility-fixtures/live-route-status-v1.json';
+import nativeInterruptibility from '../../../../../tests/fixtures/native-phone-interruptibility.json';
+
+describe('native replay interruptibility public variant', () => {
+  const input = (control: unknown) => {
+    const fixture = liveRouteStatusFixture();
+    return { ...fixture, peers: fixture.peers.map((peer) => ({ ...peer, interruptibility: control })) };
+  };
+
+  it('decodes replay work without inventing a physical cleanup maximum', async () => {
+    const value = input(nativeInterruptibility.public_loaded);
+    const client = new HttpLiveRouteStatusClient(async () => new Response(JSON.stringify(value)));
+    const decoded = await client.load();
+    expect(decoded.peers[0].interruptibility).toEqual(nativeInterruptibility.public_loaded);
+    expect(decoded.peers[0].interruptibility?.maximum_total_cleanup_ms).toBeNull();
+  });
+
+  it('keeps unavailable native telemetry unknown', () => {
+    expect(decodeLiveRouteStatus(input(null)).peers[0].interruptibility).toBeNull();
+  });
+
+  it.each([
+    { work_unit: 'transformer_layer', maximum_total_cleanup_ms: canonicalRuntimeStatus.peers[0].interruptibility.maximum_total_cleanup_ms },
+    { maximum_total_cleanup_ms: 8000 },
+    { cooperative_bound_candidate: true },
+    { physical_proof_required: false },
+    { runtime_backend: 'numpy' },
+    { decode_mode: 'stage_local_kv' },
+    { observed_work_unit_count: 1.5 },
+    { undocumented: true },
+  ])('rejects unsupported native telemetry: %j', (change) => {
+    expect(() => decodeLiveRouteStatus(input({ ...nativeInterruptibility.public_loaded, ...change }))).toThrow();
+  });
+});
 
 describe('live route status contract', () => {
   it('decodes the stage-only native phone backend without admitting unknown runtimes', () => {

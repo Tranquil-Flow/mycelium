@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import sqlite3
@@ -705,6 +706,48 @@ def _peer_counter_projection(
     else:
         chosen = {}
     return {field: int(chosen.get(field, 0)) for field in _PEER_COUNTER_FIELDS}
+
+
+def _public_interruptibility(value: object) -> dict[str, Any] | None:
+    """Reduce native replay telemetry without changing signed/private evidence.
+
+    Source work bounds are not wall-time cleanup proof. Unavailable or invalid
+    native telemetry stays unknown; the existing desktop variant is unchanged.
+    """
+    if not isinstance(value, Mapping):
+        return None
+    if value.get("reason") == "runtime_unavailable_or_not_cooperative":
+        return None
+    if value.get("work_unit") != "bounded_qwen2_replay_chunk":
+        return None if value.get("runtime_backend") == "mobile-rust-qwen2" else dict(value)
+    fields = (
+        "runtime_backend", "decode_mode", "work_unit",
+        "maximum_observed_work_unit_ms", "observed_work_unit_count",
+        "maximum_total_cleanup_ms", "physical_proof_required",
+        "backend_candidate", "cooperative_bound_candidate",
+    )
+    count = value.get("observed_work_unit_count")
+    observed = value.get("maximum_observed_work_unit_ms")
+    if (
+        any(key not in value for key in fields)
+        or value.get("runtime_backend") != "mobile-rust-qwen2"
+        or value.get("decode_mode") != "complete_context_replay"
+        or value.get("cooperative_interruption") is not True
+        or value.get("request_scoped_cleanup") is not True
+        or value.get("shared_process_termination_used") is not False
+        or value.get("bound_kind") != "source_work_not_wall_time"
+        or value.get("maximum_total_cleanup_ms") is not None
+        or value.get("cooperative_bound_candidate") is not False
+        or value.get("physical_proof_required") is not True
+        or type(value.get("backend_candidate")) is not bool
+        or type(count) is not int or not 0 <= count <= 2**53 - 1
+        or (observed is not None and (
+            not ((type(observed) is int and 0 <= observed <= 2**53 - 1)
+                 or (type(observed) is float and math.isfinite(observed) and observed >= 0))
+        ))
+    ):
+        return None
+    return {key: value[key] for key in fields}
 
 
 @dataclass(frozen=True, slots=True)
@@ -6097,11 +6140,7 @@ class PhysicalLiveRoute:
                             if isinstance(release_counts, Mapping)
                             else {}
                         ),
-                        "interruptibility": (
-                            dict(interruptibility)
-                            if isinstance(interruptibility, Mapping)
-                            else None
-                        ),
+                        "interruptibility": _public_interruptibility(interruptibility),
                         # A10: the node-co-signed runtime publication (stage-compute
                         # intervals and runtime batch observations), re-validated
                         # closed and privacy-reduced; absent or invalid -> None.

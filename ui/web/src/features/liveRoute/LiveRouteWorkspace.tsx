@@ -313,7 +313,10 @@ function PeerTable({ status }: { readonly status: LiveRouteStatus }) {
                     <small>
                       {peer.architecture ?? 'unknown architecture'} · position {peer.current_position ?? 'released'} · peak {bytes(peer.peak_kv_bytes)} · {peer.release_state}{peer.last_release_reason === null ? '' : ` (${peer.last_release_reason})`}
                       {' · '}decode work {peer.decode_input_token_count} input tokens / {peer.decode_operation_count} operations · {bytes(peer.activation_output_bytes)} activations
-                      {' · '}{peer.interruptibility === null ? 'interruptibility unknown' : `${peer.interruptibility.work_unit.replaceAll('_', ' ')} cancellation candidate${peer.interruptibility.backend_candidate ? '' : ' (ineligible)'}`}
+                      {' · '}{peer.interruptibility === null ? 'interruptibility unknown'
+                        : peer.interruptibility.work_unit === 'bounded_qwen2_replay_chunk'
+                          ? `bounded qwen2 replay chunk · cleanup bound unmeasured${peer.interruptibility.backend_candidate ? '' : ' (ineligible)'}`
+                          : `${peer.interruptibility.work_unit.replaceAll('_', ' ')} cancellation candidate${peer.interruptibility.backend_candidate ? '' : ' (ineligible)'}`}
                     </small>
                   </td>
                 </tr>

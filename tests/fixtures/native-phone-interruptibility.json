@@ -1,0 +1,42 @@
+{
+  "provenance": "Source-shaped synthetic regression fixtures from native/mobile_core/src/qwen2.rs and node.rs at 359ee19; not a captured native or physical run.",
+  "loaded": {
+    "runtime_backend": "mobile-rust-qwen2",
+    "decode_mode": "complete_context_replay",
+    "work_unit": "bounded_qwen2_replay_chunk",
+    "maximum_dot_terms": 32768,
+    "maximum_vector_chunk_elements": 8192,
+    "observed_work_unit_count": 0,
+    "maximum_observed_work_unit_ms": null,
+    "cooperative_interruption": true,
+    "backend_candidate": true,
+    "cooperative_bound_candidate": false,
+    "maximum_total_cleanup_ms": null,
+    "physical_proof_required": true,
+    "bound_kind": "source_work_not_wall_time",
+    "reason": "cooperative_chunks_implemented_wall_time_cleanup_unqualified",
+    "request_scoped_cleanup": true,
+    "shared_process_termination_used": false
+  },
+  "busy": {
+    "runtime_backend": "mobile-rust-qwen2",
+    "decode_mode": "complete_context_replay",
+    "cooperative_interruption": false,
+    "backend_candidate": false,
+    "cooperative_bound_candidate": false,
+    "maximum_total_cleanup_ms": null,
+    "physical_proof_required": true,
+    "reason": "runtime_unavailable_or_not_cooperative"
+  },
+  "public_loaded": {
+    "runtime_backend": "mobile-rust-qwen2",
+    "decode_mode": "complete_context_replay",
+    "work_unit": "bounded_qwen2_replay_chunk",
+    "observed_work_unit_count": 0,
+    "maximum_observed_work_unit_ms": null,
+    "backend_candidate": true,
+    "cooperative_bound_candidate": false,
+    "maximum_total_cleanup_ms": null,
+    "physical_proof_required": true
+  }
+}

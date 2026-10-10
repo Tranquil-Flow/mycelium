@@ -4,11 +4,21 @@ import { LiveRouteWorkspace } from './LiveRouteWorkspace';
 import { liveRouteStatusFixture } from './routeStatusTestFixture';
 import m15Fixture from '../../../../../contracts/compatibility-fixtures/m15-plan-comparison-v1.json';
 import { decodeM15PlanComparison } from './m15Comparison';
+import { decodeLiveRouteStatus } from './routeStatus';
+import nativeInterruptibility from '../../../../../tests/fixtures/native-phone-interruptibility.json';
 
 const client = { load: async () => liveRouteStatusFixture() };
 const workloadClient = { load: async () => decodeM15PlanComparison(structuredClone(m15Fixture)) };
 
 describe('LiveRouteWorkspace', () => {
+  it('labels native replay cleanup as unmeasured rather than a desktop bound', async () => {
+    const fixture = liveRouteStatusFixture();
+    const native = { ...fixture, peers: fixture.peers.map((peer, i) => i === 0
+      ? { ...peer, interruptibility: nativeInterruptibility.public_loaded } : peer) };
+    render(<LiveRouteWorkspace view="network" qualification={null} freshness="current"
+      client={{ load: async () => decodeLiveRouteStatus(native) }} />);
+    expect(await screen.findByText(/cleanup bound unmeasured/)).toBeInTheDocument();
+  });
   it('keeps independent source governance visible while physical route evidence loads or fails', async () => {
     let rejectRoute!: (reason: Error) => void;
     const pending = new Promise<never>((_, reject) => { rejectRoute = reject; });
