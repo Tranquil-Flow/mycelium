@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import os
 from pathlib import Path
 import socket
@@ -68,7 +69,15 @@ _GET_TRANSPORT_OBSERVATIONS = 14
 _TRANSPORT_OBSERVATIONS = 15
 _GET_ADMISSION_COUNTERS = 16
 _ADMISSION_COUNTERS = 17
+_CONTROL_CALL = 18
+_CONTROL_CALL_RESULT = 19
 _ZERO_ID = b"\0" * 16
+
+#: M4-host control carrier: maximum one-way wire payload of a `ControlCall`
+#: command (the phone's `MAX_COMMAND_BYTES`), and the per-call absolute
+#: timeout ceiling (the phone's 60 s `CONTROL_COMMAND_TIMEOUT`).
+CONTROL_CALL_MAX_BYTES = 4 * 1024 * 1024
+CONTROL_CALL_TIMEOUT_CEILING_SECONDS = 60.0
 
 
 class SidecarError(RuntimeError):
@@ -894,6 +903,71 @@ class SidecarClient:
             raise ProtocolError("invalid_inbound_admission_snapshot")
         return document
 
+    def control_call(
+        self,
+        *,
+        peer_endpoint_id: str,
+        request_json: str,
+        timeout_seconds: Optional[float] = None,
+    ) -> dict[str, str]:
+        """One bounded control-ALPN call from this sidecar's existing identity.
+
+        The configured peer is mandatory. JSON bytes are preserved, not
+        reserialized. The finite positive budget is capped at 60 seconds and
+        includes local lock/IO time. No retries: timeout leaves remote command
+        outcome uncertain and invalidates the local session.
+        """
+        maximum_wait = self._timeout if timeout_seconds is None else timeout_seconds
+        if (
+            isinstance(maximum_wait, bool)
+            or not isinstance(maximum_wait, (int, float))
+            or not math.isfinite(maximum_wait)
+            or maximum_wait < 0.001
+        ):
+            raise ValueError("timeout_seconds must be finite and at least 0.001")
+        maximum_wait = min(maximum_wait, CONTROL_CALL_TIMEOUT_CEILING_SECONDS)
+        deadline = time.monotonic() + maximum_wait
+        if (
+            not isinstance(peer_endpoint_id, str)
+            or len(peer_endpoint_id) != 64
+            or any(c not in "0123456789abcdef" for c in peer_endpoint_id)
+        ):
+            raise ValueError("peer_endpoint_id must be 32 bytes of lowercase hex")
+        if not isinstance(request_json, str):
+            raise ValueError("request_json must be a JSON string")
+        command = request_json.encode("utf-8")
+        if not command or len(command) > CONTROL_CALL_MAX_BYTES:
+            raise ValueError("request_json must be 1..CONTROL_CALL_MAX_BYTES UTF-8 bytes")
+
+        def reject_constant(value: str) -> None:
+            raise ValueError("non-finite JSON constant")
+
+        json.loads(request_json, parse_constant=reject_constant)
+        payload = (
+            bytes.fromhex(peer_endpoint_id)
+            + int(maximum_wait * 1000).to_bytes(8, "big")
+            + command
+        )
+        message_id = os.urandom(16)
+        kind, returned_id, response = self._request(
+            _CONTROL_CALL, message_id, payload,
+            socket_timeout=maximum_wait, deadline=deadline,
+        )
+        if returned_id != message_id:
+            raise ProtocolError("response_message_id_mismatch")
+        if kind != _CONTROL_CALL_RESULT:
+            self._raise_response(kind, returned_id, response, message_id)
+        if not response:
+            raise ProtocolError("empty_control_call_result")
+        if len(response) > CONTROL_CALL_MAX_BYTES:
+            raise ProtocolError("control_response_too_large")
+        try:
+            response_json = response.decode("utf-8")
+            json.loads(response_json, parse_constant=reject_constant)
+        except (ValueError, UnicodeError) as error:
+            raise ProtocolError("invalid_control_response") from error
+        return {"peer_endpoint_id": peer_endpoint_id, "response_json": response_json}
+
     def _request(
         self,
         kind: int,
@@ -1098,6 +1172,8 @@ def _decode_record(
         _TRANSPORT_OBSERVATIONS,
         _GET_ADMISSION_COUNTERS,
         _ADMISSION_COUNTERS,
+        _CONTROL_CALL,
+        _CONTROL_CALL_RESULT,
     }:
         raise ProtocolError("unknown_record_kind")
     if sequence != expected_sequence:

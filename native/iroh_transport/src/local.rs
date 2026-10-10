@@ -55,6 +55,11 @@ pub enum RecordKind {
     TransportObservations = 15,
     GetAdmissionCounters = 16,
     AdmissionCounters = 17,
+    /// M4-host control carrier request: carry one phone control command to a
+    /// configured phone endpoint's control ALPN and wait for its response.
+    ControlCall = 18,
+    /// Carrier reply: the phone's exact response bytes.
+    ControlCallResult = 19,
 }
 
 impl TryFrom<u8> for RecordKind {
@@ -79,6 +84,8 @@ impl TryFrom<u8> for RecordKind {
             15 => Ok(Self::TransportObservations),
             16 => Ok(Self::GetAdmissionCounters),
             17 => Ok(Self::AdmissionCounters),
+            18 => Ok(Self::ControlCall),
+            19 => Ok(Self::ControlCallResult),
             _ => Err(LocalProtocolError::UnknownRecordKind),
         }
     }
@@ -534,8 +541,18 @@ mod tests {
             RecordKind::try_from(17_u8).unwrap(),
             RecordKind::AdmissionCounters
         );
+        assert_eq!(RecordKind::ControlCall as u8, 18);
         assert_eq!(
-            RecordKind::try_from(18_u8),
+            RecordKind::try_from(18_u8).unwrap(),
+            RecordKind::ControlCall
+        );
+        assert_eq!(RecordKind::ControlCallResult as u8, 19);
+        assert_eq!(
+            RecordKind::try_from(19_u8).unwrap(),
+            RecordKind::ControlCallResult
+        );
+        assert_eq!(
+            RecordKind::try_from(20_u8),
             Err(LocalProtocolError::UnknownRecordKind)
         );
 

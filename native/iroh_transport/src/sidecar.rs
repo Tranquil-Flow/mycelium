@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use iroh::Watcher as _;
-use iroh::endpoint::{RecvStream, SendStream, VarInt, presets};
+use iroh::endpoint::{ReadToEndError, RecvStream, SendStream, VarInt, presets};
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, TransportAddr};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -40,12 +40,13 @@ use crate::local_ipc::{
     ConnectionOwnerTable, LoopbackListener, authorize_loopback_client, loopback_ready_record,
 };
 use crate::protocol::{WireError, decode_frame};
-use mycelium_mobile_core::artifact_grant::ARTIFACT_CHUNK_ALPN;
-use mycelium_mobile_core::artifact_net::ArtifactSource;
 use crate::ready_address::{
     READY_ADDRESS_WINDOW, StdoutSink, await_advertised_address, republish_address_changes,
 };
 use crate::remote::{REMOTE_MAX_FRAME_BYTES, RemoteKind, decode_remote_frame, encode_remote_frame};
+use mycelium_mobile_core::artifact_grant::ARTIFACT_CHUNK_ALPN;
+use mycelium_mobile_core::artifact_net::ArtifactSource;
+use mycelium_mobile_core::node_control::CONTROL_ALPN as NODE_CONTROL_ALPN;
 
 pub const IROH_ALPN: &[u8] = b"mycelium.iroh.sidecar.v1";
 pub const OPERATIONAL_MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
@@ -86,6 +87,22 @@ const MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 /// `cancelled` whether or not Python's cancellation arrived.
 /// `tests/path_cancellation_adversarial` pins both relations.
 pub const OUTBOUND_DELIVERY_DEADLINE: Duration = Duration::from_secs(300);
+/// M4-host control carrier: one `ControlCall` carries one phone control
+/// command document (`mycelium.physical_node_control.v1`) to the phone's
+/// control ALPN (`mycelium.node_control.v1`) and returns its exact response
+/// bytes.  These bounds are the phone's own contract
+/// (`node_control::MAX_COMMAND_BYTES` and the phone's 60 s
+/// `CONTROL_COMMAND_TIMEOUT` ceiling), mirrored here so the host carrier can
+/// never ask for more than the phone will serve.
+pub const CONTROL_CALL_MAX_BYTES: usize = 4 * 1024 * 1024;
+pub const CONTROL_CALL_TIMEOUT_CEILING: Duration = Duration::from_secs(60);
+/// Control calls in flight at once.  Bounded separately from Router work:
+/// the carrier has its own semaphore and never consumes Router queue slots.
+/// A caller sharing one synchronous local session still serializes its calls.
+pub const CONTROL_CALL_CONCURRENCY: usize = 4;
+/// Wire prefix of one `ControlCall` payload: `u64` big-endian
+/// per-call timeout in milliseconds, then the raw command bytes.
+pub const CONTROL_CALL_PREFIX_BYTES: usize = 8;
 const CANCEL_CODE: VarInt = VarInt::from_u32(7);
 const REJECT_CODE: VarInt = VarInt::from_u32(8);
 const MAX_LOCAL_SESSIONS: usize = 16;
@@ -600,7 +617,11 @@ pub async fn run_sidecar(
     let advertised_at_ready = endpoint_addr.clone();
     let endpoint_id = endpoint.id().to_string();
 
-    let state = RuntimeState::new(config.queue_capacity.get(), config.local_only);
+    let state = RuntimeState::with_control_carrier(
+        config.queue_capacity.get(),
+        config.local_only,
+        &endpoint,
+    );
     let outbound_task = tokio::spawn(outbound_worker(endpoint.clone(), state.clone()));
     if let Some(source) = &artifact_source {
         // What the owner names when issuing a v2 assignment
@@ -611,7 +632,11 @@ pub async fn run_sidecar(
             serde_json::json!({"event": "artifact_source_ready", "endpoint_id": source.endpoint_id(), "verification_key_digest": source.key_digest()})
         );
     }
-    let incoming_task = tokio::spawn(incoming_worker(endpoint.clone(), state.clone(), artifact_source));
+    let incoming_task = tokio::spawn(incoming_worker(
+        endpoint.clone(),
+        state.clone(),
+        artifact_source,
+    ));
 
     let ready_json = channel.ready_record(
         &endpoint_id,
@@ -985,7 +1010,10 @@ where
         let encoded = read_length_prefixed(stream, LOCAL_MAX_RECORD_BYTES).await?;
         let record = decode_record(&encoded, &keys.client_to_sidecar, &mut receive_sequence)
             .map_err(|_| SessionError::Authentication)?;
-        let confirmed = record.kind == RecordKind::SendConfirmed;
+        let confirmed = matches!(
+            record.kind,
+            RecordKind::SendConfirmed | RecordKind::ControlCall
+        );
         let response = process_local_record(record, session_id, &state);
         tokio::pin!(response);
         let response = if confirmed {
@@ -1199,10 +1227,36 @@ async fn process_local_record(
                 payload,
             }
         }
+        RecordKind::ControlCall => {
+            let call = match parse_control_call(&record.payload) {
+                Ok(call) => call,
+                Err(code) => return error_response(record.message_id, code),
+            };
+            let Some(endpoint) = state.control_carrier.clone() else {
+                return error_response(record.message_id, "carrier_unavailable");
+            };
+            let changed = state.peer_generation.subscribe();
+            let peer = {
+                let peers = state.peers.read().await;
+                match peers.get(call.destination) {
+                    Some(binding) => binding.clone(),
+                    None => return error_response(record.message_id, "unknown_peer"),
+                }
+            };
+            match state.control_call(endpoint, peer, call, changed).await {
+                Ok(response) => ResponseRecord {
+                    kind: RecordKind::ControlCallResult,
+                    message_id: record.message_id,
+                    payload: response,
+                },
+                Err(code) => error_response(record.message_id, code),
+            }
+        }
         RecordKind::Delivery
         | RecordKind::DeliveryFrom
         | RecordKind::TransportObservations
         | RecordKind::AdmissionCounters
+        | RecordKind::ControlCallResult
         | RecordKind::Error => error_response(record.message_id, "invalid_kind"),
     }
 }
@@ -1342,6 +1396,13 @@ impl PeerTable {
 
 struct RuntimeState {
     peers: RwLock<PeerTable>,
+    /// The endpoint the M4-host control carrier dials from.  `None` in
+    /// unit-test states and any runtime without a bound endpoint: a
+    /// `ControlCall` then answers `carrier_unavailable` instead of panicking.
+    control_carrier: Option<Endpoint>,
+    /// Bounded control-call concurrency, separate from Router work: a control
+    /// call never occupies an outbound or inbound Router slot.
+    control_slots: Arc<Semaphore>,
     peer_generation: watch::Sender<u64>,
     peer_changed: Notify,
     local_only: bool,
@@ -1364,6 +1425,57 @@ struct RuntimeState {
 #[derive(Deserialize)]
 struct AdmissionCounterRequest {
     candidate_endpoint_id: String,
+}
+
+struct ControlConnection(iroh::endpoint::Connection);
+
+impl Drop for ControlConnection {
+    fn drop(&mut self) {
+        self.0.close(CANCEL_CODE, b"control call ended");
+    }
+}
+
+/// One parsed `ControlCall` record payload.
+#[derive(Debug, PartialEq)]
+struct ControlCall {
+    destination: EndpointId,
+    /// Per-call absolute timeout; the handler rejects anything above
+    /// [`CONTROL_CALL_TIMEOUT_CEILING`] before dialing.
+    timeout: Duration,
+    command: Vec<u8>,
+}
+
+/// Decode a `ControlCall` payload: 32 raw destination `EndpointId` bytes,
+/// a `u64` big-endian per-call timeout in milliseconds, then the command
+/// bytes.  The whole payload (prefix included) is bounded by the record
+/// layer's `LOCAL_MAX_PAYLOAD_BYTES`; the command alone is bounded by
+/// [`CONTROL_CALL_MAX_BYTES`].
+fn parse_control_call(payload: &[u8]) -> Result<ControlCall, &'static str> {
+    let prefix = ENDPOINT_ID_BYTES + CONTROL_CALL_PREFIX_BYTES;
+    if payload.len() < prefix {
+        return Err("invalid_control_call");
+    }
+    let raw: [u8; ENDPOINT_ID_BYTES] = payload[..ENDPOINT_ID_BYTES]
+        .try_into()
+        .expect("destination prefix has fixed length");
+    let destination = EndpointId::from_bytes(&raw).map_err(|_| "invalid_control_destination")?;
+    let millis = u64::from_be_bytes(
+        payload[ENDPOINT_ID_BYTES..prefix]
+            .try_into()
+            .expect("timeout prefix has fixed length"),
+    );
+    if Duration::from_millis(millis) > CONTROL_CALL_TIMEOUT_CEILING {
+        return Err("control_timeout_exceeded");
+    }
+    let command = &payload[prefix..];
+    if millis == 0 || command.is_empty() || command.len() > CONTROL_CALL_MAX_BYTES {
+        return Err("invalid_control_call");
+    }
+    Ok(ControlCall {
+        destination,
+        timeout: Duration::from_millis(millis),
+        command: command.to_vec(),
+    })
 }
 
 #[derive(Serialize)]
@@ -1583,8 +1695,18 @@ impl InboundState {
 }
 
 impl RuntimeState {
+    #[cfg(test)]
     fn new(capacity: usize, local_only: bool) -> Arc<Self> {
         Self::with_outbound_deadline(capacity, local_only, OUTBOUND_DELIVERY_DEADLINE)
+    }
+
+    fn with_control_carrier(capacity: usize, local_only: bool, endpoint: &Endpoint) -> Arc<Self> {
+        let state = Self::with_outbound_deadline(capacity, local_only, OUTBOUND_DELIVERY_DEADLINE);
+        // Safe: a freshly built runtime state has exactly one owner.
+        let mut state = Arc::try_unwrap(state)
+            .unwrap_or_else(|_| unreachable!("a freshly built runtime state has one owner"));
+        state.control_carrier = Some(endpoint.clone());
+        Arc::new(state)
     }
 
     fn with_outbound_deadline(
@@ -1596,6 +1718,8 @@ impl RuntimeState {
         let (peer_generation, _) = watch::channel(0);
         Arc::new(Self {
             peers: RwLock::new(PeerTable::default()),
+            control_carrier: None,
+            control_slots: Arc::new(Semaphore::new(CONTROL_CALL_CONCURRENCY)),
             peer_generation,
             peer_changed: Notify::new(),
             local_only,
@@ -1622,6 +1746,77 @@ impl RuntimeState {
             inbound_frames_admitted: AtomicU64::new(0),
             inbound_identity_rejections_by_endpoint: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// One attempt, using the existing endpoint; every wait shares one deadline.
+    async fn control_call(
+        &self,
+        endpoint: Endpoint,
+        peer: PeerBinding,
+        call: ControlCall,
+        mut changed: watch::Receiver<u64>,
+    ) -> Result<Vec<u8>, &'static str> {
+        if call.timeout > CONTROL_CALL_TIMEOUT_CEILING {
+            return Err("control_timeout_exceeded");
+        }
+        let deadline = Instant::now()
+            .checked_add(call.timeout)
+            .ok_or("control_timeout_invalid")?;
+        let exchange = async {
+            let _permit = timeout_at(deadline, self.control_slots.clone().acquire_owned())
+                .await
+                .map_err(|_| "control_carrier_busy")?
+                .map_err(|_| "carrier_unavailable")?;
+            if self.peers.read().await.get(call.destination) != Some(&peer) {
+                return Err("peer_rotated");
+            }
+            let connection = timeout_at(
+                deadline,
+                endpoint.connect(peer.address.clone(), NODE_CONTROL_ALPN),
+            )
+            .await
+            .map_err(|_| "control_connect_timeout")?
+            .map_err(|_| "control_connect_failed")?;
+            // Own this call's connection until completion, cancellation, caller
+            // hangup or revocation. Drop closes it even when select cancels IO.
+            let connection = ControlConnection(connection);
+            if connection.0.remote_id() != call.destination {
+                return Err("control_peer_mismatch");
+            }
+            if self.peers.read().await.get(call.destination) != Some(&peer) {
+                return Err("peer_rotated");
+            }
+            let (mut send, mut recv) = timeout_at(deadline, connection.0.open_bi())
+                .await
+                .map_err(|_| "control_open_timeout")?
+                .map_err(|_| "control_open_failed")?;
+            timeout_at(deadline, send.write_all(&call.command))
+                .await
+                .map_err(|_| "control_write_timeout")?
+                .map_err(|_| "control_write_failed")?;
+            send.finish().map_err(|_| "control_write_failed")?;
+            let response =
+                match timeout_at(deadline, recv.read_to_end(CONTROL_CALL_MAX_BYTES)).await {
+                    Ok(Ok(response)) if response.is_empty() => Err("empty_control_call_result"),
+                    Ok(Ok(response)) => Ok(response),
+                    Ok(Err(ReadToEndError::TooLong)) => Err("control_response_too_large"),
+                    Ok(Err(_)) => Err("control_read_failed"),
+                    Err(_) => Err("control_read_timeout"),
+                }?;
+            // Do not admit a result under replaced authority, even if response
+            // and configuration update become ready in the same scheduler turn.
+            if self.peers.read().await.get(call.destination) != Some(&peer) {
+                return Err("peer_rotated");
+            }
+            Ok(response)
+        };
+        tokio::select! {
+            biased;
+            _ = changed.changed() => Err("peer_rotated"),
+            result = exchange => {
+                if changed.has_changed().unwrap_or(true) { Err("peer_rotated") } else { result }
+            }
+        }
     }
 
     async fn admission_counters(
@@ -2513,7 +2708,11 @@ fn cancel_streams(send: &mut SendStream, receive: &mut RecvStream) {
     let _ = receive.stop(CANCEL_CODE);
 }
 
-async fn incoming_worker(endpoint: Endpoint, state: Arc<RuntimeState>, artifacts: Option<ArtifactSource>) {
+async fn incoming_worker(
+    endpoint: Endpoint,
+    state: Arc<RuntimeState>,
+    artifacts: Option<ArtifactSource>,
+) {
     let connection_slots = Arc::new(Semaphore::new(
         state.inbound_slots.available_permits().max(1),
     ));
@@ -2799,10 +2998,14 @@ mod tests {
     #[tokio::test]
     async fn explicit_endpoint_secret_stabilizes_endpoint_identity() {
         let secret = Zeroizing::new([9_u8; 32]);
-        let first = bind_endpoint(true, false, Some(&*secret), false).await.unwrap();
+        let first = bind_endpoint(true, false, Some(&*secret), false)
+            .await
+            .unwrap();
         let first_id = first.id();
         first.close().await;
-        let second = bind_endpoint(true, false, Some(&*secret), false).await.unwrap();
+        let second = bind_endpoint(true, false, Some(&*secret), false)
+            .await
+            .unwrap();
         assert_eq!(second.id(), first_id);
         second.close().await;
     }
@@ -2874,7 +3077,7 @@ mod tests {
             .configure_peers(vec![routable_peer(1, 1)])
             .await
             .expect("peer set is accepted");
-        let endpoint = bind_endpoint(true, false, None).await.unwrap();
+        let endpoint = bind_endpoint(true, false, None, false).await.unwrap();
         let worker = tokio::spawn(outbound_worker(endpoint.clone(), state.clone()));
         let EnqueueOutcome::Queued(control) = state
             .enqueue_outbound([5; 16], valid_frame(), None, None, None)
@@ -3306,6 +3509,337 @@ mod tests {
             &keys.client_to_sidecar,
         )
         .unwrap()
+    }
+
+    fn control_call_payload(destination: &EndpointId, millis: u64, command: &[u8]) -> Vec<u8> {
+        [
+            destination.as_bytes().as_slice(),
+            &millis.to_be_bytes(),
+            command,
+        ]
+        .concat()
+    }
+
+    fn control_record(destination: EndpointId, millis: u64) -> Record {
+        Record {
+            kind: RecordKind::ControlCall,
+            sequence: 0,
+            message_id: [9; 16],
+            payload: control_call_payload(&destination, millis, b"{\"command\":\"health\"}"),
+        }
+    }
+
+    fn control_error(response: &ResponseRecord) -> String {
+        assert_eq!(response.kind, RecordKind::Error);
+        serde_json::from_slice::<serde_json::Value>(&response.payload).unwrap()["code"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    fn control_call_payload_round_trips_and_rejects_malformed_input() {
+        let id = SecretKey::from_bytes(&[0x33; 32]).public();
+        let payload = control_call_payload(&id, 500, b"{}");
+        let call = parse_control_call(&payload).unwrap();
+        assert_eq!(call.destination, id);
+        assert_eq!(call.timeout, Duration::from_millis(500));
+        assert_eq!(call.command, b"{}");
+        for payload in [
+            payload[..39].to_vec(),
+            control_call_payload(&id, 0, b"{}"),
+            control_call_payload(&id, 500, b""),
+            control_call_payload(&id, 500, &vec![b'x'; CONTROL_CALL_MAX_BYTES + 1]),
+        ] {
+            assert_eq!(
+                parse_control_call(&payload).unwrap_err(),
+                "invalid_control_call"
+            );
+        }
+        assert_eq!(
+            parse_control_call(&control_call_payload(&id, 60_001, b"{}")).unwrap_err(),
+            "control_timeout_exceeded"
+        );
+    }
+
+    async fn control_test_host() -> Endpoint {
+        bind_endpoint(true, false, Some(&[0x71; 32]), false)
+            .await
+            .unwrap()
+    }
+
+    // A real loopback QUIC peer: observes the authenticated caller and exact
+    // command, then holds the reply behind an explicit test barrier.
+    async fn control_test_phone(
+        response: Vec<u8>,
+    ) -> (
+        Endpoint,
+        tokio::sync::oneshot::Receiver<(EndpointId, Vec<u8>)>,
+        tokio::sync::oneshot::Sender<()>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let phone = Endpoint::builder(presets::Minimal)
+            .relay_mode(RelayMode::Disabled)
+            .clear_ip_transports()
+            .bind_addr(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .unwrap()
+            .secret_key(SecretKey::from_bytes(&[0x55; 32]))
+            .alpns(vec![NODE_CONTROL_ALPN.to_vec()])
+            .bind()
+            .await
+            .unwrap();
+        let server = phone.clone();
+        let (observed_tx, observed_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let connection = server.accept().await.unwrap().await.unwrap();
+            assert_eq!(connection.alpn(), NODE_CONTROL_ALPN);
+            let (mut send, mut recv) = connection.accept_bi().await.unwrap();
+            let command = recv.read_to_end(CONTROL_CALL_MAX_BYTES).await.unwrap();
+            let _ = observed_tx.send((connection.remote_id(), command));
+            if release_rx.await.is_ok() {
+                let _ = send.write_all(&response).await;
+                let _ = send.finish();
+                let _ = send.stopped().await;
+            } else {
+                let _ = connection.closed().await;
+            }
+        });
+        (phone, observed_rx, release_tx, task)
+    }
+
+    async fn control_test_state(host: &Endpoint, phone: &Endpoint) -> Arc<RuntimeState> {
+        let state = RuntimeState::with_control_carrier(2, true, host);
+        state
+            .configure_peer(ConfigurePeerPayload {
+                endpoint_id: phone.id().to_string(),
+                endpoint_addr: phone.addr(),
+                generation: 1,
+            })
+            .await
+            .unwrap();
+        state
+    }
+
+    #[tokio::test]
+    async fn control_call_without_endpoint_or_configured_peer_fails_closed() {
+        let id = SecretKey::from_bytes(&[0x33; 32]).public();
+        let response =
+            process_local_record(control_record(id, 500), 1, &RuntimeState::new(2, true)).await;
+        assert_eq!(control_error(&response), "carrier_unavailable");
+        let host = control_test_host().await;
+        let state = RuntimeState::with_control_carrier(2, true, &host);
+        let response = process_local_record(control_record(id, 500), 1, &state).await;
+        assert_eq!(control_error(&response), "unknown_peer");
+        let response = process_local_record(control_record(id, 60_001), 1, &state).await;
+        assert_eq!(control_error(&response), "control_timeout_exceeded");
+        host.close().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn control_call_authenticated_ipc_to_real_loopback_uses_existing_identity() {
+        let host = control_test_host().await;
+        let (phone, observed, release, server) =
+            control_test_phone(b"{\"ok\":true}".to_vec()).await;
+        let state = control_test_state(&host, &phone).await;
+        let (mut client, session) = spawn_duplex_session(state);
+        let keys = client_handshake(&mut client, &SESSION_SECRET)
+            .await
+            .unwrap();
+        let record = control_record(phone.id(), 2000);
+        let encoded = encode_record(
+            record.kind,
+            0,
+            record.message_id,
+            &record.payload,
+            &keys.client_to_sidecar,
+        )
+        .unwrap();
+        write_length_prefixed(&mut client, &encoded).await.unwrap();
+        let (identity, command) = timeout(Duration::from_secs(3), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(identity, host.id());
+        assert_eq!(command, b"{\"command\":\"health\"}");
+        release.send(()).unwrap();
+        let bytes = read_length_prefixed(&mut client, LOCAL_MAX_RECORD_BYTES)
+            .await
+            .unwrap();
+        let reply =
+            decode_record(&bytes, &keys.sidecar_to_client, &mut SequenceGuard::new()).unwrap();
+        assert_eq!(reply.kind, RecordKind::ControlCallResult);
+        assert_eq!(reply.message_id, record.message_id);
+        assert_eq!(reply.payload, b"{\"ok\":true}");
+        drop(client);
+        assert_eq!(
+            timeout(Duration::from_secs(1), session)
+                .await
+                .unwrap()
+                .unwrap(),
+            Err(SessionError::Disconnected)
+        );
+        server.abort();
+        phone.close().await;
+        host.close().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn control_call_revocation_aborts_pending_response_and_next_stream() {
+        let host = control_test_host().await;
+        let (phone, observed, release, server) = control_test_phone(b"{}".to_vec()).await;
+        let state = control_test_state(&host, &phone).await;
+        let worker_state = state.clone();
+        let id = phone.id();
+        let worker = tokio::spawn(async move {
+            process_local_record(control_record(id, 2000), 1, &worker_state).await
+        });
+        timeout(Duration::from_secs(3), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        state.configure_peer(loopback_peer(7, 2)).await.unwrap();
+        let response = timeout(Duration::from_millis(400), worker)
+            .await
+            .expect("revocation must abort an outstanding control stream")
+            .unwrap();
+        assert_eq!(control_error(&response), "peer_rotated");
+        let next = process_local_record(control_record(phone.id(), 500), 1, &state).await;
+        assert_eq!(control_error(&next), "unknown_peer");
+        drop(release);
+        timeout(Duration::from_millis(400), server).await.expect("revocation must close the remote connection").unwrap();
+        phone.close().await;
+        host.close().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn control_call_rotation_while_queued_prevents_stream_admission() {
+        use std::future::Future;
+        use std::task::Poll;
+        let host = control_test_host().await;
+        let (phone, mut observed, release, server) = control_test_phone(b"{}".to_vec()).await;
+        let state = control_test_state(&host, &phone).await;
+        let slots = state.control_slots.clone()
+            .acquire_many_owned(CONTROL_CALL_CONCURRENCY as u32).await.unwrap();
+        let call = process_local_record(control_record(phone.id(), 1000), 1, &state);
+        tokio::pin!(call);
+        // Poll to the admission wait before rotating; no scheduler sleep is
+        // used as a proxy for reaching the guarded boundary.
+        std::future::poll_fn(|cx| {
+            assert!(call.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        }).await;
+        state.configure_peer(ConfigurePeerPayload {
+            endpoint_id: phone.id().to_string(), endpoint_addr: phone.addr(), generation: 2,
+        }).await.unwrap();
+        let reply = timeout(Duration::from_millis(400), call).await.unwrap();
+        assert_eq!(control_error(&reply), "peer_rotated");
+        assert_eq!(observed.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty));
+        assert_eq!(state.outbound_slots.available_permits(), 2);
+        drop(slots); drop(release); server.abort(); phone.close().await; host.close().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn control_call_queue_wait_does_not_reset_absolute_deadline() {
+        let host = control_test_host().await;
+        let (phone, _observed, release, server) = control_test_phone(b"{}".to_vec()).await;
+        let state = control_test_state(&host, &phone).await;
+        let slots = state
+            .control_slots
+            .clone()
+            .acquire_many_owned(CONTROL_CALL_CONCURRENCY as u32)
+            .await
+            .unwrap();
+        let free = tokio::spawn(async move {
+            sleep(Duration::from_millis(350)).await;
+            drop(slots);
+        });
+        let start = Instant::now();
+        let reply = process_local_record(control_record(phone.id(), 500), 1, &state).await;
+        assert_eq!(control_error(&reply), "control_read_timeout");
+        assert!(
+            start.elapsed() < Duration::from_millis(700),
+            "queue time was added to budget: {:?}",
+            start.elapsed()
+        );
+        free.await.unwrap();
+        drop(release);
+        server.abort();
+        phone.close().await;
+        host.close().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn control_call_client_hangup_releases_slot_and_session() {
+        let host = control_test_host().await;
+        let (phone, observed, release, server) = control_test_phone(b"{}".to_vec()).await;
+        let state = control_test_state(&host, &phone).await;
+        let (mut client, session) = spawn_duplex_session(state.clone());
+        let keys = client_handshake(&mut client, &SESSION_SECRET)
+            .await
+            .unwrap();
+        let record = control_record(phone.id(), 2000);
+        let encoded = encode_record(
+            record.kind,
+            0,
+            record.message_id,
+            &record.payload,
+            &keys.client_to_sidecar,
+        )
+        .unwrap();
+        write_length_prefixed(&mut client, &encoded).await.unwrap();
+        timeout(Duration::from_secs(3), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        drop(client);
+        timeout(Duration::from_millis(400), session)
+            .await
+            .expect("hangup must cancel carrier work")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            state.control_slots.available_permits(),
+            CONTROL_CALL_CONCURRENCY
+        );
+        drop(release);
+        server.abort();
+        phone.close().await;
+        host.close().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn control_call_bounds_remote_response_and_releases_permit() {
+        for (body, expected) in [
+            (Vec::new(), "empty_control_call_result"),
+            (
+                vec![b'x'; CONTROL_CALL_MAX_BYTES + 1],
+                "control_response_too_large",
+            ),
+        ] {
+            let host = control_test_host().await;
+            let (phone, observed, release, server) = control_test_phone(body).await;
+            let state = control_test_state(&host, &phone).await;
+            let worker_state = state.clone();
+            let id = phone.id();
+            let worker = tokio::spawn(async move {
+                process_local_record(control_record(id, 2000), 1, &worker_state).await
+            });
+            timeout(Duration::from_secs(3), observed)
+                .await
+                .unwrap()
+                .unwrap();
+            release.send(()).unwrap();
+            let reply = worker.await.unwrap();
+            assert_eq!(control_error(&reply), expected);
+            assert_eq!(
+                state.control_slots.available_permits(),
+                CONTROL_CALL_CONCURRENCY
+            );
+            server.abort();
+            phone.close().await;
+            host.close().await;
+        }
     }
 
     /// A confirmed send stays pending (no outbound worker runs here) until
