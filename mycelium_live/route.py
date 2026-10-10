@@ -2880,23 +2880,8 @@ class PhysicalLiveRoute:
         receipt_only: bool = False,
     ) -> None:
         def snapshot_node(node_id: str) -> tuple[str, dict[str, Any]]:
-            # A peer whose transport is fatally failed can never answer a
-            # fresh snapshot within the request-scoped cleanup deadline.
-            # Record the existing last health observation (or a synthetic
-            # fatal projection) so cleanup_complete can prove the affected
-            # track and the gateway can publish a real terminal event.
-            last_health = getattr(self, "_last_health", None)
-            if isinstance(last_health, Mapping):
-                with self._lock:
-                    health = last_health.get(node_id)
-                if isinstance(health, Mapping):
-                    fatal = (
-                        health.get("details", {}).get("transport_fatal_error")
-                        if isinstance(health.get("details"), Mapping)
-                        else None
-                    )
-                    if isinstance(fatal, Mapping):
-                        return node_id, dict(health)
+            # Data-plane failure does not prove resource cleanup. The control
+            # channel may still answer; require a fresh verified observation.
             try:
                 response = self._send_before(
                     node_id,
@@ -3139,13 +3124,8 @@ class PhysicalLiveRoute:
             details = observation.get("details")
             if not isinstance(details, Mapping):
                 return False
-            # A peer whose transport is fatally failed cannot produce a
-            # cleanup receipt; the route's monitor and gateway already
-            # consider the request cancelled. Treat that peer as
-            # authoritative proof that no further scoped resource remains.
-            fatal = details.get("transport_fatal_error")
-            if isinstance(fatal, Mapping):
-                continue
+            # Fatal transport health is not an exact cleanup receipt and
+            # cannot waive runtime/transport state or subject checks below.
             if cleanup_subject is None:
                 runtime = details.get("runtime")
                 if (
@@ -3804,23 +3784,9 @@ class PhysicalLiveRoute:
         # absolute deadline to each node; a relay-level path cancellation alone
         # cannot advance the remote node's command-control generation.
         def cancel_node(node_id: str) -> tuple[str, dict[str, Any] | None]:
-            # A peer whose transport is already fatally failed cannot answer
-            # any further command. Treat the live monitor's last fatal
-            # projection as an authoritative cancellation projection so the
-            # fanout does not consume the request's only 2,000 ms budget
-            # waiting on a transport that is already declared dead.
-            last_health = getattr(self, "_last_health", None)
-            if isinstance(last_health, Mapping):
-                with self._lock:
-                    observed = last_health.get(node_id)
-                if isinstance(observed, Mapping):
-                    fatal = (
-                        observed.get("details", {}).get("transport_fatal_error")
-                        if isinstance(observed.get("details"), Mapping)
-                        else None
-                    )
-                    if isinstance(fatal, Mapping):
-                        return node_id, dict(observed)
+            # A failed data plane is a reason to cancel, not evidence that
+            # cancellation happened. Keep the bounded independent control
+            # attempt and require its exact signed cleanup observation.
             # The node deliberately returns its inline cleanup observation
             # before consuming the owner's whole deadline, but the parent must
             # enforce the same partition on response delivery.  Waiting here
