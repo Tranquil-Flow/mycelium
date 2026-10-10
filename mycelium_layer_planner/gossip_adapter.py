@@ -28,6 +28,7 @@ _QUALIFIED_DECODE_MODES = {
     "mlx": frozenset({"stage_local_kv", "complete_context_replay"}),
     "numpy": frozenset({"complete_context_replay"}),
     "pixel-stdlib": frozenset({"complete_context_replay"}),
+    "mobile-rust-qwen2": frozenset({"complete_context_replay"}),
 }
 
 

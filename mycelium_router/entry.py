@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from threading import RLock
 from typing import Any
 
+from mycelium_deadlines import PHONE_THERMAL_COOLDOWN_SECONDS
+
 from mycelium_router.contracts import (
    ExecutionGraph,
    FailureReport,
@@ -252,6 +254,28 @@ class EntryCoordinator:
       self.config = config
       self._requests: dict[str, RequestRecord] = {}
       self._pending_prefills: dict[str, PendingPrefill] = {}
+      self._phone_thermal_until: dict[str, float] = {}
+      self._phone_thermal_lock = RLock()
+
+   def _phone_thermal_exclusions(self) -> frozenset[str]:
+      with self._phone_thermal_lock:
+         now = self.clock.now()
+         self._phone_thermal_until = {node: until for node, until in self._phone_thermal_until.items() if now < until}
+         return frozenset(self._phone_thermal_until)
+
+   def _record_phone_thermal_failure(self, record, report, source_node_id) -> None:
+      # Called ONLY after current request/path/token and authenticated origin checks.
+      if report.reason != "thermal_ceiling_reached" or source_node_id is None:
+         return
+      selected = {h.placement_id for h in record.manifest.ordered_hops}
+      if not any(p.node_id == source_node_id and p.placement_id in selected
+                 and p.runtime_backend == "mobile-rust-qwen2" for s in record.graph.stages for p in s.placements):
+         return
+      with self._phone_thermal_lock:
+         self._phone_thermal_until[source_node_id] = max(
+            self._phone_thermal_until.get(source_node_id, 0),
+            self.clock.now() + PHONE_THERMAL_COOLDOWN_SECONDS)
+
 
    def admit(
       self,
@@ -363,6 +387,7 @@ class EntryCoordinator:
          raise ValueError("duplicate_request_id")
       self.transport.remember_entry(request.request_id, self.node_id)
       graph = self.topology.snapshot()
+      excluded_devices |= self._phone_thermal_exclusions()
       build = self.builder.start(
          request,
          graph,
@@ -1260,6 +1285,7 @@ class EntryCoordinator:
             source_node_id,
          ):
             return False
+         self._record_phone_thermal_failure(record, report, source_node_id)
          terminal_failure = (
             report.scope == "DEVICE" and report.node_id == self.node_id
          ) or manifest.path_attempt >= self.config.maximum_recovery_attempts
@@ -1888,6 +1914,7 @@ class EntryCoordinator:
       excluded_edges: frozenset[str],
       excluded_devices: frozenset[str],
    ) -> tuple[ExecutionGraph, PathManifest, PathBuildState]:
+      excluded_devices |= self._phone_thermal_exclusions()
       build = self.builder.start(
          request,
          graph,

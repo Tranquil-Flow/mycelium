@@ -87,13 +87,15 @@ def _positive_integer(value: Any, code: str) -> int:
 
 def _signed_observations(
     attestation: Mapping[str, Any],
+    *, phone_bindings: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     records = attestation.get("signed_observations")
     if not isinstance(records, list) or not records:
         _reject("live_observations_missing")
     verified: list[dict[str, Any]] = []
     keys_by_node: dict[str, dict[str, Any]] = {}
-    identity_by_node: dict[str, tuple[str, int, str]] = {}
+    identity_by_node: dict[str, tuple[str, int | str, str]] = {}
+    phone_bindings = phone_bindings or {}
     for value in records:
         envelope = _mapping(value, "live_observation_invalid")
         if set(envelope) != {"observation", "signature", "verification_key"}:
@@ -120,14 +122,19 @@ def _signed_observations(
         host_id = observation.get("host_id")
         process_id = observation.get("process_id")
         endpoint_id = observation.get("endpoint_id")
+        phone = phone_bindings.get(node_id)
+        valid_process = type(process_id) is int and process_id > 0
+        if phone is not None:
+            valid_process = (isinstance(process_id, str) and process_id.startswith("inc-")
+                and len(process_id) > 4 and process_id == phone.get("process_id") and host_id == node_id
+                and endpoint_id == phone.get("endpoint_id")
+                and verification_key.get("verification_key_digest") == phone.get("member_key_digest"))
         if (
             not isinstance(node_id, str)
             or not node_id
             or not isinstance(host_id, str)
             or not host_id
-            or not isinstance(process_id, int)
-            or isinstance(process_id, bool)
-            or process_id <= 0
+            or not valid_process
             or not isinstance(endpoint_id, str)
             or not endpoint_id
             or signature.get("signer_endpoint_id") != endpoint_id
@@ -209,6 +216,7 @@ def issue_live_route_qualification(
     *,
     expected_prompt_token_ids: Sequence[int],
     expected_output_token_ids: Sequence[int],
+    phone_bindings: Mapping[str, Any] | None = None,
 ) -> RouteQualificationV1:
     """Issue readiness from one signed startup challenge on an open route.
 
@@ -259,7 +267,14 @@ def issue_live_route_qualification(
     ):
         _reject("live_graph_invalid")
 
-    signed = _signed_observations(live)
+    phone_bindings = phone_bindings or {}
+    phone_nodes = {p.node_id for s in graph.stages for p in s.placements
+                   if p.runtime_backend == "mobile-rust-qwen2"}
+    if set(phone_bindings) != phone_nodes:
+        _reject("live_phone_authority_missing")
+    if any(p.node_id in phone_nodes for s in (graph.stages[0], graph.stages[-1]) for p in s.placements):
+        _reject("live_phone_stage_only")
+    signed = _signed_observations(live, phone_bindings=phone_bindings)
     observed_nodes = {item["observation"]["node_id"] for item in signed}
     if observed_nodes != set(placements):
         _reject("live_observation_set_invalid")
@@ -318,19 +333,49 @@ def issue_live_route_qualification(
         endpoint_address = _mapping(
             details.get("endpoint_addr"), "live_configuration_invalid"
         )
+        if phone_nodes and details.get("runtime_mode") != "complete_context_replay":
+            _reject("live_phone_replay_required")
+        phone = node_id in phone_nodes
+        if phone:
+            from .phone import phone_load_proof_digest
+            profile = phone_bindings[node_id].get("configure", {})
+            try:
+                load_digest = phone_load_proof_digest(configured_observation)
+            except ValueError:
+                _reject("live_phone_load_proof_invalid")
+            if (load_digest != placement.load_proof_digest
+                    or details.get("stage_id") != stage.stage_id
+                    or details.get("assignment_id") != profile.get("assignment_id")
+                    or details.get("stage_id") != profile.get("stage_id")
+                    or details.get("manifest_digest") != profile.get("manifest_digest")
+                    or details.get("phone_stage_pack_digest") != profile.get("pack_digest")
+                    or details.get("load_generation") != profile.get("load_generation")):
+                _reject("live_phone_load_proof_invalid")
         if (
             details.get("assignment_id") != placement.assignment_id
-            or details.get("placement_id") != placement.placement_id
+            or (not phone and details.get("placement_id") != placement.placement_id)
             or details.get("manifest_digest") != graph.manifest_digest
             or endpoint_address.get("id")
             != configured_observation.get("endpoint_id")
-            or not is_sha256_ref(details.get("stage_pack_digest"))
-            or not is_sha256_ref(details.get("stage_pack_verification_digest"))
+            or (not phone and (not is_sha256_ref(details.get("stage_pack_digest"))
+                or not is_sha256_ref(details.get("stage_pack_verification_digest"))))
         ):
             _reject("live_configuration_invalid")
-        started_peer = _mapping(
-            started_observation["details"].get("peer"), "live_peer_binding_invalid"
-        )
+        started_details = started_observation["details"]
+        if phone:
+            peer_node = started_details.get("peer_node_id")
+            peer_ids = started_details.get("peer_node_ids")
+            if (not isinstance(peer_ids, list) or len(peer_ids) != len(set(peer_ids))
+                    or set(peer_ids) != set(placements) - {node_id}
+                    or peer_node not in peer_ids
+                    or type(started_details.get("local_generation")) is not int
+                    or started_details["local_generation"] <= 0
+                    or started_details["local_generation"] != started_observation["peer_generation"]):
+                _reject("live_peer_binding_invalid")
+            started_peer = {"node_id": peer_node, "endpoint_id": next(
+                item["observation"]["endpoint_id"] for item in signed if item["observation"]["node_id"] == peer_node)}
+        else:
+            started_peer = _mapping(started_details.get("peer"), "live_peer_binding_invalid")
         if (
             started_peer.get("node_id") not in placements
             or started_peer.get("node_id") == node_id
@@ -350,6 +395,12 @@ def issue_live_route_qualification(
         )
         runtime = _mapping(snapshot_details.get("runtime"), "live_snapshot_invalid")
         selected = placement.placement_id in selected_placement_set
+        if phone and (runtime.get("mode") != "complete_context_replay"
+                or any(type(transport.get(k)) is not int or transport[k] < 0
+                       for k in ("remote_frames_sent", "remote_frames_received"))
+                or any(type(runtime.get(k)) is not int or runtime[k] < 0
+                       for k in ("active_state_count", "applied_operation_count"))):
+            _reject("live_snapshot_invalid")
         if (
             snapshot_details.get("transport_fatal_error") is not None
             or transport.get("local_node_id") != node_id

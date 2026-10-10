@@ -72,6 +72,7 @@ __all__ = [
     "COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS",
     "COMPOSITION_INVARIANTS",
     "CONSUMER_BINDINGS",
+    "PHONE_THERMAL_COOLDOWN_SECONDS",
     "DEADLINES",
     "DEADLINES_BY_NAME",
     "Deadline",
@@ -461,7 +462,16 @@ advertised_maximum_total_cleanup_ms: Final[int] = (
 )
 
 
+# Route-local safety exclusion after an authenticated phone thermal refusal.
+PHONE_THERMAL_COOLDOWN_SECONDS: Final[float] = 300.0
+
 DEADLINES: Final[tuple[Deadline, ...]] = (
+    Deadline(
+        name="phone_thermal_cooldown_seconds", value=PHONE_THERMAL_COOLDOWN_SECONDS,
+        unit="seconds", owner="mycelium_router/entry.py",
+        derivation="Exclude the hot phone for five minutes; expiry permits retry, never overrides device thermal refusal.",
+        source="mycelium_router.entry.PHONE_THERMAL_COOLDOWN_SECONDS",
+    ),
     Deadline(
         name="cancel_and_cleanup_budget_seconds",
         value=CANCEL_AND_CLEANUP_BUDGET_SECONDS,
@@ -1258,6 +1268,7 @@ def check_composition(
 #: ``physical_inference_node.MAXIMUM_TOTAL_CLEANUP_MS``, so the imported lane
 #: has no second copy of any number this registry owns.
 BOUND_CONSUMER_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
+    ("mycelium_router.entry.PHONE_THERMAL_COOLDOWN_SECONDS", "phone_thermal_cooldown_seconds"),
     (
         "mycelium_iroh_sidecar.client.PEER_CONNECT_DEADLINE_SECONDS",
         "peer_connect_deadline_seconds",

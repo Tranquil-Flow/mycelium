@@ -3481,6 +3481,8 @@ def _qualify_open_route(route: Any) -> Any:
             route.live_attestation(request_id=request_id),
             expected_prompt_token_ids=startup_prompt,
             expected_output_token_ids=startup_output,
+            **({"phone_bindings": route.phone_qualification_bindings()}
+               if callable(getattr(route, "phone_qualification_bindings", None)) else {}),
         )
     finally:
         route.release_request(request_id)
@@ -3495,6 +3497,7 @@ def _qualified_runtime(
     progress: Callable[[str], None] | None = None,
     force_relay: bool = False,
     session_factory=None,
+    external_session_factory=None,
 ) -> QualifiedDeploymentRuntime:
     deployment = native_deployment_projection(operator_plan)
     if progress is not None:
@@ -3504,6 +3507,7 @@ def _qualified_runtime(
         seed_state_root=seed_state_root,
         force_relay=force_relay,
         **({"session_factory": session_factory} if session_factory is not None else {}),
+        **({"external_session_factory": external_session_factory} if external_session_factory is not None else {}),
     )
     try:
         if progress is not None:
@@ -3723,6 +3727,7 @@ def run_registry_server(
     trusted_proxy_capability: bytes | None = None,
     force_relay: bool = False,
     session_factory=None,
+    external_session_factory=None,
     stop_event: threading.Event | None = None,
     on_started=None,
     api_only: bool = False,
@@ -3765,6 +3770,7 @@ def run_registry_server(
                         model_operation_file=model_operation_file,
                         force_relay=force_relay,
                         **({"session_factory": session_factory} if session_factory is not None else {}),
+                        **({"external_session_factory": external_session_factory} if external_session_factory is not None else {}),
                     )
                 )
             except Exception as exc:

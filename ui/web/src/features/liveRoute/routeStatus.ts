@@ -34,7 +34,7 @@ export interface LiveRouteStage {
   readonly stage_id: string;
   readonly placement_id: string;
   readonly node_id: string;
-  readonly runtime_backend: 'mlx' | 'numpy' | 'pixel-stdlib';
+  readonly runtime_backend: 'mlx' | 'numpy' | 'pixel-stdlib' | 'mobile-rust-qwen2';
   readonly start_layer: number;
   readonly end_layer_exclusive: number;
   readonly component_roles: readonly string[];
@@ -379,7 +379,7 @@ function stage(value: unknown, path: string): LiveRouteStage {
     path,
   );
   const backend = item.runtime_backend;
-  if (!['mlx', 'numpy', 'pixel-stdlib'].includes(String(backend))) {
+  if (!['mlx', 'numpy', 'pixel-stdlib', 'mobile-rust-qwen2'].includes(String(backend))) {
     throw new TypeError(`${path}.runtime_backend is unsupported`);
   }
   const start = integer(item.start_layer, `${path}.start_layer`);

@@ -61,6 +61,7 @@ PINNED_SHIPPED_VIOLATED_CODES: frozenset[str] = frozenset()
 #: modules (file:line cited in the registry's ``derivation``). Deliberately NOT
 #: read from the registry: this is the independent side of the no-drift check.
 HISTORICAL_LITERALS: dict[str, float | int] = {
+    "phone_thermal_cooldown_seconds": 300.0,
     "cancel_and_cleanup_budget_seconds": 8.0,
     "cleanup_fallback_reserve_seconds": 3.5,
     "cleanup_snapshot_attempt_seconds": 3.5,

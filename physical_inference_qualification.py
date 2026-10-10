@@ -369,7 +369,7 @@ def _observation_diagnostic(
     observation_fields: set[str],
     event: str,
     peer: PeerIdentity,
-    process_id: int,
+    process_id: int | str,
     run_id: str,
     deployment_id: str,
     endpoint_id: str,
@@ -585,7 +585,9 @@ class PeerIdentity:
         _segment(self.node_id, "peer_node_id_invalid")
         _segment(self.host_id, "peer_host_id_invalid")
         _segment(self.boot_id, "peer_boot_id_invalid")
-        if self.process_transport == "managed_https":
+        if self.process_transport == "external_iroh" and self.host_id != self.node_id:
+            _reject("external_peer_host_identity_invalid")
+        if self.process_transport in {"managed_https", "external_iroh"}:
             if self.ssh_target is not None or self.ssh_identity_file is not None:
                 _reject("managed_peer_ssh_authority_invalid")
         elif not isinstance(self.ssh_target, str) or _SSH_TARGET_RE.fullmatch(
@@ -605,9 +607,9 @@ class PeerIdentity:
             or not any(part.startswith("mycelium") for part in path.parts)
         ):
             _reject("peer_staging_root_invalid")
-        if self.process_transport not in {"local", "ssh", "managed_https"}:
+        if self.process_transport not in {"local", "ssh", "managed_https", "external_iroh"}:
             _reject("peer_process_transport_invalid")
-        if self.process_transport in {"local", "managed_https"}:
+        if self.process_transport in {"local", "managed_https", "external_iroh"}:
             if self.ssh_identity_file is not None:
                 _reject("peer_ssh_identity_file_invalid")
         elif (
@@ -631,7 +633,7 @@ def _peer_process_argv(
 ) -> tuple[str, ...]:
     if not command or not all(isinstance(value, str) and value for value in command):
         _reject("peer_process_command_invalid")
-    if peer.process_transport == "managed_https":
+    if peer.process_transport in {"managed_https", "external_iroh"}:
         # No remote argv capability. Only an explicitly injected app-owned
         # session factory can consume this; default subprocess factories reject it.
         return ()
@@ -1616,7 +1618,17 @@ class QualificationController:
         }
         normalized_nodes: list[dict[str, Any]] = []
         actual_node_ids: list[Any] = []
+        external_nodes = {p.node_id for p in self.peers if p.process_transport == "external_iroh"}
         for record in records:
+            if isinstance(record, Mapping) and record.get("node_id") in external_nodes:
+                from mycelium_live.phone_stage_session import validate_phone_configure
+
+                if set(record) != {"node_id", "configure"}:
+                    _reject("run_plan_external_node_invalid")
+                validate_phone_configure(record["configure"])
+                actual_node_ids.append(record["node_id"])
+                normalized_nodes.append({"node_id": record["node_id"], "configure": dict(record["configure"])})
+                continue
             if not isinstance(record, Mapping) or set(record) != expected_node_fields:
                 _reject("run_plan_node_invalid")
             node_id = record.get("node_id")
@@ -1658,7 +1670,7 @@ class QualificationController:
                 # Managed targets select/check their own identity file; this
                 # path is descriptive and is never executed by the controller.
                 or (node_id not in {p.node_id for p in self.peers
-                                   if p.process_transport == "managed_https"}
+                                   if p.process_transport in {"managed_https", "external_iroh"}}
                     and not any(part.startswith("mycelium")
                                 for part in endpoint_secret_path.parts[:-2]))
             ):
@@ -1676,8 +1688,16 @@ class QualificationController:
                     "configure": dict(configure),
                 }
             )
-        if actual_node_ids != sorted(node_ids):
-            graphs = [item["configure"].get("graph") for item in normalized_nodes]
+        if len(set(actual_node_ids)) != len(node_ids) or set(actual_node_ids) != set(node_ids):
+            _reject("run_plan_nodes_invalid")
+        if external_nodes and (actual_node_ids[0] in external_nodes or actual_node_ids[-1] in external_nodes
+                               or entry_node_id in external_nodes):
+            _reject("external_node_stage_only")
+        if external_nodes and decode_mode != "complete_context_replay":
+            _reject("run_plan_decode_mode_invalid")
+        if actual_node_ids != sorted(node_ids) or external_nodes:
+            graphs = [item["configure"].get("graph") for item in normalized_nodes
+                      if item["node_id"] not in external_nodes]
             if (
                 not graphs
                 or not all(isinstance(graph, Mapping) for graph in graphs)
@@ -1788,7 +1808,7 @@ class QualificationController:
         # Managed discovery obtains the boot identity from this response, not
         # an SSH probe. Accept the legacy closed shape only for non-managed
         # peers; never accept an extra or mismatched identity field.
-        if peer.process_transport == "managed_https" or "boot_id" in identity:
+        if peer.process_transport in {"managed_https", "external_iroh"} or "boot_id" in identity:
             expected_fields.add("boot_id")
             if identity.get("boot_id") != peer.boot_id:
                 _reject(
@@ -1806,10 +1826,16 @@ class QualificationController:
             or identity.get("deployment_id") != deployment_id
             or identity.get("node_id") != peer.node_id
             or identity.get("host_id") != peer.host_id
-            or not isinstance(identity.get("process_id"), int)
-            or isinstance(identity.get("process_id"), bool)
-            or identity["process_id"] <= 0
-            or identity.get("endpoint_id") is not None
+            or (
+                (identity.get("process_id") != peer.boot_id
+                 or not peer.boot_id.startswith("inc-")
+                 or not isinstance(identity.get("endpoint_id"), str)
+                 or re.fullmatch(r"[0-9a-f]{64}", identity["endpoint_id"]) is None)
+                if peer.process_transport == "external_iroh"
+                else (type(identity.get("process_id")) is not int
+                      or identity["process_id"] <= 0
+                      or identity.get("endpoint_id") is not None)
+            )
             or identity.get("peer_generation") != 0
             or identity.get("state") != "NEW"
             or identity.get("route_ready") is not False
@@ -1835,7 +1861,7 @@ class QualificationController:
         *,
         event: str,
         peer: PeerIdentity,
-        process_id: int,
+        process_id: int | str,
         run_id: str,
         deployment_id: str,
         endpoint_id: str,
@@ -1935,6 +1961,8 @@ class QualificationController:
         *,
         operation: str = "run",
     ) -> dict[str, Any]:
+        if any(peer.process_transport == "external_iroh" for peer in self.peers):
+            _reject("external_live_route_provider_required")
         if operation not in {"run", "cancel", "recover"}:
             _reject("physical_operation_invalid")
         plan = self._validate_run_plan()
@@ -2658,6 +2686,8 @@ class QualificationController:
         archive_digest: str,
         preposition_digest: str | None = None,
     ) -> dict[str, Any]:
+        if peer.process_transport == "external_iroh":
+            _reject("external_assignment_lifecycle_required")
         if peer.process_transport == "managed_https":
             if self._staging_adapter is None:
                 _reject("managed_staging_provider_required")
@@ -2736,6 +2766,8 @@ class QualificationController:
         endpoints: Mapping[str, Mapping[str, Any]],
     ) -> dict[str, Any]:
         del transfers
+        if any(peer.process_transport == "external_iroh" for peer in self.peers):
+            _reject("external_assignment_lifecycle_required")
         if any(peer.process_transport == "managed_https" for peer in self.peers) and self._staging_adapter is None:
             _reject("managed_staging_provider_required")
         actions: list[dict[str, Any]] = []

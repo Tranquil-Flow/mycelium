@@ -131,7 +131,7 @@ class StageQualificationBinding:
     load_proof_digest: str
     stage_probe_result_digest: str
     endpoint_id: str
-    process_id: int
+    process_id: int | str
     process_host_id: str
     tensor_scope_digest: str
     reservation_id: str
@@ -414,9 +414,9 @@ def _validate_record(record: RouteQualificationV1) -> None:
         )
         _require(is_sha256_ref(stage.tensor_scope_digest), "invalid_tensor_scope_digest")
         _require(
-            isinstance(stage.process_id, int)
-            and not isinstance(stage.process_id, bool)
-            and stage.process_id > 0,
+            (type(stage.process_id) is int and stage.process_id > 0)
+            or (isinstance(stage.process_id, str) and stage.process_id.startswith("inc-")
+                and len(stage.process_id) > 4 and stage.process_host_id == stage.node_id),
             "invalid_process_id",
         )
     if record.route_ready:

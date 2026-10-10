@@ -642,8 +642,10 @@ def _validate_runtime_dtype(runtime_dtype: str) -> str:
 
 
 def _validate_runtime_backend(runtime_backend: str, runtime_dtype: str) -> str:
-    if runtime_backend not in {"mlx", "numpy"}:
+    if runtime_backend not in {"mlx", "numpy", "mobile-rust-qwen2"}:
         raise PhysicalDeploymentError("invalid_runtime_backend")
+    if runtime_backend == "mobile-rust-qwen2" and runtime_dtype != "float32":
+        raise PhysicalDeploymentError("phone_runtime_requires_float32")
     if runtime_backend == "numpy" and runtime_dtype != "float32":
         raise PhysicalDeploymentError("numpy_runtime_requires_float32")
     return runtime_backend

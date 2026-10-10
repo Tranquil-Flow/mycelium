@@ -122,6 +122,9 @@ def extend_graph_with_standby(
    stage = graph.stages[stage_index]
    if not stage.placements or any(p.placement_id == placement_id for s in graph.stages for p in s.placements):
       raise StandbyPlanError("a7_standby_placement_conflict")
+   if any(p.runtime_backend.startswith("mobile-rust-") for s in graph.stages for p in s.placements
+          if s.stage_id == stage.stage_id or p.node_id == node_id):
+      raise StandbyPlanError("a7_phone_kv_unsupported")
    template = stage.placements[0]
    standby = replace(
       template,
@@ -307,6 +310,8 @@ def update_plan_graphs(plan: Mapping[str, Any], graph_document: Mapping[str, Any
 
 
 def require_distinct_failure_domains(graph: ExecutionGraph, *, stage_index: int, standby_placement_id: str) -> None:
+   if any(p.runtime_backend.startswith("mobile-rust-") for p in graph.stages[stage_index].placements):
+      raise StandbyPlanError("a7_phone_kv_unsupported")
    summary = plan_summary(graph, stage_index=stage_index, standby_placement_id=standby_placement_id)
    if summary["same_failure_domain_as_source"]:
       raise StandbyPlanError("a7_standby_shares_source_failure_domain")

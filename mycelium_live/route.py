@@ -1327,6 +1327,7 @@ class PhysicalLiveRoute:
         endpoints: Mapping[str, Mapping[str, Any]],
         run_plan: Mapping[str, Any],
         session_factory=_ConcurrentNodeSession,
+        external_session_factory=None,
         seed_authority: LiveSeedAuthority | None = None,
         membership_snapshot: Mapping[str, Any] | None = None,
         force_relay: bool = False,
@@ -1351,6 +1352,7 @@ class PhysicalLiveRoute:
             self._plan["nodes"][0]["configure"]["graph"]
         )
         self._session_factory = session_factory
+        self._external_session_factory = external_session_factory
         self._seed_authority = seed_authority
         self._membership_snapshot = (
             None
@@ -1623,6 +1625,7 @@ class PhysicalLiveRoute:
         seed_state_root: Path,
         force_relay: bool = False,
         session_factory=None,
+        external_session_factory=None,
     ) -> "PhysicalLiveRoute":
         document = json.loads(Path(plan_path).read_text(encoding="utf-8"))
         controller_document = document["controller"]
@@ -1640,6 +1643,11 @@ class PhysicalLiveRoute:
                 members=authority.members,
             )
             peers = tuple(PeerIdentity(**item) for item in controller_document["peers"])
+            if external_session_factory is None and any(p.get("process_transport") == "external_iroh" for p in controller_document["peers"]):
+                from .phone_stage_session import PhoneStageSessionFactory
+                external_session_factory = PhoneStageSessionFactory.from_descriptor(
+                    controller_document.get("external_control")
+                )
             controller = QualificationController(
                 mode=controller_document["mode"],
                 peers=peers,
@@ -1667,6 +1675,7 @@ class PhysicalLiveRoute:
                 membership_snapshot=membership_snapshot,
                 force_relay=force_relay,
                 session_factory=session_factory or _ConcurrentNodeSession,
+                external_session_factory=external_session_factory,
             )
         except BaseException:
             authority.close()
@@ -2229,6 +2238,10 @@ class PhysicalLiveRoute:
 
     def _node_command(self, node_id: str) -> tuple[str, ...]:
         peer = self._peers[node_id]
+        if peer.process_transport == "external_iroh":
+            if self._external_session_factory is None:
+                raise ControllerError("external_session_provider_required")
+            return ()
         if peer.process_transport == "managed_https":
             if self._session_factory is _ConcurrentNodeSession:
                 raise ControllerError("managed_session_provider_required")
@@ -2264,6 +2277,72 @@ class PhysicalLiveRoute:
             command += ("--sidecar-force-relay",)
         return _peer_process_argv(peer, command)
 
+    def _external_member_key_digest(self, node_id: str) -> str:
+        authority = self._seed_authority
+        if authority is None:
+            raise ControllerError("external_seed_authority_required")
+        members = [m for m in authority.current_members() if m.get("node_id") == node_id]
+        if len(members) != 1:
+            raise ControllerError("external_member_identity_invalid")
+        member = members[0]
+        endpoint = self._endpoints[node_id]
+        if (member.get("endpoint_id") != endpoint["endpoint_id"]
+                or member.get("incarnation") != self._peers[node_id].boot_id
+                or member.get("generation") != endpoint["membership_generation"]
+                or member.get("lifecycle_state") != "RUNNING"
+                or not isinstance(member.get("lease_expires_at"), (int, float))
+                or not member["lease_expires_at"] > time.time()
+                or not isinstance(member.get("verification_key_digest"), str)):
+            raise ControllerError("external_member_identity_invalid")
+        return member["verification_key_digest"]
+
+    def _require_stage_only_positions(self, node_ids: Sequence[str]) -> None:
+        for node_id in (node_ids[0], node_ids[-1]):
+            if self._peers[node_id].process_transport == "external_iroh":
+                raise ControllerError("external_node_stage_only")
+
+    def _prove_external_cancellation(self, node_id: str) -> None:
+        """Exercise the signed receipt before offering this route to an owner."""
+        from mycelium_live.phone_stage_session import require_cancel_receipt
+
+        command_id = self._command_id(node_id, "phone-cancel-probe")
+        deadline = time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+        subject = {
+            "request_id": command_id, "deployment_id": self._plan["deployment_id"],
+            "deployment_epoch": self._graph.deployment_epoch,
+            "qualification_digest": self._graph.manifest_digest,
+            "command_id": command_id, "publisher_generation": 1,
+            "absolute_deadline_ms": int((time.time() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS) * 1000), "request_attempt": 1,
+            "path_id": command_id, "path_attempt": 0,
+            "path_digest": self._graph.manifest_digest,
+            "topology_generation": self._graph.topology_version,
+            "cancellation_generation": 1,
+        }
+        control = {k: v for k, v in subject.items() if k != "request_id"}
+        control["cancellation_generation"] = 0
+        bound = self._send_before(node_id,
+            command_id=self._command_id(node_id, "phone-bind-probe"),
+            command="bind_request_control",
+            payload={"request_id": command_id, "control": control},
+            deadline_monotonic_s=deadline)
+        if bound.get("ok") is not True:
+            raise ControllerError("external_node_cancel_probe_bind_invalid")
+        bound_observation = self._verify_observation(node_id, bound, event="request_control_bound")
+        from mycelium_qualification.evidence import sha256_document
+        bound_details = bound_observation.get("details")
+        if (not isinstance(bound_details, Mapping)
+                or bound_details.get("request_id") != command_id
+                or bound_details.get("control_digest") != sha256_document(control)):
+            raise ControllerError("external_node_cancel_probe_bind_invalid")
+        response = self._send_before(node_id, command_id=command_id,
+            command="infer_cancel_wait", payload={**subject,
+                "deadline_budget_ms": mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS},
+            deadline_monotonic_s=deadline)
+        if response.get("ok") is not True:
+            raise ControllerError("external_node_cancel_receipt_unsupported")
+        observation = self._verify_observation(node_id, response, event="inference_cancelled")
+        require_cancel_receipt(observation, subject)
+
     def _verify_observation(
         self,
         node_id: str,
@@ -2272,6 +2351,12 @@ class PhysicalLiveRoute:
         event: str,
         require_known_key: bool = True,
     ) -> dict[str, Any]:
+        if self._peers[node_id].process_transport == "external_iroh":
+            signed = response.get("result")
+            key = signed.get("verification_key") if isinstance(signed, Mapping) else None
+            if (not isinstance(key, Mapping)
+                    or key.get("verification_key_digest") != self._external_member_key_digest(node_id)):
+                raise ControllerError("external_member_key_mismatch")
         observation = self._controller._verified_observation(
             response,
             event=event,
@@ -2302,13 +2387,33 @@ class PhysicalLiveRoute:
             if self._open:
                 raise RuntimeError("route_already_open")
             try:
+                ordered = [item["node_id"] for item in self._plan["nodes"]]
+                self._require_stage_only_positions(ordered)
+                if (any(p.process_transport == "external_iroh" for p in self._peers.values())
+                        and self._external_session_factory is None):
+                    raise ControllerError("external_session_provider_required")
+                for stage in (self._graph.stages[0], self._graph.stages[-1]):
+                    if any(self._peers[p.node_id].process_transport == "external_iroh"
+                           for p in stage.placements):
+                        raise ControllerError("external_node_stage_only")
                 for node_id in sorted(self._peers):
-                    session = self._session_factory(
-                        argv=self._node_command(node_id),
+                    external = self._peers[node_id].process_transport == "external_iroh"
+                    argv = self._node_command(node_id)
+                    factory = self._external_session_factory if external else self._session_factory
+                    if factory is None:
+                        raise ControllerError("external_session_provider_required")
+                    external_arguments = ({
+                        "peer": self._peers[node_id],
+                        "endpoint_id": self._endpoints[node_id]["endpoint_id"],
+                        "member_key_digest": self._external_member_key_digest(node_id),
+                    } if external else {})
+                    session = factory(
+                        argv=argv,
                         node_id=node_id,
                         run_id=self._plan["run_id"],
                         deployment_id=self._plan["deployment_id"],
                         timeout_seconds=NODE_SESSION_TIMEOUT_SECONDS,
+                        **external_arguments,
                     )
                     self._sessions[node_id] = session
                     hello = session.send(
@@ -2339,7 +2444,13 @@ class PhysicalLiveRoute:
                     response = self._sessions[node_id].send(
                         command_id=self._command_id(node_id, "configure"),
                         command="configure",
-                        payload=self._plans_by_node[node_id]["configure"],
+                        payload={**self._plans_by_node[node_id]["configure"], **({
+                            "request_control_graph": {
+                                "deployment_id": self._graph.deployment_id,
+                                "deployment_epoch": self._graph.deployment_epoch,
+                                "topology_generation": self._graph.topology_version,
+                            }
+                        } if self._peers[node_id].process_transport == "external_iroh" else {})},
                     )
                     observation = self._verify_observation(
                         node_id,
@@ -2404,6 +2515,9 @@ class PhysicalLiveRoute:
                         },
                     )
                     self._verify_observation(node_id, response, event="started")
+                for node_id in ordered:
+                    if self._peers[node_id].process_transport == "external_iroh":
+                        self._prove_external_cancellation(node_id)
                 self._open = True
                 self._liveness_monitor_stop.clear()
                 self._liveness_monitor_thread = threading.Thread(
@@ -4299,6 +4413,7 @@ class PhysicalLiveRoute:
                         raise ValueError("invalid_selected_placement_ids")
                     selected_placements.append(matches[0])
                 entry_node_id = selected_placements[0].node_id
+                self._require_stage_only_positions([p.node_id for p in selected_placements])
                 participating_node_ids = frozenset(
                     placement.node_id for placement in selected_placements
                 )
@@ -6428,6 +6543,15 @@ class PhysicalLiveRoute:
                 # refusal, arithmetic included, and a wrapped code here would
                 # hide the numbers a reader needs to see.
                 raise RuntimeError(str(error)) from error
+
+    def phone_qualification_bindings(self) -> dict[str, Any]:
+        """Current seed authority and planned load identity, outside the attestation."""
+        return {node_id: {
+            "endpoint_id": self._endpoints[node_id]["endpoint_id"],
+            "process_id": peer.boot_id,
+            "member_key_digest": self._external_member_key_digest(node_id),
+            "configure": dict(self._plans_by_node[node_id]["configure"]),
+        } for node_id, peer in self._peers.items() if peer.process_transport == "external_iroh"}
 
     def live_attestation(self, *, request_id: str) -> dict[str, Any]:
         if request_id not in self._request_outputs or not self.is_alive():

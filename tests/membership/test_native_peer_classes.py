@@ -83,7 +83,7 @@ def test_windows_native_iroh_is_activation_eligible() -> None:
 def test_activation_allow_set_is_closed_and_exact() -> None:
     assert _ACTIVATION_ELIGIBLE_PEER_CLASSES == frozenset(
         {"mac_mlx_iroh", "linux_numpy_iroh", "android_native_iroh", "windows_native_iroh",
-         "linux_native_iroh"}
+         "linux_native_iroh", "android_native_qwen2_iroh"}
     )
     # Negative controls: every other class stays ineligible even when it
     # declares its own exact capability, and a refusal never names an

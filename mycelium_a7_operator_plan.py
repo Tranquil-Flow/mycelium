@@ -124,6 +124,12 @@ def extend_operator_plan(
    from stage_pack import artifact_report_for_loader, compile_stage_pack, verify_stage_pack
    from weight_provisioning import artifact_report_errors, provision_assignment
 
+   peers = plan.get("controller", {}).get("peers", ())
+   _require(not any(peer.get("node_id") in {source_node_id, standby_node_id} and (
+      peer.get("process_transport") == "external_iroh"
+      or str(peer.get("peer_class", "")).startswith("android_native")
+      or str(peer.get("runtime_backend", "")).startswith("mobile-rust-")
+   ) for peer in peers), "a7_phone_kv_unsupported")
    _require(variant in CASE_VARIANTS, "a7_plan_variant_invalid")
    _require(source_node_id != standby_node_id, "a7_plan_same_failure_domain")
    _require((qualification is None) == (variant in STAGING_VARIANTS), "a7_plan_qualification_required")
@@ -146,6 +152,9 @@ def extend_operator_plan(
    _require(len(covered) == 1, "a7_plan_source_stage_invalid")
    stage_index = covered[0]
    source_placement = graph.stages[stage_index].placements[0]
+   _require(not any(p.node_id in {source_node_id, standby_node_id} and
+      p.runtime_backend.startswith("mobile-rust-") for s in graph.stages for p in s.placements),
+      "a7_phone_kv_unsupported")
    peers = {peer["node_id"]: peer for peer in controller["peers"]}
    _require(standby_node_id in peers and source_node_id in peers, "a7_plan_peer_missing")
    by_node = {node["node_id"]: node for node in nodes}

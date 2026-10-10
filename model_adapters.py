@@ -188,7 +188,7 @@ ADAPTERS = {
       tied_lm_head_source=("model.embed_tokens.",),
       supported_architectures=("Qwen2ForCausalLM",),
       decoder_tensor_suffixes=QWEN2_DECODER_TENSOR_SUFFIXES,
-      runtime_backends=("mlx", "numpy"),
+      runtime_backends=("mlx", "numpy", "mobile-rust-qwen2"),
    ),
    "qwen3": ModelAdapter(
       architecture="qwen3",

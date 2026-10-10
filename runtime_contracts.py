@@ -345,6 +345,12 @@ def validate_normalized_runtime(
         raise ValueError(f"runtime backend mismatch; expected {expected_backend}")
     if backend == "mlx":
         return validate_normalized_mlx_runtime(runtime)
+    if backend == "mobile-rust-qwen2":
+        # Metadata admission only. Execution/load proof belongs to the native phone.
+        if runtime.get("architecture") != "qwen2" or runtime.get("quantization") != "int8-weight-only":
+            raise ValueError("phone runtime requires qwen2 int8-weight-only")
+        normalized = validate_normalized_numpy_runtime({**runtime, "backend": "numpy"})
+        return {**normalized, "backend": backend}
     if backend == "numpy":
         return validate_normalized_numpy_runtime(runtime)
     raise ValueError(f"unsupported runtime backend: {backend!r}")

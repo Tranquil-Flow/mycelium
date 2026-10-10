@@ -257,6 +257,7 @@ class RegistryLaunch:
     _runner: RegistryRunner = field(repr=False, compare=False)
     seed_binding: tuple[str, str, int]
     session_factory: Any = field(default=None, repr=False, compare=False)
+    external_session_factory: Any = field(default=None, repr=False, compare=False)
     chain: tuple[str, ...] = (
         "PhysicalLiveRoute.from_operator_plan",
         "PhysicalLiveRoute.open",
@@ -314,6 +315,7 @@ class RegistryLaunch:
             **({"stop_event": stop_event} if stop_event is not None else {}),
             **({"on_started": on_started} if on_started is not None else {}),
             **({"session_factory": self.session_factory} if self.session_factory is not None else {}),
+            **({"external_session_factory": self.external_session_factory} if self.external_session_factory is not None else {}),
         )
 
 
@@ -645,6 +647,7 @@ def prepare_registry_launch(
     seed_state_root: str | Path | None = None,
     runner: RegistryRunner | None = None,
     session_factory=None,
+    external_session_factory=None,
     node_runtime_backends: Mapping[str, str] | None = None,
 ) -> RegistryLaunch:
     """Validate a built route and compose the real single-deployment registry.
@@ -688,6 +691,7 @@ def prepare_registry_launch(
         seed_binding=seed_binding,
         _runner=runner or _native_registry_runner,
         session_factory=session_factory,
+        external_session_factory=external_session_factory,
     )
 
 

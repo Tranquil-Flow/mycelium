@@ -79,6 +79,12 @@ _PEER_RUNTIME_CAPABILITIES = {
         "transport": "iroh",
         "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
     },
+    # Q2 phone ruling: a new class preserves existing reference-phone leases.
+    "android_native_qwen2_iroh": {
+        "runtime_backend": "mobile-rust-qwen2",
+        "transport": "iroh",
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
+    },
     # [OWNER RULING 2026-10-07, superseding 2026-09-27] Windows has full
     # parity with macOS and Linux: the native Windows node (host-platform
     # seam, Job Object service runner, loopback iroh sidecar) runs the NumPy
@@ -104,7 +110,7 @@ PEER_CLASSES = frozenset(_PEER_RUNTIME_CAPABILITIES)
 #: Closed allow-set of peer classes that may receive activation work.
 _ACTIVATION_ELIGIBLE_PEER_CLASSES = frozenset(
     {"mac_mlx_iroh", "linux_numpy_iroh", "android_native_iroh", "windows_native_iroh",
-     "linux_native_iroh"}
+     "linux_native_iroh", "android_native_qwen2_iroh"}
 )
 #: Named, stable refusal reasons for known peer classes that are admitted to
 #: membership but may not receive activation work yet.

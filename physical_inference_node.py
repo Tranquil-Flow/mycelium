@@ -649,9 +649,9 @@ def _route_decode_mode(graph: ExecutionGraph, architecture: str | None) -> str:
         for placement in stage.placements
         if placement.lifecycle_state == "ACTIVE"
     }
-    if not route_backends or route_backends - {"mlx", "numpy", "pixel-stdlib"}:
+    if not route_backends or route_backends - {"mlx", "numpy", "pixel-stdlib", "mobile-rust-qwen2"}:
         raise NodeCommandError("unsupported_runtime_backend")
-    if "pixel-stdlib" in route_backends:
+    if route_backends & {"pixel-stdlib", "mobile-rust-qwen2"}:
         return "complete_context_replay"
     if "numpy" in route_backends and architecture not in {"qwen2", "qwen3"}:
         return "complete_context_replay"

@@ -83,7 +83,7 @@ def _normalize_runtime(
       if not isinstance(runtime.get(field), str) or not runtime[field]:
          raise ValueError(f"runtime {field} missing for {node_id}")
    normalized = copy.deepcopy(runtime)
-   if runtime["backend"] in {"mlx", "numpy"}:
+   if runtime["backend"] in {"mlx", "numpy", "mobile-rust-qwen2"}:
       runtime_model = manifest.get("runtime_model")
       if not isinstance(runtime_model, dict):
          raise ValueError(

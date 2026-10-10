@@ -7,6 +7,12 @@ import { a5QualificationFixture, liveRouteStatusFixture, m13PlacementFixture, m1
 import canonicalRuntimeStatus from '../../../../../contracts/compatibility-fixtures/live-route-status-v1.json';
 
 describe('live route status contract', () => {
+  it('decodes the stage-only native phone backend without admitting unknown runtimes', () => {
+    const fixture = liveRouteStatusFixture();
+    const stages = fixture.stages.map((stage) => ({ ...stage, runtime_backend: 'mobile-rust-qwen2' }));
+    expect(decodeLiveRouteStatus({ ...fixture, stages }).stages[0].runtime_backend).toBe('mobile-rust-qwen2');
+    expect(() => decodeLiveRouteStatus({ ...fixture, stages: stages.map((stage) => ({ ...stage, runtime_backend: 'unknown' })) })).toThrow();
+  });
   it('decodes actual placement work separately from node totals', () => {
     const fixture = liveRouteStatusFixture();
     const id = fixture.stages[0].placement_id;

@@ -2516,6 +2516,8 @@ def select_stage_backend(*, runtime: Any, prefer: str) -> Any:
     if not isinstance(runtime, Mapping):
         raise _fail("runtime identity must be an object")
     backend = runtime.get("backend")
+    if backend == "mobile-rust-qwen2":
+        raise _fail("external_runtime_requires_phone_load_proof")
     if backend == _NUMPY_RUNTIME_BACKEND:
         if prefer == _MLX_RUNTIME_BACKEND:
             raise _fail(
