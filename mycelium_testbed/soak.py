@@ -2327,12 +2327,23 @@ class MailboxEpisode:
 
         if self.service is None or self.request_id is None:
             return
-        deadline = time.monotonic() + self.bounds.request_terminal_cancelled_seconds
-        while time.monotonic() < deadline and not self._row_terminal():
+        ledger = self.session.ledger
+        budget = self.bounds.request_terminal_cancelled_seconds
+        deadline = ledger.elapsed() + budget
+        while ledger.elapsed() < deadline and not self._row_terminal():
             if self.subscription is None:
                 break
-            self._poll_and_ack()
+            if self._poll_and_ack() == "poll_terminal_read":
+                # EOF is immediate when a terminal was deliberately dropped.
+                # Keep observing at the registry cadence instead of busy-spinning.
+                time.sleep(self.bounds.poll_seconds)
             self._observe()
+            row = ledger.rows[self.request_id]
+            if row.stalled_at is not None:
+                # The invariant's budget begins at the first observed stall, not
+                # at entry to finish(). This origin is latched, so progress cannot
+                # extend the wait indefinitely. A real terminal still exits early.
+                deadline = max(deadline, row.stalled_at + budget)
         self._observe()
 
 

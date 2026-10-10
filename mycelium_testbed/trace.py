@@ -1773,7 +1773,14 @@ def _failure_section(
     if failure is None:
         if not entries:
             return "first failure: undetermined (no aligned timeline)"
-        return "first failure: none (every transition is ok)"
+        lines = ["first failure: none (every transition is ok)"]
+        request_ids = {
+            entry.event.request_id for entry in entries
+            if entry.event.request_id is not None
+        }
+        for request_id in sorted(request_ids):
+            lines.append(_outcome_line(entries, request_id=request_id))
+        return "\n".join(lines)
     failed, previous_ok = failure
     event = failed.event
     lines = [
@@ -1796,10 +1803,16 @@ def _failure_section(
     return "\n".join(lines)
 
 
-def _outcome_line(entries: Sequence[TimelineEntry], failed: TimelineEntry) -> str:
+def _outcome_line(
+    entries: Sequence[TimelineEntry],
+    failed: TimelineEntry | None = None,
+    *,
+    request_id: str | None = None,
+) -> str:
     """How the request itself ended, so a teardown artifact is not mistaken for it."""
 
-    request_id = failed.event.request_id
+    if failed is not None:
+        request_id = failed.event.request_id
     terminals = [
         entry
         for entry in entries
@@ -1807,8 +1820,15 @@ def _outcome_line(entries: Sequence[TimelineEntry], failed: TimelineEntry) -> st
         and (request_id is None or entry.event.request_id == request_id)
     ]
     if not terminals:
-        return "  request outcome: no terminal transition recorded"
+        return "  request outcome: no terminal transition recorded" + (
+            f" (request={request_id})" if failed is None else ""
+        )
     outcome = terminals[-1]
+    if failed is None:
+        return (
+            f"  request outcome: {outcome.event.status} (request={request_id}, terminal at "
+            f"t+{outcome.delta_ns / 1e6:.3f}ms)"
+        )
     difference = outcome.monotonic_ns - failed.monotonic_ns
     relation = (
         f"{difference / 1e6:.3f}ms after this failure"

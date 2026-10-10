@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from mycelium_testbed import soak
+from mycelium_testbed.trace import EventKind, load_run
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("MYCELIUM_TESTBED_IROH_E2E") != "1",
@@ -124,7 +125,13 @@ def test_real_falsification_stall_control_loop_fires_the_control_loop_code(
         seeds=(44,),
         events=8,
         run_id="real-stall",
-        forced=(soak.ForcedFault(soak.FaultKind.STALL_CONTROL_LOOP, 1),),
+        # A stalled backend emits a named failure inside the terminal budget.
+        # To falsify BOTH properties we must also lose that terminal on the client
+        # side; a timely failure is a valid terminal, not a missing frame.
+        forced=(
+            soak.ForcedFault(soak.FaultKind.DROP_TERMINAL_FRAME, 0),
+            soak.ForcedFault(soak.FaultKind.STALL_CONTROL_LOOP, 1),
+        ),
         real_request=False,
         # The judged window is measured on the real clock, so the injected stall
         # must outlive the registry's own active-failure detection bound; it is
@@ -140,6 +147,44 @@ def test_real_falsification_stall_control_loop_fires_the_control_loop_code(
     assert soak.INVARIANT_REQUEST_WITHOUT_TERMINAL_FRAME_WITHIN_BUDGET in (
         result.invariant_codes_fired
     ), result.as_document()
+    assert result.product_material["dropped_observation_kinds"] == ["terminal_frame_dropped"]
+
+
+def test_real_stall_with_timely_named_failure_is_not_a_missing_terminal(
+    native_iroh_sidecar_binary: Path, tmp_path: Path
+) -> None:
+    config = _config(
+        tmp_path,
+        native_iroh_sidecar_binary,
+        seeds=(44,),
+        events=8,
+        run_id="real-stall-terminal-control",
+        forced=(soak.ForcedFault(soak.FaultKind.STALL_CONTROL_LOOP, 1),),
+        real_request=False,
+        time_scale=0.5,
+    )
+
+    result = soak.run_seed(config, 44)
+
+    assert result.invariant_codes_fired == (
+        soak.INVARIANT_CONTROL_LOOP_DEATH_WHILE_MEMBERSHIP_VALID,
+    ), result.as_document()
+    record = json.loads(
+        (config.run_root() / "seeds" / "seed-0044" / "seed.json").read_text()
+    )
+    row, = record["ledger"]["rows"]
+    assert row["terminal_kind"] == "failed"
+    assert row["terminal_code"] == "backend_failed"
+    assert row["stalled_at_s"] is not None
+    assert result.product_material["dropped_observation_kinds"] == []
+    events = load_run(result.trace_dirs[0]).events
+    admitted, = [e for e in events if e.detail.get("origin") == "soak.gateway_submit"]
+    terminal, = [e for e in events if e.kind is EventKind.TERMINAL]
+    assert terminal.host_id == admitted.host_id
+    assert terminal.detail["code"] == "backend_failed"
+    assert 0 <= (terminal.monotonic_ns - admitted.monotonic_ns) / 1e9 < (
+        config.resolved_bounds().request_terminal_cancelled_seconds
+    )
 
 
 def test_real_falsification_retire_nonterminal_row_fires_the_retirement_code(

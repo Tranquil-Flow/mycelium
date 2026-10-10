@@ -26,6 +26,8 @@ import threading
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from mycelium_testbed import soak
 
 
@@ -250,6 +252,71 @@ def test_a_row_that_reached_its_terminal_is_never_a_nonterminal_retirement(tmp_p
     episode._observe()
 
     assert soak.INVARIANT_NONTERMINAL_ROW_NOT_RETIRED_WITHIN_BOUND not in _codes(session)
+
+
+@pytest.mark.parametrize("terminal_mode", ["missing", "failed", "closed"])
+def test_finish_observes_the_full_row_relative_stall_budget(
+    tmp_path, monkeypatch, terminal_mode
+) -> None:
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr(soak.time, "monotonic", lambda: clock["now"])
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock["now"] += seconds
+
+    monkeypatch.setattr(soak.time, "sleep", sleep)
+    session = _session()
+    session.ledger.started_at = clock["now"]
+    request_id = "request-finish-stall"
+    _admit_mailbox_row(session, request_id)
+    live_row = _live_row_session(latest_sequence=0)
+    episode = _episode(session, tmp_path, table={request_id: live_row})
+    episode.request_id = request_id
+    bounds = _bounds()
+    polls = []
+    max_polls = int(
+        (bounds.control_loop_stall_seconds + bounds.request_terminal_cancelled_seconds)
+        / bounds.poll_seconds
+    ) + 3
+
+    def next_event(*, timeout):
+        polls.append(clock["now"])
+        assert len(polls) <= max_polls, "finish busy-spins on a closed subscription"
+        if terminal_mode == "closed":
+            # A dropped terminal leaves the subscription at EOF: no blocking poll.
+            return None
+        clock["now"] += timeout
+        if terminal_mode == "failed" and session.ledger.elapsed() >= (
+            bounds.control_loop_stall_seconds + bounds.request_terminal_cancelled_seconds / 2
+        ):
+            live_row.latest_sequence = 1
+            live_row.terminal_event = SimpleNamespace(
+                request_id=request_id, sequence=1, kind="failed", code="backend_failed",
+                terminal=True,
+            )
+            return live_row.terminal_event
+        raise TimeoutError
+
+    episode.subscription = SimpleNamespace(next_event=next_event, ack=lambda sequence: None)
+    episode._observe()
+    episode.finish()
+
+    row = session.ledger.rows[request_id]
+    assert row.stalled_at is not None
+    pending = session.ledger.elapsed() - row.stalled_at
+    if terminal_mode == "failed":
+        assert row.terminal_kind == "failed"
+        assert pending < bounds.request_terminal_cancelled_seconds
+        assert soak.INVARIANT_REQUEST_WITHOUT_TERMINAL_FRAME_WITHIN_BUDGET not in _codes(session)
+    else:
+        assert pending >= bounds.request_terminal_cancelled_seconds
+        assert soak.INVARIANT_REQUEST_WITHOUT_TERMINAL_FRAME_WITHIN_BUDGET in _codes(session)
+    if terminal_mode == "closed":
+        assert sleeps
+        assert all(seconds == bounds.poll_seconds for seconds in sleeps)
+    assert len(polls) <= max_polls
 
 
 def test_the_observer_refusal_is_a_named_constant() -> None:

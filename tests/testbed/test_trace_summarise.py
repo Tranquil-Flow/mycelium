@@ -110,7 +110,27 @@ def test_summary_hides_nothing_when_every_transition_is_ok(tmp_path: Path) -> No
     text = summarise(run_dir)
 
     assert "first failure: none (every transition is ok)" in text
+    assert "request outcome: completed" in text
     assert "t+" in text
+
+
+def test_compact_clean_summary_reports_each_request_including_unfinished(tmp_path: Path) -> None:
+    run_dir = tmp_path / "clean-multiple"
+    unfinished = "request-summary-002"
+    with TraceRunDirectory(run_dir, run_id="clean-multiple", host_id="node-a") as run:
+        recorder = TraceRecorder("node-a", run=run)
+        recorder.event(EventKind.ENQUEUE, request_id=REQUEST_ID)
+        recorder.event(EventKind.ENQUEUE, request_id=unfinished)
+        recorder.event(EventKind.TERMINAL, request_id=REQUEST_ID, status="completed")
+
+    text = summarise(run_dir, include_timeline=False)
+
+    assert "first failure: none (every transition is ok)" in text
+    assert f"request outcome: completed (request={REQUEST_ID}, terminal at t+" in text
+    assert f"request outcome: no terminal transition recorded (request={unfinished})" in text
+    assert text.count("request outcome:") == 2
+    assert "after this failure" not in text
+    assert "before this failure" not in text
 
 
 def test_timeline_prints_each_request_in_order_with_deltas(tmp_path: Path) -> None:
