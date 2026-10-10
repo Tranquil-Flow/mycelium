@@ -9,8 +9,13 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 IROH_CRATE = ROOT / "native" / "iroh_transport"
-IROH_BINARY = IROH_CRATE / "target" / "debug" / "mycelium-iroh-sidecar"
+IROH_TARGET = Path(os.environ.get("CARGO_TARGET_DIR", str(IROH_CRATE / "target")))
+if not IROH_TARGET.is_absolute():
+    IROH_TARGET = IROH_CRATE / IROH_TARGET
+IROH_BINARY = IROH_TARGET / "debug" / "mycelium-iroh-sidecar"
 _BUILD_ENVIRONMENT_KEYS = (
+    "CARGO_TARGET_DIR",
+    "CARGO_INCREMENTAL",
     "CARGO_BUILD_JOBS",
     "CARGO_HOME",
     "HOME",
