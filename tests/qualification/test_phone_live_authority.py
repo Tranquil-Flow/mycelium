@@ -5,7 +5,15 @@ import copy
 import pytest
 
 from mycelium_qualification import issue_live_route_qualification, LiveRouteQualificationError
-from mycelium_qualification.phone import phone_load_proof_digest
+from mycelium_qualification.evidence import sha256_document
+
+
+def legacy_phone_digest(o):
+    """Test-only old artifact identity; NEVER qualification authority."""
+    return sha256_document({"protocol": "mycelium.phone_load_identity.v1",
+        **{k: o[k] for k in ("node_id", "host_id", "process_id", "endpoint_id")},
+        **{k: o["details"][k] for k in ("assignment_id", "stage_id", "manifest_digest",
+            "phone_stage_pack_digest", "load_generation", "runtime_mode")}})
 from mycelium_qualification.signing import generate_ed25519_signer
 from mycelium_router.serialization import execution_graph_to_dict
 from test_router_inprocess_mesh import three_device_graph
@@ -47,7 +55,7 @@ def phone_attestation():
         o=add(n,'configured',d)
         if i==1:
             stages=list(graph.stages)
-            stages[i]=replace(s,placements=(replace(p,load_proof_digest=phone_load_proof_digest(o)),))
+            stages[i]=replace(s,placements=(replace(p,load_proof_digest=legacy_phone_digest(o)),))
             graph=replace(graph,stages=tuple(stages))
     for i,n in enumerate(nodes):
         peer=nodes[(i+1)%3]
@@ -70,15 +78,18 @@ def qualify(att, bindings):
     return issue_live_route_qualification(att,expected_prompt_token_ids=[1,2],expected_output_token_ids=[3,4],phone_bindings=bindings)
 
 
-def test_live_phone_qualification_with_real_signed_envelopes():
+def test_live_phone_qualification_refuses_missing_provenance():
     att, bindings, _ = phone_attestation()
-    record=qualify(att,bindings)
-    assert record.route_ready
-    assert record.stage_bindings[1].process_id == 'inc-phone'
+    with pytest.raises(LiveRouteQualificationError, match="phone_load_provenance_unsupported"):
+        qualify(att,bindings)
 
 
 @pytest.mark.parametrize('attack',['missing_authority','wrong_key','wrong_boot','pack','proof','stage','generation','missing_runtime','no_work','fatal','desktop_mode','wrong_peer'])
-def test_live_phone_qualification_fails_closed(attack):
+def test_live_phone_qualification_fails_closed(attack, monkeypatch):
+    # Isolate the older defenses from the new blanket provenance refusal.
+    # Only negative calls: this fixture must still fail if those checks regress.
+    from mycelium_qualification import phone
+    monkeypatch.setattr(phone, "phone_load_proof_digest", legacy_phone_digest)
     att,bindings,signers=phone_attestation()
     n=next(iter(bindings))
     if attack=='missing_authority': bindings={}

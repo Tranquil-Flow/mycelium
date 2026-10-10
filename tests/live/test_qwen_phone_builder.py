@@ -133,11 +133,10 @@ def test_phone_proof_preserves_signatures_and_checks_exact_source(evidence, synt
     e = admit(evidence)
     import copy
     assignment = copy.deepcopy(e.statement['preparation_binding']['assignment'])
-    proof = e.bind_assignment(assignment, stage_id="stage-001", snapshot_root=synthetic_snapshot[0])
-    assert proof["configured"] == evidence[0]["configured"]
-    assert proof["protocol"] == "mycelium.phone_authenticated_load_proof.v1"
-    assert proof["route_ready"] is False
-    assert "loaded_tensor_digest" not in proof  # no invented desktop loader output
+    with pytest.raises(ValueError, match="phone_load_provenance_unsupported"):
+        e.bind_assignment(assignment, stage_id="stage-001", snapshot_root=synthetic_snapshot[0])
+    assert e.document["configured"] == evidence[0]["configured"]
+    assert "loaded_tensor_digest" not in e.document  # no invented desktop loader output
     assignment["range"]["end_layer_exclusive"] = 1
     with pytest.raises(RuntimeError, match="phone_assignment_manifest_mismatch"):
         e.bind_assignment(assignment, stage_id="stage-001", snapshot_root=synthetic_snapshot[0])

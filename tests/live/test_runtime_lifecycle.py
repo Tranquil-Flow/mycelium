@@ -10,7 +10,7 @@ import zipfile
 
 import pytest
 from scripts import build_qwen_live_route as builder
-from phone_composition_fixture import fixture_build
+from phone_composition_fixture import fixture_build, build_packaging_fixture
 from test_qwen_route_builder import _topology_node, _write_topology
 from physical_inference_qualification import NodeProcessSession
 
@@ -32,7 +32,8 @@ def test_emitted_node_full_lifecycle(tmp_path,monkeypatch,record_property,mixed,
         nodes[0]['staging_root']=str(tmp_path/'desktop-build/transfer-bundle')
         fixture.args.topology=_write_topology(tmp_path/'desktop-topology.json',nodes)
         fixture.args.output_root=tmp_path/'desktop-build'
-    report=builder.build(fixture.args)
+    # Mixed bundle exercises B2 mechanics only, not phone load admission.
+    report=build_packaging_fixture(fixture.args, monkeypatch) if mixed else builder.build(fixture.args)
     plan=json.loads(Path(report['operator_plan']).read_text())
     run=plan['controller']['run_plan'];bundle=fixture.args.output_root/'transfer-bundle'
     assert (bundle/'mycelium-runtime.zip').is_file()

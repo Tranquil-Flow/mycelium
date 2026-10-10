@@ -337,10 +337,12 @@ def issue_live_route_qualification(
             _reject("live_phone_replay_required")
         phone = node_id in phone_nodes
         if phone:
-            from .phone import phone_load_proof_digest
+            from .phone import PhoneLoadProvenanceError, phone_load_proof_digest
             profile = phone_bindings[node_id].get("configure", {})
             try:
                 load_digest = phone_load_proof_digest(configured_observation)
+            except PhoneLoadProvenanceError as exc:
+                _reject(str(exc))
             except ValueError:
                 _reject("live_phone_load_proof_invalid")
             if (load_digest != placement.load_proof_digest

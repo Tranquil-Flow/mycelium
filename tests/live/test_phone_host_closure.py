@@ -91,14 +91,16 @@ def test_phone_signed_identity_requires_out_of_band_seed_binding():
             _signed_observations(att, phone_bindings=bad)
 
 
-def test_phone_load_proof_binds_configured_identity_and_pack():
+def test_phone_load_proof_refuses_unproven_identity_and_pack():
     from mycelium_qualification.phone import phone_load_proof_digest
     obs = dict(node_id='phone', host_id='phone', process_id='inc-123', endpoint_id='ab'*32,
                details=dict(assignment_id='assignment', stage_id='middle', manifest_digest='sha256:'+'a'*64,
                             phone_stage_pack_digest='sha256:'+'b'*64, load_generation=1, runtime_mode='complete_context_replay'))
-    first = phone_load_proof_digest(obs)
+    with pytest.raises(ValueError, match="phone_load_provenance_unsupported"):
+        phone_load_proof_digest(obs)
     obs['details']['phone_stage_pack_digest'] = 'sha256:'+'c'*64
-    assert phone_load_proof_digest(obs) != first
+    with pytest.raises(ValueError, match="phone_load_provenance_unsupported"):
+        phone_load_proof_digest(obs)
     obs['details']['runtime_mode'] = 'stage_local_kv'
     with pytest.raises(ValueError):
         phone_load_proof_digest(obs)

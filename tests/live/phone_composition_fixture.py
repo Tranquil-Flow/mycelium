@@ -173,6 +173,20 @@ def fixture_build(tmp_path, *, native=None, observe=None, staged_local=False):
                            nodes=nodes,sessions=sessions,preparation=prepared,descriptor=descriptor)
 
 
+def build_packaging_fixture(args, monkeypatch):
+    """B2-only harness: construct a legacy bundle despite blocked admission.
+
+    Never use this for a positive phone qualification claim. The unmodified
+    production build is separately required to refuse; all source/identity/
+    runtime extraction assertions still run on the emitted desktop artifact.
+    """
+    from mycelium_qualification import phone as provenance
+    with monkeypatch.context() as m:
+        m.setattr(provenance, "require_phone_load_provenance", lambda observation: None)
+        m.setattr(phone, "require_phone_load_provenance", lambda observation: None)
+        return builder.build(args)
+
+
 def qualify_fixture_plan(fixture, plan, checkpoint):
     """Exercise real qualifier on emitted graph and SYNTHETIC signed events.
 

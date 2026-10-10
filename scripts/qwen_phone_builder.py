@@ -31,10 +31,10 @@ BACKEND = "mobile-rust-qwen2"
 BINDING_PROTOCOL = "mycelium.phone_builder_authorization.v1"
 BUILD_PROTOCOL = "mycelium.phone_executor_build.v1"
 BUILD_ID_PROTOCOL = "mycelium.mobile_runtime_build.v1"
-LOAD_IDENTITY_PROVENANCE = dict(
-    applied_fields=['assignment_id','stage_id','phone_stage_pack_digest','runtime_backend','runtime_build_digest','golden_output_digest'],
-    controller_claim_fields=['manifest_digest','load_generation'],
-    limitation='native_manifest_load_generation_not_independently_observed')
+from mycelium_qualification.phone import (
+    LOAD_IDENTITY_PROVENANCE, require_phone_load_provenance,
+    validate_phone_load_provenance,
+)
 
 
 def digest(data: bytes) -> str:
@@ -83,7 +83,12 @@ def validate_build_receipt(receipt, *, expected_digest, binary, apk, source_root
 
 
 class PhoneEvidence:
-    """Verify seed-authorized preparation and the actual phone's load replies."""
+    """Verify preliminary preparation and original replies, NOT load authority.
+
+    Seed B1/B3 verification uses this carrier before proof promotion. The
+    native limitation stays intact; bind_assignment must refuse unsupported
+    provenance before presenting an authenticated load proof.
+    """
     def __init__(self, document, *, seed_key_digest, node, run_id, deployment_id, now=None):
         now = time.time() if now is None else now
         envelope = document["authorization"]
@@ -158,8 +163,7 @@ class PhoneEvidence:
                 and details.get("golden_output_digest") == self.manifest["golden"]["output_digest"]
                 and details.get("runtime_backend") == BACKEND,
                 "phone_authenticated_load_provenance_required")
-        require(details.get('load_identity_provenance') == LOAD_IDENTITY_PROVENANCE,
-                'phone_load_identity_provenance_required')
+        validate_phone_load_provenance(configured)
         resources = snapshot["details"].get("host_resources", {})
         require(resources.get("supported_decode_modes") == ["complete_context_replay"],
                 "phone_replay_snapshot_required")
@@ -188,6 +192,7 @@ class PhoneEvidence:
             stage_id=m["stage_id"], model_id=m["model_id"], resolved_commit=m["resolved_commit"],
             start_layer=m["start_layer"], end_layer_exclusive=m["end_layer_exclusive"], golden=m["golden"])
         require(rebuilt == m, "phone_challenge_source_mismatch")
+        require_phone_load_provenance(self.observations[0])
         return {
             "protocol": "mycelium.phone_authenticated_load_proof.v1",
             "assignment_digest": digest(canonical_json_bytes(assignment)),
