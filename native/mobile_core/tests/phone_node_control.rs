@@ -19,7 +19,7 @@ impl ControlEnv for Env {
     fn stage(&self) -> Option<StageView> {
         let s = &self.golden["stage"];
         let t = |k: &str| s[k].as_str().unwrap().to_owned();
-        Some(StageView { assignment_id: t("assignment_id"), stage_id: t("stage_id"), pack_digest: t("pack_digest"), backend: t("backend") })
+        Some(StageView { assignment_id: t("assignment_id"), stage_id: t("stage_id"), pack_digest: t("pack_digest"), backend: t("backend"), runtime_build_digest: t("runtime_build_digest"), golden_output_digest: t("golden_output_digest") })
     }
     fn install_peers(&mut self, _: &[PeerSpec], _: u64) -> Result<(), String> {
         Ok(())
@@ -27,6 +27,7 @@ impl ControlEnv for Env {
     fn health(&self) -> Value {
         Value::Object(Default::default())
     }
+    fn qualification_snapshot(&self) -> Value { serde_json::json!({}) }
     fn host_resources(&self) -> Value {
         Value::Object(Default::default())
     }
@@ -34,11 +35,24 @@ impl ControlEnv for Env {
         self.golden["monotonic_ns"].as_u64().unwrap()
     }
     fn stop(&mut self) {}
+    fn cancel_wait(&mut self, _: &mycelium_mobile_core::node_cancel::CancelSubject) -> mycelium_mobile_core::node_cancel::Residue {
+        Default::default()
+    }
 }
 
 #[test]
 fn every_response_and_signed_observation_matches_the_python_signer() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../contracts/phone-node-control-golden/index.json");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/readiness_control_golden.json");
+    check_golden(&path);
+}
+
+#[test]
+fn signed_infer_cancel_wait_and_duplicate_match_the_python_signer() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cancel_control_golden.json");
+    check_golden(&path);
+}
+
+fn check_golden(path: &std::path::Path) {
     let golden: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let seed: [u8; 32] = hex::decode(golden["seed_hex"].as_str().unwrap()).unwrap().try_into().unwrap();
     let id = &golden["identity"];
@@ -57,6 +71,13 @@ fn every_response_and_signed_observation_matches_the_python_signer() {
     for step in steps {
         let command = serde_json::to_vec(&step["command"]).unwrap();
         let response = node.handle("controller-golden", &command, &signer, &mut env);
-        assert_eq!(String::from_utf8(response).unwrap(), step["response_canonical"].as_str().unwrap(), "{}", step["command"]["command"]);
+        if step["command"]["command"] == "bind_request_control" && step["command"]["payload"]["control"]["publisher_generation"] == 0 {
+            // The archived legacy golden predates the Python validator's
+            // positive generations/digest contract. It must now fail closed.
+            let refusal: Value = serde_json::from_slice(&response).unwrap();
+            assert_eq!(refusal["error"]["code"], "invalid_bind_request_control");
+        } else {
+            assert_eq!(String::from_utf8(response).unwrap(), step["response_canonical"].as_str().unwrap(), "{}", step["command"]["command"]);
+        }
     }
 }

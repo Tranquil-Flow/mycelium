@@ -27,6 +27,7 @@ pub const HANDOFF_PAYLOAD_PROTOCOL: &str = "mycelium.encrypted_invitation_payloa
 pub const INVITE_BUNDLE_PROTOCOL: &str = "mycelium.invite_bundle.v1";
 pub const INVITE_PROTOCOL: &str = "mycelium.invite.v1";
 pub const ANDROID_PEER_CLASS: &str = "android_native_iroh";
+pub const ANDROID_QWEN2_PEER_CLASS: &str = "android_native_qwen2_iroh";
 pub const NATIVE_CARRIER: &str = "signed_native_application";
 pub const QR_SCHEME: &str = "mycelium:";
 const REQUEST_TTL_MAX: f64 = 600.0;
@@ -123,12 +124,17 @@ impl PairingSession {
         ttl_seconds: u32,
         nonce: Option<&str>,
     ) -> Result<Self, OnboardingError> {
+        Self::new_for_class(identity, device_ref, now, ttl_seconds, nonce, ANDROID_PEER_CLASS)
+    }
+
+    pub fn new_for_class(identity: &Identity, device_ref: &str, now: f64, ttl_seconds: u32,
+        nonce: Option<&str>, peer_class: &str) -> Result<Self, OnboardingError> {
         let recipient = StaticSecret::from(random::<32>()?);
         let nonce = match nonce {
             Some(n) => n.to_owned(),
             None => format!("pair-{}", b64(&random::<24>()?)),
         };
-        Self::with_recipient(identity, device_ref, now, ttl_seconds, &nonce, recipient)
+        Self::with_recipient_for_class(identity, device_ref, now, ttl_seconds, &nonce, recipient, peer_class)
     }
 
     pub fn with_recipient(
@@ -139,6 +145,15 @@ impl PairingSession {
         nonce: &str,
         recipient: StaticSecret,
     ) -> Result<Self, OnboardingError> {
+        Self::with_recipient_for_class(identity, device_ref, now, ttl_seconds, nonce, recipient, ANDROID_PEER_CLASS)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_recipient_for_class(identity: &Identity, device_ref: &str, now: f64, ttl_seconds: u32,
+        nonce: &str, recipient: StaticSecret, peer_class: &str) -> Result<Self, OnboardingError> {
+        if ![ANDROID_PEER_CLASS, ANDROID_QWEN2_PEER_CLASS].contains(&peer_class) {
+            return Err(OnboardingError::RequestInvalid);
+        }
         if !segment_ok(device_ref) || !segment_ok(nonce) || !now.is_finite() {
             return Err(OnboardingError::RequestInvalid);
         }
@@ -151,7 +166,7 @@ impl PairingSession {
             "identity_endpoint_id": identity.endpoint_id(),
             "identity_key_digest": identity.verification_key_digest(),
             "identity_verification_key": identity.public_key_record(),
-            "peer_class": ANDROID_PEER_CLASS,
+            "peer_class": peer_class,
             "carrier": NATIVE_CARRIER,
             "invite_protocol": INVITE_BUNDLE_PROTOCOL,
             "recipient_encryption_key": b64(PublicKey::from(&recipient).as_bytes()),
@@ -247,7 +262,7 @@ pub fn verify_request(request: &Value, now: f64) -> Result<(), OnboardingError> 
     }
     identity::verify(&Value::Object(statement), &signature, &map["identity_verification_key"])
         .map_err(|_| OnboardingError::RequestSignature)?;
-    if map["peer_class"] != ANDROID_PEER_CLASS || map["invite_protocol"] != INVITE_BUNDLE_PROTOCOL {
+    if (map["peer_class"] != ANDROID_PEER_CLASS && map["peer_class"] != ANDROID_QWEN2_PEER_CLASS) || map["invite_protocol"] != INVITE_BUNDLE_PROTOCOL {
         return Err(OnboardingError::RequestInvalid);
     }
     require_carrier(&map["carrier"])?;

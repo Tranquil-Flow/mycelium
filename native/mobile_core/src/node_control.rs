@@ -21,8 +21,9 @@
 //! path), `start` installs the route peers at the route generation, `stop`
 //! drains. Request control (`bind_request_control`, `update_request_control`)
 //! keeps the Python node's identity and generation rules. `infer_cancel_wait`
-//! and its sealed cleanup receipts are M4-host work (see the proposal) and
-//! are refused with `unsupported_command` until then.
+//! answers with a signed `inference_cancelled` observation whose
+//! `request_cleanup` receipt commits the exact subject it tore down, built by
+//! [`crate::node_cancel`] and reported truthfully by [`ControlEnv::cancel_wait`].
 //!
 //! This module does no I/O: [`ControlEnv`] supplies the stage view, the
 //! transport effects, the clock and the health readings.
@@ -62,8 +63,17 @@ const REQUEST_CONTROL_FIELDS: [&str; 12] = [
     "cancellation_generation",
 ];
 /// Commands only an entry (or an A7/A10 participant) answers.
-const ENTRY_ONLY: [&str; 9] =
-    ["infer_start", "infer_decode", "infer_cancel", "a7_snapshot", "a7_source_lost", "a10_target_verify", "a10_batch_policy", "rotate", "cancel"];
+const ENTRY_ONLY: [&str; 9] = [
+    "infer_start",
+    "infer_decode",
+    "infer_cancel",
+    "a7_snapshot",
+    "a7_source_lost",
+    "a10_target_verify",
+    "a10_batch_policy",
+    "rotate",
+    "cancel",
+];
 
 /// The phone's applied v2 stage, as the control channel sees it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +82,8 @@ pub struct StageView {
     pub stage_id: String,
     pub pack_digest: String,
     pub backend: String,
+    pub runtime_build_digest: String,
+    pub golden_output_digest: String,
 }
 
 /// One route peer to install (`start`).
@@ -93,12 +105,22 @@ pub trait ControlEnv {
     fn install_peers(&mut self, peers: &[PeerSpec], local_generation: u64) -> Result<(), String>;
     /// Health readings for the signed `health` observation.
     fn health(&self) -> Value;
+    /// Runtime/transport counters and interruption contract owned by the node.
+    fn qualification_snapshot(&self) -> Value;
     /// A `mycelium.host_resource_snapshot.v1`-shaped document.
     fn host_resources(&self) -> Value;
     /// Monotonic nanoseconds (the observation clock).
     fn monotonic_ns(&self) -> u64;
     /// Drain: stop serving Router frames.
     fn stop(&mut self);
+    /// Map a separately bounded execution budget ONCE to the native monotonic clock.
+    /// The control absolute deadline is opaque host identity, never Unix time.
+    fn request_deadline(&mut self, _request_id: &str, _execution_budget_ms: u64) {}
+    /// The exact teardown for one `infer_cancel_wait` subject: release the
+    /// runtime replay results of the request's own path, retire that path from
+    /// the stage node, and report the residue that is really left. The node
+    /// never synthesizes a clean receipt: whatever this returns is signed.
+    fn cancel_wait(&mut self, subject: &crate::node_cancel::CancelSubject) -> crate::node_cancel::Residue;
 }
 
 /// The node's control identity (`_identity`).
@@ -166,12 +188,37 @@ pub struct ControlNode {
     controller: Option<String>,
     state: State,
     peer_generation: u64,
+    request_control_graph: Option<Value>,
+    pending_budgets: BTreeMap<String, u64>,
+    // Never reuse an evicted receipt's request id within this session. The
+    // bounded history fails closed instead of forgetting a cleanup fence.
+    consumed_requests: BTreeSet<String>,
     request_controls: BTreeMap<String, Map<String, Value>>,
+    /// Cancellations that arrived before their request control was bound
+    /// (`_pending_cancellations`), by request id.
+    pending_cancellations: BTreeMap<String, crate::node_cancel::CancelSubject>,
+    /// Exact accepted cancellation subjects while cleanup is incomplete.
+    cancellation_controls: BTreeMap<String, crate::node_cancel::CancelSubject>,
+    /// Sealed receipts (`_request_cleanup_receipts`), oldest id first.
+    cleanup_receipts: Vec<(String, crate::node_cancel::CancelReceipt)>,
 }
 
 impl ControlNode {
     pub fn new(identity: ControlIdentity) -> Self {
-        Self { identity, run: None, controller: None, state: State::New, peer_generation: 0, request_controls: BTreeMap::new() }
+        Self {
+            identity,
+            run: None,
+            controller: None,
+            state: State::New,
+            peer_generation: 0,
+            request_control_graph: None,
+            pending_budgets: BTreeMap::new(),
+            consumed_requests: BTreeSet::new(),
+            request_controls: BTreeMap::new(),
+            pending_cancellations: BTreeMap::new(),
+            cancellation_controls: BTreeMap::new(),
+            cleanup_receipts: Vec::new(),
+        }
     }
 
     pub fn state(&self) -> &'static str {
@@ -260,6 +307,7 @@ impl ControlNode {
             "snapshot" => self.snapshot(payload, signer, env),
             "bind_request_control" => self.bind_request_control(payload, signer, env),
             "update_request_control" => self.update_request_control(payload, signer, env),
+            "infer_cancel_wait" => self.infer_cancel_wait(payload, signer, env),
             "stop" => self.stop(payload, signer, env),
             _ => refuse("unsupported_command"),
         }
@@ -305,7 +353,15 @@ impl ControlNode {
     /// applied, golden-verified v2 stage, never a file the controller wrote.
     fn configure(&mut self, payload: &Value, signer: &Identity, env: &mut dyn ControlEnv) -> Result<Value, Refusal> {
         require(self.state == State::New, "invalid_state_for_configure")?;
-        let p = exact_fields(payload, &["assignment_id", "stage_id", "pack_digest", "manifest_digest", "load_generation"], "invalid_configure_fields")?;
+        let mut base = payload.clone();
+        let graph = base.as_object_mut().and_then(|m| m.remove("request_control_graph"));
+        if let Some(graph) = &graph {
+            let g = exact_fields(graph, &["deployment_id", "deployment_epoch", "topology_generation"], "invalid_request_control_graph")?;
+            require(g["deployment_id"].as_str() == self.run.as_ref().map(|(_, d)| d.as_str())
+                && g["deployment_epoch"].as_u64().is_some_and(|n| n > 0)
+                && g["topology_generation"].as_u64().is_some_and(|n| n > 0), "invalid_request_control_graph")?;
+        }
+        let p = exact_fields(&base, &["assignment_id", "stage_id", "pack_digest", "manifest_digest", "load_generation"], "invalid_configure_fields")?;
         require(non_negative_int(&p["load_generation"]).is_some_and(|g| g > 0), "invalid_load_generation")?;
         let text = |k: &str| p[k].as_str().filter(|s| !s.is_empty()).ok_or_else(|| Refusal("invalid_configure_fields".into()));
         let (assignment_id, stage_id, pack_digest, manifest_digest) =
@@ -315,6 +371,7 @@ impl ControlNode {
         require(stage.assignment_id == assignment_id, "assignment_id_mismatch")?;
         require(stage.stage_id == stage_id, "stage_id_mismatch")?;
         require(stage.pack_digest == pack_digest, "stage_pack_digest_mismatch")?;
+        self.request_control_graph = graph;
         self.state = State::Configured;
         let details = json!({
             "assignment_id": assignment_id,
@@ -322,30 +379,48 @@ impl ControlNode {
             "manifest_digest": manifest_digest,
             "endpoint_addr": env.endpoint_addr(),
             "runtime_mode": REPLAY_DECODE_MODE,
+            "runtime_backend": stage.backend,
+            "runtime_build_digest": stage.runtime_build_digest,
+            "golden_output_digest": stage.golden_output_digest,
             "phone_stage_pack_digest": pack_digest,
             "load_generation": p["load_generation"],
+            "load_identity_provenance": {
+                "applied_fields":["assignment_id","stage_id","phone_stage_pack_digest","runtime_backend","runtime_build_digest","golden_output_digest"],
+                "controller_claim_fields":["manifest_digest","load_generation"],
+                "limitation":"native_manifest_load_generation_not_independently_observed"
+            },
         });
         self.signed("configured", details, signer, env)
     }
 
     fn peer(&self, value: &Value) -> Result<PeerSpec, Refusal> {
         let p = exact_fields(value, &PEER_FIELDS, "invalid_peer_fields")?;
-        let (Some(node_id), Some(endpoint_id), Some(generation)) = (p["node_id"].as_str(), p["endpoint_id"].as_str(), non_negative_int(&p["generation"]))
+        let (Some(node_id), Some(endpoint_id), Some(generation)) =
+            (p["node_id"].as_str(), p["endpoint_id"].as_str(), non_negative_int(&p["generation"]))
         else {
             return refuse("invalid_peer_binding");
         };
         require(!node_id.is_empty() && !endpoint_id.is_empty() && generation > 0, "invalid_peer_binding")?;
         require(p["endpoint_addr"]["id"] == endpoint_id, "invalid_peer_binding")?;
         require(node_id != self.identity.node_id, "self_peer_binding")?;
-        Ok(PeerSpec { node_id: node_id.to_owned(), endpoint_id: endpoint_id.to_owned(), endpoint_addr: p["endpoint_addr"].clone(), generation })
+        Ok(PeerSpec {
+            node_id: node_id.to_owned(),
+            endpoint_id: endpoint_id.to_owned(),
+            endpoint_addr: p["endpoint_addr"].clone(),
+            generation,
+        })
     }
 
     fn start(&mut self, payload: &Value, signer: &Identity, env: &mut dyn ControlEnv) -> Result<Value, Refusal> {
         require(self.state == State::Configured, "invalid_state_for_start")?;
         let map = payload.as_object().ok_or_else(|| Refusal("invalid_start_fields".into()))?;
         let keys: BTreeSet<&str> = map.keys().map(String::as_str).collect();
-        require(keys == BTreeSet::from(["peer", "local_generation"]) || keys == BTreeSet::from(["peer", "peers", "local_generation"]), "invalid_start_fields")?;
-        let local_generation = non_negative_int(&map["local_generation"]).filter(|g| *g > 0).ok_or_else(|| Refusal("invalid_local_generation".into()))?;
+        require(
+            keys == BTreeSet::from(["peer", "local_generation"]) || keys == BTreeSet::from(["peer", "peers", "local_generation"]),
+            "invalid_start_fields",
+        )?;
+        let local_generation =
+            non_negative_int(&map["local_generation"]).filter(|g| *g > 0).ok_or_else(|| Refusal("invalid_local_generation".into()))?;
         let mut peers = vec![self.peer(&map["peer"])?];
         if let Some(more) = map.get("peers") {
             let more = more.as_array().ok_or_else(|| Refusal("invalid_peers".into()))?;
@@ -381,7 +456,37 @@ impl ControlNode {
         self.signed("health", details, signer, env)
     }
 
-    fn snapshot(&self, payload: &Value, signer: &Identity, env: &mut dyn ControlEnv) -> Result<Value, Refusal> {
+    fn snapshot(&mut self, payload: &Value, signer: &Identity, env: &mut dyn ControlEnv) -> Result<Value, Refusal> {
+        if payload.get("cleanup_subject").is_some() {
+            let fields = if payload.get("receipt_only").is_some() { vec!["cleanup_subject", "receipt_only"] } else { vec!["cleanup_subject"] };
+            exact_fields(payload, &fields, "invalid_snapshot_fields")?;
+            require(payload.get("receipt_only").is_none_or(Value::is_boolean), "invalid_snapshot_fields")?;
+            require(matches!(self.state, State::Configured | State::Running), "invalid_state_for_snapshot")?;
+            let mut flat = payload["cleanup_subject"].clone();
+            let mut fields = crate::node_cancel::SUBJECT_FIELDS.to_vec();
+            fields.push("request_id");
+            exact_fields(&flat, &fields, "invalid_cleanup_subject")?;
+            flat["deadline_budget_ms"] = json!(1);
+            let (subject, _) = crate::node_cancel::subject_of_bound(&flat, "invalid_cleanup_subject").map_err(Refusal)?;
+            if let Some((_, receipt)) = self.cleanup_receipts.iter().find(|(id, _)| *id == subject.request_id) {
+                require(receipt.subject == subject, "cleanup_receipt_identity_mismatch")?;
+                return self.signed("snapshot", json!({"request_cleanup":receipt.cleanup_json()}), signer, env);
+            }
+            // Only an already-consumed, exact command may trigger cleanup and
+            // seal its delayed receipt. A snapshot is never a cancellation.
+            if self.cancellation_controls.get(&subject.request_id) == Some(&subject)
+                || self.pending_cancellations.get(&subject.request_id) == Some(&subject) {
+                flat["deadline_budget_ms"] = json!(self.pending_budgets.get(&subject.request_id).copied().unwrap_or(1));
+                let result = self.infer_cancel_wait(&flat, signer, env)?;
+                return self.signed("snapshot", json!({"request_cleanup":result["observation"]["details"]["request_cleanup"]}), signer, env);
+            }
+            let mut cleanup = subject.to_json();
+            cleanup["runtime_clean"] = json!(false);
+            cleanup["transport_clean"] = json!(false);
+            cleanup["cancellation_worker_complete"] = json!(false);
+            cleanup["complete"] = json!(false);
+            return self.signed("snapshot", json!({"request_cleanup":cleanup}), signer, env);
+        }
         exact_fields(payload, &[], "invalid_snapshot_fields")?;
         require(matches!(self.state, State::Configured | State::Running), "invalid_state_for_snapshot")?;
         let mut resources = env.host_resources();
@@ -393,41 +498,97 @@ impl ControlNode {
         }
         let digest = canonical_digest(&resources);
         resources["resource_digest"] = json!(digest);
-        self.signed("snapshot", json!({ "state": self.state.name(), "host_resources": resources }), signer, env)
+        let mut details = env.qualification_snapshot();
+        require(details.is_object(), "runtime_snapshot_unavailable")?;
+        details["state"] = json!(self.state.name());
+        details["host_resources"] = resources;
+        self.signed("snapshot", details, signer, env)
     }
 
     fn request_control(&self, payload: &Value, code: &str) -> Result<(String, Map<String, Value>), Refusal> {
-        let p = exact_fields(payload, &["request_id", "control"], code)?;
+        // Both callers validate their closed outer schema first (bind also
+        // carries the separately validated execution budget).
+        let p = payload.as_object().ok_or_else(|| Refusal(code.into()))?;
         let request_id = p["request_id"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| Refusal("invalid_request_id".into()))?;
         let control = exact_fields(&p["control"], &REQUEST_CONTROL_FIELDS, code)?;
-        let run = self.run.as_ref().map(|(_, d)| d.as_str());
-        require(control["deployment_id"].as_str() == run, code)?;
-        for k in [
-            "publisher_generation",
-            "cancellation_generation",
-            "request_attempt",
-            "path_attempt",
-            "topology_generation",
-            "absolute_deadline_ms",
-            "deployment_epoch",
-        ] {
-            require(control[k].is_u64(), code)?;
-        }
-        for k in ["qualification_digest", "command_id", "path_id", "path_digest"] {
-            require(control[k].as_str().is_some_and(|s| !s.is_empty()), code)?;
-        }
+        let mut flat = Value::Object(control.clone());
+        flat["request_id"] = json!(request_id);
+        flat["deadline_budget_ms"] = json!(1);
+        crate::node_cancel::subject_of_bound(&flat, code).map_err(Refusal)?;
+        self.validate_graph(&flat, code)?;
         Ok((request_id.to_owned(), control.clone()))
     }
 
+    fn validate_graph(&self, subject: &Value, code: &str) -> Result<(), Refusal> {
+        let graph = self.request_control_graph.as_ref().ok_or_else(|| Refusal(code.into()))?;
+        require(["deployment_id", "deployment_epoch", "topology_generation"].iter().all(|k| subject[*k] == graph[*k]), code)
+    }
+
+    /// Persistent within the session, including sealed receipts: never resurrect
+    /// execution after cleanup. The execution lane also keeps its own fence.
+    pub(crate) fn request_blocked(&self, request_id: &str) -> bool {
+        self.pending_cancellations.contains_key(request_id) || self.cancellation_controls.contains_key(request_id)
+            || self.cleanup_receipts.iter().any(|(id, _)| id == request_id)
+            || self.consumed_requests.contains(request_id)
+    }
+
     fn bind_request_control(&mut self, payload: &Value, signer: &Identity, env: &mut dyn ControlEnv) -> Result<Value, Refusal> {
-        exact_fields(payload, &["request_id", "control"], "invalid_bind_request_control_fields")?;
+        exact_fields(payload, &["request_id", "control", "execution_budget_ms"], "invalid_bind_request_control_fields")?;
+        let budget = payload["execution_budget_ms"].as_u64().filter(|b| (1..=3_600_000).contains(b))
+            .ok_or_else(|| Refusal("invalid_execution_budget_ms".into()))?;
         require(self.state == State::Running, "invalid_state_for_bind_request_control")?;
-        let (request_id, control) = self.request_control(payload, "invalid_bind_request_control")?;
+        let (request_id, mut control) = self.request_control(payload, "invalid_bind_request_control")?;
+        require(control["cancellation_generation"] == 0, "invalid_bind_request_control")?;
+        // A delayed original bind may acknowledge the sealed successor but
+        // must never recreate a request control after cleanup (Python parity).
+        if let Some((_, receipt)) = self.cleanup_receipts.iter().find(|(id, _)| *id == request_id) {
+            let sealed = receipt.subject.to_json();
+            require(REQUEST_CONTROL_FIELDS.iter().filter(|k| **k != "cancellation_generation").all(|k| sealed[*k] == control[*k])
+                && control["cancellation_generation"].as_u64().and_then(|g| g.checked_add(1)) == Some(receipt.subject.cancellation_generation),
+                "request_already_cleaned")?;
+            control["cancellation_generation"] = json!(receipt.subject.cancellation_generation);
+            return self.signed("request_control_bound", json!({"request_id":request_id, "control_digest":canonical_digest(&Value::Object(control))}), signer, env);
+        }
+        require(!self.consumed_requests.contains(&request_id), "request_already_cleaned")?;
+        require(self.consumed_requests.len() + self.request_controls.len() + self.pending_cancellations.len() < MAX_REQUEST_CONTROLS
+            || self.request_controls.contains_key(&request_id) || self.pending_cancellations.contains_key(&request_id), "request_control_table_full")?;
+        // A pending cancellation is the authoritative identity for the request
+        // (`_bind_request_control`, PIN:2413-2465): a later bind must carry its
+        // exact immutable fields, is pinned one generation behind it, and
+        // clears the pending record only through that fence. A bind may never
+        // silently overwrite or coexist with a recorded cancellation.
+        if let Some(pending) = self.pending_cancellations.get(&request_id) {
+            let pending_matches = crate::node_cancel::subject_of_bound(&{
+                let mut flat = serde_json::Map::new();
+                flat.insert("request_id".into(), json!(request_id));
+                flat.insert("deadline_budget_ms".into(), json!(1));
+                for k in REQUEST_CONTROL_FIELDS {
+                    flat.insert(k.into(), control[k].clone());
+                }
+                Value::Object(flat)
+            }, "invalid_bind_request_control").ok().is_some_and(|(s, _)| {
+                s.identity_json() == pending.identity_json()
+                    && s.cancellation_generation.checked_add(1) == Some(pending.cancellation_generation)
+            });
+            require(pending_matches, "stale_infer_cancel_generation")?;
+            require(self.request_controls.contains_key(&request_id) || self.request_controls.len() < MAX_REQUEST_CONTROLS, "request_control_table_full")?;
+            control["cancellation_generation"] = json!(pending.cancellation_generation);
+            self.cancellation_controls.insert(request_id.clone(), pending.clone());
+            self.pending_cancellations.remove(&request_id);
+            self.pending_budgets.remove(&request_id);
+        }
         if let Some(current) = self.request_controls.get(&request_id) {
-            require(*current == control, "conflicting_request_control")?;
+            let advanced_duplicate = REQUEST_CONTROL_FIELDS.iter().filter(|k| **k != "cancellation_generation").all(|k| current[*k] == control[*k])
+                && control["cancellation_generation"].as_u64().and_then(|g| g.checked_add(1)) == current["cancellation_generation"].as_u64()
+                && self.cancellation_controls.get(&request_id).is_some_and(|s| {
+                    REQUEST_CONTROL_FIELDS.iter().all(|k| s.to_json()[*k] == current[*k])
+                });
+            require(*current == control || advanced_duplicate, "conflicting_request_control")?;
+            control = current.clone();
         } else {
             require(self.request_controls.len() < MAX_REQUEST_CONTROLS, "request_control_table_full")?;
             self.request_controls.insert(request_id.clone(), control.clone());
+            env.request_deadline(&request_id, budget);
         }
         let digest = canonical_digest(&Value::Object(control));
         self.signed("request_control_bound", json!({ "request_id": request_id, "control_digest": digest }), signer, env)
@@ -448,7 +609,98 @@ impl ControlNode {
             require(old.checked_add(1) == Some(new), "publisher_generation_cas_mismatch")?;
             self.request_controls.insert(request_id.clone(), control);
         }
-        self.signed("request_control_updated", json!({ "request_id": request_id, "publisher_generation": new, "duplicate": duplicate }), signer, env)
+        self.signed(
+            "request_control_updated",
+            json!({ "request_id": request_id, "publisher_generation": new, "duplicate": duplicate }),
+            signer,
+            env,
+        )
+    }
+
+    /// `infer_cancel_wait`: fence the owner's exact request-control identity,
+    /// tear the request's own path down inline on this reserved control
+    /// worker, and return a signed `inference_cancelled` observation whose
+    /// `request_cleanup` names the residue the teardown actually found
+    /// (`_infer_cancel_wait`, PIN:4299-4358; receipt shape PIN:2920).
+    ///
+    /// The control worker performs only currently available cleanup and never
+    /// waits behind CPU/network work. A busy runtime or outstanding publication
+    /// yields an incomplete receipt immediately; a scoped snapshot can seal it
+    /// later. A repeat of a sealed subject never moves proof backwards.
+    fn infer_cancel_wait(&mut self, payload: &Value, signer: &Identity, env: &mut dyn ControlEnv) -> Result<Value, Refusal> {
+        let (subject, deadline_budget_ms) = crate::node_cancel::subject_of(payload, "invalid_infer_cancel_control").map_err(Refusal)?;
+        self.validate_graph(payload, "invalid_infer_cancel_control")?;
+        // A receipt already committed for this exact identity is replayed.
+        if let Some((_, receipt)) = self.cleanup_receipts.iter().find(|(id, r)| *id == subject.request_id && r.subject == subject) {
+            return self.signed("inference_cancelled", receipt.to_json(), signer, env);
+        }
+        require(!self.consumed_requests.contains(&subject.request_id), "request_already_cleaned")?;
+        if let Some(budget) = self.pending_budgets.get(&subject.request_id) {
+            require(*budget == deadline_budget_ms, "conflicting_pending_cancellation")?;
+        }
+        let bound = self.bound_subject(&subject.request_id);
+        require(!self.request_controls.contains_key(&subject.request_id) || bound.is_some(), "invalid_infer_cancel_control")?;
+        let retry = self.cancellation_controls.get(&subject.request_id) == Some(&subject);
+        let decision = if retry { crate::node_cancel::Fence::Duplicate } else {
+            crate::node_cancel::fence(bound.as_ref(), self.pending_cancellations.get(&subject.request_id), &subject)
+        };
+        match decision {
+            crate::node_cancel::Fence::Refused(code) => return refuse(code),
+            crate::node_cancel::Fence::Applied => {
+                let control = self.request_controls.get_mut(&subject.request_id).expect("bound above");
+                control["cancellation_generation"] = json!(subject.cancellation_generation);
+                self.cancellation_controls.insert(subject.request_id.clone(), subject.clone());
+            }
+            // Cancel-before-start: the cancellation itself is the authoritative
+            // pending identity; a later bind must match it exactly.
+            crate::node_cancel::Fence::Pending => {
+                require(self.consumed_requests.len() + self.request_controls.len() + self.pending_cancellations.len() < MAX_REQUEST_CONTROLS, "request_control_table_full")?;
+                self.pending_cancellations.insert(subject.request_id.clone(), subject.clone());
+                self.pending_budgets.insert(subject.request_id.clone(), deadline_budget_ms);
+            }
+            crate::node_cancel::Fence::Duplicate => {}
+        }
+        let pending_start = bound.is_none();
+        // The exact teardown. Its residue is the receipt: nothing is invented.
+        let residue = env.cancel_wait(&subject);
+        // An unbound cancellation still owns its pending identity, even if runtime residue is empty.
+        let cleanup_pending = pending_start || !residue.is_clean();
+        let receipt = crate::node_cancel::CancelReceipt {
+            request_id: subject.request_id.clone(),
+            cancelled: true,
+            status: if cleanup_pending { "CANCELLING" } else { "CANCELLED" },
+            cleanup_pending,
+            subject: subject.clone(),
+            cancellation_worker_complete: !residue.runtime_busy,
+            residue,
+            pending_start,
+            deadline_budget_ms,
+        };
+        if !cleanup_pending {
+            self.consumed_requests.insert(subject.request_id.clone());
+            self.pending_budgets.remove(&subject.request_id);
+            self.request_controls.remove(&subject.request_id);
+            self.pending_cancellations.remove(&subject.request_id);
+            self.cancellation_controls.remove(&subject.request_id);
+            while self.cleanup_receipts.len() >= crate::node_cancel::MAX_CLEANUP_RECEIPTS {
+                self.cleanup_receipts.remove(0);
+            }
+            self.cleanup_receipts.push((subject.request_id.clone(), receipt.clone()));
+        }
+        self.signed("inference_cancelled", receipt.to_json(), signer, env)
+    }
+
+    /// The bound request control as a cancellation subject, if this session
+    /// bound one for `request_id` (its identity fields, verbatim).
+    fn bound_subject(&self, request_id: &str) -> Option<crate::node_cancel::CancelSubject> {
+        let control = self.request_controls.get(request_id)?;
+        let mut payload = serde_json::Map::new();
+        payload.insert("request_id".into(), json!(request_id));
+        payload.insert("deadline_budget_ms".into(), json!(1));
+        for k in REQUEST_CONTROL_FIELDS {
+            payload.insert(k.into(), control[k].clone());
+        }
+        crate::node_cancel::subject_of_bound(&Value::Object(payload), "invalid_infer_cancel_control").ok().map(|(s, _)| s)
     }
 
     fn stop(&mut self, payload: &Value, signer: &Identity, env: &mut dyn ControlEnv) -> Result<Value, Refusal> {
@@ -457,6 +709,10 @@ impl ControlNode {
         let signed = self.signed("stopping", json!({}), signer, env)?;
         env.stop();
         self.request_controls.clear();
+        self.pending_cancellations.clear();
+        self.pending_budgets.clear();
+        self.cancellation_controls.clear();
+        self.cleanup_receipts.clear();
         Ok(json!({ "state": self.state.name(), "final_observation": signed }))
     }
 }
@@ -470,6 +726,9 @@ mod tests {
         installed: Vec<(Vec<PeerSpec>, u64)>,
         stopped: bool,
         clock: u64,
+        cancelled: Vec<crate::node_cancel::CancelSubject>,
+        deadlines: Vec<(String,u64)>,
+        residue: crate::node_cancel::Residue,
     }
 
     impl ControlEnv for Env {
@@ -486,14 +745,26 @@ mod tests {
         fn health(&self) -> Value {
             json!({"transport_running": true})
         }
+        fn qualification_snapshot(&self) -> Value {
+            json!({"runtime":{"active_state_count":3,"applied_operation_count":7},
+                "transport":{"remote_frames_sent":11,"remote_frames_received":13},
+                "transport_fatal_error":"synthetic_failure", "interruptibility":{"maximum_total_cleanup_ms":null}})
+        }
         fn host_resources(&self) -> Value {
             json!({"protocol": "mycelium.host_resource_snapshot.v1", "backend": crate::qwen2::QWEN2_BACKEND})
         }
         fn monotonic_ns(&self) -> u64 {
             self.clock
         }
+        fn request_deadline(&mut self,r:&str,b:u64) { self.deadlines.push((r.into(),b)); }
         fn stop(&mut self) {
             self.stopped = true;
+        }
+        /// A staged residue the test sets, so the receipt is only complete when
+        /// the teardown really found nothing.
+        fn cancel_wait(&mut self, subject: &crate::node_cancel::CancelSubject) -> crate::node_cancel::Residue {
+            self.cancelled.push(subject.clone());
+            std::mem::take(&mut self.residue)
         }
     }
 
@@ -504,10 +775,15 @@ mod tests {
                 stage_id: "stage-phone".into(),
                 pack_digest: "sha256:pack".into(),
                 backend: crate::qwen2::QWEN2_BACKEND.into(),
+                runtime_build_digest: format!("sha256:{}", "b".repeat(64)),
+                golden_output_digest: format!("sha256:{}", "a".repeat(64)),
             }),
             installed: vec![],
             stopped: false,
             clock: 7,
+            cancelled: Vec::new(),
+            deadlines: Vec::new(),
+            residue: crate::node_cancel::Residue::default(),
         }
     }
 
@@ -528,6 +804,21 @@ mod tests {
     fn send(node: &mut ControlNode, env: &mut Env, command: &str, payload: Value) -> Value {
         let doc = json!({"protocol": NODE_CONTROL_PROTOCOL, "command_id": format!("c-{command}"), "run_id": "run-1", "deployment_id": "dep-1", "command": command, "payload": payload});
         serde_json::from_slice(&node.handle("controller-1", &serde_json::to_vec(&doc).unwrap(), &signer(), env)).unwrap()
+    }
+
+    #[test]
+    fn execution_budget_is_required_bounded_and_not_part_of_signed_identity() {
+        let (mut n, mut e) = running();
+        for budget in [Value::Null, json!(0), json!(-1), json!(true), json!(1.5), json!(3_600_001)] {
+            let mut payload = json!({"request_id":"budget", "control":control(1)});
+            if !budget.is_null() { payload["execution_budget_ms"] = budget; }
+            assert_eq!(send(&mut n, &mut e, "bind_request_control", payload)["ok"], false);
+            assert!(!n.request_controls.contains_key("budget"));
+        }
+        let subject = control(1);
+        let r = send(&mut n, &mut e, "bind_request_control", json!({"request_id":"budget", "control":subject, "execution_budget_ms":3_600_000}));
+        let o = assert_signed(&r, "request_control_bound");
+        assert_eq!(o["details"]["control_digest"], canonical_digest(&subject));
     }
 
     fn assert_signed(response: &Value, event: &str) -> Value {
@@ -565,7 +856,25 @@ mod tests {
     }
 
     fn configure_payload() -> Value {
-        json!({"assignment_id": "assignment-1", "stage_id": "stage-phone", "pack_digest": "sha256:pack", "manifest_digest": "sha256:graph", "load_generation": 1})
+        json!({"assignment_id": "assignment-1", "stage_id": "stage-phone", "pack_digest": "sha256:pack", "manifest_digest": "sha256:graph", "load_generation": 1, "request_control_graph":{"deployment_id":"dep-1", "deployment_epoch":1, "topology_generation":1}})
+    }
+
+    #[test]
+    fn readiness_projection_signs_backend_and_has_runtime_counters() {
+        let (mut node, mut env) = (node(), env());
+        send(&mut node, &mut env, "hello", json!({}));
+        let configured = assert_signed(&send(&mut node, &mut env, "configure", configure_payload()), "configured");
+        assert_eq!(configured["details"]["runtime_backend"], crate::qwen2::QWEN2_BACKEND);
+        assert!(configured["details"]["runtime_build_digest"].as_str().is_some());
+        assert!(configured["details"]["golden_output_digest"].as_str().is_some());
+        let snapshot = assert_signed(&send(&mut node, &mut env, "snapshot", json!({})), "snapshot");
+        assert!(snapshot["details"]["runtime"].is_object());
+        assert!(snapshot["details"].get("transport_fatal_error").is_some());
+        assert!(snapshot["details"]["interruptibility"].is_object());
+        assert_eq!(snapshot["details"]["runtime"]["applied_operation_count"],7);
+        assert_eq!(snapshot["details"]["runtime"]["active_state_count"],3);
+        assert_eq!(snapshot["details"]["transport"]["remote_frames_sent"],11);
+        assert_eq!(snapshot["details"]["transport_fatal_error"],"synthetic_failure");
     }
 
     #[test]
@@ -602,13 +911,16 @@ mod tests {
             let r = send(&mut node, &mut env, command, json!({}));
             assert_eq!((r["ok"].clone(), r["error"]["code"].clone()), (json!(false), json!("stage_only_node")), "{command}");
         }
-        assert_eq!(send(&mut node, &mut env, "infer_cancel_wait", json!({}))["error"]["code"], "unsupported_command");
-        let foreign =
-            json!({"protocol": NODE_CONTROL_PROTOCOL, "command_id": "x", "run_id": "run-2", "deployment_id": "dep-1", "command": "health", "payload": {}});
-        let r: Value = serde_json::from_slice(&node.handle("controller-1", &serde_json::to_vec(&foreign).unwrap(), &signer(), &mut env)).unwrap();
+        // A bare `infer_cancel_wait` (no identity) is the owner's data-plane
+        // cancel, never the receipt command: it is refused, not answered.
+        assert_eq!(send(&mut node, &mut env, "infer_cancel_wait", json!({}))["error"]["code"], "invalid_infer_cancel_control");
+        let foreign = json!({"protocol": NODE_CONTROL_PROTOCOL, "command_id": "x", "run_id": "run-2", "deployment_id": "dep-1", "command": "health", "payload": {}});
+        let r: Value =
+            serde_json::from_slice(&node.handle("controller-1", &serde_json::to_vec(&foreign).unwrap(), &signer(), &mut env)).unwrap();
         assert_eq!(r["error"]["code"], "run_id_mismatch");
         let extra = json!({"protocol": NODE_CONTROL_PROTOCOL, "command_id": "x", "run_id": "run-1", "deployment_id": "dep-1", "command": "health", "payload": {}, "more": 1});
-        let r: Value = serde_json::from_slice(&node.handle("controller-1", &serde_json::to_vec(&extra).unwrap(), &signer(), &mut env)).unwrap();
+        let r: Value =
+            serde_json::from_slice(&node.handle("controller-1", &serde_json::to_vec(&extra).unwrap(), &signer(), &mut env)).unwrap();
         assert_eq!(r["error"]["code"], "invalid_command_fields");
         let r: Value = serde_json::from_slice(&node.handle("controller-1", b"not json", &signer(), &mut env)).unwrap();
         assert_eq!(r["error"]["code"], "invalid_command_document");
@@ -624,7 +936,10 @@ mod tests {
         env.stage = None;
         assert_eq!(send(&mut node, &mut env, "configure", configure_payload())["error"]["code"], "stage_not_loaded");
         let mut env2 = self::env();
-        assert_eq!(send(&mut node, &mut env2, "start", json!({"peer": peer("a", "e"), "local_generation": 1}))["error"]["code"], "invalid_state_for_start");
+        assert_eq!(
+            send(&mut node, &mut env2, "start", json!({"peer": peer("a", "e"), "local_generation": 1}))["error"]["code"],
+            "invalid_state_for_start"
+        );
         send(&mut node, &mut env2, "configure", configure_payload());
         for (payload, code) in [
             (json!({"peer": peer("node-phone", "e"), "local_generation": 1}), "self_peer_binding"),
@@ -641,11 +956,74 @@ mod tests {
         assert!(env2.installed.is_empty(), "nothing installed on a refused start");
     }
 
+    #[test]
+    fn lifecycle_validation_rejects_python_invalid_controls() {
+        for (field, value) in [
+            ("deployment_epoch", json!(0)), ("request_attempt", json!(0)),
+            ("qualification_digest", json!("sha256:q")), ("path_digest", json!(format!("sha256:{}", "G".repeat(64)))),
+            ("publisher_generation", json!(0)), ("topology_generation", json!(0)),
+            ("absolute_deadline_ms", json!(0)), ("path_attempt", json!(-1)),
+            ("command_id", json!("é".repeat(129))), ("cancellation_generation", json!(1)),
+        ] {
+            let (mut node, mut env) = running();
+            let mut c = control(1);
+            c["qualification_digest"] = json!(format!("sha256:{}", "b".repeat(64)));
+            c["request_attempt"] = json!(1);
+            c[field] = value;
+            let result = send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id":"r", "control":c}));
+            assert_eq!(result["error"]["code"], "invalid_bind_request_control", "{field}: {result}");
+            assert!(node.request_controls.is_empty());
+        }
+    }
+
+    #[test]
+    fn lifecycle_graph_and_pending_budget_are_exact_and_receipts_never_reopen() {
+        let (mut node, mut env) = running();
+        for field in ["deployment_epoch", "topology_generation"] {
+            let mut c = control(1); c[field] = json!(2);
+            assert_eq!(send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id":"r", "control":c}))["error"]["code"], "invalid_bind_request_control");
+            let mut c = cancel_payload(1); c[field] = json!(2);
+            assert_eq!(send(&mut node, &mut env, "infer_cancel_wait", c)["error"]["code"], "invalid_infer_cancel_control");
+        }
+        assert_signed(&send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(1)), "inference_cancelled");
+        let mut retry = cancel_payload(1); retry["deadline_budget_ms"] = json!(2000);
+        assert_eq!(send(&mut node, &mut env, "infer_cancel_wait", retry)["error"]["code"], "conflicting_pending_cancellation");
+        assert_signed(&send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id":"r", "control":control(1)})), "request_control_bound");
+        assert_signed(&send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(1)), "inference_cancelled");
+        let mut other = cancel_payload(1); other["command_id"] = json!("other");
+        assert_eq!(send(&mut node, &mut env, "infer_cancel_wait", other)["error"]["code"], "request_already_cleaned");
+        node.cleanup_receipts.clear(); // simulate the bounded receipt cache's eviction
+        assert_eq!(send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id":"r", "control":control(1)}))["error"]["code"], "request_already_cleaned");
+        assert_eq!(send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(1))["error"]["code"], "request_already_cleaned");
+    }
+
+    #[test]
+    fn lifecycle_snapshot_only_seals_consumed_exact_cancellation() {
+        let (mut node, mut env) = running();
+        let mut subject = cancel_payload(1);
+        subject.as_object_mut().unwrap().remove("deadline_budget_ms");
+        let query = json!({"cleanup_subject":subject, "receipt_only":true});
+        let unknown = assert_signed(&send(&mut node, &mut env, "snapshot", query.clone()), "snapshot");
+        assert_eq!(unknown["details"]["request_cleanup"]["complete"], false);
+        assert!(env.cancelled.is_empty(), "a query cannot cancel a request");
+        assert_signed(&send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id":"r", "control":control(1)})), "request_control_bound");
+        env.residue.inflight = 1;
+        let first = assert_signed(&send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(1)), "inference_cancelled");
+        assert_eq!(first["details"]["cleanup_pending"], true);
+        let done = assert_signed(&send(&mut node, &mut env, "snapshot", query.clone()), "snapshot");
+        assert_eq!(done["details"]["request_cleanup"]["complete"], true);
+        let replay = assert_signed(&send(&mut node, &mut env, "snapshot", query.clone()), "snapshot");
+        assert_eq!(replay["details"]["request_cleanup"], done["details"]["request_cleanup"]);
+        let mut wrong = query;
+        wrong["cleanup_subject"]["command_id"] = json!("unconsumed-command");
+        assert_eq!(send(&mut node, &mut env, "snapshot", wrong)["error"]["code"], "cleanup_receipt_identity_mismatch");
+    }
+
     fn control(publisher: u64) -> Value {
         json!({
-            "deployment_id": "dep-1", "deployment_epoch": 1, "qualification_digest": "sha256:q", "command_id": "cmd",
-            "publisher_generation": publisher, "absolute_deadline_ms": 10, "request_attempt": 0, "path_id": "p",
-            "path_attempt": 0, "path_digest": "sha256:p", "topology_generation": 1, "cancellation_generation": 0,
+            "deployment_id": "dep-1", "deployment_epoch": 1, "qualification_digest": format!("sha256:{}", "b".repeat(64)), "command_id": "cmd",
+            "publisher_generation": publisher, "absolute_deadline_ms": 10, "request_attempt": 1, "path_id": "p",
+            "path_attempt": 0, "path_digest": format!("sha256:{}", "a".repeat(64)), "topology_generation": 1, "cancellation_generation": 0,
         })
     }
 
@@ -655,37 +1033,258 @@ mod tests {
         send(&mut node, &mut env, "hello", json!({}));
         send(&mut node, &mut env, "configure", configure_payload());
         send(&mut node, &mut env, "start", json!({"peer": peer("a", "e"), "local_generation": 1}));
-        let bound =
-            assert_signed(&send(&mut node, &mut env, "bind_request_control", json!({"request_id": "r", "control": control(0)})), "request_control_bound");
-        assert_eq!(bound["details"]["control_digest"], canonical_digest(&control(0)));
-        assert_signed(&send(&mut node, &mut env, "bind_request_control", json!({"request_id": "r", "control": control(0)})), "request_control_bound");
+        let bound = assert_signed(
+            &send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id": "r", "control": control(1)})),
+            "request_control_bound",
+        );
+        assert_eq!(bound["details"]["control_digest"], canonical_digest(&control(1)));
+        assert_signed(
+            &send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id": "r", "control": control(1)})),
+            "request_control_bound",
+        );
         assert_eq!(
-            send(&mut node, &mut env, "bind_request_control", json!({"request_id": "r", "control": control(1)}))["error"]["code"],
+            send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id": "r", "control": control(2)}))["error"]["code"],
             "conflicting_request_control"
         );
-        let updated =
-            assert_signed(&send(&mut node, &mut env, "update_request_control", json!({"request_id": "r", "control": control(1)})), "request_control_updated");
-        assert_eq!((updated["details"]["publisher_generation"].clone(), updated["details"]["duplicate"].clone()), (json!(1), json!(false)));
+        let updated = assert_signed(
+            &send(&mut node, &mut env, "update_request_control", json!({"request_id": "r", "control": control(2)})),
+            "request_control_updated",
+        );
+        assert_eq!((updated["details"]["publisher_generation"].clone(), updated["details"]["duplicate"].clone()), (json!(2), json!(false)));
         assert_eq!(
-            send(&mut node, &mut env, "update_request_control", json!({"request_id": "r", "control": control(3)}))["error"]["code"],
+            send(&mut node, &mut env, "update_request_control", json!({"request_id": "r", "control": control(4)}))["error"]["code"],
             "publisher_generation_cas_mismatch"
         );
-        let mut other = control(2);
+        let mut other = control(3);
         other["path_id"] = json!("q");
         assert_eq!(
             send(&mut node, &mut env, "update_request_control", json!({"request_id": "r", "control": other}))["error"]["code"],
             "request_control_identity_mismatch"
         );
         assert_eq!(
-            send(&mut node, &mut env, "update_request_control", json!({"request_id": "x", "control": control(1)}))["error"]["code"],
+            send(&mut node, &mut env, "update_request_control", json!({"request_id": "x", "control": control(2)}))["error"]["code"],
             "request_control_unknown"
         );
-        let mut foreign = control(0);
+        assert_eq!(env.deadlines,vec![("r".into(),60_000)],"duplicate bind and publisher update cannot remap execution time");
+        let mut foreign = control(1);
         foreign["deployment_id"] = json!("dep-2");
         assert_eq!(
-            send(&mut node, &mut env, "bind_request_control", json!({"request_id": "s", "control": foreign}))["error"]["code"],
+            send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id": "s", "control": foreign}))["error"]["code"],
             "invalid_bind_request_control"
         );
+    }
+
+    fn cancel_payload(generation: u64) -> Value {
+        json!({
+            "request_id": "r", "deployment_id": "dep-1", "deployment_epoch": 1, "qualification_digest": format!("sha256:{}", "b".repeat(64)),
+            "command_id": "cmd", "publisher_generation": 1, "absolute_deadline_ms": 10, "request_attempt": 1,
+            "path_id": "p", "path_attempt": 0, "path_digest": format!("sha256:{}", "a".repeat(64)), "topology_generation": 1,
+            "cancellation_generation": generation, "deadline_budget_ms": 4000,
+        })
+    }
+
+    fn running() -> (ControlNode, Env) {
+        let (mut node, mut env) = (node(), env());
+        assert_eq!(send(&mut node, &mut env, "hello", json!({}))["ok"], true);
+        assert_eq!(send(&mut node, &mut env, "configure", configure_payload())["ok"], true);
+        assert_eq!(send(&mut node, &mut env, "start", json!({"peer": peer("a", "e"), "local_generation": 1}))["ok"], true);
+        (node, env)
+    }
+
+    #[test]
+    fn cancellation_regression_pending_bind_consumes_and_advances() {
+        let (mut node, mut env) = running();
+        assert_signed(&send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(1)), "inference_cancelled");
+        let bound = assert_signed(&send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id":"r", "control":control(1)})), "request_control_bound");
+        let mut advanced = control(1);
+        advanced["cancellation_generation"] = json!(1);
+        assert_eq!(bound["details"]["control_digest"], canonical_digest(&advanced));
+        assert!(!node.pending_cancellations.contains_key("r"));
+        assert_eq!(node.request_controls["r"]["cancellation_generation"], 1);
+        assert_signed(&send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id":"r", "control":control(1)})), "request_control_bound");
+        let done = assert_signed(&send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(1)), "inference_cancelled");
+        assert_eq!(done["details"]["request_cleanup"]["complete"], true);
+    }
+
+    #[test]
+    fn cancellation_regression_pending_bind_requires_exact_next_generation() {
+        let (mut node, mut env) = running();
+        assert_signed(&send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(3)), "inference_cancelled");
+        let mut bad = control(1);
+        bad["cancellation_generation"] = json!(1);
+        let result = send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id":"r", "control":bad}));
+        assert_eq!(result["error"]["code"], "invalid_bind_request_control");
+        assert!(node.request_controls.is_empty());
+        assert_eq!(node.pending_cancellations["r"].cancellation_generation, 3);
+    }
+
+    #[test]
+    fn cancellation_regression_incomplete_bound_cleanup_can_finish() {
+        let (mut node, mut env) = running();
+        assert_signed(&send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id":"r", "control":control(1)})), "request_control_bound");
+        env.residue.inflight = 1;
+        let first = assert_signed(&send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(1)), "inference_cancelled");
+        assert_eq!(first["details"]["cleanup_pending"], true);
+        let done = assert_signed(&send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(1)), "inference_cancelled");
+        assert_eq!(done["details"]["request_cleanup"]["complete"], true);
+        assert_eq!(env.cancelled.len(), 2);
+    }
+
+    #[test]
+    fn cancellation_regression_sealed_cleanup_cannot_be_rebound() {
+        let (mut node, mut env) = running();
+        let bind = json!({"execution_budget_ms":60_000, "request_id":"r", "control":control(1)});
+        assert_signed(&send(&mut node, &mut env, "bind_request_control", bind.clone()), "request_control_bound");
+        assert_signed(&send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(1)), "inference_cancelled");
+        assert_signed(&send(&mut node, &mut env, "bind_request_control", bind), "request_control_bound");
+        assert!(node.request_controls.is_empty(), "a late bind must not resurrect sealed cleanup");
+        let mut other = control(1);
+        other["path_id"] = json!("other");
+        assert_eq!(send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id":"r", "control":other}))["error"]["code"], "request_already_cleaned");
+    }
+
+    /// The owner cancellation fan-out: a signed `inference_cancelled`
+    /// observation whose `request_cleanup` commits the exact subject it tore
+    /// down, with `cleanup_pending: false` only when nothing is left.
+    #[test]
+    fn infer_cancel_wait_signs_a_receipt_over_the_exact_torn_down_subject() {
+        let (mut node, mut env) = (node(), env());
+        send(&mut node, &mut env, "hello", json!({}));
+        send(&mut node, &mut env, "configure", configure_payload());
+        send(&mut node, &mut env, "start", json!({"peer": peer("a", "e"), "local_generation": 1}));
+        send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id": "r", "control": control(1)}));
+        let observation = assert_signed(&send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(1)), "inference_cancelled");
+        let details = &observation["details"];
+        assert_eq!(details["request_id"], "r");
+        assert_eq!(details["cancelled"], true);
+        assert_eq!(details["status"], "CANCELLED");
+        assert_eq!(details["cleanup_pending"], false);
+        let cleanup = &details["request_cleanup"];
+        assert_eq!(cleanup["complete"], true);
+        assert_eq!(cleanup["request_id"], "r");
+        assert_eq!(cleanup["path_id"], "p");
+        assert_eq!(cleanup["cancellation_generation"], 1);
+        assert_eq!(cleanup["runtime_clean"], true);
+        assert_eq!(cleanup["transport_clean"], true);
+        assert_eq!(cleanup["cancellation_worker_complete"], true);
+        assert_eq!(
+            cleanup["residue"],
+            json!({"live_paths": [], "pending_cancellations": 0, "inflight": 0, "replay_results": 0, "path_retained": false})
+        );
+        // The teardown saw exactly this subject, once.
+        assert_eq!(env.cancelled.len(), 1);
+        assert_eq!(env.cancelled[0].request_id, "r");
+        assert_eq!(env.cancelled[0].cancellation_generation, 1);
+        // The sealed receipt replays byte-for-byte and never re-tears-down.
+        let replay = assert_signed(&send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(1)), "inference_cancelled");
+        assert_eq!(replay["details"], *details);
+        assert_eq!(env.cancelled.len(), 1);
+    }
+
+    #[test]
+    fn a_cancellation_reports_the_residue_it_found_and_never_claims_zero() {
+        for residue in [
+            crate::node_cancel::Residue { live_paths: vec!["p2".into()], ..Default::default() },
+            crate::node_cancel::Residue { pending_cancellations: 1, ..Default::default() },
+            crate::node_cancel::Residue { inflight: 1, ..Default::default() },
+            crate::node_cancel::Residue { replay_results: 2, ..Default::default() },
+            crate::node_cancel::Residue { path_retained: true, ..Default::default() },
+        ] {
+            let (mut node, mut env) = (node(), env());
+            send(&mut node, &mut env, "hello", json!({}));
+            send(&mut node, &mut env, "configure", configure_payload());
+            send(&mut node, &mut env, "start", json!({"peer": peer("a", "e"), "local_generation": 1}));
+            env.residue = residue.clone();
+            // Cancel-before-start: no control bound, so this is the pending
+            // identity and the receipt cannot be complete either.
+            let observation = assert_signed(&send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(1)), "inference_cancelled");
+            let details = &observation["details"];
+            assert_eq!(details["pending_start"], true);
+            assert_eq!(details["cleanup_pending"], true, "{details}");
+            assert_eq!(details["status"], "CANCELLING");
+            assert_eq!(details["request_cleanup"]["complete"], false, "{details}");
+            assert_eq!(details["request_cleanup"]["residue"], residue.to_json(), "{details}");
+            // A pending receipt is never sealed: a repeat re-observes.
+            send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(1));
+            assert_eq!(env.cancelled.len(), 2);
+        }
+    }
+
+    #[test]
+    fn only_the_next_cancellation_generation_of_the_bound_control_is_applied() {
+        let (mut node, mut env) = (node(), env());
+        send(&mut node, &mut env, "hello", json!({}));
+        send(&mut node, &mut env, "configure", configure_payload());
+        send(&mut node, &mut env, "start", json!({"peer": peer("a", "e"), "local_generation": 1}));
+        // No control bound yet: the cancellation is a pending identity.
+        let pending = assert_signed(&send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(1)), "inference_cancelled");
+        assert_eq!(pending["details"]["pending_start"], true);
+        // A different immutable identity for the same request cannot join it.
+        let mut other = cancel_payload(3);
+        other["path_id"] = json!("q");
+        assert_eq!(send(&mut node, &mut env, "infer_cancel_wait", other)["error"]["code"], "conflicting_pending_cancellation");
+        // A bound control at generation 0 advances only at generation 1.
+        send(&mut node, &mut env, "bind_request_control", json!({"execution_budget_ms":60_000, "request_id": "r2", "control": control(1)}));
+        let mut stale = cancel_payload(2);
+        stale["request_id"] = json!("r2");
+        assert_eq!(send(&mut node, &mut env, "infer_cancel_wait", stale.clone())["error"]["code"], "stale_infer_cancel_generation");
+        let mut wrong_attempt = stale.clone();
+        wrong_attempt["path_attempt"] = json!(9);
+        assert_eq!(send(&mut node, &mut env, "infer_cancel_wait", wrong_attempt)["error"]["code"], "stale_infer_cancel_generation");
+        let mut foreign_deployment = stale.clone();
+        foreign_deployment["deployment_id"] = json!("dep-2");
+        assert_eq!(send(&mut node, &mut env, "infer_cancel_wait", foreign_deployment)["error"]["code"], "invalid_infer_cancel_control");
+        // Nothing was torn down by any refused cancellation.
+        assert_eq!(env.cancelled.len(), 1);
+        // Generation 1 against a bound generation 0 is applied and sealed.
+        let mut applied = stale.clone();
+        applied["cancellation_generation"] = json!(1);
+        applied["cancellation_generation"] = json!(1);
+        // The bound control's own cancellation generation is 0, so this is next.
+        let receipt = assert_signed(&send(&mut node, &mut env, "infer_cancel_wait", applied), "inference_cancelled");
+        assert_eq!(receipt["details"]["request_cleanup"]["complete"], true);
+        assert!(receipt["details"].get("pending_start").is_none());
+    }
+
+    #[test]
+    fn a_malformed_cancellation_is_refused_before_any_teardown() {
+        let (mut node, mut env) = (node(), env());
+        send(&mut node, &mut env, "hello", json!({}));
+        send(&mut node, &mut env, "configure", configure_payload());
+        send(&mut node, &mut env, "start", json!({"peer": peer("a", "e"), "local_generation": 1}));
+        for (mutate, code) in [
+            (
+                Box::new(|p: &mut Value| { p.as_object_mut().unwrap().remove("request_id"); }) as Box<dyn Fn(&mut Value)>,
+                "invalid_infer_cancel_control",
+            ),
+            (Box::new(|p: &mut Value| { p.as_object_mut().unwrap().remove("deadline_budget_ms"); }), "invalid_infer_cancel_control"),
+            (Box::new(|p: &mut Value| { p.as_object_mut().unwrap().insert("extra".into(), json!(1)); }), "invalid_infer_cancel_control"),
+            (Box::new(|p: &mut Value| p["deadline_budget_ms"] = json!(9_000)), "invalid_infer_cancel_control"),
+            (Box::new(|p: &mut Value| p["cancellation_generation"] = json!(0)), "invalid_infer_cancel_control"),
+            (Box::new(|p: &mut Value| p["publisher_generation"] = json!(0)), "invalid_infer_cancel_control"),
+        ] {
+            let mut payload = cancel_payload(1);
+            mutate(&mut payload);
+            assert_eq!(send(&mut node, &mut env, "infer_cancel_wait", payload)["error"]["code"], code);
+        }
+        assert!(env.cancelled.is_empty(), "a refused cancellation never tears anything down");
+    }
+
+    #[test]
+    fn stop_and_a_cancellation_receipt_do_not_outlive_the_session() {
+        let (mut node, mut env) = (node(), env());
+        send(&mut node, &mut env, "hello", json!({}));
+        send(&mut node, &mut env, "configure", configure_payload());
+        send(&mut node, &mut env, "start", json!({"peer": peer("a", "e"), "local_generation": 1}));
+        send(&mut node, &mut env, "infer_cancel_wait", cancel_payload(1));
+        send(&mut node, &mut env, "stop", json!({}));
+        // A new session cannot replay the old session's sealed receipt.
+        let (mut fresh, mut env2) = (self::node(), self::env());
+        send(&mut fresh, &mut env2, "hello", json!({}));
+        send(&mut fresh, &mut env2, "configure", configure_payload());
+        let replay = assert_signed(&send(&mut fresh, &mut env2, "infer_cancel_wait", cancel_payload(1)), "inference_cancelled");
+        assert_eq!(replay["details"]["pending_start"], true, "{replay}");
+        assert_eq!(env2.cancelled.len(), 1);
     }
 
     #[test]

@@ -15,10 +15,10 @@
 
 use serde_json::{Value, json};
 
+use crate::artifact_grant::{self, Grant};
 use crate::identity::Identity;
 use crate::membership::{self, MemberConfig};
 use crate::runtime::Gpt2BlockStage;
-use crate::artifact_grant::{self, Grant};
 use crate::stage_manifest::{self, StageManifest};
 
 pub const REQUEST_PROTOCOL: &str = "mycelium.seed.route_assignment_request.v1";
@@ -45,6 +45,11 @@ pub struct RouteAssignment {
     pub route_generation: u64,
     pub forward_to: bool,
     pub expires_at: f64,
+    /// The route controllers (iroh endpoint ids) this assignment authorizes on
+    /// the control ALPN. The set comes from the seed-signed statement, never
+    /// from the controller: a session may not widen its own allow-list. Empty
+    /// is legal and means the control ALPN refuses everyone.
+    pub controller_endpoint_ids: Vec<String>,
 }
 
 /// The verified stage that came with an assignment.
@@ -137,10 +142,7 @@ fn finite(v: &Value, code: &str) -> Result<f64, RouteAssignmentError> {
 
 /// Verify one delivery. `Ok(None)` is the seed's signed word that this node has
 /// no assignment (never assigned, withdrawn or expired).
-pub fn verify_delivery(
-    reply: &Value,
-    expected: &Expected<'_>,
-) -> Result<Option<(RouteAssignment, DeliveredStage)>, RouteAssignmentError> {
+pub fn verify_delivery(reply: &Value, expected: &Expected<'_>) -> Result<Option<(RouteAssignment, DeliveredStage)>, RouteAssignmentError> {
     let map = reply.as_object().ok_or_else(|| fail("route_assignment_delivery_invalid"))?;
     let with_grant = map.contains_key("artifact_grant");
     if map.len() != 3 + usize::from(with_grant)
@@ -150,8 +152,7 @@ pub fn verify_delivery(
     {
         return Err(fail("route_assignment_delivery_invalid"));
     }
-    let m = membership::verify_seed_envelope(&map["envelope"], expected.pinned_seed_key, ASSIGNMENT_PROTOCOL)
-        .map_err(|e| fail(e.0))?;
+    let m = membership::verify_seed_envelope(&map["envelope"], expected.pinned_seed_key, ASSIGNMENT_PROTOCOL).map_err(|e| fail(e.0))?;
     if m["swarm_id"] != expected.swarm_id
         || m["sender_node_id"] != expected.seed_node_id
         || m["recipient_node_id"] != expected.node_id
@@ -181,13 +182,42 @@ pub fn verify_delivery(
         return if map["stage_pack"].is_null() && !with_grant { Ok(None) } else { Err(fail("route_assignment_delivery_invalid")) };
     }
     let fields = a.as_object().ok_or_else(|| fail("route_assignment_invalid"))?;
-    if fields.len() != 6 {
+    let required = ["assignment_id", "stage_pack_digest", "peer_endpoint_id", "route_generation", "forward_to", "expires_at"];
+    if fields.len() != 6 + usize::from(fields.contains_key("controller_endpoint_ids"))
+        || !required.iter().all(|key| fields.contains_key(*key))
+    {
         return Err(fail("route_assignment_invalid"));
     }
     let peer = text(&a["peer_endpoint_id"], "route_assignment_peer_invalid")?;
     if peer.len() != 64 || !peer.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) || peer == expected.endpoint_id {
         return Err(fail("route_assignment_peer_invalid"));
     }
+    // The controller set is authority, not a request: it is the seed's, and a
+    // controller can never name or extend itself. At most 16 distinct ids, each
+    // a 64-hex endpoint id that is neither this node nor its route peer.
+    let mut controller_endpoint_ids = match fields.get("controller_endpoint_ids") {
+        None => Vec::new(),
+        Some(list) => {
+            let list = list.as_array().ok_or_else(|| fail("route_assignment_controller_invalid"))?;
+            if list.len() > 16 {
+                return Err(fail("route_assignment_controller_invalid"));
+            }
+            let mut seen = std::collections::BTreeSet::new();
+            let mut ids = Vec::with_capacity(list.len());
+            for item in list {
+                let id = text(item, "route_assignment_controller_invalid")?;
+                if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+                    return Err(fail("route_assignment_controller_invalid"));
+                }
+                if id == expected.endpoint_id || id == peer || !seen.insert(id) {
+                    return Err(fail("route_assignment_controller_invalid"));
+                }
+                ids.push(id.to_owned());
+            }
+            ids
+        }
+    };
+    controller_endpoint_ids.sort();
     let assignment = RouteAssignment {
         assignment_id: text(&a["assignment_id"], "route_assignment_invalid")?.to_owned(),
         stage_pack_digest: text(&a["stage_pack_digest"], "route_assignment_invalid")?.to_owned(),
@@ -195,6 +225,7 @@ pub fn verify_delivery(
         route_generation: a["route_generation"].as_u64().filter(|g| *g >= 1).ok_or_else(|| fail("route_assignment_invalid"))?,
         forward_to: a["forward_to"].as_bool().ok_or_else(|| fail("route_assignment_invalid"))?,
         expires_at: finite(&a["expires_at"], "route_assignment_invalid")?,
+        controller_endpoint_ids,
     };
     if expected.now >= assignment.expires_at {
         return Err(fail("route_assignment_expired"));
@@ -361,10 +392,19 @@ mod tests {
         tampered["envelope"]["message"]["assignment"]["peer_endpoint_id"] = json!("c".repeat(64));
         assert_eq!(code(tampered), "membership_signature_invalid");
         // Addressed to another node, endpoint or generation, or another request (replay).
-        assert_eq!(code(delivery(&w, assignment(&w), pack(), |m| m["recipient_node_id"] = json!("node-b"))), "route_assignment_recipient_mismatch");
-        assert_eq!(code(delivery(&w, assignment(&w), pack(), |m| m["recipient_endpoint_id"] = json!("d".repeat(64)))), "route_assignment_recipient_mismatch");
+        assert_eq!(
+            code(delivery(&w, assignment(&w), pack(), |m| m["recipient_node_id"] = json!("node-b"))),
+            "route_assignment_recipient_mismatch"
+        );
+        assert_eq!(
+            code(delivery(&w, assignment(&w), pack(), |m| m["recipient_endpoint_id"] = json!("d".repeat(64)))),
+            "route_assignment_recipient_mismatch"
+        );
         assert_eq!(code(delivery(&w, assignment(&w), pack(), |m| m["generation"] = json!(2))), "route_assignment_generation_mismatch");
-        assert_eq!(code(delivery(&w, assignment(&w), pack(), |m| m["request_message_id"] = json!("req-0"))), "route_assignment_request_mismatch");
+        assert_eq!(
+            code(delivery(&w, assignment(&w), pack(), |m| m["request_message_id"] = json!("req-0"))),
+            "route_assignment_request_mismatch"
+        );
         assert_eq!(code(delivery(&w, assignment(&w), pack(), |m| m["expires_at"] = json!(1005.0))), "route_assignment_expired");
         assert_eq!(code(delivery(&w, assignment(&w), pack(), |m| m["route_ready"] = json!(true))), "route_assignment_route_ready_invalid");
         // A pack that is not the signed one, or whose content was altered.
@@ -383,6 +423,66 @@ mod tests {
         assert_eq!(code(delivery(&w, old, pack(), |_| {})), "route_assignment_expired");
         // A "no assignment" answer cannot smuggle a pack.
         assert_eq!(code(delivery(&w, Value::Null, pack(), |_| {})), "route_assignment_delivery_invalid");
+    }
+
+    #[test]
+    fn the_controller_set_is_the_seeds_and_only_the_seeds() {
+        let w = world();
+        let with = |ids: Value| {
+            let mut a = assignment(&w);
+            a["controller_endpoint_ids"] = ids;
+            a
+        };
+        let ids = |a: &RouteAssignment| a.controller_endpoint_ids.clone();
+        // A signed assignment installs exactly its set, order-independent.
+        let two = json!(["c".repeat(64), "d".repeat(64)]);
+        let (a, _) = check(&w, &delivery(&w, with(two.clone()), pack(), |_| {})).unwrap().unwrap();
+        assert_eq!(ids(&a), vec!["c".repeat(64), "d".repeat(64)]);
+        let (reordered, _) = check(&w, &delivery(&w, with(json!(["d".repeat(64), "c".repeat(64)])), pack(), |_| {})).unwrap().unwrap();
+        assert_eq!(ids(&reordered), ids(&a), "the set is canonical, not ordered");
+        // Absent means no controller may drive the phone at all.
+        let (none, _) = check(&w, &delivery(&w, assignment(&w), pack(), |_| {})).unwrap().unwrap();
+        assert!(ids(&none).is_empty());
+        let (empty, _) = check(&w, &delivery(&w, with(json!([])), pack(), |_| {})).unwrap().unwrap();
+        assert!(ids(&empty).is_empty());
+        // A controller can never name itself, the phone, or its own route peer.
+        for bad in [
+            json!([w.member.endpoint_id()]),
+            json!(["c".repeat(64), w.member.endpoint_id()]),
+            json!([w.peer]),
+            json!(["not-hex"]),
+            json!(["c".repeat(63)]),
+            json!([1]),
+        ] {
+            assert_eq!(
+                check(&w, &delivery(&w, with(bad.clone()), pack(), |_| {})).err().expect("refused").0,
+                "route_assignment_controller_invalid",
+                "{bad}"
+            );
+        }
+        // A duplicate, and a set past its bound.
+        assert_eq!(
+            check(&w, &delivery(&w, with(json!(["c".repeat(64), "c".repeat(64)])), pack(), |_| {})).err().expect("refused").0,
+            "route_assignment_controller_invalid"
+        );
+        let many: Vec<Value> = (0..17).map(|i| json!(format!("{:0>64}", i))).collect();
+        assert_eq!(
+            check(&w, &delivery(&w, with(Value::Array(many)), pack(), |_| {})).err().expect("refused").0,
+            "route_assignment_controller_invalid"
+        );
+        // The set is signed: a tampered controller list fails the signature,
+        // so no controller can widen its own allow-list after the fact.
+        let mut tampered = delivery(&w, with(json!(["c".repeat(64)])), pack(), |_| {});
+        tampered["envelope"]["message"]["assignment"]["controller_endpoint_ids"] = json!(["e".repeat(64)]);
+        assert_eq!(check(&w, &tampered).err().expect("refused").0, "membership_signature_invalid");
+    }
+
+    #[test]
+    fn cancellation_regression_assignment_field_set_stays_closed() {
+        let w = world();
+        let mut a = assignment(&w);
+        a["unknown_authority"] = json!([]);
+        assert_eq!(check(&w, &delivery(&w, a, pack(), |_| {})).err().expect("unknown seventh field refused").0, "route_assignment_invalid");
     }
 
     #[test]

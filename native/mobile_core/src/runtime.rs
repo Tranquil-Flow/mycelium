@@ -107,11 +107,30 @@ pub trait StageRuntime: Send {
     fn assignment_id(&self) -> &str;
     fn stage_id(&self) -> &str;
     fn hidden_size(&self) -> usize;
+    /// No provenance or counters are invented for runtimes without telemetry.
+    fn golden_output_digest(&self) -> Option<&str> { None }
+    fn replay_result_count(&self) -> Option<usize> { None }
+    fn applied_operation_count(&self) -> Option<u64> { None }
+    fn cooperative_work_snapshot(&self) -> Option<Value> { None }
     fn execute(&mut self, call: &StageCall<'_>) -> Result<StageOutput, RuntimeError>;
+    /// Runtime implementations must override this to interrupt inside kernels.
+    /// The default only fences entry/return and advertises no cooperation.
+    fn execute_cooperative(&mut self, call: &StageCall<'_>, check: &mut dyn FnMut(&'static str) -> Result<(), RuntimeError>) -> Result<StageOutput, RuntimeError> {
+        check("stage_entry")?;
+        let out = self.execute(call)?;
+        check("stage_return")?;
+        Ok(out)
+    }
     /// Drop every replay result (drain, new membership generation); returns how many.
     fn release_all(&mut self) -> usize;
     /// Drop the replay results of one request path (its cancellation).
     fn release_path(&mut self, _request_id: &str, _path_id: &str) -> usize {
+        0
+    }
+    /// Drop the replay results of every path of one request (a cancellation
+    /// that names the request, not one path): a successor path holds residue
+    /// too. Returns how many were dropped.
+    fn release_request(&mut self, _request_id: &str) -> usize {
         0
     }
 }
@@ -245,9 +264,7 @@ impl Gpt2BlockStage {
         }
         for f in ["manifest_digest", "parent_assignment_digest", "parent_load_proof_digest"] {
             let d = map[f].as_str().unwrap_or("");
-            let ok = d.len() == 71
-                && d.starts_with("sha256:")
-                && d[7..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+            let ok = d.len() == 71 && d.starts_with("sha256:") && d[7..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
             if !ok {
                 return reject(&format!("stage_pack_{f}_invalid"));
             }
@@ -367,9 +384,7 @@ impl Gpt2BlockStage {
                     .collect();
                 let weights = softmax(&scores);
                 for o in 0..head {
-                    combined.push(
-                        (0..=ti).fold(0.0, |acc, ki| acc + weights[ki] * qkv[ki][2 * h + s + o]),
-                    );
+                    combined.push((0..=ti).fold(0.0, |acc, ki| acc + weights[ki] * qkv[ki][2 * h + s + o]));
                 }
             }
             attended.push(combined);
@@ -469,11 +484,7 @@ fn add(a: &[f64], b: &[f64]) -> Vec<f64> {
 
 fn linear(rows: &[Vec<f64>], weight: &[Vec<f64>], bias: &[f64]) -> Rows {
     rows.iter()
-        .map(|row| {
-            (0..bias.len())
-                .map(|c| (0..row.len()).fold(0.0, |acc, i| acc + row[i] * weight[i][c]) + bias[c])
-                .collect()
-        })
+        .map(|row| (0..bias.len()).map(|c| (0..row.len()).fold(0.0, |acc, i| acc + row[i] * weight[i][c]) + bias[c]).collect())
         .collect()
 }
 

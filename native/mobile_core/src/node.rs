@@ -13,11 +13,11 @@ use serde_json::{Value, json};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
+use crate::artifact::ArtifactStore;
 use crate::evidence;
 use crate::identity::Identity;
 use crate::membership::{self, MemberConfig};
 use crate::onboarding::{self, PairingSession};
-use crate::artifact::ArtifactStore;
 use crate::qwen2::Qwen2Runtime;
 use crate::route_assignment::{self, DeliveredStage, RouteAssignment};
 use crate::runtime::{Gpt2BlockStage, REFERENCE_BACKEND, StageCall, StagePhase, StageRuntime};
@@ -34,11 +34,7 @@ pub const PEER_CLASS: &str = onboarding::ANDROID_PEER_CLASS;
 pub const PEER_CLASS: &str = "ios_native_iroh";
 
 fn require_registered_class() -> Result<(), NodeError> {
-    if PEER_CLASS == onboarding::ANDROID_PEER_CLASS {
-        Ok(())
-    } else {
-        Err(nerr(format!("platform_peer_class_unregistered:{PEER_CLASS}")))
-    }
+    if PEER_CLASS == onboarding::ANDROID_PEER_CLASS { Ok(()) } else { Err(nerr(format!("platform_peer_class_unregistered:{PEER_CLASS}"))) }
 }
 pub const PAIRING_CHANNEL_PROTOCOL: &str = "mycelium.pairing_channel.v1";
 /// Membership timing. The defaults are the product cadence; tests shorten them
@@ -70,12 +66,8 @@ impl Default for NodeTiming {
 const RESUMABLE_REFUSALS: [&str; 2] = ["seed_member_lease_expired", "seed_message_mismatch"];
 /// Seed refusals that end the membership for good: the owner revoked or never
 /// enrolled this member, so the node stops asking instead of retrying.
-const TERMINAL_RESUME_REFUSALS: [&str; 4] = [
-    "seed_resume_member_revoked",
-    "seed_member_unknown",
-    "seed_resume_identity_mismatch",
-    "seed_resume_generation_stale",
-];
+const TERMINAL_RESUME_REFUSALS: [&str; 4] =
+    ["seed_resume_member_revoked", "seed_member_unknown", "seed_resume_identity_mismatch", "seed_resume_generation_stale"];
 /// Native runtime observations are sealed on this cadence into app-private
 /// `evidence/`, keeping the newest `EVIDENCE_RETAINED` envelopes.
 const EVIDENCE_INTERVAL: Duration = Duration::from_secs(60);
@@ -86,13 +78,23 @@ const EVIDENCE_RETAINED: u64 = 64;
 /// `scripts/run_a12_mobile_physical_gate.py --build-commit`); a release without
 /// one would bind every observation to the generic core version and is refused
 /// at compile time.
-#[cfg(all(target_os = "android", not(debug_assertions)))]
 const fn release_build_digest_present(digest: Option<&str>) -> bool {
-    match digest {
-        Some(d) => d.len() == 71,
-        None => false,
+    let Some(d) = digest else { return false; };
+    let b = d.as_bytes();
+    if b.len() != 71 { return false; }
+    let prefix = b"sha256:";
+    let mut i = 0;
+    while i < 7 { if b[i] != prefix[i] { return false; } i += 1; }
+    while i < 71 {
+        if !((b[i] >= b'0' && b[i] <= b'9') || (b[i] >= b'a' && b[i] <= b'f')) { return false; }
+        i += 1;
     }
+    true
 }
+// A supplied but malformed build identity must never silently become the
+// development version fallback, on any platform.
+const _: () = assert!(option_env!("MYCELIUM_NODE_BUILD_DIGEST").is_none()
+    || release_build_digest_present(option_env!("MYCELIUM_NODE_BUILD_DIGEST")));
 #[cfg(all(target_os = "android", not(debug_assertions)))]
 const _: () = assert!(
     release_build_digest_present(option_env!("MYCELIUM_NODE_BUILD_DIGEST")),
@@ -103,10 +105,8 @@ const _: () = assert!(
 /// build digest when the release pipeline sets one, else this core's version.
 pub fn runtime_build_digest() -> String {
     match option_env!("MYCELIUM_NODE_BUILD_DIGEST") {
-        Some(digest) if digest.len() == 71 && digest.starts_with("sha256:") => digest.to_owned(),
-        _ => crate::canonical::sha256_prefixed(
-            format!("mycelium-mobile-core:{}", env!("CARGO_PKG_VERSION")).as_bytes(),
-        ),
+        Some(digest) if release_build_digest_present(Some(digest)) => digest.to_owned(),
+        _ => crate::canonical::sha256_prefixed(format!("mycelium-mobile-core:{}", env!("CARGO_PKG_VERSION")).as_bytes()),
     }
 }
 
@@ -209,6 +209,30 @@ struct Shared {
     /// The transport's route peer set was installed by the control session
     /// (`start`): it lives exactly as long as that session's authority.
     control_peers: bool,
+    /// Serializes control transport effects with accepted membership rotation.
+    control_transition: Arc<tokio::sync::Mutex<()>>,
+    /// Stage steps currently executing or queued, by request id, so a
+    /// cancellation can report the work that is still in flight.
+    inflight: std::collections::BTreeMap<String, usize>,
+    cancelled: std::collections::BTreeSet<String>,
+    deadlines: std::collections::BTreeMap<String, std::time::Instant>,
+    stage_revision: u64,
+    stage_busy: bool,
+    /// Latest periodic sweep, retained while CPU owns runtime/path tables.
+    sweep_clock: f64,
+}
+
+impl Shared {
+    /// How many stage steps are executing or queued for `request_id`.
+    fn inflight_for_request(&self, request_id: &str) -> usize {
+        self.inflight.get(request_id).copied().unwrap_or(0)
+    }
+
+    fn request_blocked(&self, id: &str) -> bool {
+        self.cancelled.contains(id)
+            || self.deadlines.get(id).is_some_and(|d| std::time::Instant::now() >= *d)
+            || self.control.as_ref().is_some_and(|c| c.request_blocked(id))
+    }
 }
 
 /// One background acquisition: which manifest, and how to stop it.
@@ -275,7 +299,20 @@ struct AppliedRoute {
     peer: iroh::EndpointId,
 }
 
+/// Explicit enrollment profiles: never mutate an existing reference lease.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NodeProfile { Reference, Qwen2 }
+impl NodeProfile {
+    pub fn peer_class(self) -> &'static str {
+        match self { Self::Reference => PEER_CLASS, Self::Qwen2 => onboarding::ANDROID_QWEN2_PEER_CLASS }
+    }
+    pub fn backend(self) -> &'static str {
+        match self { Self::Reference => REFERENCE_BACKEND, Self::Qwen2 => crate::qwen2::QWEN2_BACKEND }
+    }
+}
+
 pub struct NodeCore {
+    profile: NodeProfile,
     rt: Runtime,
     data_dir: PathBuf,
     identity: Arc<Identity>,
@@ -316,6 +353,16 @@ impl NodeCore {
     }
 
     pub fn open_with_timing(data_dir: &Path, reach: Reachability, timing: NodeTiming) -> Result<Self, NodeError> {
+        let profile = match option_env!("MYCELIUM_NODE_PROFILE") {
+            None | Some("reference") => NodeProfile::Reference,
+            Some("qwen2") => NodeProfile::Qwen2,
+            Some(_) => return Err(nerr("unknown_native_build_profile")),
+        };
+        Self::open_with_profile(data_dir, reach, timing, profile)
+    }
+
+    pub fn open_with_profile(data_dir: &Path, reach: Reachability, timing: NodeTiming, profile: NodeProfile) -> Result<Self, NodeError> {
+        if profile == NodeProfile::Qwen2 { require_registered_class()?; }
         std::fs::create_dir_all(data_dir).map_err(|_| nerr("data_dir_unwritable"))?;
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -326,17 +373,17 @@ impl NodeCore {
         let iroh_secret = load_or_create_secret(&data_dir.join("iroh.key"))?;
         let member_secret = load_or_create_secret(&data_dir.join("member.key"))?;
         let transport = rt.block_on(NodeTransport::bind(&iroh_secret, reach)).map_err(|e| nerr(e.0))?;
-        let identity = Identity::from_secret(&transport.endpoint_id(), &member_secret)
-            .map_err(|e| nerr(e.to_string()))?;
+        let identity = Identity::from_secret(&transport.endpoint_id(), &member_secret).map_err(|e| nerr(e.to_string()))?;
         let status = NodeStatus {
             phase: "unpaired".into(),
             endpoint_id: transport.endpoint_id(),
-            peer_class: PEER_CLASS.into(),
-            runtime_backend: REFERENCE_BACKEND.into(),
+            peer_class: profile.peer_class().into(),
+            runtime_backend: profile.backend().into(),
             ..Default::default()
         };
         let http = reqwest::Client::builder().timeout(timing.http_timeout).build().map_err(|_| nerr("http_client_failed"))?;
         let core = Self {
+            profile,
             rt,
             data_dir: data_dir.to_owned(),
             identity: Arc::new(identity),
@@ -355,7 +402,8 @@ impl NodeCore {
                 acquisition: None,
                 stage_node: None,
                 control: None,
-                control_peers: false,
+                control_peers: false, control_transition: Default::default(),
+                inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_busy: false, sweep_clock: 0.0,
             })),
             http,
             incarnation: new_incarnation()?,
@@ -390,10 +438,13 @@ impl NodeCore {
             let t = self.transport.clone();
             async move {
                 // Python transport semantics: acknowledge after dispatch.
-                let _ = t.spawn_accept_dispatch(tx).await;
+                if t.spawn_accept_dispatch(tx).await.is_err() {
+                    t.mark_fatal("transport_accept_worker_failed");
+                }
             }
         });
         self.rt.spawn(serve_inbox(rx, self.shared.clone(), self.transport.clone()));
+        self.rt.spawn(sweep_paths_periodically(self.shared.clone(), Duration::from_secs(1)));
         // The route controller's commands (plan §4.2), answered off the
         // compute path so `health` answers while a stage runs.
         let (control_tx, control_rx) = mpsc::channel(8);
@@ -401,7 +452,13 @@ impl NodeCore {
             let t = self.transport.clone();
             async move { t.set_control_handler(Some(control_tx)).await }
         });
-        self.rt.spawn(serve_control(control_rx, self.shared.clone(), self.transport.clone(), self.identity.clone(), self.incarnation.clone()));
+        self.rt.spawn(serve_control(
+            control_rx,
+            self.shared.clone(),
+            self.transport.clone(),
+            self.identity.clone(),
+            self.incarnation.clone(),
+        ));
         // Seal native runtime observations into app-private evidence/ on a fixed
         // cadence for the lifetime of the node (the app owns one core).
         let (data_dir, shared, identity) = (self.data_dir.clone(), self.shared.clone(), self.identity.clone());
@@ -413,7 +470,6 @@ impl NodeCore {
             }
         });
     }
-
 
     pub fn status(&self) -> NodeStatus {
         let mut status = self.shared.lock().unwrap().status.clone();
@@ -430,8 +486,7 @@ impl NodeCore {
     /// `out_dir` (the app cache the FileProvider shares from); returns its path and
     /// the number of observations it carries.
     pub fn export_evidence(&self, out_dir: &Path) -> Result<(PathBuf, usize), NodeError> {
-        let bundle = evidence::export_bundle(&self.data_dir.join("evidence"), &runtime_build_digest())
-            .map_err(|e| nerr(e.0))?;
+        let bundle = evidence::export_bundle(&self.data_dir.join("evidence"), &runtime_build_digest()).map_err(|e| nerr(e.0))?;
         let count = bundle["observations"].as_array().map_or(0, Vec::len);
         std::fs::create_dir_all(out_dir).map_err(|_| nerr("mobile_evidence_export_unwritable"))?;
         let path = out_dir.join(format!("mycelium-evidence-{}.json", (now_s() * 1000.0) as u64));
@@ -458,78 +513,67 @@ impl NodeCore {
 fn current_platform_metrics(shared: &Arc<Mutex<Shared>>) -> evidence::Metrics {
     let shell = {
         let s = shared.lock().unwrap();
-        s.shell_metrics
-            .as_ref()
-            .filter(|(_, at)| now_s() - at <= evidence::SHELL_SAMPLE_MAX_AGE_S)
-            .map(|(m, _)| m.clone())
+        s.shell_metrics.as_ref().filter(|(_, at)| now_s() - at <= evidence::SHELL_SAMPLE_MAX_AGE_S).map(|(m, _)| m.clone())
     };
     evidence::merge_platform_metrics(evidence::platform_metrics(Path::new("/")), Some(&shell.unwrap_or_default()))
 }
 
-fn observe_runtime(
-    shared: &Arc<Mutex<Shared>>,
-    identity: &Identity,
-    platform: &evidence::Metrics,
-) -> Result<Value, NodeError> {
-        require_registered_class()?;
-        let now = now_s();
-        let (mut metrics, duration_ms, samples, profile_generation, generation) = {
-            let mut s = shared.lock().unwrap();
-            let frames = s.status.frames_executed;
-            let delta = frames.saturating_sub(s.observation.frames_at_window_start);
-            let duration_ms = ((now - s.observation.window_started_at) * 1000.0).max(1.0);
-            s.observation.window_started_at = now;
-            s.observation.frames_at_window_start = frames;
-            s.observation.evidence_generation += 1;
-            let mut metrics = evidence::Metrics::new();
-            metrics.insert("frames_executed_window".into(), Some(delta as f64));
-            metrics.insert("last_execute_ms".into(), s.status.last_execute_ms);
-            metrics.insert("relay_online".into(), Some(if s.status.relay_online { 1.0 } else { 0.0 }));
-            metrics.insert("stage_loaded".into(), Some(if s.status.stage_loaded.is_some() { 1.0 } else { 0.0 }));
-            metrics.insert("heartbeats_sent".into(), Some(s.status.heartbeats_sent as f64));
-            metrics.insert(
-                "lifecycle_member".into(),
-                Some(if lease_is_fresh(&s.status, now) { 1.0 } else { 0.0 }),
-            );
-            (metrics, duration_ms, 1 + delta, s.status.member_generation.unwrap_or(1), s.observation.evidence_generation)
-        };
-        for (name, value) in platform {
-            metrics.entry(name.clone()).or_insert(*value);
-        }
-        let build = runtime_build_digest();
-        let document = evidence::runtime_observation(&evidence::Observation {
-            platform_family: "android",
-            runtime_build_digest: &build,
-            profile_generation: profile_generation.max(1),
-            evidence_generation: generation,
-            observed_at_unix_ms: now * 1000.0,
-            measurement_duration_ms: duration_ms,
-            sample_count: samples,
-            authority: evidence::OBSERVATION_AUTHORITY,
-            metrics: &metrics,
-        })
-        .map_err(|e| nerr(e.0))?;
-        evidence::sign_observation(identity, &document).map_err(|e| nerr(e.0))
+fn observe_runtime(shared: &Arc<Mutex<Shared>>, identity: &Identity, platform: &evidence::Metrics) -> Result<Value, NodeError> {
+    require_registered_class()?;
+    let now = now_s();
+    let (mut metrics, duration_ms, samples, profile_generation, generation) = {
+        let mut s = shared.lock().unwrap();
+        let frames = s.status.frames_executed;
+        let delta = frames.saturating_sub(s.observation.frames_at_window_start);
+        let duration_ms = ((now - s.observation.window_started_at) * 1000.0).max(1.0);
+        s.observation.window_started_at = now;
+        s.observation.frames_at_window_start = frames;
+        s.observation.evidence_generation += 1;
+        let mut metrics = evidence::Metrics::new();
+        metrics.insert("frames_executed_window".into(), Some(delta as f64));
+        metrics.insert("last_execute_ms".into(), s.status.last_execute_ms);
+        metrics.insert("relay_online".into(), Some(if s.status.relay_online { 1.0 } else { 0.0 }));
+        metrics.insert("stage_loaded".into(), Some(if s.status.stage_loaded.is_some() { 1.0 } else { 0.0 }));
+        metrics.insert("heartbeats_sent".into(), Some(s.status.heartbeats_sent as f64));
+        metrics.insert("lifecycle_member".into(), Some(if lease_is_fresh(&s.status, now) { 1.0 } else { 0.0 }));
+        (metrics, duration_ms, 1 + delta, s.status.member_generation.unwrap_or(1), s.observation.evidence_generation)
+    };
+    for (name, value) in platform {
+        metrics.entry(name.clone()).or_insert(*value);
+    }
+    let build = runtime_build_digest();
+    let document = evidence::runtime_observation(&evidence::Observation {
+        platform_family: "android",
+        runtime_build_digest: &build,
+        profile_generation: profile_generation.max(1),
+        evidence_generation: generation,
+        observed_at_unix_ms: now * 1000.0,
+        measurement_duration_ms: duration_ms,
+        sample_count: samples,
+        authority: evidence::OBSERVATION_AUTHORITY,
+        metrics: &metrics,
+    })
+    .map_err(|e| nerr(e.0))?;
+    evidence::sign_observation(identity, &document).map_err(|e| nerr(e.0))
 }
 
 fn seal_observation(data_dir: &Path, shared: &Arc<Mutex<Shared>>, identity: &Identity) {
-        let dir = data_dir.join("evidence");
-        if std::fs::create_dir_all(&dir).is_err() {
-            return;
-        }
-        let Ok(envelope) = observe_runtime(shared, identity, &current_platform_metrics(shared)) else {
-            return;
-        };
-        let generation = envelope["message"]["evidence_generation"].as_u64().unwrap_or(0);
-        let bytes = serde_json::to_vec(&envelope).unwrap_or_default();
-        let _ = write_private(&dir.join(format!("runtime-observation-{:06}.json", generation % 1_000_000)), &bytes);
-        if generation > EVIDENCE_RETAINED {
-            let _ = std::fs::remove_file(dir.join(format!("runtime-observation-{:06}.json", (generation - EVIDENCE_RETAINED) % 1_000_000)));
-        }
+    let dir = data_dir.join("evidence");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let Ok(envelope) = observe_runtime(shared, identity, &current_platform_metrics(shared)) else {
+        return;
+    };
+    let generation = envelope["message"]["evidence_generation"].as_u64().unwrap_or(0);
+    let bytes = serde_json::to_vec(&envelope).unwrap_or_default();
+    let _ = write_private(&dir.join(format!("runtime-observation-{:06}.json", generation % 1_000_000)), &bytes);
+    if generation > EVIDENCE_RETAINED {
+        let _ = std::fs::remove_file(dir.join(format!("runtime-observation-{:06}.json", (generation - EVIDENCE_RETAINED) % 1_000_000)));
+    }
 }
 
 impl NodeCore {
-
     fn fail(&self, e: NodeError) -> NodeError {
         self.shared.lock().unwrap().status.last_error = Some(e.0.clone());
         e
@@ -545,8 +589,7 @@ impl NodeCore {
             return Err(self.fail(nerr("pairing_channel_invalid")));
         }
         let url = channel["pairing_url"].as_str().ok_or_else(|| self.fail(nerr("pairing_channel_invalid")))?.to_owned();
-        let session = PairingSession::new(&self.identity, device_ref, now_s(), 300, None)
-            .map_err(|e| self.fail(nerr(e.to_string())))?;
+        let session = PairingSession::new_for_class(&self.identity, device_ref, now_s(), 300, None, self.profile.peer_class()).map_err(|e| self.fail(nerr(e.to_string())))?;
         let request = session.request.clone();
         // A failed attempt puts the node back where it was (paired, joined, ...),
         // never stuck in `pairing`.
@@ -565,8 +608,7 @@ impl NodeCore {
             .map_err(|e| abandon(nerr(format!("pairing_channel_unreachable:{}", e.without_url()))))?;
         let handoff = handoff.get("handoff").cloned().unwrap_or(handoff);
         let payload = session.decrypt(&handoff, now_s()).map_err(|e| abandon(nerr(e.to_string())))?;
-        write_private(&self.data_dir.join("invitation.json"), &serde_json::to_vec(&payload).unwrap())
-            .map_err(abandon)?;
+        write_private(&self.data_dir.join("invitation.json"), &serde_json::to_vec(&payload).unwrap()).map_err(abandon)?;
         let mut s = self.shared.lock().unwrap();
         s.invitation = Some(payload);
         s.status.phase = "paired".into();
@@ -577,8 +619,7 @@ impl NodeCore {
     /// Two-QR fallback: show this device QR to the owner console.
     pub fn begin_pairing(&self, device_ref: &str) -> Result<String, NodeError> {
         require_registered_class()?;
-        let session = PairingSession::new(&self.identity, device_ref, now_s(), 300, None)
-            .map_err(|e| nerr(e.to_string()))?;
+        let session = PairingSession::new_for_class(&self.identity, device_ref, now_s(), 300, None, self.profile.peer_class()).map_err(|e| nerr(e.to_string()))?;
         let qr = session.request_qr().map_err(|e| nerr(e.to_string()))?;
         let mut s = self.shared.lock().unwrap();
         s.session = Some(session);
@@ -591,8 +632,13 @@ impl NodeCore {
     /// the signed acceptance, then keep the lease alive with heartbeats.
     pub fn join(&self) -> Result<NodeStatus, NodeError> {
         let invitation = self.shared.lock().unwrap().invitation.clone().ok_or_else(|| nerr("not_paired"))?;
-        let invite = onboarding::verify_invite_bundle(&invitation["invite_bundle"], now_s())
-            .map_err(|e| self.fail(nerr(e.to_string())))?;
+        if invitation["peer_class"].as_str().is_some_and(|c| c != self.profile.peer_class()) {
+            return Err(nerr("enrollment_profile_mismatch"));
+        }
+        if self.profile == NodeProfile::Qwen2 && invitation["peer_class"] != self.profile.peer_class() {
+            return Err(nerr("enrollment_profile_mismatch"));
+        }
+        let invite = onboarding::verify_invite_bundle(&invitation["invite_bundle"], now_s()).map_err(|e| self.fail(nerr(e.to_string())))?;
         let seed_url = invite.seed_url().trim_end_matches('/').to_owned();
         let pinned = invite.seed_key_record.clone();
         let token = invitation["invite_bundle"]["token"].as_str().unwrap_or_default().to_owned();
@@ -608,9 +654,9 @@ impl NodeCore {
             seed_node_id: seed["seed_node_id"].as_str().unwrap_or_default().to_owned(),
             incarnation: self.incarnation.clone(),
             software_version: format!("mycelium-node-app/{}", env!("CARGO_PKG_VERSION")),
-            peer_class: PEER_CLASS.into(),
+            peer_class: self.profile.peer_class().into(),
             runtime_capability: json!({
-                "runtime_backend": REFERENCE_BACKEND,
+                "runtime_backend": self.profile.backend(),
                 "transport": "iroh",
                 "activation_protocol": membership::ROUTER_ACTIVATION_PROTOCOL,
             }),
@@ -640,8 +686,8 @@ impl NodeCore {
             let code = reply["error"]["code"].as_str().unwrap_or("seed_join_refused");
             return Err(self.fail(nerr(format!("seed_join_refused:{code}"))));
         }
-        let acceptance = membership::verify_seed_envelope(&reply, &pinned, membership::JOIN_ACCEPTANCE_PROTOCOL)
-            .map_err(|e| self.fail(nerr(e.0)))?;
+        let acceptance =
+            membership::verify_seed_envelope(&reply, &pinned, membership::JOIN_ACCEPTANCE_PROTOCOL).map_err(|e| self.fail(nerr(e.0)))?;
         let generation = acceptance["membership_generation"].as_u64().unwrap_or(0);
         self.enter_membership(cfg, generation, seed_url, pinned, acceptance["lease_expires_at"].as_f64())?;
         Ok(self.status())
@@ -664,14 +710,7 @@ impl NodeCore {
             s.status.member_generation = Some(generation);
             s.status.lease_expires_at = lease_expires_at;
             s.status.last_error = None;
-            s.membership = Some(ActiveMembership {
-                cfg,
-                generation,
-                seed_url,
-                pinned,
-                needs_resume: false,
-                pending_resume: None,
-            });
+            s.membership = Some(ActiveMembership { cfg, generation, seed_url, pinned, needs_resume: false, pending_resume: None });
         }
         self.ensure_supervisor();
         Ok(())
@@ -685,8 +724,10 @@ impl NodeCore {
     pub fn resume(&self) -> Result<NodeStatus, NodeError> {
         let raw = std::fs::read(self.data_dir.join("membership.json")).map_err(|_| nerr("not_enrolled"))?;
         let record: Value = serde_json::from_slice(&raw).map_err(|_| nerr("membership_store_corrupt"))?;
-        let cfg: MemberConfig =
-            serde_json::from_value(record["cfg"].clone()).map_err(|_| nerr("membership_store_corrupt"))?;
+        let cfg: MemberConfig = serde_json::from_value(record["cfg"].clone()).map_err(|_| nerr("membership_store_corrupt"))?;
+        if cfg.peer_class != self.profile.peer_class() || cfg.runtime_capability["runtime_backend"] != self.profile.backend() {
+            return Err(nerr("enrollment_profile_mismatch"));
+        }
         let generation = record["generation"].as_u64().unwrap_or(0);
         let seed_url = record["seed_url"].as_str().unwrap_or_default().to_owned();
         {
@@ -769,7 +810,8 @@ impl NodeCore {
     /// read. The controller set comes from the seed-signed assignment
     /// (M4-host proposal); an empty set refuses all control.
     pub fn set_route_controllers(&self, endpoint_ids: &[String]) -> Result<(), NodeError> {
-        let ids = endpoint_ids.iter().map(|e| crate::transport::parse_endpoint_id(e).map_err(|e| nerr(e.0))).collect::<Result<Vec<_>, _>>()?;
+        let ids =
+            endpoint_ids.iter().map(|e| crate::transport::parse_endpoint_id(e).map_err(|e| nerr(e.0))).collect::<Result<Vec<_>, _>>()?;
         self.rt.block_on(async {
             self.transport.configure_controllers(ids).await;
             // The transport's set is the single source of truth; the session
@@ -825,13 +867,7 @@ fn new_incarnation() -> Result<String, NodeError> {
     Ok(format!("inc-{}", hex::encode(raw)))
 }
 
-fn persist_membership(
-    data_dir: &Path,
-    cfg: &MemberConfig,
-    generation: u64,
-    seed_url: &str,
-    pinned: &Value,
-) -> Result<(), NodeError> {
+fn persist_membership(data_dir: &Path, cfg: &MemberConfig, generation: u64, seed_url: &str, pinned: &Value) -> Result<(), NodeError> {
     let record = json!({"cfg": cfg, "generation": generation, "seed_url": seed_url, "seed_key": pinned});
     write_private(&data_dir.join("membership.json"), &serde_json::to_vec(&record).unwrap())
 }
@@ -865,7 +901,9 @@ async fn supervise_membership(sv: Supervisor) {
     let mut sequence = 0u64;
     let mut delay = sv.timing.retry_min;
     loop {
-        let Some(m) = sv.shared.lock().unwrap().membership.clone() else { break };
+        let Some(m) = sv.shared.lock().unwrap().membership.clone() else {
+            break;
+        };
         let step = if m.needs_resume {
             let step = sv.resume_once(m).await;
             if matches!(step, Step::Held) {
@@ -905,8 +943,7 @@ async fn supervise_membership(sv: Supervisor) {
                     Some(pause)
                 }
                 Step::Ended(code) => {
-                    s.status.phase =
-                        if code.ends_with("seed_resume_member_revoked") { "revoked" } else { "membership_lost" }.into();
+                    s.status.phase = if code.ends_with("seed_resume_member_revoked") { "revoked" } else { "membership_lost" }.into();
                     s.status.last_error = Some(code);
                     s.membership = None;
                     break;
@@ -945,6 +982,9 @@ async fn drop_route(shared: &Arc<Mutex<Shared>>, transport: &NodeTransport) {
     if control_peers {
         transport.configure_route_peers(Vec::new()).await;
     }
+    // Dropping the assignment withdraws its controller authority: the control
+    // ALPN answers no one until a new assignment names a set again.
+    transport.configure_controllers(Vec::new()).await;
 }
 
 /// An assignment past its signed expiry is never served, even when the seed
@@ -960,6 +1000,9 @@ async fn drop_expired_route(shared: &Arc<Mutex<Shared>>, transport: &NodeTranspo
 
 /// Forget the applied route: stage unloaded, nothing forwarded.
 fn clear_route(s: &mut Shared) -> Option<AppliedRoute> {
+    s.stage_revision += 1;
+    s.cancelled.clear();
+    s.deadlines.clear();
     let old = s.route.take();
     // A new or dropped assignment ends the control session (its request
     // controls with it); a new controller starts afresh.
@@ -1062,15 +1105,21 @@ impl Supervisor {
     async fn route_exchange(&self) -> Result<bool, String> {
         let (m, applied) = {
             let s = self.shared.lock().unwrap();
-            (
-                s.membership.clone(),
-                s.route.as_ref().map(|r| (r.assignment.assignment_id.clone(), r.assignment.stage_pack_digest.clone())),
-            )
+            (s.membership.clone(), s.route.as_ref().map(|r| (r.assignment.assignment_id.clone(), r.assignment.stage_pack_digest.clone())))
         };
-        let Some(m) = m.filter(|m| !m.needs_resume) else { return Ok(false) };
+        let Some(m) = m.filter(|m| !m.needs_resume) else {
+            return Ok(false);
+        };
         let message_id = format!("route-{}", &new_incarnation().map_err(|e| e.0)?[4..]);
-        let env = route_assignment::request(&m.cfg, &self.identity, &message_id, m.generation, applied.as_ref().map(|(id, _)| id.as_str()), now_s())
-            .map_err(|e| e.0)?;
+        let env = route_assignment::request(
+            &m.cfg,
+            &self.identity,
+            &message_id,
+            m.generation,
+            applied.as_ref().map(|(id, _)| id.as_str()),
+            now_s(),
+        )
+        .map_err(|e| e.0)?;
         let body = json!({"protocol": membership::SEED_MEMBER_HTTP_PROTOCOL, "envelope": env});
         let (code, reply) = self.post("/seed/message", &m.seed_url, &body).await?;
         if !(200..300).contains(&code) {
@@ -1119,6 +1168,11 @@ impl Supervisor {
             s.status.route_assignment = Some(assignment.assignment_id.clone());
             s.route.replace(AppliedRoute { assignment, peer })
         };
+        // The controller set is the seed-signed assignment's, never the
+        // controller's: apply exactly what the statement authorized.
+        let controllers = self.shared.lock().unwrap().route.as_ref().map(|r| r.assignment.controller_endpoint_ids.clone()).unwrap_or_default();
+        self.transport.configure_controllers(controllers.iter().filter_map(|e| crate::transport::parse_endpoint_id(e).ok())).await;
+        reconcile_control(&self.shared, &self.transport).await;
         if let Some(old) = old
             && old.peer != peer
         {
@@ -1137,7 +1191,12 @@ impl Supervisor {
     /// endpoint and member key. It pauses on the owner's thermal ceiling and
     /// battery floor, stops when cancelled, and reports `artifact_state`; the
     /// next route sync applies the assignment once every object is promoted.
-    fn ensure_acquisition(&self, manifest: &crate::stage_manifest::StageManifest, grant: &crate::artifact_grant::Grant, quota: u64) -> Result<(), String> {
+    fn ensure_acquisition(
+        &self,
+        manifest: &crate::stage_manifest::StageManifest,
+        grant: &crate::artifact_grant::Grant,
+        quota: u64,
+    ) -> Result<(), String> {
         use std::sync::atomic::{AtomicBool, Ordering};
         let network_per_day = {
             let s = self.shared.lock().unwrap();
@@ -1164,7 +1223,9 @@ impl Supervisor {
                 Ok::<_, String>(addr)
             })
             .collect::<Result<_, _>>()?;
-        let mut client = crate::artifact_net::IrohChunkSource::new(self.transport.endpoint(), self.identity.clone(), grant.clone(), sources).map_err(|e| e.0)?;
+        let mut client =
+            crate::artifact_net::IrohChunkSource::new(self.transport.endpoint(), self.identity.clone(), grant.clone(), sources)
+                .map_err(|e| e.0)?;
         let (cancel, done) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
         let (shared, root, manifest) = (self.shared.clone(), self.data_dir.join("artifacts"), manifest.clone());
         let (task_cancel, task_done) = (cancel.clone(), done.clone());
@@ -1188,7 +1249,8 @@ impl Supervisor {
             // persisted; free space on the store volume bounds admission.
             let outcome = ArtifactStore::open(&root, quota).and_then(|store| {
                 let mut budget = crate::artifact::NetworkBudget::open(&root, network_per_day, crate::artifact::utc_day());
-                let mut metered = crate::artifact::MeteredSource { inner: &mut client, budget: &mut budget, day: &crate::artifact::utc_day };
+                let mut metered =
+                    crate::artifact::MeteredSource { inner: &mut client, budget: &mut budget, day: &crate::artifact::utc_day };
                 store.acquire_with(&manifest, &mut metered, ACQUISITION_CHUNK_BYTES, crate::artifact::available_bytes(&root), &mut gate)
             });
             let state = match outcome {
@@ -1234,7 +1296,8 @@ impl Supervisor {
         // Objects re-verified against this manifest's digests and the golden
         // run now: nothing cached from another assignment can satisfy it.
         let stage = store.load_stage_for_serving(manifest).map_err(|e| e.0)?;
-        let runtime = Qwen2Runtime::new(&assignment.assignment_id, &manifest.stage_id, stage).map_err(|e| e.0)?;
+        let runtime = Qwen2Runtime::new_verified(&assignment.assignment_id, &manifest.stage_id, stage,
+            manifest.golden.as_ref().ok_or("stage_manifest_golden_required")?).map_err(|e| e.0)?;
         self.shared.lock().unwrap().acquisition = None;
         set_state("loaded");
         Ok(runtime)
@@ -1281,43 +1344,52 @@ impl Supervisor {
                 active.pending_resume = None;
             }
             let error = format!("seed_resume_refused:{refusal}");
-            return if TERMINAL_RESUME_REFUSALS.contains(&refusal.as_str()) {
-                Step::Ended(error)
-            } else {
-                Step::Retry(error)
-            };
+            return if TERMINAL_RESUME_REFUSALS.contains(&refusal.as_str()) { Step::Ended(error) } else { Step::Retry(error) };
         }
-        let acceptance =
-            match membership::verify_seed_envelope(&reply, &m.pinned, membership::RESUME_ACCEPTANCE_PROTOCOL) {
-                Ok(a) => a,
-                Err(e) => return Step::Retry(format!("resume_acceptance_invalid:{}", e.0)),
-            };
+        let acceptance = match membership::verify_seed_envelope(&reply, &m.pinned, membership::RESUME_ACCEPTANCE_PROTOCOL) {
+            Ok(a) => a,
+            Err(e) => return Step::Retry(format!("resume_acceptance_invalid:{}", e.0)),
+        };
         let generation = acceptance["membership_generation"].as_u64().unwrap_or(0);
         let mut cfg = m.cfg;
         cfg.incarnation = incarnation;
         if let Err(e) = persist_membership(&self.data_dir, &cfg, generation, &m.seed_url, &m.pinned) {
             return Step::Retry(e.0);
         }
-        let mut s = self.shared.lock().unwrap();
-        // A new generation fences everything the previous one computed: no
-        // cached replay result may answer a frame of the new generation.
-        if let Some(stage) = s.stage.as_mut() {
-            stage.release_all();
-        }
-        s.status.phase = "joined".into();
-        s.status.member_generation = Some(generation);
-        s.status.lease_expires_at = acceptance["lease_expires_at"].as_f64();
-        s.status.last_error = None;
-        s.membership = Some(ActiveMembership {
-            cfg,
-            generation,
-            seed_url: m.seed_url,
-            pinned: m.pinned,
-            needs_resume: false,
-            pending_resume: None,
-        });
+        let transition = self.shared.lock().unwrap().control_transition.clone();
+        let _transition = transition.lock().await;
+        let peers = {
+            let mut s = self.shared.lock().unwrap();
+            install_resumed_membership(&mut s, ActiveMembership { cfg, generation, seed_url: m.seed_url, pinned: m.pinned, needs_resume: false, pending_resume: None }, acceptance["lease_expires_at"].as_f64());
+            std::mem::take(&mut s.control_peers)
+        };
+        // Withdraw old sessions' data authority before returning acceptance.
+        // The transition guard prevents this await from erasing a fresh start.
+        if peers { self.transport.configure_route_peers(Vec::new()).await; }
         Step::Held
     }
+}
+
+fn install_resumed_membership(s: &mut Shared, m: ActiveMembership, lease_expires_at: Option<f64>) {
+    let generation = m.generation;
+    // A new generation fences everything the previous one computed: no
+    // cached replay result may answer a frame of the new generation.
+    if let Some(stage) = s.stage.as_mut() {
+        stage.release_all();
+    }
+    s.stage_revision += 1;
+    s.control = None;
+    s.cancelled.clear();
+    s.deadlines.clear();
+    if let Some(node) = s.stage_node.as_mut() { node.clear(); }
+    // control_peers deliberately stays set: serve_control reconciles the
+    // retired session's transport effects before admitting a fresh command.
+    s.status.phase = "joined".into();
+    s.status.member_generation = Some(generation);
+    s.status.lease_expires_at = lease_expires_at;
+    s.status.last_error = None;
+    s.membership =
+        Some(m);
 }
 
 /// Dispatch admitted Router frames. A v2 (Qwen2) stage is a stage-only
@@ -1325,6 +1397,65 @@ impl Supervisor {
 /// decided by the node, the verdict acknowledges (or refuses) the delivery,
 /// and the frames it sends go to the peers its locked path names. A v1 (GPT-2
 /// reference) stage keeps the device-checkpoint demo forwarding.
+fn begin_inflight(inflight: &mut std::collections::BTreeMap<String, usize>, key: &str) {
+    let count = inflight.entry(key.to_owned()).or_default();
+    *count = count.saturating_add(1);
+}
+
+/// One ownership unit from queue admission through terminal publication.
+/// Creating child units before dropping the parent closes the zero-count gap.
+struct RequestWork {
+    shared: Arc<Mutex<Shared>>,
+    request_id: String,
+    revision: u64,
+    publication: Option<crate::stage_node::PathWork>,
+}
+impl RequestWork {
+    fn new(shared: &Arc<Mutex<Shared>>, request_id: &str) -> Self {
+        let mut s = shared.lock().unwrap();
+        begin_inflight(&mut s.inflight, request_id);
+        Self { shared: shared.clone(), request_id: request_id.into(), revision: s.stage_revision, publication: None }
+    }
+    fn child(&self) -> Self {
+        let mut child = Self::new(&self.shared, &self.request_id);
+        child.revision = self.revision; // never acquire a successor's authority
+        child.publication = self.publication.clone();
+        child
+    }
+    fn blocked(&self) -> bool {
+        let s = self.shared.lock().unwrap();
+        s.stage_revision != self.revision || s.request_blocked(&self.request_id)
+            || self.publication.as_ref().is_some_and(|p| p.blocked(monotonic_s().max(s.sweep_clock)))
+    }
+}
+impl Drop for RequestWork {
+    fn drop(&mut self) {
+        let mut s = self.shared.lock().unwrap();
+        if let Some(count) = s.inflight.get_mut(&self.request_id) {
+            *count = count.saturating_sub(1);
+            if *count == 0 { s.inflight.remove(&self.request_id); }
+        }
+    }
+}
+
+fn sweep_paths(shared: &Arc<Mutex<Shared>>, now: f64) {
+    let mut s = shared.lock().unwrap();
+    if now.is_finite() { s.sweep_clock = s.sweep_clock.max(now); }
+    let clock = s.sweep_clock;
+    let Some(mut paths) = s.stage_node.take() else { return }; // CPU owns it; sweep on return
+    paths.sweep_at(clock);
+    if let Some(stage) = s.stage.as_mut() {
+        for (r, p) in paths.drain_expired_releases() { stage.release_path(&r, &p); }
+    }
+    s.stage_node = Some(paths);
+}
+
+async fn sweep_paths_periodically(shared: Arc<Mutex<Shared>>, cadence: Duration) {
+    let mut tick = tokio::time::interval(cadence);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop { tick.tick().await; sweep_paths(&shared, monotonic_s()); }
+}
+
 async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>, transport: NodeTransport) {
     while let Some(mut inbound) = rx.recv().await {
         drop_expired_route(&shared, &transport).await;
@@ -1332,17 +1463,26 @@ async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>
         if v2 {
             let reply = inbound.reply.take();
             let shared_task = shared.clone();
+            // Count the step as in flight for its request from the moment it is
+            // queued, so a cancellation landing before it starts (or while it
+            // runs) reports real residue instead of claiming a clean receipt.
+            let inflight_request =
+                inbound.frame.body.get("request_id").and_then(|r| r.as_str()).filter(|r| !r.is_empty()).map(str::to_owned);
+            let work = RequestWork::new(&shared, inflight_request.as_deref().unwrap_or(""));
             let step = tokio::task::spawn_blocking(move || stage_step(&shared_task, &inbound)).await;
             let verdict = match step {
                 Ok(Ok(step)) => {
                     for send in step.sends {
-                        tokio::spawn(send_with_retry(transport.clone(), shared.clone(), send));
+                        let mut child = work.child();
+                        child.publication = step.publication.clone();
+                        tokio::spawn(send_with_retry(transport.clone(), shared.clone(), send, child));
                     }
                     if step.ack { Ok(()) } else { Err(if step.reason.is_empty() { "refused".to_owned() } else { step.reason }) }
                 }
                 Ok(Err(code)) => Err(code),
                 Err(_) => Err("router_dispatch_failed".to_owned()),
             };
+            drop(work);
             if let Some(reply) = reply {
                 let _ = reply.send(verdict);
             }
@@ -1423,6 +1563,7 @@ async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>
 struct NodeControlEnv<'a> {
     s: &'a mut Shared,
     endpoint_addr: Value,
+    transport_snapshot: Value,
     install: Option<(Vec<crate::node_control::PeerSpec>, u64)>,
     stop: bool,
 }
@@ -1439,6 +1580,8 @@ impl crate::node_control::ControlEnv for NodeControlEnv<'_> {
             stage_id: stage.stage_id().to_owned(),
             pack_digest: route.assignment.stage_pack_digest.clone(),
             backend: stage.backend().to_owned(),
+            runtime_build_digest: runtime_build_digest(),
+            golden_output_digest: stage.golden_output_digest()?.to_owned(),
         })
     }
     fn install_peers(&mut self, peers: &[crate::node_control::PeerSpec], local_generation: u64) -> Result<(), String> {
@@ -1449,11 +1592,40 @@ impl crate::node_control::ControlEnv for NodeControlEnv<'_> {
         Ok(())
     }
     fn health(&self) -> Value {
-        json!({
+        let mut details = self.qualification_snapshot();
+        let health = json!({
             "stage_loaded": self.s.stage.is_some(),
             "frames_received": self.s.status.frames_received,
             "frames_executed": self.s.status.frames_executed,
             "last_error": self.s.status.last_error,
+        });
+        details.as_object_mut().unwrap().extend(health.as_object().unwrap().clone());
+        details
+    }
+    fn qualification_snapshot(&self) -> Value {
+        let mut transport = self.transport_snapshot.clone();
+        transport["local_node_id"] = json!(self.s.membership.as_ref().map(|m| &m.cfg.node_id));
+        transport["route_ready"] = json!(false);
+        let mut interruptibility = self.s.stage.as_ref().and_then(|s| s.cooperative_work_snapshot()).unwrap_or_else(|| json!({
+            "cooperative_interruption":false, "backend_candidate":false,
+            "cooperative_bound_candidate":false, "maximum_total_cleanup_ms":null,
+            "physical_proof_required":true, "reason":"runtime_unavailable_or_not_cooperative"
+        }));
+        interruptibility["runtime_backend"] = json!(self.s.status.runtime_backend);
+        interruptibility["decode_mode"] = json!(crate::node_control::REPLAY_DECODE_MODE);
+        json!({
+            "runtime": {
+                "mode": crate::node_control::REPLAY_DECODE_MODE,
+                // Replay results are not KV; report them separately. Active work
+                // includes queued sends and checked-out execution, not fake zero.
+                "active_state_count": self.s.inflight.values().sum::<usize>().max(usize::from(self.s.stage_busy)),
+                "replay_result_count": self.s.stage.as_ref().and_then(|s| s.replay_result_count()),
+                "applied_operation_count": self.s.stage.as_ref().and_then(|s| s.applied_operation_count()),
+                "runtime_busy": self.s.stage_busy,
+            },
+            "transport_fatal_error": transport["fatal_error"],
+            "transport": transport,
+            "interruptibility": interruptibility,
         })
     }
     fn host_resources(&self) -> Value {
@@ -1476,6 +1648,41 @@ impl crate::node_control::ControlEnv for NodeControlEnv<'_> {
     fn stop(&mut self) {
         self.stop = true;
     }
+    /// The exact teardown of one cancelled request: retire the request's own
+    /// path from the stage node (the release its entry's `PathCancellation`
+    /// names, and any successor path of the same request), drop the runtime's
+    /// replay results for it, and report what is really left. Anything the
+    /// teardown could not remove is returned as residue, never hidden.
+    fn request_deadline(&mut self, request_id: &str, execution_budget_ms: u64) {
+        self.s.deadlines.entry(request_id.to_owned()).or_insert_with(|| {
+            std::time::Instant::now().checked_add(Duration::from_millis(execution_budget_ms))
+                .unwrap_or_else(std::time::Instant::now)
+        });
+    }
+    fn cancel_wait(&mut self, subject: &crate::node_cancel::CancelSubject) -> crate::node_cancel::Residue {
+        self.s.cancelled.insert(subject.request_id.clone());
+        // The control's own path, if the session ever registered it.
+        let mut residue = crate::node_cancel::Residue::default();
+        // Residue describes what remains, not how many objects were removed.
+        if let Some(stage_node) = self.s.stage_node.as_mut() {
+            let released = stage_node.release_request(subject.request_id.as_str());
+            residue.pending_cancellations = released.pending_cancellations;
+            // Whatever the request still holds after the exact teardown. The
+            // receipt names these, so a successor path is visible residue.
+            residue.live_paths = stage_node.live_paths_of(subject.request_id.as_str());
+            residue.path_retained = stage_node.path(&subject.path_id).is_some();
+        }
+        if let Some(stage) = self.s.stage.as_mut() {
+            // Drop every replay result of this request's paths, not just the
+            // one the control named: a successor path holds residue too.
+            // StageRuntime's synchronous contract drops *every* result and
+            // returns the number dropped, not the number still held.
+            stage.release_request(subject.request_id.as_str());
+        }
+        residue.runtime_busy = self.s.stage_busy;
+        residue.inflight = self.s.inflight_for_request(subject.request_id.as_str());
+        residue
+    }
 }
 
 /// End the control session and everything it installed: its request
@@ -1485,7 +1692,11 @@ impl crate::node_control::ControlEnv for NodeControlEnv<'_> {
 async fn teardown_control(shared: &Arc<Mutex<Shared>>, transport: &NodeTransport) {
     let control_peers = {
         let mut s = shared.lock().unwrap();
+        s.stage_revision += 1;
+        s.cancelled.clear();
+        s.deadlines.clear();
         s.control = None;
+        if let Some(stage) = s.stage.as_mut() { stage.release_all(); }
         if let Some(stage_node) = s.stage_node.as_mut() {
             stage_node.clear();
         }
@@ -1499,7 +1710,11 @@ async fn teardown_control(shared: &Arc<Mutex<Shared>>, transport: &NodeTransport
 /// The session's controller is no longer in the transport's controller set
 /// (the single source of truth): tear the session down.
 async fn reconcile_control(shared: &Arc<Mutex<Shared>>, transport: &NodeTransport) {
-    let bound = shared.lock().unwrap().control.as_ref().and_then(|c| c.controller().map(str::to_owned));
+    let (bound, orphaned) = {
+        let s = shared.lock().unwrap();
+        (s.control.as_ref().and_then(|c| c.controller().map(str::to_owned)), s.control.is_none() && s.control_peers)
+    };
+    if orphaned { teardown_control(shared, transport).await; return; }
     let Some(bound) = bound else { return };
     let allowed = match crate::transport::parse_endpoint_id(&bound) {
         Ok(id) => transport.is_controller(&id).await,
@@ -1511,8 +1726,8 @@ async fn reconcile_control(shared: &Arc<Mutex<Shared>>, transport: &NodeTranspor
 }
 
 /// Answer the route controller's commands. Each command runs on the blocking
-/// pool under the shared lock (never behind a stage run: the stage step takes
-/// the same lock only around its own decision), then its transport effect
+/// pool under the shared lock (compute owns its stage outside this mutex),
+/// then its transport effect
 /// (route peers, drain) is applied. Every controller-set change reconciles
 /// the session at once, and every command is re-checked against the current
 /// set before and after it runs.
@@ -1530,6 +1745,8 @@ async fn serve_control(
                 if changed.is_err() {
                     return;
                 }
+                let transition = shared.lock().unwrap().control_transition.clone();
+                let _transition = transition.lock().await;
                 reconcile_control(&shared, &transport).await;
                 continue;
             }
@@ -1542,14 +1759,19 @@ async fn serve_control(
         if !transport.is_controller(&request.from).await {
             continue;
         }
+        let transition = shared.lock().unwrap().control_transition.clone();
+        let _transition = transition.lock().await;
         reconcile_control(&shared, &transport).await;
         let (shared_task, identity_task, incarnation_task) = (shared.clone(), identity.clone(), incarnation.clone());
         let endpoint_addr = serde_json::to_value(transport.addr()).unwrap_or(Value::Null);
         let endpoint_id = transport.endpoint_id();
+        let transport_snapshot = transport.snapshot().await;
         let outcome = tokio::task::spawn_blocking(move || {
             let mut guard = shared_task.lock().unwrap();
             let s = &mut *guard;
             let node_id = s.membership.as_ref().map(|m| m.cfg.node_id.clone()).unwrap_or_default();
+            let incarnation_task = s.membership.as_ref().map(|m| m.cfg.incarnation.clone()).unwrap_or(incarnation_task);
+            let revision = s.stage_revision;
             // A stopped session ends; the next controller opens a new one.
             let mut control = s.control.take().filter(|c| !c.stopped()).unwrap_or_else(|| {
                 crate::node_control::ControlNode::new(crate::node_control::ControlIdentity {
@@ -1560,14 +1782,17 @@ async fn serve_control(
                     boot_id: incarnation_task.clone(),
                 })
             });
-            let mut env = NodeControlEnv { s, endpoint_addr, install: None, stop: false };
+            let mut env = NodeControlEnv { s, endpoint_addr, transport_snapshot, install: None, stop: false };
             let response = control.handle(&request.from.to_string(), &request.command, &identity_task, &mut env);
             let (install, stop) = (env.install.take(), env.stop);
             s.control = Some(control);
-            (response, install, stop)
+            (response, install, stop, revision)
         })
         .await;
-        let Ok((response, install, stop)) = outcome else { continue };
+        let Ok((response, install, stop, revision)) = outcome else {
+            continue;
+        };
+        if shared.lock().unwrap().stage_revision != revision { continue; }
         if let Some((peers, _local_generation)) = install {
             let bindings = peers
                 .into_iter()
@@ -1579,6 +1804,10 @@ async fn serve_control(
             transport.configure_route_peers(bindings).await;
             shared.lock().unwrap().control_peers = true;
         }
+        if shared.lock().unwrap().stage_revision != revision {
+            reconcile_control(&shared, &transport).await;
+            continue;
+        }
         if stop {
             teardown_control(&shared, &transport).await;
         }
@@ -1587,12 +1816,16 @@ async fn serve_control(
             teardown_control(&shared, &transport).await;
             continue;
         }
-        let _ = request.reply.send(response);
+        // Linearize reply with the same revision as the command. Never sign
+        // under one incarnation and publish it after a concurrent retirement.
+        let s = shared.lock().unwrap();
+        if stop || s.stage_revision == revision { let _ = request.reply.send(response); }
     }
 }
 
-/// One Router frame through the stage node, under the shared lock, on the
-/// blocking pool (the stage run is CPU work). The owner's thermal ceiling
+/// One Router frame on the blocking pool. Runtime/path tables are temporarily
+/// owned outside the control lock; revision and request fences guard restore.
+/// The owner's thermal ceiling
 /// turns an admitted hop into a `thermal_ceiling_reached` FailureReport.
 fn stage_step(shared: &Arc<Mutex<Shared>>, inbound: &Inbound) -> Result<crate::stage_node::Step, String> {
     let ceiling = {
@@ -1607,12 +1840,23 @@ fn stage_step(shared: &Arc<Mutex<Shared>>, inbound: &Inbound) -> Result<crate::s
         let local = s.membership.as_ref().map(|m| m.cfg.node_id.clone()).ok_or("not_a_member")?;
         s.stage_node = Some(crate::stage_node::StageNode::new(&local));
     }
-    let stage_node = s.stage_node.as_mut().expect("installed above");
-    let stage = s.stage.as_mut().ok_or("stage_not_loaded")?;
+    let request_id = inbound.frame.body["request_id"].as_str().unwrap_or("").to_owned();
+    if s.request_blocked(&request_id) { return Err("request_cancelled_or_expired".into()); }
+    let mut stage = s.stage.take().ok_or("stage_not_loaded")?;
+    let mut stage_node = s.stage_node.take().expect("installed above");
+    let revision = s.stage_revision;
+    s.stage_busy = true;
+    let clock = s.sweep_clock.max(monotonic_s());
+    stage_node.sweep_at(clock);
+    for (r, p) in stage_node.drain_expired_releases() { stage.release_path(&r, &p); }
+    drop(guard);
     let started = std::time::Instant::now();
     let mut executed = false;
-    let step = stage_node.on_frame_at(monotonic_s(), &inbound.from_node, &inbound.frame, &mut |path, hop, payload| {
+    let fence = stage_node.path_fence(inbound.frame.body["path_id"].as_str().unwrap_or(""));
+    let mut publication = None;
+    let mut step = stage_node.on_frame_at(monotonic_s(), &inbound.from_node, &inbound.frame, &mut |path, hop, payload| {
         executed = true;
+        publication = fence.as_ref().map(|f| f.begin());
         if hot.is_some() {
             return Err("thermal_ceiling_reached".into());
         }
@@ -1631,14 +1875,54 @@ fn stage_step(shared: &Arc<Mutex<Shared>>, inbound: &Inbound) -> Result<crate::s
             sequence,
             hidden: &hidden,
         };
-        let out = stage.execute(&call).map_err(|e| e.0)?;
+        let out = stage.execute_cooperative(&call, &mut |_| {
+            let s = shared.lock().unwrap();
+            if s.request_blocked(&request_id) || revision != s.stage_revision
+                || fence.as_ref().is_some_and(|f| f.blocked(s.sweep_clock.max(monotonic_s()))) {
+                return Err(crate::runtime::RuntimeError("request_cancelled_or_expired".into()));
+            }
+            Ok(())
+        }).map_err(|e| e.0)?;
         wire::Activation::from_flat_f32(out.sequence, out.hidden_size, &out.values).encode().map_err(|e| e.0.to_string())
     });
+    step.publication = publication;
     if let Some((request_id, path_id)) = &step.released {
         stage.release_path(request_id, path_id);
     }
+    let mut guard = shared.lock().unwrap();
+    let s = &mut *guard;
+    // Cancellation can run while compute owns the stage. Clean it before
+    // restoring anything; suppress every late output, including failures.
+    s.stage_busy = false;
+    stage_node.sweep_at(s.sweep_clock.max(monotonic_s()));
+    for (r, p) in stage_node.drain_expired_releases() { stage.release_path(&r, &p); }
+    let path_expired = inbound.frame.message_type == "HopHeader"
+        && stage_node.path(inbound.frame.body["path_id"].as_str().unwrap_or("")).is_none();
+    let blocked = s.request_blocked(&request_id) || revision != s.stage_revision || path_expired;
+    for id in &s.cancelled {
+        stage_node.release_request(id);
+        stage.release_request(id);
+    }
+    if blocked {
+        stage_node.release_request(&request_id);
+        stage.release_request(&request_id);
+        step.sends.clear();
+        step.ack = false;
+        step.reason = "request_cancelled_or_expired".into();
+    }
+    if revision == s.stage_revision {
+        s.stage = Some(stage);
+        s.stage_node = Some(stage_node);
+    } else {
+        // Preserve tombstones from the retired runtime without restoring any
+        // path or replay value. A replacement stage is never overwritten.
+        stage_node.clear();
+        stage.release_all();
+        if s.stage.is_none() && s.status.stage_loaded.is_some() { s.stage = Some(stage); }
+        if s.stage_node.is_none() { s.stage_node = Some(stage_node); }
+    }
     if executed {
-        if step.disposition == Some("FORWARDED") {
+        if step.disposition == Some("FORWARDED") && !blocked {
             s.status.frames_executed += 1;
             s.status.last_execute_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
         } else if !step.reason.is_empty() {
@@ -1651,22 +1935,37 @@ fn stage_step(shared: &Arc<Mutex<Shared>>, inbound: &Inbound) -> Result<crate::s
 /// Deliver one frame the stage node sent to its peer node, retrying like the
 /// sidecar's outbound worker until acknowledged, refused for rotation or
 /// replay collision, or out of attempts.
-async fn send_with_retry(transport: NodeTransport, shared: Arc<Mutex<Shared>>, send: crate::stage_node::Send) {
+async fn send_with_retry(transport: NodeTransport, shared: Arc<Mutex<Shared>>, send: crate::stage_node::Send, work: RequestWork) {
     let mut delay = Duration::from_millis(250);
     for _ in 0..5 {
+        if work.blocked() { return; }
         let Some(peer) = transport.peer_for_node(&send.to).await else {
             shared.lock().unwrap().status.last_error = Some(format!("route_peer_unknown:{}", send.to));
             return;
         };
-        match transport.send(peer.addr.clone(), peer.generation, &send.frame).await {
+        if work.blocked() { return; }
+        // Ownership ends only after acknowledgement/error, or after the
+        // cancellation branch has explicitly reset/stopped its QUIC streams.
+        // The 300-second ordinary data timeout remains unchanged.
+        let cancelled = async {
+            while !work.blocked() { tokio::time::sleep(Duration::from_millis(5)).await; }
+        };
+        match transport.send_cancellable(peer.addr.clone(), peer.generation, &send.frame, cancelled).await {
             Ok(_) => return,
+            Err(e) if e.0 == "request_cancelled_or_expired" => return,
             Err(e) if e.0 == "peer_rotated" || e.0 == "replay_collision" => {
                 shared.lock().unwrap().status.last_error = Some(format!("forward_refused:{}", e.0));
                 return;
             }
             Err(e) => shared.lock().unwrap().status.last_error = Some(format!("forward_failed:{}", e.0)),
         }
-        tokio::time::sleep(delay).await;
+        // Cancellation interrupts retry sleep, but never erases ownership of
+        // a send still awaiting a terminal acknowledgement above.
+        let until = tokio::time::Instant::now() + delay;
+        while tokio::time::Instant::now() < until {
+            if work.blocked() { return; }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
         delay = (delay * 2).min(Duration::from_secs(4));
     }
 }
@@ -1674,6 +1973,489 @@ async fn send_with_retry(transport: NodeTransport, shared: Arc<Mutex<Shared>>, s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn lifecycle_shared(stage: Box<dyn StageRuntime>) -> Arc<Mutex<Shared>> {
+        Arc::new(Mutex::new(Shared {
+            observation: ObservationCursor { window_started_at:0.0, frames_at_window_start:0, evidence_generation:0 },
+            membership:None, supervisor_running:false, status:NodeStatus::default(), session:None,
+            invitation:None, stage:Some(stage), forward:None, route:None, shell_metrics:None, acquisition:None,
+            stage_node:Some(crate::stage_node::StageNode::new("node-phone")), control:None, control_peers:false, control_transition:Default::default(),
+            inflight:Default::default(), cancelled:Default::default(), deadlines:Default::default(), stage_revision:0, stage_busy:false, sweep_clock:0.0,
+        }))
+    }
+
+    fn lifecycle_subject() -> crate::node_cancel::CancelSubject {
+        crate::node_cancel::CancelSubject {
+            request_id:"request-phone-golden".into(), path_id:"path-phone-golden".into(),
+            deployment_id:"dep-1".into(), deployment_epoch:1, qualification_digest:format!("sha256:{}", "b".repeat(64)),
+            command_id:"cmd".into(), publisher_generation:1, absolute_deadline_ms:1,
+            request_attempt:1, path_attempt:1, path_digest:format!("sha256:{}", "a".repeat(64)),
+            topology_generation:1, cancellation_generation:1,
+        }
+    }
+
+    struct HeldStage {
+        golden: GoldenStage,
+        entered: std::sync::mpsc::Sender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+    }
+    impl StageRuntime for HeldStage {
+        fn backend(&self) -> &'static str { crate::qwen2::QWEN2_BACKEND }
+        fn assignment_id(&self) -> &str { "held" }
+        fn stage_id(&self) -> &str { "held" }
+        fn hidden_size(&self) -> usize { 8 }
+        fn execute(&mut self, call: &StageCall<'_>) -> Result<crate::runtime::StageOutput, crate::runtime::RuntimeError> {
+            self.entered.send(()).unwrap();
+            self.release.recv_timeout(Duration::from_secs(3)).unwrap();
+            self.golden.execute(call)
+        }
+        fn release_all(&mut self) -> usize { 0 }
+        fn release_path(&mut self, r: &str, p: &str) -> usize { self.golden.release_path(r,p) }
+        fn release_request(&mut self, r: &str) -> usize { self.golden.release_request(r) }
+    }
+
+    #[test]
+    fn readiness_expiry_sweep_survives_checked_out_cpu_and_releases_other_paths() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let released = Arc::new(Mutex::new(Vec::new()));
+        let shared = lifecycle_shared(Box::new(HeldStage { golden: GoldenStage { released: released.clone() }, entered: tx, release: release_rx }));
+        let manifest = wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap();
+        let mut paths = crate::stage_node::StageNode::new("node-phone");
+        paths.on_frame_at(0.0, "node-mac-entry", &manifest, &mut |_,_,_| panic!("manifest never computes"));
+        let mut other_manifest = manifest.clone();
+        for key in ["path_id", "request_id"] {
+            other_manifest.body[key] = json!("other");
+            other_manifest.body["manifest"][key] = json!("other");
+        }
+        other_manifest.body["build"]["path_id"] = json!("other");
+        other_manifest.body["build"]["request"]["request_id"] = json!("other");
+        assert!(paths.on_frame_at(0.0, "node-mac-entry", &other_manifest, &mut |_,_,_| panic!()).ack);
+        shared.lock().unwrap().stage_node = Some(paths);
+        let inbound = Inbound { from:iroh::SecretKey::from_bytes(&[20;32]).public(), from_node:"node-mac-entry".into(), generation:1,
+            frame:wire::decode_frame(&golden("02-hop-prefill-in.bin")).unwrap(), reply:None };
+        let other = shared.clone();
+        let thread = std::thread::spawn(move || stage_step(&other, &inbound).unwrap());
+        rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        sweep_paths(&shared, 4800.0);
+        assert!(shared.lock().unwrap().stage_busy);
+        release_tx.send(()).unwrap();
+        let step = thread.join().unwrap();
+        assert!(step.sends.is_empty());
+        let s = shared.lock().unwrap();
+        assert!(s.stage_node.as_ref().unwrap().path("path-phone-golden").is_none());
+        assert!(released.lock().unwrap().contains(&("request-phone-golden".into(), "path-phone-golden".into())));
+        assert!(released.lock().unwrap().contains(&("other".into(), "other".into())));
+    }
+
+    #[tokio::test]
+    async fn readiness_periodic_sweep_runs_without_ingress() {
+        let released = Arc::new(Mutex::new(Vec::new()));
+        let shared = lifecycle_shared(Box::new(GoldenStage { released: released.clone() }));
+        let mut paths = crate::stage_node::StageNode::new("node-phone");
+        paths.on_frame_at(0.0, "node-mac-entry", &wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap(), &mut |_,_,_| panic!());
+        shared.lock().unwrap().stage_node = Some(paths);
+        shared.lock().unwrap().sweep_clock = 1200.0;
+        let task = tokio::spawn(sweep_paths_periodically(shared.clone(), Duration::from_millis(5)));
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if !released.lock().unwrap().is_empty() { break; }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        }).await.unwrap();
+        task.abort();
+        assert_eq!(released.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn lifecycle_busy_compute_never_blocks_cancel_or_publishes_late() {
+        use crate::node_control::ControlEnv;
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let released = Arc::new(Mutex::new(Vec::new()));
+        let shared = lifecycle_shared(Box::new(HeldStage { golden:GoldenStage { released:released.clone() }, entered:entered_tx, release:release_rx }));
+        let manifest = wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap();
+        shared.lock().unwrap().stage_node.as_mut().unwrap().on_frame("node-mac-entry", &manifest, &mut |_,_,_| unreachable!());
+        let inbound = Inbound { from:iroh::SecretKey::from_bytes(&[88;32]).public(), from_node:"node-mac-entry".into(), generation:1,
+            frame:wire::decode_frame(&golden("02-hop-prefill-in.bin")).unwrap(), reply:None };
+        let work = RequestWork::new(&shared, "request-phone-golden");
+        let worker_shared = shared.clone();
+        let worker = std::thread::spawn(move || stage_step(&worker_shared, &inbound));
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        // Deterministic barrier: compute is blocked until we release it, not
+        // merely slowed by a sleep. Cleanup must answer before that release.
+        let started = std::time::Instant::now();
+        let residue = match shared.try_lock() {
+            Ok(mut s) => NodeControlEnv { s:&mut s, endpoint_addr:Value::Null, transport_snapshot:serde_json::json!({}), install:None, stop:false }.cancel_wait(&lifecycle_subject()),
+            Err(_) => { release_tx.send(()).unwrap(); worker.join().unwrap().unwrap(); panic!("compute holds the cancellation lock"); }
+        };
+        assert!(started.elapsed() < Duration::from_millis(100));
+        assert_eq!(residue.inflight, 1);
+        assert!(!residue.is_clean());
+        // Another request may have replay state inside the same busy runtime.
+        // Zero request-local inflight is NOT sufficient evidence of cleanup.
+        {
+            let mut s = shared.lock().unwrap();
+            let mut other = lifecycle_subject(); other.request_id = "another".into();
+            let residue = NodeControlEnv { s:&mut s, endpoint_addr:Value::Null, transport_snapshot:serde_json::json!({}), install:None, stop:false }.cancel_wait(&other);
+            assert_eq!(residue.inflight, 0);
+            assert!(residue.runtime_busy && !residue.is_clean());
+        }
+        release_tx.send(()).unwrap();
+        let step = worker.join().unwrap().unwrap();
+        assert!(step.sends.is_empty(), "a late computed output must never reach publication");
+        assert!(!released.lock().unwrap().is_empty());
+        drop(work);
+        let mut s = shared.lock().unwrap();
+        assert!(NodeControlEnv { s:&mut s, endpoint_addr:Value::Null, transport_snapshot:serde_json::json!({}), install:None, stop:false }.cancel_wait(&lifecycle_subject()).is_clean());
+        assert!(s.stage_node.as_ref().unwrap().path("path-phone-golden").is_none());
+    }
+
+    #[test]
+    fn lifecycle_route_replacement_between_compute_and_queue_cannot_renew_publication() {
+        let shared = lifecycle_shared(Box::new(GoldenStage { released:Default::default() }));
+        let parent = RequestWork::new(&shared, "r");
+        clear_route(&mut shared.lock().unwrap());
+        let child = parent.child();
+        drop(parent);
+        assert!(child.blocked(), "a late queued output cannot inherit the new route's revision");
+        assert_eq!(shared.lock().unwrap().inflight_for_request("r"), 1);
+        drop(child);
+        assert_eq!(shared.lock().unwrap().inflight_for_request("r"), 0);
+    }
+
+    // A tiny real Qwen2 kernel matching the stage-wire fixture's hidden size.
+    fn tiny_qwen() -> Qwen2Runtime {
+        struct Source;
+        impl crate::qwen2::TensorSource for Source {
+            fn tensor(&mut self, name: &str) -> Result<crate::qwen2::RawTensor, crate::runtime::RuntimeError> {
+                let shape = if name.ends_with("layernorm.weight") { vec![8] }
+                    else if name.ends_with("q_proj.bias") { vec![8] }
+                    else if name.ends_with(".bias") { vec![4] }
+                    else if name.ends_with("k_proj.weight") || name.ends_with("v_proj.weight") { vec![4,8] }
+                    else if name.ends_with("gate_proj.weight") || name.ends_with("up_proj.weight") { vec![16,8] }
+                    else if name.ends_with("down_proj.weight") { vec![8,16] }
+                    else { vec![8,8] };
+                let value = if name.ends_with("layernorm.weight") {1.0f32} else {0.0};
+                let bytes = (0..shape.iter().product::<usize>()).flat_map(|_| value.to_le_bytes()).collect();
+                Ok(crate::qwen2::RawTensor { dtype:crate::bf16::SourceDType::F32, shape, bytes })
+            }
+        }
+        let config = crate::qwen2::Qwen2Config::from_hf_config(&json!({"hidden_size":8,"intermediate_size":16,
+            "num_attention_heads":2,"num_key_value_heads":1,"rms_norm_eps":1e-6,"rope_theta":10000.0})).unwrap();
+        Qwen2Runtime::new("assignment-golden","stage-golden",crate::qwen2::Qwen2Stage::load(config,0,1,&mut Source).unwrap()).unwrap()
+    }
+
+    struct HeldQwen { inner: Qwen2Runtime, entered:std::sync::mpsc::Sender<()>, release:std::sync::mpsc::Receiver<()> }
+    impl StageRuntime for HeldQwen {
+        fn backend(&self) -> &'static str { self.inner.backend() }
+        fn assignment_id(&self) -> &str { self.inner.assignment_id() }
+        fn stage_id(&self) -> &str { self.inner.stage_id() }
+        fn hidden_size(&self) -> usize { self.inner.hidden_size() }
+        fn replay_result_count(&self) -> Option<usize> { self.inner.replay_result_count() }
+        fn applied_operation_count(&self) -> Option<u64> { self.inner.applied_operation_count() }
+        fn execute(&mut self, c:&StageCall<'_>) -> Result<crate::runtime::StageOutput,crate::runtime::RuntimeError> { self.inner.execute(c) }
+        fn execute_cooperative(&mut self,c:&StageCall<'_>,check:&mut dyn FnMut(&'static str)->Result<(),crate::runtime::RuntimeError>) -> Result<crate::runtime::StageOutput,crate::runtime::RuntimeError> {
+            let mut held=false;
+            self.inner.execute_cooperative(c,&mut |unit| {
+                if unit=="linear_dot" && !held { held=true; self.entered.send(()).unwrap(); self.release.recv().unwrap(); }
+                check(unit)
+            })
+        }
+        fn release_all(&mut self)->usize { self.inner.release_all() }
+        fn release_request(&mut self,r:&str)->usize { self.inner.release_request(r) }
+        fn release_path(&mut self,r:&str,p:&str)->usize { self.inner.release_path(r,p) }
+    }
+
+    #[tokio::test(flavor="multi_thread")]
+    async fn held_qwen_work_observes_cancel_expiry_resume_and_teardown() {
+        use crate::node_control::ControlEnv;
+        for action in ["cancel","deadline","path_expiry","resume","stop"] {
+            let (entered_tx,entered_rx)=std::sync::mpsc::channel();
+            let (release_tx,release_rx)=std::sync::mpsc::channel();
+            let mut rt=tiny_qwen();
+            rt.execute(&StageCall::prefill("old-replay",1,&[0.0;8])).unwrap();
+            let shared=lifecycle_shared(Box::new(HeldQwen {inner:rt,entered:entered_tx,release:release_rx}));
+            shared.lock().unwrap().status.stage_loaded=Some("stage-golden".into());
+            let manifest=wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap();
+            shared.lock().unwrap().stage_node.as_mut().unwrap().on_frame("node-mac-entry",&manifest,&mut |_,_,_| unreachable!());
+            let inbound=Inbound {from:iroh::SecretKey::from_bytes(&[88;32]).public(),from_node:"node-mac-entry".into(),generation:1,
+                frame:wire::decode_frame(&golden("02-hop-prefill-in.bin")).unwrap(),reply:None};
+            let work=RequestWork::new(&shared,"request-phone-golden");
+            let owner=shared.clone();
+            let worker=std::thread::spawn(move || stage_step(&owner,&inbound));
+            entered_rx.recv_timeout(Duration::from_secs(2)).expect("real dot checkpoint reached");
+            if action=="stop" {
+                let phone=NodeTransport::bind(&[68;32],Reachability::LocalOnly).await.unwrap();
+                teardown_control(&shared,&phone).await;
+            } else {
+                let mut s=shared.lock().unwrap();
+                match action {
+                    "resume" => install_resumed_membership(&mut s,test_membership("new",2),Some(300.0)),
+                    "path_expiry" => s.sweep_clock=monotonic_s()+4801.0,
+                    "deadline" => { s.deadlines.insert("request-phone-golden".into(),std::time::Instant::now()); },
+                    _ => {
+                        let residue=NodeControlEnv {s:&mut s,endpoint_addr:Value::Null,transport_snapshot:json!({}),install:None,stop:false}.cancel_wait(&lifecycle_subject());
+                        assert!(residue.runtime_busy && !residue.is_clean());
+                    }
+                }
+            }
+            assert!(shared.lock().unwrap().stage_busy,"checked-out owner remains residue until it returns");
+            release_tx.send(()).unwrap();
+            let step=worker.join().unwrap().unwrap();
+            drop(work);
+            assert!(step.sends.is_empty() && !step.ack,"{action}: no old-generation publication");
+            let mut s=shared.lock().unwrap();
+            assert!(!s.stage_busy);
+            let rt=s.stage.as_mut().expect("weights restored after cooperative abort");
+            assert_eq!(rt.applied_operation_count(),Some(1),"{action}: held call never completed");
+            assert_eq!(rt.replay_result_count(),Some(if action=="stop" || action=="resume" {0} else {1}));
+            rt.execute(&StageCall::prefill("new",1,&[0.0;8])).unwrap();
+        }
+    }
+
+    fn test_membership(incarnation: &str, generation: u64) -> ActiveMembership {
+        ActiveMembership { cfg: MemberConfig { swarm_id:"s".into(), node_id:"node-phone".into(), seed_node_id:"seed".into(),
+            incarnation:incarnation.into(), software_version:"test".into(), peer_class:NodeProfile::Qwen2.peer_class().into(),
+            runtime_capability:json!({}), ttl_seconds:60.0 }, generation, seed_url:"unused".into(), pinned:json!({}), needs_resume:false, pending_resume:None }
+    }
+
+    #[tokio::test(flavor="multi_thread")]
+    async fn resume_once_acceptance_rotates_but_refusal_and_bad_signature_do_not() {
+        use tokio::io::{AsyncReadExt,AsyncWriteExt};
+        for outcome in ["refused","bad_signature","accepted"] {
+            let seed=Identity::from_secret("seed-endpoint",&[81;32]).unwrap();
+            let message=json!({"sender_endpoint_id":"seed-endpoint","protocol":membership::RESUME_ACCEPTANCE_PROTOCOL,
+                "membership_generation":2,"lease_expires_at":now_s()+60.0});
+            let mut reply=membership::envelope(&seed,message).unwrap();
+            let status=if outcome=="refused" { reply=json!({"error":{"code":"seed_resume_member_revoked"}}); "409 Conflict" } else {"200 OK"};
+            if outcome=="bad_signature" { reply["message"]["membership_generation"]=json!(3); }
+            let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url=format!("http://{}",listener.local_addr().unwrap());
+            let server=tokio::spawn(async move {
+                let (mut socket,_)=listener.accept().await.unwrap();
+                let mut input=[0u8;8192]; let _=socket.read(&mut input).await.unwrap();
+                let body=serde_json::to_vec(&reply).unwrap();
+                let headers=format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len());
+                socket.write_all(headers.as_bytes()).await.unwrap(); socket.write_all(&body).await.unwrap();
+            });
+            let shared=lifecycle_shared(Box::new(tiny_qwen()));
+            let mut member=test_membership("old",1);
+            member.seed_url=url; member.pinned=seed.public_key_record();
+            member.pending_resume=Some(("new".into(),json!({"test_pending_envelope":true})));
+            shared.lock().unwrap().membership=Some(member.clone());
+            let old=RequestWork::new(&shared,"old");
+            let dir=std::env::temp_dir().join(format!("native-resume-{}-{outcome}",std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let sv=Supervisor {identity:Arc::new(Identity::from_secret("phone-endpoint",&[82;32]).unwrap()),
+                http:reqwest::Client::new(),shared:shared.clone(),transport:NodeTransport::bind(&[83;32],Reachability::LocalOnly).await.unwrap(),
+                data_dir:dir.clone(),timing:NodeTiming::default()};
+            let peer=NodeTransport::bind(&[84;32],Reachability::LocalOnly).await.unwrap();
+            sv.transport.configure_route_peers(vec![crate::transport::PeerBinding {node_id:"old-peer".into(),generation:1,addr:peer.addr()}]).await;
+            shared.lock().unwrap().control_peers=true;
+            let result=sv.resume_once(member).await;
+            server.await.unwrap();
+            assert_eq!(sv.transport.peer_for_node("old-peer").await.is_some(),outcome!="accepted", "accepted resume must withdraw old transport peers immediately");
+            if outcome=="accepted" {
+                assert!(matches!(result,Step::Held)); assert!(old.blocked());
+                assert_eq!(shared.lock().unwrap().membership.as_ref().unwrap().cfg.incarnation,"new");
+            } else {
+                assert!(!matches!(result,Step::Held)); assert!(!old.blocked());
+                assert_eq!(shared.lock().unwrap().membership.as_ref().unwrap().cfg.incarnation,"old");
+            }
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn accepted_resume_retires_control_and_fences_held_owner() {
+        let shared = lifecycle_shared(Box::new(verified_synthetic_stage()));
+        let work = RequestWork::new(&shared,"old");
+        {
+            let mut s = shared.lock().unwrap();
+            s.membership = Some(test_membership("old",1));
+            s.control = Some(crate::node_control::ControlNode::new(crate::node_control::ControlIdentity {
+                node_id:"node-phone".into(),host_id:"node-phone".into(),endpoint_id:"ep".into(),process_id:"old".into(),boot_id:"old".into() }));
+            s.deadlines.insert("old".into(),std::time::Instant::now());
+            install_resumed_membership(&mut s,test_membership("new",2),Some(300.0));
+            assert!(s.control.is_none(),"accepted resume must retire the old control session");
+            assert!(s.deadlines.is_empty());
+            assert_eq!(s.membership.as_ref().unwrap().cfg.incarnation,"new");
+        }
+        assert!(work.blocked(),"old work cannot acquire the new membership revision");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn idle_teardown_drops_replay_but_preserves_weights() {
+        let shared = lifecycle_shared(Box::new(verified_synthetic_stage()));
+        {
+            let mut s = shared.lock().unwrap();
+            let rt = s.stage.as_mut().unwrap();
+            let input = vec![0.0;rt.hidden_size()];
+            rt.execute(&StageCall::prefill("r",1,&input)).unwrap();
+            rt.execute(&StageCall::prefill("r",1,&input)).unwrap();
+            assert_eq!(rt.applied_operation_count(),Some(1));
+            assert_eq!(rt.replay_result_count(),Some(1));
+        }
+        let phone = NodeTransport::bind(&[67;32], Reachability::LocalOnly).await.unwrap();
+        let work = RequestWork::new(&shared,"r");
+        teardown_control(&shared,&phone).await;
+        assert!(work.blocked());
+        let s = shared.lock().unwrap();
+        let rt = s.stage.as_ref().expect("weights preserved");
+        assert_eq!(rt.replay_result_count(),Some(0));
+        assert_eq!(rt.applied_operation_count(),Some(1));
+    }
+
+    #[test]
+    fn budget_maps_once_without_comparing_host_and_native_clocks() {
+        use crate::node_control::ControlEnv;
+        let shared = lifecycle_shared(Box::new(GoldenStage { released:Default::default() }));
+        let mut s = shared.lock().unwrap();
+        let before = std::time::Instant::now();
+        NodeControlEnv { s:&mut s, endpoint_addr:Value::Null, transport_snapshot:json!({}), install:None, stop:false }.request_deadline("r",60_000);
+        let first = s.deadlines["r"];
+        assert!(first >= before + Duration::from_secs(60));
+        NodeControlEnv { s:&mut s, endpoint_addr:Value::Null, transport_snapshot:json!({}), install:None, stop:false }.request_deadline("r",3_600_000);
+        assert_eq!(s.deadlines["r"],first);
+        NodeControlEnv { s:&mut s, endpoint_addr:Value::Null, transport_snapshot:json!({}), install:None, stop:false }.request_deadline("r",1);
+        assert_eq!(s.deadlines["r"],first, "duplicate must not remap even a shorter budget");
+    }
+
+    #[test]
+    fn lifecycle_absolute_deadline_is_monotonic_and_fences_queued_work() {
+        use crate::node_control::ControlEnv;
+        let shared = lifecycle_shared(Box::new(GoldenStage { released:Default::default() }));
+        let work = RequestWork::new(&shared, "r");
+        {
+            let mut s = shared.lock().unwrap();
+            let mut env = NodeControlEnv { s:&mut s, endpoint_addr:Value::Null, transport_snapshot:serde_json::json!({}), install:None, stop:false };
+            env.request_deadline("r", 0); // test-only already-expired native fence
+            env.request_deadline("r", 3_600_000); // retry cannot renew it
+        }
+        assert!(work.blocked());
+        assert_eq!(shared.lock().unwrap().inflight_for_request("r"), 1);
+        drop(work);
+        assert_eq!(shared.lock().unwrap().inflight_for_request("r"), 0);
+    }
+
+    #[test]
+    fn lifecycle_deadline_expiring_during_compute_discards_output_and_replay() {
+        use crate::node_control::ControlEnv;
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let released = Arc::new(Mutex::new(Vec::new()));
+        let shared = lifecycle_shared(Box::new(HeldStage { golden:GoldenStage { released:released.clone() }, entered:entered_tx, release:release_rx }));
+        let manifest = wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap();
+        shared.lock().unwrap().stage_node.as_mut().unwrap().on_frame("node-mac-entry", &manifest, &mut |_,_,_| unreachable!());
+        let inbound = Inbound { from:iroh::SecretKey::from_bytes(&[88;32]).public(), from_node:"node-mac-entry".into(), generation:1,
+            frame:wire::decode_frame(&golden("02-hop-prefill-in.bin")).unwrap(), reply:None };
+        let worker_shared = shared.clone();
+        let worker = std::thread::spawn(move || stage_step(&worker_shared, &inbound));
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        {
+            let mut s = shared.lock().unwrap();
+            NodeControlEnv { s:&mut s, endpoint_addr:Value::Null, transport_snapshot:serde_json::json!({}), install:None, stop:false }.request_deadline("request-phone-golden", 0);
+        }
+        release_tx.send(()).unwrap();
+        let step = worker.join().unwrap().unwrap();
+        assert!(step.sends.is_empty() && !step.ack);
+        assert!(!released.lock().unwrap().is_empty());
+        let again = Inbound { from:iroh::SecretKey::from_bytes(&[88;32]).public(), from_node:"node-mac-entry".into(), generation:1,
+            frame:wire::decode_frame(&golden("02-hop-prefill-in.bin")).unwrap(), reply:None };
+        assert_eq!(stage_step(&shared, &again).unwrap_err(), "request_cancelled_or_expired");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn lifecycle_publication_is_owned_until_ack_and_retry_is_fenced() {
+        use crate::transport::{PeerBinding, parse_endpoint_id};
+        use crate::node_control::ControlEnv;
+        let phone = NodeTransport::bind(&[71;32], Reachability::LocalOnly).await.unwrap();
+        let peer = NodeTransport::bind(&[72;32], Reachability::LocalOnly).await.unwrap();
+        phone.configure_route_peers(vec![PeerBinding { generation:1, node_id:"sink".into(), addr:peer.addr() }]).await;
+        peer.configure_peer(parse_endpoint_id(&phone.endpoint_id()).unwrap(), 1).await;
+        let (tx, mut rx) = mpsc::channel(8);
+        let _accept = peer.spawn_accept_dispatch(tx);
+        let shared = lifecycle_shared(Box::new(GoldenStage { released:Default::default() }));
+        let send = crate::stage_node::Send { kind:"HopHeader", to:"sink".into(), frame:golden("03-hop-prefill-forward.bin") };
+        let subject = lifecycle_subject();
+        let work = RequestWork::new(&shared, &subject.request_id);
+        let task = tokio::spawn(send_with_retry(phone.clone(), shared.clone(), send.clone(), work));
+        let mut received = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        {
+            let mut s = shared.lock().unwrap();
+            let residue = NodeControlEnv { s:&mut s, endpoint_addr:Value::Null, transport_snapshot:serde_json::json!({}), install:None, stop:false }.cancel_wait(&subject);
+            assert_eq!(residue.inflight, 1, "unacknowledged publication is not clean");
+        }
+        // Even a peer withholding its ACK cannot consume a fresh 300s data
+        // budget after cancellation. The owned stream is reset before return.
+        tokio::time::timeout(Duration::from_millis(500), task).await.unwrap().unwrap();
+        let _ = received.reply.take().unwrap().send(Err("retry-me".into()));
+        assert_eq!(shared.lock().unwrap().inflight_for_request(&subject.request_id), 0);
+        // Already queued publication after the fence never starts a stream.
+        let queued = RequestWork::new(&shared, &subject.request_id);
+        send_with_retry(phone.clone(), shared.clone(), send.clone(), queued).await;
+        assert!(rx.try_recv().is_err(), "no retry or queued send after cancellation");
+
+        // Retry backoff is owned too. Wait for the real transient transport
+        // result to enter backoff, then cancel before its next attempt.
+        let retry_shared = lifecycle_shared(Box::new(GoldenStage { released:Default::default() }));
+        let retry_work = RequestWork::new(&retry_shared, &subject.request_id);
+        let retry_task = tokio::spawn(send_with_retry(phone, retry_shared.clone(), send, retry_work));
+        let mut received = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        received.reply.take().unwrap().send(Err("retry-me".into())).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if retry_shared.lock().unwrap().status.last_error.as_deref() == Some("forward_failed:retry-me") { break; }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        }).await.unwrap();
+        {
+            let mut s = retry_shared.lock().unwrap();
+            let residue = NodeControlEnv { s:&mut s, endpoint_addr:Value::Null, transport_snapshot:serde_json::json!({}), install:None, stop:false }.cancel_wait(&subject);
+            assert_eq!(residue.inflight, 1, "backoff cannot disappear from the cleanup proof");
+        }
+        tokio::time::timeout(Duration::from_millis(500), retry_task).await.unwrap().unwrap();
+        assert!(rx.try_recv().is_err(), "cancelled retry must never publish another stream");
+        assert_eq!(retry_shared.lock().unwrap().inflight_for_request(&subject.request_id), 0);
+    }
+
+    #[test]
+    fn cancellation_regression_queued_work_is_counted() {
+        let mut inflight = Default::default();
+        begin_inflight(&mut inflight, "r");
+        begin_inflight(&mut inflight, "r");
+        assert_eq!(inflight.get("r"), Some(&2), "queued work is real cancellation residue");
+    }
+
+    #[test]
+    fn cancellation_regression_teardown_reports_remaining_not_removed() {
+        use crate::node_control::ControlEnv;
+        let released = Arc::new(Mutex::new(Vec::new()));
+        let mut s = Shared {
+            observation: ObservationCursor { window_started_at: 0.0, frames_at_window_start: 0, evidence_generation: 0 },
+            membership: None, supervisor_running: false, status: NodeStatus::default(), session: None,
+            invitation: None, stage: Some(Box::new(GoldenStage { released: released.clone() })), forward: None,
+            route: None, shell_metrics: None, acquisition: None,
+            stage_node: Some(crate::stage_node::StageNode::new("node-phone")), control: None,
+            control_peers: false, control_transition: Default::default(), inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_busy: false, sweep_clock: 0.0,
+        };
+        let frame = wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap();
+        let node = s.stage_node.as_mut().unwrap();
+        assert!(node.on_frame("node-mac-entry", &frame, &mut |_, _, _| unreachable!()).ack);
+        let path_id = frame.body["path_id"].as_str().unwrap().to_owned();
+        let request_id = frame.body["request_id"].as_str().unwrap().to_owned();
+        let subject = crate::node_cancel::CancelSubject {
+            request_id: request_id.clone(), path_id, deployment_id:"dep".into(), deployment_epoch:1,
+            qualification_digest:"sha256:q".into(), command_id:"cmd".into(), publisher_generation:1,
+            absolute_deadline_ms:10, request_attempt:0, path_attempt:0, path_digest:format!("sha256:{}", "a".repeat(64)),
+            topology_generation:1, cancellation_generation:1,
+        };
+        let mut env = NodeControlEnv { s: &mut s, endpoint_addr: Value::Null, transport_snapshot:serde_json::json!({}), install:None, stop:false };
+        assert!(env.cancel_wait(&subject).is_clean(), "removed replay outputs are not remaining residue");
+        assert!(env.cancel_wait(&subject).is_clean(), "already absent paths are clean on retry");
+        assert_eq!(released.lock().unwrap().len(), 2);
+    }
 
     #[test]
     fn frames_are_refused_at_the_owner_thermal_ceiling_only() {
@@ -1719,6 +2501,7 @@ mod tests {
             route_generation: 1,
             forward_to: true,
             expires_at: 1.0,
+            controller_endpoint_ids: Vec::new(),
         };
         assert!(already_applied(Some(&("route-1".into(), "sha256:aa".into())), &a));
         assert!(!already_applied(Some(&("route-1".into(), "sha256:bb".into())), &a), "same id, other manifest");
@@ -1749,12 +2532,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    fn verified_synthetic_stage() -> Qwen2Runtime {
+        use base64::Engine;
+        let fixture: Value = serde_json::from_str(include_str!("../tests/fixtures/qwen2_synthetic.json")).unwrap();
+        let blob = base64::engine::general_purpose::STANDARD.decode(fixture["safetensors_b64"].as_str().unwrap()).unwrap();
+        let stage = crate::qwen2::Qwen2Stage::load(crate::qwen2::Qwen2Config::from_hf_config(&fixture["config"]).unwrap(),0,2,
+            &mut crate::qwen2::SafetensorsBytes::new(&blob).unwrap()).unwrap();
+        let digest = crate::stage_manifest::golden_digest(&stage,42,2).unwrap();
+        let golden = crate::stage_manifest::Golden { seed:42, seq:2, output_digest:digest };
+        Qwen2Runtime::new_verified("assignment-1","stage-golden",stage,&golden).unwrap()
+    }
+
     /// The golden stage's output: `0.5 * ((i % 17) - 8) / 8` per value.
     struct GoldenStage {
         released: Arc<Mutex<Vec<(String, String)>>>,
     }
 
     impl StageRuntime for GoldenStage {
+        // Controlled stage fixture, not a production load proof.
+        fn golden_output_digest(&self) -> Option<&str> { Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") }
+        fn replay_result_count(&self) -> Option<usize> { Some(0) }
+        fn applied_operation_count(&self) -> Option<u64> { Some(0) }
         fn backend(&self) -> &'static str {
             crate::qwen2::QWEN2_BACKEND
         }
@@ -1776,6 +2574,10 @@ mod tests {
         }
         fn release_path(&mut self, request_id: &str, path_id: &str) -> usize {
             self.released.lock().unwrap().push((request_id.to_owned(), path_id.to_owned()));
+            1
+        }
+        fn release_request(&mut self, request_id: &str) -> usize {
+            self.released.lock().unwrap().push((request_id.to_owned(), "*".into()));
             1
         }
     }
@@ -1827,7 +2629,8 @@ mod tests {
             acquisition: None,
             stage_node: Some(crate::stage_node::StageNode::new("node-phone")),
             control: None,
-            control_peers: false,
+            control_peers: false, control_transition: Default::default(),
+            inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_busy: false, sweep_clock: 0.0,
         }));
         let (tx, rx) = mpsc::channel(8);
         let _accept = phone.spawn_accept_dispatch(tx);
@@ -1854,6 +2657,16 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(quiet(&mut last_rx));
         assert_eq!(shared.lock().unwrap().status.frames_executed, 1);
+        let telemetry = phone.snapshot().await;
+        assert!(telemetry["remote_frames_received"].as_u64().unwrap() >= 3);
+        assert!(telemetry["remote_frames_sent"].as_u64().unwrap() >= 1);
+        assert!(telemetry["fatal_error"].is_null());
+        let mut s = shared.lock().unwrap();
+        let snapshot = crate::node_control::ControlEnv::qualification_snapshot(&NodeControlEnv {
+            s:&mut s, endpoint_addr:Value::Null, transport_snapshot:telemetry.clone(), install:None, stop:false });
+        assert_eq!(snapshot["transport"]["remote_frames_sent"],telemetry["remote_frames_sent"]);
+        assert!(snapshot["transport"]["local_node_id"].is_null(), "this transport-only fixture is not enrolled");
+        drop(s);
 
         // Hot device: the admitted hop becomes a FailureReport to the entry.
         let mut hot = evidence::Metrics::new();
@@ -1865,7 +2678,10 @@ mod tests {
             .unwrap_or_else(|_| {
                 let hot = thermal_refusal(Some(45.0), &current_platform_metrics(&shared));
                 let s = shared.lock().unwrap();
-                panic!("no FailureReport; last_error={:?} received={} executed={} hot={hot:?}", s.status.last_error, s.status.frames_received, s.status.frames_executed)
+                panic!(
+                    "no FailureReport; last_error={:?} received={} executed={} hot={hot:?}",
+                    s.status.last_error, s.status.frames_received, s.status.frames_executed
+                )
             })
             .unwrap();
         assert_eq!(report.frame.message_type, "FailureReport");
@@ -1900,6 +2716,7 @@ mod tests {
             route_generation: 1,
             forward_to: false,
             expires_at: now_s() + 3600.0,
+            controller_endpoint_ids: Vec::new(),
         };
         let shared = Arc::new(Mutex::new(Shared {
             observation: ObservationCursor { window_started_at: now_s(), frames_at_window_start: 0, evidence_generation: 0 },
@@ -1908,7 +2725,7 @@ mod tests {
             status: NodeStatus::default(),
             session: None,
             invitation: None,
-            stage: Some(Box::new(GoldenStage { released: Arc::default() })),
+            stage: Some(Box::new(verified_synthetic_stage())),
             forward: None,
             route: Some(AppliedRoute { assignment, peer: parse_endpoint_id(&entry.endpoint_id()).unwrap() }),
             shell_metrics: None,
@@ -1921,7 +2738,8 @@ mod tests {
                 endpoint_id: phone.endpoint_id(),
                 boot_id: "boot-1".into(),
             })),
-            control_peers: false,
+            control_peers: false, control_transition: Default::default(),
+            inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_busy: false, sweep_clock: 0.0,
         }));
         let (dispatch_tx, _dispatch_rx) = mpsc::channel(8);
         let _accept = phone.spawn_accept_dispatch(dispatch_tx);
@@ -1952,8 +2770,52 @@ mod tests {
         let started = call(command("start", start)).await;
         assert_eq!(started["result"]["observation"]["event"], "started", "{started}");
         assert_eq!(phone.peer_for_node("node-mac-entry").await.unwrap().generation, 4);
+        assert_eq!(result["observation"]["details"]["runtime_backend"],crate::qwen2::QWEN2_BACKEND);
+        assert_eq!(result["observation"]["details"]["runtime_build_digest"],runtime_build_digest());
+        {
+            let mut s = shared.lock().unwrap();
+            let stage = s.stage.as_mut().unwrap();
+            let input = vec![0.0; stage.hidden_size()];
+            stage.execute(&StageCall::prefill("synthetic-request",1,&input)).unwrap();
+        }
+        let active = RequestWork::new(&shared,"synthetic-request");
+        let busy_snap = call(command("snapshot",json!({}))).await;
+        assert_eq!(busy_snap["result"]["observation"]["details"]["runtime"]["active_state_count"],1);
+        drop(active);
+        let snap = call(command("snapshot", json!({}))).await;
+        let result = &snap["result"];
+        crate::identity::verify(&result["observation"], &result["signature"], &result["verification_key"]).unwrap();
+        let d = &result["observation"]["details"];
+        assert_eq!(d["transport"]["peer_node_id"], "node-mac-entry");
+        assert_eq!(d["runtime"]["active_state_count"], 0);
+        assert_eq!(d["runtime"]["applied_operation_count"],1);
+        assert_eq!(d["runtime"]["replay_result_count"],1);
+        assert_eq!(configured["result"]["observation"]["details"]["golden_output_digest"],
+            shared.lock().unwrap().stage.as_ref().unwrap().golden_output_digest().unwrap());
+        assert_eq!(d["interruptibility"]["cooperative_bound_candidate"], false);
+        assert_eq!(d["interruptibility"]["cooperative_interruption"], true);
+        assert!(d["interruptibility"]["observed_work_unit_count"].as_u64().unwrap()>0);
+        assert!(d["interruptibility"]["maximum_observed_work_unit_ms"].as_f64().is_some());
+        assert!(d["interruptibility"]["maximum_total_cleanup_ms"].is_null());
         let refused = call(command("infer_start", json!({}))).await;
         assert_eq!(refused["error"]["code"], "stage_only_node");
+        let old = RequestWork::new(&shared,"old-generation");
+        {
+            let mut s=shared.lock().unwrap();
+            install_resumed_membership(&mut s,test_membership("accepted-incarnation-2",2),Some(now_s()+60.0));
+        }
+        assert!(old.blocked());
+        let stale=call(command("snapshot",json!({}))).await;
+        assert_eq!(stale["ok"],false,"old session must hello again");
+        let hello=call(command("hello",json!({}))).await;
+        assert_eq!(hello["result"]["boot_id"],"accepted-incarnation-2");
+        assert_eq!(hello["result"]["process_id"],"accepted-incarnation-2");
+        let again=call(command("configure",json!({"assignment_id":"assignment-1","stage_id":"stage-golden","pack_digest":"sha256:pack","manifest_digest":"sha256:graph","load_generation":1}))).await;
+        assert_eq!(again["ok"],true,"{again}");
+        let fresh=call(command("snapshot",json!({}))).await;
+        assert_eq!(fresh["result"]["observation"]["process_id"],"accepted-incarnation-2");
+        assert_eq!(fresh["result"]["observation"]["details"]["runtime"]["replay_result_count"],0);
+        assert!(phone.peer_for_node("node-mac-entry").await.is_none());
     }
 
     /// Revoking the session's controller mid-session tears the session down:
@@ -1975,9 +2837,11 @@ mod tests {
             route_generation: 1,
             forward_to: false,
             expires_at: now_s() + 3600.0,
+            controller_endpoint_ids: Vec::new(),
         };
         let mut stage_node = crate::stage_node::StageNode::new("node-phone");
-        let mut never = |_: &crate::stage_wire::LockedPath, _: &crate::stage_wire::AdmittedHop, _: &[u8]| -> Result<Vec<u8>, String> { unreachable!() };
+        let mut never =
+            |_: &crate::stage_wire::LockedPath, _: &crate::stage_wire::AdmittedHop, _: &[u8]| -> Result<Vec<u8>, String> { unreachable!() };
         let locked = wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap();
         assert_eq!(stage_node.on_frame("node-mac-entry", &locked, &mut never).accepted, Some(true));
         let shared = Arc::new(Mutex::new(Shared {
@@ -1987,14 +2851,15 @@ mod tests {
             status: NodeStatus::default(),
             session: None,
             invitation: None,
-            stage: Some(Box::new(GoldenStage { released: Arc::default() })),
+            stage: Some(Box::new(verified_synthetic_stage())),
             forward: None,
             route: Some(AppliedRoute { assignment, peer: parse_endpoint_id(&entry.endpoint_id()).unwrap() }),
             shell_metrics: None,
             acquisition: None,
             stage_node: Some(stage_node),
             control: None,
-            control_peers: false,
+            control_peers: false, control_transition: Default::default(),
+            inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_busy: false, sweep_clock: 0.0,
         }));
         let (dispatch_tx, _dispatch_rx) = mpsc::channel(8);
         let _accept = phone.spawn_accept_dispatch(dispatch_tx);

@@ -9,6 +9,23 @@ use serde_json::json;
 use tokio::sync::mpsc;
 
 #[tokio::test(flavor = "multi_thread")]
+async fn telemetry_primary_is_configured_role_not_sorted_peer_and_closed_is_fatal() {
+    use mycelium_mobile_core::transport::PeerBinding;
+    let phone = NodeTransport::bind(&[81;32], Reachability::LocalOnly).await.unwrap();
+    let entry = iroh::SecretKey::from_bytes(&[82;32]).public();
+    let forward = iroh::SecretKey::from_bytes(&[83;32]).public();
+    phone.configure_route_peers(vec![
+        PeerBinding { node_id:"z-entry".into(), generation:1, addr:entry.into() },
+        PeerBinding { node_id:"a-forward".into(), generation:1, addr:forward.into() },
+    ]).await;
+    assert_eq!(phone.snapshot().await["peer_node_id"], "z-entry");
+    phone.remove_peer(entry).await;
+    assert!(phone.snapshot().await["peer_node_id"].is_null());
+    phone.close().await;
+    assert_eq!(phone.snapshot().await["fatal_error"], "transport_closed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn admitted_peer_frames_are_acked_and_unknown_or_stale_peers_are_refused() {
     let phone = NodeTransport::bind(&[1; 32], Reachability::LocalOnly).await.unwrap();
     let mac = NodeTransport::bind(&[2; 32], Reachability::LocalOnly).await.unwrap();

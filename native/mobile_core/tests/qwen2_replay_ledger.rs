@@ -28,6 +28,60 @@ fn call<'a>(request: &'a str, path: &'a str, attempt: u64, seq: usize, hidden: &
 }
 
 #[test]
+fn verified_provenance_and_operation_counters_come_from_actual_stage() {
+    let f: Value = serde_json::from_str(include_str!("fixtures/qwen2_synthetic.json")).unwrap();
+    let blob = base64::engine::general_purpose::STANDARD.decode(f["safetensors_b64"].as_str().unwrap()).unwrap();
+    let load = || Qwen2Stage::load(Qwen2Config::from_hf_config(&f["config"]).unwrap(),0,2,&mut SafetensorsBytes::new(&blob).unwrap()).unwrap();
+    let stage = load();
+    let digest = mycelium_mobile_core::stage_manifest::golden_digest(&stage,42,2).unwrap();
+    let mut golden = mycelium_mobile_core::stage_manifest::Golden { seed:42, seq:2, output_digest:digest.clone() };
+    let mut rt = Qwen2Runtime::new_verified("actual-assignment","actual-stage",stage,&golden).unwrap();
+    assert_eq!(rt.golden_output_digest(),Some(digest.as_str()));
+    assert_eq!(rt.applied_operation_count(),Some(0));
+    let (_,seq,input)=runtime();
+    rt.execute(&call("r","p",0,seq,&input)).unwrap();
+    rt.execute(&call("r","p",0,seq,&input)).unwrap();
+    assert_eq!(rt.applied_operation_count(),Some(1));
+    assert_eq!(rt.replay_result_count(),Some(1));
+    rt.release_path("r","p");
+    assert_eq!(rt.replay_result_count(),Some(0));
+    golden.output_digest = format!("sha256:{}","0".repeat(64));
+    assert!(Qwen2Runtime::new_verified("a","s",load(),&golden).is_err());
+    assert!(Qwen2Runtime::new("a","s",load()).unwrap().golden_output_digest().is_none());
+}
+
+#[test]
+fn held_real_kernel_cancellation_leaves_no_partial_replay() {
+    // Barriers hold *inside* each production kernel, never a replacement runtime.
+    for unit in ["linear_dot", "attention_score", "attention_value", "rms_norm", "rope", "silu", "residual"] {
+        let (mut rt, seq, input) = runtime();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let mut held = false;
+            let result = rt.execute_cooperative(&call("held", "p", 0, seq, &input), &mut |name| {
+                if name == unit && !held {
+                    held = true;
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    return Err(mycelium_mobile_core::runtime::RuntimeError("request_cancelled_or_expired".into()));
+                }
+                Ok(())
+            });
+            (rt, result)
+        });
+        let entered = entered_rx.recv_timeout(std::time::Duration::from_secs(2));
+        if entered.is_ok() { release_tx.send(()).unwrap(); }
+        let (mut rt, result) = worker.join().unwrap();
+        assert!(entered.is_ok(), "missing cooperative checkpoint: {unit}");
+        assert_eq!(result.unwrap_err().0, "request_cancelled_or_expired");
+        assert_eq!((rt.request_count, rt.ledger_len(), rt.ledger_bytes()), (0, 0, 0));
+        let (_, seq, input) = runtime();
+        assert!(rt.execute(&call("next", "p", 0, seq, &input)).is_ok(), "weights survive interruption");
+    }
+}
+
+#[test]
 fn a_retry_returns_the_cached_output_without_recomputing() {
     let (mut rt, seq, input) = runtime();
     let first = rt.execute(&call("req-1", "path-a", 0, seq, &input)).unwrap();

@@ -10,27 +10,28 @@
 //! The `net` feature adds the seed HTTP client, the embedded iroh endpoint and
 //! the node supervisor used by the Android and iOS apps.
 
-pub mod canonical;
-pub mod identity;
-pub mod onboarding;
-pub mod runtime;
-pub mod bf16;
-pub mod quant;
-pub mod safetensors;
-pub mod qwen2;
-pub mod stage_manifest;
 pub mod artifact;
 pub mod artifact_grant;
-pub mod wire;
-pub mod stage_wire;
-pub mod stage_node;
-pub mod node_control;
-pub mod membership;
-pub mod evidence;
-pub mod route_assignment;
-#[cfg(feature = "artifact-source")]
-pub mod transport;
 #[cfg(feature = "artifact-source")]
 pub mod artifact_net;
+pub mod bf16;
+pub mod canonical;
+pub mod evidence;
+pub mod identity;
+pub mod membership;
 #[cfg(feature = "net")]
 pub mod node;
+pub mod node_cancel;
+pub mod node_control;
+pub mod onboarding;
+pub mod quant;
+pub mod qwen2;
+pub mod route_assignment;
+pub mod runtime;
+pub mod safetensors;
+pub mod stage_manifest;
+pub mod stage_node;
+pub mod stage_wire;
+#[cfg(feature = "artifact-source")]
+pub mod transport;
+pub mod wire;

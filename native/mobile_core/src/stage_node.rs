@@ -68,6 +68,8 @@ use crate::wire::{self, Frame};
 /// Relay-clock retention horizon of a tombstone record (as `relay.py`).
 pub const TOMBSTONE_RETENTION_S: f64 = 600.0;
 pub const LEDGER_CAPACITY: usize = 4096;
+pub const PATH_IDLE_S: f64 = 1200.0;
+pub const PATH_ABSOLUTE_S: f64 = 4800.0;
 
 /// Path-table bounds. Every bound fails closed for whoever hits it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,7 +88,8 @@ pub struct Bounds {
 }
 
 /// The phone's bounds (the relay's are 8192 / 64 / 4096 / 65536).
-pub const PHONE_BOUNDS: Bounds = Bounds { quota_per_creator: 512, max_creators: 16, pending_per_source: 256, pending_total: 4096, max_paths: 256 };
+pub const PHONE_BOUNDS: Bounds =
+    Bounds { quota_per_creator: 512, max_creators: 16, pending_per_source: 256, pending_total: 4096, max_paths: 256 };
 
 /// One frame to send to a peer node.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,6 +114,7 @@ pub struct Step {
     pub sends: Vec<Send>,
     /// `(request_id, path_id)` whose runtime replay results must be released.
     pub released: Option<(String, String)>,
+    pub(crate) publication: Option<PathWork>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,7 +123,38 @@ enum Outcome {
     Failed(String),
 }
 
+/// Generation-specific publication lease. A replaced path gets a new fence;
+/// delayed work holds the old one and cannot borrow its successor's lifetime.
+#[derive(Debug, Clone)]
+pub struct PathFence(std::sync::Arc<std::sync::Mutex<PathClock>>);
+#[derive(Debug)]
+struct PathClock { born: f64, admitted: f64, busy: usize, retired: bool }
+impl PathFence {
+    fn new(born: f64, admitted: f64) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(PathClock { born, admitted, busy: 0, retired: false })))
+    }
+    pub fn blocked(&self, now: f64) -> bool {
+        let c = self.0.lock().unwrap();
+        c.retired || now - c.born >= PATH_ABSOLUTE_S || (c.busy == 0 && now - c.admitted >= PATH_IDLE_S)
+    }
+    pub fn begin(&self) -> PathWork {
+        self.0.lock().unwrap().busy += 1;
+        PathWork(self.clone())
+    }
+    fn touch(&self, now: f64) { self.0.lock().unwrap().admitted = now; }
+}
+#[derive(Debug)]
+pub struct PathWork(PathFence);
+impl Clone for PathWork { fn clone(&self) -> Self { self.0.begin() } }
+impl PartialEq for PathWork { fn eq(&self, other: &Self) -> bool { std::sync::Arc::ptr_eq(&self.0.0, &other.0.0) } }
+impl Eq for PathWork {}
+impl Drop for PathWork { fn drop(&mut self) { self.0.0.lock().unwrap().busy -= 1; } }
+impl PathWork { pub fn blocked(&self, now: f64) -> bool { self.0.blocked(now) } }
+
 struct Registered {
+    born_at: f64,
+    admitted_at: f64,
+    fence: PathFence,
     path: LockedPath,
     body_digest: [u8; 32],
     /// The authenticated node that created the path (charged for it).
@@ -184,7 +219,9 @@ impl Pending {
     }
 
     fn forget(&mut self, key: &PendingKey) {
-        let Some(seq) = self.by_key.remove(key) else { return };
+        let Some(seq) = self.by_key.remove(key) else {
+            return;
+        };
         self.by_seq.remove(&seq);
         for (index, name) in [(&mut self.by_source, &key.4), (&mut self.by_path, &key.1)] {
             if let Some(set) = index.get_mut(name) {
@@ -206,6 +243,15 @@ impl Pending {
     }
 }
 
+/// What one `release_request` teardown actually removed and left behind.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Released {
+    /// Live paths retired for the request, registration order.
+    pub live_paths: Vec<String>,
+    /// Pending cancellation barriers still held for the request.
+    pub pending_cancellations: usize,
+}
+
 pub struct StageNode {
     local: String,
     bounds: Bounds,
@@ -220,6 +266,7 @@ pub struct StageNode {
     /// Relay clock: the caller's monotonic seconds (never moves back).
     now: f64,
     ledger: HopLedger<Outcome>,
+    expired_releases: Vec<(String, String)>,
 }
 
 fn digest(v: &Value) -> [u8; 32] {
@@ -243,6 +290,7 @@ impl StageNode {
             pending: Pending::default(),
             now: 0.0,
             ledger: HopLedger::new(LEDGER_CAPACITY),
+            expired_releases: Vec::new(),
         }
     }
 
@@ -338,7 +386,9 @@ impl StageNode {
             if *creator == self.local || self.live.contains_key(creator) {
                 continue;
             }
-            let Some((_, newest_key)) = records.by_seq.last_key_value() else { continue };
+            let Some((_, newest_key)) = records.by_seq.last_key_value() else {
+                continue;
+            };
             let newest = self.tombstones.get(newest_key).map_or(self.now, |t| t.recorded_at);
             if self.now - newest < TOMBSTONE_RETENTION_S {
                 continue;
@@ -388,6 +438,7 @@ impl StageNode {
 
     fn remove_live(&mut self, path_id: &str) -> Option<Registered> {
         let removed = self.paths.remove(path_id)?;
+        removed.fence.0.lock().unwrap().retired = true;
         if let Some(count) = self.live.get_mut(&removed.creator) {
             *count -= 1;
             if *count == 0 {
@@ -400,8 +451,38 @@ impl StageNode {
     /// [`on_frame`](Self::on_frame) at the caller's monotonic clock in seconds
     /// (the tombstone horizon is measured with it; it never moves back).
     pub fn on_frame_at(&mut self, now: f64, from: &str, frame: &Frame, compute: &mut Compute<'_>) -> Step {
-        self.now = self.now.max(now);
+        self.sweep_at(now);
         self.on_frame(from, frame, compute)
+    }
+
+    /// Bounded scan of the current registrations, not stale heap entries.
+    /// Retirement is atomic with selection, so an old generation cannot evict
+    /// a replacement. NaN/infinite/backward clocks never age or revive a path.
+    pub fn sweep_at(&mut self, now: f64) {
+        if now.is_finite() { self.now = self.now.max(now); }
+        let expired: Vec<String> = self.paths.iter().filter(|(_, r)|
+            r.fence.blocked(self.now)
+        ).map(|(id, _)| id.clone()).collect();
+        for id in expired {
+            let r = self.remove_live(&id).expect("selected current registration");
+            self.record_tombstone(&id, Self::owner(&r.path), r.path.path_attempt, &r.creator);
+            self.ledger.forget_path(&r.path.request_id, &id);
+            self.expired_releases.push((r.path.request_id, id));
+        }
+    }
+
+    /// Must be drained into the runtime before processing any subsequent hop.
+    pub fn drain_expired_releases(&mut self) -> Vec<(String, String)> {
+        std::mem::take(&mut self.expired_releases)
+    }
+
+    /// Every live path this request still holds, in path id order.
+    pub fn live_paths_of(&self, request_id: &str) -> Vec<String> {
+        self.paths.iter().filter(|(_, r)| r.path.request_id == request_id).map(|(id, _)| id.clone()).collect()
+    }
+
+    pub fn path_fence(&self, path_id: &str) -> Option<PathFence> {
+        self.paths.get(path_id).map(|r| r.fence.clone())
     }
 
     pub fn path(&self, path_id: &str) -> Option<&LockedPath> {
@@ -417,9 +498,41 @@ impl StageNode {
     /// and pending cancellations are kept (fail closed): a reassignment never
     /// revives a cancelled attempt.
     pub fn clear(&mut self) {
+        for r in self.paths.values() { r.fence.0.lock().unwrap().retired = true; }
         self.paths.clear();
         self.live.clear();
         self.ledger = HopLedger::new(LEDGER_CAPACITY);
+    }
+
+    /// The exact teardown of one cancelled request: every live path it owns
+    /// (the control's own path and any successor path of the same request),
+    /// retired with its creator's tombstone, plus the pending cancellation
+    /// tombstones still naming it. Returns what was released and what remains,
+    /// so a receipt can only be complete when this is empty.
+    ///
+    /// Every path removed here is charged to its creator and binds its owner up
+    /// to this attempt (I3), exactly as the entry's own release does, so a
+    /// cancelled attempt never revives.
+    pub fn release_request(&mut self, request_id: &str) -> Released {
+        let mut out = Released::default();
+        let owned: Vec<String> = self.paths.iter().filter(|(_, r)| r.path.request_id == request_id).map(|(id, _)| id.clone()).collect();
+        for path_id in owned {
+            let Some(removed) = self.remove_live(&path_id) else {
+                continue;
+            };
+            let owner = Self::owner(&removed.path);
+            let attempt = removed.path.path_attempt;
+            let creator = removed.creator.clone();
+            self.record_tombstone(&path_id, owner, attempt, &creator);
+            self.ledger.forget_path(request_id, &path_id);
+            out.live_paths.push(path_id);
+        }
+        let pending: Vec<PendingKey> = self.pending.by_key.keys().filter(|key| key.0 == request_id).cloned().collect();
+        out.pending_cancellations = pending.len();
+        // A pending barrier must survive cleanup: its late ManifestLocked
+        // has not yet established the owner/creator needed for a tombstone.
+        // Only consume_pending can safely turn it into that tombstone.
+        out
     }
 
     pub fn on_frame(&mut self, from: &str, frame: &Frame, compute: &mut Compute<'_>) -> Step {
@@ -497,11 +610,13 @@ impl StageNode {
         let combined: [u8; 32] = Sha256::digest([body_digest, build_digest].concat()).into();
         // An older attempt never replaces a newer one; the same attempt only
         // re-registers identically (a sender retry).
-        if let Some(e) = self.paths.get(&path.path_id) {
+        if let Some(e) = self.paths.get_mut(&path.path_id) {
             if path.path_attempt < e.path.path_attempt || (path.path_attempt == e.path.path_attempt && combined != e.body_digest) {
                 return rejected();
             }
             if path.path_attempt == e.path.path_attempt {
+                e.admitted_at = self.now;
+                e.fence.touch(self.now);
                 return Step { ack: true, accepted: Some(true), ..Step::default() };
             }
         }
@@ -511,14 +626,14 @@ impl StageNode {
         let path_id = path.path_id.clone();
         // A newer attempt of the same owner retires the older one, charged to
         // the path's creator.
-        let creator = match self.remove_live(&path_id) {
+        let (creator, born_at) = match self.remove_live(&path_id) {
             Some(old) => {
                 self.record_tombstone(&path_id, owner, old.path.path_attempt, &old.creator);
-                old.creator
+                (old.creator, old.born_at)
             }
-            None => creator,
+            None => (creator, self.now),
         };
-        self.insert_live(path_id, Registered { path, body_digest: combined, creator });
+        self.insert_live(path_id, Registered { path, body_digest: combined, creator, born_at, admitted_at: self.now, fence: PathFence::new(born_at, self.now) });
         Step { ack: true, accepted: Some(true), ..Step::default() }
     }
 
@@ -526,7 +641,8 @@ impl StageNode {
         let rejected = |reason: &str| Step { ack: true, disposition: Some("REJECTED"), reason: reason.into(), ..Step::default() };
         let text = |k: &str| header[k].as_str().unwrap_or("");
         let int = |k: &str| header[k].as_i64().unwrap_or(i64::MIN);
-        let key = idempotency_key(text("request_id"), text("path_id"), int("path_attempt"), text("phase"), int("token_index"), int("hop_index"));
+        let key =
+            idempotency_key(text("request_id"), text("path_id"), int("path_attempt"), text("phase"), int("token_index"), int("hop_index"));
         if header["idempotency_key"] != key.as_str() {
             return rejected("invalid_idempotency_key");
         }
@@ -541,6 +657,8 @@ impl StageNode {
         match self.ledger.check(&hop) {
             Some(LedgerHit::Conflict) => return rejected("idempotency_payload_mismatch"),
             Some(LedgerHit::Cached(outcome)) => {
+                self.paths.get_mut(&hop.path_id).unwrap().admitted_at = self.now;
+                self.paths[&hop.path_id].fence.touch(self.now);
                 return match outcome {
                     Outcome::Forwarded => Step { ack: true, disposition: Some("FORWARDED"), ..Step::default() },
                     Outcome::Failed(reason) => Step { ack: true, disposition: Some("FAILED"), reason, ..Step::default() },
@@ -548,6 +666,8 @@ impl StageNode {
             }
             None => {}
         }
+        self.paths.get_mut(&hop.path_id).unwrap().admitted_at = self.now;
+        self.paths[&hop.path_id].fence.touch(self.now);
         let (outcome, send) = match compute(&path, &hop, payload) {
             Ok(out) => match path.forward_header(&hop, header) {
                 Ok((body, next)) => match wire::encode_frame("HopHeader", &body, &out) {
@@ -634,6 +754,63 @@ mod tests {
 
     const ENTRY: &str = "node-mac-entry";
     const FINAL: &str = "node-mac-final";
+
+    #[test]
+    fn cancellation_regression_cleanup_preserves_pending_barriers() {
+        let mut node = StageNode::new("node-phone");
+        let cancel = golden_frame("08-path-cancellation.bin");
+        assert_eq!(node.on_frame(ENTRY, &cancel, &mut never).accepted, Some(true));
+        node.release_request(cancel.body["request_id"].as_str().unwrap());
+        let registration = golden_frame("01-manifest-locked.bin");
+        assert!(!node.on_frame(ENTRY, &registration, &mut never).ack, "cleanup must not erase an early cancellation fence");
+    }
+
+    #[test]
+    fn readiness_expiry_rejected_traffic_cannot_keep_path_alive() {
+        let mut node = StageNode::new("node-phone");
+        assert!(register(&mut node, 0.0, "entry", "p", "r", 0, "entry"));
+        assert!(!register(&mut node, 1199.0, "stranger", "p", "r", 0, "entry"));
+        assert!(!register(&mut node, 1200.0, "entry", "p", "r", 0, "entry"));
+        assert!(node.path("p").is_none());
+    }
+
+    #[test]
+    fn readiness_expiry_continuous_birth_survives_duplicate_and_new_attempt() {
+        let mut node = StageNode::new("node-phone");
+        assert!(register(&mut node, 0.0, "entry", "p", "r", 0, "entry"));
+        for at in [1000.0, 2000.0, 3000.0] {
+            assert!(register(&mut node, at, "entry", "p", "r", 0, "entry"));
+        }
+        assert!(register(&mut node, 4000.0, "entry", "p", "r", 1, "entry"));
+        assert!(register(&mut node, 4799.0, "entry", "p", "r", 1, "entry"));
+        assert!(!register(&mut node, 4800.0, "entry", "p", "r", 1, "entry"));
+        assert!(node.path("p").is_none());
+        assert!(register(&mut node, 4800.0, "entry", "p", "r", 2, "entry"));
+    }
+
+    #[test]
+    fn readiness_expiry_busy_idle_absolute_and_generation_fences() {
+        let mut node = StageNode::new("node-phone");
+        assert!(register(&mut node, 0.0, "entry", "p", "r", 0, "entry"));
+        let old = node.path_fence("p").unwrap();
+        let busy = old.begin();
+        node.sweep_at(2400.0);
+        assert!(node.path("p").is_some(), "admitted work is not idle");
+        node.sweep_at(4800.0);
+        assert!(busy.blocked(4800.0), "absolute ceiling overrides busy work");
+        assert_eq!(node.drain_expired_releases(), vec![("r".into(), "p".into())]);
+        assert!(node.drain_expired_releases().is_empty());
+        assert!(register(&mut node, 4800.0, "entry", "p", "r", 1, "entry"));
+        drop(busy);
+        assert!(old.blocked(4800.0));
+        node.sweep_at(4801.0);
+        assert_eq!(node.path("p").unwrap().path_attempt, 1);
+        assert!(node.drain_expired_releases().is_empty(), "old work cannot retire successor");
+        node.sweep_at(f64::INFINITY);
+        node.sweep_at(f64::NAN);
+        node.sweep_at(0.0);
+        assert!(node.path("p").is_some());
+    }
 
     fn small(quota: usize, creators: usize) -> Bounds {
         Bounds { quota_per_creator: quota, max_creators: creators, pending_per_source: 4, pending_total: 8, max_paths: 64 }

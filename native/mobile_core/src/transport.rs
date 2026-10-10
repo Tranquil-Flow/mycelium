@@ -151,6 +151,10 @@ pub struct NodeTransport {
     /// Bumped on every controller-set change: the node reconciles the
     /// control session and what it installed against the new set.
     controller_epoch: Arc<tokio::sync::watch::Sender<u64>>,
+    primary_peer: Arc<std::sync::Mutex<Option<String>>>,
+    frames_sent: Arc<std::sync::atomic::AtomicU64>,
+    frames_received: Arc<std::sync::atomic::AtomicU64>,
+    fatal: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl NodeTransport {
@@ -175,6 +179,24 @@ impl NodeTransport {
             peer_live: Live::default(),
             control_live: Live::default(),
             controller_epoch: Arc::new(tokio::sync::watch::channel(0).0),
+            primary_peer: Arc::default(), frames_sent: Arc::default(), frames_received: Arc::default(), fatal: Arc::default(),
+        })
+    }
+
+    pub(crate) fn mark_fatal(&self, code: &str) {
+        *self.fatal.lock().unwrap() = Some(code.to_owned());
+    }
+
+    pub async fn snapshot(&self) -> serde_json::Value {
+        let peers = self.peers.read().await;
+        let mut ids: Vec<&str> = peers.values().map(|p| p.node_id.as_str()).collect();
+        ids.sort_unstable();
+        serde_json::json!({
+            "peer_node_id": *self.primary_peer.lock().unwrap(), "peer_node_ids": ids,
+            "remote_frames_sent": self.frames_sent.load(std::sync::atomic::Ordering::Relaxed),
+            "remote_frames_received": self.frames_received.load(std::sync::atomic::Ordering::Relaxed),
+            "fatal_error": *self.fatal.lock().unwrap(),
+            "counter_scope": "transport_lifetime_written_and_admitted_frames",
         })
     }
 
@@ -211,7 +233,9 @@ impl NodeTransport {
 
     /// Allow-list one peer at an exact generation (ConfigurePeer semantics).
     pub async fn configure_peer(&self, peer: EndpointId, generation: u64) {
-        self.peers.write().await.insert(peer, PeerBinding { generation, node_id: peer.to_string(), addr: EndpointAddr::from(peer) });
+        let mut peers = self.peers.write().await;
+        peers.insert(peer, PeerBinding { generation, node_id: peer.to_string(), addr: EndpointAddr::from(peer) });
+        if peers.len() == 1 { *self.primary_peer.lock().unwrap() = Some(peer.to_string()); }
     }
 
     /// Replace the routed peer set (ConfigurePeers semantics): each Router
@@ -219,6 +243,9 @@ impl NodeTransport {
     pub async fn configure_route_peers(&self, peers: Vec<PeerBinding>) {
         let mut table = self.peers.write().await;
         table.clear();
+        // ConfigurePeers carries the control peer first, then its optional
+        // forward peer. Never guess this role by sorting node identifiers.
+        *self.primary_peer.lock().unwrap() = peers.first().map(|p| p.node_id.clone());
         for binding in peers {
             table.insert(binding.addr.id, binding);
         }
@@ -235,13 +262,17 @@ impl NodeTransport {
     pub async fn remove_peer(&self, peer: EndpointId) {
         let table = {
             let mut table = self.peers.write().await;
-            table.remove(&peer);
+            if let Some(removed) = table.remove(&peer) {
+                let mut primary = self.primary_peer.lock().unwrap();
+                if primary.as_deref() == Some(&removed.node_id) { *primary = None; }
+            }
             table.keys().copied().collect::<std::collections::HashSet<_>>()
         };
         self.peer_live.lock().unwrap().close_revoked(|remote| table.contains(remote));
     }
 
     pub async fn close(&self) {
+        *self.fatal.lock().unwrap() = Some("transport_closed".into());
         self.endpoint.close().await;
     }
 
@@ -303,6 +334,8 @@ impl NodeTransport {
 
     fn accept_loop(&self, inbox: mpsc::Sender<Inbound>, dispatch: bool) -> tokio::task::JoinHandle<()> {
         let endpoint = self.endpoint.clone();
+        let frames_received = self.frames_received.clone();
+        let fatal = self.fatal.clone();
         let peers = self.peers.clone();
         let seen = self.seen.clone();
         let controllers = self.controllers.clone();
@@ -311,6 +344,7 @@ impl NodeTransport {
         tokio::spawn(async move {
             while let Some(incoming) = endpoint.accept().await {
                 let peers = peers.clone();
+                let frames_received = frames_received.clone();
                 let inbox = inbox.clone();
                 let seen = seen.clone();
                 let (controllers, control) = (controllers.clone(), control.clone());
@@ -367,6 +401,7 @@ impl NodeTransport {
                             },
                             Err(_) => Err("invalid_frame".into()),
                         };
+                        if verdict.is_ok() { frames_received.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
                         let (kind, payload) = match &verdict {
                             Ok(()) => (RemoteKind::Ack, Vec::new()),
                             Err(code) => (RemoteKind::Error, code.as_bytes().to_vec()),
@@ -378,6 +413,7 @@ impl NodeTransport {
                     }
                 });
             }
+            *fatal.lock().unwrap() = Some("transport_accept_stopped".into());
         })
     }
 
@@ -388,37 +424,60 @@ impl NodeTransport {
         generation: u64,
         router_frame: &[u8],
     ) -> Result<PathReport, TransportError> {
-        let connection = timeout(Duration::from_secs(30), self.endpoint.connect(peer, IROH_ALPN))
-            .await
-            .map_err(|_| err("connect_timeout"))?
-            .map_err(|e| TransportError(format!("connect_failed:{e}")))?;
-        let (mut send, mut recv) = timeout(STREAM_IO_TIMEOUT, connection.open_bi())
-            .await
-            .map_err(|_| err("open_timeout"))?
-            .map_err(|_| err("open_failed"))?;
+        self.send_cancellable(peer, generation, router_frame, std::future::pending()).await
+    }
+
+    /// Request-scoped cancellation keeps the normal data deadlines unchanged.
+    /// A cancelled exchange explicitly resets/stops its owned streams before
+    /// returning; dropping a send future alone could gracefully flush bytes.
+    pub(crate) async fn send_cancellable(
+        &self,
+        peer: EndpointAddr,
+        generation: u64,
+        router_frame: &[u8],
+        cancel: impl std::future::Future<Output = ()>,
+    ) -> Result<PathReport, TransportError> {
+        tokio::pin!(cancel);
+        let connection = tokio::select! {
+            biased;
+            _ = &mut cancel => return Err(err("request_cancelled_or_expired")),
+            result = timeout(Duration::from_secs(30), self.endpoint.connect(peer, IROH_ALPN)) =>
+                result.map_err(|_| err("connect_timeout"))?.map_err(|e| TransportError(format!("connect_failed:{e}")))?,
+        };
+        let (mut send, mut recv) = tokio::select! {
+            biased;
+            _ = &mut cancel => return Err(err("request_cancelled_or_expired")),
+            result = timeout(STREAM_IO_TIMEOUT, connection.open_bi()) =>
+                result.map_err(|_| err("open_timeout"))?.map_err(|_| err("open_failed"))?,
+        };
         let mut message_id = [0u8; 16];
         getrandom::getrandom(&mut message_id).map_err(|_| err("randomness_unavailable"))?;
         let encoded = wire::encode_remote(RemoteKind::Transfer, message_id, &wire::transfer_payload(generation, router_frame))
             .map_err(|e| TransportError(e.0.into()))?;
-        timeout(STREAM_IO_TIMEOUT, send.write_all(&encoded))
-            .await
-            .map_err(|_| err("write_timeout"))?
-            .map_err(|_| err("write_failed"))?;
-        send.finish().map_err(|_| err("write_failed"))?;
-        let response = timeout(STREAM_IO_TIMEOUT, recv.read_to_end(MAX_TRANSFER_BYTES))
-            .await
-            .map_err(|_| err("read_timeout"))?
-            .map_err(|_| err("read_failed"))?;
-        let response = wire::decode_remote(&response).map_err(|e| TransportError(e.0.into()))?;
-        if response.message_id != message_id {
-            return Err(err("response_id_mismatch"));
+        let outcome = tokio::select! {
+            biased;
+            _ = &mut cancel => Err(err("request_cancelled_or_expired")),
+            result = async {
+                timeout(STREAM_IO_TIMEOUT, send.write_all(&encoded)).await
+                    .map_err(|_| err("write_timeout"))?.map_err(|_| err("write_failed"))?;
+                send.finish().map_err(|_| err("write_failed"))?;
+                self.frames_sent.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let response = timeout(STREAM_IO_TIMEOUT, recv.read_to_end(MAX_TRANSFER_BYTES)).await
+                    .map_err(|_| err("read_timeout"))?.map_err(|_| err("read_failed"))?;
+                let response = wire::decode_remote(&response).map_err(|e| TransportError(e.0.into()))?;
+                if response.message_id != message_id { return Err(err("response_id_mismatch")); }
+                match response.kind {
+                    RemoteKind::Ack => Ok(path_report(&connection)),
+                    RemoteKind::Error => Err(TransportError(String::from_utf8_lossy(&response.payload).into_owned())),
+                    RemoteKind::Transfer => Err(err("unexpected_transfer")),
+                }
+            } => result,
+        };
+        if outcome.is_err() {
+            let _ = send.reset(REJECT_CODE.into());
+            let _ = recv.stop(REJECT_CODE.into());
         }
-        let report = path_report(&connection);
-        match response.kind {
-            RemoteKind::Ack => Ok(report),
-            RemoteKind::Error => Err(TransportError(String::from_utf8_lossy(&response.payload).into_owned())),
-            RemoteKind::Transfer => Err(err("unexpected_transfer")),
-        }
+        outcome
     }
 }
 

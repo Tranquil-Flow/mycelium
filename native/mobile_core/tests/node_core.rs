@@ -7,6 +7,23 @@ use mycelium_mobile_core::node::NodeCore;
 use mycelium_mobile_core::transport::Reachability;
 
 #[test]
+fn q2_profile_is_explicit_and_reference_pairing_semantics_survive() {
+    use mycelium_mobile_core::{node::NodeProfile, onboarding::{self,PairingSession}, identity::Identity};
+    let id=Identity::from_secret("synthetic-endpoint", &[42;32]).unwrap();
+    let request = |class| PairingSession::with_recipient_for_class(&id,"synthetic-device",100.0,60,"nonce-1",
+        x25519_dalek::StaticSecret::from([43;32]),class).unwrap().request;
+    assert_eq!(NodeProfile::Reference.peer_class(),"android_native_iroh");
+    assert_eq!(NodeProfile::Reference.backend(),"mobile-rust-reference");
+    assert_eq!(NodeProfile::Qwen2.peer_class(),"android_native_qwen2_iroh");
+    assert_eq!(NodeProfile::Qwen2.backend(),"mobile-rust-qwen2");
+    let reference=request(NodeProfile::Reference.peer_class());
+    let q2=request(NodeProfile::Qwen2.peer_class());
+    assert_ne!(reference["signature"],q2["signature"]);
+    onboarding::verify_request(&q2,101.0).unwrap();
+    onboarding::verify_request(&reference,101.0).unwrap();
+}
+
+#[test]
 fn identity_is_durable_across_restart_and_bad_qr_fails_closed() {
     let dir = std::env::temp_dir().join(format!("mycelium-node-core-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

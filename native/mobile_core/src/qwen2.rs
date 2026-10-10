@@ -27,6 +27,34 @@ use crate::quant::Int8Rowwise;
 use crate::runtime::{RuntimeError, StageCall, StageOutput, StageRuntime};
 
 pub const QWEN2_BACKEND: &str = "mobile-rust-qwen2";
+/// Source work bounds, NOT a wall-time cleanup guarantee. A dot is at most
+/// MAX_QWEN2_INNER terms; copies/elementwise loops yield every WORK_CHUNK.
+pub const WORK_CHUNK: usize = 8192;
+type Check<'a> = dyn FnMut(&'static str) -> Result<(), RuntimeError> + 'a;
+
+fn zeros(n: usize, check: &mut Check<'_>) -> Result<Vec<f32>, RuntimeError> {
+    check("allocation")?;
+    let mut v = Vec::with_capacity(n);
+    while v.len() < n {
+        check("zero_chunk")?;
+        v.resize((v.len() + WORK_CHUNK).min(n), 0.0);
+    }
+    Ok(v)
+}
+fn copy_values(values: &[f32], check: &mut Check<'_>) -> Result<Vec<f32>, RuntimeError> {
+    check("allocation")?;
+    let mut out = Vec::with_capacity(values.len());
+    for chunk in values.chunks(WORK_CHUNK) { check("copy_chunk")?; out.extend_from_slice(chunk); }
+    Ok(out)
+}
+fn finite(values: &[f32], check: &mut Check<'_>) -> Result<bool, RuntimeError> {
+    for chunk in values.chunks(WORK_CHUNK) {
+        check("finite_chunk")?;
+        if chunk.iter().any(|v| !v.is_finite()) { return Ok(false); }
+    }
+    Ok(true)
+}
+
 /// Complete-context replay bound (tokens per call).
 pub const MAX_QWEN2_SEQUENCE: usize = 1024;
 pub const MAX_QWEN2_HIDDEN: usize = 8192;
@@ -87,8 +115,10 @@ impl Qwen2Config {
         {
             return reject("qwen2_config_activation_unsupported");
         }
-        let int = |k: &str| v.get(k).and_then(Value::as_u64).filter(|n| *n > 0).map(|n| n as usize).ok_or_else(|| RuntimeError(code.into()));
-        let float = |k: &str| v.get(k).and_then(Value::as_f64).filter(|f| f.is_finite() && *f > 0.0).ok_or_else(|| RuntimeError(code.into()));
+        let int =
+            |k: &str| v.get(k).and_then(Value::as_u64).filter(|n| *n > 0).map(|n| n as usize).ok_or_else(|| RuntimeError(code.into()));
+        let float =
+            |k: &str| v.get(k).and_then(Value::as_f64).filter(|f| f.is_finite() && *f > 0.0).ok_or_else(|| RuntimeError(code.into()));
         let hidden = int("hidden_size")?;
         let heads = int("num_attention_heads")?;
         let config = Self {
@@ -206,7 +236,8 @@ impl Qwen2Layer {
 
     fn resident_bytes(&self) -> usize {
         let m = MATRIX_SUFFIXES.iter().map(|s| self.matrix(s).unwrap().bytes()).sum::<usize>();
-        let v = self.input_layernorm.len() + self.q_bias.len() + self.k_bias.len() + self.v_bias.len() + self.post_attention_layernorm.len();
+        let v =
+            self.input_layernorm.len() + self.q_bias.len() + self.k_bias.len() + self.v_bias.len() + self.post_attention_layernorm.len();
         m + 4 * v
     }
 }
@@ -262,7 +293,12 @@ pub struct Qwen2Stage {
 }
 
 impl Qwen2Stage {
-    pub fn load(config: Qwen2Config, start_layer: usize, end_layer_exclusive: usize, src: &mut dyn TensorSource) -> Result<Self, RuntimeError> {
+    pub fn load(
+        config: Qwen2Config,
+        start_layer: usize,
+        end_layer_exclusive: usize,
+        src: &mut dyn TensorSource,
+    ) -> Result<Self, RuntimeError> {
         config.validate()?;
         if end_layer_exclusive <= start_layer || end_layer_exclusive - start_layer > MAX_QWEN2_LAYERS_PER_STAGE {
             return reject("qwen2_layer_range_invalid");
@@ -288,11 +324,11 @@ impl Qwen2Stage {
         self.layers.iter().map(Qwen2Layer::resident_bytes).sum()
     }
 
-    fn check_input(&self, seq: usize, hidden: &[f32]) -> Result<(), RuntimeError> {
+    fn check_input(&self, seq: usize, hidden: &[f32], check: &mut Check<'_>) -> Result<(), RuntimeError> {
         if seq == 0 || seq > MAX_QWEN2_SEQUENCE || seq.checked_mul(self.config.hidden_size) != Some(hidden.len()) {
             return reject("request_hidden_shape_invalid");
         }
-        if hidden.iter().any(|v| !v.is_finite()) {
+        if !finite(hidden, check)? {
             return reject("request_hidden_nonfinite");
         }
         Ok(())
@@ -300,13 +336,18 @@ impl Qwen2Stage {
 
     /// Run every layer of the stage over `seq` row-major hidden rows.
     pub fn forward(&self, seq: usize, hidden: &[f32]) -> Result<Vec<f32>, RuntimeError> {
-        self.check_input(seq, hidden)?;
-        let rope = Rope::new(&self.config, seq);
-        let mut x = hidden.to_vec();
+        self.forward_cooperative(seq, hidden, &mut |_| Ok(()))
+    }
+
+    fn forward_cooperative(&self, seq: usize, hidden: &[f32], check: &mut Check<'_>) -> Result<Vec<f32>, RuntimeError> {
+        self.check_input(seq, hidden, check)?;
+        let rope = Rope::new(&self.config, seq, check)?;
+        let mut x = copy_values(hidden, check)?;
         for layer in &self.layers {
-            x = layer_forward(&self.config, &rope, layer, seq, &x);
+            check("layer")?;
+            x = layer_forward(&self.config, &rope, layer, seq, &x, check)?;
         }
-        if x.iter().any(|v| !v.is_finite()) {
+        if !finite(&x, check)? {
             return reject("stage_output_nonfinite");
         }
         Ok(x)
@@ -315,9 +356,10 @@ impl Qwen2Stage {
     /// Run one layer (by its position inside the stage); used for per-layer
     /// parity and timing.
     pub fn forward_layer(&self, offset: usize, seq: usize, hidden: &[f32]) -> Result<Vec<f32>, RuntimeError> {
-        self.check_input(seq, hidden)?;
+        let check = &mut |_| Ok(());
+        self.check_input(seq, hidden, check)?;
         let layer = self.layers.get(offset).ok_or_else(|| RuntimeError("qwen2_layer_range_invalid".into()))?;
-        Ok(layer_forward(&self.config, &Rope::new(&self.config, seq), layer, seq, hidden))
+        layer_forward(&self.config, &Rope::new(&self.config, seq, check)?, layer, seq, hidden, check)
     }
 }
 
@@ -337,10 +379,13 @@ pub struct Qwen2Runtime {
     stage_id: String,
     stage: Qwen2Stage,
     pub request_count: u64,
+    golden_output_digest: Option<String>,
     ledger: std::collections::HashMap<CallIdentity, ([u8; 32], StageOutput)>,
     ledger_order: std::collections::VecDeque<CallIdentity>,
     ledger_bytes: usize,
     ledger_byte_cap: usize,
+    work_unit_count: u64,
+    maximum_observed_work_unit_ms: f64,
 }
 
 /// (request, path, attempt, phase, token): structured, so ids containing ':'
@@ -356,16 +401,17 @@ fn call_identity(call: &StageCall<'_>) -> CallIdentity {
     (call.request_id.to_owned(), call.path_id.to_owned(), call.path_attempt, phase, call.token_index)
 }
 
-fn call_fingerprint(call: &StageCall<'_>) -> [u8; 32] {
+fn call_fingerprint(call: &StageCall<'_>, check: &mut Check<'_>) -> Result<[u8; 32], RuntimeError> {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(b"mycelium.qwen2_stage_call.v1\0");
     h.update(call.position.to_be_bytes());
     h.update((call.sequence as u64).to_be_bytes());
-    for v in call.hidden {
-        h.update(v.to_le_bytes());
+    for chunk in call.hidden.chunks(WORK_CHUNK) {
+        check("fingerprint_chunk")?;
+        for v in chunk { h.update(v.to_le_bytes()); }
     }
-    h.finalize().into()
+    Ok(h.finalize().into())
 }
 
 impl Qwen2Runtime {
@@ -380,11 +426,52 @@ impl Qwen2Runtime {
             stage_id: stage_id.to_owned(),
             stage,
             request_count: 0,
+            golden_output_digest: None,
             ledger: std::collections::HashMap::new(),
             ledger_order: std::collections::VecDeque::new(),
             ledger_bytes: 0,
             ledger_byte_cap: MAX_QWEN2_REPLAY_BYTES,
+            work_unit_count: 0,
+            maximum_observed_work_unit_ms: 0.0,
         })
+    }
+
+    pub fn new_verified(assignment_id: &str, stage_id: &str, stage: Qwen2Stage,
+        golden: &crate::stage_manifest::Golden) -> Result<Self, RuntimeError> {
+        // Recompute from applied bytes. Never accept a controller's digest.
+        let digest = crate::stage_manifest::golden_digest(&stage, golden.seed, golden.seq)
+            .map_err(|e| RuntimeError(e.0))?;
+        if digest != golden.output_digest { return reject("stage_manifest_golden_mismatch"); }
+        let mut runtime = Self::new(assignment_id, stage_id, stage)?;
+        runtime.golden_output_digest = Some(digest);
+        Ok(runtime)
+    }
+
+    fn execute_checked(&mut self, call: &StageCall<'_>, check: &mut Check<'_>) -> Result<StageOutput, RuntimeError> {
+        check("stage_entry")?;
+        call.check_complete_context()?;
+        self.stage.check_input(call.sequence, call.hidden, check)?;
+        let identity = call_identity(call);
+        let fingerprint = call_fingerprint(call, check)?;
+        if let Some((fp, out)) = self.ledger.get(&identity) {
+            if *fp != fingerprint {
+                return reject("request_replay_conflict");
+            }
+            return Ok(StageOutput { sequence:out.sequence, hidden_size:out.hidden_size, values:copy_values(&out.values, check)? });
+        }
+        let values = self.stage.forward_cooperative(call.sequence, call.hidden, check)?;
+        let out = StageOutput { sequence: call.sequence, hidden_size: self.stage.config.hidden_size, values };
+        let size = out.values.len() * 4;
+        if size <= self.ledger_byte_cap {
+            let cached = StageOutput { sequence:out.sequence, hidden_size:out.hidden_size, values:copy_values(&out.values, check)? };
+            check("replay_commit")?;
+            self.evict_to(MAX_QWEN2_REPLAY_RESULTS - 1, self.ledger_byte_cap - size);
+            self.ledger.insert(identity.clone(), (fingerprint, cached));
+            self.ledger_order.push_back(identity);
+            self.ledger_bytes += size;
+        }
+        self.request_count += 1;
+        Ok(out)
     }
 
     pub fn stage(&self) -> &Qwen2Stage {
@@ -424,7 +511,9 @@ impl Qwen2Runtime {
 
     fn evict_to(&mut self, count: usize, bytes: usize) {
         while self.ledger.len() > count || self.ledger_bytes > bytes {
-            let Some(oldest) = self.ledger_order.pop_front() else { break };
+            let Some(oldest) = self.ledger_order.pop_front() else {
+                break;
+            };
             if let Some((_, out)) = self.ledger.remove(&oldest) {
                 self.ledger_bytes -= out.values.len() * 4;
             }
@@ -433,6 +522,9 @@ impl Qwen2Runtime {
 }
 
 impl StageRuntime for Qwen2Runtime {
+    fn golden_output_digest(&self) -> Option<&str> { self.golden_output_digest.as_deref() }
+    fn replay_result_count(&self) -> Option<usize> { Some(self.ledger.len()) }
+    fn applied_operation_count(&self) -> Option<u64> { Some(self.request_count) }
     fn backend(&self) -> &'static str {
         QWEN2_BACKEND
     }
@@ -447,30 +539,56 @@ impl StageRuntime for Qwen2Runtime {
     }
 
     fn execute(&mut self, call: &StageCall<'_>) -> Result<StageOutput, RuntimeError> {
-        call.check_complete_context()?;
-        let identity = call_identity(call);
-        let fingerprint = call_fingerprint(call);
-        if let Some((fp, out)) = self.ledger.get(&identity) {
-            if *fp != fingerprint {
-                return reject("request_replay_conflict");
-            }
-            return Ok(out.clone());
-        }
-        let values = self.stage.forward(call.sequence, call.hidden)?;
-        self.request_count += 1;
-        let out = StageOutput { sequence: call.sequence, hidden_size: self.stage.config.hidden_size, values };
-        let size = out.values.len() * 4;
-        if size <= self.ledger_byte_cap {
-            self.evict_to(MAX_QWEN2_REPLAY_RESULTS - 1, self.ledger_byte_cap - size);
-            self.ledger.insert(identity.clone(), (fingerprint, out.clone()));
-            self.ledger_order.push_back(identity);
-            self.ledger_bytes += size;
-        }
-        Ok(out)
+        self.execute_cooperative(call, &mut |_| Ok(()))
+    }
+
+    fn cooperative_work_snapshot(&self) -> Option<Value> {
+        Some(serde_json::json!({
+            "work_unit":"bounded_qwen2_replay_chunk",
+            "maximum_dot_terms":MAX_QWEN2_INNER,
+            "maximum_vector_chunk_elements":WORK_CHUNK,
+            "observed_work_unit_count":self.work_unit_count,
+            "maximum_observed_work_unit_ms":if self.work_unit_count > 0 { Some(self.maximum_observed_work_unit_ms) } else { None },
+            "cooperative_interruption":true,
+            "backend_candidate":true,
+            "cooperative_bound_candidate":false,
+            "maximum_total_cleanup_ms":null,
+            "physical_proof_required":true,
+            "bound_kind":"source_work_not_wall_time",
+            "reason":"cooperative_chunks_implemented_wall_time_cleanup_unqualified",
+            "request_scoped_cleanup":true,
+            "shared_process_termination_used":false
+        }))
+    }
+
+    fn execute_cooperative(&mut self, call: &StageCall<'_>, check: &mut Check<'_>) -> Result<StageOutput, RuntimeError> {
+        let mut count = 0u64;
+        let mut maximum = 0.0f64;
+        let mut start = std::time::Instant::now();
+        let result = self.execute_checked(call, &mut |unit| {
+            maximum = maximum.max(start.elapsed().as_secs_f64() * 1000.0);
+            count = count.saturating_add(1);
+            // Includes callback wait in the following interval. These are
+            // actual observations, never a real-time scheduling guarantee.
+            start = std::time::Instant::now();
+            check(unit)
+        });
+        maximum = maximum.max(start.elapsed().as_secs_f64() * 1000.0);
+        self.work_unit_count = self.work_unit_count.saturating_add(count);
+        self.maximum_observed_work_unit_ms = self.maximum_observed_work_unit_ms.max(maximum);
+        result
     }
 
     fn release_path(&mut self, request_id: &str, path_id: &str) -> usize {
         Qwen2Runtime::release_path(self, request_id, path_id)
+    }
+
+    fn release_request(&mut self, request_id: &str) -> usize {
+        let gone: Vec<CallIdentity> = self.ledger_order.iter().filter(|k| k.0 == request_id).cloned().collect();
+        for key in &gone {
+            self.remove(key);
+        }
+        gone.len()
     }
 
     fn release_all(&mut self) -> usize {
@@ -491,7 +609,7 @@ struct Rope {
 }
 
 impl Rope {
-    fn new(config: &Qwen2Config, seq: usize) -> Self {
+    fn new(config: &Qwen2Config, seq: usize, check: &mut Check<'_>) -> Result<Self, RuntimeError> {
         let d = config.head_dim;
         let half = d / 2;
         let theta = config.rope_theta as f32;
@@ -499,20 +617,22 @@ impl Rope {
         let mut cos = Vec::with_capacity(seq * half);
         let mut sin = Vec::with_capacity(seq * half);
         for p in 0..seq {
+            check("rope_table")?;
             for f in &inv {
                 let freq = p as f32 * f;
                 cos.push(libm::cosf(freq));
                 sin.push(libm::sinf(freq));
             }
         }
-        Self { half, cos, sin }
+        Ok(Self { half, cos, sin })
     }
 
     /// `x * cos + rotate_half(x) * sin` for every head of one row at `pos`.
-    fn apply(&self, row: &mut [f32], pos: usize, head_dim: usize) {
+    fn apply(&self, row: &mut [f32], pos: usize, head_dim: usize, check: &mut Check<'_>) -> Result<(), RuntimeError> {
         let (c, s) = (&self.cos[pos * self.half..(pos + 1) * self.half], &self.sin[pos * self.half..(pos + 1) * self.half]);
         let mut rotated = vec![0.0f32; head_dim];
         for head in row.chunks_exact_mut(head_dim) {
+            check("rope")?;
             let (first, second) = head.split_at(self.half);
             for j in 0..self.half {
                 rotated[j] = first[j] * c[j] + -second[j] * s[j];
@@ -520,6 +640,7 @@ impl Rope {
             }
             head.copy_from_slice(&rotated);
         }
+        Ok(())
     }
 }
 
@@ -605,13 +726,14 @@ fn rms_norm(row: &[f32], weight: &[f32], eps: f32, out: &mut [f32], scratch: &mu
 }
 
 /// `y = (x . w_row) * scale (+ bias)` for every row of `x` (`seq x in`).
-fn linear(x: &[f32], seq: usize, w: &Int8Rowwise, bias: Option<&[f32]>) -> Vec<f32> {
+fn linear(x: &[f32], seq: usize, w: &Int8Rowwise, bias: Option<&[f32]>, check: &mut Check<'_>) -> Result<Vec<f32>, RuntimeError> {
     let (inp, out) = (w.cols, w.rows);
-    let mut y = vec![0.0f32; seq * out];
+    let mut y = zeros(seq * out, check)?;
     for o in 0..out {
         let row = w.row(o);
         let scale = w.scales[o];
         for t in 0..seq {
+            check("linear_dot")?;
             let mut v = dot_i8(&x[t * inp..(t + 1) * inp], row) * scale;
             if let Some(b) = bias {
                 v += b[o];
@@ -619,31 +741,32 @@ fn linear(x: &[f32], seq: usize, w: &Int8Rowwise, bias: Option<&[f32]>) -> Vec<f
             y[t * out + o] = v;
         }
     }
-    y
+    Ok(y)
 }
 
-fn layer_forward(c: &Qwen2Config, rope: &Rope, l: &Qwen2Layer, seq: usize, x: &[f32]) -> Vec<f32> {
+fn layer_forward(c: &Qwen2Config, rope: &Rope, l: &Qwen2Layer, seq: usize, x: &[f32], check: &mut Check<'_>) -> Result<Vec<f32>, RuntimeError> {
     let (h, d, kvw) = (c.hidden_size, c.head_dim, c.kv_width());
     let eps = c.rms_norm_eps as f32;
     let mut scratch = Vec::with_capacity(c.intermediate_size.max(h));
 
-    let mut normed = vec![0.0f32; seq * h];
+    let mut normed = zeros(seq * h, check)?;
     for t in 0..seq {
+        check("rms_norm")?;
         rms_norm(&x[t * h..(t + 1) * h], &l.input_layernorm, eps, &mut normed[t * h..(t + 1) * h], &mut scratch);
     }
-    let mut q = linear(&normed, seq, &l.q_proj, Some(&l.q_bias));
-    let mut k = linear(&normed, seq, &l.k_proj, Some(&l.k_bias));
-    let v = linear(&normed, seq, &l.v_proj, Some(&l.v_bias));
+    let mut q = linear(&normed, seq, &l.q_proj, Some(&l.q_bias), check)?;
+    let mut k = linear(&normed, seq, &l.k_proj, Some(&l.k_bias), check)?;
+    let v = linear(&normed, seq, &l.v_proj, Some(&l.v_bias), check)?;
     for t in 0..seq {
-        rope.apply(&mut q[t * h..(t + 1) * h], t, d);
-        rope.apply(&mut k[t * kvw..(t + 1) * kvw], t, d);
+        rope.apply(&mut q[t * h..(t + 1) * h], t, d, check)?;
+        rope.apply(&mut k[t * kvw..(t + 1) * kvw], t, d, check)?;
     }
 
     // Causal grouped-query attention; query head `hd` reads KV head
     // `hd / (heads / kv_heads)` (NumPy's `np.repeat` along the head axis).
     let group = c.num_attention_heads / c.num_key_value_heads;
     let root = (d as f32).sqrt();
-    let mut attended = vec![0.0f32; seq * h];
+    let mut attended = zeros(seq * h, check)?;
     let mut scores = vec![0.0f32; seq];
     for hd in 0..c.num_attention_heads {
         let kvh = hd / group;
@@ -651,17 +774,20 @@ fn layer_forward(c: &Qwen2Config, rope: &Rope, l: &Qwen2Layer, seq: usize, x: &[
             let qrow = &q[t * h + hd * d..t * h + (hd + 1) * d];
             let mut max = f32::NEG_INFINITY;
             for (j, s) in scores.iter_mut().enumerate().take(t + 1) {
+                check("attention_score")?;
                 *s = dot_f32(qrow, &k[j * kvw + kvh * d..j * kvw + (kvh + 1) * d]) / root;
                 max = max.max(*s);
             }
             // Masked positions are exp(-inf) = 0 in NumPy; keep them in the
             // pairwise sum so the grouping matches its full-row reduction.
+            check("softmax")?;
             for (j, s) in scores.iter_mut().enumerate() {
                 *s = if j <= t { libm::expf(*s - max) } else { 0.0 };
             }
             let denom = pairwise_sum(&scores);
             let out = &mut attended[t * h + hd * d..t * h + (hd + 1) * d];
             for j in 0..=t {
+                check("attention_value")?;
                 let p = scores[j] / denom;
                 let vrow = &v[j * kvw + kvh * d..j * kvw + (kvh + 1) * d];
                 for (o, vv) in out.iter_mut().zip(vrow) {
@@ -670,17 +796,31 @@ fn layer_forward(c: &Qwen2Config, rope: &Rope, l: &Qwen2Layer, seq: usize, x: &[
             }
         }
     }
-    let o = linear(&attended, seq, &l.o_proj, None);
-    let after: Vec<f32> = x.iter().zip(&o).map(|(a, b)| a + b).collect();
+    let o = linear(&attended, seq, &l.o_proj, None, check)?;
+    let mut after = Vec::with_capacity(x.len());
+    for (a, b) in x.chunks(WORK_CHUNK).zip(o.chunks(WORK_CHUNK)) {
+        check("residual")?;
+        after.extend(a.iter().zip(b).map(|(a,b)| a+b));
+    }
 
     for t in 0..seq {
+        check("rms_norm")?;
         rms_norm(&after[t * h..(t + 1) * h], &l.post_attention_layernorm, eps, &mut normed[t * h..(t + 1) * h], &mut scratch);
     }
-    let gate = linear(&normed, seq, &l.gate_proj, None);
-    let up = linear(&normed, seq, &l.up_proj, None);
-    let gated: Vec<f32> = gate.iter().zip(&up).map(|(g, u)| (g / (1.0f32 + libm::expf(-g))) * u).collect();
-    let down = linear(&gated, seq, &l.down_proj, None);
-    after.iter().zip(&down).map(|(a, b)| a + b).collect()
+    let gate = linear(&normed, seq, &l.gate_proj, None, check)?;
+    let up = linear(&normed, seq, &l.up_proj, None, check)?;
+    let mut gated = Vec::with_capacity(gate.len());
+    for (g, u) in gate.chunks(WORK_CHUNK).zip(up.chunks(WORK_CHUNK)) {
+        check("silu")?;
+        gated.extend(g.iter().zip(u).map(|(g,u)| (g / (1.0f32 + libm::expf(-g))) * u));
+    }
+    let down = linear(&gated, seq, &l.down_proj, None, check)?;
+    let mut out = Vec::with_capacity(after.len());
+    for (a,b) in after.chunks(WORK_CHUNK).zip(down.chunks(WORK_CHUNK)) {
+        check("residual")?;
+        out.extend(a.iter().zip(b).map(|(a,b)| a+b));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -714,9 +854,14 @@ mod tests {
         let good = serde_json::json!({"model_type":"qwen2","hidden_act":"silu","hidden_size":64,"intermediate_size":128,
             "num_attention_heads":4,"num_key_value_heads":2,"rms_norm_eps":1e-6,"rope_theta":1e6});
         assert_eq!(Qwen2Config::from_hf_config(&good).unwrap().head_dim, 16);
-        for (k, v) in [("num_key_value_heads", serde_json::json!(3)), ("hidden_size", serde_json::json!(66)),
-                       ("hidden_act", serde_json::json!("gelu")), ("model_type", serde_json::json!("llama")),
-                       ("rms_norm_eps", serde_json::json!(0.0)), ("intermediate_size", serde_json::json!(null))] {
+        for (k, v) in [
+            ("num_key_value_heads", serde_json::json!(3)),
+            ("hidden_size", serde_json::json!(66)),
+            ("hidden_act", serde_json::json!("gelu")),
+            ("model_type", serde_json::json!("llama")),
+            ("rms_norm_eps", serde_json::json!(0.0)),
+            ("intermediate_size", serde_json::json!(null)),
+        ] {
             let mut bad = good.clone();
             bad[k] = v;
             assert!(Qwen2Config::from_hf_config(&bad).is_err(), "{k}");

@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 IROH_CRATE = ROOT / "native" / "iroh_transport"
 IROH_BINARY = IROH_CRATE / "target" / "debug" / "mycelium-iroh-sidecar"
 _BUILD_ENVIRONMENT_KEYS = (
+    "CARGO_BUILD_JOBS",
     "CARGO_HOME",
     "HOME",
     "LANG",
