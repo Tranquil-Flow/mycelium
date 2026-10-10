@@ -129,7 +129,9 @@ def test_session_wire_lifecycle_and_signed_cancellation_not_rewritten():
     c = Carrier()
     s = session(c)
     s.send(command_id='h', command='hello', payload={})
-    for op in ('configure', 'start', 'bind_request_control', 'update_request_control', 'health', 'snapshot', 'infer_cancel_wait'):
+    # Bind has a clock-domain wire projection and native-shaped digest response;
+    # its complete contract is covered by test_phone_deadline_wire/composition.
+    for op in ('configure', 'start', 'update_request_control', 'health', 'snapshot', 'infer_cancel_wait'):
         payload = {'request_cleanup': {'complete': False, 'cancellation_generation': 3}} if op == 'infer_cancel_wait' else {}
         response = s.send(command_id=op, command=op, payload=payload)
         assert response['result']['observation']['details'] == (dict(payload, endpoint_addr={'id': ENDPOINT}) if op == 'configure' else payload)

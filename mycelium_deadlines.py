@@ -73,6 +73,7 @@ __all__ = [
     "COMPOSITION_INVARIANTS",
     "CONSUMER_BINDINGS",
     "PHONE_THERMAL_COOLDOWN_SECONDS",
+    "PHONE_REQUEST_EXECUTION_MAX_MS",
     "DEADLINES",
     "DEADLINES_BY_NAME",
     "Deadline",
@@ -464,8 +465,16 @@ advertised_maximum_total_cleanup_ms: Final[int] = (
 
 # Route-local safety exclusion after an authenticated phone thermal refusal.
 PHONE_THERMAL_COOLDOWN_SECONDS: Final[float] = 300.0
+# Phone wire translation preserves the host subject and separately bounds local execution.
+PHONE_REQUEST_EXECUTION_MAX_MS: Final[int] = 3_600_000
 
 DEADLINES: Final[tuple[Deadline, ...]] = (
+    Deadline(
+        name="phone_request_execution_max_ms", value=PHONE_REQUEST_EXECUTION_MAX_MS,
+        unit="milliseconds", owner="mycelium_live/phone_stage_session.py",
+        derivation="At most the existing one-hour command lifetime; remaining host monotonic budget maps once at the phone.",
+        source="mycelium_live.phone_stage_session.PHONE_REQUEST_EXECUTION_MAX_MS",
+    ),
     Deadline(
         name="phone_thermal_cooldown_seconds", value=PHONE_THERMAL_COOLDOWN_SECONDS,
         unit="seconds", owner="mycelium_router/entry.py",
@@ -1268,6 +1277,7 @@ def check_composition(
 #: ``physical_inference_node.MAXIMUM_TOTAL_CLEANUP_MS``, so the imported lane
 #: has no second copy of any number this registry owns.
 BOUND_CONSUMER_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
+    ("mycelium_live.phone_stage_session.PHONE_REQUEST_EXECUTION_MAX_MS", "phone_request_execution_max_ms"),
     ("mycelium_router.entry.PHONE_THERMAL_COOLDOWN_SECONDS", "phone_thermal_cooldown_seconds"),
     (
         "mycelium_iroh_sidecar.client.PEER_CONNECT_DEADLINE_SECONDS",

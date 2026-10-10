@@ -2312,7 +2312,7 @@ class PhysicalLiveRoute:
             "deployment_epoch": self._graph.deployment_epoch,
             "qualification_digest": self._graph.manifest_digest,
             "command_id": command_id, "publisher_generation": 1,
-            "absolute_deadline_ms": int((time.time() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS) * 1000), "request_attempt": 1,
+            "absolute_deadline_ms": int(deadline * 1000), "request_attempt": 1,
             "path_id": command_id, "path_attempt": 0,
             "path_digest": self._graph.manifest_digest,
             "topology_generation": self._graph.topology_version,

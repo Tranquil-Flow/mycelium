@@ -76,7 +76,7 @@ def test_route_opens_mixed_sessions_proves_cancel_then_health_and_close(monkeypa
         assert configure['request_control_graph'] == dict(deployment_id='dep',deployment_epoch=1,topology_generation=1)
         cancel = next(d['payload'] for d in c.calls if d['command']=='infer_cancel_wait')
         assert cancel['publisher_generation'] > 0 and cancel['request_attempt'] > 0
-        assert cancel['absolute_deadline_ms'] > int(time.time()*1000)
+        assert cancel['absolute_deadline_ms'] > int(time.monotonic()*1000)
         r._snapshot_all()
         assert 'phone' in r._last_snapshots
         response = r._send_before('phone', command_id='health-now', command='health', payload={},

@@ -19,6 +19,7 @@ import threading
 import time
 from typing import Any
 
+from mycelium_deadlines import PHONE_REQUEST_EXECUTION_MAX_MS
 from mycelium_iroh_sidecar.client import SidecarClient
 from mycelium_qualification.evidence import canonical_json_bytes
 from physical_inference_qualification import ControllerError, PeerIdentity, QualificationController
@@ -32,6 +33,19 @@ _EVENTS = {
     'update_request_control': 'request_control_updated',
     'infer_cancel_wait': 'inference_cancelled', 'stop': 'stopping',
 }
+
+
+def _execution_budget_ms(control: Any) -> int:
+    """Translate only the budget; the opaque host subject stays byte-identical."""
+    deadline = control.get("absolute_deadline_ms") if isinstance(control, Mapping) else None
+    if type(deadline) is not int or deadline <= 0:
+        raise ValueError("phone_execution_budget_invalid")
+    remaining = int(deadline - time.monotonic() * 1000)
+    if remaining <= 0:
+        raise TimeoutError("request_execution_deadline_exceeded")
+    if remaining > PHONE_REQUEST_EXECUTION_MAX_MS:
+        raise ValueError("phone_execution_budget_invalid")
+    return remaining
 
 
 def validate_phone_configure(value: Any) -> dict[str, Any]:
@@ -119,8 +133,13 @@ class PhoneStageSession:
             raise ControllerError('stage_only_node')
         if not isinstance(command_id, str) or not command_id or not isinstance(payload, Mapping):
             raise ValueError('phone_command_invalid')
+        wire_payload = dict(payload)
+        if command == 'bind_request_control':
+            if set(wire_payload) != {'request_id', 'control'}:
+                raise ValueError('phone_bind_payload_invalid')
+            wire_payload['execution_budget_ms'] = _execution_budget_ms(wire_payload['control'])
         raw = canonical_json_bytes(dict(protocol=_PROTOCOL, command_id=command_id,
-            run_id=self._run_id, deployment_id=self._deployment_id, command=command, payload=dict(payload)))
+            run_id=self._run_id, deployment_id=self._deployment_id, command=command, payload=wire_payload))
         if len(raw) > _MAX_BYTES:
             raise ValueError('phone_command_too_large')
         with self._lock:
@@ -158,6 +177,12 @@ class PhoneStageSession:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError('command_deadline_exceeded')
+            if command == 'bind_request_control':
+                # Connection setup consumes the host budget. Refresh from the
+                # frozen serialized subject, never mutable caller data.
+                request = json.loads(raw)
+                request['payload']['execution_budget_ms'] = _execution_budget_ms(request['payload']['control'])
+                raw = canonical_json_bytes(request)
             result = client.control_call(peer_endpoint_id=self._endpoint_id,
                 request_json=raw.decode('utf-8'), timeout_seconds=remaining)
             if time.monotonic() >= deadline:
