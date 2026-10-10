@@ -683,6 +683,9 @@ class IrohTransport:
         self._scoped_event_sequence = 0
         self._scoped_events: deque[_ScopedTransportEvent] = deque(maxlen=256)
         self._path_graphs: dict[str, Any] = {}
+        # Live, locally registered subjects. Request owner control fences all
+        # admitted successors; a peer PathCancellation remains exact-path only.
+        self._path_subjects: dict[str, PathCancellation] = {}
         self._participant_nodes_by_path: dict[str, frozenset[str]] = {}
         self._entry_nodes: dict[str, str] = {}
         self.manifest_deltas: list[ManifestDelta] = []
@@ -756,6 +759,12 @@ class IrohTransport:
     ) -> dict[str, int | bool]:
         """Project exact-subject blockers while ``_state_lock`` is owned."""
 
+        request_wide = self._request_controlled_cancelled_locked(request_id)
+        paths = {path_id}
+        if request_wide:
+            paths.update(subject.path_id for subject in self._path_subjects.values()
+                         if subject.request_id == request_id)
+
         def matches(
             candidate_request: str | None,
             candidate_path: str | None,
@@ -763,9 +772,9 @@ class IrohTransport:
         ) -> bool:
             return (
                 candidate_request == request_id
-                and candidate_path == path_id
+                and (request_wide or candidate_path == path_id)
                 and (
-                    path_attempt is None
+                    request_wide or path_attempt is None
                     or candidate_attempt is None
                     or candidate_attempt == path_attempt
                 )
@@ -792,17 +801,30 @@ class IrohTransport:
             for scope, count in self._forward_scopes.items()
             if count > 0
             and scope[0] == request_id
-            and scope[1] == path_id
-            and (path_attempt is None or scope[2] == path_attempt)
+            and (request_wide or scope[1] == path_id)
+            and (request_wide or path_attempt is None or scope[2] == path_attempt)
         )
         return {
             "pending_delivery_count": pending_count,
             "inflight_received_count": inflight_count,
             "forward_count": forward_count,
-            "path_graph_registered": path_id in self._path_graphs,
-            "participants_registered": path_id in self._participant_nodes_by_path,
-            "entry_registered": request_id in self._entry_nodes,
-            "cancellation_worker_active": path_id in self._cancellation_threads,
+            "lineage_subject_registered": any(path in self._path_subjects for path in paths),
+            "path_graph_registered": any(path in self._path_graphs for path in paths),
+            "participants_registered": any(path in self._participant_nodes_by_path for path in paths),
+            # Peer/legacy teardown proves one exact path. A different live
+            # successor (or retired predecessor awaiting delivery) retains the
+            # shared entry identity, but is not that exact path's blocker.
+            # Authenticated owner cleanup still covers the whole request.
+            "entry_registered": (
+                request_id in self._entry_nodes
+                and (
+                    request_wide
+                    or path_id in self._path_subjects
+                    or not any(subject.request_id == request_id
+                               for subject in self._path_subjects.values())
+                )
+            ),
+            "cancellation_worker_active": any(path in self._cancellation_threads for path in paths),
             "cancellation_observed": (
                 False
                 if path_attempt is None
@@ -2777,7 +2799,8 @@ class IrohTransport:
                     header.path_id,
                     header.path_attempt,
                 )
-                if scope in self._cancellations_by_subject:
+                if (scope in self._cancellations_by_subject
+                        or self._request_controlled_cancelled_locked(header.request_id)):
                     # The authenticated frame was already in the receive queue
                     # when owner cancellation won. Absorb it without
                     # republishing Router/transport ownership; the dispatcher
@@ -2790,6 +2813,10 @@ class IrohTransport:
                 if entry_node_id != entry_node:
                     raise IrohTransportError("request_entry_conflict")
                 self._path_graphs[header.path_id] = context.graph
+                self._path_subjects[header.path_id] = PathCancellation(
+                    header.request_id, header.path_id, header.path_attempt,
+                    header.topology_version,
+                )
                 self._participant_nodes_by_path[header.path_id] = frozenset(
                     self._node_for_placement(context.graph, hop.placement_id)
                     for hop in context.build.ordered_hops
@@ -2866,9 +2893,20 @@ class IrohTransport:
                     # relay tombstone and transport sweep are then final, and
                     # this already-queued manifest must not recreate ownership.
                     return
-                self._path_graphs[message.path_id] = message.build.graph
-                self._participant_nodes_by_path[message.path_id] = participants
-                self._entry_nodes.setdefault(message.request_id, entry_node)
+                cancelled = self._request_controlled_cancelled_locked(message.request_id)
+                subject = PathCancellation(
+                    message.request_id, message.path_id, message.path_attempt,
+                    message.manifest.topology_version,
+                )
+                self._path_subjects[message.path_id] = subject
+                if not cancelled:
+                    self._path_graphs[message.path_id] = message.build.graph
+                    self._participant_nodes_by_path[message.path_id] = participants
+                    self._entry_nodes.setdefault(message.request_id, entry_node)
+            if cancelled:
+                # Router admitted this successor while owner control overtook
+                # it. Retire the admitted resources, not merely the metadata.
+                self.apply_controlled_path_cancellation(subject, entry_cancelled=False)
             return
         if isinstance(message, ManifestDelta):
             with self._state_lock:
@@ -2979,6 +3017,10 @@ class IrohTransport:
                     raise IrohTransportError("path_cancelled")
                 self._entry_nodes.setdefault(header.request_id, self.node_id)
                 self._path_graphs[header.path_id] = graph
+                self._path_subjects[header.path_id] = PathCancellation(
+                    header.request_id, header.path_id, header.path_attempt,
+                    header.topology_version,
+                )
                 self._participant_nodes_by_path[header.path_id] = participants
         else:
             if not isinstance(payload, bytes):
@@ -3040,6 +3082,10 @@ class IrohTransport:
             if entry is not None:
                 destinations.add(entry)
             self._path_graphs[locked.path_id] = graph
+            self._path_subjects[locked.path_id] = PathCancellation(
+                locked.request_id, locked.path_id, locked.path_attempt,
+                locked.manifest.topology_version,
+            )
             self._participant_nodes_by_path[locked.path_id] = frozenset(destinations)
         frame = encode_frame(locked)
         for destination in sorted(destinations):
@@ -3109,6 +3155,53 @@ class IrohTransport:
         return True
 
     def apply_controlled_path_cancellation(
+        self,
+        cancellation: PathCancellation,
+        *,
+        entry_cancelled: bool,
+        cleanup_deadline_monotonic_s: float | None = None,
+    ) -> bool:
+        """Fence an authenticated owner request and retire its admitted lineage.
+
+        The control binding names the original path, whereas an A6/A7 cutover
+        can leave a successor alive under the same immutable request. Never
+        derive successors from caller input, and never broaden peer data-plane
+        cancellations. The owner fence also blocks later successor publication.
+        """
+        if not isinstance(entry_cancelled, bool):
+            raise ValueError("entry_cancelled must be boolean")
+        with self._state_lock:
+            self._require_running()
+            if self._router is None:
+                return False
+            entry = self._entry_nodes.get(cancellation.request_id)
+            participants = self._participant_nodes_by_path.get(cancellation.path_id)
+            if entry is not None and participants is not None and self.node_id not in participants:
+                return False
+            if entry is not None and entry != self.node_id and entry_cancelled:
+                return False
+            self._remember_controlled_cancellation_locked(cancellation.request_id)
+            subjects = {cancellation.path_id: cancellation}
+            subjects.update({path: subject for path, subject in self._path_subjects.items()
+                             if subject.request_id == cancellation.request_id})
+        accepted = False
+        for subject in subjects.values():
+            try:
+                result = self._apply_controlled_path_cancellation(
+                    subject, entry_cancelled=entry_cancelled,
+                    cleanup_deadline_monotonic_s=cleanup_deadline_monotonic_s,
+                )
+            except BaseException:
+                # Exact transport metadata is retired even on lower-layer
+                # errors. Retain the admitted subject for owner retry, so a
+                # successor failure cannot disappear from cleanup authority.
+                with self._state_lock:
+                    self._path_subjects[subject.path_id] = subject
+                raise
+            accepted = result or accepted
+        return accepted
+
+    def _apply_controlled_path_cancellation(
         self,
         cancellation: PathCancellation,
         *,
@@ -3487,7 +3580,10 @@ class IrohTransport:
         with self._state_lock:
             self._path_graphs.pop(path_id, None)
             self._participant_nodes_by_path.pop(path_id, None)
-            self._entry_nodes.pop(request_id, None)
+            self._path_subjects.pop(path_id, None)
+            if not any(subject.request_id == request_id
+                       for subject in self._path_subjects.values()):
+                self._entry_nodes.pop(request_id, None)
 
     @staticmethod
     def _node_for_placement(graph: Any, placement_id: str) -> str:

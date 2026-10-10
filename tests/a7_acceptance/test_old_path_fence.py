@@ -133,3 +133,28 @@ def test_fence_rejects_a_malformed_scope() -> None:
       assert transport.fence_path_forwards("r", "p", 0) is False
    finally:
       transport.close()
+
+
+def test_cutover_cancels_the_old_path_at_every_participant_relay(tmp_path: Path) -> None:
+   """The successor has a new path id; the old one must not stay registered
+   at the participants' relays until idle expiry."""
+   harness = _Harness(tmp_path)
+   request_id = "request:a7-old-path-cancelled"
+   old_path = harness.manifest(request_id)
+   sent: list[PathCancellation] = []
+   entry_transport = harness.routers["node-a"].entry.transport
+   original = entry_transport.send_path_cancellation
+
+   def recording(cancellation):
+      sent.append(cancellation)
+      return original(cancellation)
+
+   entry_transport.send_path_cancellation = recording
+   sink = harness.run(request_id, kill_after=2)
+
+   record = harness.entry.entry.get_request(request_id)
+   assert record.kv_successor_cutover["outcome"] == "fenced_kv_successor"
+   assert sink.token_ids == _reference_tokens(harness.case)
+   assert any(c.path_id == old_path.path_id and c.path_attempt == old_path.path_attempt for c in sent)
+   for node_id, router in harness.routers.items():
+      assert old_path.path_id not in router.relay._paths, node_id

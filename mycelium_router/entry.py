@@ -1528,6 +1528,7 @@ class EntryCoordinator:
          record.verify_round = None
          manifest = record.manifest
          status = record.status
+         successor = record.kv_successor_cutover is not None
       speculation = self.a11_controller
       if speculation is not None:
          speculation.release(record.request.request_id)
@@ -1545,6 +1546,21 @@ class EntryCoordinator:
             manifest,
             outcome={"COMPLETED": "completed", "FAILED": "failed", "CANCELLED": "cancelled"}[status],
          )
+      if successor:
+         cancellation = PathCancellation(
+            request_id=record.request.request_id,
+            path_id=manifest.path_id,
+            path_attempt=manifest.path_attempt,
+            topology_version=manifest.topology_version,
+         )
+         # The route's original binding does not name the successor path.
+         # Terminal release therefore reaches its relays too. Owner fanout
+         # may already have retired transport ownership; do not recreate it.
+         send_if_entry = getattr(self.transport, "send_path_cancellation_if_entry", None)
+         if callable(send_if_entry):
+            send_if_entry(cancellation)
+         else:
+            self.transport.send_path_cancellation(cancellation)
 
    # -- A7 fenced KV-successor recovery ---------------------------------------------
 
@@ -1666,6 +1682,22 @@ class EntryCoordinator:
          return self._a7_fallback(record, result, new_attempt=new_attempt)
       self.capacity.release(tuple(hop.reservation_id for hop in old.ordered_hops))
       self.relay.release_path(old.path_id, path_attempt=old.path_attempt)
+      # The successor has its own path id, so nothing else retires the old
+      # one at the surviving participants' relays (the route's completion
+      # cleanup names the request's original path): cancel it there now. The
+      # relays accept it from this entry only; idle expiry is the backstop
+      # if a participant is unreachable.
+      try:
+         self.transport.send_path_cancellation(
+            PathCancellation(
+               request_id=request_id,
+               path_id=old.path_id,
+               path_attempt=old.path_attempt,
+               topology_version=graph.topology_version,
+            )
+         )
+      except Exception:
+         pass
       registration_failed = False
       with record.lock:
          record.kv_successor_cutover = result
