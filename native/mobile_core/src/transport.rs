@@ -96,9 +96,46 @@ pub enum Reachability {
     LocalOnly,
 }
 
+/// Local, revocable authority. Clones retain the exact installed authority;
+/// replacing a peer/session never revives a previously admitted frame. A peer
+/// has its own revocation bit and the lifecycle authority as its parent.
+#[derive(Debug, Clone, Default)]
+pub struct Admission(Arc<AdmissionState>);
+
+#[derive(Debug, Default)]
+struct AdmissionState {
+    revoked: std::sync::atomic::AtomicBool,
+    parent: Option<Admission>,
+}
+
+impl Admission {
+    fn child(&self) -> Self {
+        Self(Arc::new(AdmissionState { revoked: false.into(), parent: Some(self.clone()) }))
+    }
+    pub(crate) fn revoke(&self) {
+        self.0.revoked.store(true, std::sync::atomic::Ordering::Release);
+    }
+    pub(crate) fn revoked(&self) -> bool {
+        self.0.revoked.load(std::sync::atomic::Ordering::Acquire)
+            || self.0.parent.as_ref().is_some_and(Self::revoked)
+    }
+}
+
+#[derive(Clone)]
+struct InstalledPeer {
+    binding: PeerBinding,
+    admission: Admission,
+}
+
+impl std::ops::Deref for InstalledPeer {
+    type Target = PeerBinding;
+    fn deref(&self) -> &Self::Target { &self.binding }
+}
+
 /// One admitted inbound Router frame.
 #[derive(Debug)]
 pub struct Inbound {
+    pub admission: Admission,
     pub from: EndpointId,
     /// The Router node id the peer is configured as (its endpoint id when
     /// configured without one).
@@ -140,7 +177,7 @@ pub struct PathReport {
 #[derive(Clone)]
 pub struct NodeTransport {
     endpoint: Endpoint,
-    peers: Arc<RwLock<HashMap<EndpointId, PeerBinding>>>,
+    peers: Arc<RwLock<HashMap<EndpointId, InstalledPeer>>>,
     seen: Arc<AsyncMutex<Seen>>,
     /// Endpoints allowed to open the control ALPN, and where commands go.
     controllers: Arc<RwLock<std::collections::HashSet<EndpointId>>>,
@@ -233,21 +270,35 @@ impl NodeTransport {
 
     /// Allow-list one peer at an exact generation (ConfigurePeer semantics).
     pub async fn configure_peer(&self, peer: EndpointId, generation: u64) {
+        self.configure_peer_authorized(peer, generation, Admission::default()).await;
+    }
+
+    pub(crate) async fn configure_peer_authorized(&self, peer: EndpointId, generation: u64, admission: Admission) {
         let mut peers = self.peers.write().await;
-        peers.insert(peer, PeerBinding { generation, node_id: peer.to_string(), addr: EndpointAddr::from(peer) });
+        let binding = PeerBinding { generation, node_id: peer.to_string(), addr: EndpointAddr::from(peer) };
+        if let Some(old) = peers.insert(peer, InstalledPeer { binding, admission: admission.child() }) {
+            old.admission.revoke();
+        }
         if peers.len() == 1 { *self.primary_peer.lock().unwrap() = Some(peer.to_string()); }
     }
 
     /// Replace the routed peer set (ConfigurePeers semantics): each Router
     /// node id with its endpoint (and address hints) at its route generation.
     pub async fn configure_route_peers(&self, peers: Vec<PeerBinding>) {
+        self.configure_route_peers_authorized(peers, Admission::default()).await;
+    }
+
+    /// Install peer authority rooted in the node's current lifecycle. The root
+    /// is captured under its state lock, never refreshed when dequeuing work.
+    pub(crate) async fn configure_route_peers_authorized(&self, peers: Vec<PeerBinding>, admission: Admission) {
         let mut table = self.peers.write().await;
+        for peer in table.values() { peer.admission.revoke(); }
         table.clear();
         // ConfigurePeers carries the control peer first, then its optional
         // forward peer. Never guess this role by sorting node identifiers.
         *self.primary_peer.lock().unwrap() = peers.first().map(|p| p.node_id.clone());
         for binding in peers {
-            table.insert(binding.addr.id, binding);
+            table.insert(binding.addr.id, InstalledPeer { binding, admission: admission.child() });
         }
         // A peer that left the route keeps no live connection.
         self.peer_live.lock().unwrap().close_revoked(|remote| table.contains_key(remote));
@@ -255,7 +306,7 @@ impl NodeTransport {
 
     /// The configured peer bound to a Router node id.
     pub async fn peer_for_node(&self, node_id: &str) -> Option<PeerBinding> {
-        self.peers.read().await.values().find(|b| b.node_id == node_id).cloned()
+        self.peers.read().await.values().find(|b| b.node_id == node_id && !b.admission.revoked()).map(|b| b.binding.clone())
     }
 
     /// Withdraw a peer from the allow-list (its next connection is refused).
@@ -263,6 +314,7 @@ impl NodeTransport {
         let table = {
             let mut table = self.peers.write().await;
             if let Some(removed) = table.remove(&peer) {
+                removed.admission.revoke();
                 let mut primary = self.primary_peer.lock().unwrap();
                 if primary.as_deref() == Some(&removed.node_id) { *primary = None; }
             }
@@ -363,7 +415,7 @@ impl NodeTransport {
                     // Registered before the re-check, so a removal racing this
                     // accept either sees the connection or is seen by it.
                     let live_id = peer_live.lock().unwrap().add(remote, connection.clone());
-                    if !peers.read().await.contains_key(&remote) {
+                    if binding.admission.revoked() || !peers.read().await.contains_key(&remote) {
                         connection.close(REJECT_CODE.into(), b"revoked");
                         peer_live.lock().unwrap().remove(remote, live_id);
                         return;
@@ -373,7 +425,7 @@ impl NodeTransport {
                         // Re-checked for every stream: a peer removed from the
                         // route loses this connection (its generation check
                         // below would also refuse the frame).
-                        if !peers.read().await.contains_key(&remote) {
+                        if binding.admission.revoked() || !peers.read().await.contains_key(&remote) {
                             connection.close(REJECT_CODE.into(), b"revoked");
                             return;
                         }
@@ -388,14 +440,15 @@ impl NodeTransport {
                         // The binding may have rotated since the connection opened.
                         let current = peers.read().await.get(&remote).map(|b| b.generation);
                         let verdict: Result<(), String> = match wire::split_transfer(&request.payload) {
+                            Ok(_) if binding.admission.revoked() => Err("peer_rotated".into()),
                             Ok((generation, _)) if Some(generation) != current || generation != binding.generation => Err("peer_rotated".into()),
                             Ok((generation, raw)) => match wire::decode_frame(raw) {
-                                Ok(frame) if !dispatch => match inbox.try_send(Inbound { from: remote, from_node: binding.node_id.clone(), generation, frame, reply: None }) {
+                                Ok(frame) if !dispatch => match inbox.try_send(Inbound { admission: binding.admission.clone(), from: remote, from_node: binding.node_id.clone(), generation, frame, reply: None }) {
                                     Ok(()) => Ok(()),
                                     Err(_) => Err("queue_full".into()),
                                 },
                                 Ok(frame) => {
-                                    deliver(&seen, &inbox, request.message_id, raw, Inbound { from: remote, from_node: binding.node_id.clone(), generation, frame, reply: None }).await
+                                    deliver(&seen, &inbox, request.message_id, raw, Inbound { admission: binding.admission.clone(), from: remote, from_node: binding.node_id.clone(), generation, frame, reply: None }).await
                                 }
                                 Err(_) => Err("invalid_frame".into()),
                             },
@@ -569,8 +622,10 @@ async fn deliver(
 ) -> Result<(), String> {
     use sha2::{Digest, Sha256};
     let digest: [u8; 32] = Sha256::digest(raw).into();
+    let admission = inbound.admission.clone();
     {
         let mut table = seen.lock().await;
+        if admission.revoked() { return Err("peer_rotated".into()); }
         if let Some((done, verdict)) = table.done.get(&message_id) {
             return if *done == digest { verdict.clone() } else { Err("replay_collision".into()) };
         }
@@ -591,6 +646,7 @@ async fn deliver(
     };
     let mut table = seen.lock().await;
     table.inflight.remove(&message_id);
+    if admission.revoked() { return Err("peer_rotated".into()); }
     // Only an acknowledged delivery is final: a refused one may be retried.
     if verdict.is_ok() {
         table.done.insert(message_id, (digest, verdict.clone()));

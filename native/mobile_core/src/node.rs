@@ -217,6 +217,7 @@ struct Shared {
     cancelled: std::collections::BTreeSet<String>,
     deadlines: std::collections::BTreeMap<String, std::time::Instant>,
     stage_revision: u64,
+    admission: crate::transport::Admission,
     stage_busy: bool,
     /// Latest periodic sweep, retained while CPU owns runtime/path tables.
     sweep_clock: f64,
@@ -403,7 +404,7 @@ impl NodeCore {
                 stage_node: None,
                 control: None,
                 control_peers: false, control_transition: Default::default(),
-                inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_busy: false, sweep_clock: 0.0,
+                inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
             })),
             http,
             incarnation: new_incarnation()?,
@@ -798,7 +799,8 @@ impl NodeCore {
     /// Allow-list a route peer and set where executed activations are forwarded.
     pub fn configure_route_peer(&self, endpoint_id: &str, generation: u64, forward_to: bool) -> Result<(), NodeError> {
         let id = crate::transport::parse_endpoint_id(endpoint_id).map_err(|e| nerr(e.0))?;
-        self.rt.block_on(self.transport.configure_peer(id, generation));
+        let admission = self.shared.lock().unwrap().admission.clone();
+        self.rt.block_on(self.transport.configure_peer_authorized(id, generation, admission));
         if forward_to {
             self.shared.lock().unwrap().forward = Some((iroh::EndpointAddr::from(id), generation));
         }
@@ -1000,6 +1002,8 @@ async fn drop_expired_route(shared: &Arc<Mutex<Shared>>, transport: &NodeTranspo
 
 /// Forget the applied route: stage unloaded, nothing forwarded.
 fn clear_route(s: &mut Shared) -> Option<AppliedRoute> {
+    s.admission.revoke();
+    s.admission = Default::default();
     s.stage_revision += 1;
     s.cancelled.clear();
     s.deadlines.clear();
@@ -1159,7 +1163,8 @@ impl Supervisor {
             }
         };
         let peer = crate::transport::parse_endpoint_id(&assignment.peer_endpoint_id).map_err(|e| e.0)?;
-        self.transport.configure_peer(peer, assignment.route_generation).await;
+        let admission = self.shared.lock().unwrap().admission.clone();
+        self.transport.configure_peer_authorized(peer, assignment.route_generation, admission).await;
         let old = {
             let mut s = self.shared.lock().unwrap();
             s.status.stage_loaded = Some(digest);
@@ -1371,6 +1376,8 @@ impl Supervisor {
 }
 
 fn install_resumed_membership(s: &mut Shared, m: ActiveMembership, lease_expires_at: Option<f64>) {
+    s.admission.revoke();
+    s.admission = Default::default();
     let generation = m.generation;
     // A new generation fences everything the previous one computed: no
     // cached replay result may answer a frame of the new generation.
@@ -1408,23 +1415,33 @@ struct RequestWork {
     shared: Arc<Mutex<Shared>>,
     request_id: String,
     revision: u64,
+    admission: crate::transport::Admission,
     publication: Option<crate::stage_node::PathWork>,
 }
 impl RequestWork {
+    #[cfg(test)]
     fn new(shared: &Arc<Mutex<Shared>>, request_id: &str) -> Self {
+        let admission = shared.lock().unwrap().admission.clone();
+        Self::admitted(shared, request_id, admission)
+    }
+    fn admitted(shared: &Arc<Mutex<Shared>>, request_id: &str, admission: crate::transport::Admission) -> Self {
         let mut s = shared.lock().unwrap();
         begin_inflight(&mut s.inflight, request_id);
-        Self { shared: shared.clone(), request_id: request_id.into(), revision: s.stage_revision, publication: None }
+        // Revision only fences checked-out state restoration. Admission authority
+        // is always the transport-captured capability, never the current root.
+        Self { shared: shared.clone(), request_id: request_id.into(), revision: s.stage_revision, admission, publication: None }
     }
     fn child(&self) -> Self {
-        let mut child = Self::new(&self.shared, &self.request_id);
-        child.revision = self.revision; // never acquire a successor's authority
-        child.publication = self.publication.clone();
-        child
+        begin_inflight(&mut self.shared.lock().unwrap().inflight, &self.request_id);
+        Self { shared: self.shared.clone(), request_id: self.request_id.clone(),
+            revision: self.revision, admission: self.admission.clone(), publication: self.publication.clone() }
     }
     fn blocked(&self) -> bool {
         let s = self.shared.lock().unwrap();
-        s.stage_revision != self.revision || s.request_blocked(&self.request_id)
+        self.blocked_in(&s)
+    }
+    fn blocked_in(&self, s: &Shared) -> bool {
+        self.admission.revoked() || s.stage_revision != self.revision || s.request_blocked(&self.request_id)
             || self.publication.as_ref().is_some_and(|p| p.blocked(monotonic_s().max(s.sweep_clock)))
     }
 }
@@ -1459,6 +1476,10 @@ async fn sweep_paths_periodically(shared: Arc<Mutex<Shared>>, cadence: Duration)
 async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>, transport: NodeTransport) {
     while let Some(mut inbound) = rx.recv().await {
         drop_expired_route(&shared, &transport).await;
+        if inbound.admission.revoked() {
+            if let Some(reply) = inbound.reply.take() { let _ = reply.send(Err("request_cancelled_or_expired".into())); }
+            continue;
+        }
         let v2 = shared.lock().unwrap().stage.as_ref().is_some_and(|stage| stage.backend() == crate::qwen2::QWEN2_BACKEND);
         if v2 {
             let reply = inbound.reply.take();
@@ -1468,9 +1489,9 @@ async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>
             // runs) reports real residue instead of claiming a clean receipt.
             let inflight_request =
                 inbound.frame.body.get("request_id").and_then(|r| r.as_str()).filter(|r| !r.is_empty()).map(str::to_owned);
-            let work = RequestWork::new(&shared, inflight_request.as_deref().unwrap_or(""));
+            let work = RequestWork::admitted(&shared, inflight_request.as_deref().unwrap_or(""), inbound.admission.clone());
             let step = tokio::task::spawn_blocking(move || stage_step(&shared_task, &inbound)).await;
-            let verdict = match step {
+            let mut verdict = match step {
                 Ok(Ok(step)) => {
                     for send in step.sends {
                         let mut child = work.child();
@@ -1482,10 +1503,15 @@ async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>
                 Ok(Err(code)) => Err(code),
                 Err(_) => Err("router_dispatch_failed".to_owned()),
             };
-            drop(work);
+            // Synchronous reply is linearized with lifecycle retirement, and
+            // ownership remains dirty until after the verdict is published.
+            let s = shared.lock().unwrap();
+            if work.blocked_in(&s) { verdict = Err("request_cancelled_or_expired".into()); }
             if let Some(reply) = reply {
                 let _ = reply.send(verdict);
             }
+            drop(s);
+            drop(work);
             continue;
         }
         if let Some(reply) = inbound.reply.take() {
@@ -1646,6 +1672,9 @@ impl crate::node_control::ControlEnv for NodeControlEnv<'_> {
         (monotonic_s() * 1e9) as u64
     }
     fn stop(&mut self) {
+        // ControlNode signs its observation while this same state lock is held.
+        // Revoke now, not after the blocking task/transport cleanup awaits.
+        self.s.admission.revoke();
         self.stop = true;
     }
     /// The exact teardown of one cancelled request: retire the request's own
@@ -1692,6 +1721,8 @@ impl crate::node_control::ControlEnv for NodeControlEnv<'_> {
 async fn teardown_control(shared: &Arc<Mutex<Shared>>, transport: &NodeTransport) {
     let control_peers = {
         let mut s = shared.lock().unwrap();
+        s.admission.revoke();
+        s.admission = Default::default();
         s.stage_revision += 1;
         s.cancelled.clear();
         s.deadlines.clear();
@@ -1786,10 +1817,10 @@ async fn serve_control(
             let response = control.handle(&request.from.to_string(), &request.command, &identity_task, &mut env);
             let (install, stop) = (env.install.take(), env.stop);
             s.control = Some(control);
-            (response, install, stop, revision)
+            (response, install, stop, revision, s.admission.clone())
         })
         .await;
-        let Ok((response, install, stop, revision)) = outcome else {
+        let Ok((response, install, stop, revision, admission)) = outcome else {
             continue;
         };
         if shared.lock().unwrap().stage_revision != revision { continue; }
@@ -1801,7 +1832,7 @@ async fn serve_control(
                     Some(crate::transport::PeerBinding { generation: p.generation, node_id: p.node_id, addr })
                 })
                 .collect();
-            transport.configure_route_peers(bindings).await;
+            transport.configure_route_peers_authorized(bindings, admission).await;
             shared.lock().unwrap().control_peers = true;
         }
         if shared.lock().unwrap().stage_revision != revision {
@@ -1835,6 +1866,9 @@ fn stage_step(shared: &Arc<Mutex<Shared>>, inbound: &Inbound) -> Result<crate::s
     let hot = thermal_refusal(ceiling, &current_platform_metrics(shared));
     let mut guard = shared.lock().unwrap();
     let s = &mut *guard;
+    // This authority was captured from the installed peer at admission, not
+    // from the current session after the inbox/blocking-pool delay.
+    if inbound.admission.revoked() { return Err("request_cancelled_or_expired".into()); }
     s.status.frames_received += 1;
     if s.stage_node.is_none() {
         let local = s.membership.as_ref().map(|m| m.cfg.node_id.clone()).ok_or("not_a_member")?;
@@ -1877,7 +1911,7 @@ fn stage_step(shared: &Arc<Mutex<Shared>>, inbound: &Inbound) -> Result<crate::s
         };
         let out = stage.execute_cooperative(&call, &mut |_| {
             let s = shared.lock().unwrap();
-            if s.request_blocked(&request_id) || revision != s.stage_revision
+            if inbound.admission.revoked() || s.request_blocked(&request_id) || revision != s.stage_revision
                 || fence.as_ref().is_some_and(|f| f.blocked(s.sweep_clock.max(monotonic_s()))) {
                 return Err(crate::runtime::RuntimeError("request_cancelled_or_expired".into()));
             }
@@ -1898,7 +1932,8 @@ fn stage_step(shared: &Arc<Mutex<Shared>>, inbound: &Inbound) -> Result<crate::s
     for (r, p) in stage_node.drain_expired_releases() { stage.release_path(&r, &p); }
     let path_expired = inbound.frame.message_type == "HopHeader"
         && stage_node.path(inbound.frame.body["path_id"].as_str().unwrap_or("")).is_none();
-    let blocked = s.request_blocked(&request_id) || revision != s.stage_revision || path_expired;
+    let authority_retired = inbound.admission.revoked();
+    let blocked = authority_retired || s.request_blocked(&request_id) || revision != s.stage_revision || path_expired;
     for id in &s.cancelled {
         stage_node.release_request(id);
         stage.release_request(id);
@@ -1910,7 +1945,7 @@ fn stage_step(shared: &Arc<Mutex<Shared>>, inbound: &Inbound) -> Result<crate::s
         step.ack = false;
         step.reason = "request_cancelled_or_expired".into();
     }
-    if revision == s.stage_revision {
+    if revision == s.stage_revision && !authority_retired {
         s.stage = Some(stage);
         s.stage_node = Some(stage_node);
     } else {
@@ -1973,6 +2008,7 @@ async fn send_with_retry(transport: NodeTransport, shared: Arc<Mutex<Shared>>, s
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("node_ingress_tests.rs");
     #[cfg(unix)]
     mod real_phone_composition {
         include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/node_real_composition.rs"));
@@ -1984,7 +2020,7 @@ mod tests {
             membership:None, supervisor_running:false, status:NodeStatus::default(), session:None,
             invitation:None, stage:Some(stage), forward:None, route:None, shell_metrics:None, acquisition:None,
             stage_node:Some(crate::stage_node::StageNode::new("node-phone")), control:None, control_peers:false, control_transition:Default::default(),
-            inflight:Default::default(), cancelled:Default::default(), deadlines:Default::default(), stage_revision:0, stage_busy:false, sweep_clock:0.0,
+            inflight:Default::default(), cancelled:Default::default(), deadlines:Default::default(), stage_revision:0, admission:Default::default(), stage_busy:false, sweep_clock:0.0,
         }))
     }
 
@@ -2036,7 +2072,7 @@ mod tests {
         other_manifest.body["build"]["request"]["request_id"] = json!("other");
         assert!(paths.on_frame_at(0.0, "node-mac-entry", &other_manifest, &mut |_,_,_| panic!()).ack);
         shared.lock().unwrap().stage_node = Some(paths);
-        let inbound = Inbound { from:iroh::SecretKey::from_bytes(&[20;32]).public(), from_node:"node-mac-entry".into(), generation:1,
+        let inbound = Inbound { admission: Default::default(), from:iroh::SecretKey::from_bytes(&[20;32]).public(), from_node:"node-mac-entry".into(), generation:1,
             frame:wire::decode_frame(&golden("02-hop-prefill-in.bin")).unwrap(), reply:None };
         let other = shared.clone();
         let thread = std::thread::spawn(move || stage_step(&other, &inbound).unwrap());
@@ -2080,7 +2116,7 @@ mod tests {
         let shared = lifecycle_shared(Box::new(HeldStage { golden:GoldenStage { released:released.clone() }, entered:entered_tx, release:release_rx }));
         let manifest = wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap();
         shared.lock().unwrap().stage_node.as_mut().unwrap().on_frame("node-mac-entry", &manifest, &mut |_,_,_| unreachable!());
-        let inbound = Inbound { from:iroh::SecretKey::from_bytes(&[88;32]).public(), from_node:"node-mac-entry".into(), generation:1,
+        let inbound = Inbound { admission: Default::default(), from:iroh::SecretKey::from_bytes(&[88;32]).public(), from_node:"node-mac-entry".into(), generation:1,
             frame:wire::decode_frame(&golden("02-hop-prefill-in.bin")).unwrap(), reply:None };
         let work = RequestWork::new(&shared, "request-phone-golden");
         let worker_shared = shared.clone();
@@ -2183,7 +2219,7 @@ mod tests {
             shared.lock().unwrap().status.stage_loaded=Some("stage-golden".into());
             let manifest=wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap();
             shared.lock().unwrap().stage_node.as_mut().unwrap().on_frame("node-mac-entry",&manifest,&mut |_,_,_| unreachable!());
-            let inbound=Inbound {from:iroh::SecretKey::from_bytes(&[88;32]).public(),from_node:"node-mac-entry".into(),generation:1,
+            let inbound=Inbound { admission: Default::default(),from:iroh::SecretKey::from_bytes(&[88;32]).public(),from_node:"node-mac-entry".into(),generation:1,
                 frame:wire::decode_frame(&golden("02-hop-prefill-in.bin")).unwrap(),reply:None};
             let work=RequestWork::new(&shared,"request-phone-golden");
             let owner=shared.clone();
@@ -2352,7 +2388,7 @@ mod tests {
         let shared = lifecycle_shared(Box::new(HeldStage { golden:GoldenStage { released:released.clone() }, entered:entered_tx, release:release_rx }));
         let manifest = wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap();
         shared.lock().unwrap().stage_node.as_mut().unwrap().on_frame("node-mac-entry", &manifest, &mut |_,_,_| unreachable!());
-        let inbound = Inbound { from:iroh::SecretKey::from_bytes(&[88;32]).public(), from_node:"node-mac-entry".into(), generation:1,
+        let inbound = Inbound { admission: Default::default(), from:iroh::SecretKey::from_bytes(&[88;32]).public(), from_node:"node-mac-entry".into(), generation:1,
             frame:wire::decode_frame(&golden("02-hop-prefill-in.bin")).unwrap(), reply:None };
         let worker_shared = shared.clone();
         let worker = std::thread::spawn(move || stage_step(&worker_shared, &inbound));
@@ -2365,7 +2401,7 @@ mod tests {
         let step = worker.join().unwrap().unwrap();
         assert!(step.sends.is_empty() && !step.ack);
         assert!(!released.lock().unwrap().is_empty());
-        let again = Inbound { from:iroh::SecretKey::from_bytes(&[88;32]).public(), from_node:"node-mac-entry".into(), generation:1,
+        let again = Inbound { admission: Default::default(), from:iroh::SecretKey::from_bytes(&[88;32]).public(), from_node:"node-mac-entry".into(), generation:1,
             frame:wire::decode_frame(&golden("02-hop-prefill-in.bin")).unwrap(), reply:None };
         assert_eq!(stage_step(&shared, &again).unwrap_err(), "request_cancelled_or_expired");
     }
@@ -2442,7 +2478,7 @@ mod tests {
             invitation: None, stage: Some(Box::new(GoldenStage { released: released.clone() })), forward: None,
             route: None, shell_metrics: None, acquisition: None,
             stage_node: Some(crate::stage_node::StageNode::new("node-phone")), control: None,
-            control_peers: false, control_transition: Default::default(), inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_busy: false, sweep_clock: 0.0,
+            control_peers: false, control_transition: Default::default(), inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
         };
         let frame = wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap();
         let node = s.stage_node.as_mut().unwrap();
@@ -2634,7 +2670,7 @@ mod tests {
             stage_node: Some(crate::stage_node::StageNode::new("node-phone")),
             control: None,
             control_peers: false, control_transition: Default::default(),
-            inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_busy: false, sweep_clock: 0.0,
+            inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
         }));
         let (tx, rx) = mpsc::channel(8);
         let _accept = phone.spawn_accept_dispatch(tx);
@@ -2743,7 +2779,7 @@ mod tests {
                 boot_id: "boot-1".into(),
             })),
             control_peers: false, control_transition: Default::default(),
-            inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_busy: false, sweep_clock: 0.0,
+            inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
         }));
         let (dispatch_tx, _dispatch_rx) = mpsc::channel(8);
         let _accept = phone.spawn_accept_dispatch(dispatch_tx);
@@ -2863,7 +2899,7 @@ mod tests {
             stage_node: Some(stage_node),
             control: None,
             control_peers: false, control_transition: Default::default(),
-            inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_busy: false, sweep_clock: 0.0,
+            inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
         }));
         let (dispatch_tx, _dispatch_rx) = mpsc::channel(8);
         let _accept = phone.spawn_accept_dispatch(dispatch_tx);
