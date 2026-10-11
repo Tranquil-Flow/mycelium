@@ -94,6 +94,7 @@ def test_reordered_candidate_cannot_bypass_an_explicit_revocation(world: Synthet
         reason="critical_defect",
         now=NOW + timedelta(minutes=1),
         expected_ledger_head=first.decision_digest,
+        revoked_decision_digest=first.decision_digest,
     )
     world.candidate["nodes"].reverse()
     altered = canonical(world.candidate)
@@ -114,6 +115,7 @@ def test_explicit_revocation_records_the_revoked_semantic_identity(world: Synthe
         reason="invalid_evidence",
         now=NOW + timedelta(minutes=1),
         expected_ledger_head=first.decision_digest,
+        revoked_decision_digest=first.decision_digest,
     )
     recorded = revoked.document["body"]["revocation"]
     node_digests = sorted(node["artifact_digest"] for node in world.candidate["nodes"])
@@ -134,13 +136,16 @@ def test_reissued_registry_cannot_bypass_a_compromised_key_revocation(
         reason="compromised_key",
         now=NOW + timedelta(minutes=1),
         expected_ledger_head=first.decision_digest,
+        revoked_decision_digest=first.decision_digest,
     ) == "revocation_key_digests_required"
     revoked = append_revocation(
         ledger_dir=world.ledger,
         reason="compromised_key",
         now=NOW + timedelta(minutes=1),
         expected_ledger_head=first.decision_digest,
+        revoked_decision_digest=first.decision_digest,
         compromised_key_digests=[world.verifier.verification_key_digest],
+        trust_registry_path=world.registry_path,
     )
     world.registry["registry_generation"] = 2
     world.build()
@@ -333,6 +338,7 @@ def test_truncated_ledger_cannot_erase_a_revocation(world: SyntheticWorld) -> No
         reason="critical_defect",
         now=NOW + timedelta(minutes=1),
         expected_ledger_head=first.decision_digest,
+        revoked_decision_digest=first.decision_digest,
     )
     revoked.ledger_entry_path.unlink()
     assert refusal(
@@ -598,3 +604,247 @@ def test_browser_matrix_passing_cases_are_unchanged_by_the_repairs(world: Synthe
         ["engine:chromium", "engine:firefox", "engine:webkit"]
     )
     assert world.built().produce().decision == "ready"
+
+
+# -- re-review N1: a key revocation still revokes the decision it names ------------------
+
+
+def test_compromised_key_revocation_also_blocks_the_revoked_source_and_results(
+    world: SyntheticWorld,
+) -> None:
+    first = world.built().produce()
+    revoked = append_revocation(
+        ledger_dir=world.ledger,
+        reason="compromised_key",
+        now=NOW + timedelta(minutes=1),
+        expected_ledger_head=first.decision_digest,
+        revoked_decision_digest=first.decision_digest,
+        compromised_key_digests=[world.reviewer.verification_key_digest],
+        trust_registry_path=world.registry_path,
+    )
+    recorded = revoked.document["body"]["revocation"]
+    assert recorded["revoked_source_commit"] == world.commit
+    assert world.candidate["nodes"][0]["artifact_digest"] in recorded["revoked_result_digests"]
+
+    world.candidate["nodes"].reverse()
+    world.candidate_path.write_bytes(canonical(world.candidate))
+    again = world.produce(
+        now=NOW + timedelta(minutes=2), expected_ledger_head=revoked.decision_digest
+    )
+    # The key revocation makes the registry unusable, so results are not evaluated; the
+    # reordered candidate is still stopped by the recorded source, independent of the key.
+    assert_not_ready(again, "source_revoked", "trust_registry_key_revoked")
+    assert "candidate_revoked" not in again.findings
+
+
+def test_compromised_key_revocation_must_name_a_key_of_the_revoked_registry(
+    world: SyntheticWorld, tmp_path: Path
+) -> None:
+    first = world.built().produce()
+    other_registry = tmp_path / "other-registry.json"
+    other_registry.write_bytes(canonical({**world.registry, "registry_generation": 9}))
+    common = {
+        "ledger_dir": world.ledger,
+        "reason": "compromised_key",
+        "now": NOW + timedelta(minutes=1),
+        "expected_ledger_head": first.decision_digest,
+        "revoked_decision_digest": first.decision_digest,
+    }
+    typo = "sha256:" + "1" * 64
+    assert refusal(
+        append_revocation,
+        **common,
+        compromised_key_digests=[typo],
+        trust_registry_path=world.registry_path,
+    ) == "revocation_key_not_in_registry"
+    assert refusal(
+        append_revocation,
+        **common,
+        compromised_key_digests=[world.verifier.verification_key_digest, typo],
+        trust_registry_path=world.registry_path,
+    ) == "revocation_key_not_in_registry"
+    assert refusal(
+        append_revocation,
+        **common,
+        compromised_key_digests=[world.verifier.verification_key_digest],
+        trust_registry_path=other_registry,
+    ) == "revocation_registry_mismatch"
+    assert refusal(
+        append_revocation,
+        **common,
+        compromised_key_digests=[world.verifier.verification_key_digest],
+    ) == "revocation_registry_mismatch"
+    assert sorted(path.name for path in world.ledger.iterdir()) == ["generation-000001.json"]
+
+
+# -- re-review N2: the caller names what is revoked --------------------------------------
+
+
+def test_revocation_must_name_an_existing_generation(world: SyntheticWorld) -> None:
+    first = world.built().produce()
+    assert refusal(
+        append_revocation,
+        ledger_dir=world.ledger,
+        reason="critical_defect",
+        now=NOW + timedelta(minutes=1),
+        expected_ledger_head=first.decision_digest,
+        revoked_decision_digest="sha256:" + "2" * 64,
+    ) == "revocation_target_unknown"
+    assert sorted(path.name for path in world.ledger.iterdir()) == ["generation-000001.json"]
+
+
+def test_revocation_revokes_the_named_newer_generation_and_not_an_older_ready(
+    world: SyntheticWorld,
+) -> None:
+    first = world.built().produce()
+    world.specs["digest_class:audit"]["cases"] = [
+        {"case_id": "synthetic_fixture_case", "outcome": "fail"}
+    ]
+    second = world.built().produce(now=NOW + timedelta(minutes=1))
+    assert second.decision == "not_ready"
+    revoked = append_revocation(
+        ledger_dir=world.ledger,
+        reason="invalid_evidence",
+        now=NOW + timedelta(minutes=2),
+        expected_ledger_head=second.decision_digest,
+        revoked_decision_digest=second.decision_digest,
+    )
+    recorded = revoked.document["body"]["revocation"]
+    assert recorded["revoked_generation"] == 2
+    assert recorded["revoked_decision_digest"] == second.decision_digest
+    assert recorded["revoked_candidate_digest"] == second.document["body"]["candidate_digest"]
+    assert recorded["revoked_candidate_digest"] != first.document["body"]["candidate_digest"]
+    assert recorded["revoked_source_commit"] == world.commit
+
+
+def test_cli_revoke_names_and_prints_what_it_revoked(
+    world: SyntheticWorld, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first = world.built().produce()
+    arguments = [
+        "revoke",
+        "--ledger-dir",
+        str(world.ledger),
+        "--expect-head",
+        first.decision_digest,
+        "--reason",
+        "critical_defect",
+        "--public-out",
+        str(tmp_path / "public.json"),
+    ]
+    assert main(arguments, clock=lambda: NOW + timedelta(minutes=1)) == 2
+    assert json.loads(capsys.readouterr().err) == {"refused": "arguments_invalid"}
+    code = main(
+        [*arguments, "--revoke-decision-digest", first.decision_digest],
+        clock=lambda: NOW + timedelta(minutes=1),
+    )
+    report = json.loads(capsys.readouterr().out)
+    assert code == 1
+    assert report["revoked_generation"] == 1
+    assert report["revoked_decision_digest"] == first.decision_digest
+
+
+# -- re-review N3: junit root totals and status attributes -------------------------------
+
+
+@pytest.mark.parametrize(
+    ("root_attributes", "finding"),
+    [
+        (b'failures="5"', "junit_failures_present"),
+        (b'errors="1"', "junit_failures_present"),
+        (b'skipped="2"', "junit_skips_present"),
+        (b'tests="900"', "junit_counts_inconsistent"),
+    ],
+)
+def test_totals_on_the_testsuites_root_are_read(
+    world: SyntheticWorld, root_attributes: bytes, finding: str
+) -> None:
+    report = JUNIT_PASSING.replace(b"<testsuites>", b"<testsuites " + root_attributes + b">")
+    assert report != JUNIT_PASSING
+    assert_not_ready(junit_world(world, {"junit.xml": report}), f"{finding}:digest_class:test")
+
+
+@pytest.mark.parametrize(
+    ("attribute", "finding"),
+    [
+        (b'status="failed"', "junit_failures_present"),
+        (b'status="error"', "junit_failures_present"),
+        (b'result="failed"', "junit_failures_present"),
+        (b'status="skipped"', "junit_skips_present"),
+        (b'status="notrun"', "junit_skips_present"),
+    ],
+)
+def test_testcase_status_attribute_without_a_child_is_not_a_pass(
+    world: SyntheticWorld, attribute: bytes, finding: str
+) -> None:
+    report = JUNIT_PASSING.replace(
+        b'<testcase classname="synthetic.fixture" name="second"/>',
+        b'<testcase classname="synthetic.fixture" name="second" ' + attribute + b"/>",
+    )
+    assert report != JUNIT_PASSING
+    assert_not_ready(junit_world(world, {"junit.xml": report}), f"{finding}:digest_class:test")
+
+
+def test_testcase_with_a_passing_status_attribute_still_passes(world: SyntheticWorld) -> None:
+    report = JUNIT_PASSING.replace(
+        b'<testcase classname="synthetic.fixture" name="second"/>',
+        b'<testcase classname="synthetic.fixture" name="second" status="run" result="passed"/>',
+    )
+    assert junit_world(world, {"junit.xml": report}).decision == "ready"
+
+
+# -- interim hardening for the unsigned decision -----------------------------------------
+
+
+def consistently_relabel_as_production(document: dict[str, Any]) -> bytes:
+    """Rewrite every bound field so the body agrees with itself under another scope."""
+    forged = copy.deepcopy(document)
+    body = forged["body"]
+    body["authority_scope"] = "production"
+    body["closure_statement"]["authority_scope"] = "production"
+    root = body["graph"]["root"]
+    closure_node = body["graph"]["nodes"][-1]
+    assert closure_node["gate_id"] == "A15"
+    closure_node["artifact_digest"] = digest_of(canonical(body["closure_statement"]))
+    closure_node["environment_digest"] = digest_of(
+        canonical(
+            {
+                "authority_scope": "production",
+                "trust_registry_digest": body["trust_registry_digest"],
+            }
+        )
+    )
+    closure_node["node_digest"] = digest_of(
+        canonical({key: value for key, value in closure_node.items() if key != "node_digest"})
+    )
+    root["result_node_digests"]["A15"] = closure_node["node_digest"]
+    root["root_digest"] = digest_of(
+        canonical({key: value for key, value in root.items() if key != "root_digest"})
+    )
+    return reseal_document(forged)
+
+
+def test_consistently_reforged_production_ready_does_not_verify_anywhere(
+    world: SyntheticWorld, tmp_path: Path
+) -> None:
+    result = world.built().produce()
+    assert result.decision == "ready"
+    forged = consistently_relabel_as_production(result.document)
+
+    assert refusal(verify_decision_bytes, forged) == "decision_structure_invalid"
+    assert refusal(public_projection_bytes, forged) == "decision_structure_invalid"
+    other = tmp_path / "forged-ledger"
+    other.mkdir()
+    (other / "generation-000001.json").write_bytes(forged)
+    assert refusal(read_ledger, other) == "decision_history_tampered"
+
+
+def test_unpinned_production_scope_is_rejected_for_a_non_ready_document(
+    world: SyntheticWorld,
+) -> None:
+    world.candidate_mutators.append(lambda candidate: candidate.update(reviewer_reproduction=None))
+    result = world.built().produce()
+    assert result.decision == "not_ready"
+    forged = copy.deepcopy(result.document)
+    forged["body"]["authority_scope"] = "production"
+    assert refusal(verify_decision_bytes, reseal_document(forged)) == "decision_structure_invalid"

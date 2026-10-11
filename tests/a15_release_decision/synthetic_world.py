@@ -628,12 +628,13 @@ class SyntheticWorld:
             self.head = result.decision_digest
         return result
 
-    def revoke(self, reason: str, **overrides: Any) -> Any:
+    def revoke(self, reason: str, target: Any, **overrides: Any) -> Any:
         arguments: dict[str, Any] = {
             "ledger_dir": self.ledger,
             "reason": reason,
             "now": NOW,
             "expected_ledger_head": self.head,
+            "revoked_decision_digest": target.decision_digest,
         }
         arguments.update(overrides)
         result = append_revocation(**arguments)

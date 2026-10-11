@@ -318,7 +318,7 @@ def test_explicit_revocation_appends_and_blocks_the_revoked_candidate(
 ) -> None:
     first = world.built().produce()
     first_bytes = first.ledger_entry_path.read_bytes()
-    revoked = world.revoke("critical_defect", now=NOW + timedelta(minutes=1))
+    revoked = world.revoke("critical_defect", first, now=NOW + timedelta(minutes=1))
     again = world.produce(now=NOW + timedelta(minutes=2))
 
     assert revoked.decision == "not_ready" and revoked.decision_generation == 2
@@ -344,30 +344,34 @@ def test_explicit_revocation_appends_and_blocks_the_revoked_candidate(
     assert first.ledger_entry_path.read_bytes() == first_bytes
 
 
-def test_compromised_key_revocation_blocks_the_key_and_not_the_source(
+def test_compromised_key_revocation_blocks_the_key_and_the_revoked_decision(
     world: SyntheticWorld,
 ) -> None:
-    world.built().produce()
+    first = world.built().produce()
     revoked = world.revoke(
         "compromised_key",
+        first,
         now=NOW + timedelta(minutes=1),
         compromised_key_digests=[world.verifier.verification_key_digest],
+        trust_registry_path=world.registry_path,
     )
-    assert revoked.document["body"]["revocation"]["revoked_source_commit"] is None
-    assert revoked.document["body"]["revocation"]["revoked_result_digests"] == []
+    recorded = revoked.document["body"]["revocation"]
+    assert recorded["revoked_key_digests"] == [world.verifier.verification_key_digest]
+    assert recorded["revoked_source_commit"] == world.commit
+    assert len(recorded["revoked_result_digests"]) == 13 + 8 + 1
     world.specs["gate_result:A14"]["fields"]["runtime_digest"] = sha256_bytes(b"synthetic-new")
     result = world.built().produce(now=NOW + timedelta(minutes=2))
     assert result.decision == "not_ready"
     assert "trust_registry_key_revoked" in result.findings
+    assert "source_revoked" in result.findings
     assert "candidate_revoked" not in result.findings
-    assert "source_revoked" not in result.findings
 
 
-def test_revocation_targets_the_latest_ready_generation(world: SyntheticWorld) -> None:
+def test_revocation_can_name_an_older_ready_generation(world: SyntheticWorld) -> None:
     first = world.built().produce()
     expired = world.produce(now=NOW + timedelta(hours=25))
     assert expired.decision == "not_ready"
-    revoked = world.revoke("invalid_evidence", now=NOW + timedelta(hours=26))
+    revoked = world.revoke("invalid_evidence", first, now=NOW + timedelta(hours=26))
     recorded = revoked.document["body"]["revocation"]
     assert recorded["revoked_generation"] == 1
     assert recorded["revoked_decision_digest"] == first.decision_digest
@@ -388,6 +392,7 @@ def test_key_digests_are_only_accepted_for_a_compromised_key(world: SyntheticWor
             ledger_dir=world.ledger,
             now=NOW + timedelta(minutes=1),
             expected_ledger_head=first.decision_digest,
+            revoked_decision_digest=first.decision_digest,
             **arguments,
         ) == code
     assert ledger_names(world) == ["generation-000001.json"]
@@ -400,6 +405,7 @@ def test_revocation_reason_is_an_allowlist_and_needs_a_generation(world: Synthet
         reason="critical_defect",
         now=NOW,
         expected_ledger_head=None,
+        revoked_decision_digest="sha256:" + "0" * 64,
     ) == "nothing_to_revoke"
     first = world.built().produce()
     assert refusal(
@@ -408,6 +414,7 @@ def test_revocation_reason_is_an_allowlist_and_needs_a_generation(world: Synthet
         reason="operator says so",
         now=NOW,
         expected_ledger_head=first.decision_digest,
+        revoked_decision_digest=first.decision_digest,
     ) == "revocation_reason_invalid"
     assert ledger_names(world) == ["generation-000001.json"]
 
@@ -577,6 +584,8 @@ def test_cli_revoke_appends_an_explicit_revocation(
             str(world.ledger),
             "--expect-head",
             world.head,
+            "--revoke-decision-digest",
+            world.head,
             "--reason",
             "compromised_package",
             "--public-out",
@@ -604,6 +613,8 @@ def test_cli_process_refuses_without_a_traceback(tmp_path: Path) -> None:
             str(tmp_path / "no-ledger"),
             "--expect-head",
             "none",
+            "--revoke-decision-digest",
+            "sha256:" + "0" * 64,
             "--reason",
             "critical_defect",
             "--public-out",
