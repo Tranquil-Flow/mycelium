@@ -295,17 +295,30 @@ def test_extension_stages_measures_and_serves_each_case_variant(tmp_path: Path, 
             extend_operator_plan(plan, out_bundle=root / "bundle-twice", variant=variant, source_node_id=_NODES[1], standby_node_id=_NODES[0], qualification=qualification)
         _stage(plan)
 
-        state = _route_from_plan(plan, root)
-        harness._open_with_a7_authority(state)
-        state.route._deployment_qualification = SimpleNamespace(route_ready=True)
         from mycelium_a7_evidence_control import RouteA7Evidence
+        from mycelium_a7_physical_measurement import MeasurementRefused
 
-        fields, observations = measure(
-            driver=_RouteDriver(state),
-            evidence=RouteA7Evidence(state.route),
-            fault=SourceProcessGroupTarget(transport="local", process_pattern=re.escape(str(NODE_SCRIPT)) + r" .*--run-id " + re.escape(plan["run_id"]) + r" .*--node-id " + re.escape(_NODES[1]) + r"(\s|$)"),
-            settings=MeasurementSettings(kill_after_committed=2, settle_timeout_s=10.0, result_timeout_s=20.0, terminal_timeout_s=120.0),
-        )
+        # Even with that headroom, host load can let the request finish before
+        # a freeze settles.  That refusal injects no fault and makes no claim,
+        # so the staged plan is opened and measured again on a fresh route
+        # (bounded); any other refusal or assertion still fails the test.
+        for attempt in range(3):
+            state = _route_from_plan(plan, root / f"route-{attempt}")
+            harness._open_with_a7_authority(state)
+            state.route._deployment_qualification = SimpleNamespace(route_ready=True)
+            try:
+                fields, observations = measure(
+                    driver=_RouteDriver(state),
+                    evidence=RouteA7Evidence(state.route),
+                    fault=SourceProcessGroupTarget(transport="local", process_pattern=re.escape(str(NODE_SCRIPT)) + r" .*--run-id " + re.escape(plan["run_id"]) + r" .*--node-id " + re.escape(_NODES[1]) + r"(\s|$)"),
+                    settings=MeasurementSettings(kill_after_committed=2, settle_timeout_s=10.0, result_timeout_s=20.0, terminal_timeout_s=120.0),
+                )
+                break
+            except MeasurementRefused as exc:
+                if exc.code != "a7_request_ended_before_fault" or attempt == 2:
+                    raise
+                state.route.close()
+                state = None
         outcome, reason = _EXPECTED[variant]
         assert fields["outcome"] == outcome, observations["a7_result"]
         if reason is not None:
