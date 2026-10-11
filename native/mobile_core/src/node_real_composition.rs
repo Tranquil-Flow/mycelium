@@ -157,6 +157,6 @@ async fn real_phone_composition_startup_bound_cancel() { composition("startup").
 #[tokio::test(flavor="multi_thread", worker_threads=4)]
 async fn real_phone_composition_host_monotonic_deadline() { composition("deadline").await; }
 #[tokio::test(flavor="multi_thread", worker_threads=4)]
-async fn real_phone_composition_signed_qualification() { composition("qualification").await; }
+async fn real_phone_composition_signed_qualification_refuses_unsupported_provenance() { composition("qualification").await; }
 #[tokio::test(flavor="multi_thread", worker_threads=4)]
 async fn real_phone_composition_stop_releases_runtime() { composition("stop").await; }

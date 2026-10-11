@@ -25,7 +25,8 @@ from mycelium_iroh_sidecar import SidecarClient
 from mycelium_live.phone_stage_session import PhoneStageSessionFactory, require_cancel_receipt
 from mycelium_live.route import PhysicalLiveRoute
 from mycelium_qualification.evidence import sha256_document
-from mycelium_qualification.phone import phone_load_proof_digest
+from mycelium_qualification.phone import (LOAD_IDENTITY_PROVENANCE, PhoneLoadProvenanceError,
+    phone_load_proof_digest, validate_phone_load_provenance)
 from mycelium_qualification.signing import generate_ed25519_signer
 from physical_inference_qualification import PeerIdentity, QualificationController
 from test_phone_live_authority import phone_attestation, qualify
@@ -250,25 +251,37 @@ def run(binary, mode):
                 assert fresh['details']['runtime']['replay_result_count'] == fresh['details']['runtime']['active_state_count'] == 0
                 return
             # Whole production qualifier consumes unmodified native signed records.
+            # Affirmative phone load authority is unsupported: the native producer
+            # truthfully marks manifest/load generation as controller claims, so the
+            # authentic record must be recognized and still refused at promotion.
             att['signed_observations'] += [configured,started,snapshot]
-            graph_phone = att['execution_graph']['stages'][1]['placements'][0]
-            graph_phone['load_proof_digest'] = phone_load_proof_digest(configured['observation'])
+            native_configured = copy.deepcopy(configured)
+            assert configured['observation']['details']['load_identity_provenance'] == LOAD_IDENTITY_PROVENANCE
+            validate_phone_load_provenance(configured['observation'])
+            try: phone_load_proof_digest(configured['observation'])
+            except PhoneLoadProvenanceError as e: assert str(e) == 'phone_load_provenance_unsupported', e
+            else: raise AssertionError('unsupported native load provenance produced a load proof')
             bindings = {'node-phone':dict(endpoint_id=endpoints['node-phone'],process_id='inc-phone',member_key_digest=key,configure=PROFILE)}
             snapshots = [x['observation']['details'] for x in att['signed_observations'] if x['observation']['event']=='snapshot']
             att['counters'] = dict(frames_sent=sum(x['transport']['remote_frames_sent'] for x in snapshots),
                 frames_received=sum(x['transport']['remote_frames_received'] for x in snapshots),
                 applied_operation_count=sum(x['runtime']['applied_operation_count'] for x in snapshots),fatal=None)
-            record = qualify(att, bindings)
-            assert record.route_ready
-            # Mutation control proves the consumer really verifies native bytes.
+            from mycelium_qualification import LiveRouteQualificationError
+            def refused(candidate, code):
+                try: record = qualify(candidate,bindings)
+                except LiveRouteQualificationError as e: assert str(e) == code, (code, str(e))
+                else: raise AssertionError(f'{code} expected; qualifier returned route_ready={record.route_ready}')
+            original = copy.deepcopy(att)
+            refused(att, 'phone_load_provenance_unsupported')
+            assert att == original and configured == native_configured, 'qualifier mutated native envelopes'
+            # Mutation control: the refusal above was reached only after the
+            # consumer verified the native bytes; a tampered record fails earlier.
             corrupt = copy.deepcopy(att)
             next(x for x in corrupt['signed_observations'] if x['observation']['node_id']=='node-phone')['observation']['details']['load_generation'] = 99
-            from mycelium_qualification import LiveRouteQualificationError
-            try: qualify(corrupt,bindings)
-            except LiveRouteQualificationError: pass
-            else: raise AssertionError('tampered native signature accepted')
+            refused(corrupt, 'live_signature_invalid')
             TRANSCRIPT.append({'qualification_consumed_native_records':True,'physical_qualification':False,
-                               'desktop_records':'synthetic_test_doubles','native_signature_tamper_rejected':True})
+                               'desktop_records':'synthetic_test_doubles','native_signature_tamper_rejected':True,
+                               'phone_load_provenance':'refused_unsupported','route_ready_published':False})
         finally:
             if route is not None: route.close()
             if session is not None: session.close()
