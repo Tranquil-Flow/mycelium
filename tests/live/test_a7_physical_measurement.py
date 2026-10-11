@@ -130,6 +130,22 @@ def _source_target(state: Any) -> SourceProcessGroupTarget:
 
 
 def _measure_with_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, qualification_expired: bool, kill_after_committed: int = 2) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], Any]:
+    # Under host load the ~ms local request can finish before the freeze lands.
+    # That refusal (a7_request_ended_before_fault) injects no fault and makes no
+    # claim, so a fresh route measures again (bounded); any other refusal or
+    # assertion still fails the test.
+    for attempt in range(3):
+        root = tmp_path / f"measure-{attempt}"
+        root.mkdir()
+        try:
+            return _measure_once(root, monkeypatch, qualification_expired=qualification_expired, kill_after_committed=kill_after_committed)
+        except MeasurementRefused as exc:
+            if exc.code != "a7_request_ended_before_fault" or attempt == 2:
+                raise
+    raise AssertionError("unreachable")
+
+
+def _measure_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, qualification_expired: bool, kill_after_committed: int) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], Any]:
     # Long enough that the measured request is still decoding when the
     # measurement (HTTP evidence reads, freeze, kill) acts on the ~ms local model.
     monkeypatch.setattr(harness, "_MAX_NEW", _MAX_NEW)
@@ -208,18 +224,7 @@ def test_plug_in_measures_the_positive_cutover_from_product_evidence(tmp_path: P
 def test_plug_in_measures_a_final_decode_step_cutover_from_product_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The source is killed with only the final decode step left (11 of 12 committed)."""
 
-    # Only one decode step is killable, so under host load the request can
-    # finish before the freeze lands.  That refusal injects no fault and makes
-    # no claim; a fresh route measures again (bounded).
-    for attempt in range(3):
-        root = tmp_path / f"attempt-{attempt}"
-        root.mkdir()
-        try:
-            record, observations, plan, scoped = _measure_with_harness(root, monkeypatch, qualification_expired=False, kill_after_committed=_MAX_NEW - 1)
-            break
-        except MeasurementRefused as exc:
-            if exc.code != "a7_request_ended_before_fault" or attempt == 2:
-                raise
+    record, observations, plan, scoped = _measure_with_harness(tmp_path, monkeypatch, qualification_expired=False, kill_after_committed=_MAX_NEW - 1)
     failures = gate.evaluate_case(record, plan)
     assert set(failures) - _HARNESS_ONLY <= {"added_tpot"}, failures
     assert record["outcome"] == "fenced_kv_successor", record
