@@ -1269,6 +1269,8 @@ def _receipt_shape_valid(receipt: Any) -> bool:
 
 
 _JUNIT_BENIGN_CHILDREN = frozenset({"properties", "system-out", "system-err"})
+_JUNIT_PASSING_STATES = frozenset({"run", "passed", "pass", "success", "completed"})
+_JUNIT_SKIPPED_STATES = frozenset({"skipped", "notrun", "disabled", "ignored"})
 _XML_ENCODING = re.compile(rb"""\s*<\?xml[^>]*?encoding\s*=\s*["']([^"']*)["']""")
 _XML_DECLARED_ENTITIES = re.compile(rb"<!\s*(?:DOCTYPE|ENTITY)", re.IGNORECASE)
 
@@ -1299,8 +1301,11 @@ def _verify_junit(context: _Context, files: dict[str, bytes], directory: Path, a
 
     Every ``.xml`` evidence file (any letter case) is a report. A case passes only when it
     has no child other than properties and captured output: failure, error, skipped and
-    the rerun/flaky variants, or any unknown child, are not a pass. Each leaf suite must
-    declare a ``tests`` count equal to the cases counted in it.
+    the rerun/flaky variants, or any unknown child, are not a pass, and neither is a
+    ``status``/``result`` attribute that is not a passing state. Each leaf suite must
+    declare a ``tests`` count equal to the cases counted in it; failure, error and skip
+    totals are read on every suite and on a ``testsuites`` root, whose ``tests`` total, if
+    present, must equal the cases counted.
     """
     reports = [content for name, content in sorted(files.items()) if name.lower().endswith(".xml")]
     if not reports:
@@ -1314,27 +1319,46 @@ def _verify_junit(context: _Context, files: dict[str, bytes], directory: Path, a
             add("junit_report_invalid")
             return
         counted_in_suites = 0
-        for suite in root.iter("testsuite"):
+        # ``iter`` on a ``testsuite`` root yields the root; a ``testsuites`` root carries
+        # its own totals and is read explicitly.
+        containers = list(root.iter("testsuite"))
+        if root.tag == "testsuites":
+            containers.append(root)
+        for suite in containers:
             cases = [child for child in suite if child.tag == "testcase"]
-            counted_in_suites += len(cases)
+            if suite is not root or root.tag == "testsuite":
+                counted_in_suites += len(cases)
+            failures += suite.get("failures", "0") != "0" or suite.get("errors", "0") != "0"
+            skips += suite.get("skipped", "0") != "0" or suite.get("disabled", "0") != "0"
+            if suite.tag == "testsuites" or any(child.tag == "testsuite" for child in suite):
+                continue
             declared_count = suite.get("tests")
-            if not any(child.tag == "testsuite" for child in suite) and (
+            if (
                 declared_count is None
                 or not declared_count.isdigit()
                 or int(declared_count) != len(cases)
             ):
                 counts_consistent = False
-            failures += suite.get("failures", "0") != "0" or suite.get("errors", "0") != "0"
-            skips += suite.get("skipped", "0") != "0"
             for case in cases:
                 tests += 1
                 children = {child.tag for child in case} - _JUNIT_BENIGN_CHILDREN
-                skips += "skipped" in children
-                failures += bool(children - {"skipped"})
-        if counted_in_suites != sum(1 for _ in root.iter("testcase")):
+                states = {
+                    case.get(name, "").strip().lower() for name in ("status", "result")
+                } - {""}
+                skipped = "skipped" in children or bool(states & _JUNIT_SKIPPED_STATES)
+                skips += skipped
+                # A verdict carried only in an attribute is still a verdict.
+                failures += bool(children - {"skipped"}) or bool(
+                    states - _JUNIT_PASSING_STATES - _JUNIT_SKIPPED_STATES
+                )
+        total_cases = sum(1 for _ in root.iter("testcase"))
+        if counted_in_suites != total_cases:
             # A case outside a counted suite cannot be reconciled with any total.
             add("junit_report_invalid")
             return
+        root_total = root.get("tests") if root.tag == "testsuites" else None
+        if root_total is not None and (not root_total.isdigit() or int(root_total) != total_cases):
+            counts_consistent = False
     if not counts_consistent:
         add("junit_counts_inconsistent")
     if tests == 0:
@@ -2190,6 +2214,12 @@ def _structure_valid(body: Mapping[str, Any]) -> bool:
         )
         or (body["previous_decision_digest"] is None) != (body["decision_generation"] == 1)
         or body["authority_scope"] not in {SCOPE_PRODUCTION, SCOPE_SYNTHETIC, SCOPE_UNDETERMINED}
+        # The decision is unsigned, so a production label is honoured only for a registry
+        # pinned in source. With the allowlist empty no production document verifies.
+        or (
+            body["authority_scope"] == SCOPE_PRODUCTION
+            and body["trust_registry_digest"] not in PRODUCTION_REGISTRY_PINS
+        )
     ):
         return False
     graph = body["graph"]
@@ -2602,21 +2632,47 @@ def produce_release_decision(
     return _append(directory, entries, body)
 
 
+def _registry_key_digests(path: Any, expected_digest: Any) -> set[str]:
+    """Key digests of the registry that backed a decision, matched by its digest."""
+    if path is None or not is_sha256_ref(expected_digest):
+        raise _refuse("revocation_registry_mismatch")
+    try:
+        content, _status = _load_file(Path(os.path.abspath(os.fspath(path))), MAX_REGISTRY_BYTES)
+    except (TypeError, ValueError):
+        content = None
+    if content is None or sha256_bytes(content) != expected_digest:
+        raise _refuse("revocation_registry_mismatch")
+    try:
+        trust = _parse_trust_registry(
+            canonical_json_loads(content, path="trust-registry"), expected_digest
+        )
+    except EvidenceValidationError:
+        trust = None
+    if trust is None:
+        raise _refuse("revocation_registry_mismatch")
+    return set(trust.roles)
+
+
 def append_revocation(
     *,
     ledger_dir: os.PathLike[str] | str,
     reason: str,
     now: datetime,
     expected_ledger_head: str | None,
+    revoked_decision_digest: str,
     compromised_key_digests: tuple[str, ...] | list[str] = (),
+    trust_registry_path: os.PathLike[str] | str | None = None,
 ) -> DecisionResult:
     """Append an explicit non-ready generation revoking a decision (spec section 8).
 
-    The revoked decision is the most recent ``ready`` generation, or the latest generation
-    when none was ready. What is blocked afterwards is its semantic identity, so rewriting
-    the candidate file does not escape it: for ``compromised_key`` the named verification
-    key digests in any registry; for every other reason the source commit and every gate,
-    class and reviewer result digest of the revoked decision.
+    The caller names the generation being revoked by the digest of its exact bytes; no
+    target is guessed. What is blocked afterwards is that decision's semantic identity, so
+    rewriting the candidate file does not escape it: for every reason its candidate digest,
+    its source commit and, when it was ``ready``, every gate, class and reviewer result
+    digest. ``compromised_key`` additionally blocks the named verification key digests in
+    any registry, and each must be a key of the registry that backed the revoked decision,
+    read from ``trust_registry_path`` and matched by digest, so a mistyped digest cannot
+    produce a revocation that revokes no key.
     """
     now = _require_utc(now)
     directory = _ledger_directory(ledger_dir)
@@ -2635,27 +2691,29 @@ def append_revocation(
     if reason != "compromised_key" and key_digests:
         raise _refuse("revocation_key_digests_unexpected")
     latest = entries[-1]
-    target = next((entry for entry in reversed(entries) if entry.decision == "ready"), latest)
+    target = next(
+        (entry for entry in entries if entry.decision_digest == revoked_decision_digest), None
+    )
+    if target is None:
+        raise _refuse("revocation_target_unknown")
     revoked = target.document["body"]
+    if key_digests:
+        registry_keys = _registry_key_digests(trust_registry_path, revoked["trust_registry_digest"])
+        if not set(key_digests) <= registry_keys:
+            raise _refuse("revocation_key_not_in_registry")
     graph = revoked["graph"]
-    source_commit = None
+    source_commit = revoked["source"]["commit"]
     result_digests: list[str] = []
-    if reason != "compromised_key":
-        source_commit = revoked["source"]["commit"]
-        if graph is not None:
-            root = graph["root"]
-            source_commit = root["source_commit"]
-            result_digests = sorted(
-                {
-                    *(
-                        node["artifact_digest"]
-                        for node in graph["nodes"]
-                        if node["gate_id"] != ROOT_GATE
-                    ),
-                    *root["digest_class_roots"].values(),
-                    root["reviewer_reproduction_digest"],
-                }
-            )
+    if graph is not None:
+        root = graph["root"]
+        source_commit = root["source_commit"]
+        result_digests = sorted(
+            {
+                *(node["artifact_digest"] for node in graph["nodes"] if node["gate_id"] != ROOT_GATE),
+                *root["digest_class_roots"].values(),
+                root["reviewer_reproduction_digest"],
+            }
+        )
     finding = f"release_revoked:{reason}"
     body = {
         "authority_scope": revoked["authority_scope"],

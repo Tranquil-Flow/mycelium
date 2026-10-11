@@ -79,7 +79,16 @@ def _parser() -> argparse.ArgumentParser:
     revoke = commands.add_parser("revoke", allow_abbrev=False)
     revoke.add_argument("--ledger-dir", required=True)
     revoke.add_argument("--expect-head", required=True, metavar="DIGEST|none")
+    revoke.add_argument(
+        "--revoke-decision-digest",
+        required=True,
+        help="decision_digest of the generation being revoked; no target is guessed",
+    )
     revoke.add_argument("--reason", required=True, choices=REVOCATION_REASONS)
+    revoke.add_argument(
+        "--trust-registry",
+        help="registry that backed the revoked decision; required for compromised_key",
+    )
     revoke.add_argument(
         "--compromised-key-digest",
         action="append",
@@ -144,7 +153,9 @@ def main(
                 reason=arguments.reason,
                 now=now,
                 expected_ledger_head=expected_head,
+                revoked_decision_digest=arguments.revoke_decision_digest,
                 compromised_key_digests=arguments.compromised_key_digest,
+                trust_registry_path=arguments.trust_registry,
             )
     except ReleaseDecisionRefused as refused:
         _emit(sys.stderr, {"refused": refused.code})
@@ -159,6 +170,11 @@ def main(
         "decision_digest": result.decision_digest,
         "decision_generation": result.decision_generation,
     }
+    revocation = result.document["body"]["revocation"]
+    if isinstance(revocation, dict) and revocation.get("kind") == "explicit":
+        # Say exactly which generation was revoked so the operator can check it.
+        appended["revoked_generation"] = revocation["revoked_generation"]
+        appended["revoked_decision_digest"] = revocation["revoked_decision_digest"]
     try:
         public = public_projection_bytes(result.sealed_bytes)
         write_exclusive(arguments.public_out, public, protected_paths=protected)
