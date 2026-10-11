@@ -23,7 +23,8 @@ def main():
     a = p.parse_args()
     a.evidence.mkdir(parents=True,exist_ok=False)
     assert not a.evidence.resolve().is_relative_to(ROOT), 'evidence outside source tree'
-    sources = ['native/mobile_core/src/node.rs','native/mobile_core/src/node_real_composition.rs',
+    sources = ['native/mobile_core/src/node.rs','native/mobile_core/src/node_control.rs',
+               'native/mobile_core/src/node_real_composition.rs','tests/live/phone_composition_fixture.py',
                'tests/iroh_conformance/real_phone_composition_client.py',
                'tests/iroh_conformance/run_real_phone_composition.py']
     source_hashes = {}
@@ -36,12 +37,23 @@ def main():
     target = Path(os.environ['CARGO_TARGET_DIR'])
     locks = [ROOT/'native'/x/'Cargo.lock' for x in ('iroh_transport','mobile_core')]
     before = {str(p.relative_to(ROOT)):digest(p) for p in locks}
-    env = dict(os.environ,PHONE_COMPOSITION_EVIDENCE=str(a.evidence.resolve()),PYTHONDONTWRITEBYTECODE='1')
+    head = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
+    # The native test binary is compiled with the build identity of exactly this
+    # checkout; the qualification case's receipt validation then requires the
+    # checkout to be that clean commit. A dirty tree fails there, by design.
+    import tomllib
+    version = tomllib.loads((ROOT/'native/mobile_core/Cargo.toml').read_text())['package']['version']
+    identity = json.dumps({'protocol':'mycelium.mobile_runtime_build.v1','source_commit':head,
+                           'mobile_core_version':version},sort_keys=True,separators=(',',':')).encode()
+    build_digest = 'sha256:'+hashlib.sha256(identity).hexdigest()
+    env = dict(os.environ,PHONE_COMPOSITION_EVIDENCE=str(a.evidence.resolve()),PYTHONDONTWRITEBYTECODE='1',
+               MYCELIUM_NODE_BUILD_DIGEST=build_digest,PHONE_COMPOSITION_SOURCE=str(ROOT))
     commands = [
         ['cargo','build','--manifest-path','native/iroh_transport/Cargo.toml','--offline','--locked','--bin','mycelium-iroh-sidecar'],
         ['cargo','test','--manifest-path','native/mobile_core/Cargo.toml','--offline','--locked','--features','net','--lib','real_phone_composition','--','--nocapture','--test-threads=1'],
     ]
-    result = {'head':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
+    result = {'head':head,'native_build_digest':build_digest,
+              'tree_status':subprocess.check_output(['git','status','--porcelain','--untracked-files=all'],cwd=ROOT,text=True),
               'synthetic_cpu_only':True,'physical_devices':False,'commands':[], 'locks_before':before,
               'harness_sha256':source_hashes}
     rc = 1

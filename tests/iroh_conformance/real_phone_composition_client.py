@@ -4,6 +4,12 @@
 Desktop session/attestation records and the pre-applied seed membership are
 explicit test doubles. Phone commands, signatures, stage execution and telemetry
 are native. The runtime is the repository's tiny synthetic CPU stage fixture.
+
+The qualification case additionally runs the production seed issuance, builder
+and current-authority validation against a disposable seed, and feeds the final
+qualifier the unmodified records the native process signed. Its build receipt
+names the checked-out source commit the native test binary was compiled from;
+the "APK" is a labelled placeholder file. None of it is device evidence.
 """
 import copy
 import json
@@ -20,12 +26,12 @@ from types import SimpleNamespace
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path[:0] = [str(ROOT), str(ROOT / 'tests/qualification')]
+sys.path[:0] = [str(ROOT), str(ROOT / 'tests/qualification'), str(ROOT / 'tests/live'), str(ROOT / 'tests')]
 from mycelium_iroh_sidecar import SidecarClient
 from mycelium_live.phone_stage_session import PhoneStageSessionFactory, require_cancel_receipt
 from mycelium_live.route import PhysicalLiveRoute
 from mycelium_qualification.evidence import sha256_document
-from mycelium_qualification.phone import (LOAD_IDENTITY_PROVENANCE, PhoneLoadProvenanceError,
+from mycelium_qualification.phone import (LOAD_IDENTITY_PROVENANCE_V2,
     phone_load_proof_digest, validate_phone_load_provenance)
 from mycelium_qualification.signing import generate_ed25519_signer
 from physical_inference_qualification import PeerIdentity, QualificationController
@@ -77,6 +83,172 @@ def packet(fixture):
     return att, endpoints
 
 
+def exchange_with(action, **fields):
+    print(json.dumps(dict(fields, action=action)), flush=True)
+    assert select.select([sys.stdin], [], [], 60)[0], 'native witness timeout'
+    result = json.loads(sys.stdin.readline())
+    TRANSCRIPT.append({'native_witness': action, 'result': result})
+    return result
+
+
+def qualification(fixture, ready, socket, secret, factory):
+    """Seed issuance -> native load -> builder -> current authority -> final qualifier.
+
+    Every phone envelope below is the native process's own, unmodified. The
+    disposable seed's member rows for the phone are signed with the native
+    test key the harness also holds (the membership supervisor is not run).
+    """
+    import tempfile as _tempfile
+    from phone_composition_fixture import fixture_build, qualify_fixture_plan
+    from scripts import build_qwen_live_route as builder
+    from mycelium_qualification import LiveRouteQualificationError
+    from physical_inference_qualification import ControllerError
+    native = dict(source=os.environ['PHONE_COMPOSITION_SOURCE'], endpoint_id=fixture['phone']['id'],
+        controller=ready['endpoint_id'], key=fixture['key'],
+        desktop_endpoints={0: fixture['entry']['id'], 2: fixture['final']['id']})
+    state = dict(session=None, sessions=0)
+    def open_session(setup):
+        peer = PeerIdentity(node_id='node-1', host_id='node-1', boot_id=setup['member']['incarnation'], ssh_target=None,
+            staging_root='/tmp/mycelium/phone-stage', process_transport='external_iroh')
+        state['sessions'] += 1
+        state['session'] = factory(argv=(), node_id='node-1', run_id='synthetic-run', deployment_id=setup['deployment_id'],
+            timeout_seconds=10, peer=peer, endpoint_id=native['endpoint_id'],
+            member_key_digest=fixture['key']['verification_key_digest'])
+    def call(command, payload=None, *, ok=True):
+        response = state['session'].send(command_id=f"q{state['sessions']}-{len(TRANSCRIPT)}-{command}",
+            command=command, payload=payload or {})
+        TRANSCRIPT.append({'command': command, 'payload': payload or {}, 'response': response})
+        assert response['ok'] is ok, response
+        return response
+    def close_session():
+        call('stop'); state['session'].close(); state['session'] = None
+    graph_control = lambda setup: dict(deployment_id=setup['deployment_id'], deployment_epoch=1, topology_generation=1)
+    kept = {}
+    def observe(setup):
+        kept['setup'] = setup
+        loaded = exchange_with('apply', model=setup['model'], manifest=setup['manifest'], record=setup['record'],
+            member=dict(incarnation=setup['member']['incarnation'], generation=setup['member']['generation']),
+            node_id='node-1', entry_node_id='node-0', final_node_id='node-2', deployment_id=setup['deployment_id'])
+        assert loaded['load_generation'] == 1, loaded
+        assert setup['record']['route_generation'] == 1
+        open_session(setup)
+        call('hello')
+        hint = call('stage_load')['result']
+        assert hint == {'protocol': 'mycelium.physical_node_control.v1', 'stage_load_generation': 1}, hint
+        profile = dict(setup['profile'], load_generation=hint['stage_load_generation'])
+        # Coherent generation laundering: the controller picks another number.
+        # The phone signs nothing for it, so there is nothing to re-sign around.
+        for chosen in (profile['load_generation'] + 1, 17):
+            refused = call('configure', dict(profile, load_generation=chosen), ok=False)
+            assert refused['error'] == {'code': 'load_generation_mismatch'} and 'result' not in refused, refused
+        configured = call('configure', profile)
+        snapshot = call('snapshot')
+        details = configured['result']['observation']['details']
+        assert details['load_identity_provenance'] == LOAD_IDENTITY_PROVENANCE_V2
+        assert details['runtime_build_digest'] == fixture['runtime_build_digest']
+        assert details['assignment_id'] == setup['record']['assignment_id']
+        close_session()
+        return configured, snapshot
+    original_run = subprocess.run
+    def no_network(cmd, **kw):
+        if cmd[0] == 'ssh': return subprocess.CompletedProcess(cmd, 0, json.dumps(['fixture-remote', 'fixture-boot']), '')
+        return original_run(cmd, **kw)
+    subprocess.run = no_network
+    with _tempfile.TemporaryDirectory(prefix='phone-qualify-') as temp:
+        tmp = Path(temp).resolve()
+        built = fixture_build(tmp, native=native, observe=observe)
+        native_preparation = copy.deepcopy(built.document)
+        assert built.document['configured'] == next(x['response'] for x in TRANSCRIPT
+            if x.get('command') == 'configure' and x['response']['ok'])
+        report = builder.build(built.args)  # unpatched production build
+        assert report['route_ready'] is False
+        plan_path = Path(report['operator_plan']); plan = json.loads(plan_path.read_text())
+        checkpoint = json.loads((built.args.output_root / 'local-challenge-checkpoint.json').read_text())
+        graph = plan['controller']['run_plan']['nodes'][0]['configure']['graph']
+        expected = phone_load_proof_digest(built.document['configured']['result']['observation'])
+        assert graph['stages'][1]['placements'][0]['load_proof_digest'] == expected
+        proof = json.loads((built.args.output_root / 'transfer-bundle/control/node-1-load-proof.json').read_text())
+        assert all(proof[k] == native_preparation[k] for k in ('configured', 'snapshot')), 'packaging rewrote a native envelope'
+        setup = kept['setup']
+        exchange_with('frames', topology_version=graph['topology_version'])
+        route = PhysicalLiveRoute.from_operator_plan(plan_path, seed_state_root=built.args.phone_seed_state_root,
+            external_session_factory=factory)
+        try:
+            # THIS route open: a new control session against the same applied load.
+            profile = plan['controller']['run_plan']['nodes'][1]['configure']
+            control = dict(deployment_id=graph['deployment_id'], deployment_epoch=graph['deployment_epoch'],
+                           topology_generation=graph['topology_version'])
+            open_session(setup)
+            call('hello')
+            configured = call('configure', dict(profile, request_control_graph=control))['result']
+            peer = lambda n, k: dict(node_id=n, endpoint_id=fixture[k]['id'], endpoint_addr=fixture[k], generation=1)
+            started = call('start', dict(peer=peer('node-2', 'final'), peers=[peer('node-0', 'entry')], local_generation=1))['result']
+            exchange('drive')
+            snapshot = call('snapshot')['result']
+            assert snapshot['observation']['details']['runtime']['applied_operation_count'] == 1
+            records = [configured, started, snapshot]
+            native_records = copy.deepcopy(records)
+            assert configured['observation']['monotonic_ns'] > native_preparation['configured']['result']['observation']['monotonic_ns']
+            assert phone_load_proof_digest(configured['observation']) == expected, 'same applied load, same identity'
+            bindings = route.phone_qualification_bindings()  # production: pinned seed rows + packaged proof
+            authority = bindings['node-1']['load_authority']
+            assert (authority.load_generation, authority.load_proof_digest) == (1, expected)
+            record = qualify_fixture_plan(built, plan, checkpoint, bindings=bindings, phone_records=records)
+            assert record.route_ready is True
+            assert [b.load_proof_digest for b in record.stage_bindings if b.node_id == 'node-1'] == [expected]
+            assert records == native_records, 'qualifier mutated native envelopes'
+            def refused(candidate, code, using=None):
+                try: result = qualify_fixture_plan(built, plan, checkpoint, bindings=using or bindings, phone_records=candidate)
+                except LiveRouteQualificationError as e: assert str(e) == code, (code, str(e))
+                else: raise AssertionError(f'{code} expected; qualifier returned route_ready={result.route_ready}')
+            # Tampered native record: a signature refusal, before any provenance decision.
+            corrupt = copy.deepcopy(records)
+            corrupt[0]['observation']['details']['load_generation'] = 99
+            refused(corrupt, 'live_signature_invalid')
+            corrupt = copy.deepcopy(records)
+            corrupt[2]['observation']['details']['load_identity']['load_generation'] = 99
+            refused(corrupt, 'live_signature_invalid')
+            # The plan's configure copy without validated authority is refused.
+            refused(records, 'live_phone_load_authority_required',
+                    using={'node-1': {k: v for k, v in bindings['node-1'].items() if k != 'load_authority'}})
+            close_session()
+            # Stale generation: the node loads its assignment again.
+            assert exchange('reload')['load_generation'] == 2
+            open_session(setup)
+            call('hello')
+            stale = call('configure', dict(profile, request_control_graph=control), ok=False)
+            assert stale['error'] == {'code': 'load_generation_mismatch'}, stale
+            assert call('stage_load')['result']['stage_load_generation'] == 2
+            reconfigured = call('configure', dict(profile, load_generation=2, request_control_graph=control))['result']
+            newer = call('snapshot')['result']
+            assert newer['observation']['details']['load_identity']['load_generation'] == 2
+            # The old signed configured record against the newer signed snapshot.
+            refused([configured, started, newer], 'live_phone_load_stale')
+            # The new load is not the one the seed authorization, graph and proof name.
+            refused([reconfigured, started, newer], 'live_phone_load_authority_mismatch')
+            assert records == native_records and configured == native_records[0]
+            # The seed's rows did not change, so its authority still names load 1:
+            # only the phone's own signed count exposes the reload.
+            assert route.phone_qualification_bindings()['node-1']['load_authority'].load_generation == 1
+            # Current-authority control on the real chain: the applied row is withdrawn.
+            from mycelium_seed import route_assignment as ra
+            with ra._connect(built.database) as c:
+                c.execute('UPDATE seed_route_assignments SET withdrawn=1')
+            try: route.phone_qualification_bindings()
+            except ControllerError as e: assert e.code == 'phone_applied_assignment_required', e.code
+            else: raise AssertionError('withdrawn assignment still produced load authority')
+            close_session()
+            TRANSCRIPT.append({'qualification_consumed_native_records': True, 'physical_qualification': False,
+                'desktop_records': 'synthetic_test_doubles', 'route_ready_published_for_native_load': True,
+                'load_proof_digest': expected, 'native_generation_laundering_refused': 'load_generation_mismatch',
+                'native_stale_profile_refused': 'load_generation_mismatch', 'host_stale_record_refused': 'live_phone_load_stale',
+                'native_signature_tamper_rejected': 'live_signature_invalid',
+                'build_receipt': 'checked-out source commit; placeholder APK file, not an APK'})
+        finally:
+            if state['session'] is not None: state['session'].close()
+            route.close()
+
+
 def run(binary, mode):
     secret = b'c' * 32  # synthetic local IPC authentication only
     # macOS UDS path length is small; authenticated runtime owns a private subdir.
@@ -98,6 +270,8 @@ def run(binary, mode):
                 client.configure_peer(fixture['phone']['id'], fixture['phone'], generation=1)
             factory = PhoneStageSessionFactory(socket_path=socket, bootstrap_secret=secret,
                                                controller_endpoint_id=ready['endpoint_id'])
+            if mode == 'qualification':
+                return qualification(fixture, ready, socket, secret, factory)
             att, endpoints = packet(fixture)
             dep = att['execution_graph']['deployment_id']
             key = fixture['key']['verification_key_digest']
@@ -250,38 +424,7 @@ def run(binary, mode):
                 assert fresh['peer_generation'] == 2 and fresh['monotonic_ns'] > again['observation']['monotonic_ns']
                 assert fresh['details']['runtime']['replay_result_count'] == fresh['details']['runtime']['active_state_count'] == 0
                 return
-            # Whole production qualifier consumes unmodified native signed records.
-            # Affirmative phone load authority is unsupported: the native producer
-            # truthfully marks manifest/load generation as controller claims, so the
-            # authentic record must be recognized and still refused at promotion.
-            att['signed_observations'] += [configured,started,snapshot]
-            native_configured = copy.deepcopy(configured)
-            assert configured['observation']['details']['load_identity_provenance'] == LOAD_IDENTITY_PROVENANCE
-            validate_phone_load_provenance(configured['observation'])
-            try: phone_load_proof_digest(configured['observation'])
-            except PhoneLoadProvenanceError as e: assert str(e) == 'phone_load_provenance_unsupported', e
-            else: raise AssertionError('unsupported native load provenance produced a load proof')
-            bindings = {'node-phone':dict(endpoint_id=endpoints['node-phone'],process_id='inc-phone',member_key_digest=key,configure=PROFILE)}
-            snapshots = [x['observation']['details'] for x in att['signed_observations'] if x['observation']['event']=='snapshot']
-            att['counters'] = dict(frames_sent=sum(x['transport']['remote_frames_sent'] for x in snapshots),
-                frames_received=sum(x['transport']['remote_frames_received'] for x in snapshots),
-                applied_operation_count=sum(x['runtime']['applied_operation_count'] for x in snapshots),fatal=None)
-            from mycelium_qualification import LiveRouteQualificationError
-            def refused(candidate, code):
-                try: record = qualify(candidate,bindings)
-                except LiveRouteQualificationError as e: assert str(e) == code, (code, str(e))
-                else: raise AssertionError(f'{code} expected; qualifier returned route_ready={record.route_ready}')
-            original = copy.deepcopy(att)
-            refused(att, 'phone_load_provenance_unsupported')
-            assert att == original and configured == native_configured, 'qualifier mutated native envelopes'
-            # Mutation control: the refusal above was reached only after the
-            # consumer verified the native bytes; a tampered record fails earlier.
-            corrupt = copy.deepcopy(att)
-            next(x for x in corrupt['signed_observations'] if x['observation']['node_id']=='node-phone')['observation']['details']['load_generation'] = 99
-            refused(corrupt, 'live_signature_invalid')
-            TRANSCRIPT.append({'qualification_consumed_native_records':True,'physical_qualification':False,
-                               'desktop_records':'synthetic_test_doubles','native_signature_tamper_rejected':True,
-                               'phone_load_provenance':'refused_unsupported','route_ready_published':False})
+            raise AssertionError('unknown composition mode: ' + mode)
         finally:
             if route is not None: route.close()
             if session is not None: session.close()
