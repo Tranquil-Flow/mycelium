@@ -211,9 +211,15 @@ def qualification(fixture, ready, socket, secret, factory):
             # The plan's configure copy without validated authority is refused.
             refused(records, 'live_phone_load_authority_required',
                     using={'node-1': {k: v for k, v in bindings['node-1'].items() if k != 'load_authority'}})
-            close_session()
-            # Stale generation: the node loads its assignment again.
-            assert exchange('reload')['load_generation'] == 2
+            # Stale generation: the node installs its assignment again while this
+            # session is RUNNING. The phone ends the session with its load: the
+            # next hop is not executed and nothing more is signed for it.
+            replaced = exchange('replace')
+            assert replaced == dict(load_generation=2, was_running=True, control_gone=True,
+                                    hop_refused=True, executed_after=0), replaced
+            orphan = call('snapshot', ok=False)
+            assert orphan['error'] == {'code': 'run_id_mismatch'} and 'result' not in orphan, orphan
+            state['session'].close(); state['session'] = None
             open_session(setup)
             call('hello')
             stale = call('configure', dict(profile, request_control_graph=control), ok=False)
@@ -241,7 +247,8 @@ def qualification(fixture, ready, socket, secret, factory):
             TRANSCRIPT.append({'qualification_consumed_native_records': True, 'physical_qualification': False,
                 'desktop_records': 'synthetic_test_doubles', 'route_ready_published_for_native_load': True,
                 'load_proof_digest': expected, 'native_generation_laundering_refused': 'load_generation_mismatch',
-                'native_stale_profile_refused': 'load_generation_mismatch', 'host_stale_record_refused': 'live_phone_load_stale',
+                'native_stale_profile_refused': 'load_generation_mismatch',
+                'running_session_ended_by_stage_replacement': replaced, 'host_stale_record_refused': 'live_phone_load_stale',
                 'native_signature_tamper_rejected': 'live_signature_invalid',
                 'build_receipt': 'checked-out source commit; placeholder APK file, not an APK'})
         finally:

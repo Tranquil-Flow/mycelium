@@ -200,6 +200,23 @@ async fn composition(mode: &str) {
                 assert!(s.control.is_none(), "reload between control sessions");
                 json!({"load_generation":s.install_stage(Box::new(runtime))})
             },
+            Some("replace") => {
+                // The same install while a control session is RUNNING: the node
+                // ends that session with the load it was configured for.
+                let runtime = applied.as_ref().expect("applied before replace").load();
+                let (load_generation, was_running, control_gone) = {
+                    let mut s = shared.lock().unwrap();
+                    let was_running = s.control.as_ref().is_some_and(|c| c.state() == "RUNNING");
+                    let load_generation = s.install_stage(Box::new(runtime));
+                    (load_generation, was_running, s.control.is_none())
+                };
+                reconcile_control(&shared, &phone).await;
+                // A hop the old session's entry peer sends now is not executed.
+                let before = shared.lock().unwrap().status.frames_executed;
+                let refused = entry.send(phone.addr(),1,&composition_frame("04-hop-decode-in.bin", &spec)).await.is_err();
+                json!({"load_generation":load_generation,"was_running":was_running,"control_gone":control_gone,
+                    "hop_refused":refused,"executed_after":shared.lock().unwrap().status.frames_executed - before})
+            },
             Some("drive") => {
                 entry.send(phone.addr(),1,&composition_frame("01-manifest-locked.bin", &spec)).await.unwrap();
                 entry.send(phone.addr(),1,&composition_frame("02-hop-prefill-in.bin", &spec)).await.unwrap();

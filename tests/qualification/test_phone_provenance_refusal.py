@@ -234,3 +234,35 @@ def test_final_authority_ignores_the_preparation_window_only_when_told(evidence)
     doc["authorization"]["message"]["node_id"] = "another"
     with pytest.raises(RuntimeError, match="phone_authority_signature_invalid"):
         phone.PhoneEvidence(doc, now=later, preparation_window=False, **kw)
+
+
+@pytest.mark.parametrize("field,value", [("load_generation", 99), ("manifest_digest", "sha256:"+"0"*64),
+                                         ("assignment_id", "assignment-B"), ("checked_at", 1.0)])
+def test_authority_seal_binds_its_content(field, value):
+    """A copied-and-changed or hand-assembled authority is not the issuer's result."""
+    import dataclasses
+    att, bindings, _ = phone_attestation()
+    n = next(iter(bindings))
+    authority = bindings[n]["load_authority"]
+    assert "_seal" not in repr(authority) and authority._seal not in repr(authority)
+    assert dataclasses.replace(authority) == authority  # an unchanged copy is the same content
+    with pytest.raises(TypeError, match="phone_load_authority_unsealed"):
+        dataclasses.replace(authority, **{field: value})
+    fields = {k: getattr(authority, k) for k in authority.__dataclass_fields__}
+    with pytest.raises(TypeError, match="phone_load_authority_unsealed"):
+        load.PhoneLoadAuthority(**{**fields, field: value})
+    # Assembled without the constructor, carrying the genuine seal of other content.
+    forged = object.__new__(load.PhoneLoadAuthority)
+    for key, item in {**fields, field: value}.items():
+        object.__setattr__(forged, key, item)
+    assert type(forged) is load.PhoneLoadAuthority
+    # Make the forgery agree with the native record so only the seal can refuse it.
+    if field == "checked_at":
+        bindings[n]["load_authority"] = forged
+        with pytest.raises(LiveRouteQualificationError) as refused:
+            qualify(att, bindings)
+        assert str(refused.value) == "live_phone_load_authority_required"
+    with pytest.raises(TypeError, match="phone_load_authority_unsealed"):
+        forged.verify_seal()
+    bindings[n]["load_authority"] = authority
+    assert qualify(att, bindings).route_ready is True
