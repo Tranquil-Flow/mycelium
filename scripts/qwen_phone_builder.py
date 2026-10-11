@@ -28,12 +28,16 @@ from mycelium_live.phone_stage_session import validate_phone_configure
 from physical_inference_qualification import PeerIdentity, QualificationController
 
 BACKEND = "mobile-rust-qwen2"
-BINDING_PROTOCOL = "mycelium.phone_builder_authorization.v1"
+BINDING_PROTOCOL = "mycelium.phone_builder_authorization.v2"
+PROOF_PROTOCOL = "mycelium.phone_authenticated_load_proof.v2"
+#: What the seed's preparation binding is, and what it is not. The route
+#: generation is the seed's own peer-routing fact; it is recorded, never
+#: compared with or substituted for the phone's load generation.
+PREPARATION_PROVENANCE = "seed_compiled_assignment_and_route_generation_distinct_from_native_load_generation"
 BUILD_PROTOCOL = "mycelium.phone_executor_build.v1"
 BUILD_ID_PROTOCOL = "mycelium.mobile_runtime_build.v1"
 from mycelium_qualification.phone import (
-    LOAD_IDENTITY_PROVENANCE, require_phone_load_provenance,
-    validate_phone_load_provenance,
+    LOAD_IDENTITY_PROVENANCE_V2, PhoneLoadProvenanceError, validate_phone_load_provenance,
 )
 
 
@@ -83,13 +87,21 @@ def validate_build_receipt(receipt, *, expected_digest, binary, apk, source_root
 
 
 class PhoneEvidence:
-    """Verify preliminary preparation and original replies, NOT load authority.
+    """Verify the seed authorization and the original native replies.
 
-    Seed B1/B3 verification uses this carrier before proof promotion. The
-    native limitation stays intact; bind_assignment must refuse unsupported
-    provenance before presenting an authenticated load proof.
+    The load generation is the phone's own signed count (v2 descriptor); a
+    record from a producer that only echoed the controller is refused. The
+    manifest digest remains a controller claim here: bind_assignment and
+    bind_packaged establish it externally, against the seed-compiled
+    assignment and the packaged model bytes.
+
+    ``preparation_window=False`` is for final qualification and renewal only:
+    the authorization's 600 second window was a preparation-time check, so its
+    signature and content are verified but its expiry is not, and the caller
+    MUST take freshness from the current seed rows instead.
     """
-    def __init__(self, document, *, seed_key_digest, node, run_id, deployment_id, now=None):
+    def __init__(self, document, *, seed_key_digest, node, run_id, deployment_id, now=None,
+                 preparation_window=True):
         now = time.time() if now is None else now
         envelope = document["authorization"]
         key = envelope["verification_key"]
@@ -107,7 +119,8 @@ class PhoneEvidence:
         issued, expires = statement["issued_at"], statement["expires_at"]
         require(type(issued) in (int, float) and type(expires) in (int, float)
                 and math.isfinite(issued) and math.isfinite(expires)
-                and issued <= now < expires and 0 < expires - issued <= 600,
+                and issued <= now and 0 < expires - issued <= 600
+                and (now < expires or preparation_window is False),
                 "phone_authority_stale")
         require(all(statement[k] == v for k, v in {
             "node_id": node["node_id"], "endpoint_id": node["endpoint_id"],
@@ -126,12 +139,15 @@ class PhoneEvidence:
         binding = statement['preparation_binding']
         from mycelium_seed.route_assignment import validate_preparation_assignment
         validate_preparation_assignment(binding['assignment'], document['manifest'], node['node_id'])
+        # The seed's route generation is carried as its own fact. It is NOT the
+        # load generation and no equality between the two is required or used.
         require(set(binding) == {'assignment', 'route_generation', 'provenance'}
-                and binding['provenance'] == 'seed_compiled_assignment_and_route_generation_not_native_observation'
+                and binding['provenance'] == PREPARATION_PROVENANCE
                 and binding['assignment']['assignment_id'] == self.profile['assignment_id']
                 and binding['assignment']['manifest_digest'] == self.profile['manifest_digest']
                 and binding['assignment']['deployment_id'] == deployment_id
-                and binding['route_generation'] == self.profile['load_generation'], 'phone_preparation_binding_mismatch')
+                and type(binding['route_generation']) is int and binding['route_generation'] > 0,
+                'phone_preparation_binding_mismatch')
         self.receipt = document["build_receipt"]
         require(digest(canonical_json_bytes(self.receipt)) == statement["build_receipt_digest"],
                 "phone_build_receipt_digest_mismatch")
@@ -167,9 +183,48 @@ class PhoneEvidence:
         resources = snapshot["details"].get("host_resources", {})
         require(resources.get("supported_decode_modes") == ["complete_context_replay"],
                 "phone_replay_snapshot_required")
+        # The snapshot of the same session must still name the configured load.
+        from mycelium_qualification.phone import require_current_phone_load
+        try:
+            require_current_phone_load(configured, snapshot)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
         self.observations = observations
 
-    def bind_assignment(self, assignment, *, stage_id, snapshot_root):
+    @property
+    def native_load_generation(self):
+        """The phone-signed load count; never the seed's or the controller's."""
+        return self.observations[0]["details"]["load_generation"]
+
+    def bind_packaged(self, assignment, *, model_manifest):
+        """Bind the claimed manifest digest to the packaged full-model manifest.
+
+        The native stage manifest (seed-signed, and the pack the phone applied)
+        names one source Safetensors file by hash and size. That same file
+        must be the assignment's only weight file and a file of the packaged
+        full-model manifest whose digest the assignment and the claim carry.
+        Any other representation (sharded or transformed weights) is an
+        unsupported mapping and is refused, never assumed equivalent.
+        """
+        import model_manifest as mm
+        m = self.manifest
+        require(isinstance(model_manifest, dict) and mm.verify_manifest_digest(model_manifest)
+                and mm.manifest_digest_ref(model_manifest) == assignment["manifest_digest"]
+                == self.profile["manifest_digest"]
+                and model_manifest.get("model_id") == m["model_id"]
+                and model_manifest.get("resolved_commit") == m["resolved_commit"],
+                "phone_packaged_manifest_mismatch")
+        source = m["source"]
+        record = dict(path=source["file"], size_bytes=source["size_bytes"], content_digest=source["sha256"])
+        packaged = [dict(path=f["path"], size_bytes=f["size_bytes"],
+                         content_digest=f"{f['content_digest']['algorithm']}:{f['content_digest']['value']}")
+                    for f in model_manifest.get("files", []) if f.get("path") == source["file"]]
+        require(assignment["files"] == [record] and packaged == [record],
+                "phone_packaged_source_mapping_unsupported")
+        return dict(model_manifest_digest=assignment["manifest_digest"], source_file=record,
+                    native_pack_digest=m["pack_digest"])
+
+    def bind_assignment(self, assignment, *, stage_id, snapshot_root, model_manifest):
         m = self.manifest
         require(assignment["runtime"]["backend"] == BACKEND
                 and assignment["runtime"]["dtype"] == "float32"
@@ -192,9 +247,12 @@ class PhoneEvidence:
             stage_id=m["stage_id"], model_id=m["model_id"], resolved_commit=m["resolved_commit"],
             start_layer=m["start_layer"], end_layer_exclusive=m["end_layer_exclusive"], golden=m["golden"])
         require(rebuilt == m, "phone_challenge_source_mismatch")
-        require_phone_load_provenance(self.observations[0])
+        # The rebuilt manifest hashed these exact bytes; the same hash must be
+        # the packaged representation's, not merely an equal model name.
+        source_binding = self.bind_packaged(assignment, model_manifest=model_manifest)
+        validate_phone_load_provenance(self.observations[0])
         return {
-            "protocol": "mycelium.phone_authenticated_load_proof.v1",
+            "protocol": PROOF_PROTOCOL,
             "assignment_digest": digest(canonical_json_bytes(assignment)),
             "node_id": assignment["node_id"], "runtime_backend": BACKEND,
             "runtime": dict(assignment["runtime"]),
@@ -202,9 +260,10 @@ class PhoneEvidence:
             "authorization": self.document["authorization"],
             "configured": self.document["configured"], "snapshot": self.document["snapshot"],
             "build_receipt": self.receipt, "route_ready": False,
-            "load_identity_provenance": LOAD_IDENTITY_PROVENANCE,
+            "load_identity_provenance": LOAD_IDENTITY_PROVENANCE_V2,
             "preparation_binding": self.statement['preparation_binding'],
-            "claim_boundary": "Native applied pack plus seed-authorized compiled assignment/route generation, not native-observed graph or load generation; distributed token challenge still required.",
+            "source_binding": source_binding,
+            "claim_boundary": "Native applied pack and native stage-load generation within one process incarnation; the full-model manifest digest is a controller claim bound externally through the seed-compiled assignment and the packaged source file, not natively observed; distributed token challenge still required.",
         }
 
 
@@ -231,9 +290,13 @@ def bind_phone_graph(graph, phone_evidence):
 def preparation_proof_digest(proof):
     from mycelium_qualification.phone import phone_load_proof_digest
     from mycelium_router.layer_builder import layer_load_proof_digest
-    if proof.get("protocol") == "mycelium.phone_authenticated_load_proof.v1":
+    protocol = proof.get("protocol")
+    if protocol == PROOF_PROTOCOL:
         # Only used after PhoneEvidence has verified the original envelope.
         return phone_load_proof_digest(proof["configured"]["result"]["observation"])
+    if isinstance(protocol, str) and protocol.startswith("mycelium.phone_authenticated_load_proof."):
+        # A retired phone proof is never rehashed as a generic layer proof.
+        raise PhoneLoadProvenanceError("phone_load_provenance_unsupported")
     return layer_load_proof_digest(proof)
 
 
@@ -267,7 +330,7 @@ def authorized_membership_snapshot(snapshot, *, seed_key_digest, assignments, pa
                 and message["deployment_epoch"] == assignment["deployment_epoch"],
                 "phone_membership_assignment_mismatch")
         if phone:
-            require(message["load_generation"] == phone.profile["load_generation"],
+            require(message["load_generation"] == phone.native_load_generation,
                     "phone_membership_assignment_mismatch")
         records = {p["node_id"]: p for p in message["peer_endpoint_records"]}
         require(set(records) == set(by_node) - {node_id}, "phone_membership_peers_mismatch")

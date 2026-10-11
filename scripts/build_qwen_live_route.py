@@ -1816,7 +1816,8 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
         evidence = phone_evidence.get(assignment["node_id"])
         if evidence is not None:
             phone_proofs[assignment["node_id"]] = evidence.bind_assignment(assignment,
-                stage_id=f"stage-{index:03d}", snapshot_root=args.model_root)
+                stage_id=f"stage-{index:03d}", snapshot_root=args.model_root,
+                model_manifest=prepared.manifest)
             executor = resources.enter_context(RustStageExecutor(args.phone_executor, args.model_root,
                 evidence.manifest["start_layer"], evidence.manifest["end_layer_exclusive"],
                 hidden_size=evidence.manifest["architecture"]["hidden_size"]))

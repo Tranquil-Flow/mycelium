@@ -127,6 +127,98 @@ implementation detail.
     are owner-reviewed steps of the implementation lane; this lane deliberately
     changes no shared surface.
 
+### 2.1 Phone load identity v2 (native-observed load)
+
+Owner decision of 2026-10-11. This subsection is normative for the stage-only
+phone (`mobile-rust-qwen2`) and replaces nothing else in this contract.
+
+**Native counter.** The phone keeps one stage-load counter per node object. It
+advances by exactly one each time a verified stage runtime is installed as the
+applied stage, and at no other time: not on a control-session teardown or `stop`,
+not when a route is dropped, not on a membership resume, and not when compute
+hands the same runtime back. It is not `stage_revision`, the route generation,
+the membership or applied generation, the deployment epoch, a peer or control
+generation, a timestamp or a digest. A stage installed while compute still holds
+the previous runtime stays applied; the old runtime is not restored over it and
+its late output is not published.
+
+**Configure.** `configure` is refused with `load_generation_mismatch` unless the
+controller's `load_generation` equals that counter for the applied stage; nothing
+is signed for a refused value. `start` is refused with the same code if the
+applied load changed after `configure`. The unsigned `stage_load` command returns
+`{protocol, stage_load_generation}` (null when no stage is applied) so a
+controller can learn the number before its first `configure`. It is a hint and
+carries no authority.
+
+**Signed descriptor.** The `configured` observation carries the native counter
+value and exactly this `load_identity_provenance`:
+
+- `applied_fields`: `assignment_id`, `stage_id`, `phone_stage_pack_digest`,
+  `runtime_backend`, `runtime_build_digest`, `golden_output_digest`,
+  `load_generation`;
+- `controller_claim_fields`: `manifest_digest`;
+- `limitation`: `native_full_model_manifest_digest_not_independently_observed`;
+- `load_generation_basis`: `native_stage_load_sequence_within_process_incarnation`.
+
+A full `snapshot` signs `load_identity` (`assignment_id`, `stage_id`,
+`phone_stage_pack_digest`, `load_generation` of what is applied now, or null) and
+`configured_load_generation`. The earlier descriptor, which listed
+`load_generation` as a controller claim, is no longer emitted and is never
+promoted by any consumer.
+
+**What the counter proves, and what it does not.** Within one process
+incarnation (the `process_id` every observation signs) the pair
+(incarnation, load generation) names one stage install: a later load of the same
+or another assignment has a larger number, and an older signed record is
+detectably stale. It does not prove which full-model manifest the stage came
+from, it is not comparable across incarnations (a restarted process counts from
+one again under a new incarnation), it is not durable, and it says nothing about
+a device, an APK or a real model. It is a software fact of the node process.
+
+**Digest.** `mycelium.phone_load_identity.v2` is the SHA-256 of the canonical
+document holding the protocol name, `node_id`, `host_id`, `process_id`,
+`endpoint_id`, `assignment_id`, `stage_id`, `phone_stage_pack_digest`,
+`runtime_backend`, `runtime_build_digest`, `golden_output_digest`,
+`load_generation`, `runtime_mode`, `manifest_digest` and the descriptor above.
+Run, clock and peer-generation fields are excluded, so the same applied load has
+the same identity at preparation and at a later route open. Any other
+descriptor fails with `phone_load_provenance_unsupported`. v1 is not redefined.
+
+**External manifest relation.** `manifest_digest` is bound outside the phone, and
+every link is checked, never inferred:
+
+1. the seed's current route row for the member is unwithdrawn, unexpired, and
+   applied (within the existing 600 second application rule) under the member's
+   current membership generation, endpoint and key, and was not re-issued after
+   the seed authorization;
+2. row assignment id = natively configured assignment id = seed-compiled
+   preparation assignment id = graph placement assignment id;
+3. the seed-signed native stage manifest equals the row's manifest, and its pack
+   digest equals the row's pack digest and the natively applied pack;
+4. the compiled assignment's `manifest_digest` equals the claimed one, the
+   graph's, and the recomputed digest of the packaged full-model manifest;
+5. the native manifest's source Safetensors file (hash and size) is the
+   assignment's only weight file and a file of that packaged manifest, and at
+   build time the native manifest is rebuilt from those exact bytes. Any other
+   representation (sharded or transformed weights) is refused as
+   `phone_packaged_source_mapping_unsupported`.
+
+The seed's `route_generation` is recorded in the authorization as its own
+peer-routing fact and is never compared with or substituted for the load
+generation.
+
+**Where it is enforced.** The builder refuses before emitting a proof, graph
+digest or plan. The seed re-validates under its write lock before signing and
+before projecting membership offers, whose phone `load_generation` is the
+native-observed value. At final qualification and at every renewal the route
+re-reads the member and applied-route rows in one transaction, verifies the
+packaged proof files against the plan's transfer digests, and hands the
+qualifier a validated authority; the qualifier compares it exactly with the
+`configured` record signed in that route open and requires the signed snapshot
+to name the same load. The authorization's 600 second window is checked at
+preparation only; later freshness comes from the current seed rows and the
+current native observations.
+
 ## 3. Scaffold boundary (what is implemented, and what is refused)
 
 Declared entry points and their fixed refusal codes:

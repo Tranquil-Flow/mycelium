@@ -337,15 +337,48 @@ def issue_live_route_qualification(
             _reject("live_phone_replay_required")
         phone = node_id in phone_nodes
         if phone:
-            from .phone import PhoneLoadProvenanceError, phone_load_proof_digest
-            profile = phone_bindings[node_id].get("configure", {})
+            from .phone import (
+                PhoneLoadAuthority, PhoneLoadProvenanceError, phone_load_proof_digest,
+                require_current_phone_load,
+            )
+            binding = phone_bindings[node_id]
+            profile = binding.get("configure", {})
+            # Current seed and packaged authority, validated outside this
+            # attestation. A copy of the plan's configure, a mapping or a
+            # caller's flag is not that authority.
+            authority = binding.get("load_authority")
+            if type(authority) is not PhoneLoadAuthority:
+                _reject("live_phone_load_authority_required")
             try:
                 load_digest = phone_load_proof_digest(configured_observation)
             except PhoneLoadProvenanceError as exc:
                 _reject(str(exc))
             except ValueError:
                 _reject("live_phone_load_proof_invalid")
+            expected = authority.expected_details()
+            if (authority.node_id != node_id
+                    or authority.endpoint_id != configured_observation.get("endpoint_id")
+                    or authority.process_id != configured_observation.get("process_id")
+                    or authority.endpoint_id != binding.get("endpoint_id")
+                    or authority.process_id != binding.get("process_id")
+                    or authority.member_key_digest != binding.get("member_key_digest")
+                    or authority.assignment_id != placement.assignment_id
+                    or authority.manifest_digest != graph.manifest_digest
+                    or authority.load_proof_digest != placement.load_proof_digest
+                    or any(type(details.get(k)) is not type(v) or details.get(k) != v
+                           for k, v in expected.items())):
+                _reject("live_phone_load_authority_mismatch")
+            # The record of THIS route open must be the applied load still: a
+            # reload or replacement shows in the signed snapshot's own count.
+            try:
+                require_current_phone_load(
+                    configured_observation,
+                    _select(signed, node_id=node_id, event="snapshot"),
+                )
+            except ValueError:
+                _reject("live_phone_load_stale")
             if (load_digest != placement.load_proof_digest
+                    or load_digest != authority.load_proof_digest
                     or details.get("stage_id") != stage.stage_id
                     or details.get("assignment_id") != profile.get("assignment_id")
                     or details.get("stage_id") != profile.get("stage_id")

@@ -35,6 +35,12 @@ _EVENTS = {
 }
 
 
+#: Replies that carry no signature. ``stage_load`` is the phone's current
+#: stage-load count as a HINT for the first configure; it is never evidence.
+#: The only authority for a load generation is the signed configured record.
+_UNSIGNED = frozenset({'hello', 'stage_load'})
+
+
 def _execution_budget_ms(control: Any) -> int:
     """Translate only the budget; the opaque host subject stays byte-identical."""
     deadline = control.get("absolute_deadline_ms") if isinstance(control, Mapping) else None
@@ -129,7 +135,7 @@ class PhoneStageSession:
         deadline = min(deadline_monotonic_s, time.monotonic() + self._timeout)
         if deadline <= time.monotonic():
             raise TimeoutError('command_deadline_exceeded')
-        if command != 'hello' and command not in _EVENTS:
+        if command not in _UNSIGNED and command not in _EVENTS:
             raise ControllerError('stage_only_node')
         if not isinstance(command_id, str) or not command_id or not isinstance(payload, Mapping):
             raise ValueError('phone_command_invalid')
@@ -221,6 +227,15 @@ class PhoneStageSession:
                     raise ControllerError('phone_hello_endpoint_mismatch')
                 with self._lock:
                     self._identity = identity
+            elif command == 'stage_load':
+                hint = response.get('result') if response['ok'] is True else None
+                if response['ok'] is True and (not isinstance(hint, Mapping)
+                        or set(hint) != {'protocol', 'stage_load_generation'}
+                        or hint['protocol'] != _PROTOCOL
+                        or not (hint['stage_load_generation'] is None
+                                or (type(hint['stage_load_generation']) is int
+                                    and hint['stage_load_generation'] > 0))):
+                    raise ControllerError('phone_stage_load_hint_invalid')
             elif response['ok'] is True:
                 signed = response.get('result')
                 if command == 'stop' and isinstance(signed, Mapping):

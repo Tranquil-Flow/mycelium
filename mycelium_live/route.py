@@ -6584,13 +6584,15 @@ class PhysicalLiveRoute:
                 raise RuntimeError(str(error)) from error
 
     def phone_qualification_bindings(self) -> dict[str, Any]:
-        """Current seed authority and planned load identity, outside the attestation."""
-        return {node_id: {
-            "endpoint_id": self._endpoints[node_id]["endpoint_id"],
-            "process_id": peer.boot_id,
-            "member_key_digest": self._external_member_key_digest(node_id),
-            "configure": dict(self._plans_by_node[node_id]["configure"]),
-        } for node_id, peer in self._peers.items() if peer.process_transport == "external_iroh"}
+        """Validated current seed and packaged load authority, outside the attestation.
+
+        Recomputed on every call, so each qualification and renewal re-reads
+        the pinned seed's member and applied-route rows together and re-checks
+        the packaged proof. A refusal raises; nothing is returned for the
+        qualifier to fall back on.
+        """
+        from .phone_load_authority import current_phone_load_bindings
+        return current_phone_load_bindings(self)
 
     def live_attestation(self, *, request_id: str) -> dict[str, Any]:
         if request_id not in self._request_outputs or not self.is_alive():
