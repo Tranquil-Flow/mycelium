@@ -271,3 +271,30 @@ def test_session_composes_with_real_sidecar_client_authenticated_records():
             worker.join(2)
             assert not worker.is_alive()
     assert not errors
+
+
+@pytest.mark.parametrize('hint,accepted', [
+    ({'protocol': 'mycelium.physical_node_control.v1', 'stage_load_generation': 3}, True),
+    ({'protocol': 'mycelium.physical_node_control.v1', 'stage_load_generation': None}, True),
+    ({'protocol': 'mycelium.physical_node_control.v1', 'stage_load_generation': 0}, False),
+    ({'protocol': 'mycelium.physical_node_control.v1', 'stage_load_generation': True}, False),
+    ({'protocol': 'mycelium.physical_node_control.v1', 'stage_load_generation': 3, 'verified': True}, False),
+    ({'protocol': 'other', 'stage_load_generation': 3}, False),
+    ({'stage_load_generation': 3}, False),
+])
+def test_stage_load_hint_is_a_closed_unsigned_reply_after_hello(hint, accepted):
+    """The hint only tells a controller which number to name; it proves nothing."""
+    carrier = Carrier()
+    s = session(carrier)
+    with pytest.raises(RuntimeError, match='phone_hello_required'):
+        s.send(command_id='early', command='stage_load', payload={})
+    s.send(command_id='h', command='hello', payload={})
+    carrier.mutate = lambda response: dict(response, result=hint)
+    if accepted:
+        assert s.send(command_id='l', command='stage_load', payload={})['result'] == hint
+    else:
+        with pytest.raises(ControllerError, match='phone_stage_load_hint_invalid'):
+            s.send(command_id='l', command='stage_load', payload={})
+    # A native refusal is passed through untouched, as for every command.
+    carrier.mutate = lambda response: {k: v for k, v in dict(response, ok=False, error={'code': 'run_id_mismatch'}).items() if k != 'result'}
+    assert s.send(command_id='r', command='stage_load', payload={})['error'] == {'code': 'run_id_mismatch'}

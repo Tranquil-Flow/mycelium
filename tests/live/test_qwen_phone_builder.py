@@ -72,9 +72,30 @@ def synthetic_snapshot(tmp_path):
     return model, fixture
 
 
+def packaged_manifest(model):
+    """The full-model manifest of the one-file synthetic snapshot (shape only)."""
+    import hashlib
+    import model_manifest as mm
+    raw = (Path(model)/"model.safetensors").read_bytes()
+    manifest = dict(protocol="mycelium.model_manifest.v1", model_id="synthetic-qwen", resolved_commit="a"*40,
+        files=[dict(path="model.safetensors", size_bytes=len(raw),
+                    content_digest=dict(algorithm="sha256", value=hashlib.sha256(raw).hexdigest()))])
+    manifest["manifest_digest"] = mm._digest_document(manifest)
+    return manifest
+
+
+#: The phone's own stage-load count in these fixtures. Deliberately NOT the
+#: seed route generation (17) or the membership generation (2).
+LOAD = 3
+
+
 @pytest.fixture
 def evidence(synthetic_snapshot):
     model, _ = synthetic_snapshot
+    import model_manifest as mm
+    packaged = packaged_manifest(model)
+    M = mm.manifest_digest_ref(packaged)
+    source = packaged["files"][0]
     existing = json.loads((ROOT/"native/mobile_core/tests/fixtures/qwen2_stage_manifest_v2.json").read_text())
     manifest = build_stage_manifest_from_safetensors(model/"model.safetensors",
         json.loads((model/"config.json").read_text()), stage_id="stage-001", model_id="synthetic-qwen",
@@ -87,14 +108,15 @@ def evidence(synthetic_snapshot):
     config = json.loads((model/'config.json').read_text())
     config.update(vocab_size=32,max_position_embeddings=1024,hidden_act='silu',tie_word_embeddings=False)
     assignment = dict(protocol='mycelium.layer_assignment.v2', deployment_id='11111111-1111-4111-8111-111111111111',
-        deployment_epoch=1,node_id='node-1',manifest_digest=D,model_id='synthetic-qwen',resolved_commit='a'*40,
+        deployment_epoch=1,node_id='node-1',manifest_digest=M,model_id='synthetic-qwen',resolved_commit='a'*40,
         range=dict(start_layer=0,end_layer_exclusive=2), components=['decoder'],component_tensor_keys={},component_aliases={},
-        expected_tensor_prefixes=[],expected_tensor_keys=[t['name'] for t in manifest['tensors']],files=[],artifact_cache_root='/tmp/fixture',
+        expected_tensor_prefixes=[],expected_tensor_keys=[t['name'] for t in manifest['tensors']],
+        files=[dict(path=source['path'],size_bytes=source['size_bytes'],content_digest='sha256:'+source['content_digest']['value'])],artifact_cache_root='/tmp/fixture',
         runtime=dict(backend=phone.BACKEND,dtype='float32',quantization='int8-weight-only',architecture='qwen2',
                      model_config=normalize_qwen2_model_config(config,expected_layers=2)),route_ready=False)
     assignment['assignment_id']=assignment_id_for(assignment)
     profile = dict(assignment_id=assignment['assignment_id'], stage_id="stage-001",
-        pack_digest=manifest["pack_digest"], manifest_digest=D, load_generation=17)
+        pack_digest=manifest["pack_digest"], manifest_digest=M, load_generation=LOAD)
     receipt = dict(protocol=phone.BUILD_PROTOCOL, source_commit="a"*40,
         mobile_core_version="0.1.0", runtime_build_digest=D, executor_digest=D, apk_digest=D)
     statement = dict(protocol=phone.BINDING_PROTOCOL, node_id="node-1", endpoint_id="ab"*32,
@@ -103,7 +125,7 @@ def evidence(synthetic_snapshot):
         expires_at=time.time()+300, configure=profile, controller_endpoint_id="cd"*32,
         build_receipt_digest=phone.digest(canonical_json_bytes(receipt)),
         preparation_binding=dict(assignment=assignment,route_generation=17,
-            provenance='seed_compiled_assignment_and_route_generation_not_native_observation'))
+            provenance=phone.PREPARATION_PROVENANCE))
     def signed(event, details, monotonic):
         obs = dict(protocol="mycelium.physical_node_observation.v1", event=event,
             monotonic_ns=monotonic, run_id=statement["run_id"], deployment_id=statement["deployment_id"],
@@ -114,12 +136,15 @@ def evidence(synthetic_snapshot):
     details.update(phone_stage_pack_digest=profile["pack_digest"], endpoint_addr={"id":"ab"*32},
         runtime_mode="complete_context_replay", runtime_backend=phone.BACKEND,
         runtime_build_digest=D, golden_output_digest=manifest["golden"]["output_digest"],
-        load_identity_provenance=phone.LOAD_IDENTITY_PROVENANCE)
+        load_identity_provenance=phone.LOAD_IDENTITY_PROVENANCE_V2)
+    applied = dict(assignment_id=profile["assignment_id"], stage_id="stage-001",
+                   phone_stage_pack_digest=profile["pack_digest"], load_generation=LOAD)
     doc = dict(authorization=dict(protocol="mycelium.membership.signed_message.v1", message=statement,
             signature=seed.sign(statement), verification_key=seed.public_key_record()),
         manifest=sign_stage_manifest(manifest, seed), build_receipt=receipt,
         configured=signed("configured", details, 1),
-        snapshot=signed("snapshot", {"host_resources":{"supported_decode_modes":["complete_context_replay"]}}, 2))
+        snapshot=signed("snapshot", {"host_resources":{"supported_decode_modes":["complete_context_replay"]},
+            "load_identity":applied, "configured_load_generation":LOAD}, 2))
     return doc, seed, member
 
 
@@ -132,14 +157,58 @@ def admit(evidence):
 def test_phone_proof_preserves_signatures_and_checks_exact_source(evidence, synthetic_snapshot):
     e = admit(evidence)
     import copy
+    packaged = packaged_manifest(synthetic_snapshot[0])
     assignment = copy.deepcopy(e.statement['preparation_binding']['assignment'])
-    with pytest.raises(ValueError, match="phone_load_provenance_unsupported"):
-        e.bind_assignment(assignment, stage_id="stage-001", snapshot_root=synthetic_snapshot[0])
+    proof = e.bind_assignment(assignment, stage_id="stage-001", snapshot_root=synthetic_snapshot[0],
+                              model_manifest=packaged)
+    assert proof["protocol"] == "mycelium.phone_authenticated_load_proof.v2"
+    assert proof["load_identity_provenance"] == phone.LOAD_IDENTITY_PROVENANCE_V2
+    assert proof["configured"] == evidence[0]["configured"] and proof["snapshot"] == evidence[0]["snapshot"]
+    assert proof["source_binding"]["source_file"] == assignment["files"][0]
+    # The seed's route generation stays its own recorded fact, unequal to the load.
+    assert proof["preparation_binding"]["route_generation"] == 17 != e.native_load_generation == LOAD
     assert e.document["configured"] == evidence[0]["configured"]
     assert "loaded_tensor_digest" not in e.document  # no invented desktop loader output
     assignment["range"]["end_layer_exclusive"] = 1
     with pytest.raises(RuntimeError, match="phone_assignment_manifest_mismatch"):
-        e.bind_assignment(assignment, stage_id="stage-001", snapshot_root=synthetic_snapshot[0])
+        e.bind_assignment(assignment, stage_id="stage-001", snapshot_root=synthetic_snapshot[0],
+                          model_manifest=packaged)
+
+
+@pytest.mark.parametrize("attack,code", [
+    ("other_manifest", "phone_packaged_manifest_mismatch"),
+    ("undigested", "phone_packaged_manifest_mismatch"),
+    ("other_source_hash", "phone_packaged_source_mapping_unsupported"),
+    ("sharded", "phone_packaged_source_mapping_unsupported"),
+    ("missing", "phone_packaged_manifest_mismatch"),
+])
+def test_claimed_manifest_must_be_the_packaged_one_holding_the_native_source(evidence, synthetic_snapshot, attack, code):
+    """Manifest laundering: the applied stage is fixed; only the packaged relation changes."""
+    import copy
+    import model_manifest as mm
+    e = admit(evidence)
+    packaged = packaged_manifest(synthetic_snapshot[0])
+    assignment = copy.deepcopy(e.statement['preparation_binding']['assignment'])
+    if attack == "other_manifest":
+        packaged["requested_revision"] = "another-model-with-the-same-name"
+        packaged["manifest_digest"] = mm._digest_document({k: v for k, v in packaged.items() if k != "manifest_digest"})
+    elif attack == "undigested":
+        packaged["model_id"] = "synthetic-qwen-changed"
+    elif attack == "missing":
+        packaged = None
+    else:
+        if attack == "other_source_hash":
+            packaged["files"][0]["content_digest"]["value"] = "0"*64
+        else:
+            packaged["files"].append(dict(packaged["files"][0], path="model-00002-of-00002.safetensors"))
+            assignment["files"].append(dict(assignment["files"][0], path="model-00002-of-00002.safetensors"))
+        # A coherent controller recomputes every digest it can reach.
+        packaged["manifest_digest"] = mm._digest_document({k: v for k, v in packaged.items() if k != "manifest_digest"})
+        for item in (assignment, e.statement['preparation_binding']['assignment']):
+            item["manifest_digest"] = mm.manifest_digest_ref(packaged)
+        e.profile["manifest_digest"] = mm.manifest_digest_ref(packaged)
+    with pytest.raises(RuntimeError, match=code):
+        e.bind_packaged(assignment, model_manifest=packaged)
 
 
 @pytest.mark.parametrize("field", ["runtime_build_digest", "golden_output_digest", "runtime_backend"])
@@ -272,7 +341,8 @@ def test_actual_build_requires_phone_authority_before_remote_or_materialization(
 def test_phone_proof_rejects_unsupported_representations(evidence, synthetic_snapshot, dtype, quantization):
     with pytest.raises(RuntimeError, match="phone_runtime_representation_invalid"):
         admit(evidence).bind_assignment(dict(runtime=dict(backend=phone.BACKEND, dtype=dtype,
-            quantization=quantization)), stage_id="stage-001", snapshot_root=synthetic_snapshot[0])
+            quantization=quantization)), stage_id="stage-001", snapshot_root=synthetic_snapshot[0],
+            model_manifest=packaged_manifest(synthetic_snapshot[0]))
 
 
 def test_actual_build_refuses_old_native_load_provenance(evidence, tmp_path, monkeypatch):

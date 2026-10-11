@@ -89,14 +89,45 @@ def test_freshness_at_acquisition_and_release(preparation, monkeypatch, boundary
     assert authority_rows(swarm.database) == before
 
 
-@pytest.mark.parametrize('field,value',[('manifest_digest','sha256:'+'b'*64),('load_generation',18)])
-def test_controller_claims_require_independent_issuance_binding(preparation,field,value):
+@pytest.mark.parametrize('field,value,code',[
+    # The manifest digest is a controller claim: only the seed-compiled assignment binds it.
+    ('manifest_digest','sha256:'+'b'*64,'phone_preparation_binding_mismatch'),
+    # A configured record re-signed for another count disagrees with the same
+    # session's signed snapshot of the applied load.
+    ('load_generation',18,'phone_load_stale')])
+def test_controller_claims_require_independent_issuance_binding(preparation,field,value,code):
     swarm,kw=preparation
     result=kw['document']['configured']['result']
     result['observation']['details'][field]=value
     result['signature']=swarm.nodes['node-1'].signer.sign(result['observation'])
     before=authority_rows(swarm.database)
-    with pytest.raises(Exception,match='phone_preparation_binding_mismatch'):
+    with pytest.raises(Exception,match=code):
+        pp.issue_builder_authorization(swarm.database.parent,clock=lambda:swarm.clock[0],**kw)
+    assert authority_rows(swarm.database)==before
+
+
+def test_seed_route_generation_is_not_the_load_generation(preparation):
+    """Generation-domain confusion: route 17, membership generation and load 3 all differ."""
+    swarm,kw=preparation
+    details=kw['document']['configured']['result']['observation']['details']
+    with ra._connect(swarm.database) as c:
+        route_generation,applied_generation=c.execute('SELECT route_generation,applied_generation FROM seed_route_assignments').fetchone()
+    assert route_generation == 17 and details['load_generation'] == 3 != applied_generation
+    envelope=pp.issue_builder_authorization(swarm.database.parent,clock=lambda:swarm.clock[0],**kw)
+    statement=envelope['message']
+    assert statement['configure']['load_generation'] == 3
+    assert statement['preparation_binding']['route_generation'] == 17
+    assert 'not_native_observation' not in statement['preparation_binding']['provenance']
+    # The retired echoing producer cannot be authorized whatever number it carries,
+    # including one made equal to the seed's route generation.
+    from mycelium_qualification.phone import LOAD_IDENTITY_PROVENANCE_V1
+    for name in ('configured','snapshot'):
+        result=kw['document'][name]['result']; d=result['observation']['details']
+        if name == 'configured': d.update(load_generation=17,load_identity_provenance=dict(LOAD_IDENTITY_PROVENANCE_V1))
+        else: d['load_identity']['load_generation']=17; d['configured_load_generation']=17
+        result['signature']=swarm.nodes['node-1'].signer.sign(result['observation'])
+    before=authority_rows(swarm.database)
+    with pytest.raises(Exception,match='phone_load_provenance_unsupported'):
         pp.issue_builder_authorization(swarm.database.parent,clock=lambda:swarm.clock[0],**kw)
     assert authority_rows(swarm.database)==before
 

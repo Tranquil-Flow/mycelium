@@ -41,6 +41,11 @@ from test_qwen_phone_builder import BINARY, ROOT, topology
 from test_qwen_route_builder import _template, _write_topology
 
 
+#: The phone's own stage-load count in the synthetic-signer fixture. Not the
+#: seed route generation (1) and not the membership generation.
+SYNTHETIC_LOAD = 2
+
+
 def fixture_build(tmp_path, *, native=None, observe=None, staged_local=False):
     assert BINARY.is_file(), 'Required previously-built real native fixture executor missing'
     fixture=json.loads((ROOT/'native/mobile_core/tests/fixtures/qwen2_synthetic.json').read_text())
@@ -92,7 +97,9 @@ def fixture_build(tmp_path, *, native=None, observe=None, staged_local=False):
         node['process_transport']='external_iroh' if is_phone else 'local' if i==0 else 'ssh'
         node['ssh_target']=None if is_phone else 'operator@synthetic-no-network';node['ssh_identity_file']=None
         from mycelium_qualification.signing import generate_ed25519_signer
-        signer=generate_ed25519_signer(endpoint_id=('%02x' % (i+1))*32)
+        # A real-native composition supplies its own live iroh endpoints for
+        # the desktop doubles, so the phone can install them as route peers.
+        signer=generate_ed25519_signer(endpoint_id=(native or {}).get('desktop_endpoints',{}).get(i,('%02x' % (i+1))*32))
         if is_phone and native:
             from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
             from mycelium_qualification.signing import Ed25519EvidenceSigner
@@ -141,7 +148,7 @@ def fixture_build(tmp_path, *, native=None, observe=None, staged_local=False):
         generation=member['generation'],issued_at=now,expires_at=now+60,applied_assignment_id=record['assignment_id'])
     ra.service_for(seed).answer(dict(protocol=ra.SIGNED_MESSAGE_PROTOCOL,message=msg,signature=signer.sign(msg),verification_key=signer.public_key_record()))
     profile=dict(assignment_id=assignment['assignment_id'],stage_id='stage-001',manifest_digest=assignment['manifest_digest'],
-                 pack_digest=manifest['pack_digest'],load_generation=1)
+                 pack_digest=manifest['pack_digest'],load_generation=SYNTHETIC_LOAD)
     def response(event,details,mono):
         obs=dict(protocol='mycelium.physical_node_observation.v1',event=event,monotonic_ns=mono,run_id='synthetic-run',
             deployment_id=prepared['deployment_id'],node_id='node-1',host_id='node-1',process_id=member['incarnation'],
@@ -150,11 +157,14 @@ def fixture_build(tmp_path, *, native=None, observe=None, staged_local=False):
     details={k:v for k,v in profile.items() if k!='pack_digest'}
     details.update(phone_stage_pack_digest=profile['pack_digest'],endpoint_addr={'id':member['endpoint_id']},
         runtime_mode='complete_context_replay',runtime_backend=phone.BACKEND,runtime_build_digest=receipt['runtime_build_digest'],
-        golden_output_digest=golden['output_digest'],load_identity_provenance=phone.LOAD_IDENTITY_PROVENANCE)
+        golden_output_digest=golden['output_digest'],load_identity_provenance=phone.LOAD_IDENTITY_PROVENANCE_V2)
     doc=dict(manifest=signed_manifest,build_receipt=receipt)
     if observe is None:
         doc.update(configured=response('configured',details,1),
-            snapshot=response('snapshot',{'host_resources':{'supported_decode_modes':['complete_context_replay']}},2))
+            snapshot=response('snapshot',{'host_resources':{'supported_decode_modes':['complete_context_replay']},
+                'load_identity':dict(assignment_id=profile['assignment_id'],stage_id=profile['stage_id'],
+                    phone_stage_pack_digest=profile['pack_digest'],load_generation=SYNTHETIC_LOAD),
+                'configured_load_generation':SYNTHETIC_LOAD},2))
     if observe is not None:
         # The callback returns untouched signed native responses. No observation
         # field, signature, generation or ID is rewritten by this fixture.
@@ -170,28 +180,63 @@ def fixture_build(tmp_path, *, native=None, observe=None, staged_local=False):
     args.phone_evidence=evidence_path;args.phone_seed_key_digest=seed.signer.verification_key_digest
     args.phone_executor=BINARY;args.phone_apk=apk;args.phone_source_root=source;args.phone_seed_state_root=seed_root
     return SimpleNamespace(args=args,seed=seed,database=database,request=request,approved=approved,document=doc,
-                           nodes=nodes,sessions=sessions,preparation=prepared,descriptor=descriptor)
+                           nodes=nodes,sessions=sessions,preparation=prepared,descriptor=descriptor,
+                           member=member,profile=profile,golden=golden,receipt=receipt)
 
 
-def build_packaging_fixture(args, monkeypatch):
-    """B2-only harness: construct a legacy bundle despite blocked admission.
+def synthetic_route_open(fixture, plan, *, mutate=None):
+    """Phone records of one route open, signed by the SYNTHETIC member key.
 
-    Never use this for a positive phone qualification claim. The unmodified
-    production build is separately required to refuse; all source/identity/
-    runtime extraction assertions still run on the emitted desktop artifact.
+    Shaped exactly like the native v2 records and labelled for what they are:
+    a pytest stand-in. The real native process signs these in the real
+    composition (tests/iroh_conformance), never here.
     """
-    from mycelium_qualification import phone as provenance
-    with monkeypatch.context() as m:
-        m.setattr(provenance, "require_phone_load_provenance", lambda observation: None)
-        m.setattr(phone, "require_phone_load_provenance", lambda observation: None)
-        return builder.build(args)
+    run=plan['controller']['run_plan']
+    profile=run['nodes'][1]['configure'];signer=fixture.sessions['node-1'].signer
+    endpoints={n['node_id']:n['endpoint_id'] for n in fixture.nodes}
+    statement=fixture.document['authorization']['message']
+    def signed(event,details,mono,state='RUNNING'):
+        obs=dict(protocol='mycelium.physical_node_observation.v1',event=event,monotonic_ns=mono,run_id=run['run_id'],
+            deployment_id=run['deployment_id'],node_id='node-1',host_id='node-1',process_id=statement['incarnation'],
+            endpoint_id=endpoints['node-1'],peer_generation=1,state=state,route_ready=False,details=details)
+        if mutate is not None: mutate(obs)
+        return dict(observation=obs,signature=signer.sign(obs),verification_key=signer.public_key_record())
+    details={k:v for k,v in profile.items() if k!='pack_digest'}
+    details.update(phone_stage_pack_digest=profile['pack_digest'],endpoint_addr={'id':endpoints['node-1']},
+        runtime_mode='complete_context_replay',runtime_backend=phone.BACKEND,
+        runtime_build_digest=fixture.receipt['runtime_build_digest'],golden_output_digest=fixture.golden['output_digest'],
+        load_identity_provenance=json.loads(json.dumps(phone.LOAD_IDENTITY_PROVENANCE_V2)))
+    applied=dict(assignment_id=profile['assignment_id'],stage_id=profile['stage_id'],
+        phone_stage_pack_digest=profile['pack_digest'],load_generation=profile['load_generation'])
+    return [signed('configured',details,1000,'CONFIGURED'),
+        signed('started',dict(peer_node_id='node-2',peer_node_ids=['node-0','node-2'],local_generation=1),1001),
+        signed('snapshot',dict(runtime=dict(active_state_count=0,applied_operation_count=4,mode='complete_context_replay'),
+            transport=dict(local_node_id='node-1',peer_node_id='node-2',remote_frames_sent=4,remote_frames_received=4,route_ready=False),
+            transport_fatal_error=None,load_identity=applied,configured_load_generation=profile['load_generation']),1002)]
 
 
-def qualify_fixture_plan(fixture, plan, checkpoint):
-    """Exercise real qualifier on emitted graph and SYNTHETIC signed events.
+def restoring(database):
+    """Snapshot the disposable seed's authority rows; returns a restore callable."""
+    tables=('seed_members','seed_route_assignments','seed_route_preparations')
+    with ra._connect(database) as c:
+        saved={t:[tuple(r) for r in c.execute('SELECT * FROM '+t)] for t in tables}
+    def restore():
+        with ra._connect(database) as c:
+            c.execute('BEGIN IMMEDIATE')
+            for t,rows in saved.items():
+                c.execute('DELETE FROM '+t)
+                for r in rows: c.execute('INSERT INTO '+t+' VALUES ('+','.join('?'*len(r))+')',r)
+            c.execute('COMMIT')
+    return restore
 
-    Output tokens are the measured local challenge. Transport/start/snapshot
-    events below are explicitly synthetic, NOT native/device execution evidence.
+
+def qualify_fixture_plan(fixture, plan, checkpoint, *, bindings, phone_records):
+    """Exercise the real qualifier on the emitted graph.
+
+    Desktop configure/start/snapshot events are SYNTHETIC signed doubles, NOT
+    device execution evidence. ``phone_records`` are the configured, started and
+    snapshot envelopes of this route open, passed through unmodified, and
+    ``bindings`` is what the production route returned.
     """
     from mycelium_qualification import issue_live_route_qualification
     from physical_inference_node import execution_graph_from_document
@@ -204,34 +249,33 @@ def qualify_fixture_plan(fixture, plan, checkpoint):
         signer=fixture.sessions[node].signer
         obs=dict(protocol='mycelium.physical_node_observation.v1',event=event,monotonic_ns=len(observations)+10,
             run_id=run['run_id'],deployment_id=run['deployment_id'],node_id=node,host_id=node,
-            process_id=fixture.document['authorization']['message']['incarnation'] if node=='node-1' else 100+nodes.index(node),
+            process_id=100+nodes.index(node),
             endpoint_id=endpoints[node],peer_generation=1,state='RUNNING',route_ready=False,details=details)
         observations.append(dict(observation=obs,signature=signer.sign(obs),verification_key=signer.public_key_record()))
     for i,node in enumerate(nodes):
         p=graph['stages'][i]['placements'][0]
         if node=='node-1':
-            observations.append(fixture.document['configured']['result'])
-        else:
-            pack=json.loads((fixture.args.output_root/f'transfer-bundle/control/node-{i}-stage-pack.json').read_text())
-            proof=json.loads((fixture.args.output_root/f'transfer-bundle/control/node-{i}-load-proof.json').read_text())
-            add(node,'configured',dict(assignment_id=p['assignment_id'],placement_id=p['placement_id'],
-                manifest_digest=graph['manifest_digest'],endpoint_addr={'id':endpoints[node]},runtime_mode='complete_context_replay',
-                stage_pack_digest=pack['stage_pack_digest'],stage_pack_verification_digest=proof['stage_pack_verification_digest']))
+            observations.extend(phone_records)
+            continue
+        pack=json.loads((fixture.args.output_root/f'transfer-bundle/control/node-{i}-stage-pack.json').read_text())
+        proof=json.loads((fixture.args.output_root/f'transfer-bundle/control/node-{i}-load-proof.json').read_text())
+        add(node,'configured',dict(assignment_id=p['assignment_id'],placement_id=p['placement_id'],
+            manifest_digest=graph['manifest_digest'],endpoint_addr={'id':endpoints[node]},runtime_mode='complete_context_replay',
+            stage_pack_digest=pack['stage_pack_digest'],stage_pack_verification_digest=proof['stage_pack_verification_digest']))
         peer=nodes[(i+1)%len(nodes)]
-        add(node,'started',dict(peer_node_id=peer,peer_node_ids=[n for n in nodes if n!=node],local_generation=1)
-            if node=='node-1' else dict(peer=dict(node_id=peer,endpoint_id=endpoints[peer])))
+        add(node,'started',dict(peer=dict(node_id=peer,endpoint_id=endpoints[peer])))
         add(node,'snapshot',dict(runtime=dict(active_state_count=0,applied_operation_count=4,mode='complete_context_replay'),
             transport=dict(local_node_id=node,peer_node_id=peer,remote_frames_sent=4,remote_frames_received=4,route_ready=False),
             transport_fatal_error=None))
     output=checkpoint['challenge_output_token_ids'];prompt=checkpoint['challenge_prompt_token_ids']
     add(nodes[0],'inference_started',dict(request_id='fixture-request',status='DECODING',output={'token_ids':output[:1]}))
     add(nodes[0],'inference_decoded',dict(request_id='fixture-request',status='COMPLETED',output={'token_ids':output}))
+    snapshots=[x['observation']['details'] for x in observations if x['observation']['event']=='snapshot']
     att=dict(protocol='mycelium.live_route_attestation.v1',captured_at_unix_ms=int(time.time()*1000),run_id=run['run_id'],
         entry_node_id=nodes[0],request_id='fixture-request',prompt_token_ids=prompt,max_new_tokens=len(output),execution_graph=graph,
-        output_token_ids=output,signed_observations=observations,counters=dict(frames_sent=12,frames_received=12,
-        applied_operation_count=12,fatal=None))
-    statement=fixture.document['authorization']['message']
-    binding=dict(endpoint_id=endpoints['node-1'],process_id=statement['incarnation'],
-        member_key_digest=statement['member_verification_key']['verification_key_digest'],configure=statement['configure'])
+        output_token_ids=output,signed_observations=observations,counters=dict(
+            frames_sent=sum(x['transport']['remote_frames_sent'] for x in snapshots),
+            frames_received=sum(x['transport']['remote_frames_received'] for x in snapshots),
+            applied_operation_count=sum(x['runtime']['applied_operation_count'] for x in snapshots),fatal=None))
     return issue_live_route_qualification(att,expected_prompt_token_ids=prompt,expected_output_token_ids=output,
-                                          phone_bindings={'node-1':binding})
+                                          phone_bindings=bindings)
