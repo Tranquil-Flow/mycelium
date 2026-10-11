@@ -128,44 +128,49 @@ REQUIRED_MATRIX_EVIDENCE = (
     "internet_native_membership_and_route_explorer",
 )
 
-# The exact verifier contracts this slice does NOT have and must not fake.
+# What stands between the retained artifacts this slice reads and a current executed gate
+# result. A release-decision producer now exists in ``mycelium_a15_release_decision``; it
+# verifies a candidate graph of signed receipts under a pinned trust registry. None of the
+# retained artifacts is in that form, this slice never calls the producer, and the producer
+# has no production trust registry pinned. The entries name those remaining gaps and must
+# not be read as "no verifier exists".
 MISSING_VERIFIER_CONTRACTS = (
     {
         "contract": "mycelium.executed_gate_result.v1",
         "reason": (
-            "no production verifier exists for the common executed-result envelope; the only "
-            "in-tree evaluator is the design-only synthetic candidate validator in "
-            "tests/a15_acceptance/validator.py, which consumes a canonical synthetic graph and "
-            "must never be called on retained artifacts or reported as live evidence"
+            "retained artifacts are not executed-result envelopes backed by a signed result "
+            "receipt; this slice does not convert them and must not, and the design-only "
+            "synthetic validator in tests/a15_acceptance/validator.py is never called on "
+            "retained artifacts or reported as live evidence"
         ),
     },
     {
         "contract": "mycelium.executed_result_graph.v1",
         "reason": (
-            "no production verifier for node/root content addressing, exact dependency digests, "
-            "acyclicity, duplicate-conflict rejection or the corrected exact direct-prerequisite graph"
+            "no content-addressed A2 to A14 result graph has been assembled from current "
+            "executions; the producer verifies such a graph but this slice does not build one"
         ),
     },
     {
         "contract": "mycelium.executed_release_decision.v1",
         "reason": (
-            "no producer or signer for the release decision; no decision generation is emitted by "
-            "this slice and none may be inferred from retained records"
+            "this slice emits no decision generation and none may be inferred from retained "
+            "records; the producer's decision is unsigned and no production decision exists"
         ),
     },
     {
         "contract": "mycelium.exclusion_signature_verifier.v1",
         "reason": (
-            "owner exclusion signatures are unverifiable here: the in-tree exclusion signature form "
-            "is the synthetic 'fixture-signature:' string, and no owner key registry or signature "
-            "verifier contract exists"
+            "no owner exclusion-signer key is registered in any pinned production trust "
+            "registry, so no owner exclusion can be verified for a release; the synthetic "
+            "'fixture-signature:' form is never a signature"
         ),
     },
     {
         "contract": "mycelium.verifier_policy_registry.v1",
         "reason": (
-            "no allowlisted verifier-policy registry binding identity, version and the provenance "
-            "each result kind requires (live/physical/clean-tree/browser-engine/independent-review)"
+            "the producer's production trust-registry allowlist is empty: no owner-reviewed "
+            "registry of verifier keys and verifier-policy digests has been pinned"
         ),
     },
     {
@@ -173,14 +178,16 @@ MISSING_VERIFIER_CONTRACTS = (
         "reason": (
             "retained artifact references are ambiguous about their evidence root: A3 names a "
             "repo-relative-looking path that only resolves under the off-repo physical evidence root, "
-            "and A5 names absolute owner-private paths; no contract declares or binds those roots"
+            "and A5 names absolute owner-private paths; they do not use the producer's explicit "
+            "root-id references"
         ),
     },
     {
         "contract": "mycelium.authority_generation_currentness.v1",
         "reason": (
-            "no contract decides whether a retained authority generation is still current, so a "
-            "retained record cannot be promoted to a current gate result"
+            "the current authority generation is declared only by a pinned trust registry and "
+            "none is pinned for production, so a retained record cannot be promoted to a "
+            "current gate result"
         ),
     },
 )

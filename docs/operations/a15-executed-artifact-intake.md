@@ -60,6 +60,8 @@ files are read separately and any divergence from the pin is reported as
   `authoritative` and `production_verifier` are `false`, `gate_state` is `design_only`, and two
   guards raise if any code path tried otherwise.
 
-The report also lists `missing_evidence` and the seven `missing_verifier_contracts` that would have to
-exist — under a governance decision this slice is not authorized to make — before retained artifacts
-could be promoted to current executed gate results.
+The report also lists `missing_evidence` and the seven `missing_verifier_contracts` gaps that would have to
+be closed — under a governance decision this slice is not authorized to make — before retained artifacts
+could be promoted to current executed gate results. A release-decision producer exists in
+`mycelium_a15_release_decision.py`; the gaps are that retained artifacts are not signed result receipts in
+a content-addressed graph and that no production trust registry is pinned, not that no verifier exists.
