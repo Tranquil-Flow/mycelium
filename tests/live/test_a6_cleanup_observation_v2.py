@@ -187,14 +187,21 @@ def test_unarmed_cleanup_hold_never_waits(tmp_path):
 
 
 def test_cleanup_hold_is_reachable_only_from_the_a6_fault_seam():
-    # The hold is armed only by the fault seam; no product path arms it.
+    # The hold is armed only by the fault seam; no product path arms it. Product paths are the
+    # files git tracks or would track: ignored build output (a package build copies sources into
+    # build/) is not one.
+    import subprocess
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
+    listed = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.py"],
+        capture_output=True, check=True).stdout.decode().split("\0")
     arming = sorted(
-        str(path.relative_to(root)) for path in root.rglob("*.py")
-        if not any(part in {"tests", "runs", ".venv", "node_modules", ".git", "__pycache__"}
-                   for part in path.relative_to(root).parts)
-        and "a6_arm_completion_cleanup_hold" in path.read_text(errors="ignore"))
+        name for name in listed
+        if name and (root / name).is_file()
+        and not any(part in {"tests", "runs", ".venv", "node_modules", ".git", "__pycache__"}
+                    for part in Path(name).parts)
+        and "a6_arm_completion_cleanup_hold" in (root / name).read_text(errors="ignore"))
     assert arming == ["mycelium_a6_product_fault_seams.py", "mycelium_live/router_port.py"]
 
 
