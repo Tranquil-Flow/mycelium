@@ -217,6 +217,10 @@ def external_control_descriptor(descriptor):
 
 def bind_phone_graph(graph, phone_evidence):
     """Replace only the generic JSON digest with the verified native identity."""
+    if not phone_evidence:
+        # A build with no phone node has nothing to bind: the graph is returned
+        # as the caller built it, never rebuilt.
+        return graph
     from dataclasses import replace
     from mycelium_qualification.phone import phone_load_proof_digest
     return replace(graph, stages=tuple(replace(stage, placements=tuple(
