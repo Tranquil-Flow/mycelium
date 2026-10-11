@@ -1360,9 +1360,11 @@ def test_bounded_send_queue_fails_closed_and_deadline_cancels_message() -> None:
         transport.close()
 
 
-def test_rotation_is_monotonic_and_cancels_old_generation_inflight() -> None:
+@pytest.mark.parametrize("hold_cancel_worker", [False, True], ids=["scheduled", "cancel_worker_held"])
+def test_rotation_is_monotonic_and_cancels_old_generation_inflight(hold_cancel_worker: bool) -> None:
     hub = _Hub()
     hub.block_confirmed_send = True
+    hub.block_cancel = hold_cancel_worker
     transport = _transport(hub, delivery_timeout_seconds=1.0)
     transport.bind_router(_RecordingRouter())
     transport.start()
@@ -1386,10 +1388,17 @@ def test_rotation_is_monotonic_and_cancels_old_generation_inflight() -> None:
         assert not thread.is_alive()
         assert errors and isinstance(errors[0], IrohTransportError)
         assert errors[0].code == "peer_rotated"
+        # The old generation's cancel runs on its own delivery-cancel worker, so the sender can
+        # report peer_rotated before that cancel lands; wait for it, bounded, then count it.
+        if hold_cancel_worker:
+            assert hub.cancel_entered.wait(1) and hub.cancels == []
+            hub.release_cancel.set()
+        assert hub.cancel_completed.wait(timeout=1)
         assert len(hub.cancels) == 1
         assert hub.configurations[-1][2] == 8
         assert transport.peer_binding.generation == 8
     finally:
+        hub.release_cancel.set()
         transport.close()
 
 
