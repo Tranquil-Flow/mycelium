@@ -50,7 +50,7 @@ def main():
                MYCELIUM_NODE_BUILD_DIGEST=build_digest,PHONE_COMPOSITION_SOURCE=str(ROOT))
     commands = [
         ['cargo','build','--manifest-path','native/iroh_transport/Cargo.toml','--offline','--locked','--bin','mycelium-iroh-sidecar'],
-        ['cargo','test','--manifest-path','native/mobile_core/Cargo.toml','--offline','--locked','--features','net','--lib','real_phone_composition','--','--nocapture','--test-threads=1'],
+        ['cargo','test','--manifest-path','native/mobile_core/Cargo.toml','--offline','--locked','--features','net','--lib','real_phone_composition','--','--include-ignored','--nocapture','--test-threads=1'],
     ]
     result = {'head':head,'native_build_digest':build_digest,
               'tree_status':subprocess.check_output(['git','status','--porcelain','--untracked-files=all'],cwd=ROOT,text=True),

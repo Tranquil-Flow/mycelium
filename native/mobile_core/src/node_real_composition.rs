@@ -257,7 +257,12 @@ async fn composition(mode: &str) {
 async fn real_phone_composition_startup_bound_cancel() { composition("startup").await; }
 #[tokio::test(flavor="multi_thread", worker_threads=4)]
 async fn real_phone_composition_host_monotonic_deadline() { composition("deadline").await; }
+// The build receipt this case validates names the source commit the test binary
+// was compiled from, which only the composition runner compiles in. A plain
+// `cargo test` therefore reports it as ignored instead of running it without
+// that identity.
 #[tokio::test(flavor="multi_thread", worker_threads=4)]
+#[ignore = "needs the source-bound build identity: run tests/iroh_conformance/run_real_phone_composition.py"]
 async fn real_phone_composition_native_observed_load_qualifies_and_stale_or_tampered_records_refuse() { composition("qualification").await; }
 #[tokio::test(flavor="multi_thread", worker_threads=4)]
 async fn real_phone_composition_stop_releases_runtime() { composition("stop").await; }
