@@ -65,14 +65,15 @@ def _xattr(path: Path, value: str | None = None) -> str | None:
 
 
 def _finalize(tmp: Path, version: str, *, key: Path, floor: str = "0.1.0", marker: bytes = b"v1",
-              quarantine: str | None = None) -> Path:
+              quarantine: str | None = None, copy=None) -> Path:
     app = _app(tmp / f"build-{version}", marker)
     if quarantine:
         _xattr(app, quarantine)
         _xattr(app / "Contents" / "MacOS" / "Mycelium A13 Demo", quarantine)
     out = tmp / f"bundle-{version}"
     finalize_a13_macos.finalize_macos_bundle(app_dir=app, output_root=out, signing_key_path=key,
-                                             version=version, rollback_floor=floor, issued_at=ISSUED, root=REPO)
+                                             version=version, rollback_floor=floor, issued_at=ISSUED, root=REPO,
+                                             copy=copy)
     return out
 
 
@@ -134,18 +135,55 @@ def test_links_are_part_of_the_digest(tmp_path):
 # ------------------------------------------------------------------ quarantine preservation
 
 
-def test_ditto_install_keeps_quarantine_where_shutil_would_drop_it(tmp_path, key, seams):
-    value = "0083;6700f000;Safari;F00DF00D-0000-0000-0000-000000000000"
-    bundle = _finalize(tmp_path, "0.1.0", key=key, quarantine=value)
+WRITTEN_QUARANTINE = "0083;6700f000;Safari;F00DF00D-0000-0000-0000-000000000000"
+#: What this host once read back from finalize's ditto copy of WRITTEN_QUARANTINE (2026-10-11):
+#: flag 0x0200 added, timestamp and agent cleared, the quarantine event UUID kept.
+OS_REWRITTEN_QUARANTINE = "0283;00000000;;F00DF00D-0000-0000-0000-000000000000"
+
+
+def _ditto_then_os_rewrite(src: Path, dst: Path) -> int:
+    code = subprocess.run(["/usr/bin/ditto", str(src), str(dst)], check=False).returncode
+    _xattr(dst, OS_REWRITTEN_QUARANTINE)
+    return code
+
+
+def _keeps_quarantine(observed: str | None, written: str) -> bool:
+    """The copy kept the quarantine: same event UUID and every written flag still set.
+
+    The flags may gain bits and the timestamp and agent fields may be rewritten by the OS
+    (OS_REWRITTEN_QUARANTINE); none of that is the installer's to preserve or prevent.
+    """
+    if observed is None:
+        return False
+    seen, want = observed.split(";"), written.split(";")
+    flags = int(want[0], 16)
+    return len(seen) == 4 and seen[3] == want[3] and int(seen[0], 16) & flags == flags
+
+
+@pytest.mark.parametrize("observed,kept", [
+    (WRITTEN_QUARANTINE, True),
+    (OS_REWRITTEN_QUARANTINE, True),
+    (None, False),  # dropped, as shutil does
+    ("0083;6700f000;Safari;0BADF00D-0000-0000-0000-000000000000", False),  # a different quarantine event
+    ("0003;6700f000;Safari;F00DF00D-0000-0000-0000-000000000000", False),  # a written flag cleared
+])
+def test_kept_quarantine_means_same_event_and_no_cleared_flag(observed, kept):
+    assert _keeps_quarantine(observed, WRITTEN_QUARANTINE) is kept
+
+
+@pytest.mark.parametrize("copy", [None, _ditto_then_os_rewrite], ids=["ditto", "ditto_then_os_rewrite"])
+def test_ditto_install_keeps_quarantine_where_shutil_would_drop_it(tmp_path, key, seams, copy):
+    value = WRITTEN_QUARANTINE
+    bundle = _finalize(tmp_path, "0.1.0", key=key, quarantine=value, copy=copy)
     staged = bundle / "Mycelium A13 Demo.app"
-    assert _xattr(staged) == value  # finalize's ditto copy kept it
+    assert _keeps_quarantine(_xattr(staged), value)  # finalize's ditto copy kept it
     naive = tmp_path / "naive.app"
     shutil.copytree(staged, naive, symlinks=True)
     assert _xattr(naive) is None  # the bypass the installer must not commit
     result = installer.install(bundle, seams=seams)
     installed = seams.programs_root / "0.1.0" / "Mycelium A13 Demo.app"
-    assert _xattr(installed) == value
-    assert _xattr(installed / "Contents" / "MacOS" / "Mycelium A13 Demo") == value
+    assert _keeps_quarantine(_xattr(installed), value)
+    assert _keeps_quarantine(_xattr(installed / "Contents" / "MacOS" / "Mycelium A13 Demo"), value)
     assert result["developer_id_team"] == DEVELOPER_ID_UNSIGNED and result["identity_created"] is False
 
 
