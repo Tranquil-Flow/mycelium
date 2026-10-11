@@ -5,9 +5,15 @@
 pinned trust registry. ``revoke`` appends an explicit non-ready generation. The decision
 time is the system clock; it is not an argument, so stale evidence cannot be made fresh.
 
-Exit codes: 0 a ``ready`` generation was appended; 1 a ``not_ready`` generation was
-appended; 2 the producer refused to run and appended nothing; 3 the generation was
-appended but the public projection could not be written.
+Both commands require ``--expect-head``: the ``decision_digest`` printed by the previous
+run, or ``none`` for an empty ledger. A ledger directory cannot prove it was not truncated
+or replaced, so the operator pins the head they last saw.
+
+Exit codes: 0 a ``ready`` generation under production trust was appended; 1 a ``not_ready``
+generation was appended; 2 the producer refused to run and appended nothing; 3 the
+generation was appended but the public projection could not be written; 4 a ``ready``
+generation was appended under synthetic self-test trust, which grants no release authority
+and must never be read as production readiness.
 
 Standard output and standard error carry bounded JSON only: digests, a generation number
 and stable codes. Paths and operating-system error text are never printed.
@@ -28,6 +34,7 @@ if str(ROOT) not in sys.path:
 
 from mycelium_a15_release_decision import (  # noqa: E402
     REVOCATION_REASONS,
+    SCOPE_PRODUCTION,
     DecisionResult,
     ReleaseDecisionRefused,
     append_revocation,
@@ -49,24 +56,36 @@ class _Parser(argparse.ArgumentParser):
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = _Parser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = _Parser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False,
+    )
     commands = parser.add_subparsers(dest="command", required=True, parser_class=_Parser)
-    decide = commands.add_parser("decide")
+    decide = commands.add_parser("decide", allow_abbrev=False)
     decide.add_argument("--candidate", required=True)
     decide.add_argument("--repo-root", required=True)
     decide.add_argument("--evidence-root", action="append", default=[], metavar="ID=DIRECTORY")
     decide.add_argument("--trust-registry", required=True)
     decide.add_argument("--trust-registry-sha256", required=True)
     decide.add_argument("--ledger-dir", required=True)
+    decide.add_argument("--expect-head", required=True, metavar="DIGEST|none")
     decide.add_argument("--public-out", required=True)
     decide.add_argument(
         "--synthetic-self-test",
         action="store_true",
         help="admit a synthetic_test_fixture trust registry; grants no release authority",
     )
-    revoke = commands.add_parser("revoke")
+    revoke = commands.add_parser("revoke", allow_abbrev=False)
     revoke.add_argument("--ledger-dir", required=True)
+    revoke.add_argument("--expect-head", required=True, metavar="DIGEST|none")
     revoke.add_argument("--reason", required=True, choices=REVOCATION_REASONS)
+    revoke.add_argument(
+        "--compromised-key-digest",
+        action="append",
+        default=[],
+        help="verification key digest to revoke; required for --reason compromised_key",
+    )
     revoke.add_argument("--public-out", required=True)
     return parser
 
@@ -94,6 +113,7 @@ def main(
         _emit(sys.stderr, {"refused": "arguments_invalid"})
         return 2
     now = (clock or (lambda: datetime.now(timezone.utc)))()
+    expected_head = None if arguments.expect_head == "none" else arguments.expect_head
     try:
         if arguments.command == "decide":
             roots = _evidence_roots(arguments.evidence_root)
@@ -112,6 +132,7 @@ def main(
                 trust_registry_path=arguments.trust_registry,
                 trust_registry_sha256=arguments.trust_registry_sha256,
                 ledger_dir=arguments.ledger_dir,
+                expected_ledger_head=expected_head,
                 now=now,
                 allow_synthetic_trust=arguments.synthetic_self_test,
             )
@@ -119,7 +140,11 @@ def main(
             protected = (arguments.ledger_dir,)
             check_exclusive_target(arguments.public_out, protected_paths=protected)
             result = append_revocation(
-                ledger_dir=arguments.ledger_dir, reason=arguments.reason, now=now
+                ledger_dir=arguments.ledger_dir,
+                reason=arguments.reason,
+                now=now,
+                expected_ledger_head=expected_head,
+                compromised_key_digests=arguments.compromised_key_digest,
             )
     except ReleaseDecisionRefused as refused:
         _emit(sys.stderr, {"refused": refused.code})
@@ -129,7 +154,7 @@ def main(
         return 2
 
     appended = {
-        "authority_scope": result.document["body"]["authority_scope"],
+        "authority_scope": result.authority_scope,
         "decision": result.decision,
         "decision_digest": result.decision_digest,
         "decision_generation": result.decision_generation,
@@ -141,7 +166,9 @@ def main(
         _emit(sys.stderr, {**appended, "public_projection_refused": refused.code})
         return 3
     _emit(sys.stdout, {**appended, "public_digest": sha256_bytes(public)})
-    return 0 if result.decision == "ready" else 1
+    if result.decision != "ready":
+        return 1
+    return 0 if result.authority_scope == SCOPE_PRODUCTION else 4
 
 
 if __name__ == "__main__":

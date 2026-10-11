@@ -17,12 +17,37 @@ Inputs and where authority comes from:
   verification keys, their roles, the allowlisted verifier-policy digests and the current
   authority generation. It must live outside the checkout, the evidence roots and the
   ledger, so the candidate being checked cannot supply its own trust.
-* decision ledger (explicit directory). Generations are appended with exclusive create and
-  chained by the digest of the previous entry's exact bytes; history is never rewritten.
+* decision ledger (explicit directory) plus the caller's expected ledger head. Generations
+  are appended with exclusive create and chained by the digest of the previous entry's
+  exact bytes. The directory alone cannot prove it was not truncated or replaced, so the
+  caller pins the digest of the last generation it saw (or ``None`` for an empty ledger).
 
 Result kinds are an allowlist (``RESULT_KINDS``). Every result is a signed receipt whose
-signature, bindings, evidence manifest and kind-specific artifact content are verified.
-The envelope's declared outcome is only compared against what the artifact proves.
+signature, bindings and evidence-file hashes are verified, and the envelope's declared
+outcome is compared against the receipt. What is verified beyond that differs by kind:
+
+* content-verified: ``junit_suite`` (JUnit XML is parsed and counted),
+  ``physical_evidence_bundle`` (``verify_bundle``), ``contract_manifest`` (bytes equal the
+  manifest in the source commit) and ``sbom_document`` (``validate_sbom``);
+* attestation-only: ``physical_gate``, ``audit_report``, ``browser_engine_matrix``,
+  ``model_qualification``, ``package_manifest`` and ``external_reviewer_reproduction``.
+  For these the outcome, cases, properties and provenance are the authorised signer's
+  assertion and the evidence files are opaque hashed bytes. Their strength is exactly the
+  trust registry's key authority; no artifact semantics are inspected.
+
+Limits that are deliberate and stated rather than hidden:
+
+* the decision is unsigned. ``verify_decision_bytes`` and ``read_ledger`` prove that a
+  document is self-consistent, not that this producer wrote it. Authenticity rests on the
+  caller's ledger-head pin and on re-derivation from the same inputs.
+* no production trust registry is pinned in ``PRODUCTION_REGISTRY_PINS``, so no production
+  ``ready`` is derivable until an owner-reviewed commit adds a pin.
+* gate commits are bound to the gate receipts and to source ancestry; that each gate is one
+  atomic commit by content is not checked.
+* ``privacy_leak_detected`` is a narrow guard for user-home paths and PEM private keys, not
+  a privacy scan.
+* ``runtime_digest`` and ``environment_digest`` are format-checked per result, with no
+  cross-result consistency rule.
 
 Input-node versus derived-root boundary (reconciled with the frozen synthetic validator in
 ``tests/a15_acceptance/validator.py``): callers supply gate-result nodes for A2..A14 only.
@@ -44,6 +69,7 @@ synthetic-labelled evidence. A synthetic derivation grants no release authority.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import os
 import re
 import secrets
@@ -141,7 +167,7 @@ RESULT_KINDS: dict[str, dict[str, Any]] = {
         "requirement": "gate_result",
         "properties": ("clean_tree", "physical"),
         "required_cases": (),
-        "artifact_verifier": "signed_receipt_and_evidence_manifest",
+        "artifact_verifier": "signer_attestation_with_hashed_evidence",
     },
     "junit_suite": {
         "requirement": "digest_class:test",
@@ -153,7 +179,7 @@ RESULT_KINDS: dict[str, dict[str, Any]] = {
         "requirement": "digest_class:audit",
         "properties": ("clean_tree",),
         "required_cases": (),
-        "artifact_verifier": "signed_receipt_and_evidence_manifest",
+        "artifact_verifier": "signer_attestation_with_hashed_evidence",
     },
     "physical_evidence_bundle": {
         "requirement": "digest_class:physical",
@@ -165,13 +191,13 @@ RESULT_KINDS: dict[str, dict[str, Any]] = {
         "requirement": "digest_class:browser",
         "properties": ("browser_engine", "clean_tree"),
         "required_cases": BROWSER_ENGINE_CASES,
-        "artifact_verifier": "signed_receipt_and_evidence_manifest",
+        "artifact_verifier": "signer_attestation_with_hashed_evidence",
     },
     "model_qualification": {
         "requirement": "digest_class:model",
         "properties": ("physical",),
         "required_cases": (),
-        "artifact_verifier": "signed_receipt_and_evidence_manifest",
+        "artifact_verifier": "signer_attestation_with_hashed_evidence",
     },
     "contract_manifest": {
         "requirement": "digest_class:contract",
@@ -183,7 +209,7 @@ RESULT_KINDS: dict[str, dict[str, Any]] = {
         "requirement": "digest_class:package",
         "properties": ("clean_tree", "platform_specific"),
         "required_cases": (),
-        "artifact_verifier": "signed_receipt_and_evidence_manifest",
+        "artifact_verifier": "signer_attestation_with_hashed_evidence",
     },
     "sbom_document": {
         "requirement": "digest_class:sbom",
@@ -195,7 +221,7 @@ RESULT_KINDS: dict[str, dict[str, Any]] = {
         "requirement": REVIEWER_REQUIREMENT,
         "properties": ("clean_tree", "independently_reviewed", "physical"),
         "required_cases": (*REVIEWER_REQUIRED_STEPS, REVIEW_FINDINGS_CASE),
-        "artifact_verifier": "signed_receipt_and_evidence_manifest",
+        "artifact_verifier": "signer_attestation_with_hashed_evidence",
     },
     "release_closure": {
         "requirement": "derived_root",
@@ -230,8 +256,9 @@ MAX_REQUIREMENTS_PER_EXCLUSION = 8
 MAX_EXCLUSION_REASON_BYTES = 1024
 MAX_EXCLUSION_LIFETIME = timedelta(hours=720)
 EXCLUSION_SCOPE = "exact_requirement_ids"
-# Narrow by design: one browser engine case may be owner-excluded. Everything else the
-# producer evaluates is mandatory integrity, provenance, source or qualification evidence.
+# Narrow by design: at most one browser engine case may be owner-excluded per decision, and
+# only while that case is blocked or absent. Everything else the producer evaluates is
+# mandatory integrity, provenance, source or qualification evidence.
 EXCLUDABLE_REQUIREMENTS = frozenset(
     f"digest_class:browser#{case_id}" for case_id in BROWSER_ENGINE_CASES
 )
@@ -259,6 +286,12 @@ REVOCATION_REASONS = (
     "expired_mandatory_result",
     "invalid_evidence",
 )
+
+# Digests of trust registries allowed to declare ``production``. Deliberately empty: a
+# registry cannot make itself production by labelling itself. Adding a pin is an
+# owner-reviewed source change.
+PRODUCTION_REGISTRY_PINS: frozenset[str] = frozenset()
+MAX_REGISTRY_LIFETIME = timedelta(days=90)
 
 MAX_CANDIDATE_BYTES = 8 * 1024 * 1024
 MAX_REGISTRY_BYTES = 1024 * 1024
@@ -320,6 +353,11 @@ EXCLUSION_FIELDS = frozenset(
         "issued_at",
         "expires_at",
         "signature",
+        # Bindings beyond the frozen inventory's required fields: an exclusion is valid for
+        # one source, one authority generation and one affected result only.
+        "source_commit",
+        "authority_generation",
+        "bound_result_digest",
     }
 )
 CANDIDATE_FIELDS = frozenset(
@@ -350,6 +388,10 @@ RECEIPT_FIELDS = frozenset(
         "representation_digest",
         "runtime_digest",
         "environment_digest",
+        "assignment_digest",
+        "route_digest",
+        "qualification_digest",
+        "gate_commit",
         "authority_generation",
         "verifier_policy_digest",
         "executed_at",
@@ -429,6 +471,7 @@ class DecisionResult:
     ledger_entry_path: Path
     findings: tuple[str, ...]
     document: dict[str, Any]
+    authority_scope: str
 
 
 def source_tree_digest(object_format: str, tree_id: str) -> str:
@@ -522,7 +565,32 @@ def _has_claim(value: Any) -> bool:
 
 
 def _is_within(path: str, directory: str) -> bool:
-    return path == directory or path.startswith(directory.rstrip(os.sep) + os.sep)
+    """True when ``path`` is ``directory`` or lies under it, judged by file identity.
+
+    The string comparison alone is defeated by a case-variant spelling on a
+    case-insensitive volume, so every existing ancestor is also compared by device/inode.
+    """
+    if path == directory or path.startswith(directory.rstrip(os.sep) + os.sep):
+        return True
+    try:
+        target = os.stat(directory)
+    except OSError:
+        return False
+    current = path
+    while True:
+        try:
+            metadata = os.stat(current)
+        except OSError:
+            metadata = None
+        if metadata is not None and (metadata.st_dev, metadata.st_ino) == (
+            target.st_dev,
+            target.st_ino,
+        ):
+            return True
+        parent = os.path.dirname(current)
+        if parent == current:
+            return False
+        current = parent
 
 
 def _load_file(path: Path, maximum: int) -> tuple[bytes | None, str | None]:
@@ -603,6 +671,16 @@ class _Source:
 
 
 @dataclasses.dataclass(slots=True)
+class _Revoked:
+    """What explicit revocations in the ledger block, by semantic identity."""
+
+    candidates: set[str] = dataclasses.field(default_factory=set)
+    sources: set[str] = dataclasses.field(default_factory=set)
+    results: set[str] = dataclasses.field(default_factory=set)
+    keys: set[str] = dataclasses.field(default_factory=set)
+
+
+@dataclasses.dataclass(slots=True)
 class _Context:
     now: datetime
     roots: dict[str, Path]
@@ -611,7 +689,11 @@ class _Context:
     declared_commit: Any
     declared_tree: Any
     findings: _Findings
+    declared_gate_commits: dict[str, Any] = dataclasses.field(default_factory=dict)
+    browser_result_digest: Any = None
+    revoked_results: set[str] = dataclasses.field(default_factory=set)
     excluded_cases: set[str] = dataclasses.field(default_factory=set)
+    applied_exclusions: set[str] = dataclasses.field(default_factory=set)
     validity: list[datetime] = dataclasses.field(default_factory=list)
     receipts: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)
     signers: dict[str, str] = dataclasses.field(default_factory=dict)
@@ -691,9 +773,14 @@ def _load_trust(
     forbidden_directories: list[str],
     now: datetime,
     allow_synthetic: bool,
+    revoked_keys: set[str],
     findings: _Findings,
 ) -> tuple[_Trust | None, str | None, str]:
-    """Return (usable trust, pinned-and-observed digest, authority scope)."""
+    """Return (usable trust, pinned-and-observed digest, authority scope).
+
+    The registry file is judged by file identity: it may not be a symlink, may not have a
+    second hard link, and may not live under the checkout, an evidence root or the ledger.
+    """
     requirement = "trust_registry"
     if not is_sha256_ref(pinned):
         findings.add(requirement, "trust_registry_pin_invalid")
@@ -708,7 +795,15 @@ def _load_trust(
     if status == "missing":
         findings.add(requirement, "trust_registry_missing")
         return None, None, SCOPE_UNDETERMINED
-    if status == "symlink" or any(_is_within(real, item) for item in forbidden_directories):
+    try:
+        link_count = os.lstat(absolute).st_nlink
+    except OSError:
+        link_count = 0
+    if (
+        status == "symlink"
+        or link_count != 1
+        or any(_is_within(real, item) for item in forbidden_directories)
+    ):
         findings.add(requirement, "trust_registry_origin_invalid")
         return None, None, SCOPE_UNDETERMINED
     if content is None:
@@ -734,6 +829,17 @@ def _load_trust(
     if trust.expires_at <= now:
         findings.add(requirement, "trust_registry_expired")
         usable = False
+    if issued_at is not None and trust.expires_at - issued_at > MAX_REGISTRY_LIFETIME:
+        findings.add(requirement, "trust_registry_lifetime_unbounded")
+        usable = False
+    if revoked_keys & set(trust.roles):
+        # A compromised key stays revoked however the registry is re-issued.
+        findings.add(requirement, "trust_registry_key_revoked")
+        usable = False
+    if trust.scope == SCOPE_PRODUCTION and digest not in PRODUCTION_REGISTRY_PINS:
+        # "production" is not something a registry can declare about itself.
+        findings.add(requirement, "trust_registry_not_recognised")
+        return None, digest, SCOPE_UNDETERMINED
     if trust.scope == SCOPE_SYNTHETIC and not allow_synthetic:
         findings.add(requirement, "synthetic_trust_registry_not_admitted")
         return None, digest, SCOPE_UNDETERMINED
@@ -763,6 +869,24 @@ def _check_signature(trust: _Trust, document: Mapping[str, Any], role: str) -> s
 # -- source binding --------------------------------------------------------------------
 
 
+# Repository-local configuration must not be able to make a changed tree look clean.
+_GIT_FORCED_CONFIG = tuple(
+    item
+    for setting in (
+        "core.fsmonitor=false",
+        "core.untrackedCache=false",
+        "core.fileMode=true",
+        "core.ignoreStat=false",
+        "core.trustctime=true",
+        "core.checkStat=default",
+        "core.autocrlf=false",
+        "diff.ignoreSubmodules=none",
+        "status.showUntrackedFiles=all",
+    )
+    for item in ("-c", setting)
+)
+
+
 def _git(repo: str, *arguments: str) -> tuple[int, bytes]:
     environment = {
         "PATH": os.environ.get("PATH", os.defpath),
@@ -776,7 +900,7 @@ def _git(repo: str, *arguments: str) -> tuple[int, bytes]:
     }
     try:
         completed = subprocess.run(
-            ["git", "-c", "core.fsmonitor=false", *arguments],
+            ["git", *_GIT_FORCED_CONFIG, *arguments],
             cwd=repo,
             env=environment,
             stdout=subprocess.PIPE,
@@ -789,8 +913,62 @@ def _git(repo: str, *arguments: str) -> tuple[int, bytes]:
     return completed.returncode, completed.stdout
 
 
+def _worktree_matches_tree(real: str, commit: str) -> tuple[bool, bool]:
+    """Hash every tracked path in the worktree against the commit's tree.
+
+    This does not consult the index, so assume-unchanged and skip-worktree bits, a disabled
+    file-mode check and stat-cache tricks cannot hide a difference. Returns (matches,
+    has_submodule); a submodule entry cannot be verified here.
+    """
+    code, output = _git(real, "ls-tree", "-r", "-z", "--full-tree", commit)
+    if code != 0:
+        return False, False
+    root = os.fsencode(real)
+    matches = True
+    has_submodule = False
+    for entry in output.split(b"\0"):
+        if not entry:
+            continue
+        metadata_text, separator, name = entry.partition(b"\t")
+        fields = metadata_text.split()
+        if not separator or len(fields) != 3:
+            return False, has_submodule
+        mode, kind, object_id = fields
+        if kind == b"commit":
+            has_submodule = True
+            continue
+        path = os.path.join(root, name)
+        try:
+            metadata = os.lstat(path)
+            if mode == b"120000":
+                if not stat.S_ISLNK(metadata.st_mode):
+                    matches = False
+                    continue
+                content = os.readlink(path)
+            elif mode in {b"100644", b"100755"}:
+                executable = bool(metadata.st_mode & 0o100)
+                if not stat.S_ISREG(metadata.st_mode) or executable != (mode == b"100755"):
+                    matches = False
+                    continue
+                with open(path, "rb") as handle:
+                    content = handle.read()
+            else:
+                matches = False
+                continue
+        except OSError:
+            matches = False
+            continue
+        blob = hashlib.sha1(b"blob %d\0" % len(content) + content, usedforsecurity=False)
+        if blob.hexdigest().encode("ascii") != object_id:
+            matches = False
+    return matches, has_submodule
+
+
 def _observe_source(repo_root: os.PathLike[str] | str, findings: _Findings) -> _Source | None:
-    """Observe the explicitly supplied checkout. Nothing in the candidate selects it."""
+    """Observe the explicitly supplied checkout. Nothing in the candidate selects it.
+
+    Every later Git call names the commit id observed here, never the symbolic ``HEAD``.
+    """
     requirement = "source_integrity"
     try:
         real = os.path.realpath(os.fspath(repo_root))
@@ -816,19 +994,54 @@ def _observe_source(repo_root: os.PathLike[str] | str, findings: _Findings) -> _
     except ValueError:
         findings.add(requirement, "source_checkout_invalid")
         return None
-    code, output = _git(real, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    code, output = _git(
+        real, "rev-parse", "--path-format=absolute", "--absolute-git-dir", "--git-common-dir"
+    )
+    git_directories = output.decode("utf-8", "replace").splitlines()
+    if code != 0 or len(git_directories) != 2:
+        findings.add(requirement, "source_checkout_invalid")
+        return None
+    if any(
+        os.path.lexists(os.path.join(directory, *name))
+        for directory in git_directories
+        for name in (("info", "grafts"), ("shallow",))
+    ):
+        # Grafts and shallow boundaries rewrite the ancestry Git reports.
+        findings.add(requirement, "source_history_rewritten")
+
+    code, output = _git(
+        real,
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+        "--ignored=matching",
+        "--ignore-submodules=none",
+    )
     entries = [entry for entry in output.split(b"\0") if entry]
+    hidden_prefixes = (b"?? ", b"!! ")
+    tracked_changes = any(not entry.startswith(hidden_prefixes) for entry in entries)
+    if code == 0 and any(entry.startswith(hidden_prefixes) for entry in entries):
+        # Untracked files withhold release whether or not an ignore rule hides them.
+        findings.add(requirement, "untracked_source_input_present")
+    flags_code, flags_output = _git(real, "ls-files", "-v", "-z")
+    if flags_code != 0 or any(
+        not entry.startswith(b"H ") for entry in flags_output.split(b"\0") if entry
+    ):
+        findings.add(requirement, "source_index_flag_present")
+    worktree_matches, has_submodule = _worktree_matches_tree(real, head)
+    if has_submodule:
+        findings.add(requirement, "source_submodule_unverifiable")
     if code != 0:
         tree_state = "unknown"
-    elif any(not entry.startswith(b"?? ") for entry in entries):
+    elif tracked_changes or not worktree_matches:
         tree_state = "dirty"
     else:
         tree_state = "clean"
     if tree_state != "clean":
         findings.add(requirement, "clean_tree_required")
-    if code == 0 and any(entry.startswith(b"?? ") for entry in entries):
-        findings.add(requirement, "untracked_source_input_present")
-    code, output = _git(real, "rev-list", "--parents", "HEAD")
+
+    code, output = _git(real, "rev-list", "--parents", head)
     parents: dict[str, tuple[str, ...]] = {}
     if code == 0:
         for line in output.decode("ascii", "replace").splitlines():
@@ -837,7 +1050,7 @@ def _observe_source(repo_root: os.PathLike[str] | str, findings: _Findings) -> _
                 parents[fields[0]] = tuple(fields[1:])
     if head not in parents:
         findings.add(requirement, "source_history_unreadable")
-    code, output = _git(real, "cat-file", "blob", f"HEAD:{CONTRACT_MANIFEST_PATH}")
+    code, output = _git(real, "cat-file", "blob", f"{head}:{CONTRACT_MANIFEST_PATH}")
     contract_bytes = output if code == 0 else None
     if contract_bytes is None:
         findings.add(requirement, "contract_manifest_absent_from_source")
@@ -849,6 +1062,13 @@ def _observe_source(repo_root: os.PathLike[str] | str, findings: _Findings) -> _
         parents=parents,
         contract_bytes=contract_bytes,
     )
+
+
+def _source_fingerprint(source: _Source | None, findings: _Findings) -> tuple[Any, ...]:
+    observed = tuple(sorted(findings.by_requirement.get("source_integrity", ())))
+    if source is None:
+        return (None, observed)
+    return (source.commit, source.tree_digest, source.tree_state, source.contract_bytes, observed)
 
 
 def _strict_ancestors(parents: Mapping[str, tuple[str, ...]], commit: str) -> set[str]:
@@ -865,6 +1085,13 @@ def _strict_ancestors(parents: Mapping[str, tuple[str, ...]], commit: str) -> se
 def _check_gate_commits(
     gate_commits: Any, source: _Source | None, findings: _Findings
 ) -> dict[str, str] | None:
+    """Check the declared gate commits against the observed source history.
+
+    Verified: one distinct commit per A3..A14 gate, each an ancestor of the source commit,
+    each prerequisite gate's commit a strict ancestor of its dependent's, and (in
+    ``_verify_result``) each gate receipt signs the same commit. Not verified: that a gate
+    commit contains exactly that gate's change; atomicity by content is a known limitation.
+    """
     requirement = "gate_graph"
     if not isinstance(gate_commits, dict) or set(gate_commits) != set(CLOSURE_GATES):
         findings.add(requirement, "gate_commit_set_mismatch")
@@ -894,7 +1121,9 @@ def _check_gate_commits(
 # -- evidence roots and artifacts ------------------------------------------------------
 
 
-def _prepare_roots(evidence_roots: Any, findings: _Findings) -> dict[str, Path]:
+def _prepare_roots(
+    evidence_roots: Any, ledger_directory: str, findings: _Findings
+) -> dict[str, Path]:
     requirement = "evidence_roots"
     if not isinstance(evidence_roots, Mapping):
         findings.add(requirement, "evidence_root_invalid")
@@ -910,6 +1139,10 @@ def _prepare_roots(evidence_roots: Any, findings: _Findings) -> dict[str, Path]:
             real = ""
         if not real or not os.path.isdir(real):
             findings.add(requirement, "evidence_root_missing", root_id)
+            continue
+        if _is_within(real, ledger_directory) or _is_within(ledger_directory, real):
+            # Evidence may not be read from where decisions are written.
+            findings.add(requirement, "evidence_root_overlaps_ledger")
             continue
         resolved[root_id] = real
     items = sorted(resolved.items())
@@ -993,7 +1226,17 @@ def _receipt_shape_valid(receipt: Any) -> bool:
                 "representation_digest",
                 "runtime_digest",
                 "environment_digest",
+                "assignment_digest",
+                "route_digest",
+                "qualification_digest",
                 "verifier_policy_digest",
+            )
+        )
+        or not (
+            receipt["gate_commit"] is None
+            or (
+                isinstance(receipt["gate_commit"], str)
+                and _COMMIT.fullmatch(receipt["gate_commit"]) is not None
             )
         )
         or not _is_generation(receipt["authority_generation"])
@@ -1025,29 +1268,75 @@ def _receipt_shape_valid(receipt: Any) -> bool:
 # -- result-kind artifact verifiers ----------------------------------------------------
 
 
+_JUNIT_BENIGN_CHILDREN = frozenset({"properties", "system-out", "system-err"})
+_XML_ENCODING = re.compile(rb"""\s*<\?xml[^>]*?encoding\s*=\s*["']([^"']*)["']""")
+_XML_DECLARED_ENTITIES = re.compile(rb"<!\s*(?:DOCTYPE|ENTITY)", re.IGNORECASE)
+
+
+def _parse_junit(content: bytes) -> ElementTree.Element | None:
+    """Parse one report, refusing anything that is not plain UTF-8 XML without a DTD."""
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    declared = _XML_ENCODING.match(content)
+    if (
+        content.startswith(b"\xef\xbb\xbf")
+        or "\x00" in text
+        or _XML_DECLARED_ENTITIES.search(content) is not None
+        or (declared is not None and declared.group(1).lower() not in {b"utf-8", b"utf8"})
+    ):
+        return None
+    try:
+        root = ElementTree.fromstring(content)
+    except ElementTree.ParseError:
+        return None
+    return root if root.tag in {"testsuites", "testsuite"} else None
+
+
 def _verify_junit(context: _Context, files: dict[str, bytes], directory: Path, add: Any) -> None:
-    reports = [content for name, content in sorted(files.items()) if name.endswith(".xml")]
+    """Count executed cases from the report bytes; a report's own totals are only checked.
+
+    Every ``.xml`` evidence file (any letter case) is a report. A case passes only when it
+    has no child other than properties and captured output: failure, error, skipped and
+    the rerun/flaky variants, or any unknown child, are not a pass. Each leaf suite must
+    declare a ``tests`` count equal to the cases counted in it.
+    """
+    reports = [content for name, content in sorted(files.items()) if name.lower().endswith(".xml")]
     if not reports:
         add("junit_report_missing")
         return
     tests = failures = skips = 0
+    counts_consistent = True
     for content in reports:
-        if b"<!DOCTYPE" in content or b"<!ENTITY" in content:
+        root = _parse_junit(content)
+        if root is None:
             add("junit_report_invalid")
             return
-        try:
-            root = ElementTree.fromstring(content)
-        except ElementTree.ParseError:
-            add("junit_report_invalid")
-            return
-        for case in root.iter("testcase"):
-            tests += 1
-            children = {child.tag for child in case}
-            failures += bool(children & {"failure", "error"})
-            skips += "skipped" in children
+        counted_in_suites = 0
         for suite in root.iter("testsuite"):
+            cases = [child for child in suite if child.tag == "testcase"]
+            counted_in_suites += len(cases)
+            declared_count = suite.get("tests")
+            if not any(child.tag == "testsuite" for child in suite) and (
+                declared_count is None
+                or not declared_count.isdigit()
+                or int(declared_count) != len(cases)
+            ):
+                counts_consistent = False
             failures += suite.get("failures", "0") != "0" or suite.get("errors", "0") != "0"
             skips += suite.get("skipped", "0") != "0"
+            for case in cases:
+                tests += 1
+                children = {child.tag for child in case} - _JUNIT_BENIGN_CHILDREN
+                skips += "skipped" in children
+                failures += bool(children - {"skipped"})
+        if counted_in_suites != sum(1 for _ in root.iter("testcase")):
+            # A case outside a counted suite cannot be reconciled with any total.
+            add("junit_report_invalid")
+            return
+    if not counts_consistent:
+        add("junit_counts_inconsistent")
     if tests == 0:
         add("junit_no_executed_tests")
     if failures:
@@ -1166,6 +1455,9 @@ def _verify_result(
     if sha256_bytes(content) != declared_digest:
         add("artifact_digest_inconsistent")
         return None
+    if declared_digest in context.revoked_results:
+        # An explicitly revoked result stays revoked wherever it is referenced from.
+        add("result_revoked")
     if _PRIVATE_BYTES.search(content):
         add("privacy_leak_detected")
     try:
@@ -1198,6 +1490,13 @@ def _verify_result(
         or (result_kind != "external_reviewer_reproduction" and receipt["bound_result_digests"])
     ):
         add("result_binding_mismatch")
+    gate_id = requirement.split(":", 1)[1] if slot == "gate_result" else None
+    expected_gate_commit = (
+        context.declared_gate_commits.get(gate_id) if gate_id in CLOSURE_GATES else None
+    )
+    if receipt["gate_commit"] != expected_gate_commit:
+        # The signer attests the gate commit; a caller cannot substitute other ancestors.
+        add("gate_commit_binding_mismatch")
     if receipt["provenance"] != REQUIRED_PROVENANCE:
         add("provenance_requirement_unsatisfied")
     for required_property in sorted(kind_policy["properties"]):
@@ -1259,8 +1558,9 @@ def _verify_result(
         outcome = outcomes.get(case_id)
         if outcome == "pass":
             continue
-        excluded = f"{requirement}#{case_id}" in context.excluded_cases
-        if excluded and outcome in {None, "blocked"}:
+        claim = f"{requirement}#{case_id}"
+        if claim in context.excluded_cases and outcome in {None, "blocked"}:
+            context.applied_exclusions.add(claim)
             continue
         add("required_case_missing" if outcome is None else "required_case_not_passed", case_id)
     if any(
@@ -1327,6 +1627,15 @@ def _evaluate_exclusions(context: _Context, exclusions: Any) -> list[dict[str, A
         digest = exclusion_digest(exclusion)
         if exclusion["exclusion_digest"] != digest:
             findings.add(requirement, "exclusion_digest_mismatch")
+        if (
+            exclusion["source_commit"] != context.declared_commit
+            or exclusion["authority_generation"] != context.trust.current_generation
+            or type(exclusion["authority_generation"]) is not int
+            or exclusion["bound_result_digest"] != context.browser_result_digest
+            or not is_sha256_ref(exclusion["bound_result_digest"])
+        ):
+            # Signed for another source, authority generation or result: not valid here.
+            findings.add(requirement, "exclusion_binding_mismatch")
         if len(requirement_ids) > MAX_REQUIREMENTS_PER_EXCLUSION:
             findings.add(requirement, "exclusion_requirement_count_exceeded")
         for requirement_id in sorted(set(requirement_ids)):
@@ -1372,8 +1681,8 @@ def _evaluate_exclusions(context: _Context, exclusions: Any) -> list[dict[str, A
                 "state": "approved" if approved else "invalid",
             }
         )
-    if EXCLUDABLE_REQUIREMENTS <= set(covered):
-        # Excluding every engine would remove the browser matrix, not narrow it.
+    if len(set(covered) & EXCLUDABLE_REQUIREMENTS) > 1:
+        # One engine may be excluded. Two would let a single engine stand for the matrix.
         findings.add(requirement, "exclusion_scope_unbounded")
     if findings.count(requirement) == 0:
         context.excluded_cases = set(covered)
@@ -1503,7 +1812,12 @@ def _evaluate_nodes(context: _Context, nodes: Any) -> dict[str, dict[str, Any]]:
 
 
 def _evaluate_bindings(context: _Context) -> tuple[str | None, str | None, str | None]:
-    """One contract, model and representation across every verified result."""
+    """One contract, model, representation, assignment, route and qualification.
+
+    The source's contract manifest fixes the contract digest; the ``digest_class:model``
+    result is the reference for the other five, so a result executed for another model,
+    serving representation, assignment, route or qualification is named individually.
+    """
     source = context.source
     contract_digest = (
         None if source is None or source.contract_bytes is None else sha256_bytes(source.contract_bytes)
@@ -1522,6 +1836,9 @@ def _evaluate_bindings(context: _Context) -> tuple[str | None, str | None, str |
             context.findings.add(requirement, "model_binding_inconsistent", requirement)
         if receipt["representation_digest"] != representation_digest:
             context.findings.add(requirement, "representation_binding_inconsistent", requirement)
+        for field in ("assignment", "route", "qualification"):
+            if receipt[f"{field}_digest"] != model_receipt[f"{field}_digest"]:
+                context.findings.add(requirement, f"{field}_binding_inconsistent", requirement)
     return contract_digest, model_digest, representation_digest
 
 
@@ -1554,6 +1871,7 @@ class _Evaluation:
     withheld_claims: list[str]
     valid_until: datetime | None
     graph_inputs: dict[str, Any] | None
+    source_fingerprint: tuple[Any, ...] = ()
 
 
 def _evaluate(
@@ -1564,25 +1882,24 @@ def _evaluate(
     trust_registry_path: os.PathLike[str] | str,
     trust_registry_sha256: Any,
     forbidden_trust_directories: list[str],
+    ledger_directory: str,
     now: datetime,
     allow_synthetic_trust: bool,
-    revoked_candidates: set[str],
-    revoked_registries: set[str],
+    revoked: _Revoked,
 ) -> _Evaluation:
     findings = _Findings()
-    roots = _prepare_roots(evidence_roots, findings)
+    roots = _prepare_roots(evidence_roots, ledger_directory, findings)
     source = _observe_source(repo_root, findings)
+    source_fingerprint = _source_fingerprint(source, findings)
     trust, registry_digest, scope = _load_trust(
         trust_registry_path,
         trust_registry_sha256,
         forbidden_trust_directories,
         now,
         allow_synthetic_trust is True,
+        revoked.keys,
         findings,
     )
-    if registry_digest is not None and registry_digest in revoked_registries:
-        findings.add("trust_registry", "trust_registry_revoked")
-        trust = None
     evaluation = _Evaluation(
         findings=findings,
         not_evaluated=set(),
@@ -1594,6 +1911,7 @@ def _evaluate(
         withheld_claims=[],
         valid_until=None,
         graph_inputs=None,
+        source_fingerprint=source_fingerprint,
     )
 
     try:
@@ -1605,7 +1923,7 @@ def _evaluate(
         findings.add("candidate", "candidate_missing" if status == "missing" else "candidate_unreadable")
     else:
         evaluation.candidate_digest = sha256_bytes(content)
-        if evaluation.candidate_digest in revoked_candidates:
+        if evaluation.candidate_digest in revoked.candidates:
             findings.add("candidate", "candidate_revoked")
         try:
             candidate = canonical_json_loads(content, path="candidate")
@@ -1639,6 +1957,9 @@ def _evaluate(
             findings.add("source_integrity", "source_head_mismatch")
         if source.tree_digest != declared_tree:
             findings.add("source_integrity", "source_tree_mismatch")
+    if isinstance(declared_commit, str) and declared_commit in revoked.sources:
+        # A revoked decision's source stays revoked however the candidate is rewritten.
+        findings.add("source_integrity", "source_revoked")
     gate_commits = _check_gate_commits(candidate["gate_commits"], source, findings)
 
     if trust is None:
@@ -1654,13 +1975,19 @@ def _evaluate(
         declared_commit=declared_commit,
         declared_tree=declared_tree,
         findings=findings,
+        revoked_results=revoked.results,
     )
+    declared_gate_commits = candidate["gate_commits"]
+    if isinstance(declared_gate_commits, dict):
+        context.declared_gate_commits = declared_gate_commits
+    class_results = candidate["class_results"]
+    browser_entry = class_results.get("browser") if isinstance(class_results, dict) else None
+    if isinstance(browser_entry, dict):
+        context.browser_result_digest = browser_entry.get("artifact_digest")
     context.validity.append(trust.expires_at)
     evaluation.exclusions = _evaluate_exclusions(context, candidate["exclusions"])
-    evaluation.withheld_claims = sorted(context.excluded_cases)
     by_gate = _evaluate_nodes(context, candidate["nodes"])
 
-    class_results = candidate["class_results"]
     class_digests: dict[str, str] = {}
     if not isinstance(class_results, dict) or set(class_results) != set(DIGEST_CLASSES):
         findings.add("candidate", "digest_class_set_mismatch")
@@ -1698,10 +2025,13 @@ def _evaluate(
         )
         reviewer_digest = reviewer["artifact_digest"]
         if receipt is not None:
-            node_digests = sorted(
+            # The reviewer reproduces exactly these gate results and class results.
+            reproduced = [
                 node["node_digest"] for node in by_gate.values() if isinstance(node["node_digest"], str)
-            )
-            if receipt["bound_result_digests"] != node_digests or len(node_digests) != len(INPUT_GATES):
+            ] + [digest for digest in class_digests.values() if isinstance(digest, str)]
+            if receipt["bound_result_digests"] != sorted(set(reproduced)) or len(reproduced) != len(
+                INPUT_GATES
+            ) + len(DIGEST_CLASSES):
                 findings.add(REVIEWER_REQUIREMENT, "reviewer_result_binding_mismatch")
             reviewer_key = context.signers.get(REVIEWER_REQUIREMENT)
             if reviewer_key is not None and any(
@@ -1712,6 +2042,9 @@ def _evaluate(
                 findings.add(REVIEWER_REQUIREMENT, "reviewer_not_independent")
 
     contract_digest, model_digest, representation_digest = _evaluate_bindings(context)
+    # A claim is withheld only where an exclusion was actually applied to a blocked or
+    # absent case; an exclusion for a case that passed changes nothing.
+    evaluation.withheld_claims = sorted(context.applied_exclusions)
     if findings.all():
         return evaluation
     evaluation.valid_until = min(context.validity)
@@ -1903,11 +2236,66 @@ def _structure_valid(body: Mapping[str, Any]) -> bool:
         and set(root["gate_commit_digests"]) == set(CLOSURE_GATES)
         and by_gate[ROOT_GATE]["artifact_digest"] == sha256_document(closure)
         and by_gate[ROOT_GATE]["fresh_until"] == body["valid_until"]
+        and _closure_binds_body(body, closure, root, by_gate)
+    )
+
+
+def _closure_binds_body(
+    body: Mapping[str, Any],
+    closure: Mapping[str, Any],
+    root: Mapping[str, Any],
+    by_gate: Mapping[str, Mapping[str, Any]],
+) -> bool:
+    """The sealed body, the closure statement, the root and the nodes must agree.
+
+    Without this a ``ready`` body could be relabelled (another authority scope, candidate,
+    registry or source) and resealed while its own closure statement still said otherwise.
+    """
+    source = body["source"]
+    closure_node = by_gate[ROOT_GATE]
+    return (
+        closure.get("protocol") == CLOSURE_PROTOCOL
+        and closure.get("authority_scope") == body["authority_scope"]
+        and closure.get("candidate_digest") == body["candidate_digest"]
+        and closure.get("trust_registry_digest") == body["trust_registry_digest"]
+        and is_sha256_ref(body["candidate_digest"])
+        and is_sha256_ref(body["trust_registry_digest"])
+        and closure.get("source_commit") == source["commit"] == root["source_commit"]
+        and closure.get("source_tree_digest") == source["tree_digest"] == root["source_tree_digest"]
+        and source["tree_state"] == root["tree_state"] == "clean"
+        and all(
+            node["source_commit"] == source["commit"]
+            and node["source_tree_digest"] == source["tree_digest"]
+            for node in by_gate.values()
+        )
+        and closure.get("dependency_node_digests")
+        == {gate_id: by_gate[gate_id]["node_digest"] for gate_id in CLOSURE_GATES}
+        and closure.get("gate_commit_digests") == root["gate_commit_digests"]
+        and closure.get("digest_class_roots") == root["digest_class_roots"]
+        and closure.get("exclusion_digests") == root["exclusion_digests"]
+        and closure.get("reviewer_reproduction_digest") == root["reviewer_reproduction_digest"]
+        and closure.get("withheld_claims") == body["withheld_claims"]
+        and body["producer"] == PRODUCER
+        and closure_node["runtime_digest"] == sha256_document({"producer": PRODUCER})
+        and closure_node["environment_digest"]
+        == sha256_document(
+            {
+                "authority_scope": body["authority_scope"],
+                "trust_registry_digest": body["trust_registry_digest"],
+            }
+        )
     )
 
 
 def verify_decision_bytes(content: bytes) -> dict[str, Any]:
-    """Check the seal and structure of one decision generation's exact bytes."""
+    """Check the seal and structure of one decision generation's exact bytes.
+
+    This proves self-consistency only: canonical bytes, a matching body digest, and for
+    ``ready`` a graph, closure statement and body that all agree. The decision is unsigned,
+    so it does not prove that this producer derived it or that the named trust registry
+    and evidence exist. Authenticity comes from the caller's ledger-head pin and from
+    re-deriving the decision from the same inputs.
+    """
     if (
         not isinstance(content, bytes)
         or len(content) > MAX_DECISION_BYTES
@@ -1950,6 +2338,7 @@ def _result_from_bytes(content: bytes, path: Path) -> DecisionResult:
         ledger_entry_path=path,
         findings=tuple(body["findings"]),
         document=document,
+        authority_scope=body["authority_scope"],
     )
 
 
@@ -1970,7 +2359,12 @@ def _ledger_directory(ledger_dir: os.PathLike[str] | str) -> Path:
 
 
 def read_ledger(ledger_dir: os.PathLike[str] | str) -> list[DecisionResult]:
-    """Read and verify the whole generation chain. Any inconsistency refuses."""
+    """Read and verify the whole generation chain. Any inconsistency refuses.
+
+    A consistent chain is not proof of a complete one: a directory can be truncated or
+    replaced by a shorter consistent chain. Producers therefore also require the caller's
+    expected head (see ``_history_state``).
+    """
     directory = _ledger_directory(ledger_dir)
     try:
         names = sorted(name for name in os.listdir(directory) if not name.startswith("."))
@@ -2035,6 +2429,12 @@ def _append(directory: Path, entries: list[DecisionResult], body: dict[str, Any]
             os.close(descriptor)
         # A hard link fails if the generation exists: complete bytes or nothing.
         os.link(temporary, target)
+        # Make the new directory entry durable, or a crash could silently truncate history.
+        directory_descriptor = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
     except FileExistsError:
         raise _refuse("decision_generation_conflict") from None
     except OSError:
@@ -2048,25 +2448,45 @@ def _append(directory: Path, entries: list[DecisionResult], body: dict[str, Any]
 
 
 def _history_state(
-    directory: Path, now: datetime
-) -> tuple[list[DecisionResult], set[str], set[str], set[str]]:
+    directory: Path, now: datetime, expected_ledger_head: Any
+) -> tuple[list[DecisionResult], _Revoked, set[str]]:
+    """Read the chain and require it to end at the head the caller last saw.
+
+    The directory cannot prove it was not truncated or swapped for an empty one, which
+    would silently drop revocations, the clock floor and the scope history. The caller
+    therefore pins the digest of the latest generation, or ``None`` for an empty ledger.
+    """
     entries = read_ledger(directory)
+    observed_head = entries[-1].decision_digest if entries else None
+    if expected_ledger_head != observed_head or not (
+        expected_ledger_head is None or isinstance(expected_ledger_head, str)
+    ):
+        raise _refuse("ledger_head_mismatch")
     if entries and format_timestamp(now) < entries[-1].document["body"]["decided_at"]:
         raise _refuse("clock_regression")
-    revoked_candidates: set[str] = set()
-    revoked_registries: set[str] = set()
+    revoked = _Revoked()
     scopes: set[str] = set()
     for entry in entries:
         body = entry.document["body"]
         if body["authority_scope"] != SCOPE_UNDETERMINED:
             scopes.add(body["authority_scope"])
         revocation = body["revocation"]
-        if isinstance(revocation, dict) and revocation.get("kind") == "explicit":
-            if body["candidate_digest"] is not None:
-                revoked_candidates.add(body["candidate_digest"])
-            if revocation.get("reason") == "compromised_key" and body["trust_registry_digest"]:
-                revoked_registries.add(body["trust_registry_digest"])
-    return entries, revoked_candidates, revoked_registries, scopes
+        if not isinstance(revocation, dict) or revocation.get("kind") != "explicit":
+            continue
+        for field, bucket in (
+            ("revoked_candidate_digest", revoked.candidates),
+            ("revoked_source_commit", revoked.sources),
+        ):
+            if isinstance(revocation.get(field), str):
+                bucket.add(revocation[field])
+        for field, bucket in (
+            ("revoked_result_digests", revoked.results),
+            ("revoked_key_digests", revoked.keys),
+        ):
+            values = revocation.get(field)
+            if isinstance(values, list):
+                bucket.update(item for item in values if isinstance(item, str))
+    return entries, revoked, scopes
 
 
 def produce_release_decision(
@@ -2077,6 +2497,7 @@ def produce_release_decision(
     trust_registry_path: os.PathLike[str] | str,
     trust_registry_sha256: str,
     ledger_dir: os.PathLike[str] | str,
+    expected_ledger_head: str | None,
     now: datetime,
     allow_synthetic_trust: bool = False,
 ) -> DecisionResult:
@@ -2084,11 +2505,13 @@ def produce_release_decision(
 
     Invalid, missing, stale or untrusted input is never a refusal: it derives a new
     ``not_ready`` generation naming the finding. A refusal means the ledger itself cannot
-    be safely extended (unsafe directory, tampered history, clock regression).
+    be safely extended (unsafe directory, tampered or truncated history, a head other than
+    ``expected_ledger_head``, clock regression, or a checkout that changed while it was
+    being evaluated).
     """
     now = _require_utc(now)
     directory = _ledger_directory(ledger_dir)
-    entries, revoked_candidates, revoked_registries, scopes = _history_state(directory, now)
+    entries, revoked, scopes = _history_state(directory, now, expected_ledger_head)
 
     private_paths: list[str] = [str(directory), os.path.realpath(directory)]
     forbidden: list[str] = [os.path.realpath(directory)]
@@ -2112,10 +2535,10 @@ def produce_release_decision(
         trust_registry_path=trust_registry_path,
         trust_registry_sha256=trust_registry_sha256,
         forbidden_trust_directories=forbidden,
+        ledger_directory=os.path.realpath(directory),
         now=now,
         allow_synthetic_trust=allow_synthetic_trust,
-        revoked_candidates=revoked_candidates,
-        revoked_registries=revoked_registries,
+        revoked=revoked,
     )
     if evaluation.authority_scope != SCOPE_UNDETERMINED and scopes - {evaluation.authority_scope}:
         # A synthetic derivation must never extend a production decision history.
@@ -2169,22 +2592,70 @@ def produce_release_decision(
     sealed_preview = canonical_json_bytes(body)
     if any(len(item) > 1 and item.encode("utf-8") in sealed_preview for item in private_paths):
         raise _refuse("privacy_guard_tripped")
+    # Re-observe the checkout immediately before sealing: a decision must not mix what was
+    # verified with a tree or HEAD that moved while it was being evaluated.
+    recheck = _Findings()
+    if _source_fingerprint(_observe_source(repo_root, recheck), recheck) != (
+        evaluation.source_fingerprint
+    ):
+        raise _refuse("source_changed_during_evaluation")
     return _append(directory, entries, body)
 
 
 def append_revocation(
-    *, ledger_dir: os.PathLike[str] | str, reason: str, now: datetime
+    *,
+    ledger_dir: os.PathLike[str] | str,
+    reason: str,
+    now: datetime,
+    expected_ledger_head: str | None,
+    compromised_key_digests: tuple[str, ...] | list[str] = (),
 ) -> DecisionResult:
-    """Append an explicit non-ready generation revoking the latest one (spec section 8)."""
+    """Append an explicit non-ready generation revoking a decision (spec section 8).
+
+    The revoked decision is the most recent ``ready`` generation, or the latest generation
+    when none was ready. What is blocked afterwards is its semantic identity, so rewriting
+    the candidate file does not escape it: for ``compromised_key`` the named verification
+    key digests in any registry; for every other reason the source commit and every gate,
+    class and reviewer result digest of the revoked decision.
+    """
     now = _require_utc(now)
     directory = _ledger_directory(ledger_dir)
-    entries, _candidates, _registries, _scopes = _history_state(directory, now)
+    entries, _revoked, _scopes = _history_state(directory, now, expected_ledger_head)
     if not entries:
         raise _refuse("nothing_to_revoke")
     if reason not in REVOCATION_REASONS:
         raise _refuse("revocation_reason_invalid")
-    previous = entries[-1]
-    revoked = previous.document["body"]
+    key_digests = sorted(set(compromised_key_digests)) if isinstance(
+        compromised_key_digests, (list, tuple)
+    ) else None
+    if key_digests is None or any(not is_sha256_ref(item) for item in key_digests):
+        raise _refuse("revocation_key_digests_invalid")
+    if reason == "compromised_key" and not key_digests:
+        raise _refuse("revocation_key_digests_required")
+    if reason != "compromised_key" and key_digests:
+        raise _refuse("revocation_key_digests_unexpected")
+    latest = entries[-1]
+    target = next((entry for entry in reversed(entries) if entry.decision == "ready"), latest)
+    revoked = target.document["body"]
+    graph = revoked["graph"]
+    source_commit = None
+    result_digests: list[str] = []
+    if reason != "compromised_key":
+        source_commit = revoked["source"]["commit"]
+        if graph is not None:
+            root = graph["root"]
+            source_commit = root["source_commit"]
+            result_digests = sorted(
+                {
+                    *(
+                        node["artifact_digest"]
+                        for node in graph["nodes"]
+                        if node["gate_id"] != ROOT_GATE
+                    ),
+                    *root["digest_class_roots"].values(),
+                    root["reviewer_reproduction_digest"],
+                }
+            )
     finding = f"release_revoked:{reason}"
     body = {
         "authority_scope": revoked["authority_scope"],
@@ -2193,11 +2664,11 @@ def append_revocation(
         "closure_statement": None,
         "decided_at": format_timestamp(now),
         "decision": "not_ready",
-        "decision_generation": previous.decision_generation + 1,
+        "decision_generation": latest.decision_generation + 1,
         "exclusions": [],
         "findings": [finding],
         "graph": None,
-        "previous_decision_digest": previous.decision_digest,
+        "previous_decision_digest": latest.decision_digest,
         "producer": dict(PRODUCER),
         "requirements": [
             {"requirement_id": "decision_history", "state": "not_verified", "findings": [finding]}
@@ -2205,8 +2676,12 @@ def append_revocation(
         "revocation": {
             "kind": "explicit",
             "reason": reason,
-            "revoked_decision_digest": previous.decision_digest,
-            "revoked_generation": previous.decision_generation,
+            "revoked_candidate_digest": revoked["candidate_digest"],
+            "revoked_decision_digest": target.decision_digest,
+            "revoked_generation": target.decision_generation,
+            "revoked_key_digests": key_digests,
+            "revoked_result_digests": result_digests,
+            "revoked_source_commit": source_commit,
         },
         "source": dict(revoked["source"]),
         "trust_registry_digest": revoked["trust_registry_digest"],
@@ -2281,6 +2756,8 @@ def public_projection_bytes(sealed_bytes: bytes) -> bytes:
             "tree_digest": body["source"]["tree_digest"],
             "tree_state": body["source"]["tree_state"],
         },
+        # Names which registry backed the decision; the scope label alone proves nothing.
+        "trust_registry_digest": body["trust_registry_digest"],
         "valid_until": body["valid_until"],
         "withheld_claims": body["withheld_claims"],
     }
@@ -2353,6 +2830,7 @@ __all__ = [
     "DECISION_PROTOCOL",
     "DIRECT_PREREQUISITES",
     "DecisionResult",
+    "PRODUCTION_REGISTRY_PINS",
     "PUBLIC_PROTOCOL",
     "RESULT_KINDS",
     "ReleaseDecisionRefused",
