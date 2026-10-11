@@ -2438,8 +2438,8 @@
     },
     {
       "path": "tests/live/test_a7_physical_measurement.py",
-      "sha256": "sha256:e3afd615c6f1f5be3bd37df33df2b8d968e5816b82e83d5d9bdd251325413d37",
-      "size_bytes": 27178
+      "sha256": "sha256:4ad6e637105b886540a25d109d25780a8551b19ba4281f25b2c247b4b32e1a2d",
+      "size_bytes": 27593
     },
     {
       "path": "tests/live/test_a7_physical_parity_measurement.py",
@@ -2963,5 +2963,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:47fda3bd4ee2a07553b165ea05cbc80f7a5ad1e3984eedad3d466a081a1d697f"
+  "source_digest": "sha256:e4274ad770cfcc678181539f62054d2b66414f6ef8487053f29af12b706d4d23"
 }
