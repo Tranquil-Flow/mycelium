@@ -1758,8 +1758,8 @@
     },
     {
       "path": "test_router_iroh_transport.py",
-      "sha256": "sha256:b38d1840b0b6696bbbf6f8d38e352fc53b80752ba2e0597cf35e777c9769c3c7",
-      "size_bytes": 107005
+      "sha256": "sha256:c9b735164213a9fed3ed81280746c8d668715f523433519cf5f35a1c21fec2f8",
+      "size_bytes": 107584
     },
     {
       "path": "test_router_mlx_persistent_int8.py",
@@ -2963,5 +2963,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:da201ff7195b9cae8e8a8732bd967cd7576e473bcd4c83e84555acaafa48df2f"
+  "source_digest": "sha256:941d23a1a60dadf81797dfdfe8fde798ac5b82f56feea9871ae517f1d7ffb3a0"
 }
