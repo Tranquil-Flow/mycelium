@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+import mycelium_a15_release_decision as producer
 from mycelium_a15_release_decision import (
     PUBLIC_PROTOCOL,
     SCOPE_PRODUCTION,
@@ -317,18 +318,25 @@ def test_explicit_revocation_appends_and_blocks_the_revoked_candidate(
 ) -> None:
     first = world.built().produce()
     first_bytes = first.ledger_entry_path.read_bytes()
-    revoked = append_revocation(
-        ledger_dir=world.ledger, reason="critical_defect", now=NOW + timedelta(minutes=1)
-    )
+    revoked = world.revoke("critical_defect", now=NOW + timedelta(minutes=1))
     again = world.produce(now=NOW + timedelta(minutes=2))
 
     assert revoked.decision == "not_ready" and revoked.decision_generation == 2
     assert revoked.findings == ("release_revoked:critical_defect",)
+    graph = first.document["body"]["graph"]
     assert revoked.document["body"]["revocation"] == {
         "kind": "explicit",
         "reason": "critical_defect",
+        "revoked_candidate_digest": first.document["body"]["candidate_digest"],
         "revoked_decision_digest": first.decision_digest,
         "revoked_generation": 1,
+        "revoked_key_digests": [],
+        "revoked_result_digests": sorted(
+            [node["artifact_digest"] for node in graph["nodes"] if node["gate_id"] != "A15"]
+            + list(graph["root"]["digest_class_roots"].values())
+            + [graph["root"]["reviewer_reproduction_digest"]]
+        ),
+        "revoked_source_commit": world.commit,
     }
     assert revoked.document["body"]["candidate_digest"] == first.document["body"]["candidate_digest"]
     assert again.decision == "not_ready" and again.decision_generation == 3
@@ -336,39 +344,95 @@ def test_explicit_revocation_appends_and_blocks_the_revoked_candidate(
     assert first.ledger_entry_path.read_bytes() == first_bytes
 
 
-def test_compromised_key_revocation_blocks_the_trust_registry(world: SyntheticWorld) -> None:
+def test_compromised_key_revocation_blocks_the_key_and_not_the_source(
+    world: SyntheticWorld,
+) -> None:
     world.built().produce()
-    append_revocation(
-        ledger_dir=world.ledger, reason="compromised_key", now=NOW + timedelta(minutes=1)
+    revoked = world.revoke(
+        "compromised_key",
+        now=NOW + timedelta(minutes=1),
+        compromised_key_digests=[world.verifier.verification_key_digest],
     )
+    assert revoked.document["body"]["revocation"]["revoked_source_commit"] is None
+    assert revoked.document["body"]["revocation"]["revoked_result_digests"] == []
     world.specs["gate_result:A14"]["fields"]["runtime_digest"] = sha256_bytes(b"synthetic-new")
     result = world.built().produce(now=NOW + timedelta(minutes=2))
     assert result.decision == "not_ready"
-    assert "trust_registry_revoked" in result.findings
+    assert "trust_registry_key_revoked" in result.findings
     assert "candidate_revoked" not in result.findings
+    assert "source_revoked" not in result.findings
+
+
+def test_revocation_targets_the_latest_ready_generation(world: SyntheticWorld) -> None:
+    first = world.built().produce()
+    expired = world.produce(now=NOW + timedelta(hours=25))
+    assert expired.decision == "not_ready"
+    revoked = world.revoke("invalid_evidence", now=NOW + timedelta(hours=26))
+    recorded = revoked.document["body"]["revocation"]
+    assert recorded["revoked_generation"] == 1
+    assert recorded["revoked_decision_digest"] == first.decision_digest
+    assert recorded["revoked_source_commit"] == world.commit
+    assert revoked.document["body"]["previous_decision_digest"] == expired.decision_digest
+
+
+def test_key_digests_are_only_accepted_for_a_compromised_key(world: SyntheticWorld) -> None:
+    first = world.built().produce()
+    for arguments, code in [
+        ({"reason": "critical_defect", "compromised_key_digests": ["sha256:" + "1" * 64]},
+         "revocation_key_digests_unexpected"),
+        ({"reason": "compromised_key", "compromised_key_digests": ["not-a-digest"]},
+         "revocation_key_digests_invalid"),
+    ]:
+        assert refusal(
+            append_revocation,
+            ledger_dir=world.ledger,
+            now=NOW + timedelta(minutes=1),
+            expected_ledger_head=first.decision_digest,
+            **arguments,
+        ) == code
+    assert ledger_names(world) == ["generation-000001.json"]
 
 
 def test_revocation_reason_is_an_allowlist_and_needs_a_generation(world: SyntheticWorld) -> None:
     assert refusal(
-        append_revocation, ledger_dir=world.ledger, reason="critical_defect", now=NOW
+        append_revocation,
+        ledger_dir=world.ledger,
+        reason="critical_defect",
+        now=NOW,
+        expected_ledger_head=None,
     ) == "nothing_to_revoke"
-    world.built().produce()
+    first = world.built().produce()
     assert refusal(
-        append_revocation, ledger_dir=world.ledger, reason="operator says so", now=NOW
+        append_revocation,
+        ledger_dir=world.ledger,
+        reason="operator says so",
+        now=NOW,
+        expected_ledger_head=first.decision_digest,
     ) == "revocation_reason_invalid"
     assert ledger_names(world) == ["generation-000001.json"]
 
 
 def test_synthetic_and_production_generations_never_share_a_ledger(
-    world: SyntheticWorld, tmp_path_factory: pytest.TempPathFactory, template: Any
+    world: SyntheticWorld,
+    tmp_path_factory: pytest.TempPathFactory,
+    template: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    world.built().produce()
+    first = world.built().produce()
     production = SyntheticWorld(
         tmp_path_factory.mktemp("production-class"), template, registry_class=SCOPE_PRODUCTION
     )
     production.build()
+    # Test-only: recognise this throwaway production-labelled registry so the production
+    # branch can be exercised. The source allowlist itself stays empty.
+    monkeypatch.setattr(
+        producer, "PRODUCTION_REGISTRY_PINS", frozenset({production.registry_digest})
+    )
     assert refusal(
-        production.produce, ledger_dir=world.ledger, now=NOW + timedelta(minutes=1)
+        production.produce,
+        ledger_dir=world.ledger,
+        now=NOW + timedelta(minutes=1),
+        expected_ledger_head=first.decision_digest,
     ) == "ledger_scope_mismatch"
     assert ledger_names(world) == ["generation-000001.json"]
 
@@ -393,6 +457,8 @@ def cli_arguments(world: SyntheticWorld, public_out: Path, *extra: str) -> list[
         world.registry_digest,
         "--ledger-dir",
         str(world.ledger),
+        "--expect-head",
+        world.head or "none",
         "--public-out",
         str(public_out),
         *extra,
@@ -411,7 +477,8 @@ def test_cli_writes_sealed_outputs_and_reports_their_digests(
     code = main(cli_arguments(world, public_out, "--synthetic-self-test"), clock=clock())
     captured = capsys.readouterr()
 
-    assert code == 0, captured.err
+    # Exit 4, not 0: a synthetic self-test ready is never production readiness.
+    assert code == 4, captured.err
     report = json.loads(captured.out)
     entry = world.ledger / "generation-000001.json"
     assert report == {
@@ -508,6 +575,8 @@ def test_cli_revoke_appends_an_explicit_revocation(
             "revoke",
             "--ledger-dir",
             str(world.ledger),
+            "--expect-head",
+            world.head,
             "--reason",
             "compromised_package",
             "--public-out",
@@ -533,6 +602,8 @@ def test_cli_process_refuses_without_a_traceback(tmp_path: Path) -> None:
             "revoke",
             "--ledger-dir",
             str(tmp_path / "no-ledger"),
+            "--expect-head",
+            "none",
             "--reason",
             "critical_defect",
             "--public-out",

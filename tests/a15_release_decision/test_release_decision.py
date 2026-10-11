@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+import mycelium_a15_release_decision as producer
 from mycelium_a15_release_decision import (
     DIGEST_CLASSES,
     DIRECT_PREREQUISITES,
@@ -25,7 +26,6 @@ from mycelium_a15_release_decision import (
     SCOPE_PRODUCTION,
     SCOPE_SYNTHETIC,
     ReleaseDecisionRefused,
-    node_digest,
     source_tree_digest,
     verify_decision_bytes,
 )
@@ -39,6 +39,7 @@ from tests.a15_release_decision.synthetic_world import (
     build_template_repo,
     commit_file,
     git,
+    independent_node_digest as node_digest,
     label_digest,
     passing,
     seal_nodes,
@@ -436,10 +437,14 @@ def test_envelope_cannot_relabel_fixture_receipt_as_live(world: SyntheticWorld) 
 
 
 def test_synthetic_evidence_is_never_admitted_under_production_trust(
-    tmp_path: Path, template: tuple[Path, dict[str, str]]
+    tmp_path: Path, template: tuple[Path, dict[str, str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     world = SyntheticWorld(tmp_path, template, registry_class=SCOPE_PRODUCTION)
-    result = world.built().produce()
+    world.build()
+    # Test-only: recognise this throwaway production-labelled registry so the production
+    # branch can be exercised. The source allowlist itself stays empty.
+    monkeypatch.setattr(producer, "PRODUCTION_REGISTRY_PINS", frozenset({world.registry_digest}))
+    result = world.produce(allow_synthetic_trust=False)
     assert_not_ready(
         result,
         "synthetic_evidence_not_admissible:gate_result:A3",
