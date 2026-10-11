@@ -168,6 +168,18 @@ LEGACY_PEER_CLASS_DECOMPOSITION = {
         "runtimes": [],
         "declared_ineligible": True,
     },
+    # Q2 phone ruling: the Qwen2 Android app is a separate v1 class so
+    # reference-phone leases survive.  Same v2 stance as ``android_native_iroh``:
+    # no registered v2 backend is guessed and it stays declared ineligible
+    # until class qualification evidence exists.
+    "android_native_qwen2_iroh": {
+        "identity_kind": "native_peer",
+        "platform_family": "android",
+        "architecture": "unknown",
+        "transports": ["iroh"],
+        "runtimes": [],
+        "declared_ineligible": True,
+    },
     "windows_native_iroh": {
         "identity_kind": "native_peer",
         "platform_family": "windows",
