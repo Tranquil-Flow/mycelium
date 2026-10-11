@@ -235,7 +235,26 @@ impl Shared {
     /// Make `stage` the applied stage runtime and count the load. The only
     /// way a NEW runtime becomes `stage`; handing a checked-out runtime back
     /// after compute is not a load and does not come through here.
+    ///
+    /// A control session that was configured for the previous load ends here,
+    /// under the same lock that applies the new one: its admission is revoked
+    /// (so no hop admitted under it executes or publishes on the new load),
+    /// its request controls and live paths go with it, and work in flight is
+    /// fenced by the revision. The caller's `reconcile_control` then clears
+    /// the route peers that session installed, through the usual teardown. A
+    /// session that has not configured yet holds no load and is left alone.
     fn install_stage(&mut self, stage: Box<dyn StageRuntime>) -> u64 {
+        if self.control.as_ref().is_some_and(|c| c.configured_load().is_some()) {
+            self.admission.revoke();
+            self.admission = Default::default();
+            self.stage_revision += 1;
+            self.cancelled.clear();
+            self.deadlines.clear();
+            self.control = None;
+            if let Some(stage_node) = self.stage_node.as_mut() {
+                stage_node.clear();
+            }
+        }
         self.stage_load_generation += 1;
         self.stage = Some(stage);
         self.stage_load_generation
@@ -1180,8 +1199,7 @@ impl Supervisor {
             }
         };
         let peer = crate::transport::parse_endpoint_id(&assignment.peer_endpoint_id).map_err(|e| e.0)?;
-        let admission = self.shared.lock().unwrap().admission.clone();
-        self.transport.configure_peer_authorized(peer, assignment.route_generation, admission).await;
+        let route_generation = assignment.route_generation;
         let old = {
             let mut s = self.shared.lock().unwrap();
             s.status.stage_loaded = Some(digest);
@@ -1195,6 +1213,11 @@ impl Supervisor {
         let controllers = self.shared.lock().unwrap().route.as_ref().map(|r| r.assignment.controller_endpoint_ids.clone()).unwrap_or_default();
         self.transport.configure_controllers(controllers.iter().filter_map(|e| crate::transport::parse_endpoint_id(e).ok())).await;
         reconcile_control(&self.shared, &self.transport).await;
+        // Authorize the route peer only now, under the admission that is
+        // current AFTER the install: installing may have ended a session
+        // configured for the previous load and retired what it admitted.
+        let admission = self.shared.lock().unwrap().admission.clone();
+        self.transport.configure_peer_authorized(peer, route_generation, admission).await;
         if let Some(old) = old
             && old.peer != peer
         {
@@ -3089,5 +3112,78 @@ mod tests {
         let details = &snapshot["result"]["observation"]["details"];
         assert_eq!(details["load_identity"], json!({"assignment_id":"assignment-1","stage_id":"stage-golden","phone_stage_pack_digest":"sha256:pack","load_generation":2}));
         assert_eq!(details["configured_load_generation"], 2);
+    }
+
+    /// A session configured and RUNNING on load N does not survive the stage
+    /// being replaced in place (the seed delivered another assignment or pack
+    /// that names the same controller): no hop admitted under it executes or
+    /// publishes on load N+1, and the controller must open and configure a
+    /// new session for the load that is applied now.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn replacing_the_stage_ends_a_running_session_configured_for_the_previous_load() {
+        use crate::transport::{Reachability, parse_endpoint_id};
+        let phone = NodeTransport::bind(&[71; 32], Reachability::LocalOnly).await.unwrap();
+        let controller = NodeTransport::bind(&[72; 32], Reachability::LocalOnly).await.unwrap();
+        let entry = NodeTransport::bind(&[73; 32], Reachability::LocalOnly).await.unwrap();
+        let identity = Arc::new(Identity::from_secret(&phone.endpoint_id(), &[74; 32]).unwrap());
+        let released = Arc::new(Mutex::new(Vec::new()));
+        let shared = lifecycle_shared(Box::new(GoldenStage { released: released.clone() }));
+        {
+            let mut s = shared.lock().unwrap();
+            s.membership = Some(test_membership("inc-1", 5));
+            let mut route = load_test_route(&entry.endpoint_id(), 9);
+            route.assignment.assignment_id = "assignment-golden".into();
+            s.route = Some(route);
+        }
+        let (dispatch_tx, _dispatch_rx) = mpsc::channel(8);
+        let _accept = phone.spawn_accept_dispatch(dispatch_tx);
+        let (control_tx, control_rx) = mpsc::channel(8);
+        phone.set_control_handler(Some(control_tx)).await;
+        phone.configure_controllers([parse_endpoint_id(&controller.endpoint_id()).unwrap()]).await;
+        tokio::spawn(serve_control(control_rx, shared.clone(), phone.clone(), identity, "inc-1".into()));
+        let call = |command: &str, payload: Value| {
+            let bytes = serde_json::to_vec(&json!({"protocol": crate::node_control::NODE_CONTROL_PROTOCOL, "command_id": format!("c-{command}"), "run_id": "run-1", "deployment_id": "dep-1", "command": command, "payload": payload})).unwrap();
+            let (controller, addr) = (controller.clone(), phone.addr());
+            async move { serde_json::from_slice::<Value>(&controller.control_call(addr, &bytes).await.unwrap()).unwrap() }
+        };
+        let profile = |load_generation: u64| json!({"assignment_id": "assignment-golden", "stage_id": "stage-golden", "pack_digest": "sha256:pack", "manifest_digest": "sha256:graph", "load_generation": load_generation});
+        assert_eq!(call("hello", json!({})).await["ok"], true);
+        let configured = call("configure", profile(1)).await;
+        assert_eq!(configured["ok"], true, "{configured}");
+        let entry_addr = serde_json::to_value(entry.addr()).unwrap();
+        let start = json!({"peer": {"node_id": "node-mac-entry", "endpoint_id": entry.endpoint_id(), "endpoint_addr": entry_addr, "generation": 4}, "local_generation": 2});
+        assert_eq!(call("start", start).await["result"]["observation"]["state"], "RUNNING");
+        assert!(phone.peer_for_node("node-mac-entry").await.is_some());
+        // The authority a hop of this session was admitted under.
+        let admitted = shared.lock().unwrap().admission.clone();
+        let hop = |admission: crate::transport::Admission| Inbound { admission, from: iroh::SecretKey::from_bytes(&[20; 32]).public(),
+            from_node: "node-mac-entry".into(), generation: 4, frame: wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap(), reply: None };
+        assert!(stage_step(&shared, &hop(admitted.clone())).is_ok(), "the session serves its own load");
+
+        // The seed delivers a replacement and the node installs it in place.
+        assert_eq!(shared.lock().unwrap().install_stage(Box::new(GoldenStage { released: released.clone() })), 2);
+        {
+            let s = shared.lock().unwrap();
+            assert!(s.control.is_none(), "a session configured for load 1 cannot stay on load 2");
+            assert!(admitted.revoked(), "what the session admitted is retired with it");
+        }
+        let before = shared.lock().unwrap().status.frames_received;
+        assert_eq!(stage_step(&shared, &hop(admitted)).unwrap_err(), "request_cancelled_or_expired");
+        assert_eq!(shared.lock().unwrap().status.frames_received, before, "the refused hop never reached the new load");
+        reconcile_control(&shared, &phone).await;
+        assert!(phone.peer_for_node("node-mac-entry").await.is_none(), "the route peers it installed are cleared");
+        // Nothing is signed for the ended session; a new one must be opened
+        // and configured for the load that is applied now.
+        let orphan = call("snapshot", json!({})).await;
+        assert_eq!((orphan["ok"].clone(), orphan["error"]["code"].clone()), (json!(false), json!("run_id_mismatch")));
+        let hello = call("hello", json!({})).await;
+        assert_eq!((hello["result"]["state"].clone(), hello["result"]["peer_generation"].clone()), (json!("NEW"), json!(0)));
+        assert_eq!(call("configure", profile(1)).await["error"]["code"], "load_generation_mismatch");
+        assert_eq!(call("configure", profile(2)).await["ok"], true);
+        let snapshot = call("snapshot", json!({})).await;
+        let observation = &snapshot["result"]["observation"];
+        assert_eq!(observation["state"], "CONFIGURED", "not RUNNING on a load it was not started for");
+        assert_eq!((observation["details"]["load_identity"]["load_generation"].clone(), observation["details"]["configured_load_generation"].clone()), (json!(2), json!(2)));
+        assert!(observation["details"]["interruptibility"]["maximum_total_cleanup_ms"].is_null());
     }
 }

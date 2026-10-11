@@ -150,6 +150,16 @@ applied load changed after `configure`. The unsigned `stage_load` command return
 controller can learn the number before its first `configure`. It is a hint and
 carries no authority.
 
+**A session lives on one load.** When the phone installs another stage while a
+control session is configured or running (the seed delivered another assignment
+or pack that still names the same controller), the phone ends that session in
+the same step that applies the new stage: what the session admitted is revoked,
+so no hop admitted under it executes or publishes on the new load, its request
+controls and paths are dropped, and the route peers it installed are cleared by
+the ordinary session teardown. The controller must open a new session and
+configure it for the load that is applied now. No cleanup-time bound is claimed
+for this; `maximum_total_cleanup_ms` stays null.
+
 **Signed descriptor.** The `configured` observation carries the native counter
 value and exactly this `load_identity_provenance`:
 

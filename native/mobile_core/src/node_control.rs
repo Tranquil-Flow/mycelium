@@ -36,6 +36,9 @@
 //! nothing across a restart, where the count starts again under a new
 //! incarnation. `stage_load` returns the current count unsigned, as a hint a
 //! controller needs before its first `configure`; it carries no authority.
+//! A session lives on exactly the load it configured: when the node installs
+//! another stage, a configured or running session is ended by the node and
+//! its controller has to open and configure a new one.
 //!
 //! This module does no I/O: [`ControlEnv`] supplies the stage view, the
 //! transport effects, the clock and the health readings.
@@ -248,6 +251,12 @@ impl ControlNode {
     /// The controller (iroh endpoint id) this session is bound to, if any.
     pub fn controller(&self) -> Option<&str> {
         self.controller.as_deref()
+    }
+
+    /// The native load generation this session was configured for, if it has
+    /// configured. The node ends such a session when it installs another load.
+    pub(crate) fn configured_load(&self) -> Option<u64> {
+        self.configured_load
     }
 
     /// Whether this session has ended (`stop`): the node starts a new one.
