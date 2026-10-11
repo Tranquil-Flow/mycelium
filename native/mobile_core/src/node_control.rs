@@ -25,6 +25,18 @@
 //! `request_cleanup` receipt commits the exact subject it tore down, built by
 //! [`crate::node_cancel`] and reported truthfully by [`ControlEnv::cancel_wait`].
 //!
+//! Load identity. The phone counts its own stage loads ([`StageView::load_generation`]).
+//! `configure` is refused with `load_generation_mismatch` unless the
+//! controller names exactly that count, so the `load_generation` in a signed
+//! `configured` observation is the phone's own fact for the stage it has
+//! applied, bound to the process incarnation the observation also signs
+//! (`process_id`). It proves an ordering of loads inside one incarnation and
+//! nothing else: not which full-model manifest the stage came from (the
+//! `manifest_digest` stays a controller claim and is listed as one), and
+//! nothing across a restart, where the count starts again under a new
+//! incarnation. `stage_load` returns the current count unsigned, as a hint a
+//! controller needs before its first `configure`; it carries no authority.
+//!
 //! This module does no I/O: [`ControlEnv`] supplies the stage view, the
 //! transport effects, the clock and the health readings.
 
@@ -84,6 +96,11 @@ pub struct StageView {
     pub backend: String,
     pub runtime_build_digest: String,
     pub golden_output_digest: String,
+    /// The node's own stage-load sequence number for this applied stage: how
+    /// many verified stage runtimes this node has installed so far, this one
+    /// included. Never the controller's value, the route generation, the
+    /// membership generation or the stage revision.
+    pub load_generation: u64,
 }
 
 /// One route peer to install (`start`).
@@ -188,6 +205,8 @@ pub struct ControlNode {
     controller: Option<String>,
     state: State,
     peer_generation: u64,
+    /// The native load generation `configure` was signed for.
+    configured_load: Option<u64>,
     request_control_graph: Option<Value>,
     pending_budgets: BTreeMap<String, u64>,
     // Never reuse an evicted receipt's request id within this session. The
@@ -211,6 +230,7 @@ impl ControlNode {
             controller: None,
             state: State::New,
             peer_generation: 0,
+            configured_load: None,
             request_control_graph: None,
             pending_budgets: BTreeMap::new(),
             consumed_requests: BTreeSet::new(),
@@ -301,6 +321,7 @@ impl ControlNode {
         }
         match command {
             "hello" => self.hello(payload),
+            "stage_load" => self.stage_load(payload, env),
             "configure" => self.configure(payload, signer, env),
             "start" => self.start(payload, signer, env),
             "health" => self.health(payload, signer, env),
@@ -348,9 +369,32 @@ impl ControlNode {
         Ok(Value::Object(result))
     }
 
+    /// The phone's current stage-load count, or null when no stage is applied
+    /// (or it is checked out for compute). Unsigned on purpose: a hint for the
+    /// controller's first `configure`, never evidence. Authority is only the
+    /// signed `configured` observation.
+    fn stage_load(&self, payload: &Value, env: &dyn ControlEnv) -> Result<Value, Refusal> {
+        exact_fields(payload, &[], "invalid_stage_load_fields")?;
+        Ok(json!({
+            "protocol": NODE_CONTROL_PROTOCOL,
+            "stage_load_generation": env.stage().map(|stage| stage.load_generation),
+        }))
+    }
+
+    /// The applied load as the phone holds it now, for a signed snapshot.
+    fn load_identity(stage: &StageView) -> Value {
+        json!({
+            "assignment_id": stage.assignment_id,
+            "stage_id": stage.stage_id,
+            "phone_stage_pack_digest": stage.pack_digest,
+            "load_generation": stage.load_generation,
+        })
+    }
+
     /// Phone profile: `{assignment_id, stage_id, pack_digest,
     /// manifest_digest, load_generation}`; the stage is the phone's own
     /// applied, golden-verified v2 stage, never a file the controller wrote.
+    /// `load_generation` must equal the phone's own count for that stage.
     fn configure(&mut self, payload: &Value, signer: &Identity, env: &mut dyn ControlEnv) -> Result<Value, Refusal> {
         require(self.state == State::New, "invalid_state_for_configure")?;
         let mut base = payload.clone();
@@ -362,7 +406,7 @@ impl ControlNode {
                 && g["topology_generation"].as_u64().is_some_and(|n| n > 0), "invalid_request_control_graph")?;
         }
         let p = exact_fields(&base, &["assignment_id", "stage_id", "pack_digest", "manifest_digest", "load_generation"], "invalid_configure_fields")?;
-        require(non_negative_int(&p["load_generation"]).is_some_and(|g| g > 0), "invalid_load_generation")?;
+        let claimed_load = non_negative_int(&p["load_generation"]).filter(|g| *g > 0).ok_or_else(|| Refusal("invalid_load_generation".into()))?;
         let text = |k: &str| p[k].as_str().filter(|s| !s.is_empty()).ok_or_else(|| Refusal("invalid_configure_fields".into()));
         let (assignment_id, stage_id, pack_digest, manifest_digest) =
             (text("assignment_id")?, text("stage_id")?, text("pack_digest")?, text("manifest_digest")?);
@@ -371,6 +415,10 @@ impl ControlNode {
         require(stage.assignment_id == assignment_id, "assignment_id_mismatch")?;
         require(stage.stage_id == stage_id, "stage_id_mismatch")?;
         require(stage.pack_digest == pack_digest, "stage_pack_digest_mismatch")?;
+        // The controller does not choose this number: it must name the load
+        // the phone itself counted, or nothing is signed.
+        require(stage.load_generation == claimed_load, "load_generation_mismatch")?;
+        self.configured_load = Some(stage.load_generation);
         self.request_control_graph = graph;
         self.state = State::Configured;
         let details = json!({
@@ -383,11 +431,12 @@ impl ControlNode {
             "runtime_build_digest": stage.runtime_build_digest,
             "golden_output_digest": stage.golden_output_digest,
             "phone_stage_pack_digest": pack_digest,
-            "load_generation": p["load_generation"],
+            "load_generation": stage.load_generation,
             "load_identity_provenance": {
-                "applied_fields":["assignment_id","stage_id","phone_stage_pack_digest","runtime_backend","runtime_build_digest","golden_output_digest"],
-                "controller_claim_fields":["manifest_digest","load_generation"],
-                "limitation":"native_manifest_load_generation_not_independently_observed"
+                "applied_fields":["assignment_id","stage_id","phone_stage_pack_digest","runtime_backend","runtime_build_digest","golden_output_digest","load_generation"],
+                "controller_claim_fields":["manifest_digest"],
+                "limitation":"native_full_model_manifest_digest_not_independently_observed",
+                "load_generation_basis":"native_stage_load_sequence_within_process_incarnation"
             },
         });
         self.signed("configured", details, signer, env)
@@ -433,6 +482,10 @@ impl ControlNode {
         require(nodes.len() == peers.len(), "duplicate_peer_node_id")?;
         let endpoints: BTreeSet<&str> = peers.iter().map(|p| p.endpoint_id.as_str()).collect();
         require(endpoints.len() == peers.len(), "duplicate_peer_endpoint_id")?;
+        // A stage reloaded or replaced since `configure` is another load: the
+        // session was signed for the old one and may not start on the new.
+        let stage = env.stage().ok_or_else(|| Refusal("stage_not_loaded".into()))?;
+        require(self.configured_load == Some(stage.load_generation), "load_generation_mismatch")?;
         env.install_peers(&peers, local_generation).map_err(Refusal)?;
         self.peer_generation = local_generation;
         self.state = State::Running;
@@ -502,6 +555,11 @@ impl ControlNode {
         require(details.is_object(), "runtime_snapshot_unavailable")?;
         details["state"] = json!(self.state.name());
         details["host_resources"] = resources;
+        // What is applied NOW next to what `configure` was signed for, so a
+        // consumer can see a reload or replacement. Null while no stage is
+        // applied (or it is checked out); never the configured value copied.
+        details["load_identity"] = env.stage().as_ref().map(Self::load_identity).unwrap_or(Value::Null);
+        details["configured_load_generation"] = json!(self.configured_load);
         self.signed("snapshot", details, signer, env)
     }
 
@@ -777,6 +835,7 @@ mod tests {
                 backend: crate::qwen2::QWEN2_BACKEND.into(),
                 runtime_build_digest: format!("sha256:{}", "b".repeat(64)),
                 golden_output_digest: format!("sha256:{}", "a".repeat(64)),
+                load_generation: 1,
             }),
             installed: vec![],
             stopped: false,
@@ -1304,5 +1363,109 @@ mod tests {
         }
         assert_eq!(answer(node.handle("", &doc("hello"), &signer(), &mut env))["error"]["code"], "controller_mismatch");
         assert!(!env.stopped && node.state() == "NEW");
+    }
+
+    fn v2_provenance() -> Value {
+        json!({
+            "applied_fields":["assignment_id","stage_id","phone_stage_pack_digest","runtime_backend","runtime_build_digest","golden_output_digest","load_generation"],
+            "controller_claim_fields":["manifest_digest"],
+            "limitation":"native_full_model_manifest_digest_not_independently_observed",
+            "load_generation_basis":"native_stage_load_sequence_within_process_incarnation"
+        })
+    }
+
+    #[test]
+    fn configure_refuses_a_load_generation_the_phone_did_not_count() {
+        let (mut node, mut env) = (node(), env());
+        send(&mut node, &mut env, "hello", json!({}));
+        for claimed in [2u64, 17, u64::MAX] {
+            let mut wrong = configure_payload();
+            wrong["load_generation"] = json!(claimed);
+            let refused = send(&mut node, &mut env, "configure", wrong);
+            assert_eq!((refused["ok"].clone(), refused["error"]["code"].clone()), (json!(false), json!("load_generation_mismatch")), "{refused}");
+            assert!(refused.get("result").is_none(), "a refused claim is never signed");
+            assert_eq!(node.state(), "NEW");
+        }
+        // The other applied-stage refusals keep their own codes ahead of it.
+        let mut both = configure_payload();
+        both["pack_digest"] = json!("sha256:other");
+        both["load_generation"] = json!(2);
+        assert_eq!(send(&mut node, &mut env, "configure", both)["error"]["code"], "stage_pack_digest_mismatch");
+        let configured = assert_signed(&send(&mut node, &mut env, "configure", configure_payload()), "configured");
+        assert_eq!(configured["details"]["load_generation"], 1);
+    }
+
+    #[test]
+    fn the_configured_observation_signs_the_closed_v2_load_descriptor_and_never_the_old_one() {
+        let (mut node, mut env) = (node(), env());
+        send(&mut node, &mut env, "hello", json!({}));
+        let response = send(&mut node, &mut env, "configure", configure_payload());
+        let configured = assert_signed(&response, "configured");
+        assert_eq!(configured["details"]["load_identity_provenance"], v2_provenance());
+        let raw = response.to_string();
+        assert!(!raw.contains("native_manifest_load_generation_not_independently_observed"), "old descriptor emitted");
+        assert!(!raw.contains("\"controller_claim_fields\":[\"manifest_digest\",\"load_generation\"]"), "old claim list emitted");
+        // The manifest digest stays what it is: the controller's claim, echoed.
+        assert_eq!(configured["details"]["manifest_digest"], "sha256:graph");
+    }
+
+    #[test]
+    fn stage_load_is_an_unsigned_hint_and_null_without_an_applied_stage() {
+        let (mut node, mut env) = (node(), env());
+        // Like every command, it follows the hello that binds the run.
+        assert_eq!(send(&mut node, &mut env, "stage_load", json!({}))["error"]["code"], "run_id_mismatch");
+        send(&mut node, &mut env, "hello", json!({}));
+        let hint = send(&mut node, &mut env, "stage_load", json!({}));
+        assert_eq!(hint["ok"], true, "{hint}");
+        assert_eq!(hint["result"], json!({"protocol": NODE_CONTROL_PROTOCOL, "stage_load_generation": 1}));
+        assert_eq!(send(&mut node, &mut env, "stage_load", json!({"x":1}))["error"]["code"], "invalid_stage_load_fields");
+        env.stage = None;
+        assert_eq!(send(&mut node, &mut env, "stage_load", json!({}))["result"]["stage_load_generation"], Value::Null);
+        assert_eq!(node.state(), "NEW", "a hint changes no state");
+    }
+
+    #[test]
+    fn a_reload_after_configure_is_refused_at_start_and_visible_in_the_signed_snapshot() {
+        let (mut node, mut env) = (node(), env());
+        send(&mut node, &mut env, "hello", json!({}));
+        assert_signed(&send(&mut node, &mut env, "configure", configure_payload()), "configured");
+        let before = assert_signed(&send(&mut node, &mut env, "snapshot", json!({})), "snapshot");
+        assert_eq!(before["details"]["load_identity"], json!({"assignment_id":"assignment-1","stage_id":"stage-phone","phone_stage_pack_digest":"sha256:pack","load_generation":1}));
+        assert_eq!(before["details"]["configured_load_generation"], 1);
+        // The node reloads the same assignment: its own count advances.
+        env.stage.as_mut().unwrap().load_generation = 2;
+        let after = assert_signed(&send(&mut node, &mut env, "snapshot", json!({})), "snapshot");
+        assert_eq!(after["details"]["load_identity"]["load_generation"], 2);
+        assert_eq!(after["details"]["configured_load_generation"], 1, "the configured load is not rewritten");
+        let start = json!({"peer": peer("a", "e"), "local_generation": 1});
+        assert_eq!(send(&mut node, &mut env, "start", start.clone())["error"]["code"], "load_generation_mismatch");
+        assert!(env.installed.is_empty() && node.state() == "CONFIGURED");
+        env.stage = None;
+        assert_eq!(send(&mut node, &mut env, "start", start)["error"]["code"], "stage_not_loaded");
+        assert_eq!(assert_signed(&send(&mut node, &mut env, "snapshot", json!({})), "snapshot")["details"]["load_identity"], Value::Null);
+    }
+
+    #[test]
+    fn a_new_session_must_name_the_current_load_and_a_new_incarnation_is_signed_into_it() {
+        let mut env = env();
+        env.stage.as_mut().unwrap().load_generation = 2;
+        let mut second = node();
+        send(&mut second, &mut env, "hello", json!({}));
+        // The profile signed for load 1 is the old one now.
+        assert_eq!(send(&mut second, &mut env, "configure", configure_payload())["error"]["code"], "load_generation_mismatch");
+        let mut current = configure_payload();
+        current["load_generation"] = json!(2);
+        let configured = assert_signed(&send(&mut second, &mut env, "configure", current), "configured");
+        assert_eq!((configured["details"]["load_generation"].clone(), configured["process_id"].clone()), (json!(2), json!("process-1")));
+        // A restarted process counts from one again, under another incarnation:
+        // the same number is a different signed identity.
+        let mut restarted = ControlNode::new(ControlIdentity {
+            node_id: "node-phone".into(), host_id: "host-phone".into(), process_id: "process-2".into(),
+            endpoint_id: "endpoint-phone".into(), boot_id: "boot-2".into(),
+        });
+        let mut fresh = self::env();
+        send(&mut restarted, &mut fresh, "hello", json!({}));
+        let again = assert_signed(&send(&mut restarted, &mut fresh, "configure", configure_payload()), "configured");
+        assert_eq!((again["details"]["load_generation"].clone(), again["process_id"].clone()), (json!(1), json!("process-2")));
     }
 }

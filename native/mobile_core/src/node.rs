@@ -217,6 +217,14 @@ struct Shared {
     cancelled: std::collections::BTreeSet<String>,
     deadlines: std::collections::BTreeMap<String, std::time::Instant>,
     stage_revision: u64,
+    /// How many verified stage runtimes this node has installed as its applied
+    /// stage, the current one included. It advances only in
+    /// [`Shared::install_stage`] and never otherwise: not on a control
+    /// teardown, a dropped route, a membership resume, or when compute hands
+    /// the same runtime back (all of which move `stage_revision`). It lives as
+    /// long as this node object, which outlives every membership incarnation
+    /// it signs under, so within one incarnation it never repeats or goes back.
+    stage_load_generation: u64,
     admission: crate::transport::Admission,
     stage_busy: bool,
     /// Latest periodic sweep, retained while CPU owns runtime/path tables.
@@ -224,6 +232,15 @@ struct Shared {
 }
 
 impl Shared {
+    /// Make `stage` the applied stage runtime and count the load. The only
+    /// way a NEW runtime becomes `stage`; handing a checked-out runtime back
+    /// after compute is not a load and does not come through here.
+    fn install_stage(&mut self, stage: Box<dyn StageRuntime>) -> u64 {
+        self.stage_load_generation += 1;
+        self.stage = Some(stage);
+        self.stage_load_generation
+    }
+
     /// How many stage steps are executing or queued for `request_id`.
     fn inflight_for_request(&self, request_id: &str) -> usize {
         self.inflight.get(request_id).copied().unwrap_or(0)
@@ -404,7 +421,7 @@ impl NodeCore {
                 stage_node: None,
                 control: None,
                 control_peers: false, control_transition: Default::default(),
-                inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
+                inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_load_generation: 0, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
             })),
             http,
             incarnation: new_incarnation()?,
@@ -792,7 +809,7 @@ impl NodeCore {
         let stage = Gpt2BlockStage::from_document(pack).map_err(|e| self.fail(nerr(e.0)))?;
         let mut s = self.shared.lock().unwrap();
         s.status.stage_loaded = Some(stage.pack_digest().to_owned());
-        s.stage = Some(Box::new(stage));
+        s.install_stage(Box::new(stage));
         Ok(s.status.clone())
     }
 
@@ -1168,7 +1185,7 @@ impl Supervisor {
         let old = {
             let mut s = self.shared.lock().unwrap();
             s.status.stage_loaded = Some(digest);
-            s.stage = Some(stage);
+            s.install_stage(stage);
             s.forward = assignment.forward_to.then(|| (iroh::EndpointAddr::from(peer), assignment.route_generation));
             s.status.route_assignment = Some(assignment.assignment_id.clone());
             s.route.replace(AppliedRoute { assignment, peer })
@@ -1608,6 +1625,7 @@ impl crate::node_control::ControlEnv for NodeControlEnv<'_> {
             backend: stage.backend().to_owned(),
             runtime_build_digest: runtime_build_digest(),
             golden_output_digest: stage.golden_output_digest()?.to_owned(),
+            load_generation: self.s.stage_load_generation,
         })
     }
     fn install_peers(&mut self, peers: &[crate::node_control::PeerSpec], local_generation: u64) -> Result<(), String> {
@@ -1879,6 +1897,9 @@ fn stage_step(shared: &Arc<Mutex<Shared>>, inbound: &Inbound) -> Result<crate::s
     let mut stage = s.stage.take().ok_or("stage_not_loaded")?;
     let mut stage_node = s.stage_node.take().expect("installed above");
     let revision = s.stage_revision;
+    // The load this step checked out. A stage installed meanwhile is another
+    // load: this runtime is never handed back over it, nor its output published.
+    let load_generation = s.stage_load_generation;
     s.stage_busy = true;
     let clock = s.sweep_clock.max(monotonic_s());
     stage_node.sweep_at(clock);
@@ -1912,6 +1933,7 @@ fn stage_step(shared: &Arc<Mutex<Shared>>, inbound: &Inbound) -> Result<crate::s
         let out = stage.execute_cooperative(&call, &mut |_| {
             let s = shared.lock().unwrap();
             if inbound.admission.revoked() || s.request_blocked(&request_id) || revision != s.stage_revision
+                || load_generation != s.stage_load_generation
                 || fence.as_ref().is_some_and(|f| f.blocked(s.sweep_clock.max(monotonic_s()))) {
                 return Err(crate::runtime::RuntimeError("request_cancelled_or_expired".into()));
             }
@@ -1933,7 +1955,8 @@ fn stage_step(shared: &Arc<Mutex<Shared>>, inbound: &Inbound) -> Result<crate::s
     let path_expired = inbound.frame.message_type == "HopHeader"
         && stage_node.path(inbound.frame.body["path_id"].as_str().unwrap_or("")).is_none();
     let authority_retired = inbound.admission.revoked();
-    let blocked = authority_retired || s.request_blocked(&request_id) || revision != s.stage_revision || path_expired;
+    let reloaded = load_generation != s.stage_load_generation;
+    let blocked = authority_retired || s.request_blocked(&request_id) || revision != s.stage_revision || path_expired || reloaded;
     for id in &s.cancelled {
         stage_node.release_request(id);
         stage.release_request(id);
@@ -1945,7 +1968,7 @@ fn stage_step(shared: &Arc<Mutex<Shared>>, inbound: &Inbound) -> Result<crate::s
         step.ack = false;
         step.reason = "request_cancelled_or_expired".into();
     }
-    if revision == s.stage_revision && !authority_retired {
+    if revision == s.stage_revision && !authority_retired && !reloaded {
         s.stage = Some(stage);
         s.stage_node = Some(stage_node);
     } else {
@@ -1953,7 +1976,7 @@ fn stage_step(shared: &Arc<Mutex<Shared>>, inbound: &Inbound) -> Result<crate::s
         // path or replay value. A replacement stage is never overwritten.
         stage_node.clear();
         stage.release_all();
-        if s.stage.is_none() && s.status.stage_loaded.is_some() { s.stage = Some(stage); }
+        if s.stage.is_none() && s.status.stage_loaded.is_some() && !reloaded { s.stage = Some(stage); }
         if s.stage_node.is_none() { s.stage_node = Some(stage_node); }
     }
     if executed {
@@ -2020,7 +2043,7 @@ mod tests {
             membership:None, supervisor_running:false, status:NodeStatus::default(), session:None,
             invitation:None, stage:Some(stage), forward:None, route:None, shell_metrics:None, acquisition:None,
             stage_node:Some(crate::stage_node::StageNode::new("node-phone")), control:None, control_peers:false, control_transition:Default::default(),
-            inflight:Default::default(), cancelled:Default::default(), deadlines:Default::default(), stage_revision:0, admission:Default::default(), stage_busy:false, sweep_clock:0.0,
+            inflight:Default::default(), cancelled:Default::default(), deadlines:Default::default(), stage_revision:0, stage_load_generation: 1, admission:Default::default(), stage_busy:false, sweep_clock:0.0,
         }))
     }
 
@@ -2478,7 +2501,7 @@ mod tests {
             invitation: None, stage: Some(Box::new(GoldenStage { released: released.clone() })), forward: None,
             route: None, shell_metrics: None, acquisition: None,
             stage_node: Some(crate::stage_node::StageNode::new("node-phone")), control: None,
-            control_peers: false, control_transition: Default::default(), inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
+            control_peers: false, control_transition: Default::default(), inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_load_generation: 1, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
         };
         let frame = wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap();
         let node = s.stage_node.as_mut().unwrap();
@@ -2670,7 +2693,7 @@ mod tests {
             stage_node: Some(crate::stage_node::StageNode::new("node-phone")),
             control: None,
             control_peers: false, control_transition: Default::default(),
-            inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
+            inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_load_generation: 1, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
         }));
         let (tx, rx) = mpsc::channel(8);
         let _accept = phone.spawn_accept_dispatch(tx);
@@ -2779,7 +2802,7 @@ mod tests {
                 boot_id: "boot-1".into(),
             })),
             control_peers: false, control_transition: Default::default(),
-            inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
+            inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_load_generation: 1, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
         }));
         let (dispatch_tx, _dispatch_rx) = mpsc::channel(8);
         let _accept = phone.spawn_accept_dispatch(dispatch_tx);
@@ -2899,7 +2922,7 @@ mod tests {
             stage_node: Some(stage_node),
             control: None,
             control_peers: false, control_transition: Default::default(),
-            inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
+            inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_load_generation: 1, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
         }));
         let (dispatch_tx, _dispatch_rx) = mpsc::channel(8);
         let _accept = phone.spawn_accept_dispatch(dispatch_tx);
@@ -2941,5 +2964,130 @@ mod tests {
         assert!(call(&first, command("hello", json!({}))).await.is_err());
         let hello = call(&second, command("hello", json!({}))).await.unwrap();
         assert_eq!((hello["ok"].clone(), hello["result"]["state"].clone()), (json!(true), json!("NEW")));
+    }
+
+    fn load_test_route(peer_endpoint_id: &str, route_generation: u64) -> AppliedRoute {
+        AppliedRoute { assignment: RouteAssignment {
+            assignment_id: "assignment-1".into(), stage_pack_digest: "sha256:pack".into(),
+            peer_endpoint_id: peer_endpoint_id.into(), route_generation, forward_to: false,
+            expires_at: now_s() + 3600.0, controller_endpoint_ids: Vec::new(),
+        }, peer: crate::transport::parse_endpoint_id(peer_endpoint_id).unwrap() }
+    }
+
+    /// The load generation is the count of stage installs. Everything else
+    /// that fences work (`stage_revision`) leaves it alone.
+    #[test]
+    fn load_generation_counts_real_stage_installs_and_nothing_else() {
+        let released = Arc::new(Mutex::new(Vec::new()));
+        let shared = lifecycle_shared(Box::new(GoldenStage { released: released.clone() }));
+        let peer = hex::encode(iroh::SecretKey::from_bytes(&[20; 32]).public().as_bytes());
+        let mut s = shared.lock().unwrap();
+        assert_eq!(s.stage_load_generation, 1, "the fixture holds one installed stage");
+        let revision = s.stage_revision;
+        install_resumed_membership(&mut s, test_membership("accepted-incarnation-2", 2), Some(now_s() + 60.0));
+        clear_route(&mut s);
+        assert!(s.stage_revision >= revision + 2, "resume and route clearing both fence work");
+        assert!(s.stage.is_some(), "no route was applied, so nothing was unloaded");
+        assert_eq!(s.stage_load_generation, 1, "a resume or a cleared route is not a load");
+        assert_eq!(s.install_stage(Box::new(GoldenStage { released: released.clone() })), 2);
+        // Dropping an applied route unloads the stage; unloading is not a load.
+        s.route = Some(load_test_route(&peer, 7));
+        clear_route(&mut s);
+        assert!(s.stage.is_none());
+        assert_eq!(s.stage_load_generation, 2);
+        // The same assignment loaded again is a new load, never the old number.
+        assert_eq!(s.install_stage(Box::new(GoldenStage { released })), 3);
+    }
+
+    /// A stage installed while compute still holds the previous runtime is
+    /// the applied stage: the old runtime is not handed back over it and its
+    /// late output is not published.
+    #[test]
+    fn a_stage_installed_while_compute_holds_the_old_one_is_never_overwritten_by_it() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let released = Arc::new(Mutex::new(Vec::new()));
+        let shared = lifecycle_shared(Box::new(HeldStage { golden: GoldenStage { released: released.clone() }, entered: tx, release: release_rx }));
+        let mut paths = crate::stage_node::StageNode::new("node-phone");
+        paths.on_frame_at(0.0, "node-mac-entry", &wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap(), &mut |_,_,_| panic!("manifest never computes"));
+        shared.lock().unwrap().stage_node = Some(paths);
+        let inbound = Inbound { admission: Default::default(), from:iroh::SecretKey::from_bytes(&[20;32]).public(), from_node:"node-mac-entry".into(), generation:1,
+            frame:wire::decode_frame(&golden("02-hop-prefill-in.bin")).unwrap(), reply:None };
+        let other = shared.clone();
+        let thread = std::thread::spawn(move || stage_step(&other, &inbound).unwrap());
+        rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        {
+            let mut s = shared.lock().unwrap();
+            assert!(s.stage.is_none() && s.stage_busy, "compute owns the old runtime");
+            assert_eq!(s.install_stage(Box::new(GoldenStage { released: released.clone() })), 2);
+        }
+        release_tx.send(()).unwrap();
+        let step = thread.join().unwrap();
+        assert!(step.sends.is_empty() && !step.ack, "output of a replaced load is never published");
+        let s = shared.lock().unwrap();
+        assert_eq!(s.stage_load_generation, 2);
+        assert_eq!(s.stage.as_ref().unwrap().assignment_id(), "assignment-golden", "the replacement stays applied");
+    }
+
+    /// Through the real control service: the controller must name the phone's
+    /// own load count. Route and membership generations are other numbers; a
+    /// `stop` (which tears the session down) is not a load; a reload makes the
+    /// old profile stale.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_reloaded_stage_refuses_the_old_load_generation_and_stop_is_not_a_load() {
+        use crate::transport::{Reachability, parse_endpoint_id};
+        let phone = NodeTransport::bind(&[61; 32], Reachability::LocalOnly).await.unwrap();
+        let controller = NodeTransport::bind(&[62; 32], Reachability::LocalOnly).await.unwrap();
+        let entry = NodeTransport::bind(&[63; 32], Reachability::LocalOnly).await.unwrap();
+        let identity = Arc::new(Identity::from_secret(&phone.endpoint_id(), &[64; 32]).unwrap());
+        let shared = lifecycle_shared(Box::new(verified_synthetic_stage()));
+        {
+            let mut s = shared.lock().unwrap();
+            s.membership = Some(test_membership("inc-1", 5));
+            s.route = Some(load_test_route(&entry.endpoint_id(), 9));
+        }
+        let (dispatch_tx, _dispatch_rx) = mpsc::channel(8);
+        let _accept = phone.spawn_accept_dispatch(dispatch_tx);
+        let (control_tx, control_rx) = mpsc::channel(8);
+        phone.set_control_handler(Some(control_tx)).await;
+        phone.configure_controllers([parse_endpoint_id(&controller.endpoint_id()).unwrap()]).await;
+        tokio::spawn(serve_control(control_rx, shared.clone(), phone.clone(), identity, "inc-1".into()));
+        let call = |command: &str, payload: Value| {
+            let bytes = serde_json::to_vec(&json!({"protocol": crate::node_control::NODE_CONTROL_PROTOCOL, "command_id": format!("c-{command}"), "run_id": "run-1", "deployment_id": "dep-1", "command": command, "payload": payload})).unwrap();
+            let (controller, addr) = (controller.clone(), phone.addr());
+            async move { serde_json::from_slice::<Value>(&controller.control_call(addr, &bytes).await.unwrap()).unwrap() }
+        };
+        let profile = |load_generation: u64| json!({"assignment_id": "assignment-1", "stage_id": "stage-golden", "pack_digest": "sha256:pack", "manifest_digest": "sha256:graph", "load_generation": load_generation});
+        assert_eq!(call("hello", json!({})).await["ok"], true);
+        assert_eq!(call("stage_load", json!({})).await["result"]["stage_load_generation"], 1);
+        // Neither the route generation (9) nor the membership generation (5).
+        for other_domain in [9, 5] {
+            assert_eq!(call("configure", profile(other_domain)).await["error"]["code"], "load_generation_mismatch");
+        }
+        let configured = call("configure", profile(1)).await;
+        assert_eq!(configured["ok"], true, "{configured}");
+        let observation = &configured["result"]["observation"];
+        assert_eq!((observation["details"]["load_generation"].clone(), observation["process_id"].clone()), (json!(1), json!("inc-1")));
+        assert_eq!(call("stop", json!({})).await["ok"], true);
+        {
+            let s = shared.lock().unwrap();
+            assert!(s.control.is_none() && s.stage_revision > 0, "stop tore the session down");
+            assert_eq!(s.stage_load_generation, 1, "a teardown is not a load");
+        }
+        // The same load, a new session: the same number is still the truth.
+        assert_eq!(call("hello", json!({})).await["ok"], true);
+        assert_eq!(call("configure", profile(1)).await["ok"], true);
+        assert_eq!(call("stop", json!({})).await["ok"], true);
+        // The node loads the assignment again.
+        assert_eq!(shared.lock().unwrap().install_stage(Box::new(verified_synthetic_stage())), 2);
+        assert_eq!(call("hello", json!({})).await["ok"], true);
+        let stale = call("configure", profile(1)).await;
+        assert_eq!((stale["ok"].clone(), stale["error"]["code"].clone()), (json!(false), json!("load_generation_mismatch")));
+        assert_eq!(call("stage_load", json!({})).await["result"]["stage_load_generation"], 2);
+        assert_eq!(call("configure", profile(2)).await["result"]["observation"]["details"]["load_generation"], 2);
+        let snapshot = call("snapshot", json!({})).await;
+        let details = &snapshot["result"]["observation"]["details"];
+        assert_eq!(details["load_identity"], json!({"assignment_id":"assignment-1","stage_id":"stage-golden","phone_stage_pack_digest":"sha256:pack","load_generation":2}));
+        assert_eq!(details["configured_load_generation"], 2);
     }
 }

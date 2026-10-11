@@ -19,7 +19,7 @@ impl ControlEnv for Env {
     fn stage(&self) -> Option<StageView> {
         let s = &self.golden["stage"];
         let t = |k: &str| s[k].as_str().unwrap().to_owned();
-        Some(StageView { assignment_id: t("assignment_id"), stage_id: t("stage_id"), pack_digest: t("pack_digest"), backend: t("backend"), runtime_build_digest: t("runtime_build_digest"), golden_output_digest: t("golden_output_digest") })
+        Some(StageView { assignment_id: t("assignment_id"), stage_id: t("stage_id"), pack_digest: t("pack_digest"), backend: t("backend"), runtime_build_digest: t("runtime_build_digest"), golden_output_digest: t("golden_output_digest"), load_generation: s["load_generation"].as_u64().unwrap() })
     }
     fn install_peers(&mut self, _: &[PeerSpec], _: u64) -> Result<(), String> {
         Ok(())

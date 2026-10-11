@@ -20,7 +20,8 @@ OUTPUT = Path(__file__).with_name('cancel_control_golden.json')
 def readiness_golden():
     golden = json.loads((ROOT / 'contracts/phone-node-control-golden/index.json').read_text())
     stage = golden['stage']
-    stage.update(runtime_build_digest='sha256:'+'b'*64, golden_output_digest='sha256:'+'a'*64)
+    # The node's own stage-load count: the golden controller names exactly it.
+    stage.update(runtime_build_digest='sha256:'+'b'*64, golden_output_digest='sha256:'+'a'*64, load_generation=1)
     for row in golden['steps']:
         if row['command']['command'] == 'bind_request_control':
             row['command']['payload']['execution_budget_ms'] = 60_000
@@ -30,9 +31,11 @@ def readiness_golden():
     obs['details'].update(runtime_backend=stage['backend'], runtime_build_digest=stage['runtime_build_digest'],
                           golden_output_digest=stage['golden_output_digest'])
     obs['details']['load_identity_provenance'] = {
-        'applied_fields':['assignment_id','stage_id','phone_stage_pack_digest','runtime_backend','runtime_build_digest','golden_output_digest'],
-        'controller_claim_fields':['manifest_digest','load_generation'],
-        'limitation':'native_manifest_load_generation_not_independently_observed'}
+        'applied_fields':['assignment_id','stage_id','phone_stage_pack_digest','runtime_backend','runtime_build_digest','golden_output_digest','load_generation'],
+        'controller_claim_fields':['manifest_digest'],
+        'limitation':'native_full_model_manifest_digest_not_independently_observed',
+        'load_generation_basis':'native_stage_load_sequence_within_process_incarnation'}
+    assert obs['details']['load_generation'] == stage['load_generation'] == step['command']['payload']['load_generation']
     response['result'] = _signed(_signer(), obs['event'], obs['state'], obs['peer_generation'], obs['monotonic_ns'], obs['details'])
     step['response_canonical'] = canonical_json_bytes(response).decode()
     return golden
