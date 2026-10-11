@@ -13,7 +13,7 @@ before using this digest. A digest is an identity, not an authority: the final
 qualifier additionally requires a :class:`PhoneLoadAuthority`.
 """
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from .evidence import is_sha256_ref, sha256_document
 
 PHONE_LOAD_IDENTITY_PROTOCOL = "mycelium.phone_load_identity.v2"
@@ -114,7 +114,22 @@ def require_current_phone_load(configured: Mapping, snapshot: Mapping) -> None:
         raise ValueError("phone_load_stale")
 
 
-_AUTHORITY_SEAL = object()
+_AUTHORITY_FIELDS = (
+    "node_id", "endpoint_id", "process_id", "member_key_digest", "membership_generation",
+    "seed_key_digest", "assignment_id", "assignment_digest", "stage_id", "pack_digest",
+    "manifest_digest", "load_generation", "runtime_backend", "runtime_build_digest",
+    "golden_output_digest", "load_proof_digest", "checked_at")
+# Process-local and never serialized: an authority does not survive a pickle,
+# a JSON round trip or another process.
+_AUTHORITY_KEY = __import__("secrets").token_bytes(32)
+
+
+def _authority_seal(fields: Mapping) -> str:
+    import hashlib
+    import hmac
+    from .evidence import canonical_json_bytes
+    document = {key: fields[key] for key in _AUTHORITY_FIELDS}
+    return hmac.new(_AUTHORITY_KEY, canonical_json_bytes(document), hashlib.sha256).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +141,17 @@ class PhoneLoadAuthority:
     packaged proof. It is trusted consumer context, produced outside the
     attestation it is compared with; a mapping, a flag or a copy of the plan's
     configure is not one.
+
+    The seal binds the content: it is a keyed digest over every field, so an
+    instance built directly, copied with ``dataclasses.replace`` and changed,
+    or assembled field by field does not verify. The qualifier calls
+    :meth:`verify_seal` before it reads anything.
+
+    Limit, stated plainly: this stops accidents and casual construction, not
+    code running in the same process. Such code can read this module's key or
+    call its sealing function, exactly as it could replace the qualifier. The
+    qualifier already trusts its caller for the whole binding (the member key
+    digest included); the seal does not change that trust boundary.
     """
     node_id: str
     endpoint_id: str
@@ -144,10 +170,20 @@ class PhoneLoadAuthority:
     golden_output_digest: str
     load_proof_digest: str
     checked_at: float
-    _seal: object = None
+    _seal: str | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
-        if self._seal is not _AUTHORITY_SEAL:
+        self.verify_seal()
+
+    def verify_seal(self) -> None:
+        """Raise unless the seal is this module's digest of exactly these fields."""
+        import hmac
+        try:
+            sealed = isinstance(self._seal, str) and hmac.compare_digest(
+                self._seal, _authority_seal({key: getattr(self, key) for key in _AUTHORITY_FIELDS}))
+        except (AttributeError, TypeError, ValueError):
+            sealed = False
+        if not sealed:
             raise TypeError("phone_load_authority_unsealed")
 
     def expected_details(self) -> dict:
@@ -160,4 +196,4 @@ class PhoneLoadAuthority:
 
 def _seal_phone_load_authority(**fields) -> PhoneLoadAuthority:
     """Module-private constructor for the one validating issuer."""
-    return PhoneLoadAuthority(**fields, _seal=_AUTHORITY_SEAL)
+    return PhoneLoadAuthority(**fields, _seal=_authority_seal(fields))

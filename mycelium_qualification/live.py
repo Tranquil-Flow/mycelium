@@ -350,6 +350,12 @@ def issue_live_route_qualification(
             if type(authority) is not PhoneLoadAuthority:
                 _reject("live_phone_load_authority_required")
             try:
+                # The seal covers every field: a copied-and-changed or
+                # hand-assembled instance is not the issuer's result.
+                authority.verify_seal()
+            except TypeError:
+                _reject("live_phone_load_authority_required")
+            try:
                 load_digest = phone_load_proof_digest(configured_observation)
             except PhoneLoadProvenanceError as exc:
                 _reject(str(exc))
