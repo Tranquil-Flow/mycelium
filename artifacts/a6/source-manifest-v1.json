@@ -2423,8 +2423,8 @@
     },
     {
       "path": "tests/live/test_a7_operator_plan.py",
-      "sha256": "sha256:00e65a113b090fe49359ff270bcf765b26af57e37b9f217797b8c625d0b2b285",
-      "size_bytes": 24973
+      "sha256": "sha256:f2d94202498cc92a0fc1f6a22325cbb68cebfbd0456aa0bb74892deb90617a46",
+      "size_bytes": 25722
     },
     {
       "path": "tests/live/test_a7_operator_plan_ssh.py",
@@ -2963,5 +2963,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:e4274ad770cfcc678181539f62054d2b66414f6ef8487053f29af12b706d4d23"
+  "source_digest": "sha256:19976c3d8eac6e2bd9871e615e1a8c954e27228e3a6a8f617de6b1c1a7d480d1"
 }
