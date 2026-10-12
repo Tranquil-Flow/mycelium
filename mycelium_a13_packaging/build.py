@@ -54,7 +54,7 @@ def runtime_source_closure(root: Path, seeds: tuple[str, ...], *, label: str = "
             selected.add(seed)
         elif path.is_dir():
             selected.update(
-                str(item.relative_to(root)) for item in path.rglob("*.py") if item.is_file()
+                item.relative_to(root).as_posix() for item in path.rglob("*.py") if item.is_file()
             )
         else:
             raise SystemExit(f"{label}_runtime_closure_seed_missing:{seed}")
@@ -79,10 +79,10 @@ def runtime_source_closure(root: Path, seeds: tuple[str, ...], *, label: str = "
             module_path = root / (head + ".py")
             folder = root / head
             if module_path.is_file():
-                selected.add(str(module_path.relative_to(root)))
+                selected.add(module_path.relative_to(root).as_posix())
             elif folder.is_dir():
                 selected.update(
-                    str(item.relative_to(root))
+                    item.relative_to(root).as_posix()
                     for item in folder.rglob("*.py")
                     if item.is_file() and "__pycache__" not in item.parts
                 )
@@ -115,7 +115,7 @@ def stage_data_tree(root: Path, relative_dir: str, destination: Path, digests: d
             target.parent.mkdir(parents=True, exist_ok=True)
             raw = path.read_bytes()
             target.write_bytes(raw)
-            digests[str(path.relative_to(root))] = hashlib.sha256(raw).hexdigest()
+            digests[path.relative_to(root).as_posix()] = hashlib.sha256(raw).hexdigest()
 
 
 def git_head(root: Path) -> str | None:
