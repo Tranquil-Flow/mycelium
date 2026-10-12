@@ -127,13 +127,11 @@ def test_a9_inventory_is_closed_design_only_private_and_specification_bound() ->
     assert inventory["gate"] == "A9"
     assert inventory["state"] == "design_only"
     assert inventory["claim_boundary"] == CLAIM_BOUNDARY
-    assert inventory["source_specification"] == str(
-        SPECIFICATION.relative_to(ROOT)
-    )
+    assert inventory["source_specification"] == SPECIFICATION.relative_to(ROOT).as_posix()
 
     specification = SPECIFICATION.read_text("utf-8")
     assert "**Status:** `design_only`;" in specification
-    assert f"`{INVENTORY.relative_to(ROOT)}`" in specification
+    assert f"`{INVENTORY.relative_to(ROOT).as_posix()}`" in specification
     assert f"`{PROTOCOL}`" in specification
     for decision_id in REQUIRED_DECISIONS:
         assert f"`{decision_id}`" in specification
@@ -331,8 +329,15 @@ def test_runtime_backend_registry_modules_exist_and_are_implemented_only() -> No
         "llama_http_backend": "mycelium_router.llama_runtime",
         "openrouter_http_backend": "mycelium_router.openrouter_runtime",
     }
+    import importlib.util
+
     for name, module_path in backends.items():
         assert name in registry["authorities"]
+        if name == "mlx_backend" and importlib.util.find_spec("mlx") is None:
+            # Hosts without Apple MLX (Windows, Linux): the module must still
+            # exist; importing it would need mlx itself.
+            assert importlib.util.find_spec(module_path) is not None
+            continue
         module = importlib.import_module(module_path)
         assert module is not None
     # The registry declares implementation stage only — never qualified.
