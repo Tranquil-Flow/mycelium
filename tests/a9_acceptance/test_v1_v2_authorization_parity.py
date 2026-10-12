@@ -12,7 +12,6 @@ profile signature checks have no v1 counterpart; they are tested elsewhere.
 from __future__ import annotations
 
 from itertools import count
-import shutil
 import sqlite3
 
 import pytest
@@ -32,6 +31,7 @@ from mycelium_platform_neutral.seed_migration import (
 )
 from mycelium_qualification.signing import generate_ed25519_signer
 from mycelium_seed import SeedCoordinator, SeedCoordinatorError, SqliteSeedState
+from tests.host_platform.portable import copy_private_file, make_private_directory
 
 NOW = 2_000.0
 BUILD = "sha256:" + "b" * 64
@@ -102,8 +102,8 @@ class World:
 
     def _cut_over(self):
         gate = self.tmp / "gate"
-        gate.mkdir(mode=0o700)
-        shutil.copy2(self.database, gate / "copy.sqlite3")
+        make_private_directory(gate)
+        copy_private_file(self.database, gate / "copy.sqlite3")
         state = SqliteSeedState(gate / "copy.sqlite3")
         store = FileMembershipState(gate / "private")
         store.initialize(export_seed_baseline(state, software_build_digest=BUILD, swarm_id="swarm-a",

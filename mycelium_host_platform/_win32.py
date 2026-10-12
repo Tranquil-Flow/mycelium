@@ -335,6 +335,37 @@ class Win32PrivateDirectory:
         finally:
             _close_quietly(self._api, handle)
 
+    def require_file(self, name: str) -> None:
+        """``name`` is an owner-only, single-link, non-reparse regular file.
+
+        The checks of :meth:`read_file` without reading the bytes, for a file
+        another component opens by path afterwards (an SQLite database).
+        """
+
+        self.revalidate()
+        path = self._child(name)
+        try:
+            handle = self._api.open(
+                path,
+                access=w.GENERIC_READ,
+                share=w.FILE_SHARE_READ | w.FILE_SHARE_WRITE,
+                disposition=w.OPEN_EXISTING,
+                flags=w.FILE_FLAG_OPEN_REPARSE_POINT,
+            )
+        except w.Win32Error as exc:
+            if exc.winerror in _MISSING_ERRORS:
+                raise HostPlatformError("host_file_missing") from exc
+            raise HostPlatformError("host_io_failed", "open") from exc
+        try:
+            information = _information(self._api, handle)
+            _require_plain_file(information)
+            if information.number_of_links != 1:
+                raise HostPlatformError("host_file_invalid", "link_count")
+            _require_final_path(self._api, handle, path)
+            require_owner_only(self._api, handle, self._user_sid)
+        finally:
+            _close_quietly(self._api, handle)
+
     def _write_new(self, path: str, data: bytes) -> None:
         """CREATE_NEW an owner-only file and durably write ``data`` to it."""
 

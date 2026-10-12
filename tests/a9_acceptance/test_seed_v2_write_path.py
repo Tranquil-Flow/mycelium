@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from itertools import count
 from pathlib import Path
-import shutil
 import sqlite3
 
 import pytest
@@ -34,6 +33,7 @@ from mycelium_platform_neutral.seed_migration import (
 )
 from mycelium_qualification.signing import generate_ed25519_signer
 from mycelium_seed import SeedCoordinator, SeedCoordinatorError, SqliteSeedState
+from tests.host_platform.portable import copy_private_file, make_private_directory
 
 NOW = 2_000.0
 BUILD = "sha256:" + "b" * 64
@@ -93,9 +93,9 @@ def migrated(tmp_path):
     for index, node_id in enumerate(("node-a", "node-b")):
         _join(coordinator, _session(tmp_path, node_id, clock, "incarnation-a"), f"invite-{index}")
     gate = tmp_path / "gate"
-    gate.mkdir(mode=0o700)
+    make_private_directory(gate)
     copy = gate / "seed.sqlite3"
-    shutil.copy2(database, copy)
+    copy_private_file(database, copy)
     state = SqliteSeedState(copy)
     store = FileMembershipState(gate / "private")
     store.initialize(export_seed_baseline(state, software_build_digest=BUILD, swarm_id="swarm-a",
@@ -197,7 +197,7 @@ def test_prepare_refuses_forged_or_mismatched_profiles(migrated):
 
 def test_after_cutover_v1_writes_and_stale_processes_are_refused(migrated):
     stale = _session(migrated["tmp"], "node-a", migrated["clock"], "incarnation-a")
-    _join(_coordinator(migrated["tmp"] / "scratch.sqlite3", generate_ed25519_signer(endpoint_id="x"),
+    _join(_coordinator(migrated["tmp"] / "scratch" / "state.sqlite3", generate_ed25519_signer(endpoint_id="x"),
                        migrated["clock"], "scratch"), stale, "scratch")  # a joined v1 session object
     coordinator = _cut_over(migrated)
     before = sqlite3.connect(migrated["database"]).execute(

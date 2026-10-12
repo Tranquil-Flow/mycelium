@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import sqlite3
 import stat
+import sys
 
 from .token import InviteError
 
@@ -19,6 +20,9 @@ class SqliteInviteRegistry:
         self._initialize()
 
     def _prepare_path(self) -> None:
+        if sys.platform == "win32":
+            self._prepare_path_win32()
+            return
         parent = self.database.parent
         try:
             missing: list[Path] = []
@@ -78,6 +82,32 @@ class SqliteInviteRegistry:
         except InviteError:
             raise
         except OSError as exc:
+            raise InviteError("invite_registry_path_invalid") from exc
+
+    def _prepare_path_win32(self) -> None:
+        """The same owner-only contract on Windows, through the host-platform seam.
+
+        Windows has no mode bits or uids.  The registry directory is leased as an
+        owner-only private directory (protected DACL; missing components are
+        created owner-only and every component that is a reparse point is
+        refused), and the database is created exclusively with an owner-only
+        DACL or must already be a single-link plain file only this user can open.
+        """
+        # Imported here so the POSIX import graph of this package is unchanged.
+        import mycelium_host_platform
+        from mycelium_host_platform import HostPlatformError
+
+        try:
+            with mycelium_host_platform.private_directory(self.database.parent, create=True) as lease:
+                try:
+                    lease.create_file_exclusive(self.database.name, b"")
+                except HostPlatformError as exc:
+                    if exc.code != "host_file_exists":
+                        raise
+                    lease.require_file(self.database.name)
+        except HostPlatformError as exc:
+            if exc.code == "host_permissions_invalid":
+                raise InviteError("invite_registry_permissions_invalid") from exc
             raise InviteError("invite_registry_path_invalid") from exc
 
     def _connect(self) -> sqlite3.Connection:

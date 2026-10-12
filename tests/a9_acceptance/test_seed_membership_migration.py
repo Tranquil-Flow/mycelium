@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from itertools import count
 from pathlib import Path
-import shutil
 import sqlite3
 
 import pytest
@@ -37,6 +36,7 @@ from mycelium_platform_neutral.seed_migration import (
 )
 from mycelium_qualification.signing import generate_ed25519_signer
 from mycelium_seed import SeedCoordinator, SeedCoordinatorError, SqliteSeedState
+from tests.host_platform.portable import copy_private_file, make_private_directory
 
 NOW = 2_000.0
 BUILD = "sha256:" + "b" * 64
@@ -110,9 +110,8 @@ def swarm(tmp_path):
     for index, node in enumerate(nodes.values()):
         _join(coordinator, node, f"invite-{index}")
     copy = tmp_path / "gate" / "seed-copy.sqlite3"
-    copy.parent.mkdir()
-    copy.parent.chmod(0o700)
-    shutil.copy2(database, copy)
+    make_private_directory(copy.parent)
+    copy_private_file(database, copy)
     return database, signer, coordinator, nodes, copy
 
 
