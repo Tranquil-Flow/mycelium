@@ -97,6 +97,9 @@ PHYSICAL_STOP_CELSIUS = 42.0
 #: sealed ``thermal_refusals_window`` observations.
 THERMAL_PROBE_NOT_RUN = 0
 THERMAL_PROBE_EXECUTED = 3
+#: An operator command that outlives its bound counts as failed (exit 124).
+COMMAND_TIMED_OUT = 124
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 900.0
 DEFAULT_HEAT_WINDOW_SECONDS = 1500.0
 DEFAULT_THERMAL_PROBE_INTERVAL_SECONDS = 120.0
 POLL_SECONDS = 2.0
@@ -204,6 +207,7 @@ class Gate:
       timeout: float = 600.0,
       wait: Callable[..., Any] = wait_until,
       run_command: Callable[[str], int] | None = None,
+      command_timeout_seconds: float = DEFAULT_COMMAND_TIMEOUT_SECONDS,
       clock: Callable[[], float] = time.monotonic,
       sleep: Callable[[float], None] = time.sleep,
    ) -> None:
@@ -225,7 +229,8 @@ class Gate:
       self.thermal_probe_interval_seconds = thermal_probe_interval_seconds
       self.timeout = timeout
       self.wait = wait
-      self.run_command = run_command or (lambda command: subprocess.run(shlex.split(command), check=False, timeout=900).returncode)
+      self.command_timeout_seconds = command_timeout_seconds
+      self.run_command = run_command or self._run_command
       self.clock = clock
       self.sleep = sleep
       self.node_id: str | None = None
@@ -236,6 +241,12 @@ class Gate:
       self.route_closed: bool | None = None
 
    # -- helpers --------------------------------------------------------------
+   def _run_command(self, command: str) -> int:
+      try:
+         return subprocess.run(shlex.split(command), check=False, timeout=self.command_timeout_seconds).returncode
+      except subprocess.TimeoutExpired:
+         return COMMAND_TIMED_OUT
+
    def _current(self) -> dict[str, Any] | None:
       return _member(self.authority, self.node_id) if self.node_id else None
 
@@ -305,6 +316,11 @@ class Gate:
       if not self.browser_request_command:
          self._record(self.positives, "browser_request_completed", "not_executed", reason="browser_request_command_absent")
          return
+      self.operator(
+         "Route bring-up: issue the phone's Qwen2 stage assignment and bring the route up (Mac entry -> phone middle "
+         "stage -> laptop final) with the route harness, up to and including `serve`. Keep the phone cool and the "
+         "app serving. Press Enter once the harness reports the route alive."
+      )
       code = self.run_command(self.browser_request_command)
       self._record(self.positives, "browser_request_completed", "passed" if code == 0 else "violated", exit_code=code)
 
@@ -618,6 +634,7 @@ def parser() -> argparse.ArgumentParser:
       type=Path,
       help="the owner quota the gate seed's pairing window carried; its thermal_ceiling_c judges the thermal window",
    )
+   root.add_argument("--command-timeout-seconds", type=float, default=DEFAULT_COMMAND_TIMEOUT_SECONDS)
    root.add_argument("--heat-window-seconds", type=float, default=DEFAULT_HEAT_WINDOW_SECONDS)
    root.add_argument("--thermal-probe-interval-seconds", type=float, default=DEFAULT_THERMAL_PROBE_INTERVAL_SECONDS)
    root.add_argument("--timeout", type=float, default=600.0)
@@ -649,6 +666,7 @@ def main(argv: Sequence[str] | None = None) -> int:
          thermal_ceiling_celsius=ceiling,
          heat_window_seconds=arguments.heat_window_seconds,
          thermal_probe_interval_seconds=arguments.thermal_probe_interval_seconds,
+         command_timeout_seconds=arguments.command_timeout_seconds,
          timeout=arguments.timeout,
       )
    except GateError as error:

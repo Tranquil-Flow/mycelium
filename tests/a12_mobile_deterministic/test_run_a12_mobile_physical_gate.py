@@ -621,7 +621,28 @@ def test_the_driver_exposes_the_m5_commands():
          "--evidence-dir", "e", "--out", "o",
          "--browser-request-command", "b", "--thermal-probe-command", "p", "--route-close-command", "c",
          "--invite-quota-file", "q.json", "--heat-window-seconds", "900", "--thermal-probe-interval-seconds", "90",
+         "--command-timeout-seconds", "1200",
       ]
    )
+   assert arguments.command_timeout_seconds == 1200.0
    assert (arguments.browser_request_command, arguments.thermal_probe_command, arguments.route_close_command) == ("b", "p", "c")
    assert arguments.heat_window_seconds == 900.0 and arguments.thermal_probe_interval_seconds == 90.0
+
+
+def test_the_operator_brings_the_route_up_before_the_browser_request(tmp_path, signer):
+   swarm = SimulatedSwarm(signer.verification_key_digest)
+   commands = Commands(swarm, **{"route-peer": [0], "browser": [0], "probe": [0], "close": [0]})
+   _run_stage(tmp_path, _stage_gate(swarm, commands), _envelopes(signer, count=6, hot_at=3, refused_at=4))
+   bring_up = next(i for i, p in enumerate(swarm.prompts) if p.startswith("Route bring-up"))
+   assert swarm.prompts.index("$ route-peer") < bring_up < swarm.prompts.index("$ browser")
+
+
+def test_a_hung_operator_command_is_a_failed_command_not_a_crashed_gate(signer):
+   swarm = SimulatedSwarm(signer.verification_key_digest)
+   gate = gate_module.Gate(
+      authority=swarm, operator=swarm.operator, role="qualified_model_stage", route_peer_command=None,
+      wait=immediate_wait, command_timeout_seconds=0.2,
+   )
+   started = time.monotonic()
+   assert gate.run_command("sleep 5") == gate_module.COMMAND_TIMED_OUT
+   assert time.monotonic() - started < 3
