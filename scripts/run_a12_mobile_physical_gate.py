@@ -15,17 +15,32 @@ Cases
 -----
 Positives: ``off_tailnet_join``, ``reconnect``, ``native_evidence_published``
 and, for a model-stage claim, ``router_frames_executed``, ``native_parity`` and
-``browser_request_completed`` (the frame and parity cases run the operator's
-``--route-peer-command``; the browser case needs the phone on a live product route
-and is recorded ``not_executed`` otherwise).
+``browser_request_completed``.  The frame and parity cases run the operator's
+``--route-peer-command``.  The browser case runs ``--browser-request-command``:
+one real browser request through a live product route on which the phone is a
+middle stage; exit 0 passes, any other exit is a violation, and the case is
+``not_executed`` only when no command is given.  A model-stage phone may be the
+reference class (``android_native_iroh``) or the Qwen2 stage class
+(``android_native_qwen2_iroh``); a probe contributor is the reference class only.
 
 Negatives (specification section 11, Android): ``background`` (the member drains
 or stays a member, never corrupts, and returns), ``network_loss`` (the lease goes
 stale, then the same member reconnects), ``revocation`` (the seed fences the
 generation and the member cannot renew), ``process_death`` (the old incarnation is
-fenced and a restart resumes with a new one) and ``thermal_window`` (a sustained
-observation window; if the device crosses the thermal ceiling it must stop
-executing, otherwise the case is recorded as not executed rather than passed).
+fenced and a restart resumes with a new one) and ``thermal_window``.
+
+Thermal window [OWNER DECISION 2026-10-12, replacing the fixed 45 C constant of
+2026-09-30]: the ceiling is the ``thermal_ceiling_c`` of the owner's invite quota
+(``--invite-quota-file``, the same file the gate seed's pairing window carried),
+never a constant.  A quota ceiling above the standing 42 C physical stop rule is
+refused before the gate starts.  The sustained observations must cover the frozen
+window, reach the ceiling, and show no frame executed after the first sample at
+the ceiling.  For a model stage, the driver additionally offers hops during an
+operator heat window (``--thermal-probe-command``) and at least one of them must
+be refused by the phone with ``thermal_ceiling_reached``; a phone that merely
+received no work while hot is not a pass.  The route is closed
+(``--route-close-command``) after the heat window and before the airplane-mode
+step, because the fleet's network runs through the phone's hotspot.
 
 After the gate, the operator exports the app's sealed observations with the app's
 own "Export evidence" share (one ``mycelium-evidence-*.json`` bundle, protocol
@@ -44,6 +59,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
@@ -62,7 +78,22 @@ from mycelium_mobile import a12_activation as a12
 
 GATE_PROTOCOL = "mycelium.a12_mobile_physical_gate_run.v1"
 ANDROID_CLASS = "android_native_iroh"
-THERMAL_CEILING_CELSIUS = 45.0
+ANDROID_QWEN2_CLASS = "android_native_qwen2_iroh"
+#: Peer classes the gate accepts as the joining phone, per claimed role.
+JOIN_CLASSES: dict[str, frozenset[str]] = {
+   "probe_contributor": frozenset({ANDROID_CLASS}),
+   "qualified_model_stage": frozenset({ANDROID_CLASS, ANDROID_QWEN2_CLASS}),
+}
+#: The owner's standing physical stop rule: phone work stops at 42 C.  A quota
+#: ceiling above it would require breaking the rule, so the gate refuses it.
+PHYSICAL_STOP_CELSIUS = 42.0
+#: ``--thermal-probe-command`` exit codes: the offered hop was refused by the
+#: phone with ``thermal_ceiling_reached`` / the hop executed (phone not hot).
+#: Any other exit is an inconclusive offer and is retried.
+THERMAL_PROBE_REFUSED = 0
+THERMAL_PROBE_EXECUTED = 3
+DEFAULT_HEAT_WINDOW_SECONDS = 1500.0
+DEFAULT_THERMAL_PROBE_INTERVAL_SECONDS = 120.0
 POLL_SECONDS = 2.0
 EXPORT_PROTOCOL = "mycelium.mobile_evidence_export.v1"
 BUILD_PROTOCOL = "mycelium.mobile_runtime_build.v1"
@@ -71,6 +102,18 @@ OBSERVATION_NAME = re.compile(r"runtime-observation-[0-9]{6}\.json")
 
 class GateError(RuntimeError):
    """A coded gate failure."""
+
+
+def invite_quota_thermal_ceiling(path: Path) -> float:
+   """The ``thermal_ceiling_c`` of the owner's invite quota file (validated as the seed does)."""
+
+   from mycelium_mobile.android_onboarding import AndroidOnboardingError, validate_android_quota
+
+   try:
+      quota = validate_android_quota(json.loads(Path(path).read_text("utf-8")))
+   except (OSError, ValueError, AndroidOnboardingError) as error:
+      raise GateError("invite_quota_invalid") from error
+   return float(quota["thermal_ceiling_c"])
 
 
 def write_private_json(path: Path, document: object) -> None:
@@ -147,22 +190,45 @@ class Gate:
       operator: Callable[[str], None],
       role: str,
       route_peer_command: str | None,
+      browser_request_command: str | None = None,
+      thermal_probe_command: str | None = None,
+      route_close_command: str | None = None,
+      thermal_ceiling_celsius: float | None = None,
+      heat_window_seconds: float = DEFAULT_HEAT_WINDOW_SECONDS,
+      thermal_probe_interval_seconds: float = DEFAULT_THERMAL_PROBE_INTERVAL_SECONDS,
       timeout: float = 600.0,
       wait: Callable[..., Any] = wait_until,
       run_command: Callable[[str], int] | None = None,
+      clock: Callable[[], float] = time.monotonic,
+      sleep: Callable[[float], None] = time.sleep,
    ) -> None:
       if role not in ("probe_contributor", "qualified_model_stage"):
          raise GateError("mobile_gate_role_unsupported")
+      if thermal_ceiling_celsius is not None and not (
+         math.isfinite(thermal_ceiling_celsius) and thermal_ceiling_celsius <= PHYSICAL_STOP_CELSIUS
+      ):
+         raise GateError("invite_quota_thermal_ceiling_above_physical_stop")
       self.authority = authority
       self.operator = operator
       self.role = role
       self.route_peer_command = route_peer_command
+      self.browser_request_command = browser_request_command
+      self.thermal_probe_command = thermal_probe_command
+      self.route_close_command = route_close_command
+      self.thermal_ceiling_celsius = None if thermal_ceiling_celsius is None else float(thermal_ceiling_celsius)
+      self.heat_window_seconds = heat_window_seconds
+      self.thermal_probe_interval_seconds = thermal_probe_interval_seconds
       self.timeout = timeout
       self.wait = wait
       self.run_command = run_command or (lambda command: subprocess.run(shlex.split(command), check=False, timeout=900).returncode)
+      self.clock = clock
+      self.sleep = sleep
       self.node_id: str | None = None
       self.positives: dict[str, dict[str, Any]] = {}
       self.negatives: dict[str, dict[str, Any]] = {}
+      #: Hops offered to the phone during the heat window, in order.
+      self.thermal_probes: list[dict[str, Any]] = []
+      self.route_closed: bool | None = None
 
    # -- helpers --------------------------------------------------------------
    def _current(self) -> dict[str, Any] | None:
@@ -178,6 +244,7 @@ class Gate:
    # -- positives ------------------------------------------------------------
    def join(self) -> None:
       before = {item["node_id"] for item in self.authority.members()}
+      classes = JOIN_CLASSES[self.role]
       self.operator(
          "Create a fresh invite on the Mac and scan it with the node app on the phone "
          "(phone off the tailnet, on its own network). Then tap Start serving."
@@ -188,7 +255,7 @@ class Gate:
                item
                for item in self.authority.members()
                if item["node_id"] not in before
-               and item["peer_class"] == ANDROID_CLASS
+               and item["peer_class"] in classes
                and item["lease_freshness"] == "fresh"
             ),
             None,
@@ -221,7 +288,58 @@ class Gate:
          outcome = "passed" if code == 0 else "violated"
          self._record(self.positives, "router_frames_executed", outcome)
          self._record(self.positives, "native_parity", outcome)
-      self._record(self.positives, "browser_request_completed", "not_executed", reason="phone_not_on_a_live_product_route")
+
+   def browser_request(self) -> None:
+      """One real browser request through a live route with the phone as a middle stage.
+
+      The command owns the route evidence: it exits 0 only when the request
+      completed and the route shows the phone placement executed.
+      """
+      if self.role != "qualified_model_stage":
+         return
+      if not self.browser_request_command:
+         self._record(self.positives, "browser_request_completed", "not_executed", reason="browser_request_command_absent")
+         return
+      code = self.run_command(self.browser_request_command)
+      self._record(self.positives, "browser_request_completed", "passed" if code == 0 else "violated", exit_code=code)
+
+   def heat_window(self) -> None:
+      """Offer hops while the operator warms the phone; stop at the first refusal.
+
+      Runs after the browser request (a frame executed after the phone's first
+      sample at the ceiling would violate the thermal window) and only for a
+      model stage, the only role that is offered work.
+      """
+      if self.role != "qualified_model_stage" or not self.thermal_probe_command or self.thermal_ceiling_celsius is None:
+         return
+      ceiling = f"{self.thermal_ceiling_celsius:g}"
+      self.operator(
+         f"Heat window: keep the node app serving, screen at full brightness, hotspot on, charging from a warm "
+         f"charger. The driver offers a hop every {self.thermal_probe_interval_seconds:g} s for up to "
+         f"{self.heat_window_seconds / 60:g} min. STOP heating at the quota ceiling {ceiling} C and never let the "
+         f"phone pass {PHYSICAL_STOP_CELSIUS:g} C. Press Enter to start the hop offers."
+      )
+      started = self.clock()
+      while True:
+         code = self.run_command(self.thermal_probe_command)
+         outcome = {THERMAL_PROBE_REFUSED: "refused", THERMAL_PROBE_EXECUTED: "executed"}.get(code, "inconclusive")
+         self.thermal_probes.append({"at_unix_ms": int(time.time() * 1000), "exit_code": code, "outcome": outcome})
+         if outcome == "refused" or self.clock() - started + self.thermal_probe_interval_seconds > self.heat_window_seconds:
+            break
+         self.sleep(self.thermal_probe_interval_seconds)
+      if outcome == "refused":
+         self.operator(
+            f"The phone refused a hop at its {ceiling} C ceiling. Keep it at or just above {ceiling} C for about 3 "
+            f"more minutes (two observations), never past {PHYSICAL_STOP_CELSIUS:g} C, then stop heating and let it cool."
+         )
+      else:
+         self.operator("No hop was refused during the heat window. Stop heating and let the phone cool.")
+
+   def close_route(self) -> None:
+      """Close the live route before the network-loss step cuts the phone's hotspot."""
+      if self.role != "qualified_model_stage" or not self.route_close_command:
+         return
+      self.route_closed = self.run_command(self.route_close_command) == 0
 
    # -- negatives ------------------------------------------------------------
    def background(self) -> None:
@@ -266,19 +384,36 @@ class Gate:
       self._record(self.negatives, "revocation", "failed_closed" if ok else "violated")
 
    def thermal_window(self, observations: Sequence[Mapping[str, Any]]) -> None:
+      ceiling = self.thermal_ceiling_celsius
+      if ceiling is None:
+         self._record(self.negatives, "thermal_window", "not_executed", reason="invite_quota_thermal_ceiling_absent")
+         return
       documents = [item["observation"] for item in observations]
       covered = sum(float(doc["measurement_duration_ms"]) for doc in documents)
       thermal = [doc["metrics"].get("thermal_max_celsius", "unknown") for doc in documents]
       if covered < a12.SUSTAINED_OBSERVATION_WINDOW_MS or any(value == "unknown" for value in thermal):
          self._record(self.negatives, "thermal_window", "violated", reason="sustained_thermal_window_not_observed")
          return
-      hot = [index for index, value in enumerate(thermal) if float(value) >= THERMAL_CEILING_CELSIUS]
+      facts = {"window_ms": covered, "ceiling_celsius": ceiling}
+      hot = [index for index, value in enumerate(thermal) if float(value) >= ceiling]
       if not hot:
-         self._record(self.negatives, "thermal_window", "not_executed", reason="thermal_pressure_not_reached", window_ms=covered)
+         self._record(self.negatives, "thermal_window", "not_executed", reason="thermal_pressure_not_reached", **facts)
          return
       after = documents[hot[0] + 1 :]
       drained = all(doc["metrics"].get("frames_executed_window") in (0, 0.0) for doc in after) and bool(after)
-      self._record(self.negatives, "thermal_window", "failed_closed" if drained else "violated", window_ms=covered)
+      if not drained:
+         self._record(self.negatives, "thermal_window", "violated", reason="frames_executed_after_ceiling", **facts)
+         return
+      refused = sum(1 for probe in self.thermal_probes if probe["outcome"] == "refused")
+      if self.role == "qualified_model_stage" and not refused:
+         self._record(
+            self.negatives, "thermal_window", "not_executed", reason="thermal_refusal_not_observed",
+            hops_offered=len(self.thermal_probes), **facts,
+         )
+         return
+      self._record(
+         self.negatives, "thermal_window", "failed_closed", hops_offered=len(self.thermal_probes), hops_refused=refused, **facts
+      )
 
 
 def mobile_build_digest(source_commit: str, core_version: str) -> str:
@@ -368,6 +503,12 @@ def run_gate(
    member_key_digest = recorded_key
    gate.reconnect()
    gate.route_frames()
+   gate.browser_request()
+   try:
+      gate.heat_window()
+   finally:
+      # The fleet's network is the phone's hotspot: close before airplane mode.
+      gate.close_route()
    gate.background()
    gate.network_loss()
    gate.process_death()
@@ -423,6 +564,9 @@ def run_gate(
       "negatives": {case: item["outcome"] for case, item in sorted(gate.negatives.items())},
       "decision": qualification["decision"],
       "blockers": qualification["blockers"],
+      "thermal_ceiling_celsius": gate.thermal_ceiling_celsius,
+      "thermal_probes": gate.thermal_probes,
+      "route_closed": gate.route_closed,
    }
    write_private_json(out / "mobile-physical-gate.json", bundle)
    write_private_json(out / "mobile-role-qualification.json", qualification)
@@ -447,6 +591,24 @@ def parser() -> argparse.ArgumentParser:
    root.add_argument("--family-ref", required=True)
    root.add_argument("--evidence-dir", type=Path, required=True)
    root.add_argument("--route-peer-command")
+   root.add_argument(
+      "--browser-request-command",
+      help="one real browser request through a live route with the phone as a middle stage; exit 0 = completed "
+      "and the phone placement executed",
+   )
+   root.add_argument(
+      "--thermal-probe-command",
+      help=f"offer one hop to the phone during the heat window; exit {THERMAL_PROBE_REFUSED} = refused with "
+      f"thermal_ceiling_reached, {THERMAL_PROBE_EXECUTED} = executed, anything else = inconclusive",
+   )
+   root.add_argument("--route-close-command", help="close the live route after the heat window, before airplane mode")
+   root.add_argument(
+      "--invite-quota-file",
+      type=Path,
+      help="the owner quota the gate seed's pairing window carried; its thermal_ceiling_c judges the thermal window",
+   )
+   root.add_argument("--heat-window-seconds", type=float, default=DEFAULT_HEAT_WINDOW_SECONDS)
+   root.add_argument("--thermal-probe-interval-seconds", type=float, default=DEFAULT_THERMAL_PROBE_INTERVAL_SECONDS)
    root.add_argument("--timeout", type=float, default=600.0)
    root.add_argument("--out", type=Path, required=True)
    return root
@@ -463,13 +625,24 @@ def main(argv: Sequence[str] | None = None) -> int:
       if expected != arguments.runtime_build_digest:
          print(json.dumps({"error": "mobile_build_digest_mismatch", "expected": expected}), file=sys.stderr)
          return 2
-   gate = Gate(
-      authority=SeedAuthority(arguments.seed_state_root),
-      operator=_operator_prompt,
-      role=arguments.role,
-      route_peer_command=arguments.route_peer_command,
-      timeout=arguments.timeout,
-   )
+   try:
+      ceiling = None if arguments.invite_quota_file is None else invite_quota_thermal_ceiling(arguments.invite_quota_file)
+      gate = Gate(
+         authority=SeedAuthority(arguments.seed_state_root),
+         operator=_operator_prompt,
+         role=arguments.role,
+         route_peer_command=arguments.route_peer_command,
+         browser_request_command=arguments.browser_request_command,
+         thermal_probe_command=arguments.thermal_probe_command,
+         route_close_command=arguments.route_close_command,
+         thermal_ceiling_celsius=ceiling,
+         heat_window_seconds=arguments.heat_window_seconds,
+         thermal_probe_interval_seconds=arguments.thermal_probe_interval_seconds,
+         timeout=arguments.timeout,
+      )
+   except GateError as error:
+      print(json.dumps({"error": str(error)}), file=sys.stderr)
+      return 2
    try:
       summary = run_gate(
          gate,

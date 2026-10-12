@@ -31,9 +31,10 @@ NOW = time.time() * 1000.0
 class SimulatedSwarm:
    """Seed authority + phone.  ``faults`` names the device behaviours to break."""
 
-   def __init__(self, member_key: str, faults: set[str] | None = None) -> None:
+   def __init__(self, member_key: str, faults: set[str] | None = None, peer_class: str = "android_native_iroh") -> None:
       self.member_key = member_key
       self.faults = faults or set()
+      self.peer_class = peer_class
       self.members_state: list[dict] = [
          {
             "node_id": "node-mac",
@@ -72,7 +73,7 @@ class SimulatedSwarm:
          self.members_state.append(
             {
                "node_id": "node-phone",
-               "peer_class": "android_native_iroh",
+               "peer_class": self.peer_class,
                "generation": 1,
                "incarnation": "inc-1",
                "lifecycle_state": "RUNNING",
@@ -95,7 +96,7 @@ def immediate_wait(predicate, *, timeout, **_):
    return predicate()
 
 
-def _envelopes(signer, count=5, thermal=38.0, hot_at=None, drain=True):
+def _envelopes(signer, count=5, thermal=35.0, hot_at=None, drain=True, hot_reading=40.5):
    envelopes = []
    for generation in range(1, count + 1):
       hot = hot_at is not None and generation == hot_at
@@ -112,7 +113,7 @@ def _envelopes(signer, count=5, thermal=38.0, hot_at=None, drain=True):
          "sample_count": 4,
          "authority": "mycelium_node_app",
          "metrics": {
-            "thermal_max_celsius": 46.0 if hot else thermal,
+            "thermal_max_celsius": hot_reading if hot else thermal,
             "battery_level_percent": 70.0,
             "charging": 0.0,
             "memory_available_bytes": 2.5e9,
@@ -151,13 +152,18 @@ def _loader(envelopes):
    return load
 
 
-def _run(tmp_path, swarm, envelopes):
+#: The owner's invite quota ceiling the simulated phone joined with.
+QUOTA_CEILING = 40.0
+
+
+def _run(tmp_path, swarm, envelopes, thermal_ceiling_celsius=QUOTA_CEILING):
    gate = gate_module.Gate(
       authority=swarm,
       operator=swarm.operator,
       role="probe_contributor",
       route_peer_command=None,
       wait=immediate_wait,
+      thermal_ceiling_celsius=thermal_ceiling_celsius,
    )
    return gate_module.run_gate(
       gate,
@@ -350,3 +356,250 @@ def test_the_driver_refuses_a_build_digest_that_does_not_match_the_named_commit(
    )
    assert code == 2
    assert "mobile_build_digest_mismatch" in capsys.readouterr().err
+
+
+# -- M5: browser request, Qwen2 stage phone, quota-ceiling thermal window ------
+#
+# Owner decisions 2026-10-12: (1a) the thermal window is judged against the
+# phone's invite-quota ceiling, needs at least one hop refused with
+# ``thermal_ceiling_reached`` and no frame executed after the ceiling; the 42 C
+# physical stop rule stands.  (2a) the driver runs a browser request through a
+# live route with the phone as a middle stage and accepts the Qwen2 stage-phone
+# peer class.
+
+
+class Commands:
+   """Operator commands by name; each returns its scripted exit codes in turn."""
+
+   def __init__(self, swarm, **codes):
+      self.swarm = swarm
+      self.codes = {name: list(values) for name, values in codes.items()}
+      self.calls: list[str] = []
+
+   def __call__(self, command: str) -> int:
+      self.calls.append(command)
+      # Interleave with the operator prompts so ordering can be asserted.
+      self.swarm.prompts.append(f"$ {command}")
+      values = self.codes[command]
+      return values.pop(0) if len(values) > 1 else values[0]
+
+
+class FakeClock:
+   def __init__(self) -> None:
+      self.now = 0.0
+
+   def __call__(self) -> float:
+      return self.now
+
+   def sleep(self, seconds: float) -> None:
+      self.now += seconds
+
+
+def _stage_gate(swarm, commands, *, ceiling=QUOTA_CEILING, browser="browser", probe="probe", close="close", window=600.0):
+   clock = FakeClock()
+   return gate_module.Gate(
+      authority=swarm,
+      operator=swarm.operator,
+      role="qualified_model_stage",
+      route_peer_command="route-peer",
+      browser_request_command=browser,
+      thermal_probe_command=probe,
+      route_close_command=close,
+      thermal_ceiling_celsius=ceiling,
+      heat_window_seconds=window,
+      thermal_probe_interval_seconds=60.0,
+      wait=immediate_wait,
+      run_command=commands,
+      clock=clock,
+      sleep=clock.sleep,
+   )
+
+
+def _run_stage(tmp_path, gate, envelopes):
+   return gate_module.run_gate(
+      gate,
+      evidence_loader=_loader(envelopes),
+      member_key_digest=None,
+      runtime_build_digest=BUILD,
+      family_ref=FAMILY,
+      out=tmp_path,
+   )
+
+
+def _negative(tmp_path, case):
+   return json.loads((tmp_path / "mobile-physical-gate.json").read_text("utf-8"))["negatives"][case]
+
+
+def _positive(tmp_path, case):
+   return json.loads((tmp_path / "mobile-physical-gate.json").read_text("utf-8"))["positives"][case]
+
+
+def test_a_qwen2_stage_phone_on_a_live_route_that_refuses_hops_at_its_quota_ceiling_qualifies(tmp_path, signer):
+   swarm = SimulatedSwarm(signer.verification_key_digest, peer_class="android_native_qwen2_iroh")
+   commands = Commands(swarm, **{"route-peer": [0], "browser": [0], "probe": [3, 3, 0], "close": [0]})
+   gate = _stage_gate(swarm, commands)
+   # 40.0 is AT the 40 C quota ceiling: the old fixed 45 C constant never saw it.
+   summary = _run_stage(tmp_path, gate, _envelopes(signer, count=6, hot_at=3, hot_reading=40.0))
+
+   assert summary["positives"]["off_tailnet_join"] == "passed"
+   assert summary["positives"]["browser_request_completed"] == "passed"
+   assert summary["negatives"]["thermal_window"] == "failed_closed"
+   assert summary["decision"] == "eligible", summary["blockers"]
+   thermal = _negative(tmp_path, "thermal_window")
+   assert thermal["ceiling_celsius"] == 40.0
+   assert thermal["hops_refused"] == 1
+   # Hop offers stop at the first refusal: nothing more is sent to a hot phone.
+   assert commands.calls == ["route-peer", "browser", "probe", "probe", "probe", "close"]
+
+
+def test_the_route_closes_after_the_heat_window_and_before_the_airplane_mode_step(tmp_path, signer):
+   swarm = SimulatedSwarm(signer.verification_key_digest, peer_class="android_native_qwen2_iroh")
+   commands = Commands(swarm, **{"route-peer": [0], "browser": [0], "probe": [0], "close": [0]})
+   _run_stage(tmp_path, _stage_gate(swarm, commands), _envelopes(signer, count=6, hot_at=3))
+   def first(prefix):
+      return next(index for index, prompt in enumerate(swarm.prompts) if prompt.startswith(prefix))
+
+   assert (
+      first("$ route-peer")
+      < first("$ browser")
+      < first("Heat window")
+      < first("$ probe")
+      < first("$ close")
+      < first("Send the node app to the background")
+      < first("Enable airplane mode")
+   )
+
+
+def test_the_heat_prompt_names_the_quota_ceiling_and_the_42_c_stop_rule(tmp_path, signer):
+   swarm = SimulatedSwarm(signer.verification_key_digest)
+   commands = Commands(swarm, **{"route-peer": [0], "browser": [0], "probe": [0], "close": [0]})
+   _run_stage(tmp_path, _stage_gate(swarm, commands, ceiling=39.5), _envelopes(signer, count=6, hot_at=3))
+   heat = next(p for p in swarm.prompts if p.startswith("Heat window"))
+   assert "39.5" in heat and "42" in heat
+
+
+@pytest.mark.parametrize(("code", "outcome"), [(0, "passed"), (1, "violated"), (7, "violated")])
+def test_the_browser_request_command_decides_the_browser_case(tmp_path, signer, code, outcome):
+   swarm = SimulatedSwarm(signer.verification_key_digest)
+   commands = Commands(swarm, **{"route-peer": [0], "browser": [code], "probe": [0], "close": [0]})
+   summary = _run_stage(tmp_path, _stage_gate(swarm, commands), _envelopes(signer, count=6, hot_at=3))
+   assert summary["positives"]["browser_request_completed"] == outcome
+   assert _positive(tmp_path, "browser_request_completed")["exit_code"] == code
+
+
+def test_without_a_browser_request_command_the_browser_case_is_not_executed(tmp_path, signer):
+   swarm = SimulatedSwarm(signer.verification_key_digest)
+   commands = Commands(swarm, **{"route-peer": [0], "probe": [0], "close": [0]})
+   summary = _run_stage(tmp_path, _stage_gate(swarm, commands, browser=None), _envelopes(signer, count=6, hot_at=3))
+   assert summary["positives"]["browser_request_completed"] == "not_executed"
+   assert _positive(tmp_path, "browser_request_completed")["reason"] == "browser_request_command_absent"
+   assert "physical_positive_not_passed:browser_request_completed" in summary["blockers"]
+
+
+def test_a_qwen2_class_member_is_not_taken_for_a_probe_contributor(tmp_path, signer):
+   swarm = SimulatedSwarm(signer.verification_key_digest, peer_class="android_native_qwen2_iroh")
+   with pytest.raises(gate_module.GateError) as refused:
+      _run(tmp_path, swarm, _envelopes(signer))
+   assert str(refused.value) == "mobile_join_not_observed"
+
+
+def test_a_hot_stage_phone_that_never_refused_an_offered_hop_is_not_passed(tmp_path, signer):
+   swarm = SimulatedSwarm(signer.verification_key_digest)
+   # Every offered hop executed (exit 3): the phone never refused at its ceiling.
+   commands = Commands(swarm, **{"route-peer": [0], "browser": [0], "probe": [3], "close": [0]})
+   summary = _run_stage(tmp_path, _stage_gate(swarm, commands, window=300.0), _envelopes(signer, count=6, hot_at=3))
+   assert summary["negatives"]["thermal_window"] == "not_executed"
+   assert _negative(tmp_path, "thermal_window")["reason"] == "thermal_refusal_not_observed"
+   assert summary["decision"] == "withheld"
+   # The offers stop when the heat window ends (300 s / 60 s => 6 offers).
+   assert commands.calls.count("probe") == 6
+
+
+def test_a_stage_phone_without_a_thermal_probe_command_cannot_pass_the_thermal_window(tmp_path, signer):
+   swarm = SimulatedSwarm(signer.verification_key_digest)
+   commands = Commands(swarm, **{"route-peer": [0], "browser": [0], "close": [0]})
+   summary = _run_stage(tmp_path, _stage_gate(swarm, commands, probe=None), _envelopes(signer, count=6, hot_at=3))
+   assert summary["negatives"]["thermal_window"] == "not_executed"
+   assert _negative(tmp_path, "thermal_window")["reason"] == "thermal_refusal_not_observed"
+
+
+def test_a_refused_hop_does_not_excuse_frames_executed_after_the_ceiling(tmp_path, signer):
+   swarm = SimulatedSwarm(signer.verification_key_digest)
+   commands = Commands(swarm, **{"route-peer": [0], "browser": [0], "probe": [0], "close": [0]})
+   summary = _run_stage(tmp_path, _stage_gate(swarm, commands), _envelopes(signer, count=6, hot_at=3, drain=False))
+   assert summary["negatives"]["thermal_window"] == "violated"
+
+
+def test_a_reading_below_the_quota_ceiling_is_not_thermal_pressure(tmp_path, signer):
+   swarm = SimulatedSwarm(signer.verification_key_digest)
+   commands = Commands(swarm, **{"route-peer": [0], "browser": [0], "probe": [3], "close": [0]})
+   summary = _run_stage(tmp_path, _stage_gate(swarm, commands), _envelopes(signer, count=6, hot_at=3, hot_reading=39.9))
+   assert summary["negatives"]["thermal_window"] == "not_executed"
+   assert _negative(tmp_path, "thermal_window")["reason"] == "thermal_pressure_not_reached"
+
+
+def test_without_the_invite_quota_the_thermal_window_cannot_be_judged(tmp_path, signer):
+   swarm = SimulatedSwarm(signer.verification_key_digest)
+   summary = _run(tmp_path, swarm, _envelopes(signer, count=6, hot_at=3), thermal_ceiling_celsius=None)
+   assert summary["negatives"]["thermal_window"] == "not_executed"
+   assert _negative(tmp_path, "thermal_window")["reason"] == "invite_quota_thermal_ceiling_absent"
+
+
+@pytest.mark.parametrize("ceiling", [42.5, 45.0, float("nan")])
+def test_a_quota_ceiling_above_the_42_c_physical_stop_is_refused_before_the_gate(signer, ceiling):
+   swarm = SimulatedSwarm(signer.verification_key_digest)
+   with pytest.raises(gate_module.GateError) as refused:
+      _stage_gate(swarm, Commands(swarm, x=[0]), ceiling=ceiling)
+   assert str(refused.value) == "invite_quota_thermal_ceiling_above_physical_stop"
+   assert swarm.prompts == []
+
+
+def _quota(tmp_path, **overrides):
+   quota = {
+      "background_allowed": True,
+      "battery_floor_percent": 20,
+      "network_bytes_per_day": 1073741824,
+      "storage_bytes": 1073741824,
+      "thermal_ceiling_c": 40,
+      **overrides,
+   }
+   path = tmp_path / "quota.json"
+   path.write_text(json.dumps(quota))
+   return path
+
+
+def test_the_ceiling_is_read_from_the_invite_quota_file_not_hard_coded(tmp_path):
+   assert gate_module.invite_quota_thermal_ceiling(_quota(tmp_path, thermal_ceiling_c=39)) == 39.0
+   assert gate_module.invite_quota_thermal_ceiling(_quota(tmp_path, thermal_ceiling_c=40.5)) == 40.5
+   with pytest.raises(gate_module.GateError) as refused:
+      gate_module.invite_quota_thermal_ceiling(_quota(tmp_path, extra=1))
+   assert str(refused.value) == "invite_quota_invalid"
+
+
+def test_the_driver_refuses_a_quota_above_the_physical_stop_rule(tmp_path, capsys):
+   code = gate_module.main(
+      [
+         "--seed-state-root", str(tmp_path / "seed"),
+         "--role", "qualified_model_stage",
+         "--runtime-build-digest", BUILD,
+         "--family-ref", FAMILY,
+         "--evidence-dir", str(tmp_path / "evidence"),
+         "--out", str(tmp_path / "out"),
+         "--invite-quota-file", str(_quota(tmp_path, thermal_ceiling_c=45)),
+      ]
+   )
+   assert code == 2
+   assert "invite_quota_thermal_ceiling_above_physical_stop" in capsys.readouterr().err
+
+
+def test_the_driver_exposes_the_m5_commands():
+   arguments = gate_module.parser().parse_args(
+      [
+         "--seed-state-root", "s", "--runtime-build-digest", BUILD, "--family-ref", FAMILY,
+         "--evidence-dir", "e", "--out", "o",
+         "--browser-request-command", "b", "--thermal-probe-command", "p", "--route-close-command", "c",
+         "--invite-quota-file", "q.json", "--heat-window-seconds", "900", "--thermal-probe-interval-seconds", "90",
+      ]
+   )
+   assert (arguments.browser_request_command, arguments.thermal_probe_command, arguments.route_close_command) == ("b", "p", "c")
+   assert arguments.heat_window_seconds == 900.0 and arguments.thermal_probe_interval_seconds == 90.0
