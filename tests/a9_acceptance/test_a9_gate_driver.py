@@ -24,6 +24,7 @@ from mycelium_invite import SqliteInviteRegistry, verify_invite_bundle
 from mycelium_node import NodeMembershipSession, load_or_create_node_signer
 from mycelium_node.durable_membership import save_membership_state
 from mycelium_seed import SeedCoordinator, SqliteSeedState
+from tests.host_platform.portable import make_private_directory
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -45,7 +46,7 @@ def swarm(tmp_path):
 
     now = time.time()
     seed_home = tmp_path / "seed"
-    seed_home.mkdir(mode=0o700)
+    make_private_directory(seed_home)
     seed_signer = load_or_create_node_signer(seed_home / "identity" / "seed.key")
     database = seed_home / "state" / "state.sqlite3"
     coordinator = SeedCoordinator(
@@ -57,7 +58,7 @@ def swarm(tmp_path):
     data_dirs = {}
     for index, node_id in enumerate(("node-a", "node-b")):
         data_dir = tmp_path / node_id
-        data_dir.mkdir(mode=0o700)
+        make_private_directory(data_dir)
         signer = load_or_create_node_signer(data_dir / "identity" / "node.key")
         session = NodeMembershipSession(
             node_id=node_id, swarm_id="swarm-a", seed_node_id="seed-node", signer=signer,
@@ -86,6 +87,7 @@ def _run(*argv):
     return gate_driver.main([str(item) for item in argv])
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="macOS mlx members: member-sign observes this host and correctly refuses a macOS class on Windows")
 def test_migration_sequence_writes_receipts_and_refuses_after_cutover(swarm, tmp_path, capsys):
     seed_home, database, data_dirs = swarm
     gate = tmp_path / "gate"
@@ -193,6 +195,7 @@ def test_windows_commands_refuse_non_windows_hosts_unless_conformance(kernel, tm
     assert receipt["thermal"]["native_unavailable"] is True
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="macOS mlx members: member-sign observes this host and correctly refuses a macOS class on Windows")
 def test_live_cutover_adoption_and_v2_resume_through_the_driver(swarm, tmp_path, capsys):
     import time
 

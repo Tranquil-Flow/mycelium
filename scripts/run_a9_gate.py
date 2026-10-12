@@ -74,6 +74,17 @@ def _sha256_file(path: Path) -> str:
 def _private_dir(path: Path) -> Path:
     if path.is_symlink():
         raise GateError(f"refusing symlinked gate directory {path}")
+    if os.name == "nt":
+        # No mode bits: an owner-only protected-DACL directory through the seam,
+        # which the seed state and invite registry then accept.
+        import mycelium_host_platform
+
+        try:
+            with mycelium_host_platform.private_directory(path, create=True):
+                pass
+        except mycelium_host_platform.HostPlatformError as exc:
+            raise GateError(f"gate directory is not owner-only: {path}") from exc
+        return path
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
     if os.name != "nt":
         path.chmod(0o700)
@@ -124,6 +135,15 @@ def _source_identity() -> dict[str, Any]:
 def _backup_sqlite(live: Path, copy: Path) -> None:
     if copy.exists():
         raise GateError(f"seed copy already exists: {copy}")
+    if os.name == "nt":
+        # Create the copy owner-only first; SQLite then writes into it.
+        import mycelium_host_platform
+
+        try:
+            with mycelium_host_platform.private_directory(copy.parent, create=True) as lease:
+                lease.create_file_exclusive(copy.name, b"")
+        except mycelium_host_platform.HostPlatformError as exc:
+            raise GateError(f"seed copy could not be created owner-only: {copy}") from exc
     source = sqlite3.connect(f"file:{live}?mode=ro", uri=True)
     try:
         target = sqlite3.connect(copy)
