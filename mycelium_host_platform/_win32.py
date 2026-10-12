@@ -302,6 +302,9 @@ class Win32PrivateDirectory:
         except w.Win32Error as exc:
             if exc.winerror in _MISSING_ERRORS:
                 raise HostPlatformError("host_file_missing") from exc
+            if exc.winerror == w.ERROR_SHARING_VIOLATION:
+                # Another handle holds it without sharing: a writer is mid-create.
+                raise HostPlatformError("host_io_failed", "sharing_violation") from exc
             raise HostPlatformError("host_io_failed", "open") from exc
         try:
             before = _information(self._api, handle)

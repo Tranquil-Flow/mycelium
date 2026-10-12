@@ -86,6 +86,10 @@ def _win32_load_existing(
             raise NodeIdentityError("node_identity_missing") from None
         if exc.code == "host_file_invalid" and exc.detail == "size":
             raise NodeIdentityError("node_identity_invalid") from exc
+        if allow_incomplete and exc.code == "host_io_failed" and exc.detail == "sharing_violation":
+            # A concurrent first start is still writing the key (_win32_write_new
+            # holds it unshared): not complete yet, the caller retries.
+            return None
         raise _win32_identity_error(exc) from exc
     if len(private_bytes) < _KEY_BYTES and allow_incomplete:
         return None
