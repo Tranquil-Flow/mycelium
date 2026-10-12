@@ -4875,6 +4875,7 @@ class PhysicalLiveRoute:
                 participating_node_ids = self._bound_participants(
                     request_id, participating_node_ids
                 )
+                stop_cleanup_authorized = False
                 if cancelled_for_stop:
                     if route_identity is None:
                         cancelled_response = self._sessions[entry_node_id].send(
@@ -4887,8 +4888,31 @@ class PhysicalLiveRoute:
                             cancelled_response,
                             event="inference_cancelled",
                         )
-                    elif not self.cancel_request(request_id):
-                        raise RuntimeError("route_cancellation_rejected")
+                    else:
+                        # A stop token completes the request, so its teardown
+                        # is completion cleanup. Take the owner's cleanup
+                        # authority first, as the token-bound completion below
+                        # does, so the owner's command generation advances
+                        # before any node tears down under the next one.
+                        # Tearing down first let node receipts reach the owner
+                        # while its command still held the previous generation
+                        # (identity mismatch) or before its authority time
+                        # (cleanup_before_authority); the request then ended
+                        # through the cancelled branch although nobody
+                        # cancelled it (A6 case 15 on c0dc4350).
+                        stop_cleanup_deadline = (
+                            time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+                        )
+                        if authorize_cleanup is not None:
+                            stop_cleanup_deadline = authorize_cleanup(
+                                stop_cleanup_deadline
+                            )
+                            stop_cleanup_authorized = True
+                        if not self.cancel_request(
+                            request_id,
+                            deadline_monotonic_s=stop_cleanup_deadline,
+                        ):
+                            raise RuntimeError("route_cancellation_rejected")
                 output = output[:max_new_tokens]
                 if cancelled_for_stop or cancelled_for_request:
                     if cancelled_for_request:
@@ -4906,7 +4930,7 @@ class PhysicalLiveRoute:
                             ].get("cancellation_deadline")
                     if cancellation_deadline is None:
                         cancellation_deadline = time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
-                    if authorize_cleanup is not None:
+                    if authorize_cleanup is not None and not stop_cleanup_authorized:
                         cancellation_deadline = authorize_cleanup(
                             float(cancellation_deadline)
                         )
