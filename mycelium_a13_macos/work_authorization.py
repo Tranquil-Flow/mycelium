@@ -145,14 +145,23 @@ def _staged_document(root, relative):
     if not _safe_relative_path(relative):raise ValueError('work_document_invalid')
     path=root.joinpath(*PurePosixPath(relative).parts)
     if path.resolve(strict=True)!=path:raise ValueError('work_document_invalid')
-    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+    import mycelium_host_platform
+    if mycelium_host_platform.is_win32():
+        # No O_NOFOLLOW on Windows (the Windows managed host reuses this
+        # workflow): open by handle, refusing every reparse point on the way.
+        try:
+            stream=mycelium_host_platform.open_beneath(root,PurePosixPath(relative).parts)
+        except mycelium_host_platform.HostPlatformError as exc:
+            raise ValueError('work_document_invalid') from exc
+    else:
+        stream=os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW),'rb')
     def pairs(items):
         result={}
         for key,value in items:
             if key in result:raise ValueError('work_document_invalid')
             result[key]=value
         return result
-    with os.fdopen(fd,'rb') as stream:
+    with stream:
         info=os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode) or not 0<info.st_size<=2*1024*1024:
             raise ValueError('work_document_invalid')
