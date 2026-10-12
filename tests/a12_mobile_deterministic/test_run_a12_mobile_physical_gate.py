@@ -96,7 +96,7 @@ def immediate_wait(predicate, *, timeout, **_):
    return predicate()
 
 
-def _envelopes(signer, count=5, thermal=35.0, hot_at=None, drain=True, hot_reading=40.5):
+def _envelopes(signer, count=5, thermal=35.0, hot_at=None, drain=True, hot_reading=40.5, refused_at=None):
    envelopes = []
    for generation in range(1, count + 1):
       hot = hot_at is not None and generation == hot_at
@@ -121,6 +121,8 @@ def _envelopes(signer, count=5, thermal=35.0, hot_at=None, drain=True, hot_readi
             "relay_online": 1.0,
             "stage_loaded": 0.0,
             "frames_executed_window": 0.0 if (after_hot and drain) else 5.0,
+            # Hops the phone itself refused with thermal_ceiling_reached in this window.
+            **({"thermal_refusals_window": 1.0 if generation == refused_at else 0.0} if refused_at else {}),
          },
       }
       envelopes.append(
@@ -439,7 +441,7 @@ def test_a_qwen2_stage_phone_on_a_live_route_that_refuses_hops_at_its_quota_ceil
    commands = Commands(swarm, **{"route-peer": [0], "browser": [0], "probe": [3, 3, 0], "close": [0]})
    gate = _stage_gate(swarm, commands)
    # 40.0 is AT the 40 C quota ceiling: the old fixed 45 C constant never saw it.
-   summary = _run_stage(tmp_path, gate, _envelopes(signer, count=6, hot_at=3, hot_reading=40.0))
+   summary = _run_stage(tmp_path, gate, _envelopes(signer, count=6, hot_at=3, hot_reading=40.0, refused_at=4))
 
    assert summary["positives"]["off_tailnet_join"] == "passed"
    assert summary["positives"]["browser_request_completed"] == "passed"
@@ -448,14 +450,15 @@ def test_a_qwen2_stage_phone_on_a_live_route_that_refuses_hops_at_its_quota_ceil
    thermal = _negative(tmp_path, "thermal_window")
    assert thermal["ceiling_celsius"] == 40.0
    assert thermal["hops_refused"] == 1
-   # Hop offers stop at the first refusal: nothing more is sent to a hot phone.
+   assert thermal["hops_offered"] == 3
+   # Hop offers stop at the first offer that did not run: nothing more is sent to a hot phone.
    assert commands.calls == ["route-peer", "browser", "probe", "probe", "probe", "close"]
 
 
 def test_the_route_closes_after_the_heat_window_and_before_the_airplane_mode_step(tmp_path, signer):
    swarm = SimulatedSwarm(signer.verification_key_digest, peer_class="android_native_qwen2_iroh")
    commands = Commands(swarm, **{"route-peer": [0], "browser": [0], "probe": [0], "close": [0]})
-   _run_stage(tmp_path, _stage_gate(swarm, commands), _envelopes(signer, count=6, hot_at=3))
+   _run_stage(tmp_path, _stage_gate(swarm, commands), _envelopes(signer, count=6, hot_at=3, refused_at=4))
    def first(prefix):
       return next(index for index, prompt in enumerate(swarm.prompts) if prompt.startswith(prefix))
 
@@ -515,6 +518,25 @@ def test_a_hot_stage_phone_that_never_refused_an_offered_hop_is_not_passed(tmp_p
    assert commands.calls.count("probe") == 6
 
 
+def test_a_failed_hop_offer_is_not_a_refusal_without_the_phones_signed_word(tmp_path, signer):
+   swarm = SimulatedSwarm(signer.verification_key_digest)
+   # The offered request did not run (exit 0), but the phone's sealed observations
+   # never counted a hop refused with thermal_ceiling_reached: not a pass.
+   commands = Commands(swarm, **{"route-peer": [0], "browser": [0], "probe": [0], "close": [0]})
+   summary = _run_stage(tmp_path, _stage_gate(swarm, commands), _envelopes(signer, count=6, hot_at=3))
+   assert summary["negatives"]["thermal_window"] == "not_executed"
+   assert _negative(tmp_path, "thermal_window")["reason"] == "thermal_refusal_not_observed"
+
+
+def test_a_phone_that_executes_frames_after_its_signed_refusal_violates_the_thermal_window(tmp_path, signer):
+   swarm = SimulatedSwarm(signer.verification_key_digest)
+   commands = Commands(swarm, **{"route-peer": [0], "browser": [0], "probe": [0], "close": [0]})
+   # The phone signed a refusal at its ceiling in window 2, then executed frames in window 3.
+   summary = _run_stage(tmp_path, _stage_gate(swarm, commands), _envelopes(signer, count=6, hot_at=3, refused_at=2))
+   assert summary["negatives"]["thermal_window"] == "violated"
+   assert _negative(tmp_path, "thermal_window")["reason"] == "frames_executed_after_ceiling"
+
+
 def test_a_stage_phone_without_a_thermal_probe_command_cannot_pass_the_thermal_window(tmp_path, signer):
    swarm = SimulatedSwarm(signer.verification_key_digest)
    commands = Commands(swarm, **{"route-peer": [0], "browser": [0], "close": [0]})
@@ -526,7 +548,7 @@ def test_a_stage_phone_without_a_thermal_probe_command_cannot_pass_the_thermal_w
 def test_a_refused_hop_does_not_excuse_frames_executed_after_the_ceiling(tmp_path, signer):
    swarm = SimulatedSwarm(signer.verification_key_digest)
    commands = Commands(swarm, **{"route-peer": [0], "browser": [0], "probe": [0], "close": [0]})
-   summary = _run_stage(tmp_path, _stage_gate(swarm, commands), _envelopes(signer, count=6, hot_at=3, drain=False))
+   summary = _run_stage(tmp_path, _stage_gate(swarm, commands), _envelopes(signer, count=6, hot_at=3, drain=False, refused_at=4))
    assert summary["negatives"]["thermal_window"] == "violated"
 
 

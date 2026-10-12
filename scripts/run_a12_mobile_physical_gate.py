@@ -34,11 +34,14 @@ Thermal window [OWNER DECISION 2026-10-12, replacing the fixed 45 C constant of
 (``--invite-quota-file``, the same file the gate seed's pairing window carried),
 never a constant.  A quota ceiling above the standing 42 C physical stop rule is
 refused before the gate starts.  The sustained observations must cover the frozen
-window, reach the ceiling, and show no frame executed after the first sample at
-the ceiling.  For a model stage, the driver additionally offers hops during an
-operator heat window (``--thermal-probe-command``) and at least one of them must
-be refused by the phone with ``thermal_ceiling_reached``; a phone that merely
-received no work while hot is not a pass.  The route is closed
+window and show no frame executed after the phone first reached the ceiling (its
+first sealed sample at or above the ceiling, or its first signed refusal).  For a
+model stage the phone's own sealed observations must also count at least one hop
+refused with ``thermal_ceiling_reached`` (``thermal_refusals_window``); a phone
+that merely received no work while hot is not a pass, and neither is a failed
+hop offer.  To give the phone work to refuse, the driver offers hops during an
+operator heat window (``--thermal-probe-command``) and stops offering at the
+first offer that did not run on the phone.  The route is closed
 (``--route-close-command``) after the heat window and before the airplane-mode
 step, because the fleet's network runs through the phone's hotspot.
 
@@ -87,10 +90,12 @@ JOIN_CLASSES: dict[str, frozenset[str]] = {
 #: The owner's standing physical stop rule: phone work stops at 42 C.  A quota
 #: ceiling above it would require breaking the rule, so the gate refuses it.
 PHYSICAL_STOP_CELSIUS = 42.0
-#: ``--thermal-probe-command`` exit codes: the offered hop was refused by the
-#: phone with ``thermal_ceiling_reached`` / the hop executed (phone not hot).
-#: Any other exit is an inconclusive offer and is retried.
-THERMAL_PROBE_REFUSED = 0
+#: ``--thermal-probe-command`` exit codes: the offered hop did not run on the
+#: phone (expected: refused at its ceiling), so offers stop / the hop executed
+#: (phone not hot yet).  Any other exit is an inconclusive offer and is retried.
+#: Offers only provoke work; the refusal itself is judged from the phone's own
+#: sealed ``thermal_refusals_window`` observations.
+THERMAL_PROBE_NOT_RUN = 0
 THERMAL_PROBE_EXECUTED = 3
 DEFAULT_HEAT_WINDOW_SECONDS = 1500.0
 DEFAULT_THERMAL_PROBE_INTERVAL_SECONDS = 120.0
@@ -322,18 +327,19 @@ class Gate:
       started = self.clock()
       while True:
          code = self.run_command(self.thermal_probe_command)
-         outcome = {THERMAL_PROBE_REFUSED: "refused", THERMAL_PROBE_EXECUTED: "executed"}.get(code, "inconclusive")
+         outcome = {THERMAL_PROBE_NOT_RUN: "not_run", THERMAL_PROBE_EXECUTED: "executed"}.get(code, "inconclusive")
          self.thermal_probes.append({"at_unix_ms": int(time.time() * 1000), "exit_code": code, "outcome": outcome})
-         if outcome == "refused" or self.clock() - started + self.thermal_probe_interval_seconds > self.heat_window_seconds:
+         if outcome == "not_run" or self.clock() - started + self.thermal_probe_interval_seconds > self.heat_window_seconds:
             break
          self.sleep(self.thermal_probe_interval_seconds)
-      if outcome == "refused":
+      if outcome == "not_run":
          self.operator(
-            f"The phone refused a hop at its {ceiling} C ceiling. Keep it at or just above {ceiling} C for about 3 "
-            f"more minutes (two observations), never past {PHYSICAL_STOP_CELSIUS:g} C, then stop heating and let it cool."
+            f"An offered hop did not run on the phone (expected: refused at its {ceiling} C ceiling). Keep the phone "
+            f"at or just above {ceiling} C for about 3 more minutes (two observations), never past "
+            f"{PHYSICAL_STOP_CELSIUS:g} C, then stop heating and let it cool. No more hops are offered."
          )
       else:
-         self.operator("No hop was refused during the heat window. Stop heating and let the phone cool.")
+         self.operator("Every offered hop ran during the heat window. Stop heating and let the phone cool.")
 
    def close_route(self) -> None:
       """Close the live route before the network-loss step cuts the phone's hotspot."""
@@ -395,16 +401,20 @@ class Gate:
          self._record(self.negatives, "thermal_window", "violated", reason="sustained_thermal_window_not_observed")
          return
       facts = {"window_ms": covered, "ceiling_celsius": ceiling}
-      hot = [index for index, value in enumerate(thermal) if float(value) >= ceiling]
-      if not hot:
+      # The phone's own signed count of hops it refused with thermal_ceiling_reached
+      # (absent from builds that predate the metric: counts as none).
+      refusals = [doc["metrics"].get("thermal_refusals_window", 0) for doc in documents]
+      refusals = [value if isinstance(value, (int, float)) and value >= 0 else 0 for value in refusals]
+      reached = [index for index, value in enumerate(thermal) if float(value) >= ceiling or refusals[index] > 0]
+      if not reached:
          self._record(self.negatives, "thermal_window", "not_executed", reason="thermal_pressure_not_reached", **facts)
          return
-      after = documents[hot[0] + 1 :]
+      after = documents[reached[0] + 1 :]
       drained = all(doc["metrics"].get("frames_executed_window") in (0, 0.0) for doc in after) and bool(after)
       if not drained:
          self._record(self.negatives, "thermal_window", "violated", reason="frames_executed_after_ceiling", **facts)
          return
-      refused = sum(1 for probe in self.thermal_probes if probe["outcome"] == "refused")
+      refused = int(sum(refusals))
       if self.role == "qualified_model_stage" and not refused:
          self._record(
             self.negatives, "thermal_window", "not_executed", reason="thermal_refusal_not_observed",
@@ -598,8 +608,9 @@ def parser() -> argparse.ArgumentParser:
    )
    root.add_argument(
       "--thermal-probe-command",
-      help=f"offer one hop to the phone during the heat window; exit {THERMAL_PROBE_REFUSED} = refused with "
-      f"thermal_ceiling_reached, {THERMAL_PROBE_EXECUTED} = executed, anything else = inconclusive",
+      help=f"offer one hop to the phone during the heat window; exit {THERMAL_PROBE_NOT_RUN} = the hop did not run "
+      f"on the phone (offers stop), {THERMAL_PROBE_EXECUTED} = executed, anything else = inconclusive; the refusal "
+      "itself is judged from the phone's signed thermal_refusals_window",
    )
    root.add_argument("--route-close-command", help="close the live route after the heat window, before airplane mode")
    root.add_argument(
