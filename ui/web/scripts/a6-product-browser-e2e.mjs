@@ -281,21 +281,39 @@ export async function exerciseReconnect(page, observe) {
   return observe();
 }
 
-async function waitForObservation(page, predicate, timeout = 300_000) {
+// Polls the product snapshot until ``predicate`` holds (bounded by
+// ``timeout``). ``abort`` names a state that can never reach the predicate,
+// e.g. a positive request that went terminal-blocked: the wait then fails at
+// once with ``abort.code`` instead of waiting out the whole bound. Either
+// failure reports the wait's ``label`` and the last observation on stderr.
+export async function waitForObservation(page, predicate, options = {}) {
+  const {
+    timeout = 300_000,
+    label = 'unlabelled',
+    abort = null,
+    observe = productRecoveryStatus,
+    report = (line) => process.stderr.write(`${line}\n`),
+  } = typeof options === 'number' ? { timeout: options } : options;
   const deadline = Date.now() + timeout;
   let previousSignature = '';
+  let observation = null;
   const history = [];
+  const failWith = (code) => {
+    report(JSON.stringify({ event: 'a6_browser_wait_failed', code, wait: label, last: observation }));
+    fail(code);
+  };
   while (Date.now() < deadline) {
-    const observation = await productRecoveryStatus(page);
+    observation = await observe(page);
     const signature = JSON.stringify(observation);
     if (signature !== previousSignature) {
       history.push(observation);
       previousSignature = signature;
     }
     if (predicate(observation)) return { observation, history };
+    if (abort !== null && abort.when(observation)) failWith(abort.code);
     await page.waitForTimeout(200);
   }
-  fail('recovery_transition_timeout');
+  failWith('recovery_transition_timeout');
 }
 
 
@@ -332,6 +350,7 @@ async function startRequest(page, privateCanaries, maximumNewTokens) {
   const started = await waitForObservation(
     page,
     (observation) => observation.request_count > baseline.request_count,
+    { label: 'request_started' },
   );
   return { ...started, baseline };
 }
@@ -382,21 +401,36 @@ async function runScenario(page, scenario, faultControl, usedCases, maximumNewTo
   const privateCanaries = [promptCanary, outputCanary];
   const started = await startRequest(page, privateCanaries, maximumNewTokens);
   await sendControlledFault(faultControl, usedCases);
+  // A positive request that goes terminal-blocked can never recover: fail at
+  // once and say so, rather than as a late recovery_transition_timeout.
+  const blocked = scenario === 'positive' ? {
+    code: 'positive_recovery_terminal_blocked',
+    when: (observation) => observation.terminal_blocked_count
+      > started.baseline.terminal_blocked_count,
+  } : null;
   const failed = await waitForObservation(
     page,
     (observation) => observation.recovering_count > 0
-      || observation.terminal_blocked_count > started.baseline.terminal_blocked_count,
+      || (blocked === null
+        && observation.terminal_blocked_count > started.baseline.terminal_blocked_count),
+    { label: 'recovering_or_blocked', abort: blocked },
   );
   const beforeCutoverReconnect = await exerciseReconnect(
     page,
-    () => waitForObservation(page, (observation) => observation.cursor >= failed.observation.cursor),
+    () => waitForObservation(
+      page,
+      (observation) => observation.cursor >= failed.observation.cursor,
+      { label: 'cursor_before_cutover' },
+    ),
   );
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   const afterReload = await waitForObservation(
     page,
     (observation) => observation.max_recovery_attempt > 0
-      || observation.terminal_blocked_count > started.baseline.terminal_blocked_count,
+      || (blocked === null
+        && observation.terminal_blocked_count > started.baseline.terminal_blocked_count),
+    { label: 'attempt_or_blocked', abort: blocked },
   );
   const beforeCutoverHistory = [
     ...started.history,
@@ -409,6 +443,7 @@ async function runScenario(page, scenario, faultControl, usedCases, maximumNewTo
   const finished = await waitForObservation(
     page,
     (observation) => observation.terminal_count > started.baseline.terminal_count,
+    { label: 'terminal' },
   );
   await verifyInferenceOutcome(page, scenario);
   const afterCutoverReconnect = await exerciseReconnect(
@@ -417,6 +452,7 @@ async function runScenario(page, scenario, faultControl, usedCases, maximumNewTo
       page,
       (observation) => observation.cursor >= finished.observation.cursor
         && observation.terminal_count >= finished.observation.terminal_count,
+      { label: 'cursor_after_terminal' },
     ),
   );
   const signatures = new Set();

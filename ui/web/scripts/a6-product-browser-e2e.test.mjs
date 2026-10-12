@@ -396,3 +396,54 @@ test('controlled fault transport outlasts the product seam bounds', () => {
   assert.ok(faultHarness.CONTROLLED_FAULT_TIMEOUT_MS > 2 * 30_000);
   assert.ok(faultHarness.CONTROLLED_FAULT_TIMEOUT_MS <= 120_000);
 });
+
+function scriptedObservations(observations) {
+  let index = 0;
+  const page = { waitForTimeout: async () => {} };
+  const observe = async () => observations[Math.min(index++, observations.length - 1)];
+  return { page, observe };
+}
+
+test('a positive request that goes terminal-blocked fails at once with its own code', async () => {
+  // c0dc4350 browser matrix: the first successor ended terminal-blocked and the
+  // harness waited out its 300 s bound before reporting a transition timeout.
+  const { page, observe } = scriptedObservations([
+    { recovering_count: 0, terminal_blocked_count: 0 },
+    { recovering_count: 0, terminal_blocked_count: 1 },
+  ]);
+  const reports = [];
+  await assert.rejects(
+    faultHarness.waitForObservation(page, (o) => o.recovering_count > 0, {
+      label: 'recovering_or_blocked',
+      abort: { code: 'positive_recovery_terminal_blocked', when: (o) => o.terminal_blocked_count > 0 },
+      observe,
+      report: (line) => reports.push(JSON.parse(line)),
+    }),
+    /positive_recovery_terminal_blocked/,
+  );
+  assert.deepEqual(reports, [{
+    event: 'a6_browser_wait_failed',
+    code: 'positive_recovery_terminal_blocked',
+    wait: 'recovering_or_blocked',
+    last: { recovering_count: 0, terminal_blocked_count: 1 },
+  }]);
+});
+
+test('a transition timeout names the wait that expired and its last observation', async () => {
+  const { page, observe } = scriptedObservations([{ recovering_count: 0, terminal_count: 0 }]);
+  const reports = [];
+  await assert.rejects(
+    faultHarness.waitForObservation(page, () => false, {
+      timeout: 0, label: 'terminal', observe, report: (line) => reports.push(JSON.parse(line)),
+    }),
+    /^Error: recovery_transition_timeout$/,
+  );
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].wait, 'terminal');
+  assert.equal(reports[0].code, 'recovery_transition_timeout');
+});
+
+test('the browser harness keeps its 300 s transition bound by default', () => {
+  const source = readFileSync(scriptPath, 'utf8');
+  assert.match(source, /timeout = 300_000/);
+});
