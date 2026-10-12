@@ -6,9 +6,7 @@ raw ``declared_members`` / ``record`` keyword calls are refused as before.
 
 from __future__ import annotations
 
-import fcntl
 import json
-import os
 
 import pytest
 
@@ -170,17 +168,13 @@ def test_concurrent_resume_is_serialized_not_interleaved(tmp_path):
     store, envelopes = _members(tmp_path)
     with pytest.raises(migration.MigrationUnavailable):
         MigrationExecutor(store).execute(_request(envelopes), now=NOW, stop_after="profiles_verified")
-    descriptor = os.open(store.root / "transaction.lock", os.O_RDWR)
-    try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+    # Another holder of the transaction lock (flock on POSIX, LockFileEx on win32).
+    with FileMembershipState(store.root).lock():
         with pytest.raises(migration.MigrationUnavailable) as busy:
             migration.resume_concurrent_migration(
                 storage=FileMembershipState(store.root), request=_request(envelopes), now=NOW
             )
         assert busy.value.code == "concurrent_resume_serialized"
-    finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
     assert MigrationExecutor(store).checkpoint() == "profiles_verified"
     resumed = migration.resume_concurrent_migration(
         storage=FileMembershipState(store.root), request=_request(envelopes), now=NOW

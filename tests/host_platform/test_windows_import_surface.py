@@ -88,6 +88,18 @@ ENTRY_POINTS = (
     "mycelium_a13_packaging.installer_core",
     "stage_pack",
     "runtime_loader",
+    # A9 on a Windows host: the windows-probe / windows-benchmark driver path
+    # (local-declaration binds observe_host_platform from seed_migration), the
+    # member-sign / member-declare path, and the migration executor they import.
+    "mycelium_platform_neutral.migration_executor",
+    "mycelium_platform_neutral.migration",
+    "mycelium_platform_neutral.seed_migration",
+    "mycelium_platform_neutral.native_int8",
+    "mycelium_platform_neutral.windows_provider",
+    "mycelium_platform_neutral.int8_stage_benchmark",
+    "mycelium_platform_neutral.runtime_efficiency",
+    "mycelium_platform_neutral.thermal",
+    "mycelium_node.durable_membership",
 )
 
 _PROBE = """

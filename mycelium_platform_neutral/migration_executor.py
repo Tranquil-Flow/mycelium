@@ -14,7 +14,10 @@ seed consults the same cutover file through ``mycelium_seed`` wiring.
 """
 from __future__ import annotations
 
-import fcntl
+try:  # POSIX lock; win32 goes through mycelium_host_platform
+    import fcntl
+except ImportError:  # pragma: no cover - win32
+    fcntl = None
 import hashlib
 import os
 from pathlib import Path
@@ -24,6 +27,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+import mycelium_host_platform
+from mycelium_host_platform import HostPlatformError
 from mycelium_qualification.evidence import canonical_json_loads
 from .migration import LegacyMemberIdentity, ContinuityEvidence, evaluate_identity_continuity, MigrationUnavailable
 from .peer_profile import verify_peer_profile
@@ -47,11 +52,24 @@ def _bytes(value: Any) -> bytes:
     return content
 
 class FileMembershipState:
-    """Private same-filesystem atomic adapter. Never points at the live seed DB."""
+    """Private same-filesystem atomic adapter. Never points at the live seed DB.
+
+    On win32 the root is an owner-only private directory, records are read and
+    atomically replaced through it, and the transaction lock is ``LockFileEx``
+    (``mycelium_host_platform``); POSIX mode bits and ``flock`` are not used there.
+    """
     def __init__(self, root: Path):
         self.root = Path(root)
         if self.root.is_symlink() or (self.root.exists() and not self.root.is_dir()):
             raise MigrationError('unsafe_storage_root')
+        self._win32 = mycelium_host_platform.is_win32()
+        if self._win32:
+            try:
+                with mycelium_host_platform.private_directory(self.root, create=True):
+                    pass
+            except HostPlatformError as exc:
+                raise MigrationError('unsafe_storage_permissions') from exc
+            return
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self.root.stat().st_mode & 0o077:
             raise MigrationError('unsafe_storage_permissions')
@@ -64,6 +82,20 @@ class FileMembershipState:
 
     @contextmanager
     def lock(self, *, blocking: bool = True):
+        if self._win32:
+            self._path('transaction.lock')  # refuse a link, as on POSIX
+            try:
+                held = mycelium_host_platform.hold_exclusive_lock(
+                    self.root, 'transaction.lock', blocking=blocking)
+            except HostPlatformError as exc:
+                if exc.code == 'host_lock_busy':
+                    raise MigrationUnavailable('concurrent_resume_serialized') from None
+                raise MigrationError('unsafe_storage_lock') from exc
+            try:
+                yield
+            finally:
+                held.release()
+            return
         path = self._path('transaction.lock')
         fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
         try:
@@ -79,6 +111,15 @@ class FileMembershipState:
 
     def _read(self, name: str) -> tuple[dict, bytes] | None:
         path = self._path(name)
+        if self._win32:
+            try:
+                with mycelium_host_platform.private_directory(self.root, create=False) as lease:
+                    raw = lease.read_file(name, max_bytes=MAX_FILE)
+            except HostPlatformError as exc:
+                if exc.code == 'host_file_missing':
+                    return None
+                raise MigrationError('unsafe_storage_file') from exc
+            return self._decode(name, raw)
         try:
             fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
         except FileNotFoundError:
@@ -89,18 +130,29 @@ class FileMembershipState:
                 raise MigrationError('unsafe_storage_file')
             with os.fdopen(fd, 'rb', closefd=False) as stream:
                 raw = stream.read(MAX_FILE + 1)
-            if len(raw) > MAX_FILE:
-                raise MigrationError('migration_file_oversized')
-            value = canonical_json_loads(raw, path=name)
-            if not isinstance(value, dict):
-                raise MigrationError('migration_file_invalid')
-            return value, raw
+            return self._decode(name, raw)
         finally:
             os.close(fd)
+
+    @staticmethod
+    def _decode(name: str, raw: bytes) -> tuple[dict, bytes]:
+        if len(raw) > MAX_FILE:
+            raise MigrationError('migration_file_oversized')
+        value = canonical_json_loads(raw, path=name)
+        if not isinstance(value, dict):
+            raise MigrationError('migration_file_invalid')
+        return value, raw
 
     def _write(self, name: str, value: dict):
         self._path(name)  # refuse symlink, including pre-existing target
         content = _bytes(value)
+        if self._win32:
+            try:
+                with mycelium_host_platform.private_directory(self.root, create=False) as lease:
+                    lease.atomic_replace(name, content)
+            except HostPlatformError as exc:
+                raise MigrationError('unsafe_storage_write') from exc
+            return
         fd, temporary = tempfile.mkstemp(prefix='.migration-', dir=self.root)
         try:
             with os.fdopen(fd, 'wb') as stream:
