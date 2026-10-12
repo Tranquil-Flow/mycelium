@@ -13,6 +13,13 @@ entries and handle identity, and models the Windows-only parts in memory:
 * injectable one-shot failures per operation and queued ``MoveFileExW`` errors.
 
 Every call is appended to ``calls`` so tests can assert exact ordering.
+
+Because the bytes live on a POSIX filesystem (directory descriptors,
+``O_NOFOLLOW``, ``F_GETPATH`` or ``/proc/self/fd``), the fake cannot run on a
+real Windows host.  The first operation that needs that backing skips the test
+there (:func:`require_posix_backing`); the real Win32 bindings are exercised by
+the real-host suites instead.  A test that never reaches such an operation
+still runs on Windows.
 """
 
 from __future__ import annotations
@@ -89,7 +96,25 @@ def inherited_profile_acl(user_sid: str = USER_SID) -> w.SecurityDescriptor:
     )
 
 
+def require_posix_backing(operation: str) -> None:
+    """Skip the running test on a real Windows host: ``operation`` needs POSIX backing.
+
+    ``pytest.skip`` raises a ``BaseException``, so product code that maps
+    ``Exception``/``OSError`` to its own refusal codes cannot turn it into a
+    misleading failure.
+    """
+
+    if os.name == "nt":
+        import pytest
+
+        pytest.skip(
+            f"FakeWin32Api simulates win32 over a POSIX filesystem ({operation}); "
+            "on a real Windows host the real Win32 API suites run instead"
+        )
+
+
 def final_path_of_descriptor(descriptor: int) -> str:
+    require_posix_backing("final path of a descriptor")
     # ``sys.platform`` is monkeypatched to ``win32`` while the fake runs, so
     # ask the kernel which host this really is.
     if os.uname().sysname == "Darwin":
@@ -229,6 +254,7 @@ class FakeWin32Api:
                 raise w.Win32Error(w.ERROR_FILE_EXISTS, "CreateFileW")
             if self._parent_missing(path):
                 raise w.Win32Error(w.ERROR_PATH_NOT_FOUND, "CreateFileW")
+            require_posix_backing("O_NOFOLLOW exclusive create")
             descriptor = os.open(
                 path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
             )
@@ -261,6 +287,7 @@ class FakeWin32Api:
         if os.path.isdir(target):
             if not flags & w.FILE_FLAG_BACKUP_SEMANTICS:
                 raise w.Win32Error(w.ERROR_ACCESS_DENIED, "CreateFileW")
+            require_posix_backing("directory descriptor")
             descriptor = os.open(target, os.O_RDONLY)
             kind = "directory"
         else:
