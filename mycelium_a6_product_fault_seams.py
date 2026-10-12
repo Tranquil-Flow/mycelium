@@ -661,18 +661,35 @@ class ProductCaseSeam:
         }
 
     def _apply_successor_prefill_failure(self, record):
+        """Fail the first successor during prefill; no further successor exists.
+
+        Owner decision (A6 c0dc4350-a1, option A): the case proves the
+        bounded abort when the failed successor has no compatible
+        replacement. On a deployment with a third placement the router would
+        legitimately retry onto it, so once the first successor's prefill
+        started and before it is killed, every remaining placement is
+        withheld from this request's next attempt. Withholding only narrows
+        the next attempt's candidates; the running attempt is unaffected.
+        """
+
         target = self._target
         target.fail_source(record)
         started = target.wait_phase(record, "recovery_prefill", attempts=1)
         injected = False
+        withheld = False
         if started:
-            for node in target.successor_nodes(record, 1):
+            nodes = target.successor_nodes(record, 1)
+            if not target.router.a6_withhold_recovery_successors(record.request_id):
+                raise FaultRejected("a6_fault_candidates_not_withheld")
+            withheld = True
+            for node in nodes:
                 target.signal_node(node, signal.SIGKILL)
                 injected = True
         return {
             "source_failure_observed": True,
             "successor_attempt_started": started,
             "successor_failure_injected": injected,
+            "successors_withheld": withheld,
         }
 
     def _apply_cancellation_before_recovery(self, record):
