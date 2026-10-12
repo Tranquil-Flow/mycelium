@@ -1527,6 +1527,7 @@ class LiveRouterPort:
         source_fenced = False
         cutover_committed = False
         successor_registered = False
+        successor_placements: tuple[str, ...] = ()
         command_terminal_error: str | None = None
         try:
             manifest = authority.reserve_candidate(
@@ -1743,11 +1744,19 @@ class LiveRouterPort:
                         self._changed.notify_all()
                     return self.recover_full_context(request_id, checkpoint)
 
-            cancelled = (
-                isinstance(error, InferenceCancelled)
-                or pending.cancellation_requested.is_set()
-                or coordinator.terminal_state(request_id) == "cancelled"
-            )
+            # Which cancellation evidence ends the recovery: each condition is
+            # recorded, because a recovery nobody cancelled must never end in
+            # the cancelled branch (A6 case 15 on c0dc4350).
+            cancelled_conditions = {
+                "inference_cancelled": isinstance(error, InferenceCancelled),
+                "cancellation_requested": pending.cancellation_requested.is_set(),
+                "coordinator_cancelled": (
+                    coordinator.terminal_state(request_id) == "cancelled"),
+            }
+            cancelled = any(cancelled_conditions.values())
+            command_generation_at_failure = (
+                None if pending.command_identity is None
+                else pending.command_identity.cancellation_generation)
             try:
                 if cancelled:
                     if coordinator.terminal_state(request_id) is None:
@@ -1800,6 +1809,25 @@ class LiveRouterPort:
                     if command_terminal_error is not None:
                         pending.terminal_blocked_reason = command_terminal_error
                     self._changed.notify_all()
+            # The route's own failure underneath a cleanup-unproven refusal,
+            # so a blocked successor says what it actually hit.
+            cause = error.__cause__
+            diagnostics = {
+                "request_id": request_id,
+                "error_type": type(error).__name__,
+                "error_code": self._bounded_error_code(error),
+                "route_failure_code": (
+                    None if cause is None else self._bounded_error_code(cause)),
+                "source_fenced": source_fenced,
+                "successor_reserved": successor_identity is not None,
+                "successor_placement_ids": list(successor_placements),
+                "recovery_attempts": pending.recovery_attempts,
+                "terminal_blocked_reason": (
+                    None
+                    if command_terminal_error is None
+                    else command_terminal_error[:96]
+                ),
+            }
             if not cancelled:
                 # Operator diagnostics only: bounded codes, no request content.
                 _LOGGER.warning(
@@ -1807,22 +1835,40 @@ class LiveRouterPort:
                     json.dumps(
                         {
                             "event": "a6_recovery_failed",
-                            "request_id": request_id,
                             "reason": pending.recovery_failure_reason,
-                            "error_type": type(error).__name__,
-                            "error_code": self._bounded_error_code(error),
-                            "source_fenced": source_fenced,
-                            "successor_reserved": successor_identity is not None,
-                            "recovery_attempts": pending.recovery_attempts,
-                            "terminal_blocked_reason": (
-                                None
-                                if command_terminal_error is None
-                                else command_terminal_error[:96]
-                            ),
+                            **diagnostics,
                         },
                         sort_keys=True,
                         separators=(",", ":"),
                     ),
+                )
+            else:
+                _LOGGER.warning(
+                    "%s",
+                    json.dumps(
+                        {
+                            "event": "a6_recovery_cancelled",
+                            "conditions": [name for name, fired in
+                                           cancelled_conditions.items() if fired],
+                            "cancellation_linearized": pending.cancellation_linearized,
+                            "cutover_committed": cutover_committed,
+                            "command_cancellation_generation": (
+                                command_generation_at_failure),
+                            **diagnostics,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                )
+            if command_terminal_error is not None:
+                _record_blocked_terminal(
+                    route=self._route,
+                    request_id=request_id,
+                    reason=command_terminal_error,
+                    pending=pending,
+                    route_error_code=diagnostics["route_failure_code"]
+                    or diagnostics["error_code"],
+                    scoped_incident=False,
                 )
             return False
 
@@ -2751,6 +2797,18 @@ class LiveRouterPort:
             identity_mismatch_fields
             or publisher_generation_mismatch
         ):
+            _LOGGER.warning("%s", json.dumps({
+                "event": "a6_cleanup_receipt_identity_mismatch",
+                "request_id": identity.request_id,
+                "request_attempt": identity.request_attempt,
+                "fields": list(identity_mismatch_fields),
+                "receipt_cancellation_generation": receipt.get("cancellation_generation"),
+                "command_cancellation_generation": identity.cancellation_generation,
+                "receipt_publisher_generation": receipt_publisher_generation,
+                "command_publisher_generation": identity.publisher_generation,
+                "recovery_phase": pending.recovery_phase,
+                "completion_cleanup_held": pending.a6_completion_cleanup_held,
+            }, sort_keys=True, separators=(",", ":"), default=str))
             _LOGGER.error(
                 "cleanup receipt identity mismatch request_id=%s fields=%s "
                 "receipt_publisher_generation=%r controller_publisher_generation=%r "
