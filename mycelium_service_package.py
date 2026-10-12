@@ -20,7 +20,8 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
+import posixpath
 import plistlib
 import re
 import stat
@@ -50,6 +51,22 @@ def _absolute(value: Any, code: str) -> str:
         raise ServicePackageError(code)
     path = Path(value)
     if not path.is_absolute() or str(path) != os.path.abspath(value):
+        raise ServicePackageError(code)
+    return value
+
+
+def _posix_absolute(value: Any, code: str) -> str:
+    """``_absolute`` for the launchd/systemd members, judged identically on every host.
+
+    Those members always run on a POSIX host, so a Windows build host (the A13
+    Windows ``finalize`` step) must not judge their paths with ``ntpath``.  On a
+    POSIX host this is exactly ``_absolute``.
+    """
+
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise ServicePackageError(code)
+    path = PurePosixPath(value)
+    if not path.is_absolute() or str(path) != posixpath.abspath(value):
         raise ServicePackageError(code)
     return value
 
@@ -589,7 +606,7 @@ def build_service_package(
     value: Mapping[str, Any], *, package_root: Path, include_windows_member: bool = False,
     systemd_user_unit: bool = False,
 ) -> dict[str, Any]:
-    config = validate_service_config(value)
+    config = _validate_config(value, absolute=_posix_absolute)
     if not package_root.is_absolute():
         raise ServicePackageError("service_package_root_invalid")
     config_path = package_root / "service-config.json"
