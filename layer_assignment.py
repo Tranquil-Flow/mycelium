@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import uuid
-from pathlib import PurePosixPath
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 import model_manifest as mm
@@ -96,10 +96,51 @@ def _normalize_runtime(
    return normalized
 
 
+_WINDOWS_RESERVED_NAMES = frozenset(
+   {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+   | {f"COM{n}" for n in range(1, 10)}
+   | {f"LPT{n}" for n in range(1, 10)}
+)
+_WINDOWS_FORBIDDEN_CHARACTERS = frozenset('<>:"/\\|?*') | frozenset(chr(n) for n in range(1, 32))
+
+
+def _is_windows_drive_path(value: str) -> bool:
+   return len(value) >= 3 and value[0].isascii() and value[0].isalpha() and value[1:3] == ":\\"
+
+
+def _windows_component_is_canonical(part: str) -> bool:
+   # One spelling per directory: Windows strips trailing dots and spaces, maps
+   # reserved device names onto devices, and reads ':' as a stream separator.
+   return (
+      part not in {"", ".", ".."}
+      and not part.endswith((".", " "))
+      and not (set(part) & _WINDOWS_FORBIDDEN_CHARACTERS)
+      and part.split(".", 1)[0].rstrip(" ").upper() not in _WINDOWS_RESERVED_NAMES
+   )
+
+
 def validate_target_cache_root(value: str, node_id: str = "peer") -> str:
-   """Validate a target-owned POSIX path without resolving it on the coordinator."""
+   """Validate a target-owned absolute path without resolving it on the coordinator.
+
+   The coordinator does not know the target's file system, so it accepts the two
+   absolute spellings a target can own: a canonical POSIX path (``/srv/cache``) or
+   a canonical local Windows drive path (``C:\\Mycelium\\cache``).  Both get the
+   same checks: absolute, already normalized, no ``.``/``..`` components.  Windows
+   paths must also be on a local drive (no UNC share or ``\\\\?\\`` device path) and
+   each component must have exactly one spelling.  The target still checks that the
+   root is absolute in its *own* flavor before touching it.
+   """
    if not isinstance(value, str) or not value or "\x00" in value:
-      raise ValueError(f"artifact cache root for {node_id} must be an absolute POSIX path")
+      raise ValueError(f"artifact cache root for {node_id} must be an absolute path")
+   if _is_windows_drive_path(value):
+      windows_path = PureWindowsPath(value)
+      if str(windows_path) != value or not all(
+         _windows_component_is_canonical(part) for part in windows_path.parts[1:]
+      ):
+         raise ValueError(f"artifact cache root for {node_id} must be canonical")
+      return value
+   if value.startswith("\\"):
+      raise ValueError(f"artifact cache root for {node_id} must be absolute on a local drive")
    path = PurePosixPath(value)
    if not path.is_absolute():
       raise ValueError(f"artifact cache root for {node_id} must be absolute")

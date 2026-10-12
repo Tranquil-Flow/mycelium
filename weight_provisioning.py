@@ -179,6 +179,11 @@ def provision_assignment(
 ) -> dict[str, Any]:
    _validate_assignment(assignment)
    assigned_cache_root = assignment["artifact_cache_root"]
+   # The assignment admits POSIX and Windows spellings; this host owns only its own.
+   if not Path(assigned_cache_root).is_absolute():
+      raise ValueError(
+         f"artifact cache root for {assignment.get('node_id', 'peer')} is not absolute on this host"
+      )
    cache_root = Path(assigned_cache_root).resolve()
    cache_root.mkdir(parents=True, exist_ok=True)
    required_bytes = sum(record["size_bytes"] for record in assignment["files"])
