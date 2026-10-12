@@ -125,9 +125,11 @@ class Win32Error(OSError):
     """One failed Win32 call; ``winerror`` is the ``GetLastError`` value."""
 
     def __init__(self, winerror: int, operation: str) -> None:
+        # On Windows, OSError.__init__ resets the C-level winerror slot, so the
+        # attributes must be assigned after it (else winerror is None).
+        super().__init__(f"{operation} failed with Win32 error {int(winerror)}")
         self.winerror = int(winerror)
         self.operation = operation
-        super().__init__(f"{operation} failed with Win32 error {int(winerror)}")
 
 
 @dataclass(frozen=True)
