@@ -135,8 +135,8 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "b6a03432a93d684151980fc206b91ed91a88bd30c302b255f903a45ab1af5d5c",
-          "size_bytes": 143245
+          "sha256": "839099c236e050dcac8edd240f1d16d8703359e99584508650c0e0f24b692995",
+          "size_bytes": 146269
         },
         {
           "path": "ui/web/src/features/liveRoute/m16Runtime.ts",
@@ -380,8 +380,8 @@
         },
         {
           "path": "ui/web/scripts/a6-product-browser-e2e.mjs",
-          "sha256": "ac58058802dd6815db6e49cb6e68239808d7443b4daf4edccf0bc937b889642d",
-          "size_bytes": 24208
+          "sha256": "f0a41308337abd9c7bebfb8262d829c06d1e410700b4684a00f29c8b28fa6a7e",
+          "size_bytes": 25763
         }
       ],
       "protocol": "mycelium.full_context_recovery_gate.v1"
@@ -450,8 +450,8 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "b6a03432a93d684151980fc206b91ed91a88bd30c302b255f903a45ab1af5d5c",
-          "size_bytes": 143245
+          "sha256": "839099c236e050dcac8edd240f1d16d8703359e99584508650c0e0f24b692995",
+          "size_bytes": 146269
         },
         {
           "path": "mycelium_live/supervisor.py",
@@ -670,8 +670,8 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "b6a03432a93d684151980fc206b91ed91a88bd30c302b255f903a45ab1af5d5c",
-          "size_bytes": 143245
+          "sha256": "839099c236e050dcac8edd240f1d16d8703359e99584508650c0e0f24b692995",
+          "size_bytes": 146269
         },
         {
           "path": "physical_inference_node.py",
@@ -820,8 +820,8 @@
       "owner_sources": [
         {
           "path": "mycelium_live/route.py",
-          "sha256": "c448bcc865b1d6b0be929402ffbec93658e056c5bd7022721e6296ae3faf32a6",
-          "size_bytes": 303455
+          "sha256": "75cf5782130e8851ae5400c395820d4751765a6ff47a40e146957d972f48be19",
+          "size_bytes": 304952
         },
         {
           "path": "mycelium_live/registry.py",
@@ -840,8 +840,8 @@
       "owner_sources": [
         {
           "path": "mycelium_live/route.py",
-          "sha256": "c448bcc865b1d6b0be929402ffbec93658e056c5bd7022721e6296ae3faf32a6",
-          "size_bytes": 303455
+          "sha256": "75cf5782130e8851ae5400c395820d4751765a6ff47a40e146957d972f48be19",
+          "size_bytes": 304952
         },
         {
           "path": "ui/web/src/features/liveRoute/routeStatus.ts",
@@ -1485,8 +1485,8 @@
         },
         {
           "path": "mycelium_live/route.py",
-          "sha256": "c448bcc865b1d6b0be929402ffbec93658e056c5bd7022721e6296ae3faf32a6",
-          "size_bytes": 303455
+          "sha256": "75cf5782130e8851ae5400c395820d4751765a6ff47a40e146957d972f48be19",
+          "size_bytes": 304952
         }
       ],
       "protocol": "mycelium.product_ui.swarm.v1"
@@ -1795,8 +1795,8 @@
         },
         {
           "path": "mycelium_live/route.py",
-          "sha256": "c448bcc865b1d6b0be929402ffbec93658e056c5bd7022721e6296ae3faf32a6",
-          "size_bytes": 303455
+          "sha256": "75cf5782130e8851ae5400c395820d4751765a6ff47a40e146957d972f48be19",
+          "size_bytes": 304952
         }
       ],
       "protocol": "mycelium.scoped_runtime_incident.v1"
@@ -1955,8 +1955,8 @@
         },
         {
           "path": "mycelium_live/route.py",
-          "sha256": "c448bcc865b1d6b0be929402ffbec93658e056c5bd7022721e6296ae3faf32a6",
-          "size_bytes": 303455
+          "sha256": "75cf5782130e8851ae5400c395820d4751765a6ff47a40e146957d972f48be19",
+          "size_bytes": 304952
         },
         {
           "path": "mycelium_router/transports/iroh.py",
@@ -1985,8 +1985,8 @@
         },
         {
           "path": "native/iroh_transport/src/sidecar.rs",
-          "sha256": "d4f0cca692f3218618cbef455a9d13bd1f47a03c70df13bb7494a1e345f28cc6",
-          "size_bytes": 153984
+          "sha256": "b3c4b75a445562f93956b0bff30d12c6ae4f07d9d46510a37a2b6a5686de7d54",
+          "size_bytes": 153958
         }
       ],
       "protocol": "mycelium.transport_path_observation.v1"
