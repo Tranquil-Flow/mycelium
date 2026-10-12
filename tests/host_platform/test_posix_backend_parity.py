@@ -6,6 +6,7 @@ on the same inputs, so the two cannot drift apart silently.
 
 from __future__ import annotations
 
+import sys
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -48,6 +49,8 @@ def test_private_directory_creation_matches_the_node_lease(tmp_path) -> None:
         lease.revalidate()
     with process.private_directory_lease(theirs, create=True) as lease:
         lease.revalidate()
+    if sys.platform == "win32":
+        return  # no mode bits or uids: the DACL is owner-only (test_win32_private_directory.py)
     for path in (ours, theirs):
         metadata = path.stat()
         assert stat.S_IMODE(metadata.st_mode) == 0o700
@@ -77,6 +80,7 @@ def test_a_symlinked_directory_is_refused_by_both(tmp_path) -> None:
         process.private_directory_lease(tmp_path / "link", create=False)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX mkdir(0o700) setup: on win32 that directory is not owner-only")
 def test_atomic_replace_matches_the_membership_state_writer(tmp_path) -> None:
     ours = tmp_path / "ours"
     theirs = tmp_path / "theirs"
@@ -97,6 +101,7 @@ def test_atomic_replace_matches_the_membership_state_writer(tmp_path) -> None:
     assert durable_membership.load_membership_state(ours) == json.loads(raw)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX chmod widening: no mode bits on win32")
 @pytest.mark.parametrize("mode", [0o644, 0o640, 0o604])
 def test_a_widened_file_is_refused_by_both_readers(tmp_path, mode) -> None:
     root = tmp_path / "state"
@@ -119,8 +124,9 @@ def test_exclusive_create_matches_the_identity_writer(tmp_path) -> None:
         assert _code(lambda: lease.create_file_exclusive("node.key", b"x" * 32)) == "host_file_exists"
         lease.create_file_exclusive("other.key", b"y" * 32)
         assert lease.read_file("node.key", max_bytes=33) == (root / "node.key").read_bytes()
-    for name in ("node.key", "other.key"):
-        assert stat.S_IMODE((root / name).stat().st_mode) == 0o600
+    if sys.platform != "win32":  # no mode bits on win32
+        for name in ("node.key", "other.key"):
+            assert stat.S_IMODE((root / name).stat().st_mode) == 0o600
 
 
 def test_open_beneath_matches_the_stage_pack_walk(tmp_path) -> None:

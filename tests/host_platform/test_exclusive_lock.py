@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import os
 import threading
 
@@ -28,7 +29,8 @@ def test_posix_lock_is_exclusive_and_released(tmp_path):
             assert _busy(second) == "host_lock_busy"
         with second.exclusive_lock("t.lock", blocking=False):
             pass
-        assert oct(os.stat(root / "t.lock").st_mode & 0o777) == "0o600"
+        if sys.platform != "win32":  # no mode bits on win32
+            assert oct(os.stat(root / "t.lock").st_mode & 0o777) == "0o600"
 
 
 def test_posix_blocking_lock_waits_for_the_holder(tmp_path):
@@ -60,7 +62,8 @@ def test_posix_lock_refuses_a_symlinked_lock_file(tmp_path):
         with pytest.raises(HostPlatformError) as caught:
             with directory.exclusive_lock("t.lock"):
                 pass
-        assert caught.value.code == "host_io_failed"
+        # The win32 backend refuses the reparse point as a path, POSIX at open.
+        assert caught.value.code == ("host_path_invalid" if sys.platform == "win32" else "host_io_failed")
 
 
 def test_win32_lock_is_exclusive_owner_only_and_released(monkeypatch, tmp_path):

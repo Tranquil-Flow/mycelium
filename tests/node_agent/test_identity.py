@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import os
 from pathlib import Path
 import stat
@@ -31,8 +32,9 @@ def test_identity_survives_restart_and_signs_with_same_pin(tmp_path: Path) -> No
     metadata = key_path.lstat()
     assert stat.S_ISREG(metadata.st_mode)
     assert metadata.st_nlink == 1
-    assert stat.S_IMODE(metadata.st_mode) == 0o600
-    assert stat.S_IMODE(key_path.parent.lstat().st_mode) == 0o700
+    if sys.platform != "win32":  # Windows has no mode bits: owner-only is the DACL
+        assert stat.S_IMODE(metadata.st_mode) == 0o600
+        assert stat.S_IMODE(key_path.parent.lstat().st_mode) == 0o700
     assert key_path.stat().st_size == 32
     assert "verification_key" not in key_path.name
 
@@ -87,6 +89,7 @@ def test_concurrent_first_load_converges_on_one_identity(tmp_path: Path) -> None
     assert len({item.verification_key_digest for item in signers}) == 1
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX 0o700/0o600 setup; win32 refusals are in test_node_win32_seam.py")
 def test_rejects_symlinked_key_and_hardlinked_key(tmp_path: Path) -> None:
     private = tmp_path / "private"
     private.mkdir(mode=0o700)
@@ -139,6 +142,7 @@ def test_load_only_rejects_symlinked_ancestor_above_private_parent(
     assert exc_info.value.code == "node_identity_path_invalid"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX mode-bit refusals; win32 refusals are in test_node_win32_seam.py")
 def test_rejects_truncated_or_nonexact_key_file_mode(tmp_path: Path) -> None:
     private = tmp_path / "private"
     private.mkdir(mode=0o700)

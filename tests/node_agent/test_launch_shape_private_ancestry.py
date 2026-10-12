@@ -14,6 +14,7 @@ uid 0 cannot be created without root) while every descriptor opened is real.
 
 from __future__ import annotations
 
+import sys
 import importlib
 import os
 import stat
@@ -21,6 +22,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+# Root-owned sticky ancestors and uid/mode metadata are POSIX; the win32 walk is
+# handle-bound and refuses reparse points instead (test_node_win32_seam.py).
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX sticky-ancestor walk (uids, mode bits)"
+)
 
 process = importlib.import_module("mycelium_node.process")
 

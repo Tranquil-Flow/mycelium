@@ -7,7 +7,9 @@ host reports win32 but no Win32 API can be bound.
 
 from __future__ import annotations
 
+import ctypes
 import importlib
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -27,6 +29,7 @@ def _private_root(tmp_path):
     return root
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX backend dispatch: this host is win32")
 def test_posix_host_dispatches_to_the_posix_backend(tmp_path) -> None:
     assert mycelium_host_platform.is_win32() is False
     with mycelium_host_platform.private_directory(_private_root(tmp_path), create=False) as lease:
@@ -49,6 +52,8 @@ def test_selection_is_read_at_call_time(tmp_path, monkeypatch) -> None:
     assert mycelium_host_platform.is_win32() is True
     monkeypatch.setattr(mycelium_host_platform.sys, "platform", "darwin")
     assert mycelium_host_platform.is_win32() is False
+    if os.name == "nt":
+        return  # the POSIX backend itself cannot run on a real Windows host
     with mycelium_host_platform.private_directory(root, create=False) as lease:
         assert isinstance(lease, _posix.PosixPrivateDirectory)
 
@@ -57,6 +62,8 @@ def test_win32_without_a_bindable_api_fails_closed(tmp_path, monkeypatch) -> Non
     monkeypatch.setattr(mycelium_host_platform.sys, "platform", "win32")
     monkeypatch.setattr(mycelium_host_platform, "_API_OVERRIDE", None)
     monkeypatch.setattr(mycelium_host_platform, "_REAL_API", None)
+    # On a real Windows host the binding would succeed: take ctypes.WinDLL away.
+    monkeypatch.delattr(ctypes, "WinDLL", raising=False)
     with pytest.raises(HostPlatformError) as caught:
         mycelium_host_platform.private_directory(tmp_path / "state", create=True)
     assert caught.value.code == "host_platform_unavailable"
@@ -71,10 +78,17 @@ def test_win32_without_a_bindable_api_fails_closed(tmp_path, monkeypatch) -> Non
         assert caught.value.code == "host_platform_unavailable"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="this host is Windows: the real binding binds")
 def test_the_real_binding_refuses_off_a_windows_host() -> None:
     with pytest.raises(HostPlatformError) as caught:
         load_real_api()
     assert caught.value.code == "host_platform_unavailable"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="real Win32 binding")
+def test_the_real_binding_binds_on_a_windows_host() -> None:
+    api = load_real_api()
+    assert api.current_user_sid().startswith("S-1-5-")
 
 
 def test_use_win32_api_restores_the_previous_api() -> None:

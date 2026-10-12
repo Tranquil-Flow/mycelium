@@ -4,10 +4,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
+
+import pytest
 
 from mycelium_node.process import capture_executable_identity
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="shebang script without an .exe image; win32 resolves .exe through PATHEXT")
 def test_capture_executable_identity_resolves_bare_path_command(
     tmp_path: Path,
     monkeypatch,

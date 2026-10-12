@@ -7,6 +7,7 @@ CREATE_NEW, MoveFileExW) and fail closed with the module's own stable codes.
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -133,6 +134,8 @@ def test_identity_without_a_win32_api_fails_closed(tmp_path, monkeypatch) -> Non
     monkeypatch.setattr(mycelium_host_platform.sys, "platform", "win32")
     monkeypatch.setattr(mycelium_host_platform, "_API_OVERRIDE", None)
     monkeypatch.setattr(mycelium_host_platform, "_REAL_API", None)
+    # On a real Windows host the binding would succeed: take ctypes.WinDLL away.
+    monkeypatch.delattr(ctypes, "WinDLL", raising=False)
     key = tmp_path / "identity" / "node.key"
     assert _identity_code(lambda: identity.load_or_create_node_signer(key)) == (
         "node_identity_path_invalid"

@@ -206,8 +206,9 @@ def test_correlated_waiters_allow_out_of_order_concurrent_responses(
                     "result": {{"value": command["payload"].get("value")}},
                 }}
                 with write_lock:
-                    sys.stdout.write(json.dumps(response, sort_keys=True, separators=(",", ":")) + "\\n")
-                    sys.stdout.flush()
+                    # Binary stdout: text mode writes CRLF on Windows, which is not a canonical frame.
+                    sys.stdout.buffer.write((json.dumps(response, sort_keys=True, separators=(",", ":")) + "\\n").encode())
+                    sys.stdout.buffer.flush()
 
             workers = []
             for raw in sys.stdin.buffer:
@@ -289,7 +290,9 @@ def respond(command):
         "result": {"value": command["payload"]["value"]},
     }
     with write_lock:
-        print(json.dumps(response, sort_keys=True, separators=(",", ":")), flush=True)
+        # Binary stdout: text mode writes CRLF on Windows, which is not a canonical frame.
+        sys.stdout.buffer.write(json.dumps(response, sort_keys=True, separators=(",", ":")).encode() + b"\\n")
+        sys.stdout.buffer.flush()
 
 for raw in sys.stdin:
     command = json.loads(raw)
@@ -364,7 +367,9 @@ def respond(command):
         "result": {"value": command["payload"].get("value")},
     }
     with write_lock:
-        print(json.dumps(response, sort_keys=True, separators=(",", ":")), flush=True)
+        # Binary stdout: text mode writes CRLF on Windows, which is not a canonical frame.
+        sys.stdout.buffer.write(json.dumps(response, sort_keys=True, separators=(",", ":")).encode() + b"\\n")
+        sys.stdout.buffer.flush()
 
 for raw in sys.stdin:
     command = json.loads(raw)
@@ -457,7 +462,9 @@ def respond(command):
         "result": {"value": command["payload"].get("value")},
     }
     with write_lock:
-        print(json.dumps(response, sort_keys=True, separators=(",", ":")), flush=True)
+        # Binary stdout: text mode writes CRLF on Windows, which is not a canonical frame.
+        sys.stdout.buffer.write(json.dumps(response, sort_keys=True, separators=(",", ":")).encode() + b"\\n")
+        sys.stdout.buffer.flush()
 
 for raw in sys.stdin:
     command = json.loads(raw)
@@ -795,7 +802,9 @@ def respond(command):
         "result": {"value": command["payload"].get("value")},
     }
     with write_lock:
-        print(json.dumps(response, sort_keys=True, separators=(",", ":")), flush=True)
+        # Binary stdout: text mode writes CRLF on Windows, which is not a canonical frame.
+        sys.stdout.buffer.write(json.dumps(response, sort_keys=True, separators=(",", ":")).encode() + b"\\n")
+        sys.stdout.buffer.flush()
 
 for raw in sys.stdin:
     command = json.loads(raw)

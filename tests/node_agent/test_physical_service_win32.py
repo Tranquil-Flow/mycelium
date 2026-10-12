@@ -8,6 +8,7 @@ root, the graceful-stop event channel and the runner lock refusal.
 
 from __future__ import annotations
 
+import sys
 import _thread
 import hashlib
 import os
@@ -122,6 +123,7 @@ def test_the_win32_deadline_refuses_off_the_main_thread(fake) -> None:
     assert outcome == ["command_deadline_unavailable"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX deadline path: this host is win32")
 def test_a_host_without_setitimer_refuses_instead_of_running_unbounded(monkeypatch) -> None:
     assert mycelium_host_platform.is_win32() is False
     monkeypatch.delattr(node.signal, "setitimer")
@@ -133,6 +135,7 @@ def test_a_host_without_setitimer_refuses_instead_of_running_unbounded(monkeypat
     assert ran == []
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX deadline path: no setitimer on win32")
 def test_the_posix_deadline_still_uses_setitimer() -> None:
     assert hasattr(signal, "setitimer")
     with pytest.raises(node.NodeCommandError) as caught:
@@ -203,11 +206,12 @@ def test_win32_capacity_root_must_be_owner_only(tmp_path, fake) -> None:
 def test_the_cancel_diagnostic_is_skipped_without_no_follow(tmp_path, monkeypatch) -> None:
     destination = tmp_path / "diagnostic.log"
     monkeypatch.setenv(node._CANCEL_PHASE_DIAGNOSTIC_ENV, str(destination))
-    monkeypatch.delattr(node.os, "O_NOFOLLOW")
+    monkeypatch.delattr(node.os, "O_NOFOLLOW", raising=False)  # absent on Windows
     node._cancel_phase_diagnostic("phase", 1.0, call_index=1)
     assert not destination.exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX O_NOFOLLOW diagnostic writer: absent on win32")
 def test_the_cancel_diagnostic_still_writes_on_posix(tmp_path, monkeypatch) -> None:
     destination = tmp_path / "diagnostic.log"
     monkeypatch.setenv(node._CANCEL_PHASE_DIAGNOSTIC_ENV, str(destination))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 import os
 
 import pytest
@@ -32,6 +33,7 @@ def _state() -> dict:
     }
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX chmod 0o700 setup and mode check; win32 round trip is in test_node_win32_seam.py")
 def test_membership_state_roundtrip_is_owner_only_and_atomic(tmp_path: Path) -> None:
     tmp_path.chmod(0o700)
     expected = _state()

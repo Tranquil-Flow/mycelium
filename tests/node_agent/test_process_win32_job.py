@@ -300,6 +300,7 @@ def test_the_write_path_dispatches_to_the_threaded_writer_on_win32(monkeypatch) 
     assert seen == [b"p"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX launch path: this host is win32")
 def test_posix_launch_never_touches_the_job_seam(tmp_path) -> None:
     assert mycelium_host_platform.is_win32() is False
     assert Path(process.__file__).exists()

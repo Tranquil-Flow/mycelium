@@ -7,6 +7,7 @@ canonical-script adapter on the same bytes and parsed by the real controller.
 
 from __future__ import annotations
 
+import sys
 import hashlib
 import io
 import json
@@ -74,17 +75,26 @@ def test_stage_ack_matches_the_macos_adapter_and_the_controller_accepts_it(tmp_p
     archive, digest = bundle(("a/one.bin", b"1" * 10), ("physical_inference_node.py", b"# n\n"))
     windows = stager(tmp_path / "w")
     ack = windows.prepare(archive=archive, archive_digest=digest)
-    mac = TargetStaging(tmp_path / "m" / "mycelium-target", node_id=NODE, max_archive_bytes=100_000,
-                        max_disk_bytes=200_000, current_member=lambda: True, authorize=lambda i: True)
-    mac_ack = mac.prepare(archive=archive, archive_digest=digest)
-    assert {**ack, "staging_root": None} == {**mac_ack, "staging_root": None}
+    # The macOS reference adapter is POSIX-only (O_NOFOLLOW, mode bits): compare
+    # against it off Windows; on a real Windows host check the Windows side alone.
+    windows_host = sys.platform == "win32"
+    if not windows_host:
+        mac = TargetStaging(tmp_path / "m" / "mycelium-target", node_id=NODE, max_archive_bytes=100_000,
+                            max_disk_bytes=200_000, current_member=lambda: True, authorize=lambda i: True)
+        mac_ack = mac.prepare(archive=archive, archive_digest=digest)
+        assert {**ack, "staging_root": None} == {**mac_ack, "staging_root": None}
     assert ack["staging_root"] == logical_staging_root(NODE, RUN)
     assert _controller_parses(tmp_path, ack, archive, digest) == ack
 
     def tree(root):
         return sorted((p.relative_to(root).as_posix(), p.read_bytes()) for p in root.rglob("*") if p.is_file())
 
-    assert tree(windows.staging_root) == tree(mac.staging_root)
+    if windows_host:
+        assert {("a/one.bin", b"1" * 10), ("physical_inference_node.py", b"# n\n")} <= set(
+            tree(windows.staging_root)
+        )
+    else:
+        assert tree(windows.staging_root) == tree(mac.staging_root)
     assert str(windows.staging_root).startswith(str(tmp_path / "w"))
     assert windows.prepare(archive=archive, archive_digest=digest) == ack  # exact retry
     assert windows.verify_prepared(archive=archive, archive_digest=digest) == {

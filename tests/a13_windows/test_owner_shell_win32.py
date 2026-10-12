@@ -179,7 +179,7 @@ def test_relay_isolates_userprofile_and_closes_without_o_nofollow(fake, tmp_path
     monkeypatch.setattr(relay, "installed_relay_binary", lambda: "cloudflared.exe")
     monkeypatch.setattr(relay, "SeedRelayProxy", Proxy)
     monkeypatch.setattr(relay.subprocess, "Popen", Process)
-    monkeypatch.delattr(os, "O_NOFOLLOW")  # absent on Windows
+    monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)  # absent on Windows
     tunnel = relay.TemporaryHttpsRelay(tmp_path / "relay")
     tunnel.start(acknowledged=True, max_seconds=30)
     assert tunnel.public_origin == "https://one.trycloudflare.com"

@@ -15,6 +15,7 @@ executes it.
 
 from __future__ import annotations
 
+import platform
 import hashlib
 import json
 from pathlib import Path
@@ -155,7 +156,22 @@ def test_dispatch_requires_a_native_windows_x86_64_observation() -> None:
     )
 
 
-@pytest.mark.parametrize("system", ["Darwin", "Linux", "FreeBSD", None, 7])
+@pytest.mark.parametrize(
+    "system",
+    [
+        "Darwin",
+        "Linux",
+        "FreeBSD",
+        # None observes this host, which is only a refusal off Windows.
+        pytest.param(
+            None,
+            marks=pytest.mark.skipif(
+                platform.system() == "Windows", reason="None observes a Windows host"
+            ),
+        ),
+        7,
+    ],
+)
 def test_non_windows_systems_are_refused_never_inferred(system) -> None:
     code = _code(lambda: detect_windows_dispatch(system=system, machine="AMD64"))
     assert code in {"unsupported_platform", "platform_observation_invalid"}

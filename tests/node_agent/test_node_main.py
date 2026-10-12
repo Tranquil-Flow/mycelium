@@ -81,6 +81,31 @@ def node_main_sidecar_binary(
     )
 
 
+# POSIX-only implementation details.  On win32 the node uses handle-bound
+# leases, Job Objects and .exe images instead (test_node_win32_seam.py,
+# test_process_win32_job.py), so these cases cannot run on a real Windows host.
+_POSIX_DESCRIPTORS = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX descriptor inventory or directory descriptors (/dev/fd, fchdir); win32 has neither",
+)
+_POSIX_PROCESS_GROUPS = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX process-group supervision (uids, killpg, signals, fifos); win32 uses Job Objects",
+)
+_POSIX_MODES = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX mode bits or shebang scripts; win32 checks DACLs and .exe images",
+)
+# End-to-end node CLI cases whose fixtures are POSIX-shaped (mkdir 0o700 data
+# directories, chmod'ed bundle files, shebang sidecars, select() on pipes, the
+# POSIX walk anchor).  The node CLI itself runs on win32; porting these fixtures
+# is a test-portability follow-up, not a product gap.
+_POSIX_NODE_CLI_FIXTURE = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX-shaped node CLI fixture (0o700 dirs, shebang sidecar, select on pipes)",
+)
+
+
 def _ids():
     values = count(1)
     return lambda: f"node-main-seed-message-{next(values)}"
@@ -286,6 +311,7 @@ def test_node_module_joins_seed_supervises_child_and_cleans_up(
     assert _pid_exists(child_pid) is False
 
 
+@_POSIX_NODE_CLI_FIXTURE
 def test_membership_control_only_renews_without_launching_stage_runtime(
     tmp_path: Path,
 ) -> None:
@@ -541,6 +567,7 @@ def test_node_accepts_join_bundle_from_stdin_without_secret_leakage(
     assert status["route_ready"] is False
 
 
+@_POSIX_NODE_CLI_FIXTURE
 def test_node_dry_run_performs_no_network_or_process_io(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -601,6 +628,7 @@ def test_node_dry_run_performs_no_network_or_process_io(
     assert captured.err == ""
 
 
+@_POSIX_NODE_CLI_FIXTURE
 def test_source_only_dry_run_requires_no_sidecar(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -649,6 +677,7 @@ def test_source_only_dry_run_requires_no_sidecar(
     assert captured.err == ""
 
 
+@_POSIX_MODES
 def test_node_rejects_non_owner_only_bundle_file(tmp_path: Path) -> None:
     data_dir = tmp_path / "node-private"
     data_dir.mkdir(mode=0o700)
@@ -682,6 +711,7 @@ def test_node_rejects_non_owner_only_bundle_file(tmp_path: Path) -> None:
     assert stat.S_IMODE(bundle_file.stat().st_mode) == 0o644
 
 
+@_POSIX_NODE_CLI_FIXTURE
 def test_node_rejects_non_owner_only_state_root(tmp_path: Path) -> None:
     data_dir = tmp_path / "node-public-state"
     data_dir.mkdir(mode=0o755)
@@ -833,6 +863,7 @@ def test_node_runtime_failure_has_distinct_exit_status(
     assert bundle["token"] not in completed.stdout + completed.stderr
 
 
+@_POSIX_NODE_CLI_FIXTURE
 def test_sigterm_reaps_node_service_and_sidecar_within_deadline(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1018,6 +1049,7 @@ def test_node_state_root_rejects_nonfinal_symlink_without_creation(
     assert not (real_parent / "state").exists()
 
 
+@_POSIX_NODE_CLI_FIXTURE
 def test_node_dry_run_accepts_absent_root_without_creating_it(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -1060,6 +1092,7 @@ def test_node_dry_run_accepts_absent_root_without_creating_it(
     capsys.readouterr()
 
 
+@_POSIX_MODES
 def test_join_bundle_open_is_descriptor_bounded_and_never_uses_read_bytes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1192,6 +1225,7 @@ def test_join_rejection_requires_complete_canonical_status_code_matrix() -> None
             )
 
 
+@_POSIX_NODE_CLI_FIXTURE
 def test_private_path_anchor_avoids_root_walk_and_rejects_escape(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1332,6 +1366,7 @@ def test_node_main_catches_keyerror_without_value_or_traceback(
     assert "Traceback" not in captured.err
 
 
+@_POSIX_PROCESS_GROUPS
 def test_process_verified_signal_refuses_changed_or_protected_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1400,6 +1435,7 @@ def test_process_verified_signal_refuses_changed_or_protected_identity(
     assert sent == []
 
 
+@_POSIX_PROCESS_GROUPS
 def test_reader_thread_start_failure_reaps_launched_child(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1581,6 +1617,7 @@ def test_node_parser_rejects_file_and_stdin_bundle_sources(
     assert completed.stderr == "node_preflight_failed\n"
 
 
+@_POSIX_MODES
 def test_sidecar_replacement_is_rejected_before_popen(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1635,6 +1672,7 @@ def test_temporary_root_cleanup_refuses_path_replacement(tmp_path: Path) -> None
     moved.rmdir()
 
 
+@_POSIX_PROCESS_GROUPS
 def test_process_group_signal_reinventories_after_protected_group_discovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1721,6 +1759,7 @@ def test_process_group_signal_reinventories_after_protected_group_discovery(
     ]
 
 
+@_POSIX_PROCESS_GROUPS
 def test_process_group_signal_poll_consuming_deadline_prevents_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1782,6 +1821,7 @@ def test_process_group_signal_poll_consuming_deadline_prevents_action(
     assert calls == [("protected", 11.0), "poll"]
 
 
+@_POSIX_PROCESS_GROUPS
 def test_process_group_signal_poll_error_prevents_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1968,6 +2008,7 @@ def test_heartbeat_shape_validator_rejects_noncanonical_scheduled_shapes() -> No
             membership.validate_heartbeat_shape(**{**valid, **change})
 
 
+@_POSIX_NODE_CLI_FIXTURE
 def test_heartbeat_validator_delegates_before_mutation_and_during_dry_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2336,6 +2377,7 @@ def test_join_route_uses_one_exact_immutable_error_status_vocabulary(
             )
 
 
+@_POSIX_DESCRIPTORS
 def test_working_directory_restore_retries_and_preserves_primary_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2595,6 +2637,7 @@ def test_liveness_source_requires_exact_str_before_every_side_effect(
     assert session._activity_receipts == receipts
 
 
+@_POSIX_PROCESS_GROUPS
 def test_process_group_terminal_action_has_no_followup_observation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2675,6 +2718,7 @@ def test_process_group_terminal_action_has_no_followup_observation(
         ]
 
 
+@_POSIX_PROCESS_GROUPS
 def test_pre_exec_launcher_blocks_target_until_owned_release(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2745,6 +2789,7 @@ signal.pause()
         supervised.close()
 
 
+@_POSIX_PROCESS_GROUPS
 def test_owned_group_receives_term_before_kill(
     tmp_path: Path,
 ) -> None:
@@ -2790,6 +2835,7 @@ while True:
             supervised._process.wait(timeout=2.0)
 
 
+@_POSIX_PROCESS_GROUPS
 def test_post_release_inventory_failure_cleans_preowned_group(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2836,6 +2882,7 @@ def test_post_release_inventory_failure_cleans_preowned_group(
         os.killpg(launched[0].pid, 0)
 
 
+@_POSIX_PROCESS_GROUPS
 def test_leader_dead_inherited_sidecar_group_is_cleaned(
     tmp_path: Path,
 ) -> None:
@@ -2906,6 +2953,7 @@ os._exit(0)
             supervised._process.wait(timeout=2.0)
 
 
+@_POSIX_DESCRIPTORS
 def test_process_cleanup_retry_and_handshake_fd_thread_inventory_stay_stable(
     tmp_path: Path,
 ) -> None:
@@ -2962,6 +3010,7 @@ while True:
     } - baseline_threads == set()
 
 
+@_POSIX_DESCRIPTORS
 def test_handshake_release_failure_closes_fds_and_reaps_blocked_launcher(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3335,7 +3384,25 @@ def test_join_client_hides_status_mismatched_authoritative_error() -> None:
     def serve_one() -> None:
         connection, _address = listener.accept()
         with connection:
-            connection.recv(65536)
+            # Drain the whole request first: closing a socket with unread bytes
+            # resets the connection on Windows before the client reads the reply.
+            request = b""
+            while b"\r\n\r\n" not in request:
+                chunk = connection.recv(65536)
+                if not chunk:
+                    break
+                request += chunk
+            head, _, body = request.partition(b"\r\n\r\n")
+            length = 0
+            for line in head.split(b"\r\n")[1:]:
+                name, _, value = line.partition(b":")
+                if name.strip().lower() == b"content-length":
+                    length = int(value.strip())
+            while len(body) < length:
+                chunk = connection.recv(65536)
+                if not chunk:
+                    break
+                body += chunk
             connection.sendall(
                 b"HTTP/1.1 500 Internal Server Error\r\n"
                 b"Content-Type: application/json\r\n"
@@ -3369,6 +3436,7 @@ def test_join_client_hides_status_mismatched_authoritative_error() -> None:
     assert "membership_signature_invalid" not in str(caught.value)
 
 
+@_POSIX_DESCRIPTORS
 def test_working_directory_out_of_order_lease_stack_unwinds_to_origin(
     tmp_path: Path,
 ) -> None:
@@ -3424,6 +3492,7 @@ def test_working_directory_out_of_order_lease_stack_unwinds_to_origin(
 
 
 @pytest.mark.parametrize("primary_fails", (False, True))
+@_POSIX_DESCRIPTORS
 def test_cwd_deactivation_does_not_retain_close_failures(
     monkeypatch: pytest.MonkeyPatch,
     primary_fails: bool,
@@ -3484,6 +3553,7 @@ def test_cwd_deactivation_does_not_retain_close_failures(
             gc.enable()
 
 
+@_POSIX_DESCRIPTORS
 def test_cwd_cleanup_error_traceback_excludes_descriptor_and_private_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3651,6 +3721,7 @@ def test_cwd_cleanup_error_traceback_excludes_descriptor_and_private_values(
         pytest.param(3, (0, 1, 2), True, True, id="three-all-primary"),
     ),
 )
+@_POSIX_DESCRIPTORS
 def test_nested_working_directory_close_failures_are_aggregated(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3825,6 +3896,7 @@ def test_nested_working_directory_close_failures_are_aggregated(
         real_close(safety)
 
 
+@_POSIX_DESCRIPTORS
 def test_out_of_order_cwd_restore_failure_notes_deferred_primary_and_reuses_lock(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
