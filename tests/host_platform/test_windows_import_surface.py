@@ -109,14 +109,19 @@ for name in {blocked!r}:
 import importlib
 for name in {entries!r}:
     importlib.import_module(name)
-root = {root!r}
+import pathlib
+# Compare resolved paths, not string prefixes: on Windows the separator is "\\".
+root = pathlib.Path({root!r}).resolve()
+def inside(value):
+    try:
+        relative = pathlib.Path(value).resolve().relative_to(root)
+    except ValueError:
+        return False
+    return ".venv" not in relative.parts and "tests" not in relative.parts
 files = sorted(
-    getattr(module, "__file__", None)
+    str(pathlib.Path(module.__file__).resolve())
     for module in list(sys.modules.values())
-    if getattr(module, "__file__", None)
-    and str(module.__file__).startswith(root)
-    and "/.venv/" not in str(module.__file__)
-    and "/tests/" not in str(module.__file__)
+    if getattr(module, "__file__", None) and inside(module.__file__)
 )
 print(json.dumps(files))
 """
@@ -131,7 +136,7 @@ def closure() -> list[Path]:
             _PROBE.format(
                 blocked=sorted(POSIX_ONLY_MODULES),
                 entries=list(ENTRY_POINTS),
-                root=str(ROOT) + "/",
+                root=str(ROOT),
             ),
         ],
         cwd=ROOT,
