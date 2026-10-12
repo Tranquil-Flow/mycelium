@@ -146,6 +146,9 @@ pub struct NodeStatus {
     pub stage_loaded: Option<String>,
     pub frames_received: u64,
     pub frames_executed: u64,
+    /// Admitted hops refused with `thermal_ceiling_reached` because the device
+    /// was at or above the owner's quota ceiling (cumulative).
+    pub thermal_refusals: u64,
     pub last_execute_ms: Option<f64>,
     pub peer_class: String,
     pub runtime_backend: String,
@@ -169,6 +172,7 @@ struct ObservationCursor {
     window_started_at: f64,
     frames_at_window_start: u64,
     evidence_generation: u64,
+    thermal_refusals_at_window_start: u64,
 }
 
 /// The durable membership the supervisor keeps alive.
@@ -426,7 +430,7 @@ impl NodeCore {
             identity: Arc::new(identity),
             transport,
             shared: Arc::new(Mutex::new(Shared {
-                observation: ObservationCursor { window_started_at: now_s(), frames_at_window_start: 0, evidence_generation: 0 },
+                observation: ObservationCursor { window_started_at: now_s(), frames_at_window_start: 0, evidence_generation: 0, thermal_refusals_at_window_start: 0 },
                 status,
                 membership: None,
                 supervisor_running: false,
@@ -562,12 +566,17 @@ fn observe_runtime(shared: &Arc<Mutex<Shared>>, identity: &Identity, platform: &
         let mut s = shared.lock().unwrap();
         let frames = s.status.frames_executed;
         let delta = frames.saturating_sub(s.observation.frames_at_window_start);
+        let refusals = s.status.thermal_refusals;
+        let refused = refusals.saturating_sub(s.observation.thermal_refusals_at_window_start);
         let duration_ms = ((now - s.observation.window_started_at) * 1000.0).max(1.0);
         s.observation.window_started_at = now;
         s.observation.frames_at_window_start = frames;
+        s.observation.thermal_refusals_at_window_start = refusals;
         s.observation.evidence_generation += 1;
         let mut metrics = evidence::Metrics::new();
         metrics.insert("frames_executed_window".into(), Some(delta as f64));
+        // The A12 thermal window judges the refusal from this signed count.
+        metrics.insert("thermal_refusals_window".into(), Some(refused as f64));
         metrics.insert("last_execute_ms".into(), s.status.last_execute_ms);
         metrics.insert("relay_online".into(), Some(if s.status.relay_online { 1.0 } else { 0.0 }));
         metrics.insert("stage_loaded".into(), Some(if s.status.stage_loaded.is_some() { 1.0 } else { 0.0 }));
@@ -1569,6 +1578,9 @@ async fn serve_inbox(mut rx: mpsc::Receiver<Inbound>, shared: Arc<Mutex<Shared>>
             let mut s = shared.lock().unwrap();
             s.status.frames_received += 1;
             if let Some(code) = hot {
+                if inbound.frame.message_type == "HopHeader" {
+                    s.status.thermal_refusals += 1;
+                }
                 s.status.last_error = Some(code);
                 None
             } else if inbound.frame.message_type != "HopHeader" {
@@ -2002,6 +2014,10 @@ fn stage_step(shared: &Arc<Mutex<Shared>>, inbound: &Inbound) -> Result<crate::s
         if s.stage.is_none() && s.status.stage_loaded.is_some() && !reloaded { s.stage = Some(stage); }
         if s.stage_node.is_none() { s.stage_node = Some(stage_node); }
     }
+    if executed && hot.is_some() && !blocked {
+        // The admitted hop was answered with a thermal_ceiling_reached FailureReport.
+        s.status.thermal_refusals += 1;
+    }
     if executed {
         if step.disposition == Some("FORWARDED") && !blocked {
             s.status.frames_executed += 1;
@@ -2062,7 +2078,7 @@ mod tests {
 
     fn lifecycle_shared(stage: Box<dyn StageRuntime>) -> Arc<Mutex<Shared>> {
         Arc::new(Mutex::new(Shared {
-            observation: ObservationCursor { window_started_at:0.0, frames_at_window_start:0, evidence_generation:0 },
+            observation: ObservationCursor { window_started_at:0.0, frames_at_window_start:0, evidence_generation:0, thermal_refusals_at_window_start: 0 },
             membership:None, supervisor_running:false, status:NodeStatus::default(), session:None,
             invitation:None, stage:Some(stage), forward:None, route:None, shell_metrics:None, acquisition:None,
             stage_node:Some(crate::stage_node::StageNode::new("node-phone")), control:None, control_peers:false, control_transition:Default::default(),
@@ -2519,7 +2535,7 @@ mod tests {
         use crate::node_control::ControlEnv;
         let released = Arc::new(Mutex::new(Vec::new()));
         let mut s = Shared {
-            observation: ObservationCursor { window_started_at: 0.0, frames_at_window_start: 0, evidence_generation: 0 },
+            observation: ObservationCursor { window_started_at: 0.0, frames_at_window_start: 0, evidence_generation: 0, thermal_refusals_at_window_start: 0 },
             membership: None, supervisor_running: false, status: NodeStatus::default(), session: None,
             invitation: None, stage: Some(Box::new(GoldenStage { released: released.clone() })), forward: None,
             route: None, shell_metrics: None, acquisition: None,
@@ -2541,6 +2557,26 @@ mod tests {
         assert!(env.cancel_wait(&subject).is_clean(), "removed replay outputs are not remaining residue");
         assert!(env.cancel_wait(&subject).is_clean(), "already absent paths are clean on retry");
         assert_eq!(released.lock().unwrap().len(), 2);
+    }
+
+    /// The A12 thermal window needs the phone's own signed word that it refused
+    /// work at its ceiling: each sealed observation carries the hops refused with
+    /// `thermal_ceiling_reached` since the previous one.
+    #[test]
+    fn observations_count_the_hops_refused_at_the_thermal_ceiling_per_window() {
+        let shared = Arc::new(Mutex::new(Shared {
+            observation: ObservationCursor { window_started_at: 0.0, frames_at_window_start: 0, evidence_generation: 0, thermal_refusals_at_window_start: 0 },
+            membership: None, supervisor_running: false, status: NodeStatus::default(), session: None,
+            invitation: None, stage: None, forward: None, route: None, shell_metrics: None, acquisition: None,
+            stage_node: None, control: None,
+            control_peers: false, control_transition: Default::default(), inflight: Default::default(), cancelled: Default::default(), deadlines: Default::default(), stage_revision: 0, stage_load_generation: 1, admission: Default::default(), stage_busy: false, sweep_clock: 0.0,
+        }));
+        let identity = Identity::from_secret("phone-endpoint", &[83; 32]).unwrap();
+        let refused = |envelope: &Value| envelope["message"]["metrics"]["thermal_refusals_window"].as_f64();
+        assert_eq!(refused(&observe_runtime(&shared, &identity, &evidence::Metrics::new()).unwrap()), Some(0.0));
+        shared.lock().unwrap().status.thermal_refusals += 2;
+        assert_eq!(refused(&observe_runtime(&shared, &identity, &evidence::Metrics::new()).unwrap()), Some(2.0));
+        assert_eq!(refused(&observe_runtime(&shared, &identity, &evidence::Metrics::new()).unwrap()), Some(0.0));
     }
 
     #[test]
@@ -2702,7 +2738,7 @@ mod tests {
 
         let released = Arc::new(Mutex::new(Vec::new()));
         let shared = Arc::new(Mutex::new(Shared {
-            observation: ObservationCursor { window_started_at: now_s(), frames_at_window_start: 0, evidence_generation: 0 },
+            observation: ObservationCursor { window_started_at: now_s(), frames_at_window_start: 0, evidence_generation: 0, thermal_refusals_at_window_start: 0 },
             membership: None,
             supervisor_running: false,
             status: NodeStatus::default(),
@@ -2774,6 +2810,9 @@ mod tests {
         assert_eq!(report.frame.body["reason"], "thermal_ceiling_reached");
         assert_eq!(report.frame.body["node_id"], "node-phone");
         assert!(quiet(&mut last_rx));
+        // The refusal is counted for the next sealed observation; nothing executed.
+        assert_eq!(shared.lock().unwrap().status.thermal_refusals, 1);
+        assert_eq!(shared.lock().unwrap().status.frames_executed, 1);
 
         // The entry's cancellation releases the runtime's replay results.
         entry.send(phone.addr(), 1, &golden("08-path-cancellation.bin")).await.unwrap();
@@ -2805,7 +2844,7 @@ mod tests {
             controller_endpoint_ids: Vec::new(),
         };
         let shared = Arc::new(Mutex::new(Shared {
-            observation: ObservationCursor { window_started_at: now_s(), frames_at_window_start: 0, evidence_generation: 0 },
+            observation: ObservationCursor { window_started_at: now_s(), frames_at_window_start: 0, evidence_generation: 0, thermal_refusals_at_window_start: 0 },
             membership: None,
             supervisor_running: false,
             status: NodeStatus::default(),
@@ -2931,7 +2970,7 @@ mod tests {
         let locked = wire::decode_frame(&golden("01-manifest-locked.bin")).unwrap();
         assert_eq!(stage_node.on_frame("node-mac-entry", &locked, &mut never).accepted, Some(true));
         let shared = Arc::new(Mutex::new(Shared {
-            observation: ObservationCursor { window_started_at: now_s(), frames_at_window_start: 0, evidence_generation: 0 },
+            observation: ObservationCursor { window_started_at: now_s(), frames_at_window_start: 0, evidence_generation: 0, thermal_refusals_at_window_start: 0 },
             membership: None,
             supervisor_running: false,
             status: NodeStatus::default(),
