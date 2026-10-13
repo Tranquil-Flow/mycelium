@@ -557,6 +557,47 @@ def test_live_router_aborts_if_successor_fails_before_cutover(tmp_path) -> None:
         service.close()
 
 
+def test_public_projection_of_a_pre_cutover_abort_is_a_cleaned_failed_terminal(tmp_path) -> None:
+    """Pin the producer shape the A6 browser harness reads.
+
+    ui/web/scripts/a6-product-browser-e2e.mjs (scenarioExpectations) treats a
+    terminal without a cutover as an abort: no cutover leaves recovery_attempt
+    at 0, and the terminal is the coordinator's ``failed``, never
+    ``TERMINAL_BLOCKED``. A recovered request reaches recovery_attempt 1.
+    """
+    route = FailingThenRecoveringRoute(fail_successor=True)
+    _coordinator, _router, service, qualification = _runtime(tmp_path, route)
+    try:
+        request_id, _events = _submit_and_drain(service, qualification)
+        request = next(
+            item
+            for item in validate_recovery_runtime(service.recovery_public_projection())["requests"]
+            if item["request_id"] == request_id
+        )
+        assert request["phase"] == "aborted"
+        assert request["terminal"] == "failed"
+        assert request["recovery_attempt"] == 0
+        assert request["cleanup_complete"] is True
+    finally:
+        service.close()
+
+    recovered_route = FailingThenRecoveringRoute()
+    _coordinator, _router, service, qualification = _runtime(tmp_path / "recovered", recovered_route)
+    try:
+        request_id, _events = _submit_and_drain(service, qualification)
+        request = next(
+            item
+            for item in validate_recovery_runtime(service.recovery_public_projection())["requests"]
+            if item["request_id"] == request_id
+        )
+        assert request["phase"] == "terminal"
+        assert request["terminal"] == "completed"
+        assert request["recovery_attempt"] == 1
+        assert request["cleanup_complete"] is True
+    finally:
+        service.close()
+
+
 def test_live_router_cleanup_receipt_failure_after_cutover_publishes_failure_to_prove_terminal(
     tmp_path,
 ) -> None:
