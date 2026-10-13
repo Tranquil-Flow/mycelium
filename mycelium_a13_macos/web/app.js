@@ -85,6 +85,7 @@ function render(value) {
   }
   const observation=value.resource_observation;
   $('resource-observation').textContent=observation ? `Observed power: ${observation.power} · thermal: ${observation.thermal} · network: ${observation.network}` : 'Resource observations unavailable';
+  renderJoinFlow(value,target,a);
   $('members').replaceChildren();
   for (const member of a.members ?? []) {
     const row=document.createElement('div'); row.className='member';
@@ -191,7 +192,7 @@ $('download-weights').addEventListener('click',()=>{
 $('cancel-download').addEventListener('click',()=>void perform('/api/model/cancel',{},'Download cancellation requested; partial files are retained for explicit retry.'));
 $('refresh').addEventListener('click',()=>void refresh());
 $('capability-report').addEventListener('click',()=>void perform('/api/capability/report',{},
-  'Local arithmetic self-probe reported through signed HTTPS. This is not model or physical qualification.'));
+  'Capability and relay link re-reported through signed HTTPS. Reports are also sent automatically on join and before each run. This is not model or physical qualification.'));
 $('start').addEventListener('click',()=>void perform('/api/start',{},'Reconnected using retained identity.'));
 $('stop').addEventListener('click',()=>void perform('/api/stop',{},'Stopped. Identity, recovery and evidence retained.'));
 $('quit').addEventListener('click',()=>void perform('/api/quit',{},'Launcher stopped; identity and evidence retained.'));
@@ -254,6 +255,77 @@ $('accept-handoff').addEventListener('click',async()=>{
     if(result){$('handoff-input').value='';$('pair-output').textContent='';}
   }catch(_){notice('Invalid encrypted invitation. Existing identity is retained.');}
 });
+function gb(bytes){return `${(bytes/1e9).toFixed(1)} GB`;}
+function renderJoinFlow(value,target,a){
+  const flow=value.join_flow ?? {};
+  const owner=!target;
+  $('invite-owner').hidden=!owner;
+  $('join-target').hidden=owner && !!a.swarm_created;
+  $('relay-start').hidden=!owner || !!a.swarm_created || value.network?.state!=='private';
+  $('window-open').disabled=busy || !owner || !a.swarm_created || !value.network?.public_origin;
+  $('standing-text').textContent=flow.standing_disclosure?.text ?? '';
+  const joined=a.membership_state==='current';
+  const waiting=!!flow.join_window;
+  $('join-with-code').disabled=busy || joined || waiting || !$('standing-confirm').checked || !$('visibility').checked;
+  $('join-cancel').hidden=!waiting;
+  $('join-fingerprint').textContent=waiting?`Waiting for the owner. Check that the owner sees this fingerprint: ${flow.join_window.fingerprint}`:'';
+  const standing=flow.standing_consent;
+  $('standing-withdraw').hidden=!target || !standing || standing.state==='withdrawn';
+  $('standing-state').textContent=standing?`Standing consent: ${standing.state.replaceAll('_',' ')}${standing.last?` · last offer ${standing.last.state}${standing.last.reason?' ('+standing.last.reason.replaceAll('_',' ')+')':''}`:''}${flow.last_report?` · last report ${flow.last_report.purpose} ${flow.last_report.state}`:''}`:'';
+  $('windows').replaceChildren();
+  for(const w of flow.pairing_windows ?? []){
+    const row=document.createElement('div');row.className='member';
+    const label=document.createElement('pre');
+    const expires=new Date(w.expires_at*1000).toLocaleTimeString();
+    let text=`Code ${w.window_id} · ${w.state} · expires ${expires}`;
+    if(w.short_code)text+=`\nType on the joining Mac: ${w.tunnel_name} ${w.short_code}\nOr paste: ${w.join_link}`;
+    const p=w.pending;
+    if(p)text+=`\nMac ${p.node_id} · fingerprint ${p.fingerprint}\n${p.device.chip} · ${gb(p.device.memory_bytes)} RAM · ${gb(p.device.available_storage_bytes)} free · MLX ${p.device.mlx.available?'yes':'no'} · power ${p.device.power} · thermal ${p.device.thermal}\nRelay link: ${p.link.rtt_ms_median} ms RTT · ${(p.link.upload_bytes_per_second/1e6).toFixed(1)} MB/s up · ${(p.link.download_bytes_per_second/1e6).toFixed(1)} MB/s down`;
+    label.textContent=text;row.append(label);
+    if(p && w.state==='claimed'){
+      const approve=document.createElement('button');approve.type='button';approve.textContent='Approve this Mac';
+      approve.addEventListener('click',()=>void perform('/api/pair/window/approve',{window_id:w.window_id,request_digest:p.request_digest},'Approved. The encrypted invitation returns to that Mac automatically.'));
+      row.append(approve);
+    }
+    if(['open','claimed','approved'].includes(w.state)){
+      const revoke=document.createElement('button');revoke.type='button';revoke.className='secondary';revoke.textContent='Close code';
+      revoke.addEventListener('click',()=>void perform('/api/pair/window/revoke',{window_id:w.window_id},'Code closed. It can no longer be used.'));
+      row.append(revoke);
+    }
+    $('windows').append(row);
+  }
+}
+function currentConsent(){
+  return {peer_visibility:$('visibility').checked,power:$('power').value,storage_bytes:Number($('storage').value),
+    network:$('network').value,background:false,diagnostics:false,thermal:'stop_on_serious'};
+}
+$('relay-start').addEventListener('click',()=>{
+  if(!window.confirm('Start a temporary Cloudflare quick tunnel? The relay terminates HTTPS and can observe control traffic; inference stays on Iroh.'))return;
+  void perform('/api/network/start',{relay_acknowledged:true,max_seconds:1800},'Public relay started. Now create the swarm, then invite Macs.');
+});
+$('window-open').addEventListener('click',()=>void perform('/api/pair/window/open',{ttl_seconds:Number($('window-ttl').value)},'Join code opened. Show it to one person; approve their Mac when it appears.'));
+$('standing-confirm').addEventListener('change',()=>{if(latest&&connected)render(latest);});
+$('join-with-code').addEventListener('click',()=>{
+  const disclosure=latest?.join_flow?.standing_disclosure;
+  if(!disclosure || !$('standing-confirm').checked)return;
+  void perform('/api/join/window',{consent:currentConsent(),join:$('join-code').value,standing_consent:{acknowledged:true,
+    disclosure_digest:disclosure.digest,caps:{storage_bytes:Number($('storage').value),max_memory_bytes:Number($('standing-memory').value),
+    max_wall_seconds:Number($('standing-wall').value),max_commands:5000}}},
+    'Request sent through the owner’s relay. Waiting for one-click approval.');
+});
+$('join-cancel').addEventListener('click',()=>void perform('/api/join/window/cancel',{},'Join cancelled on this Mac.'));
+$('standing-withdraw').addEventListener('click',()=>{
+  if(!window.confirm('Withdraw standing consent? Automatic acceptance and running work stop now. Membership is kept.'))return;
+  void perform('/api/consent/standing/withdraw',{confirm:true},'Standing consent withdrawn. Running work stopped.');
+});
+let joinPolling=false;
+setInterval(async()=>{
+  if(busy||!connected||joinPolling||!latest?.join_flow?.join_window)return;
+  joinPolling=true;
+  try{const value=await api('/api/join/window/poll',{});if(value.state==='joined'){notice('Joined. Capability and relay link reported to the owner automatically.');}await refresh(false);}
+  catch(error){notice(`Join not completed: ${error.message.replaceAll('_',' ')}.`);await refresh(false);}
+  finally{joinPolling=false;}
+},3000);
 window.addEventListener('pageshow',()=>void refresh(false));
 window.addEventListener('online',()=>void refresh());
 void refresh();

@@ -1074,5 +1074,65 @@ class RemoteMacMember:
                 "route_ready": False,
             }
 
+    # -- A13 join flow helpers (pairing window / automatic report) ---------------
+
+    def signed_capability_link_report(
+        self, *, purpose: str, device: Mapping[str, Any], link: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Sign one self-reported device + relay-link report with the durable key.
+
+        ``join`` reports precede membership (no generation); every later report
+        is bound to the current membership generation.
+        """
+
+        from .capability import signed_capability_link_report
+
+        with self._lock:
+            self._require_started()
+            generation = None
+            if purpose != "join" or self._member is not None:
+                member, _client = self._require_current()
+                generation = member.generation
+            assert self._signer is not None
+            return signed_capability_link_report(
+                signer=self._signer, node_id=self._node_id(), purpose=purpose,
+                generation=generation, device=device, link=link, now=self._clock())
+
+    def handoff_seed_key_digest(self, handoff: Mapping[str, Any]) -> str:
+        """Recipient-decrypt a handoff WITHOUT joining, to check a join-link pin."""
+
+        with self._lock:
+            self._require_started()
+            pending = self._load_pending()
+            try:
+                payload = decrypt_invitation_handoff(
+                    request=pending["request"], handoff=dict(handoff),
+                    recipient_private_key=pending["recipient_private_key"],
+                    now=self._clock())
+            except PairingError as exc:
+                raise self._translate(exc) from exc
+            return str(payload["seed_key_digest"])
+
+    def membership_binding(self) -> dict[str, str] | None:
+        """Owner binding for standing consent: swarm, node and owner seed key."""
+
+        with self._lock:
+            member = self._member
+            if member is None:
+                return None
+            return {"swarm_id": member.swarm_id, "node_id": member.node_id,
+                    "seed_key_digest": member.seed_key_digest}
+
+    def owner_origin(self) -> str | None:
+        """The accepted owner's public HTTPS origin (the relay), if joined."""
+
+        retained = load_membership_state(self.state_root) if self.state_root.exists() else None
+        if retained is None:
+            return None
+        try:
+            return canonical_https_origin(str(retained["seed_url"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RemoteMacMemberError("peer_seed_origin_invalid") from exc
+
 
 __all__ = ["RemoteMacMember", "RemoteMacMemberError"]

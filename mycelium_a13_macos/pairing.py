@@ -10,7 +10,10 @@ import json
 import math
 import os
 import re
-from typing import Any
+import secrets
+import threading
+import time
+from typing import Any, Callable
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
@@ -428,12 +431,473 @@ def decrypt_invitation_handoff(
     return payload
 
 
+# -- owner pairing window (A13 join flow) ---------------------------------------
+#
+# The owner opens a short-lived window; the app shows a join link and a short
+# typed code.  The target posts its target-signed pairing request (plus its
+# signed join capability/link report) to the window through the owner's public
+# HTTPS relay, the owner approves it with one click, and the target collects
+# the recipient-encrypted handoff by polling the same window.  Nothing is
+# carried by hand, and the relay only ever sees the code, the public request
+# and recipient ciphertext.  Windows are in-memory: an owner restart closes
+# every open window (fail closed).
+
+JOIN_LINK_PROTOCOL = "mycelium.a13_join_link.v1"
+JOIN_LINK_SCHEME = "mycelium-join:"
+PAIRING_WINDOW_PREFIX = "/pairing-window/v1/"
+_SUBMISSION_PROTOCOL = "mycelium.a13_pairing_submission.v1"
+_POLL_PROTOCOL = "mycelium.a13_pairing_poll.v1"
+_WINDOW_TTL_MIN = 30
+_WINDOW_TTL_MAX = 900
+_MAX_WINDOWS = 8
+_MAX_CODE_FAILURES = 5
+_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
+_WINDOW_ID_RE = re.compile(r"^[23456789ABCDEFGHJKMNPQRSTVWXYZ]{4}$")
+_CODE_RE = re.compile(r"^[23456789ABCDEFGHJKMNPQRSTVWXYZ]{8}$")
+_TUNNEL_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,95}$")
+_WINDOW_STATUS = {
+    "pairing_window_unknown": 404,
+    "pairing_window_expired": 410,
+    "pairing_window_revoked": 410,
+    "pairing_window_locked": 410,
+    "pairing_window_code_invalid": 403,
+    "pairing_window_request_mismatch": 403,
+    "pairing_window_claimed": 409,
+}
+
+
+def request_digest(request: Mapping[str, Any]) -> str:
+    """Public digest of one exact pairing request (the window claim key)."""
+
+    return _digest(request)
+
+
+def identity_fingerprint(identity_key_digest: str) -> str:
+    """Short grouped fingerprint both screens show before the owner approves."""
+
+    if not isinstance(identity_key_digest, str) or _DIGEST_RE.fullmatch(identity_key_digest) is None:
+        raise PairingError("pairing_request_invalid")
+    raw = identity_key_digest.removeprefix("sha256:")[:12].upper()
+    return "-".join(raw[i : i + 4] for i in range(0, 12, 4))
+
+
+def _random_text(length: int) -> str:
+    return "".join(secrets.choice(_CODE_ALPHABET) for _ in range(length))
+
+
+def _window_origin(origin: Any) -> str:
+    from mycelium_internet.bootstrap import canonical_https_origin
+
+    try:
+        canonical = canonical_https_origin(origin)
+    except (TypeError, ValueError) as exc:
+        raise PairingError("pairing_window_origin_invalid") from exc
+    if canonical != origin:
+        raise PairingError("pairing_window_origin_invalid")
+    return canonical
+
+
+def encode_join_link(document: Mapping[str, Any]) -> str:
+    return JOIN_LINK_SCHEME + _b64encode(canonical_json_bytes(dict(document)))
+
+
+def _normalized_code(text: str) -> tuple[str, str]:
+    compact = re.sub(r"[\s-]", "", text).upper()
+    window_id, code = compact[:4], compact[4:]
+    if len(compact) != 12 or _WINDOW_ID_RE.fullmatch(window_id) is None or _CODE_RE.fullmatch(code) is None:
+        raise PairingError("join_code_invalid")
+    return window_id, code
+
+
+def parse_join_text(text: Any, *, now: float) -> dict[str, Any]:
+    """Parse a full join link or the short ``<tunnel-name> ABCD-EFGH-JKLM`` form.
+
+    The full link pins the owner's seed key digest; the short typed form
+    trusts the public HTTPS (Web-PKI) relay origin and returns no pin.
+    """
+
+    if not isinstance(text, str) or not text.strip() or len(text) > 4096:
+        raise PairingError("join_code_invalid")
+    value = text.strip()
+    instant = _finite(now)
+    if value.startswith(JOIN_LINK_SCHEME):
+        try:
+            document = json.loads(_b64decode(value[len(JOIN_LINK_SCHEME):]))
+        except (PairingError, ValueError, UnicodeError) as exc:
+            raise PairingError("join_code_invalid") from exc
+        if (
+            not isinstance(document, dict)
+            or set(document) != {"protocol", "origin", "window_id", "code", "seed_key_digest", "expires_at"}
+            or document["protocol"] != JOIN_LINK_PROTOCOL
+            or not isinstance(document["window_id"], str)
+            or _WINDOW_ID_RE.fullmatch(document["window_id"]) is None
+            or not isinstance(document["code"], str)
+            or _CODE_RE.fullmatch(document["code"]) is None
+            or not isinstance(document["seed_key_digest"], str)
+            or _DIGEST_RE.fullmatch(document["seed_key_digest"]) is None
+        ):
+            raise PairingError("join_code_invalid")
+        try:
+            origin = _window_origin(document["origin"])
+        except PairingError as exc:
+            raise PairingError("join_code_invalid") from exc
+        expires_at = _finite(document["expires_at"])
+        if instant > expires_at:
+            raise PairingError("join_link_expired")
+        return {"origin": origin, "window_id": document["window_id"], "code": document["code"],
+                "seed_key_digest": document["seed_key_digest"], "expires_at": expires_at}
+    host, _separator, code_text = value.partition(" ")
+    host = host.strip().lower()
+    if host.startswith("https://"):
+        host = host[len("https://"):]
+    host = host.removesuffix("/").removesuffix(".trycloudflare.com")
+    if _TUNNEL_RE.fullmatch(host) is None or not code_text.strip():
+        raise PairingError("join_code_invalid")
+    window_id, code = _normalized_code(code_text)
+    return {"origin": f"https://{host}.trycloudflare.com", "window_id": window_id, "code": code,
+            "seed_key_digest": None, "expires_at": None}
+
+
+def _public_json_object(raw: bytes) -> dict[str, Any]:
+    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("duplicate")
+            result[key] = value
+        return result
+
+    value = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs,
+                       parse_constant=lambda _value: (_ for _ in ()).throw(ValueError("constant")))
+    if not isinstance(value, dict):
+        raise ValueError("object")
+    return value
+
+
+class _Window:
+    __slots__ = ("window_id", "code", "origin", "seed_key_digest", "opened_at", "expires_at",
+                 "state", "failures", "request", "report", "quota", "handoff")
+
+    def __init__(self, *, window_id, code, origin, seed_key_digest, opened_at, expires_at):
+        self.window_id = window_id
+        self.code = code
+        self.origin = origin
+        self.seed_key_digest = seed_key_digest
+        self.opened_at = opened_at
+        self.expires_at = expires_at
+        self.state = "open"
+        self.failures = 0
+        self.request = None
+        self.report = None
+        self.quota = None
+        self.handoff = None
+
+
+class PairingWindows:
+    """Owner-side, in-memory registry of single-use pairing windows."""
+
+    def __init__(self, *, clock: Callable[[], float] = time.time) -> None:
+        if not callable(clock):
+            raise ValueError("clock is invalid")
+        self._clock = clock
+        self._lock = threading.RLock()
+        self._windows: dict[str, _Window] = {}
+
+    def _now(self) -> float:
+        return _finite(self._clock())
+
+    def _refresh(self, window: _Window, now: float) -> None:
+        if window.state in {"open", "claimed", "approved", "delivered"} and now > window.expires_at:
+            window.state = "expired"
+            window.request = window.report = window.quota = window.handoff = None
+
+    def _live(self, window_id: Any, code: Any, now: float) -> _Window:
+        window = self._windows.get(window_id) if isinstance(window_id, str) else None
+        if window is None:
+            raise PairingError("pairing_window_unknown")
+        self._refresh(window, now)
+        if window.state in {"expired", "revoked", "locked"}:
+            raise PairingError(f"pairing_window_{window.state}")
+        if not isinstance(code, str) or not secrets.compare_digest(code.encode(), window.code.encode()):
+            window.failures += 1
+            if window.failures >= _MAX_CODE_FAILURES:
+                window.state = "locked"
+                window.request = window.report = window.quota = window.handoff = None
+                raise PairingError("pairing_window_locked")
+            raise PairingError("pairing_window_code_invalid")
+        return window
+
+    def open(self, *, origin: str, seed_key_digest: str, ttl_seconds: int) -> dict[str, Any]:
+        origin = _window_origin(origin)
+        if not isinstance(seed_key_digest, str) or _DIGEST_RE.fullmatch(seed_key_digest) is None:
+            raise PairingError("pairing_window_pin_invalid")
+        if (isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int)
+                or not _WINDOW_TTL_MIN <= ttl_seconds <= _WINDOW_TTL_MAX):
+            raise PairingError("pairing_window_ttl_invalid")
+        with self._lock:
+            now = self._now()
+            for window in self._windows.values():
+                self._refresh(window, now)
+            for key in [k for k, w in self._windows.items() if w.state in {"expired", "revoked", "locked"}]:
+                if len(self._windows) >= _MAX_WINDOWS:
+                    del self._windows[key]
+            if sum(w.state in {"open", "claimed", "approved"} for w in self._windows.values()) >= _MAX_WINDOWS:
+                raise PairingError("pairing_window_capacity")
+            window_id = _random_text(4)
+            while window_id in self._windows:
+                window_id = _random_text(4)
+            window = _Window(window_id=window_id, code=_random_text(8), origin=origin,
+                             seed_key_digest=seed_key_digest, opened_at=now,
+                             expires_at=now + ttl_seconds)
+            self._windows[window_id] = window
+            return self._owner_view(window, with_secret=True)
+
+    def _owner_view(self, window: _Window, *, with_secret: bool = False) -> dict[str, Any]:
+        view: dict[str, Any] = {"window_id": window.window_id, "state": window.state,
+                                "opened_at": window.opened_at, "expires_at": window.expires_at}
+        if with_secret or window.state == "open":
+            code = window.code
+            view["short_code"] = f"{window.window_id}-{code[:4]}-{code[4:]}"
+            view["tunnel_name"] = window.origin.removeprefix("https://").removesuffix(".trycloudflare.com")
+            view["join_link"] = encode_join_link({
+                "protocol": JOIN_LINK_PROTOCOL, "origin": window.origin,
+                "window_id": window.window_id, "code": code,
+                "seed_key_digest": window.seed_key_digest, "expires_at": window.expires_at})
+        if window.request is not None and window.state in {"claimed", "approved", "delivered"}:
+            view["pending"] = {
+                "node_id": window.request["node_id"],
+                "peer_class": window.request["peer_class"],
+                "fingerprint": identity_fingerprint(window.request["identity_key_digest"]),
+                "request_digest": request_digest(window.request),
+                "request_expires_at": window.request["expires_at"],
+                "device": window.report["device"], "link": window.report["link"],
+                "quota": dict(window.quota),
+            }
+        return view
+
+    def list(self) -> list[dict[str, Any]]:
+        with self._lock:
+            now = self._now()
+            for window in self._windows.values():
+                self._refresh(window, now)
+            return [self._owner_view(w) for w in sorted(self._windows.values(), key=lambda w: w.opened_at)]
+
+    def revoke(self, window_id: str) -> dict[str, Any]:
+        with self._lock:
+            window = self._windows.get(window_id) if isinstance(window_id, str) else None
+            if window is None:
+                raise PairingError("pairing_window_unknown")
+            window.state = "revoked"
+            window.request = window.report = window.quota = window.handoff = None
+            return self._owner_view(window)
+
+    def submit(self, window_id: str, document: Any) -> dict[str, Any]:
+        from .capability import verify_capability_link_report
+
+        with self._lock:
+            now = self._now()
+            if not isinstance(document, Mapping) or set(document) != {"protocol", "code", "request", "report", "quota"} \
+                    or document.get("protocol") != _SUBMISSION_PROTOCOL:
+                # Unknown/closed windows answer first so a probe learns nothing more.
+                self._live(window_id, document.get("code") if isinstance(document, Mapping) else None, now)
+                raise PairingError("pairing_submission_invalid")
+            window = self._live(window_id, document["code"], now)
+            request = verify_pairing_request(document["request"], now=now)
+            digest = request_digest(request)
+            if window.state != "open":
+                if window.request is not None and request_digest(window.request) == digest:
+                    return self._waiting(window)
+                stale = (window.state == "claimed" and window.request is not None
+                         and window.request["identity_key_digest"] == request["identity_key_digest"]
+                         and now > float(window.request["expires_at"]))
+                if not stale:
+                    raise PairingError("pairing_window_claimed")
+            report = verify_capability_link_report(document["report"], now=now,
+                expected_key_digest=request["identity_key_digest"], node_id=request["node_id"],
+                purposes=frozenset({"join"}))
+            quota = validate_quota(document["quota"])
+            if quota["background_allowed"] is not False:
+                raise PairingError("pairing_quota_invalid")
+            window.request, window.report, window.quota = request, report, quota
+            window.state = "claimed"
+            return self._waiting(window)
+
+    @staticmethod
+    def _waiting(window: _Window) -> dict[str, Any]:
+        return {"state": "waiting_for_owner",
+                "fingerprint": identity_fingerprint(window.request["identity_key_digest"]),
+                "request_digest": request_digest(window.request)}
+
+    def approve(self, window_id: str, digest: str,
+                issue: Callable[[dict[str, Any], dict[str, Any]], Mapping[str, Any]]) -> dict[str, Any]:
+        """One owner click: mint the recipient-encrypted handoff for the claimant."""
+
+        with self._lock:
+            now = self._now()
+            window = self._windows.get(window_id) if isinstance(window_id, str) else None
+            if window is None:
+                raise PairingError("pairing_window_unknown")
+            self._refresh(window, now)
+            if window.state in {"expired", "revoked", "locked"}:
+                raise PairingError(f"pairing_window_{window.state}")
+            if window.state == "open" or window.request is None:
+                raise PairingError("pairing_window_not_claimed")
+            if request_digest(window.request) != digest:
+                raise PairingError("pairing_window_request_mismatch")
+            if window.handoff is None:
+                handoff = issue(dict(window.request), dict(window.quota))
+                if not isinstance(handoff, Mapping):
+                    raise PairingError("pairing_handoff_invalid")
+                window.handoff = dict(handoff)
+                window.state = "approved"
+            return self._owner_view(window)
+
+    def pending_request(self, window_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            window = self._windows.get(window_id)
+            return None if window is None or window.request is None else dict(window.request)
+
+    def poll(self, window_id: str, document: Any) -> dict[str, Any]:
+        with self._lock:
+            now = self._now()
+            code = document.get("code") if isinstance(document, Mapping) else None
+            window = self._live(window_id, code, now)
+            if (not isinstance(document, Mapping) or set(document) != {"protocol", "code", "request_digest"}
+                    or document.get("protocol") != _POLL_PROTOCOL):
+                raise PairingError("pairing_submission_invalid")
+            if window.request is None or request_digest(window.request) != document["request_digest"]:
+                raise PairingError("pairing_window_request_mismatch")
+            if window.handoff is None:
+                return {"state": "waiting_for_owner"}
+            window.state = "delivered"
+            return {"state": "approved", "handoff": dict(window.handoff)}
+
+    def handle(self, method: str, path: str, body: bytes) -> tuple[int, bytes]:
+        """Public HTTP surface reached through the owner's relay proxy."""
+
+        def reply(status: int, value: Mapping[str, Any]) -> tuple[int, bytes]:
+            return status, json.dumps(value, separators=(",", ":")).encode()
+
+        rest = path[len(PAIRING_WINDOW_PREFIX):] if path.startswith(PAIRING_WINDOW_PREFIX) else ""
+        window_id, _slash, action = rest.partition("/")
+        if action not in {"request", "poll"}:
+            return reply(404, {"error": "route_unknown"})
+        if _WINDOW_ID_RE.fullmatch(window_id) is None:
+            return reply(404, {"error": "pairing_window_unknown"})
+        if method != "POST":
+            return reply(405, {"error": "method_not_allowed"})
+        try:
+            document = _public_json_object(body)
+        except (TypeError, ValueError, UnicodeError):
+            return reply(400, {"error": "pairing_submission_invalid"})
+        try:
+            value = self.submit(window_id, document) if action == "request" else self.poll(window_id, document)
+        except PairingError as exc:
+            code = exc.code if _ERROR_CODE_RE.fullmatch(exc.code) else "pairing_submission_invalid"
+            return reply(_WINDOW_STATUS.get(code, 400), {"error": code})
+        except Exception:  # noqa: BLE001 - public surface: closed code only
+            return reply(400, {"error": "pairing_submission_invalid"})
+        return reply(200, value)
+
+
+class JoinWindowClient:
+    """Target-side HTTPS client for one owner's pairing window and link probe.
+
+    Production: canonical ``https://`` origin, system Web-PKI trust, no
+    redirects, Cloudflare DoH fallback for ``*.trycloudflare.com`` (the same
+    opener the seed client uses).  ``_test_base_url`` is a deterministic
+    local-test seam that sends the identical requests to a loopback relay.
+    """
+
+    def __init__(self, origin: str, *, timeout: float = 10.0, _test_base_url: str | None = None) -> None:
+        self.origin = _window_origin(origin)
+        self._timeout = float(timeout)
+        if _test_base_url is not None and not re.fullmatch(r"http://127\.0\.0\.1:[0-9]{1,5}", _test_base_url):
+            raise ValueError("test base url is invalid")
+        self._base = _test_base_url or self.origin
+        if _test_base_url is None:
+            from .public_https import public_opener
+
+            self._opener = public_opener()
+        else:
+            from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener
+
+            class _NoRedirect(HTTPRedirectHandler):
+                def redirect_request(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                    return None
+
+            self._opener = build_opener(ProxyHandler({}), _NoRedirect())
+
+    def post(self, path: str, body: bytes, *, content_type: str = "application/json") -> bytes:
+        from urllib.error import HTTPError, URLError
+        from urllib.request import Request
+
+        request = Request(self._base + path, data=body, method="POST",
+                          headers={"Content-Type": content_type})
+        try:
+            with self._opener.open(request, timeout=self._timeout) as response:
+                return response.read(1024 * 1024 + 1)
+        except HTTPError as exc:
+            try:
+                code = json.loads(exc.read(4096)).get("error")
+            except Exception:  # noqa: BLE001 - remote body
+                code = None
+            finally:
+                exc.close()
+            if not isinstance(code, str) or _ERROR_CODE_RE.fullmatch(code) is None:
+                code = "pairing_window_unreachable"
+            raise PairingError(code) from None
+        except (URLError, OSError, ValueError) as exc:
+            raise PairingError("pairing_window_unreachable") from exc
+
+    def _json(self, path: str, document: Mapping[str, Any]) -> dict[str, Any]:
+        raw = self.post(path, json.dumps(dict(document), separators=(",", ":")).encode())
+        try:
+            value = json.loads(raw)
+        except ValueError as exc:
+            raise PairingError("pairing_window_response_invalid") from exc
+        if not isinstance(value, dict):
+            raise PairingError("pairing_window_response_invalid")
+        return value
+
+    def submit(self, window_id: str, *, code: str, request: Mapping[str, Any],
+               report: Mapping[str, Any], quota: Mapping[str, Any]) -> dict[str, Any]:
+        return self._json(f"{PAIRING_WINDOW_PREFIX}{window_id}/request", {
+            "protocol": _SUBMISSION_PROTOCOL, "code": code, "request": dict(request),
+            "report": dict(report), "quota": dict(quota)})
+
+    def poll(self, window_id: str, *, code: str, digest: str) -> dict[str, Any]:
+        return self._json(f"{PAIRING_WINDOW_PREFIX}{window_id}/poll", {
+            "protocol": _POLL_PROTOCOL, "code": code, "request_digest": digest})
+
+    def probe(self, download_kib: int, upload: bytes) -> bytes:
+        from .capability import LINK_PROBE_PATH
+
+        return self.post(f"{LINK_PROBE_PATH}/{int(download_kib)}", upload,
+                         content_type="application/octet-stream")
+
+    def member_report(self, report: Mapping[str, Any]) -> dict[str, Any]:
+        from .capability import MEMBER_REPORT_PATH
+
+        return self._json(MEMBER_REPORT_PATH, report)
+
+
 __all__ = [
     "ENCRYPTED_HANDOFF_PROTOCOL",
+    "JOIN_LINK_PROTOCOL",
+    "JOIN_LINK_SCHEME",
+    "JoinWindowClient",
     "PAIRING_REQUEST_PROTOCOL",
+    "PAIRING_WINDOW_PREFIX",
+    "PairingWindows",
     "PairingError",
     "approve_pairing_request",
     "decrypt_invitation_handoff",
+    "encode_join_link",
+    "identity_fingerprint",
+    "parse_join_text",
+    "request_digest",
     "new_pairing_request",
     "validate_quota",
     "verify_pairing_request",

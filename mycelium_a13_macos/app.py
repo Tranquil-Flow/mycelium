@@ -332,8 +332,26 @@ class _Server(ThreadingHTTPServer):
 
 
 class DemoApp:
-    def __init__(self, state_root, *, authority_factory=None, check_platform=True, _test_peer_factory=None):
+    def __init__(self, state_root, *, authority_factory=None, check_platform=True, _test_peer_factory=None,
+                 _test_join_base_url=None):
         self.root = Path(state_root).expanduser().absolute()
+        # Join flow (pairing window, standing consent, automatic reports).
+        # ``_test_join_base_url`` is a deterministic local-test seam only: it
+        # sends the target's window/probe/report requests to a loopback relay
+        # proxy instead of the public HTTPS origin.
+        self._test_join_base_url = _test_join_base_url
+        from .pairing import PairingWindows
+        from .capability import MemberReports
+        self.pairing_windows = PairingWindows()
+        self.member_reports = MemberReports(lookup=self._member_lookup)
+        self.standing = None
+        self.standing_error = None
+        #: Click-free target steps another lane registers: fn(app, context) -> dict | None
+        #: (see standing_consent.auto_poll_step).  Run only under standing consent.
+        self.auto_steps = []
+        self.last_report = None
+        self._next_periodic_report = 0.0
+        self._probe_times = []
         self.check_platform = check_platform
         self.authority_factory = authority_factory
         self._test_peer_factory = _test_peer_factory
@@ -433,6 +451,8 @@ class DemoApp:
             self.renew_thread.start()
             self.policy_thread = threading.Thread(target=self._policy_loop, daemon=True)
             self.policy_thread.start()
+            self.standing_thread = threading.Thread(target=self._standing_loop, daemon=True)
+            self.standing_thread.start()
             return self
         except BaseException:
             self.close(); raise
@@ -530,6 +550,178 @@ class DemoApp:
                     self.acquisition_policy_error = reason
                     self._cancel_acquisition()
 
+    # -- join flow: pairing window, standing consent, automatic reports --------
+
+    def _member_lookup(self, node_id):
+        coordinator = getattr(self.authority, 'coordinator', None) if self.installation_role == 'owner' else None
+        if coordinator is None: return None
+        try: member = coordinator.member(node_id)
+        except Exception: return None
+        return {'verification_key_digest':member['verification_key_digest'],
+                'generation':member['generation'],'lifecycle_state':member['lifecycle_state']}
+
+    def member_capability_reports(self):
+        """Interface for the compile lane: latest verified self-report per member."""
+        return self.member_reports.latest()
+
+    def _public_route(self, method, path, body):
+        """Owner routes reached through the relay proxy; never takes the app guard."""
+        import json as _json
+        from .pairing import PAIRING_WINDOW_PREFIX
+        from .capability import LINK_PROBE_PATH, MEMBER_REPORT_PATH, link_probe_response
+        if path.startswith(PAIRING_WINDOW_PREFIX):
+            return self.pairing_windows.handle(method, path, body)
+        if path == MEMBER_REPORT_PATH:
+            return self.member_reports.handle(method, path, body)
+        if path.startswith(LINK_PROBE_PATH + '/'):
+            kib = path[len(LINK_PROBE_PATH) + 1:]
+            if method != 'POST' or not kib.isdigit() or len(kib) > 3:
+                return 404, b'{"error":"route_unknown"}'
+            now = time.monotonic()
+            self._probe_times = [t for t in self._probe_times if now - t < 10][-64:]
+            if len(self._probe_times) >= 64: return 429, b'{"error":"link_probe_rate_limited"}'
+            self._probe_times.append(now)
+            try: return 200, link_probe_response(int(kib), body)
+            except Exception: return 400, b'{"error":"link_probe_invalid"}'
+        return 404, _json.dumps({'error':'route_unknown'}).encode()
+
+    def _bind_public_routes(self):
+        if self.public_relay is not None and getattr(self.public_relay, 'proxy', None) is not None:
+            self.public_relay.proxy.bind_local(self._public_route)
+
+    def _join_client(self, origin):
+        from .pairing import JoinWindowClient
+        return JoinWindowClient(origin, _test_base_url=self._test_join_base_url)
+
+    def _join_state_path(self):
+        return self.root / 'join-window.json'
+
+    def _load_join_state(self):
+        from .authority import _load_private_json
+        value = _load_private_json(self._join_state_path())
+        if value is None: return None
+        if set(value) != {'protocol','origin','window_id','code','seed_key_digest','request_digest','fingerprint'} \
+                or value['protocol'] != 'mycelium.a13_join_window_state.v1':
+            raise DemoError('join_state_invalid')
+        return value
+
+    def _become_target(self, consent):
+        """Shared by both join routes: persist consent, select the target role once."""
+        if self.installation_role != 'target' and self.authority.status().get('swarm_created'):
+            raise DemoError('owner_cannot_become_target')
+        saved = read_resource_policy(self.root)
+        if saved is not None and saved != consent:
+            raise DemoError('consent_retry_changed')
+        if saved is None:
+            private_write(self.root / 'resource-policy.json',json.dumps(consent,sort_keys=True).encode())
+        if self.installation_role != 'target':
+            self.authority.stop()
+            self.running = False
+            from .authority import _atomic_private_json
+            _atomic_private_json(self.root / 'installation-role.json',{
+                'protocol':'mycelium.a13_installation_role.v1','role':'target'})
+            from .target_app import TargetApplication
+            self.installation_role = 'target'
+            self.authority = TargetApplication(self.root / 'target',_test_peer_factory=self._test_peer_factory)
+        if not self.running:
+            self.authority.start()
+            self.running = True
+        if (self.acquisition is None or
+                self.acquisition.state_root != self.authority.peer.state_root / 'serving'):
+            self._open_acquisition()
+
+    def _measure_and_sign(self, client, purpose):
+        from .capability import observe_device, measure_link
+        peer = self.authority.peer
+        link = measure_link(client.probe)
+        device = observe_device(peer.state_root)
+        return peer.signed_capability_link_report(purpose=purpose, device=device, link=link)
+
+    def _auto_report(self, purpose):
+        """Best-effort automatic report on join, before each run and periodically.
+
+        Sends the canonical signed seed capability message and the extended
+        device + relay-link report to the owner.  Never qualifies anything and
+        never blocks the caller: failures are recorded with a closed code.
+        """
+        record = {'purpose':purpose,'at':time.time(),'state':'delivered','error':None,
+                  'seed_capability':'not_sent'}
+        try:
+            origin = self.authority.peer.owner_origin()
+            if origin is None: raise DemoError('membership_required')
+            client = self._join_client(origin)
+            client.member_report(self._measure_and_sign(client, purpose))
+        except Exception as error:
+            record.update(state='failed', error=public_failure_code(error)
+                          if not isinstance(error, DemoError) else str(error))
+        try:
+            self.authority.report_capability(); record['seed_capability']='accepted'
+        except Exception as error:
+            record['seed_capability'] = public_failure_code(error)
+        self.last_report = record
+        self._next_periodic_report = time.monotonic() + 300
+        return dict(record)
+
+    # Duck-typed surface for standing_consent.auto_poll_step (stable interface b).
+    def auto_step_context(self):
+        binding = self.authority.peer.membership_binding() if self.installation_role == 'target' else None
+        if binding is not None and self.authority.status().get('membership_state') != 'current':
+            binding = None
+        return {'binding':binding,'policy':read_resource_policy(self.root)}
+
+    def auto_report(self, purpose):
+        return self._auto_report(purpose)
+
+    def auto_accept(self):
+        from .standing_consent import StandingAcceptor
+        policy = read_resource_policy(self.root)
+        binding = self.auto_step_context()['binding']
+        if policy is None or binding is None: return None
+        if self.standing is None:
+            self.standing = StandingAcceptor(self.root, report=lambda purpose, _offer: self._auto_report(purpose))
+        def admitted(_intent):
+            return self.running and not self.closed.is_set() and self._resource_check() is None
+        return self.standing.tick(self.authority, policy=policy, binding=binding,
+            resource_check=self._resource_check, authorize_stage=admitted,
+            _test_observer=self._policy_observer)
+
+    def _standing_tick(self):
+        from .standing_consent import auto_poll_step
+        due = time.monotonic() >= self._next_periodic_report
+        return auto_poll_step(self, report_due=due)
+
+    def _standing_loop(self):
+        while not self.closed.wait(2):
+            with self.guard:
+                if self.closed.is_set() or not self.running or self.installation_role != 'target':
+                    continue
+                try:
+                    self._standing_tick(); self.standing_error = None
+                except Exception as error:
+                    self.standing_error = public_failure_code(error)
+
+    def _join_flow_status(self):
+        from .standing_consent import DISCLOSURE_TEXT, DISCLOSURE_DIGEST, load_standing_consent
+        value = {'standing_disclosure':{'text':DISCLOSURE_TEXT,'digest':DISCLOSURE_DIGEST}}
+        if self.installation_role == 'owner':
+            value['pairing_windows'] = self.pairing_windows.list()
+            value['member_reports'] = self.member_reports.latest()
+            return value
+        try: grant = load_standing_consent(self.root)
+        except Exception: grant = None
+        try: join = self._load_join_state()
+        except Exception: join = None
+        value.update(
+            standing_consent=None if grant is None else {
+                'state':grant['state'],'caps':dict(grant['caps']),'granted_at':grant['granted_at'],
+                'withdrawn_at':grant['withdrawn_at'],
+                'last':None if self.standing is None else self.standing.status()['last']},
+            standing_error=self.standing_error,
+            join_window=None if join is None else {'state':'waiting_for_owner',
+                'fingerprint':join['fingerprint'],'pinned':join['seed_key_digest'] is not None},
+            last_report=None if self.last_report is None else dict(self.last_report))
+        return value
+
     def status(self):
         if self.closed.is_set(): raise DemoError('application_closed')
         value = self.authority.status()
@@ -548,13 +740,15 @@ class DemoApp:
                 'running':self.running,'authority':value,'renewal_error':self.renew_error,
                 'recovery_error':self.recovery_error,
                 'distribution':'unsigned development software; not notarized',
+                'join_flow':self._join_flow_status(),
                 'serving':{'state':'not_yet_serving','route_ready':False,
                            'next_action':'Native route preparation and exact model execution approval required.'}}
 
     def action(self, path, body):
         with self.guard:
             if self.closed.is_set(): raise DemoError('application_closed')
-            if self.installation_role == 'target' and path in {'/api/create','/api/revoke','/api/revoke-self','/api/pair/approve','/api/pair/preview'}:
+            if self.installation_role == 'target' and path in {'/api/create','/api/revoke','/api/revoke-self','/api/pair/approve','/api/pair/preview',
+                    '/api/pair/window/open','/api/pair/window/list','/api/pair/window/approve','/api/pair/window/revoke'}:
                 raise DemoError('owner_role_required')
             if path == '/api/local-contributor/start':
                 if body:raise DemoError('invalid_request')
@@ -648,6 +842,7 @@ class DemoApp:
                 except BaseException:
                     relay.close();raise
                 self.public_relay=relay;self.running=True
+                self._bind_public_routes()
                 return {'network':relay.status(),'recovery_card':card}
             if path == '/api/network/start':
                 if (self.installation_role!='owner' or self.public_relay is not None
@@ -668,6 +863,7 @@ class DemoApp:
                     self.authority.configure_public_endpoint(public_origin=relay.public_origin,
                         port=port,acknowledged=True)
                     self.public_relay=relay
+                    self._bind_public_routes()
                     return relay.status()
                 except BaseException:
                     relay.close();raise
@@ -776,30 +972,12 @@ class DemoApp:
             if path == '/api/join/request':
                 if set(body) != {'consent'} or not consent_valid(body['consent']):
                     raise DemoError('consent_required')
-                if self.installation_role != 'target' and self.authority.status().get('swarm_created'):
-                    raise DemoError('owner_cannot_become_target')
-                consent = body['consent']
-                saved = read_resource_policy(self.root)
-                if saved is not None and saved != consent:
-                    raise DemoError('consent_retry_changed')
-                if saved is None:
-                    private_write(self.root / 'resource-policy.json',json.dumps(consent,sort_keys=True).encode())
-                if self.installation_role != 'target':
-                    self.authority.stop()
-                    self.running = False
-                    from .authority import _atomic_private_json
-                    _atomic_private_json(self.root / 'installation-role.json',{
-                        'protocol':'mycelium.a13_installation_role.v1','role':'target'})
-                    from .target_app import TargetApplication
-                    self.installation_role = 'target'
-                    self.authority = TargetApplication(self.root / 'target',_test_peer_factory=self._test_peer_factory)
-                if not self.running:
-                    self.authority.start()
-                    self.running = True
-                if (self.acquisition is None or
-                        self.acquisition.state_root != self.authority.peer.state_root / 'serving'):
-                    self._open_acquisition()
+                self._become_target(body['consent'])
                 return self.authority.pair_request()
+            if path in {'/api/pair/window/open','/api/pair/window/list','/api/pair/window/approve','/api/pair/window/revoke'}:
+                return self._owner_window_action(path, body)
+            if path in {'/api/join/window','/api/join/window/poll','/api/join/window/cancel','/api/consent/standing/withdraw'}:
+                return self._target_join_action(path, body)
             if path == '/api/create':
                 if set(body) != {'consent'} or not consent_valid(body['consent']):
                     raise DemoError('consent_required')
@@ -879,6 +1057,124 @@ class DemoApp:
                 threading.Thread(target=self.close,daemon=True).start()
                 return {'stopping':True,'identity_retained':True,'evidence_retained':True}
             raise DemoError('unknown_action')
+
+    def _owner_window_action(self, path, body):
+        from .pairing import PairingError
+        if path == '/api/pair/window/list':
+            if body: raise DemoError('invalid_request')
+            return {'windows':self.pairing_windows.list()}
+        if path == '/api/pair/window/revoke':
+            if set(body) != {'window_id'}: raise DemoError('invalid_request')
+            return self.pairing_windows.revoke(body['window_id'])
+        if path == '/api/pair/window/open':
+            if set(body) != {'ttl_seconds'}: raise DemoError('invalid_request')
+            current = self.authority.status()
+            if not current.get('swarm_created') or self.authority.coordinator is None:
+                raise DemoError('pairing_window_swarm_required')
+            relay = self.public_relay
+            origin = None if relay is None else relay.status().get('public_origin')
+            if relay is None or not origin:
+                # Relay-only by design: venue Wi-Fi isolates clients, so a
+                # target can reach the owner only through the public relay.
+                raise DemoError('pairing_window_relay_required')
+            self._bind_public_routes()
+            if self.authority.coordinator.seed_url != origin:
+                raise DemoError('pairing_window_origin_stale')
+            return self.pairing_windows.open(origin=origin,
+                seed_key_digest=self.authority.coordinator.signer.verification_key_digest, ttl_seconds=body['ttl_seconds'])
+        if set(body) != {'window_id','request_digest'}: raise DemoError('invalid_request')
+        from .serving import RESOURCE_PROPOSAL
+        def issue(request, quota):
+            if (quota['storage_bytes'] > RESOURCE_PROPOSAL.additional_disk_bytes
+                    or quota['network_bytes_per_day'] > RESOURCE_PROPOSAL.additional_disk_bytes):
+                raise PairingError('pairing_quota_invalid')
+            remaining = int(float(request['expires_at']) - time.time()) - 1
+            if remaining < 30: raise PairingError('pairing_request_expiring')
+            return self.authority.approve_pairing(request, ttl_seconds=min(120, remaining), quota=quota)
+        return self.pairing_windows.approve(body['window_id'], body['request_digest'], issue)
+
+    def _target_join_action(self, path, body):
+        from .pairing import PairingError, identity_fingerprint, parse_join_text, request_digest
+        from .standing_consent import (bind_standing_consent, grant_standing_consent,
+                                       withdraw_standing_consent)
+        from .authority import _atomic_private_json
+        if path == '/api/consent/standing/withdraw':
+            if set(body) != {'confirm'} or body['confirm'] is not True:
+                raise DemoError('revoke_confirmation_required')
+            if self.installation_role == 'target' and self.authority is not None:
+                self.authority.stop_control()
+            value = withdraw_standing_consent(self.root, now=time.time())
+            if value is None: raise DemoError('standing_consent_missing')
+            return {'state':value['state'],'withdrawn_at':value['withdrawn_at'],'route_ready':False}
+        if path == '/api/join/window/cancel':
+            if body: raise DemoError('invalid_request')
+            self._join_state_path().unlink(missing_ok=True)
+            return {'state':'cancelled'}
+        if path == '/api/join/window':
+            if (set(body) != {'consent','standing_consent','join'} or not consent_valid(body['consent'])):
+                raise DemoError('consent_required')
+            if self.installation_role != 'target' and self.authority.status().get('swarm_created'):
+                raise DemoError('owner_cannot_become_target')
+            if self.installation_role == 'target' and self.authority.status().get('membership_state') == 'current':
+                raise DemoError('already_joined')
+            link = parse_join_text(body['join'], now=time.time())
+            # Validate the standing grant against THIS consent before any role change.
+            from .standing_consent import _caps, StandingConsentError
+            sc = body['standing_consent']
+            if not isinstance(sc, dict) or set(sc) != {'acknowledged','disclosure_digest','caps'}:
+                raise DemoError('standing_consent_required')
+            try: _caps(sc['caps'], body['consent'])
+            except StandingConsentError as error: raise DemoError(error.code) from None
+            self._become_target(body['consent'])
+            try: grant_standing_consent(self.root, sc, policy=body['consent'], now=time.time())
+            except StandingConsentError as error: raise DemoError(error.code) from None
+            request = self.authority.pair_request()
+            client = self._join_client(link['origin'])
+            report = self._measure_and_sign(client, 'join')
+            storage = body['consent']['storage_bytes']
+            result = client.submit(link['window_id'], code=link['code'], request=request, report=report,
+                quota={'storage_bytes':storage,'network_bytes_per_day':storage,'background_allowed':False})
+            fingerprint = identity_fingerprint(request['identity_key_digest'])
+            if result.get('state') != 'waiting_for_owner' or result.get('fingerprint') != fingerprint:
+                raise DemoError('pairing_window_response_invalid')
+            _atomic_private_json(self._join_state_path(), {
+                'protocol':'mycelium.a13_join_window_state.v1','origin':link['origin'],
+                'window_id':link['window_id'],'code':link['code'],'seed_key_digest':link['seed_key_digest'],
+                'request_digest':request_digest(request),'fingerprint':fingerprint})
+            return {'state':'waiting_for_owner','fingerprint':fingerprint,
+                    'pinned':link['seed_key_digest'] is not None}
+        # /api/join/window/poll
+        if body: raise DemoError('invalid_request')
+        state = self._load_join_state()
+        if state is None or self.installation_role != 'target': raise DemoError('join_window_missing')
+        try:
+            value = self._join_client(state['origin']).poll(state['window_id'], code=state['code'],
+                                                            digest=state['request_digest'])
+        except PairingError as error:
+            if error.code in {'pairing_window_unknown','pairing_window_expired','pairing_window_revoked',
+                              'pairing_window_locked','pairing_window_request_mismatch'}:
+                self._join_state_path().unlink(missing_ok=True)
+            raise
+        if value.get('state') == 'waiting_for_owner':
+            return {'state':'waiting_for_owner','fingerprint':state['fingerprint']}
+        if value.get('state') != 'approved' or not isinstance(value.get('handoff'), dict):
+            raise DemoError('pairing_window_response_invalid')
+        handoff = value['handoff']
+        if (state['seed_key_digest'] is not None
+                and self.authority.peer.handoff_seed_key_digest(handoff) != state['seed_key_digest']):
+            raise DemoError('join_seed_pin_mismatch')
+        joined = self.authority.accept_pairing(handoff)
+        binding = self.authority.peer.membership_binding()
+        if binding is not None:
+            try: bind_standing_consent(self.root, binding, now=time.time())
+            except Exception as error: self.standing_error = public_failure_code(error)
+        self._join_state_path().unlink(missing_ok=True)
+        self.running = True
+        report = self._auto_report('join')
+        return {'state':'joined','membership_state':joined.get('membership_state', 'current')
+                if isinstance(joined, dict) else 'current',
+                'membership_generation':self.authority.member.generation,
+                'report':report,'route_ready':False}
 
     def close(self):
         with self.guard:

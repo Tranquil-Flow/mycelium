@@ -23,12 +23,18 @@ from .authority import _private_directory
 from .tls import LocalTLSSeedServer
 
 _MAX_FRAME=1024*1024
+#: Join-flow routes answered in-process by the owner app (pairing window, link
+#: probe, member capability report) instead of being forwarded to the seed.
+#: Interface for the join lane: ``SeedRelayProxy.bind_local(handler)`` where
+#: ``handler(method, path, body) -> (status, raw_json_bytes)``.
+_LOCAL_PREFIXES=('/pairing-window/','/link-probe/','/member-report/')
 
 
 class _RelayServer(ThreadingHTTPServer):
     daemon_threads=True
     def __init__(self):
         self.backend=None
+        self.local=None
         self.slots=threading.BoundedSemaphore(16)
         super().__init__(('127.0.0.1',0),_RelayHandler)
     def process_request(self,request,client_address):
@@ -54,9 +60,10 @@ class _RelayHandler(BaseHTTPRequestHandler):
         self.end_headers();self.wfile.write(raw);self.close_connection=True
     def _forward(self):
         self.connection.settimeout(5)
-        if (not self.path.startswith(('/seed/','/managed-control/'))
+        if (not self.path.startswith(('/seed/','/managed-control/')+_LOCAL_PREFIXES)
                 or any(value in self.path for value in ('..','%','?','#','\\'))):
             return self._reply(404,b'{"error":"relay_route_unknown"}')
+        if self.path.startswith(_LOCAL_PREFIXES):return self._local()
         if (self.headers.get('Transfer-Encoding') is not None
                 or self.headers.get('Cookie') is not None
                 or self.headers.get('Authorization') is not None):
@@ -82,6 +89,27 @@ class _RelayHandler(BaseHTTPRequestHandler):
         except (OSError,http.client.HTTPException):self._reply(502,b'{"error":"relay_backend_unavailable"}')
         finally:
             if connection is not None:connection.close()
+    def _local(self):
+        if (self.headers.get('Transfer-Encoding') is not None
+                or self.headers.get('Cookie') is not None
+                or self.headers.get('Authorization') is not None):
+            return self._reply(400,b'{"error":"relay_headers_invalid"}')
+        try:
+            lengths=self.headers.get_all('Content-Length',[])
+            if len(lengths)>1 or (self.command=='POST' and len(lengths)!=1):raise ValueError()
+            length=int(lengths[0]) if lengths else 0
+            if not 0<=length<=_MAX_FRAME or (self.command=='GET' and length):raise ValueError()
+            body=self.rfile.read(length)
+            if len(body)!=length:raise ValueError()
+        except (ValueError,OSError):return self._reply(400,b'{"error":"relay_frame_invalid"}')
+        handler=self.server.local
+        if handler is None:return self._reply(503,b'{"error":"relay_join_not_bound"}')
+        try:
+            status,raw=handler(self.command,self.path,body)
+            if type(status) is not int or not 200<=status<=599 or not isinstance(raw,bytes) or len(raw)>_MAX_FRAME:
+                raise ValueError()
+        except Exception:return self._reply(500,b'{"error":"relay_join_failed"}')
+        self._reply(status,raw)
     do_GET=_forward
     do_POST=_forward
 
@@ -102,6 +130,9 @@ class SeedRelayProxy:
         context=ssl.create_default_context(cafile=str(server.material.ca_certificate))
         context.minimum_version=ssl.TLSVersion.TLSv1_2
         self.server.backend=(parts.port,context)
+    def bind_local(self,handler):
+        if handler is not None and not callable(handler):raise ValueError('relay_local_invalid')
+        self.server.local=handler
     def close(self):
         if self._closed:return
         self._closed=True
