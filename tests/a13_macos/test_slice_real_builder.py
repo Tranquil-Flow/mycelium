@@ -21,7 +21,7 @@ import pytest
 
 from mycelium_a13_macos import serving
 from mycelium_a13_macos.slice_acquisition import fetch_node_slice, node_slice_plan
-from test_nhost_chain_compile import _app, _compile
+from test_nhost_chain_compile import _app, _compile, _register_tiny_shape
 
 RUNTIMES = ["float32+none", "float32+int8-weight-only"]
 
@@ -88,6 +88,7 @@ def _slice_compile(tmp_path, monkeypatch, runtime):
                                          model_type="qwen3")
     app._observation_context.deployment_id = "6f1c2f1e-8d1b-4b7a-9a43-0f6f1c2f1e8d"
     monkeypatch.setattr(serving, "SLICE_FETCH_MIN_SOURCE_BYTES", 0)  # tiny stand-in model
+    _register_tiny_shape(monkeypatch, snapshot)
     app._chain_slice_fetch = True
     monkeypatch.setattr(builder, "build", _real_digest_build(captured, runtime=runtime))
     state = _compile(app)
@@ -146,9 +147,10 @@ def test_runtime_dtype_and_quantization_do_not_change_shard_bytes(tmp_path, monk
 def test_slice_compile_fails_closed_when_the_build_names_another_shard_root(
         tmp_path, monkeypatch, report):
     from scripts import build_qwen_live_route as builder
-    app, captured, _, _ = _app(tmp_path, monkeypatch, (8, 16, 48), model_type="qwen3")
+    app, captured, _, snapshot = _app(tmp_path, monkeypatch, (8, 16, 48), model_type="qwen3")
     app._observation_context.deployment_id = "6f1c2f1e-8d1b-4b7a-9a43-0f6f1c2f1e8d"
     monkeypatch.setattr(serving, "SLICE_FETCH_MIN_SOURCE_BYTES", 0)
+    _register_tiny_shape(monkeypatch, snapshot)
     app._chain_slice_fetch = True
     real = _real_digest_build(captured, runtime=RUNTIMES[1])
     monkeypatch.setattr(builder, "build", lambda args: (real(args), report)[1])
