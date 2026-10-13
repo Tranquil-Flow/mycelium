@@ -206,7 +206,9 @@ class Workflow:
         if self.state == 'awaiting_activation' and time.time() >= self.expires:
             self.state, self.error = 'failed', 'managed_workflow_activation_expired'
         return {'state': self.state, 'error_code': self.error,
-                'startup': {'url': 'http://127.0.0.1:55555'} if self.state == 'api_running' else None}
+                'startup': {'url': 'http://127.0.0.1:55555', 'startup_qualification_complete': True,
+                            'deployment_count': 1, 'unavailable_deployment_count': 0}
+                if self.state == 'api_running' else None}
     def activate(self):
         assert self.state == 'awaiting_activation', self.state
         for actor in self.actors.values():

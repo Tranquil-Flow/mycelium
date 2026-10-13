@@ -584,6 +584,18 @@ class AppDemoChain:
             return state.get('state') == 'api_running'
         self._wait(ctx, up, budget='serving', code='route_qualification_timeout')
         startup = self._workflow_state().get('startup') or {}
+        # 'api_running' only means the registry API is up: it also starts when
+        # the startup route challenge failed (two-Mac run 14: the joined Mac
+        # refused configure with placement_load_proof_mismatch, the registry
+        # served with no qualified route, and this run claimed 'serving').
+        if (startup.get('startup_qualification_complete') is not True
+                or startup.get('unavailable_deployment_count') != 0):
+            unavailable = startup.get('unavailable_deployment_count')
+            ctx.progress('the startup route challenge did not qualify the route (%s deployment(s) '
+                         'unavailable); the owner log names the reason '
+                         '(mycelium.live_serve_diagnostic.v1)'
+                         % (unavailable if type(unavailable) is int else 'unknown'))
+            raise OwnerRunError('route_qualification_failed')
         # The supervisor reports 'http://127.0.0.1:<port>/'; chat and status
         # carry the bare origin (chat.RegistryClient accepts exactly that).
         origin = startup.get('url') or ctx.state.get('registry_origin')

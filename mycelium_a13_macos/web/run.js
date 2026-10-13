@@ -30,6 +30,7 @@
     member_storage_cap_below_share:'A joined Mac agreed to less storage than its share of this model needs.',
     member_cannot_hold_share:'A Mac cannot hold even the smallest share of this model. Add a Mac with more memory, or choose a smaller model.',
     owner_storage_consent_below_model:'This Mac\'s storage limit is below what the selected model needs here.',
+    route_qualification_failed:'The route failed its startup qualification, so nothing is served. The owner log names the Mac and reason.',
   };
   function explain(code) { return ERRORS[code] ? `${ERRORS[code]} (${code})` : code; }
   function renderPicker(status) {

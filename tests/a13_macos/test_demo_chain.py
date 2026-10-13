@@ -65,14 +65,22 @@ class Context:
 
 
 class Workflow:
-    def __init__(self, nodes):
+    def __init__(self, nodes, *, qualified=True):
         self.state = 'prepared'
+        self.qualified = qualified
         self.node_slice_plans = {n: {'node_id': n, 'node_plan_digest': 'sha256:' + '4' * 64} for n in nodes}
     def status(self):
+        # The supervisor's mycelium.live_registry_server_started.v1 document: the
+        # registry serves its API even when the startup route challenge failed
+        # (two-Mac run 14: placement_load_proof_mismatch on the joined Mac).
+        startup = {'protocol': 'mycelium.live_registry_server_started.v1',
+                   # The real supervisor reports its URL with a trailing slash
+                   # (mycelium_live/supervisor.py); chat needs the bare origin.
+                   'url': 'http://127.0.0.1:55555/', 'startup_qualification_complete': self.qualified,
+                   'simulated': False, 'api_only': True, 'deployment_count': int(self.qualified),
+                   'unavailable_deployment_count': int(not self.qualified)}
         return {'state': self.state, 'error_code': None,
-                # The real supervisor reports its URL with a trailing slash
-                # (mycelium_live/supervisor.py); chat needs the bare origin.
-                'startup': {'url': 'http://127.0.0.1:55555/'} if self.state == 'api_running' else None}
+                'startup': startup if self.state == 'api_running' else None}
 
 
 PROPOSAL = {'max_combined_rss_bytes': 16_000, 'max_additional_disk_bytes': 24_000,
@@ -80,9 +88,9 @@ PROPOSAL = {'max_combined_rss_bytes': 16_000, 'max_additional_disk_bytes': 24_00
 
 
 class Ops:
-    def __init__(self, app, *, compile_error=None, collect_errors=()):
+    def __init__(self, app, *, compile_error=None, collect_errors=(), qualified=True):
         self.app = app; self.calls = []; self.compile_error = compile_error
-        self.collect_errors = collect_errors
+        self.collect_errors = collect_errors; self.qualified = qualified
     def prepare_observation(self, app, *, run_id, deployment_id, descriptors):
         self.calls.append(('prepare', [c['statement']['target_node_id'] for c in descriptors]))
         app._observation_context = Context([c['statement']['target_node_id'] for c in descriptors],
@@ -95,7 +103,7 @@ class Ops:
         self.calls.append(('compile', dict(app._member_capability_reports), app._chain_slice_fetch))
         if self.compile_error: raise ValueError(self.compile_error)
         nodes = sorted(app._observation_context.facts)
-        app._chain_workflow = Workflow(nodes)
+        app._chain_workflow = Workflow(nodes, qualified=self.qualified)
         app._chain_compile_state = {'state': 'compiled', 'execution_proposal': PROPOSAL,
             'layer_split': {'stages': [{'node_id': n, 'start': i * 14, 'end': (i + 1) * 14} for i, n in enumerate(nodes)]}}
     def start_serving(self, app, proposal):
@@ -130,9 +138,10 @@ class Members:
     def close(self): pass
 
 
-def make(tmp_path, *, remote=True, prepared=True, compile_error=None, fail_at=None, collect_errors=()):
+def make(tmp_path, *, remote=True, prepared=True, compile_error=None, fail_at=None, collect_errors=(),
+         qualified=True):
     app = FakeApp(tmp_path, remote=remote, prepared=prepared)
-    ops = Ops(app, compile_error=compile_error, collect_errors=collect_errors)
+    ops = Ops(app, compile_error=compile_error, collect_errors=collect_errors, qualified=qualified)
     members = {}
     def factory(app, local, exchange):
         members['m'] = Members(app, exchange, [LOCAL] + ([REMOTE] if remote else []), fail_at=fail_at)
@@ -177,6 +186,39 @@ def test_start_walks_the_real_chain_to_serving_then_stop_tears_down(tmp_path):
     assert ops.calls[-1] == ('stop',)
     assert app.run_exchange.announcement(REMOTE)['phase'] == 'stopped'
     assert app._observation_context is None
+
+
+def test_failed_startup_qualification_is_a_failed_run_not_serving(tmp_path):
+    # Two-Mac run 14: the registry came up api_running with
+    # startup_qualification_complete false (the joined Mac refused configure
+    # with placement_load_proof_mismatch) and the run still said 'serving'
+    # while chat got qualification 503s for four minutes.
+    app, ops, members, run = make(tmp_path, qualified=False)
+    run.start()
+    status = wait(run, lambda s: s['state'] in {'serving', 'failed'})
+    assert status['state'] == 'failed', status
+    assert (status['failed_step'], status['error_code']) == ('serving', 'route_qualification_failed')
+    serving = next(step for step in status['steps'] if step['name'] == 'serving')
+    assert 'startup route challenge' in (serving['detail'] or '')
+    assert ops.calls[-1] == ('stop',)
+    assert 'serving' not in members['m'].phases
+
+
+def test_startup_without_a_qualification_verdict_is_not_serving(tmp_path):
+    app, ops, members, run = make(tmp_path)
+    workflow_status = Workflow.status
+    def legacy_status(self):
+        document = workflow_status(self)
+        if document['startup'] is not None:
+            document['startup'] = {'url': document['startup']['url']}
+        return document
+    Workflow.status = legacy_status
+    try:
+        run.start()
+        status = wait(run, lambda s: s['state'] in {'serving', 'failed'})
+    finally:
+        Workflow.status = workflow_status
+    assert (status['state'], status['error_code']) == ('failed', 'route_qualification_failed')
 
 
 def test_compile_refusal_is_reported_with_its_code(tmp_path):
