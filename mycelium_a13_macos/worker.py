@@ -464,6 +464,10 @@ class _ConcurrentNativeSession:
         return self._process.pid
 
     @property
+    def launch_timing(self) -> dict[str, Any] | None:
+        return getattr(self._process, "launch_timing", None)
+
+    @property
     def returncode(self) -> int | None:
         return self._process.returncode
 
@@ -921,6 +925,7 @@ class ManagedWorker:
             if hello.get("ok") is not True or not group_owned:
                 raise WorkerError("worker_native_start_failed")
             self._group_owned = True
+            self._record_start_timing()
             if self._budget_owner is self:
                 # One admitted execution owns the wall budget, and that budget
                 # starts once the node is up.  Charging the spawn+hello against
@@ -944,11 +949,62 @@ class ManagedWorker:
                 if self._session is None and getattr(exc, "code", None) == "node_process_cleanup_failed":
                     self._startup_cleanup_unproven = True
                     self._startup_cleanup_owner = getattr(exc, "cleanup_owner", None)
+            self._record_start_failure(exc)
             self.close()
             raise
         finally:
             with self._close_lock:
                 self._starting = False
+
+    def _record_start_failure(self, error: BaseException) -> None:
+        """Persist the closed cause of a failed native launch (diagnostics only).
+
+        Run #10: the joined Air answered ``node_process_start_failed`` and kept
+        no trace of which launch step failed.  ``NodeStartFailure`` is closed
+        codes and small integers (phase, outcome, elapsed vs the launch budget,
+        exception type, errno, launcher returncode) -- no path, message or new
+        identifier -- written next to ``native-exit.private.json``.  It never
+        replaces or masks the raised error.
+        """
+        failure = getattr(error, "start_failure", None)
+        if self.capacity_root is None or failure is None:
+            return
+        try:
+            from .authority import _atomic_private_json
+            _atomic_private_json(self.capacity_root / "node-start-failure.private.json", {
+                "protocol": "mycelium.a13.node_start_failure_diagnostic.v1",
+                "run_id": self.run_id, "node_id": self.node_id,
+                "recorded_at": int(time.time()),
+                "error_code": getattr(error, "code", None),
+                "public_code": getattr(error, "public_code", None),
+                "cause": failure.as_record()})
+        except Exception:  # noqa: BLE001 - a diagnostic must not change the outcome
+            pass
+
+    def _record_start_timing(self) -> None:
+        """Record how much of the launch budget a SUCCESSFUL start used.
+
+        The 2 s handshake budget is shared with the A-gate paths and is not
+        loosened on a guess; the measured headroom on each Mac is the evidence
+        a budget change would need.
+        """
+        timing = getattr(self._session, "launch_timing", None)
+        if self.capacity_root is None or not isinstance(timing, Mapping):
+            return
+        try:
+            marks = timing.get("phase_ms") or {}
+            last = max((v for v in marks.values() if isinstance(v, int)), default=None)
+            budget = timing.get("budget_ms")
+            from .authority import _atomic_private_json
+            _atomic_private_json(self.capacity_root / "node-start-timing.private.json", {
+                "protocol": "mycelium.a13.node_start_timing_diagnostic.v1",
+                "run_id": self.run_id, "node_id": self.node_id,
+                "recorded_at": int(time.time()),
+                "timing": dict(timing),
+                "headroom_ms": (budget - last if isinstance(budget, int) and last is not None
+                                else None)})
+        except Exception:  # noqa: BLE001 - a diagnostic must not change the outcome
+            pass
 
     def _reserve_command(self, command_id: str) -> Any:
         with self._account_lock:

@@ -138,19 +138,192 @@ def _deactivate_working_directory_token(token: _WorkingDirectoryToken) -> None:
         restoration_descriptor = None
 
 
+#: Closed set of launch steps a ``node_process_start_failed`` can name.  The
+#: POSIX launch runs them in this order; ``win32_job`` is the win32 spawn.
+NODE_START_FAILURE_PHASES: frozenset[str] = frozenset({
+    "handshake_pipes", "popen", "launcher_ready", "pre_exec_ownership",
+    "launcher_release", "target_exec", "inventory", "identity",
+    "reader_threads", "win32_job", "unknown",
+})
+#: Closed outcome of the failed step: the launch budget ran out, the launcher
+#: (or its exec'd target) was already gone, an identity/ownership check
+#: refused, or anything else.
+NODE_START_FAILURE_KINDS: frozenset[str] = frozenset({
+    "timeout", "exited", "identity_invalid", "error",
+})
+_LAUNCH_TIMING_PHASES: tuple[str, ...] = (
+    "launcher_ready", "pre_exec_ownership", "launcher_release", "target_exec",
+    "inventory", "identity",
+)
+_EXCEPTION_TYPE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+_INNER_CODE_RE = re.compile(r"^node_process_[a-z_]{1,48}$")
+_MAX_DIAGNOSTIC_MS = 3_600_000
+
+
+def _bounded_ms(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value):
+        return None
+    return max(0, min(int(value), _MAX_DIAGNOSTIC_MS))
+
+
+@dataclass(frozen=True)
+class NodeStartFailure:
+    """Bounded cause of one failed node launch.
+
+    Closed codes and small integers only: no path, argv, environment,
+    exception message, pid or identifier, so the record can be persisted next
+    to the existing private diagnostics and its ``public_reason`` can travel in
+    a member report.  ``elapsed_ms`` and every ``phase_ms`` mark are measured
+    from the moment the launch budget (``budget_ms``) started, i.e. right
+    after ``Popen`` returned; ``popen_ms`` is the spawn itself, which the
+    budget does not cover.
+    """
+
+    phase: str
+    kind: str
+    elapsed_ms: int | None
+    budget_ms: int
+    popen_ms: int | None
+    exception_type: str
+    errno: int | None
+    inner_code: str | None
+    launcher_exited: bool | None
+    launcher_returncode: int | None
+    phase_ms: tuple[tuple[str, int], ...]
+
+    @classmethod
+    def from_exception(
+        cls,
+        *,
+        phase: str,
+        exception: BaseException,
+        started: float | None,
+        budget_seconds: float,
+        popen_ms: Any,
+        phase_ms: Mapping[str, Any],
+        launcher_returncode: Any,
+        launcher_exited: bool | None,
+        failed_at: float | None = None,
+    ) -> "NodeStartFailure":
+        if phase not in NODE_START_FAILURE_PHASES:
+            phase = "unknown"
+        if failed_at is None:
+            failed_at = time.monotonic()
+        code = getattr(exception, "code", None)
+        inner_code = (
+            code
+            if isinstance(exception, NodeProcessError)
+            and isinstance(code, str)
+            and _INNER_CODE_RE.fullmatch(code)
+            else None
+        )
+        if inner_code == "node_process_identity_invalid":
+            kind = "identity_invalid"
+        elif isinstance(exception, _HandshakeClosed):
+            kind = "exited"
+        elif isinstance(exception, (TimeoutError, subprocess.TimeoutExpired)):
+            kind = "timeout"
+        elif launcher_exited:
+            kind = "exited"
+        else:
+            kind = "error"
+        exception_type = type(exception).__name__
+        if not _EXCEPTION_TYPE_RE.fullmatch(exception_type):
+            exception_type = "Exception"
+        error_number = getattr(exception, "errno", None)
+        if (
+            isinstance(error_number, bool)
+            or not isinstance(error_number, int)
+            or not 0 < error_number <= 4096
+        ):
+            error_number = None
+        if (
+            isinstance(launcher_returncode, bool)
+            or not isinstance(launcher_returncode, int)
+            or not -255 <= launcher_returncode <= 255
+        ):
+            launcher_returncode = None
+        marks = tuple(
+            (name, bounded)
+            for name in _LAUNCH_TIMING_PHASES
+            if name in phase_ms
+            and (bounded := _bounded_ms(phase_ms[name])) is not None
+        )
+        return cls(
+            phase=phase,
+            kind=kind,
+            elapsed_ms=(
+                None if started is None
+                else _bounded_ms((failed_at - started) * 1000)
+            ),
+            budget_ms=int(budget_seconds * 1000),
+            popen_ms=_bounded_ms(popen_ms),
+            exception_type=exception_type,
+            errno=error_number,
+            inner_code=inner_code,
+            launcher_exited=(
+                True if kind == "exited"
+                else None if launcher_exited is None
+                else bool(launcher_exited)
+            ),
+            launcher_returncode=launcher_returncode,
+            phase_ms=marks,
+        )
+
+    @property
+    def public_reason(self) -> str:
+        """Closed ``<phase>_<kind>`` token, safe for a member report."""
+
+        return f"{self.phase}_{self.kind}"
+
+    def as_record(self) -> dict[str, Any]:
+        return {
+            "phase": self.phase,
+            "kind": self.kind,
+            "elapsed_ms": self.elapsed_ms,
+            "budget_ms": self.budget_ms,
+            "popen_ms": self.popen_ms,
+            "exception_type": self.exception_type,
+            "errno": self.errno,
+            "inner_code": self.inner_code,
+            "launcher_exited": self.launcher_exited,
+            "launcher_returncode": self.launcher_returncode,
+            "phase_ms": dict(self.phase_ms),
+        }
+
+
 class NodeProcessError(RuntimeError):
     """Stable, fail-closed node-process failure."""
 
     def __init__(
         self, code: str, detail: str = "", *,
         cleanup_owner: "PhysicalNodeProcess | None" = None,
+        start_failure: NodeStartFailure | None = None,
     ) -> None:
         self.code = code
         self.detail = detail
         # Preserve incarnation-bound teardown when a failed constructor cannot
         # prove that the child it spawned has gone.
         self.cleanup_owner = cleanup_owner
+        # Bounded cause of a failed launch.  Never part of ``code`` or the
+        # message: callers compare both, and the cause is diagnostics only.
+        self.start_failure = start_failure
         super().__init__(code if not detail else f"{code}:{detail}")
+
+    @property
+    def public_code(self) -> str:
+        """``code``, suffixed with the closed launch cause when one is known.
+
+        E.g. ``node_process_start_failed_launcher_ready_timeout``.  It still
+        matches the ``[a-z][a-z0-9_]{0,95}`` member-report code contract.
+        """
+
+        failure = self.start_failure
+        if failure is None:
+            return self.code
+        return f"{self.code}_{failure.public_reason}"
 
 
 class _RemoteNodeError(NodeProcessError):
@@ -1256,6 +1429,10 @@ def _handshake_descriptor(
     return descriptor
 
 
+class _HandshakeClosed(RuntimeError):
+    """The launcher closed its ready pipe without signalling: it is gone."""
+
+
 def _await_handshake_byte(
     descriptor: int,
     deadline: float,
@@ -1274,6 +1451,8 @@ def _await_handshake_byte(
     if expected is None:
         if value:
             raise RuntimeError("launcher exec failed")
+    elif not value:
+        raise _HandshakeClosed("launcher readiness failed")
     elif value != expected:
         raise RuntimeError("launcher readiness failed")
 
@@ -1776,7 +1955,15 @@ class PhysicalNodeProcess:
             handshake = _handshake_pipes()
         except Exception as exc:
             self._closed = True
-            raise NodeProcessError("node_process_start_failed") from exc
+            raise NodeProcessError(
+                "node_process_start_failed",
+                start_failure=NodeStartFailure.from_exception(
+                    phase="handshake_pipes", exception=exc, started=None,
+                    budget_seconds=_LAUNCH_HANDSHAKE_SECONDS, popen_ms=None,
+                    phase_ms={}, launcher_returncode=None, launcher_exited=None,
+                ),
+            ) from exc
+        popen_started = time.monotonic()
         try:
             ready_write = _handshake_descriptor(handshake, "ready_write")
             release_read = _handshake_descriptor(handshake, "release_read")
@@ -1812,12 +1999,34 @@ class PhysicalNodeProcess:
                 env=self._environment,
             )
         except Exception as exc:
+            popen_failed_at = time.monotonic()
             for name in tuple(handshake):
                 _close_handshake_descriptor(handshake, name)
             self._closed = True
-            raise NodeProcessError("node_process_start_failed") from exc
+            raise NodeProcessError(
+                "node_process_start_failed",
+                start_failure=NodeStartFailure.from_exception(
+                    phase="popen", exception=exc, started=None,
+                    budget_seconds=_LAUNCH_HANDSHAKE_SECONDS,
+                    popen_ms=(popen_failed_at - popen_started) * 1000,
+                    phase_ms={}, launcher_returncode=None, launcher_exited=None,
+                ),
+            ) from exc
+        # Every launch step below runs inside ONE immutable budget.  ``phase``
+        # names the step in flight and ``marks`` the ms (from budget start) at
+        # which each earlier step completed, so a failure names its own step
+        # and how much of the budget the previous ones used.
+        budget_started = time.monotonic()
+        popen_ms = (budget_started - popen_started) * 1000
+        phase = "launcher_ready"
+        marks: dict[str, float] = {}
+
+        def mark(completed: str, following: str) -> str:
+            marks[completed] = (time.monotonic() - budget_started) * 1000
+            return following
+
         try:
-            startup_deadline = time.monotonic() + _LAUNCH_HANDSHAKE_SECONDS
+            startup_deadline = budget_started + _LAUNCH_HANDSHAKE_SECONDS
             _close_handshake_descriptor(handshake, "ready_write")
             _close_handshake_descriptor(handshake, "release_read")
             _close_handshake_descriptor(handshake, "exec_write")
@@ -1829,19 +2038,23 @@ class PhysicalNodeProcess:
                 self._process,
                 startup_deadline,
             )
+            phase = mark("launcher_ready", "pre_exec_ownership")
             _close_handshake_descriptor(handshake, "ready_read")
             self._pre_exec_ownership = _capture_pre_exec_ownership(
                 self._process,
                 launcher_identity,
                 startup_deadline,
             )
+            phase = mark("pre_exec_ownership", "launcher_release")
             _release_pre_exec_launcher(release_write)
+            phase = mark("launcher_release", "target_exec")
             _close_handshake_descriptor(handshake, "release_write")
             _await_target_exec(
                 exec_read,
                 self._process,
                 startup_deadline,
             )
+            phase = mark("target_exec", "inventory")
             _close_handshake_descriptor(handshake, "exec_read")
             while True:
                 try:
@@ -1866,6 +2079,7 @@ class PhysicalNodeProcess:
                         raise
                     remaining = _deadline_remaining(startup_deadline)
                     time.sleep(min(0.01, remaining))
+            phase = mark("inventory", "identity")
             if (
                 not _identity_matches_pre_exec_ownership(
                     launch,
@@ -1875,7 +2089,15 @@ class PhysicalNodeProcess:
                 or launch.executable != command_identity
             ):
                 raise NodeProcessError("node_process_identity_invalid")
+            phase = mark("identity", "reader_threads")
             self._launch_identity = launch
+            self._launch_timing = {
+                "budget_ms": int(_LAUNCH_HANDSHAKE_SECONDS * 1000),
+                "popen_ms": _bounded_ms(popen_ms),
+                "phase_ms": {
+                    name: _bounded_ms(marks[name]) for name in _LAUNCH_TIMING_PHASES
+                },
+            }
             self._stdout_thread = threading.Thread(
                 target=self._read_stdout,
                 name=f"mycelium-node-stdout-{self.node_id}",
@@ -1889,6 +2111,10 @@ class PhysicalNodeProcess:
             self._stdout_thread.start()
             self._stderr_thread.start()
         except Exception as exc:
+            failed_at = time.monotonic()
+            # Observed before any cleanup signal: was the launcher (or its
+            # exec'd target) already gone when this step failed?
+            launcher_exited = self._process.poll() is not None
             if self._pre_exec_ownership is None:
                 try:
                     self._pre_exec_ownership = _capture_pre_exec_ownership(
@@ -1910,10 +2136,28 @@ class PhysicalNodeProcess:
             )
             raise NodeProcessError(
                 code, cleanup_owner=None if cleaned else self,
+                start_failure=NodeStartFailure.from_exception(
+                    phase=phase, exception=exc, started=budget_started,
+                    budget_seconds=_LAUNCH_HANDSHAKE_SECONDS, popen_ms=popen_ms,
+                    phase_ms=marks,
+                    # After cleanup: the launcher's own status when it had
+                    # already exited, else the cleanup signal's.
+                    launcher_returncode=self._process.returncode,
+                    launcher_exited=launcher_exited, failed_at=failed_at,
+                ),
             ) from exc
         finally:
             for name in tuple(handshake):
                 _close_handshake_descriptor(handshake, name)
+
+    @property
+    def launch_timing(self) -> dict[str, Any] | None:
+        """Bounded ms marks of the successful launch, against its budget."""
+
+        timing = getattr(self, "_launch_timing", None)
+        if timing is None:
+            return None
+        return {**timing, "phase_ms": dict(timing["phase_ms"])}
 
     def _start_win32_job(
         self,
@@ -1956,7 +2200,15 @@ class PhysicalNodeProcess:
                 if exc.code == "host_process_identity_invalid"
                 else "node_process_start_failed"
             )
-            raise NodeProcessError(code) from exc
+            raise NodeProcessError(
+                code,
+                start_failure=None if code != "node_process_start_failed"
+                else NodeStartFailure.from_exception(
+                    phase="win32_job", exception=exc, started=None,
+                    budget_seconds=_LAUNCH_HANDSHAKE_SECONDS, popen_ms=None,
+                    phase_ms={}, launcher_returncode=None, launcher_exited=None,
+                ),
+            ) from exc
         self._process = job.process
         self._win32_job = job
         try:
@@ -1981,6 +2233,11 @@ class PhysicalNodeProcess:
             raise NodeProcessError(
                 "node_process_start_failed" if cleaned else "node_process_cleanup_failed",
                 cleanup_owner=None if cleaned else self,
+                start_failure=NodeStartFailure.from_exception(
+                    phase="reader_threads", exception=exc, started=None,
+                    budget_seconds=_LAUNCH_HANDSHAKE_SECONDS, popen_ms=None,
+                    phase_ms={}, launcher_returncode=None, launcher_exited=None,
+                ),
             ) from exc
 
     def win32_job_resident_bytes(self) -> int:

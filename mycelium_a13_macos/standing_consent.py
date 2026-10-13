@@ -21,6 +21,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 import threading
 import time
 from typing import Any, Callable, Mapping
@@ -46,6 +47,8 @@ _FIELDS = frozenset({"protocol", "disclosure_digest", "caps", "granted_at", "bin
                      "bound_at", "withdrawn_at", "state"})
 _MIN_MEMORY = 256 * 1024**2
 _MAX_MEMORY = 512 * 1024**3
+#: The member-report code contract (``run_exchange._CODE``).
+_PUBLIC_CODE = re.compile(r"[a-z][a-z0-9_]{0,95}\Z")
 #: Reasons that can change on a later tick (the offer is retried, not dropped).
 _TRANSIENT = frozenset({"membership_required", "standing_consent_withdrawn",
                         "standing_consent_unbound", "standing_consent_missing"})
@@ -348,7 +351,13 @@ class StandingAcceptor:
                         return dict(self._last)
                     self._accept(actor, preview, work_acknowledged=True, **options)
                 except Exception as exc:  # noqa: BLE001 - recorded as a closed code
-                    code = getattr(exc, "code", None) or (str(exc) if str(exc).isidentifier() else None)
+                    # A failed native launch names its closed launch step
+                    # (``node_process_start_failed_launcher_ready_timeout``);
+                    # every other error keeps its bare code.
+                    public = getattr(exc, "public_code", None)
+                    code = (public if isinstance(public, str) and _PUBLIC_CODE.fullmatch(public)
+                            else getattr(exc, "code", None)
+                            or (str(exc) if str(exc).isidentifier() else None))
                     reason = code if isinstance(code, str) and len(code) <= 96 else "standing_accept_failed"
                     self._handled.add(offer_id)
                     self._last = {"offer_id": offer_id, "state": "failed", "reason": reason}
