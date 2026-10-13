@@ -111,25 +111,33 @@ def qwen35_stage_resident_bytes(
 
     ``none``: every tensor float32.  ``int8-weight-only``: 2-D ``.weight``
     matrices and packed 3-D experts are int8 codes plus one float32 scale per
-    output row (per expert for packed experts); norms, conv1d, ``A_log``,
-    ``dt_bias`` and the MoE routing matrices stay float32.  An untied
-    ``lm_head`` counts as a matrix of the embedding's shape.
+    output row (per expert for packed experts), held once in the packed MLX
+    layout (plus its float32 group scale and bias per 128 codes, see
+    ``weight_quantization.int8_rowwise_resident_bytes``); norms, conv1d,
+    ``A_log``, ``dt_bias`` and the MoE routing matrices stay float32.  An
+    untied ``lm_head`` counts as a matrix of the embedding's shape.
     """
 
-    from weight_quantization import rowwise_int8_kind
+    from weight_quantization import int8_rowwise_resident_bytes, rowwise_int8_kind
 
     if quantization not in {"none", "int8-weight-only"}:
         raise ValueError("unsupported quantization")
     shapes = expected_qwen35_shapes(config, start, end, components)
-    if "lm_head" in components and not config["tie_word_embeddings"]:
-        shapes["lm_head.weight"] = (int(config["vocab_size"]), int(config["n_embd"]))
+    if "lm_head" in components:
+        head_shape = (int(config["vocab_size"]), int(config["n_embd"]))
+        if not config["tie_word_embeddings"]:
+            shapes["lm_head.weight"] = head_shape
+        else:
+            # A tied head is the embedding matrix itself: the stage loads it
+            # (once, shared with ``input_embedding`` when both are owned).
+            shapes.setdefault(EMBED_KEY, head_shape)
     total = 0
     for key, shape in shapes.items():
         elements = 1
         for extent in shape:
             elements *= extent
         if quantization == "int8-weight-only" and rowwise_int8_kind(key, len(shape)):
-            total += elements + 4 * (elements // shape[-1])
+            total += int8_rowwise_resident_bytes(tuple(shape))
         else:
             total += 4 * elements
     return total

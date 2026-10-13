@@ -39,7 +39,7 @@ from typing import Any, Callable, Mapping
 
 import mlx.core as mx
 
-from weight_quantization import Int8RowwiseWeight
+from weight_quantization import Int8RowwiseWeight, int8_float32_values
 
 from qwen35_shapes import (
     EMBED_KEY as EMBED_KEY,
@@ -295,7 +295,7 @@ def expert_linear(hidden: mx.array, weight: Any, indices: mx.array) -> mx.array:
     lhs = hidden[:, :, None, :]
     if isinstance(weight, Int8RowwiseWeight):
         product = mx.gather_mm(
-            lhs, weight.values.astype(mx.float32).swapaxes(-1, -2), rhs_indices=indices
+            lhs, int8_float32_values(weight).swapaxes(-1, -2), rhs_indices=indices
         )
         scales = weight.scales[indices]
         return product[:, :, 0, :] * scales

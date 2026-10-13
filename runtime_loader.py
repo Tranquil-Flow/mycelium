@@ -47,7 +47,12 @@ from runtime_contracts import (
 from weight_provisioning import artifact_report_errors
 from weight_quantization import (
     Int8RowwiseWeight,
+    PackedInt8RowwiseWeight,
     ROWWISE_INT8_CONVERSION_CHUNK_FLOAT_BYTES,
+    int8_float32_values,
+    int8_rows,
+    packed_int8_packable,
+    packed_int8_weight,
     rowwise_int8_kind,
 )
 
@@ -935,6 +940,39 @@ def _load_rowwise_int8_weight(
     shape: tuple[int, ...],
     key: str,
 ) -> Int8RowwiseWeight:
+    values, scales = _stream_rowwise_int8_codes(
+        handle,
+        data_offset=data_offset,
+        start=start,
+        end=end,
+        source_dtype=source_dtype,
+        shape=shape,
+        key=key,
+        offset_binary=False,
+    )
+    values.flags.writeable = False
+    scales.flags.writeable = False
+    return Int8RowwiseWeight(values, scales)
+
+
+def _stream_rowwise_int8_codes(
+    handle: BinaryIO,
+    *,
+    data_offset: int,
+    start: int,
+    end: int,
+    source_dtype: str,
+    shape: tuple[int, ...],
+    key: str,
+    offset_binary: bool,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Row-wise int8 codes and scales of one matrix, streamed in bounded chunks.
+
+    ``offset_binary`` writes ``value + 128`` as ``uint8`` (the packed MLX
+    layout's byte order) straight into the only full-size buffer, so the
+    packed MLX loader never holds a signed copy next to the packed one.
+    """
+
     if len(shape) != 2 or not key.endswith(".weight"):
         raise _fail(f"invalid row-wise int8 tensor shape: {key}")
     rows, columns = shape
@@ -946,7 +984,7 @@ def _load_rowwise_int8_weight(
         1,
         ROWWISE_INT8_CONVERSION_CHUNK_FLOAT_BYTES // max(columns * 4, 1),
     )
-    values = np.empty(shape, dtype=np.int8)
+    values = np.empty(shape, dtype=np.uint8 if offset_binary else np.int8)
     scales = np.empty((rows,), dtype=np.float32)
     for row_start in range(0, rows, rows_per_chunk):
         row_end = min(rows, row_start + rows_per_chunk)
@@ -965,11 +1003,67 @@ def _load_rowwise_int8_weight(
         converted = quantize_qwen2_numpy_tensor(key, chunk)
         if not isinstance(converted, Int8RowwiseWeight):
             raise _fail(f"row-wise int8 conversion failed for tensor {key}")
-        values[row_start:row_end] = converted.values
+        if offset_binary:
+            np.bitwise_xor(
+                converted.values.view(np.uint8),
+                np.uint8(0x80),
+                out=values[row_start:row_end],
+            )
+        else:
+            values[row_start:row_end] = converted.values
         scales[row_start:row_end] = converted.scales
-    values.flags.writeable = False
-    scales.flags.writeable = False
-    return Int8RowwiseWeight(values, scales)
+    return values, scales
+
+
+def _load_packed_int8_mlx_weight(
+    handle: BinaryIO,
+    *,
+    data_offset: int,
+    start: int,
+    end: int,
+    source_dtype: str,
+    shape: tuple[int, ...],
+    key: str,
+    kind: str,
+    mx: Any,
+) -> Int8RowwiseWeight:
+    """One row-wise int8 tensor, packed ONCE at load into its MLX execution layout.
+
+    The packed ``uint32`` codes (plus row scales and group parameters) are the
+    only resident copy: the NumPy staging buffer is released before the next
+    tensor is read, so the load peak stays one tensor above the packed total.
+    A tensor whose input width is not a multiple of the packing group keeps
+    plain ``int8`` codes (and the port then runs the stage per call).
+    """
+
+    if kind == "experts":
+        if len(shape) != 3 or rowwise_int8_kind(key, 3) != "experts":
+            raise _fail(f"invalid packed expert int8 tensor shape: {key}")
+        matrix_shape = (shape[0] * shape[1], shape[2])
+        matrix_key = key + ".rows.weight"
+    else:
+        matrix_shape = shape
+        matrix_key = key
+    packable = packed_int8_packable(shape)
+    codes, scales = _stream_rowwise_int8_codes(
+        handle,
+        data_offset=data_offset,
+        start=start,
+        end=end,
+        source_dtype=source_dtype,
+        shape=matrix_shape,
+        key=matrix_key,
+        offset_binary=packable,
+    )
+    row_scales = mx.array(scales.reshape(shape[:-1]))
+    if not packable:
+        weight = Int8RowwiseWeight(mx.array(codes.reshape(shape)), row_scales)
+        mx.eval(weight.values, weight.scales)
+        return weight
+    packed = mx.array(codes.reshape(shape).view(np.uint32))
+    mx.eval(packed)
+    del codes
+    return packed_int8_weight(packed, row_scales)
 
 
 def _load_expert_rowwise_int8_weight(
@@ -1110,26 +1204,43 @@ def _load_exact_tensors(
             header, data_offset = _validate_safetensors_header(handle, path)
             selected = expected_set.intersection(header)
             if runtime_backend == _MLX_RUNTIME_BACKEND and quantize_qwen:
-                numpy_tensors = _load_numpy_safetensors(
-                    handle,
-                    header,
-                    data_offset,
-                    selected,
-                    np.dtype("float32"),
-                    quantize_qwen=True,
-                )
+                # One tensor at a time: read, quantize, pack into the MLX
+                # execution layout, release the staging copy, continue.
                 selected_tensors = {}
                 for key in sorted(selected):
-                    value = numpy_tensors[key]
-                    if isinstance(value, Int8RowwiseWeight):
-                        converted = Int8RowwiseWeight(
-                            mx.array(value.values),
-                            mx.array(value.scales),
+                    entry = header[key]
+                    shape = tuple(int(dimension) for dimension in entry["shape"])
+                    int8_kind = rowwise_int8_kind(key, len(shape))
+                    if int8_kind is not None:
+                        source_dtype = entry["dtype"]
+                        if source_dtype not in {"BF16", "F16", "F32"}:
+                            raise _fail(
+                                "unverified or quantized source dtype for tensor "
+                                f"{key}: {source_dtype}"
+                            )
+                        tensor_start, tensor_end = entry["data_offsets"]
+                        selected_tensors[key] = _load_packed_int8_mlx_weight(
+                            handle,
+                            data_offset=data_offset,
+                            start=tensor_start,
+                            end=tensor_end,
+                            source_dtype=source_dtype,
+                            shape=shape,
+                            key=key,
+                            kind=int8_kind,
+                            mx=mx,
                         )
-                        mx.eval(converted.values, converted.scales)
-                    else:
-                        converted = mx.array(value).astype(runtime_dtype)
-                        mx.eval(converted)
+                        continue
+                    value = _load_numpy_safetensors(
+                        handle,
+                        header,
+                        data_offset,
+                        {key},
+                        np.dtype("float32"),
+                    )[key]
+                    converted = mx.array(value).astype(runtime_dtype)
+                    mx.eval(converted)
+                    del value
                     selected_tensors[key] = converted
             elif runtime_backend == _MLX_RUNTIME_BACKEND:
                 try:
@@ -1511,14 +1622,17 @@ def _quantize_qwen2_mlx_tensors(tensors: Mapping[str, Any], mx: Any) -> dict[str
 
 def _qwen2_linear(hidden: Any, weight: Any, mx: Any) -> Any:
     if isinstance(weight, Int8RowwiseWeight):
-        projected = mx.matmul(hidden, weight.values.astype(mx.float32).transpose(1, 0))
+        projected = mx.matmul(hidden, int8_float32_values(weight).transpose(1, 0))
         return projected * weight.scales
     return mx.matmul(hidden, weight.transpose(1, 0))
 
 
 def _qwen2_embedding(weight: Any, token_ids: Any, mx: Any) -> Any:
     if isinstance(weight, Int8RowwiseWeight):
-        return weight.values[token_ids].astype(mx.float32) * weight.scales[token_ids, None]
+        return (
+            int8_rows(weight, token_ids).astype(mx.float32)
+            * weight.scales[token_ids, None]
+        )
     return weight[token_ids]
 
 
@@ -1969,11 +2083,13 @@ def _digest_arrays(tensors: Mapping[str, Any]) -> str:
     digest = hashlib.sha256()
     for key in sorted(tensors):
         value = tensors[key]
-        arrays = (
-            (("values", value.values), ("scales", value.scales))
-            if isinstance(value, Int8RowwiseWeight)
-            else (("value", value),)
-        )
+        if isinstance(value, PackedInt8RowwiseWeight):
+            # The signed codes' exact bytes, read from the single packed copy.
+            arrays = (("values", value), ("scales", value.scales))
+        elif isinstance(value, Int8RowwiseWeight):
+            arrays = (("values", value.values), ("scales", value.scales))
+        else:
+            arrays = (("value", value),)
         for part, array in arrays:
             metadata = canonical_json(
                 {
@@ -1983,7 +2099,11 @@ def _digest_arrays(tensors: Mapping[str, Any]) -> str:
                     "shape": list(_shape(array)),
                 }
             ).encode("utf-8")
-            payload = bytes(array)
+            payload = (
+                memoryview(array.host_values()).cast("B")
+                if isinstance(array, PackedInt8RowwiseWeight)
+                else bytes(array)
+            )
             digest.update(len(metadata).to_bytes(8, "big"))
             digest.update(metadata)
             digest.update(len(payload).to_bytes(8, "big"))

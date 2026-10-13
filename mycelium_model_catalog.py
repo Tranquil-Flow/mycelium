@@ -17,7 +17,11 @@ from mycelium_layer_planner.contracts import (
     PlanningPolicy,
     WorkloadScenario,
 )
-from weight_quantization import rowwise_int8_streaming_transient_bytes
+from weight_quantization import (
+    int8_rowwise_resident_bytes,
+    rowwise_int8_kind,
+    rowwise_int8_streaming_transient_bytes,
+)
 
 
 MODEL_CATALOG_PROTOCOL = "mycelium.model_catalog.v1"
@@ -299,7 +303,19 @@ def _int8_runtime_accounting(
     resident_other = 0
     load_other = 0
     streaming_transient_other = 0
+    tied = config.get("tie_word_embeddings") is True
     for tensor_name, filename in weight_map.items():
+        # Recognised-but-never-loaded tensors (vision encoder, MTP head) and a
+        # redundant checkpoint head under tied embeddings are not resident.
+        if tensor_name.startswith(adapter.excluded_tensor_prefixes) or (
+            tied
+            and any(
+                tensor_name.startswith(prefix)
+                for prefix in adapter.components.get("lm_head", ())
+                if "{layer}" not in prefix
+            )
+        ):
+            continue
         record = headers[filename][tensor_name]
         shape = record.get("shape")
         if (
@@ -312,15 +328,18 @@ def _int8_runtime_accounting(
         for extent in shape:
             elements *= extent
         unquantized_bytes = elements * 4
+        # The loader's single rule; a quantized tensor is resident once, in
+        # the packed MLX layout (codes, row scales, group parameters).
+        quantized = rowwise_int8_kind(tensor_name, len(shape)) is not None
         resident_bytes = (
-            elements + shape[0] * 4
-            if len(shape) == 2 and tensor_name.endswith(".weight")
+            int8_rowwise_resident_bytes(tuple(shape))
+            if quantized
             else unquantized_bytes
         )
         load_bytes = unquantized_bytes + resident_bytes
         streaming_transient_bytes = rowwise_int8_streaming_transient_bytes(
             tuple(shape),
-            quantized_matrix=(len(shape) == 2 and tensor_name.endswith(".weight")),
+            quantized_matrix=quantized,
         )
         matched = False
         for layer in range(num_layers):

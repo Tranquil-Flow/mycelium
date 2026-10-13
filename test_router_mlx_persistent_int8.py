@@ -55,7 +55,15 @@ def test_packed_state_dequantizes_to_the_exact_int8_values():
    weight = _int8_weight(96, 256, 1)
    packed = _pack_int8_rowwise(weight)
    assert isinstance(packed, PackedInt8RowwiseWeight)
-   assert packed.values is weight.values and packed.scales is weight.scales
+   assert packed.scales is weight.scales
+   # One resident representation: the packed weight holds no signed codes;
+   # ``values`` re-derives them exactly, as a fresh transient, on each access.
+   held = [getattr(packed, name) for name in ("packed", "scales", "group_scales", "group_biases")]
+   assert not any(array.dtype == mx.int8 for array in held)
+   assert packed.values is not packed.values
+   assert bool(mx.array_equal(packed.values, weight.values).item())
+   assert packed.values.dtype == mx.int8 and packed.shape == (96, 256)
+   assert packed.dtype == mx.int8
    restored = mx.dequantize(
       packed.packed,
       packed.group_scales,
@@ -187,3 +195,50 @@ def test_packed_decode_never_upcasts_a_whole_int8_matrix(monkeypatch):
    assert len(upcasts) == 7
    monkeypatch.undo()
    assert _close(decoded, legacy)
+
+
+def test_a_packed_stage_is_executed_in_place_without_a_second_copy():
+   tensors = {
+      "a.weight": _pack_int8_rowwise(_int8_weight(64, 256, 1)),
+      "b.weight": _pack_int8_rowwise(_int8_weight(128, 128, 2)),
+      "norm.weight": mx.ones((128,)),
+   }
+   execution, mode = _persistent_int8_tensors(tensors)
+   assert mode == INT8_EXECUTION_PERSISTENT_PACKED
+   assert all(execution[key] is tensors[key] for key in tensors)
+
+
+def test_the_per_call_fallback_derives_codes_from_the_single_packed_copy():
+   packed = _pack_int8_rowwise(_int8_weight(64, 256, 1))
+   plain = _int8_weight(64, 200, 2)  # unpackable: the whole stage falls back
+   tensors = {"a.weight": packed, "b.weight": plain}
+   execution, mode = _persistent_int8_tensors(tensors)
+   assert mode == INT8_EXECUTION_PER_CALL_MATERIALIZATION
+   view = execution["a.weight"]
+   assert not isinstance(view, PackedInt8RowwiseWeight)
+   assert isinstance(view, Int8RowwiseWeight) and execution["b.weight"] is plain
+   assert view.source is packed and view.scales is packed.scales
+   hidden = mx.random.normal((1, 3, 256), key=mx.random.key(4))
+   expected = _qwen2_linear(hidden, Int8RowwiseWeight(packed.values, packed.scales))
+   assert bool(mx.array_equal(_qwen2_linear(hidden, view), expected).item())
+
+
+def test_packed_embedding_rows_equal_the_signed_rows():
+   weight = _int8_weight(96, 128, 9)
+   packed = _pack_int8_rowwise(weight)
+   ids = mx.array([[0, 5, 95, 5]], dtype=mx.int32)
+   expected = weight.values[ids].astype(mx.float32) * weight.scales[ids, None]
+   actual = mlx_runtime._qwen2_embedding(packed, ids)
+   assert bool(mx.array_equal(actual, expected).item())
+
+
+@pytest.mark.parametrize("shape", [(96, 256), (4, 64, 128)])
+def test_packed_float32_values_equal_the_int8_upcast_bit_for_bit(shape):
+   values = mx.random.randint(-127, 128, shape, key=mx.random.key(3)).astype(mx.int8)
+   scales = mx.ones(shape[:-1], dtype=mx.float32)
+   packed = _pack_int8_rowwise(Int8RowwiseWeight(values, scales))
+   assert isinstance(packed, PackedInt8RowwiseWeight)
+   restored = packed.float32_values()
+   assert restored.dtype == mx.float32
+   assert bool(mx.array_equal(restored, values.astype(mx.float32)).item())
+

@@ -311,19 +311,25 @@ def test_qwen35_moe_memory_model_is_exact_per_layer() -> None:
 
     config = _normalize(CONFIG_35B_A3B)
     h, e, mi, si = 2048, 256, 512, 512
+
+    def codes(n: int) -> int:
+        # The single resident packed copy: int8 codes plus one float32 group
+        # scale and one float32 group bias per 128 codes.
+        return n + 2 * 4 * n // 128
+
     moe_int8 = (
-        e * (2 * mi * h + h * mi)  # packed expert int8 codes
+        codes(e * (2 * mi * h + h * mi))  # packed expert int8 codes
         + 4 * e * (2 * mi + h)  # per-expert per-row float32 scales
         + 4 * e * h  # float32 router
-        + (2 * si * h + h * si) + 4 * (2 * si + h)  # shared expert int8 + scales
+        + codes(2 * si * h + h * si) + 4 * (2 * si + h)  # shared expert int8 + scales
         + 4 * h  # float32 shared-expert gate
         + 2 * 4 * h  # layer norms
     )
-    linear_mixer = (8192 + 4096 + 32 + 32) * h + 4 * (8192 + 4096 + 32 + 32) + (
-        h * 4096 + 4 * h
+    linear_mixer = codes((8192 + 4096 + 32 + 32) * h) + 4 * (8192 + 4096 + 32 + 32) + (
+        codes(h * 4096) + 4 * h
     ) + 4 * (8192 * 4 + 32 + 32 + 128)
-    full_mixer = (8192 + 512 + 512) * h + 4 * (8192 + 512 + 512) + (
-        h * 4096 + 4 * h
+    full_mixer = codes((8192 + 512 + 512) * h) + 4 * (8192 + 512 + 512) + (
+        codes(h * 4096) + 4 * h
     ) + 4 * (256 + 256)
     assert qwen35_stage_resident_bytes(config, 0, 1, (), "int8-weight-only") == (
         moe_int8 + linear_mixer
@@ -331,7 +337,7 @@ def test_qwen35_moe_memory_model_is_exact_per_layer() -> None:
     assert qwen35_stage_resident_bytes(config, 3, 4, (), "int8-weight-only") == (
         moe_int8 + full_mixer
     )
-    embed = 248320 * h + 4 * 248320
+    embed = codes(248320 * h) + 4 * 248320
     assert qwen35_stage_resident_bytes(
         config, 0, 0, ("input_embedding",), "int8-weight-only"
     ) == embed
@@ -341,7 +347,7 @@ def test_qwen35_moe_memory_model_is_exact_per_layer() -> None:
     assert total == 30 * (moe_int8 + linear_mixer) + 10 * (moe_int8 + full_mixer) + (
         2 * embed + 4 * h
     )
-    assert 34.0e9 < total < 36.0e9
+    assert 36.0e9 < total < 38.0e9
 
 
 # --- per-expert int8 ----------------------------------------------------------------
