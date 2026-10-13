@@ -36,6 +36,12 @@ _CHAT_CSP=("default-src 'self'; script-src 'self'; style-src 'self'; connect-src
 _CHUNK_LINE_MAX=10
 _CHUNK_SIZE_RE=re.compile(rb'[0-9A-Fa-f]{1,8}\r\n')
 _LOCAL_TYPES=frozenset({'application/json','text/html; charset=utf-8','image/svg+xml'})
+#: Public swarm entry (swarm_entry.py): ``SeedRelayProxy.bind_swarm_entry(handler)``
+#: with ``handler(method, path, headers, body) -> (status, 'application/json', raw)``.
+#: Cross-origin (the directory page is another origin): CORS ``*``, no credentials.
+_SWARM_PREFIX='/swarm-entry/v1/'
+_SWARM_CORS=(('Access-Control-Allow-Origin','*'),('Access-Control-Allow-Methods','POST'),
+             ('Access-Control-Allow-Headers','Content-Type'),('Access-Control-Max-Age','600'))
 
 
 def _chat_path(path):
@@ -48,6 +54,7 @@ class _RelayServer(ThreadingHTTPServer):
         self.backend=None
         self.local=None
         self.chat=None
+        self.swarm=None
         self.slots=threading.BoundedSemaphore(16)
         super().__init__(('127.0.0.1',0),_RelayHandler)
     def process_request(self,request,client_address):
@@ -64,9 +71,10 @@ class _RelayServer(ThreadingHTTPServer):
 
 class _RelayHandler(BaseHTTPRequestHandler):
     def log_message(self,*args):pass
-    def _reply(self,status,raw,content_type='application/json',csp=None):
+    def _reply(self,status,raw,content_type='application/json',csp=None,extra=()):
         self.send_response(status)
         self.send_header('Content-Type',content_type)
+        for name,value in extra:self.send_header(name,value)
         if csp is not None:
             self.send_header('Content-Security-Policy',csp)
             self.send_header('X-Content-Type-Options','nosniff')
@@ -77,10 +85,12 @@ class _RelayHandler(BaseHTTPRequestHandler):
         self.end_headers();self.wfile.write(raw);self.close_connection=True
     def _forward(self):
         self.connection.settimeout(5)
-        if ((not self.path.startswith(('/seed/','/managed-control/')+_LOCAL_PREFIXES) and not _chat_path(self.path))
+        if ((not self.path.startswith(('/seed/','/managed-control/',_SWARM_PREFIX)+_LOCAL_PREFIXES)
+                and not _chat_path(self.path))
                 or any(value in self.path for value in ('..','%','?','#','\\'))):
             return self._reply(404,b'{"error":"relay_route_unknown"}')
         if _chat_path(self.path):return self._local(chat=True)
+        if self.path.startswith(_SWARM_PREFIX):return self._local(swarm=True)
         if self.path.startswith(_LOCAL_PREFIXES):return self._local()
         if (self.headers.get('Transfer-Encoding') is not None
                 or self.headers.get('Cookie') is not None
@@ -121,7 +131,7 @@ class _RelayHandler(BaseHTTPRequestHandler):
             body+=data
         if self.rfile.read(2)!=b'\r\n':raise ValueError()
         return bytes(body)
-    def _local(self,chat=False):
+    def _local(self,chat=False,swarm=False):
         # Cloudflare's tunnel re-frames a body whose length its edge did not
         # forward (observed: every empty-body POST) as ``Transfer-Encoding:
         # chunked`` without Content-Length.  Only the in-process routes accept
@@ -144,6 +154,16 @@ class _RelayHandler(BaseHTTPRequestHandler):
                 body=self.rfile.read(length)
                 if len(body)!=length:raise ValueError()
         except (ValueError,OSError):return self._reply(400,b'{"error":"relay_frame_invalid"}')
+        if swarm:
+            handler=self.server.swarm
+            if handler is None:return self._reply(503,b'{"error":"relay_swarm_entry_not_bound"}',extra=_SWARM_CORS)
+            try:
+                status,kind,raw=handler(self.command,self.path,{k:v for k,v in self.headers.items()},body)
+                if (type(status) is not int or not 200<=status<=599 or not isinstance(raw,bytes)
+                        or len(raw)>_MAX_FRAME or kind!='application/json'):
+                    raise ValueError()
+            except Exception:return self._reply(500,b'{"error":"relay_swarm_entry_failed"}',extra=_SWARM_CORS)
+            return self._reply(status,raw,kind,extra=_SWARM_CORS)
         if chat:
             handler=self.server.chat
             if handler is None:return self._reply(503,b'{"error":"relay_chat_not_bound"}')
@@ -167,6 +187,12 @@ class _RelayHandler(BaseHTTPRequestHandler):
                 raise ValueError()
         except Exception:return self._reply(500,b'{"error":"relay_join_failed"}')
         self._reply(status,raw,kind,csp=None if kind=='application/json' else _CHAT_CSP)
+    def do_OPTIONS(self):
+        # CORS preflight for the swarm entry only; nothing else answers OPTIONS.
+        if (not self.path.startswith(_SWARM_PREFIX) or any(v in self.path for v in ('..','%','?','#','\\'))
+                or self.headers.get('Content-Length') not in (None,'0') or self.headers.get('Transfer-Encoding')):
+            return self._reply(404,b'{"error":"relay_route_unknown"}')
+        return self._reply(204,b'',extra=_SWARM_CORS)
     do_GET=_forward
     do_POST=_forward
 
@@ -193,6 +219,9 @@ class SeedRelayProxy:
     def bind_chat(self,handler):
         if handler is not None and not callable(handler):raise ValueError('relay_chat_invalid')
         self.server.chat=handler
+    def bind_swarm_entry(self,handler):
+        if handler is not None and not callable(handler):raise ValueError('relay_swarm_entry_invalid')
+        self.server.swarm=handler
     def close(self):
         if self._closed:return
         self._closed=True

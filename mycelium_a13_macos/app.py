@@ -352,6 +352,15 @@ def bounded_action_failure(path, error, public_code):
     return record
 
 
+def _swarm_status(app):
+    """'Publish this run as a swarm' status; never lets it break /api/status."""
+    try:
+        from .swarm_publish import status
+        return status(app)
+    except Exception:
+        return {'state':'unavailable'}
+
+
 def _demo_status(app, part):
     """Status of the one-click demo pieces; never lets them break /api/status."""
     try:
@@ -699,6 +708,8 @@ class DemoApp:
                 from .chat import handle as _chat_handle
                 bind_chat(lambda method, path, headers, body: _chat_handle(
                     self, method, path, headers, body, via_relay=True))
+            from .swarm_entry import bind as _bind_swarm_entry
+            _bind_swarm_entry(self, self.public_relay.proxy)
 
     def _join_client(self, origin):
         from .pairing import JoinWindowClient
@@ -867,7 +878,7 @@ class DemoApp:
                 'distribution':'unsigned development software; not notarized',
                 'join_flow':self._join_flow_status(),
                 'owner_run':_demo_status(self,'owner'),'demo_target':_demo_status(self,'target'),
-                'chat':_demo_status(self,'chat'),
+                'chat':_demo_status(self,'chat'),'swarm':_swarm_status(self),
                 'serving':{'state':'not_yet_serving','route_ready':False,
                            'next_action':'Native route preparation and exact model execution approval required.'}}
 
@@ -883,6 +894,9 @@ class DemoApp:
             if path in _DEMO_ROUTES:
                 from .demo_app import action as _demo_action
                 return _demo_action(self, path, body)
+            if path.startswith('/api/swarm/'):
+                from .swarm_publish import action as _swarm_action
+                return _swarm_action(self, path, body)
             if path == '/api/local-contributor/start':
                 if body:raise DemoError('invalid_request')
                 return self._start_local_contributor()
@@ -1318,6 +1332,11 @@ class DemoApp:
                 _demo_close(self)
             except Exception:
                 self.cleanup_error='demo_run_stop_failed'
+            try:
+                from .swarm_publish import close as _swarm_close
+                _swarm_close(self)
+            except Exception:
+                pass
         with self.guard:
             if self.closed.is_set(): return
             self.closed.set()
@@ -1388,11 +1407,11 @@ class _Handler(BaseHTTPRequestHandler):
         return valid
     def do_GET(self):
         if not self.base_guard(): return
-        if self.path in {'/','/app.js','/style.css','/run.js'}:
-            name={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/run.js':'run.js'}[self.path]
+        if self.path in {'/','/app.js','/style.css','/run.js','/swarm.js'}:
+            name={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/run.js':'run.js','/swarm.js':'swarm.js'}[self.path]
             path=Path(__file__).parent/'web'/name
             if not path.is_file(): self.fail(503,'assets_unavailable'); return
-            kind={'/':'text/html; charset=utf-8','/app.js':'text/javascript; charset=utf-8','/run.js':'text/javascript; charset=utf-8','/style.css':'text/css; charset=utf-8'}[self.path]
+            kind={'/':'text/html; charset=utf-8','/app.js':'text/javascript; charset=utf-8','/run.js':'text/javascript; charset=utf-8','/swarm.js':'text/javascript; charset=utf-8','/style.css':'text/css; charset=utf-8'}[self.path]
             self.send_value(200,path.read_bytes(),content_type=kind); return
         if self.path == '/chat' or self.path.startswith('/chat/'):
             self.chat_route(b''); return

@@ -6,7 +6,7 @@
 * ``directory`` the phonebook service core (pure; storage and crypto injected).
 * ``store``     ``MemoryStore`` / ``SqliteStore`` behind a 4-method KV interface.
 * ``entry``     the swarm-entry guard: grant signature, expiry, quota, rates.
-* ``http``      stdlib HTTP server for the directory API and ``web/`` assets.
+* ``server``    stdlib HTTP server for the directory API and ``web/`` assets.
 
 Trust model: the directory is only a phonebook.  Access is enforced by the
 swarm's own entry node (``entry.EntryGuard``), which trusts only grants signed
