@@ -41,7 +41,7 @@ from scripts.qwen_phone_builder import (
 
 from layer_assignment import compile_layer_assignments
 from mycelium_assignment_cache import ArtifactObjectKey, AssignmentArtifactCache
-from mycelium_live.codec import Qwen2PromptCodec
+from mycelium_live.codec import Qwen2PromptCodec, Qwen3PromptCodec
 from mycelium_layer_planner.gossip_adapter import (
     plan_signed_evidence,
     planner_snapshot_from_signed_evidence,
@@ -1287,6 +1287,20 @@ def _membership_snapshot(
     }
 
 
+def _deployment_prompt_codec(manifest: object, deployment_root: Path) -> Any:
+    """The prompt codec of the manifest's architecture (Qwen3: thinking off)."""
+
+    runtime_model = (
+        manifest.get("runtime_model") if isinstance(manifest, Mapping) else None
+    )
+    architecture = (
+        runtime_model.get("architecture") if isinstance(runtime_model, Mapping) else None
+    )
+    if architecture == "qwen3":
+        return Qwen3PromptCodec.from_deployment(deployment_root)
+    return Qwen2PromptCodec.from_deployment(deployment_root)
+
+
 def _challenge(
     codec: Qwen2PromptCodec,
     loaded: list[Any],
@@ -1972,7 +1986,7 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
         node_id: asdict(state)
         for node_id, state in build_physical_device_states(graph).items()
     }
-    codec = Qwen2PromptCodec.from_deployment(deployment_root)
+    codec = _deployment_prompt_codec(prepared.manifest, deployment_root)
     if (
         m13_document is not None
         and m13_document["protocol"] == "mycelium.m18_physical_candidate.v1"

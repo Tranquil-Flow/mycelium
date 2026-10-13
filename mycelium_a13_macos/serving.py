@@ -108,6 +108,16 @@ class ModelContract:
     def resource_proposal(self) -> ResourceProposal:
         return RESOURCE_PROPOSAL
 
+    @property
+    def architecture(self) -> str:
+        """The manifest runtime architecture this exact revision must compile to.
+
+        A property, not a field: ``asdict(model)`` is the model identity carried
+        in acquisition/status documents and must stay unchanged.
+        """
+
+        return _MODEL_ARCHITECTURES.get(self.model_id, "qwen2")
+
 
 # Owner-directed useful-model composition (wp8-02 G1): the A13 app is now a
 # 7B vehicle.  Every field is locally evidenced: the pinned HF-cache snapshot
@@ -148,14 +158,42 @@ A9_ROUTE_MODEL = ModelContract(
     runtime_quantization="int8-weight-only",
 )
 
+# Qwen3 dense stepping stone toward the qwen3_5 hybrid models: the pinned
+# Qwen/Qwen3-0.6B revision (28 layers, hidden 1024, 16 query x 128 = 2048-wide
+# attention, 8 KV heads, tied embeddings; one 1,503,300,328 B bf16
+# model.safetensors).  The small registered Qwen3 for tests and bring-up: a
+# two-stage MLX route over this exact revision reproduces a single-process NumPy
+# reference token for token (float32 and int8-weight-only).  Opt-in only
+# (``MYCELIUM_A13_RUN_MODEL=qwen3-0.6b``); never the default.  Its prompt codec
+# closes an empty think block (thinking off).  The shared RESOURCE_PROPOSAL was
+# derived for the 7B candidate and is not re-derived here.
+QWEN3_0_6B_MODEL = ModelContract(
+    model_id="Qwen/Qwen3-0.6B",
+    resolved_commit="c1899de289a04d12100db370d81485cdf75e47ca",
+    source_representation="bfloat16-safetensors",
+    runtime_backend="mlx",
+    runtime_dtype="float32",
+    runtime_quantization="int8-weight-only",
+)
+
+_MODEL_ARCHITECTURES = {QWEN3_0_6B_MODEL.model_id: "qwen3"}
+
 #: Every model a run may pin.  A run selects exactly one; nothing else loads.
-REGISTERED_MODELS: tuple[ModelContract, ...] = (CANDIDATE_MODEL, A9_ROUTE_MODEL)
+REGISTERED_MODELS: tuple[ModelContract, ...] = (
+    CANDIDATE_MODEL,
+    A9_ROUTE_MODEL,
+    QWEN3_0_6B_MODEL,
+)
 #: Stage runtimes a node may run for a registered model.
 STAGE_RUNTIME_BACKENDS = frozenset({"mlx", "numpy"})
 
 
 RUN_MODEL_ENVIRONMENT = "MYCELIUM_A13_RUN_MODEL"
-_RUN_MODEL_NAMES = {"candidate": CANDIDATE_MODEL, "a9-route": A9_ROUTE_MODEL}
+_RUN_MODEL_NAMES = {
+    "candidate": CANDIDATE_MODEL,
+    "a9-route": A9_ROUTE_MODEL,
+    "qwen3-0.6b": QWEN3_0_6B_MODEL,
+}
 
 
 def selected_run_model(environ: Mapping[str, str] | None = None) -> ModelContract:
@@ -411,7 +449,7 @@ def prepare_local_source(
     _snapshot_identity(root, model)
     config = _read_json_object(root / "config.json", reason="source_config_invalid")
     if (
-        config.get("model_type") != "qwen2"
+        config.get("model_type") != model.architecture
         or config.get("torch_dtype") not in {"bfloat16", "bf16"}
     ):
         raise ServingPreparationError("source_architecture_mismatch")
@@ -432,7 +470,7 @@ def prepare_local_source(
     if (
         manifest.get("model_id") != model.model_id
         or manifest.get("resolved_commit") != model.resolved_commit
-        or manifest.get("runtime_model", {}).get("architecture") != "qwen2"
+        or manifest.get("runtime_model", {}).get("architecture") != model.architecture
         or len(manifest_digest) != 71
     ):
         raise ServingPreparationError("native_manifest_identity_mismatch")
@@ -735,6 +773,7 @@ def _assert_loopback_port_free(port: int) -> None:
 __all__ = [
     "A9_ROUTE_MODEL",
     "CANDIDATE_MODEL",
+    "QWEN3_0_6B_MODEL",
     "REGISTERED_MODELS",
     "STAGE_RUNTIME_BACKENDS",
     "node_runtime",

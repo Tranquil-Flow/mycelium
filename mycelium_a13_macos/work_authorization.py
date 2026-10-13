@@ -281,7 +281,7 @@ def authorize_work_consent(
             == model.resolved_commit
             and assignment_document.get("manifest_digest") == manifest_digest
             and _mapping(runtime)
-            and expected_runtime["architecture"] == "qwen2"
+            and expected_runtime["architecture"] == model.architecture
             and dict(runtime) == expected_runtime
             and assignment_document.get("artifact_cache_root") == str(staged / "deployment")
         )

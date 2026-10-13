@@ -1180,14 +1180,16 @@ def _validate_qwen2_shapes(
     hidden = config["n_embd"]
     inner = config["n_inner"]
     kv_hidden = config["n_kv_head"] * config["head_dim"]
+    # Qwen3 may project attention wider than the residual stream.
+    q_hidden = config["n_head"] * config["head_dim"]
     if "input_embedding" in components:
         _expect_shape(tensors, "model.embed_tokens.weight", (config["vocab_size"], hidden))
     suffix_shapes: dict[str, tuple[int, ...]] = {
         "input_layernorm.weight": (hidden,),
-        "self_attn.q_proj.weight": (hidden, hidden),
+        "self_attn.q_proj.weight": (q_hidden, hidden),
         "self_attn.k_proj.weight": (kv_hidden, hidden),
         "self_attn.v_proj.weight": (kv_hidden, hidden),
-        "self_attn.o_proj.weight": (hidden, hidden),
+        "self_attn.o_proj.weight": (hidden, q_hidden),
         "post_attention_layernorm.weight": (hidden,),
         "mlp.gate_proj.weight": (inner, hidden),
         "mlp.up_proj.weight": (inner, hidden),
@@ -1196,7 +1198,7 @@ def _validate_qwen2_shapes(
     if runtime["architecture"] == "qwen2":
         suffix_shapes.update(
             {
-                "self_attn.q_proj.bias": (hidden,),
+                "self_attn.q_proj.bias": (q_hidden,),
                 "self_attn.k_proj.bias": (kv_hidden,),
                 "self_attn.v_proj.bias": (kv_hidden,),
             }

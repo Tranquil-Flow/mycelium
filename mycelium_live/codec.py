@@ -19,6 +19,13 @@ _QWEN_TEMPLATE = (
     "<|im_start|>user\n{prompt}<|im_end|>\n"
     "<|im_start|>assistant\n"
 )
+_QWEN3_PROTOCOL = (
+    "mycelium.prompt_codec.qwen3_byte_bpe.chat_no_thinking.incremental_utf8.v1"
+)
+# Qwen3 hybrid-thinking checkpoints: the shipped chat template rendered with
+# ``enable_thinking=False`` closes an empty think block after the assistant cue,
+# so the model answers directly instead of emitting a reasoning trace.
+_QWEN3_TEMPLATE = _QWEN_TEMPLATE + "<think>\n\n</think>\n\n"
 
 
 def _digest(document: object) -> str:
@@ -105,6 +112,8 @@ class GPT2PromptCodec:
 class Qwen2PromptCodec:
     """Qwen2 byte-level tokenizer with the canonical instruct chat envelope."""
 
+    TEMPLATE = _QWEN_TEMPLATE
+    PROTOCOL = _QWEN_PROTOCOL
     _SYSTEM = (
         "You are a helpful and safe assistant. Follow the user's instructions, "
         "including exact output-format constraints; when a format is requested, "
@@ -134,7 +143,7 @@ class Qwen2PromptCodec:
         return self._stop_token_ids
 
     def encode(self, prompt: str) -> tuple[int, ...]:
-        chat = _QWEN_TEMPLATE.format(system=self._SYSTEM, prompt=prompt)
+        chat = self.TEMPLATE.format(system=self._SYSTEM, prompt=prompt)
         return tuple(
             self._tokenizer.encode(chat, add_special_tokens=False).ids
         )
@@ -210,14 +219,29 @@ class Qwen2PromptCodec:
 
         document = self._byte_level_document()
         return {
-            "codec_protocol": _QWEN_PROTOCOL,
+            "codec_protocol": self.PROTOCOL,
             "tokenizer_digest": _digest(document),
             "template_digest": _digest(
-                {"template": _QWEN_TEMPLATE, "system": self._SYSTEM}
+                {"template": self.TEMPLATE, "system": self._SYSTEM}
             ),
             "unicode_policy": _UNICODE_POLICY,
             "stop_token_ids": sorted(self._stop_token_ids),
         }
+
+
+class Qwen3PromptCodec(Qwen2PromptCodec):
+    """Qwen3 dense byte-level tokenizer; chat envelope with thinking disabled."""
+
+    TEMPLATE = _QWEN3_TEMPLATE
+    PROTOCOL = _QWEN3_PROTOCOL
+
+    @classmethod
+    def from_deployment(cls, deployment_dir: Path) -> "Qwen3PromptCodec":
+        try:
+            from tokenizers import Tokenizer
+        except ImportError as exc:
+            raise RuntimeError("qwen3_tokenizer_backend_unavailable") from exc
+        return cls(Tokenizer.from_file(str(Path(deployment_dir) / "tokenizer.json")))
 
 
 def prompt_codec_from_deployment(deployment_dir: Path) -> Any:
@@ -231,8 +255,10 @@ def prompt_codec_from_deployment(deployment_dir: Path) -> Any:
     model_type = config.get("model_type")
     if model_type == "gpt2":
         return GPT2PromptCodec.from_deployment(deployment_dir)
-    if model_type in {"qwen2", "qwen3"}:
+    if model_type == "qwen2":
         return Qwen2PromptCodec.from_deployment(deployment_dir)
+    if model_type == "qwen3":
+        return Qwen3PromptCodec.from_deployment(deployment_dir)
     raise RuntimeError(f"unsupported_prompt_codec:{model_type!r}")
 
 
@@ -240,5 +266,6 @@ __all__ = [
     "GPT2PromptCodec",
     "IncrementalTokenDecoder",
     "Qwen2PromptCodec",
+    "Qwen3PromptCodec",
     "prompt_codec_from_deployment",
 ]

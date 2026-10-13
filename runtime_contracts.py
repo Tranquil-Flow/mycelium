@@ -164,6 +164,17 @@ def normalize_qwen2_model_config(
 ) -> dict[str, Any]:
     """Extract the exact Qwen2 decoder subset executable by Mycelium."""
 
+    return _normalize_qwen_decoder_config(
+        config, expected_layers=expected_layers, wide_attention=False
+    )
+
+
+def _normalize_qwen_decoder_config(
+    config: Mapping[str, Any], *, expected_layers: int, wide_attention: bool
+) -> dict[str, Any]:
+    # ``wide_attention`` admits Qwen3 checkpoints whose attention width
+    # ``n_head * head_dim`` differs from ``hidden_size`` (Qwen3-0.6B, -4B, -32B).
+    # Qwen2 keeps the exact equality it always required.
     if not isinstance(config, Mapping):
         raise ValueError("runtime model_config source must be an object")
     n_layer = _positive_int(config.get("num_hidden_layers", config.get("n_layer")), "n_layer")
@@ -173,7 +184,10 @@ def normalize_qwen2_model_config(
     n_head = _positive_int(config.get("num_attention_heads", config.get("n_head")), "n_head")
     n_kv_head = _positive_int(config.get("num_key_value_heads", config.get("n_kv_head")), "n_kv_head")
     head_dim = _positive_int(config.get("head_dim", n_embd // n_head), "head_dim")
-    if n_embd != n_head * head_dim or n_head % n_kv_head != 0:
+    if (
+        (not wide_attention and n_embd != n_head * head_dim)
+        or n_head % n_kv_head != 0
+    ):
         raise ValueError("runtime model_config has incompatible attention heads")
     n_inner = _positive_int(config.get("intermediate_size", config.get("n_inner")), "n_inner")
     vocab_size = _positive_int(config.get("vocab_size"), "vocab_size")
@@ -220,8 +234,8 @@ def normalize_qwen3_model_config(
 ) -> dict[str, Any]:
     """Extract the exact Qwen3 dense decoder subset executable by Mycelium."""
 
-    normalized = normalize_qwen2_model_config(
-        config, expected_layers=expected_layers
+    normalized = _normalize_qwen_decoder_config(
+        config, expected_layers=expected_layers, wide_attention=True
     )
     if config.get("attention_bias", False) is not False:
         raise ValueError("runtime qwen3 attention_bias must be false")

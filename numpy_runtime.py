@@ -612,16 +612,18 @@ def _qwen2_expected_shapes(
     inner = int(config["n_inner"])
     head_dim = int(config["head_dim"])
     kv = int(config["n_kv_head"]) * head_dim
+    # Qwen3 may project attention wider than the residual stream.
+    q = int(config["n_head"]) * head_dim
     shapes: dict[str, tuple[int, ...]] = {
         "model.embed_tokens.weight": (int(config["vocab_size"]), hidden),
         "model.norm.weight": (hidden,),
     }
     suffix_shapes: dict[str, tuple[int, ...]] = {
         "input_layernorm.weight": (hidden,),
-        "self_attn.q_proj.weight": (hidden, hidden),
+        "self_attn.q_proj.weight": (q, hidden),
         "self_attn.k_proj.weight": (kv, hidden),
         "self_attn.v_proj.weight": (kv, hidden),
-        "self_attn.o_proj.weight": (hidden, hidden),
+        "self_attn.o_proj.weight": (hidden, q),
         "post_attention_layernorm.weight": (hidden,),
         "mlp.gate_proj.weight": (inner, hidden),
         "mlp.up_proj.weight": (inner, hidden),
@@ -630,7 +632,7 @@ def _qwen2_expected_shapes(
     if architecture == "qwen2":
         suffix_shapes.update(
             {
-                "self_attn.q_proj.bias": (hidden,),
+                "self_attn.q_proj.bias": (q,),
                 "self_attn.k_proj.bias": (kv,),
                 "self_attn.v_proj.bias": (kv,),
             }
