@@ -62,7 +62,7 @@ def test_declaration_names_the_linux_target_and_claims_no_execution() -> None:
     assert declaration["protocol"] == PROTOCOL
     assert declaration["package_class"] == "signed_linux_package"
     assert declaration["claim_level"] == "managed_native_host"
-    assert declaration["target_device_label"] == "mycelium-node2"
+    assert declaration["target_device_label"] == "linux-member"
     assert declaration["physical_execution"] == "not_executed"
     assert declaration["claim_boundary"] == CLAIM_BOUNDARY
     assert declaration["declared_service_manager"] == "systemd"
@@ -82,7 +82,7 @@ def test_admitted_linux_platform_returns_member_only_source_facts() -> None:
     assert admission["service_manager"] == "systemd"
     assert admission["lifecycle_support"] is True
     assert admission["package_class"] == "signed_linux_package"
-    assert admission["target_device_label"] == "mycelium-node2"
+    assert admission["target_device_label"] == "linux-member"
     assert admission["eligibility"] == "member_only"
     assert admission["route_ready"] is False
     assert admission["physical_execution"] == "not_executed"

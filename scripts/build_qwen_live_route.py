@@ -24,7 +24,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any
+from typing import Any, Sequence
 import uuid
 
 import mlx.core as mx
@@ -861,6 +861,47 @@ def _membership_generations(template: dict[str, Any]) -> dict[str, int]:
     return result
 
 
+def _template_backend(runtime: Mapping[str, Any], *, index: int) -> str:
+    """A template node's backend: its declared ``runtime_backend``, else LEGACY.
+
+    The legacy rule (first node MLX, the rest NumPy) is the R7 two-host fleet's
+    shape; a template that declares each node's backend never depends on it.
+    """
+
+    declared = runtime.get("runtime_backend")
+    if declared is not None:
+        return str(declared)
+    return "mlx" if index == 0 else "numpy"
+
+
+def check_topology_against_role_binding(
+    topology: Sequence[Mapping[str, Any]], role_binding: Mapping[str, Any]
+) -> None:
+    """Refuse a route topology that is not exactly the bound members, in order.
+
+    ``role_binding`` is a verified ``mycelium.gate_role_binding.v1`` document
+    (``mycelium_gate_requirements``).  Its placements (role order) must equal
+    the topology node order, and each node's runtime backend must be one the
+    bound member's signed capability report offered.
+    """
+
+    from mycelium_gate_requirements.binding import verify_binding
+
+    try:
+        binding = verify_binding(role_binding)
+    except ValueError as exc:
+        raise RuntimeError("topology_role_binding_invalid") from exc
+    if [node["node_id"] for node in topology] != list(binding["placements"]):
+        raise RuntimeError("topology_role_binding_mismatch")
+    backends: dict[str, set[str]] = {}
+    for members in binding["roles"].values():
+        for member in members:
+            backends.setdefault(member["node_id"], set()).update(member["device_class"]["backends"])
+    for node in topology:
+        if node["runtime_backend"] not in backends.get(node["node_id"], set()):
+            raise RuntimeError("topology_role_binding_backend_mismatch")
+
+
 def _topology_nodes(
     template: dict[str, Any],
     topology_path: Path | None,
@@ -902,7 +943,7 @@ def _topology_nodes(
                     "endpoint_id": endpoint_ids[node_id],
                     "membership_generation": membership_generations[node_id],
                     "runtime_backend": (PHONE_BACKEND if peer["process_transport"] == "external_iroh"
-                                        else "mlx" if index == 0 else "numpy"),
+                                        else _template_backend(runtime, index=index)),
                 }
             )
     else:
@@ -1589,6 +1630,11 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
         args.topology,
         managed_transport=bool(getattr(args, "managed_transport", False)),
     )
+    role_binding_path = getattr(args, "role_binding", None)
+    if role_binding_path is not None:
+        check_topology_against_role_binding(
+            topology, json.loads(Path(role_binding_path).read_text("utf-8"))
+        )
     node_ids = tuple(node["node_id"] for node in topology)
     runtime_backends = {node["node_id"]: node["runtime_backend"] for node in topology}
     managed_ranges = _managed_layer_ranges(
@@ -2542,6 +2588,14 @@ def main() -> int:
         "--topology",
         type=Path,
         help="ordered public host/runtime topology (default: derive two hosts from template)",
+    )
+    parser.add_argument(
+        "--role-binding",
+        type=Path,
+        help=(
+            "verified gate role binding (mycelium_gate_requirements); the topology "
+            "must be exactly its bound members, in role order, on offered backends"
+        ),
     )
     parser.add_argument(
         "--m13-control-plane",

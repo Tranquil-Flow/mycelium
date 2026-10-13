@@ -50,11 +50,34 @@ def _write_private(path: Path, document: object) -> None:
       handle.write("\n")
 
 
+#: LEGACY default (owner ruling R7: the standby is a second MLX placement on the
+#: R7 fleet's entry Mac).  New runs name the standby through ``--role-binding``.
+LEGACY_STANDBY_NODE = "node-0"
+
+
+def resolve_standby_node(args: argparse.Namespace) -> str:
+   """The standby member: the A7 binding's ``standby`` role, an explicit flag, or legacy."""
+
+   if args.role_binding is None:
+      return args.standby_node if args.standby_node is not None else LEGACY_STANDBY_NODE
+   from mycelium_gate_requirements.binding import load_binding, role_node_ids
+
+   nodes = role_node_ids(load_binding(args.role_binding, gate_id="A7"), "standby")
+   if len(nodes) != 1:
+      raise ValueError("standby_role_binding_incomplete")
+   if args.standby_node is not None and args.standby_node != nodes[0]:
+      raise ValueError("standby_node_conflicts_with_role_binding")
+   return nodes[0]
+
+
 def main(argv: list[str] | None = None) -> int:
    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
    parser.add_argument("--plan", type=Path, required=True)
    parser.add_argument("--stage-index", type=int, default=1)
-   parser.add_argument("--standby-node", default="node-0")
+   parser.add_argument("--standby-node", default=None,
+                       help=f"standby member node id (default: the --role-binding standby, else legacy {LEGACY_STANDBY_NODE})")
+   parser.add_argument("--role-binding", type=Path, default=None,
+                       help="verified role binding of the pinned A7 requirements spec")
    parser.add_argument("--standby-placement-id", required=True)
    parser.add_argument("--standby-assignment", type=Path, required=True)
    parser.add_argument("--standby-load-proof-digest", required=True)
@@ -64,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
    parser.add_argument("--out-plan", type=Path, required=True)
    parser.add_argument("--stage-root", type=Path, required=True)
    args = parser.parse_args(argv)
+   args.standby_node = resolve_standby_node(args)
 
    plan = json.loads(args.plan.read_text(encoding="utf-8"))
    assignment = json.loads(args.standby_assignment.read_text(encoding="utf-8"))

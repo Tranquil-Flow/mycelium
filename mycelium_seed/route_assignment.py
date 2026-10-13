@@ -532,8 +532,55 @@ def route_assignment_status(
     return _record_projection(row, now=float(now()))
 
 
+def member_for_gate_role(
+    database: Path,
+    binding: Mapping[str, Any],
+    role: str,
+    *,
+    now: Callable[[], float] = time.time,
+) -> str:
+    """The member a verified gate role binding put in ``role``, if still current.
+
+    Requirements-based replacement for ``newest_android_member``: the gate
+    harness (``mycelium_gate_requirements``) bound the role from the seed
+    membership and signed capability reports; this re-checks, against the
+    live seed table, that exactly that member (same generation) is still
+    unrevoked and lease-fresh.
+    """
+
+    from mycelium_gate_requirements.binding import role_node_ids, verify_binding
+
+    try:
+        nodes = role_node_ids(verify_binding(binding), role)
+    except ValueError as exc:
+        raise _fail("gate_role_binding_invalid") from exc
+    if len(nodes) != 1:
+        raise _fail("gate_role_binding_ambiguous")
+    bound = next(item for item in binding["roles"][role] if item["node_id"] == nodes[0])
+    connection = _connect(database)
+    try:
+        row = connection.execute(
+            """
+            SELECT node_id, generation FROM seed_members
+            WHERE node_id = ? AND lifecycle_state != 'STOPPED' AND lease_expires_at > ?
+            """,
+            (nodes[0], float(now())),
+        ).fetchone()
+    except sqlite3.Error as exc:
+        raise _fail("seed_route_assignment_store_unavailable") from exc
+    finally:
+        connection.close()
+    if row is None or int(row["generation"]) != int(bound["generation"]):
+        raise _fail("seed_member_not_current")
+    return str(row["node_id"])
+
+
 def newest_android_member(database: Path, *, now: Callable[[], float] = time.time) -> str:
-    """The single lease-fresh, unrevoked Android member (the gate's phone)."""
+    """LEGACY: the single lease-fresh, unrevoked Android member (the gate's phone).
+
+    Kept for the A12 run-day sheets; ``--gate-role-binding`` selects the member
+    through ``member_for_gate_role`` instead.
+    """
 
     connection = _connect(database)
     try:
@@ -821,7 +868,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--state-root", required=True, type=Path)
     sub = parser.add_subparsers(dest="command", required=True)
     issue = sub.add_parser("issue")
-    issue.add_argument("--node-id", help="default: the single lease-fresh Android member")
+    issue.add_argument("--node-id", help="default: the --gate-role-binding member, else the single lease-fresh Android member")
     issue.add_argument("--stage-pack", required=True, type=Path)
     issue.add_argument("--preparation-assignment", type=Path, help="Compiled layer assignment JSON; validates and binds its deterministic ID")
     issue.add_argument("--peer-endpoint-id", required=True)
@@ -852,6 +899,13 @@ def _parser() -> argparse.ArgumentParser:
                 default=0.0,
                 help="seconds to wait until the member reports the assignment applied",
             )
+    for command in sub.choices.values():
+        command.add_argument(
+            "--gate-role-binding",
+            type=Path,
+            help="verified gate role binding; the member bound to --gate-role is addressed",
+        )
+        command.add_argument("--gate-role", default="phone")
     return parser
 
 
@@ -877,7 +931,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     try:
         database = lease.path / "state.sqlite3"
-        node_id = args.node_id or newest_android_member(database)
+        if args.node_id:
+            node_id = args.node_id
+        elif args.gate_role_binding is not None:
+            node_id = member_for_gate_role(
+                database,
+                json.loads(args.gate_role_binding.read_text("utf-8")),
+                args.gate_role,
+            )
+        else:
+            node_id = newest_android_member(database)
         lease.revalidate()
         if args.command == "issue":
             result = issue_route_assignment(

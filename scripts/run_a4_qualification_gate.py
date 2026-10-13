@@ -532,6 +532,11 @@ def _write_private_json(path: Path, document: Mapping[str, Any]) -> None:
         raise
 
 
+#: LEGACY placement members of the August A4 route (R7 fleet).  A completion
+#: record for a requirements-bound run passes the bound placements instead.
+LEGACY_A4_PLACEMENT_NODES = ("node-0", "node-2")
+
+
 def write_completion_record(
     *,
     path: Path,
@@ -541,6 +546,7 @@ def write_completion_record(
     now: datetime,
     browser: Mapping[str, Any],
     root: Path,
+    placement_nodes: Sequence[str] = LEGACY_A4_PLACEMENT_NODES,
 ) -> dict[str, Any]:
     observed_at = now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
     fresh_until = (now + timedelta(hours=1)).isoformat(
@@ -575,7 +581,7 @@ def write_completion_record(
             "model_id": gate_document.get("selected_deployment_qualification", {})
             .get("model_id"),
             "stage_count": 2,
-            "placement_nodes": ["node-0", "node-2"],
+            "placement_nodes": list(placement_nodes),
         },
         "browser": {
             "reconnect_scenarios": browser.get("reconnect_scenarios"),

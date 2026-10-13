@@ -2,7 +2,7 @@
 # ruff: noqa: E402 -- direct execution bootstraps the repository import root.
 """Execute the A4 data-plane negative gate against a live product serve.
 
-Kills the participating node-2 data-plane iroh sidecar while one ordinary
+Kills the participating faulted member's data-plane iroh sidecar while one ordinary
 product request is in flight, then proves: the active failure is observed, the
 blocked command is interrupted, the affected request terminates explicitly,
 every request-owned resource returns to baseline within the 2,000 ms bound
@@ -37,8 +37,17 @@ from scripts.run_a4_product_gate import (  # noqa: E402
 )
 
 CLEANUP_BOUND_MS = 2000.0
-DEFAULT_SSH_HOST = "astra@100.125.181.68"
-DEFAULT_SSH_KEY = "/Users/evinova-self/.ssh/id_ed25519_mycelium_linux"
+# LEGACY R7 fleet defaults (the August A4 run): SSH target/key, the faulted and
+# healthy member ids and the faulted sidecar's socket marker.  A run with
+# ``--role-binding`` takes the faulted member from the binding's ``final`` role
+# and the healthy one from ``entry`` instead.
+LEGACY_SSH_HOST = "astra@100.125.181.68"
+LEGACY_SSH_KEY = "/Users/evinova-self/.ssh/id_ed25519_mycelium_linux"
+LEGACY_FAULTED_NODE = "node-2"
+LEGACY_HEALTHY_NODE = "node-0"
+LEGACY_SIDECAR_UDS_MARKER = "--uds /home/astra/mycelium-a4-concurrency-node2"
+DEFAULT_SSH_HOST = LEGACY_SSH_HOST
+DEFAULT_SSH_KEY = LEGACY_SSH_KEY
 
 RESOLVE_SIDECARS = (
     "import os\n"
@@ -75,6 +84,21 @@ def _ssh_prefix(args: argparse.Namespace) -> list[str]:
     ]
 
 
+def peer_roles(args: argparse.Namespace) -> tuple[str, str]:
+    """(faulted, healthy) member ids: from a role binding, explicit flags, or legacy."""
+
+    if getattr(args, "role_binding", None) is not None:
+        from mycelium_gate_requirements.binding import load_binding, role_node_ids
+
+        binding = load_binding(args.role_binding)
+        faulted, healthy = role_node_ids(binding, "final"), role_node_ids(binding, "entry")
+        if len(faulted) != 1 or len(healthy) != 1 or faulted == healthy:
+            raise GateError("a4_role_binding_incomplete")
+        return faulted[0], healthy[0]
+    return (getattr(args, "faulted_node", None) or LEGACY_FAULTED_NODE,
+            getattr(args, "healthy_node", None) or LEGACY_HEALTHY_NODE)
+
+
 def resolve_targets(args: argparse.Namespace, explicit: list[int]) -> list[int]:
     if explicit:
         return explicit
@@ -88,7 +112,7 @@ def resolve_targets(args: argparse.Namespace, explicit: list[int]) -> list[int]:
     targets = [
         pid
         for pid, cmd in candidates
-        if "--uds /home/astra/mycelium-a4-concurrency-node2" in cmd
+        if getattr(args, "sidecar_uds_marker", LEGACY_SIDECAR_UDS_MARKER) in cmd
     ]
     if not targets and candidates:
         targets = [candidates[0][0]]
@@ -167,8 +191,9 @@ def run_gate(args: argparse.Namespace) -> dict[str, Any]:
     stream_thread.join(timeout=5)
     status = public_json(base_url, "/__mycelium/live-status")
     peers = status.get("peers") or []
-    node2 = next((peer for peer in peers if peer.get("node_id") == "node-2"), {})
-    node0 = next((peer for peer in peers if peer.get("node_id") == "node-0"), {})
+    faulted_node, healthy_node = peer_roles(args)
+    node2 = next((peer for peer in peers if peer.get("node_id") == faulted_node), {})
+    node0 = next((peer for peer in peers if peer.get("node_id") == healthy_node), {})
     runtime = public_json(base_url, "/__mycelium/runtime/admission-status")
     residual = [
         request
@@ -260,10 +285,17 @@ def main(argv: list[str] | None = None) -> int:
         "--sidecar-pids",
         type=lambda value: [int(item) for item in value.split(",") if item],
         default=None,
-        help="explicit node-2 sidecar pids; resolved via SSH when omitted",
+        help="explicit faulted-member sidecar pids; resolved via LEGACY SSH when omitted",
     )
-    parser.add_argument("--ssh-host", default=DEFAULT_SSH_HOST)
-    parser.add_argument("--ssh-key", default=DEFAULT_SSH_KEY)
+    parser.add_argument("--ssh-host", default=DEFAULT_SSH_HOST, help="LEGACY fleet SSH host")
+    parser.add_argument("--ssh-key", default=DEFAULT_SSH_KEY, help="LEGACY fleet SSH key")
+    parser.add_argument("--sidecar-uds-marker", default=LEGACY_SIDECAR_UDS_MARKER,
+                        help="command-line marker of the faulted sidecar (LEGACY default)")
+    roles = parser.add_mutually_exclusive_group()
+    roles.add_argument("--role-binding", type=Path,
+                       help="verified role binding: faulted = final role, healthy = entry role")
+    roles.add_argument("--faulted-node", help=f"faulted member id (LEGACY default {LEGACY_FAULTED_NODE})")
+    parser.add_argument("--healthy-node", help=f"healthy member id (LEGACY default {LEGACY_HEALTHY_NODE})")
     args = parser.parse_args(argv)
     if not 2 <= args.maximum_new_tokens <= 128:
         raise SystemExit("--maximum-new-tokens must be in [2, 128]")

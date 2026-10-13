@@ -42,11 +42,19 @@ REQUIRED_CLEANUP_CHECKS = (
     "physical_processes",
     "reservations",
 )
-# Owner ruling (2026-10-05): SB2 (node-3) is the third A6 placement, so the
-# exhausted-attempts case has a real second disjoint successor. The two-node
-# topology stays admissible; it can only fail that case.
-EXPECTED_PLACEMENTS = ("node-0", "node-2", "node-3")
-ADMISSIBLE_PLACEMENTS = (("node-0", "node-2"), EXPECTED_PLACEMENTS)
+# LEGACY fleet placements (owner ruling 2026-10-05: the R7 fleet's third member
+# is the third A6 placement, so the exhausted-attempts case has a real second
+# disjoint successor; the two-node topology stays admissible and can only fail
+# that case).  Kept so the old run-day sheets still validate.  A plan built
+# with ``--role-binding`` instead carries a verified binding of the pinned A6
+# requirements spec (``mycelium_gate_requirements/specs/a6.v1.json``: one
+# entry and one or two successors, each able to hold the complete model) and
+# its placements are exactly the bound members, whatever devices they are.
+LEGACY_EXPECTED_PLACEMENTS = ("node-0", "node-2", "node-3")
+LEGACY_ADMISSIBLE_PLACEMENTS = (("node-0", "node-2"), LEGACY_EXPECTED_PLACEMENTS)
+EXPECTED_PLACEMENTS = LEGACY_EXPECTED_PLACEMENTS
+ADMISSIBLE_PLACEMENTS = LEGACY_ADMISSIBLE_PLACEMENTS
+REQUIREMENTS_SPEC = "mycelium_gate_requirements/specs/a6.v1.json"
 EXPECTED_ORIGIN = "http://127.0.0.1:8787"
 TRUSTED_CASE_RUNNER = Path(__file__).resolve().with_name("run_a6_recovery_case.py")
 # Owner ruling R6: the cleanup-authority-failure case is admitted under the
@@ -84,6 +92,32 @@ def _argv(value: object, code: str) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _gate_requirements():
+    root = str(Path(__file__).resolve().parents[1])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from mycelium_gate_requirements import binding, spec
+
+    return binding, spec
+
+
+def bound_placements(role_binding: Any) -> list[str]:
+    """Placements of a verified binding of the pinned A6 spec (entry first)."""
+
+    binding_module, spec_module = _gate_requirements()
+    try:
+        binding = binding_module.verify_binding(
+            role_binding, spec=spec_module.load_pinned_spec("A6"))
+    except ValueError:
+        _fail("physical_plan_role_binding_invalid")
+    entry = binding_module.role_node_ids(binding, "entry")
+    successors = binding_module.role_node_ids(binding, "successor")
+    placements = [*entry, *successors]
+    if len(entry) != 1 or not successors or len(set(placements)) != len(placements):
+        _fail("physical_plan_role_binding_invalid")
+    return placements
+
+
 def validate_plan(document: Mapping[str, Any]) -> dict[str, Any]:
     if document.get("protocol") != "mycelium.a6_physical_recovery_execution.v1":
         _fail("physical_plan_protocol_invalid")
@@ -96,8 +130,11 @@ def validate_plan(document: Mapping[str, Any]) -> dict[str, Any]:
     evidence_root = _absolute_path(
         document.get("evidence_root"), "physical_plan_evidence_root_invalid"
     )
-    if document.get("expected_placements") not in [
-        list(placements) for placements in ADMISSIBLE_PLACEMENTS
+    if "role_binding" in document:
+        if document.get("expected_placements") != bound_placements(document["role_binding"]):
+            _fail("physical_plan_placements_invalid")
+    elif document.get("expected_placements") not in [
+        list(placements) for placements in LEGACY_ADMISSIBLE_PLACEMENTS
     ]:
         _fail("physical_plan_placements_invalid")
 
@@ -199,6 +236,9 @@ def preparation_plan() -> dict[str, Any]:
         "expected_product_port": 8787,
         "expected_placements": list(EXPECTED_PLACEMENTS),
         "admissible_placements": [list(item) for item in ADMISSIBLE_PLACEMENTS],
+        "placements_authority": "legacy_fleet_or_role_binding",
+        "requirements_spec": REQUIREMENTS_SPEC,
+        "requirements_spec_digest": _gate_requirements()[1].load_pinned_spec("A6").digest,
         "required_cases": list(REQUIRED_CASES),
         "v2_admissible_cases": list(V2_CASES),
         "required_cleanup_checks": list(REQUIRED_CLEANUP_CHECKS),

@@ -36,6 +36,7 @@ from scripts.run_a6_recovery_gate import (  # noqa: E402
     TRUSTED_CASE_RUNNER,
     TRUSTED_CASE_RUNNER_V2,
     V2_CASES,
+    bound_placements,
     validate_plan,
 )
 
@@ -74,8 +75,15 @@ def build_plan(
     repo_root: Path,
     operator_plan: Path,
     evidence_root: Path,
-    placements: Sequence[str] = EXPECTED_PLACEMENTS,
+    placements: Sequence[str] | None = None,
+    role_binding: Any = None,
 ) -> dict[str, Any]:
+    """Build the A6 execution plan.
+
+    With ``role_binding`` (a verified binding of the pinned A6 requirements
+    spec) the placements are exactly the bound members and the binding is
+    carried in the plan; otherwise the legacy fleet placements apply.
+    """
     if not Path(operator_plan).is_absolute():
         raise ValueError("a6_plan_operator_plan_not_absolute")
     if not Path(evidence_root).is_absolute():
@@ -90,7 +98,10 @@ def build_plan(
         "product_origin": EXPECTED_ORIGIN,
         "operator_plan": plan_path,
         "evidence_root": str(evidence_root),
-        "expected_placements": list(placements),
+        "expected_placements": (
+            bound_placements(role_binding) if role_binding is not None
+            else list(placements if placements is not None else EXPECTED_PLACEMENTS)
+        ),
         "cases": [
             {
                 "case_id": case_id,
@@ -114,6 +125,10 @@ def build_plan(
             for check_id in REQUIRED_CLEANUP_CHECKS
         ],
     }
+    if role_binding is not None:
+        if placements is not None:
+            raise ValueError("a6_plan_placements_conflict_with_role_binding")
+        document["role_binding"] = json.loads(json.dumps(role_binding))
     validate_plan(document)
     return document
 
@@ -124,11 +139,19 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--evidence-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
-    parser.add_argument(
+    placement = parser.add_mutually_exclusive_group()
+    placement.add_argument(
         "--placements",
         choices=[",".join(item) for item in ADMISSIBLE_PLACEMENTS],
-        default=",".join(EXPECTED_PLACEMENTS),
-        help="the A6 placement nodes, in plan order",
+        default=None,
+        help="LEGACY fleet placement nodes, in plan order (default: "
+        + ",".join(EXPECTED_PLACEMENTS) + ")",
+    )
+    placement.add_argument(
+        "--role-binding",
+        type=Path,
+        help="verified role binding of the pinned A6 requirements spec; its "
+        "entry and successors become the placements",
     )
     parser.add_argument(
         "--create-evidence-root",
@@ -151,7 +174,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             repo_root=args.repo_root,
             operator_plan=args.operator_plan,
             evidence_root=args.evidence_root,
-            placements=tuple(args.placements.split(",")),
+            placements=tuple(args.placements.split(",")) if args.placements else None,
+            role_binding=(json.loads(args.role_binding.read_text("utf-8"))
+                          if args.role_binding is not None else None),
         )
     except (OSError, KeyError, ValueError, json.JSONDecodeError) as error:
         print(str(error), file=sys.stderr)

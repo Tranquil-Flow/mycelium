@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Linux target-side invitation onboarding for A13 (source tranche).
 
-The Linux target (``mycelium-node2``) creates its own pairing request, decrypts
+The Linux target (any admitted Linux member) creates its own pairing request, decrypts
 an owner-approved handoff with a recipient-only X25519 key, checks the seed key
 the target was pinned to, and performs exactly one atomic local join.  It speaks
 the SAME wire protocols the committed macOS slice froze:

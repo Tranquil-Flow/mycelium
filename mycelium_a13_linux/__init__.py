@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Linux (mycelium-node2) half of the A13 cross-platform onboarding tranche.
+"""Linux-member half of the A13 cross-platform onboarding tranche.
 
 SOURCE ONLY.  Nothing in this package builds, signs, publishes, installs,
 launches, or qualifies a package, and nothing here reads the host's identity:

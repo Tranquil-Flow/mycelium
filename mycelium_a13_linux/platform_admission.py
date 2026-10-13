@@ -9,13 +9,15 @@ never claims a qualification, a launch, or an execution.
 The declared distribution set is this tranche's own declaration (the A13
 specification requires "signed Linux packages for the declared distributions").
 It is declared, not exercised: ``physical_execution`` stays ``not_executed``
-because no package has been built, signed, installed, or run on
-``mycelium-node2``.
+because no package has been built, signed, installed, or run on any Linux
+member.  The physical target is a device CLASS (any admitted Linux member),
+not a named host.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Any
 import platform
 import re
 
@@ -38,10 +40,13 @@ ADMITTED_DISTRIBUTIONS: dict[str, dict[str, str]] = {
 
 ADMITTED_ARCHITECTURES: frozenset[str] = frozenset({"x86_64", "aarch64"})
 
-#: The named future physical target of this tranche.  Naming it is a plan, not
-#: an observation: ``physical_execution`` stays ``not_executed``.
-DECLARED_TARGET: dict[str, str] = {
-    "device_label": "mycelium-node2",
+#: The future physical target of this tranche: any member of the admitted Linux
+#: class (owner direction 2026-10-13: gates verify features on whatever
+#: eligible devices are present).  Declaring it is a plan, not an observation:
+#: ``physical_execution`` stays ``not_executed``.
+DECLARED_TARGET: dict[str, Any] = {
+    "device_label": "linux-member",
+    "device_class": {"os_family": "linux", "architectures": sorted(ADMITTED_ARCHITECTURES)},
     "claim_level": "managed_native_host",
     "physical_execution": "not_executed",
 }

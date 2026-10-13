@@ -45,9 +45,12 @@ VERDICT_PROTOCOL = "mycelium.a7_kv_successor_gate_verdict.v1"
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 
-# Owner ruling R7: two Macs; the stage-1 source on the laptop (node-2) and the
-# stage-1 standby as a second MLX placement on node-0.
-TOPOLOGY = {
+# LEGACY fleet topology (owner ruling R7, two Macs): kept so the old R7 run-day
+# sheets reproduce byte-identical plans.  New runs pass ``--role-binding``: a
+# verified binding of the pinned A7 requirements spec
+# (``mycelium_gate_requirements/specs/a7.v1.json``) supplies the entry, source
+# and standby members from whatever eligible devices the seed holds.
+LEGACY_TOPOLOGY = {
    "entry_node": "node-0",
    "source_node": "node-2",
    "standby_node": "node-0",
@@ -55,6 +58,7 @@ TOPOLOGY = {
    "standby_backend": "mlx",
    "fallback_incompatibility": ("dtype_mismatch", "numpy_runtime"),
 }
+TOPOLOGY = LEGACY_TOPOLOGY
 
 POSITIVE = "ordinary_browser_source_kill_kv_successor"
 INCOMPATIBLE = "incompatible_standby_falls_back_to_a6"
@@ -198,13 +202,47 @@ def _sha(value: Any) -> str:
    return "sha256:" + hashlib.sha256(_canonical(value)).hexdigest()
 
 
-def build_plan(candidate_commit: str) -> dict[str, Any]:
+def _bound_topology(role_binding: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+   """Entry/source/standby from a verified binding of the pinned A7 spec."""
+
+   root = str(Path(__file__).resolve().parents[1])
+   if root not in sys.path:
+      sys.path.insert(0, root)
+   from mycelium_gate_requirements.binding import (
+      role_device_classes,
+      role_node_ids,
+      verify_binding,
+   )
+   from mycelium_gate_requirements.spec import load_pinned_spec
+
+   spec = load_pinned_spec("A7")
+   binding = verify_binding(role_binding, spec=spec)
+   nodes = {role: role_node_ids(binding, role) for role in ("entry", "source", "standby")}
+   if any(len(value) != 1 for value in nodes.values()):
+      _fail("a7_gate_role_binding_incomplete")
+   topology = {
+      **LEGACY_TOPOLOGY,
+      "entry_node": nodes["entry"][0],
+      "source_node": nodes["source"][0],
+      "standby_node": nodes["standby"][0],
+   }
+   extra = {
+      "requirements_spec_digest": spec.digest,
+      "role_binding_digest": binding["binding_digest"],
+      "device_classes": role_device_classes(binding),
+   }
+   return topology, extra
+
+
+def build_plan(candidate_commit: str, *, role_binding: Mapping[str, Any] | None = None) -> dict[str, Any]:
    if not isinstance(candidate_commit, str) or COMMIT.fullmatch(candidate_commit) is None:
       _fail("a7_gate_candidate_invalid")
+   topology, extra = (LEGACY_TOPOLOGY, {}) if role_binding is None else _bound_topology(role_binding)
    body = {
       "protocol": PLAN_PROTOCOL,
       "candidate_commit": candidate_commit,
-      "topology": TOPOLOGY,
+      "topology": topology,
+      **extra,
       "cases": list(CASES),
       "thresholds": THRESHOLDS,
       "fallback_scope": FALLBACK_SCOPE,
@@ -528,11 +566,17 @@ def main(argv: list[str] | None = None) -> int:
    parser.add_argument("--plan", type=Path)
    parser.add_argument("--records", type=Path)
    parser.add_argument("--verdict-out", type=Path)
+   parser.add_argument(
+      "--role-binding",
+      type=Path,
+      help="verified role binding of the pinned A7 requirements spec (default: legacy R7 fleet topology)",
+   )
    parser.add_argument("--case-runner", nargs=argparse.REMAINDER)
    args = parser.parse_args(argv)
    try:
       if args.plan_out is not None:
-         _write_private(args.plan_out, build_plan(args.candidate or ""))
+         binding = _read_json(args.role_binding) if args.role_binding is not None else None
+         _write_private(args.plan_out, build_plan(args.candidate or "", role_binding=binding))
          return 0
       if args.plan is None or args.records is None:
          _fail("a7_gate_plan_and_records_required")

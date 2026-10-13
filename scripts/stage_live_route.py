@@ -54,7 +54,7 @@ def _peer_argument(peer: dict) -> str:
     )
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--operator-plan", type=Path, required=True)
     parser.add_argument(
@@ -65,8 +65,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--python",
-        default="/opt/homebrew/bin/python3.14",
-        help="interpreter used to run the controller",
+        default=sys.executable,
+        help="interpreter used to run the controller (default: this interpreter)",
     )
     parser.add_argument(
         "--command",
@@ -74,7 +74,11 @@ def main(argv: list[str] | None = None) -> int:
         choices=("preflight", "prepare", "cleanup"),
         help="controller command to run (default: prepare)",
     )
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
 
     plan = json.loads(args.operator_plan.read_text(encoding="utf-8"))
     controller = plan["controller"]

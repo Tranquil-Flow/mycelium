@@ -13,8 +13,18 @@ admitted on the replica track, then proves (spec §5, §10):
     remains usable at reduced capacity;
 (d) zero live resources remain afterwards.
 
-The data-plane sidecar is killed through the ordinary SSH path used to
-operate node-3-r2 (NOT the membership daemon). The output is a bounded
+The fault is injected in one of two ways (``--fault-transport``):
+
+* ``signed-control``: a signed, gate-scoped ``kill_process`` verb addressed to
+  the bound ``replica`` member of a verified A5 role binding
+  (``mycelium_gate_requirements``), executed by that member's own agent.  The
+  run names no host; the receipt digest is recorded.  ``run_gate`` takes the
+  injector programmatically; the member-side agent transport is not built yet.
+* ``legacy-ssh`` (default, LEGACY): the replica data-plane sidecar is killed
+  over SSH on the R7 fleet host (NOT the membership daemon), as the old
+  run-day sheets do.
+
+The output is a bounded
 privacy-reduced observation (mycelium.a5_replica_loss_negative_observation.v1):
 no prompt, decoded text, token IDs, cookies, CSRF values, hostnames,
 addresses, paths, command lines, or exception strings.
@@ -46,8 +56,13 @@ from scripts.run_a5_product_gate import (  # noqa: E402
     wait_for,
 )
 
-DEFAULT_SSH_HOST = "mycelium-laptop"
+# LEGACY fleet SSH defaults used by the R7 run-day sheets; the signed-control
+# path names no host.
+LEGACY_SSH_HOST = "mycelium-laptop"
+LEGACY_SSH_KEY = "/Users/evinova-self/.ssh/id_ed25519_m4pro_to_laptop"
+DEFAULT_SSH_HOST = LEGACY_SSH_HOST
 QUARANTINE_TIMEOUT_SECONDS = 120.0
+REPLICA_SIDECAR_TARGET = "replica_data_sidecar"
 
 
 def _ssh(args: argparse.Namespace, remote: str, *, timeout: float = 30.0) -> str:
@@ -83,6 +98,54 @@ def _kill_sidecar(args: argparse.Namespace, pid: int) -> None:
     _ssh(args, f"kill {pid}")
 
 
+class LegacySshSidecarKill:
+    """LEGACY: resolve and kill the replica sidecar over SSH on a fleet host."""
+
+    def __init__(self, args: argparse.Namespace) -> None:
+        self._args = args
+        self._pid: int | None = None
+
+    def prepare(self) -> None:
+        self._pid = _resolve_sidecar_pid(self._args)
+
+    def inject(self) -> dict[str, Any]:
+        if self._pid is None:
+            self.prepare()
+        assert self._pid is not None
+        _kill_sidecar(self._args, self._pid)
+        return {"fault_transport": "legacy_ssh", "sidecar_pid": self._pid}
+
+
+class SignedReplicaKill:
+    """Kill the bound replica's data sidecar through a signed control verb.
+
+    ``injector`` is a ``mycelium_gate_requirements.control.SignedFaultInjector``
+    over a verified A5 binding; ``member_index`` selects which bound replica.
+    """
+
+    def __init__(self, *, injector: Any, member_index: int = 0) -> None:
+        self._injector = injector
+        self._member_index = member_index
+
+    def prepare(self) -> None:
+        """Nothing to resolve: the member's own agent owns its process table."""
+
+    def inject(self) -> dict[str, Any]:
+        from mycelium_gate_requirements.control import public_control_receipt
+
+        if self._injector.binding.get("gate_id") != "A5":
+            raise GateError("replica_fault_binding_not_a5")
+        receipt = self._injector.inject(role="replica", verb="kill_process",
+                                        target=REPLICA_SIDECAR_TARGET,
+                                        member_index=self._member_index)
+        if receipt["outcome"]["state"] != "executed":
+            raise GateError("replica_fault_not_executed")
+        public = public_control_receipt(receipt)
+        return {"fault_transport": "signed_control",
+                "control_receipt_digest": public["receipt_digest"],
+                "control_receipt": public}
+
+
 def _replica_placement_id(status: dict[str, Any]) -> str:
     qualifications = status.get("replica_track_qualification") or []
     placement_ids = sorted(
@@ -101,7 +164,8 @@ def _loss_observed(status: dict[str, Any], replica_placement_id: str) -> bool:
     return replica_placement_id in (status.get("replica_loss_placement_ids") or [])
 
 
-def run_gate(base_url: str, args: argparse.Namespace) -> dict[str, Any]:
+def run_gate(base_url: str, args: argparse.Namespace, *, fault: Any = None) -> dict[str, Any]:
+    fault = fault if fault is not None else LegacySshSidecarKill(args)
     session = ProductSession(base_url)
     before = public_json(base_url, "/__mycelium/live-status")
     if before.get("route_alive") is not True:
@@ -163,10 +227,10 @@ def run_gate(base_url: str, args: argparse.Namespace) -> dict[str, Any]:
         item for item in accepted if item["request_id"] != replica_request["request_id"]
     )
 
-    # Kill the node-3-r2 data sidecar while the replica request is in flight.
-    sidecar_pid = _resolve_sidecar_pid(args)
+    # Kill the replica's data sidecar while the replica request is in flight.
+    fault.prepare()
     kill_started = time.monotonic()
-    _kill_sidecar(args, sidecar_pid)
+    fault_observation = fault.inject()
 
     for thread in threads:
         thread.join(timeout=240.0)
@@ -248,7 +312,7 @@ def run_gate(base_url: str, args: argparse.Namespace) -> dict[str, Any]:
             request_id: list(placements)
             for request_id, placements in placements_by_request.items()
         },
-        "sidecar_pid": sidecar_pid,
+        **fault_observation,
         "kill_to_terminal_ms": (
             replica_summary["terminal_at_monotonic_s"] - kill_started
         )
@@ -280,12 +344,16 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:8791")
     parser.add_argument("--maximum-new-tokens", type=int, default=64)
-    parser.add_argument("--ssh-host", default=DEFAULT_SSH_HOST)
-    parser.add_argument("--sidecar-socket-path", required=True)
     parser.add_argument(
-        "--ssh-key",
-        default="/Users/evinova-self/.ssh/id_ed25519_m4pro_to_laptop",
+        "--fault-transport",
+        choices=("legacy-ssh",),
+        default="legacy-ssh",
+        help="legacy-ssh only from the CLI until the member agent transport exists; "
+        "signed-control is available to run_gate(fault=SignedReplicaKill(...))",
     )
+    parser.add_argument("--ssh-host", default=LEGACY_SSH_HOST, help="LEGACY fleet SSH host")
+    parser.add_argument("--sidecar-socket-path", required=True)
+    parser.add_argument("--ssh-key", default=LEGACY_SSH_KEY, help="LEGACY fleet SSH key")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if not 2 <= args.maximum_new_tokens <= 128:
