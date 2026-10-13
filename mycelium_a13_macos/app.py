@@ -519,9 +519,16 @@ class DemoApp:
         model = self.run_model_contract()
         # A non-default run model keeps its own cache and status, never the candidate's.
         suffix = '' if model == _CANDIDATE else '-' + model.resolved_commit[:12]
-        # A target's cache stays the staging consumer's confined 'serving' root.
-        root = (self.authority.peer.state_root / 'serving'
-                if self.installation_role == 'target' else self.root / ('model-source' + suffix))
+        # A target's cache stays inside the staging consumer's confined 'serving'
+        # root, one directory per run model: reopening another model's durable
+        # status there is (correctly) acquisition_state_corrupt.
+        if self.installation_role == 'target':
+            serving = self.authority.peer.state_root / 'serving'
+            if suffix:
+                private_dir(serving)
+            root = serving / ('model-source' + suffix) if suffix else serving
+        else:
+            root = self.root / ('model-source' + suffix)
         self.acquisition = SelectedModelAcquisition(root, model=model)
         self._acquisition_active = False
 
