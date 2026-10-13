@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -208,18 +209,106 @@ _RECOVERY_DEADLINE_POLL_SECONDS = 0.25
 _A6_COMPLETION_CLEANUP_HOLD_SECONDS = 30.0
 
 
-class _RecoveryDeadlineGuard:
-    """Interrupt in-flight successor work once the frozen recovery deadline passes.
+#: Largest accepted recovery deadline: the successor command inherits the
+#: source command's absolute deadline, which is one hour after admission.
+_MAX_RECOVERY_DEADLINE_MS = 3_600_000
+#: Environment overrides (seconds) for the frozen per-phase recovery deadlines.
+_RECOVERY_DEADLINE_ENVIRONMENT = (
+    ("qualification_ms", "MYCELIUM_A6_RECOVERY_QUALIFICATION_SECONDS"),
+    ("prefill_ms", "MYCELIUM_A6_RECOVERY_PREFILL_SECONDS"),
+    ("progress_ms", "MYCELIUM_A6_RECOVERY_PROGRESS_SECONDS"),
+    ("cutover_ms", "MYCELIUM_A6_RECOVERY_CUTOVER_SECONDS"),
+    ("total_ms", "MYCELIUM_A6_RECOVERY_TOTAL_SECONDS"),
+)
 
-    The replay checkpoint's expiry bounds the whole recovery: neither the
-    successor qualification nor the cutover can succeed after it. Without this
-    guard a stalled successor would hold the request until the command's
-    absolute deadline (one hour) instead of failing at that bound.
+
+@dataclass(frozen=True)
+class RecoveryPhaseDeadlines:
+    """Frozen per-phase bounds of one full-context replay recovery.
+
+    A6 spec section 5 freezes successor qualification, prefill, cutover and
+    total recovery deadlines separately. One checkpoint expiry used to bound
+    qualification, replay prefill and the whole buffered continuation, so a
+    normal-length answer on a slow successor could never recover. Each phase
+    now has its own bound and a stalled successor still aborts at the first
+    bound it misses:
+
+    * ``qualification_ms``: recovery attempt start to a qualified successor
+      reservation (the fleet's physical challenge measured about 6 s).
+    * ``prefill_ms``: successor start to its first verified next position.
+    * ``progress_ms``: longest gap between successor tokens once they flow.
+    * ``cutover_ms``: successor output finished to the cutover CAS (includes
+      the fresh qualification re-read before publication).
+    * ``total_ms``: hard cap from the checkpoint freeze; it is the replay
+      checkpoint's expiry, so neither qualification nor cutover can succeed
+      after it.
     """
 
-    def __init__(self, *, deadline_unix_ms: int, clock_ms: Callable[[], int],
-                 interrupt: Callable[[Callable[[], bool]], bool]) -> None:
-        self._deadline_unix_ms = deadline_unix_ms
+    qualification_ms: int = 30_000
+    prefill_ms: int = 30_000
+    progress_ms: int = 15_000
+    cutover_ms: int = 30_000
+    total_ms: int = 300_000
+
+    def __post_init__(self) -> None:
+        values = (
+            self.qualification_ms,
+            self.prefill_ms,
+            self.progress_ms,
+            self.cutover_ms,
+            self.total_ms,
+        )
+        if any(
+            type(value) is not int or not 0 < value <= _MAX_RECOVERY_DEADLINE_MS
+            for value in values
+        ) or any(value > self.total_ms for value in values[:-1]):
+            raise ValueError("a6_recovery_deadlines_invalid")
+
+    @classmethod
+    def from_environment(
+        cls, environ: Mapping[str, str] | None = None,
+    ) -> "RecoveryPhaseDeadlines":
+        """Defaults, overridden by ``MYCELIUM_A6_RECOVERY_*_SECONDS``."""
+
+        source = os.environ if environ is None else environ
+        overrides: dict[str, int] = {}
+        for name, variable in _RECOVERY_DEADLINE_ENVIRONMENT:
+            raw = source.get(variable)
+            if raw is None or not raw.strip():
+                continue
+            try:
+                seconds = float(raw)
+            except ValueError:
+                raise ValueError("a6_recovery_deadlines_invalid") from None
+            if not math.isfinite(seconds):
+                raise ValueError("a6_recovery_deadlines_invalid")
+            overrides[name] = int(round(seconds * 1_000))
+        total_ms = overrides.get("total_ms")
+        if total_ms is not None:
+            # A lowered total also lowers the phase defaults it would
+            # otherwise undercut; explicitly configured phases stay
+            # validated against it.
+            for name, _variable in _RECOVERY_DEADLINE_ENVIRONMENT[:-1]:
+                if name not in overrides:
+                    default = cls.__dataclass_fields__[name].default
+                    overrides[name] = min(default, total_ms) if total_ms > 0 else default
+        return cls(**overrides)
+
+
+class _RecoveryDeadlineGuard:
+    """Interrupt in-flight successor work once its current phase deadline passes.
+
+    ``deadline`` returns the bound that applies now and the phase it belongs
+    to (prefill until the first successor token, then progress since the last
+    token, capped by the total recovery deadline); it is re-read after every
+    wait. Without this guard a stalled successor would hold the request until
+    the command's absolute deadline (one hour) instead of failing at that bound.
+    """
+
+    def __init__(self, *, deadline: Callable[[], tuple[int, str]],
+                 clock_ms: Callable[[], int],
+                 interrupt: Callable[[Callable[[], bool], str], bool | None]) -> None:
+        self._deadline = deadline
         self._clock_ms = clock_ms
         self._interrupt = interrupt
         self._done = threading.Event()
@@ -230,21 +319,41 @@ class _RecoveryDeadlineGuard:
 
     def _run(self) -> None:
         while not self._done.is_set():
-            remaining_ms = self._deadline_unix_ms - self._clock_ms()
-            if remaining_ms <= 0:
-                break
-            self._done.wait(min(_RECOVERY_DEADLINE_POLL_SECONDS, remaining_ms / 1_000.0))
-        if self._done.is_set():
+            deadline_unix_ms, phase = self._deadline()
+            remaining_ms = deadline_unix_ms - self._clock_ms()
+            if remaining_ms > 0:
+                self._done.wait(
+                    min(_RECOVERY_DEADLINE_POLL_SECONDS, remaining_ms / 1_000.0))
+                continue
+            try:
+                # ``None``: the bound moved (a token arrived) between the read
+                # above and the interruption's own check under the router lock.
+                result = self._interrupt(self._done.is_set, phase)
+            except Exception:
+                # The interruption itself failed; the work still ran past the
+                # deadline, so its result can never be published.
+                self.fired = True
+                return
+            if result is None:
+                continue
+            self.fired = bool(result)
             return
-        try:
-            self.fired = bool(self._interrupt(self._done.is_set))
-        except Exception:
-            # The interruption itself failed; the work still ran past the
-            # deadline, so its result can never be published.
-            self.fired = True
 
     def stop(self) -> None:
         self._done.set()
+
+    def join(self, timeout: float) -> None:
+        """Wait (bounded) until a started interruption has returned.
+
+        The interruption owns the route cancellation fan-out, which publishes
+        the successor's exact cleanup receipt. The interrupted worker can
+        return before that fan-out does; recording the command terminal in
+        that gap finds no receipt (``command_cleanup_receipt_missing``) and
+        blocks a recovery that is about to be proven clean.
+        """
+
+        if self._thread is not threading.current_thread():
+            self._thread.join(timeout=timeout)
 
 
 def _route_that_ran(route: Any, request_id: str) -> Any:
@@ -293,9 +402,14 @@ class _Pending:
     recovery_attempts: int = 0
     recovery_failure_reason: str | None = None
     recovery_excluded_placements: set[str] = field(default_factory=set)
-    #: The frozen recovery deadline (the replay checkpoint's expiry) elapsed
-    #: while successor work was still in flight, and that work was interrupted.
+    #: A frozen recovery phase deadline elapsed (successor work in flight was
+    #: interrupted, or the recovery stopped before the next phase).
     recovery_deadline_exceeded: bool = False
+    #: Which bound fired: ``qualification``, ``prefill``, ``progress``,
+    #: ``cutover`` or ``total``; ``None`` while none has.
+    recovery_deadline_phase: str | None = None
+    #: Recovery-clock time of the latest buffered successor token.
+    recovery_last_progress_unix_ms: int | None = None
     #: Successor output buffered before cutover, and the successor's bound;
     #: counts only, never token material.
     recovery_output_count: int = 0
@@ -343,6 +457,7 @@ class LiveRouterPort:
         recovery_a4_atomic_commit: str | None = None,
         recovery_clock_ms: Callable[[], int] | None = None,
         qualification_source: Any | None = None,
+        recovery_deadlines: RecoveryPhaseDeadlines | None = None,
     ) -> None:
         recovery_parts = (
             recovery_authority,
@@ -354,6 +469,11 @@ class LiveRouterPort:
             or any(part is None for part in recovery_parts)
         ):
             raise ValueError("a6_recovery_configuration_incomplete")
+        if recovery_deadlines is None:
+            recovery_deadlines = RecoveryPhaseDeadlines.from_environment()
+        if not isinstance(recovery_deadlines, RecoveryPhaseDeadlines):
+            raise ValueError("a6_recovery_deadlines_invalid")
+        self._recovery_deadlines = recovery_deadlines
         self._route = route
         self._graph = execution_graph
         self._lock = threading.RLock()
@@ -369,6 +489,7 @@ class LiveRouterPort:
         self._retained_source_failures: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._retained_recovery_attempts: OrderedDict[str, int] = OrderedDict()
         self._retained_terminal_statuses: OrderedDict[str, str] = OrderedDict()
+        self._retained_recovery_outcomes: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._coordinator = runtime_coordinator
         self._recovery_authority = recovery_authority
         self._recovery_qualification_source = recovery_qualification_source
@@ -1075,7 +1196,7 @@ class LiveRouterPort:
             if pending.release_requested and pending.terminal_status is not None:
                 self._pending.pop(request_id, None)
                 self._sinks.pop(request_id, None)
-                self._retain_terminal_status(request_id, pending.terminal_status)
+                self._retain_terminal_status(request_id, pending.terminal_status, pending)
                 should_release = True
             self._changed.notify_all()
         if should_release:
@@ -1210,7 +1331,9 @@ class LiveRouterPort:
         while len(retained) > _RETAINED_SOURCE_FAILURES_MAX:
             retained.popitem(last=False)
 
-    def _retain_terminal_status(self, request_id: str, status: str | None) -> None:
+    def _retain_terminal_status(
+        self, request_id: str, status: str | None, pending: _Pending | None = None,
+    ) -> None:
         """Keep a released request's terminal status (bounded FIFO).
 
         Caller holds ``self._lock``. The gateway releases a settled request
@@ -1225,6 +1348,20 @@ class LiveRouterPort:
         retained[request_id] = status
         while len(retained) > _RETAINED_SOURCE_FAILURES_MAX:
             retained.popitem(last=False)
+        if pending is not None and pending.recovery_attempts > 0:
+            # How a recovery ended (bounded flags and codes only), so an
+            # observer polling after release still sees which deadline
+            # fired and that the terminal was not cleanup-blocked.
+            outcomes = self._retained_recovery_outcomes
+            outcomes.pop(request_id, None)
+            outcomes[request_id] = {
+                "recovery_deadline_exceeded": pending.recovery_deadline_exceeded,
+                "recovery_deadline_phase": pending.recovery_deadline_phase,
+                "recovery_output_finished": pending.recovery_output_finished,
+                "terminal_blocked_reason": pending.terminal_blocked_reason,
+            }
+            while len(outcomes) > _RETAINED_SOURCE_FAILURES_MAX:
+                outcomes.popitem(last=False)
 
     def _retain_recovery_attempts(self, request_id: str, attempts: int) -> None:
         """Keep how many recovery attempts started past request release.
@@ -1341,6 +1478,9 @@ class LiveRouterPort:
                     view["recovery_attempts"] = attempts
                     view["source_failure_observed"] = (
                         request_id in self._retained_source_failures)
+                    outcome = self._retained_recovery_outcomes.get(request_id)
+                    if outcome is not None:
+                        view.update(outcome)
                 return view
             identity = pending.command_identity
             return {
@@ -1354,6 +1494,7 @@ class LiveRouterPort:
                 "recovery_attempts": pending.recovery_attempts,
                 "recovery_failure_reason": pending.recovery_failure_reason,
                 "recovery_deadline_exceeded": pending.recovery_deadline_exceeded,
+                "recovery_deadline_phase": pending.recovery_deadline_phase,
                 "recovery_output_count": pending.recovery_output_count,
                 "recovery_output_limit": pending.recovery_output_limit,
                 "recovery_output_finished": pending.recovery_output_finished,
@@ -1451,7 +1592,9 @@ class LiveRouterPort:
             "path_attempt": source["path_attempt"],
             "tokenizer_digest": self._recovery_tokenizer_digest,
             "created_at_unix_ms": now_ms,
-            "expiry_unix_ms": now_ms + 30_000,
+            # The total recovery deadline. Qualification, prefill, progress
+            # and cutover have their own shorter bounds (RecoveryPhaseDeadlines).
+            "expiry_unix_ms": now_ms + self._recovery_deadlines.total_ms,
             "recovery_attempt": attempt,
         }
 
@@ -1521,7 +1664,13 @@ class LiveRouterPort:
             )
             pending.recovery_attempts += 1
             pending.recovery_phase = "successor_pending"
+            pending.recovery_last_progress_unix_ms = None
             self._retain_recovery_attempts(request_id, pending.recovery_attempts)
+        deadlines = self._recovery_deadlines
+        attempt_started_ms = self._recovery_clock_ms()
+        #: The phase whose bound applies to a failure that is not the
+        #: in-flight guard's own interruption (``execution`` has the guard).
+        stage = "qualification"
 
         successor_identity: dict[str, Any] | None = None
         source_fenced = False
@@ -1552,6 +1701,10 @@ class LiveRouterPort:
                 expected_source_identity=source_identity,
                 now_unix_ms=self._recovery_clock_ms(),
             )
+            # The successor qualified, but too late: it is never fenced in.
+            self._enforce_recovery_phase_deadline(
+                pending, checkpoint, phase="qualification",
+                bound_unix_ms=attempt_started_ms + deadlines.qualification_ms)
             successor_request = coordinator.recovery_successor_request(request_id)
             successor_manifest = path_manifest_to_dict(manifest)
             successor_placements = tuple(
@@ -1582,6 +1735,7 @@ class LiveRouterPort:
             source_fenced = True
 
             buffered: list[tuple[int, int]] = []
+            recovery_clock_ms = self._recovery_clock_ms
 
             class _RecoveryCollector:
                 def emit(self, token_index: int, token_id: int) -> None:
@@ -1594,6 +1748,8 @@ class LiveRouterPort:
                         raise M16AdmissionError("recovery_output_noncontiguous")
                     buffered.append((token_index, token_id))
                     pending.recovery_output_count = len(buffered)
+                    # Progress re-arms the idle (progress) deadline.
+                    pending.recovery_last_progress_unix_ms = recovery_clock_ms()
 
             identity = pending.command_identity
             assert identity is not None
@@ -1617,12 +1773,30 @@ class LiveRouterPort:
                 pending.recovery_output_limit = successor_request.max_new_tokens
                 pending.recovery_output_finished = False
                 pending.recovery_phase = "recovery_prefill"
+                pending.recovery_last_progress_unix_ms = None
+            stage = "execution"
+            execution_started_ms = self._recovery_clock_ms()
+
+            def execution_deadline() -> tuple[int, str]:
+                # Prefill until the first successor token, then the idle
+                # bound since the latest token; never past the total cap.
+                last_progress = pending.recovery_last_progress_unix_ms
+                if last_progress is None:
+                    bound, phase = execution_started_ms + deadlines.prefill_ms, "prefill"
+                else:
+                    bound, phase = last_progress + deadlines.progress_ms, "progress"
+                if checkpoint.expiry_unix_ms <= bound:
+                    return checkpoint.expiry_unix_ms, "total"
+                return bound, phase
+
             deadline_guard = _RecoveryDeadlineGuard(
-                deadline_unix_ms=checkpoint.expiry_unix_ms,
+                deadline=execution_deadline,
                 clock_ms=self._recovery_clock_ms,
-                interrupt=lambda stopped: self._interrupt_recovery_at_deadline(
-                    pending, request_id, stopped=stopped),
+                interrupt=lambda stopped, phase: self._interrupt_recovery_at_deadline(
+                    pending, request_id, stopped=stopped, phase=phase,
+                    deadline=execution_deadline),
             )
+            execution_error: Exception | None = None
             try:
                 self._route.infer(
                     successor_request.prompt_token_ids,
@@ -1633,18 +1807,26 @@ class LiveRouterPort:
                     **route_options,
                 )
             except Exception as error:
-                if pending.recovery_deadline_exceeded:
-                    raise TimeoutError("recovery_deadline_exceeded") from error
-                raise
+                execution_error = error
             finally:
                 with self._changed:
                     # Under the router lock: the guard either interrupted the
                     # work above or can no longer fire.
                     deadline_guard.stop()
             if pending.recovery_deadline_exceeded:
-                raise TimeoutError("recovery_deadline_exceeded")
+                # The interrupted worker can return before the interruption's
+                # cancellation fan-out has published the successor's exact
+                # cleanup receipt. Wait (bounded by the cancellation budget)
+                # for it so the abort records a proven-clean terminal instead
+                # of ``command_cleanup_receipt_missing``.
+                deadline_guard.join(_MAX_CANCELLATION_AND_CLEANUP_SECONDS)
+                raise TimeoutError("recovery_deadline_exceeded") from execution_error
+            if execution_error is not None:
+                raise execution_error
             if len(buffered) > successor_request.max_new_tokens:
                 raise M16AdmissionError("recovery_output_overflow")
+            stage = "cutover"
+            output_finished_ms = self._recovery_clock_ms()
 
             # Qualification is an expiring owner publication, not a one-time
             # prefill admission token. Re-read and validate the exact reserved
@@ -1674,6 +1856,9 @@ class LiveRouterPort:
             with self._changed:
                 if pending.cancellation_requested.is_set():
                     raise InferenceCancelled("recovery_cancelled_before_cutover")
+                self._enforce_recovery_phase_deadline(
+                    pending, checkpoint, phase="cutover",
+                    bound_unix_ms=output_finished_ms + deadlines.cutover_ms)
                 pending.recovery_phase = "cutover_pending"
                 committed_identity = coordinator.cutover_recovery_successor(
                     request_id,
@@ -1743,6 +1928,21 @@ class LiveRouterPort:
                         pending.recovery_phase = "successor_pending"
                         self._changed.notify_all()
                     return self.recover_full_context(request_id, checkpoint)
+
+            if (
+                stage != "execution"
+                and not isinstance(error, InferenceCancelled)
+                and self._recovery_failure_code(error) == "recovery_timeout"
+            ):
+                # An authority or qualifier expiry outside successor
+                # execution: name the bound it belongs to.
+                with self._changed:
+                    if pending.recovery_deadline_phase is None:
+                        pending.recovery_deadline_phase = (
+                            "total"
+                            if self._recovery_clock_ms() >= checkpoint.expiry_unix_ms
+                            else stage
+                        )
 
             # Which cancellation evidence ends the recovery: each condition is
             # recorded, because a recovery nobody cancelled must never end in
@@ -1872,18 +2072,52 @@ class LiveRouterPort:
                 )
             return False
 
+    def _enforce_recovery_phase_deadline(
+        self,
+        pending: _Pending,
+        checkpoint: ReplayCheckpoint,
+        *,
+        phase: str,
+        bound_unix_ms: int,
+    ) -> None:
+        """Fail the recovery if ``phase`` (or the total cap) has elapsed.
+
+        Used at the phase boundaries no successor work is in flight for:
+        qualification before fencing, cutover before the CAS.
+        """
+
+        now_ms = self._recovery_clock_ms()
+        if now_ms >= checkpoint.expiry_unix_ms:
+            phase = "total"
+        elif now_ms < bound_unix_ms:
+            return
+        with self._changed:
+            pending.recovery_deadline_exceeded = True
+            pending.recovery_deadline_phase = phase
+            self._changed.notify_all()
+        _LOGGER.warning("%s", json.dumps(
+            {"event": "a6_recovery_deadline_exceeded",
+             "request_id": pending.request.request_id if pending.request else None,
+             "phase": phase, "recovery_attempts": pending.recovery_attempts},
+            sort_keys=True, separators=(",", ":")))
+        raise TimeoutError("recovery_deadline_exceeded")
+
     def _interrupt_recovery_at_deadline(
         self,
         pending: _Pending,
         request_id: str,
         *,
         stopped: Callable[[], bool],
-    ) -> bool:
+        phase: str,
+        deadline: Callable[[], tuple[int, str]],
+    ) -> bool | None:
         """Interrupt the successor command whose recovery deadline elapsed.
 
         Uses the owner cancellation mechanics (command-controller cancellation
         generation, then physical fan-out) without setting the owner's
         cancellation latch, so the request fails as a recovery timeout.
+        Returns ``None`` when the bound moved (a successor token arrived)
+        since the guard read it, so the guard keeps watching.
         """
 
         route_cancel = None
@@ -1893,7 +2127,11 @@ class LiveRouterPort:
                     or pending.terminal_status is not None
                     or pending.recovery_phase != "recovery_prefill"):
                 return False
+            bound_unix_ms, phase = deadline()
+            if self._recovery_clock_ms() < bound_unix_ms:
+                return None
             pending.recovery_deadline_exceeded = True
+            pending.recovery_deadline_phase = phase
             cancellation_deadline = self._request_command_cancellation(
                 pending,
                 deadline_monotonic_s=(
@@ -1903,7 +2141,7 @@ class LiveRouterPort:
             self._changed.notify_all()
         _LOGGER.warning("%s", json.dumps(
             {"event": "a6_recovery_deadline_exceeded", "request_id": request_id,
-             "recovery_attempts": pending.recovery_attempts},
+             "phase": phase, "recovery_attempts": pending.recovery_attempts},
             sort_keys=True, separators=(",", ":")))
         if callable(route_cancel):
             route_cancel(request_id, deadline_monotonic_s=cancellation_deadline)
@@ -2533,7 +2771,7 @@ class LiveRouterPort:
                 if should_release:
                     self._pending.pop(request_id, None)
                     self._sinks.pop(request_id, None)
-                    self._retain_terminal_status(request_id, pending.terminal_status)
+                    self._retain_terminal_status(request_id, pending.terminal_status, pending)
                 self._changed.notify_all()
             else:
                 # Retain the exact receipt with command ownership before any
@@ -2580,7 +2818,7 @@ class LiveRouterPort:
                     if pending.release_requested and request_id is not None:
                         self._pending.pop(request_id, None)
                         self._sinks.pop(request_id, None)
-                        self._retain_terminal_status(request_id, pending.terminal_status)
+                        self._retain_terminal_status(request_id, pending.terminal_status, pending)
                         should_release = True
                     self._changed.notify_all()
             elif not late_finalized:
@@ -2948,7 +3186,7 @@ class LiveRouterPort:
             else:
                 self._pending.pop(request_id, None)
                 self._sinks.pop(request_id, None)
-                self._retain_terminal_status(request_id, pending.terminal_status)
+                self._retain_terminal_status(request_id, pending.terminal_status, pending)
                 should_release = True
             self._changed.notify_all()
         if should_release:
@@ -3108,7 +3346,7 @@ class LiveRouterPort:
             for request_id, _pending in releasable:
                 self._pending.pop(request_id, None)
                 self._sinks.pop(request_id, None)
-                self._retain_terminal_status(request_id, _pending.terminal_status)
+                self._retain_terminal_status(request_id, _pending.terminal_status, _pending)
         for request_id, pending in releasable:
             self._release_route_request(pending)
             self._retire_command(pending)

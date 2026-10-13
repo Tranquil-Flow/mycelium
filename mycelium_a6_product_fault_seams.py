@@ -71,8 +71,9 @@ _REMOTE_SIGNAL_NAMES = {
 }
 _RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 REMOTE_SIGNAL_TIMEOUT_SECONDS = 30.0
-#: Bound of each timeout-case wait. The router's recovery deadline is the
-#: replay checkpoint expiry, 30 s after the checkpoint froze.
+#: Bound of each timeout-case wait. A stalled successor is interrupted at the
+#: router's prefill (default 30 s) or progress (default 15 s) recovery
+#: deadline, see ``RecoveryPhaseDeadlines``.
 RECOVERY_DEADLINE_WAIT_SECONDS = 120.0
 #: Exit status of the remote script when the PID is not the bound node worker.
 REMOTE_IDENTITY_MISMATCH_EXIT = 65
@@ -794,8 +795,8 @@ class ProductCaseSeam:
         if target.wait_phase(record, "recovery_prefill", attempts=1):
             for node in target.successor_nodes(record, 1):
                 target.signal_node(node, signal.SIGSTOP)
-            # The router's frozen recovery deadline is the replay checkpoint's
-            # expiry (30 s after the checkpoint froze). Hold the successor
+            # The router's prefill/progress recovery deadline interrupts the
+            # stopped successor (``RecoveryPhaseDeadlines``). Hold the successor
             # until the router reports that it interrupted the stalled work,
             # then resume it so the interruption's cleanup can be proven.
             fired = target.wait(lambda: (lambda v: v if (
