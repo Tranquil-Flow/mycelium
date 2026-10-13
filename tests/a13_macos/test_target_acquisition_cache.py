@@ -9,7 +9,9 @@ def test_target_role_switch_and_restart_use_the_managed_artifact_cache(tmp_path)
     app=DemoApp(root,check_platform=False).start()
     try:
         previous=app.acquisition
-        assert previous.state_root==root/'model-source'
+        # The owner cache is per run model (model-source-<commit12> for any model
+        # but the old 7B candidate); the demo default is now a Qwen3 (run_model.py).
+        assert previous.state_root==root/('model-source-'+app.run_model_contract().resolved_commit[:12])
         retained=previous.state_root/'retained-owner-file'
         retained.write_text('preserve prior source state')
         assert request(app,'/api/join/request','POST',{'consent':CONSENT},login(app))[0]==200

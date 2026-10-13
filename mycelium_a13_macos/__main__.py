@@ -50,6 +50,16 @@ def _frozen_module_main(argv):
     return module.main(rest[2:])
 
 
+def _show_refusal_dialog(message):
+    """A Finder launch has no terminal: show the refusal as a native alert."""
+    import subprocess
+    script=('display alert "Mycelium A13 Demo cannot run on this Mac" message '
+            + json.dumps(message) + ' as critical buttons {"OK"} default button "OK"')
+    try:subprocess.run(['/usr/bin/osascript','-e',script],timeout=300,check=False,
+                       stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    except Exception:pass
+
+
 def main():
     if sys.argv[1:2] in (['-B'],['-m']):
         result=_frozen_module_main(sys.argv)
@@ -117,8 +127,12 @@ def main():
         while not done.wait(.25) and not app.closed.is_set(): pass
         return 0
     except DemoError as error:
+        message=getattr(error,'user_message',None)
         print(json.dumps({'event':'launcher_refused','code':str(error),
-            **({'observed_platform':error.observed_platform} if hasattr(error,'observed_platform') else {})}),file=sys.stderr)
+            **({'observed_platform':error.observed_platform} if hasattr(error,'observed_platform') else {}),
+            **({'message':message} if message else {})}),file=sys.stderr)
+        if message and not args.headless and not args.preflight and sys.platform=='darwin':
+            _show_refusal_dialog(message)
         return 2
     except Exception as error:
         # Never expose exception strings that might carry request/state material.

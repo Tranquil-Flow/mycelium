@@ -12,7 +12,7 @@ def test_installation_facts_bound_to_current_member_and_run(tmp_path,monkeypatch
     try:
         app.action('/api/create',{'consent':CONSENT});app.action('/api/local-contributor/start',{})
         actor=app.local_contributor;assert actor is not None
-        source=app.root/'model-source'/'fixture';source.mkdir()
+        source=app.acquisition.state_root/'fixture';source.mkdir()  # per-model owner cache (run_model.py)
         monkeypatch.setattr(app.acquisition,'prepared_source',lambda:SimpleNamespace(source_root=source,manifest_digest='sha256:'+'1'*64))
         with pytest.raises(ValueError):installation_descriptor(app,run_id='run-one',deployment_id='deployment-one',acknowledged=False)
         card=installation_descriptor(app,run_id='run-one',deployment_id='deployment-one',acknowledged=True)

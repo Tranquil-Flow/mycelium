@@ -19,8 +19,8 @@ def test_real_browser_enrollment_lifecycle_and_privacy(tmp_path):
             page.goto(app.launch_file.as_uri())
             page.get_by_role('button',name='Open private demo',exact=True).click()
             expect(page.locator('#private')).to_be_visible()
-            expect(page.locator('#model-contract')).to_contain_text('Qwen/Qwen2.5-7B-Instruct')
-            expect(page.locator('#model-contract')).to_contain_text('a09a35458c702b33eeacc393d103063234e8bc28')
+            expect(page.locator('#model-contract')).to_contain_text('Qwen/Qwen3-8B')  # demo default (run_model.py), was the 7B candidate
+            expect(page.locator('#model-contract')).to_contain_text('b968826d9c46dd6066d109eabc6255188de91218')
             expect(page.locator('#model-contract')).to_contain_text('int8-weight-only')
             # Core A13 has no hackathon verifier configuration or placeholder.
             assert page.locator('#verifier-connect').count()==0

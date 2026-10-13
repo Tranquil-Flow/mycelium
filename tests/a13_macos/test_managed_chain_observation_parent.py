@@ -12,7 +12,7 @@ def test_application_bootstrap_observes_native_hello_without_tensor_authority(tm
     try:
         app.action('/api/create',{'consent':CONSENT});app.action('/api/local-contributor/start',{})
         app._policy_observer=lambda:dict(SAFE)
-        source=app.root/'model-source'/'fixture';source.mkdir()
+        source=app.acquisition.state_root/'fixture';source.mkdir()  # per-model owner cache (run_model.py)
         monkeypatch.setattr(app.acquisition,'prepared_source',lambda:SimpleNamespace(source_root=source,manifest_digest='sha256:'+'1'*64))
         run='observe-qwen-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
         card=app.action('/api/installation/descriptor',{'run_id':run,'deployment_id':'observe-native','disclosure_acknowledged':True})

@@ -1,0 +1,140 @@
+'use strict';
+// One-click demo run (owner), this Mac's run status (joined Mac), model picker,
+// QR join codes and chat links. Independent of app.js: own status poll.
+(() => {
+  const $ = (id) => document.getElementById(id);
+  let busy = false;
+  let pickerKey = '';
+  async function api(path, body) {
+    const response = await fetch(path, {method: body === undefined ? 'GET' : 'POST', cache:'no-store',
+      credentials:'same-origin', redirect:'error', referrerPolicy:'no-referrer',
+      headers: body === undefined ? {} : {'Content-Type':'application/json','X-Mycelium-Action':'1'},
+      body: body === undefined ? undefined : JSON.stringify(body)});
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.error || 'request_failed');
+    return value;
+  }
+  const gb = (n) => (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + ' GB';
+  const ERRORS = {
+    owner_model_not_prepared:'Download the selected model on this Mac first (Inference → Download / resume source), then press Start again.',
+    two_macs_required:'At least two Macs must have joined and reported in. Invite a Mac with a code or QR, then press Start again.',
+    two_distinct_hosts_required:'The run needs two different physical Macs; two copies of the app on one Mac do not count.',
+    member_descriptors_timeout:'Some joined Macs did not report in.',
+    owner_swarm_required:'Create the swarm first.',
+    owner_run_active:'A run is already active. Stop it first.',
+    member_slice_timeout:'A joined Mac did not finish fetching its slice in time.',
+    route_qualification_timeout:'The route did not qualify in time.',
+  };
+  function explain(code) { return ERRORS[code] ? `${ERRORS[code]} (${code})` : code; }
+  function renderPicker(status) {
+    const picker = status.run_model; if (!picker) return;
+    const key = JSON.stringify([picker.selected, picker.locked]);
+    if (key !== pickerKey) {
+      pickerKey = key;
+      $('run-model').replaceChildren(...picker.choices.map((c) => {
+        const o = document.createElement('option'); o.value = c.name;
+        o.textContent = `${c.label} · ${gb(c.snapshot_bytes)} download on this Mac${c.fits_storage_ceiling ? '' : ' · too large for the storage limit'}`;
+        o.selected = c.name === picker.selected; return o;
+      }));
+    }
+    const run = status.owner_run || {};
+    $('run-model').disabled = busy || picker.locked || ['running','serving','stopping'].includes(run.state);
+    $('run-model-note').textContent = picker.locked ? `Fixed by MYCELIUM_A13_RUN_MODEL (${picker.selected}).`
+      : `Pinned: ${picker.model_id} @ ${picker.resolved_commit.slice(0, 12)} · ${picker.source === 'saved' ? 'your choice' : 'demo default'}. Joined Macs fetch only their slice of it.`;
+  }
+  function renderRun(status) {
+    const run = status.owner_run; if (!run) return;
+    const active = ['running','serving','stopping'].includes(run.state);
+    $('demo-start').disabled = busy || active;
+    $('demo-stop').disabled = busy || !active;
+    $('demo-rebuild').disabled = busy || !run.run_id || run.state === 'stopping';
+    const step = (run.steps || []).find((s) => s.name === run.step);
+    $('demo-state').textContent = run.state === 'failed' ? `Stopped at “${(run.steps.find((s) => s.name === run.failed_step) || {}).label}”: ${explain(run.error_code)}`
+      : run.state === 'serving' ? 'Serving — open the chat below.' : run.state === 'running' ? `Running: ${step ? step.label : ''}…`
+      : run.state === 'stopping' ? 'Stopping…' : run.state === 'stopped' ? 'Stopped.' : 'Idle.';
+    $('demo-steps').replaceChildren(...(run.steps || []).map((s) => {
+      const li = document.createElement('li'); li.className = s.state;
+      li.textContent = s.label + (s.detail ? ` — ${s.detail}` : '') + (s.state === 'done' ? ' ✓' : s.state === 'failed' ? ' ✗' : '');
+      return li;
+    }));
+    const people = run.participants || [];
+    if (!people.length) { $('demo-participants').replaceChildren(); }
+    else {
+      const table = document.createElement('table'); table.className = 'members';
+      const head = table.insertRow(); ['Mac','Node','State','Layers'].forEach((t) => { const th = document.createElement('th'); th.textContent = t; head.append(th); });
+      for (const p of people) {
+        const row = table.insertRow();
+        const progress = p.progress && p.progress.total_bytes ? ` ${Math.floor(100 * p.progress.done_bytes / p.progress.total_bytes)}%` : '';
+        [p.label, p.node_id.slice(0, 12), (p.state || 'waiting') + progress + (p.detail ? ` (${p.detail})` : ''),
+         p.layers ? `${p.layers[0]}–${p.layers[1] - 1}` : '—'].forEach((t) => { row.insertCell().textContent = t; });
+      }
+      $('demo-participants').replaceChildren(table);
+    }
+    const chat = status.chat || {};
+    const links = $('chat-links'); links.replaceChildren();
+    if (chat.available) {
+      const local = document.createElement('a'); local.href = '/chat'; local.target = '_blank'; local.rel = 'noopener'; local.textContent = 'Open the chat on this Mac';
+      links.append(local);
+      if (chat.share_url) {
+        const share = document.createElement('p'); share.textContent = 'Share with the room: ' + chat.share_url; links.append(share);
+      }
+    } else links.textContent = 'The chat opens when the route is serving.';
+  }
+  function renderQr(status) {
+    const flow = status.join_flow || {}; const box = $('window-qr'); if (!box) return;
+    const open = (flow.pairing_windows || []).filter((w) => w.state === 'open' && w.short_code);
+    const ids = open.map((w) => w.window_id).join(',');
+    if (box.dataset.ids === ids) return; box.dataset.ids = ids;
+    box.replaceChildren(...open.map((w) => {
+      const figure = document.createElement('figure');
+      const img = document.createElement('img'); img.src = `/api/pair/window/qr/${w.window_id}.svg`;
+      img.alt = `QR code: join page for ${w.short_code}`;
+      const caption = document.createElement('figcaption'); caption.textContent = `Scan to see how to join (code ${w.short_code})`;
+      figure.append(img, caption); return figure;
+    }));
+  }
+  const TARGET = {
+    not_joined:['Not joined yet','Join with a code from the owner above.'],
+    joined:['Joined · idle','Waiting for the owner to start a run.'],
+    idle:['Joined · idle','Waiting for the owner to start a run.'],
+    waiting_for_consent:['Joined · waiting for standing consent','Grant standing consent when joining so this Mac can take part without clicks.'],
+    reported:['Joined · reported to the owner','This Mac told the owner it is ready.'],
+    preparing:['Preparing','Starting native hello (no model load).'],
+    bootstrap_running:['Preparing','Native hello running (no model load).'],
+    cleaning_up:['Preparing','Cleaning up the hello step.'],
+    downloading_slice:['Downloading slice','Fetching only this Mac’s layers of the model, verifying every byte.'],
+    slice_ready:['Slice ready','Waiting for the owner to start serving.'],
+    work_running:['Loading / qualifying','Running its slice; the route is being qualified.'],
+    serving:['Serving','This Mac is computing its layers for prompts in the room.'],
+    stopped:['Joined · idle','The owner stopped the run.'],
+    error:['Problem','See the detail below; the owner sees it too.'],
+  };
+  function renderTarget(status) {
+    const t = status.demo_target; if (!t) return;
+    const [title, text] = TARGET[t.state] || [t.state, ''];
+    $('target-title').textContent = title;
+    $('target-detail').textContent = text + (t.model_id ? ` Model: ${t.model_id}.` : '') + (t.detail ? ` (${t.detail})` : '');
+    const bar = $('target-progress');
+    if (t.progress && t.progress.total_bytes) { bar.hidden = false; bar.max = t.progress.total_bytes; bar.value = t.progress.done_bytes; }
+    else bar.hidden = true;
+  }
+  async function refresh() {
+    let status;
+    try { status = await api('/api/status'); } catch (error) { return; }
+    const owner = status.installation_role === 'owner' && status.authority && status.authority.swarm_created;
+    $('demo-run').hidden = !owner;
+    $('demo-target').hidden = status.installation_role !== 'target';
+    if (owner) { renderPicker(status); renderRun(status); }
+    renderQr(status); renderTarget(status);
+  }
+  async function act(path, body) {
+    busy = true;
+    try { await api(path, body); } catch (error) { $('demo-state').textContent = explain(error.message); }
+    finally { busy = false; refresh(); }
+  }
+  $('demo-start').addEventListener('click', () => act('/api/demo/start', {}));
+  $('demo-stop').addEventListener('click', () => act('/api/demo/stop', {}));
+  $('demo-rebuild').addEventListener('click', () => act('/api/demo/rebuild', {}));
+  $('run-model').addEventListener('change', () => act('/api/run-model', {choice:$('run-model').value}));
+  refresh(); setInterval(refresh, 2000);
+})();

@@ -34,7 +34,7 @@ def test_bound_cache_rejects_escape_and_symlink(tmp_path):
     try:
         owner.action('/api/create',{'consent':CONSENT});actor=create_local_contributor(owner)
         cache=actor._preposition_cache_root({'preposition':{}})
-        assert cache==owner.root/'model-source'
+        assert cache==owner.acquisition.state_root
         parked=cache.with_name('model-source-parked');cache.rename(parked)
         cache.symlink_to(tmp_path,target_is_directory=True)
         try:
@@ -59,3 +59,19 @@ def test_app_owns_local_actor_and_routes_existing_staging_actions(tmp_path):
         assert owner.local_contributor.member.node_id==node
         assert owner.action('/api/control/stop',{})['state']=='stopped'
     finally:owner.close()
+
+
+def test_preposition_cache_follows_the_selected_run_model(tmp_path,monkeypatch):
+    # A non-default run model keeps its own cache (model-source-<commit12>); the
+    # owner's own contributor must preposition from THAT cache, not the 7B one.
+    monkeypatch.delenv('MYCELIUM_A13_RUN_MODEL',raising=False)
+    owner=DemoApp(tmp_path/'owner',check_platform=False).start();actor=None
+    try:
+        owner.action('/api/create',{'consent':CONSENT})
+        owner.action('/api/run-model',{'choice':'qwen3-0.6b'})
+        actor=create_local_contributor(owner)
+        assert actor._preposition_cache_root({'preposition':{}})==owner.acquisition.state_root
+        assert owner.acquisition.state_root.name=='model-source-c1899de289a0'
+    finally:
+        if actor:actor.stop()
+        owner.close()

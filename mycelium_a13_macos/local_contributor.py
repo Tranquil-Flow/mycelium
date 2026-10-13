@@ -65,10 +65,14 @@ class LocalContributor(TargetApplication):
         super().__init__(owner_app.root/'local-contributor')
         self.peer=LocalOwnerMember(owner_app.root/'local-contributor',owner=owner_app.authority)
         self.owner_root=owner_app.root
+        self.owner_app=owner_app
 
     def _preposition_cache_root(self,offer):
         if offer.get('preposition') is None:return None
-        root=self.owner_root/'model-source'
+        # The owner's CURRENT acquisition cache: a non-default run model keeps
+        # its own model-source-<commit12> root (app._open_acquisition).
+        acquisition=getattr(self.owner_app,'acquisition',None)
+        root=(self.owner_root/'model-source') if acquisition is None else acquisition.state_root
         if root.resolve(strict=True)!=root:raise ValueError('local_owner_cache_invalid')
         return _private_directory(root,create=False)
 

@@ -303,6 +303,11 @@ class ManagedProvisioningMailbox(ManagedControlMailbox):
                 **{k:statement[k] for k in _BINDING_FIELDS},'offer':offer,'ack':ack})
 
     def handle_http(self,method,path,body):
+        # Owner-local extensions on the same signed plane (run_exchange.RunExchange.install).
+        extension=(getattr(self,'route_extensions',None) or {}).get(path)
+        if extension is not None:
+            _require(method=='POST','managed_control_method_invalid')
+            return 200,extension(body)
         if path in {'/managed-control/staging/cleanup/read','/managed-control/staging/cleanup/ack'}:
             _require(method=='POST','managed_control_method_invalid')
             return 200,self.cleanup_state(body,acknowledge=path.endswith('/ack'))

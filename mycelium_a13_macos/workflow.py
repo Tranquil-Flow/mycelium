@@ -172,6 +172,7 @@ class ManagedServingWorkflow:
         self._offers={}
         self._startup=None
         self._error=None
+        self.node_slice_plans=None
 
     def status(self):
         with self._lock:
@@ -249,8 +250,30 @@ class ManagedServingWorkflow:
                 except Exception:pass  # Original failure and private offers remain inspectable.
 
 
+def bind_member_artifacts(controller, *, prepared, target_source_roots, slice_plan=None):
+    """Remove model bytes from the per-node archives; prepositions replace them.
+
+    Without a slice plan every member binds the whole pinned snapshot file it
+    already holds (``bind_hf_prepositions``).  With a slice plan (relaxed D-1,
+    Qwen3 demo) each member binds only ITS verified slice files under the slice
+    root it disclosed (``target_source_roots`` then holds slice roots), and the
+    per-member node plans are returned so the owner can hand each member its own
+    plan (pinned by ``node_plan_digest``) before publishing offers.
+    Returns ``(controller, node_plans | None)``.
+    """
+    if slice_plan is None:
+        from .managed_transfers import bind_hf_prepositions
+        return bind_hf_prepositions(controller,prepared=prepared,
+            target_source_roots=target_source_roots),None
+    from .slice_acquisition import bind_slice_prepositions,node_slice_plan
+    node_plans={peer['node_id']:node_slice_plan(slice_plan,peer['node_id'])
+                for peer in controller['peers']}
+    return bind_slice_prepositions(controller,node_plans=node_plans,
+        target_slice_roots=target_source_roots),node_plans
+
+
 def prepare_serving_workflow(*, authority, channel, prepared, operator_plan,
-                             target_source_roots):
+                             target_source_roots, slice_plan=None):
     """Bind a native builder result to current members and this owner's seed.
 
     Metadata/files only: no model load, publication, process or route starts.
@@ -262,7 +285,6 @@ def prepare_serving_workflow(*, authority, channel, prepared, operator_plan,
     import time
     from .authority import _private_directory, _atomic_private_json
     from .serving import _read_json_object, prepare_registry_launch
-    from .managed_transfers import bind_hf_prepositions
     from .session_factory import ManagedSessionFactory
     # Imported ABOVE the try that uses it. A function-local import written BELOW its use makes the name
     # local for the whole scope, so the call site raised UnboundLocalError on every round and the except
@@ -277,8 +299,8 @@ def prepare_serving_workflow(*, authority, channel, prepared, operator_plan,
             or channel.client.signer.verification_key_digest!=authority.coordinator.signer.verification_key_digest):
         raise ValueError('managed_workflow_owner_unavailable')
     document=_read_json_object(Path(operator_plan),reason='managed_workflow_plan_invalid')
-    document['controller']=bind_hf_prepositions(document['controller'],prepared=prepared,
-        target_source_roots=target_source_roots)
+    document['controller'],node_plans=bind_member_artifacts(document['controller'],prepared=prepared,
+        target_source_roots=target_source_roots,slice_plan=slice_plan)
     coordinator=authority.coordinator
     # Collect the node hello observations BEFORE the binding, so the binding can prefer a LIVE boot id
     # over the one the plan document recorded. Measured 2026-09-19: soak03's plan carried
@@ -372,4 +394,7 @@ def prepare_serving_workflow(*, authority, channel, prepared, operator_plan,
         prepositioned_artifacts=c.get('prepositioned_artifacts'),membership_snapshot=c['membership_snapshot'],
         run_plan=run,now=c['now'],session_factory=factory)
     controller._validate_transfers()
-    return ManagedServingWorkflow(authority=authority,controller=controller,launch=launch)
+    workflow=ManagedServingWorkflow(authority=authority,controller=controller,launch=launch)
+    #: Slice mode: each member's own node plan, handed out before offers publish.
+    workflow.node_slice_plans=node_plans
+    return workflow

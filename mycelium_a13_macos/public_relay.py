@@ -28,6 +28,16 @@ _MAX_FRAME=1024*1024
 #: Interface for the join lane: ``SeedRelayProxy.bind_local(handler)`` where
 #: ``handler(method, path, body) -> (status, raw_json_bytes)``.
 _LOCAL_PREFIXES=('/pairing-window/','/link-probe/','/member-report/')
+#: The owner's shared chat page (chat.py), answered in-process like the join
+#: routes: ``SeedRelayProxy.bind_chat(handler)`` with
+#: ``handler(method, path, headers, body) -> (status, content_type, raw)``.
+_CHAT_CSP=("default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; "
+           "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+_LOCAL_TYPES=frozenset({'application/json','text/html; charset=utf-8','image/svg+xml'})
+
+
+def _chat_path(path):
+    return path=='/chat' or path.startswith('/chat/')
 
 
 class _RelayServer(ThreadingHTTPServer):
@@ -35,6 +45,7 @@ class _RelayServer(ThreadingHTTPServer):
     def __init__(self):
         self.backend=None
         self.local=None
+        self.chat=None
         self.slots=threading.BoundedSemaphore(16)
         super().__init__(('127.0.0.1',0),_RelayHandler)
     def process_request(self,request,client_address):
@@ -51,18 +62,23 @@ class _RelayServer(ThreadingHTTPServer):
 
 class _RelayHandler(BaseHTTPRequestHandler):
     def log_message(self,*args):pass
-    def _reply(self,status,raw,content_type='application/json'):
+    def _reply(self,status,raw,content_type='application/json',csp=None):
         self.send_response(status)
         self.send_header('Content-Type',content_type)
+        if csp is not None:
+            self.send_header('Content-Security-Policy',csp)
+            self.send_header('X-Content-Type-Options','nosniff')
+            self.send_header('Referrer-Policy','no-referrer')
         self.send_header('Content-Length',str(len(raw)))
         self.send_header('Cache-Control','no-store')
         self.send_header('Connection','close')
         self.end_headers();self.wfile.write(raw);self.close_connection=True
     def _forward(self):
         self.connection.settimeout(5)
-        if (not self.path.startswith(('/seed/','/managed-control/')+_LOCAL_PREFIXES)
+        if ((not self.path.startswith(('/seed/','/managed-control/')+_LOCAL_PREFIXES) and not _chat_path(self.path))
                 or any(value in self.path for value in ('..','%','?','#','\\'))):
             return self._reply(404,b'{"error":"relay_route_unknown"}')
+        if _chat_path(self.path):return self._local(chat=True)
         if self.path.startswith(_LOCAL_PREFIXES):return self._local()
         if (self.headers.get('Transfer-Encoding') is not None
                 or self.headers.get('Cookie') is not None
@@ -89,7 +105,7 @@ class _RelayHandler(BaseHTTPRequestHandler):
         except (OSError,http.client.HTTPException):self._reply(502,b'{"error":"relay_backend_unavailable"}')
         finally:
             if connection is not None:connection.close()
-    def _local(self):
+    def _local(self,chat=False):
         if (self.headers.get('Transfer-Encoding') is not None
                 or self.headers.get('Cookie') is not None
                 or self.headers.get('Authorization') is not None):
@@ -102,14 +118,29 @@ class _RelayHandler(BaseHTTPRequestHandler):
             body=self.rfile.read(length)
             if len(body)!=length:raise ValueError()
         except (ValueError,OSError):return self._reply(400,b'{"error":"relay_frame_invalid"}')
+        if chat:
+            handler=self.server.chat
+            if handler is None:return self._reply(503,b'{"error":"relay_chat_not_bound"}')
+            try:
+                status,kind,raw=handler(self.command,self.path,{k:v for k,v in self.headers.items()},body)
+                if (type(status) is not int or not 200<=status<=599 or not isinstance(raw,bytes)
+                        or len(raw)>_MAX_FRAME or not isinstance(kind,str)):
+                    raise ValueError()
+            except Exception:return self._reply(500,b'{"error":"relay_chat_failed"}')
+            return self._reply(status,raw,kind,csp=_CHAT_CSP)
         handler=self.server.local
         if handler is None:return self._reply(503,b'{"error":"relay_join_not_bound"}')
         try:
-            status,raw=handler(self.command,self.path,body)
-            if type(status) is not int or not 200<=status<=599 or not isinstance(raw,bytes) or len(raw)>_MAX_FRAME:
+            answer=handler(self.command,self.path,body)
+            # (status, raw) is JSON; (status, raw, content_type) admits the
+            # QR join page / its SVG (closed set of types).
+            status,raw=answer[0],answer[1]
+            kind=answer[2] if len(answer)==3 else 'application/json'
+            if (type(status) is not int or not 200<=status<=599 or not isinstance(raw,bytes)
+                    or len(raw)>_MAX_FRAME or kind not in _LOCAL_TYPES):
                 raise ValueError()
         except Exception:return self._reply(500,b'{"error":"relay_join_failed"}')
-        self._reply(status,raw)
+        self._reply(status,raw,kind,csp=None if kind=='application/json' else _CHAT_CSP)
     do_GET=_forward
     do_POST=_forward
 
@@ -133,6 +164,9 @@ class SeedRelayProxy:
     def bind_local(self,handler):
         if handler is not None and not callable(handler):raise ValueError('relay_local_invalid')
         self.server.local=handler
+    def bind_chat(self,handler):
+        if handler is not None and not callable(handler):raise ValueError('relay_chat_invalid')
+        self.server.chat=handler
     def close(self):
         if self._closed:return
         self._closed=True

@@ -13,18 +13,34 @@ _FACT_FIELDS={'node_id','process_transport','ssh_target','ssh_identity_file','st
     'membership_generation','runtime_backend','source_root','manifest_digest','route_ready'}
 
 
-def installation_descriptor(app,*,run_id,deployment_id,acknowledged):
+def installation_descriptor(app,*,run_id,deployment_id,acknowledged,slice_source=None):
     """Disclose exact local install/cache paths only after explicit local consent.
 
     The native worker still resolves its own executable and sidecar. No path
     here can authorize a remote command. Host/boot IDs require native hello.
+
+    ``slice_source`` (slice mode, relaxed D-1): ``{'source_root', 'manifest_digest'}``
+    for a member that holds no whole snapshot.  ``source_root`` is its empty
+    per-run slice root inside its artifact cache (where it will fetch ONLY its
+    slice); ``manifest_digest`` is the owner-announced digest of the pinned
+    revision.  Every slice byte is later verified against owner-compiled
+    digests, and the staging consumer re-hashes every prepositioned file.
     """
     if acknowledged is not True:raise ValueError('installation_disclosure_consent_required')
     run_id=_segment(run_id);deployment_id=_segment(deployment_id)
     actor=app.authority if app.installation_role=='target' else app.local_contributor
     if actor is None or not app.running:raise ValueError('installation_member_required')
     member=actor.peer.staging_control_snapshot()
-    prepared=app.acquisition.prepared_source()
+    if slice_source is None:
+        prepared=app.acquisition.prepared_source()
+        source_root,manifest_digest=str(prepared.source_root),prepared.manifest_digest
+    else:
+        if (not isinstance(slice_source,dict) or set(slice_source)!={'source_root','manifest_digest'}
+                or not isinstance(slice_source['source_root'],str) or not Path(slice_source['source_root']).is_absolute()
+                or not isinstance(slice_source['manifest_digest'],str)
+                or not slice_source['manifest_digest'].startswith('sha256:')):
+            raise ValueError('installation_slice_source_invalid')
+        source_root,manifest_digest=slice_source['source_root'],slice_source['manifest_digest']
     from mycelium_node.durable_membership import load_membership_state
     retained=load_membership_state(actor.peer.state_root)
     binding=_binding_from_member(member,run_id,deployment_id)
@@ -36,8 +52,8 @@ def installation_descriptor(app,*,run_id,deployment_id,acknowledged):
         'endpoint_secret_file':str(actor._endpoint_identity_file(member)),
         'process_transport':'managed_https','ssh_target':None,'ssh_identity_file':None,
         'runtime_backend':managed_runtime_backend(member.get('peer_class','mac_mlx_iroh')),
-        'source_root':str(prepared.source_root),
-        'manifest_digest':prepared.manifest_digest,'route_ready':False}
+        'source_root':source_root,
+        'manifest_digest':manifest_digest,'route_ready':False}
     now=time.time()
     return sign_managed_statement(actor.peer._signer,{'protocol':PROTOCOL,**binding,
         'swarm_id':retained['swarm_id'],'issued_at':now,'expires_at':now+300,'facts':facts})

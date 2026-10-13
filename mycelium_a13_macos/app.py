@@ -39,9 +39,18 @@ BUSY_RESPONSE = (b'HTTP/1.1 503 Service Unavailable\r\n'
                  b'\r\n' + BUSY_BODY)
 
 
-def model_contract():
-    from .serving import selected_run_model
-    return asdict(selected_run_model())
+def model_contract(root=None):
+    """The run model before/without state: env override, else the demo default.
+
+    With a state root the persisted picker choice applies (run_model.py).
+    """
+    from .run_model import app_run_model, demo_default_choice, choice
+    from .serving import RUN_MODEL_ENVIRONMENT, selected_run_model
+    if root is not None:
+        return asdict(app_run_model(root)[2])
+    if RUN_MODEL_ENVIRONMENT in os.environ:
+        return asdict(selected_run_model())
+    return asdict(choice(demo_default_choice()).model)
 
 
 class DemoError(RuntimeError):
@@ -55,6 +64,27 @@ def _admitted_macos(os_version):
     if not 2 <= len(parts) <= 3 or not all(p.isdigit() and len(p) <= 3 for p in parts):
         return False
     return int(parts[0]) >= 26
+
+
+#: The packaged app's real floor: its bundled Python/OpenSSL/sqlite are built
+#: for macOS 26.0 (Mach-O minos), and Info.plist LSMinimumSystemVersion says so.
+MACOS_FLOOR = '26.0'
+
+
+def unsupported_mac_message(*, system, machine, os_version):
+    """Plain words for a person whose Mac cannot run this build."""
+    shown = os_version if isinstance(os_version, str) and len(os_version) <= 16 else 'unknown'
+    if system == 'Darwin' and machine != 'arm64':
+        return ('This Mac has an Intel processor (macOS %s). Mycelium A13 Demo needs an Apple Silicon '
+                'Mac (M1 or later) with macOS %s or later, because the model runs on the Apple GPU '
+                'with MLX. You can still use the shared chat page from this Mac\'s browser.'
+                % (shown, MACOS_FLOOR))
+    if system == 'Darwin':
+        return ('This Mac runs macOS %s. Mycelium A13 Demo needs macOS %s or later. Update macOS in '
+                'System Settings > General > Software Update, then open the app again. Until then you '
+                'can still use the shared chat page from this Mac\'s browser.' % (shown, MACOS_FLOOR))
+    return ('This build of Mycelium A13 Demo runs on Apple Silicon Macs with macOS %s or later.'
+            % MACOS_FLOOR)
 
 
 def preflight(*, system=None, machine=None, os_version=None):
@@ -72,6 +102,7 @@ def preflight(*, system=None, machine=None, os_version=None):
     if system != 'Darwin' or machine != 'arm64' or not _admitted_macos(os_version):
         error=DemoError('unsupported_platform')
         error.observed_platform={'system':system,'machine':machine,'os_version':os_version}
+        error.user_message=unsupported_mac_message(system=system,machine=machine,os_version=os_version)
         raise error
     return {'platform': 'macos', 'architecture': machine, 'os_version': os_version,
             'model_contract':model_contract(),
@@ -298,6 +329,18 @@ def bounded_action_failure(path, error, public_code):
     return record
 
 
+def _demo_status(app, part):
+    """Status of the one-click demo pieces; never lets them break /api/status."""
+    try:
+        from . import demo_app
+        if part == 'owner': return demo_app.owner_status(app)
+        if part == 'target': return demo_app.target_status(app)
+        from .chat import chat_status
+        return chat_status(app)
+    except Exception:
+        return {'state':'unavailable'}
+
+
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
     block_on_close = False
@@ -349,6 +392,13 @@ class DemoApp:
         #: Click-free target steps another lane registers: fn(app, context) -> dict | None
         #: (see standing_consent.auto_poll_step).  Run only under standing consent.
         self.auto_steps = []
+        # One-click demo run (demo_app.py): owner run + exchange, joined-Mac agent.
+        from . import demo_app as _demo_app
+        self.run_exchange = None
+        self.owner_run = None
+        self.demo_target = None
+        self.chat = None
+        self.auto_steps.append(_demo_app.auto_step)
         self.last_report = None
         self._next_periodic_report = 0.0
         self._probe_times = []
@@ -465,8 +515,8 @@ class DemoApp:
         # A target's downloaded weights must be inside the same private cache
         # that its staging consumer confines and re-verifies. Retain old owner
         # cache bytes on role change; never migrate or delete unrelated state.
-        from .serving import CANDIDATE_MODEL as _CANDIDATE, selected_run_model
-        model = selected_run_model()
+        from .serving import CANDIDATE_MODEL as _CANDIDATE
+        model = self.run_model_contract()
         # A non-default run model keeps its own cache and status, never the candidate's.
         suffix = '' if model == _CANDIDATE else '-' + model.resolved_commit[:12]
         # A target's cache stays the staging consumer's confined 'serving' root.
@@ -474,6 +524,28 @@ class DemoApp:
                 if self.installation_role == 'target' else self.root / ('model-source' + suffix))
         self.acquisition = SelectedModelAcquisition(root, model=model)
         self._acquisition_active = False
+
+    # -- demo run: model picker, owner one-click run, target auto loop, chat ---
+
+    def run_model_contract(self):
+        """The model this installation's runs pin (picker choice, env override)."""
+        from .run_model import app_run_model
+        return app_run_model(self.root)[2]
+
+    def _choose_run_model(self, body):
+        from .run_model import app_run_model, save_choice, choice, document
+        if set(body) != {'choice'}: raise DemoError('invalid_request')
+        try: choice(body['choice'])
+        except ValueError: raise DemoError('run_model_choice_invalid') from None
+        if app_run_model(self.root)[1] == 'environment':
+            raise DemoError('run_model_locked_by_environment')
+        if self._acquisition_active: raise DemoError('acquisition_already_active')
+        run = getattr(self, 'owner_run', None)
+        if run is not None and run.active(): raise DemoError('owner_run_active')
+        save_choice(self.root, body['choice'])
+        self.acquisition_policy_error = None
+        self._open_acquisition()
+        return document(self.root)
 
     def make_launch_file(self):
         self.launch_code = secrets.token_urlsafe(32)
@@ -569,6 +641,10 @@ class DemoApp:
         import json as _json
         from .pairing import PAIRING_WINDOW_PREFIX
         from .capability import LINK_PROBE_PATH, MEMBER_REPORT_PATH, link_probe_response
+        from .join_page import is_join_page, render as _join_page
+        if is_join_page(path):
+            if method != 'GET': return 405, b'{"error":"method_not_allowed"}'
+            return _join_page(self.pairing_windows, path)  # QR join page (text/html)
         if path.startswith(PAIRING_WINDOW_PREFIX):
             return self.pairing_windows.handle(method, path, body)
         if path == MEMBER_REPORT_PATH:
@@ -588,6 +664,11 @@ class DemoApp:
     def _bind_public_routes(self):
         if self.public_relay is not None and getattr(self.public_relay, 'proxy', None) is not None:
             self.public_relay.proxy.bind_local(self._public_route)
+            bind_chat = getattr(self.public_relay.proxy, 'bind_chat', None)
+            if bind_chat is not None:
+                from .chat import handle as _chat_handle
+                bind_chat(lambda method, path, headers, body: _chat_handle(
+                    self, method, path, headers, body, via_relay=True))
 
     def _join_client(self, origin):
         from .pairing import JoinWindowClient
@@ -677,6 +758,8 @@ class DemoApp:
         policy = read_resource_policy(self.root)
         binding = self.auto_step_context()['binding']
         if policy is None or binding is None: return None
+        from .demo_app import holds_offer
+        if holds_offer(self): return None  # bootstrap offer / slice not verified yet
         if self.standing is None:
             self.standing = StandingAcceptor(self.root, report=lambda purpose, _offer: self._auto_report(purpose))
         def admitted(_intent):
@@ -730,8 +813,10 @@ class DemoApp:
             value = {**value, 'members': [
                 {'node_id':m['node_id'],'generation':m['generation'],'lifecycle_state':m['lifecycle_state']}
                 for m in coordinator.members()]}
+        from .run_model import document as run_model_document
         return {'label':'macOS A13 hackathon demo','role':'not_yet_serving',
-                'model_contract':model_contract(),
+                'model_contract':asdict(self.run_model_contract()),
+                'run_model':run_model_document(self.root),
                 'network':({'state':'private'} if self.public_relay is None else self.public_relay.status()),
                 'acquisition':self.acquisition.status(),
                 'resource_observation':dict(self.resource_observation),
@@ -741,6 +826,8 @@ class DemoApp:
                 'recovery_error':self.recovery_error,
                 'distribution':'unsigned development software; not notarized',
                 'join_flow':self._join_flow_status(),
+                'owner_run':_demo_status(self,'owner'),'demo_target':_demo_status(self,'target'),
+                'chat':_demo_status(self,'chat'),
                 'serving':{'state':'not_yet_serving','route_ready':False,
                            'next_action':'Native route preparation and exact model execution approval required.'}}
 
@@ -750,6 +837,12 @@ class DemoApp:
             if self.installation_role == 'target' and path in {'/api/create','/api/revoke','/api/revoke-self','/api/pair/approve','/api/pair/preview',
                     '/api/pair/window/open','/api/pair/window/list','/api/pair/window/approve','/api/pair/window/revoke'}:
                 raise DemoError('owner_role_required')
+            if path == '/api/run-model':
+                return self._choose_run_model(body)
+            from .demo_app import OWNER_ROUTES as _DEMO_ROUTES
+            if path in _DEMO_ROUTES:
+                from .demo_app import action as _demo_action
+                return _demo_action(self, path, body)
             if path == '/api/local-contributor/start':
                 if body:raise DemoError('invalid_request')
                 return self._start_local_contributor()
@@ -1177,6 +1270,14 @@ class DemoApp:
                 'report':report,'route_ready':False}
 
     def close(self):
+        # Stop the one-click run first, outside the guard: its teardown drives
+        # this Mac's own contributor through app.action (which takes the guard).
+        if not self.closed.is_set():
+            try:
+                from .demo_app import close as _demo_close
+                _demo_close(self)
+            except Exception:
+                self.cleanup_error='demo_run_stop_failed'
         with self.guard:
             if self.closed.is_set(): return
             self.closed.set()
@@ -1247,12 +1348,25 @@ class _Handler(BaseHTTPRequestHandler):
         return valid
     def do_GET(self):
         if not self.base_guard(): return
-        if self.path in {'/','/app.js','/style.css'}:
-            name={'/':'index.html','/app.js':'app.js','/style.css':'style.css'}[self.path]
+        if self.path in {'/','/app.js','/style.css','/run.js'}:
+            name={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/run.js':'run.js'}[self.path]
             path=Path(__file__).parent/'web'/name
             if not path.is_file(): self.fail(503,'assets_unavailable'); return
-            kind={'/':'text/html; charset=utf-8','/app.js':'text/javascript; charset=utf-8','/style.css':'text/css; charset=utf-8'}[self.path]
+            kind={'/':'text/html; charset=utf-8','/app.js':'text/javascript; charset=utf-8','/run.js':'text/javascript; charset=utf-8','/style.css':'text/css; charset=utf-8'}[self.path]
             self.send_value(200,path.read_bytes(),content_type=kind); return
+        if self.path == '/chat' or self.path.startswith('/chat/'):
+            self.chat_route(b''); return
+        if self.path.startswith('/api/pair/window/qr/') and self.path.endswith('.svg'):
+            # Owner-only QR of an OPEN pairing window's HTTPS join page.
+            if not self.authorized(): return
+            import re as _re
+            window_id=self.path[len('/api/pair/window/qr/'):-4]
+            if self.app.installation_role!='owner' or not _re.fullmatch(r'[23456789ABCDEFGHJKMNPQRSTVWXYZ]{4}',window_id):
+                self.fail(404,'not_found'); return
+            from .join_page import owner_qr_svg
+            svg=owner_qr_svg(self.app.pairing_windows,window_id)
+            if svg is None: self.fail(410,'pairing_window_closed'); return
+            self.send_value(200,svg,content_type='image/svg+xml'); return
         if self.path == '/api/status':
             if not self.authorized(): return
             with self.app.guard:
@@ -1260,8 +1374,27 @@ class _Handler(BaseHTTPRequestHandler):
                 except Exception: self.fail(503,'status_unavailable')
             return
         self.fail(404,'not_found')
+    def chat_route(self, body):
+        # Shared chat page: no accounts and no session cookie (local UI and the
+        # same handler behind the public relay); limits live in chat.py.
+        from .chat import handle, CSP
+        try:
+            status,kind,raw=handle(self.app,self.command,self.path,
+                {k:v for k,v in self.headers.items()},body,via_relay=False)
+        except Exception:
+            self.fail(503,'chat_unavailable'); return
+        self.send_value(status,raw,content_type=kind,extra={'Content-Security-Policy':CSP})
     def do_POST(self):
         if not self.base_guard(): return
+        if self.path.startswith('/chat/'):
+            if self.headers.get('Transfer-Encoding') or len(self.headers.get_all('Content-Length',[])) != 1:
+                self.fail(400,'framing_rejected'); return
+            try:
+                length=int(self.headers['Content-Length'])
+                if not 0<=length<=MAX_BODY: raise ValueError
+                raw=self.rfile.read(length)
+            except (ValueError,TypeError,OSError): self.fail(400,'framing_rejected'); return
+            self.chat_route(raw); return
         if self.path == '/native-session':
             supplied=self.headers.get('X-Native-Authorization','')
             if not secrets.compare_digest(supplied,self.app.native_credential):

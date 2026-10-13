@@ -7,8 +7,15 @@ from mycelium_a13_macos.serving import CANDIDATE_MODEL, ServingPreparationError,
 from tests.a13_macos.test_serving import _prepared, _operator_plan, seed, private_fixture_identity
 
 
-def test_status_names_exact_selected_model(tmp_path):
-    expected=asdict(CANDIDATE_MODEL)
+def test_status_names_exact_selected_model(tmp_path,monkeypatch):
+    # Owner decision 2026-10-13 (coworking demo): with no env override and no
+    # saved picker choice the app pins the demo default -- the largest Qwen3
+    # whose whole snapshot fits the consent ceiling (run_model.py) -- instead
+    # of the Qwen2.5-7B candidate. This test pinned the old default by design.
+    from mycelium_a13_macos.run_model import choice, demo_default_choice
+    monkeypatch.delenv('MYCELIUM_A13_RUN_MODEL',raising=False)
+    expected=asdict(choice(demo_default_choice()).model)
+    assert expected['model_id']=='Qwen/Qwen3-8B'
     assert preflight()['model_contract']==expected
     app=DemoApp(tmp_path/'app').start()
     try:

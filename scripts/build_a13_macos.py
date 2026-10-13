@@ -102,6 +102,61 @@ def vendor_expat(app):
         'version':source.resolve().parents[1].name,'license':'Expat/MIT (COPYING bundled)'}
 
 
+def macho_minimum_version(path):
+    """The macOS minos of one Mach-O file (LC_BUILD_VERSION / LC_VERSION_MIN_MACOSX), or None."""
+    try:
+        with open(path,'rb') as f:magic=f.read(4)
+    except OSError:return None
+    if magic not in (b'\xcf\xfa\xed\xfe',b'\xce\xfa\xed\xfe',b'\xca\xfe\xba\xbe',b'\xbe\xba\xfe\xca'):
+        return None
+    out=subprocess.run(['/usr/bin/otool','-l',str(path)],capture_output=True,text=True).stdout
+    versions=[]
+    lines=out.splitlines()
+    for i,line in enumerate(lines):
+        text=line.strip()
+        if text=='cmd LC_BUILD_VERSION':
+            for follow in lines[i+1:i+6]:
+                if follow.strip().startswith('minos '):versions.append(follow.split()[1])
+        elif text=='cmd LC_VERSION_MIN_MACOSX':
+            for follow in lines[i+1:i+4]:
+                if follow.strip().startswith('version '):versions.append(follow.split()[1])
+    if not versions:return None
+    return max(versions,key=_version_key)
+
+
+def _version_key(text):
+    return tuple(int(p) for p in text.split('.'))
+
+
+def bundle_macho_floor(app):
+    """Highest Mach-O minos in the bundle: the oldest macOS that can load all of it."""
+    floor=None
+    for path in sorted(Path(app).rglob('*')):
+        if path.is_symlink() or not path.is_file():continue
+        version=macho_minimum_version(path)
+        if version is not None and (floor is None or _version_key(version)>_version_key(floor)):
+            floor=version
+    return floor
+
+
+def set_bundle_minimum_system_version(app,*,minimum='26.0'):
+    """Write Info.plist LSMinimumSystemVersion so Finder refuses older macOS cleanly.
+
+    Without it, a Mac below the bundled runtime's minos would crash at dyld load
+    with no message. The declared floor must cover every bundled Mach-O.
+    """
+    import plistlib
+    floor=bundle_macho_floor(app)
+    if floor is None:raise SystemExit('bundle_macho_floor_unknown')
+    declared=floor if minimum is None else minimum
+    if _version_key(declared)<_version_key(floor):raise SystemExit('bundle_floor_below_macho_minos')
+    plist=Path(app)/'Contents/Info.plist'
+    with plist.open('rb') as f:info=plistlib.load(f)
+    info['LSMinimumSystemVersion']=declared
+    with plist.open('wb') as f:plistlib.dump(info,f)
+    return declared
+
+
 def stage_compiler_sources(destination):
     """Ship source data the canonical compiler stages; never developer state."""
     import shutil
@@ -179,6 +234,7 @@ def main():
     provenance.write_text(json.dumps(runtime_wheels,indent=2)+'\n')
     (provenance.parent/'compiler-source-identity.json').write_text(
         json.dumps(build_identity(compiler_identity),sort_keys=True,indent=2)+'\n')
+    macos_floor=set_bundle_minimum_system_version(output/'Mycelium A13 Demo.app',minimum='26.0')
     expat=vendor_expat(output/'Mycelium A13 Demo.app')
     executable=output/'Mycelium A13 Demo.app/Contents/MacOS/Mycelium A13 Demo'
     preflight=subprocess.run([str(executable),'--preflight'],capture_output=True,text=True,check=True)
@@ -187,7 +243,7 @@ def main():
             'preflight':json.loads(preflight.stdout),
             'resource_probe_sha256':hashlib.sha256(probe.read_bytes()).hexdigest(),
             'sidecar_source_sha256':hashlib.sha256(sidecar.read_bytes()).hexdigest(),
-            'version':output.name,'vendored_expat':expat}
+            'version':output.name,'vendored_expat':expat,'macos_floor':macos_floor}
     (output/'artifact-identity.json').write_text(json.dumps(report,indent=2)+'\n')
     launcher=output/'Open Mycelium.command'
     launcher.write_text('#!/bin/sh\nset -eu\nHERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nexec "$HERE/Mycelium A13 Demo.app/Contents/MacOS/Mycelium A13 Demo" "$@"\n')

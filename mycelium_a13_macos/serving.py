@@ -207,13 +207,73 @@ QWEN3_0_6B_MODEL = ModelContract(
     runtime_quantization="int8-weight-only",
 )
 
-_MODEL_ARCHITECTURES = {QWEN3_0_6B_MODEL.model_id: "qwen3"}
+# Coworking-demo Qwen3 dense sizes, registered the same way as 0.6B: the exact
+# HF revision (main on 2026-10-13, read from the HF API), bf16 source, MLX,
+# float32 activations with int8 rowwise weights (the qualified Qwen mode).
+# Qwen3-8B: 36 layers, hidden 4096, 32 q x 128 / 8 KV heads, 5 bf16 shards,
+# snapshot 16,397,461,266 B.  Qwen3-14B: 40 layers, hidden 5120, 40 q x 128 /
+# 8 KV heads, 8 bf16 shards, snapshot 29,552,613,776 B.  Both have square
+# attention.  The shared RESOURCE_PROPOSAL is still the 7B derivation and is not
+# re-derived here (owned by the N-host/slice lane); the app's model picker
+# (run_model.py) only offers a size whose whole snapshot fits the consent
+# ceiling until slice fetch lands.
+QWEN3_8B_MODEL = ModelContract(
+    model_id="Qwen/Qwen3-8B",
+    resolved_commit="b968826d9c46dd6066d109eabc6255188de91218",
+    source_representation="bfloat16-safetensors",
+    runtime_backend="mlx",
+    runtime_dtype="float32",
+    runtime_quantization="int8-weight-only",
+)
+QWEN3_14B_MODEL = ModelContract(
+    model_id="Qwen/Qwen3-14B",
+    resolved_commit="40c069824f4251a91eefaf281ebe4c544efd3e18",
+    source_representation="bfloat16-safetensors",
+    runtime_backend="mlx",
+    runtime_dtype="float32",
+    runtime_quantization="int8-weight-only",
+)
+
+#: Every file of the pinned Qwen3-14B revision: (size bytes, sha256).  The
+#: safetensors digests are the HF LFS sha256 of revision 40c06982...; the small
+#: files were checked against their HF git blob ids and hashed locally.  Every
+#: entry was verified once against the local snapshot (2026-10-13, nice -n 10;
+#: .gitattributes and README.md, which the lead's download skipped, were fetched
+#: at the pinned revision).  Total 29,552,613,776 B.
+QWEN3_14B_SNAPSHOT_FILES: dict[str, tuple[int, str]] = {
+    '.gitattributes': (1570, 'sha256:34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930'),
+    'LICENSE': (11343, 'sha256:832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e'),
+    'README.md': (16670, 'sha256:7ef503e68996a4e32007fedc7d8e198846e9b1f36620d38a79b89934100b1250'),
+    'config.json': (728, 'sha256:e73c3664ca09b10a673fef0c22e8a6b456201d49bd4713c9691f775720e8857a'),
+    'generation_config.json': (239, 'sha256:2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2'),
+    'merges.txt': (1671853, 'sha256:8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5'),
+    'model-00001-of-00008.safetensors': (3841788544, 'sha256:e942bdbdf08857d16a8fef7d1dae9fceabeb4e84def6043485fe2f6f085dab0e'),
+    'model-00002-of-00008.safetensors': (3963750816, 'sha256:f7c9c6eee628f5ad831d2d1d292e120505e5fcadeb38f88b4d3c4cb86306ccf9'),
+    'model-00003-of-00008.safetensors': (3963750880, 'sha256:dfb8c5df9404b41ad6ae74e8b6b367135f017b4467b884cf71b17c71954f18a9'),
+    'model-00004-of-00008.safetensors': (3963750880, 'sha256:eab286fec759e3e59ab228621aefa0fef14ed56039e06f959e67257d5af7604d'),
+    'model-00005-of-00008.safetensors': (3963750880, 'sha256:97f0dc2992e59da95c466eff6f4fd0c8335843bbc36ed5c913a6f5150748c0e6'),
+    'model-00006-of-00008.safetensors': (3963750880, 'sha256:9e8e76a013cd5e253865b792991e0b410f869b136b3c500079b531b09198e99e'),
+    'model-00007-of-00008.safetensors': (3963750880, 'sha256:0aee70ee6e91dc00d818804fb47f124d13ee4ad5b4a64553e09dbf9391cd5750'),
+    'model-00008-of-00008.safetensors': (1912371880, 'sha256:0d6b92296e326d39bbbaeb32c3ec454ac606da843d4c8ffa8edf010b62b8c9e0'),
+    'model.safetensors.index.json': (36514, 'sha256:62d7ad35757bae5e7baa452cb1483178b7daa50e869e923226b8da10871f7ebc'),
+    'tokenizer.json': (11422654, 'sha256:aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4'),
+    'tokenizer_config.json': (9732, 'sha256:d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101'),
+    'vocab.json': (2776833, 'sha256:ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910'),
+}
+
+_MODEL_ARCHITECTURES = {
+    QWEN3_0_6B_MODEL.model_id: "qwen3",
+    QWEN3_8B_MODEL.model_id: "qwen3",
+    QWEN3_14B_MODEL.model_id: "qwen3",
+}
 
 #: Every model a run may pin.  A run selects exactly one; nothing else loads.
 REGISTERED_MODELS: tuple[ModelContract, ...] = (
     CANDIDATE_MODEL,
     A9_ROUTE_MODEL,
     QWEN3_0_6B_MODEL,
+    QWEN3_8B_MODEL,
+    QWEN3_14B_MODEL,
 )
 #: Stage runtimes a node may run for a registered model.
 STAGE_RUNTIME_BACKENDS = frozenset({"mlx", "numpy"})
@@ -224,6 +284,8 @@ _RUN_MODEL_NAMES = {
     "candidate": CANDIDATE_MODEL,
     "a9-route": A9_ROUTE_MODEL,
     "qwen3-0.6b": QWEN3_0_6B_MODEL,
+    "qwen3-8b": QWEN3_8B_MODEL,
+    "qwen3-14b": QWEN3_14B_MODEL,
 }
 
 
