@@ -67,9 +67,11 @@ def test_packaged_native_app_in_clean_working_directory(tmp_path,role):
         assert first, 'packaged_launcher_failed_before_start'
         started=json.loads(first)
         assert started['event']=='launcher_started'
-        assert started['model_contract']['model_id']=='Qwen/Qwen2.5-7B-Instruct'
-        assert started['model_contract']['model_id']==CANDIDATE_MODEL.model_id
-        assert started['model_contract']['resolved_commit']=='a09a35458c702b33eeacc393d103063234e8bc28'
+        # Demo default since the run-model picker (run_model.py): the largest
+        # Qwen3 whose snapshot fits the consent ceiling, not the 7B candidate.
+        assert started['model_contract']['model_id']=='Qwen/Qwen3-8B'
+        assert started['model_contract']['model_id']!=CANDIDATE_MODEL.model_id
+        assert started['model_contract']['resolved_commit']=='b968826d9c46dd6066d109eabc6255188de91218'
         assert started['model_contract']['runtime_quantization']=='int8-weight-only'
         assert started['model_contract']['sampling_seed']==0
         with sync_playwright() as p:
