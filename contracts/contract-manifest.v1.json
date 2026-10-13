@@ -170,8 +170,8 @@
         },
         {
           "path": "runtime_contracts.py",
-          "sha256": "0f607b781c4b45478e009298168dc4284e4a40f342784b17236f0c310572b600",
-          "size_bytes": 22788
+          "sha256": "ca80ebf6d4dbb9a518586ef32876fd58e8ad34a0ebdc86f5284c868522d6b0c5",
+          "size_bytes": 34135
         },
         {
           "path": "mycelium_gossip/evidence_bundle.py",
@@ -375,8 +375,8 @@
         },
         {
           "path": "scripts/run_a6_recovery_gate.py",
-          "sha256": "a2c04208a06aa723cdd5f1b35a0449a6115cc70996a18d927a97657beb002f57",
-          "size_bytes": 13922
+          "sha256": "ba8caee1d6cf8d180418b9d4f9d9627ac9c36bbbc9b032edae947a8b179ddfd7",
+          "size_bytes": 15855
         },
         {
           "path": "ui/web/scripts/a6-product-browser-e2e.mjs",
@@ -425,8 +425,8 @@
         },
         {
           "path": "mycelium_live/a6_recovery.py",
-          "sha256": "d537cbf24fcb1b83e5a9657104c810940f8bdb4ffd7f8e1443b5bddc8ab81c46",
-          "size_bytes": 21892
+          "sha256": "4734cf880672afd8f7f47f9261c0cc0c715604fbf4a69efae95156434c0e9c60",
+          "size_bytes": 25055
         }
       ],
       "protocol": "mycelium.full_context_recovery_qualification.v1"
@@ -675,8 +675,8 @@
         },
         {
           "path": "physical_inference_node.py",
-          "sha256": "8edcdd756a84d66f2e395431b5b02578d0941adfbfb89fc232db07db69625d9d",
-          "size_bytes": 219201
+          "sha256": "e0e94803a81428551c9a74275d82ffbb8f3eb9292c69ffb2ed7ddf781e773ea5",
+          "size_bytes": 221063
         }
       ],
       "protocol": "mycelium.interruptible_stage_command.v1"
@@ -695,13 +695,13 @@
         },
         {
           "path": "model_manifest.py",
-          "sha256": "bbda8f8d5655291cdfc0e0d3dc3bbcf4e9063d8abc5cd9d28efd51371a2dcfed",
-          "size_bytes": 11912
+          "sha256": "dcda9ad8bc5ea7a161199554ce5abfc8b17511751b980e2ea2b644505712bcd9",
+          "size_bytes": 14246
         },
         {
           "path": "model_adapters.py",
-          "sha256": "bedbcc8d0bf644085527b016437f8f685e8ce73948a53b32cb5df2775cd8fe96",
-          "size_bytes": 8202
+          "sha256": "6252e45a3fe6c6b41ecf04e12e5d2b68bd7705a4703e2ba3a4a1fd6e8185b61b",
+          "size_bytes": 12426
         },
         {
           "path": "route_contract.py",
@@ -710,8 +710,8 @@
         },
         {
           "path": "runtime_contracts.py",
-          "sha256": "0f607b781c4b45478e009298168dc4284e4a40f342784b17236f0c310572b600",
-          "size_bytes": 22788
+          "sha256": "ca80ebf6d4dbb9a518586ef32876fd58e8ad34a0ebdc86f5284c868522d6b0c5",
+          "size_bytes": 34135
         }
       ],
       "protocol": "mycelium.layer_assignment.v2"
@@ -725,13 +725,13 @@
       "owner_sources": [
         {
           "path": "runtime_loader.py",
-          "sha256": "aa7e1df1953b73828b02db0de6872fad486f029616058168de30eb11c641e371",
-          "size_bytes": 98955
+          "sha256": "98a38504765568c318a8f9a23a881c56b16f827065f766bc9c69d7cb6d735093",
+          "size_bytes": 110684
         },
         {
           "path": "runtime_contracts.py",
-          "sha256": "0f607b781c4b45478e009298168dc4284e4a40f342784b17236f0c310572b600",
-          "size_bytes": 22788
+          "sha256": "ca80ebf6d4dbb9a518586ef32876fd58e8ad34a0ebdc86f5284c868522d6b0c5",
+          "size_bytes": 34135
         },
         {
           "path": "mycelium_router/layer_builder.py",
@@ -1230,8 +1230,8 @@
         },
         {
           "path": "scripts/build_qwen_live_route.py",
-          "sha256": "c572fc9e96706036930d8ee33a78d21e8dd5172c74a8812aa44871cf6e69b72f",
-          "size_bytes": 104235
+          "sha256": "e7a4b3561f7153d560d66f0a34378e417019cef197fdb122fe0e001ee3a7340b",
+          "size_bytes": 109895
         },
         {
           "path": "ui/web/src/features/models/modelPreparation.ts",
