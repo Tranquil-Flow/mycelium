@@ -317,9 +317,10 @@ class Gate:
          self._record(self.positives, "browser_request_completed", "not_executed", reason="browser_request_command_absent")
          return
       self.operator(
-         "Route bring-up: issue the phone's Qwen2 stage assignment and bring the route up (Mac entry -> phone middle "
-         "stage -> laptop final) with the route harness, up to and including `serve`. Keep the phone cool and the "
-         "app serving. Press Enter once the harness reports the route alive."
+         "Route bring-up: enrol node-0 and node-2 as temporary members of this gate seed, issue the phone's Qwen2 "
+         "stage assignment and bring the route up (Mac entry -> phone middle stage -> laptop final) with the route "
+         "harness, up to and including `serve`. Keep the phone cool and the app serving. Press Enter once the "
+         "harness reports the route alive."
       )
       code = self.run_command(self.browser_request_command)
       self._record(self.positives, "browser_request_completed", "passed" if code == 0 else "violated", exit_code=code)
@@ -528,12 +529,14 @@ def run_gate(
       raise GateError("member_key_digest_mismatch")
    member_key_digest = recorded_key
    gate.reconnect()
-   gate.route_frames()
-   gate.browser_request()
    try:
+      gate.route_frames()
+      gate.browser_request()
       gate.heat_window()
    finally:
-      # The fleet's network is the phone's hotspot: close before airplane mode.
+      # The fleet's network is the phone's hotspot: close before airplane mode.  It
+      # also runs when the gate aborts after bring-up: the route close tears down
+      # the temporary gate memberships of the desktop placements (seed authority a).
       gate.close_route()
    gate.background()
    gate.network_loss()

@@ -646,3 +646,22 @@ def test_a_hung_operator_command_is_a_failed_command_not_a_crashed_gate(signer):
    started = time.monotonic()
    assert gate.run_command("sleep 5") == gate_module.COMMAND_TIMED_OUT
    assert time.monotonic() - started < 3
+
+
+def test_the_route_closes_when_the_gate_aborts_before_the_heat_window(tmp_path, signer):
+   # Seed authority (a): the route close also tears down node-0's and node-2's
+   # temporary gate memberships, so it must run on an aborted gate too.
+   swarm = SimulatedSwarm(signer.verification_key_digest, peer_class="android_native_qwen2_iroh")
+   commands = Commands(swarm, **{"route-peer": [0], "browser": [0], "probe": [0], "close": [0]})
+   gate = _stage_gate(swarm, commands)
+
+   def abort_at_bring_up(message: str) -> None:
+      swarm.operator(message)
+      if message.startswith("Route bring-up"):
+         raise KeyboardInterrupt
+
+   gate.operator = abort_at_bring_up
+   with pytest.raises(KeyboardInterrupt):
+      _run_stage(tmp_path, gate, _envelopes(signer, count=6, hot_at=3, refused_at=4))
+   assert commands.calls == ["route-peer", "close"]
+   assert gate.route_closed is True
