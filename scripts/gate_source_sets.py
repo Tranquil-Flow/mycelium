@@ -487,7 +487,10 @@ GATE_DEFINITIONS: tuple[GateDefinition, ...] = (
             "mycelium_node",
         ),
         trees=("scripts/a13_operator",),
-        paths=("Mycelium A13 Demo.spec", "requirements-a13-macos-runtime.txt"),
+        # The committed PyInstaller spec is inert: build_a13_macos.py writes its own
+        # spec into the work dir, and tests/a13_macos/test_build_source_truth.py
+        # fails if any script names the committed one. It is not a gate input.
+        paths=("requirements-a13-macos-runtime.txt",),
         native_units=("native/iroh_transport",),
         external=(
             "runday/a13/A13-LINUX-PACKAGING.md",
