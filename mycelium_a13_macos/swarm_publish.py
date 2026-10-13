@@ -131,6 +131,7 @@ class SwarmPublisher:
         self._policy: EntryPolicy | None = None
         self._last_offer = 0.0
         self._last_heartbeat = None
+        self._last_at = 0
         self._error: str | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -368,12 +369,30 @@ class SwarmPublisher:
         status, members, model = run_state(self.app)
         if status_override is not None:
             status, members, model = status_override, 0, None
-        at = self.now()
-        if self._last_heartbeat is not None and at <= self._last_heartbeat[1]:
-            at = self._last_heartbeat[1] + 1
-        self._client().post('/heartbeat', docs.heartbeat(self.signer, self.state['swarm_id'], status=status,
-                                                          members=members, served_model=model, at=at))
+        for attempt in (0, 1):
+            # strictly increasing ``at`` (the directory refuses a replayed/older beat);
+            # after a restart the directory may hold a beat from this same second.
+            at = max(self.now(), self._last_at + 1) + attempt
+            try:
+                self._client().post('/heartbeat', docs.heartbeat(self.signer, self.state['swarm_id'], status=status,
+                                                                  members=members, served_model=model, at=at))
+                break
+            except SwarmPublishError as error:
+                if attempt or error.code != 'swarm_directory_heartbeat_stale':
+                    raise
+        self._last_at = at
         self._last_heartbeat = (self.clock(), at, status)
+
+    def heartbeat_now(self) -> dict[str, Any]:
+        """Send a heartbeat immediately (e.g. right after the run changes state)."""
+        with self._op:
+            if self.state.get('enabled'):
+                try:
+                    self._heartbeat(force=True)
+                    self._error = None
+                except SwarmPublishError as error:
+                    self._error = error.code
+        return self.status()
 
     def start(self, interval: float = HEARTBEAT_SECONDS) -> None:
         if self._thread is not None:
