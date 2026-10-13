@@ -1,10 +1,51 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Normal unsigned Mac launcher: no source edits or network IDs required."""
+import sys
+
+#: Byte-identical copy of ``mycelium_node.process._LAUNCHER_SOURCE`` (pinned by
+#: tests/a13_macos/test_launcher_entry_is_cheap.py).  A frozen app runs
+#: ``<exe> --node-process-launcher ...`` for every node process, and its ready
+#: byte is inside the 2.0 s launch budget, so this entry must reach the
+#: trampoline before importing the app (or even the node package): only ``sys``
+#: is imported above this line.
+_NODE_PROCESS_LAUNCHER_SOURCE = """import os
+import sys
+
+ready = int(sys.argv[1])
+release = int(sys.argv[2])
+exec_status = int(sys.argv[3])
+target = sys.argv[4:]
+try:
+    os.set_inheritable(exec_status, False)
+    os.write(ready, b"R")
+    os.close(ready)
+    if os.read(release, 1) != b"G":
+        os._exit(125)
+    os.close(release)
+    os.execv(target[0], target)
+except BaseException:
+    try:
+        os.write(exec_status, b"E")
+    except BaseException:
+        pass
+    os._exit(126)
+"""
+
+
+def _run_node_process_launcher(argv):
+    """Fixed packaged trampoline, never caller-supplied Python source."""
+    sys.argv=list(argv[1:])
+    exec(compile(_NODE_PROCESS_LAUNCHER_SOURCE, '<node-process-launcher>', 'exec'), {'__name__':'__main__'})
+    return 126
+
+
+if __name__=='__main__' and sys.argv[1:2]==['--node-process-launcher']:
+    raise SystemExit(_run_node_process_launcher(sys.argv))
+
 import argparse
 import json
 from pathlib import Path
 import signal
-import sys
 import threading
 import webbrowser
 from mycelium_a13_macos.app import DemoApp, DemoError, bounded_failure_locus, preflight, reopen_native, model_contract, public_failure_code
@@ -79,11 +120,8 @@ def main():
             return 2
         return installer_main(sys.argv[1:])
     if sys.argv[1:2]==['--node-process-launcher']:
-        # Fixed packaged trampoline, never caller-supplied Python source.
-        from mycelium_node.process import _LAUNCHER_SOURCE
-        sys.argv=sys.argv[1:]
-        exec(compile(_LAUNCHER_SOURCE, '<node-process-launcher>', 'exec'), {'__name__':'__main__'})
-        return 126
+        # Normally dispatched at import time above; kept for in-process callers.
+        return _run_node_process_launcher(sys.argv)
     if sys.argv[1:2]==['--compile-route']:
         del sys.argv[1]
         from scripts.build_qwen_live_route import main as compile_main
