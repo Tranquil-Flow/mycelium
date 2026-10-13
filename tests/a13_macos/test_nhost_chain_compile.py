@@ -150,6 +150,8 @@ def test_slice_mode_compiles_digest_pinned_member_slices(tmp_path, monkeypatch):
     from scripts import build_qwen_live_route as builder
     from mycelium_qualification.safetensors_sharding import shard_qwen2_checkpoint
     app, captured, nodes, snapshot = _app(tmp_path, monkeypatch, (16, 32, 48), model_type="qwen3")
+    # The tiny fixture stands in for a slice-sized model (> 4 GB source).
+    monkeypatch.setattr(serving, "SLICE_FETCH_MIN_SOURCE_BYTES", 0)
     app._chain_slice_fetch = True
 
     def fake_build(args):

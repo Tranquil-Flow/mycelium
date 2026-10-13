@@ -22,7 +22,8 @@ class Coordinator:
 
 
 class FakeApp:
-    def __init__(self, tmp_path, *, remote=True, prepared=True):
+    def __init__(self, tmp_path, *, remote=True, prepared=True, source_bytes=16_380_000_000):
+        self.source_bytes = source_bytes
         self.root = tmp_path
         self.installation_role = 'owner'; self.running = True
         self.guard = threading.RLock()
@@ -30,7 +31,9 @@ class FakeApp:
         self.authority = SimpleNamespace(status=lambda: {'swarm_created': True},
             member=SimpleNamespace(node_id=OWN), coordinator=Coordinator(nodes),
             control_mailbox=SimpleNamespace(request_stage_cleanup=lambda offer: None))
-        source = SimpleNamespace(model=QWEN3_0_6B_MODEL, source_bytes=1_519_209_243,
+        # source_bytes stands in for a slice-sized Qwen3 (8B bf16 source); the
+        # 0.6B itself goes whole (test_small_model_goes_whole_to_each_mac).
+        source = SimpleNamespace(model=QWEN3_0_6B_MODEL, source_bytes=self.source_bytes,
                                  manifest_digest='sha256:' + '1' * 64, source_root=tmp_path)
         self.acquisition = SimpleNamespace(status=lambda: {'state': 'prepared' if prepared else 'not_started'},
                                            prepared_source=lambda: source)
@@ -158,7 +161,7 @@ def test_start_walks_the_real_chain_to_serving_then_stop_tears_down(tmp_path):
     assert [c[0] for c in ops.calls] == ['prepare', 'compile', 'serve', 'activate']
     assert ops.calls[0][1] == [LOCAL, REMOTE]
     compiled = ops.calls[1]
-    assert compiled[2] is True  # Qwen3-0.6B is a slice-fetch model
+    assert compiled[2] is True  # slice-sized source: each Mac fetches only its slice
     assert compiled[1][LOCAL]['memory_bytes'] == 48 << 30 and compiled[1][REMOTE]['memory_bytes'] == 16 << 30
     assert {p['node_id']: p['layers'] for p in status['participants']} == {LOCAL: [0, 14], REMOTE: [14, 28]}
     run.status()  # a status poll keeps this Mac's agent reporting while serving
@@ -266,3 +269,11 @@ def test_capability_records_glue_join_reports_and_local_observation(tmp_path):
 def test_work_limits_derive_from_the_proposal_and_policy(tmp_path):
     app = FakeApp(tmp_path)
     assert work_limits(app, PROPOSAL)['max_rss_bytes'] == 8000
+
+
+def test_small_model_goes_whole_to_each_mac(tmp_path):
+    # Qwen3-0.6B (~1.5 GB bf16 source) is below the slice window: whole snapshot.
+    app = FakeApp(tmp_path, source_bytes=1_519_209_243)
+    from mycelium_a13_macos.serving import slice_fetch_permitted
+    assert not slice_fetch_permitted(app.acquisition.prepared_source().source_bytes,
+                                     architecture=app.acquisition.prepared_source().model.architecture)

@@ -38,14 +38,19 @@ class ResourceProposal:
 #: Owner decision D-1 as RELAXED on 2026-10-13 for the coworking demo.
 D1_MODEL_BYTES_RULE = (
     "D-1 (relaxed 2026-10-13): for a Qwen3 demo model whose pinned bf16 source "
-    "weights total at most SLICE_FETCH_MAX_SOURCE_BYTES, each member Mac fetches "
+    "weights total more than SLICE_FETCH_MIN_SOURCE_BYTES and at most "
+    "SLICE_FETCH_MAX_SOURCE_BYTES, each member Mac fetches "
     "ONLY its assigned layer slice of the pinned revision (ranged HTTPS), every "
     "byte verified against the owner-compiled slice plan digests; never the whole "
-    "model. Other models (the Qwen2.5 7B candidate) keep the original D-1 rule: "
+    "model. A smaller Qwen3 model goes as a whole snapshot to each Mac, verified "
+    "against its pinned digests (slicing it saves almost nothing). Other models "
+    "(the Qwen2.5 7B candidate) keep the original D-1 rule: "
     "weight bytes are pre-staged and never fetched by the app."
 )
-#: Slice-fetch ceiling on the bf16 SOURCE bytes: covers Qwen3 0.6B..14B
-#: (Qwen3-14B ~29.5 GB bf16 source, ~14.8 GB int8 at runtime); 32B does not fit.
+#: Slice-fetch window on the bf16 SOURCE bytes: Qwen3 8B..14B slice (Qwen3-14B
+#: ~29.5 GB bf16 source, ~14.8 GB int8 at runtime); 32B does not fit; 0.6B
+#: (~1.5 GB) goes whole.
+SLICE_FETCH_MIN_SOURCE_BYTES = 4_000_000_000
 SLICE_FETCH_MAX_SOURCE_BYTES = 32_000_000_000
 SLICE_FETCH_ARCHITECTURES = frozenset({"qwen3"})
 
@@ -56,7 +61,7 @@ def slice_fetch_permitted(source_weight_bytes: object, *, architecture: object) 
     return (
         architecture in SLICE_FETCH_ARCHITECTURES
         and type(source_weight_bytes) is int
-        and 0 < source_weight_bytes <= SLICE_FETCH_MAX_SOURCE_BYTES
+        and SLICE_FETCH_MIN_SOURCE_BYTES < source_weight_bytes <= SLICE_FETCH_MAX_SOURCE_BYTES
     )
 
 

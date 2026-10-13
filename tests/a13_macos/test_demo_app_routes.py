@@ -26,7 +26,8 @@ def owner(tmp_path, monkeypatch):
 def prepared(app):
     source = app.acquisition.state_root / 'fixture-snapshot'
     source.mkdir()
-    value = SimpleNamespace(model=QWEN3_0_6B_MODEL, source_bytes=1_519_209_243, source_root=source,
+    # source_bytes stands in for a slice-sized Qwen3 (8B bf16 source).
+    value = SimpleNamespace(model=QWEN3_0_6B_MODEL, source_bytes=16_380_000_000, source_root=source,
                             manifest_digest='sha256:' + '1' * 64, manifest={'files': []})
     app.acquisition.status = lambda: {'state': 'prepared'}
     app.acquisition.prepared_source = lambda: value
