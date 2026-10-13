@@ -12,6 +12,8 @@ async function call(path, body) {
 }
 const MESSAGES = {
   chat_not_ready:'The swarm is not serving right now. The host starts it from the Mycelium app.',
+  chat_warming_up:'Warming up: the swarm is qualifying its route. Chat opens when it is ready.',
+  chat_route_not_qualified:'The route is not qualified yet (warming up). Try again in a moment.',
   chat_busy:'Someone else\'s prompt is running. Try again in a few seconds.',
   chat_rate_limited:'You sent several prompts this minute. Wait a little.',
   chat_swarm_rate_limited:'The room sent many prompts this minute. Wait a little.',
@@ -24,7 +26,8 @@ function servedText(list) {
 async function refresh() {
   try {
     state = await call('/chat/api/state');
-    $('state').textContent = state.available ? `Serving ${state.model_id || ''}${state.busy ? ' · busy' : ' · ready'}` : MESSAGES.chat_not_ready;
+    $('state').textContent = state.available ? `Serving ${state.model_id || ''}${state.busy ? ' · busy' : ' · ready'}`
+      : state.warming_up ? MESSAGES.chat_warming_up : MESSAGES.chat_not_ready;
     $('served').textContent = servedText(state.served_by);
   } catch (error) { $('state').textContent = 'Cannot reach the host right now.'; state = null; }
   $('send').disabled = sending || !state || !state.available;

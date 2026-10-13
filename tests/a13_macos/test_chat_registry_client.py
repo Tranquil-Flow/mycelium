@@ -22,6 +22,7 @@ BINDING = {'deployment_id': 'dep-1', 'model_id': 'Qwen/Qwen3-0.6B'}
 
 class Gateway(BaseHTTPRequestHandler):
     refuse_post: tuple[int, str] | None = None
+    qualification: tuple[int, dict] = (200, {'route_ready': True, 'binding': BINDING})
     seen: list = []
 
     def log_message(self, *args):
@@ -45,7 +46,7 @@ class Gateway(BaseHTTPRequestHandler):
         if 'mycelium_session=s1' not in (self.headers.get('Cookie') or ''):
             return self._json(401, {'error': {'code': 'session_required'}})
         if self.path == '/api/v1/qualification/current':
-            return self._json(200, {'route_ready': True, 'binding': BINDING})
+            return self._json(*self.qualification)
         if self.path == '/api/v1/inference/r1/events':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
@@ -74,6 +75,7 @@ class Gateway(BaseHTTPRequestHandler):
 @pytest.fixture
 def gateway():
     Gateway.refuse_post = None
+    Gateway.qualification = (200, {'route_ready': True, 'binding': BINDING})
     Gateway.seen = []
     server = ThreadingHTTPServer(('127.0.0.1', 0), Gateway)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -112,3 +114,18 @@ def test_failure_code_is_bounded_and_never_bare_for_unexpected_errors():
     assert failure_code(KeyError('event_path')) == 'chat_generation_failed_keyerror'
     code = failure_code(RuntimeError('boom'))
     assert len(code) <= 96 and code.replace('_', '').isalnum()
+
+
+@pytest.mark.parametrize('qualification', [
+    # Two-Mac runs 13/14: the registry served its API with no qualified route;
+    # chat recorded chat_http_get_qualification_503 for minutes.
+    (503, {'error': {'code': 'qualification_unavailable'}}),
+    (200, {'route_ready': False, 'binding': BINDING}),
+])
+def test_an_unqualified_route_is_named_not_qualified_not_an_error(gateway, qualification):
+    Gateway.qualification = qualification
+    origin = 'http://127.0.0.1:%d' % gateway.server_address[1]
+    with pytest.raises(ChatError) as caught:
+        RegistryClient(origin, timeout=5).stream('hi', 16, lambda _t: None)
+    assert (caught.value.status, caught.value.code) == (503, 'chat_route_not_qualified')
+    assert not [s for s in Gateway.seen if s[0] == 'POST']

@@ -37,6 +37,8 @@ PER_CLIENT_PER_MINUTE = 4
 GLOBAL_PER_MINUTE = 30
 MAX_KEPT_REQUESTS = 64
 _ID = re.compile(r'[A-Za-z0-9_-]{16,64}\Z')
+# Owner-run steps during which the route is being activated/qualified.
+_WARMING_STEPS = frozenset({'activate', 'serving'})
 _ASSETS = {'/chat': ('chat.html', 'text/html; charset=utf-8'),
            '/chat/chat.js': ('chat.js', 'text/javascript; charset=utf-8'),
            '/chat/chat.css': ('chat.css', 'text/css; charset=utf-8')}
@@ -88,9 +90,16 @@ class RegistryClient:
         # (mycelium_a7_physical_measurement.py): request_gateway v2, interactive.
         session = self._json('/api/v1/bootstrap')['session']
         self._csrf = {session['csrf_header']: session['csrf_token']}
-        qualification = self._json('/api/v1/qualification/current')
+        # 503 is the registry's answer while no route is qualified (runs 13/14
+        # surfaced it as chat_http_get_qualification_503): name the state.
+        try:
+            qualification = self._json('/api/v1/qualification/current')
+        except ChatError as error:
+            if error.code.startswith('chat_http_get_qualification_503'):
+                raise ChatError(503, 'chat_route_not_qualified') from None
+            raise
         if qualification.get('route_ready') is not True:
-            raise ChatError(503, 'chat_route_not_ready')
+            raise ChatError(503, 'chat_route_not_qualified')
         accepted = self._json('/api/v1/inference', {
             'protocol': 'mycelium.request_gateway.v2', 'prompt': prompt,
             'max_new_tokens': max_new_tokens, 'qualification': qualification['binding'],
@@ -168,6 +177,12 @@ class ChatService:
     def available(self) -> bool:
         return self._serving() is not None
 
+    def _warming_up(self) -> bool:
+        """The owner run is activating or qualifying its route (not failed)."""
+        run = getattr(self.app, 'owner_run', None)
+        status = None if run is None else run.status()
+        return bool(status) and status.get('state') == 'running' and status.get('step') in _WARMING_STEPS
+
     def _rate(self, key: str) -> None:
         now = self._clock()
         bucket = self._per_client.setdefault(key, deque())
@@ -197,7 +212,7 @@ class ChatService:
         max_new_tokens = min(wanted, MAX_NEW_TOKENS_CAP)
         serving = self._serving()
         if serving is None:
-            raise ChatError(503, 'chat_not_ready')
+            raise ChatError(503, 'chat_warming_up' if self._warming_up() else 'chat_not_ready')
         with self._lock:
             if self._busy is not None:
                 raise ChatError(429, 'chat_busy')
@@ -259,6 +274,7 @@ class ChatService:
     def state(self) -> dict[str, Any]:
         serving = self._serving()
         return {'available': serving is not None, 'busy': self._busy is not None,
+                'warming_up': serving is None and self._warming_up(),
                 'model_id': None if serving is None else _model_id(self.app),
                 'served_by': [] if serving is None else [
                     {'label': p.get('label'), 'node': (p.get('node_id') or '')[:12], 'layers': p.get('layers')}

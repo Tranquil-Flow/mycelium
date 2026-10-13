@@ -12,18 +12,19 @@ from mycelium_a13_macos.chat import (MAX_NEW_TOKENS_CAP, PER_CLIENT_PER_MINUTE, 
 
 
 class Run:
-    def __init__(self, state='serving'):
+    def __init__(self, state='serving', step=None):
         self.state = state
+        self.step = step
     def status(self):
-        return {'state': self.state, 'registry_origin': 'http://127.0.0.1:55555', 'run_id': 'r1',
+        return {'state': self.state, 'step': self.step, 'registry_origin': 'http://127.0.0.1:55555', 'run_id': 'r1',
                 'participants': [{'node_id': 'a' * 20, 'label': 'This Mac (owner)', 'layers': [0, 20]},
                                  {'node_id': 'b' * 20, 'label': 'Joined Mac', 'layers': [20, 40]}]}
 
 
 class FakeApp:
     installation_role = 'owner'
-    def __init__(self, state='serving'):
-        self.owner_run = Run(state)
+    def __init__(self, state='serving', step=None):
+        self.owner_run = Run(state, step)
         self.chat = None
         self.server = None
     def run_model_contract(self):
@@ -131,6 +132,23 @@ def test_not_serving_refuses_with_not_ready():
     with pytest.raises(ChatError, match='chat_not_ready'):
         s.send('local', {'prompt': 'hi'})
     assert s.state()['available'] is False
+
+
+@pytest.mark.parametrize('step', ['activate', 'serving'])
+def test_route_still_qualifying_is_warming_up_not_an_error(step):
+    s = ChatService(FakeApp(state='running', step=step), client_factory=Client)
+    with pytest.raises(ChatError) as caught:
+        s.send('local', {'prompt': 'hi'})
+    assert (caught.value.status, caught.value.code) == (503, 'chat_warming_up')
+    state = s.state()
+    assert state['available'] is False and state['warming_up'] is True
+
+
+def test_a_failed_run_is_not_warming_up():
+    s = ChatService(FakeApp(state='failed', step='serving'), client_factory=Client)
+    with pytest.raises(ChatError, match='chat_not_ready'):
+        s.send('local', {'prompt': 'hi'})
+    assert s.state()['warming_up'] is False
 
 
 def test_generation_failure_is_a_closed_code(svc):
