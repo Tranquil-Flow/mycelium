@@ -32,10 +32,12 @@ import runtime_loader
 from mycelium_qualification.physical_deployment import (
     LocalModelSource,
     build_execution_graph,
+    prepare_assignment_artifacts,
     prepare_physical_deployment,
 )
 from mycelium_router.layer_builder import layer_load_proof_digest
 from runtime_loader import canonical_json, load_assignment_stage
+from tests.model import qwen35_moe_tiny as moe_tiny
 from tests.model.test_qwen3_dense_mlx_path import COMMIT, MODEL_ID, _snapshot
 
 
@@ -143,6 +145,79 @@ def test_member_probe_computing_a_different_function_still_mismatches(
     monkeypatch.setattr(runtime_loader, "_run_qwen2_probe", wrong_function_probe)
     for index, (assignment, report) in enumerate(
         zip(deployment.assignments, deployment.artifact_reports, strict=True)
+    ):
+        member = load_assignment_stage(assignment, report, load_generation=17)
+        assert _member_digest(member) != graph.stages[index].placements[0].load_proof_digest
+
+
+def _compiled_moe(tmp_path: Path, quantization: str):
+    """Owner side for a Qwen3.5 MoE (``qwen3_5_moe``) two-stage route."""
+
+    source = tmp_path / "moe-source"
+    moe_tiny.write_checkpoint(source)
+    prepared = prepare_assignment_artifacts(
+        tmp_path / f"moe-deployment-{quantization}",
+        node_ids=("node-000", "node-001"),
+        model_source=LocalModelSource(
+            root=source, model_id="synthetic/Qwen3.5-MoE-tiny", resolved_commit="f" * 40
+        ),
+        runtime_dtype="float32",
+        runtime_quantization=quantization,
+        layer_ranges=(range(0, 2), range(2, 4)),
+    )
+    proofs = [
+        load_assignment_stage(assignment, report, load_generation=17).proof
+        for assignment, report in zip(prepared.assignments, prepared.reports, strict=True)
+    ]
+    graph = build_execution_graph(
+        prepared.assignments, proofs, link_scheme="iroh", runtime_scheme="iroh"
+    )
+    return prepared, proofs, graph
+
+
+@pytest.mark.parametrize("quantization", ["none", "int8-weight-only"])
+def test_moe_member_on_another_gpu_class_reproduces_the_placement_load_proof(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, quantization: str
+) -> None:
+    prepared, proofs, graph = _compiled_moe(tmp_path, quantization)
+    assert prepared.assignments[0]["runtime"]["architecture"] == "qwen3_5_moe"
+    real_probe = runtime_loader._run_qwen35_probe
+    raw_digests: list[tuple[str, str]] = []
+
+    def other_gpu_probe(*args, **kwargs):
+        output = real_probe(*args, **kwargs)
+        moved = _one_ulp_up(output)
+        raw_digests.append(
+            (runtime_loader._digest_array(output), runtime_loader._digest_array(moved))
+        )
+        return moved
+
+    monkeypatch.setattr(runtime_loader, "_run_qwen35_probe", other_gpu_probe)
+    for index, (assignment, report) in enumerate(
+        zip(prepared.assignments, prepared.reports, strict=True)
+    ):
+        member = load_assignment_stage(assignment, report, load_generation=17)
+        placement = graph.stages[index].placements[0]
+        assert member.proof["loaded_tensor_digest"] == proofs[index]["loaded_tensor_digest"]
+        assert _member_digest(member) == placement.load_proof_digest
+    assert raw_digests and all(before != after for before, after in raw_digests)
+
+
+def test_moe_member_probe_computing_a_different_function_still_mismatches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared, _proofs, graph = _compiled_moe(tmp_path, "int8-weight-only")
+    real_probe = runtime_loader._run_qwen35_probe
+
+    def wrong_function_probe(*args, **kwargs):
+        values = np.array(real_probe(*args, **kwargs), dtype=np.float32)
+        lowest = np.argsort(values, axis=-1, kind="stable")[..., :1]
+        np.put_along_axis(values, lowest, np.float32(1e6), axis=-1)
+        return mx.array(values)
+
+    monkeypatch.setattr(runtime_loader, "_run_qwen35_probe", wrong_function_probe)
+    for index, (assignment, report) in enumerate(
+        zip(prepared.assignments, prepared.reports, strict=True)
     ):
         member = load_assignment_stage(assignment, report, load_generation=17)
         assert _member_digest(member) != graph.stages[index].placements[0].load_proof_digest
