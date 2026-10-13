@@ -64,6 +64,13 @@ from runtime_loader import (
 )
 from weight_quantization import Int8RowwiseWeight
 
+import qwen35_mlx
+
+#: Qwen3.5 hybrid stages hold a Gated DeltaNet recurrent state per linear layer.
+#: It is a running summary that cannot be sliced back to an earlier position, so
+#: every KV rewind, positional slice or padded batch over it is refused.
+HYBRID_STATE_ARCHITECTURES = frozenset({"qwen3_5"})
+
 
 _SHA256_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _DTYPE_BYTES = {"float16": 2, "bfloat16": 2, "float32": 4}
@@ -879,7 +886,7 @@ class MLXRuntimePort:
       self._execution_tensors: dict[int, Mapping[str, Any]] = {}
       int8_modes: set[str] = set()
       for _stage, _placement, loaded, _runtime in bound.values():
-         if self._architecture in {"qwen2", "qwen3"}:
+         if self._architecture in {"qwen2", "qwen3", "qwen3_5"}:
             execution, mode = _persistent_int8_tensors(loaded.tensors)
          else:
             execution, mode = loaded.tensors, INT8_EXECUTION_NONE
@@ -1463,6 +1470,11 @@ class MLXRuntimePort:
 
       from mycelium_router.kv_checkpoint import export_port_kv_checkpoint
 
+      if self._architecture in HYBRID_STATE_ARCHITECTURES:
+         # The checkpoint format carries position-sliced [1, heads, T, dim] KV
+         # only; a typed linear-state checkpoint does not exist yet, so the
+         # cutover must fall back to successor prefill.
+         _reject("kv_checkpoint_hybrid_state_unsupported")
       state = self._kv_states.get(path_id)
       if state is not None and state.speculative_window is not None:
          # A11 tentative KV past the committed watermark is never exported.
@@ -1495,6 +1507,8 @@ class MLXRuntimePort:
 
       from mycelium_router.kv_checkpoint import import_port_kv_checkpoint
 
+      if self._architecture in HYBRID_STATE_ARCHITECTURES:
+         _reject("kv_checkpoint_hybrid_state_unsupported")
       return import_port_kv_checkpoint(
          self,
          payload,
@@ -1523,8 +1537,16 @@ class MLXRuntimePort:
    ) -> dict[str, Any]:
       """Move this stage's KV to a fenced successor path (A7 cutover)."""
 
-      from mycelium_router.kv_checkpoint import rekey_port_kv_path
+      from mycelium_router.kv_checkpoint import KVCheckpointError, rekey_port_kv_path
 
+      if (
+         self._architecture in HYBRID_STATE_ARCHITECTURES
+         and truncate_to_position is not None
+      ):
+         with self._state_lock:
+            state = self._kv_states.get(old_path_id)
+            if state is not None and state.next_position != truncate_to_position:
+               raise KVCheckpointError("hybrid_state_rewind_unsupported")
       return rekey_port_kv_path(
          self,
          old_path_id,
@@ -1851,6 +1873,20 @@ class MLXRuntimePort:
       tensors = self._tensors_for(loaded)
       start = stage.layer_range.start_layer
       end = stage.layer_range.end_layer_exclusive
+      if runtime["architecture"] == "qwen3_5":
+         return self._execute_qwen35_stage(
+            stage=stage,
+            loaded=loaded,
+            config=config,
+            tensors=tensors,
+            token_ids=token_ids,
+            hidden_states=hidden_states,
+            position=position,
+            past_layers=past_layers,
+            path_id=path_id,
+            produce_logits=produce_logits,
+            all_positions=all_positions,
+         )
       if runtime["architecture"] in {"qwen2", "qwen3"}:
          if "input_embedding" in stage.component_roles:
             if token_ids is None or hidden_states is not None:
@@ -2018,6 +2054,98 @@ class MLXRuntimePort:
          _reject("nonfinite_stage_output")
       return hidden, next_layers
 
+   def _execute_qwen35_stage(
+      self,
+      *,
+      stage: Stage,
+      loaded: LoadedStage,
+      config: Mapping[str, Any],
+      tensors: Mapping[str, Any],
+      token_ids: mx.array | None,
+      hidden_states: mx.array | None,
+      position: int | tuple[int, ...],
+      past_layers: Mapping[int, Any],
+      path_id: str,
+      produce_logits: bool,
+      all_positions: bool,
+   ) -> tuple[mx.array, dict[int, Any]]:
+      """Qwen3.5 hybrid stage: per-layer KV (full) or conv+recurrent (linear) state."""
+
+      if not isinstance(position, int) or isinstance(position, bool):
+         # Ragged decode groups stack state along the batch axis; never for hybrid.
+         _reject("hybrid_recurrent_state_batching_unsupported")
+      if "input_embedding" in stage.component_roles:
+         if token_ids is None or hidden_states is not None:
+            _reject("entry_stage_requires_token_ids")
+         hidden = _qwen2_embedding(tensors[qwen35_mlx.EMBED_KEY], token_ids)
+      else:
+         if hidden_states is None or token_ids is not None:
+            _reject("non_entry_stage_requires_hidden_states")
+         hidden = hidden_states
+      next_layers: dict[int, Any] = {}
+      start = stage.layer_range.start_layer
+      end = stage.layer_range.end_layer_exclusive
+      for layer in range(start, end):
+         self._checkpoint_path(path_id)
+         work_unit_started = time.monotonic()
+         try:
+            hidden, layer_state = qwen35_mlx.decoder_layer(
+               hidden,
+               tensors,
+               layer,
+               config,
+               position,
+               past_layers.get(layer),
+               _qwen2_linear,
+            )
+         except qwen35_mlx.Qwen35ExecutionError as exc:
+            raise MLXRuntimeError(str(exc)) from exc
+         next_layers[layer] = layer_state
+         mx.eval(hidden, *layer_state)
+         self._observe_cooperative_work_unit(work_unit_started)
+         self._checkpoint_path(path_id)
+      if (
+         produce_logits
+         and not all_positions
+         and "lm_head" in stage.component_roles
+         and int(hidden.shape[1]) > 1
+      ):
+         hidden = hidden[:, -1:, :]
+      if produce_logits and "final_norm" in stage.component_roles:
+         self._checkpoint_path(path_id)
+         work_unit_started = time.monotonic()
+         hidden = qwen35_mlx.rms_norm_offset(
+            hidden,
+            tensors[qwen35_mlx.FINAL_NORM_KEY],
+            float(config["rms_norm_epsilon"]),
+         )
+         mx.eval(hidden)
+         self._observe_cooperative_work_unit(work_unit_started)
+      if produce_logits and "lm_head" in stage.component_roles:
+         self._checkpoint_path(path_id)
+         work_unit_started = time.monotonic()
+         aliases = loaded.resolved_aliases
+         if not isinstance(aliases, Mapping):
+            _reject("invalid_loaded_stage_aliases")
+         alias = aliases.get("lm_head", {})
+         if not isinstance(alias, Mapping):
+            _reject("invalid_loaded_stage_aliases")
+         head_keys = alias.get("tensor_keys", ["lm_head.weight"])
+         if (
+            not isinstance(head_keys, (list, tuple))
+            or len(head_keys) != 1
+            or not isinstance(head_keys[0], str)
+         ):
+            _reject("invalid_loaded_stage_aliases")
+         hidden = _qwen2_linear(hidden, tensors[head_keys[0]])
+         mx.eval(hidden)
+         self._observe_cooperative_work_unit(work_unit_started)
+         self._checkpoint_path(path_id)
+      mx.eval(hidden, *(array for pair in next_layers.values() for array in pair))
+      if not bool(mx.all(mx.isfinite(hidden)).item()):
+         _reject("nonfinite_stage_output")
+      return hidden, next_layers
+
    def _tensors_for(self, loaded: LoadedStage) -> Mapping[str, Any]:
       """The execution tensors of a bound stage (packed int8 when available)."""
 
@@ -2124,7 +2252,7 @@ class MLXRuntimePort:
             _reject("decode_sequence_mismatch")
 
       try:
-         if runtime["architecture"] in {"qwen2", "qwen3"}:
+         if runtime["architecture"] in {"qwen2", "qwen3", "qwen3_5"}:
             # Replay from position zero through the checkpointed executor.
             # The temporary KV is intentionally discarded: complete-context
             # mode recomputes on every decode, but it must remain cooperatively
@@ -2181,6 +2309,10 @@ class MLXRuntimePort:
          _reject("unsupported_runtime_phase")
       if item.phase == "VERIFY" and item.terminal:
          _reject("verify_is_never_terminal")
+      if item.phase == "VERIFY" and self._architecture in HYBRID_STATE_ARCHITECTURES:
+         # A11 verification may rewind state inside its window; a recurrent
+         # state cannot be rewound.
+         _reject("hybrid_state_rewind_unsupported")
       if not isinstance(item.payload, bytes):
          _reject("runtime_payload_must_be_bytes")
       if not isinstance(item.idempotency_key, str) or not item.idempotency_key:
@@ -2627,6 +2759,8 @@ class MLXRuntimePort:
       split.
       """
 
+      if self._architecture in HYBRID_STATE_ARCHITECTURES:
+         return "hybrid_recurrent_state_batching_unsupported"
       if len(members) < MINIMUM_PHYSICAL_BATCH_MEMBERS:
          return "single_member_group"
       first = members[0]

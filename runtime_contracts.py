@@ -51,6 +51,20 @@ QWEN2_MODEL_CONFIG_FIELDS = frozenset(
     }
 )
 QWEN3_MODEL_CONFIG_FIELDS = QWEN2_MODEL_CONFIG_FIELDS
+QWEN35_MODEL_CONFIG_FIELDS = frozenset(
+    {
+        *QWEN2_MODEL_CONFIG_FIELDS,
+        "layer_types",
+        "rotary_dim",
+        "attn_output_gate",
+        "linear_conv_kernel_dim",
+        "linear_num_key_heads",
+        "linear_key_head_dim",
+        "linear_num_value_heads",
+        "linear_value_head_dim",
+    }
+)
+QWEN35_LAYER_TYPES = frozenset({"linear_attention", "full_attention"})
 _SUPPORTED_MLX_DTYPES = frozenset({"float16", "bfloat16", "float32"})
 SUPPORTED_NUMPY_DTYPES = frozenset({"float32"})
 _RUNTIME_IDENTITY_FIELDS = frozenset(
@@ -251,6 +265,131 @@ def normalize_qwen3_model_config(
     return normalized
 
 
+def normalize_qwen35_model_config(
+    config: Mapping[str, Any], *, expected_layers: int
+) -> dict[str, Any]:
+    """Extract the exact Qwen3.5 hybrid text decoder executable by Mycelium.
+
+    Accepts the Hugging Face ``Qwen3_5ForConditionalGeneration`` config (text
+    fields under ``text_config``), a bare text config, or an already
+    normalized document.  Only the text decoder is admitted: vision inputs
+    (multimodal positions) and the MTP head are out of scope.
+    """
+
+    if not isinstance(config, Mapping):
+        raise ValueError("runtime model_config source must be an object")
+    text = config.get("text_config", config)
+    if not isinstance(text, Mapping):
+        raise ValueError("runtime qwen3_5 text_config must be an object")
+    for field in ("num_experts", "num_experts_per_tok"):
+        experts = text.get(field, 0)
+        if experts not in (0, None):
+            raise ValueError("runtime qwen3_5 dense contract refuses moe fields")
+    decoder_source = dict(text)
+    if "tie_word_embeddings" not in decoder_source and "tie_word_embeddings" in config:
+        # Published 27B/35B text_configs carry the flag only at the top level.
+        decoder_source["tie_word_embeddings"] = config["tie_word_embeddings"]
+    if "rotary_dim" not in text:
+        rope = text.get("rope_parameters")
+        if isinstance(rope, Mapping) and "rope_theta" not in decoder_source:
+            decoder_source["rope_theta"] = rope.get("rope_theta")
+    normalized = _normalize_qwen_decoder_config(
+        decoder_source, expected_layers=expected_layers, wide_attention=True
+    )
+    if text.get("attention_bias", False) is not False:
+        raise ValueError("runtime qwen3_5 attention_bias must be false")
+    attention_dropout = text.get("attention_dropout", 0.0)
+    if attention_dropout != 0 and attention_dropout != 0.0:
+        raise ValueError("runtime qwen3_5 attention_dropout must be zero")
+    if text.get("attn_output_gate", True) is not True:
+        raise ValueError("runtime qwen3_5 attn_output_gate must be true")
+    if text.get("mlp_only_layers", []) not in ([], ()):
+        raise ValueError("runtime qwen3_5 mlp_only_layers must be empty")
+    if text.get("mamba_ssm_dtype", "float32") != "float32":
+        raise ValueError("runtime qwen3_5 linear state must be float32")
+    head_dim = normalized["head_dim"]
+    if "rotary_dim" in text:
+        rotary_dim = _positive_int(text.get("rotary_dim"), "rotary_dim")
+        rope_theta = normalized["rope_theta"]
+    else:
+        rope = text.get("rope_parameters")
+        if not isinstance(rope, Mapping):
+            raise ValueError("runtime qwen3_5 rope_parameters must be an object")
+        if rope.get("rope_type", rope.get("type")) != "default":
+            raise ValueError("runtime qwen3_5 rope_type must be default (no rope scaling)")
+        factor = rope.get("partial_rotary_factor")
+        if (
+            not isinstance(factor, (int, float))
+            or isinstance(factor, bool)
+            or not 0 < float(factor) <= 1
+        ):
+            raise ValueError("runtime qwen3_5 partial_rotary_factor is invalid")
+        rotary_dim = int(head_dim * float(factor))
+        if rotary_dim * 1.0 != head_dim * float(factor):
+            raise ValueError("runtime qwen3_5 rotary dimension is not integral")
+        section = rope.get("mrope_section")
+        # Text-only positions: all three mRoPE streams carry the token position,
+        # so interleaved mRoPE is exactly 1-D RoPE on the rotary slice when the
+        # sections cover every rotary frequency.
+        if (
+            not isinstance(section, (list, tuple))
+            or len(section) != 3
+            or not all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in section)
+            or sum(section) != rotary_dim // 2
+        ):
+            raise ValueError("runtime qwen3_5 mrope_section does not cover the rotary dimension")
+        theta = rope.get("rope_theta")
+        if (
+            not isinstance(theta, (int, float))
+            or isinstance(theta, bool)
+            or not math.isfinite(float(theta))
+            or float(theta) <= 0
+        ):
+            raise ValueError("runtime qwen3_5 rope_theta must be positive and finite")
+        rope_theta = float(theta)
+    if rotary_dim % 2 or rotary_dim > head_dim:
+        raise ValueError("runtime qwen3_5 rotary dimension is invalid")
+    linear = {
+        field: _positive_int(text.get(field), field)
+        for field in (
+            "linear_conv_kernel_dim",
+            "linear_num_key_heads",
+            "linear_key_head_dim",
+            "linear_num_value_heads",
+            "linear_value_head_dim",
+        )
+    }
+    if linear["linear_num_value_heads"] % linear["linear_num_key_heads"]:
+        raise ValueError("runtime qwen3_5 linear value heads must be a multiple of key heads")
+    layer_types = text.get("layer_types")
+    if (
+        not isinstance(layer_types, (list, tuple))
+        or len(layer_types) != normalized["n_layer"]
+        or any(kind not in QWEN35_LAYER_TYPES for kind in layer_types)
+    ):
+        raise ValueError("runtime qwen3_5 layer_types are invalid")
+    interval = text.get("full_attention_interval")
+    if interval is not None:
+        interval = _positive_int(interval, "full_attention_interval")
+        expected = [
+            "full_attention" if (index + 1) % interval == 0 else "linear_attention"
+            for index in range(normalized["n_layer"])
+        ]
+        if list(layer_types) != expected:
+            raise ValueError("runtime qwen3_5 layer_types disagree with full_attention_interval")
+    normalized.update(
+        {
+            "rope_theta": rope_theta,
+            "layer_types": list(layer_types),
+            "rotary_dim": rotary_dim,
+            "attn_output_gate": True,
+            **linear,
+        }
+    )
+    json.dumps(normalized, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return normalized
+
+
 def _normalize_architecture_runtime(runtime: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
     architecture = runtime.get("architecture")
     model_config = runtime.get("model_config")
@@ -281,7 +420,18 @@ def _normalize_architecture_runtime(runtime: Mapping[str, Any]) -> tuple[str, di
             model_config,
             expected_layers=_positive_int(model_config.get("n_layer"), "n_layer"),
         )
-    raise ValueError("unsupported runtime architecture; expected gpt2, qwen2, or qwen3")
+    if architecture == "qwen3_5":
+        if set(model_config) != QWEN35_MODEL_CONFIG_FIELDS:
+            raise ValueError(
+                "qwen3_5 architecture model_config fields do not match the normalized runtime contract"
+            )
+        return architecture, normalize_qwen35_model_config(
+            model_config,
+            expected_layers=_positive_int(model_config.get("n_layer"), "n_layer"),
+        )
+    raise ValueError(
+        "unsupported runtime architecture; expected gpt2, qwen2, qwen3, or qwen3_5"
+    )
 
 
 def validate_normalized_mlx_runtime(runtime: Any) -> dict[str, Any]:
@@ -333,6 +483,10 @@ def validate_normalized_numpy_runtime(runtime: Any) -> dict[str, Any]:
     architecture, normalized_config = _normalize_architecture_runtime(runtime)
     if architecture == "gpt2" and runtime["quantization"] != "none":
         raise ValueError("gpt2 runtime quantization is unsupported")
+    if architecture == "qwen3_5":
+        # The hybrid decoder has an MLX stage kernel only; the NumPy Qwen3.5
+        # implementation is a test oracle, not a stage backend.
+        raise ValueError("qwen3_5 numpy stage runtime is unsupported")
     normalized = {
         "backend": "numpy",
         "dtype": runtime["dtype"],

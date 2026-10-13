@@ -1375,3 +1375,210 @@ class NumpyStageBackend:
                 ),
             }
         )
+
+
+# ---------------------------------------------------------------------------
+# Qwen3.5 hybrid text decoder: full-context NumPy oracle (tests only)
+#
+# Independent of MLX and of the stage kernels: the Gated DeltaNet recurrence is
+# evaluated sequentially over the whole context from zero state, and gated
+# attention recomputes every position.  It is not a NumPy *stage* backend; the
+# normalized NumPy runtime contract refuses qwen3_5.
+# ---------------------------------------------------------------------------
+
+_QWEN35_PREFIX = "model.language_model."
+
+
+def _qwen35_rms_offset(hidden: np.ndarray, weight: np.ndarray, epsilon: float) -> np.ndarray:
+    compute = hidden.astype(np.float32)
+    normalized = compute / np.sqrt(np.mean(np.square(compute), axis=-1, keepdims=True) + epsilon)
+    return normalized * (1.0 + weight.astype(np.float32))
+
+
+def _qwen35_silu(value: np.ndarray) -> np.ndarray:
+    return value / (1.0 + np.exp(-value))
+
+
+def _qwen35_sigmoid(value: np.ndarray) -> np.ndarray:
+    return 1.0 / (1.0 + np.exp(-value))
+
+
+def _qwen35_gated_attention(
+    normalized: np.ndarray, tensors: Mapping[str, Any], prefix: str, config: Mapping[str, Any]
+) -> np.ndarray:
+    batch, sequence, _ = normalized.shape
+    n_head, n_kv, head_dim = config["n_head"], config["n_kv_head"], config["head_dim"]
+    epsilon = float(config["rms_norm_epsilon"])
+    projected = _qwen2_linear(normalized, tensors[prefix + "self_attn.q_proj.weight"])
+    projected = projected.reshape(batch, sequence, n_head, 2 * head_dim)
+    query, gate = projected[..., :head_dim], projected[..., head_dim:]
+    key = _qwen2_linear(normalized, tensors[prefix + "self_attn.k_proj.weight"]).reshape(
+        batch, sequence, n_kv, head_dim
+    )
+    value = _qwen2_linear(normalized, tensors[prefix + "self_attn.v_proj.weight"]).reshape(
+        batch, sequence, n_kv, head_dim
+    )
+    query = _qwen35_rms_offset(query, tensors[prefix + "self_attn.q_norm.weight"], epsilon)
+    key = _qwen35_rms_offset(key, tensors[prefix + "self_attn.k_norm.weight"], epsilon)
+    query, key, value = (array.transpose(0, 2, 1, 3) for array in (query, key, value))
+    rotary = int(config["rotary_dim"])
+    inv_freq = 1.0 / np.power(
+        np.float32(config["rope_theta"]),
+        np.arange(0, rotary, 2, dtype=np.float32) / np.float32(rotary),
+    )
+    frequencies = np.arange(sequence, dtype=np.float32)[:, None] * inv_freq[None, :]
+    embedding = np.concatenate((frequencies, frequencies), axis=-1)
+    cosine, sine = np.cos(embedding), np.sin(embedding)
+
+    def rope(array: np.ndarray) -> np.ndarray:
+        part, rest = array[..., :rotary], array[..., rotary:]
+        half = rotary // 2
+        rotated = np.concatenate((-part[..., half:], part[..., :half]), axis=-1)
+        return np.concatenate((part * cosine + rotated * sine, rest), axis=-1)
+
+    query, key = rope(query), rope(key)
+    key = np.repeat(key, n_head // n_kv, axis=1)
+    value = np.repeat(value, n_head // n_kv, axis=1)
+    scores = np.matmul(query, key.transpose(0, 1, 3, 2)) / np.float32(math.sqrt(head_dim))
+    causal = np.tril(np.ones((sequence, sequence), dtype=bool))
+    scores = np.where(causal[None, None], scores, -np.inf)
+    probabilities = _softmax(scores.astype(np.float32), axis=-1)
+    attended = np.matmul(probabilities, value).transpose(0, 2, 1, 3)
+    attended = attended * _qwen35_sigmoid(gate)
+    return _qwen2_linear(
+        attended.reshape(batch, sequence, n_head * head_dim),
+        tensors[prefix + "self_attn.o_proj.weight"],
+    )
+
+
+def _qwen35_gated_delta_net(
+    normalized: np.ndarray, tensors: Mapping[str, Any], prefix: str, config: Mapping[str, Any]
+) -> np.ndarray:
+    batch, sequence, _ = normalized.shape
+    hk, dk = config["linear_num_key_heads"], config["linear_key_head_dim"]
+    hv, dv = config["linear_num_value_heads"], config["linear_value_head_dim"]
+    kernel = config["linear_conv_kernel_dim"]
+    key_dim = hk * dk
+    mixed = _qwen2_linear(normalized, tensors[prefix + "linear_attn.in_proj_qkv.weight"])
+    z = _qwen2_linear(normalized, tensors[prefix + "linear_attn.in_proj_z.weight"])
+    b = _qwen2_linear(normalized, tensors[prefix + "linear_attn.in_proj_b.weight"])
+    a = _qwen2_linear(normalized, tensors[prefix + "linear_attn.in_proj_a.weight"])
+    weight = np.asarray(tensors[prefix + "linear_attn.conv1d.weight"], dtype=np.float32)[:, 0, :]
+    padded = np.concatenate(
+        (np.zeros((batch, kernel - 1, mixed.shape[-1]), dtype=np.float32), mixed), axis=1
+    )
+    convolved = np.zeros_like(mixed, dtype=np.float32)
+    for t in range(sequence):
+        window = padded[:, t : t + kernel, :]  # [B, K, C]
+        convolved[:, t, :] = np.sum(window * weight.T[None], axis=1)
+    convolved = _qwen35_silu(convolved)
+    query = convolved[..., :key_dim].reshape(batch, sequence, hk, dk)
+    key = convolved[..., key_dim : 2 * key_dim].reshape(batch, sequence, hk, dk)
+    value = convolved[..., 2 * key_dim :].reshape(batch, sequence, hv, dv)
+    query = np.repeat(query, hv // hk, axis=2)
+    key = np.repeat(key, hv // hk, axis=2)
+    query = query / np.sqrt(np.sum(np.square(query), axis=-1, keepdims=True) + 1e-6)
+    query = query * np.float32(dk ** -0.5)
+    key = key / np.sqrt(np.sum(np.square(key), axis=-1, keepdims=True) + 1e-6)
+    beta = _qwen35_sigmoid(b)
+    a_log = np.asarray(tensors[prefix + "linear_attn.A_log"], dtype=np.float32)
+    dt_bias = np.asarray(tensors[prefix + "linear_attn.dt_bias"], dtype=np.float32)
+    decay = np.exp(-np.exp(a_log) * np.logaddexp(0.0, a + dt_bias))
+    state = np.zeros((batch, hv, dk, dv), dtype=np.float32)  # HF layout [Dk, Dv]
+    core = np.zeros((batch, sequence, hv, dv), dtype=np.float32)
+    for t in range(sequence):
+        state = state * decay[:, t, :, None, None]
+        k_t = key[:, t]
+        remembered = np.einsum("bhkv,bhk->bhv", state, k_t)
+        delta = (value[:, t] - remembered) * beta[:, t, :, None]
+        state = state + k_t[..., :, None] * delta[..., None, :]
+        core[:, t] = np.einsum("bhkv,bhk->bhv", state, query[:, t])
+    epsilon = float(config["rms_norm_epsilon"])
+    core = core / np.sqrt(np.mean(np.square(core), axis=-1, keepdims=True) + epsilon)
+    core = core * np.asarray(tensors[prefix + "linear_attn.norm.weight"], dtype=np.float32)
+    core = core * _qwen35_silu(z.reshape(batch, sequence, hv, dv))
+    return _qwen2_linear(
+        core.reshape(batch, sequence, hv * dv), tensors[prefix + "linear_attn.out_proj.weight"]
+    )
+
+
+class NumpyQwen35Runtime:
+    """Full-context NumPy Qwen3.5 hybrid text oracle used by parity tests."""
+
+    backend = "numpy"
+
+    def __init__(
+        self,
+        *,
+        model_config: Mapping[str, Any],
+        tensors: Mapping[str, Any],
+        quantization: str = "none",
+    ):
+        from runtime_contracts import normalize_qwen35_model_config
+
+        try:
+            config = normalize_qwen35_model_config(
+                model_config, expected_layers=int(model_config["n_layer"])
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise NumpyRuntimeError("invalid_numpy_runtime") from exc
+        if quantization not in {"none", "int8-weight-only"}:
+            _reject("invalid_numpy_runtime")
+        from qwen35_shapes import expected_qwen35_shapes
+
+        shapes = expected_qwen35_shapes(
+            config, 0, config["n_layer"], ("input_embedding", "final_norm")
+        )
+        if not config["tie_word_embeddings"]:
+            shapes["lm_head.weight"] = (config["vocab_size"], config["n_embd"])
+        if not isinstance(tensors, Mapping) or set(tensors) != set(shapes):
+            _reject("tensor_inventory_mismatch")
+        materialized: dict[str, Any] = {}
+        for key in sorted(shapes):
+            value = np.array(np.asarray(tensors[key]), dtype=np.float32, order="C", copy=True)
+            if value.shape != shapes[key]:
+                _reject("tensor_shape_mismatch")
+            if not np.isfinite(value).all():
+                _reject("nonfinite_tensor")
+            materialized[key] = value
+        if quantization == "int8-weight-only":
+            materialized = quantize_qwen2_numpy_tensors(materialized)
+        self._config = config
+        self._tensors = MappingProxyType(materialized)
+
+    def forward_token_ids(self, token_ids: Any) -> np.ndarray:
+        config = self._config
+        ids = _validated_token_ids(token_ids, config)
+        embed = self._tensors[_QWEN35_PREFIX + "embed_tokens.weight"]
+        hidden = _qwen2_embedding(embed, ids).astype(np.float32)
+        epsilon = float(config["rms_norm_epsilon"])
+        for layer, kind in enumerate(config["layer_types"]):
+            prefix = f"{_QWEN35_PREFIX}layers.{layer}."
+            normalized = _qwen35_rms_offset(
+                hidden, self._tensors[prefix + "input_layernorm.weight"], epsilon
+            )
+            if kind == "linear_attention":
+                mixed = _qwen35_gated_delta_net(normalized, self._tensors, prefix, config)
+            else:
+                mixed = _qwen35_gated_attention(normalized, self._tensors, prefix, config)
+            hidden = hidden + mixed
+            normalized = _qwen35_rms_offset(
+                hidden, self._tensors[prefix + "post_attention_layernorm.weight"], epsilon
+            )
+            gate = _qwen2_linear(normalized, self._tensors[prefix + "mlp.gate_proj.weight"])
+            up = _qwen2_linear(normalized, self._tensors[prefix + "mlp.up_proj.weight"])
+            hidden = hidden + _qwen2_linear(
+                _qwen35_silu(gate) * up, self._tensors[prefix + "mlp.down_proj.weight"]
+            )
+        hidden = _qwen35_rms_offset(
+            hidden, self._tensors[_QWEN35_PREFIX + "norm.weight"], epsilon
+        )
+        head = (
+            embed if config["tie_word_embeddings"] else self._tensors["lm_head.weight"]
+        )
+        logits = _qwen2_linear(hidden, head)
+        if not np.isfinite(logits).all():
+            _reject("nonfinite_logits")
+        result = np.ascontiguousarray(logits, dtype=np.float32)
+        result.flags.writeable = False
+        return result

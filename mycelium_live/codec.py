@@ -26,6 +26,14 @@ _QWEN3_PROTOCOL = (
 # ``enable_thinking=False`` closes an empty think block after the assistant cue,
 # so the model answers directly instead of emitting a reasoning trace.
 _QWEN3_TEMPLATE = _QWEN_TEMPLATE + "<think>\n\n</think>\n\n"
+_QWEN35_PROTOCOL = (
+    "mycelium.prompt_codec.qwen3_5_byte_bpe.chat_no_thinking.incremental_utf8.v1"
+)
+# Qwen3.5 ships its own tokenizer (248,320 ids, a different pre-tokenizer) and a
+# template that renders the same system/user/assistant envelope with the empty
+# think block when ``enable_thinking`` is false.  The token ids come from the
+# checkpoint's own tokenizer.json, so only the protocol identity differs.
+_QWEN35_TEMPLATE = _QWEN3_TEMPLATE
 
 
 def _digest(document: object) -> str:
@@ -244,6 +252,21 @@ class Qwen3PromptCodec(Qwen2PromptCodec):
         return cls(Tokenizer.from_file(str(Path(deployment_dir) / "tokenizer.json")))
 
 
+class Qwen35PromptCodec(Qwen2PromptCodec):
+    """Qwen3.5 hybrid byte-level tokenizer; chat envelope with thinking disabled."""
+
+    TEMPLATE = _QWEN35_TEMPLATE
+    PROTOCOL = _QWEN35_PROTOCOL
+
+    @classmethod
+    def from_deployment(cls, deployment_dir: Path) -> "Qwen35PromptCodec":
+        try:
+            from tokenizers import Tokenizer
+        except ImportError as exc:
+            raise RuntimeError("qwen3_5_tokenizer_backend_unavailable") from exc
+        return cls(Tokenizer.from_file(str(Path(deployment_dir) / "tokenizer.json")))
+
+
 def prompt_codec_from_deployment(deployment_dir: Path) -> Any:
     """Select the tokenizer from the pinned deployment config."""
 
@@ -259,6 +282,8 @@ def prompt_codec_from_deployment(deployment_dir: Path) -> Any:
         return Qwen2PromptCodec.from_deployment(deployment_dir)
     if model_type == "qwen3":
         return Qwen3PromptCodec.from_deployment(deployment_dir)
+    if model_type == "qwen3_5":
+        return Qwen35PromptCodec.from_deployment(deployment_dir)
     raise RuntimeError(f"unsupported_prompt_codec:{model_type!r}")
 
 
@@ -267,5 +292,6 @@ __all__ = [
     "IncrementalTokenDecoder",
     "Qwen2PromptCodec",
     "Qwen3PromptCodec",
+    "Qwen35PromptCodec",
     "prompt_codec_from_deployment",
 ]

@@ -41,7 +41,7 @@ from scripts.qwen_phone_builder import (
 
 from layer_assignment import compile_layer_assignments
 from mycelium_assignment_cache import ArtifactObjectKey, AssignmentArtifactCache
-from mycelium_live.codec import Qwen2PromptCodec, Qwen3PromptCodec
+from mycelium_live.codec import Qwen2PromptCodec, Qwen3PromptCodec, Qwen35PromptCodec
 from mycelium_layer_planner.gossip_adapter import (
     plan_signed_evidence,
     planner_snapshot_from_signed_evidence,
@@ -1334,6 +1334,8 @@ def _deployment_prompt_codec(manifest: object, deployment_root: Path) -> Any:
     )
     if architecture == "qwen3":
         return Qwen3PromptCodec.from_deployment(deployment_root)
+    if architecture == "qwen3_5":
+        return Qwen35PromptCodec.from_deployment(deployment_root)
     return Qwen2PromptCodec.from_deployment(deployment_root)
 
 

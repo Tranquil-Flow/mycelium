@@ -2,7 +2,7 @@
 """Architecture adapters shared by manifest compilation and future loaders."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -47,6 +47,47 @@ QWEN3_DECODER_TENSOR_SUFFIXES = (
    "mlp.up_proj.weight",
    "mlp.down_proj.weight",
 )
+# Qwen3.5 hybrid decoder: every layer shares norms + MLP; the token mixer is a
+# Gated DeltaNet ("linear_attention") or gated full attention, per layer_types.
+QWEN35_SHARED_TENSOR_SUFFIXES = (
+   "input_layernorm.weight",
+   "post_attention_layernorm.weight",
+   "mlp.gate_proj.weight",
+   "mlp.up_proj.weight",
+   "mlp.down_proj.weight",
+)
+QWEN35_LINEAR_ATTENTION_TENSOR_SUFFIXES = (
+   "linear_attn.in_proj_qkv.weight",
+   "linear_attn.in_proj_z.weight",
+   "linear_attn.in_proj_b.weight",
+   "linear_attn.in_proj_a.weight",
+   "linear_attn.conv1d.weight",
+   "linear_attn.dt_bias",
+   "linear_attn.A_log",
+   "linear_attn.norm.weight",
+   "linear_attn.out_proj.weight",
+)
+QWEN35_FULL_ATTENTION_TENSOR_SUFFIXES = (
+   "self_attn.q_proj.weight",
+   "self_attn.q_norm.weight",
+   "self_attn.k_proj.weight",
+   "self_attn.k_norm.weight",
+   "self_attn.v_proj.weight",
+   "self_attn.o_proj.weight",
+)
+# qwen3_5_moe replaces the dense MLP with a router, packed experts and a shared
+# expert.  Design/skeleton only: not runtime-supported.
+QWEN35_MOE_SHARED_TENSOR_SUFFIXES = (
+   "input_layernorm.weight",
+   "post_attention_layernorm.weight",
+   "mlp.gate.weight",
+   "mlp.experts.gate_up_proj",
+   "mlp.experts.down_proj",
+   "mlp.shared_expert.gate_proj.weight",
+   "mlp.shared_expert.up_proj.weight",
+   "mlp.shared_expert.down_proj.weight",
+   "mlp.shared_expert_gate.weight",
+)
 
 
 @dataclass(frozen=True)
@@ -60,6 +101,21 @@ class ModelAdapter:
    supported_architectures: tuple[str, ...] = ()
    decoder_tensor_suffixes: tuple[str, ...] = ()
    runtime_backends: tuple[str, ...] = ()
+   # Heterogeneous decoders (Qwen3.5 hybrid): suffixes added to
+   # ``decoder_tensor_suffixes`` for a layer of the given ``layer_types`` kind.
+   layer_type_tensor_suffixes: dict[str, tuple[str, ...]] = field(default_factory=dict)
+   # Checkpoint tensors that are recognised but never assigned or executed
+   # (vision encoder, multi-token-prediction head); recorded in the manifest.
+   excluded_tensor_prefixes: tuple[str, ...] = ()
+   # Non-"ForCausalLM" architecture names whose text decoder is a causal LM.
+   causal_lm_architectures: tuple[str, ...] = ()
+
+   def decoder_suffixes_for_layer(self, layer_type: str | None) -> tuple[str, ...]:
+      if not self.layer_type_tensor_suffixes:
+         return self.decoder_tensor_suffixes
+      if layer_type not in self.layer_type_tensor_suffixes:
+         raise ValueError(f"unsupported {self.architecture} layer type: {layer_type!r}")
+      return self.decoder_tensor_suffixes + self.layer_type_tensor_suffixes[layer_type]
 
    @property
    def runtime_supported(self) -> bool:
@@ -99,6 +155,14 @@ _MODEL_LAYERS_COMPONENTS = {
    "final_norm": ("model.norm.",),
    "lm_head": ("lm_head.",),
 }
+
+_QWEN35_COMPONENTS = {
+   "input_embedding": ("model.language_model.embed_tokens.",),
+   "decoder": ("model.language_model.layers.{layer}.",),
+   "final_norm": ("model.language_model.norm.",),
+   "lm_head": ("lm_head.",),
+}
+_QWEN35_EXCLUDED_PREFIXES = ("model.visual.", "mtp.")
 
 
 ADAPTERS = {
@@ -199,6 +263,39 @@ ADAPTERS = {
       supported_architectures=("Qwen3ForCausalLM",),
       decoder_tensor_suffixes=QWEN3_DECODER_TENSOR_SUFFIXES,
       runtime_backends=("mlx", "numpy"),
+   ),
+   "qwen3_5": ModelAdapter(
+      architecture="qwen3_5",
+      layer_count_fields=("text_config.num_hidden_layers", "num_hidden_layers"),
+      block_prefix_template="model.language_model.layers.{layer}.",
+      components=_QWEN35_COMPONENTS,
+      tied_lm_head_source=("model.language_model.embed_tokens.",),
+      supported_architectures=("Qwen3_5ForConditionalGeneration",),
+      decoder_tensor_suffixes=QWEN35_SHARED_TENSOR_SUFFIXES,
+      runtime_backends=("mlx",),
+      layer_type_tensor_suffixes={
+         "linear_attention": QWEN35_LINEAR_ATTENTION_TENSOR_SUFFIXES,
+         "full_attention": QWEN35_FULL_ATTENTION_TENSOR_SUFFIXES,
+      },
+      excluded_tensor_prefixes=_QWEN35_EXCLUDED_PREFIXES,
+      causal_lm_architectures=("Qwen3_5ForConditionalGeneration",),
+   ),
+   # Skeleton only: manifest-compilable, never runtime-supported (no backends).
+   "qwen3_5_moe": ModelAdapter(
+      architecture="qwen3_5_moe",
+      layer_count_fields=("text_config.num_hidden_layers", "num_hidden_layers"),
+      block_prefix_template="model.language_model.layers.{layer}.",
+      components=_QWEN35_COMPONENTS,
+      tied_lm_head_source=("model.language_model.embed_tokens.",),
+      supported_architectures=("Qwen3_5MoeForConditionalGeneration",),
+      decoder_tensor_suffixes=QWEN35_MOE_SHARED_TENSOR_SUFFIXES,
+      runtime_backends=(),
+      layer_type_tensor_suffixes={
+         "linear_attention": QWEN35_LINEAR_ATTENTION_TENSOR_SUFFIXES,
+         "full_attention": QWEN35_FULL_ATTENTION_TENSOR_SUFFIXES,
+      },
+      excluded_tensor_prefixes=_QWEN35_EXCLUDED_PREFIXES,
+      causal_lm_architectures=("Qwen3_5MoeForConditionalGeneration",),
    ),
 }
 

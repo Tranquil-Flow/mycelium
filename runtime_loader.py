@@ -320,6 +320,8 @@ def _validate_range_and_prefixes(
         )
     if architecture == "gpt2":
         namespace = "transformer." if selected.startswith("transformer.") else ""
+    elif architecture == "qwen3_5":
+        namespace = "model.language_model."
     else:
         namespace = "model."
     return start, end, list(prefixes), namespace
@@ -346,6 +348,8 @@ def _resolve_aliases(
         expected_source = (
             [f"{namespace}wte.weight"]
             if architecture == "gpt2"
+            else [f"{namespace}embed_tokens.weight"]
+            if architecture == "qwen3_5"
             else ["model.embed_tokens.weight"]
         )
         if component_keys.get(source) != expected_source:
@@ -362,6 +366,7 @@ def _validate_component_ownership(
     prefixes: list[str],
     namespace: str,
     architecture: str,
+    layer_types: list[str] | None = None,
 ) -> tuple[list[str], dict[str, dict[str, Any]]]:
     components = assignment.get("components")
     if (
@@ -431,10 +436,24 @@ def _validate_component_ownership(
         adapter = adapter_for_runtime(architecture)
     except ValueError as exc:
         raise _fail("runtime architecture adapter unavailable") from exc
-    suffixes = adapter.decoder_tensor_suffixes
-    expected_decoder_keys = sorted(
-        prefix + suffix for prefix in prefixes for suffix in suffixes
-    )
+    if adapter.layer_type_tensor_suffixes:
+        # Heterogeneous hybrid decoder: per-layer ownership from layer_types.
+        start = assignment["range"]["start_layer"]
+        if not isinstance(layer_types, list) or len(layer_types) < start + len(prefixes):
+            raise _fail(f"{architecture} layer_types do not cover the assigned range")
+        try:
+            expected_decoder_keys = sorted(
+                prefix + suffix
+                for offset, prefix in enumerate(prefixes)
+                for suffix in adapter.decoder_suffixes_for_layer(layer_types[start + offset])
+            )
+        except ValueError as exc:
+            raise _fail(str(exc)) from exc
+    else:
+        suffixes = adapter.decoder_tensor_suffixes
+        expected_decoder_keys = sorted(
+            prefix + suffix for prefix in prefixes for suffix in suffixes
+        )
     if decoder_keys != expected_decoder_keys:
         raise _fail(f"{architecture} decoder tensor ownership is missing, extra, or mismatched")
     expected_static: dict[str, list[str]] = (
@@ -444,8 +463,8 @@ def _validate_component_ownership(
         }
         if architecture == "gpt2"
         else {
-            "input_embedding": ["model.embed_tokens.weight"],
-            "final_norm": ["model.norm.weight"],
+            "input_embedding": [f"{namespace}embed_tokens.weight"],
+            "final_norm": [f"{namespace}norm.weight"],
         }
     )
     for component, keys in expected_static.items():
@@ -520,7 +539,11 @@ def _validate_assignment(
         assignment, runtime["architecture"]
     )
     expected_keys, aliases = _validate_component_ownership(
-        assignment, prefixes, namespace, runtime["architecture"]
+        assignment,
+        prefixes,
+        namespace,
+        runtime["architecture"],
+        runtime["model_config"].get("layer_types"),
     )
     _validate_stage_boundaries(assignment, assignment["components"], runtime)
     return (
@@ -1219,6 +1242,70 @@ def _validate_qwen2_shapes(
     if "lm_head" in components:
         head_key = aliases.get("lm_head", {}).get("tensor_keys", ["lm_head.weight"])[0]
         _expect_shape(tensors, head_key, (config["vocab_size"], hidden))
+
+
+def _validate_qwen35_shapes(
+    tensors: Mapping[str, Any],
+    runtime: dict[str, Any],
+    start: int,
+    end: int,
+    components: list[str],
+    aliases: Mapping[str, dict[str, Any]],
+) -> None:
+    from qwen35_shapes import expected_qwen35_shapes
+
+    config = runtime["model_config"]
+    for key, shape in expected_qwen35_shapes(config, start, end, components).items():
+        _expect_shape(tensors, key, shape)
+    if "lm_head" in components:
+        head_key = aliases.get("lm_head", {}).get("tensor_keys", ["lm_head.weight"])[0]
+        _expect_shape(tensors, head_key, (config["vocab_size"], config["n_embd"]))
+
+
+def _run_qwen35_probe(
+    tensors: Mapping[str, Any],
+    runtime: dict[str, Any],
+    start: int,
+    end: int,
+    components: list[str],
+    aliases: Mapping[str, dict[str, Any]],
+) -> Any:
+    import qwen35_mlx
+
+    mx = _mlx_module()
+    config = runtime["model_config"]
+    if "input_embedding" in components:
+        hidden = _qwen2_embedding(
+            tensors[qwen35_mlx.EMBED_KEY], mx.array([[0, 1, 2]], dtype=mx.int32), mx
+        )
+    else:
+        positions = mx.arange(1, 4, dtype=mx.float32).reshape(1, 3, 1)
+        channels = mx.arange(1, config["n_embd"] + 1, dtype=mx.float32).reshape(
+            1, 1, config["n_embd"]
+        )
+        hidden = (
+            mx.sin(positions * channels)
+            + positions * mx.square(channels) / (config["n_embd"] ** 2)
+        ).astype(_runtime_dtypes()[runtime["dtype"]])
+
+    def linear(value: Any, weight: Any) -> Any:
+        return _qwen2_linear(value, weight, mx)
+
+    for layer in range(start, end):
+        hidden, _state = qwen35_mlx.decoder_layer(
+            hidden, tensors, layer, config, 0, None, linear
+        )
+    if "final_norm" in components:
+        hidden = qwen35_mlx.rms_norm_offset(
+            hidden, tensors[qwen35_mlx.FINAL_NORM_KEY], float(config["rms_norm_epsilon"])
+        )
+    if "lm_head" in components:
+        head_key = aliases.get("lm_head", {}).get("tensor_keys", ["lm_head.weight"])[0]
+        hidden = _qwen2_linear(hidden, tensors[head_key], mx)
+    mx.eval(hidden)
+    if not bool(mx.all(mx.isfinite(hidden)).item()):
+        raise _fail("deterministic functional probe produced non-finite output")
+    return hidden
 
 
 def _layer_norm(
@@ -2341,7 +2428,7 @@ def load_assignment_stage(
             artifact_report,
         )
         quantize_during_load = (
-            runtime["architecture"] in {"qwen2", "qwen3"}
+            runtime["architecture"] in {"qwen2", "qwen3", "qwen3_5"}
             and runtime["quantization"] == "int8-weight-only"
         )
         if selection == PLATFORM_NEUTRAL_INT8_EXECUTION and not quantize_during_load:
@@ -2360,7 +2447,11 @@ def load_assignment_stage(
             quantize_qwen=quantize_during_load,
         )
         components = list(assignment["components"])
-        if runtime["architecture"] in {"qwen2", "qwen3"}:
+        if runtime["architecture"] == "qwen3_5":
+            _validate_qwen35_shapes(
+                tensors, runtime, start, end, components, aliases
+            )
+        elif runtime["architecture"] in {"qwen2", "qwen3"}:
             _validate_qwen2_shapes(
                 tensors, runtime, start, end, components, aliases
             )
@@ -2408,7 +2499,11 @@ def load_assignment_stage(
         )
         runtime_identity = _actual_runtime_identity(runtime)
         if runtime["backend"] == _MLX_RUNTIME_BACKEND:
-            if runtime["architecture"] in {"qwen2", "qwen3"}:
+            if runtime["architecture"] == "qwen3_5":
+                probe_output = _run_qwen35_probe(
+                    tensors, runtime, start, end, components, aliases
+                )
+            elif runtime["architecture"] in {"qwen2", "qwen3"}:
                 probe_output = _run_qwen2_probe(
                     tensors, runtime, start, end, components, aliases
                 )

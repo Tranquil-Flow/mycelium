@@ -14,6 +14,7 @@ from runtime_contracts import (
    normalize_gpt2_model_config,
    normalize_qwen2_model_config,
    normalize_qwen3_model_config,
+   normalize_qwen35_model_config,
 )
 
 
@@ -75,15 +76,37 @@ def _component_files(
    }
 
 
-def _is_causal_lm(config: dict[str, Any]) -> bool:
+def _is_causal_lm(
+   config: dict[str, Any], causal_lm_architectures: tuple[str, ...] = ()
+) -> bool:
    architectures = config.get("architectures")
    return isinstance(architectures, list) and any(
       isinstance(name, str) and (
          name.endswith("ForCausalLM")
          or name in {"GPT2LMHeadModel"}
+         or name in causal_lm_architectures
       )
       for name in architectures
    )
+
+
+def _validate_layer_typed_decoder(
+   adapter: Any,
+   config: dict[str, Any],
+   tensor_keys_by_layer: dict[str, list[str]],
+   block_prefix_template: str,
+) -> None:
+   text = config.get("text_config", config)
+   layer_types = text.get("layer_types") if isinstance(text, dict) else None
+   if not isinstance(layer_types, list) or len(layer_types) != len(tensor_keys_by_layer):
+      raise ValueError(f"{adapter.architecture} layer_types do not cover every layer")
+   for layer, kind in enumerate(layer_types):
+      prefix = block_prefix_template.format(layer=layer)
+      expected = sorted(prefix + suffix for suffix in adapter.decoder_suffixes_for_layer(kind))
+      if tensor_keys_by_layer[str(layer)] != expected:
+         raise ValueError(
+            f"{adapter.architecture} layer {layer} ({kind}) tensors are missing, extra, or mismatched"
+         )
 
 
 def compile_model_manifest(
@@ -180,13 +203,21 @@ def compile_model_manifest(
       for keys in component_tensor_keys.values()
       for key in keys
    )
-   unowned_tensor_keys = sorted(set(weight_map) - recognized_tensor_keys)
+   excluded_tensor_keys = sorted(
+      key
+      for key in weight_map
+      if key not in recognized_tensor_keys
+      and any(key.startswith(prefix) for prefix in adapter.excluded_tensor_prefixes)
+   )
+   unowned_tensor_keys = sorted(
+      set(weight_map) - recognized_tensor_keys - set(excluded_tensor_keys)
+   )
    if unowned_tensor_keys:
       preview = ", ".join(unowned_tensor_keys[:5])
       suffix = "" if len(unowned_tensor_keys) <= 5 else f" (+{len(unowned_tensor_keys) - 5} more)"
       raise ValueError(f"unowned tensor keys for {adapter.architecture}: {preview}{suffix}")
    component_aliases: dict[str, str] = {}
-   if _is_causal_lm(config):
+   if _is_causal_lm(config, adapter.causal_lm_architectures):
       for required in ("input_embedding", "final_norm"):
          if not component_tensor_keys.get(required):
             raise ValueError(f"causal LM missing {required} tensor coverage")
@@ -205,7 +236,7 @@ def compile_model_manifest(
    component_files = _component_files(weight_map, component_tensor_keys)
    runtime_model = None
    if adapter.architecture == "gpt2" and (
-      _is_causal_lm(config)
+      _is_causal_lm(config, adapter.causal_lm_architectures)
       or any(field in config for field in ("n_embd", "n_head", "vocab_size", "n_positions"))
    ):
       runtime_model = {
@@ -214,20 +245,31 @@ def compile_model_manifest(
             config, expected_layers=num_layers
          ),
       }
-   elif adapter.architecture == "qwen2" and _is_causal_lm(config):
+   elif adapter.architecture == "qwen2" and _is_causal_lm(config, adapter.causal_lm_architectures):
       runtime_model = {
          "architecture": "qwen2",
          "model_config": normalize_qwen2_model_config(
             config, expected_layers=num_layers
          ),
       }
-   elif adapter.architecture == "qwen3" and _is_causal_lm(config):
+   elif adapter.architecture == "qwen3" and _is_causal_lm(config, adapter.causal_lm_architectures):
       runtime_model = {
          "architecture": "qwen3",
          "model_config": normalize_qwen3_model_config(
             config, expected_layers=num_layers
          ),
       }
+   elif adapter.architecture == "qwen3_5" and _is_causal_lm(
+      config, adapter.causal_lm_architectures
+   ):
+      runtime_model = {
+         "architecture": "qwen3_5",
+         "model_config": normalize_qwen35_model_config(
+            config, expected_layers=num_layers
+         ),
+      }
+   if adapter.layer_type_tensor_suffixes:
+      _validate_layer_typed_decoder(adapter, config, tensor_keys_by_layer, block_prefix_template)
    manifest = {
       "protocol": "mycelium.model_manifest.v1",
       "model_id": model_id,
@@ -247,6 +289,9 @@ def compile_model_manifest(
       "layer_files": layer_files,
       "tensor_keys_by_layer": tensor_keys_by_layer,
    }
+   if adapter.excluded_tensor_prefixes:
+      # Recognised but never assigned, loaded or executed (vision encoder, MTP).
+      manifest["excluded_tensor_keys"] = excluded_tensor_keys
    if runtime_model is not None:
       manifest["runtime_model"] = runtime_model
    manifest["manifest_digest"] = _digest_document(manifest)

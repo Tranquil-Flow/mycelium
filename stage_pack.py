@@ -320,6 +320,40 @@ _PACK_RUNTIME_SCHEMA: tuple[str, Any] = (
         ),
     ),
 )
+def _with_qwen35_runtime_option(
+    one_of: tuple[str, Any], *, scalar: Any, typed: bool
+) -> tuple[str, Any]:
+    """Append the Qwen3.5 hybrid runtime shape to a runtime ``one_of`` schema.
+
+    The Qwen3.5 model_config is the Qwen field set plus its hybrid fields; the
+    existing GPT-2/Qwen options are left exactly as they were.
+    """
+
+    qwen_option = one_of[1][-1]
+    model_config = dict(qwen_option[1]["model_config"][1])
+    extra: dict[str, Any] = {
+        "layer_types": ("list", str if typed else scalar),
+        "rotary_dim": int if typed else scalar,
+        "attn_output_gate": bool if typed else scalar,
+        "linear_conv_kernel_dim": int if typed else scalar,
+        "linear_num_key_heads": int if typed else scalar,
+        "linear_key_head_dim": int if typed else scalar,
+        "linear_num_value_heads": int if typed else scalar,
+        "linear_value_head_dim": int if typed else scalar,
+    }
+    model_config.update(extra)
+    option = ("map", {**qwen_option[1], "model_config": ("map", model_config)})
+    return ("one_of", (*one_of[1], option))
+
+
+_PACK_RUNTIME_SCHEMA = _with_qwen35_runtime_option(
+    _PACK_RUNTIME_SCHEMA, scalar=_ANY_SCHEMA, typed=False
+)
+_VERIFICATION_SCHEMA[1]["runtime"] = _with_qwen35_runtime_option(
+    _VERIFICATION_SCHEMA[1]["runtime"], scalar=_ANY_SCHEMA, typed=True
+)
+
+
 _PACK_SCHEMA: tuple[str, Any] = (
     "map",
     {
