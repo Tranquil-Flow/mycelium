@@ -10,13 +10,13 @@
       "owner_sources": [
         {
           "path": "weight_provisioning.py",
-          "sha256": "e73e1d312b2463a3827d36053af9fa881466f66eebccdf20945be866d6554d88",
-          "size_bytes": 21434
+          "sha256": "0a7655014efcb7f4eaa03af7fa0c63479183f8dbd005aaa374224b04ef42deb8",
+          "size_bytes": 21703
         },
         {
           "path": "layer_assignment.py",
-          "sha256": "ac8c0837c48032a3b65e913b1b60e88d6e72296ac17bb01c41558cadba0a98f4",
-          "size_bytes": 9411
+          "sha256": "f1a0325520387af6cb22b2ac0a23addd5a717fa9468c8bd6eb26591226590752",
+          "size_bytes": 11296
         }
       ],
       "protocol": "mycelium.artifact_verification_report.v1"
@@ -50,8 +50,8 @@
         },
         {
           "path": "layer_assignment.py",
-          "sha256": "ac8c0837c48032a3b65e913b1b60e88d6e72296ac17bb01c41558cadba0a98f4",
-          "size_bytes": 9411
+          "sha256": "f1a0325520387af6cb22b2ac0a23addd5a717fa9468c8bd6eb26591226590752",
+          "size_bytes": 11296
         }
       ],
       "protocol": "mycelium.assignment_materialization.v1"
@@ -165,8 +165,8 @@
         },
         {
           "path": "layer_assignment.py",
-          "sha256": "ac8c0837c48032a3b65e913b1b60e88d6e72296ac17bb01c41558cadba0a98f4",
-          "size_bytes": 9411
+          "sha256": "f1a0325520387af6cb22b2ac0a23addd5a717fa9468c8bd6eb26591226590752",
+          "size_bytes": 11296
         },
         {
           "path": "runtime_contracts.py",
@@ -690,8 +690,8 @@
       "owner_sources": [
         {
           "path": "layer_assignment.py",
-          "sha256": "ac8c0837c48032a3b65e913b1b60e88d6e72296ac17bb01c41558cadba0a98f4",
-          "size_bytes": 9411
+          "sha256": "f1a0325520387af6cb22b2ac0a23addd5a717fa9468c8bd6eb26591226590752",
+          "size_bytes": 11296
         },
         {
           "path": "model_manifest.py",
@@ -1500,13 +1500,13 @@
       "owner_sources": [
         {
           "path": "weight_provisioning.py",
-          "sha256": "e73e1d312b2463a3827d36053af9fa881466f66eebccdf20945be866d6554d88",
-          "size_bytes": 21434
+          "sha256": "0a7655014efcb7f4eaa03af7fa0c63479183f8dbd005aaa374224b04ef42deb8",
+          "size_bytes": 21703
         },
         {
           "path": "layer_assignment.py",
-          "sha256": "ac8c0837c48032a3b65e913b1b60e88d6e72296ac17bb01c41558cadba0a98f4",
-          "size_bytes": 9411
+          "sha256": "f1a0325520387af6cb22b2ac0a23addd5a717fa9468c8bd6eb26591226590752",
+          "size_bytes": 11296
         },
         {
           "path": "route_contract.py",

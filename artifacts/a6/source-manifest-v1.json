@@ -38,8 +38,8 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:09327d86e2b2bf07c6c396a61cfebeeb5bbb966de4b8fa9d0b57f4fa3f15b374",
-      "size_bytes": 71567
+      "sha256": "sha256:898b962dd2c79d6bb41a6a752b3aa9a00750d451c4d45b77aed61e862ebf81cd",
+      "size_bytes": 71572
     },
     {
       "path": "contracts/phone-node-control-golden/index.json",
@@ -418,8 +418,8 @@
     },
     {
       "path": "layer_assignment.py",
-      "sha256": "sha256:ac8c0837c48032a3b65e913b1b60e88d6e72296ac17bb01c41558cadba0a98f4",
-      "size_bytes": 9411
+      "sha256": "sha256:f1a0325520387af6cb22b2ac0a23addd5a717fa9468c8bd6eb26591226590752",
+      "size_bytes": 11296
     },
     {
       "path": "model_adapters.py",
@@ -633,8 +633,8 @@
     },
     {
       "path": "mycelium_a13_macos/work_authorization.py",
-      "sha256": "sha256:b63d3b374ce1753fcbb0544f5450e6a0c5cde1570fc9b50c5586e28bd3a9bb58",
-      "size_bytes": 16173
+      "sha256": "sha256:b7d27bd22fcfd2c83b0d069ae8cedf4100bd600c8ac4e10986391e818d18bb1b",
+      "size_bytes": 16643
     },
     {
       "path": "mycelium_a13_macos/worker.py",
@@ -653,8 +653,8 @@
     },
     {
       "path": "mycelium_a13_packaging/build.py",
-      "sha256": "sha256:40a57fff4230a68d2caf780183b775b08a39e91b291ee1b880c0d40aac9619bc",
-      "size_bytes": 13607
+      "sha256": "sha256:e538773132aae323f2761602ca4f8c7a38cc2770e6bbe713b8579a6074cf02c3",
+      "size_bytes": 13631
     },
     {
       "path": "mycelium_a13_packaging/install_source.py",
@@ -868,8 +868,8 @@
     },
     {
       "path": "mycelium_host_platform/_win32.py",
-      "sha256": "sha256:304c41b172fd73b8c837d2f8c56a83ee9af8a902c549cbc856e603e623d2a998",
-      "size_bytes": 30716
+      "sha256": "sha256:e75de70592403cf841b5786439b3453b36884ee34066a2cbb4a452b11d7e424a",
+      "size_bytes": 32231
     },
     {
       "path": "mycelium_host_platform/_win32_api.py",
@@ -880,6 +880,11 @@
       "path": "mycelium_host_platform/_win32_job.py",
       "sha256": "sha256:d6f972ccf572670e5841469d1c1a095fab9fb05832de10a3f0953d8f972f858b",
       "size_bytes": 9535
+    },
+    {
+      "path": "mycelium_invite/sqlite_registry.py",
+      "sha256": "sha256:721a13f1cbb4c16e7e034bef4a2dc4ab4ca7a8feab3babf098af3baa213793f0",
+      "size_bytes": 8079
     },
     {
       "path": "mycelium_iroh_sidecar/__init__.py",
@@ -980,6 +985,11 @@
       "path": "mycelium_node/durable_membership.py",
       "sha256": "sha256:2413b13787286c39e540bc3830ef3ddffb1cc02bc981e10fe66a29fea5b430d5",
       "size_bytes": 11597
+    },
+    {
+      "path": "mycelium_node/identity.py",
+      "sha256": "sha256:fcdd889a72eb3b6db7aa567bf90a25ab37d8ce34b94c43b2ee9c91ca3e5eb59d",
+      "size_bytes": 13884
     },
     {
       "path": "mycelium_node/membership.py",
@@ -1203,8 +1213,8 @@
     },
     {
       "path": "mycelium_service_package.py",
-      "sha256": "sha256:8d4549bc9f042a1b687da15608886741830c20135128f01feb23fb8746d93343",
-      "size_bytes": 27431
+      "sha256": "sha256:3e21cc09eff88bb51978a164098a1f9bc171270cdae87344fbfccf66b02b7dd4",
+      "size_bytes": 28107
     },
     {
       "path": "mycelium_speculative_decode.py",
@@ -1248,8 +1258,8 @@
     },
     {
       "path": "native/a9_int8_kernel/build_windows.cmd",
-      "sha256": "sha256:10c1ffaea63385130f4f010d56c22b050cb34ccb5e8875498eadc86876041f96",
-      "size_bytes": 604
+      "sha256": "sha256:d57781d21117570548866a1833a69bb318e5ec3fedcae69710c72ee645d821cb",
+      "size_bytes": 828
     },
     {
       "path": "native/a9_int8_kernel/mycelium_int8.c",
@@ -1368,8 +1378,8 @@
     },
     {
       "path": "native/mobile_core/src/node.rs",
-      "sha256": "sha256:41008ebd15413c4aad3d3aabfd9ad7aed8ec0a315bc818113e231bf255fce991",
-      "size_bytes": 171675
+      "sha256": "sha256:86f2339c195ae9a6312a87b086eb702b38b6e6a4372e843eb8f6e9cd9afe1c01",
+      "size_bytes": 174701
     },
     {
       "path": "native/mobile_core/src/node_cancel.rs",
@@ -1612,6 +1622,11 @@
       "size_bytes": 98955
     },
     {
+      "path": "scripts/a12_gate_membership.py",
+      "sha256": "sha256:807dfe619d2239f9a10e2c74e89ebeb40c6970ed0dc0cfb8fd8c7ef81936f9a5",
+      "size_bytes": 20943
+    },
+    {
       "path": "scripts/a15_release_decision.py",
       "sha256": "sha256:52ea95d5675c018d9c6b00a42a323b0e8e8eef1d5164602087621a1ca4219fbe",
       "size_bytes": 7858
@@ -1707,6 +1722,16 @@
       "size_bytes": 30491
     },
     {
+      "path": "scripts/run_a12_mobile_physical_gate.py",
+      "sha256": "sha256:ab698598e57482f7159a52edf505e0439d2b98feb6be9b585f24095a6321a7c7",
+      "size_bytes": 32807
+    },
+    {
+      "path": "scripts/run_a12_phone_route.py",
+      "sha256": "sha256:1c61566c184e89fd42ebf1023263f35664661a6b9cb37ad5bc4e976d9a7678ea",
+      "size_bytes": 52540
+    },
+    {
       "path": "scripts/run_a6_recovery_case.py",
       "sha256": "sha256:f9edcb49a62fbe5f01f974e7991e322798e0318fece05067b5dee55daac07a34",
       "size_bytes": 18406
@@ -1733,8 +1758,8 @@
     },
     {
       "path": "scripts/run_a9_gate.py",
-      "sha256": "sha256:0b2ea80ca985669c2c5f639782347d0142e174580246f8934f38cb46ab06b90d",
-      "size_bytes": 36699
+      "sha256": "sha256:d5a1a41a5d8f94f00403efebd149db8d177dce424218bc862e021916e06b211f",
+      "size_bytes": 37642
     },
     {
       "path": "scripts/run_a9_windows_route.py",
@@ -1772,6 +1797,11 @@
       "size_bytes": 15696
     },
     {
+      "path": "tests/a12_mobile_deterministic/test_a12_gate_membership.py",
+      "sha256": "sha256:0f3ceece90c3a9f57adaa347abb65d815cad681ae8038fba025e3931262f292d",
+      "size_bytes": 25303
+    },
+    {
       "path": "tests/a12_mobile_deterministic/test_mobile_artifact_grant.py",
       "sha256": "sha256:ba788f38de804cff2fd69df0e8a3cf407f06b07e7e10ac4dd08633aebf762c26",
       "size_bytes": 8115
@@ -1790,6 +1820,16 @@
       "path": "tests/a12_mobile_deterministic/test_route_assignment_delivery.py",
       "sha256": "sha256:3fadc93ce2b0c8d5c27ba818122e7343fca3dac60dc016b7220fa9f724852e7b",
       "size_bytes": 10364
+    },
+    {
+      "path": "tests/a12_mobile_deterministic/test_run_a12_mobile_physical_gate.py",
+      "sha256": "sha256:6099a5c8ede4d0de46ef6ad964e0a2b999fb9604b2d8e4c738c839cb83a9db1c",
+      "size_bytes": 29142
+    },
+    {
+      "path": "tests/a12_mobile_deterministic/test_run_a12_phone_route.py",
+      "sha256": "sha256:5c72f7aa7cbfc4564c7ed5f82bd978acb89913af5cd9d29c08e46ade2b488f2e",
+      "size_bytes": 11598
     },
     {
       "path": "tests/a12_mobile_deterministic/test_v2_artifact_delivery.py",
@@ -1888,8 +1928,13 @@
     },
     {
       "path": "tests/a13_windows/test_owner_shell_win32.py",
-      "sha256": "sha256:b13f69bb116f8f4900ea0c2c87d8a17692e06a8802a2fcbfc4eb3ea55ddfd89f",
-      "size_bytes": 9605
+      "sha256": "sha256:8d2af311105b862cf9d8a422e97e2fb23a14678f9af27d61355c3b7abe9f18ef",
+      "size_bytes": 9620
+    },
+    {
+      "path": "tests/a13_windows/test_packaging_posix_names.py",
+      "sha256": "sha256:710dcc4a05ff79834a5d5ba31e79a3823c54693fa29a7be260fe62c9662b7366",
+      "size_bytes": 1082
     },
     {
       "path": "tests/a13_windows/test_route_model_and_node_runtime.py",
@@ -1900,6 +1945,11 @@
       "path": "tests/a13_windows/test_service_install_win32.py",
       "sha256": "sha256:66f390271b951cac3621c39f958cc63f7fe166c840ce30f75e2a350d930fd245",
       "size_bytes": 8188
+    },
+    {
+      "path": "tests/a13_windows/test_service_package_posix_members.py",
+      "sha256": "sha256:cb43814b77d97f30d0b23ea89a40c390459c7edd9bf11fd1f43a73ab75635f31",
+      "size_bytes": 2453
     },
     {
       "path": "tests/a13_windows/test_windows_boot_identity.py",
@@ -1918,13 +1968,18 @@
     },
     {
       "path": "tests/a13_windows/test_windows_target_staging.py",
-      "sha256": "sha256:6b2143790b30729fcdcd9648e51f463b7470317e23669d9d75d5127765d6f9f1",
-      "size_bytes": 9036
+      "sha256": "sha256:03ec99aec70ab3f63293977b3284e413903c82e1f86803a9cf1104c33514bcd1",
+      "size_bytes": 9471
     },
     {
       "path": "tests/a13_windows/test_windows_worker_accounting.py",
       "sha256": "sha256:87ed1615dcbf792c085f4d8a934463cf63187663305cde9b013b966710539b26",
       "size_bytes": 3632
+    },
+    {
+      "path": "tests/a13_windows/test_work_authorization_win32.py",
+      "sha256": "sha256:87cced8cae65a9acf289bc38ee4202cf90eeed43ccd11a61a38d61128b00dfda",
+      "size_bytes": 2079
     },
     {
       "path": "tests/a14b_acceptance/__init__.py",
@@ -2138,13 +2193,18 @@
     },
     {
       "path": "tests/a9_acceptance/test_a9_gate_driver.py",
-      "sha256": "sha256:422696c982e13b6a9f98bb4e2c0e2e28b8a0e578404de7a3584af8b8512d071d",
-      "size_bytes": 14222
+      "sha256": "sha256:745064c27b872af922305fc523d80ce9df2a748cad2e0ce907e776faa9b4db2a",
+      "size_bytes": 14602
     },
     {
       "path": "tests/a9_acceptance/test_identity_preserving_migration.py",
       "sha256": "sha256:42fa05a50191e141dbbe7d4c32219f8b02eac71df910793c9a9e40d558c7f105",
       "size_bytes": 14447
+    },
+    {
+      "path": "tests/a9_acceptance/test_inventory.py",
+      "sha256": "sha256:d69067f2d48736a89c203a12c4907a74de93abec6b0c79f14cbf1d9291abd3af",
+      "size_bytes": 12166
     },
     {
       "path": "tests/a9_acceptance/test_migration_executor_win32.py",
@@ -2163,13 +2223,18 @@
     },
     {
       "path": "tests/a9_acceptance/test_seed_membership_migration.py",
-      "sha256": "sha256:f4175e129741cea75cf6878060d37e8be88e65e31cc970ccd22a38688226772b",
-      "size_bytes": 17280
+      "sha256": "sha256:34c9877ed357c718b6edff32c0624bbbeca17b90c4940c04cbc10fe9ac3f7ce6",
+      "size_bytes": 17341
     },
     {
       "path": "tests/a9_acceptance/test_seed_v2_write_path.py",
-      "sha256": "sha256:1c745fb7694fd6e553111df2b60290c71a3d429b046ef4c4ac759794e8623f63",
-      "size_bytes": 19033
+      "sha256": "sha256:b0d0b2d46f962304f0fe895753cb28790a18b2882ad3786037be901d361ee1eb",
+      "size_bytes": 19123
+    },
+    {
+      "path": "tests/a9_acceptance/test_target_cache_root_windows_paths.py",
+      "sha256": "sha256:6ca4052baa5681b8a1f89a5fca562b4abf88a3689ac861a28dd22b2dcccf808c",
+      "size_bytes": 6563
     },
     {
       "path": "tests/a9_acceptance/test_thermal_observation.py",
@@ -2178,8 +2243,13 @@
     },
     {
       "path": "tests/a9_acceptance/test_v1_v2_authorization_parity.py",
-      "sha256": "sha256:df0f2b14dd17c4050d5a54b479c09c091ded22e71f77abcb5afbf68e40f7d598",
-      "size_bytes": 14701
+      "sha256": "sha256:164713f85be9386995cc693f8556828f78e0ae3bfe98fe4170be951c0b75d471",
+      "size_bytes": 14781
+    },
+    {
+      "path": "tests/a9_acceptance/test_windows_native_provider_adapter.py",
+      "sha256": "sha256:6d3d1e6d6bff0078d9c883374cd9425eb01230fd4790c9b9544869dc69be8c57",
+      "size_bytes": 14848
     },
     {
       "path": "tests/a9_migration_scaffold/conftest.py",
@@ -2208,8 +2278,8 @@
     },
     {
       "path": "tests/e2e_request_iroh/conftest.py",
-      "sha256": "sha256:3e58c539672a0af4a067f7d52331d4b9ffff6448ec5dcd2fb8d23f4f386ce837",
-      "size_bytes": 1306
+      "sha256": "sha256:58007f857889894278f0b52696a76a08c4d0f516e1d771338c0cc245aa72de5f",
+      "size_bytes": 2064
     },
     {
       "path": "tests/fixtures/native-phone-interruptibility.json",
@@ -2233,13 +2303,28 @@
     },
     {
       "path": "tests/host_platform/fake_win32.py",
-      "sha256": "sha256:93b139ad2234f912f7b3c1cdab2836bbeddeba40ae5385bea6c2cb6dc0331098",
-      "size_bytes": 25702
+      "sha256": "sha256:daacd97c83123960dd8b4fb3c165d0a53018ad8eb2ca81bd68b165093ee5cd14",
+      "size_bytes": 26849
+    },
+    {
+      "path": "tests/host_platform/portable.py",
+      "sha256": "sha256:55144b1e6db4bc4ff4ecebec747318184bd70a24bf241a5bbb985fb473dce502",
+      "size_bytes": 1065
     },
     {
       "path": "tests/host_platform/test_exclusive_lock.py",
-      "sha256": "sha256:776f40296a678c2d37d67ca9f5ab5ae30e32603129367bd7e6875d3e696776b7",
-      "size_bytes": 3384
+      "sha256": "sha256:0f98f53cd3a83d92f3f2949ee966e8af3a50d19266be367f3d29b33b3aec2f39",
+      "size_bytes": 3594
+    },
+    {
+      "path": "tests/host_platform/test_posix_backend_parity.py",
+      "sha256": "sha256:49e74261b81f361d3842f4814918032000493c2dc979335f638bf70180092fa0",
+      "size_bytes": 6281
+    },
+    {
+      "path": "tests/host_platform/test_selection.py",
+      "sha256": "sha256:9a91c816b590c5f85cf3bf6f54ba8d6f645f4da414c7f778d60044a7464b5d34",
+      "size_bytes": 5428
     },
     {
       "path": "tests/host_platform/test_win32_error_winerror.py",
@@ -2248,8 +2333,13 @@
     },
     {
       "path": "tests/host_platform/test_windows_import_surface.py",
-      "sha256": "sha256:f8e8c96d1658dcc66eff40a98f9b21f3161837c342ee33f77f340b75e4c85941",
-      "size_bytes": 8820
+      "sha256": "sha256:523acf9036614b648da4a4f2992b8603286478173edfe7084d89cbe58f8e600e",
+      "size_bytes": 9049
+    },
+    {
+      "path": "tests/invite/test_sqlite_registry_win32.py",
+      "sha256": "sha256:0908159449c6cfc1d526cb663261a39f10a0e8fec59d5df971f7acfdb740c7cb",
+      "size_bytes": 3869
     },
     {
       "path": "tests/iroh_conformance/control_call_e2e_client.py",
@@ -2592,19 +2682,54 @@
       "size_bytes": 16015
     },
     {
+      "path": "tests/node_agent/test_durable_membership.py",
+      "sha256": "sha256:63ba69ecb6c0d505a8e13fe5bb4ff7bae1c51ac3cb9c6594bf6d4be9922c4f56",
+      "size_bytes": 2173
+    },
+    {
+      "path": "tests/node_agent/test_executable_resolution.py",
+      "sha256": "sha256:e25a1e0d38553e46f0d009371c8c48f623b29ff1a6d878c34581459e3b69053c",
+      "size_bytes": 1290
+    },
+    {
+      "path": "tests/node_agent/test_identity.py",
+      "sha256": "sha256:673a95340fb102bd0e30c0e621939fb9c4707c4bde3a2944f75b5e3f64dfe88d",
+      "size_bytes": 6670
+    },
+    {
+      "path": "tests/node_agent/test_identity_win32_concurrency.py",
+      "sha256": "sha256:972add8fe0a056660faffd3f55450ecb8287492ce2e4ba82e5a1588818d6be9f",
+      "size_bytes": 2391
+    },
+    {
+      "path": "tests/node_agent/test_launch_shape_private_ancestry.py",
+      "sha256": "sha256:34a6ec33b6c4dbb6e1c088a1c2fee0c086ef194ff2a085f41cd7a448de361fb3",
+      "size_bytes": 5036
+    },
+    {
       "path": "tests/node_agent/test_node_main.py",
-      "sha256": "sha256:86ea43986ef7492a1c0fabbf089172be71f618a4989fb490f5ec0b9807413bac",
-      "size_bytes": 131127
+      "sha256": "sha256:24d9c39020e1d72ae3d2bedc93599f752766ae5110fe108019f71d526fde9279",
+      "size_bytes": 133750
+    },
+    {
+      "path": "tests/node_agent/test_node_win32_seam.py",
+      "sha256": "sha256:8652ea02aa6350e9b59fed1af8bae0adc31747766a2342e7d8e5da1d668ae4e3",
+      "size_bytes": 14847
     },
     {
       "path": "tests/node_agent/test_physical_service_win32.py",
-      "sha256": "sha256:74aa10358e2d319c580316975352b2948ff01ace5a993dca0d0fb9e1d7e9d3d4",
-      "size_bytes": 11305
+      "sha256": "sha256:70d3c7b4a7089973271f1a0b95838f62d25c1f739841cf73db74fa2276e2db8d",
+      "size_bytes": 11652
+    },
+    {
+      "path": "tests/node_agent/test_process.py",
+      "sha256": "sha256:7cfb613123f1c861af24abe4bd8fb865f31f008eb860b9d30814745bf8c88f02",
+      "size_bytes": 47604
     },
     {
       "path": "tests/node_agent/test_process_win32_job.py",
-      "sha256": "sha256:68a8fc688ab7456435aef7ff4e81a7c2dce02a42a70f9c39a71e5bad7d797f83",
-      "size_bytes": 12176
+      "sha256": "sha256:a6544caf0abeff09413f389e9039ffbd58e0c6d80a77596a0a75688083aedb7b",
+      "size_bytes": 12269
     },
     {
       "path": "tests/path_cancellation_adversarial/test_contract_entry_relay.py",
@@ -2852,6 +2977,11 @@
       "size_bytes": 2726
     },
     {
+      "path": "ui/web/scripts/a12-phone-route-browser.mjs",
+      "sha256": "sha256:d524cc34801866ec27e073ceb88957acbd3807d493a309ae264dc01515cb6e9a",
+      "size_bytes": 4114
+    },
+    {
       "path": "ui/web/scripts/a14-live-browser.mjs",
       "sha256": "sha256:8c2a3fc5686c6106f8cb14d35a76b5696ff764f49927662712f0f3a9b05de2fb",
       "size_bytes": 17850
@@ -2985,8 +3115,13 @@
       "path": "ui/web/vite.config.ts",
       "sha256": "sha256:c91fed1a10a226e123fb5a4baf5018f54bfc6a440761093cb7d9c2ef04933864",
       "size_bytes": 569
+    },
+    {
+      "path": "weight_provisioning.py",
+      "sha256": "sha256:0a7655014efcb7f4eaa03af7fa0c63479183f8dbd005aaa374224b04ef42deb8",
+      "size_bytes": 21703
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:07b8532681665be5e5a3f23bbb60e1e508dd446cb5451e5e435369d3fb306fdc"
+  "source_digest": "sha256:8de6b7e0b9e534fdf335b8897f7c61738e1181efdf15f917500662a00f4ab288"
 }
