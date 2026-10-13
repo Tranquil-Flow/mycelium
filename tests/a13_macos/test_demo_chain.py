@@ -279,3 +279,56 @@ def test_small_model_goes_whole_to_each_mac(tmp_path):
     from mycelium_a13_macos.serving import slice_fetch_permitted
     assert not slice_fetch_permitted(app.acquisition.prepared_source().source_bytes,
                                      architecture=app.acquisition.prepared_source().model.architecture)
+
+
+class SlowJoiner(Members):
+    """The remote Mac downloads the model for `seconds` before it can describe itself
+    (two-Mac run 16: a laptop on a phone hotspot needed > 180 s)."""
+    def __init__(self, *args, seconds, stalled=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.until = time.monotonic() + seconds
+        self.stalled = stalled
+        self.done = 0
+    def tick(self):
+        a = self.exchange.announcement(REMOTE)
+        if a['phase'] == 'collect' and time.monotonic() < self.until:
+            for node in self.nodes:
+                if node == REMOTE:
+                    if not self.stalled:
+                        self.done += 1
+                    self.exchange.submit_local(node, {'protocol': MEMBER_REPORT, 'run_id': a['run_id'],
+                        'deployment_id': a['deployment_id'], 'state': 'downloading_model', 'detail': None,
+                        'model': None, 'progress': {'done_bytes': self.done, 'total_bytes': 10**9},
+                        'descriptor': None, 'issued_at': time.time()})
+            local = [n for n in self.nodes if n != REMOTE]
+            saved, self.nodes = self.nodes, local
+            try:
+                super().tick()
+            finally:
+                self.nodes = saved
+            return
+        super().tick()
+
+
+def make_slow(tmp_path, *, seconds, stalled=False):
+    app, ops, members, run = make(tmp_path)
+    def factory(app, local, exchange):
+        members['m'] = SlowJoiner(app, exchange, [LOCAL, REMOTE], seconds=seconds, stalled=stalled)
+        return members['m']
+    run.chain._agent_factory = factory
+    run.chain.budgets.update({'descriptors': 1.0, 'download_stall': 0.6, 'descriptors_download': 8.0})
+    return app, ops, members, run
+
+
+def test_a_mac_still_downloading_with_progress_is_waited_for(tmp_path):
+    app, ops, members, run = make_slow(tmp_path, seconds=2.5)
+    run.start()
+    status = wait(run, lambda s: s['state'] in {'serving', 'failed'}, timeout=20)
+    assert status['state'] == 'serving', status
+
+
+def test_a_stalled_download_is_dropped_after_the_base_wait(tmp_path):
+    app, ops, members, run = make_slow(tmp_path, seconds=30, stalled=True)
+    run.start()
+    status = wait(run, lambda s: s['state'] == 'failed', timeout=20)
+    assert (status['failed_step'], status['error_code']) == ('descriptors', 'two_macs_required')

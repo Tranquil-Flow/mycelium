@@ -123,7 +123,7 @@ class AppDemoChain:
         self.ops = ops or ChainOps()
         self.interval = interval
         self._agent_factory = agent_factory
-        self.budgets = {'model': 5.0, 'descriptors': 180.0, 'bootstrap': 180.0, 'collect': 180.0,
+        self.budgets = {'model': 5.0, 'descriptors': 180.0, 'descriptors_download': 1800.0, 'download_stall': 120.0, 'bootstrap': 180.0, 'collect': 180.0,
                         'cleanup': 120.0, 'compile': 3600.0, 'slices': 7200.0, 'publish': 600.0,
                         'targets': 280.0, 'serving': 900.0, **(budgets or {})}
         self._local_device = local_device
@@ -262,15 +262,47 @@ class AppDemoChain:
         expected = [local, *self._remote_members()]
         ctx.state['participants'] = expected
 
+        # Base wait as before; past it, keep waiting ONLY while some member is
+        # visibly downloading the model (its bytes rose within download_stall),
+        # up to descriptors_download in total.  A silent or stalled member is
+        # still dropped at the base budget (two-Mac run 16: a laptop on a phone
+        # hotspot needed more than the 180 s base to fetch Qwen3-0.6B).
+        clock = time.monotonic
+        started = clock()
+        base = self.budgets['descriptors']
+        stall = self.budgets.get('download_stall', 120.0)
+        seen: dict[str, tuple[int, float]] = {}
+
+        class _GiveUp(Exception):
+            pass
+
         def have():
             reports = self._reports(ctx)
             ready = [n for n in expected if (reports.get(n) or {}).get('descriptor') is not None]
             self._publish_participants(ctx)
-            ctx.progress('%d of %d Macs reported' % (len(ready), len(expected)))
-            return len(ready) == len(expected)
+            now = clock()
+            active = False
+            for node in expected:
+                report = reports.get(node) or {}
+                if node in ready or report.get('state') != 'downloading_model':
+                    continue
+                done = (report.get('progress') or {}).get('done_bytes')
+                done = done if type(done) is int else -1
+                previous = seen.get(node)
+                if previous is None or done > previous[0]:
+                    seen[node] = (done, now)
+                if now - seen[node][1] < stall:
+                    active = True
+            ctx.progress('%d of %d Macs reported%s' % (len(ready), len(expected),
+                         '; waiting for a Mac that is downloading the model' if active else ''))
+            if len(ready) == len(expected):
+                return True
+            if now - started >= base and not active:
+                raise _GiveUp()
+            return False
         try:
-            self._wait(ctx, have, budget='descriptors', code='member_descriptors_timeout')
-        except OwnerRunError:
+            self._wait(ctx, have, budget='descriptors_download', code='member_descriptors_timeout')
+        except (OwnerRunError, _GiveUp):
             pass  # proceed with the Macs that reported; the compiler decides if enough
         reports = self._reports(ctx)
         cards = [reports[n]['descriptor'] for n in expected if (reports.get(n) or {}).get('descriptor')]
