@@ -158,6 +158,7 @@ class DemoTargetAgent:
         self._slice_stop = threading.Event()
         self._last_report: tuple | None = None
         self._last_report_at = 0.0
+        self._download_for: tuple | None = None
 
     # -- helpers ------------------------------------------------------------
     def _actor(self):
@@ -276,6 +277,12 @@ class DemoTargetAgent:
             self._set('stopped' if phase == 'stopped' else 'idle')
             return
         run_id, deployment_id = a['run_id'], a['deployment_id']
+        # 0. Whole-snapshot mode (small models): this Mac needs the owner's whole
+        #    pinned snapshot before it can describe its installation.
+        if (not a.get('slice_mode') and not self.local
+                and self._descriptor_for != (run_id, deployment_id)
+                and not self._ensure_whole_model(a)):
+            return
         # 1. Descriptor (once per run).
         if self._descriptor_for != (run_id, deployment_id):
             if not self._consent('installation_descriptor'):
@@ -330,6 +337,48 @@ class DemoTargetAgent:
             self._set('slice_ready', None, self.progress)
         else:
             self._set('reported')
+
+    _ACQUIRING = frozenset({'starting', 'resolving_metadata', 'downloading', 'verifying', 'compiling'})
+
+    def _ensure_whole_model(self, a: Mapping[str, Any]) -> bool:
+        """Adopt the owner's announced model and fetch its whole snapshot here.
+
+        Runs under the standing consent ('model_download') and within its storage
+        cap; the app's own acquisition pins and verifies every byte.  Returns True
+        once the announced model is prepared on this Mac.
+        """
+        model = a.get('model') or {}
+        want = (model.get('model_id'), model.get('resolved_commit'))
+        acquisition = self.app.acquisition
+        status = acquisition.status()
+        state = status.get('state')
+        if state == 'prepared':
+            prepared = acquisition.prepared_source().model
+            if (prepared.model_id, prepared.resolved_commit) != want:
+                self._set('error', 'demo_model_mismatch')
+                return False
+            return True
+        if state in self._ACQUIRING:
+            self._set('downloading_model', None,
+                      {'done_bytes': int(status.get('downloaded_bytes') or 0),
+                       'total_bytes': int(status.get('total_bytes') or 0)})
+            return False
+        if state == 'failed' and self._download_for == want:
+            self._set('error', status.get('error_code') or 'model_download_failed')
+            return False
+        if not self._consent('model_download'):
+            return False
+        choice = model.get('choice')
+        if not choice:
+            self._set('error', 'demo_model_choice_unknown')
+            return False
+        cap = int(self.consent.storage_cap(self.app))
+        self.app.action('/api/run-model', {'choice': choice})
+        self.app.action('/api/model/download', {'consent': {
+            'download_acknowledged': True, 'max_download_bytes': cap, 'storage_limit_bytes': cap}})
+        self._download_for = want
+        self._set('downloading_model', None, {'done_bytes': 0, 'total_bytes': 0})
+        return False
 
     def _make_descriptor(self, a: Mapping[str, Any]) -> dict[str, Any]:
         from .installation_descriptor import installation_descriptor

@@ -195,3 +195,89 @@ def test_idle_announcement_is_idle_and_holds_nothing(world):
     assert agent.tick()['state'] == 'idle' and agent.holds_offer() is False
     state['a'] = None
     assert agent.tick()['state'] == 'idle'
+
+
+class Acquisition:
+    """Whole-snapshot acquisition double: not started -> downloading -> prepared."""
+    def __init__(self, model_id='Qwen/Qwen3-0.6B', commit='c' * 40):
+        self.state = 'not_started'; self.error = None
+        self.model = type('Mo', (), {'model_id': model_id, 'resolved_commit': commit})()
+        self.downloaded = 0; self.total = 1_519_209_243
+    def status(self):
+        return {'state': self.state, 'downloaded_bytes': self.downloaded, 'total_bytes': self.total,
+                'error_code': self.error}
+    def prepared_source(self):
+        if self.state != 'prepared':
+            raise ValueError('source_not_prepared')
+        return type('S', (), {'model': self.model})()
+
+
+@pytest.fixture
+def whole(world):
+    app, agent, gate, state, calls = world
+    app.acquisition = Acquisition()
+    orig = app.action
+    def action(path, body):
+        out = orig(path, body)
+        if path == '/api/model/download':
+            app.acquisition.state = 'downloading'
+        return out
+    app.action = action
+    return app, agent, gate, state, calls
+
+
+def test_whole_mode_adopts_the_owners_model_and_downloads_under_the_cap(whole):
+    app, agent, gate, state, calls = whole
+    gate.cap = 8_000_000_000
+    state['a'] = announcement('collect', slice_mode=False)
+    status = agent.tick()
+    assert status['state'] == 'downloading_model'
+    assert [p for p, _ in app.actions] == ['/api/run-model', '/api/model/download']
+    assert app.actions[0][1] == {'choice': 'qwen3-0.6b'}
+    assert app.actions[1][1] == {'consent': {'download_acknowledged': True,
+        'max_download_bytes': 8_000_000_000, 'storage_limit_bytes': 8_000_000_000}}
+    assert calls == []  # no descriptor before the model is on this Mac
+    app.acquisition.downloaded = 700_000_000
+    status = agent.tick()
+    assert status['state'] == 'downloading_model' and len(app.actions) == 2  # never twice
+    assert status['progress'] == {'done_bytes': 700_000_000, 'total_bytes': 1_519_209_243}
+    assert state['reports'][-1]['state'] == 'downloading_model'
+    app.acquisition.state = 'prepared'
+    assert agent.tick()['state'] == 'reported'
+    assert len(calls) == 1 and 'slice_source' not in calls[0]
+
+
+def test_whole_mode_download_needs_standing_consent(whole):
+    app, agent, gate, state, calls = whole
+    gate.reason = 'standing_consent_missing'
+    state['a'] = announcement('collect', slice_mode=False)
+    assert agent.tick()['state'] == 'waiting_for_consent'
+    assert app.actions == []
+
+
+def test_whole_mode_failed_download_reports_its_code(whole):
+    app, agent, gate, state, calls = whole
+    state['a'] = announcement('collect', slice_mode=False)
+    agent.tick()
+    app.acquisition.state, app.acquisition.error = 'failed', 'storage_limit_exceeded'
+    status = agent.tick()
+    assert (status['state'], status['detail']) == ('error', 'storage_limit_exceeded')
+    assert len([p for p, _ in app.actions if p == '/api/model/download']) == 1
+
+
+def test_whole_mode_with_the_model_already_here_downloads_nothing(whole):
+    app, agent, gate, state, calls = whole
+    app.acquisition.state = 'prepared'
+    state['a'] = announcement('collect', slice_mode=False)
+    assert agent.tick()['state'] == 'reported'
+    assert app.actions == [] and len(calls) == 1
+
+
+def test_whole_mode_refuses_a_different_prepared_model(whole):
+    app, agent, gate, state, calls = whole
+    app.acquisition = Acquisition(model_id='Qwen/Qwen3-8B')
+    app.acquisition.state = 'prepared'
+    state['a'] = announcement('collect', slice_mode=False)
+    status = agent.tick()
+    assert (status['state'], status['detail']) == ('error', 'demo_model_mismatch')
+    assert calls == []
