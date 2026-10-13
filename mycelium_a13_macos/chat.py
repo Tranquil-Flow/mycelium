@@ -24,6 +24,7 @@ import re
 import secrets
 import threading
 import time
+import urllib.error
 import urllib.request
 from collections import deque
 from pathlib import Path
@@ -61,42 +62,86 @@ class RegistryClient:
             def redirect_request(self, *args, **kwargs): return None
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
-        self._headers = {'Origin': origin, 'Accept': 'application/json', 'Content-Type': 'application/json'}
+        self._csrf: dict[str, str] = {}
 
-    def _open(self, path, body=None, extra=None):
-        request = urllib.request.Request(self.origin + path,
-            data=None if body is None else json.dumps(body).encode(), headers={**self._headers, **(extra or {})})
-        return self._opener.open(request, timeout=self.timeout)
+    def _open(self, path, body=None, *, accept='application/json'):
+        """GETs are plain reads; only the POST carries CSRF, Origin and a JSON body
+        (the gateway's rules; mycelium_ui_gateway/app.py)."""
+        headers = {'Accept': accept}
+        data = None
+        if body is not None:
+            headers.update({'Content-Type': 'application/json', 'Origin': self.origin, **self._csrf})
+            data = json.dumps(body, sort_keys=True, separators=(',', ':')).encode()
+        request = urllib.request.Request(self.origin + path, data=data, headers=headers,
+                                         method='GET' if body is None else 'POST')
+        try:
+            return self._opener.open(request, timeout=self.timeout)
+        except urllib.error.HTTPError as error:
+            raise ChatError(502, _http_code(request.get_method(), path, error)) from None
 
     def _json(self, path, body=None):
         with self._open(path, body) as response:
             return json.load(response)
 
     def stream(self, prompt: str, max_new_tokens: int, on_token: Callable[[str], None]) -> dict[str, Any]:
-        from mycelium_request_gateway.contracts import InferenceSubmission, QualificationBinding
+        # Same request shape as the client that drove this API on hardware
+        # (mycelium_a7_physical_measurement.py): request_gateway v2, interactive.
         session = self._json('/api/v1/bootstrap')['session']
-        self._headers[session['csrf_header']] = session['csrf_token']
+        self._csrf = {session['csrf_header']: session['csrf_token']}
         qualification = self._json('/api/v1/qualification/current')
         if qualification.get('route_ready') is not True:
             raise ChatError(503, 'chat_route_not_ready')
-        submission = InferenceSubmission(prompt=prompt, max_new_tokens=max_new_tokens,
-            qualification=QualificationBinding.from_dict(qualification['binding']))
-        accepted = self._json('/api/v1/inference', submission.to_dict())
+        accepted = self._json('/api/v1/inference', {
+            'protocol': 'mycelium.request_gateway.v2', 'prompt': prompt,
+            'max_new_tokens': max_new_tokens, 'qualification': qualification['binding'],
+            'workload_profile_id': 'interactive_chat_v1', 'qos_class': 'interactive'})
         terminal = None
-        with self._open(accepted['event_path'], extra={'Accept': 'text/event-stream'}) as response:
+        kind = None
+        with self._open(accepted['event_path'], accept='text/event-stream') as response:
             for raw in response:
-                if not raw.startswith(b'data: '):
-                    continue
-                event = json.loads(raw[6:])
-                if event.get('type') == 'token':
-                    on_token(event['text'])
-                elif event.get('type') in {'completed', 'cancelled', 'failed'}:
-                    terminal = event
-                    break
-        return {'terminal': None if terminal is None else terminal.get('type'),
+                line = raw.decode('utf-8', 'strict').rstrip('\r\n')
+                if line.startswith('event: '):
+                    kind = line[7:]
+                elif line.startswith('data: ') and kind is not None:
+                    event = json.loads(line[6:])
+                    if kind == 'token':
+                        on_token(event.get('text') or '')
+                    elif kind in {'completed', 'cancelled', 'failed'}:
+                        terminal = {'type': kind, 'code': event.get('code')}
+                        break
+                elif line == '':
+                    kind = None
+        return {'terminal': None if terminal is None else terminal['type'],
                 'code': None if terminal is None else terminal.get('code'),
                 'deployment_id': qualification['binding'].get('deployment_id'),
                 'model_id': qualification['binding'].get('model_id')}
+
+
+_CODE_PART = re.compile(r'[^a-z0-9]+')
+
+
+def _bounded(text: str, limit: int = 96) -> str:
+    return _CODE_PART.sub('_', text.lower()).strip('_')[:limit].rstrip('_')
+
+
+def _http_code(method: str, path: str, error: Exception) -> str:
+    """e.g. chat_http_post_inference_403_origin_mismatch (bounded, no IDs)."""
+    route = path.rstrip('/').split('/')[3] if path.startswith('/api/v1/') else 'events'
+    code = ''
+    try:
+        document = json.loads(error.read(4096) or b'{}')
+        inner = document.get('error')
+        code = inner.get('code', '') if isinstance(inner, dict) else (inner if isinstance(inner, str) else '')
+    except Exception:
+        pass
+    return _bounded('chat_http_%s_%s_%s_%s' % (method, route, getattr(error, 'code', 0), code))
+
+
+def failure_code(error: BaseException) -> str:
+    """Bounded public code for an unexpected chat failure: never a bare code."""
+    if isinstance(error, ChatError):
+        return error.code
+    return _bounded('chat_generation_failed_' + type(error).__name__)
 
 
 class ChatService:
@@ -186,8 +231,8 @@ class ChatService:
                     record['error'] = result.get('code') or 'chat_generation_failed'
         except ChatError as error:
             with self._lock: record['error'] = error.code
-        except Exception:
-            with self._lock: record['error'] = 'chat_generation_failed'
+        except Exception as error:
+            with self._lock: record['error'] = failure_code(error)
         finally:
             with self._lock:
                 record['done'] = True

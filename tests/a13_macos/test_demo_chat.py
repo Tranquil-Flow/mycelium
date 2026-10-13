@@ -139,7 +139,8 @@ def test_generation_failure_is_a_closed_code(svc):
         def stream(self, *a): raise RuntimeError('/secret/path')
     s._client_factory = Broken
     page = drain(s, s.send('local', {'prompt': 'hi'})['request_id'])
-    assert page['error'] == 'chat_generation_failed' and 'secret' not in json.dumps(page)
+    # Closed code naming only the exception type; never the message.
+    assert page['error'] == 'chat_generation_failed_runtimeerror' and 'secret' not in json.dumps(page)
 
 
 def test_handler_requires_header_and_serves_page_without_session():
