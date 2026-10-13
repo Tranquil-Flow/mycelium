@@ -70,7 +70,9 @@ class Workflow:
         self.node_slice_plans = {n: {'node_id': n, 'node_plan_digest': 'sha256:' + '4' * 64} for n in nodes}
     def status(self):
         return {'state': self.state, 'error_code': None,
-                'startup': {'url': 'http://127.0.0.1:55555'} if self.state == 'api_running' else None}
+                # The real supervisor reports its URL with a trailing slash
+                # (mycelium_live/supervisor.py); chat needs the bare origin.
+                'startup': {'url': 'http://127.0.0.1:55555/'} if self.state == 'api_running' else None}
 
 
 PROPOSAL = {'max_combined_rss_bytes': 16_000, 'max_additional_disk_bytes': 24_000,

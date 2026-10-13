@@ -470,7 +470,10 @@ class AppDemoChain:
             return state.get('state') == 'api_running'
         self._wait(ctx, up, budget='serving', code='route_qualification_timeout')
         startup = self._workflow_state().get('startup') or {}
-        ctx.result['registry_origin'] = startup.get('url') or ctx.state.get('registry_origin')
+        # The supervisor reports 'http://127.0.0.1:<port>/'; chat and status
+        # carry the bare origin (chat.RegistryClient accepts exactly that).
+        origin = startup.get('url') or ctx.state.get('registry_origin')
+        ctx.result['registry_origin'] = origin.rstrip('/') if isinstance(origin, str) else origin
         self._announce(ctx, 'serving', work_limits=ctx.state.get('work_limits'),
                        per_node=ctx.state.get('work_nodes'))
         self._publish_participants(ctx)
