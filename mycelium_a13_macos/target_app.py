@@ -296,6 +296,6 @@ class TargetApplication:
             and value['membership_generation'] == capability['generation']
             and capability['expires_at'] > time.time())
         return {**value, 'swarm_created': False, 'member_count': 0,
-            'native_control':self._runtime.status() if self._runtime is not None else {'state':'stopped','model_load_authorized':False},
+            'native_control':self._runtime.status() if self._runtime is not None else {'state':'stopped','model_load_authorized':False,'work_admitted':False},
             'capability_state': 'self_report_accepted' if current else 'not_reported',
             'capability': dict(capability) if current else None}

@@ -31,11 +31,15 @@ class App:
     def action(self, path, body):
         self.actions.append((path, body))
         a = self.authority
-        if path == '/api/control/start': a.native = {'state': 'running', 'model_load_authorized': False}
+        if path == '/api/control/start': a.native = {'state': 'running', 'model_load_authorized': False,
+                                                     'work_admitted': False}
         if path == '/api/control/stop': a.native = {'state': 'stopped', 'model_load_authorized': False}
         if path == '/api/staging/cleanup/accept': a.cleanup = None
         if path == '/api/work/preview': return {'consent_digest': 'sha256:' + '0' * 64}
-        if path == '/api/work/accept': a.native = {'state': 'running', 'model_load_authorized': True}
+        # Real accept starts the worker for work but does not load: the owner's
+        # configure after activation admits the load (test_work_acceptance_parent).
+        if path == '/api/work/accept': a.native = {'state': 'running', 'model_load_authorized': False,
+                                                    'work_admitted': True}
         return {}
     def _resource_check(self): return None
 
@@ -281,3 +285,27 @@ def test_whole_mode_refuses_a_different_prepared_model(whole):
     status = agent.tick()
     assert (status['state'], status['detail']) == ('error', 'demo_model_mismatch')
     assert calls == []
+
+
+def test_whole_mode_member_reports_work_running_before_the_owner_configures(whole):
+    # Run 9: a joined Mac whose standing acceptor had started the work worker
+    # still reported 'reported' (it waited for model_load_authorized, which only
+    # the owner's configure after activation sets), so 'targets' never finished.
+    app, agent, gate, state, calls = whole
+    app.acquisition.state = 'prepared'
+    limits = {'max_rss_bytes': 1, 'max_disk_bytes': 2, 'max_wall_seconds': 600, 'max_commands': 5000}
+    state['a'] = announcement('collect', slice_mode=False); agent.tick()
+    state['a'] = announcement('work', slice_mode=False, work_limits=limits)
+    assert (agent.tick()['state'], agent.status()['detail']) == ('reported', 'work_offer_not_published')
+    app.authority.offer = offer('work-1')
+    assert agent.holds_offer() is False  # whole mode: the standing acceptor takes it
+    assert (agent.tick()['state'], agent.status()['detail']) == ('reported', 'work_not_accepted')
+    app.authority.native = {'state': 'running', 'model_load_authorized': False, 'work_admitted': False}
+    assert agent.tick()['detail'] == 'bootstrap_control_running'
+    app.action('/api/work/accept', {})  # what StandingAcceptor.tick does on this Mac
+    status = agent.tick()
+    assert (status['state'], status['detail']) == ('work_running', None)
+    assert state['reports'][-1]['state'] == 'work_running'
+    app.authority.native = {'state': 'blocked', 'error_code': 'runtime_member_stale',
+                            'model_load_authorized': False, 'work_admitted': True}
+    assert (agent.tick()['state'], agent.status()['detail']) == ('reported', 'runtime_member_stale')

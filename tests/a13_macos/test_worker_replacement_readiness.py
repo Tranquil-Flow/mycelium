@@ -52,6 +52,7 @@ def _replacement_fixture(tmp_path, monkeypatch, *, permit_replacement=True, load
     runtime._worker_generation = 0
     runtime._replacement_worker = None
     runtime.worker = old
+    runtime._authorize_load = grant  # a work runtime: the load authorizer is attached
     runtime.pump = SimpleNamespace(worker=old)
     monkeypatch.setattr(runtime, '_make_worker', lambda: new)
     return runtime, old, new, session, authorized

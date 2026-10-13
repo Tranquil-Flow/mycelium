@@ -36,6 +36,10 @@ def test_preview_then_exact_accept_starts_native_but_does_not_load(tmp_path):
         try:
             result=accept_work(app,preview,work_acknowledged=True,**options)
             assert result['worker_running'] and result['model_load_authorized'] is False
+            # Accepted work: the load authorizer is attached; the load itself waits
+            # for the owner's configure after activation (demo 'targets' reads this).
+            assert result['state']=='running' and result['work_admitted'] is True
+            assert app.status()['native_control']['work_admitted'] is True
         finally:app.stop_control()
 
 

@@ -331,12 +331,36 @@ class DemoTargetAgent:
             app.action('/api/work/accept', {'limits': limits, 'preview': preview, 'work_acknowledged': True})
             self._work_done.add(offer['offer_id'])
             native = actor.status().get('native_control') or {}
-        if native.get('state') == 'running' and native.get('model_load_authorized'):
+        if native.get('state') == 'running' and (native.get('work_admitted') or native.get('model_load_authorized')):
+            # Work accepted and its worker is up.  The model load itself is
+            # admitted only by the owner's configure AFTER activation, so waiting
+            # for model_load_authorized here would deadlock the owner's targets step.
             self._set('serving' if phase == 'serving' else 'work_running')
         elif a.get('slice_mode') and node_plan:
             self._set('slice_ready', None, self.progress)
         else:
-            self._set('reported')
+            self._set('reported', self._work_waiting(offer, run_id, bootstrap, native))
+
+    def _work_waiting(self, offer: Mapping[str, Any] | None, run_id: str, bootstrap: str | None,
+                      native: Mapping[str, Any]) -> str:
+        """What this member is still waiting for in the work phase (a closed code)."""
+        if native.get('state') == 'running':
+            return 'bootstrap_control_running'
+        if native.get('state') not in {None, 'stopped', 'closed', 'prepared'}:
+            return _code(ValueError(native.get('error_code') or ''), 'native_worker_' + str(native.get('state')))
+        if offer is None or offer.get('run_id') != run_id or offer.get('offer_id') == bootstrap:
+            return 'work_offer_not_published'
+        last = None
+        standing = getattr(self.app, 'standing', None)
+        if not self.local and standing is not None:
+            try:
+                last = standing.status().get('last')
+            except Exception:
+                last = None
+        if (isinstance(last, Mapping) and last.get('offer_id') == offer.get('offer_id')
+                and last.get('state') in {'refused', 'failed'} and last.get('reason')):
+            return _code(ValueError(str(last['reason'])), 'work_not_accepted')
+        return 'work_not_accepted'
 
     _ACQUIRING = frozenset({'starting', 'resolving_metadata', 'downloading', 'verifying', 'compiling'})
 

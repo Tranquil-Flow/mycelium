@@ -121,6 +121,7 @@ def test_target_staged_control_start_requires_consent_and_real_native_hello(tmp_
             result=app.start_control(offer,acknowledged=True,resource_policy=POLICY,max_disk_bytes=100_000,
                 _test_observer=lambda:dict(SAFE),_test_ca_certificate=ca)
             assert result['state']=='running' and result['model_load_authorized'] is False
+            assert result['work_admitted'] is False  # bootstrap control: no load authorizer
             native=session(sender,w)
             response=native.send(command_id='offer-native-hello',command='hello',payload={})
             assert response['ok'] is True and response['route_ready'] is False

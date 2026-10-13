@@ -390,20 +390,70 @@ class AppDemoChain:
 
         def awaiting():
             state = self._workflow_state() or {}
-            if state.get('state') == 'failed':
-                raise OwnerRunError(state.get('error_code') or 'managed_workflow_failed')
             self._publish_participants(ctx)
+            if state.get('state') == 'failed':
+                code = state.get('error_code') or 'managed_workflow_failed'
+                self._name_waiting(ctx, code)
+                raise OwnerRunError(code)
             return state.get('state') == 'awaiting_activation'
-        self._wait(ctx, awaiting, budget='publish', code='member_staging_timeout')
+        try:
+            self._wait(ctx, awaiting, budget='publish', code='member_staging_timeout')
+        except OwnerRunError as error:
+            if error.code == 'member_staging_timeout':
+                self._name_waiting(ctx, 'timed out')
+            raise
+
+    _WORK_READY = frozenset({'work_running', 'serving'})
+
+    def _name_waiting(self, ctx, prefix) -> bool:
+        """Show which members the work steps are still waiting for, and why."""
+        try:
+            waiting = self._waiting_for(ctx, self._WORK_READY)
+        except Exception:
+            return False
+        if waiting:
+            ctx.progress('%s; still waiting for %s' % (prefix, '; '.join(waiting)))
+        return bool(waiting)
+
+    def _waiting_for(self, ctx, ready_states) -> list[str]:
+        """'<label> <node>: <what it waits for>' for every participant not ready yet."""
+        reports = self._reports(ctx)
+        local = ctx.state.get('local_node')
+        waiting = []
+        for node in self._participants(ctx):
+            report = reports.get(node) or {}
+            if report.get('state') in ready_states:
+                continue
+            label = 'This Mac (owner)' if node == local else 'Joined Mac'
+            why = report.get('detail') or report.get('state') or 'no_report'
+            waiting.append('%s …%s: %s' % (label, node[-8:], why))
+        return waiting
 
     def _step_targets(self, ctx):
+        ready = self._WORK_READY
+
         def running():
             state = self._workflow_state() or {}
-            if state.get('state') == 'failed':
-                raise OwnerRunError(state.get('error_code') or 'managed_workflow_failed')
             self._publish_participants(ctx)
-            return self._all_in(ctx, {'work_running', 'serving'})
-        self._wait(ctx, running, budget='targets', code='member_work_timeout')
+            done = self._all_in(ctx, ready)
+            if state.get('state') == 'failed':
+                code = state.get('error_code') or 'managed_workflow_failed'
+                # Name the stalled members instead of a bare workflow code
+                # (run 9: both Macs 'reported' until managed_workflow_activation_expired).
+                if not done and self._name_waiting(ctx, code):
+                    raise OwnerRunError('member_work_not_running')
+                raise OwnerRunError(code)
+            if not done:
+                waiting = self._waiting_for(ctx, ready)
+                if waiting:
+                    ctx.progress('waiting for ' + '; '.join(waiting))
+            return done
+        try:
+            self._wait(ctx, running, budget='targets', code='member_work_timeout')
+        except OwnerRunError as error:
+            if error.code == 'member_work_timeout':
+                self._name_waiting(ctx, 'timed out')
+            raise
 
     def _step_activate(self, ctx):
         try:

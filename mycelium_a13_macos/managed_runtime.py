@@ -396,10 +396,16 @@ class ManagedTargetRuntime:
             self._stop.set()
 
     def status(self):
+        # work_admitted: this runtime was started for accepted work (a target-local
+        # load authorizer is attached), as opposed to bootstrap hello-only control.
+        # model_load_authorized only turns true after the owner's configure, which
+        # the owner sends after activation -- so "work accepted and running" must
+        # be read from work_admitted, never from model_load_authorized.
         with self._lock:
             return {'state':self._state,'error_code':self._error,'route_ready':False,
                 'worker_running':self.worker.status()['running'],
-                'model_load_authorized':self.worker.status()['model_load_authorized']}
+                'model_load_authorized':self.worker.status()['model_load_authorized'],
+                'work_admitted':self._authorize_load is not None}
 
     def close(self,*,cleanup=False):
         with self._lock:
