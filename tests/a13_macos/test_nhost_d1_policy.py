@@ -20,8 +20,8 @@ def test_slice_fetch_gate_by_architecture_and_source_size():
 
 def test_small_models_use_the_whole_snapshot_path():
     # A small model goes whole to each Mac (the path that served on two Macs in
-    # September): slicing it saves almost nothing, and the stage shards of a
-    # converted runtime are not byte ranges of the bf16 source.
+    # September); slicing it saves little. Slices are byte-exact for it too
+    # (test_slice_real_builder; runtime dtype/quantization apply at load).
     assert serving.SLICE_FETCH_MIN_SOURCE_BYTES == 4_000_000_000
     assert not serving.slice_fetch_permitted(1_503_300_328, architecture="qwen3")   # Qwen3-0.6B
     assert not serving.slice_fetch_permitted(4_000_000_000, architecture="qwen3")

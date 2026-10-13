@@ -2,11 +2,19 @@
 """Per-member slice acquisition for small models (owner decision D-1, relaxed).
 
 Owner side: ``compile_slice_plan`` maps every byte of each member's compiled
-stage-shard files (the builder's ``--stage-sharded`` output) either to an
+stage-shard files (the builder's ``--stage-sharded`` output, read from where
+the builder emitted them: ``<--emit-stage-shards>/model``) either to an
 exact byte range of a file in the pinned Hugging Face revision or to a small
 inline header, and pins a sha256 for every segment and every whole file. The
 whole-file digests must equal the compiled operator plan's transfer rows, so a
 member's reconstructed file is byte-identical to what qualification expects.
+
+The stage shards carry the source tensors' raw bf16 bytes: the builder's
+shard writer copies tensors unchanged, and the runtime dtype and int8
+weight-only quantization are applied when a stage is loaded, not written into
+the shards. Rebuilding a shard therefore needs no converter on the member, and
+the same plan serves every runtime. A shard tensor whose dtype, shape or bytes
+differ from its source tensor fails closed (``slice_source_tensor_mismatch``).
 
 Member side: ``fetch_node_slice`` fetches ONLY its own segments with HTTP
 Range requests from the pinned revision, verifies each segment before it is

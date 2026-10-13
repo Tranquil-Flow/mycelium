@@ -76,6 +76,19 @@ def compile_member_slices(*,operator_plan,shard_root,prepared):
         node_files=node_weight_files(operator_plan),shard_root=shard_root)
 
 
+def _emitted_shard_root(report,expected):
+    """The directory the builder actually wrote the stage shards to.
+
+    ``--emit-stage-shards <root>`` writes into ``<root>/model``; the build
+    report names it. Both must agree, or the slice plan would hash files that
+    are not the ones the operator plan pins.
+    """
+    try:emitted=report['stage_sharding']['emitted_root']
+    except (KeyError,TypeError):raise ValueError('stage_shard_root_unreported') from None
+    if not isinstance(emitted,str) or emitted!=str(expected):raise ValueError('stage_shard_root_mismatch')
+    return expected
+
+
 def _compile_hosts(context,doc):
     observations=doc['observations']
     hosts=[v['host_id'] for v in observations]
@@ -127,7 +140,7 @@ def start_compile(app,*,acknowledged):
     app._chain_compile_state={'state':'compiling','route_ready':False}
     def work():
         try:
-            from scripts.build_qwen_live_route import build,_TOPOLOGY_FIELDS
+            from scripts.build_qwen_live_route import build,_TOPOLOGY_FIELDS,emitted_stage_shard_root
             keys={'gossip':[app.authority.coordinator.signer.public_key_record()],
                   'load_proof':app._chain_target_keys}
             template=fresh_operator_template(root/'compiled',keys)
@@ -148,13 +161,14 @@ def start_compile(app,*,acknowledged):
                 m13_control_plane=None,m14_control_plane=None,m18_control_plane=None,
                 model_preparation_authorization=None,
                 managed_layer_ranges=None if split is None else [[s['start'],s['end']] for s in split['stages']])
-            build(args)
+            report=build(args)
             slice_plan=None
             if slice_fetch:
                 from .slice_acquisition import node_slice_plan
                 operator_plan=json.loads((root/'compiled/operator-plan.json').read_text('utf-8'))
                 slice_plan=compile_member_slices(operator_plan=operator_plan,
-                    shard_root=root/'stage-shards',prepared=prepared)
+                    shard_root=_emitted_shard_root(report,emitted_stage_shard_root(args.emit_stage_shards)),
+                    prepared=prepared)
                 _atomic_private_json(root/'slice-plan.json',slice_plan)
             with app.guard:
                 if app.closed.is_set() or not app.running:raise ValueError('compiler_stopped')

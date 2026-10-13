@@ -158,6 +158,12 @@ def _private_temporary_root(path: Path | None) -> Path | None:
     return candidate.resolve(strict=True)
 
 
+def emitted_stage_shard_root(emit_root: Path) -> Path:
+    """Where ``--emit-stage-shards <emit_root>`` writes the shard files."""
+
+    return Path(emit_root) / "model"
+
+
 @contextlib.contextmanager
 def _stage_shard_destination(
     emit_root: Path | None,
@@ -180,7 +186,7 @@ def _stage_shard_destination(
         ) as temporary:
             yield Path(temporary) / "model"
         return
-    sharded_root = Path(emit_root) / "model"
+    sharded_root = emitted_stage_shard_root(emit_root)
     if sharded_root.exists():
         raise RuntimeError("emit_stage_shards_already_exists")
     sharded_root.parent.mkdir(parents=True, exist_ok=True)
@@ -1480,6 +1486,89 @@ def _streaming_challenge(
     return prompt, tuple(generated)
 
 
+def _prepare_model_representation(
+    args: argparse.Namespace,
+    prepare: Any,
+    *,
+    shard_count: int,
+    layer_ranges: Any,
+) -> tuple[Any, dict[str, Any] | None]:
+    """Prepare assignments from the source or its stage-sharded representation.
+
+    The stage-sharded branch writes the deployment safetensors that members
+    receive; ``stage_sharding["emitted_root"]`` names where they were emitted.
+    """
+
+    stage_sharding = None
+    reusable_stage_root = getattr(args, "reuse_stage_sharded_root", None)
+    emit_stage_shards = getattr(args, "emit_stage_shards", None)
+    if getattr(args, "stage_sharded", False) and reusable_stage_root is not None:
+        raise RuntimeError("stage_sharding_source_conflict")
+    if emit_stage_shards is not None and not (
+        getattr(args, "stage_sharded", False) or reusable_stage_root is not None
+    ):
+        raise RuntimeError("emit_stage_shards_requires_stage_branch")
+    if reusable_stage_root is not None:
+        candidate = Path(reusable_stage_root)
+        try:
+            reusable_root = candidate.resolve(strict=True)
+        except OSError as exc:
+            raise RuntimeError("stage_sharding_reuse_invalid") from exc
+        if candidate.is_symlink() or not reusable_root.is_dir():
+            raise RuntimeError("stage_sharding_reuse_invalid")
+        # A prior immutable representation may have been file-sharded at a
+        # different layer boundary. Feeding those files directly to a new
+        # assignment can make one physical file contain tensors owned by two
+        # peers. Repartition the already-created representation to the exact
+        # current ranges before assignment compilation; this does not read the
+        # source checkpoint or perform another quantization.
+        with _stage_shard_destination(
+            emit_stage_shards,
+            getattr(args, "temporary_root", None),
+            prefix="mycelium-reused-stage-shards-",
+        ) as sharded_root:
+            repartition = shard_qwen2_checkpoint(
+                reusable_root,
+                sharded_root,
+                shard_count=shard_count,
+                layer_ranges=layer_ranges,
+                max_file_bytes=_MAX_STAGED_MODEL_FILE_BYTES,
+            )
+            prepared = prepare(sharded_root)
+        stage_sharding = {
+            "protocol": "mycelium.stage_sharding_reuse.v2",
+            "manifest_digest": "sha256:"
+            + prepared.manifest["manifest_digest"]["value"],
+            "model_id": prepared.manifest["model_id"],
+            "resolved_commit": prepared.manifest["resolved_commit"],
+            "layer_ranges": repartition["layer_ranges"],
+            "source_representation_reused": True,
+            "source_requantized": False,
+            "verified_by_builder": True,
+        }
+        if emit_stage_shards is not None:
+            stage_sharding["emitted_root"] = str(sharded_root)
+    elif getattr(args, "stage_sharded", False):
+        with _stage_shard_destination(
+            emit_stage_shards,
+            getattr(args, "temporary_root", None),
+            prefix="mycelium-stage-shards-",
+        ) as sharded_root:
+            stage_sharding = shard_qwen2_checkpoint(
+                args.model_root,
+                sharded_root,
+                shard_count=shard_count,
+                layer_ranges=layer_ranges,
+                max_file_bytes=_MAX_STAGED_MODEL_FILE_BYTES,
+            )
+            prepared = prepare(sharded_root)
+        if emit_stage_shards is not None:
+            stage_sharding["emitted_root"] = str(sharded_root)
+    else:
+        prepared = prepare(args.model_root)
+    return prepared, stage_sharding
+
+
 def build(args: argparse.Namespace) -> dict[str, Any]:
     # Native helpers must be reaped even if later preparation or serialization fails.
     with contextlib.ExitStack() as resources:
@@ -1674,73 +1763,9 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
             ),
         )
 
-    stage_sharding = None
-    reusable_stage_root = getattr(args, "reuse_stage_sharded_root", None)
-    emit_stage_shards = getattr(args, "emit_stage_shards", None)
-    if getattr(args, "stage_sharded", False) and reusable_stage_root is not None:
-        raise RuntimeError("stage_sharding_source_conflict")
-    if emit_stage_shards is not None and not (
-        getattr(args, "stage_sharded", False) or reusable_stage_root is not None
-    ):
-        raise RuntimeError("emit_stage_shards_requires_stage_branch")
-    if reusable_stage_root is not None:
-        candidate = Path(reusable_stage_root)
-        try:
-            reusable_root = candidate.resolve(strict=True)
-        except OSError as exc:
-            raise RuntimeError("stage_sharding_reuse_invalid") from exc
-        if candidate.is_symlink() or not reusable_root.is_dir():
-            raise RuntimeError("stage_sharding_reuse_invalid")
-        # A prior immutable representation may have been file-sharded at a
-        # different layer boundary. Feeding those files directly to a new
-        # assignment can make one physical file contain tensors owned by two
-        # peers. Repartition the already-created representation to the exact
-        # current ranges before assignment compilation; this does not read the
-        # source checkpoint or perform another quantization.
-        with _stage_shard_destination(
-            emit_stage_shards,
-            getattr(args, "temporary_root", None),
-            prefix="mycelium-reused-stage-shards-",
-        ) as sharded_root:
-            repartition = shard_qwen2_checkpoint(
-                reusable_root,
-                sharded_root,
-                shard_count=len(node_ids),
-                layer_ranges=prepare_ranges,
-                max_file_bytes=_MAX_STAGED_MODEL_FILE_BYTES,
-            )
-            prepared = prepare(sharded_root)
-        stage_sharding = {
-            "protocol": "mycelium.stage_sharding_reuse.v2",
-            "manifest_digest": "sha256:"
-            + prepared.manifest["manifest_digest"]["value"],
-            "model_id": prepared.manifest["model_id"],
-            "resolved_commit": prepared.manifest["resolved_commit"],
-            "layer_ranges": repartition["layer_ranges"],
-            "source_representation_reused": True,
-            "source_requantized": False,
-            "verified_by_builder": True,
-        }
-        if emit_stage_shards is not None:
-            stage_sharding["emitted_root"] = str(sharded_root)
-    elif getattr(args, "stage_sharded", False):
-        with _stage_shard_destination(
-            emit_stage_shards,
-            getattr(args, "temporary_root", None),
-            prefix="mycelium-stage-shards-",
-        ) as sharded_root:
-            stage_sharding = shard_qwen2_checkpoint(
-                args.model_root,
-                sharded_root,
-                shard_count=len(node_ids),
-                layer_ranges=prepare_ranges,
-                max_file_bytes=_MAX_STAGED_MODEL_FILE_BYTES,
-            )
-            prepared = prepare(sharded_root)
-        if emit_stage_shards is not None:
-            stage_sharding["emitted_root"] = str(sharded_root)
-    else:
-        prepared = prepare(args.model_root)
+    prepared, stage_sharding = _prepare_model_representation(
+        args, prepare, shard_count=len(node_ids), layer_ranges=prepare_ranges
+    )
 
     peers = [
         {

@@ -157,24 +157,26 @@ def test_slice_mode_compiles_digest_pinned_member_slices(tmp_path, monkeypatch):
     def fake_build(args):
         captured["args"] = args
         ranges = [range(s, e) for s, e in args.managed_layer_ranges]
-        shard_qwen2_checkpoint(args.model_root, args.emit_stage_shards, shard_count=3,
-                               layer_ranges=ranges)
+        # Where the real builder writes them (test_slice_real_builder runs its code).
+        emitted = builder.emitted_stage_shard_root(args.emit_stage_shards)
+        shard_qwen2_checkpoint(args.model_root, emitted, shard_count=3, layer_ranges=ranges)
         manifests = {}
-        stage_names = sorted(p.name for p in Path(args.emit_stage_shards).glob("model-stage-*"))
+        stage_names = sorted(p.name for p in emitted.glob("model-stage-*"))
         for index, node in enumerate(nodes):
             names = [stage_names[index]]
             if index == 0:
                 names.append("model-static-embedding.safetensors")
             if index == 2:
                 names += ["model-static-embedding.safetensors", "model-static-output.safetensors"]
-            rows = [{"path": "deployment/" + n, "size_bytes": (Path(args.emit_stage_shards) / n).stat().st_size,
-                     "content_digest": _sha((Path(args.emit_stage_shards) / n).read_bytes())}
+            rows = [{"path": "deployment/" + n, "size_bytes": (emitted / n).stat().st_size,
+                     "content_digest": _sha((emitted / n).read_bytes())}
                     for n in sorted(names)]
             manifests[node] = {"protocol": "mycelium.controller_transfer_manifest.v1", "files": rows}
         out = Path(args.output_root)
         out.mkdir(parents=True)
         (out / "operator-plan.json").write_text(json.dumps({"controller": {"node_transfer_manifests": {
             "protocol": "mycelium.controller_node_transfer_manifests.v1", "manifests": manifests}}}))
+        return {"stage_sharding": {"emitted_root": str(emitted)}}
 
     monkeypatch.setattr(builder, "build", fake_build)
     state = _compile(app)
