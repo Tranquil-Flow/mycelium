@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 import contextlib
 import copy
 from dataclasses import asdict
@@ -192,6 +192,66 @@ def _stage_shard_destination(
     sharded_root.parent.mkdir(parents=True, exist_ok=True)
     yield sharded_root
 
+
+
+def _preparation_selection(
+    m18_document: Mapping[str, Any] | None,
+    *,
+    node_ids: Sequence[str],
+    planned_ranges: Sequence[range] | None,
+    preparation_ranges: Sequence[range] | None,
+    managed_ranges: Sequence[range] | None = None,
+) -> tuple[tuple[str, ...], tuple[range, ...] | None]:
+    """Nodes and layer ranges the artifact preparer (and stage sharding) covers.
+
+    An M18 replica plan prepares its PRIMARY track only: a replica serves the same
+    stage artifacts as the primary of its replica group, so it adds no stage.
+    """
+    node_ids = tuple(node_ids)
+    if m18_document is not None:
+        primary_track = m18_document["route_plan"]["legal_tracks"][0]["placement_ids"]
+        placement_intent = {
+            item["placement_id"]: item
+            for item in m18_document["route_plan"]["placements"]
+        }
+        prepare_node_ids = tuple(
+            placement_intent[item]["node_id"] for item in primary_track
+        )
+        prepare_ranges = tuple(
+            range(
+                placement_intent[item]["layer_range"]["start"],
+                placement_intent[item]["layer_range"]["end"],
+            )
+            for item in primary_track
+        )
+        if len(prepare_node_ids) == 1:
+            # The generic artifact preparer requires a multi-node route. For a
+            # complete-model replica plan, use an inert balanced preparation only
+            # to materialize the local model; replica-bound assignments below are
+            # still compiled from the signed M18 route.
+            return node_ids, None
+        return prepare_node_ids, prepare_ranges
+    if preparation_ranges is not None:
+        return node_ids, tuple(preparation_ranges)
+    if managed_ranges is not None:
+        return node_ids, tuple(managed_ranges)
+    return node_ids, None if planned_ranges is None else tuple(planned_ranges)
+
+
+def _shard_stages(
+    source_root: Path,
+    destination: Path,
+    prepare_node_ids: Sequence[str],
+    prepare_ranges: Sequence[range] | None,
+) -> dict[str, Any]:
+    """Stage-shard one file set per PREPARED stage (never per topology node)."""
+    return shard_qwen2_checkpoint(
+        source_root,
+        destination,
+        shard_count=len(prepare_node_ids),
+        layer_ranges=prepare_ranges,
+        max_file_bytes=_MAX_STAGED_MODEL_FILE_BYTES,
+    )
 
 def _m18_runtime_kv_bytes(
     model_config: Mapping[str, Any],
@@ -1738,38 +1798,13 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
         # One placement authority per build: an owner capability split never
         # silently overrides a signed control-plane or preparation plan.
         raise RuntimeError("managed_layer_ranges_conflict")
-    if is_m18:
-        primary_track = m13_document["route_plan"]["legal_tracks"][0]["placement_ids"]
-        placement_intent = {
-            item["placement_id"]: item
-            for item in m13_document["route_plan"]["placements"]
-        }
-        prepare_node_ids = tuple(
-            placement_intent[item]["node_id"] for item in primary_track
-        )
-        prepare_ranges = tuple(
-            range(
-                placement_intent[item]["layer_range"]["start"],
-                placement_intent[item]["layer_range"]["end"],
-            )
-            for item in primary_track
-        )
-        if len(prepare_node_ids) == 1:
-            # The generic artifact preparer requires a multi-node route. For a
-            # complete-model replica plan, use an inert balanced preparation only
-            # to materialize the local model; replica-bound assignments below are
-            # still compiled from the signed M18 route.
-            prepare_node_ids = node_ids
-            prepare_ranges = None
-    elif preparation_ranges is not None:
-        prepare_node_ids = node_ids
-        prepare_ranges = preparation_ranges
-    elif managed_ranges is not None:
-        prepare_node_ids = node_ids
-        prepare_ranges = managed_ranges
-    else:
-        prepare_node_ids = node_ids
-        prepare_ranges = planned_ranges
+    prepare_node_ids, prepare_ranges = _preparation_selection(
+        m13_document if is_m18 else None,
+        node_ids=node_ids,
+        planned_ranges=planned_ranges,
+        preparation_ranges=preparation_ranges,
+        managed_ranges=managed_ranges,
+    )
 
     def prepare(model_root: Path) -> Any:
         return prepare_assignment_artifacts(
@@ -1810,7 +1845,7 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
         )
 
     prepared, stage_sharding = _prepare_model_representation(
-        args, prepare, shard_count=len(node_ids), layer_ranges=prepare_ranges
+        args, prepare, shard_count=len(prepare_node_ids), layer_ranges=prepare_ranges
     )
 
     peers = [
