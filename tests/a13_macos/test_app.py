@@ -79,6 +79,19 @@ def test_preflight_rejects_platform_before_state(tmp_path):
     assert not list(tmp_path.iterdir())
 
 
+def test_preflight_admits_any_macos_26_release_on_arm64(tmp_path):
+    # A coworking Mac is not pinned to the owner's exact point release; the
+    # bundled runtime's own floor is macOS 26.0 (Homebrew Python/OpenSSL).
+    for version in ['26.0','26.0.1','26.1','26.5.1','26.6','27.0']:
+        assert preflight(system='Darwin',machine='arm64',os_version=version)['os_version']==version
+    for version in ['25.9','15.7','15.6','14.6.1','','26','abc','26.x']:
+        with pytest.raises(DemoError,match='unsupported_platform'):
+            preflight(system='Darwin',machine='arm64',os_version=version)
+    with pytest.raises(DemoError,match='unsupported_platform'):
+        preflight(system='Darwin',machine='x86_64',os_version='26.1')
+    assert not list(tmp_path.iterdir())
+
+
 def test_clean_second_browser_cannot_read_or_mutate(app):
     assert request(app, '/api/status')[0] == 401
     assert request(app, '/api/create', 'POST', {'consent':{}})[0] == 401

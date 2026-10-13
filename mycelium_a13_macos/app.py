@@ -48,6 +48,15 @@ class DemoError(RuntimeError):
     pass
 
 
+def _admitted_macos(os_version):
+    if os_version == '15.6.1':
+        return True
+    parts = os_version.split('.') if isinstance(os_version, str) else []
+    if not 2 <= len(parts) <= 3 or not all(p.isdigit() and len(p) <= 3 for p in parts):
+        return False
+    return int(parts[0]) >= 26
+
+
 def preflight(*, system=None, machine=None, os_version=None):
     system = platform.system() if system is None else system
     machine = platform.machine() if machine is None else machine
@@ -56,9 +65,11 @@ def preflight(*, system=None, machine=None, os_version=None):
     if system == 'Linux':
         return _linux_preflight(machine=machine, os_version=os_version)
     os_version = platform.mac_ver()[0] if os_version is None else os_version
-    # Exact two-device compatibility targets. Admitting a target here is not
-    # evidence that the final package or physical serving was exercised on it.
-    if system != 'Darwin' or machine != 'arm64' or os_version not in {'26.5.1','15.6.1'}:
+    # 15.6.1 stays an exact historical target; any macOS 26 or later release is
+    # admitted because that is the bundled runtime's own floor (Homebrew
+    # Python/OpenSSL built for 26.0). Admitting a release here is not evidence
+    # that the final package or physical serving was exercised on it.
+    if system != 'Darwin' or machine != 'arm64' or not _admitted_macos(os_version):
         error=DemoError('unsupported_platform')
         error.observed_platform={'system':system,'machine':machine,'os_version':os_version}
         raise error
