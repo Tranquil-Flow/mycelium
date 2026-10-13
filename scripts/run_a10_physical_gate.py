@@ -30,6 +30,15 @@ Subcommands (every output is an owner-private file under ``--out``, mode 0700/06
     batch in the nodes' A10 publications and a baseline window must show none;
     missing publications invalidate the window (``missing_measurement``), never
     count as batching.  Output parity is judged privately per request shape.
+    Before any of that, gate 1's two clean browser sessions run under the
+    candidate policy: ``ui/web/scripts/a10-browser-sessions.mjs`` (one engine,
+    ``--browser-engine``, default chromium; ``--node`` the Node binary) drives two
+    fresh browser profiles through the ordinary operator UI to submit the frozen
+    concurrent and late-arrival browser workload (``browser_workload``).  The run
+    refuses before any traffic when the harness or engine is unavailable, and
+    stops before calibration unless the harness report passes and the route's own
+    publications show every browser request executed and one in a true runtime
+    batch (``browser-sessions.json``).
 
 ``verifier-product``
     Runs the same matrix and negatives through the product dispatcher of a live
@@ -49,7 +58,8 @@ Subcommands (every output is an owner-private file under ``--out``, mode 0700/06
 
 ``qualify``
     Assembles the evidence written by the other subcommands and decides it with
-    ``qualify_runtime_batch``.
+    ``qualify_runtime_batch``; ``gate-decision.json`` binds that sealed bundle to
+    gate 1's browser-session evidence and is qualified only when both are.
 
 No output contains a prompt, decoded text, token IDs, cookies, hostnames,
 addresses, private paths or exception strings.
@@ -67,6 +77,7 @@ import os
 import random
 import re
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
@@ -792,9 +803,27 @@ def run_benchmark(
    out: Path,
    time_scale: float = 1.0,
    seed: int = 165,
+   browser_sessions: Callable[[], Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-   """Calibrate, warm up and run the 16 registered pairs; seal the run document."""
+   """Run gate 1's browser phase, then calibrate, warm up and run the 16 pairs.
 
+   ``browser_sessions`` is the two-clean-browser-session phase (specification
+   §10 gate 1, :class:`BrowserSessionsPhase`).  It runs first, under the
+   candidate policy, before any scored traffic; its sealed evidence is written to
+   ``browser-sessions.json`` and a failed phase stops the run before
+   calibration, so a refused browser gate never costs the 3-4 h benchmark.
+   Without it the summary records gate 1's browser requirement as unproven.
+   """
+
+   if browser_sessions is None:
+      browser = {"executed": False, "passed": False, "reason": "not_configured"}
+   else:
+      switch_mode("candidate")
+      browser = dict(browser_sessions())
+      write_private_json(out / "browser-sessions.json", browser)
+      if browser.get("passed") is not True:
+         blockers = browser.get("blockers") or ["browser_sessions_unproven"]
+         raise GateError(f"browser_sessions_failed:{blockers[0]}")
    switch_mode("baseline")
    calibration = []
    selected = None
@@ -884,6 +913,7 @@ def run_benchmark(
       "latency_ms": {key: max(values) for key, values in latency.items()},
       "output_parity": {"compared_requests": len(compared), "mismatched_requests": len(mismatched)},
       "reliability": {mode: dict(counts) for mode, counts in reliability.items()},
+      "browser_sessions": browser,
    }
    write_private_json(out / "benchmark-run.json", run)
    write_private_json(out / "benchmark-summary.json", summary)
@@ -916,6 +946,414 @@ def command_switcher(commands: Mapping[str, str]) -> Callable[[str], None]:
          raise GateError(f"mode_command_failed:{mode}")
 
    return switch
+
+
+# ---------------------------------------------------------------------------
+# gate 1: two clean browser sessions submit the frozen workload
+# ---------------------------------------------------------------------------
+
+BROWSER_PROTOCOL = "mycelium.a10_browser_sessions.v1"
+BROWSER_WORKLOAD_PROTOCOL = "mycelium.a10_browser_workload.v1"
+BROWSER_EVIDENCE_PROTOCOL = "mycelium.a10_gate1_browser_evidence.v1"
+BROWSER_HARNESS = REPO_ROOT / "ui" / "web" / "scripts" / "a10-browser-sessions.mjs"
+BROWSER_ENGINES = ("chromium", "firefox", "webkit")
+BROWSER_MODES = ("live", "local_conformance")
+#: The harness's ordered checks (``REQUIRED_CHECKS`` in the .mjs); all must pass.
+REQUIRED_BROWSER_CHECKS = (
+   "live_status_preflight",
+   "fresh_independent_sessions",
+   "concurrent_round_submitted_through_ui",
+   "concurrent_overlap_observed",
+   "late_arrival_round_submitted_through_ui",
+   "late_arrival_observed",
+   "all_requests_completed",
+   "cross_session_privacy",
+   "clean_third_session_privacy",
+   "same_origin_inference_only_mutations",
+)
+#: Frozen browser rounds over the benchmark's own request shapes: equal prompt
+#: lengths (single-digit indexes, ``prompt_short``) so concurrent members can share a
+#: decode position, interactive QoS (the UI's ordinary policy), and a long leader so
+#: the late arrival lands while it decodes.
+BROWSER_ROUNDS = (
+   (
+      "concurrent",
+      (
+         ("a", RequestShape(0, "prompt_short", "output_long", "interactive", 0.0)),
+         ("b", RequestShape(2, "prompt_short", "output_long", "interactive", 0.0)),
+      ),
+   ),
+   (
+      "late_arrival",
+      (
+         ("a", RequestShape(4, "prompt_short", "output_long", "interactive", 0.0)),
+         ("b", RequestShape(6, "prompt_short", "output_short", "interactive", 0.0)),
+      ),
+   ),
+)
+_BROWSER_REPORT_FIELDS = frozenset(
+   {
+      "protocol", "mode", "engine", "origin", "deployment_id", "workload_digest",
+      "independent_sessions", "checks", "failures", "rounds", "requests", "request_count",
+      "passed", "live_evidence", "qualification_claim", "physical_claim",
+   }
+)
+_BROWSER_REQUEST_FIELDS = frozenset(
+   {
+      "session", "round", "index", "request_ref", "max_new_tokens", "qos_class",
+      "accepted_at_ms", "submitted_through_ui", "frozen_submission_verified", "terminal",
+      "tokens", "terminal_observed_at_ms",
+   }
+)
+_REF = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_HARNESS_CODE = re.compile(r"[a-z][a-z0-9_]{0,40}(?::[a-z0-9_]{1,80}){0,3}\Z")
+
+
+def _sha256_json(document: object) -> str:
+   canonical = json.dumps(document, sort_keys=True, separators=(",", ":"), allow_nan=False)
+   return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def browser_workload() -> dict[str, Any]:
+   """The frozen two-session browser workload, digest-bound (the harness re-checks it)."""
+
+   body = {
+      "protocol": BROWSER_WORKLOAD_PROTOCOL,
+      "sessions": ["a", "b"],
+      "rounds": [
+         {
+            "round": name,
+            "submissions": [
+               {
+                  "session": session,
+                  "index": shape.index,
+                  "prompt": prompt_text(shape),
+                  "max_new_tokens": OUTPUT_BUCKETS[shape.output_bucket],
+                  "qos_class": shape.qos_class,
+                  "workload_profile_id": "interactive_chat_v1",
+               }
+               for session, shape in submissions
+            ],
+         }
+         for name, submissions in BROWSER_ROUNDS
+      ],
+   }
+   return {**body, "workload_digest": _sha256_json(body)}
+
+
+def _browser_request_valid(record: object, expected: Mapping[str, Any], round_name: str) -> bool:
+   extra = set()
+   if round_name == "late_arrival":
+      extra = {"first_token_observed_at_ms"} if expected["session"] == "a" else {"arrived_while_leader_decoding"}
+   if not isinstance(record, Mapping) or set(record) != _BROWSER_REQUEST_FIELDS | extra:
+      return False
+   tokens = record["tokens"]
+   return (
+      record["session"] == expected["session"]
+      and record["round"] == round_name
+      and record["index"] == expected["index"]
+      and record["max_new_tokens"] == expected["max_new_tokens"]
+      and record["qos_class"] == expected["qos_class"]
+      and isinstance(record["request_ref"], str)
+      and _REF.fullmatch(record["request_ref"]) is not None
+      and record["submitted_through_ui"] is True
+      and record["frozen_submission_verified"] is True
+      and record["terminal"] == "completed"
+      and type(tokens) is int
+      and 1 <= tokens <= expected["max_new_tokens"]
+      and (record.get("arrived_while_leader_decoding", True) is True)
+   )
+
+
+def validate_browser_report(
+   report: object, *, workload: Mapping[str, Any], mode: str
+) -> dict[str, Any]:
+   """Decide one harness report; any deviation is a coded refusal (GateError)."""
+
+   if not isinstance(report, Mapping) or set(report) != _BROWSER_REPORT_FIELDS:
+      raise GateError("browser_report_shape_invalid")
+   if report["protocol"] != BROWSER_PROTOCOL:
+      raise GateError("browser_report_protocol_invalid")
+   if report["mode"] != mode or mode not in BROWSER_MODES:
+      raise GateError("browser_report_mode_mismatch")
+   if report["workload_digest"] != workload["workload_digest"]:
+      raise GateError("browser_report_workload_mismatch")
+   if report["independent_sessions"] != 2:
+      raise GateError("browser_report_sessions_invalid")
+   if report["passed"] is not True or report["failures"] != []:
+      raise GateError("browser_report_not_passed")
+   if list(report["checks"]) != list(REQUIRED_BROWSER_CHECKS):
+      raise GateError("browser_report_checks_incomplete")
+   if report["live_evidence"] is not (mode == "live"):
+      raise GateError("browser_report_not_live_evidence")
+   if report["qualification_claim"] is not False or report["physical_claim"] is not False:
+      raise GateError("browser_report_claim_invalid")
+   expected = [
+      (round_["round"], item) for round_ in workload["rounds"] for item in round_["submissions"]
+   ]
+   records = report["requests"]
+   if (
+      not isinstance(records, list)
+      or len(records) != len(expected)
+      or not all(
+         _browser_request_valid(record, item, name)
+         for record, (name, item) in zip(records, expected)
+      )
+      or len({record["request_ref"] for record in records}) != len(records)
+   ):
+      raise GateError("browser_report_requests_invalid")
+   if report["engine"] not in BROWSER_ENGINES or not isinstance(report["deployment_id"], str):
+      raise GateError("browser_report_shape_invalid")
+   rounds = report["rounds"] if isinstance(report["rounds"], Mapping) else {}
+
+   def _count(round_name: str, key: str) -> int | None:
+      value = rounds.get(round_name, {}).get(key) if isinstance(rounds.get(round_name), Mapping) else None
+      return value if type(value) is int and value >= 0 else None
+
+   return {
+      "mode": mode,
+      "engine": report["engine"],
+      "deployment_id": report["deployment_id"],
+      "workload_digest": report["workload_digest"],
+      "concurrent_acceptance_skew_ms": _count("concurrent", "acceptance_skew_ms"),
+      "leader_tokens_before_late_submit": _count("late_arrival", "leader_tokens_before_late_submit"),
+      "request_refs": [record["request_ref"] for record in records],
+      "requests": [
+         {key: record[key] for key in ("session", "round", "index", "tokens", "terminal")}
+         for record in records
+      ],
+   }
+
+
+def browser_runtime_evidence(
+   publications: Sequence[Mapping[str, Any]], request_refs: Sequence[str]
+) -> dict[str, Any]:
+   """What the route's own runtime publications show for the browser requests.
+
+   A request is *executed on the route* when a node published a stage-compute
+   interval under its pseudonym, and *in a true runtime batch* when one of its
+   intervals carries a ``runtime_batch_ref`` shared with at least one other
+   request.  Absent publications count as nothing, never as success.
+   """
+
+   refs = set(request_refs)
+   executed: set[str] = set()
+   members: dict[str, set[str]] = {}
+   for publication in publications:
+      for interval in publication.get("intervals", ()) if isinstance(publication, Mapping) else ():
+         if not isinstance(interval, Mapping):
+            continue
+         ref = interval.get("request_ref")
+         if ref in refs:
+            executed.add(ref)
+         batch = interval.get("runtime_batch_ref")
+         if isinstance(batch, str) and batch and isinstance(ref, str):
+            members.setdefault(batch, set()).add(ref)
+   true_batches = {batch: refs_in for batch, refs_in in members.items() if len(refs_in) >= 2}
+   batched = {ref for refs_in in true_batches.values() for ref in refs_in if ref in refs}
+   with_browser = [refs_in for refs_in in true_batches.values() if refs_in & refs]
+   return {
+      "browser_requests": len(refs),
+      "executed_on_route": len(executed),
+      "in_true_runtime_batch": len(batched),
+      "browser_pair_in_one_batch": any(len(refs_in & refs) >= 2 for refs_in in with_browser),
+      "true_batches_with_browser_members": len(with_browser),
+   }
+
+
+def browser_runtime_blockers(evidence: Mapping[str, Any]) -> list[str]:
+   blockers = []
+   if evidence["browser_requests"] == 0 or evidence["executed_on_route"] != evidence["browser_requests"]:
+      blockers.append("browser_request_not_executed_on_route")
+   if evidence["in_true_runtime_batch"] < 1:
+      blockers.append("browser_requests_not_in_true_runtime_batch")
+   return blockers
+
+
+class _PublicationCollector:
+   """Union the route's A10 publications while the browser phase runs.
+
+   A publication retains only its most recent intervals, so the live status is
+   read repeatedly and intervals are merged by their node-unique ``interval_ref``.
+   """
+
+   def __init__(self, live_status: Callable[[], Mapping[str, Any]], interval_s: float = 1.0) -> None:
+      self._live_status = live_status
+      self._interval_s = interval_s
+      self._intervals: dict[str, dict[str, Any]] = {}
+      self._lock = threading.Lock()
+      self._stop = threading.Event()
+      self._thread = threading.Thread(target=self._run, name="a10-browser-publications", daemon=True)
+      self.deployment_id: str | None = None
+
+   def _poll(self) -> None:
+      try:
+         status = self._live_status()
+      except Exception:  # noqa: BLE001 - a missed read is simply not evidence
+         return
+      if isinstance(status.get("deployment_id"), str):
+         self.deployment_id = status["deployment_id"]
+      with self._lock:
+         for publication in publications_from_status(status):
+            for interval in publication.get("intervals", ()):
+               if isinstance(interval, Mapping) and isinstance(interval.get("interval_ref"), str):
+                  self._intervals[interval["interval_ref"]] = dict(interval)
+
+   def _run(self) -> None:
+      while not self._stop.wait(self._interval_s):
+         self._poll()
+
+   def __enter__(self) -> "_PublicationCollector":
+      self._poll()
+      self._thread.start()
+      return self
+
+   def __exit__(self, *_exc: object) -> None:
+      self._stop.set()
+      self._thread.join(timeout=30)
+      self._poll()
+
+   def publications(self) -> list[dict[str, Any]]:
+      with self._lock:
+         return [{"intervals": list(self._intervals.values())}]
+
+
+class BrowserSessionsPhase:
+   """Run the two-session browser harness against the gate's own base URL.
+
+   One engine, one invocation (``node a10-browser-sessions.mjs --engine=…``), with
+   the frozen workload written next to the evidence.  ``preflight`` checks the
+   configuration and the engine executable without contacting the origin, so a
+   missing browser refuses before the benchmark starts.  ``__call__`` returns the
+   sealed gate-1 browser evidence; it passes only when the harness report is a
+   complete, live, passed report for the frozen workload, bound to the live
+   deployment, and the route's runtime publications show every browser request
+   executed and at least one in a true runtime batch.
+   """
+
+   def __init__(
+      self,
+      *,
+      base_url: str,
+      out: Path,
+      live_status: Callable[[], Mapping[str, Any]],
+      engine: str = "chromium",
+      node: str = "node",
+      harness: Path = BROWSER_HARNESS,
+      mode: str = "live",
+      timeout_s: float = 1800.0,
+      environment: Mapping[str, str] | None = None,
+   ) -> None:
+      if engine not in BROWSER_ENGINES:
+         raise GateError("browser_engine_invalid")
+      if mode not in BROWSER_MODES:
+         raise GateError("browser_mode_invalid")
+      self.base_url = base_url.rstrip("/")
+      self.out = Path(out)
+      self.evidence = self.out / "browser-sessions"
+      self.live_status = live_status
+      self.engine = engine
+      self.node = node
+      self.harness = Path(harness)
+      self.mode = mode
+      self.timeout_s = timeout_s
+      self.workload = browser_workload()
+      self._environment = dict(environment or {})
+
+   def _env(self) -> dict[str, str]:
+      env = {
+         key: value
+         for key, value in os.environ.items()
+         if key in {"HOME", "PATH", "TMPDIR", "LANG", "PLAYWRIGHT_BROWSERS_PATH"}
+      }
+      env.update(self._environment)
+      env.update(
+         A10_BROWSER_ORIGIN=self.base_url,
+         A10_BROWSER_EVIDENCE=str(self.evidence / self.engine),
+         A10_BROWSER_WORKLOAD=str(self.out / "browser-workload.json"),
+         A10_BROWSER_MODE=self.mode,
+      )
+      return env
+
+   def _invoke(self, *arguments: str, timeout: float) -> subprocess.CompletedProcess[str]:
+      try:
+         return subprocess.run(
+            [self.node, str(self.harness), f"--engine={self.engine}", *arguments],
+            cwd=str(self.harness.parent.parent),
+            env=self._env(),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+         )
+      except (OSError, subprocess.TimeoutExpired):
+         raise GateError("browser_harness_unavailable") from None
+
+   def preflight(self) -> dict[str, Any]:
+      if not self.harness.is_file():
+         raise GateError("browser_harness_missing")
+      if self.evidence.exists():
+         raise GateError("browser_evidence_directory_exists")
+      write_private_json(self.out / "browser-workload.json", self.workload)
+      completed = self._invoke("--preflight", timeout=120)
+      try:
+         document = json.loads(completed.stdout.strip().splitlines()[-1])
+      except (IndexError, ValueError):
+         document = None
+      if (
+         completed.returncode != 0
+         or not isinstance(document, Mapping)
+         or document.get("engine_executable_present") is not True
+         or document.get("workload_digest") != self.workload["workload_digest"]
+      ):
+         raise GateError("browser_harness_preflight_failed")
+      return dict(document)
+
+   def __call__(self) -> dict[str, Any]:
+      blockers: list[str] = []
+      decided: dict[str, Any] | None = None
+      runtime: dict[str, Any] | None = None
+      with _PublicationCollector(self.live_status) as collector:
+         completed = self._invoke(timeout=self.timeout_s)
+      try:
+         report = read_json(self.evidence / self.engine / "browser-report.json")
+      except (OSError, ValueError):
+         report = None
+         blockers.append("browser_report_missing")
+      if report is not None:
+         try:
+            decided = validate_browser_report(report, workload=self.workload, mode=self.mode)
+         except GateError as error:
+            blockers.append(str(error))
+            failures = report.get("failures") if isinstance(report, Mapping) else None
+            for item in failures[:8] if isinstance(failures, list) else ():
+               # Only closed codes are recorded; free text could carry a path.
+               code = item if isinstance(item, str) and _HARNESS_CODE.fullmatch(item) else "unclassified"
+               blockers.append(f"harness:{code}")
+      if completed.returncode != 0 and not blockers:
+         blockers.append("browser_harness_exit_nonzero")
+      if decided is not None:
+         if collector.deployment_id is None or decided["deployment_id"] != collector.deployment_id:
+            blockers.append("browser_deployment_binding_mismatch")
+         runtime = browser_runtime_evidence(collector.publications(), decided["request_refs"])
+         blockers.extend(browser_runtime_blockers(runtime))
+      checks_passed = decided is not None and not blockers
+      if self.mode != "live":
+         blockers.append("local_conformance_is_not_gate_evidence")
+      return {
+         "protocol": BROWSER_EVIDENCE_PROTOCOL,
+         "mode": self.mode,
+         "engine": self.engine,
+         "workload_digest": self.workload["workload_digest"],
+         "report_digest": None if report is None else _sha256_json(report),
+         "browser": None
+         if decided is None
+         else {key: value for key, value in decided.items() if key != "request_refs"},
+         "runtime": runtime,
+         "checks_passed": checks_passed,
+         "passed": checks_passed and self.mode == "live",
+         "blockers": blockers,
+      }
 
 
 # ---------------------------------------------------------------------------
@@ -1003,6 +1441,30 @@ def assemble_and_qualify(out: Path, *, benchmark_manifest_digest: str, cross_hos
       bundle = {"decision": "not_qualified", "blockers": [getattr(error, "code", type(error).__name__)]}
    write_private_json(out / "runtime-batch-qualification.json", bundle)
    return bundle
+
+
+def gate_decision(out: Path, bundle: Mapping[str, Any]) -> dict[str, Any]:
+   """Gate-level decision: the runtime-batch bundle plus gate 1's browser sessions.
+
+   The sealed runtime-batch bundle is left untouched; this document binds it and
+   the gate-1 browser evidence, and is ``qualified`` only when both are.
+   """
+
+   summary = read_json(out / "benchmark-summary.json") if (out / "benchmark-summary.json").is_file() else {}
+   browser = summary.get("browser_sessions") if isinstance(summary, Mapping) else None
+   blockers = list(bundle.get("blockers", []))
+   if not isinstance(browser, Mapping) or browser.get("passed") is not True:
+      blockers.append("browser_sessions_not_proven")
+   decision = {
+      "protocol": GATE_PROTOCOL,
+      "subcommand": "qualify",
+      "runtime_batch_qualification_binding": bundle.get("qualification_binding"),
+      "browser_sessions_digest": _sha256_json(browser) if isinstance(browser, Mapping) else None,
+      "decision": "qualified" if bundle.get("decision") == "qualified" and not blockers else "not_qualified",
+      "blockers": sorted(set(blockers)),
+   }
+   write_private_json(out / "gate-decision.json", decision)
+   return decision
 
 
 # ---------------------------------------------------------------------------
@@ -1184,6 +1646,8 @@ def parser() -> argparse.ArgumentParser:
    bench.add_argument("--baseline-command", required=True)
    bench.add_argument("--candidate-command", required=True)
    bench.add_argument("--out", type=Path, required=True)
+   bench.add_argument("--browser-engine", choices=BROWSER_ENGINES, default="chromium")
+   bench.add_argument("--node", default=shutil.which("node") or "node")
    negative = sub.add_parser("negatives")
    negative.add_argument("--base-url", required=True)
    negative.add_argument("--out", type=Path, required=True)
@@ -1254,6 +1718,17 @@ def main(argv: Sequence[str] | None = None) -> int:
          )
          print(json.dumps({"decision": bundle["decision"], "matrix_passed": bundle["matrix_passed"], "blockers": bundle["blockers"]}, sort_keys=True))
          return 0 if bundle["matrix_passed"] else 1
+      if arguments.command == "benchmark":
+         # Gate 1's two clean browser sessions: refuse before any traffic when the
+         # harness or its browser engine is unavailable (no origin contact here).
+         browser = BrowserSessionsPhase(
+            base_url=arguments.base_url,
+            out=out,
+            live_status=lambda: client.live_status(),
+            engine=arguments.browser_engine,
+            node=arguments.node,
+         )
+         browser.preflight()
       client = ProductClient(arguments.base_url) if hasattr(arguments, "base_url") else None
       if arguments.command == "benchmark":
          summary = run_benchmark(
@@ -1261,9 +1736,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             switch_mode=command_switcher({"baseline": arguments.baseline_command, "candidate": arguments.candidate_command}),
             observe_mode=mode_observer(client),
             out=out,
+            browser_sessions=browser,
          )
          write_private_json(out / "live-status-final.json", client.live_status())
-         print(json.dumps({"throughput": summary["throughput"]["decision"]}, sort_keys=True))
+         print(
+            json.dumps(
+               {"throughput": summary["throughput"]["decision"], "browser_sessions": summary["browser_sessions"]["passed"]},
+               sort_keys=True,
+            )
+         )
          return 0
       if arguments.command == "negatives":
          results = run_product_negatives(client, out=out)
@@ -1275,8 +1756,9 @@ def main(argv: Sequence[str] | None = None) -> int:
          cross_host_clock_uncertainty=arguments.cross_host_clock_uncertainty,
          provenance=arguments.provenance,
       )
-      print(json.dumps({"decision": bundle["decision"], "blockers": bundle.get("blockers", [])}, sort_keys=True))
-      return 0 if bundle["decision"] == "qualified" else 1
+      decision = gate_decision(out, bundle)
+      print(json.dumps({"decision": decision["decision"], "blockers": decision["blockers"]}, sort_keys=True))
+      return 0 if decision["decision"] == "qualified" else 1
    except GateError as error:
       print(json.dumps({"error": str(error)}), file=sys.stderr)
       return 2
