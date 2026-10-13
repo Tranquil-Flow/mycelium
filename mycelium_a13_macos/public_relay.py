@@ -33,6 +33,8 @@ _LOCAL_PREFIXES=('/pairing-window/','/link-probe/','/member-report/')
 #: ``handler(method, path, headers, body) -> (status, content_type, raw)``.
 _CHAT_CSP=("default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; "
            "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+_CHUNK_LINE_MAX=10
+_CHUNK_SIZE_RE=re.compile(rb'[0-9A-Fa-f]{1,8}\r\n')
 _LOCAL_TYPES=frozenset({'application/json','text/html; charset=utf-8','image/svg+xml'})
 
 
@@ -105,18 +107,42 @@ class _RelayHandler(BaseHTTPRequestHandler):
         except (OSError,http.client.HTTPException):self._reply(502,b'{"error":"relay_backend_unavailable"}')
         finally:
             if connection is not None:connection.close()
+    def _read_chunked(self):
+        """Strict, bounded HTTP/1.1 chunked body (no extensions, no trailers)."""
+        body=bytearray()
+        while True:
+            line=self.rfile.readline(_CHUNK_LINE_MAX+1)
+            if not _CHUNK_SIZE_RE.fullmatch(line):raise ValueError()
+            size=int(line[:-2],16)
+            if size==0:break
+            if len(body)+size>_MAX_FRAME:raise ValueError()
+            data=self.rfile.read(size)
+            if len(data)!=size or self.rfile.read(2)!=b'\r\n':raise ValueError()
+            body+=data
+        if self.rfile.read(2)!=b'\r\n':raise ValueError()
+        return bytes(body)
     def _local(self,chat=False):
-        if (self.headers.get('Transfer-Encoding') is not None
+        # Cloudflare's tunnel re-frames a body whose length its edge did not
+        # forward (observed: every empty-body POST) as ``Transfer-Encoding:
+        # chunked`` without Content-Length.  Only the in-process routes accept
+        # exactly that one shape; TE+CL, repeated/listed codings, GET bodies and
+        # credentials stay refused.  Forwarded /seed/ traffic is unchanged.
+        codings=self.headers.get_all('Transfer-Encoding',[])
+        chunked=len(codings)==1 and codings[0].strip().lower()=='chunked'
+        if ((codings and (not chunked or self.command!='POST'
+                          or self.headers.get_all('Content-Length',[])))
                 or self.headers.get('Cookie') is not None
                 or self.headers.get('Authorization') is not None):
             return self._reply(400,b'{"error":"relay_headers_invalid"}')
         try:
-            lengths=self.headers.get_all('Content-Length',[])
-            if len(lengths)>1 or (self.command=='POST' and len(lengths)!=1):raise ValueError()
-            length=int(lengths[0]) if lengths else 0
-            if not 0<=length<=_MAX_FRAME or (self.command=='GET' and length):raise ValueError()
-            body=self.rfile.read(length)
-            if len(body)!=length:raise ValueError()
+            if chunked:body=self._read_chunked()
+            else:
+                lengths=self.headers.get_all('Content-Length',[])
+                if len(lengths)>1 or (self.command=='POST' and len(lengths)!=1):raise ValueError()
+                length=int(lengths[0]) if lengths else 0
+                if not 0<=length<=_MAX_FRAME or (self.command=='GET' and length):raise ValueError()
+                body=self.rfile.read(length)
+                if len(body)!=length:raise ValueError()
         except (ValueError,OSError):return self._reply(400,b'{"error":"relay_frame_invalid"}')
         if chat:
             handler=self.server.chat
