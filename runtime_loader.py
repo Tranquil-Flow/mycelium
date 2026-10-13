@@ -2132,18 +2132,39 @@ def _digest_array(array: Any) -> str:
     return "sha256:" + digest.hexdigest()
 
 
-def _digest_probe_output(array: Any, runtime: Mapping[str, Any]) -> str:
-    """Digest probe semantics without binding NumPy BLAS rounding noise.
+#: Probe outputs digested by ranking instead of raw float bytes, per backend.
+_RANKED_PROBE_ARCHITECTURES = {
+    "numpy": frozenset({"qwen2", "qwen3"}),
+    "mlx": frozenset({"qwen2", "qwen3", "qwen3_5"}),
+}
 
-    Qwen's final NumPy stage can differ by a few float32 ULPs across otherwise
-    equivalent CPU math libraries.  The ordered top logits are the stable,
-    inference-relevant result of that probe, so bind the top eight indices at
-    every probe position instead of raw floating-point bytes.
+
+def _digest_probe_output(array: Any, runtime: Mapping[str, Any]) -> str:
+    """Digest probe semantics without binding device float rounding noise.
+
+    The digest lands in the load proof whose canonical digest the compiling
+    owner publishes as ``placement.load_proof_digest``; the member that later
+    loads the stage must reproduce it on ITS machine.  Raw float32 probe bytes
+    are not reproducible across machines: Qwen's final NumPy stage differs by a
+    few ULPs across equivalent CPU math libraries, and MLX selects its GEMM
+    tiling per GPU class (M1 ``applegpu_g13g`` vs M4 Pro ``applegpu_g16s``
+    accumulate in a different order), so a byte-identical stage loaded on an
+    M1 failed ``placement_load_proof_mismatch`` against an M4-compiled proof
+    (two-Mac run 14).  The ordered top eight indices at every probe position
+    are the stable, inference-relevant result of the probe, so those are bound
+    instead.  The loaded weight bytes stay bound exactly by
+    ``loaded_tensor_digest``.
     """
 
-    if runtime["architecture"] not in {"qwen2", "qwen3"} or runtime["backend"] != "numpy":
+    if runtime["architecture"] not in _RANKED_PROBE_ARCHITECTURES.get(
+        runtime["backend"], ()
+    ):
         return _digest_array(array)
-    values = np.asarray(array)
+    if isinstance(array, np.ndarray):
+        values = array
+    else:
+        mx = _mlx_module()
+        values = np.asarray(array.astype(mx.float32))
     top_count = min(8, values.shape[-1])
     ranked = np.argsort(values, axis=-1, kind="stable")[..., -top_count:]
     return _digest_array(ranked.astype(np.dtype("<i8"), copy=False))
