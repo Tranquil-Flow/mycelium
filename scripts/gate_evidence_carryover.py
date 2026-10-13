@@ -49,7 +49,9 @@ RECEIPT_PROTOCOL = "mycelium.gate_evidence_carryover.v1"
 DECISION_RULE = (
     "D2 (owner, 2026-10-13): a physical A-gate's GREEN evidence obtained on the evidence candidate "
     "STANDS on the final candidate when the gate's pinned source set is byte-identical between the two "
-    "commits; any change in a pinned file forces a rerun."
+    "commits; any change in a pinned file forces a rerun. R1 (owner, 2026-10-13): a change confined to the "
+    "generated pin manifests (A6 source manifest, contract manifest) carries; it is labelled "
+    "generated_pins_only."
 )
 CLAIM_BOUNDARY = (
     "Source-identity check only: CARRY says the pinned in-repo bytes are identical; it does not re-verify "
@@ -138,20 +140,24 @@ def evaluate_carryover(
         external_status, external_changed = _external_status(
             definition.gate, manifest_f["externals"], evidence_externals
         )
+        changed_paths = {item["path"] for item in changed}
+        generated_only = bool(changed) and changed_paths <= GENERATED_PIN_FILES
         reasons: list[str] = []
-        if changed:
+        if generated_only:
+            # Owner ruling R1: a regenerated pin manifest is metadata about code, not code.
+            reasons.append("generated_pins_only")
+        elif changed:
             reasons.append("pinned_source_changed")
         if external_status == "changed":
             reasons.append("external_driver_changed")
         if not at_final.externals_scanned and definition.external:
             reasons.append("externals_not_scanned")
         verdict = "RERUN" if ("pinned_source_changed" in reasons or "external_driver_changed" in reasons) else "CARRY"
-        changed_paths = {item["path"] for item in changed}
         results[definition.gate] = {
             "verdict": verdict,
             "reasons": reasons,
             "changed_files": changed,
-            "changed_only_generated_pins": bool(changed) and changed_paths <= GENERATED_PIN_FILES,
+            "changed_only_generated_pins": generated_only,
             "evidence_source_digest": manifest_e["source_digest"],
             "final_source_digest": manifest_f["source_digest"],
             "pinned_file_count_evidence": manifest_e["file_count"],

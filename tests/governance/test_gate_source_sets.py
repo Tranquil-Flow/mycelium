@@ -23,6 +23,7 @@ from scripts.gate_evidence_carryover import (
 )
 from scripts.gate_source_sets import (
     GATE_DEFINITIONS,
+    GENERATED_PIN_FILES,
     PROTOCOL,
     GateDefinition,
     GitTree,
@@ -206,7 +207,7 @@ def test_unrelated_change_carries(repo: tuple[Path, str]) -> None:
 
 def test_every_pinned_file_change_forces_rerun(repo: tuple[Path, str]) -> None:
     root, base = repo
-    pinned = sorted(_paths(GitTree(root, base), DEMO_GATE))
+    pinned = sorted(_paths(GitTree(root, base), DEMO_GATE) - GENERATED_PIN_FILES)
     assert len(pinned) >= 15
     for path in pinned:
         _git(root, "checkout", "-q", "--detach", base)
@@ -316,7 +317,7 @@ def test_path_join_pins_the_joined_file_not_its_parent_directories(repo: tuple[P
     assert stager == {"stager.py"}
 
 
-def test_rerun_driven_only_by_generated_pin_files_is_labelled(repo: tuple[Path, str]) -> None:
+def test_change_only_in_generated_pin_files_carries_under_r1(repo: tuple[Path, str]) -> None:
     root, base = repo
     files = {
         "contracts/contract-manifest.v1.json": '{"v": 1}\n',
@@ -326,9 +327,30 @@ def test_rerun_driven_only_by_generated_pin_files_is_labelled(repo: tuple[Path, 
     final = _commit(root, {"contracts/contract-manifest.v1.json": '{"v": 2}\n'}, "repin")
     gate = GateDefinition(gate="G", python_entries=("audit.py",))
     item = evaluate_carryover(root, evidence, final, definitions=(gate,))["gates"]["G"]
-    assert item["verdict"] == "RERUN"
+    assert item["verdict"] == "CARRY"
     assert item["changed_only_generated_pins"] is True
+    assert "generated_pins_only" in item["reasons"]
+    assert "pinned_source_changed" not in item["reasons"]
     assert [c["path"] for c in item["changed_files"]] == ["contracts/contract-manifest.v1.json"]
+
+
+def test_generated_pin_change_with_a_code_change_still_reruns(repo: tuple[Path, str]) -> None:
+    root, base = repo
+    files = {
+        "contracts/contract-manifest.v1.json": '{"v": 1}\n',
+        "audit.py": "from pathlib import Path\nM = Path(__file__).parent / 'contracts' / 'contract-manifest.v1.json'\n",
+    }
+    evidence = _commit(root, files, "pins")
+    final = _commit(
+        root,
+        {"contracts/contract-manifest.v1.json": '{"v": 2}\n', "audit.py": files["audit.py"] + "X = 1\n"},
+        "code and repin",
+    )
+    gate = GateDefinition(gate="G", python_entries=("audit.py",))
+    item = evaluate_carryover(root, evidence, final, definitions=(gate,))["gates"]["G"]
+    assert item["verdict"] == "RERUN"
+    assert item["changed_only_generated_pins"] is False
+    assert "pinned_source_changed" in item["reasons"]
 
 
 def test_external_window_npm_build_pins_the_web_bundle(repo: tuple[Path, str], tmp_path: Path) -> None:
