@@ -35,10 +35,41 @@ class ResourceProposal:
     estimated_cost_usd: int = 0
 
 
+#: Owner decision D-1 as RELAXED on 2026-10-13 for the coworking demo.
+D1_MODEL_BYTES_RULE = (
+    "D-1 (relaxed 2026-10-13): for a Qwen3 demo model whose pinned bf16 source "
+    "weights total at most SLICE_FETCH_MAX_SOURCE_BYTES, each member Mac fetches "
+    "ONLY its assigned layer slice of the pinned revision (ranged HTTPS), every "
+    "byte verified against the owner-compiled slice plan digests; never the whole "
+    "model. Other models (the Qwen2.5 7B candidate) keep the original D-1 rule: "
+    "weight bytes are pre-staged and never fetched by the app."
+)
+#: Slice-fetch ceiling on the bf16 SOURCE bytes: covers Qwen3 0.6B..14B
+#: (Qwen3-14B ~29.5 GB bf16 source, ~14.8 GB int8 at runtime); 32B does not fit.
+SLICE_FETCH_MAX_SOURCE_BYTES = 32_000_000_000
+SLICE_FETCH_ARCHITECTURES = frozenset({"qwen3"})
+
+
+def slice_fetch_permitted(source_weight_bytes: object, *, architecture: object) -> bool:
+    """Whether the relaxed D-1 slice rule applies to this model."""
+
+    return (
+        architecture in SLICE_FETCH_ARCHITECTURES
+        and type(source_weight_bytes) is int
+        and 0 < source_weight_bytes <= SLICE_FETCH_MAX_SOURCE_BYTES
+    )
+
+
 RESOURCE_PROPOSAL = ResourceProposal(
-    # D-1 (owner, 2026-09-16): model bytes are provisioned from the LAN seed /
-    # retained state and are NEVER fetched by the app.  The network allowance is
-    # therefore only the pinned 7B snapshot's non-weight metadata/text assets,
+    # D-1 (owner, 2026-09-16; relaxed 2026-10-13 for Qwen3 demo models, see
+    # D1_MODEL_BYTES_RULE): for THIS Qwen2.5 7B proposal model bytes are still
+    # provisioned from the LAN seed / retained state and are NEVER fetched by
+    # the app (not a slice-fetch architecture).  Qwen3 demo
+    # members instead fetch only their own digest-pinned slice
+    # (mycelium_a13_macos/slice_acquisition.py), budgeted by the slice plan's
+    # per-member ``download_bytes``, never by this whole-model allowance.
+    # The network allowance below is therefore only the pinned 7B snapshot's
+    # non-weight metadata/text assets,
     # 11,535,382 B = .gitattributes 1,519 + LICENSE 11,343 + README.md 6,240 +
     # config.json 663 + generation_config.json 243 + merges.txt 1,671,839 +
     # model.safetensors.index.json 27,752 + tokenizer.json 7,031,645 +

@@ -68,6 +68,9 @@ _STATUS_STATES = _ACTIVE_STATES | frozenset(
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _GIT_SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+_MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+_CONTENT_RANGE_RE = re.compile(r"^bytes ([0-9]{1,19})-([0-9]{1,19})/([0-9]{1,19}|\*)$")
+_MAX_RANGE_BYTES = 64 * 1024 * 1024
 _MAX_METADATA_BYTES = 4 * 1024 * 1024
 _MAX_REPOSITORY_FILES = 256
 _MAX_PATH_BYTES = 1024
@@ -539,6 +542,76 @@ class _HTTPRepositoryTransport:
             self.download_origin + path, method="GET", headers=headers
         )
         return self._open(request)
+
+    def read_range(
+        self,
+        model_id: str,
+        resolved_commit: str,
+        path: str,
+        offset: int,
+        length: int,
+    ) -> bytes:
+        """Exactly ``length`` bytes at ``offset`` of one pinned-revision file.
+
+        Slice fetch (D-1 as relaxed 2026-10-13): a member fetches only the
+        byte ranges of its assigned tensors. The caller digest-verifies every
+        range against the owner-compiled slice plan; this method only refuses
+        anything that is not one exact identity-encoded 206 partial response.
+        """
+        if (
+            not isinstance(model_id, str)
+            or _MODEL_ID_RE.fullmatch(model_id) is None
+            or not isinstance(resolved_commit, str)
+            or _COMMIT_RE.fullmatch(resolved_commit) is None
+            or type(offset) is not int
+            or type(length) is not int
+            or offset < 0
+            or not 0 < length <= _MAX_RANGE_BYTES
+        ):
+            _raise("range_request_invalid")
+        relative = _safe_relative_path(path)
+        url = (
+            self.download_origin
+            + "/"
+            + quote(model_id, safe="/")
+            + "/resolve/"
+            + quote(resolved_commit, safe="")
+            + "/"
+            + quote(relative.as_posix(), safe="/")
+            + "?download=true"
+        )
+        end = offset + length - 1
+        request = urllib.request.Request(
+            url,
+            method="GET",
+            headers={
+                "Accept": "application/octet-stream",
+                "Accept-Encoding": "identity",
+                "Range": f"bytes={offset}-{end}",
+                "User-Agent": "MyceliumA13SliceAcquisition/1",
+            },
+        )
+        with self._open(request) as response:
+            content_range = response.headers.get("Content-Range") or ""
+            matched = _CONTENT_RANGE_RE.fullmatch(content_range.strip())
+            declared = response.headers.get("Content-Length")
+            if (
+                getattr(response, "status", None) != 206
+                or response.headers.get("Content-Encoding") not in {None, "identity"}
+                or matched is None
+                or int(matched.group(1)) != offset
+                or int(matched.group(2)) != end
+                or (matched.group(3) != "*" and int(matched.group(3)) <= end)
+                or (declared is not None and declared.strip() != str(length))
+            ):
+                _raise("range_response_invalid")
+            try:
+                body = response.read(length + 1)
+            except (OSError, TimeoutError, http.client.HTTPException) as exc:
+                _raise("network_error", exc)
+        if len(body) != length:
+            _raise("range_response_invalid")
+        return body
 
 
 def _validate_manifest(value: object, *, model: ModelContract) -> dict[str, Any]:

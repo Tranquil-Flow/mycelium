@@ -983,6 +983,42 @@ def _topology_nodes(
     return copy.deepcopy(nodes)
 
 
+def _managed_layer_ranges(
+    value: Any,
+    *,
+    node_ids: tuple[str, ...],
+    managed_transport: bool,
+) -> tuple[range, ...] | None:
+    """Validate an owner-computed contiguous split for a managed topology.
+
+    The A13 owner derives these ranges from member capability reports
+    (``mycelium_a13_macos.layer_split``), one non-empty ``[start, end)`` per
+    topology node in topology order, starting at layer 0. Coverage of the full
+    model depth is re-checked by the canonical preparer against the manifest.
+    """
+
+    if value is None:
+        return None
+    if not managed_transport:
+        raise RuntimeError("managed_layer_ranges_require_managed_transport")
+    if not isinstance(value, (list, tuple)) or len(value) != len(node_ids):
+        raise RuntimeError("managed_layer_ranges_invalid")
+    ranges: list[range] = []
+    expected = 0
+    for item in value:
+        if (
+            not isinstance(item, (list, tuple))
+            or len(item) != 2
+            or any(type(bound) is not int for bound in item)
+            or item[0] != expected
+            or item[1] <= item[0]
+        ):
+            raise RuntimeError("managed_layer_ranges_invalid")
+        ranges.append(range(item[0], item[1]))
+        expected = item[1]
+    return tuple(ranges)
+
+
 def _placement_exclusions(document: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     """Keep topology-wide M14 exclusions out of M13's node exclusion field."""
 
@@ -1464,6 +1500,11 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
     )
     node_ids = tuple(node["node_id"] for node in topology)
     runtime_backends = {node["node_id"]: node["runtime_backend"] for node in topology}
+    managed_ranges = _managed_layer_ranges(
+        getattr(args, "managed_layer_ranges", None),
+        node_ids=node_ids,
+        managed_transport=bool(getattr(args, "managed_transport", False)),
+    )
     deployment_id = getattr(args, "deployment_id", None) or str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
@@ -1554,6 +1595,12 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
     )
     if is_m18 and phone_evidence:
         raise RuntimeError("phone_replica_plan_unsupported")
+    if managed_ranges is not None and (
+        m13_document is not None or preparation_ranges is not None
+    ):
+        # One placement authority per build: an owner capability split never
+        # silently overrides a signed control-plane or preparation plan.
+        raise RuntimeError("managed_layer_ranges_conflict")
     if is_m18:
         primary_track = m13_document["route_plan"]["legal_tracks"][0]["placement_ids"]
         placement_intent = {
@@ -1580,6 +1627,9 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
     elif preparation_ranges is not None:
         prepare_node_ids = node_ids
         prepare_ranges = preparation_ranges
+    elif managed_ranges is not None:
+        prepare_node_ids = node_ids
+        prepare_ranges = managed_ranges
     else:
         prepare_node_ids = node_ids
         prepare_ranges = planned_ranges
