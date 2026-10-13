@@ -395,7 +395,7 @@ export async function verifyInferenceOutcome(page, scenario) {
   if (!/Failed/i.test(statusText)) fail('negative_ui_terminal_missing');
 }
 
-async function runScenario(page, scenario, faultControl, usedCases, maximumNewTokens) {
+export async function runScenario(page, scenario, faultControl, usedCases, maximumNewTokens) {
   const promptCanary = `A6-BROWSER-PRIVATE-PROMPT-${scenario}-${Date.now()}`;
   const outputCanary = `A6-BROWSER-PRIVATE-OUTPUT-${scenario}-${Date.now()}`;
   const privateCanaries = [promptCanary, outputCanary];

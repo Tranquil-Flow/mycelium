@@ -447,3 +447,148 @@ test('the browser harness keeps its 300 s transition bound by default', () => {
   const source = readFileSync(scriptPath, 'utf8');
   assert.match(source, /timeout = 300_000/);
 });
+
+// Recovery aggregates shaped like the production producer, not a hand model:
+// mycelium_live/router_port.py recovery_public_projection publishes the M16
+// coordinator's terminal state (completed, failed or cancelled; never
+// TERMINAL_BLOCKED) and recovery_attempt = request_attempt - 1, which rises
+// only at cutover. mycelium_product_spine/projector.py then aggregates them.
+const IDLE = Object.freeze({
+  breaker_state: 'closed', request_count: 0, recovering_count: 0, terminal_count: 0,
+  terminal_blocked_count: 0, cleanup_complete_count: 0, reconciled_count: 0,
+  max_recovery_attempt: 0,
+});
+const AFTER_POSITIVE = Object.freeze({
+  ...IDLE, request_count: 1, terminal_count: 1, cleanup_complete_count: 1, max_recovery_attempt: 1,
+});
+
+function scenarioPage({ baseline, afterFault, uiStatus, clock }) {
+  const state = { clicked: false, faulted: false, index: 0, cursor: 100, url: 'http://127.0.0.1:9/#inference' };
+  const body = [...new Set(Object.values(JSON.parse(readFileSync(fileURLToPath(
+    new URL('../src/features/recovery/workspaceFields.json', import.meta.url)), 'utf8'))).flat())].join('\n');
+  const observe = () => {
+    if (!state.clicked) return baseline;
+    if (!state.faulted) return { ...baseline, request_count: baseline.request_count + 1 };
+    return afterFault[Math.min(state.index++, afterFault.length - 1)];
+  };
+  const waits = { waitFor: async () => undefined };
+  const page = {
+    url: () => state.url,
+    goto: async (url) => { state.url = url; },
+    reload: async () => undefined,
+    goBack: async () => undefined,
+    goForward: async () => undefined,
+    evaluate: async () => ({ cursor: state.cursor++, ...observe() }),
+    waitForTimeout: async (ms) => { clock.now += ms; },
+    waitForFunction: async () => undefined,
+    context: () => ({ setOffline: async () => undefined }),
+    getByLabel: () => ({ fill: async () => undefined }),
+    locator: () => ({ innerText: async () => body }),
+    getByRole: (role) => ({
+      ...waits,
+      first: () => waits,
+      isDisabled: async () => false,
+      fill: async () => undefined,
+      click: async () => { state.clicked = true; },
+      innerText: async () => (role === 'status' ? uiStatus : 'bounded recovered output'),
+    }),
+  };
+  return { page, state };
+}
+
+async function runProductionShapedScenario(t, scenario, script) {
+  const clock = { now: 1_791_926_092_000 };
+  const realNow = Date.now;
+  Date.now = () => clock.now;
+  t.after(() => { Date.now = realNow; });
+  const { page, state } = scenarioPage({ ...script, clock });
+  const http = await import('node:http');
+  const receiver = http.createServer((request, response) => {
+    request.resume();
+    request.on('end', () => { state.faulted = true; response.end('{"code":"controlled_fault_executed"}'); });
+  });
+  await new Promise((resolve) => receiver.listen(0, '127.0.0.1', resolve));
+  t.after(() => receiver.close());
+  const url = `http://127.0.0.1:${receiver.address().port}/a6/controlled-fault`;
+  const controls = validateFaultControl({
+    grant: 'FLEET GRANTED TO A6', productOrigin: 'http://127.0.0.1:9',
+    positiveUrl: url, negativeUrl: url,
+    positiveCaseId: 'ordinary_browser_source_failure_recovery', negativeCaseId: 'no_successor',
+  });
+  const started = clock.now;
+  const outcome = faultHarness.runScenario(
+    page, scenario, scenario === 'positive' ? controls.positive : controls.negative, new Set(), 16);
+  return { outcome, elapsed: () => clock.now - started };
+}
+
+test('production-shaped positive recovery passes and requires its cleanup', async (t) => {
+  const recovering = { ...IDLE, request_count: 1, recovering_count: 1 };
+  const { outcome } = await runProductionShapedScenario(t, 'positive', {
+    baseline: IDLE, uiStatus: 'Completed',
+    afterFault: [recovering, recovering, recovering, AFTER_POSITIVE],
+  });
+  const result = await outcome;
+  assert.equal(result.recovery_observed, true);
+  assert.equal(result.terminal_count, 1);
+});
+
+test('a completed positive whose cleanup is not proven is not a recovery', async (t) => {
+  const recovering = { ...IDLE, request_count: 1, recovering_count: 1 };
+  const { outcome } = await runProductionShapedScenario(t, 'positive', {
+    baseline: IDLE, uiStatus: 'Completed',
+    afterFault: [recovering, recovering, { ...AFTER_POSITIVE, cleanup_complete_count: 0 }],
+  });
+  await assert.rejects(outcome, /^Error: positive_recovery_missing$/);
+});
+
+test('a positive request that aborts before cutover fails at once, not after 300 s', async (t) => {
+  // 67bb87b7 a2 browser matrix: the successor ran past the 30 s checkpoint
+  // expiry and the request ended failed with no cutover. The production
+  // aggregate never shows a blocked terminal or a recovery attempt for that,
+  // so the harness waited out attempt_or_blocked and reported a timeout.
+  const recovering = { ...IDLE, request_count: 1, recovering_count: 1 };
+  const aborted = { ...IDLE, request_count: 1, terminal_count: 1, cleanup_complete_count: 1 };
+  const { outcome, elapsed } = await runProductionShapedScenario(t, 'positive', {
+    baseline: IDLE, uiStatus: 'Failed', afterFault: [recovering, recovering, aborted],
+  });
+  await assert.rejects(outcome, /^Error: positive_recovery_aborted$/);
+  assert.ok(elapsed() < 10_000, `failed after ${elapsed()} ms`);
+});
+
+test('production-shaped truthful no-successor abort passes', async (t) => {
+  // The abort is a cleaned failed terminal with no cutover; it can finish
+  // before the first poll, so no recovering aggregate is ever observed.
+  const { outcome, elapsed } = await runProductionShapedScenario(t, 'negative', {
+    baseline: AFTER_POSITIVE, uiStatus: 'Failed',
+    afterFault: [{ ...AFTER_POSITIVE, request_count: 2, terminal_count: 2, cleanup_complete_count: 2 }],
+  });
+  const result = await outcome;
+  assert.equal(result.scenario, 'negative');
+  assert.equal(result.terminal_count, 2);
+  assert.ok(elapsed() < 10_000, `passed after ${elapsed()} ms`);
+});
+
+test('a negative abort whose cleanup is unproven is not a truthful abort', async (t) => {
+  const { outcome } = await runProductionShapedScenario(t, 'negative', {
+    baseline: AFTER_POSITIVE, uiStatus: 'Failed',
+    afterFault: [{ ...AFTER_POSITIVE, request_count: 2, terminal_count: 2, terminal_blocked_count: 1 }],
+  });
+  await assert.rejects(outcome, /^Error: negative_abort_cleanup_unproven$/);
+});
+
+test('a negative terminal without completed cleanup is not a truthful abort', async (t) => {
+  const { outcome } = await runProductionShapedScenario(t, 'negative', {
+    baseline: AFTER_POSITIVE, uiStatus: 'Failed',
+    afterFault: [{ ...AFTER_POSITIVE, request_count: 2, terminal_count: 2 }],
+  });
+  await assert.rejects(outcome, /^Error: truthful_abort_missing$/);
+});
+
+test('a negative request that recovers is not an abort', async (t) => {
+  const { outcome } = await runProductionShapedScenario(t, 'negative', {
+    baseline: AFTER_POSITIVE, uiStatus: 'Completed',
+    afterFault: [{ ...AFTER_POSITIVE, request_count: 2, recovering_count: 1 },
+      { ...AFTER_POSITIVE, request_count: 2, terminal_count: 2, cleanup_complete_count: 2 }],
+  });
+  await assert.rejects(outcome, /^Error: negative_ui_terminal_missing$/);
+});
