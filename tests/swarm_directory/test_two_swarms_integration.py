@@ -237,3 +237,13 @@ def test_10_status_follows_the_owner_run_and_unpublish_goes_offline(world):
     a['publisher'].unpublish({})
     assert listing(world)[a_id]['status'] == 'offline'
     assert entry_post(a['proxy'], 'state', {}, 'ip:70')[0] == 503
+
+
+def test_11_refusal_probe_reports_refused_without_grant(world):
+    from mycelium_swarm_directory.probe import probe
+    b = world['b']  # still published and serving
+    before = len(b['backend'].inference_posts)
+    result = probe(b['proxy'].origin, b['id'])
+    assert result['verdict'] == 'refused_without_grant', result
+    assert tuple(result['self_signed_grant']) == (403, 'entry_grant_issuer_invalid')
+    assert len(b['backend'].inference_posts) == before
