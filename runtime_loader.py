@@ -2135,7 +2135,7 @@ def _digest_array(array: Any) -> str:
 #: Probe outputs digested by ranking instead of raw float bytes, per backend.
 _RANKED_PROBE_ARCHITECTURES = {
     "numpy": frozenset({"qwen2", "qwen3"}),
-    "mlx": frozenset({"qwen2", "qwen3", "qwen3_5"}),
+    "mlx": frozenset({"qwen2", "qwen3", "qwen3_5", "qwen3_5_moe"}),
 }
 
 
