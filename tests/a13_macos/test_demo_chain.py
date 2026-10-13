@@ -46,11 +46,17 @@ class FakeApp:
 
 
 class Context:
-    def __init__(self, nodes):
+    def __init__(self, nodes, collect_errors=()):
         self.facts = {n: {} for n in nodes}
         self.offers = {n: {'offer_id': 'boot-' + n} for n in nodes}
         self.observations = None
+        self.collect_errors = list(collect_errors)
+        self.collects = 0
     def collect(self):
+        self.collects += 1
+        if self.collect_errors:
+            error = self.collect_errors.pop(0) if len(self.collect_errors) > 1 else self.collect_errors[0]
+            if error is not None: raise error
         self.observations = {'observations': [{'host_id': 'h-' + n} for n in self.facts]}
     def retire_bootstrap(self): return {}
 
@@ -69,11 +75,13 @@ PROPOSAL = {'max_combined_rss_bytes': 16_000, 'max_additional_disk_bytes': 24_00
 
 
 class Ops:
-    def __init__(self, app, *, compile_error=None):
+    def __init__(self, app, *, compile_error=None, collect_errors=()):
         self.app = app; self.calls = []; self.compile_error = compile_error
+        self.collect_errors = collect_errors
     def prepare_observation(self, app, *, run_id, deployment_id, descriptors):
         self.calls.append(('prepare', [c['statement']['target_node_id'] for c in descriptors]))
-        app._observation_context = Context([c['statement']['target_node_id'] for c in descriptors])
+        app._observation_context = Context([c['statement']['target_node_id'] for c in descriptors],
+                                           self.collect_errors)
     def rebuild(self, app, *, run_id, deployment_id, descriptors):
         self.calls.append(('rebuild', [c['statement']['target_node_id'] for c in descriptors]))
         app._observation_context = Context([c['statement']['target_node_id'] for c in descriptors])
@@ -117,9 +125,9 @@ class Members:
     def close(self): pass
 
 
-def make(tmp_path, *, remote=True, prepared=True, compile_error=None, fail_at=None):
+def make(tmp_path, *, remote=True, prepared=True, compile_error=None, fail_at=None, collect_errors=()):
     app = FakeApp(tmp_path, remote=remote, prepared=prepared)
-    ops = Ops(app, compile_error=compile_error)
+    ops = Ops(app, compile_error=compile_error, collect_errors=collect_errors)
     members = {}
     def factory(app, local, exchange):
         members['m'] = Members(app, exchange, [LOCAL] + ([REMOTE] if remote else []), fail_at=fail_at)
@@ -172,6 +180,39 @@ def test_compile_refusal_is_reported_with_its_code(tmp_path):
     status = wait(run, lambda s: s['state'] == 'failed')
     assert (status['failed_step'], status['error_code']) == ('compile', 'two_distinct_hosts_required')
     assert ops.calls[-1] == ('stop',)
+
+
+@pytest.mark.parametrize('code', ['managed_observation_hosts_not_distinct',
+                                  'managed_observation_boots_not_distinct'])
+def test_same_host_observation_fails_at_once_with_its_own_code(tmp_path, code):
+    # Two app instances on one Mac share a host id: that is final, not a
+    # member that is still starting, so it must not wait out the budget.
+    from mycelium_a13_macos.managed_observations import ManagedObservationsError
+    app, ops, members, run = make(tmp_path, collect_errors=[ManagedObservationsError(code)])
+    started = time.monotonic()
+    run.start()
+    status = wait(run, lambda s: s['state'] == 'failed')
+    assert (status['failed_step'], status['error_code']) == ('observe', code)
+    assert time.monotonic() - started < 1.5
+    assert [c[0] for c in ops.calls] == ['prepare', 'stop']
+
+
+def test_transient_collect_failures_are_retried_then_named_on_timeout(tmp_path):
+    from mycelium_a13_macos.managed_observations import ManagedObservationsError
+    app, ops, members, run = make(tmp_path, collect_errors=[
+        ManagedObservationsError('managed_observation_session_open_failed'), None])
+    run.start()
+    assert wait(run, lambda s: s['state'] in {'serving', 'failed'})['state'] == 'serving'
+    assert app._observation_context is not None and app._observation_context.collects == 2
+    run.stop(); wait(run, lambda s: s['state'] == 'stopped')
+
+    app, ops, members, run = make(tmp_path, collect_errors=[
+        ManagedObservationsError('managed_observation_session_open_failed')])
+    run.start()
+    status = wait(run, lambda s: s['state'] == 'failed')
+    assert (status['failed_step'], status['error_code']) == ('observe', 'member_observation_timeout')
+    observe = next(step for step in status['steps'] if step['name'] == 'observe')
+    assert 'managed_observation_session_open_failed' in (observe['detail'] or '')
 
 
 def test_only_this_mac_fails_two_macs_required(tmp_path):

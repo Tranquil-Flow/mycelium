@@ -32,6 +32,11 @@ from .owner_run import OwnerRunError
 _CODE_RE = __import__('re').compile(r'[a-z][a-z0-9_]{0,79}\Z')
 
 
+#: Observation failures that no retry can change (one physical Mac, one boot).
+_OBSERVATION_FINAL = frozenset({'managed_observation_hosts_not_distinct',
+                                'managed_observation_boots_not_distinct'})
+
+
 def _code(error: BaseException, default: str) -> str:
     code = getattr(error, 'code', None) or str(error)
     return code if isinstance(code, str) and _CODE_RE.fullmatch(code) else default
@@ -300,14 +305,22 @@ class AppDemoChain:
         self._wait(ctx, lambda: self._publish_participants(ctx) or self._all_in(ctx, {'bootstrap_running'}),
                    budget='bootstrap', code='member_bootstrap_timeout')
 
+        last = [None]
+
         def collected():
             try:
                 context.collect(); return True
-            except ValueError as error:
-                if _code(error, '') == 'observations_already_collected':
+            except Exception as error:
+                code = _code(error, 'observation_collect_failed')
+                if code == 'observations_already_collected':
                     return True
-                return False
-            except Exception:
+                # Same host / same boot is a fact about the members, not a
+                # member still starting: stop now with that code.
+                if code in _OBSERVATION_FINAL:
+                    raise OwnerRunError(code) from None
+                if code != last[0]:
+                    last[0] = code
+                    ctx.progress('observing hosts (retrying after %s)' % code)
                 return False
         ctx.progress('observing hosts')
         self._wait(ctx, collected, budget='collect', code='member_observation_timeout')
