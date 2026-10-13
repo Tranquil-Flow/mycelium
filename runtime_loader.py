@@ -1460,6 +1460,10 @@ def _run_qwen35_probe(
         hidden, _state = qwen35_mlx.decoder_layer(
             hidden, tensors, layer, config, 0, None, linear
         )
+        # Evaluate per layer: the probe's per-call float32 weight images are
+        # then released layer by layer instead of being scheduled together
+        # (same kernels, same bytes; only the load peak changes).
+        mx.eval(hidden)
     if "final_norm" in components:
         hidden = qwen35_mlx.rms_norm_offset(
             hidden, tensors[qwen35_mlx.FINAL_NORM_KEY], float(config["rms_norm_epsilon"])
@@ -1797,6 +1801,9 @@ def _run_qwen2_probe(
             mx,
             runtime["architecture"],
         )
+        # Per-layer evaluation bounds the probe's float32 weight transients
+        # (same kernels, same bytes; only the load peak changes).
+        mx.eval(hidden)
     if "final_norm" in components:
         hidden = _rms_norm(
             hidden,
