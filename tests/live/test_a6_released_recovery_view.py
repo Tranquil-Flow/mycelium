@@ -31,6 +31,14 @@ def test_released_view_reports_that_a_quickly_settled_recovery_ran(tmp_path) -> 
             "recovery_attempts": 1,
             "source_failure_observed": True,
             "terminal_status": "COMPLETED",
+            # How the recovery ended, kept past release: no phase deadline
+            # fired and the terminal was not cleanup-blocked. This route never
+            # asks for completion-cleanup authorization, so its successor
+            # output is not marked finished.
+            "recovery_deadline_exceeded": False,
+            "recovery_deadline_phase": None,
+            "recovery_output_finished": False,
+            "terminal_blocked_reason": None,
         }
         assert router.a6_request_view("never-admitted") is None
     finally:
