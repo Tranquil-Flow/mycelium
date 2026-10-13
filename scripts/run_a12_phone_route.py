@@ -18,6 +18,16 @@ driver (``scripts/run_a12_mobile_physical_gate.py``) calls three subcommands:
                     the artifact source and the controller endpoint.
 
 Everything before the gate is one ``run <step>`` per step, in ``plan`` order.
+
+Seed authority (owner decision 2026-10-13, option a): the route's three
+placements are members of ONE seed, the throwaway A12 gate seed that holds the
+phone.  ``members-invite`` / ``members-enrol`` / ``members-wait`` give node-0 and
+node-2 a temporary, gate-scoped second membership there (their fleet seed-r7
+memberships keep running untouched), ``bind-topology`` binds the route topology
+to the gate seed's current generations, and ``members-down`` (also run by
+``down``, and by every failed enrolment) stops both agents and revokes both gate
+memberships.  Every command refuses to run when a configured seed path, member
+dir or URL is the fleet seed's (``scripts/a12_gate_membership.py``).
 ``plan`` is the dry run: it validates the config and the topology, checks the
 local inputs exist, and prints every step's exact command.  It never starts a
 process, opens a socket, writes a file or touches a device.  ``prepare`` is the
@@ -43,6 +53,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -56,6 +67,8 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts import a12_gate_membership as gm
 
 CONFIG_PROTOCOL = "mycelium.a12_phone_route_config.v1"
 EVIDENCE_PROTOCOL = "mycelium.phone_builder_evidence.v1"
@@ -77,13 +90,16 @@ CONFIG_FIELDS = frozenset(
       "protocol", "checkout", "work_dir", "python", "seed_state_root", "seed_key_digest", "seed_url",
       "model_root", "model_id", "resolved_commit", "template_plan", "topology", "phone_node_id",
       "phone_layers", "route_generation", "phone_executor", "phone_apk", "phone_source_root",
-      "build_receipt", "artifact_source", "controller", "serve", "request",
+      "build_receipt", "artifact_source", "controller", "serve", "request", "gate_seed", "gate_members", "fleet_seed",
    }
 )
+#: Where the route topology bound to the gate seed's generations is written.
+GATE_TOPOLOGY = "topology.gate.json"
+#: Prefix of the pid key of a member agent the harness started locally (state.json).
+MEMBER_AGENT_PREFIX = "member-"
 
-
-class HarnessError(RuntimeError):
-   """A coded harness refusal."""
+#: A coded harness refusal (shared with the gate membership module).
+HarnessError = gm.MembershipError
 
 
 def _require(ok: object, code: str) -> None:
@@ -141,6 +157,9 @@ def validate_config(document: Any) -> dict[str, Any]:
       and type(request["max_new_tokens"]) is int and 1 <= request["max_new_tokens"] <= MAX_NEW_TOKENS_CEILING,
       "config_request_unbounded",
    )
+   gm.validate_gate_seed(document["gate_seed"], seed_url=document["seed_url"])
+   gm.validate_gate_members(document["gate_members"], seed_state_root=document["seed_state_root"])
+   gm.validate_fleet_seed(document["fleet_seed"])
    return dict(document)
 
 
@@ -243,6 +262,8 @@ class Step:
    in_process: bool = False
    background: bool = False
    env: dict[str, str] = field(default_factory=dict)
+   #: Further commands an in-process step runs (printed by the dry run).
+   detail: list[list[str]] = field(default_factory=list)
 
 
 def _work(config: Mapping[str, Any]) -> Path:
@@ -273,10 +294,16 @@ def steps(config: Mapping[str, Any], state: Mapping[str, Any]) -> list[Step]:
    controller_id = state.get("controller_endpoint_id", "<controller endpoint id: printed by `run controller-up`>")
    source_spec = state.get("artifact_source_spec", "<artifact source spec: printed by `run artifact-source-up`>")
    final_endpoint = state.get("final_endpoint_id", "<laptop node-2 endpoint id from the topology>")
+   entry_endpoint = state.get("entry_endpoint_id", "<Mac node-0 endpoint id from the topology>")
    serve = config["serve"]
+   members, gate = config["gate_members"], config["gate_seed"]
+   entry, final = members["entry"], members["final"]
+   invites = state.get("gate_members", {}).get("invites", {})
+   entry_invite = invites.get(entry["node_id"], "<invite 001: written by `run members-invite`>")
+   generations = state.get("gate_members", {}).get("generations", {})
    builder = [py, "-B", f"{ck}/scripts/build_qwen_live_route.py", "--template-plan", str(work / "template-plan.json"),
               "--model-root", config["model_root"], "--model-id", config["model_id"],
-              "--resolved-commit", config["resolved_commit"], "--topology", config["topology"],
+              "--resolved-commit", config["resolved_commit"], "--topology", str(work / GATE_TOPOLOGY),
               "--deployment-id", deployment, "--route-label", "a12", "--phone-seed-state-root", config["seed_state_root"]]
    return [
       Step("controller-up", "start the operator's controller iroh endpoint (owner-local sidecar; the phone allow-lists "
@@ -299,6 +326,23 @@ def steps(config: Mapping[str, Any], state: Mapping[str, Any]) -> list[Step]:
       Step("artifact-source-up", "serve the objects to the phone under seed grants (A2-over-iroh)",
            [config["artifact_source"]["binary"], str(work / "objects"), str(work / "seed-key-record.json"),
             config["artifact_source"]["key_dir"]], background=True),
+      Step("members-invite", f"two invites from the GATE seed (swarm {gate['swarm_id']}, {config['seed_url']}) for "
+           f"{entry['node_id']} and {final['node_id']}; never the fleet seed",
+           [py, "-B", f"{ck}/scripts/mint_swarm_invites.py", "--seed-data-dir", config["seed_state_root"],
+            "--seed-url", config["seed_url"], "--swarm-id", gate["swarm_id"],
+            "--output-root", str(work / "gate-members" / "invites"), "--count", str(gm.INVITE_COUNT),
+            "--ttl-seconds", str(members["invite_ttl_seconds"])]),
+      Step("members-enrol", f"start the temporary gate-scoped membership agents: {entry['node_id']} on this Mac, "
+           f"{final['node_id']} on {final['ssh_target']} over ssh (seed endpoint id = topology data-plane endpoint "
+           "id); a failure tears down what started", in_process=True,
+           detail=[gm.agent_argv(py, entry, invite=entry_invite, endpoint_id=entry_endpoint),
+                   [*gm.ssh_argv(final["ssh_target"], "<invite 002 on stdin> " + gm.remote_copy_invite_script(
+                      final, seed_key_digest=config["seed_key_digest"], swarm_id=gate["swarm_id"]))],
+                   gm.ssh_argv(final["ssh_target"], gm.remote_start_script(final, endpoint_id=final_endpoint))]),
+      Step("members-wait", f"wait (<= {members['wait_seconds']} s) until both are RUNNING gate members on the "
+           "topology endpoints, then delete the invites; a timeout tears both down", in_process=True),
+      Step("bind-topology", f"write {GATE_TOPOLOGY}: the route topology with the gate seed's current generations "
+           "for node-0, the phone and node-2 (the builder's --topology)", in_process=True),
       Step("prepare", "REHEARSAL: builder --phone-prepare-only (assignment inputs only, no load/route authority)",
            [*builder, "--phone-prepare-only", "--output-root", str(work / "prepare")]),
       Step("assign", "seed-signed v2 route assignment to the phone; wait until the phone applied it "
@@ -334,12 +378,19 @@ def steps(config: Mapping[str, Any], state: Mapping[str, Any]) -> list[Step]:
                 "MYCELIUM_A12_BROWSER_EVIDENCE": str(work / "browser-request.json")}),
       Step("thermal-probe", "one bounded API request during the heat window (driver --thermal-probe-command)",
            in_process=True),
-      Step("down", "stop the serve (closes the route), the artifact source and the controller "
-           "(driver --route-close-command)", in_process=True),
+      Step("down", "stop the serve (closes the route), the artifact source and the controller, then "
+           "members-down (driver --route-close-command)", in_process=True),
+      Step("members-down", "stop both gate member agents and revoke both gate memberships (idempotent; also the "
+           "abort path)", in_process=True,
+           detail=[["kill", f"<{entry['node_id']} agent pid>"], gm.ssh_argv(final["ssh_target"], gm.remote_stop_script(final)),
+                   *(gm.revoke_command(py, ck, config["seed_state_root"], m["node_id"],
+                                       str(generations.get(m["node_id"], "<current generation>")))
+                     for m in (entry, final))]),
    ]
 
 
 GATE_STEPS = ("browser-request", "thermal-probe", "down")
+MEMBER_STEPS = ("members-enrol", "members-wait", "bind-topology", "members-down")
 
 
 def preflight(config: Mapping[str, Any]) -> list[str]:
@@ -362,7 +413,10 @@ def preflight(config: Mapping[str, Any]) -> list[str]:
    try:
       topology = json.loads(Path(config["topology"]).read_text("utf-8"))
       nodes = topology.get("nodes", topology) if isinstance(topology, Mapping) else topology
-      validate_topology(nodes, phone_node_id=config["phone_node_id"])
+      facts = validate_topology(nodes, phone_node_id=config["phone_node_id"])
+      members = config["gate_members"]
+      if (facts["entry"], facts["final"]) != (members["entry"]["node_id"], members["final"]["node_id"]):
+         problems.append("topology:gate_members_not_entry_and_final")
    except (OSError, ValueError) as error:
       problems.append(f"topology:{error}")
    except HarnessError as error:
@@ -528,8 +582,8 @@ def _thermal_probe(config: Mapping[str, Any]) -> int:
    return code
 
 
-def _down(config: Mapping[str, Any]) -> int:
-   """Stop what this harness started; the serve first (it closes the route)."""
+def _close_route(config: Mapping[str, Any]) -> int:
+   """Stop the route processes this harness started; the serve first (it closes the route)."""
 
    state = _state(config)
    stopped = {}
@@ -551,9 +605,199 @@ def _down(config: Mapping[str, Any]) -> int:
       else:
          os.kill(pid, signal.SIGKILL)
       stopped[name] = "stopped"
-   _save_state(config, down=stopped, pids={})
+   remaining = {k: v for k, v in state.get("pids", {}).items() if k.startswith(MEMBER_AGENT_PREFIX)}
+   _save_state(config, down=stopped, pids=remaining)
    print(json.dumps({"down": stopped}, sort_keys=True))
    return EXIT_OK if stopped.get("serve") in ("stopped", "absent", None) else EXIT_FAILED
+
+
+def _down(config: Mapping[str, Any]) -> int:
+   """The driver's route close: close the route, then ALWAYS tear the gate members down."""
+
+   code = EXIT_FAILED
+   try:
+      code = _close_route(config)
+   except Exception as error:  # the teardown below must still run
+      print(json.dumps({"error": f"route_close_failed:{type(error).__name__}"}), file=sys.stderr)
+   finally:
+      members = _members_down(config) if "gate_members" in _state(config) else EXIT_OK
+   return EXIT_OK if code == EXIT_OK and members == EXIT_OK else EXIT_FAILED
+
+
+# -- temporary gate memberships (seed authority a) ------------------------------------------------
+
+
+def _members(config: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+   return dict(config["gate_members"]["entry"]), dict(config["gate_members"]["final"])
+
+
+def _save_members(config: Mapping[str, Any], **values: Any) -> None:
+   _save_state(config, gate_members={**_state(config).get("gate_members", {}), **values})
+
+
+def _invite_outbox(config: Mapping[str, Any]) -> Path:
+   return _work(config) / "gate-members" / "invites"
+
+
+def _before_invite(config: Mapping[str, Any]) -> None:
+   _require(not _state(config).get("gate_members", {}).get("active"), "gate_members_already_enrolled")
+   gm.gate_seed_members(config)
+   parent = _work(config) / "gate-members"
+   parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+   # Unused invites of an earlier attempt: the batch tool never reuses an output root.
+   gm.remove_tree(_invite_outbox(config))
+
+
+def _after_invite(config: Mapping[str, Any], stdout: bytes) -> None:
+   status = next((json.loads(line) for line in stdout.decode("utf-8", "replace").splitlines()[::-1]
+                  if line.strip().startswith("{")), None)
+   _require(isinstance(status, Mapping) and isinstance(status.get("output_directory"), str), "gate_invites_unreadable")
+   batch = Path(status["output_directory"])
+   _require(batch.parent == _invite_outbox(config), "gate_invites_outside_outbox")
+   entry, final = _members(config)
+   _save_members(config, invites={entry["node_id"]: str(batch / "native-node-001.invite.json"),
+                                  final["node_id"]: str(batch / "native-node-002.invite.json")})
+
+
+def _members_enrol(config: Mapping[str, Any]) -> int:
+   """Start both gate member agents; any failure tears down what already started."""
+
+   state = _state(config)
+   _require(not state.get("gate_members", {}).get("active"), "gate_members_already_enrolled")
+   entry, final = _members(config)
+   invites = state.get("gate_members", {}).get("invites", {})
+   _require(all(Path(invites.get(m["node_id"], "")).is_file() for m in (entry, final)), "gate_invites_absent")
+   gm.gate_seed_members(config)
+   gate_swarm, digest = config["gate_seed"]["swarm_id"], config["seed_key_digest"]
+   gm.clear_local_state(entry, seed_key_digest=digest, swarm_id=gate_swarm)
+   _save_members(config, active=True, error=None, torn_down=False)
+   try:
+      Path(entry["data_dir"]).parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+      pid = gm.spawn_local(gm.agent_argv(config["python"], entry, invite=invites[entry["node_id"]],
+                                         endpoint_id=state["entry_endpoint_id"]),
+                           cwd=config["checkout"], log_path=_work(config) / "gate-members" / f"{entry['node_id']}.log")
+      _save_state(config, pids={**_state(config).get("pids", {}), MEMBER_AGENT_PREFIX + entry["node_id"]: pid})
+      code, _ = gm.ssh(final["ssh_target"], gm.remote_copy_invite_script(final, seed_key_digest=digest, swarm_id=gate_swarm),
+                       stdin=Path(invites[final["node_id"]]).read_bytes())
+      _require(code != gm.FOREIGN_STATE_EXIT, f"gate_member_state_foreign:{final['node_id']}")
+      _require(code == 0, f"gate_member_invite_copy_failed:{final['node_id']}")
+      code, _ = gm.ssh(final["ssh_target"], gm.remote_start_script(final, endpoint_id=state["final_endpoint_id"]))
+      _require(code == 0, f"gate_member_start_failed:{final['node_id']}")
+   except (HarnessError, OSError) as error:
+      _members_down(config)
+      _save_members(config, error=str(error) if isinstance(error, HarnessError) else f"gate_member_start_failed:{error}")
+      print(json.dumps({"error": _state(config)["gate_members"]["error"], "torn_down": True}), file=sys.stderr)
+      return EXIT_FAILED
+   print(json.dumps({"members_enrolled": [entry["node_id"], final["node_id"]]}))
+   return EXIT_OK
+
+
+def _members_wait(config: Mapping[str, Any]) -> int:
+   """Both agents RUNNING on the topology endpoints, or both torn down."""
+
+   state = _state(config)
+   entry, final = _members(config)
+   expected = {entry["node_id"]: (state["entry_endpoint_id"], entry["incarnation"]),
+               final["node_id"]: (state["final_endpoint_id"], final["incarnation"])}
+   deadline = gm.monotonic() + config["gate_members"]["wait_seconds"]
+   current: dict[str, Any] = {}
+   while True:
+      rows = gm.gate_seed_members(config)
+      at = gm.now()
+      current = {node: rows.get(node) for node, (endpoint, incarnation) in expected.items()
+                 if gm.member_is_current(rows.get(node), endpoint_id=endpoint, incarnation=incarnation, at=at)}
+      if len(current) == len(expected) or gm.monotonic() >= deadline:
+         break
+      gm.sleep(2.0)
+   if len(current) != len(expected):
+      _members_down(config)
+      _save_members(config, error="gate_members_not_running")
+      print(json.dumps({"error": "gate_members_not_running", "torn_down": True}), file=sys.stderr)
+      return EXIT_FAILED
+   gm.remove_tree(_invite_outbox(config))
+   gm.ssh(final["ssh_target"], gm.remote_forget_invite_script(final))
+   generations = {node: int(row["generation"]) for node, row in current.items()}
+   _save_members(config, invites={}, generations=generations)
+   print(json.dumps({"members_running": generations}, sort_keys=True))
+   return EXIT_OK
+
+
+def _bind_topology(config: Mapping[str, Any]) -> int:
+   """The route topology with the gate seed's CURRENT generations (resume bumps them)."""
+
+   document = json.loads(Path(config["topology"]).read_text("utf-8"))
+   nodes = document.get("nodes", document) if isinstance(document, Mapping) else document
+   facts = validate_topology(nodes, phone_node_id=config["phone_node_id"])
+   entry, final = _members(config)
+   _require((facts["entry"], facts["final"]) == (entry["node_id"], final["node_id"]), "gate_members_not_entry_and_final")
+   rows, at = gm.gate_seed_members(config), gm.now()
+   bound = [dict(node) for node in nodes]
+   phone_binding = "topology_placeholder"
+   for node in bound:
+      row = rows.get(node["node_id"])
+      if node["node_id"] == config["phone_node_id"]:
+         if row is None:
+            continue  # rehearsal: the phone has not joined; `build` refuses this binding
+         _require(row["endpoint_id"] == node["endpoint_id"], "gate_phone_endpoint_mismatch")
+         _require(row["lifecycle_state"] != "STOPPED" and float(row["lease_expires_at"]) > at, "gate_phone_not_current")
+         phone_binding = "gate_seed"
+      else:
+         member = entry if node["node_id"] == entry["node_id"] else final
+         _require(gm.member_is_current(row, endpoint_id=node.get("endpoint_id"), incarnation=member["incarnation"], at=at),
+                  f"gate_member_not_current:{node['node_id']}")
+      node["membership_generation"] = int(row["generation"])
+   target = _work(config) / GATE_TOPOLOGY
+   payload = {**document, "nodes": bound} if isinstance(document, Mapping) else bound
+   target.write_text(json.dumps(payload, sort_keys=True, indent=1) + "\n", encoding="utf-8")
+   os.chmod(target, 0o600)
+   _save_state(config, phone_binding=phone_binding)
+   print(json.dumps({"bound": {n["node_id"]: n["membership_generation"] for n in bound}, "phone_binding": phone_binding}))
+   return EXIT_OK
+
+
+def _members_down(config: Mapping[str, Any]) -> int:
+   """Stop both agents, then revoke both gate memberships; best effort per part, idempotent.
+
+   The agents stop first so nothing renews; the seed-side revocation then lands
+   even when the laptop is unreachable, and never in a seed that is not the
+   configured gate seed.
+   """
+
+   entry, final = _members(config)
+   report: dict[str, Any] = {entry["node_id"]: {}, final["node_id"]: {}}
+   ok = True
+   agent_key = MEMBER_AGENT_PREFIX + entry["node_id"]
+   pid = _state(config).get("pids", {}).get(agent_key)
+   try:
+      report[entry["node_id"]]["agent"] = gm.stop_local(pid) if pid else "absent"
+   except OSError as error:
+      report[entry["node_id"]]["agent"], ok = f"stop_failed:{type(error).__name__}", False
+   code, _ = gm.ssh(final["ssh_target"], gm.remote_stop_script(final))
+   report[final["node_id"]]["agent"] = "stopped" if code == 0 else f"ssh_exit_{code}"
+   ok = ok and code == 0
+   try:
+      rows = gm.gate_seed_members(config)
+      for node in (entry["node_id"], final["node_id"]):
+         row = rows.get(node)
+         if row is None:
+            report[node]["revoked"] = "absent"
+         elif row["lifecycle_state"] == "STOPPED":
+            report[node]["revoked"] = "already_revoked"
+         else:
+            gm.revoke(config["seed_state_root"], node, int(row["generation"]))
+            report[node]["revoked"] = "revoked"
+   except Exception as error:  # report, never mask: the operator must see it
+      report["error"] = str(error) if isinstance(error, HarnessError) else f"revoke_failed:{type(error).__name__}"
+      ok = False
+   try:
+      gm.remove_tree(_invite_outbox(config))
+   except OSError:
+      ok = False
+   pids = {k: v for k, v in _state(config).get("pids", {}).items() if k != agent_key}
+   _save_state(config, pids=pids)
+   _save_members(config, active=False, torn_down=True, invites={}, teardown=report)
+   print(json.dumps({"members_down": report}, sort_keys=True))
+   return EXIT_OK if ok else EXIT_FAILED
 
 
 def ready_record(text: str) -> dict[str, Any] | None:
@@ -616,16 +860,17 @@ def _start_background(config: Mapping[str, Any], step: Step) -> None:
 
 
 def topology_facts(config: Mapping[str, Any]) -> dict[str, Any]:
-   """Read-only: the validated topology's final endpoint (the phone forwards to it)."""
+   """Read-only: the validated topology's entry and final endpoints (the phone forwards to the final)."""
 
    document = json.loads(Path(config["topology"]).read_text("utf-8"))
    nodes = document.get("nodes", document) if isinstance(document, Mapping) else document
    facts = validate_topology(nodes, phone_node_id=config["phone_node_id"])
-   return {"final_endpoint_id": facts["final_endpoint_id"]} if facts["final_endpoint_id"] else {}
+   endpoints = {"entry_endpoint_id": nodes[0].get("endpoint_id"), "final_endpoint_id": facts["final_endpoint_id"]}
+   return {k: v for k, v in endpoints.items() if isinstance(v, str) and v}
 
 
 def run_step(config: Mapping[str, Any], name: str) -> int:
-   if "final_endpoint_id" not in _state(config):
+   if "entry_endpoint_id" not in _state(config):
       _work(config).mkdir(mode=0o700, parents=True, exist_ok=True)
       _save_state(config, **topology_facts(config))
    state = _state(config)
@@ -637,6 +882,15 @@ def run_step(config: Mapping[str, Any], name: str) -> int:
       step = next(s for s in steps(config, _state(config)) if s.name == name)
    if any(part.startswith("<") for part in step.argv):
       raise HarnessError(f"step_inputs_unresolved:{name}")
+   if name in ("prepare", "build"):
+      _require((_work(config) / GATE_TOPOLOGY).is_file(), "gate_topology_unbound")
+   if name == "build":
+      _require(_state(config).get("phone_binding") == "gate_seed", "gate_phone_membership_unbound")
+   if name == "members-invite":
+      _before_invite(config)
+   if name in MEMBER_STEPS:
+      return {"members-enrol": _members_enrol, "members-wait": _members_wait, "bind-topology": _bind_topology,
+              "members-down": _members_down}[name](config)
    if name == "template":
       _template(config)
       return EXIT_OK
@@ -654,6 +908,8 @@ def run_step(config: Mapping[str, Any], name: str) -> int:
       return EXIT_OK
    output = subprocess.run(step.argv, cwd=config["checkout"], check=False, capture_output=True, timeout=3600)
    (_work(config) / f"{name}.log").write_bytes(output.stdout + output.stderr)
+   if output.returncode == 0 and name == "members-invite":
+      _after_invite(config, output.stdout)
    if output.returncode == 0 and name == "golden":
       (_work(config) / "golden.json").write_bytes(output.stdout)
    if output.returncode == 0 and name == "prepare":
@@ -663,15 +919,37 @@ def run_step(config: Mapping[str, Any], name: str) -> int:
    return EXIT_OK if output.returncode == 0 else EXIT_FAILED
 
 
+def gate_seed_argv(config: Mapping[str, Any]) -> list[str]:
+   """The gate seed listener the members, the phone and the serve all need (started by the gate script)."""
+
+   gate = config["gate_seed"]
+   argv = [config["python"], "-B", "-m", "mycelium_seed", "--bind", gate["bind"], "--port", str(gate["port"]),
+           "--data-dir", config["seed_state_root"], "--swarm-id", gate["swarm_id"],
+           "--advertised-url", gate["advertised_url"]]
+   return argv + (["--trusted-https-proxy"] if gate["trusted_https_proxy"] else [])
+
+
 def render_plan(config: Mapping[str, Any], state: Mapping[str, Any], problems: Sequence[str]) -> str:
-   lines = [f"A12 phone route harness plan (dry run; nothing started or written). work_dir={config['work_dir']}"]
+   gate, fleet = config["gate_seed"], config["fleet_seed"]
+   transport = "https behind a loopback proxy" if gate["trusted_https_proxy"] else "LAN http; no tunnel"
+   pairing = "https://<pairing host>/pair" if gate["trusted_https_proxy"] else f"http://{gate['bind']}:<pairing port>/pair"
+   lines = [
+      f"A12 phone route harness plan (dry run; nothing started or written). work_dir={config['work_dir']}",
+      f"gate seed: swarm {gate['swarm_id']} at {gate['advertised_url']} (bind {gate['bind']}:{gate['port']}, {transport}); "
+      f"data dir {config['seed_state_root']}",
+      "   gate seed listener (gate script, plus its pairing flags with --pairing-url " + pairing + "):",
+      "      $ " + " ".join(gate_seed_argv(config)),
+      f"fleet seed (never touched): {fleet['data_dir']} {fleet['url']} (launch agent {fleet['launch_agent']})",
+   ]
    for index, step in enumerate(steps(config, state), start=1):
       kind = "in-process" if step.in_process else "background" if step.background else "command"
-      gate = "  [called by the A12 driver]" if step.name in GATE_STEPS else ""
-      lines.append(f"{index:2d}. {step.name} ({kind}){gate}: {step.summary}")
+      gate_mark = "  [called by the A12 driver]" if step.name in GATE_STEPS else ""
+      lines.append(f"{index:2d}. {step.name} ({kind}){gate_mark}: {step.summary}")
       if step.argv:
          env = " ".join(f"{k}={v}" for k, v in step.env.items())
          lines.append("      $ " + (env + " " if env else "") + " ".join(step.argv))
+      for argv in step.detail:
+         lines.append("      $ " + " ".join(shlex.quote(part) if " " in part else part for part in argv))
    lines.append("problems: " + ("none" if not problems else "; ".join(problems)))
    return "\n".join(lines)
 
@@ -692,13 +970,19 @@ def main(argv: Sequence[str] | None = None) -> int:
    arguments = parser().parse_args(argv)
    try:
       config = validate_config(json.loads(arguments.config.read_text("utf-8")))
+      try:
+         refusals = gm.fleet_refusals(config)
+      except HarnessError as error:
+         refusals = [str(error)]
       if arguments.command == "plan":
          workdir_state = _state(config)
-         problems = preflight(config)
+         problems = [*refusals, *preflight(config)]
          if not problems:
             workdir_state = {**topology_facts(config), **workdir_state}
          print(render_plan(config, workdir_state, problems))
          return EXIT_OK if not problems else EXIT_FAILED
+      # Seed authority (a): nothing ever runs against the fleet seed (seed-r7).
+      _require(not refusals, refusals[0] if refusals else "")
       name = arguments.step if arguments.command == "run" else arguments.command
       return run_step(config, name)
    except HarnessError as error:

@@ -11,6 +11,7 @@ side effects.
 from __future__ import annotations
 
 import json
+import plistlib
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,21 @@ def _topology():
    ]
 
 
+def _fleet_seed(tmp_path: Path) -> dict:
+   """The fleet seed (seed-r7 stand-in) and its launchd agent, which the harness must never touch."""
+
+   fleet = tmp_path / "fleet"
+   fleet.mkdir(parents=True, exist_ok=True)
+   agent = fleet / "org.mycelium.core-pilot.r7.seed.plist"
+   if not agent.exists():
+      agent.write_bytes(plistlib.dumps({"Label": "org.mycelium.core-pilot.r7.seed", "ProgramArguments": [
+         "/usr/bin/env", "/opt/homebrew/bin/python3.14", "-B", "-m", "mycelium_seed", "--bind", "198.51.100.4",
+         "--port", "8877", "--data-dir", str(fleet / "seed-r7"), "--advertised-url", "http://198.51.100.4:8877",
+         "--swarm-id", "interactive-swarm"]}))
+   return {"launch_agent": str(agent), "data_dir": str(fleet / "seed-r7"), "url": "http://198.51.100.4:8877",
+           "protected_roots": [str(fleet), "/Users/evinova/mycelium-physical-run/w6-ethonline"]}
+
+
 def _config(tmp_path: Path, **overrides):
    root = tmp_path / "inputs"
    config = {
@@ -40,7 +56,7 @@ def _config(tmp_path: Path, **overrides):
       "python": "/opt/homebrew/bin/python3.14",
       "seed_state_root": str(root / "seed"),
       "seed_key_digest": "sha256:" + "5" * 64,
-      "seed_url": "https://seed.example.invalid",
+      "seed_url": "http://192.0.2.10:18865",
       "model_root": str(root / "model"),
       "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
       "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
@@ -58,6 +74,18 @@ def _config(tmp_path: Path, **overrides):
                      "bootstrap_secret_file": str(root / "controller.secret")},
       "serve": {"host": "127.0.0.1", "port": 8797, "product_state_root": str(root / "product-state")},
       "request": {"prompt": "Name one colour of the sky.", "max_new_tokens": 12},
+      "gate_seed": {"swarm_id": "a12-gate", "bind": "192.0.2.10", "port": 18865,
+                    "advertised_url": "http://192.0.2.10:18865", "trusted_https_proxy": False},
+      "gate_members": {
+         "invite_ttl_seconds": 900,
+         "wait_seconds": 60,
+         "entry": {"node_id": "node-0", "data_dir": str(root / "members/node-0"), "advertise": "http://192.0.2.10:18800",
+                   "incarnation": "a12-gate-node-0"},
+         "final": {"node_id": "node-2", "ssh_target": "mycelium-laptop", "python": "/Users/evinova/venv/bin/python",
+                   "checkout": "/Users/evinova/src", "data_dir": f"/Users/evinova/a12/{root.name}/members/node-2",
+                   "advertise": "http://192.0.2.20:18800", "incarnation": "a12-gate-node-2"},
+      },
+      "fleet_seed": _fleet_seed(tmp_path),
    }
    config.update(overrides)
    return config
@@ -165,8 +193,9 @@ def test_the_dry_run_prints_every_step_and_has_no_side_effects(tmp_path, capsys)
    assert "problems: missing:checkout" in out
    names = [step.name for step in harness.steps(harness.validate_config(_config(tmp_path)), {})]
    assert names == [
-      "controller-up", "template", "golden", "manifest", "export", "artifact-source-up", "prepare", "assign",
-      "assign-wait", "evidence", "build", "stage", "serve", "browser-request", "thermal-probe", "down",
+      "controller-up", "template", "golden", "manifest", "export", "artifact-source-up",
+      "members-invite", "members-enrol", "members-wait", "bind-topology", "prepare", "assign",
+      "assign-wait", "evidence", "build", "stage", "serve", "browser-request", "thermal-probe", "down", "members-down",
    ]
    for name in names:
       assert f". {name} (" in out
