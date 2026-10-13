@@ -23,6 +23,14 @@ RoPE), ``o_proj(attn * sigmoid(gate))`` with the gate taken per head from
 gated RMSNorm ``w * rmsnorm(o) * silu(z)``.  Activations are float32 here; the
 module takes the stage's linear projection function so row-wise int8 weights
 reuse the incumbent kernels.
+
+``qwen3_5_moe`` (Qwen3.6-35B-A3B class) replaces the dense SwiGLU MLP with
+:func:`sparse_moe_block`: a float32 router, deterministic top-k
+(:func:`route_top_k`, ties to the lowest expert index), renormalised weights,
+packed 3-D experts executed per (token, expert) by ``gather_mm`` (or the
+stage's packed-int8 ``gather_qmm`` kernel) and a sigmoid-gated shared expert.
+Experts are never split across stages: a stage holds every expert of its
+layers (pipeline-only sharding).
 """
 from __future__ import annotations
 
@@ -30,6 +38,8 @@ import math
 from typing import Any, Callable, Mapping
 
 import mlx.core as mx
+
+from weight_quantization import Int8RowwiseWeight
 
 from qwen35_shapes import (
     EMBED_KEY as EMBED_KEY,
@@ -41,10 +51,20 @@ from qwen35_shapes import (
     layer_prefix,
 )
 
-__all__ = ["EMBED_KEY", "FINAL_NORM_KEY", "TEXT_PREFIX", "expected_shapes", "decoder_layer"]
+__all__ = [
+    "EMBED_KEY",
+    "FINAL_NORM_KEY",
+    "TEXT_PREFIX",
+    "decoder_layer",
+    "expected_shapes",
+    "expert_linear",
+    "route_top_k",
+    "sparse_moe_block",
+]
 _L2_EPSILON = 1e-6
 
 Linear = Callable[[mx.array, Any], mx.array]
+ExpertLinear = Callable[[mx.array, Any, mx.array], mx.array]
 
 
 class Qwen35ExecutionError(ValueError):
@@ -218,6 +238,110 @@ def gated_delta_net(
     return output, (next_conv_state, state)
 
 
+def route_top_k(probabilities: mx.array, top_k: int) -> tuple[mx.array, mx.array]:
+    """Deterministic top-k over float32 router probabilities ``[N, E]``.
+
+    Experts rank by probability, descending; equal probabilities rank the lower
+    expert index first.  The selection never depends on a sort's stability or
+    on reduction order:
+
+    1. ``t`` = the k-th largest probability (the minimum of ``mx.topk``'s
+       values -- a multiset, so exact);
+    2. every expert with ``p > t`` is selected, then the lowest-index experts
+       with ``p == t`` fill the remaining slots;
+    3. the k selected experts are put in rank order by their pairwise rank
+       (``#{j: p_j > p_i or (p_j == p_i and j < i)}``, a permutation of
+       ``0..k-1``).
+
+    Memory is ``O(N * E + N * k^2)``.  Returns the indices in rank order
+    (``uint32``) and their float32 weights renormalised to sum to one
+    (``norm_topk_prob``).  The routed sum is accumulated in this order.
+    """
+
+    compute = probabilities.astype(mx.float32)
+    experts = int(compute.shape[-1])
+    order = mx.arange(experts, dtype=mx.int32)
+    threshold = mx.min(mx.topk(compute, top_k, axis=-1), axis=-1, keepdims=True)
+    above = compute > threshold
+    tied = compute == threshold
+    missing = top_k - mx.sum(above.astype(mx.int32), axis=-1, keepdims=True)
+    chosen = above | (tied & (mx.cumsum(tied.astype(mx.int32), axis=-1) <= missing))
+    # Selected experts in ascending index order (unique sort keys).
+    ascending = mx.argsort(mx.where(chosen, order, order + experts), axis=-1)[..., :top_k]
+    picked = mx.take_along_axis(compute, ascending, axis=-1)
+    mine = picked[..., :, None]
+    other = picked[..., None, :]
+    slot = mx.arange(top_k, dtype=mx.int32)
+    beaten = (other > mine) | ((other == mine) & (slot[None, :] < slot[:, None]))
+    rank = mx.sum(beaten.astype(mx.int32), axis=-1)
+    by_rank = mx.argsort(rank, axis=-1)
+    indices = mx.take_along_axis(ascending, by_rank, axis=-1)
+    selected = mx.take_along_axis(picked, by_rank, axis=-1)
+    weights = selected / mx.sum(selected, axis=-1, keepdims=True)
+    return indices.astype(mx.uint32), weights
+
+
+def expert_linear(hidden: mx.array, weight: Any, indices: mx.array) -> mx.array:
+    """Per-token expert projections: ``hidden[n, s] @ weight[indices[n, k]].T``.
+
+    ``hidden`` is ``[N, S, in]`` with ``S`` either 1 (same input for every
+    selected expert) or ``top_k`` (one input per selected expert); ``weight``
+    is a packed ``[E, out, in]`` tensor (float, or row-wise int8 with scales
+    ``[E, out]``).  Every (token, expert) product is its own single-row
+    product, so a token's result does not depend on how many tokens share the
+    call.  Returns ``[N, top_k, out]``.
+    """
+
+    lhs = hidden[:, :, None, :]
+    if isinstance(weight, Int8RowwiseWeight):
+        product = mx.gather_mm(
+            lhs, weight.values.astype(mx.float32).swapaxes(-1, -2), rhs_indices=indices
+        )
+        scales = weight.scales[indices]
+        return product[:, :, 0, :] * scales
+    product = mx.gather_mm(lhs, weight.swapaxes(-1, -2), rhs_indices=indices)
+    return product[:, :, 0, :]
+
+
+def sparse_moe_block(
+    normalized: mx.array,
+    tensors: Mapping[str, Any],
+    prefix: str,
+    config: Mapping[str, Any],
+    linear: Linear,
+    expert_projection: ExpertLinear | None = None,
+) -> mx.array:
+    """Qwen3.5 sparse MoE MLP (``qwen3_5_moe``), float32 throughout.
+
+    ``p = softmax(x Wg^T)`` in float32, :func:`route_top_k` selects
+    ``num_experts_per_tok`` experts and renormalises their weights,
+    ``y = sum_k w_k * down_k(silu(gate_k x) * up_k x)`` over the packed experts
+    (gate rows first, then up rows, in ``gate_up_proj``), plus the shared
+    expert scaled by ``sigmoid(x w_s^T)``.  The routed sum runs in rank order.
+    """
+
+    project = expert_projection or expert_linear
+    batch, sequence, hidden = (int(extent) for extent in normalized.shape)
+    tokens = normalized.reshape(batch * sequence, hidden).astype(mx.float32)
+    logits = linear(tokens, tensors[prefix + "mlp.gate.weight"]).astype(mx.float32)
+    indices, weights = route_top_k(
+        mx.softmax(logits, axis=-1), int(config["num_experts_per_tok"])
+    )
+    intermediate = int(config["moe_intermediate_size"])
+    projected = project(tokens[:, None, :], tensors[prefix + "mlp.experts.gate_up_proj"], indices)
+    activated = _silu(projected[..., :intermediate]) * projected[..., intermediate:]
+    routed = project(activated, tensors[prefix + "mlp.experts.down_proj"], indices)
+    routed = mx.sum(routed * weights[..., None], axis=1)
+    shared = linear(
+        _silu(linear(tokens, tensors[prefix + "mlp.shared_expert.gate_proj.weight"]))
+        * linear(tokens, tensors[prefix + "mlp.shared_expert.up_proj.weight"]),
+        tensors[prefix + "mlp.shared_expert.down_proj.weight"],
+    )
+    shared_gate = mx.sigmoid(linear(tokens, tensors[prefix + "mlp.shared_expert_gate.weight"]))
+    output = routed + shared_gate * shared
+    return output.reshape(batch, sequence, hidden).astype(normalized.dtype)
+
+
 def decoder_layer(
     hidden: mx.array,
     tensors: Mapping[str, Any],
@@ -226,8 +350,13 @@ def decoder_layer(
     position: int,
     past: tuple[mx.array, mx.array] | None,
     linear: Linear,
+    expert_projection: ExpertLinear | None = None,
 ) -> tuple[mx.array, tuple[mx.array, mx.array]]:
-    """One Qwen3.5 decoder layer; returns the residual stream and its state."""
+    """One Qwen3.5 decoder layer; returns the residual stream and its state.
+
+    A ``qwen3_5_moe`` config (``num_experts`` present) runs the sparse MoE MLP;
+    ``expert_projection`` lets the stage supply its packed-int8 expert kernel.
+    """
 
     if not isinstance(position, int) or isinstance(position, bool) or position < 0:
         raise Qwen35ExecutionError("invalid_kv_position")
@@ -247,6 +376,9 @@ def decoder_layer(
     normalized = rms_norm_offset(
         hidden, tensors[prefix + "post_attention_layernorm.weight"], epsilon
     )
+    if "num_experts" in config:
+        mlp = sparse_moe_block(normalized, tensors, prefix, config, linear, expert_projection)
+        return hidden + mlp.astype(hidden.dtype), state
     gate = linear(normalized, tensors[prefix + "mlp.gate_proj.weight"])
     up = linear(normalized, tensors[prefix + "mlp.up_proj.weight"])
     hidden = hidden + linear(_silu(gate) * up, tensors[prefix + "mlp.down_proj.weight"])

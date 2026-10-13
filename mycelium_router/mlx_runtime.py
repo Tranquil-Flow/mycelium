@@ -69,7 +69,7 @@ import qwen35_mlx
 #: Qwen3.5 hybrid stages hold a Gated DeltaNet recurrent state per linear layer.
 #: It is a running summary that cannot be sliced back to an earlier position, so
 #: every KV rewind, positional slice or padded batch over it is refused.
-HYBRID_STATE_ARCHITECTURES = frozenset({"qwen3_5"})
+HYBRID_STATE_ARCHITECTURES = frozenset({"qwen3_5", "qwen3_5_moe"})
 
 
 _SHA256_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -556,6 +556,106 @@ def _packed_int8_rows_are_call_independent(weight: PackedInt8RowwiseWeight) -> b
    return True
 
 
+def _is_packed_expert_tensor(weight: Int8RowwiseWeight) -> bool:
+   values = weight.values
+   return isinstance(values, mx.array) and values.ndim == 3
+
+
+def _pack_int8_expert_rowwise(weight: Int8RowwiseWeight) -> Int8RowwiseWeight:
+   """Packed MoE experts ``[E, out, in]``: the 2-D packing applied per expert.
+
+   Same unsigned 8-bit affine layout as :func:`_pack_int8_rowwise` (group
+   scale 1, group bias -128, so every code dequantizes to exactly its signed
+   value); the per-expert row scales ``[E, out]`` are applied after the
+   product.  Executed by ``mx.gather_qmm`` over the selected experts only.
+   """
+
+   values = weight.values
+   if (
+      isinstance(weight, PackedInt8RowwiseWeight)
+      or not isinstance(values, mx.array)
+      or values.dtype != mx.int8
+      or values.ndim != 3
+   ):
+      return weight
+   experts, rows, columns = (int(extent) for extent in values.shape)
+   if (
+      experts < 1
+      or rows < 1
+      or columns < 1
+      or columns % _PACKED_INT8_GROUP_SIZE
+      or tuple(int(extent) for extent in weight.scales.shape) != (experts, rows)
+   ):
+      return weight
+   unsigned = (values.astype(mx.int16) + 128).astype(mx.uint8)
+   packed = (
+      unsigned.reshape(experts, rows, columns // 4, 4)
+      .view(mx.uint32)
+      .reshape(experts, rows, columns // 4)
+   )
+   groups = columns // _PACKED_INT8_GROUP_SIZE
+   group_scales = mx.ones((experts, rows, groups), dtype=mx.float32)
+   group_biases = mx.full((experts, rows, groups), -128.0, dtype=mx.float32)
+   mx.eval(packed, group_scales, group_biases)
+   return PackedInt8RowwiseWeight(
+      values=values,
+      scales=weight.scales,
+      packed=packed,
+      group_scales=group_scales,
+      group_biases=group_biases,
+   )
+
+
+def _packed_int8_expert_product(
+   hidden: mx.array, weight: PackedInt8RowwiseWeight, indices: mx.array
+) -> mx.array:
+   """``hidden[n, s] @ values[indices[n, k]].T`` from the packed experts, ``[N, k, out]``."""
+
+   product = mx.gather_qmm(
+      hidden[:, :, None, :],
+      weight.packed,
+      weight.group_scales,
+      weight.group_biases,
+      rhs_indices=indices,
+      transpose=True,
+      group_size=_PACKED_INT8_GROUP_SIZE,
+      bits=_PACKED_INT8_BITS,
+   )
+   return product[:, :, 0, :]
+
+
+def _packed_int8_expert_rows_are_call_independent(weight: PackedInt8RowwiseWeight) -> bool:
+   """A token's expert products must not depend on the tokens sharing the call.
+
+   Every (token, expert) pair is a single-row product, so this holds by
+   construction; port construction still checks it per packed expert shape,
+   like the 2-D packing, and refuses packing when it does not hold.
+   """
+
+   experts = int(weight.packed.shape[0])
+   width = int(weight.packed.shape[2]) * 4
+   total = 2 * _PACKED_INT8_MINIMUM_ROWS + 1
+   probe = mx.random.normal((total, 1, width), key=mx.random.key(0x5EED))
+   indices = (
+      mx.arange(total * 2, dtype=mx.uint32).reshape(total, 2) % experts
+   ).astype(mx.uint32)
+   reference = _packed_int8_expert_product(probe, weight, indices)
+   mx.eval(reference)
+   for rows in sorted({1, 2, 8, _PACKED_INT8_MINIMUM_ROWS, total}):
+      partial = _packed_int8_expert_product(probe[:rows], weight, indices[:rows])
+      if not bool(mx.array_equal(partial, reference[:rows]).item()):
+         return False
+   return True
+
+
+def _qwen35_expert_linear(hidden: mx.array, weight: Any, indices: mx.array) -> mx.array:
+   """Stage expert kernel: packed int8 via ``gather_qmm``, else the module default."""
+
+   if isinstance(weight, PackedInt8RowwiseWeight) and weight.values.ndim == 3:
+      return _packed_int8_expert_product(hidden, weight, indices) * weight.scales[indices]
+   return qwen35_mlx.expert_linear(hidden, weight, indices)
+
+
 def _persistent_int8_tensors(
    tensors: Mapping[str, Any],
 ) -> tuple[Mapping[str, Any], str]:
@@ -574,16 +674,22 @@ def _persistent_int8_tensors(
       return tensors, INT8_EXECUTION_NONE
    packed: dict[str, Any] = {}
    for key, value in quantized.items():
-      candidate = _pack_int8_rowwise(value)
+      if _is_packed_expert_tensor(value):
+         candidate = _pack_int8_expert_rowwise(value)
+      else:
+         candidate = _pack_int8_rowwise(value)
       if not isinstance(candidate, PackedInt8RowwiseWeight):
          return tensors, INT8_EXECUTION_PER_CALL_MATERIALIZATION
       packed[key] = candidate
-   verified_shapes: set[tuple[int, int]] = set()
+   verified_shapes: set[tuple[int, ...]] = set()
    for value in packed.values():
       shape = tuple(int(extent) for extent in value.values.shape)
       if shape in verified_shapes:
          continue
-      if not _packed_int8_rows_are_call_independent(value):
+      if len(shape) == 3:
+         if not _packed_int8_expert_rows_are_call_independent(value):
+            return tensors, INT8_EXECUTION_PER_CALL_MATERIALIZATION
+      elif not _packed_int8_rows_are_call_independent(value):
          return tensors, INT8_EXECUTION_PER_CALL_MATERIALIZATION
       verified_shapes.add(shape)
    execution = dict(tensors)
@@ -886,7 +992,7 @@ class MLXRuntimePort:
       self._execution_tensors: dict[int, Mapping[str, Any]] = {}
       int8_modes: set[str] = set()
       for _stage, _placement, loaded, _runtime in bound.values():
-         if self._architecture in {"qwen2", "qwen3", "qwen3_5"}:
+         if self._architecture in {"qwen2", "qwen3", "qwen3_5", "qwen3_5_moe"}:
             execution, mode = _persistent_int8_tensors(loaded.tensors)
          else:
             execution, mode = loaded.tensors, INT8_EXECUTION_NONE
@@ -1873,7 +1979,7 @@ class MLXRuntimePort:
       tensors = self._tensors_for(loaded)
       start = stage.layer_range.start_layer
       end = stage.layer_range.end_layer_exclusive
-      if runtime["architecture"] == "qwen3_5":
+      if runtime["architecture"] in HYBRID_STATE_ARCHITECTURES:
          return self._execute_qwen35_stage(
             stage=stage,
             loaded=loaded,
@@ -2097,6 +2203,7 @@ class MLXRuntimePort:
                position,
                past_layers.get(layer),
                _qwen2_linear,
+               _qwen35_expert_linear,
             )
          except qwen35_mlx.Qwen35ExecutionError as exc:
             raise MLXRuntimeError(str(exc)) from exc
@@ -2252,7 +2359,7 @@ class MLXRuntimePort:
             _reject("decode_sequence_mismatch")
 
       try:
-         if runtime["architecture"] in {"qwen2", "qwen3", "qwen3_5"}:
+         if runtime["architecture"] in {"qwen2", "qwen3", "qwen3_5", "qwen3_5_moe"}:
             # Replay from position zero through the checkpointed executor.
             # The temporary KV is intentionally discarded: complete-context
             # mode recomputes on every decode, but it must remain cooperatively

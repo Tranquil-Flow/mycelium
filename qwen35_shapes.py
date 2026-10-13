@@ -15,10 +15,30 @@ def layer_prefix(layer: int) -> str:
     return f"{TEXT_PREFIX}layers.{layer}."
 
 
+def _moe_mlp_shapes(
+    config: Mapping[str, Any], prefix: str, hidden: int
+) -> dict[str, tuple[int, ...]]:
+    """``qwen3_5_moe`` MLP: router, packed 3-D experts, shared expert + gate."""
+
+    experts = int(config["num_experts"])
+    moe_inner = int(config["moe_intermediate_size"])
+    shared_inner = int(config["shared_expert_intermediate_size"])
+    return {
+        prefix + "mlp.gate.weight": (experts, hidden),
+        # gate rows [0, mi) then up rows [mi, 2*mi) of every expert.
+        prefix + "mlp.experts.gate_up_proj": (experts, 2 * moe_inner, hidden),
+        prefix + "mlp.experts.down_proj": (experts, hidden, moe_inner),
+        prefix + "mlp.shared_expert.gate_proj.weight": (shared_inner, hidden),
+        prefix + "mlp.shared_expert.up_proj.weight": (shared_inner, hidden),
+        prefix + "mlp.shared_expert.down_proj.weight": (hidden, shared_inner),
+        prefix + "mlp.shared_expert_gate.weight": (1, hidden),
+    }
+
+
 def expected_qwen35_shapes(
     config: Mapping[str, Any], start: int, end: int, components: list[str] | tuple[str, ...]
 ) -> dict[str, tuple[int, ...]]:
-    """Exact tensor shapes one Qwen3.5 stage must hold (head key excluded)."""
+    """Exact tensor shapes one Qwen3.5 / Qwen3.5-MoE stage must hold (head key excluded)."""
 
     hidden = int(config["n_embd"])
     inner = int(config["n_inner"])
@@ -38,11 +58,18 @@ def expected_qwen35_shapes(
             {
                 prefix + "input_layernorm.weight": (hidden,),
                 prefix + "post_attention_layernorm.weight": (hidden,),
-                prefix + "mlp.gate_proj.weight": (inner, hidden),
-                prefix + "mlp.up_proj.weight": (inner, hidden),
-                prefix + "mlp.down_proj.weight": (hidden, inner),
             }
         )
+        if "num_experts" in config:
+            shapes.update(_moe_mlp_shapes(config, prefix, hidden))
+        else:
+            shapes.update(
+                {
+                    prefix + "mlp.gate_proj.weight": (inner, hidden),
+                    prefix + "mlp.up_proj.weight": (inner, hidden),
+                    prefix + "mlp.down_proj.weight": (hidden, inner),
+                }
+            )
         if config["layer_types"][layer] == LINEAR_ATTENTION:
             shapes.update(
                 {
@@ -71,3 +98,38 @@ def expected_qwen35_shapes(
     if "final_norm" in components:
         shapes[FINAL_NORM_KEY] = (hidden,)
     return shapes
+
+
+def qwen35_stage_resident_bytes(
+    config: Mapping[str, Any],
+    start: int,
+    end: int,
+    components: list[str] | tuple[str, ...],
+    quantization: str,
+) -> int:
+    """Resident weight bytes of one stage with this repo's loader rules.
+
+    ``none``: every tensor float32.  ``int8-weight-only``: 2-D ``.weight``
+    matrices and packed 3-D experts are int8 codes plus one float32 scale per
+    output row (per expert for packed experts); norms, conv1d, ``A_log``,
+    ``dt_bias`` and the MoE routing matrices stay float32.  An untied
+    ``lm_head`` counts as a matrix of the embedding's shape.
+    """
+
+    from weight_quantization import rowwise_int8_kind
+
+    if quantization not in {"none", "int8-weight-only"}:
+        raise ValueError("unsupported quantization")
+    shapes = expected_qwen35_shapes(config, start, end, components)
+    if "lm_head" in components and not config["tie_word_embeddings"]:
+        shapes["lm_head.weight"] = (int(config["vocab_size"]), int(config["n_embd"]))
+    total = 0
+    for key, shape in shapes.items():
+        elements = 1
+        for extent in shape:
+            elements *= extent
+        if quantization == "int8-weight-only" and rowwise_int8_kind(key, len(shape)):
+            total += elements + 4 * (elements // shape[-1])
+        else:
+            total += 4 * elements
+    return total

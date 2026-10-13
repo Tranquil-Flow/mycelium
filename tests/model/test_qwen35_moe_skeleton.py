@@ -1,11 +1,9 @@
-"""qwen3_5_moe (Qwen3.6-35B-A3B class) — adapter skeleton and RED placeholders.
+"""qwen3_5_moe (Qwen3.6-35B-A3B class) — adapter, manifest and runtime contract.
 
 The MoE text decoder is the Qwen3.5 hybrid with the dense MLP replaced by a
 256-way top-8 router, packed 3-D expert tensors and a sigmoid-gated shared
-expert.  This lane ships only the manifest-level adapter (recognising every
-tensor, excluding vision/MTP) and RED tests for the runtime work, marked
-``xfail(strict=True)`` so they flip loudly when the implementation lands.
-Nothing here claims MoE execution.
+expert.  These were the skeleton's strict-xfail RED tests; they now pass with
+the MLX runtime (execution parity lives in ``test_qwen35_moe_mlx_path.py``).
 """
 
 from __future__ import annotations
@@ -82,15 +80,14 @@ def _weight_map(layers: int) -> dict[str, str]:
     return {key: "model.safetensors" for key in keys}
 
 
-def test_qwen35_moe_adapter_is_a_manifest_only_skeleton() -> None:
+def test_qwen35_moe_adapter_is_runtime_supported() -> None:
     adapter = adapter_for_config(_config())
 
     assert adapter.architecture == "qwen3_5_moe"
-    assert adapter.runtime_supported is False
+    assert adapter.runtime_supported is True
     assert "mlp.experts.gate_up_proj" in adapter.decoder_tensor_suffixes
     assert "mlp.shared_expert_gate.weight" in adapter.decoder_tensor_suffixes
-    with pytest.raises(ValueError, match="runtime adapter unavailable"):
-        adapter_for_runtime("qwen3_5_moe")
+    assert adapter_for_runtime("qwen3_5_moe") is adapter
 
 
 def test_qwen35_moe_manifest_recognises_packed_experts_and_excludes_mtp() -> None:
@@ -106,18 +103,14 @@ def test_qwen35_moe_manifest_recognises_packed_experts_and_excludes_mtp() -> Non
     )
 
     assert manifest["architecture"] == "qwen3_5_moe"
-    assert "runtime_model" not in manifest  # no executable contract yet
+    assert manifest["runtime_model"]["architecture"] == "qwen3_5_moe"
+    assert manifest["runtime_model"]["model_config"]["num_experts"] == 256
     assert "mtp.layers.0.mlp.experts.255.gate_proj.weight" in manifest["excluded_tensor_keys"]
     assert "model.language_model.layers.0.mlp.experts.down_proj" in (
         manifest["tensor_keys_by_layer"]["0"]
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="qwen3_5_moe runtime contract not implemented: router/expert config "
-    "normalization (256 experts, top-8, norm_topk_prob, shared expert) is design-only",
-)
 def test_qwen35_moe_runtime_contract_normalizes_35b_a3b() -> None:
     from runtime_contracts import normalize_qwen35_moe_model_config  # noqa: F401
 
@@ -126,21 +119,11 @@ def test_qwen35_moe_runtime_contract_normalizes_35b_a3b() -> None:
     assert normalized["num_experts_per_tok"] == 8
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="no MLX sparse-MoE block: float32 router softmax, top-8 with lowest-index "
-    "tie-break, renormalized weights, packed [E, 2*mi, H] experts, sigmoid shared expert",
-)
 def test_qwen35_moe_mlx_block_exists() -> None:
     import qwen35_mlx
 
     assert callable(qwen35_mlx.sparse_moe_block)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="qwen3_5_moe is not runtime-supported: no adapter backends, no loader "
-    "shape table, no per-expert row-wise int8 for 3-D packed expert tensors",
-)
 def test_qwen35_moe_is_runtime_supported_on_mlx() -> None:
     assert ADAPTERS["qwen3_5_moe"].runtime_backends == ("mlx",)

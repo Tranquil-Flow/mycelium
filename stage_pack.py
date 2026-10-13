@@ -354,6 +354,34 @@ _VERIFICATION_SCHEMA[1]["runtime"] = _with_qwen35_runtime_option(
 )
 
 
+def _with_qwen35_moe_runtime_option(
+    one_of: tuple[str, Any], *, scalar: Any, typed: bool
+) -> tuple[str, Any]:
+    """Append the ``qwen3_5_moe`` shape: the Qwen3.5 option plus the MoE fields."""
+
+    qwen35_option = one_of[1][-1]
+    model_config = dict(qwen35_option[1]["model_config"][1])
+    model_config.update(
+        {
+            "num_experts": int if typed else scalar,
+            "num_experts_per_tok": int if typed else scalar,
+            "moe_intermediate_size": int if typed else scalar,
+            "shared_expert_intermediate_size": int if typed else scalar,
+            "norm_topk_prob": bool if typed else scalar,
+        }
+    )
+    option = ("map", {**qwen35_option[1], "model_config": ("map", model_config)})
+    return ("one_of", (*one_of[1], option))
+
+
+_PACK_RUNTIME_SCHEMA = _with_qwen35_moe_runtime_option(
+    _PACK_RUNTIME_SCHEMA, scalar=_ANY_SCHEMA, typed=False
+)
+_VERIFICATION_SCHEMA[1]["runtime"] = _with_qwen35_moe_runtime_option(
+    _VERIFICATION_SCHEMA[1]["runtime"], scalar=_ANY_SCHEMA, typed=True
+)
+
+
 _PACK_SCHEMA: tuple[str, Any] = (
     "map",
     {

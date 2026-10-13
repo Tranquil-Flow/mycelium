@@ -65,6 +65,18 @@ QWEN35_MODEL_CONFIG_FIELDS = frozenset(
     }
 )
 QWEN35_LAYER_TYPES = frozenset({"linear_attention", "full_attention"})
+# qwen3_5_moe: the hybrid fields plus the sparse MoE MLP.  ``n_inner`` is the
+# per-expert intermediate width (== moe_intermediate_size): no dense MLP exists.
+QWEN35_MOE_FIELDS = frozenset(
+    {
+        "num_experts",
+        "num_experts_per_tok",
+        "moe_intermediate_size",
+        "shared_expert_intermediate_size",
+        "norm_topk_prob",
+    }
+)
+QWEN35_MOE_MODEL_CONFIG_FIELDS = frozenset({*QWEN35_MODEL_CONFIG_FIELDS, *QWEN35_MOE_FIELDS})
 _SUPPORTED_MLX_DTYPES = frozenset({"float16", "bfloat16", "float32"})
 SUPPORTED_NUMPY_DTYPES = frozenset({"float32"})
 _RUNTIME_IDENTITY_FIELDS = frozenset(
@@ -390,6 +402,62 @@ def normalize_qwen35_model_config(
     return normalized
 
 
+def normalize_qwen35_moe_model_config(
+    config: Mapping[str, Any], *, expected_layers: int
+) -> dict[str, Any]:
+    """Extract the exact Qwen3.5 MoE (``qwen3_5_moe``) text decoder.
+
+    The hybrid decoder of :func:`normalize_qwen35_model_config` with every
+    layer's MLP replaced by a sparse MoE block: a router over ``num_experts``
+    experts, top ``num_experts_per_tok`` with renormalised weights
+    (``norm_topk_prob``; the Hugging Face router always renormalises), packed
+    experts of width ``moe_intermediate_size`` and one sigmoid-gated shared
+    expert of width ``shared_expert_intermediate_size``.  Accepts the HF
+    ``Qwen3_5MoeForConditionalGeneration`` config, a bare text config, or an
+    already normalized document.
+    """
+
+    if not isinstance(config, Mapping):
+        raise ValueError("runtime model_config source must be an object")
+    text = config.get("text_config", config)
+    if not isinstance(text, Mapping):
+        raise ValueError("runtime qwen3_5_moe text_config must be an object")
+    moe: dict[str, Any] = {}
+    for field in (
+        "num_experts",
+        "num_experts_per_tok",
+        "moe_intermediate_size",
+        "shared_expert_intermediate_size",
+    ):
+        try:
+            moe[field] = _positive_int(text.get(field), field)
+        except ValueError as exc:
+            raise ValueError(f"runtime qwen3_5_moe {field} must be a positive integer") from exc
+    if moe["num_experts_per_tok"] > moe["num_experts"]:
+        raise ValueError("runtime qwen3_5_moe num_experts_per_tok exceeds num_experts")
+    if text.get("norm_topk_prob", True) is not True:
+        raise ValueError("runtime qwen3_5_moe norm_topk_prob must be true")
+    if text.get("decoder_sparse_step", 1) != 1:
+        raise ValueError("runtime qwen3_5_moe decoder_sparse_step must be 1 (every layer sparse)")
+    if text.get("mlp_only_layers", []) not in ([], ()):
+        raise ValueError("runtime qwen3_5_moe mlp_only_layers must be empty")
+    if "n_inner" in text and text.get("n_inner") != moe["moe_intermediate_size"]:
+        raise ValueError("runtime qwen3_5_moe n_inner must equal moe_intermediate_size")
+    dense_source = {
+        key: value
+        for key, value in text.items()
+        if key not in QWEN35_MOE_FIELDS
+        and key not in {"decoder_sparse_step", "intermediate_size", "n_inner"}
+    }
+    dense_source["intermediate_size"] = moe["moe_intermediate_size"]
+    if "tie_word_embeddings" not in dense_source and "tie_word_embeddings" in config:
+        dense_source["tie_word_embeddings"] = config["tie_word_embeddings"]
+    normalized = normalize_qwen35_model_config(dense_source, expected_layers=expected_layers)
+    normalized.update({**moe, "norm_topk_prob": True})
+    json.dumps(normalized, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return normalized
+
+
 def _normalize_architecture_runtime(runtime: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
     architecture = runtime.get("architecture")
     model_config = runtime.get("model_config")
@@ -429,8 +497,18 @@ def _normalize_architecture_runtime(runtime: Mapping[str, Any]) -> tuple[str, di
             model_config,
             expected_layers=_positive_int(model_config.get("n_layer"), "n_layer"),
         )
+    if architecture == "qwen3_5_moe":
+        if set(model_config) != QWEN35_MOE_MODEL_CONFIG_FIELDS:
+            raise ValueError(
+                "qwen3_5_moe architecture model_config fields do not match the normalized "
+                "runtime contract"
+            )
+        return architecture, normalize_qwen35_moe_model_config(
+            model_config,
+            expected_layers=_positive_int(model_config.get("n_layer"), "n_layer"),
+        )
     raise ValueError(
-        "unsupported runtime architecture; expected gpt2, qwen2, qwen3, or qwen3_5"
+        "unsupported runtime architecture; expected gpt2, qwen2, qwen3, qwen3_5, or qwen3_5_moe"
     )
 
 
@@ -483,10 +561,10 @@ def validate_normalized_numpy_runtime(runtime: Any) -> dict[str, Any]:
     architecture, normalized_config = _normalize_architecture_runtime(runtime)
     if architecture == "gpt2" and runtime["quantization"] != "none":
         raise ValueError("gpt2 runtime quantization is unsupported")
-    if architecture == "qwen3_5":
+    if architecture in {"qwen3_5", "qwen3_5_moe"}:
         # The hybrid decoder has an MLX stage kernel only; the NumPy Qwen3.5
-        # implementation is a test oracle, not a stage backend.
-        raise ValueError("qwen3_5 numpy stage runtime is unsupported")
+        # implementations are test oracles, not stage backends.
+        raise ValueError(f"{architecture} numpy stage runtime is unsupported")
     normalized = {
         "backend": "numpy",
         "dtype": runtime["dtype"],

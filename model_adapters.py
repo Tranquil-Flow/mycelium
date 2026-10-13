@@ -75,8 +75,8 @@ QWEN35_FULL_ATTENTION_TENSOR_SUFFIXES = (
    "self_attn.v_proj.weight",
    "self_attn.o_proj.weight",
 )
-# qwen3_5_moe replaces the dense MLP with a router, packed experts and a shared
-# expert.  Design/skeleton only: not runtime-supported.
+# qwen3_5_moe replaces the dense MLP with a router, packed 3-D experts (no
+# ``.weight`` suffix) and a sigmoid-gated shared expert.
 QWEN35_MOE_SHARED_TENSOR_SUFFIXES = (
    "input_layernorm.weight",
    "post_attention_layernorm.weight",
@@ -280,7 +280,6 @@ ADAPTERS = {
       excluded_tensor_prefixes=_QWEN35_EXCLUDED_PREFIXES,
       causal_lm_architectures=("Qwen3_5ForConditionalGeneration",),
    ),
-   # Skeleton only: manifest-compilable, never runtime-supported (no backends).
    "qwen3_5_moe": ModelAdapter(
       architecture="qwen3_5_moe",
       layer_count_fields=("text_config.num_hidden_layers", "num_hidden_layers"),
@@ -289,7 +288,7 @@ ADAPTERS = {
       tied_lm_head_source=("model.language_model.embed_tokens.",),
       supported_architectures=("Qwen3_5MoeForConditionalGeneration",),
       decoder_tensor_suffixes=QWEN35_MOE_SHARED_TENSOR_SUFFIXES,
-      runtime_backends=(),
+      runtime_backends=("mlx",),
       layer_type_tensor_suffixes={
          "linear_attention": QWEN35_LINEAR_ATTENTION_TENSOR_SUFFIXES,
          "full_attention": QWEN35_FULL_ATTENTION_TENSOR_SUFFIXES,

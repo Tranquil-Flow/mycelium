@@ -15,6 +15,7 @@ from runtime_contracts import (
    normalize_qwen2_model_config,
    normalize_qwen3_model_config,
    normalize_qwen35_model_config,
+   normalize_qwen35_moe_model_config,
 )
 
 
@@ -265,6 +266,15 @@ def compile_model_manifest(
       runtime_model = {
          "architecture": "qwen3_5",
          "model_config": normalize_qwen35_model_config(
+            config, expected_layers=num_layers
+         ),
+      }
+   elif adapter.architecture == "qwen3_5_moe" and _is_causal_lm(
+      config, adapter.causal_lm_architectures
+   ):
+      runtime_model = {
+         "architecture": "qwen3_5_moe",
+         "model_config": normalize_qwen35_moe_model_config(
             config, expected_layers=num_layers
          ),
       }

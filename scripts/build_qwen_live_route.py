@@ -1381,7 +1381,7 @@ def _deployment_prompt_codec(manifest: object, deployment_root: Path) -> Any:
     )
     if architecture == "qwen3":
         return Qwen3PromptCodec.from_deployment(deployment_root)
-    if architecture == "qwen3_5":
+    if architecture in {"qwen3_5", "qwen3_5_moe"}:
         return Qwen35PromptCodec.from_deployment(deployment_root)
     return Qwen2PromptCodec.from_deployment(deployment_root)
 

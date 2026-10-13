@@ -282,7 +282,7 @@ def prompt_codec_from_deployment(deployment_dir: Path) -> Any:
         return Qwen2PromptCodec.from_deployment(deployment_dir)
     if model_type == "qwen3":
         return Qwen3PromptCodec.from_deployment(deployment_dir)
-    if model_type == "qwen3_5":
+    if model_type in {"qwen3_5", "qwen3_5_moe"}:
         return Qwen35PromptCodec.from_deployment(deployment_dir)
     raise RuntimeError(f"unsupported_prompt_codec:{model_type!r}")
 

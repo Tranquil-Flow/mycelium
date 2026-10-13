@@ -22,7 +22,7 @@ from runtime_contracts import (
     validate_loaded_stage_authentication,
     validate_normalized_numpy_runtime,
 )
-from weight_quantization import Int8RowwiseWeight
+from weight_quantization import Int8RowwiseWeight, rowwise_int8_kind
 
 
 _CANCELLABLE_SEQUENCE_CHUNK = 32
@@ -138,18 +138,37 @@ def _softmax(value: np.ndarray, axis: int) -> np.ndarray:
     return (exponent / np.sum(exponent, axis=axis, keepdims=True)).astype(dtype)
 
 
-def quantize_qwen2_numpy_tensor(key: str, raw: Any) -> Any:
-    """Quantize one Qwen matrix without retaining its float source."""
+def _rowwise_int8_numpy(compute: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Symmetric int8 codes and one float32 scale per row of a 2-D float32 array."""
 
-    value = np.asarray(raw)
-    if not key.endswith(".weight") or value.ndim != 2:
-        return raw
-    compute = value.astype(np.float32)
     scales = np.max(np.abs(compute), axis=1) / 127.0
     scales = np.where(scales == 0.0, 1.0, scales).astype(np.float32)
     scaled = compute / scales[:, None]
     rounded = np.sign(scaled) * np.floor(np.abs(scaled) + 0.5)
     quantized = np.clip(rounded, -127, 127).astype(np.int8)
+    return quantized, scales
+
+
+def quantize_qwen2_numpy_tensor(key: str, raw: Any) -> Any:
+    """Quantize one Qwen matrix without retaining its float source.
+
+    Packed 3-D MoE expert tensors ``[E, out, in]`` are quantized per expert and
+    per output row (identical to quantizing each expert's matrix alone);
+    MoE routing matrices stay in their float dtype.
+    """
+
+    value = np.asarray(raw)
+    kind = rowwise_int8_kind(key, value.ndim)
+    if kind is None:
+        return raw
+    compute = value.astype(np.float32)
+    if kind == "experts":
+        experts, rows, columns = compute.shape
+        quantized, scales = _rowwise_int8_numpy(compute.reshape(experts * rows, columns))
+        quantized = quantized.reshape(experts, rows, columns)
+        scales = scales.reshape(experts, rows)
+    else:
+        quantized, scales = _rowwise_int8_numpy(compute)
     quantized.flags.writeable = False
     scales.flags.writeable = False
     return Int8RowwiseWeight(quantized, scales)
@@ -1502,10 +1521,77 @@ def _qwen35_gated_delta_net(
     )
 
 
+def qwen35_moe_route_top_k(
+    probabilities: np.ndarray, top_k: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Deterministic top-k over float32 router probabilities ``[N, E]``.
+
+    Experts are ranked by probability, descending; equal probabilities rank
+    the lower expert index first (a stable sort of the negated probabilities).
+    Returns the selected indices in rank order and their weights renormalised
+    to sum to one (``norm_topk_prob``), both per token.
+    """
+
+    compute = np.asarray(probabilities, dtype=np.float32)
+    order = np.argsort(-compute, axis=-1, kind="stable")[:, :top_k]
+    selected = np.take_along_axis(compute, order, axis=-1)
+    weights = (selected / np.sum(selected, axis=-1, keepdims=True)).astype(np.float32)
+    return order.astype(np.int64), weights
+
+
+def _qwen35_expert(weight: Any, expert: int) -> Any:
+    if isinstance(weight, Int8RowwiseWeight):
+        return Int8RowwiseWeight(weight.values[expert], weight.scales[expert])
+    return weight[expert]
+
+
+def qwen35_sparse_moe_numpy(
+    normalized: np.ndarray, tensors: Mapping[str, Any], prefix: str, config: Mapping[str, Any]
+) -> np.ndarray:
+    """Qwen3.5 sparse MoE MLP: routed experts plus the sigmoid-gated shared expert."""
+
+    batch, sequence, hidden = normalized.shape
+    tokens = normalized.reshape(batch * sequence, hidden).astype(np.float32)
+    logits = _qwen2_linear(tokens, tensors[prefix + "mlp.gate.weight"]).astype(np.float32)
+    indices, weights = qwen35_moe_route_top_k(
+        _softmax(logits, axis=-1), int(config["num_experts_per_tok"])
+    )
+    intermediate = int(config["moe_intermediate_size"])
+    gate_up = tensors[prefix + "mlp.experts.gate_up_proj"]
+    down = tensors[prefix + "mlp.experts.down_proj"]
+    routed = np.zeros_like(tokens)
+    for token in range(tokens.shape[0]):
+        row = tokens[token : token + 1]
+        total = np.zeros((1, hidden), dtype=np.float32)
+        for slot in range(indices.shape[1]):
+            expert = int(indices[token, slot])
+            projected = _qwen2_linear(row, _qwen35_expert(gate_up, expert))
+            activated = _qwen35_silu(projected[:, :intermediate]) * projected[:, intermediate:]
+            total = total + weights[token, slot] * _qwen2_linear(
+                activated, _qwen35_expert(down, expert)
+            )
+        routed[token] = total[0]
+    shared = _qwen2_linear(
+        _qwen35_silu(_qwen2_linear(tokens, tensors[prefix + "mlp.shared_expert.gate_proj.weight"]))
+        * _qwen2_linear(tokens, tensors[prefix + "mlp.shared_expert.up_proj.weight"]),
+        tensors[prefix + "mlp.shared_expert.down_proj.weight"],
+    )
+    shared_gate = _qwen35_sigmoid(
+        _qwen2_linear(tokens, tensors[prefix + "mlp.shared_expert_gate.weight"])
+    )
+    return (routed + shared_gate * shared).reshape(batch, sequence, hidden).astype(np.float32)
+
+
 class NumpyQwen35Runtime:
     """Full-context NumPy Qwen3.5 hybrid text oracle used by parity tests."""
 
     backend = "numpy"
+
+    @staticmethod
+    def _normalize(config: Mapping[str, Any], *, expected_layers: int) -> dict[str, Any]:
+        from runtime_contracts import normalize_qwen35_model_config
+
+        return normalize_qwen35_model_config(config, expected_layers=expected_layers)
 
     def __init__(
         self,
@@ -1514,10 +1600,8 @@ class NumpyQwen35Runtime:
         tensors: Mapping[str, Any],
         quantization: str = "none",
     ):
-        from runtime_contracts import normalize_qwen35_model_config
-
         try:
-            config = normalize_qwen35_model_config(
+            config = self._normalize(
                 model_config, expected_layers=int(model_config["n_layer"])
             )
         except (KeyError, TypeError, ValueError) as exc:
@@ -1565,6 +1649,11 @@ class NumpyQwen35Runtime:
             normalized = _qwen35_rms_offset(
                 hidden, self._tensors[prefix + "post_attention_layernorm.weight"], epsilon
             )
+            if "num_experts" in config:
+                hidden = hidden + qwen35_sparse_moe_numpy(
+                    normalized, self._tensors, prefix, config
+                )
+                continue
             gate = _qwen2_linear(normalized, self._tensors[prefix + "mlp.gate_proj.weight"])
             up = _qwen2_linear(normalized, self._tensors[prefix + "mlp.up_proj.weight"])
             hidden = hidden + _qwen2_linear(
@@ -1582,3 +1671,20 @@ class NumpyQwen35Runtime:
         result = np.ascontiguousarray(logits, dtype=np.float32)
         result.flags.writeable = False
         return result
+
+
+class NumpyQwen35MoeRuntime(NumpyQwen35Runtime):
+    """Full-context NumPy ``qwen3_5_moe`` text oracle used by parity tests.
+
+    The Qwen3.5 hybrid with the sparse MoE MLP (float32 router, top-k with
+    lowest-index tie-break, renormalised weights, packed experts, sigmoid-gated
+    shared expert).  ``int8-weight-only`` quantizes the packed experts per
+    expert and output row and keeps the routing matrices float32, exactly as
+    the loader does.  Tests only, not a stage backend.
+    """
+
+    @staticmethod
+    def _normalize(config: Mapping[str, Any], *, expected_layers: int) -> dict[str, Any]:
+        from runtime_contracts import normalize_qwen35_moe_model_config
+
+        return normalize_qwen35_moe_model_config(config, expected_layers=expected_layers)

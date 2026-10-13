@@ -48,6 +48,7 @@ from weight_provisioning import artifact_report_errors
 from weight_quantization import (
     Int8RowwiseWeight,
     ROWWISE_INT8_CONVERSION_CHUNK_FLOAT_BYTES,
+    rowwise_int8_kind,
 )
 
 
@@ -320,7 +321,7 @@ def _validate_range_and_prefixes(
         )
     if architecture == "gpt2":
         namespace = "transformer." if selected.startswith("transformer.") else ""
-    elif architecture == "qwen3_5":
+    elif architecture in {"qwen3_5", "qwen3_5_moe"}:
         namespace = "model.language_model."
     else:
         namespace = "model."
@@ -349,7 +350,7 @@ def _resolve_aliases(
             [f"{namespace}wte.weight"]
             if architecture == "gpt2"
             else [f"{namespace}embed_tokens.weight"]
-            if architecture == "qwen3_5"
+            if architecture in {"qwen3_5", "qwen3_5_moe"}
             else ["model.embed_tokens.weight"]
         )
         if component_keys.get(source) != expected_source:
@@ -971,6 +972,44 @@ def _load_rowwise_int8_weight(
     return Int8RowwiseWeight(values, scales)
 
 
+def _load_expert_rowwise_int8_weight(
+    handle: BinaryIO,
+    *,
+    data_offset: int,
+    start: int,
+    end: int,
+    source_dtype: str,
+    shape: tuple[int, ...],
+    key: str,
+) -> Int8RowwiseWeight:
+    """Quantize a packed ``[E, out, in]`` expert tensor per expert and output row.
+
+    The bytes of a C-ordered ``[E, out, in]`` tensor are exactly those of an
+    ``[E * out, in]`` matrix, so this streams it through the incumbent
+    row-wise converter (bounded chunks, one float32 scale per row) and
+    reshapes: codes ``[E, out, in]`` int8, scales ``[E, out]`` float32 --
+    identical to quantizing every expert's matrix on its own.
+    """
+
+    if len(shape) != 3 or rowwise_int8_kind(key, 3) != "experts":
+        raise _fail(f"invalid packed expert int8 tensor shape: {key}")
+    experts, rows, columns = shape
+    flat = _load_rowwise_int8_weight(
+        handle,
+        data_offset=data_offset,
+        start=start,
+        end=end,
+        source_dtype=source_dtype,
+        shape=(experts * rows, columns),
+        key=key + ".rows.weight",
+    )
+    values = flat.values.reshape(shape)
+    scales = flat.scales.reshape(experts, rows)
+    values.flags.writeable = False
+    scales.flags.writeable = False
+    return Int8RowwiseWeight(values, scales)
+
+
 def _load_numpy_safetensors(
     handle: BinaryIO,
     header: Mapping[str, Mapping[str, Any]],
@@ -993,7 +1032,19 @@ def _load_numpy_safetensors(
             )
         start, end = entry["data_offsets"]
         shape = tuple(int(dimension) for dimension in entry["shape"])
-        if quantize_qwen and key.endswith(".weight") and len(shape) == 2:
+        int8_kind = rowwise_int8_kind(key, len(shape)) if quantize_qwen else None
+        if int8_kind == "experts":
+            loaded[key] = _load_expert_rowwise_int8_weight(
+                handle,
+                data_offset=data_offset,
+                start=start,
+                end=end,
+                source_dtype=source_dtype,
+                shape=shape,
+                key=key,
+            )
+            continue
+        if int8_kind == "matrix":
             loaded[key] = _load_rowwise_int8_weight(
                 handle,
                 data_offset=data_offset,
@@ -1257,6 +1308,9 @@ def _validate_qwen35_shapes(
     config = runtime["model_config"]
     for key, shape in expected_qwen35_shapes(config, start, end, components).items():
         _expect_shape(tensors, key, shape)
+        value = tensors[key]
+        if isinstance(value, Int8RowwiseWeight) and _shape(value.scales) != shape[:-1]:
+            raise _fail(f"row-wise int8 scale shape mismatch for {key}")
     if "lm_head" in components:
         head_key = aliases.get("lm_head", {}).get("tensor_keys", ["lm_head.weight"])[0]
         _expect_shape(tensors, head_key, (config["vocab_size"], config["n_embd"]))
@@ -2428,9 +2482,19 @@ def load_assignment_stage(
             artifact_report,
         )
         quantize_during_load = (
-            runtime["architecture"] in {"qwen2", "qwen3", "qwen3_5"}
+            runtime["architecture"] in {"qwen2", "qwen3", "qwen3_5", "qwen3_5_moe"}
             and runtime["quantization"] == "int8-weight-only"
         )
+        if (
+            selection == PLATFORM_NEUTRAL_INT8_EXECUTION
+            and runtime["architecture"] == "qwen3_5_moe"
+        ):
+            # The A9 kernel executes 2-D row-wise matrices only; packed 3-D
+            # experts run on the MLX stage kernels.
+            raise _fail(
+                "platform_neutral_int8_packed_experts_unsupported: qwen3_5_moe "
+                "packed experts execute on the MLX stage path only"
+            )
         if selection == PLATFORM_NEUTRAL_INT8_EXECUTION and not quantize_during_load:
             raise _fail(
                 "platform_neutral_int8_requires_int8_weight_only: the A9 int8 "
@@ -2447,7 +2511,7 @@ def load_assignment_stage(
             quantize_qwen=quantize_during_load,
         )
         components = list(assignment["components"])
-        if runtime["architecture"] == "qwen3_5":
+        if runtime["architecture"] in {"qwen3_5", "qwen3_5_moe"}:
             _validate_qwen35_shapes(
                 tensors, runtime, start, end, components, aliases
             )
@@ -2499,7 +2563,7 @@ def load_assignment_stage(
         )
         runtime_identity = _actual_runtime_identity(runtime)
         if runtime["backend"] == _MLX_RUNTIME_BACKEND:
-            if runtime["architecture"] == "qwen3_5":
+            if runtime["architecture"] in {"qwen3_5", "qwen3_5_moe"}:
                 probe_output = _run_qwen35_probe(
                     tensors, runtime, start, end, components, aliases
                 )
