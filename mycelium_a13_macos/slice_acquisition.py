@@ -9,6 +9,14 @@ inline header, and pins a sha256 for every segment and every whole file. The
 whole-file digests must equal the compiled operator plan's transfer rows, so a
 member's reconstructed file is byte-identical to what qualification expects.
 
+Owner disk: the owner's own slice files are byte-identical to the deployment
+files its compile just wrote, so a transport may offer ``clone_candidate(path)``.
+``fetch_node_slice`` then makes each such file an APFS clone (shared blocks,
+own inode, ``st_nlink`` 1 -- never a hardlink), hashes the clone against the
+plan's pinned digest, and only publishes it on a match; any other outcome falls
+back to the ranged fetch. A cloned file needs no new data blocks, so it is not
+counted against free disk.
+
 The stage shards carry the source tensors' raw bf16 bytes: the builder's
 shard writer copies tensors unchanged, and the runtime dtype and int8
 weight-only quantization are applied when a stage is loaded, not written into
@@ -43,6 +51,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import stat
 import struct
 from typing import Any, Callable, Mapping
 
@@ -376,6 +385,60 @@ def _atomic_json(path: Path, value: Any) -> None:
     os.replace(temporary, path)
 
 
+def _clone_file(source_fd: int, destination: Path) -> bool:
+    """APFS clone of an open regular file; False where cloning is unsupported."""
+    try:
+        import ctypes
+        function = ctypes.CDLL(None, use_errno=True).fclonefileat
+    except (AttributeError, OSError, ImportError):
+        return False
+    function.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+    function.restype = ctypes.c_int
+    # AT_FDCWD (-2), CLONE_NOFOLLOW (1): the destination path is never followed.
+    if function(source_fd, -2, os.fsencode(destination), 1) == 0:
+        return True
+    return False
+
+
+def _clone_verified(row: Mapping[str, Any], root: Path, clone_candidate: Callable[[str], Any]) -> bool:
+    """Publish ``row`` as a verified clone of a local candidate, or return False."""
+    try:
+        candidate = clone_candidate(row["path"])
+    except Exception:
+        return False
+    if candidate is None:
+        return False
+    work = root / _WORK / ("clone-" + _digest_value(row).split(":", 1)[1])
+    shutil.rmtree(work, ignore_errors=True)
+    _private_dir(work)
+    partial = work / "partial"
+    try:
+        try:
+            fd = os.open(Path(candidate), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        except OSError:
+            return False
+        try:
+            info = os.fstat(fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.geteuid()
+                    or info.st_size != row["size_bytes"] or not _clone_file(fd, partial)):
+                return False
+        finally:
+            os.close(fd)
+        info = partial.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size != row["size_bytes"]
+                or _file_sha(partial) != row["content_digest"]):
+            return False
+        os.chmod(partial, 0o600)
+        final = root / row["path"]
+        _private_dir(final.parent)
+        os.replace(partial, final)
+        return True
+    except OSError:
+        return False
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def fetch_node_slice(node_plan: Mapping[str, Any], *, expected_node_plan_digest: str,
                      destination_root: str | Path, transport: Any, max_download_bytes: int,
                      max_disk_bytes: int,
@@ -384,7 +447,9 @@ def fetch_node_slice(node_plan: Mapping[str, Any], *, expected_node_plan_digest:
 
     Every segment is sha256-checked before it is journalled; every file is
     sha256-checked against the plan before an atomic publish. Already-verified
-    files and journalled segments are reused (resumable, idempotent).
+    files and journalled segments are reused (resumable, idempotent). Files the
+    transport can offer locally (``clone_candidate``) are cloned and verified
+    first; only the rest are fetched by range and need free disk.
     """
     plan = _validated_node_plan(node_plan, expected_node_plan_digest)
     if (type(max_download_bytes) is not int or type(max_disk_bytes) is not int
@@ -398,7 +463,7 @@ def fetch_node_slice(node_plan: Mapping[str, Any], *, expected_node_plan_digest:
     if not root.is_absolute() or root.is_symlink() or not root.is_dir() or root.resolve() != root:
         raise SliceError("slice_destination_invalid")
     stop = should_stop or (lambda: False)
-    downloaded = reused = requests = 0
+    downloaded = reused = requests = cloned = 0
     pending = []
     for row in plan["files"]:
         final = root / row["path"]
@@ -411,6 +476,17 @@ def fetch_node_slice(node_plan: Mapping[str, Any], *, expected_node_plan_digest:
             reused += row["size_bytes"]
             continue
         pending.append(row)
+    clone_candidate = getattr(transport, "clone_candidate", None)
+    if callable(clone_candidate):
+        remaining = []
+        for row in pending:
+            if stop():
+                raise SliceError("slice_fetch_cancelled")
+            if _clone_verified(row, root, clone_candidate):
+                cloned += row["size_bytes"]
+            else:
+                remaining.append(row)
+        pending = remaining
     needed = sum(row["size_bytes"] for row in pending)
     if needed and shutil.disk_usage(root).free < needed:
         raise SliceError("slice_disk_unavailable")
@@ -477,7 +553,7 @@ def fetch_node_slice(node_plan: Mapping[str, Any], *, expected_node_plan_digest:
             "plan_digest": plan["plan_digest"], "destination_root": root,
             "files": [{k: row[k] for k in ("path", "size_bytes", "content_digest")}
                       for row in plan["files"]],
-            "downloaded_bytes": downloaded, "reused_bytes": reused,
+            "downloaded_bytes": downloaded, "reused_bytes": reused, "cloned_bytes": cloned,
             "range_requests": requests, "route_ready": False}
 
 

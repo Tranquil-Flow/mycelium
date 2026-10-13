@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from .owner_run import OwnerRunError
@@ -40,6 +41,20 @@ _OBSERVATION_FINAL = frozenset({'managed_observation_hosts_not_distinct',
 def _code(error: BaseException, default: str) -> str:
     code = getattr(error, 'code', None) or str(error)
     return code if isinstance(code, str) and _CODE_RE.fullmatch(code) else default
+
+
+def _owner_compiled_bundle(app):
+    """The owner's compiled transfer bundle for the current run, if any.
+
+    ``chain_compile`` writes it to ``<root>/chain-runs/<run_id>/compiled``; its
+    ``deployment/*.safetensors`` are this Mac's slice files byte for byte, so the
+    owner's own slice is cloned from there instead of being written again.
+    """
+    context = getattr(app, '_observation_context', None)
+    run_id = getattr(context, 'run_id', None)
+    if not isinstance(run_id, str) or not run_id:
+        return None
+    return Path(app.root) / 'chain-runs' / run_id / 'compiled' / 'transfer-bundle'
 
 
 class ChainOps:
@@ -235,7 +250,8 @@ class AppDemoChain:
             source=lambda: exchange.announcement(local),
             sink=lambda report: exchange.submit_local(local, report),
             slice_transport=lambda: SnapshotRangeTransport(source.source_root,
-                model_id=source.model.model_id, resolved_commit=source.model.resolved_commit))
+                model_id=source.model.model_id, resolved_commit=source.model.resolved_commit,
+                clone_root=_owner_compiled_bundle(app)))
         ctx.progress('this Mac contributes as node ' + local[:12])
 
     def _remote_members(self) -> list[str]:

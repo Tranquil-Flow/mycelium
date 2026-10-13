@@ -170,6 +170,14 @@ class TargetStaging:
             raise StagingError('stage_disk_limit_exceeded')
         return files,encoded
 
+    def _clonable(self,preposition):
+        if preposition is None or sys.platform!='darwin': return set()
+        try:
+            device=os.stat(self.root).st_dev
+            return {row['destination_path'] for row in preposition['files']
+                    if os.stat(row['source_path'],follow_symlinks=False).st_dev==device}
+        except (OSError,KeyError,TypeError): return set()
+
     def _verify(self,files):
         try:
             observed=set()
@@ -227,7 +235,10 @@ class TargetStaging:
                     raise StagingError('stage_existing_binding_mismatch')
                 self._verify(files)
                 return ack
-            needed=len(archive)+len(encoded)+sum(size for size,d in files.values())
+            # Prepositioned files on this volume become APFS clones in the canonical
+            # script (no new data blocks); it re-checks free disk before any byte copy.
+            clones=self._clonable(preposition)
+            needed=len(archive)+len(encoded)+sum(size for name,(size,d) in files.items() if name not in clones)
             if shutil.disk_usage(self.root).free<needed: raise StagingError('stage_disk_unavailable')
             actual=self._run('prepare',args,archive+encoded)
             if actual!=ack: raise StagingError('stage_ack_invalid')

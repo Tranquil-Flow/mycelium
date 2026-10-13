@@ -29,7 +29,7 @@ import json
 import shutil
 import threading
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
 
 from .run_exchange import MEMBER_REPORT
@@ -90,10 +90,24 @@ class OwnerRunConsent:
 class SnapshotRangeTransport:
     """``read_range`` over the owner's own verified snapshot (no network)."""
 
-    def __init__(self, source_root: Path, *, model_id: str, resolved_commit: str) -> None:
+    def __init__(self, source_root: Path, *, model_id: str, resolved_commit: str,
+                 clone_root: Path | None = None) -> None:
         self.root = Path(source_root)
         self.model_id = model_id
         self.resolved_commit = resolved_commit
+        # The owner's compiled transfer bundle: its deployment files are the
+        # slice files byte for byte, so the slice is cloned, not re-written.
+        self.clone_root = None if clone_root is None else Path(clone_root)
+
+    def clone_candidate(self, path: str) -> Path | None:
+        """A local file to clone for ``path``; the fetcher verifies its digest."""
+        if self.clone_root is None:
+            return None
+        relative = PurePosixPath(path)
+        if relative.is_absolute() or any(part in {'', '.', '..'} for part in relative.parts):
+            return None
+        candidate = self.clone_root.joinpath(*relative.parts)
+        return candidate if candidate.is_file() and not candidate.is_symlink() else None
 
     def read_range(self, model_id, commit, path, offset, length):
         if model_id != self.model_id or commit != self.resolved_commit:

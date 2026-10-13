@@ -107,6 +107,19 @@ _NODE_PROCESS_ENV_PREFIX = (
 _RUN_PLAN_PROTOCOL = "mycelium.controller_run_plan.v1"
 _REMOTE_STAGE_SCRIPT = r'''import hashlib,json,os,shutil,stat,sys,tarfile
 from pathlib import Path,PurePosixPath
+def _clone(source_fd,destination):
+    # A prepositioned artifact becomes an APFS clone (shared blocks, its own inode,
+    # st_nlink 1), never a hardlink; elsewhere the byte copy below is kept. Either
+    # way the destination bytes are hashed against the pinned digest.
+    if sys.platform!="darwin":return False
+    import ctypes,errno
+    try:function=ctypes.CDLL(None,use_errno=True).fclonefileat
+    except (AttributeError,OSError):return False
+    function.argtypes=[ctypes.c_int,ctypes.c_int,ctypes.c_char_p,ctypes.c_uint32];function.restype=ctypes.c_int
+    if function(source_fd,-2,os.fsencode(destination),1)==0:return True
+    error=ctypes.get_errno()
+    if error in (errno.ENOTSUP,errno.EXDEV,errno.EINVAL,errno.ENOSYS,getattr(errno,"EOPNOTSUPP",errno.ENOTSUP)):return False
+    raise OSError(error,"clone")
 root=Path(sys.argv[1]);node_id=sys.argv[2];expected_digest=sys.argv[3];expected_size=int(sys.argv[4]);preposition_digest=sys.argv[5] if len(sys.argv)>5 else None;preposition_size=int(sys.argv[6]) if len(sys.argv)>6 else 0;created=False
 try:
     if not root.is_absolute() or str(root)!=sys.argv[1] or len(root.parts)<4 or not any(part.startswith("mycelium") for part in root.parts):raise ValueError("root")
@@ -190,18 +203,30 @@ try:
                 metadata=os.fstat(fd)
                 if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid!=os.geteuid() or metadata.st_size!=size or destination.exists():raise ValueError("preposition_source")
                 destination.parent.mkdir(parents=True,mode=0o700,exist_ok=True)
-                output_flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL
-                if hasattr(os,"O_NOFOLLOW"):output_flags|=os.O_NOFOLLOW
-                output_fd=os.open(destination,output_flags,0o600)
                 copied=0;content_hash=hashlib.sha256()
-                try:
-                    while copied<size:
-                        content=os.read(fd,min(1_048_576,size-copied))
-                        if not content:raise ValueError("preposition_size")
-                        os.write(output_fd,content);content_hash.update(content);copied+=len(content)
-                    if os.read(fd,1):raise ValueError("preposition_size")
-                    os.fsync(output_fd)
-                finally:os.close(output_fd)
+                if _clone(fd,destination):
+                    output_fd=os.open(destination,os.O_RDONLY|getattr(os,"O_NOFOLLOW",0))
+                    try:
+                        cloned=os.fstat(output_fd)
+                        if not stat.S_ISREG(cloned.st_mode) or cloned.st_nlink!=1 or cloned.st_uid!=os.geteuid() or cloned.st_size!=size:raise ValueError("preposition_clone")
+                        os.fchmod(output_fd,0o600)
+                        while content:=os.read(output_fd,1_048_576):content_hash.update(content);copied+=len(content)
+                        if copied!=size:raise ValueError("preposition_size")
+                        os.fsync(output_fd)
+                    finally:os.close(output_fd)
+                else:
+                    if shutil.disk_usage(root).free<size:raise ValueError("preposition_disk")
+                    output_flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL
+                    if hasattr(os,"O_NOFOLLOW"):output_flags|=os.O_NOFOLLOW
+                    output_fd=os.open(destination,output_flags,0o600)
+                    try:
+                        while copied<size:
+                            content=os.read(fd,min(1_048_576,size-copied))
+                            if not content:raise ValueError("preposition_size")
+                            os.write(output_fd,content);content_hash.update(content);copied+=len(content)
+                        if os.read(fd,1):raise ValueError("preposition_size")
+                        os.fsync(output_fd)
+                    finally:os.close(output_fd)
                 if "sha256:"+content_hash.hexdigest()!=content_digest:raise ValueError("preposition_content")
             finally:os.close(fd)
         if destinations!=sorted(destinations) or len(destinations)!=len(set(destinations)):raise ValueError("preposition_order")
