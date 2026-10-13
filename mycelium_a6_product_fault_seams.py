@@ -472,6 +472,40 @@ class LiveProductFaultTarget:
             raise FaultRejected("a6_fault_successor_nodes_unavailable")
         return nodes
 
+    def successor_challenge_facts(self, record: ExecutedCase) -> dict[str, Any]:
+        """Why no successor attempt started, as the qualifier measured it.
+
+        The successor's physical challenge runs before its prefill. When that
+        challenge failed (or is still running when the seam's bounded wait
+        ends), these scalars name its outcome, its error and how any challenged
+        node's control process exited (for an ssh peer: the ssh client's exit
+        status and last stderr line), so a refused case says whether its
+        successor never ran. Diagnostics only: nothing here is compared with
+        the case contract.
+        """
+
+        reader = getattr(self.qualifier, "physical_challenge_outcome", None)
+        try:
+            outcome = reader(record.request_id) if callable(reader) else None
+        except Exception:
+            outcome = None
+        if not isinstance(outcome, Mapping):
+            outcome = {}
+        exits = outcome.get("participant_exits")
+        transport = ";".join(
+            f"{item.get('node_id')}:{item.get('returncode')}:"
+            f"{item.get('stderr_last_line') or ''}"
+            for item in (exits if isinstance(exits, (list, tuple)) else ())
+            if isinstance(item, Mapping)
+        )
+        error = outcome.get("error")
+        return {
+            "successor_challenge_outcome": outcome.get("outcome"),
+            "successor_challenge_error": error if isinstance(error, str) else None,
+            "successor_transport_exit": transport or None,
+            "recovery_phase": self.view(record.request_id).get("recovery_phase"),
+        }
+
     def wait_phase(self, record: ExecutedCase, phase: str, attempts: int | None = None) -> bool:
         return bool(self.wait(lambda: (
             (lambda v: v.get("recovery_phase") == phase and (
@@ -685,12 +719,16 @@ class ProductCaseSeam:
             for node in nodes:
                 target.signal_node(node, signal.SIGKILL)
                 injected = True
-        return {
+        state = {
             "source_failure_observed": True,
             "successor_attempt_started": started,
             "successor_failure_injected": injected,
             "successors_withheld": withheld,
         }
+        if not started:
+            # The successor never reached prefill: say why (its challenge).
+            state.update(target.successor_challenge_facts(record))
+        return state
 
     def _apply_cancellation_before_recovery(self, record):
         target = self._target
@@ -928,7 +966,7 @@ class ProductCaseSeam:
             and view.get("token_count") == held_tokens
             and view.get("cursor") == held_tokens
             and delivered is not None and delivered[1] == held_tokens)
-        return {
+        state = {
             "cleanup_authority_refused": refused,
             "cutover_committed": cut_over,
             "unpublishable_suffix_discarded": suffix_discarded,
@@ -942,6 +980,10 @@ class ProductCaseSeam:
             "terminal_status": view.get("terminal_status"),
             "terminal_blocked_reason": view.get("terminal_blocked_reason"),
         }
+        if not held:
+            # The successor never reached prefill: say why (its challenge).
+            state.update(target.successor_challenge_facts(record))
+        return state
 
     def _apply_shutdown_during_recovery(self, record):
         target = self._target

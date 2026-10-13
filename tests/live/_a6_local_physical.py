@@ -10,7 +10,9 @@ deployment from ``prepare_physical_deployment``. Two graph shapes are offered:
   on ``node-a`` and again on ``node-b`` (complete-model replica tracks), so a
   successor survives the loss of every source placement. This is the only
   disjoint two-path shape two physically distinct hosts can carry: the
-  production controller refuses two node processes on one host.
+  production controller refuses two node processes on one host. With
+  ``replica_count=3`` a third complete replica runs on ``node-c``, as the run-day
+  A6 plan places the model on node-0, node-2 and node-3.
 
 This is a controlled local session: never physical or browser qualification.
 """
@@ -249,13 +251,17 @@ class LocalPhysical:
         shutil.rmtree(self.root, ignore_errors=True)
 
 
-def build_local_physical(tmp_path: Path, *, shape: str = "single") -> LocalPhysical:
+def build_local_physical(
+    tmp_path: Path, *, shape: str = "single", replica_count: int = 2
+) -> LocalPhysical:
     if shape not in {"single", "full_replica"}:
         raise ValueError(shape)
+    if replica_count not in {2, 3} or (shape == "single" and replica_count != 2):
+        raise ValueError(replica_count)
     root = Path(tempfile.mkdtemp(prefix="mycelium-a6-local-", dir="/tmp")).resolve()
     root.chmod(0o700)
     deployment = prepare_physical_deployment(tmp_path / "deployment", runtime_backend="mlx")
-    node_ids = ("node-a", "node-b")
+    node_ids = ("node-a", "node-b", "node-c")[:replica_count]
     if shape == "single":
         assignments = list(deployment.assignments)
         loaded = [
@@ -277,7 +283,7 @@ def build_local_physical(tmp_path: Path, *, shape: str = "single") -> LocalPhysi
                 assignment, loader_report, load_generation=LOAD_GENERATION).proof
             for node, (assignment, _pack, loader_report) in replicas.items()
         }
-        placement_ids = {"node-a": "placement-000", "node-b": "placement-001"}
+        placement_ids = {node: f"placement-{index:03d}" for index, node in enumerate(node_ids)}
         layers = deployment.reference_assignment["range"]["end_layer_exclusive"]
         route_plan = {
             "protocol": "mycelium.route_plan.v2",

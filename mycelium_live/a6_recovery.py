@@ -51,6 +51,66 @@ def _bounded_message(error: BaseException) -> str:
     return text[:_MAX_DIAGNOSTIC_MESSAGE]
 
 
+def _challenge_sessions(route: Any, placement_ids: tuple[str, ...]) -> dict[str, Any]:
+    """The control sessions of the nodes a successor challenge runs on.
+
+    Resolved before the challenge starts, so a route the challenge's own
+    failure retires is still the one inspected afterwards. Diagnostics only:
+    any shape this cannot read yields no sessions.
+    """
+
+    try:
+        current = getattr(route, "_current_route_or_raise", None)
+        concrete = current() if callable(current) else route
+        graph = concrete.execution_graph
+        wanted = set(placement_ids)
+        node_ids = sorted({
+            placement.node_id
+            for stage in graph.stages
+            for placement in stage.placements
+            if placement.placement_id in wanted
+        })
+        sessions = getattr(concrete, "_sessions", None)
+        if not isinstance(sessions, Mapping):
+            return {}
+        return {node_id: sessions[node_id] for node_id in node_ids if node_id in sessions}
+    except Exception:
+        return {}
+
+
+def _participant_exits(sessions: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Which challenged nodes' control processes exited, and how.
+
+    For a node reached over ssh the control process is the local ssh client:
+    exit status 255 with ``Timeout, server ... not responding.`` is a lost
+    link (``ServerAliveCountMax``), not a node crash, and the remote worker
+    may still be running.
+    """
+
+    exits: list[dict[str, Any]] = []
+    for node_id, session in sorted(sessions.items()):
+        try:
+            returncode = session.returncode
+        except Exception:
+            continue
+        if returncode is None:
+            continue
+        try:
+            raw = session.stderr
+            text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+        except Exception:
+            text = ""
+        lines = [" ".join(line.split()) for line in text.splitlines() if line.strip()]
+        exits.append(
+            {
+                "node_id": node_id,
+                "returncode": returncode if type(returncode) is int else None,
+                "stderr_last_line": lines[-1][:_MAX_DIAGNOSTIC_MESSAGE] if lines else None,
+            }
+        )
+    return exits
+
+
 _TOKENIZER_FILES = (
     "tokenizer.json",
     "tokenizer_config.json",
@@ -260,6 +320,19 @@ class LiveA6RecoveryQualifier:
             _LOGGER.info("%s", document)
         else:
             _LOGGER.warning("%s", document)
+
+    def _record_challenge_in_flight(self, request_id: str, outcome: Mapping[str, Any]) -> None:
+        """Expose a started challenge before it ends, without logging it.
+
+        A challenge whose node stalls can outlive the A6 seam's bounded wait;
+        the seam then reports ``in_flight`` instead of no outcome at all.
+        """
+
+        with self._fault_lock:
+            self._challenge_outcomes.pop(request_id, None)
+            self._challenge_outcomes[request_id] = {**outcome, "outcome": "in_flight"}
+            while len(self._challenge_outcomes) > _MAX_RETAINED_OBSERVATIONS:
+                self._challenge_outcomes.pop(next(iter(self._challenge_outcomes)))
 
     def _consume_fault(self, request_id: str) -> str | None:
         with self._fault_lock:
@@ -477,7 +550,9 @@ class LiveA6RecoveryQualifier:
             "error": None,
             "release_error_type": None,
             "release_error": None,
+            "participant_exits": [],
         }
+        sessions = _challenge_sessions(route, placement_ids)
         try:
             if self._clock_ms() >= absolute_deadline_unix_ms:
                 outcome["outcome"] = "deadline_elapsed"
@@ -486,6 +561,7 @@ class LiveA6RecoveryQualifier:
                     "parity_policy_digest": policy_digest,
                     "workload_envelope_digest": workload_digest,
                 }
+            self._record_challenge_in_flight(request_id, outcome)
             result = route.infer(
                 prompt,
                 max_new_tokens=len(expected),
@@ -516,6 +592,7 @@ class LiveA6RecoveryQualifier:
             outcome["outcome"] = "infer_error"
             outcome["error_type"] = type(error).__name__
             outcome["error"] = _bounded_message(error)
+            outcome["participant_exits"] = _participant_exits(sessions)
         finally:
             outcome["emitted_token_count"] = len(emitted)
             try:

@@ -126,6 +126,74 @@ def test_diagnostic_message_is_single_line_and_bounded(tmp_path) -> None:
     assert "\n" not in message and len(message) <= 160
 
 
+class _ExitedSshRoute(_Route):
+    """A route whose challenged node's ssh client exited on a lost link."""
+
+    def __init__(self, *, stderr: bytes, returncode=255) -> None:
+        super().__init__(infer_error=RuntimeError("node_process_exited"))
+        placements = (SimpleNamespace(placement_id="placement-000", node_id="node-0"),
+                      SimpleNamespace(placement_id="placement-001", node_id="node-2"),
+                      SimpleNamespace(placement_id="placement-002", node_id="node-3"))
+        self.execution_graph = SimpleNamespace(stages=(SimpleNamespace(placements=placements),))
+        self._sessions = {
+            "node-0": SimpleNamespace(returncode=-9, stderr=b"source killed\n"),
+            "node-2": SimpleNamespace(returncode=returncode, stderr=stderr),
+            "node-3": SimpleNamespace(returncode=None, stderr=b""),
+        }
+
+
+def test_exited_challenge_participant_is_named_with_its_exit_and_last_line(
+        tmp_path, caplog) -> None:
+    line = "Timeout, server 100.126.111.123 not responding."
+    route = _ExitedSshRoute(stderr=b"physical node ready\n" + line.encode() + b"\n\n")
+    qualifier = _qualifier(tmp_path, route)
+    assert _challenge(qualifier)["passed"] is False
+    outcome = qualifier.physical_challenge_outcome("req-1")
+    assert outcome["error"] == "node_process_exited"
+    # Only the challenged placement's node, never the killed source.
+    assert outcome["participant_exits"] == [
+        {"node_id": "node-2", "returncode": 255, "stderr_last_line": line}]
+    [(_level, document)] = _logged(caplog, "a6_successor_physical_challenge")
+    assert document["participant_exits"] == outcome["participant_exits"]
+
+
+def test_participant_stderr_line_is_bounded_and_missing_stderr_is_null(tmp_path) -> None:
+    qualifier = _qualifier(tmp_path, _ExitedSshRoute(stderr=b"x" * 400 + b"\n"))
+    _challenge(qualifier)
+    [exited] = qualifier.physical_challenge_outcome("req-1")["participant_exits"]
+    assert len(exited["stderr_last_line"]) <= 160
+    qualifier = _qualifier(tmp_path, _ExitedSshRoute(stderr=b"", returncode=-9))
+    _challenge(qualifier)
+    assert qualifier.physical_challenge_outcome("req-1")["participant_exits"] == [
+        {"node_id": "node-2", "returncode": -9, "stderr_last_line": None}]
+
+
+def test_unreadable_route_reports_no_participant_exits(tmp_path) -> None:
+    qualifier = _qualifier(tmp_path, _Route(infer_error=RuntimeError("node_process_exited")))
+    _challenge(qualifier)
+    assert qualifier.physical_challenge_outcome("req-1")["participant_exits"] == []
+    passed = _qualifier(tmp_path, _Route())
+    _challenge(passed)
+    assert passed.physical_challenge_outcome("req-1")["participant_exits"] == []
+
+
+def test_running_challenge_is_visible_in_flight_and_not_logged(tmp_path, caplog) -> None:
+    caplog.set_level(logging.INFO, logger="mycelium_live.a6_recovery")
+    seen: list = []
+
+    class _Watching(_Route):
+        def infer(self, *args, **kwargs):
+            seen.append((qualifier.physical_challenge_outcome("req-1"),
+                         _logged(caplog, "a6_successor_physical_challenge")))
+            return super().infer(*args, **kwargs)
+
+    qualifier = _qualifier(tmp_path, _Watching())
+    assert _challenge(qualifier)["passed"] is True
+    [(during, logged_during)] = seen
+    assert during["outcome"] == "in_flight" and logged_during == []
+    assert qualifier.physical_challenge_outcome("req-1")["outcome"] == "passed"
+
+
 @pytest.mark.parametrize(
     ("reason", "expected"),
     [("recovery_physical_qualification_required", "recovery_physical_qualification_required"),

@@ -533,3 +533,70 @@ def test_cleanup_reservation_release_counts_a_blocked_terminal_as_terminal(termi
     assert state["request_terminal"] is True
     assert state["release_observed"] is True and state["release_count_positive"] is True
     assert state["reservations_before"] == 2 and state["reservations_after"] == 0
+
+
+_LOST_LINK_CHALLENGE = {
+    "outcome": "infer_error", "error": "node_process_exited", "placement_ids": ["p-1"],
+    "participant_exits": [{"node_id": "node-2", "returncode": 255,
+                           "stderr_last_line": "Timeout, server h not responding."}],
+}
+
+
+@pytest.mark.parametrize("challenge", [_LOST_LINK_CHALLENGE, {"outcome": "in_flight"}, None])
+def test_successor_prefill_failure_says_why_its_successor_never_started(challenge):
+    router = _Router(nodes=("node-0", "node-2", "node-3"))
+    router.a6_withhold_recovery_successors = lambda _rid: True
+
+    def on_signal(node_id, signum):
+        if node_id == "node-0" and signum == signal.SIGKILL:
+            router.state.update(recovery_phase="successor_pending", recovery_attempts=1)
+
+    target, signals = _target(router, SimpleNamespace(terminal_event_count=lambda _r: 0),
+                              on_signal)
+    target.qualifier.physical_challenge_outcome = lambda _rid: challenge
+    seam = ProductCaseSeam("successor_prefill_failure", target)
+    seam.arm(case_id="successor_prefill_failure")
+    state = seam.apply(case_id="successor_prefill_failure")
+    assert state["successor_attempt_started"] is False
+    assert state["successor_failure_injected"] is False
+    assert signals == [("node-0", signal.SIGKILL)]  # no successor was signalled
+    expected = challenge or {}
+    assert state["successor_challenge_outcome"] == expected.get("outcome")
+    assert state["successor_challenge_error"] == expected.get("error")
+    assert state["successor_transport_exit"] == (
+        "node-2:255:Timeout, server h not responding." if challenge is _LOST_LINK_CHALLENGE
+        else None)
+    assert state["recovery_phase"] == "successor_pending"
+
+
+def test_cleanup_authority_failure_says_why_its_successor_never_started():
+    router = _HoldRouter()
+
+    def on_signal(node_id, signum):
+        if node_id == "node-0" and signum == signal.SIGKILL:
+            router.state.update(recovery_phase="successor_pending", recovery_attempts=1)
+
+    events: list = []
+    target, _signals = _target(router, SimpleNamespace(terminal_event_count=lambda _r: 0),
+                               lambda n, s: (events.append((n, s)), on_signal(n, s)))
+    target.gateway_committed = lambda _rid: (1, 1)
+    target.qualifier.physical_challenge_outcome = lambda _rid: _LOST_LINK_CHALLENGE
+    seam = ProductCaseSeam("cleanup_authority_failure", target)
+    seam.arm(case_id="cleanup_authority_failure")
+    state = seam.apply(case_id="cleanup_authority_failure")
+    assert state["cleanup_authority_refused"] is False and state["cleanup_held"] is False
+    assert router.hold_calls == ["arm", "release"]
+    assert state["successor_challenge_error"] == "node_process_exited"
+    assert state["successor_transport_exit"] == "node-2:255:Timeout, server h not responding."
+
+
+def test_executed_successor_cases_carry_no_challenge_facts():
+    router = _HoldRouter(on_release=lambda: _refused_before_cutover(router))
+
+    def on_signal(node_id, signum):
+        if node_id == "node-0" and signum == signal.SIGKILL:
+            _successor_reaches_its_held_cleanup(router)
+
+    state, _signals = _cleanup_case(router, on_signal)
+    assert state["cleanup_authority_refused"] is True
+    assert not any(key.startswith("successor_challenge") for key in state)
