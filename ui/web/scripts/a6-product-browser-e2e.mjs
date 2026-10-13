@@ -282,10 +282,11 @@ export async function exerciseReconnect(page, observe) {
 }
 
 // Polls the product snapshot until ``predicate`` holds (bounded by
-// ``timeout``). ``abort`` names a state that can never reach the predicate,
-// e.g. a positive request that went terminal-blocked: the wait then fails at
-// once with ``abort.code`` instead of waiting out the whole bound. Either
-// failure reports the wait's ``label`` and the last observation on stderr.
+// ``timeout``). ``abort`` (one entry or a list) names states that can never
+// reach the predicate, e.g. a positive request that ended without a cutover:
+// the wait then fails at once with that entry's ``code`` instead of waiting
+// out the whole bound. Either failure reports the wait's ``label`` and the
+// last observation on stderr.
 export async function waitForObservation(page, predicate, options = {}) {
   const {
     timeout = 300_000,
@@ -295,6 +296,7 @@ export async function waitForObservation(page, predicate, options = {}) {
     report = (line) => process.stderr.write(`${line}\n`),
   } = typeof options === 'number' ? { timeout: options } : options;
   const deadline = Date.now() + timeout;
+  const aborts = abort === null ? [] : [].concat(abort);
   let previousSignature = '';
   let observation = null;
   const history = [];
@@ -310,7 +312,9 @@ export async function waitForObservation(page, predicate, options = {}) {
       previousSignature = signature;
     }
     if (predicate(observation)) return { observation, history };
-    if (abort !== null && abort.when(observation)) failWith(abort.code);
+    for (const entry of aborts) {
+      if (entry.when(observation)) failWith(entry.code);
+    }
     await page.waitForTimeout(200);
   }
   failWith('recovery_transition_timeout');
@@ -395,25 +399,61 @@ export async function verifyInferenceOutcome(page, scenario) {
   if (!/Failed/i.test(statusText)) fail('negative_ui_terminal_missing');
 }
 
+// What each scenario must observe, in terms of the production aggregate.
+// mycelium_live/router_port.py recovery_public_projection publishes the M16
+// coordinator terminal (completed, failed or cancelled), keeps a request whose
+// cleanup is unproven nonterminal, and raises the recovery attempt only at
+// cutover. So a recovery is a cutover that ends terminal with its cleanup
+// complete; a terminal without a cutover is an abort. A truthful abort is a
+// cleaned terminal without a cutover (the UI must say Failed); a rise in the
+// blocked count means cleanup was not proven and is never a truthful abort.
+export function scenarioExpectations(scenario, baseline) {
+  const ended = (o) => o.terminal_count > baseline.terminal_count;
+  const cutOver = (o) => o.max_recovery_attempt > baseline.max_recovery_attempt;
+  const cleaned = (o) => o.cleanup_complete_count > baseline.cleanup_complete_count;
+  const blocked = (o) => o.terminal_blocked_count > baseline.terminal_blocked_count;
+  if (scenario === 'positive') {
+    return Object.freeze({
+      failureObserved: (o) => o.recovering_count > 0,
+      outcomeReached: cutOver,
+      // Either state can never become a recovery: fail at once with its own
+      // code rather than as a late recovery_transition_timeout.
+      aborts: Object.freeze([
+        { code: 'positive_recovery_terminal_blocked', when: blocked },
+        { code: 'positive_recovery_aborted', when: (o) => ended(o) && !cutOver(o) },
+      ]),
+      outcomeFailure: (o) => (blocked(o) || !cutOver(o) || !ended(o) || !cleaned(o)
+        ? 'positive_recovery_missing' : null),
+    });
+  }
+  if (scenario !== 'negative') fail('browser_scenario_invalid');
+  return Object.freeze({
+    // A no-successor abort can end before the first poll after the fault.
+    failureObserved: (o) => o.recovering_count > 0 || ended(o),
+    outcomeReached: ended,
+    aborts: Object.freeze([
+      { code: 'negative_abort_cleanup_unproven', when: blocked },
+      { code: 'negative_unexpected_recovery', when: cutOver },
+    ]),
+    outcomeFailure: (o) => {
+      if (blocked(o)) return 'negative_abort_cleanup_unproven';
+      if (!ended(o) || cutOver(o) || !cleaned(o)) return 'truthful_abort_missing';
+      return null;
+    },
+  });
+}
+
 export async function runScenario(page, scenario, faultControl, usedCases, maximumNewTokens) {
   const promptCanary = `A6-BROWSER-PRIVATE-PROMPT-${scenario}-${Date.now()}`;
   const outputCanary = `A6-BROWSER-PRIVATE-OUTPUT-${scenario}-${Date.now()}`;
   const privateCanaries = [promptCanary, outputCanary];
   const started = await startRequest(page, privateCanaries, maximumNewTokens);
   await sendControlledFault(faultControl, usedCases);
-  // A positive request that goes terminal-blocked can never recover: fail at
-  // once and say so, rather than as a late recovery_transition_timeout.
-  const blocked = scenario === 'positive' ? {
-    code: 'positive_recovery_terminal_blocked',
-    when: (observation) => observation.terminal_blocked_count
-      > started.baseline.terminal_blocked_count,
-  } : null;
+  const expect = scenarioExpectations(scenario, started.baseline);
   const failed = await waitForObservation(
     page,
-    (observation) => observation.recovering_count > 0
-      || (blocked === null
-        && observation.terminal_blocked_count > started.baseline.terminal_blocked_count),
-    { label: 'recovering_or_blocked', abort: blocked },
+    expect.failureObserved,
+    { label: 'recovering_or_blocked', abort: expect.aborts },
   );
   const beforeCutoverReconnect = await exerciseReconnect(
     page,
@@ -427,10 +467,8 @@ export async function runScenario(page, scenario, faultControl, usedCases, maxim
   await page.reload({ waitUntil: 'domcontentloaded' });
   const afterReload = await waitForObservation(
     page,
-    (observation) => observation.max_recovery_attempt > 0
-      || (blocked === null
-        && observation.terminal_blocked_count > started.baseline.terminal_blocked_count),
-    { label: 'attempt_or_blocked', abort: blocked },
+    expect.outcomeReached,
+    { label: 'attempt_or_blocked', abort: expect.aborts },
   );
   const beforeCutoverHistory = [
     ...started.history,
@@ -468,16 +506,9 @@ export async function runScenario(page, scenario, faultControl, usedCases, maxim
   });
   const validation = validateRecoveryHistory(history);
   if (!validation.source_failure_observed) fail(`${scenario}_source_failure_missing`);
-  if (scenario === 'positive') {
-    if (
-      !validation.recovery_observed
-      || finished.observation.terminal_blocked_count > started.baseline.terminal_blocked_count
-    ) fail('positive_recovery_missing');
-  } else if (
-    finished.observation.terminal_blocked_count <= started.baseline.terminal_blocked_count
-  ) {
-    fail('truthful_abort_missing');
-  }
+  const outcome = expect.outcomeFailure(finished.observation);
+  if (outcome !== null) fail(outcome);
+  if (scenario === 'positive' && !validation.recovery_observed) fail('positive_recovery_missing');
   const workspaces = await verifyWorkspaces(page, privateCanaries);
   return {
     scenario,
