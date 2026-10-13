@@ -5,6 +5,8 @@ fetch files, authorize a load, write a plan or claim remote cache readiness.
 Targets independently confine, hash and authorize every local copy. Only the
 unchanged pinned BF16 source is supported; transformed/sharded sources need a
 separate explicit representation contract rather than an implicit fallback.
+The source may be the Qwen2.5 7B candidate or any registered demo run model
+(run_model.py); the member roots must be that model's pinned snapshot path.
 """
 from __future__ import annotations
 import json
@@ -22,12 +24,15 @@ def bind_hf_prepositions(controller, *, prepared, target_source_roots):
     required before signing/publishing and at the receiving target.
     """
     import model_manifest as mm
+    from .run_model import choice_for_model
     try:
-        if (not isinstance(prepared, PreparedSource) or prepared.model != CANDIDATE_MODEL
+        model = getattr(prepared, 'model', None)
+        if (not isinstance(prepared, PreparedSource)
+                or (model != CANDIDATE_MODEL and choice_for_model(model) is None)
                 or not mm.verify_manifest_digest(prepared.manifest)
                 or mm.manifest_digest_ref(prepared.manifest) != prepared.manifest_digest
-                or prepared.manifest['model_id'] != CANDIDATE_MODEL.model_id
-                or prepared.manifest['resolved_commit'] != CANDIDATE_MODEL.resolved_commit):
+                or prepared.manifest['model_id'] != model.model_id
+                or prepared.manifest['resolved_commit'] != model.resolved_commit):
             raise ValueError()
         result = json.loads(json.dumps(controller, allow_nan=False))
         peers = result['peers']
@@ -37,8 +42,8 @@ def bind_hf_prepositions(controller, *, prepared, target_source_roots):
                 or set(target_source_roots) != set(nodes)
                 or 'prepositioned_artifacts' in result):
             raise ValueError()
-        suffix = ('models--'+CANDIDATE_MODEL.model_id.replace('/', '--'),
-                  'snapshots', CANDIDATE_MODEL.resolved_commit)
+        suffix = ('models--'+model.model_id.replace('/', '--'),
+                  'snapshots', model.resolved_commit)
         roots = {}
         for node in nodes:
             value = target_source_roots[node]
