@@ -166,6 +166,46 @@ def _bounded_transport_diagnostic(text: str) -> dict[str, Any] | None:
     return None
 
 
+# Bounded, allowlisted load-proof diagnostic: on placement_load_proof_mismatch
+# the native node prints the component digests of the proof it observed so the
+# operator can diff them against the compiled node-N-load-proof.json.  Only
+# ``sha256:`` references (or ``none``) under an exact key set survive.
+_NATIVE_LOAD_PROOF_LINE = re.compile(r"^MYCELIUM-LOAD-PROOF-DIAG ([!-~ ]{1,800})$", re.M)
+_NATIVE_LOAD_PROOF_KEYS = (
+    "expected_load_proof_digest",
+    "observed_load_proof_digest",
+    "loaded_tensor_digest",
+    "probe_digest",
+    "runtime_identity_digest",
+    "stage_pack_digest",
+)
+_NATIVE_LOAD_PROOF_VALUE = re.compile(r"(?:sha256:[0-9a-f]{64}|none)\Z")
+
+
+def _bounded_load_proof_diagnostic(text: str) -> dict[str, Any] | None:
+    """Reduce one ``MYCELIUM-LOAD-PROOF-DIAG`` line to allowlisted digests.
+
+    Fails closed exactly like the transport line: the exact key set, each value
+    a ``sha256:`` reference or ``none``; anything else yields ``None``.
+    """
+    for match in _NATIVE_LOAD_PROOF_LINE.finditer(text):
+        fields: dict[str, str] = {}
+        for token in match.group(1).split():
+            key, separator, value = token.partition("=")
+            if not separator or key in fields:
+                return None
+            fields[key] = value
+        if set(fields) != set(_NATIVE_LOAD_PROOF_KEYS) or not all(
+            _NATIVE_LOAD_PROOF_VALUE.fullmatch(value) for value in fields.values()
+        ):
+            return None
+        return {
+            "protocol": "mycelium.a13.native_load_proof_diagnostic.v1",
+            **{key: fields[key] for key in _NATIVE_LOAD_PROOF_KEYS},
+        }
+    return None
+
+
 def _bounded_native_diagnostics(raw: Any) -> dict[str, Any]:
     """Derive allowlisted frames and exception classes from a stderr tail.
 
@@ -191,6 +231,9 @@ def _bounded_native_diagnostics(raw: Any) -> dict[str, Any]:
     transport = _bounded_transport_diagnostic(text)
     if transport is not None:
         result["transport"] = transport
+    load_proof = _bounded_load_proof_diagnostic(text)
+    if load_proof is not None:
+        result["load_proof"] = load_proof
     return result
 
 

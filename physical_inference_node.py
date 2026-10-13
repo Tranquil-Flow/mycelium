@@ -434,6 +434,46 @@ def _emit_prefill_transport_diagnostic(transport: Any) -> None:
         pass
 
 
+_LOAD_PROOF_DIAGNOSTIC_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+
+
+def _emit_load_proof_diagnostic(
+    proof: Mapping[str, Any], *, expected_load_proof_digest: Any
+) -> None:
+    """Name which part of a refused placement load proof differed.
+
+    ``placement_load_proof_mismatch`` alone does not say whether the weights,
+    the probe, the runtime identity or the stage pack differed (two-Mac run 14
+    had to reload the stage offline to learn it was the probe).  Print one
+    fixed-shape line of ``sha256:`` component digests of the proof this node
+    observed; the managed worker keeps only those allowlisted values, and the
+    operator diffs them against the compiled ``node-N-load-proof.json``.
+    Never changes control flow: failures to report are swallowed.
+    """
+
+    def digest(value: Any) -> str:
+        return value if isinstance(value, str) and _LOAD_PROOF_DIAGNOSTIC_DIGEST.fullmatch(value) else "none"
+
+    try:
+        fields = {
+            "expected_load_proof_digest": digest(expected_load_proof_digest),
+            "observed_load_proof_digest": layer_load_proof_digest(proof),
+            "loaded_tensor_digest": digest(proof.get("loaded_tensor_digest")),
+            "probe_digest": digest(proof.get("probe_digest")),
+            "runtime_identity_digest": "sha256:"
+            + hashlib.sha256(canonical_json_bytes(proof.get("runtime_identity"))).hexdigest(),
+            "stage_pack_digest": digest(proof.get("stage_pack_digest")),
+        }
+        print(
+            "MYCELIUM-LOAD-PROOF-DIAG "
+            + " ".join(f"{key}={value}" for key, value in fields.items()),
+            file=sys.stderr,
+            flush=True,
+        )
+    except BaseException:
+        pass
+
+
 def _validated_endpoint_secret_file(value: Path | None) -> Path | None:
     if value is None:
         return None
@@ -2290,11 +2330,12 @@ class PhysicalNodeService:
                 load_generation=data["load_generation"],
             )
             load_proof_document = json.loads(canonical_json(loaded.proof))
-            _require(
-                layer_load_proof_digest(load_proof_document)
-                == placement.load_proof_digest,
-                "placement_load_proof_mismatch",
-            )
+            if layer_load_proof_digest(load_proof_document) != placement.load_proof_digest:
+                _emit_load_proof_diagnostic(
+                    load_proof_document,
+                    expected_load_proof_digest=placement.load_proof_digest,
+                )
+                raise NodeCommandError("placement_load_proof_mismatch")
             proof_runtime_identity = load_proof_document.get("runtime_identity")
             _require(
                 isinstance(proof_runtime_identity, dict)
