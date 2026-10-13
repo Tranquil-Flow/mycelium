@@ -111,12 +111,16 @@ def member_capability_records(app, node_ids, *, now=None, local_device=None) -> 
             records[node] = {'memory_bytes': int(local_device['memory_bytes']),
                              'generation': coordinator.member(node)['generation'],
                              'expires_at': now + 900}
+            if type(local_device.get('available_storage_bytes')) is int:
+                records[node]['available_storage_bytes'] = local_device['available_storage_bytes']
             continue
         report = reports.get(node)
         if not isinstance(report, Mapping) or not isinstance(report.get('device'), Mapping):
             continue
         records[node] = {'memory_bytes': report['device'].get('memory_bytes'),
                          'generation': report.get('generation'), 'expires_at': report.get('expires_at')}
+        if type(report['device'].get('available_storage_bytes')) is int:
+            records[node]['available_storage_bytes'] = report['device']['available_storage_bytes']
     return records
 
 
@@ -128,6 +132,28 @@ def work_limits(app, proposal: Mapping[str, Any]) -> dict[str, int]:
                                   int(policy.get('storage_bytes', 0)) or 1),
             'max_wall_seconds': min(int(proposal['max_wall_seconds']), 3600),
             'max_commands': 5000}
+
+
+def member_work_limits(state: Mapping[str, Any], node_id: str, *,
+                       storage_bytes: int | None = None) -> dict[str, int] | None:
+    """One member's worker limits from the compiled per-split resource plan.
+
+    Its own memory/load-peak guard and disk limit (model_resources), the disk
+    capped by the storage this Mac consented to; ``None`` without a plan
+    (legacy two-host compile: the run-wide ``work_limits`` apply).
+    """
+    from .model_resources import work_limits_for
+    plan = (state or {}).get('resource_plan') or {}
+    row = next((m for m in plan.get('members', []) if m.get('node_id') == node_id), None)
+    return None if row is None else work_limits_for(row, storage_bytes=storage_bytes)
+
+
+def _member_row(state: Mapping[str, Any], node_id: str | None) -> dict[str, Any] | None:
+    plan = (state or {}).get('resource_plan') or {}
+    return next((dict(m) for m in plan.get('members', []) if m.get('node_id') == node_id), None)
+
+
+_RESOURCE_CODES = frozenset({'member_memory_cap_below_share', 'member_storage_cap_below_share'})
 
 
 class AppDemoChain:
@@ -177,7 +203,15 @@ class AppDemoChain:
             if r is None:
                 return False
             if r['state'] == 'error':
-                raise OwnerRunError(r.get('detail') or 'member_reported_error')
+                code = r.get('detail') or 'member_reported_error'
+                message = None
+                row = _member_row(ctx.state.get('compile_state') or {}, node)
+                if code in _RESOURCE_CODES and row is not None:
+                    from .model_resources import refusal_message
+                    model = getattr(ctx.state.get('prepared'), 'model', None)
+                    message = refusal_message(code, row, model=model,
+                                              need=row['max_rss_bytes'] if 'memory' in code else row['max_disk_bytes'])
+                raise OwnerRunError(code, message)
             if r['state'] not in states:
                 return False
         return bool(nodes)
@@ -190,7 +224,8 @@ class AppDemoChain:
              'state': (reports.get(node) or {}).get('state'),
              'detail': (reports.get(node) or {}).get('detail'),
              'progress': (reports.get(node) or {}).get('progress'),
-             'layers': (ctx.state.get('layers') or {}).get(node)}
+             'layers': (ctx.state.get('layers') or {}).get(node),
+             'resources': _member_row(ctx.state.get('compile_state') or {}, node)}
             for node in ctx.state.get('participants', [])]
 
     def _announce(self, ctx, phase, **extra) -> None:
@@ -222,7 +257,9 @@ class AppDemoChain:
                        interval=min(self.interval, 1.0))
         source = app.acquisition.prepared_source()
         model = source.model
-        slice_mode = slice_fetch_permitted(getattr(source, 'source_bytes', None), architecture=model.architecture)
+        slice_mode = slice_fetch_permitted(getattr(source, 'source_bytes', None), architecture=model.architecture,
+                                           model=model)
+        self._check_owner_storage(model)
         chosen = choice_for_model(model)
         ctx.state.update(prepared=source, slice_mode=bool(slice_mode),
                          manifest_digest=source.manifest_digest,
@@ -230,6 +267,19 @@ class AppDemoChain:
                                 'model_id': model.model_id, 'resolved_commit': model.resolved_commit})
         app._chain_slice_fetch = bool(slice_mode)
         ctx.progress(model.model_id + (' · each Mac fetches only its slice' if slice_mode else ' · whole snapshot per Mac'))
+
+    def _check_owner_storage(self, model) -> None:
+        """The owner's storage consent must hold the selected model here."""
+        from .app import read_resource_policy
+        from .model_resources import model_shape, owner_storage_requirement, refusal_message
+        if model_shape(model) is None:
+            return
+        policy = read_resource_policy(self.app.root) or {}
+        cap, need = policy.get('storage_bytes'), owner_storage_requirement(model)
+        if type(cap) is int and cap < need:
+            raise OwnerRunError('owner_storage_consent_below_model',
+                                refusal_message('owner_storage_consent_below_model', model=model,
+                                                cap=cap, need=need))
 
     def _step_contributor(self, ctx):
         app = self.app
@@ -392,7 +442,7 @@ class AppDemoChain:
         try:
             self.ops.start_compile(app)
         except Exception as error:
-            raise OwnerRunError(_code(error, 'chain_compile_failed')) from None
+            raise OwnerRunError(_code(error, 'chain_compile_failed'), getattr(error, 'message', None)) from None
         ctx.progress('compiling the route over %d Macs' % len(nodes))
 
         def compiled():
@@ -403,6 +453,7 @@ class AppDemoChain:
         self._wait(ctx, compiled, budget='compile', code='chain_compile_timeout')
         state = app._chain_compile_state
         ctx.state['proposal'] = state['execution_proposal']
+        ctx.state['compile_state'] = {'resource_plan': state.get('resource_plan')}
         ctx.state['layers'] = {s['node_id']: [s['start'], s['end']]
                                for s in (state.get('layer_split') or {}).get('stages', [])}
         self._publish_participants(ctx)
@@ -414,6 +465,21 @@ class AppDemoChain:
         limits = work_limits(app, ctx.state['proposal'])
         ctx.state['work_limits'] = limits
         per_node = {n: {'node_slice_plan': plan} for n, plan in (plans or {}).items()}
+        # Per-member limits from the compiled split: each Mac runs under its own
+        # share's guard and disk limit, and can refuse a share beyond its caps.
+        from .app import read_resource_policy
+        from .model_resources import public_member_resources
+        compiled = ctx.state.get('compile_state') or {}
+        local = ctx.state.get('local_node')
+        storage = (read_resource_policy(app.root) or {}).get('storage_bytes')
+        for node in self._participants(ctx):
+            row = _member_row(compiled, node)
+            if row is None:
+                continue
+            entry = per_node.setdefault(node, {})
+            entry['work_limits'] = member_work_limits(compiled, node,
+                                                      storage_bytes=storage if node == local else None)
+            entry['resources'] = public_member_resources(row)
         ctx.state['work_nodes'] = per_node
         self._announce(ctx, 'work', work_limits=limits, per_node=per_node)
         if not plans:

@@ -146,12 +146,28 @@ def test_host_count_bounds(tmp_path, monkeypatch):
         cc.start_compile(app2, acknowledged=True)
 
 
+def _register_tiny_shape(monkeypatch, snapshot, layers=12):
+    """Slice fetch needs a registered per-model resource derivation (D-1 relaxed)."""
+    from mycelium_a13_macos import model_resources as R
+    shape = R.ModelShape("tiny-dense", layers, 8, 16, 1, 1, 8, 32, True, False, True,
+                         snapshot_bytes=sum(r["size_bytes"] for r in file_rows(snapshot)), non_weight_bytes=0)
+    monkeypatch.setitem(R.MODEL_SHAPES, ("test-org/tiny-dense", COMMIT), shape)
+
+
+def test_slice_mode_refuses_a_model_without_a_resource_derivation(tmp_path, monkeypatch):
+    app, _, _, _ = _app(tmp_path, monkeypatch, (16, 32, 48), model_type="qwen3")
+    app._chain_slice_fetch = True
+    with pytest.raises(ValueError, match="slice_fetch_model_not_permitted"):
+        cc.start_compile(app, acknowledged=True)
+
+
 def test_slice_mode_compiles_digest_pinned_member_slices(tmp_path, monkeypatch):
     from scripts import build_qwen_live_route as builder
     from mycelium_qualification.safetensors_sharding import shard_qwen2_checkpoint
     app, captured, nodes, snapshot = _app(tmp_path, monkeypatch, (16, 32, 48), model_type="qwen3")
     # The tiny fixture stands in for a slice-sized model (> 4 GB source).
     monkeypatch.setattr(serving, "SLICE_FETCH_MIN_SOURCE_BYTES", 0)
+    _register_tiny_shape(monkeypatch, snapshot)
     app._chain_slice_fetch = True
 
     def fake_build(args):
@@ -191,6 +207,16 @@ def test_slice_mode_compiles_digest_pinned_member_slices(tmp_path, monkeypatch):
     for node in nodes:
         from mycelium_a13_macos.slice_acquisition import node_slice_plan
         assert node_slice_plan(plan, node)["download_bytes"] < whole
+    # Per-member resources from this split, and the run's proposal built from them.
+    rows = {r["node_id"]: r for r in state["resource_plan"]["members"]}
+    assert sorted(rows) == nodes
+    stages = {s["node_id"]: s for s in state["layer_split"]["stages"]}
+    for node in nodes:
+        assert rows[node]["stage_source_bytes"] == stages[node]["stage_bytes"]
+        assert rows[node]["max_disk_bytes"] >= stages[node]["stage_bytes"]
+    proposal = state["execution_proposal"]
+    assert proposal["max_combined_rss_bytes"] == 2 * max(r["max_rss_bytes"] for r in rows.values())
+    assert proposal["max_additional_disk_bytes"] == 2 * max(r["max_disk_bytes"] for r in rows.values())
 
 
 def test_slice_mode_refuses_models_outside_the_relaxed_d1_rule(tmp_path, monkeypatch):

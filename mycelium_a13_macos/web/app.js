@@ -42,6 +42,7 @@ function render(value) {
   $('create').hidden=target;
   $('join').hidden=target && a.membership_state==='current';
   $('revoke-consent').hidden=target;
+  applyResources(value);
   if(value.resource_policy){
     for(const key of ['power','network','storage']){
       $(key).value=String(value.resource_policy[key==='storage'?'storage_bytes':key]);
@@ -256,6 +257,46 @@ $('accept-handoff').addEventListener('click',async()=>{
   }catch(_){notice('Invalid encrypted invitation. Existing identity is retained.');}
 });
 function gb(bytes){return `${(bytes/1e9).toFixed(1)} GB`;}
+// Consent choices derived per model (model_resources.py, via /api/status
+// run_model.resources): the same numbers the app enforces.
+let resourceKey='';
+function setOptions(select,options,keep){
+  const current=keep ?? select.value;
+  select.replaceChildren(...options.map(([v,label])=>{const o=document.createElement('option');o.value=String(v);o.textContent=label;return o;}));
+  if(current && options.some(([v])=>String(v)===String(current)))select.value=String(current);
+}
+function applyResources(value){
+  const r=value.run_model?.resources; if(!r)return;
+  const key=JSON.stringify([r.selected?.model_id,r.storage_consent_ceiling_bytes,r.device_memory_bytes,value.resource_policy?.storage_bytes]);
+  if(key===resourceKey)return; resourceKey=key;
+  const ceiling=r.storage_consent_ceiling_bytes, quota=r.pairing_quota_ceiling_bytes;
+  const storage=[[2e9,'2 GB'],[1e9,'1 GB'],[4e9,'4 GB'],[8e9,'8 GB'],[16e9,'16 GB']];
+  for(const m of r.models){
+    if(m.owner_storage_bytes<=ceiling)storage.push([m.owner_storage_bytes,`${gb(m.owner_storage_bytes)} (${m.label} on the owner Mac: pinned download + headroom)`]);
+  }
+  const saved=value.resource_policy?.storage_bytes;
+  if(saved && !storage.some(([v])=>v===saved))storage.push([saved,`${gb(saved)} (saved)`]);
+  setOptions($('storage'),storage.filter(([v])=>v<=ceiling),saved);
+  const sel=r.selected;
+  $('storage-detail').textContent=`Largest storage limit any supported model needs here: ${gb(ceiling)}.`+
+    (sel?` The selected model ${sel.label} needs ${gb(sel.owner_storage_bytes)} on the owner Mac; a joined Mac needs only its slice (at most ${gb(sel.whole_model_member_disk_bytes)}, usually far less; its exact share is shown when the run is compiled).`:'');
+  setOptions($('pair-storage'),[[2e9,'2 GB'],[1e9,'1 GB'],[4e9,'4 GB'],[8e9,'8 GB'],[16e9,'16 GB'],[quota,`${gb(quota)} (largest share any model gives one Mac)`]].filter(([v])=>v<=quota));
+  const mem=r.memory_cap_options||[];
+  if(mem.length){
+    setOptions($('standing-memory'),mem.slice().reverse().map((v)=>[v,`${gb(v)} (${Math.round(100*v/r.device_memory_bytes)}% of this Mac's ${gb(r.device_memory_bytes)})`]));
+  }
+  if(sel){
+    const preStaged=sel.label==='Qwen2.5-7B';
+    $('acquisition-detail').textContent=preStaged
+      ?"Model bytes are provisioned from a local seed (the pinned 7B snapshot, a LAN copy); this installation only ever fetches the pinned repository's small metadata/text files (11,535,382 bytes) and refuses instead of downloading model bytes."
+      :`Downloads the pinned ${sel.label} snapshot (${sel.snapshot_bytes.toLocaleString('en-US')} bytes) from Hugging Face on this owner Mac; it needs a storage limit of at least ${gb(sel.owner_storage_bytes)}. Joined Macs never download the whole model: each fetches only its own verified slice.`;
+    const limit=$('download-limit');
+    limit.max=String(Math.max(sel.snapshot_bytes,11535382));
+    // The grant may not exceed the storage limit (app.py download_consent_invalid).
+    const room=Math.min(sel.snapshot_bytes,saved||sel.snapshot_bytes);
+    if(!preStaged)limit.value=String(room);
+  }
+}
 function renderJoinFlow(value,target,a){
   const flow=value.join_flow ?? {};
   const owner=!target;

@@ -42,10 +42,13 @@ D1_MODEL_BYTES_RULE = (
     "SLICE_FETCH_MAX_SOURCE_BYTES, each member Mac fetches "
     "ONLY its assigned layer slice of the pinned revision (ranged HTTPS), every "
     "byte verified against the owner-compiled slice plan digests; never the whole "
-    "model. A smaller Qwen3 model goes as a whole snapshot to each Mac, verified "
-    "against its pinned digests (slicing it saves almost nothing). Other models "
-    "(the Qwen2.5 7B candidate) keep the original D-1 rule: "
-    "weight bytes are pre-staged and never fetched by the app."
+    "model. Each member's slice download and disk are bounded by its share in the "
+    "per-model, per-split resource proposal (model_resources.py); a model without a "
+    "registered resource derivation is never slice-fetched. A smaller Qwen3 model "
+    "goes as a whole snapshot to each Mac, verified against its pinned digests "
+    "(slicing it saves almost nothing). Other models (the Qwen2.5 7B candidate) "
+    "keep the original D-1 rule: weight bytes are pre-staged and never fetched by "
+    "the app."
 )
 #: Slice-fetch window on the bf16 SOURCE bytes: Qwen3 8B..14B slice (Qwen3-14B
 #: ~29.5 GB bf16 source, ~14.8 GB int8 at runtime); 32B does not fit; 0.6B
@@ -55,9 +58,19 @@ SLICE_FETCH_MAX_SOURCE_BYTES = 32_000_000_000
 SLICE_FETCH_ARCHITECTURES = frozenset({"qwen3"})
 
 
-def slice_fetch_permitted(source_weight_bytes: object, *, architecture: object) -> bool:
-    """Whether the relaxed D-1 slice rule applies to this model."""
+def slice_fetch_permitted(source_weight_bytes: object, *, architecture: object,
+                          model: object = None) -> bool:
+    """Whether the relaxed D-1 slice rule applies to this model.
 
+    With ``model`` the contract must also have a registered per-model resource
+    derivation (``model_resources.MODEL_SHAPES``): that is what bounds each
+    member's slice download and disk.
+    """
+
+    if model is not None:
+        from .model_resources import model_shape
+        if model_shape(model) is None:
+            return False
     return (
         architecture in SLICE_FETCH_ARCHITECTURES
         and type(source_weight_bytes) is int
@@ -65,6 +78,11 @@ def slice_fetch_permitted(source_weight_bytes: object, *, architecture: object) 
     )
 
 
+#: The Qwen2.5-7B candidate's measured proposal (2026-09-16/19).  No longer the
+#: one global bound: every contract derives its own via ``ModelContract.
+#: resource_proposal`` / ``model_resources`` (per model, and per compiled split
+#: for a run).  ``model_resources.MEASURED_ANCHORS`` reproduces these exact
+#: numbers for the 7B contract; tests pin them.
 RESOURCE_PROPOSAL = ResourceProposal(
     # D-1 (owner, 2026-09-16; relaxed 2026-10-13 for Qwen3 demo models, see
     # D1_MODEL_BYTES_RULE): for THIS Qwen2.5 7B proposal model bytes are still
@@ -142,7 +160,16 @@ class ModelContract:
 
     @property
     def resource_proposal(self) -> ResourceProposal:
-        return RESOURCE_PROPOSAL
+        """This contract's model-level proposal (an upper bound for any member).
+
+        Derived by ``model_resources`` from the registered model shape; the 7B
+        candidate returns its measured ``RESOURCE_PROPOSAL`` exactly.  A run
+        replaces it with the per-split proposal once the split is compiled.
+        """
+        from .model_resources import model_resource_proposal, model_shape
+        if model_shape(self) is None:
+            return RESOURCE_PROPOSAL
+        return model_resource_proposal(self)
 
     @property
     def architecture(self) -> str:
@@ -201,8 +228,8 @@ A9_ROUTE_MODEL = ModelContract(
 # two-stage MLX route over this exact revision reproduces a single-process NumPy
 # reference token for token (float32 and int8-weight-only).  Opt-in only
 # (``MYCELIUM_A13_RUN_MODEL=qwen3-0.6b``); never the default.  Its prompt codec
-# closes an empty think block (thinking off).  The shared RESOURCE_PROPOSAL was
-# derived for the 7B candidate and is not re-derived here.
+# closes an empty think block (thinking off).  Its resource proposal is derived
+# per model and per split (model_resources.py).
 QWEN3_0_6B_MODEL = ModelContract(
     model_id="Qwen/Qwen3-0.6B",
     resolved_commit="c1899de289a04d12100db370d81485cdf75e47ca",
@@ -218,10 +245,8 @@ QWEN3_0_6B_MODEL = ModelContract(
 # Qwen3-8B: 36 layers, hidden 4096, 32 q x 128 / 8 KV heads, 5 bf16 shards,
 # snapshot 16,397,461,266 B.  Qwen3-14B: 40 layers, hidden 5120, 40 q x 128 /
 # 8 KV heads, 8 bf16 shards, snapshot 29,552,613,776 B.  Both have square
-# attention.  The shared RESOURCE_PROPOSAL is still the 7B derivation and is not
-# re-derived here (owned by the N-host/slice lane); the app's model picker
-# (run_model.py) only offers a size whose whole snapshot fits the consent
-# ceiling until slice fetch lands.
+# attention.  Their resource proposals are derived per model and per compiled
+# split (model_resources.py), not from the 7B RESOURCE_PROPOSAL.
 QWEN3_8B_MODEL = ModelContract(
     model_id="Qwen/Qwen3-8B",
     resolved_commit="b968826d9c46dd6066d109eabc6255188de91218",
@@ -578,6 +603,7 @@ def prepare_local_source(
         source_bytes=source_bytes,
         manifest=manifest,
         manifest_digest=manifest_digest,
+        resource_proposal=model.resource_proposal,
     )
 
 

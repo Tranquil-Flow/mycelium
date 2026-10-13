@@ -106,13 +106,19 @@ def test_storage_policy_ceiling_covers_the_seeded_7b_budget():
 
     Derived (runs/wp8-02-g1/g2-derivation.json): laptop seeded 7B snapshot
     15,242,807,270 B + [0,14)+embedding stage copy 7,810,167,792 B =
-    23,052,975,062 B == serving.RESOURCE_PROPOSAL.additional_disk_bytes.
+    23,052,975,062 B <= serving.RESOURCE_PROPOSAL.additional_disk_bytes.  The
+    ceiling itself is now the largest per-model storage need
+    (model_resources.storage_consent_ceiling: the Qwen3-14B owner download).
     """
 
     from mycelium_a13_macos.app import consent_valid
+    from mycelium_a13_macos.model_resources import storage_consent_ceiling
 
     policy={'peer_visibility':True,'power':'ac_only','network':'unmetered_only',
             'background':False,'diagnostics':False,'thermal':'stop_on_serious'}
+    assert consent_valid({**policy,'storage_bytes':23_052_975_062})
     assert consent_valid({**policy,'storage_bytes':24_854_140_006})
-    assert not consent_valid({**policy,'storage_bytes':24_854_140_007})
+    assert storage_consent_ceiling() == 32_568_709_325 > 24_854_140_006
+    assert consent_valid({**policy,'storage_bytes':storage_consent_ceiling()})
+    assert not consent_valid({**policy,'storage_bytes':storage_consent_ceiling()+1})
     assert not consent_valid({**policy,'storage_bytes':99_999_999})

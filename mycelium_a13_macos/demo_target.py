@@ -68,6 +68,12 @@ class StandingConsentGate:
         grant = load_standing_consent(app.root)
         return int(grant['caps']['storage_bytes'])
 
+    def member_caps(self, app: Any) -> dict[str, int]:
+        """The standing caps this Mac's share must fit (memory guard + storage)."""
+        from .standing_consent import load_standing_consent
+        caps = load_standing_consent(app.root)['caps']
+        return {'storage_bytes': int(caps['storage_bytes']), 'max_memory_bytes': int(caps['max_memory_bytes'])}
+
 
 class OwnerRunConsent:
     """Owner's own Mac: allowed only while the owner's Start is active."""
@@ -85,6 +91,10 @@ class OwnerRunConsent:
     def storage_cap(self, app: Any) -> int:
         from .app import read_resource_policy
         return int(read_resource_policy(app.root)['storage_bytes'])
+
+    def member_caps(self, app: Any) -> dict[str, int]:
+        """The owner's own Mac: only its storage consent caps its share."""
+        return {'storage_bytes': self.storage_cap(app)}
 
 
 class SnapshotRangeTransport:
@@ -237,6 +247,24 @@ class DemoTargetAgent:
                     'phase': a.get('phase'), 'run_id': a.get('run_id'),
                     'model_id': (a.get('model') or {}).get('model_id'), 'local': self.local}
 
+    def member_limits(self, offer: Mapping[str, Any] | None) -> dict[str, int] | None:
+        """This Mac's share-derived worker limits for ``offer``'s run (StandingAcceptor)."""
+        with self._lock:
+            a = self.announcement or {}
+            if (not isinstance(offer, Mapping) or offer.get('run_id') != a.get('run_id')
+                    or not a.get('member_resources') or not isinstance(a.get('work_limits'), Mapping)):
+                return None
+            return dict(a['work_limits'])
+
+    def _share_refusal(self, a: Mapping[str, Any]) -> str | None:
+        """A closed code when this Mac's caps cannot hold its announced share."""
+        from .model_resources import check_member_caps
+        share = a.get('member_resources')
+        caps_of = getattr(self.consent, 'member_caps', None)
+        if not isinstance(share, Mapping) or caps_of is None:
+            return None
+        return check_member_caps(share, caps_of(self.app))
+
     def holds_offer(self) -> bool:
         """Tell the standing acceptor to leave the pending offer to this agent."""
         with self._lock:
@@ -326,14 +354,18 @@ class DemoTargetAgent:
         native = actor.status().get('native_control') or {}
         if phase in {'collect', 'observe', 'compile'}:
             self._set('bootstrap_running' if native.get('state') == 'running' else 'reported'); return
-        # 4. Slice (slice mode): fetch only this member's verified slice.
+        # 4. This Mac's share must fit its caps: refuse by name before any fetch.
+        refusal = self._share_refusal(a)
+        if refusal is not None:
+            self._set('error', refusal); return
+        # 5. Slice (slice mode): fetch only this member's verified slice.
         node_plan = a.get('node_slice_plan')
         if a.get('slice_mode') and node_plan:
             if self._slice_result.get('run_id') != run_id:
                 self._drive_slice(a, node_plan)
                 if self._slice_result.get('run_id') != run_id:
                     return
-        # 5. Work: remote members are accepted by the standing acceptor; the
+        # 6. Work: remote members are accepted by the standing acceptor; the
         #    owner's own contributor previews/accepts here under the owner's Start.
         if (self.local and offer is not None and offer['run_id'] == run_id
                 and offer['offer_id'] not in self._work_done and offer['offer_id'] != bootstrap
@@ -456,6 +488,9 @@ class DemoTargetAgent:
         if not self._consent('slice_fetch'):
             return
         cap = self.consent.storage_cap(self.app)
+        share = a.get('member_resources')
+        if isinstance(share, Mapping) and type(share.get('max_disk_bytes')) is int:
+            cap = min(cap, share['max_disk_bytes'])  # its share's disk limit
         expected = node_plan['node_plan_digest']
         transport = self._slice_transport() if self._slice_transport else None
         if transport is None:

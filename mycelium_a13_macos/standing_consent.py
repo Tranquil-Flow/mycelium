@@ -64,7 +64,7 @@ def _int_in(value: Any, low: int, high: int) -> bool:
     return type(value) is int and low <= value <= high
 
 
-def _caps(value: Any, policy: Mapping[str, Any]) -> dict[str, int]:
+def _caps(value: Any, policy: Mapping[str, Any], *, device_memory_bytes: int | None = None) -> dict[str, int]:
     if (not isinstance(value, Mapping) or set(value) != _CAP_FIELDS
             or not isinstance(policy, Mapping) or type(policy.get("storage_bytes")) is not int
             or not _int_in(value["storage_bytes"], 100_000_000, policy["storage_bytes"])
@@ -72,6 +72,12 @@ def _caps(value: Any, policy: Mapping[str, Any]) -> dict[str, int]:
             or not _int_in(value["max_wall_seconds"], 60, 3600)
             or not _int_in(value["max_commands"], 1, 10000)):
         raise StandingConsentError("standing_consent_caps_invalid")
+    if type(device_memory_bytes) is int and device_memory_bytes > 0:
+        # A per-run memory limit this Mac cannot honour is not a real consent:
+        # at most 3/4 of its RAM (model_resources.MEMBER_PEAK_MEMORY_FRACTION).
+        from .model_resources import member_memory_ceiling
+        if value["max_memory_bytes"] > member_memory_ceiling(device_memory_bytes):
+            raise StandingConsentError("standing_consent_memory_exceeds_device")
     return {key: int(value[key]) for key in sorted(_CAP_FIELDS)}
 
 
@@ -101,13 +107,13 @@ def load_standing_consent(root: Path | str) -> dict[str, Any] | None:
 
 
 def grant_standing_consent(root: Path | str, body: Any, *, policy: Mapping[str, Any],
-                           now: float) -> dict[str, Any]:
+                           now: float, device_memory_bytes: int | None = None) -> dict[str, Any]:
     """Record the one explicit grant shown at join (unbound until membership)."""
 
     if (not isinstance(body, Mapping) or set(body) != {"acknowledged", "disclosure_digest", "caps"}
             or body["acknowledged"] is not True or body["disclosure_digest"] != DISCLOSURE_DIGEST):
         raise StandingConsentError("standing_consent_required")
-    caps = _caps(body["caps"], policy)
+    caps = _caps(body["caps"], policy, device_memory_bytes=device_memory_bytes)
     existing = load_standing_consent(root)
     if existing is not None and existing["state"] != "withdrawn":
         if existing["caps"] != caps:
@@ -175,11 +181,28 @@ def standing_admission(grant: Mapping[str, Any] | None, *, binding: Mapping[str,
     return None
 
 
-def standing_limits(grant: Mapping[str, Any]):
+def standing_limits(grant: Mapping[str, Any], *, required: Mapping[str, Any] | None = None):
+    """Worker limits under the standing caps.
+
+    With ``required`` (this member's share-derived limits from the owner's
+    per-split resource proposal) the worker runs under exactly its share's
+    guard and disk limit, which must fit within the caps; otherwise the share
+    is refused by name before anything is staged.
+    """
     from .worker import WorkerLimits
 
     caps = grant["caps"]
-    return WorkerLimits(max_rss_bytes=caps["max_memory_bytes"], max_disk_bytes=caps["storage_bytes"],
+    rss, disk = caps["max_memory_bytes"], caps["storage_bytes"]
+    if required is not None:
+        need_rss, need_disk = required.get("max_rss_bytes"), required.get("max_disk_bytes")
+        if type(need_rss) is not int or type(need_disk) is not int or need_rss <= 0 or need_disk <= 0:
+            raise StandingConsentError("member_resources_invalid")
+        if need_rss > rss:
+            raise StandingConsentError("member_memory_cap_below_share")
+        if need_disk > disk:
+            raise StandingConsentError("member_storage_cap_below_share")
+        rss, disk = need_rss, need_disk
+    return WorkerLimits(max_rss_bytes=rss, max_disk_bytes=disk,
                         max_wall_seconds=caps["max_wall_seconds"], max_commands=caps["max_commands"])
 
 
@@ -300,8 +323,10 @@ class StandingAcceptor:
     def __init__(self, root: Path | str, *, preview: Callable[..., Any] = _default_preview,
                  accept: Callable[..., Any] = _default_accept,
                  report: Callable[[str, Mapping[str, Any]], Any] | None = None,
-                 clock: Callable[[], float] = time.time) -> None:
+                 clock: Callable[[], float] = time.time,
+                 limits_for: Callable[[Mapping[str, Any]], Mapping[str, Any] | None] | None = None) -> None:
         self.root = Path(root)
+        self._limits_for = limits_for
         self._preview = preview
         self._accept = accept
         self._report = report
@@ -333,7 +358,13 @@ class StandingAcceptor:
             reason = standing_admission(grant, binding=binding, offer=offer,
                                         resource_violation=resource_check())
             if reason is None:
-                limits = standing_limits(grant)
+                required = self._limits_for(offer) if self._limits_for is not None else None
+                try:
+                    limits = standing_limits(grant, required=required)
+                except StandingConsentError as error:
+                    self._handled.add(offer_id)
+                    self._last = {"offer_id": offer_id, "state": "refused", "reason": error.code}
+                    return dict(self._last)
                 authorize = authorize_stage or (lambda _intent: resource_check() is None)
                 options = {"limits": limits, "resource_policy": dict(policy),
                            "authorize_stage": authorize, "_test_observer": _test_observer}

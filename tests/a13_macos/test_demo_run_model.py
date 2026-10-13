@@ -40,17 +40,20 @@ def test_choices_are_the_three_qwen3_sizes_with_pinned_snapshot_bytes():
 
 def test_demo_default_is_14b_when_it_fits_else_largest_fitting_qwen3():
     assert run_model.demo_default_choice(storage_ceiling=40_000_000_000) == 'qwen3-14b'
-    # The current consent ceiling (the 7B-derived proposal) cannot hold the
-    # whole 14B snapshot, so the demo build defaults to 8B until slices land.
+    # The 7B-derived proposal alone could not hold the whole 14B snapshot; the
+    # consent ceiling is now derived per model (model_resources.py), so the
+    # 14B owner requirement (snapshot + 10%) fits and 14B is the default.
     assert RESOURCE_PROPOSAL.additional_disk_bytes < 29_552_613_776
-    assert run_model.demo_default_choice() == 'qwen3-8b'
+    assert run_model.storage_ceiling() == 32_568_709_325
+    assert run_model.demo_default_choice() == 'qwen3-14b'
+    assert run_model.demo_default_choice(storage_ceiling=20_000_000_000) == 'qwen3-8b'
     assert run_model.demo_default_choice(storage_ceiling=2_000_000_000) == 'qwen3-0.6b'
     assert run_model.demo_default_choice(storage_ceiling=1_000) is None
 
 
 def test_choice_persists_in_private_state_and_env_var_still_wins(tmp_path):
     root = tmp_path / 'state'; root.mkdir(mode=0o700)
-    assert run_model.app_run_model(root, environ={})[:2] == ('qwen3-8b', 'demo_default')
+    assert run_model.app_run_model(root, environ={})[:2] == ('qwen3-14b', 'demo_default')
     run_model.save_choice(root, 'qwen3-0.6b')
     assert (root / 'run-model.json').stat().st_mode & 0o777 == 0o600
     name, source, model = run_model.app_run_model(root, environ={})
@@ -90,13 +93,13 @@ def app(tmp_path, monkeypatch):
 
 def test_app_route_changes_model_reopens_acquisition_and_survives_restart(app, tmp_path):
     status = app.status()
-    assert status['model_contract']['model_id'] == 'Qwen/Qwen3-8B'
-    assert status['run_model']['selected'] == 'qwen3-8b'
+    assert status['model_contract']['model_id'] == 'Qwen/Qwen3-14B'
+    assert status['run_model']['selected'] == 'qwen3-14b'
     assert status['run_model']['source'] == 'demo_default'
     assert status['run_model']['locked'] is False
     assert [c['name'] for c in status['run_model']['choices']] == ['qwen3-0.6b', 'qwen3-8b', 'qwen3-14b']
     assert {c['name']: c['fits_storage_ceiling'] for c in status['run_model']['choices']} == {
-        'qwen3-0.6b': True, 'qwen3-8b': True, 'qwen3-14b': False}
+        'qwen3-0.6b': True, 'qwen3-8b': True, 'qwen3-14b': True}
     result = app.action('/api/run-model', {'choice': 'qwen3-0.6b'})
     assert result['selected'] == 'qwen3-0.6b'
     assert app.acquisition.model is QWEN3_0_6B_MODEL

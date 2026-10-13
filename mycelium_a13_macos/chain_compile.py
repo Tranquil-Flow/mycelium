@@ -13,7 +13,7 @@ the routes/buttons):
   acknowledged, run_id, deployment_id, descriptors)`` -> idempotent rebuild.
 """
 from argparse import Namespace
-from dataclasses import asdict
+from dataclasses import asdict,is_dataclass,replace
 from typing import Any, Mapping, Sequence
 import hashlib,json,math,socket,threading,time,traceback
 from .authority import _private_directory,_atomic_private_json
@@ -65,6 +65,36 @@ def plan_member_split(capability_reports,*,model_root,model_contract=None,member
     rows=_capability_rows(capability_reports,node_ids,members=members,now=now)
     policy=policy_for_runtime(getattr(model_contract,'runtime_quantization',None))
     return memory_proportional_split(rows,model_layer_profile(model_root),policy)
+
+
+def member_resource_plan(model,split,*,reports=None,owner_node_id=None,slice_mode=True):
+    """Stable API: compiled split -> per-member resources + the run's proposal.
+
+    Each member's worker disk limit and memory/load-peak guard come from its
+    own stage (model_resources.member_resources); a member whose RAM or
+    reported free disk cannot hold its share is refused by name with a human
+    message (``ResourceRefused``: ``code``, ``node_id``, ``message``).
+    """
+    from .model_resources import aggregate_proposal,check_members,member_resources
+    rows=member_resources(model,split,owner_node_id=owner_node_id,slice_mode=slice_mode)
+    check_members(model,rows,reports if isinstance(reports,Mapping) else None)
+    return {'members':rows,'proposal':aggregate_proposal(model,rows)}
+
+
+def _with_proposal(prepared,proposal):
+    """The prepared source carrying this run's per-split proposal (never mutated)."""
+    if is_dataclass(prepared):return replace(prepared,resource_proposal=proposal)
+    copy=type(prepared).__new__(type(prepared));copy.__dict__.update(vars(prepared))
+    copy.resource_proposal=proposal
+    return copy
+
+
+def _with_message(error,model):
+    """A split refusal carries the same human message as a resource refusal."""
+    if getattr(error,'message',None) is None:
+        from .model_resources import refusal_message
+        error.message=refusal_message(error.code,{'node_id':error.node_id},model=model)
+    return error
 
 
 def compile_member_slices(*,operator_plan,shard_root,prepared):
@@ -124,16 +154,29 @@ def start_compile(app,*,acknowledged):
     split=None
     if reports is not None:
         if not isinstance(reports,Mapping):raise ValueError('member_capability_report_required')
-        split=plan_member_split({n:reports.get(n) for n in node_ids},
-            model_root=prepared.source_root,model_contract=prepared.model,members=current)
+        try:
+            split=plan_member_split({n:reports.get(n) for n in node_ids},
+                model_root=prepared.source_root,model_contract=prepared.model,members=current)
+        except SplitRefused as error:
+            raise _with_message(error,prepared.model)
         if [s['node_id'] for s in split['stages']]!=node_ids:raise ValueError('member_capability_report_required')
     elif len(node_ids)!=2:
         raise ValueError('member_capability_report_required')
     slice_fetch=getattr(app,'_chain_slice_fetch',False) is True
     if slice_fetch:
         architecture=model_layer_profile(prepared.source_root).model_type
-        if split is None or not slice_fetch_permitted(getattr(prepared,'source_bytes',None),architecture=architecture):
+        if split is None or not slice_fetch_permitted(getattr(prepared,'source_bytes',None),architecture=architecture,
+                                                      model=prepared.model):
             raise ValueError('slice_fetch_model_not_permitted')
+    # Per-member resources from the compiled split: each member's guard and
+    # disk limit, and the run's proposal (replaces the model-level one).
+    resource_plan=None
+    from .model_resources import model_shape
+    if split is not None and model_shape(prepared.model) is not None:
+        local=getattr(getattr(app,'local_contributor',None),'member',None)
+        resource_plan=member_resource_plan(prepared.model,split,reports=reports,
+            owner_node_id=getattr(local,'node_id',None),slice_mode=slice_fetch)
+        prepared=_with_proposal(prepared,resource_plan['proposal'])
     context.retire_bootstrap()
     root=_private_directory(app.root/'chain-runs'/context.run_id,create=True)
     epoch=getattr(app,'_chain_epoch',0);app._chain_epoch=epoch
@@ -190,6 +233,9 @@ def start_compile(app,*,acknowledged):
                     physical_host_ids=workflow.launch.physical_host_ids)
                 app._chain_workflow=workflow;app._chain_approval=approval
                 state={'state':'compiled','route_ready':False,'execution_proposal':json.loads(json.dumps(asdict(approval)))}
+                if resource_plan is not None:
+                    from .model_resources import public_member_resources
+                    state['resource_plan']={'members':[public_member_resources(r) for r in resource_plan['members']]}
                 if split is not None:
                     state['layer_split']={'split_digest':split['split_digest'],'weighting':split['weighting'],
                         'stages':[{k:s[k] for k in ('node_id','start','end','stage_bytes','cost_bytes','budget_bytes')}

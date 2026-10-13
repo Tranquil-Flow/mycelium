@@ -6,12 +6,13 @@ chooses its model in the owner UI and the choice is stored privately as
 ``<state root>/run-model.json``.  The environment variable still wins when it
 is set (operator scripts and tests), and then the picker is shown as locked.
 
-Without a saved choice the demo default is Qwen3-14B when its whole pinned
-snapshot fits the consent storage ceiling, else the largest Qwen3 that does.
-Today every member fetches the whole snapshot (acquisition.py), and the
-ceiling is ``RESOURCE_PROPOSAL.additional_disk_bytes`` (24,854,140,006 B), so
-the default resolves to Qwen3-8B; it becomes 14B automatically once that
-ceiling (or per-member slice fetch) admits the 29.55 GB 14B snapshot.
+Without a saved choice the demo default is Qwen3-14B when the owner's storage
+requirement for it (its pinned snapshot plus 10%, model_resources.py) fits the
+consent storage ceiling, else the largest Qwen3 that does.  The ceiling is
+derived per model (``model_resources.storage_consent_ceiling``: 32,568,709,325 B,
+set by Qwen3-14B; its owner need is 32,507,875,154 B), so the default is
+Qwen3-14B; joined Macs fetch only their
+slice, bounded by their share of the per-split proposal.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
-from .serving import (QWEN3_0_6B_MODEL, QWEN3_8B_MODEL, QWEN3_14B_MODEL, RESOURCE_PROPOSAL,
+from .serving import (QWEN3_0_6B_MODEL, QWEN3_8B_MODEL, QWEN3_14B_MODEL,
                       RUN_MODEL_ENVIRONMENT, ModelContract, selected_run_model)
 
 PROTOCOL = 'mycelium.a13_run_model_choice.v1'
@@ -60,12 +61,19 @@ def choice_for_model(model: object) -> Choice | None:
 
 def storage_ceiling() -> int:
     """Largest storage a person can consent to (app.consent_valid's bound)."""
-    return RESOURCE_PROPOSAL.additional_disk_bytes
+    from .model_resources import storage_consent_ceiling
+    return storage_consent_ceiling()
+
+
+def owner_storage_bytes(c: Choice) -> int:
+    """Storage the owner must consent to for this choice (model_resources)."""
+    from .model_resources import owner_storage_requirement
+    return owner_storage_requirement(c.model)
 
 
 def demo_default_choice(*, storage_ceiling: int | None = None) -> str | None:
     ceiling = globals()['storage_ceiling']() if storage_ceiling is None else storage_ceiling
-    fitting = [c for c in CHOICES if c.snapshot_bytes <= ceiling]
+    fitting = [c for c in CHOICES if owner_storage_bytes(c) <= ceiling]
     return max(fitting, key=lambda c: c.snapshot_bytes).name if fitting else None
 
 
@@ -112,13 +120,17 @@ def app_run_model(root: Path | str, *, environ: Mapping[str, str] | None = None
 
 def document(root: Path | str, *, environ: Mapping[str, str] | None = None) -> dict:
     """The picker state shown by the UI (owner and target)."""
+    from .app import host_memory_bytes
+    from .model_resources import consent_document
     name, source, model = app_run_model(root, environ=environ)
     ceiling = storage_ceiling()
     return {'selected': name, 'source': source, 'locked': source == 'environment',
             'model_id': model.model_id, 'resolved_commit': model.resolved_commit,
             'demo_default': demo_default_choice(), 'storage_ceiling_bytes': ceiling,
+            'resources': consent_document(model, device_memory_bytes=host_memory_bytes()),
             'choices': [{'name': c.name, 'label': c.label, 'model_id': c.model.model_id,
                          'resolved_commit': c.model.resolved_commit,
                          'snapshot_bytes': c.snapshot_bytes,
                          'int8_weight_bytes': c.int8_weight_bytes,
-                         'fits_storage_ceiling': c.snapshot_bytes <= ceiling} for c in CHOICES]}
+                         'owner_storage_bytes': owner_storage_bytes(c),
+                         'fits_storage_ceiling': owner_storage_bytes(c) <= ceiling} for c in CHOICES]}

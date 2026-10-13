@@ -88,6 +88,24 @@ def validate_report(report: Any) -> dict[str, Any]:
     return json.loads(raw)
 
 
+_NODE_EXTRA = frozenset({'bootstrap_offer_id', 'node_slice_plan', 'work_limits', 'resources'})
+_WORK_LIMIT_FIELDS = frozenset({'max_rss_bytes', 'max_disk_bytes', 'max_wall_seconds', 'max_commands'})
+
+
+def _check_node_extra(extra: Mapping[str, Any]) -> None:
+    from .model_resources import PUBLIC_RESOURCE_FIELDS
+    if not set(extra) <= _NODE_EXTRA:
+        raise ValueError('demo_announcement_invalid')
+    limits = extra.get('work_limits')
+    if limits is not None and (not isinstance(limits, Mapping) or set(limits) != _WORK_LIMIT_FIELDS
+                               or any(type(v) is not int or v <= 0 for v in limits.values())):
+        raise ValueError('demo_announcement_invalid')
+    resources = extra.get('resources')
+    if resources is not None and (not isinstance(resources, Mapping)
+                                  or set(resources) != set(PUBLIC_RESOURCE_FIELDS)):
+        raise ValueError('demo_announcement_invalid')
+
+
 class RunExchange:
     """Owner side: mounted on the authority's ManagedProvisioningMailbox."""
 
@@ -122,16 +140,14 @@ class RunExchange:
                     'issued_at': self._clock()}
         nodes = {node: dict(extra) for node, extra in (per_node or {}).items()}
         for extra in nodes.values():
-            if not set(extra) <= {'bootstrap_offer_id', 'node_slice_plan'}:
-                raise ValueError('demo_announcement_invalid')
+            _check_node_extra(extra)
         with self._lock:
             self._announcement = json.loads(json.dumps(document, allow_nan=False))
             self._per_node = json.loads(json.dumps(nodes, allow_nan=False))
         return self.announcement()
 
     def update_node(self, node_id: str, **extra: Any) -> None:
-        if not set(extra) <= {'bootstrap_offer_id', 'node_slice_plan'}:
-            raise ValueError('demo_announcement_invalid')
+        _check_node_extra(extra)
         with self._lock:
             self._per_node.setdefault(node_id, {}).update(json.loads(json.dumps(extra)))
 
@@ -141,6 +157,12 @@ class RunExchange:
             extra = self._per_node.get(node_id, {}) if node_id is not None else {}
         value['bootstrap_offer_id'] = extra.get('bootstrap_offer_id')
         value['node_slice_plan'] = extra.get('node_slice_plan')
+        # This member's share of the per-split resource proposal: its own worker
+        # limits override the run-wide ones, and its share facts let it refuse
+        # by name when its standing caps cannot hold it.
+        if extra.get('work_limits') is not None:
+            value['work_limits'] = extra['work_limits']
+        value['member_resources'] = extra.get('resources')
         return value
 
     def reports(self) -> dict[str, dict[str, Any]]:

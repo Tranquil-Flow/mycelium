@@ -9,8 +9,9 @@ without forking them:
 * ``mycelium_a13_macos.authority.DemoAuthority.status`` /
   ``DemoAuthority.coordinator.members`` — current identity/member/lease state.
 * ``mycelium_a13_macos.serving.ModelContract`` /
-  ``mycelium_a13_macos.serving.RESOURCE_PROPOSAL`` — exact model and bounded
-  resource contract the lane already commits to.
+  ``PreparedSource.resource_proposal`` — exact model and its bounded
+  resource contract (model_resources.py; the 7B candidate's is the measured
+  ``serving.RESOURCE_PROPOSAL``).
 * ``mycelium_a13_macos.serving.PreparedSource`` — digest-bound compiled
   native manifest produced by ``prepare_local_source``.
 
@@ -36,7 +37,8 @@ Design invariants — non-negotiable
 5. The exact host grant is bound.  ``profile.grant_host_ids`` MUST match
    the current canonical roster (``distinct_hosts_required``).
 6. Bounded budgets.  Network / disk / RSS / wall / run counts on the
-   profile MUST be within ``RESOURCE_PROPOSAL`` — never silently above.
+   profile MUST be within the prepared source's resource proposal — never
+   silently above.
 7. Freshness window.  ``profile.freshness_window_seconds`` MUST be a
    positive integer and the owner lease MUST still be fresh.
 8. No tensor side-effects.  This module imports no model loader, MLX
@@ -524,7 +526,7 @@ def admit_run_profile(
     if normalized_source_root != str(prepared.source_root):
         raise ProvisioningAdmissionError("admission_source_root_mismatch")
 
-    _validate_budgets(profile, RESOURCE_PROPOSAL)
+    _validate_budgets(profile, prepared.resource_proposal)
     grant_members = _validate_grant_members(profile)
     _validate_cache_roots(profile, grant_members)
 
@@ -583,7 +585,7 @@ def admit_run_profile(
     )
     profile_digest = _digest_payload(payload)
 
-    resource_proposal_digest = _resource_proposal_digest(RESOURCE_PROPOSAL)
+    resource_proposal_digest = _resource_proposal_digest(prepared.resource_proposal)
 
     admission_payload: dict[str, Any] = {
         "protocol": ADMISSION_PROTOCOL,

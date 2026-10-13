@@ -11,9 +11,10 @@ Design invariants:
 
 * Fail closed.  Any malformed input, unknown field, digest mismatch, path
   escape, or internal exception denies authorization.
-* Pins come from the pinned candidate contract (``serving.CANDIDATE_MODEL`` /
-  ``RESOURCE_PROPOSAL``); nothing is re-hardcoded here, and the candidate
-  model itself is never modified.
+* Pins come from the run's registered model contract (``serving.
+  REGISTERED_MODELS``) and its own resource proposal (``ModelContract.
+  resource_proposal``, model_resources.py; the 7B candidate's is the measured
+  ``RESOURCE_PROPOSAL``); nothing is re-hardcoded here.
 * ``authorize_load`` never grants on command name alone: every exact-grant
   command's payload is checked against the consent pins (graph identity,
   staged file shape, run/deployment binding, typed limits semantics).
@@ -179,6 +180,18 @@ def _mapping(value: Any) -> bool:
     return isinstance(value, Mapping)
 
 
+def _proposal_ceiling(manifest: Any):
+    """The run's model-level proposal (upper bound for any member of any split).
+
+    Unregistered or malformed manifests fall back to the candidate's proposal;
+    they are refused below as ``work_manifest_invalid``.
+    """
+    try:
+        return registered_model_contract(manifest.get("model_id"), manifest.get("resolved_commit")).resource_proposal
+    except Exception:
+        return RESOURCE_PROPOSAL
+
+
 def authorize_work_consent(
     *,
     offer: Mapping[str, Any],
@@ -217,10 +230,11 @@ def authorize_work_consent(
         raise
     except Exception as exc:
         raise WorkAuthorizationError("work_offer_invalid") from exc
+    proposal = _proposal_ceiling(manifest)
     if (
-        limits.max_rss_bytes > RESOURCE_PROPOSAL.max_combined_rss_bytes
-        or limits.max_disk_bytes > RESOURCE_PROPOSAL.additional_disk_bytes
-        or limits.max_wall_seconds > RESOURCE_PROPOSAL.max_wall_seconds
+        limits.max_rss_bytes > proposal.max_combined_rss_bytes
+        or limits.max_disk_bytes > proposal.additional_disk_bytes
+        or limits.max_wall_seconds > proposal.max_wall_seconds
     ):
         raise WorkAuthorizationError("work_limits_exceed_proposal")
     _require(

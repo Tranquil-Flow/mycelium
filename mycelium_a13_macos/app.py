@@ -209,19 +209,42 @@ def private_write(path, raw):
 
 
 def consent_valid(c):
-    # G2 (D-1, 2026-09-16): the storage ceiling is derived from the selected
-    # contract's own resource proposal (serving.RESOURCE_PROPOSAL.
-    # additional_disk_bytes = the largest per-host requirement: the laptop's
-    # seeded 7B snapshot 15,242,807,270 B + its [0,14)+embedding stage copy
-    # 7,810,167,792 B = 23,052,975,062 B).  It must be expressible, because the
-    # seeded-path policy also bounds the acquisition's storage grant and the
-    # worker's staging disk.  See runs/wp8-02-g1/.
+    # The storage ceiling is derived per model (model_resources.py): the
+    # largest single enforced storage item any registered contract can need on
+    # one host.  Qwen3-14B sets it: a member holding the whole model needs
+    # 1.1 x (29,536,614,400 B weights + 4 MiB headers + 64 MiB control archive)
+    # = 32,568,709,325 B (its owner download need, snapshot + 10%, is
+    # 32,507,875,154 B).  The measured 7B seeded path stays expressible
+    # (24,854,140,006 B; laptop snapshot + stage copy 23,052,975,062 B, G2 D-1).
+    # It must be expressible, because the policy also bounds the acquisition's
+    # storage grant, the slice fetch and the worker's staging disk.  Whether
+    # it suffices for the SELECTED model is checked when a run starts.
+    from .model_resources import storage_consent_ceiling
     return (isinstance(c, dict) and set(c) == {'peer_visibility','power','storage_bytes','network','background','diagnostics','thermal'}
             and c['peer_visibility'] is True and c['power'] in {'ac_only','battery_allowed'}
-            and type(c['storage_bytes']) is int and 100_000_000 <= c['storage_bytes'] <= RESOURCE_PROPOSAL.additional_disk_bytes
+            and type(c['storage_bytes']) is int and 100_000_000 <= c['storage_bytes'] <= storage_consent_ceiling()
             and c['network'] in {'unmetered_only','metered_allowed'}
             and c['background'] is False and c['diagnostics'] is False
             and c['thermal'] == 'stop_on_serious')
+
+
+def pairing_quota_valid(quota):
+    """The owner may approve a joining Mac's quota up to the largest member share
+    any registered model can give one Mac (model_resources.pairing_quota_ceiling)."""
+    from .model_resources import pairing_quota_ceiling
+    cap = pairing_quota_ceiling()
+    return (isinstance(quota, dict) and type(quota.get('storage_bytes')) is int
+            and type(quota.get('network_bytes_per_day')) is int
+            and quota['storage_bytes'] <= cap and quota['network_bytes_per_day'] <= cap)
+
+
+def host_memory_bytes():
+    """This Mac's physical memory (no subprocess); ``None`` when unknown."""
+    try:
+        value = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
+    except (ValueError, OSError, AttributeError):
+        return None
+    return value if type(value) is int and value > 0 else None
 
 
 def read_resource_policy(root):
@@ -718,6 +741,10 @@ class DemoApp:
                 self.acquisition.state_root != self.authority.peer.state_root / 'serving'):
             self._open_acquisition()
 
+    def _device_memory_bytes(self):
+        """RAM bounding this Mac's per-run memory consent (test seam)."""
+        return host_memory_bytes()
+
     def _measure_and_sign(self, client, purpose):
         from .capability import observe_device, measure_link
         peer = self.authority.peer
@@ -768,12 +795,18 @@ class DemoApp:
         from .demo_app import holds_offer
         if holds_offer(self): return None  # bootstrap offer / slice not verified yet
         if self.standing is None:
-            self.standing = StandingAcceptor(self.root, report=lambda purpose, _offer: self._auto_report(purpose))
+            self.standing = StandingAcceptor(self.root, report=lambda purpose, _offer: self._auto_report(purpose),
+                                             limits_for=self._member_limits_for)
         def admitted(_intent):
             return self.running and not self.closed.is_set() and self._resource_check() is None
         return self.standing.tick(self.authority, policy=policy, binding=binding,
             resource_check=self._resource_check, authorize_stage=admitted,
             _test_observer=self._policy_observer)
+
+    def _member_limits_for(self, offer):
+        """This Mac's share-derived worker limits for the offer's run (or None)."""
+        agent = getattr(self, 'demo_target', None)
+        return None if agent is None else agent.member_limits(offer)
 
     def _standing_tick(self):
         from .standing_consent import auto_poll_step
@@ -1183,10 +1216,8 @@ class DemoApp:
             return self.pairing_windows.open(origin=origin,
                 seed_key_digest=self.authority.coordinator.signer.verification_key_digest, ttl_seconds=body['ttl_seconds'])
         if set(body) != {'window_id','request_digest'}: raise DemoError('invalid_request')
-        from .serving import RESOURCE_PROPOSAL
         def issue(request, quota):
-            if (quota['storage_bytes'] > RESOURCE_PROPOSAL.additional_disk_bytes
-                    or quota['network_bytes_per_day'] > RESOURCE_PROPOSAL.additional_disk_bytes):
+            if not pairing_quota_valid(quota):
                 raise PairingError('pairing_quota_invalid')
             remaining = int(float(request['expires_at']) - time.time()) - 1
             if remaining < 30: raise PairingError('pairing_request_expiring')
@@ -1223,10 +1254,12 @@ class DemoApp:
             sc = body['standing_consent']
             if not isinstance(sc, dict) or set(sc) != {'acknowledged','disclosure_digest','caps'}:
                 raise DemoError('standing_consent_required')
-            try: _caps(sc['caps'], body['consent'])
+            device_memory = self._device_memory_bytes()
+            try: _caps(sc['caps'], body['consent'], device_memory_bytes=device_memory)
             except StandingConsentError as error: raise DemoError(error.code) from None
             self._become_target(body['consent'])
-            try: grant_standing_consent(self.root, sc, policy=body['consent'], now=time.time())
+            try: grant_standing_consent(self.root, sc, policy=body['consent'], now=time.time(),
+                                        device_memory_bytes=device_memory)
             except StandingConsentError as error: raise DemoError(error.code) from None
             request = self.authority.pair_request()
             client = self._join_client(link['origin'])

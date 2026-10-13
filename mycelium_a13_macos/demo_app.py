@@ -82,7 +82,7 @@ def owner_status(app: Any) -> dict | None:
     run = getattr(app, 'owner_run', None)
     if run is None:
         from .owner_run import STEPS
-        return {'state': 'idle', 'step': None, 'error_code': None, 'failed_step': None,
+        return {'state': 'idle', 'step': None, 'error_code': None, 'error_message': None, 'failed_step': None,
                 'steps': [{'name': n, 'label': l, 'state': 'pending', 'detail': None} for n, l in STEPS],
                 'participants': None, 'registry_origin': None, 'route_ready': False, 'run_id': None}
     return run.status()
