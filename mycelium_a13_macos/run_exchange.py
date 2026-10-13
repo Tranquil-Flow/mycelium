@@ -117,6 +117,7 @@ class RunExchange:
         self._per_node: dict[str, dict[str, Any]] = {}
         self._reports: dict[str, dict[str, Any]] = {}
         self._issued: dict[str, float] = {}
+        self._model_source = None
         self.announce(phase='idle')
 
     def install(self) -> 'RunExchange':
@@ -146,6 +147,26 @@ class RunExchange:
             self._per_node = json.loads(json.dumps(nodes, allow_nan=False))
         return self.announcement()
 
+    def set_model_source_provider(self, provider) -> None:
+        """``provider() -> hint | None``: where members may read the pinned bytes.
+
+        Evaluated per read, only while a run is announced; the hint rides inside
+        this owner-signed announcement (peer_model_source.validate_hint).
+        """
+        if provider is not None and not callable(provider):
+            raise ValueError('demo_announcement_invalid')
+        self._model_source = provider
+
+    def _model_source_hint(self, phase: str) -> dict[str, Any] | None:
+        provider = self._model_source
+        if provider is None or phase in {'idle', 'stopped'}:
+            return None
+        try:
+            hint = provider()
+            return None if hint is None else json.loads(json.dumps(hint, allow_nan=False))
+        except Exception:
+            return None
+
     def update_node(self, node_id: str, **extra: Any) -> None:
         _check_node_extra(extra)
         with self._lock:
@@ -163,6 +184,7 @@ class RunExchange:
         if extra.get('work_limits') is not None:
             value['work_limits'] = extra['work_limits']
         value['member_resources'] = extra.get('resources')
+        value['model_source'] = self._model_source_hint(value['phase'])
         return value
 
     def reports(self) -> dict[str, dict[str, Any]]:

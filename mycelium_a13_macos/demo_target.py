@@ -159,6 +159,7 @@ class DemoTargetAgent:
     def __init__(self, app: Any, *, consent: Any, source: Callable[[], Mapping[str, Any] | None],
                  sink: Callable[[Mapping[str, Any]], Any], local: bool = False,
                  slice_transport: Callable[[], Any] | None = None,
+                 model_source: Callable[[Mapping[str, Any]], Any] | None = None,
                  clock: Callable[[], float] = time.time, report_interval: float = 10.0) -> None:
         self.app = app
         self.consent = consent
@@ -166,6 +167,8 @@ class DemoTargetAgent:
         self.sink = sink
         self.local = local
         self._slice_transport = slice_transport
+        self._model_source = model_source
+        self._sources: Any = None
         self._clock = clock
         self._report_interval = report_interval
         self._lock = threading.RLock()
@@ -245,7 +248,15 @@ class DemoTargetAgent:
             a = self.announcement or {}
             return {'state': self.state, 'detail': self.detail, 'progress': self.progress,
                     'phase': a.get('phase'), 'run_id': a.get('run_id'),
-                    'model_id': (a.get('model') or {}).get('model_id'), 'local': self.local}
+                    'model_id': (a.get('model') or {}).get('model_id'), 'local': self.local,
+                    'sources': self._source_status()}
+
+    def _source_status(self) -> list[dict[str, Any]] | None:
+        """Which byte sources served this member (owner LAN / relay / Hugging Face)."""
+        try:
+            return None if self._sources is None else self._sources.status()
+        except Exception:
+            return None
 
     def member_limits(self, offer: Mapping[str, Any] | None) -> dict[str, int] | None:
         """This Mac's share-derived worker limits for ``offer``'s run (StandingAcceptor)."""
@@ -444,11 +455,27 @@ class DemoTargetAgent:
             return False
         cap = int(self.consent.storage_cap(self.app))
         self.app.action('/api/run-model', {'choice': choice})
+        # Same consent and cap; only where the bytes come from (the owner's Mac
+        # first, Hugging Face as the pinned fallback -- peer_model_source.py).
+        setter = getattr(self.app.acquisition, 'set_byte_source', None)
+        if setter is not None:
+            setter(self._peer_source(a))
         self.app.action('/api/model/download', {'consent': {
             'download_acknowledged': True, 'max_download_bytes': cap, 'storage_limit_bytes': cap}})
         self._download_for = want
         self._set('downloading_model', None, {'done_bytes': 0, 'total_bytes': 0})
         return False
+
+    def _peer_source(self, a: Mapping[str, Any]) -> Any:
+        """The owner-served byte source for this run, or ``None`` (pinned origin only)."""
+        if self._model_source is None:
+            return None
+        try:
+            source = self._model_source(a)
+        except Exception:
+            source = None
+        self._sources = source
+        return source
 
     def _make_descriptor(self, a: Mapping[str, Any]) -> dict[str, Any]:
         from .installation_descriptor import installation_descriptor
@@ -492,7 +519,7 @@ class DemoTargetAgent:
         if isinstance(share, Mapping) and type(share.get('max_disk_bytes')) is int:
             cap = min(cap, share['max_disk_bytes'])  # its share's disk limit
         expected = node_plan['node_plan_digest']
-        transport = self._slice_transport() if self._slice_transport else None
+        transport = self._slice_transport() if self._slice_transport else self._peer_source(a)
         if transport is None:
             from .acquisition import _HTTPRepositoryTransport
             transport = _HTTPRepositoryTransport()

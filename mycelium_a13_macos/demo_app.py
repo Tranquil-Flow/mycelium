@@ -29,6 +29,16 @@ def ensure_exchange(app: Any):
         from .run_exchange import RunExchange
         exchange = RunExchange(mailbox).install()
         app.run_exchange = exchange
+    source = getattr(app, 'model_source_server', None)
+    if source is None or source.mailbox is not mailbox:
+        # Members may read the owner's verified pinned snapshot (relay route,
+        # plus a LAN-direct listener during a run) instead of Hugging Face.
+        from .peer_model_source import OwnerModelSource, owner_snapshot
+        if source is not None:
+            source.close()
+        source = OwnerModelSource(mailbox, source=lambda: owner_snapshot(app)).install()
+        app.model_source_server = source
+    exchange.set_model_source_provider(source.hint)
     run = getattr(app, 'owner_run', None)
     if (run is None or not run.active()) and exchange.announcement()['phase'] in {'idle', 'stopped'}:
         from .run_model import app_run_model
@@ -95,8 +105,10 @@ def target_agent(app: Any):
     if agent is None and app.installation_role == 'target' and getattr(app.authority, 'peer', None) is not None:
         from .demo_target import DemoTargetAgent, StandingConsentGate
         from .run_exchange import RunExchangeClient
+        from .peer_model_source import joiner_model_source
         client = RunExchangeClient(app.authority.peer)
-        agent = DemoTargetAgent(app, consent=StandingConsentGate(), source=client.read, sink=client.report)
+        agent = DemoTargetAgent(app, consent=StandingConsentGate(), source=client.read, sink=client.report,
+                                model_source=lambda announcement: joiner_model_source(app, announcement))
         app.demo_target = agent
     return agent
 
@@ -136,3 +148,6 @@ def close(app: Any) -> None:
     agent = getattr(app, 'demo_target', None)
     if agent is not None:
         agent.close()
+    source = getattr(app, 'model_source_server', None)
+    if source is not None:
+        source.close()

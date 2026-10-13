@@ -38,7 +38,9 @@ needs only outbound connections (no inbound, no peer-to-peer), spreads load
 over the CDN, survives a tunnel restart, and loses no integrity: trust comes
 from the owner-compiled digests, not from the byte source. The ``transport``
 seam takes any object with ``read_range(model_id, commit, path, offset,
-length)``, so an owner-served relay source can be added without plan changes.
+length)``: ``peer_model_source.MultiSourceTransport`` reads the same ranges from
+the owner's verified snapshot (LAN or relay) first, with this ranged HTTPS as
+the fallback, and ``reject`` re-fetches a segment that failed its digest.
 """
 from __future__ import annotations
 
@@ -439,6 +441,38 @@ def _clone_verified(row: Mapping[str, Any], root: Path, clone_candidate: Callabl
         shutil.rmtree(work, ignore_errors=True)
 
 
+_MAX_SEGMENT_RETRIES = 2
+
+
+def _fetch_segment(transport: Any, plan: Mapping[str, Any],
+                   segment: Mapping[str, Any]) -> tuple[bytes, int, int]:
+    """One plan segment, digest-verified; (data, range requests, bytes received).
+
+    A transport with ``reject`` (peer_model_source) quarantines the source of a
+    segment that failed its pinned digest and the segment is fetched again from
+    what remains, at most ``_MAX_SEGMENT_RETRIES`` times; otherwise fail closed.
+    """
+    from .acquisition import AcquisitionError
+    requests = received = 0
+    for attempt in range(_MAX_SEGMENT_RETRIES + 1):
+        try:
+            data = transport.read_range(plan["model_id"], plan["resolved_commit"],
+                segment["source_path"], segment["source_offset"], segment["length"])
+        except AcquisitionError as exc:
+            raise SliceError("slice_transport_" + exc.code) from None
+        requests += 1
+        if isinstance(data, bytes):
+            received += len(data)
+        if (isinstance(data, bytes) and len(data) == segment["length"]
+                and _sha(data) == segment["sha256"]):
+            return data, requests, received
+        reject = getattr(transport, "reject", None)
+        if (reject is None or attempt == _MAX_SEGMENT_RETRIES
+                or reject(segment["source_path"], segment["source_offset"], segment["length"]) is not True):
+            break
+    raise SliceError("slice_segment_digest_mismatch")
+
+
 def fetch_node_slice(node_plan: Mapping[str, Any], *, expected_node_plan_digest: str,
                      destination_root: str | Path, transport: Any, max_download_bytes: int,
                      max_disk_bytes: int,
@@ -518,19 +552,13 @@ def fetch_node_slice(node_plan: Mapping[str, Any], *, expected_node_plan_digest:
                     raise SliceError("slice_fetch_cancelled")
                 if "inline_base64" in segment:
                     data = base64.b64decode(segment["inline_base64"])
-                else:
-                    from .acquisition import AcquisitionError
-                    try:
-                        data = transport.read_range(plan["model_id"], plan["resolved_commit"],
-                            segment["source_path"], segment["source_offset"], segment["length"])
-                    except AcquisitionError as exc:
-                        raise SliceError("slice_transport_" + exc.code) from None
-                    requests += 1
-                    if not isinstance(data, bytes) or len(data) != segment["length"]:
+                    if _sha(data) != segment["sha256"]:
                         raise SliceError("slice_segment_digest_mismatch")
-                    downloaded += len(data)
-                if _sha(data) != segment["sha256"]:
-                    raise SliceError("slice_segment_digest_mismatch")
+                else:
+                    data = _fetch_segment(transport, plan, segment)
+                    requests += data[1]
+                    downloaded += data[2]
+                    data = data[0]
                 if os.pwrite(fd, data, segment["offset"]) != len(data):
                     raise SliceError("slice_write_failed")
                 os.fsync(fd)

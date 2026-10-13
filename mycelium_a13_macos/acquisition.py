@@ -79,6 +79,7 @@ _MAX_FILE_BYTES = (1 << 63) - 1
 _STREAM_CHUNK_BYTES = 64 * 1024
 _PARTIAL_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 _DEFAULT_TIMEOUT_SECONDS = 30.0
+_MAX_SOURCE_RETRIES = 2
 _HF_ORIGIN = "https://huggingface.co"
 
 
@@ -762,6 +763,11 @@ class SelectedModelAcquisition:
         self.model = _validate_model(model)
         self.state_root = _private_root(state_root)
         self._transport = _HTTPRepositoryTransport() if _transport is None else _transport
+        # Optional byte source (peer_model_source.MultiSourceTransport): only
+        # where file BYTES come from.  The manifest (the pinned digests) still
+        # comes from ``_transport``/the injected manifest, every byte is still
+        # verified here, and the consent budget is unchanged.
+        self._byte_source: Any | None = None
         self._injected_manifest = None if _manifest is None else copy.deepcopy(_manifest)
         self._disk_free = _disk_free_bytes or (lambda path: shutil.disk_usage(path).free)
         self._clock = _clock_unix_ms or (lambda: int(time.time() * 1_000))
@@ -903,6 +909,37 @@ class SelectedModelAcquisition:
         with self._guard:
             return copy.deepcopy(self._status)
 
+    def set_byte_source(self, source: Any | None) -> None:
+        """Fetch file bytes from ``source`` (``None``: the pinned origin) next time.
+
+        The source changes, never the trust: the pinned manifest still comes
+        from the origin transport, and every file is digest-verified as before.
+        """
+
+        if source is not None and not callable(getattr(source, "open_file", None)):
+            _raise("transport_configuration_invalid")
+        with self._guard:
+            if self._active:
+                _raise("acquisition_in_progress")
+            self._byte_source = source
+
+    def verified_snapshot(self) -> tuple[Path, dict[str, Any]] | None:
+        """The prepared snapshot root and its verified manifest, without re-hashing.
+
+        For serving byte ranges to members (peer_model_source): members verify
+        every byte against their own pinned digests, so this is a cheap view.
+        """
+
+        with self._guard:
+            if (
+                self._closed
+                or self._prepared is None
+                or self._verified_manifest is None
+                or self._status["state"] != "prepared"
+            ):
+                return None
+            return Path(self._prepared.source_root), copy.deepcopy(self._verified_manifest)
+
     def _begin(self, consent: Mapping[str, Any]) -> dict[str, Any]:
         checked = _validate_consent(consent)
         with self._guard:
@@ -914,6 +951,9 @@ class SelectedModelAcquisition:
                 _raise("source_already_prepared")
             self._active = True
             self._cancel.clear()
+            restart = getattr(self._byte_source, "reset_cancel", None)
+            if restart is not None:
+                restart()
             self._network_bytes = 0
             self._set_status(
                 state="starting", downloaded_bytes=0, total_bytes=0, error_code=None
@@ -1036,13 +1076,29 @@ class SelectedModelAcquisition:
                 final, partial = self._stage_file_paths(stage, record["path"])
                 if final.exists():
                     continue
-                self._download_file(
-                    record,
-                    partial=partial,
-                    final=final,
-                    total=total,
-                    consent=consent,
-                )
+                for attempt in range(_MAX_SOURCE_RETRIES + 1):
+                    try:
+                        self._download_file(
+                            record,
+                            partial=partial,
+                            final=final,
+                            total=total,
+                            consent=consent,
+                        )
+                        break
+                    except AcquisitionError as exc:
+                        # Bytes from a peer failed the pinned digest: the peer is
+                        # quarantined and the file is fetched again from what
+                        # remains (the partial is already gone).  Never retried
+                        # when only the pinned origin served it.
+                        reject = getattr(self._byte_source, "reject", None)
+                        if (
+                            exc.code != "artifact_digest_mismatch"
+                            or reject is None
+                            or attempt == _MAX_SOURCE_RETRIES
+                            or reject(record["path"]) is not True
+                        ):
+                            raise
             self._set_status(state="verifying", downloaded_bytes=total)
             self._verify_snapshot(stage, manifest)
             try:
@@ -1156,8 +1212,9 @@ class SelectedModelAcquisition:
         if remaining == 0:
             _raise("artifact_storage_unsafe")
         self._check_disk(remaining)
+        source = self._transport if self._byte_source is None else self._byte_source
         try:
-            response = self._transport.open_file(self.model, record, offset=offset)
+            response = source.open_file(self.model, record, offset=offset)
         except AcquisitionError:
             raise
         except BaseException as exc:
@@ -1402,6 +1459,9 @@ class SelectedModelAcquisition:
         """Request bounded cancellation; safe partials remain resumable."""
 
         self._cancel.set()
+        stop = getattr(self._byte_source, "cancel", None)
+        if stop is not None:
+            stop()  # a multi-source read stops between chunks, not after retries
 
     def close(self) -> None:
         """Cancel and join an active attempt, then release the process lock."""
@@ -1411,8 +1471,15 @@ class SelectedModelAcquisition:
                 return
             self._cancel.set()
             thread = self._thread
+        stop = getattr(self._byte_source, "cancel", None)
+        if stop is not None:
+            stop()
         if thread is not None and thread is not threading.current_thread():
-            timeout = getattr(self._transport, "timeout_seconds", _DEFAULT_TIMEOUT_SECONDS)
+            timeout = max(
+                float(getattr(source, "timeout_seconds", _DEFAULT_TIMEOUT_SECONDS))
+                for source in (self._transport, self._byte_source)
+                if source is not None
+            )
             thread.join(timeout=float(timeout) + 2.0)
             if thread.is_alive():
                 _raise("acquisition_close_timeout")
