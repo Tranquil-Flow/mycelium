@@ -161,3 +161,33 @@ def test_step_budget_expiry_fails_with_timeout_code():
     chain = Slow(); run = OwnerRun(chain); run.start()
     status = wait_for(run, lambda s: s['state'] == 'failed')
     assert status['error_code'] == 'owner_model_not_prepared' and status['failed_step'] == 'model'
+
+
+def test_a_failed_run_stays_active_until_its_teardown_finishes():
+    # F3: after a step fails the run sits in 'failing' while teardown announces
+    # 'stopped' and ticks this Mac's own contributor.  active() said False there,
+    # so a concurrent status poll re-announced 'idle' mid-teardown (the local
+    # contributor then overwrote its run report with a run-less one) and a new
+    # Start was accepted before the failed run had cleaned up.
+    chain = FakeChain(fail_at='descriptors', fail_code='two_macs_required')
+    entered, leave = threading.Event(), threading.Event()
+    seen = []
+
+    def teardown(ctx, *, failed):
+        seen.append(failed)
+        entered.set()
+        assert leave.wait(5)
+    chain.teardown = teardown
+    run = OwnerRun(chain)
+    run.start(); chain.release_all()
+    assert entered.wait(5)
+    try:
+        assert run.status()['state'] == 'failing'
+        assert run.active() is True
+        with pytest.raises(OwnerRunError, match='owner_run_active'):
+            run.start()
+    finally:
+        leave.set()
+    status = wait_for(run, lambda s: s['state'] == 'failed')
+    assert (status['failed_step'], status['error_code']) == ('descriptors', 'two_macs_required')
+    assert seen == [True] and run.active() is False
