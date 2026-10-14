@@ -2064,6 +2064,21 @@ class LiveHTTPServer(ThreadingHTTPServer):
     trusted_https_proxy: bool
 
 
+def _route_restart_code(exc: ColdRouteRestartError) -> str:
+    """The bounded public code for a request that found no route to read.
+
+    While the cold-restart owner restarts (or after its restart failed) it has
+    no route, and every reader through it raises ``ColdRouteRestartError``.
+    The code is the one the product snapshot publishes for the same state
+    (``ProductSourceUnavailable``), so it is validated the same way.
+    """
+
+    try:
+        return ProductSourceUnavailable(exc.code).reason_code
+    except ValueError:
+        return COLD_ROUTE_RESTART_FAILED_CODE
+
+
 def _handler() -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -2149,19 +2164,33 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             body = _json_bytes(document)
             self._send_bytes(200, body, "application/json; charset=utf-8")
 
+        def _route_restarting(self, status: int, exc: ColdRouteRestartError) -> None:
+            # A route reader looked up through a restarting owner raises; a
+            # getattr default does not catch it. Answer the bounded restart
+            # code instead of letting the handler thread drop the connection.
+            self._send_bytes(
+                status,
+                _json_bytes({"error": _route_restart_code(exc)}),
+                "application/json; charset=utf-8",
+            )
 
         def _deployment_registry(self) -> None:
-            registry_status = getattr(self.server.route, "registry_status", None)
-            if not callable(registry_status):
-                self._send_bytes(
-                    404,
-                    _json_bytes({"error": "deployment_registry_unavailable"}),
-                    "application/json; charset=utf-8",
-                )
+            try:
+                registry_status = getattr(self.server.route, "registry_status", None)
+                if not callable(registry_status):
+                    self._send_bytes(
+                        404,
+                        _json_bytes({"error": "deployment_registry_unavailable"}),
+                        "application/json; charset=utf-8",
+                    )
+                    return
+                document = registry_status()
+            except ColdRouteRestartError as exc:
+                self._route_restarting(503, exc)
                 return
             self._send_bytes(
                 200,
-                _json_bytes(registry_status()),
+                _json_bytes(document),
                 "application/json; charset=utf-8",
             )
 
@@ -2548,8 +2577,12 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             )
 
         def _m15_plan_comparison(self) -> None:
-            source = getattr(self.server.route, "m15_plan_comparison", None)
-            document = source() if callable(source) else None
+            try:
+                source = getattr(self.server.route, "m15_plan_comparison", None)
+                document = source() if callable(source) else None
+            except ColdRouteRestartError as exc:
+                self._route_restarting(503, exc)
+                return
             if document is None:
                 self._send_bytes(
                     404,
@@ -2564,8 +2597,12 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             )
 
         def _m16_runtime_status(self) -> None:
-            source = getattr(self.server.route, "m16_runtime_status", None)
-            document = source() if callable(source) else None
+            try:
+                source = getattr(self.server.route, "m16_runtime_status", None)
+                document = source() if callable(source) else None
+            except ColdRouteRestartError as exc:
+                self._route_restarting(503, exc)
+                return
             if document is None:
                 self._send_bytes(
                     404,
@@ -2580,8 +2617,12 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             )
 
         def _m17_model_operation(self) -> None:
-            source = getattr(self.server.route, "m17_model_operation", None)
-            document = source() if callable(source) else None
+            try:
+                source = getattr(self.server.route, "m17_model_operation", None)
+                document = source() if callable(source) else None
+            except ColdRouteRestartError as exc:
+                self._route_restarting(503, exc)
+                return
             if document is None:
                 self._send_bytes(
                     404,
@@ -2596,7 +2637,11 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             )
 
         def _m17_swarm_evidence(self) -> None:
-            source = getattr(self.server.route, "m17_swarm_evidence", None)
+            try:
+                source = getattr(self.server.route, "m17_swarm_evidence", None)
+            except ColdRouteRestartError as exc:
+                self._route_restarting(503, exc)
+                return
             if not callable(source):
                 self._send_bytes(
                     404,
@@ -2606,6 +2651,9 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 return
             try:
                 document = source()
+            except ColdRouteRestartError as exc:
+                self._route_restarting(503, exc)
+                return
             except RuntimeError as exc:
                 self._send_bytes(
                     503,
@@ -2620,7 +2668,11 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             )
 
         def _select_deployment(self) -> None:
-            select = getattr(self.server.route, "select", None)
+            try:
+                select = getattr(self.server.route, "select", None)
+            except ColdRouteRestartError as exc:
+                self._route_restarting(409, exc)
+                return
             if not callable(select):
                 self._send_bytes(
                     404,
@@ -2653,6 +2705,9 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 ):
                     raise ValueError
                 status = select(document["deployment_id"])
+            except ColdRouteRestartError as exc:
+                self._route_restarting(409, exc)
+                return
             except DeploymentSelectionError as exc:
                 self._send_bytes(
                     409,
@@ -2685,9 +2740,13 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             route method validates again fail-closed.
             """
 
-            install = getattr(
-                self.server.route, "set_replica_track_qualification", None
-            )
+            try:
+                install = getattr(
+                    self.server.route, "set_replica_track_qualification", None
+                )
+            except ColdRouteRestartError as exc:
+                self._route_restarting(409, exc)
+                return
             if not callable(install):
                 self._send_bytes(
                     404,
@@ -2744,6 +2803,9 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                     for item in document["documents"]
                 ]
                 install(validated)
+            except ColdRouteRestartError as exc:
+                self._route_restarting(409, exc)
+                return
             except (TypeError, ValueError, json.JSONDecodeError):
                 self._send_bytes(
                     400,
@@ -2758,7 +2820,11 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             )
 
         def _promote_candidate(self) -> None:
-            promote = getattr(self.server.route, "promote_candidate", None)
+            try:
+                promote = getattr(self.server.route, "promote_candidate", None)
+            except ColdRouteRestartError as exc:
+                self._route_restarting(409, exc)
+                return
             if not callable(promote):
                 self._send_bytes(
                     404,
@@ -2779,6 +2845,9 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             try:
                 document = json.loads(body)
                 status = promote(document)
+            except ColdRouteRestartError as exc:
+                self._route_restarting(409, exc)
+                return
             except DeploymentSelectionError as exc:
                 self._send_bytes(
                     409,
@@ -2798,7 +2867,11 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             )
 
         def _canary_candidate(self) -> None:
-            canary = getattr(self.server.route, "canary_candidate", None)
+            try:
+                canary = getattr(self.server.route, "canary_candidate", None)
+            except ColdRouteRestartError as exc:
+                self._route_restarting(409, exc)
+                return
             if not callable(canary):
                 self._send_bytes(
                     404,
@@ -2831,6 +2904,9 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                     prompt=document["prompt"],
                     max_new_tokens=document["max_new_tokens"],
                 )
+            except ColdRouteRestartError as exc:
+                self._route_restarting(409, exc)
+                return
             except DeploymentSelectionError as exc:
                 self._send_bytes(
                     409,
@@ -2850,7 +2926,11 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             )
 
         def _rollback_candidate(self) -> None:
-            rollback = getattr(self.server.route, "rollback_candidate", None)
+            try:
+                rollback = getattr(self.server.route, "rollback_candidate", None)
+            except ColdRouteRestartError as exc:
+                self._route_restarting(409, exc)
+                return
             if not callable(rollback):
                 self._send_bytes(
                     404,
@@ -2875,6 +2955,9 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 status = rollback(
                     document["candidate_deployment_id"], reason=document["reason"]
                 )
+            except ColdRouteRestartError as exc:
+                self._route_restarting(409, exc)
+                return
             except DeploymentSelectionError as exc:
                 self._send_bytes(
                     409,
