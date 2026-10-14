@@ -1182,6 +1182,102 @@ def test_registration_accepts_the_settled_image_of_a_held_open_exec(
         _reap_owned_member(process)
 
 
+def _owned_member_in(worktree: Path) -> subprocess.Popen[str]:
+    process = subprocess.Popen(
+        [str(SERVICE_EXECUTABLE), "-c", _SETTLED_PAYLOAD],
+        cwd=str(worktree),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    _await_settled_member(process, token=_SETTLED_TOKEN)
+    return process
+
+
+def test_owned_group_survives_an_entry_added_to_the_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A new entry in the worktree must not make the harness refuse its own group.
+
+    The L2 on 7947494 lost the native two-node e2e to ``owner worktree path
+    identity changed``: under -n8, ``tests/a13_macos/test_resources.py`` creates
+    ``outputs/`` in the fresh checkout root while the e2e's nodes run there.
+    That changes the root directory's size, mtime and ctime, which the
+    worktree identity used to include, so every later revalidation - and the
+    cleanup that should stop the nodes - refused the group.  The entry is added
+    here directly, at the same point in the group's life.
+    """
+
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    monkeypatch.setattr(harness, "WORKTREE_ROOT", worktree.resolve())
+    process = _owned_member_in(worktree)
+    try:
+        owners: dict[str, harness.OwnedGroup] = {}
+        owner = harness.register_owned_group(
+            owners, "node", process, SERVICE_EXECUTABLE, worktree=worktree
+        )
+        (worktree / "outputs").mkdir()
+        groups, _ = harness.owned_inventory([owner], known_pids=set())
+        assert groups == {owner.pgid: [process.pid]}
+        errors, uncertain = harness.signal_owned_groups([owner], signal.SIGTERM)
+        assert errors == [] and uncertain is False
+        assert process.wait(timeout=harness.PROCESS_WAIT_TIMEOUT * 5) == -signal.SIGTERM
+    finally:
+        _reap_owned_member(process)
+
+
+def test_owned_group_is_refused_once_its_worktree_is_replaced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control: a different directory at the worktree path is still refused."""
+
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    monkeypatch.setattr(harness, "WORKTREE_ROOT", worktree.resolve())
+    process = _owned_member_in(worktree)
+    try:
+        owners: dict[str, harness.OwnedGroup] = {}
+        owner = harness.register_owned_group(
+            owners, "node", process, SERVICE_EXECUTABLE, worktree=worktree
+        )
+        worktree.rename(tmp_path / "moved-away")
+        worktree.mkdir()
+        with pytest.raises(AssertionError, match="owner worktree path identity changed"):
+            harness.owned_inventory([owner], known_pids=set())
+        errors, uncertain = harness.signal_owned_groups([owner], signal.SIGTERM)
+        assert uncertain is True and len(errors) == 1
+        assert "owner worktree path identity changed" in str(errors[0])
+        assert process.poll() is None
+    finally:
+        _reap_owned_member(process)
+
+
+def test_owned_member_cwd_identity_ignores_entries_but_not_replacement(
+    tmp_path: Path,
+) -> None:
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    before = harness.path_identity(worktree)
+    (worktree / "outputs").mkdir()
+    (worktree / "file").write_bytes(b"x")
+    (worktree / "file").unlink()
+    assert harness.path_identity(worktree) == before
+    worktree.chmod(0o700)
+    assert harness.path_identity(worktree) != before
+    worktree.chmod(0o755)
+    worktree.rename(tmp_path / "moved-away")
+    worktree.mkdir(mode=0o755)
+    assert harness.path_identity(worktree) != before
+    executable = tmp_path / "binary"
+    executable.write_bytes(b"one")
+    pinned = harness.path_identity(executable)
+    executable.write_bytes(b"three")
+    assert harness.path_identity(executable) != pinned
+
+
 def test_registration_never_fingerprints_a_fork_to_exec_observation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
