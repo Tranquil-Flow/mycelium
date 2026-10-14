@@ -22,6 +22,7 @@ import numpy as np
 from mycelium_mobile.qwen_stage_manifest import (
     build_stage_manifest_from_safetensors, verify_signed_stage_manifest,
 )
+from mycelium_membership import MAX_CLOCK_SKEW_SECONDS
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import build_ed25519_verifier
 from mycelium_live.phone_stage_session import validate_phone_configure
@@ -117,9 +118,11 @@ class PhoneEvidence:
         require(set(statement) == fields and statement["protocol"] == BINDING_PROTOCOL,
                 "phone_authority_invalid")
         issued, expires = statement["issued_at"], statement["expires_at"]
+        # issued_at is the seed's clock and this may run on the controller
+        # host: allow MAX_CLOCK_SKEW_SECONDS ahead; expiry gets no allowance.
         require(type(issued) in (int, float) and type(expires) in (int, float)
                 and math.isfinite(issued) and math.isfinite(expires)
-                and issued <= now and 0 < expires - issued <= 600
+                and issued <= now + MAX_CLOCK_SKEW_SECONDS and 0 < expires - issued <= 600
                 and (now < expires or preparation_window is False),
                 "phone_authority_stale")
         require(all(statement[k] == v for k, v in {
