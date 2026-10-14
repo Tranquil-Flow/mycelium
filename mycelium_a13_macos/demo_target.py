@@ -156,6 +156,17 @@ def slice_progress(node_plan: Mapping[str, Any] | None, root: Path) -> dict[str,
     return {'done_bytes': min(done, total), 'total_bytes': total}
 
 
+#: Whole-snapshot download failures a link drop causes (every byte source
+#: struck: owner LAN, owner relay, Hugging Face).  The member retries these
+#: with a growing backoff; any other code (storage, consent, digest) is final.
+_DOWNLOAD_RETRYABLE = frozenset({
+    'network_error', 'source_disconnected', 'source_unavailable', 'source_incomplete',
+    'managed_control_unreachable', 'managed_control_remote_error', 'managed_control_response_timeout',
+    'model_source_busy', 'acquisition_failed'})
+_RETRY_FIRST_SECONDS = 5.0
+_RETRY_MAX_SECONDS = 60.0
+
+
 class DemoTargetAgent:
     def __init__(self, app: Any, *, consent: Any, source: Callable[[], Mapping[str, Any] | None],
                  sink: Callable[[Mapping[str, Any]], Any], local: bool = False,
@@ -187,6 +198,8 @@ class DemoTargetAgent:
         self._last_report: tuple | None = None
         self._last_report_at = 0.0
         self._download_for: tuple | None = None
+        self._retry_delay = 0.0
+        self._retry_at: float | None = None
 
     # -- helpers ------------------------------------------------------------
     def _actor(self):
@@ -454,6 +467,7 @@ class DemoTargetAgent:
         status = acquisition.status()
         state = status.get('state')
         if state == 'prepared':
+            self._retry_delay, self._retry_at = 0.0, None
             prepared = acquisition.prepared_source().model
             if (prepared.model_id, prepared.resolved_commit) != want:
                 self._set('error', 'demo_model_mismatch')
@@ -465,8 +479,25 @@ class DemoTargetAgent:
                        'total_bytes': int(status.get('total_bytes') or 0)})
             return False
         if state == 'failed' and self._download_for == want:
-            self._set('error', status.get('error_code') or 'model_download_failed')
-            return False
+            code = status.get('error_code') or 'model_download_failed'
+            if code not in _DOWNLOAD_RETRYABLE:
+                self._set('error', code)
+                return False
+            # A link drop exhausted every byte source (two-Mac run 21, phone
+            # hotspot).  Back off, keep reporting the bytes already here, then
+            # start again: the acquisition resumes its safe partials.  Bounded
+            # by the owner's run: an idle/stopped announcement ends the retries.
+            now = self._clock()
+            if self._retry_at is None:
+                self._retry_delay = min(_RETRY_MAX_SECONDS, self._retry_delay * 2) if self._retry_delay else \
+                    _RETRY_FIRST_SECONDS
+                self._retry_at = now + self._retry_delay
+            if now < self._retry_at:
+                self._set('downloading_model', 'model_download_retrying',
+                          {'done_bytes': int(status.get('downloaded_bytes') or 0),
+                           'total_bytes': int(status.get('total_bytes') or 0)})
+                return False
+            self._retry_at = None
         if not self._consent('model_download'):
             return False
         choice = model.get('choice')

@@ -23,6 +23,7 @@ later compile strategy) can replace them without touching the state machine.
 from __future__ import annotations
 
 import json
+import math
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -54,6 +55,43 @@ def _descriptor_left(card: Any, now: float) -> float | None:
     if type(expires) not in (int, float) or expires != expires:
         return None
     return float(expires) - now
+
+
+def _mb(value: int) -> str:
+    return '%d MB' % (value // 1_000_000)
+
+
+def _download_note(progress: Any, first: tuple[int, float], now: float) -> str:
+    """'the joined Mac is downloading the model: 412 of 1519 MB, 1.1 MB/s, about 17 min left'."""
+    progress = progress if isinstance(progress, Mapping) else {}
+    done, total = progress.get('done_bytes'), progress.get('total_bytes')
+    text = 'waiting for a Mac that is downloading the model'
+    if type(done) is not int or type(total) is not int or total <= 0:
+        return text
+    text += ': %s of %s' % (_mb(done), _mb(total))
+    elapsed = now - first[1]
+    if first[0] >= 0 and elapsed > 0 and done > first[0]:
+        rate = (done - first[0]) / elapsed
+        left = max(0, total - done) / rate
+        text += ', %.1f MB/s, about %s left' % (rate / 1e6, '%d min' % math.ceil(left / 60)
+                                                 if left >= 60 else '%d s' % math.ceil(left))
+    return text
+
+
+def _member_failure_message(code: str, report: Any, *, stall: float, silent_max: float) -> str | None:
+    progress = (report or {}).get('progress') if isinstance(report, Mapping) else None
+    done = (progress or {}).get('done_bytes') if isinstance(progress, Mapping) else None
+    total = (progress or {}).get('total_bytes') if isinstance(progress, Mapping) else None
+    where = (' (%s of %s downloaded)' % (_mb(done), _mb(total))
+             if type(done) is int and type(total) is int and total > 0 else '')
+    if code == 'member_download_stalled':
+        return 'The joined Mac kept reporting, but its model download made no progress for %d s%s.' % (
+            stall, where)
+    if code == 'member_unreachable':
+        return ('The joined Mac stopped answering while downloading the model and did not come back '
+                'within %d s%s. Check its network, then press Start again; its download resumes.' % (
+                    silent_max, where))
+    return None
 
 
 def _owner_compiled_bundle(app):
@@ -177,7 +215,10 @@ class AppDemoChain:
         self.ops = ops or ChainOps()
         self.interval = interval
         self._agent_factory = agent_factory
-        self.budgets = {'model': 5.0, 'descriptors': 180.0, 'descriptors_download': 1800.0, 'download_stall': 120.0,
+        # descriptors: base wait; download_stall / report_silence / member_silence
+        # bound a joined Mac's model download (_step_descriptors) -- no total cap.
+        self.budgets = {'model': 5.0, 'descriptors': 180.0, 'download_stall': 120.0,
+                        'report_silence': 30.0, 'member_silence': 300.0,
                         'descriptor_margin': 60.0, 'bootstrap': 180.0, 'collect': 180.0,
                         'cleanup': 120.0, 'compile': 3600.0, 'slices': 7200.0, 'publish': 600.0,
                         'targets': 280.0, 'serving': 900.0, **(budgets or {})}
@@ -342,16 +383,24 @@ class AppDemoChain:
         expected = [local, *self._remote_members()]
         ctx.state['participants'] = expected
 
-        # Base wait as before; past it, keep waiting ONLY while some member is
-        # visibly downloading the model (its bytes rose within download_stall),
-        # up to descriptors_download in total.  A silent or stalled member is
-        # still dropped at the base budget (two-Mac run 16: a laptop on a phone
-        # hotspot needed more than the 180 s base to fetch Qwen3-0.6B).
+        # Base wait as before; past it, keep waiting ONLY while a member is
+        # visibly downloading the model, and end with that member's own code:
+        # * still reporting: its bytes must rise within download_stall; every
+        #   rise renews the wait (budgets scale with measured progress -- no
+        #   total cap while it advances; run 18b needed 1585 s of 1800);
+        # * silent (no report for report_silence): a link drop.  Wait while its
+        #   seed lease is live, up to member_silence (two-Mac run 21: the laptop
+        #   on a phone hotspot lost every report and heartbeat ~110 s in, with
+        #   its lease live to 408 s, and the run gave up at 252 s);
+        # * otherwise it is dropped at the base budget, as before.
         clock = time.monotonic
         started = clock()
         base = self.budgets['descriptors']
         stall = self.budgets.get('download_stall', 120.0)
-        seen: dict[str, tuple[int, float]] = {}
+        silence = self.budgets.get('report_silence', 30.0)
+        silent_max = self.budgets.get('member_silence', 300.0)
+        seen: dict[str, dict[str, Any]] = {}
+        reasons: dict[str, str] = {}
 
         class _GiveUp(Exception):
             pass
@@ -379,7 +428,11 @@ class AppDemoChain:
             stale.update(n for n in expected if n not in ready and (reports.get(n) or {}).get('descriptor'))
             self._publish_participants(ctx)
             now = clock()
+            wall = time.time()
+            live = None
             active = resigning = False
+            notes = []
+            reasons.clear()
             for node in expected:
                 report = reports.get(node) or {}
                 if node in stale:
@@ -390,36 +443,72 @@ class AppDemoChain:
                         resigning = True
                     continue
                 stale_since.pop(node, None)
-                if node in ready or report.get('state') != 'downloading_model':
+                downloading = report.get('state') == 'downloading_model' or (
+                    node in seen and report.get('state') == 'error')
+                if node in ready or not downloading:
+                    if report.get('state') == 'error' and report.get('detail'):
+                        reasons[node] = report['detail']
                     continue
                 done = (report.get('progress') or {}).get('done_bytes')
                 done = done if type(done) is int else -1
-                previous = seen.get(node)
-                if previous is None or done > previous[0]:
-                    seen[node] = (done, now)
-                if now - seen[node][1] < stall:
+                heard = report.get('received_at')
+                silent_for = wall - heard if type(heard) in (int, float) else 0.0
+                # Per member: last byte rise, and the time it was HEARD without
+                # one (silences do not count as a stall, and do not reset it).
+                track = seen.setdefault(node, {'done': done, 'rose': now, 'flat': 0.0,
+                                               'polled': now, 'heard': True, 'first': (done, now)})
+                if done > track['done']:
+                    track.update(done=done, rose=now, flat=0.0)
+                elif silent_for < silence and track['heard']:
+                    track['flat'] += now - track['polled']
+                track['polled'], track['heard'] = now, silent_for < silence
+                idle = now - track['rose']  # bounds a member alternating silence and flat reports
+                if silent_for >= silence:
+                    # Not heard from: a link drop, not a stalled download.
+                    if live is None:
+                        live = set(self._remote_members())
+                    if node in live and silent_for < silent_max and idle < silent_max + stall:
+                        active = True
+                        notes.append('the joined Mac has not been heard from for %d s (link drop?); '
+                                     'waiting up to %d s' % (silent_for, silent_max))
+                    else:
+                        reasons[node] = 'member_unreachable'
+                    continue
+                if track['flat'] < stall and idle < silent_max + stall:
                     active = True
-            ctx.progress('%d of %d Macs reported%s' % (len(ready), len(expected),
-                         '; waiting for a Mac that is downloading the model' if active else
-                         '; waiting for a Mac to re-sign its descriptor' if resigning else ''))
+                    notes.append(_download_note(report.get('progress'), track['first'], now))
+                else:
+                    reasons[node] = ('member_download_stalled' if report.get('state') != 'error'
+                                     else report.get('detail') or 'member_download_stalled')
+            ctx.progress(('%d of %d Macs reported' % (len(ready), len(expected)))
+                         + ('; ' + '; '.join(notes) if notes else
+                            '; waiting for a Mac to re-sign its descriptor' if resigning else ''))
             if len(ready) == len(expected):
                 return True
             if now - started >= base and not (active or resigning):
                 raise _GiveUp()
             return False
         try:
-            self._wait(ctx, have, budget='descriptors_download', code='member_descriptors_timeout')
-        except (OwnerRunError, _GiveUp):
+            ctx.wait_until(lambda: self._tick_local() or have(), budget=float('inf'),
+                           code='member_descriptors_timeout', interval=self.interval)
+        except _GiveUp:
             pass  # proceed with the Macs that reported; the compiler decides if enough
         reports = self._reports(ctx)
         fresh = [n for n in expected if usable(reports.get(n))]
         cards = [reports[n]['descriptor'] for n in fresh]
+        if len(cards) < 2:
+            if any((reports.get(n) or {}).get('descriptor') for n in expected if n not in fresh):
+                raise OwnerRunError('member_descriptor_stale')
+            missing = [n for n in expected if n not in fresh and n in reasons]
+            if missing:
+                # Keep the joined Mac on the page with its state and progress.
+                self._publish_participants(ctx)
+                raise OwnerRunError(reasons[missing[0]], _member_failure_message(
+                    reasons[missing[0]], reports.get(missing[0]), stall=stall, silent_max=silent_max))
         ctx.state['participants'] = sorted(c['statement']['target_node_id'] for c in cards)
         ctx.state['descriptors'] = sorted(cards, key=lambda c: c['statement']['target_node_id'])
         self._publish_participants(ctx)
         if len(cards) < 2:
-            if any((reports.get(n) or {}).get('descriptor') for n in expected if n not in fresh):
-                raise OwnerRunError('member_descriptor_stale')
             raise OwnerRunError('two_macs_required')
 
     def _step_observe(self, ctx):
