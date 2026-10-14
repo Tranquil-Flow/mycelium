@@ -385,18 +385,33 @@ async function verifyWorkspaces(page, privateCanaries) {
   return visited;
 }
 
-export async function verifyInferenceOutcome(page, scenario) {
-  const status = page.getByRole('status');
-  await status.waitFor({ state: 'visible', timeout: 60_000 });
-  const statusText = await status.innerText();
-  if (scenario === 'positive') {
-    if (!/Completed/i.test(statusText)) fail('positive_ui_terminal_missing');
-    const output = page.getByRole('log', { name: 'Decoded output' });
-    await output.waitFor({ state: 'visible', timeout: 60_000 });
-    if ((await output.innerText()).trim().length === 0) fail('positive_ui_output_missing');
-    return;
+const UI_TERMINAL_LABEL = /\b(Completed|Cancelled|Failed)\b/;
+
+// The inference workspace renders several role=status regions (route activity,
+// catalog, acquisition, evidence); only the named outcome region is the request
+// terminal. After a reload it first shows the restored local phase (e.g.
+// "Stream interrupted") and reaches the server terminal once the restored page
+// re-attaches and the gateway replays, so wait for a terminal label instead of
+// reading the first paint. A different terminal label fails at once.
+export async function verifyInferenceOutcome(page, scenario, options = {}) {
+  const { timeout = 60_000, interval = 250 } = options;
+  if (scenario !== 'positive' && scenario !== 'negative') fail('browser_scenario_invalid');
+  const expected = scenario === 'positive' ? 'Completed' : 'Failed';
+  const code = scenario === 'positive' ? 'positive_ui_terminal_missing' : 'negative_ui_terminal_missing';
+  const status = page.getByRole('status', { name: 'Inference outcome', exact: true });
+  await status.waitFor({ state: 'visible', timeout });
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const terminal = UI_TERMINAL_LABEL.exec(await status.innerText())?.[1] ?? null;
+    if (terminal === expected) break;
+    if (terminal !== null || Date.now() >= deadline) fail(code);
+    await page.waitForTimeout(interval);
   }
-  if (!/Failed/i.test(statusText)) fail('negative_ui_terminal_missing');
+  if (scenario === 'positive') {
+    const output = page.getByRole('log', { name: 'Decoded output' });
+    await output.waitFor({ state: 'visible', timeout });
+    if ((await output.innerText()).trim().length === 0) fail('positive_ui_output_missing');
+  }
 }
 
 // What each scenario must observe, in terms of the production aggregate.
