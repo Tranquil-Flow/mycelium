@@ -198,6 +198,65 @@ def test_status_read_cancelling_before_the_reader_sees_eof_still_records_the_exi
     """
 
     local, owner, router, service, target = _compose(tmp_path, "single")
+    state = _hold_source_eof_for_a_status_read(monkeypatch, owner)
+    try:
+        first_route = owner._current
+        state["armed"] = True
+        request_id, outcome = _run_case(service, owner, target, _CASE)
+        # The forced interleaving really happened: the status read cancelled
+        # the request while the source's EOF was still undelivered.
+        assert state["eof_held"] is True, state
+        assert state["observer_error"] is None, state
+        assert state["lost_peer_cancelled"] is True, state
+        assert "refusal" not in outcome, (outcome, state)
+        _assert_source_failure_recovered_then_cold_restarted(
+            local, owner, router, service, request_id, outcome, first_route)
+    finally:
+        service.close()
+        owner.close()
+        local.close()
+
+
+def test_status_read_ordering_still_recovers_on_the_disjoint_successor(
+        tmp_path, watchdog, monkeypatch) -> None:  # noqa: F811
+    """The run-day A6 case 1 shape: whole model on node-a and again on node-b.
+
+    The source's only participant is the killed node, so there is no survivor
+    to prove; the status-read ordering above must still yield the source's
+    ``node_process_exited`` incident, and the request continues on the
+    successor with the uninterrupted token sequence.
+    """
+
+    local, owner, router, service, target = _compose(tmp_path, "full_replica")
+    state = _hold_source_eof_for_a_status_read(monkeypatch, owner)
+    try:
+        _baseline_id, baseline = _run_without_fault(service, owner)
+        assert baseline["kinds"] == ["completed"], baseline
+        state["armed"] = True
+        request_id, outcome = _run_case(service, owner, target, _CASE)
+        assert state["eof_held"] is True, state
+        assert state["observer_error"] is None, state
+        assert state["lost_peer_cancelled"] is True, state
+        assert "refusal" not in outcome, (outcome, state)
+        assert outcome["post_state"]["source_failure_observed"] is True
+        assert outcome["post_state"]["recovery_required"] is True
+        assert outcome["post_state"]["actual_incident"]["subject_id"] == "node-a"
+        assert outcome["kinds"] == ["completed"], outcome
+        assert outcome["tokens"] == baseline["tokens"]
+        assert router.recovery_failure_reason(request_id) is None
+        status = _wait_ready(owner, 120)
+        assert status["state"] == "ready" and status["generation"] == 2, status
+        _after_id, after = _run_without_fault(service, owner)
+        assert after["kinds"] == ["completed"], after
+    finally:
+        service.close()
+        owner.close()
+        local.close()
+
+
+def _hold_source_eof_for_a_status_read(monkeypatch, owner) -> dict:
+    """Hold node-a's reader EOF (once, when armed) until a status read finished."""
+
     lock = threading.Lock()
     state: dict = {"armed": False, "eof_held": False, "observer": None,
                    "lost_peer_cancelled": False, "observer_error": None}
@@ -214,7 +273,7 @@ def test_status_read_cancelling_before_the_reader_sees_eof_still_records_the_exi
         state["observer"] = threading.get_ident()
         try:
             owner.public_status()
-        except BaseException as error:  # noqa: BLE001 - asserted below
+        except BaseException as error:  # noqa: BLE001 - asserted by the caller
             state["observer_error"] = repr(error)
 
     original_fail_waiters = process_module.PhysicalNodeProcess._fail_waiters
@@ -234,20 +293,4 @@ def test_status_read_cancelling_before_the_reader_sees_eof_still_records_the_exi
 
     monkeypatch.setattr(route_module.PhysicalLiveRoute, "cancel_request", cancel_request)
     monkeypatch.setattr(process_module.PhysicalNodeProcess, "_fail_waiters", fail_waiters)
-    try:
-        first_route = owner._current
-        with lock:
-            state["armed"] = True
-        request_id, outcome = _run_case(service, owner, target, _CASE)
-        # The forced interleaving really happened: the status read cancelled
-        # the request while the source's EOF was still undelivered.
-        assert state["eof_held"] is True, state
-        assert state["observer_error"] is None, state
-        assert state["lost_peer_cancelled"] is True, state
-        assert "refusal" not in outcome, (outcome, state)
-        _assert_source_failure_recovered_then_cold_restarted(
-            local, owner, router, service, request_id, outcome, first_route)
-    finally:
-        service.close()
-        owner.close()
-        local.close()
+    return state
