@@ -20,6 +20,7 @@ class Router:
       clock,
       id_source,
       config,
+      kv_lease_seconds=None,
    ):
       scorer = RouteScorer(config)
       policy = RoutePolicy(scorer)
@@ -27,6 +28,7 @@ class Router:
          policy=policy,
          capacity=capacity,
          id_source=id_source,
+         lease_seconds=kv_lease_seconds,
       )
       scheduler = HopScheduler(config)
       relay = RelayEngine(

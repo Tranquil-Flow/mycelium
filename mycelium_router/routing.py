@@ -124,10 +124,30 @@ class RoutePolicy:
 
 
 class ProgressivePathBuilder:
-   def __init__(self, *, policy, capacity, id_source):
+   def __init__(self, *, policy, capacity, id_source, lease_seconds=None):
       self.policy = policy
       self.capacity = capacity
       self.id_source = id_source
+      # Optional ``() -> seconds`` that scales the issued reservation lease
+      # with the measured link (a physical node passes its transport's KV
+      # lease window); ``None`` keeps ``reservation_lease_seconds``.
+      self.lease_seconds = lease_seconds
+
+   def reservation_lease_seconds(self) -> float:
+      """TTL of a lease issued now: the base lease, or the composer's
+      link-scaled window when that is longer (never shorter than the base)."""
+
+      base = float(self.policy.scorer.config.reservation_lease_seconds)
+      provider = self.lease_seconds
+      if provider is None:
+         return base
+      try:
+         scaled = float(provider())
+      except Exception:
+         return base
+      if not math.isfinite(scaled):
+         return base
+      return max(base, scaled)
 
    def start(
       self,
@@ -185,9 +205,7 @@ class ProgressivePathBuilder:
                placement_id=decision.placement_id,
                kv_bytes=kv_bytes,
                deployment_epoch=current.graph.deployment_epoch,
-               lease_expires_at=(
-                  lease_base + self.policy.scorer.config.reservation_lease_seconds
-               ),
+               lease_expires_at=lease_base + self.reservation_lease_seconds(),
             )
          )
          reservation_is_live = (

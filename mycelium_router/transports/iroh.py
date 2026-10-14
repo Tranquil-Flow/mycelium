@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections import OrderedDict, deque
 from dataclasses import asdict, dataclass, is_dataclass
 import hashlib
+import re
 import json
 from pathlib import Path
 from queue import Empty, Full, Queue
@@ -244,6 +245,43 @@ class PrefillStallPolicy:
         ceiling = float(command_timeout) * self.total_command_fraction
         return min(ceiling, max(self.total_floor_seconds, raw))
 
+    def kv_lease_ceiling_seconds(self, base_seconds: float) -> float:
+        """Upper bound of a link-scaled KV lease window.
+
+        ``(max_resends + 1) x stall_ceiling + watchdog_rtt_multiplier x
+        rtt_cap`` with ``rtt_cap = stall_ceiling / stall_rtt_multiplier`` (the
+        RTT above which ``S`` is clamped anyway): 420 s with the defaults.  A
+        host also bounds an imported (peer-issued) reservation lease by it.
+        """
+
+        rtt_cap = (
+            self.stall_ceiling_seconds / self.stall_rtt_multiplier
+            if self.stall_rtt_multiplier > 0
+            else self.stall_ceiling_seconds
+        )
+        return max(
+            float(base_seconds),
+            (self.max_resends + 1) * self.stall_ceiling_seconds
+            + self.watchdog_rtt_multiplier * rtt_cap,
+        )
+
+    def kv_lease_seconds(
+        self, *, base_seconds: float, chunk_bytes: int, link: Any
+    ) -> float:
+        """KV reservation lease / progress-renewal window for the measured link.
+
+        ``min(ceiling, max(base, W))``: never shorter than the Router's base
+        lease, and never shorter than the watchdog ``W`` - the no-progress
+        bound after which the request is abandoned anyway - so a lease cannot
+        expire on a link that is still delivering within the transport's own
+        stall recovery.  Work with no progress for this long expires.
+        """
+
+        return min(
+            self.kv_lease_ceiling_seconds(base_seconds),
+            max(float(base_seconds), self.watchdog_seconds(chunk_bytes, link)),
+        )
+
 
 DEFAULT_PREFILL_STALL_POLICY = PrefillStallPolicy()
 
@@ -271,6 +309,36 @@ def _prefill_stall_frame(message: Any) -> bool:
 _PEER_FRAME_HISTORY = 16
 #: Pending sends listed in one ``diagnostic_state`` snapshot.
 _DIAGNOSTIC_PENDING_LIMIT = 32
+#: FailureReports (sent and received) kept for an evidence bundle.
+_FAILURE_REPORT_HISTORY = 16
+_FAILURE_REPORT_TEXT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:\-]{0,95}\Z")
+
+
+def _failure_report_fields(report: FailureReport) -> dict[str, Any]:
+    """Bounded, id-free fields of one FailureReport for diagnostics.
+
+    ``reason`` is the stage runtime's (or relay's) failure code, ``scope``
+    its class, ``placement_id`` names the hop/stage placement that failed and
+    ``token_index`` the chunk (``PREFILL_CHUNK``; ``-1`` = the progressive
+    first chunk) or decode step.  Request and path ids are never included; a
+    value outside the plain code shape is replaced by its sha256 prefix.
+    """
+
+    fields: dict[str, Any] = {}
+    for name in ("scope", "reason", "placement_id", "edge_id", "node_id"):
+        value = getattr(report, name, "")
+        if not isinstance(value, str) or not value:
+            continue
+        if _FAILURE_REPORT_TEXT.fullmatch(value):
+            fields[name] = value
+        else:
+            fields[name] = "sha256:" + hashlib.sha256(
+                value.encode("utf-8", errors="replace")
+            ).hexdigest()[:16]
+    token_index = getattr(report, "token_index", None)
+    if type(token_index) is int and -(2**31) <= token_index < 2**31:
+        fields["token_index"] = token_index
+    return fields
 
 
 def _frame_kind(message: Any) -> str:
@@ -940,6 +1008,11 @@ class IrohTransport:
         self._active_forward: tuple[str, float] | None = None
         self._peer_inbound: dict[str, deque[tuple[str, float, str]]] = {}
         self._peer_outbound: dict[str, deque[tuple[str, float, str]]] = {}
+        # A14 serve-2 (f9a8d961 r1): the FailureReport's own reason was in
+        # neither node's bundle; keep the last reports (both directions).
+        self._failure_reports: deque[dict[str, Any]] = deque(
+            maxlen=_FAILURE_REPORT_HISTORY
+        )
 
     @property
     def stall_policy(self) -> PrefillStallPolicy:
@@ -1575,6 +1648,13 @@ class IrohTransport:
 
         message_id = uuid.uuid4().bytes
         frame_kind = _frame_kind(decoded.message)
+        failure_record = (
+            self._note_failure_report(
+                "sent", destination_node_id, decoded.message, "sending"
+            )
+            if isinstance(decoded.message, FailureReport)
+            else None
+        )
         pending = _PendingSend(
             peer.generation,
             request_id,
@@ -1792,6 +1872,10 @@ class IrohTransport:
                     frame_kind,
                     outcome if outcome == "confirmed" else pending.reason or outcome,
                 )
+                if failure_record is not None:
+                    failure_record["outcome"] = str(
+                        outcome if outcome == "confirmed" else pending.reason or outcome
+                    )[:96]
             if send_operation_acquired:
                 self._send_operation_lock.release()
             self._send_slots.release()
@@ -2190,6 +2274,47 @@ class IrohTransport:
     #: per-node stderr tails.  ``None`` changes nothing.
     stall_event_observer = None
 
+    #: Optional ``observer(direction, fields, request_id=...)`` told about
+    #: every FailureReport this transport sends (``"sent"``) or receives
+    #: (``"received"``).  ``fields`` are the bounded id-free fields of
+    #: ``_failure_report_fields`` plus ``peer``.  A physical node prints a
+    #: ``MYCELIUM-FAILURE-REPORT`` line, so the reason reaches both nodes'
+    #: stderr tails and evidence bundles.  ``None`` changes nothing.
+    failure_report_observer = None
+
+    def _note_failure_report(
+        self,
+        direction: str,
+        peer_node_id: str,
+        report: FailureReport,
+        outcome: str,
+    ) -> dict[str, Any]:
+        fields = _failure_report_fields(report)
+        record: dict[str, Any] = {
+            "direction": direction,
+            "peer": str(peer_node_id)[:96],
+            **fields,
+            "outcome": outcome,
+            "at": time.monotonic(),
+        }
+        with self._state_lock:
+            history = self.__dict__.get("_failure_reports")
+            if history is None:
+                history = deque(maxlen=_FAILURE_REPORT_HISTORY)
+                self._failure_reports = history
+            history.append(record)
+        observer = self.failure_report_observer
+        if observer is not None:
+            try:
+                observer(
+                    direction,
+                    {"peer": record["peer"], **fields},
+                    request_id=getattr(report, "request_id", None),
+                )
+            except BaseException:
+                pass
+        return record
+
     def _emit_stall_event(
         self,
         event: str,
@@ -2309,6 +2434,13 @@ class IrohTransport:
             )[:_DIAGNOSTIC_PENDING_LIMIT]
             inflight = list(self._inflight_received.items())[:_DIAGNOSTIC_PENDING_LIMIT]
             active_forward = self._active_forward
+            failure_reports = [
+                {
+                    **{key: value for key, value in record.items() if key != "at"},
+                    "age_ms": _age_ms(record.get("at"), now),
+                }
+                for record in self.__dict__.get("_failure_reports", ())
+            ]
             peers: dict[str, dict[str, list[dict[str, Any]]]] = {}
             for name, history in (
                 ("inbound", self._peer_inbound),
@@ -2379,6 +2511,7 @@ class IrohTransport:
                     ),
                 },
                 "peers": peers,
+                "failure_reports": failure_reports,
                 "counters": self._counter_snapshot_locked(),
                 "stall_recovery": {
                     "stall_resends": self._prefill_stall_resends,
@@ -3190,6 +3323,12 @@ class IrohTransport:
                 with self._state_lock:
                     self._dispatcher_phase = (
                         f"dispatching:{type(decoded.message).__name__}"
+                    )
+                if isinstance(decoded.message, FailureReport):
+                    # Recorded before the dispatch acts on it (cancellation,
+                    # recovery), so the reason survives whatever follows.
+                    self._note_failure_report(
+                        "received", source_node_id, decoded.message, "received"
                     )
                 self._dispatch(decoded, source_node_id=source_node_id)
                 with self._state_lock:

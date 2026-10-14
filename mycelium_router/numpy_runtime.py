@@ -34,6 +34,12 @@ from mycelium_router.contracts import (
 )
 from mycelium_router.decoding import quantized_greedy_token_id
 from mycelium_router.layer_builder import layer_load_proof_digest
+from mycelium_router.leases import (
+   DEFAULT_KV_LEASE_RENEWAL_SECONDS,
+   kv_lease_deadline,
+   renew_kv_lease,
+   validated_renewal_source,
+)
 from mycelium_router.payloads import (
    PayloadError,
    decode_activation,
@@ -166,6 +172,9 @@ class _KVState:
    next_sequence: int
    cached_context_tokens: int
    layers: dict[int, tuple[np.ndarray, np.ndarray]]
+   # Local progress renewal of the KV deadline (``mycelium_router.leases``);
+   # ``lease_expires_at`` stays the manifest-bound value every item must carry.
+   lease_renewed_until: float = float("-inf")
 
 
 def _numpy_identity_fields() -> tuple[str, ...]:
@@ -211,9 +220,16 @@ class NumpyRuntimePort:
       *,
       clock: Callable[[], float] | None = None,
       decode_mode: str = "complete_context_replay",
+      kv_lease_renewal_seconds: float | Callable[[], float] | None = (
+         DEFAULT_KV_LEASE_RENEWAL_SECONDS
+      ),
    ):
       if not isinstance(node_id, str) or not node_id or node_id != node_id.strip():
          _reject("invalid_runtime_node_id")
+      try:
+         self._kv_lease_renewal = validated_renewal_source(kv_lease_renewal_seconds)
+      except ValueError as exc:
+         raise NumpyRuntimeError("invalid_kv_lease_renewal_seconds") from exc
       if not isinstance(graph, ExecutionGraph):
          _reject("invalid_execution_graph")
       try:
@@ -791,7 +807,7 @@ class NumpyRuntimePort:
          now=now,
          accept=lambda held: held.request_id == request_id
          and held.placement_id == placement_id
-         and now < float(held.lease_expires_at),
+         and now < kv_lease_deadline(held),
       )
       self._discard_retained(displaced)
       return state
@@ -831,7 +847,7 @@ class NumpyRuntimePort:
       expired: list[str] = []
       with self._state_lock:
          for path_id, state in tuple(self._kv_states.items()):
-            if float(current) >= state.lease_expires_at:
+            if float(current) >= kv_lease_deadline(state):
                if self._release_state(path_id, "lease_expired"):
                   expired.append(path_id)
          self._discard_retained(self._retention().expire(now=float(current)))
@@ -1641,7 +1657,7 @@ class NumpyRuntimePort:
             _reject("kv_prefill_chunk_sequence_mismatch")
          if float(item.lease_expires_at) != state.lease_expires_at:
             _reject("kv_lease_mismatch")
-         if float(self._clock()) >= state.lease_expires_at:
+         if float(self._clock()) >= kv_lease_deadline(state):
             self._release_state(item.path_id, "lease_expired")
             _reject("kv_lease_expired")
          output, layers = self._execute_stage_with_kv(
@@ -1666,6 +1682,9 @@ class NumpyRuntimePort:
          if not continues_prefill:
             state.next_sequence += 1
          state.cached_context_tokens += sequence
+         # An applied continuation is progress of the owning request: keep
+         # its KV alive one more bounded window (abandoned work still expires).
+         renew_kv_lease(state, now=float(self._clock()), source=self._kv_lease_renewal)
          self._update_kv_watermark()
 
       self._applied_operation_count += 1

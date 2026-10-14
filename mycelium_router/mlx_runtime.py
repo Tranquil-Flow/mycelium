@@ -45,6 +45,12 @@ from mycelium_router.contracts import (
 )
 from mycelium_router.decoding import quantized_greedy_token_ids
 from mycelium_router.layer_builder import layer_load_proof_digest
+from mycelium_router.leases import (
+   DEFAULT_KV_LEASE_RENEWAL_SECONDS,
+   kv_lease_deadline,
+   renew_kv_lease,
+   validated_renewal_source,
+)
 from mycelium_router.payloads import (
    PayloadError,
    decode_activation,
@@ -182,6 +188,9 @@ class _KVState:
    # rewind the tentative KV to any committed position in ``floor..ceiling``
    # whose ``position - token_index`` equals ``offset``; ``None`` otherwise.
    speculative_window: tuple[int, int, int] | None = None
+   # Local progress renewal of the KV deadline (``mycelium_router.leases``);
+   # ``lease_expires_at`` stays the manifest-bound value every item must carry.
+   lease_renewed_until: float = float("-inf")
 
 
 @dataclass(frozen=True)
@@ -918,9 +927,16 @@ class MLXRuntimePort:
       *,
       clock: Callable[[], float] | None = None,
       decode_mode: str = "stage_local_kv",
+      kv_lease_renewal_seconds: float | Callable[[], float] | None = (
+         DEFAULT_KV_LEASE_RENEWAL_SECONDS
+      ),
    ):
       if not isinstance(node_id, str) or not node_id or node_id != node_id.strip():
          _reject("invalid_runtime_node_id")
+      try:
+         self._kv_lease_renewal = validated_renewal_source(kv_lease_renewal_seconds)
+      except ValueError as exc:
+         raise MLXRuntimeError("invalid_kv_lease_renewal_seconds") from exc
       if sys.byteorder != "little":
          _reject("unsupported_host_byte_order")
       if not isinstance(graph, ExecutionGraph):
@@ -1495,7 +1511,7 @@ class MLXRuntimePort:
          now=now,
          accept=lambda held: held.request_id == request_id
          and held.placement_id == placement_id
-         and now < float(held.lease_expires_at),
+         and now < kv_lease_deadline(held),
       )
       self._discard_retained(displaced)
       return state
@@ -1551,7 +1567,7 @@ class MLXRuntimePort:
       expired: list[str] = []
       with self._state_lock:
          for path_id, state in tuple(self._kv_states.items()):
-            if float(current) >= state.lease_expires_at:
+            if float(current) >= kv_lease_deadline(state):
                if self._release_state(path_id, "lease_expired"):
                   expired.append(path_id)
          self._discard_retained(self._retention().expire(now=float(current)))
@@ -2600,7 +2616,7 @@ class MLXRuntimePort:
             _reject("kv_prefill_chunk_sequence_mismatch")
          if float(item.lease_expires_at) != state.lease_expires_at:
             _reject("kv_lease_mismatch")
-         if float(self._clock()) >= state.lease_expires_at:
+         if float(self._clock()) >= kv_lease_deadline(state):
             self._release_state(item.path_id, "lease_expired")
             _reject("kv_lease_expired")
          verify = item.phase == "VERIFY"
@@ -2634,6 +2650,9 @@ class MLXRuntimePort:
             if verify
             else None
          )
+         # An applied continuation is progress of the owning request: keep
+         # its KV alive one more bounded window (abandoned work still expires).
+         renew_kv_lease(state, now=float(self._clock()), source=self._kv_lease_renewal)
          self._update_kv_watermark()
 
       self._applied_operation_count += 1
@@ -2868,7 +2887,7 @@ class MLXRuntimePort:
          return False
       if float(item.lease_expires_at) != state.lease_expires_at:
          return False
-      if float(self._clock()) >= state.lease_expires_at:
+      if float(self._clock()) >= kv_lease_deadline(state):
          return False
       if (item.path_id, item.idempotency_key) in self._replays:
          return False
@@ -3209,6 +3228,9 @@ class MLXRuntimePort:
                if not (item.phase == "PREFILL_CHUNK" and item.token_index > 0):
                   state.next_sequence += 1
                state.cached_context_tokens += length
+               renew_kv_lease(
+                  state, now=float(self._clock()), source=self._kv_lease_renewal
+               )
             self._update_kv_watermark()
             self._applied_operation_count += 1
             phase_counter = (

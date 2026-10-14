@@ -29,7 +29,7 @@ import threading
 import time
 import traceback
 from types import SimpleNamespace
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 import uuid
 
 try:  # POSIX-only; the win32 memory probe goes through mycelium_host_platform.
@@ -64,6 +64,7 @@ from mycelium_router.live_ports import (
 from mycelium_router.layer_builder import layer_load_proof_digest
 from mycelium_router.router import Router
 from mycelium_router.transports.iroh import (
+    DEFAULT_PREFILL_STALL_POLICY,
     IrohTransport,
     IrohTransportError,
     PeerBinding,
@@ -458,6 +459,23 @@ _PREFILL_STALL_SOURCE = re.compile(r"[a-z][a-z0-9_:]{0,60}\Z")
 _STDERR_LINE_LOCK = threading.Lock()
 
 
+def _maximum_imported_lease_seconds(config: RouterConfig) -> float:
+    """Longest peer-issued reservation lease this host mirrors.
+
+    A peer issues leases scaled with its measured link
+    (``PhysicalNodeService._kv_lease_window_seconds``), never longer than the
+    stall policy's KV lease ceiling; that ceiling (plus the tolerated clock
+    skew) still bounds how long a peer can hold this host's capacity.
+    """
+
+    return (
+        DEFAULT_PREFILL_STALL_POLICY.kv_lease_ceiling_seconds(
+            config.reservation_lease_seconds
+        )
+        + MAXIMUM_PHYSICAL_CLOCK_SKEW_SECONDS
+    )
+
+
 def _emit_stderr_line(text: str) -> None:
     """Write one whole diagnostic line; threads never interleave inside it."""
 
@@ -753,6 +771,97 @@ def _print_transport_stall_event(event: str, fields: Mapping[str, Any]) -> None:
             parts.append(f"holder_kind={holder_kind}")
             parts.append(f"holder_age_ms={holder_age}")
         _emit_stderr_line("MYCELIUM-TRANSPORT-STALL " + " ".join(parts))
+    except BaseException:
+        pass
+
+
+# -- FailureReport diagnostics (A14 serve-2, f9a8d961 r1) ----------------------
+#
+# r1's final node sent a FailureReport mid-prefill and the entry failed
+# ``route_qualify`` with ``inference_start_failed``; the report's reason was in
+# neither node's stderr nor bundle.  Both ends now print it, and the entry
+# names it when a start fails.
+
+_FAILURE_REPORT_VALUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:\-]{0,95}\Z")
+
+
+def _failure_report_token(value: Any) -> str | None:
+    if type(value) is int and -(2**31) <= value < 2**31:
+        return str(value)
+    if not isinstance(value, str) or not value:
+        return None
+    if _FAILURE_REPORT_VALUE.fullmatch(value):
+        return value
+    return "sha256:" + hashlib.sha256(value.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def _failure_report_parts(fields: Mapping[str, Any], names: Sequence[tuple[str, str]]) -> list[str]:
+    parts: list[str] = []
+    for key, label in names:
+        token = _failure_report_token(fields.get(key))
+        if token is not None:
+            parts.append(f"{label}={token}")
+    return parts
+
+
+def _print_failure_report_event(
+    direction: str, fields: Mapping[str, Any], *, request_id: Any = None
+) -> None:
+    """Transport observer: one bounded line per FailureReport sent or received.
+
+    ``reason`` is the reporter's failure code (e.g. ``kv_lease_expired``),
+    ``placement`` the hop that failed, ``token_index`` its chunk (``-1`` = the
+    progressive first chunk) or decode step.  No request or path id.
+    """
+
+    del request_id
+    try:
+        if direction not in {"sent", "received"}:
+            return
+        parts = [f"direction={direction}"] + _failure_report_parts(
+            fields,
+            (
+                ("peer", "peer"),
+                ("scope", "scope"),
+                ("reason", "reason"),
+                ("placement_id", "placement"),
+                ("token_index", "token_index"),
+                ("node_id", "node"),
+                ("edge_id", "edge"),
+            ),
+        )
+        _emit_stderr_line("MYCELIUM-FAILURE-REPORT " + " ".join(parts))
+    except BaseException:
+        pass
+
+
+def _print_inference_start_failure(status: str, cause: Mapping[str, Any] | None) -> None:
+    """Name why ``infer_start`` failed, just before ``inference_start_failed``.
+
+    The control error carries only the code, so the route's cause chain gets
+    this line through the node's stderr tail (``node_stderr_tail``).
+    """
+
+    try:
+        parts = [f"status={_failure_report_token(status) or 'unknown'}"]
+        if not cause:
+            parts.append("cause=none")
+        else:
+            parts.append("cause=failure_report")
+            parts += _failure_report_parts(
+                cause,
+                (
+                    ("source_node_id", "source"),
+                    ("scope", "scope"),
+                    ("reason", "reason"),
+                    ("stage_id", "stage"),
+                    ("placement_id", "placement"),
+                    ("token_index", "token_index"),
+                    ("path_attempt", "path_attempt"),
+                ),
+            )
+            parts.append(f"applied={1 if cause.get('applied') else 0}")
+        _emit_stderr_line("MYCELIUM-INFERENCE-START-FAILED " + " ".join(parts))
     except BaseException:
         pass
 
@@ -2355,6 +2464,7 @@ class PhysicalNodeService:
                 loaded_stages,
                 clock=clock,
                 decode_mode=route_decode_mode,
+                kv_lease_renewal_seconds=self._kv_lease_window_seconds,
             )
         if backend == "mlx":
             from mycelium_router.mlx_runtime import MLXRuntimePort
@@ -2365,8 +2475,65 @@ class PhysicalNodeService:
                 loaded_stages,
                 clock=clock,
                 decode_mode=route_decode_mode,
+                kv_lease_renewal_seconds=self._kv_lease_window_seconds,
             )
         raise NodeCommandError("unsupported_runtime_backend")
+
+    def _kv_lease_window_seconds(self) -> float:
+        """KV lease TTL / progress-renewal window, scaled with the measured link.
+
+        A14 serve-2 (f9a8d961 r1): a fixed 30 s lease issued at path build
+        expired while a forced-relay prefill was still delivering a chunk
+        every 3-6 s.  The window is the transport policy's
+        ``min(ceiling, max(reservation_lease_seconds, W))``, where ``W`` is the
+        same no-progress watchdog the prefill wait uses (all peers'
+        conservative link estimate, chunk bytes ``8 x hidden x activation +
+        4 KiB`` as before the first measured frame).  It issues each new
+        reservation lease (path build) and renews a stage's KV on every
+        applied continuation, so a slow but progressing link keeps its KV
+        while work without progress for ``W`` still expires.
+        """
+
+        config = getattr(self, "_router_config", None)
+        base = float(
+            getattr(config, "reservation_lease_seconds", None)
+            or RouterConfig.reservation_lease_seconds
+        )
+        transport = getattr(self, "transport", None)
+        policy = getattr(transport, "stall_policy", None) or DEFAULT_PREFILL_STALL_POLICY
+        link = None
+        reader = getattr(transport, "link_estimate", None)
+        if callable(reader):
+            try:
+                link = reader(None)
+                if not (
+                    float(link.goodput_bytes_per_second) > 0
+                    and float(link.rtt_p95_seconds) > 0
+                ):
+                    link = None
+            except Exception:
+                link = None
+        if link is None:
+            link = SimpleNamespace(
+                goodput_bytes_per_second=float(policy.unmeasured_goodput_bytes_per_second),
+                rtt_p95_seconds=float(policy.unmeasured_rtt_seconds),
+            )
+        graph = getattr(self, "graph", None)
+        hidden = getattr(graph, "hidden_size", 0)
+        width = getattr(graph, "activation_bytes", 0)
+        chunk_bytes = (
+            8 * hidden * width + _PREFILL_FRAME_ENVELOPE_BYTES
+            if type(hidden) is int and type(width) is int and hidden > 0 and width > 0
+            else _PREFILL_FRAME_ENVELOPE_BYTES
+        )
+        try:
+            return float(
+                policy.kv_lease_seconds(
+                    base_seconds=base, chunk_bytes=chunk_bytes, link=link
+                )
+            )
+        except Exception:
+            return base
 
     def _bind_router_config_to_runtime(self, runtime: Any) -> None:
         """Make Router prefill framing follow the runtime's resolved mode.
@@ -2963,9 +3130,8 @@ class PhysicalNodeService:
             {node: state.available_kv_bytes for node, state in states.items()},
             clock=self._clock,
             id_source=self._ids,
-            maximum_imported_lease_seconds=(
-                self._router_config.reservation_lease_seconds
-                + MAXIMUM_PHYSICAL_CLOCK_SKEW_SECONDS
+            maximum_imported_lease_seconds=_maximum_imported_lease_seconds(
+                self._router_config
             ),
         )
         runtime = self._build_runtime_port(
@@ -3123,12 +3289,16 @@ class PhysicalNodeService:
             clock=self._clock,
             id_source=self._ids,
             config=self._router_config,
+            kv_lease_seconds=self._kv_lease_window_seconds,
         )
         try:
             transport.bind_router(router)
             # A14 class D: this node's own prefill stall recovery reaches its
             # stderr tail, which the route prints for every node on failure.
             transport.stall_event_observer = _print_transport_stall_event
+            # A14 serve-2: every FailureReport's reason reaches this node's
+            # stderr tail and its evidence bundle (both directions).
+            transport.failure_report_observer = _print_failure_report_event
             self._a7_attach(router, transport)
             if self._a11_wiring is not None:
                 self._a11_wiring.attach(router)
@@ -4433,6 +4603,14 @@ class PhysicalNodeService:
 
         if status in _STARTED_REQUEST_STATUSES:
             return
+        cause = None
+        reader = getattr(getattr(getattr(self, "router", None), "entry", None), "last_failure_report", None)
+        if callable(reader):
+            try:
+                cause = reader(request_id)
+            except Exception:
+                cause = None
+        _print_inference_start_failure(status, cause)
         if legacy and status in {"COMPLETED", "FAILED", "CANCELLED"}:
             self._retire_legacy_terminal_path(request_id)
         raise NodeCommandError("inference_start_failed")

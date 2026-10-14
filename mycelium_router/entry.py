@@ -3,6 +3,7 @@ KV-successor classification of every replacement-path attempt."""
 
 import importlib
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from threading import RLock
 from typing import Any
@@ -31,6 +32,9 @@ from mycelium_router.routing import RoutingError
 from mycelium_router.state import RequestStateMachine
 from mycelium_router.validation import validate_manifest
 from mycelium_router.leases import validate_hop_leases
+
+#: Requests whose last FailureReport is kept for diagnostics.
+_LAST_FAILURE_REPORTS = 256
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +260,66 @@ class EntryCoordinator:
       self._pending_prefills: dict[str, PendingPrefill] = {}
       self._phone_thermal_until: dict[str, float] = {}
       self._phone_thermal_lock = RLock()
+      # Diagnostics only (A14 serve-2): the last FailureReport each request
+      # received, so a failed start can name its cause.  Bounded, oldest out.
+      self._last_failure_reports: OrderedDict[str, dict[str, Any]] = OrderedDict()
+      self._last_failure_reports_lock = RLock()
+
+   def last_failure_report(self, request_id: str) -> dict[str, Any] | None:
+      """The last FailureReport received for ``request_id`` (diagnostics).
+
+      ``reason``/``scope`` are the reporter's code, ``placement_id`` and
+      ``stage_id`` the hop that failed, ``token_index`` its chunk (``-1`` = the
+      progressive first chunk) or decode step, ``source_node_id`` the
+      reporter, ``applied`` whether it matched the request's current path.
+      """
+
+      if "_last_failure_reports" not in self.__dict__:
+         return None
+      with self._last_failure_reports_lock:
+         found = self._last_failure_reports.get(request_id)
+         return None if found is None else dict(found)
+
+   def _remember_failure_report(
+      self, report: FailureReport, source_node_id: str | None
+   ) -> dict[str, Any] | None:
+      requests = self.__dict__.get("_requests", {})
+      pending_prefills = self.__dict__.get("_pending_prefills", {})
+      record = requests.get(report.request_id)
+      if record is None and report.request_id not in pending_prefills:
+         return None
+      stage_id = None
+      graph = record.graph if record is not None else None
+      if graph is None:
+         pending = pending_prefills.get(report.request_id)
+         graph = None if pending is None else pending.graph
+      for stage in getattr(graph, "stages", ()) or ():
+         if any(
+            placement.placement_id == report.placement_id
+            for placement in stage.placements
+         ):
+            stage_id = stage.stage_id
+            break
+      entry = {
+         "reason": report.reason,
+         "scope": report.scope,
+         "placement_id": report.placement_id,
+         "stage_id": stage_id,
+         "token_index": report.token_index,
+         "path_attempt": report.path_attempt,
+         "source_node_id": source_node_id or report.node_id or None,
+         "applied": False,
+      }
+      if "_last_failure_reports" not in self.__dict__:
+         # A coordinator assembled without ``__init__`` (test doubles).
+         self._last_failure_reports = OrderedDict()
+         self._last_failure_reports_lock = RLock()
+      with self._last_failure_reports_lock:
+         self._last_failure_reports[report.request_id] = entry
+         self._last_failure_reports.move_to_end(report.request_id)
+         while len(self._last_failure_reports) > _LAST_FAILURE_REPORTS:
+            self._last_failure_reports.popitem(last=False)
+      return entry
 
    def _phone_thermal_exclusions(self) -> frozenset[str]:
       with self._phone_thermal_lock:
@@ -1248,6 +1312,7 @@ class EntryCoordinator:
       source_node_id: str | None = None,
       redispatch_successor: bool | None = None,
    ) -> bool:
+      remembered = self._remember_failure_report(report, source_node_id)
       record = self._requests.get(report.request_id)
       if record is None:
          return False
@@ -1285,6 +1350,8 @@ class EntryCoordinator:
             source_node_id,
          ):
             return False
+         if remembered is not None:
+            remembered["applied"] = True
          self._record_phone_thermal_failure(record, report, source_node_id)
          terminal_failure = (
             report.scope == "DEVICE" and report.node_id == self.node_id
@@ -1848,7 +1915,7 @@ class EntryCoordinator:
       )
       stages = {stage.stage_id: stage for stage in graph.stages}
       now = self.clock.now()
-      lease_seconds = self.builder.policy.scorer.config.reservation_lease_seconds
+      lease_seconds = self.builder.reservation_lease_seconds()
       for hop in old.ordered_hops:
          placement_id = replacements.get(hop.placement_id, hop.placement_id)
          stage = stages[hop.stage_id]

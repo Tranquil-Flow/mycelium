@@ -17,7 +17,8 @@ retained KV back.  It is discarded on whichever comes first:
 * the request's terminal release (the entry's ``KVShadowRelease`` or its own
   relay cleanup, both arriving as ``cancel(path_id)``), a cancellation, or an
   A6 fallback release;
-* the retention deadline (``min(lease_expires_at, now + seconds)``);
+* the retention deadline (``min(KV lease deadline, now + seconds)``, the
+  lease deadline including its progress renewals);
 * eviction of the oldest entry beyond ``max_entries``;
 * runtime close (node shutdown).
 
@@ -29,6 +30,8 @@ from __future__ import annotations
 from collections import Counter, OrderedDict
 from collections.abc import Callable
 from typing import Any
+
+from mycelium_router.leases import kv_lease_deadline
 
 DEFAULT_TERMINAL_KV_RETENTION_SECONDS = 30.0
 DEFAULT_TERMINAL_KV_RETENTION_ENTRIES = 64
@@ -72,7 +75,8 @@ class TerminalKVRetention:
       """Retain ``state``; returns the entries this displaced (expired or evicted)."""
 
       displaced = self.expire(now=now)
-      deadline = min(float(now) + self.seconds, float(state.lease_expires_at))
+      # The KV's own deadline includes its progress renewals.
+      deadline = min(float(now) + self.seconds, kv_lease_deadline(state))
       self._held[path_id] = (state, deadline)
       self._held.move_to_end(path_id)
       self.retained_total += 1
