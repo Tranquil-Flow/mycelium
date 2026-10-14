@@ -2493,8 +2493,8 @@
     },
     {
       "path": "tests/a13_macos/test_package.py",
-      "sha256": "sha256:61dde7eaeefcf8acea29f2dce9027adfb2d3dc33a39d863e2520faa102ffc58b",
-      "size_bytes": 11399
+      "sha256": "sha256:3f77d69db0550cc710ff1f6caa0e5bb50895ce2a6615a8fe5c1b1bec426e2c7f",
+      "size_bytes": 11740
     },
     {
       "path": "tests/a13_macos/test_pairing_window.py",
@@ -3978,5 +3978,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:b4b4209742de83f34865f5f88a43018a4e881d0fda4876cf206cc8264b531166"
+  "source_digest": "sha256:7c4b0b0e72ff7bd56614475c9ce05e6028340d4c61111d5e4f8752c46ca39a26"
 }
