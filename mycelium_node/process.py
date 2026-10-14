@@ -53,6 +53,12 @@ _CWD_LEASE_STACK: list[_WorkingDirectoryToken] = []
 _CWD_RESTORE_ATTEMPTS = 3
 _CWD_RESTORATION_ERROR = "working directory restoration failed"
 _LAUNCH_HANDSHAKE_SECONDS = mycelium_deadlines.NODE_LAUNCH_HANDSHAKE_SECONDS
+#: How long a failed start waits to collect the exit status of a launcher it
+#: already saw exit.  A dying process closes its descriptors before its status
+#: becomes waitable, so the ready pipe can report EOF while ``poll()`` still
+#: has no status; under load that gap is real.  Bounded so a diagnostic never
+#: holds a failed start open.
+_LAUNCHER_EXIT_STATUS_SECONDS = 0.5
 _LAUNCH_READY = b"R"
 _LAUNCH_RELEASE = b"G"
 _LAUNCHER_SOURCE = """import os
@@ -178,7 +184,10 @@ class NodeStartFailure:
     a member report.  ``elapsed_ms`` and every ``phase_ms`` mark are measured
     from the moment the launch budget (``budget_ms``) started, i.e. right
     after ``Popen`` returned; ``popen_ms`` is the spawn itself, which the
-    budget does not cover.
+    budget does not cover.  ``launcher_reaped`` says whether the launcher's
+    exit status was collected when the record was made: ``False`` means
+    ``launcher_returncode`` is unknown (not "no exit"), ``None`` that no
+    launcher was spawned or the caller did not say.
     """
 
     phase: str
@@ -191,6 +200,7 @@ class NodeStartFailure:
     inner_code: str | None
     launcher_exited: bool | None
     launcher_returncode: int | None
+    launcher_reaped: bool | None
     phase_ms: tuple[tuple[str, int], ...]
 
     @classmethod
@@ -206,6 +216,7 @@ class NodeStartFailure:
         launcher_returncode: Any,
         launcher_exited: bool | None,
         failed_at: float | None = None,
+        launcher_reaped: bool | None = None,
     ) -> "NodeStartFailure":
         if phase not in NODE_START_FAILURE_PHASES:
             phase = "unknown"
@@ -269,6 +280,9 @@ class NodeStartFailure:
                 else bool(launcher_exited)
             ),
             launcher_returncode=launcher_returncode,
+            launcher_reaped=(
+                launcher_reaped if isinstance(launcher_reaped, bool) else None
+            ),
             phase_ms=marks,
         )
 
@@ -290,6 +304,7 @@ class NodeStartFailure:
             "inner_code": self.inner_code,
             "launcher_exited": self.launcher_exited,
             "launcher_returncode": self.launcher_returncode,
+            "launcher_reaped": self.launcher_reaped,
             "phase_ms": dict(self.phase_ms),
         }
 
@@ -2134,6 +2149,15 @@ class PhysicalNodeProcess:
                 if cleaned
                 else "node_process_cleanup_failed"
             )
+            if (
+                launcher_exited or isinstance(exc, _HandshakeClosed)
+            ) and self._process.returncode is None:
+                # The launcher was seen gone (EOF on its ready pipe) before its
+                # status was waitable, and a cleanup without pre-exec
+                # ownership never reaps it: collect the status, bounded.
+                self._collect_exit_status(
+                    min(_LAUNCHER_EXIT_STATUS_SECONDS, self.shutdown_timeout_seconds)
+                )
             raise NodeProcessError(
                 code, cleanup_owner=None if cleaned else self,
                 start_failure=NodeStartFailure.from_exception(
@@ -2144,11 +2168,20 @@ class PhysicalNodeProcess:
                     # already exited, else the cleanup signal's.
                     launcher_returncode=self._process.returncode,
                     launcher_exited=launcher_exited, failed_at=failed_at,
+                    launcher_reaped=self._process.returncode is not None,
                 ),
             ) from exc
         finally:
             for name in tuple(handshake):
                 _close_handshake_descriptor(handshake, name)
+
+    def _collect_exit_status(self, timeout: float) -> None:
+        """Wait at most ``timeout`` for an exited launcher's status."""
+
+        try:
+            self._process.wait(timeout=timeout)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
 
     @property
     def launch_timing(self) -> dict[str, Any] | None:
