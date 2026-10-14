@@ -135,8 +135,8 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "839099c236e050dcac8edd240f1d16d8703359e99584508650c0e0f24b692995",
-          "size_bytes": 146269
+          "sha256": "f216224b0c9257dc373e66186258cdccc0456a8ce1869dc79ab17ed06e5cdaee",
+          "size_bytes": 157884
         },
         {
           "path": "ui/web/src/features/liveRoute/m16Runtime.ts",
@@ -380,8 +380,8 @@
         },
         {
           "path": "ui/web/scripts/a6-product-browser-e2e.mjs",
-          "sha256": "f0a41308337abd9c7bebfb8262d829c06d1e410700b4684a00f29c8b28fa6a7e",
-          "size_bytes": 25763
+          "sha256": "fb581e989ce5269c9eec0a9a1b1526c8afee3dd9f2c24a73e0d20b1f6d646269",
+          "size_bytes": 27389
         }
       ],
       "protocol": "mycelium.full_context_recovery_gate.v1"
@@ -450,8 +450,8 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "839099c236e050dcac8edd240f1d16d8703359e99584508650c0e0f24b692995",
-          "size_bytes": 146269
+          "sha256": "f216224b0c9257dc373e66186258cdccc0456a8ce1869dc79ab17ed06e5cdaee",
+          "size_bytes": 157884
         },
         {
           "path": "mycelium_live/supervisor.py",
@@ -670,8 +670,8 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "839099c236e050dcac8edd240f1d16d8703359e99584508650c0e0f24b692995",
-          "size_bytes": 146269
+          "sha256": "f216224b0c9257dc373e66186258cdccc0456a8ce1869dc79ab17ed06e5cdaee",
+          "size_bytes": 157884
         },
         {
           "path": "physical_inference_node.py",
@@ -725,8 +725,8 @@
       "owner_sources": [
         {
           "path": "runtime_loader.py",
-          "sha256": "98a38504765568c318a8f9a23a881c56b16f827065f766bc9c69d7cb6d735093",
-          "size_bytes": 110684
+          "sha256": "bb48f92fea15f25eaa6ef01b889cb41dd484566e04d636ed497f06b34d8d1df1",
+          "size_bytes": 110699
         },
         {
           "path": "runtime_contracts.py",
@@ -1230,8 +1230,8 @@
         },
         {
           "path": "scripts/build_qwen_live_route.py",
-          "sha256": "e7a4b3561f7153d560d66f0a34378e417019cef197fdb122fe0e001ee3a7340b",
-          "size_bytes": 109895
+          "sha256": "19baef27c1ea024106851becf7b9838743c234ef6d1533ff72260509421bc97f",
+          "size_bytes": 111189
         },
         {
           "path": "ui/web/src/features/models/modelPreparation.ts",

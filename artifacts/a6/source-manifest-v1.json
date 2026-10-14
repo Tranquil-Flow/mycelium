@@ -38,7 +38,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:d5a279b59d51ad7cc78bee113c32dd0fd90adaac7ffb3f090b9a051bad7925cd",
+      "sha256": "sha256:4a80c8ea16c151418d57d790266e5fef9c66c29dd205df704da6e82752f2fd8e",
       "size_bytes": 71574
     },
     {
@@ -933,8 +933,8 @@
     },
     {
       "path": "mycelium_a6_product_fault_seams.py",
-      "sha256": "sha256:7cf3b82295fe7a7b4d618f0527f576b4ac8c2acd8466cdbe0c35fe9b5fc51499",
-      "size_bytes": 48718
+      "sha256": "sha256:f9f260a8c5abfafa81f6d4b07fc84548ac22978850442c3c1a729f47c053631f",
+      "size_bytes": 48780
     },
     {
       "path": "mycelium_a7_checkpoint_channel.py",
@@ -1183,8 +1183,8 @@
     },
     {
       "path": "mycelium_live/router_port.py",
-      "sha256": "sha256:839099c236e050dcac8edd240f1d16d8703359e99584508650c0e0f24b692995",
-      "size_bytes": 146269
+      "sha256": "sha256:f216224b0c9257dc373e66186258cdccc0456a8ce1869dc79ab17ed06e5cdaee",
+      "size_bytes": 157884
     },
     {
       "path": "mycelium_live/supervisor.py",
@@ -1878,8 +1878,8 @@
     },
     {
       "path": "runtime_loader.py",
-      "sha256": "sha256:98a38504765568c318a8f9a23a881c56b16f827065f766bc9c69d7cb6d735093",
-      "size_bytes": 110684
+      "sha256": "sha256:bb48f92fea15f25eaa6ef01b889cb41dd484566e04d636ed497f06b34d8d1df1",
+      "size_bytes": 110699
     },
     {
       "path": "scripts/a12_gate_membership.py",
@@ -1948,8 +1948,8 @@
     },
     {
       "path": "scripts/build_qwen_live_route.py",
-      "sha256": "sha256:e7a4b3561f7153d560d66f0a34378e417019cef197fdb122fe0e001ee3a7340b",
-      "size_bytes": 109895
+      "sha256": "sha256:19baef27c1ea024106851becf7b9838743c234ef6d1533ff72260509421bc97f",
+      "size_bytes": 111189
     },
     {
       "path": "scripts/derive_a6_replica_plan.py",
@@ -1965,6 +1965,16 @@
       "path": "scripts/finalize_a13_macos.py",
       "sha256": "sha256:037769c22aaf5e09d6ba80d52e237e8af30d72ea7a1e24005f5b807c67e1e5e2",
       "size_bytes": 9865
+    },
+    {
+      "path": "scripts/gate_evidence_carryover.py",
+      "sha256": "sha256:a3502f526b950ba93909c175557342f6eb4fd63be32f5b82eb56c3b5c012f4ad",
+      "size_bytes": 12433
+    },
+    {
+      "path": "scripts/gate_source_sets.py",
+      "sha256": "sha256:2663bda0a7b3920eb63e79da1fa1ff5a4040cff0394b07f541645451596e8966",
+      "size_bytes": 57450
     },
     {
       "path": "scripts/generate_phone_node_control_golden.py",
@@ -2467,6 +2477,11 @@
       "size_bytes": 1984
     },
     {
+      "path": "tests/a13_operator/test_compile_evidence_wait.py",
+      "sha256": "sha256:e9dfb0d3497dee6cede4429d85b164509f34ec17b6e398052abcac86e7d1f278",
+      "size_bytes": 28093
+    },
+    {
       "path": "tests/a13_windows/__init__.py",
       "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "size_bytes": 0
@@ -2912,6 +2927,11 @@
       "size_bytes": 16311
     },
     {
+      "path": "tests/governance/test_gate_source_sets.py",
+      "sha256": "sha256:e2f22b6ae37dd7b89ee9c17cd20521079c1195e82902fc5accb18ea80f6db986",
+      "size_bytes": 16638
+    },
+    {
       "path": "tests/governance/test_mycelium_completion_audit.py",
       "sha256": "sha256:0f8738d4cb05254d4bde624f5c339e288c5930eb8e7b52a2f0e22ab6fedd8d2f",
       "size_bytes": 31097
@@ -3028,8 +3048,8 @@
     },
     {
       "path": "tests/live/test_a6_live_router_recovery.py",
-      "sha256": "sha256:c97cb102e6dee0feb6a54582f491d44f552266cc2c364015723277838912f4bb",
-      "size_bytes": 45213
+      "sha256": "sha256:b7736b729570565872e1f321d9bde6af99b092e2e1357ffb784baa9e6cddc7a1",
+      "size_bytes": 46991
     },
     {
       "path": "tests/live/test_a6_local_cold_restart.py",
@@ -3077,9 +3097,14 @@
       "size_bytes": 7080
     },
     {
+      "path": "tests/live/test_a6_recovery_phase_deadlines.py",
+      "sha256": "sha256:9a3c7111ee986720d8f8c42f3b75fd9ec9253bc7e4c0bc3aae5d3f0d14d23638",
+      "size_bytes": 21381
+    },
+    {
       "path": "tests/live/test_a6_released_recovery_view.py",
-      "sha256": "sha256:126eda4f986bc62f20e31be420f9c6dac8b4713f8f97cb09c084caa9dc3273bd",
-      "size_bytes": 4129
+      "sha256": "sha256:c5f6af71c78739d98d8d67eb5da8f5bf6415dc32e6aa85f3a94e1be85dc8fd30",
+      "size_bytes": 4588
     },
     {
       "path": "tests/live/test_a6_replica_plan_derivation.py",
@@ -3363,8 +3388,8 @@
     },
     {
       "path": "tests/model/test_qwen_load_proof_device_independence.py",
-      "sha256": "sha256:c4a920715c97c0652952216a8b4825ca191e5f7182aa82b7a4add0c8976f9cae",
-      "size_bytes": 6240
+      "sha256": "sha256:392563741e91f86899a4520eb8aa59cabd796e2a8daaab81945f609d6c677b80",
+      "size_bytes": 9542
     },
     {
       "path": "tests/node_agent/test_durable_membership.py",
@@ -3460,6 +3485,11 @@
       "path": "tests/product_spine/test_a6_recovery_projection.py",
       "sha256": "sha256:0b5027e29670084b72c8a10062f208d7ea23ad1bd031439098f8b6c9a7ac2457",
       "size_bytes": 6562
+    },
+    {
+      "path": "tests/qualification/test_m18_stage_sharding.py",
+      "sha256": "sha256:15064078d2ff3d9fbe8fa77fdb9f61af0fd3d89bde588a8d5d9e712a90a75c51",
+      "size_bytes": 2994
     },
     {
       "path": "tests/qualification/test_phone_live_authority.py",
@@ -3693,13 +3723,13 @@
     },
     {
       "path": "ui/web/scripts/a6-product-browser-e2e.mjs",
-      "sha256": "sha256:f0a41308337abd9c7bebfb8262d829c06d1e410700b4684a00f29c8b28fa6a7e",
-      "size_bytes": 25763
+      "sha256": "sha256:fb581e989ce5269c9eec0a9a1b1526c8afee3dd9f2c24a73e0d20b1f6d646269",
+      "size_bytes": 27389
     },
     {
       "path": "ui/web/scripts/a6-product-browser-e2e.test.mjs",
-      "sha256": "sha256:c84b0c9e441a583f8d85323d0ae814a3010ddcaf3f6e10bc5a59cccc4653cf25",
-      "size_bytes": 20373
+      "sha256": "sha256:4c822882b3f9a471329d64ba125c5c3fe379e13921a332d90b80a312d47bab8d",
+      "size_bytes": 27550
     },
     {
       "path": "ui/web/src/App.tsx",
@@ -3828,5 +3858,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:acb0c7a0f31cdecefb77679c900b65b020bd052f578c245f3037a07dc4e4693a"
+  "source_digest": "sha256:c083862bb743e69e26bf99150ded3b88ce4390f7cd069d1c20f749b81dbbe115"
 }
