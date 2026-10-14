@@ -120,7 +120,9 @@ class ProcessRecord(NamedTuple):
     comm: str
 
 
-PathIdentity = tuple[int, int, int, int, int, int, int, int, int | None]
+PathIdentity = tuple[
+    int, int, int, int, int, int | None, int | None, int | None, int | None
+]
 
 
 class OwnedMember(NamedTuple):
@@ -166,17 +168,29 @@ def same_canonical_file(actual: str | Path, expected: Path) -> bool:
 
 
 def path_identity(path: str | Path) -> PathIdentity:
+    """Return the fields that pin one file or directory object at ``path``.
+
+    A directory's size, mtime and ctime change whenever an entry inside it is
+    added or removed.  The worktree is the cwd of every owned member and other
+    tests (or the build) may create entries in it while a group runs, so those
+    fields are content, not identity: a directory is pinned by device, inode,
+    mode, owner and birth time, which a replacement directory cannot keep.  A
+    regular file (the executable) keeps its size and timestamps in the
+    identity, so a rewritten binary is still refused.
+    """
+
     metadata = os.stat(Path(path).resolve(strict=True), follow_symlinks=False)
     birthtime = getattr(metadata, "st_birthtime", None)
+    is_directory = stat.S_ISDIR(metadata.st_mode)
     return (
         metadata.st_dev,
         metadata.st_ino,
         metadata.st_mode,
         metadata.st_uid,
         metadata.st_gid,
-        metadata.st_size,
-        metadata.st_mtime_ns,
-        metadata.st_ctime_ns,
+        None if is_directory else metadata.st_size,
+        None if is_directory else metadata.st_mtime_ns,
+        None if is_directory else metadata.st_ctime_ns,
         None if birthtime is None else int(birthtime * 1_000_000_000),
     )
 
