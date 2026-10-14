@@ -4122,6 +4122,11 @@
       "size_bytes": 2660
     },
     {
+      "path": "ui/tests/test_read_only_boundary.py",
+      "sha256": "sha256:1654ce47375ca5d06a6d6d1f6cf20788d33b3b51ab40a5b92967ec05dbbef363",
+      "size_bytes": 6266
+    },
+    {
       "path": "ui/web/package-lock.json",
       "sha256": "sha256:2cd7ccf5b874402a6833fe01015a291ceaf1d0bb5a44ddf06f2e2dca0361da26",
       "size_bytes": 105372
@@ -4398,5 +4403,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:cad6faff4f262d12b3fdf9fefe4377824a51ad5d25a425deb1ad03b5713606b7"
+  "source_digest": "sha256:70d03c33d041663d87dc12510b86aab88cef3585382cbcf44bd4ff0dc175bbe0"
 }
