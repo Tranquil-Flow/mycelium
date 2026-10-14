@@ -29,6 +29,7 @@ from typing import Any, Mapping
 
 import mycelium_host_platform
 from mycelium_host_platform import HostPlatformError
+from mycelium_membership import MAX_CLOCK_SKEW_SECONDS
 from mycelium_qualification.evidence import canonical_json_loads
 from .migration import LegacyMemberIdentity, ContinuityEvidence, evaluate_identity_continuity, MigrationUnavailable
 from .peer_profile import verify_peer_profile
@@ -257,7 +258,10 @@ def _target(request: dict, baseline: dict, now: float) -> dict:
         if decision.state != 'preserved' or profile.membership_generation != decision.committed_generation:
             raise MigrationError('continuity_rejected')
         if (profile.software_build_digest != current['software_build_digest']
-                or profile.lease_expires_at < now or profile.issued_at > now
+                # issued_at is the member host's clock (signed there, checked
+                # here on the seed host); the lease gets no allowance.
+                or profile.lease_expires_at < now
+                or profile.issued_at > now + MAX_CLOCK_SKEW_SECONDS
                 or profile.lease_expires_at > profile.expires_at
                 or profile.lease_expires_at > current['lease_expires_at']):
             raise MigrationError('profile_build_or_lease_mismatch')

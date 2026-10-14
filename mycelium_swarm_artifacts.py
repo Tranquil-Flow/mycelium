@@ -18,6 +18,12 @@ from typing import Any
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import Ed25519EvidenceSigner, SIGNATURE_FIELDS
 
+# A request signed on another member's clock may be issued up to this far in
+# the verifier's future: mycelium_membership.MAX_CLOCK_SKEW_SECONDS (30 s) in
+# ms. Kept as a literal so the closed member runtime (mycelium_member_runtime
+# RUNTIME_PATHS) does not have to carry mycelium_membership; a test pins it.
+MAX_CLOCK_SKEW_MS = 30_000
+
 
 MANIFEST_PROTOCOL = "mycelium.swarm_stage_pack_manifest.v1"
 AVAILABILITY_PROTOCOL = "mycelium.swarm_artifact_availability.v1"
@@ -916,7 +922,8 @@ def validate_chunk_request(
         or manifest_digest != checked_manifest["manifest_digest"]
         or chunk is None
         or offset + length > chunk["size_bytes"]
-        or issued > now_unix_ms
+        # issued is the recipient's clock; expiry gets no allowance.
+        or issued > now_unix_ms + MAX_CLOCK_SKEW_MS
         or expires < now_unix_ms
         or expires <= issued
     ):
