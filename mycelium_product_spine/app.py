@@ -6,14 +6,37 @@ from __future__ import annotations
 from collections import deque
 import json
 from pathlib import Path
+import re
 import threading
 import time
 from typing import Any, Callable, Mapping, Sequence
 
 from .contracts import validate_product_event
-from .projector import ProductProjector
+from .projector import ProductProjector, _unknown_internet_native
 from .state import ProductEvidenceStateStore, TransportHistoryStateStore
 from .transport_history import TransportTransitionHistory
+
+_REASON = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
+
+
+class ProductSourceUnavailable(RuntimeError):
+    """A source is transiently unavailable for a bounded, public reason.
+
+    A composition raises it from a source reader (for example while the route
+    owner cold-restarts); the snapshot then names ``reason_code`` for that
+    source instead of the generic ``<source>_failed`` code. Any other error a
+    reader raises keeps the generic code, so no private detail is published.
+    """
+
+    def __init__(self, reason_code: str) -> None:
+        if not isinstance(reason_code, str) or _REASON.fullmatch(reason_code) is None:
+            raise ValueError("product_source_reason_invalid")
+        self.reason_code = reason_code
+        super().__init__(reason_code)
+
+
+def _reason(exc: Exception, fallback: str) -> str:
+    return exc.reason_code if isinstance(exc, ProductSourceUnavailable) else fallback
 
 
 class ProductEvidenceApplication:
@@ -167,46 +190,59 @@ class ProductEvidenceApplication:
             source_errors: dict[str, str] = {}
             try:
                 members = self._membership_source()
-            except Exception:
+            except Exception as exc:
                 members = []
-                source_errors["membership-source"] = "membership_source_failed"
+                source_errors["membership-source"] = _reason(exc, "membership_source_failed")
             assignments = None
             if self._assignment_source is not None:
                 try:
                     assignments = self._assignment_source()
-                except Exception:
+                except Exception as exc:
                     assignments = []
-                    source_errors["assignment-source"] = "assignment_source_failed"
+                    source_errors["assignment-source"] = _reason(
+                        exc, "assignment_source_failed")
             try:
                 route_status = self._route_source()
-            except Exception:
+            except Exception as exc:
                 route_status = None
-                source_errors["route-source"] = "route_source_failed"
+                source_errors["route-source"] = _reason(exc, "route_source_failed")
             try:
                 qualification = self._qualification_source()
-            except Exception:
+            except Exception as exc:
                 qualification = None
-                source_errors["qualification-source"] = "qualification_source_failed"
-            internet_native = (
-                None
-                if self._internet_native_source is None
-                else self._transport_history.observe(
-                    self._internet_native_source(),
-                    now_unix_ms=self._clock_unix_ms(),
+                source_errors["qualification-source"] = _reason(
+                    exc, "qualification_source_failed")
+            internet_native = None
+            if self._internet_native_source is not None:
+                observed_at = self._clock_unix_ms()
+                try:
+                    document = self._internet_native_source()
+                except Exception as exc:
+                    # An unreadable source publishes the existing unknown A8
+                    # projection: the current path is unknown, never invented,
+                    # and the retained transition history stays published. A
+                    # typed transient unavailability (a restarting route) also
+                    # says the route is unavailable. Evidence the source did
+                    # return is still validated below and fails closed.
+                    document = _unknown_internet_native(observed_at)
+                    if isinstance(exc, ProductSourceUnavailable):
+                        document["bootstrap_status"]["route_state"] = "unavailable"
+                internet_native = self._transport_history.observe(
+                    document,
+                    now_unix_ms=observed_at,
                 )
-            )
             recovery_status = None
             if self._recovery_source is not None:
                 try:
                     recovery_status = self._recovery_source()
-                except Exception:
-                    source_errors["recovery-source"] = "recovery_source_failed"
+                except Exception as exc:
+                    source_errors["recovery-source"] = _reason(exc, "recovery_source_failed")
             a7_status = None
             if self._a7_source is not None:
                 try:
                     a7_status = self._a7_source()
-                except Exception:
-                    source_errors["a7-source"] = "a7_source_failed"
+                except Exception as exc:
+                    source_errors["a7-source"] = _reason(exc, "a7_source_failed")
             coarse_region_evidence = None
             if self._coarse_region_source is not None:
                 try:

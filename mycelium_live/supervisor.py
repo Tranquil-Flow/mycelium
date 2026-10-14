@@ -30,6 +30,7 @@ from mycelium_governance import governance_readiness
 from mycelium_host_platform import StopRequest
 from mycelium_product_spine import (
     ProductEvidenceApplication, ProductEvidenceStateError, ProductProjector,
+    ProductSourceUnavailable,
 )
 from mycelium_layer_planner.public_projection import validate_m13_placement_projection
 from mycelium_layer_planner.workload_intelligence import validate_m15_plan_comparison
@@ -1917,8 +1918,14 @@ def _product_application(
         # A cold-restart owner swaps in a new route and closes the old one, so a
         # method bound at build time would keep reading the closed route. Look the
         # reader up again on every call to follow the route that currently serves.
+        # While the owner restarts (or after its restart failed) there is no route
+        # to read: name that bounded state for this source instead of failing it.
         def read() -> Any:
-            return getattr(route, name)()
+            try:
+                reader = getattr(route, name)
+            except ColdRouteRestartError as exc:
+                raise ProductSourceUnavailable(exc.code) from None
+            return reader()
 
         return read
 
@@ -1929,7 +1936,7 @@ def _product_application(
     def internet_native_document() -> Mapping[str, Any]:
         if not callable(internet_native):
             raise ValueError("product_internet_native_source_unavailable")
-        document = getattr(route, "product_internet_native_snapshot")()
+        document = _follow("product_internet_native_snapshot")()
         if not isinstance(document, Mapping):
             raise ValueError("product_internet_native_source_invalid")
         return document

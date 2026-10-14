@@ -7,7 +7,7 @@ from .contracts import (
     validate_product_snapshot,
 )
 from .projector import ProductProjector
-from .app import ProductEvidenceApplication
+from .app import ProductEvidenceApplication, ProductSourceUnavailable
 from .state import ProductEvidenceStateError, ProductEvidenceStateStore
 
 __all__ = [
@@ -17,6 +17,7 @@ __all__ = [
     "ProductEvidenceStateError",
     "ProductEvidenceStateStore",
     "ProductProjector",
+    "ProductSourceUnavailable",
     "validate_product_event",
     "validate_product_snapshot",
 ]
