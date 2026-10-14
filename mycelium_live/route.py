@@ -1437,6 +1437,8 @@ class PhysicalLiveRoute:
         self._command_sequence = 0
         self._open = False
         self._closed = False
+        # Latched lock-free by abort_open(); open() checks it between nodes.
+        self._open_aborted = False
         self._fatal: str | None = None
         self._m16_runtime_source: Callable[[], Mapping[str, Any] | None] | None = None
         self._lock = threading.RLock()
@@ -2430,6 +2432,7 @@ class PhysicalLiveRoute:
             if self._open:
                 raise RuntimeError("route_already_open")
             try:
+                self._refuse_aborted_open()
                 ordered = [item["node_id"] for item in self._plan["nodes"]]
                 self._require_stage_only_positions(ordered)
                 if (any(p.process_transport == "external_iroh" for p in self._peers.values())
@@ -2459,6 +2462,7 @@ class PhysicalLiveRoute:
                         **external_arguments,
                     )
                     self._sessions[node_id] = session
+                    self._refuse_aborted_open()
                     hello = session.send(
                         command_id=self._command_id(node_id, "hello"),
                         command="hello",
@@ -2484,6 +2488,7 @@ class PhysicalLiveRoute:
                     )
 
                 for node_id in sorted(self._sessions):
+                    self._refuse_aborted_open()
                     response = self._sessions[node_id].send(
                         command_id=self._command_id(node_id, "configure"),
                         command="configure",
@@ -2526,6 +2531,7 @@ class PhysicalLiveRoute:
                     for index, node_id in enumerate(ordered)
                 }
                 for node_id in ordered:
+                    self._refuse_aborted_open()
                     remote_node_id = successors[node_id]
                     additional_node_ids = [
                         candidate
@@ -2561,6 +2567,7 @@ class PhysicalLiveRoute:
                 for node_id in ordered:
                     if self._peers[node_id].process_transport == "external_iroh":
                         self._prove_external_cancellation(node_id)
+                self._refuse_aborted_open()
                 self._open = True
                 self._liveness_monitor_stop.clear()
                 self._liveness_monitor_thread = threading.Thread(
@@ -6812,6 +6819,28 @@ class PhysicalLiveRoute:
             and bool(self._sessions)
             and all(session.returncode is None for session in self._sessions.values())
         )
+
+    def abort_open(self) -> None:
+        """Abandon this route's open from another thread (owner shutdown).
+
+        ``open`` holds the route lock for the whole node start-up, so ``close``
+        from another thread would wait the start-up out. This takes no lock: it
+        latches the refusal ``open`` checks before every node step and closes
+        the node sessions started so far, so a pending node command fails at
+        once and ``open`` closes the route itself. A route that already opened
+        loses its sessions, so a qualification running on it fails at once.
+        """
+
+        self._open_aborted = True
+        for session in tuple(self._sessions.values()):
+            try:
+                session.close()
+            except BaseException:
+                pass
+
+    def _refuse_aborted_open(self) -> None:
+        if self._open_aborted:
+            raise ControllerError("route_open_aborted")
 
     def close(self) -> None:
         self._liveness_monitor_stop.set()

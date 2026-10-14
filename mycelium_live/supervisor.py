@@ -614,6 +614,8 @@ class ColdRouteRestartOwner:
         self._changed = threading.Condition(self._lock)
         self._current: LiveRoute | None = None
         self._startup_failed_route: LiveRoute | None = None
+        # The replacement a cold restart is opening; close() aborts it.
+        self._replacing: LiveRoute | None = None
         self._qualification: Any | None = None
         self._qualification_refresh: Callable[[LiveRoute], RouteQualificationV1] | None = None
         self._qualification_refresh_allowed: Callable[[], bool] = lambda: False
@@ -1168,7 +1170,19 @@ class ColdRouteRestartOwner:
             if self._startup_failed_route is not None:
                 routes.append(self._startup_failed_route)
             self._qualification = None
+            replacing = self._replacing
             self._changed.notify_all()
+        if replacing is not None:
+            # A cold restart is opening a replacement in a request thread. Do
+            # not wait out its open and qualification: abort it without the
+            # route's lock (its open holds it), so the opener fails at once and
+            # the restart retires the replacement (see _restart_from).
+            abort = getattr(replacing, "abort_open", None)
+            if callable(abort):
+                try:
+                    abort()
+                except BaseException:  # pragma: no cover - never mask shutdown
+                    pass
         for route in self._unique_routes(routes):
             route.close()
 
@@ -1331,33 +1345,57 @@ class ColdRouteRestartOwner:
         replacement: LiveRoute | None = None
         try:
             replacement = self._route_factory()
+            with self._lock:
+                if self._closed:
+                    raise ColdRouteRestartError(COLD_ROUTE_RESTART_FAILED_CODE)
+                self._replacing = replacement
             identity, qualification = self._open_and_prepare(
                 replacement,
                 generation=next_generation,
             )
             _ = identity  # Identity is validated by the opener; retained via route state.
         except BaseException as exc:
+            with self._lock:
+                self._replacing = None
+                closed = self._closed
             if replacement is not None:
                 try:
-                    self._retire_route(replacement)
+                    # Closed by the serve: close it as an ordinary shutdown
+                    # does (the staging stays); otherwise retire it fully.
+                    self._retire_route(replacement, cleanup=not closed)
                 except BaseException:
                     pass
             self._mark_restart_failed(self._error_code(exc))
             raise ColdRouteRestartError(COLD_ROUTE_RESTART_FAILED_CODE) from exc
         with self._lock:
+            self._replacing = None
             if self._closed:
-                self._startup_failed_route = replacement
-                raise ColdRouteRestartError(COLD_ROUTE_RESTART_FAILED_CODE)
-            self._current = replacement
-            self._generation = next_generation
-            self._qualification = qualification
-            self._state = "ready"
-            self._last_error_code = None
-            self._last_restart_reason = None
-            self._changed.notify_all()
+                retire_closed = True
+            else:
+                retire_closed = False
+                self._current = replacement
+                self._generation = next_generation
+                self._qualification = qualification
+                self._state = "ready"
+                self._last_error_code = None
+                self._last_restart_reason = None
+                self._changed.notify_all()
+        if retire_closed:
+            # The owner was closed while this replacement opened. close() has
+            # already run, so nothing else would ever close it: its node
+            # processes (and their non-daemon reader threads) would keep the
+            # serve process alive after shutdown.
+            try:
+                self._retire_route(replacement, cleanup=False)
+            except BaseException:
+                pass
+            raise ColdRouteRestartError(COLD_ROUTE_RESTART_FAILED_CODE)
 
     def _mark_restart_failed(self, reason: str) -> None:
         with self._lock:
+            if self._closed:
+                # Shutdown is not a restart failure; keep the closed state.
+                return
             self._state = "failed"
             self._last_error_code = COLD_ROUTE_RESTART_FAILED_CODE
             self._last_restart_reason = reason[:128]
