@@ -657,14 +657,21 @@ class DemoApp:
             self.local_contributor=None
 
     def _renew_loop(self):
+        # Seed heartbeats never wait for self.guard: the standing tick holds it
+        # across managed-control round trips (10 s timeout each, peer.py), so on
+        # a slow link a joined Mac's heartbeat came late and its lease aged.
+        # The authority and the contributor serialize their own state (their
+        # renew() runs under their own lock); read the current ones and renew.
         while not self.closed.wait(20):
-            with self.guard:
-                if self.closed.is_set() or not self.running: continue
-                try:
-                    self.authority.renew()
-                    if self.local_contributor is not None:self.local_contributor.renew()
-                    self.renew_error = None
-                except Exception:
+            if self.closed.is_set() or not self.running: continue
+            authority, contributor = self.authority, self.local_contributor
+            if authority is None: continue
+            try:
+                authority.renew()
+                if contributor is not None:contributor.renew()
+                self.renew_error = None
+            except Exception:
+                if self.running and not self.closed.is_set():
                     self.renew_error = 'renewal_unavailable'
 
     def _resource_check(self):
