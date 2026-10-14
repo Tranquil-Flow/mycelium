@@ -44,26 +44,74 @@ def test_minos_parser_reads_a_real_system_binary():
     assert version is not None and version.count('.') >= 1
 
 
-def test_floor_writer_sets_the_plist_key_and_refuses_a_lower_floor(tmp_path):
-    from build_a13_macos import set_bundle_minimum_system_version
+def _fake_app(tmp_path, *binaries):
+    """A bundle holding copies of /bin/ls re-stamped to the given minos values."""
+    import shutil
     app = tmp_path / 'X.app'
     (app / 'Contents' / 'MacOS').mkdir(parents=True)
     with (app / 'Contents' / 'Info.plist').open('wb') as f:
         plistlib.dump({'CFBundleName': 'X'}, f)
-    import shutil
-    shutil.copyfile('/bin/ls', app / 'Contents' / 'MacOS' / 'X')
-    floor = set_bundle_minimum_system_version(app, minimum=None)
+    for index, minos in enumerate(binaries):
+        target = app / 'Contents' / 'MacOS' / f'X{index}'
+        if minos is None:
+            shutil.copyfile('/bin/ls', target)
+        else:
+            subprocess.run(['/usr/bin/vtool', '-set-build-version', 'macos', minos, minos, '-replace',
+                            '-output', str(target), '/bin/ls'], check=True, capture_output=True)
+    return app
+
+
+def _declared(app):
     with (app / 'Contents' / 'Info.plist').open('rb') as f:
-        assert plistlib.load(f)['LSMinimumSystemVersion'] == floor
-    with pytest.raises(SystemExit, match='bundle_floor_below_macho_minos'):
-        set_bundle_minimum_system_version(app, minimum='10.0')
+        return plistlib.load(f)['LSMinimumSystemVersion']
+
+
+def test_floor_is_the_macho_floor_when_it_is_below_the_lowest_admitted_macos(tmp_path):
+    from build_a13_macos import set_bundle_minimum_system_version
+    app = _fake_app(tmp_path, '11.0', '14.0')
+    floor = set_bundle_minimum_system_version(app, admitted_versions={'15.6.1', '26.5.1'})
+    assert floor['declared'] == '14.0' == _declared(app)
+    assert floor['macho_minos_max'] == '14.0' and floor['admitted_floor'] == '15.6.1'
+    assert floor['macho_minos_above_declared'] == []
+
+
+def test_floor_never_exceeds_the_lowest_admitted_macos(tmp_path):
+    # Homebrew-built runtimes are stamped minos 26.0 by their build host; the
+    # product admits 15.6.1, so Finder must not refuse the app there.
+    from build_a13_macos import set_bundle_minimum_system_version
+    app = _fake_app(tmp_path, '11.0', '26.0')
+    floor = set_bundle_minimum_system_version(app, admitted_versions={'15.6.1', '26.5.1'})
+    assert floor['declared'] == '15.6.1' == _declared(app)
+    assert floor['macho_minos_max'] == '26.0'
+    assert floor['macho_minos_above_declared'] == ['Contents/MacOS/X1']
+
+
+def test_floor_defaults_to_the_package_manifest_admitted_versions(tmp_path):
+    from build_a13_macos import set_bundle_minimum_system_version
+    from mycelium_a13_macos.package_manifest import ADMITTED_VERSIONS
+    app = _fake_app(tmp_path, '26.0')
+    floor = set_bundle_minimum_system_version(app)
+    lowest = min(ADMITTED_VERSIONS, key=lambda v: tuple(int(p) for p in v.split('.')))
+    assert floor['declared'] == lowest == _declared(app)
+
+
+def test_floor_writer_refuses_a_bundle_without_macho(tmp_path):
+    from build_a13_macos import set_bundle_minimum_system_version
+    app = _fake_app(tmp_path)
+    with pytest.raises(SystemExit, match='bundle_macho_floor_unknown'):
+        set_bundle_minimum_system_version(app, admitted_versions={'15.6.1'})
+
+
+def test_builder_does_not_hard_code_a_floor_above_the_admitted_versions():
+    source = (ROOT / 'scripts' / 'build_a13_macos.py').read_text()
+    assert "'26.0'" not in source
 
 
 @pytest.mark.skipif(not os.environ.get('A13_PACKAGE_EXECUTABLE'), reason='needs the built package')
-def test_built_bundle_declares_26_0_and_it_matches_the_macho_minos():
+def test_built_bundle_declares_the_lowest_admitted_macos():
     from build_a13_macos import bundle_macho_floor
+    from mycelium_a13_macos.package_manifest import ADMITTED_VERSIONS
+    key = lambda v: tuple(int(p) for p in v.split('.'))
     app = Path(os.environ['A13_PACKAGE_EXECUTABLE']).parents[2]
-    with (app / 'Contents' / 'Info.plist').open('rb') as f:
-        declared = plistlib.load(f)['LSMinimumSystemVersion']
-    assert declared == '26.0'
-    assert bundle_macho_floor(app) == '26.0'
+    lowest_admitted = min(ADMITTED_VERSIONS, key=key)
+    assert _declared(app) == min(bundle_macho_floor(app), lowest_admitted, key=key)
