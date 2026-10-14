@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from mycelium_a7_node_agent import A7NodeAgent
-from mycelium_router.contracts import KVShadowRelease, KVSuccessorCutover
+from mycelium_router.contracts import KVShadowRelease, KVSuccessorCutover, RouterConfig
 from mycelium_router.kv_checkpoint import KVCheckpointError
 from mycelium_router.payloads import encode_token_ids
 from test_router_numpy_qwen_kv import _case, _reference
@@ -29,6 +29,8 @@ from tests.a7_acceptance.test_kv_checkpoint_transfer import _MAX, _fresh_ports
 
 _LEASE = 1_000_000_000_000.0
 _PROMPT = (1, 7, 11, 5)
+#: A stage runtime's default KV lease renewal window (the base reservation lease).
+_RENEWAL_SECONDS = RouterConfig().reservation_lease_seconds
 
 
 class _Clock:
@@ -463,8 +465,13 @@ def test_a_terminal_release_naming_the_old_path_frees_a_successor_a_stale_cutove
 def test_the_retained_entrys_own_lease_is_enforced_at_take_time(tmp_path: Path) -> None:
    clock = _Clock()
    case = _case(tmp_path, "qwen2", clock=clock)
-   _enable(*case.ports, seconds=30.0)
+   # The KV's own deadline is its issued lease renewed by its last applied
+   # continuation (``mycelium_router.leases``): here the terminal decode step,
+   # so ``started + _RENEWAL_SECONDS``.  Retention is longer,
+   # so only the entry's own deadline can refuse the take below.
+   _enable(*case.ports, seconds=2 * _RENEWAL_SECONDS)
    request_id, old_path = "request:lease", "path:old"
+   started = clock.now
    lease = clock.now + 5.0
    prompt_payload = encode_token_ids(_PROMPT)
    payload = prompt_payload
@@ -477,12 +484,48 @@ def test_the_retained_entrys_own_lease_is_enforced_at_take_time(tmp_path: Path) 
    result = _stage(case.ports[0], case, 0, encode_token_ids((tokens[-1],)), phase="DECODE", request_id=request_id, path_id=old_path, path_attempt=0, token_index=1, position=len(_PROMPT), terminal=True, lease=lease)
    assert result.success, result.failure_reason
    assert _retention(case.ports[0])["retained_count"] == 1
-   clock.now = lease  # within the 30 s retention, past the path's own lease
+   clock.now = started + _RENEWAL_SECONDS  # within retention, past the KV's own deadline
    with pytest.raises(KVCheckpointError) as refused:
       case.ports[0].rekey_kv_path(old_path, new_path_id="path:successor", new_path_attempt=1, lease_expires_at=clock.now + 60.0, truncate_to_position=len(_PROMPT), **_auth(case, request_id))
    assert refused.value.code == "kv_checkpoint_state_missing"
    assert len(case.ports[0]._terminal_retention) == 0
    assert case.ports[0].kv_subject_clean(request_id, old_path, 0) is True
+
+
+def test_a_request_that_progressed_past_its_issued_lease_still_retains_its_terminal_kv(
+   tmp_path: Path,
+) -> None:
+   """A slow but progressing request keeps its KV through the terminal step.
+
+   Its issued lease passed while decode steps kept being applied (each renews
+   the KV's own deadline), so the terminal hop's KV is retained for the A7
+   rekey instead of being discarded as already expired.
+   """
+
+   clock = _Clock()
+   case = _case(tmp_path, "qwen2", clock=clock)
+   _enable(*case.ports, seconds=30.0)
+   request_id, old_path = "request:slow", "path:old"
+   lease = clock.now + 5.0
+   payload = encode_token_ids(_PROMPT)
+   tokens = []
+   for stage_index, port in enumerate(case.ports):
+      result = _stage(port, case, stage_index, payload, phase="PREFILL", request_id=request_id, path_id=old_path, path_attempt=0, token_index=-1, position=0, lease=lease)
+      assert result.success, result.failure_reason
+      payload = result.payload if result.payload is not None else payload
+      tokens.append(result.token_id)
+   clock.now += 4.0  # one slow decode round, still inside the issued lease
+   result = _stage(case.ports[0], case, 0, encode_token_ids((tokens[-1],)), phase="DECODE", request_id=request_id, path_id=old_path, path_attempt=0, token_index=1, position=len(_PROMPT), lease=lease)
+   assert result.success, result.failure_reason
+   clock.now += 4.0  # the terminal step arrives after the issued lease
+   result = _stage(case.ports[0], case, 0, encode_token_ids((3,)), phase="DECODE", request_id=request_id, path_id=old_path, path_attempt=0, token_index=2, position=len(_PROMPT) + 1, terminal=True, lease=lease)
+   assert result.success, result.failure_reason
+   assert clock.now > lease
+   assert _retention(case.ports[0])["retained_count"] == 1
+   clock.now += 1.0
+   receipt = case.ports[0].rekey_kv_path(old_path, new_path_id="path:successor", new_path_attempt=1, lease_expires_at=clock.now + 60.0, truncate_to_position=len(_PROMPT) + 1, **_auth(case, request_id))
+   assert receipt
+   assert set(case.ports[0].kv_snapshot()["states"]) == {"path:successor"}
 
 
 def test_retained_kv_is_never_read_by_another_path_and_its_subject_is_scoped(tmp_path: Path) -> None:
