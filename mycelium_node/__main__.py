@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from queue import Empty, SimpleQueue
 import random
 import shutil
 import signal
@@ -715,12 +716,46 @@ def _endpoint_identity_digest(endpoint_id: str) -> str:
     return "sha256:" + hashlib.sha256(endpoint_id.encode("utf-8")).hexdigest()
 
 
+class _StopRequest:
+    """A stop flag that a signal handler may set at any call boundary.
+
+    ``threading.Event.set()`` takes the event's non-reentrant condition lock.
+    CPython runs a Python signal handler on the main thread between
+    bytecodes, so a SIGTERM that lands while the main thread is inside
+    ``Event.wait()``'s locked bookkeeping re-acquires that lock from the same
+    thread and deadlocks the node forever.  ``SimpleQueue.put()`` is
+    documented as reentrant, and the flag write takes no lock.
+    """
+
+    def __init__(self) -> None:
+        self._requested = False
+        self._wakeups: SimpleQueue[None] = SimpleQueue()
+
+    def set(self) -> None:
+        self._requested = True
+        self._wakeups.put(None)
+
+    def is_set(self) -> bool:
+        return self._requested
+
+    def wait(self, timeout: float | None = None) -> bool:
+        if self._requested:
+            return True
+        if timeout is not None and timeout <= 0:
+            return False
+        try:
+            self._wakeups.get(timeout=timeout)
+        except Empty:
+            pass
+        return self._requested
+
+
 def _renew_lease(
     *,
     client: SeedHTTPClient,
     session: NodeMembershipSession,
     lifecycle_state: str,
-    stopping: threading.Event,
+    stopping: _StopRequest | threading.Event,
     policy: RenewalRetryPolicy,
 ) -> bool:
     """Renew one exact signed heartbeat with bounded idempotent retry."""
@@ -910,7 +945,7 @@ def _run_bound(
         raise failure from exc
 
     process: PhysicalNodeProcess | None = None
-    stopping = threading.Event()
+    stopping = _StopRequest()
     acknowledged_authority_generation: int | None = None
     previous: dict[int, object] = {}
     failure: _EntrypointFailure | None = None
