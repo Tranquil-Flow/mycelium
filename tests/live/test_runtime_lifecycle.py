@@ -10,7 +10,8 @@ import zipfile
 
 import pytest
 from scripts import build_qwen_live_route as builder
-from phone_composition_fixture import elapse_keepalive_interval, fixture_build
+from phone_composition_fixture import (
+    elapse_keepalive_interval, fixture_build, members_heartbeat_during_builds)
 from test_qwen_route_builder import _topology_node, _write_topology
 from physical_inference_qualification import NodeProcessSession
 
@@ -35,7 +36,9 @@ def test_emitted_node_full_lifecycle(tmp_path,monkeypatch,record_property,mixed,
     # The mixed bundle is the unpatched production build over a synthetic-signer
     # phone record; this test claims the desktop lifecycle only. It must not
     # depend on host speed: the build runs as if one seed keepalive interval
-    # had passed since the members last heartbeated.
+    # had passed since the members last heartbeated; they heartbeat during the
+    # build, as live members do.
+    members_heartbeat_during_builds(fixture,monkeypatch)
     elapse_keepalive_interval(fixture)
     report=builder.build(fixture.args)
     plan=json.loads(Path(report['operator_plan']).read_text())

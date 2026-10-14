@@ -93,8 +93,8 @@ def test_actual_build_with_real_native_fixture_executor(tmp_path, record_propert
     monkeypatch.setattr(subprocess, 'run', fixture_ssh)
     from pathlib import Path
     from phone_composition_fixture import (
-        SYNTHETIC_LOAD, elapse_keepalive_interval, fixture_build, qualify_fixture_plan, restoring,
-        synthetic_route_open)
+        SYNTHETIC_LOAD, elapse_keepalive_interval, fixture_build, members_heartbeat_during_builds,
+        qualify_fixture_plan, restoring, synthetic_route_open)
     from mycelium_qualification import LiveRouteQualificationError
     from mycelium_seed import route_assignment as ra
     fixture = fixture_build(tmp_path)
@@ -102,7 +102,9 @@ def test_actual_build_with_real_native_fixture_executor(tmp_path, record_propert
     # The outcome must not depend on host speed: each build below runs as if
     # one seed keepalive interval had passed since the members last heartbeated
     # (a loaded host took ~34 s here and the final build refused with
-    # seed_member_liveness_stale instead of the withdrawal's code).
+    # seed_member_liveness_stale instead of the withdrawal's code). Live
+    # members heartbeat during the build, as they do in a real swarm.
+    members_heartbeat_during_builds(fixture, monkeypatch)
     elapse_keepalive_interval(fixture)
     report = builder.build(fixture.args)
     assert report['route_ready'] is False

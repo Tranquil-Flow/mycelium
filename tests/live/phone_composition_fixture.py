@@ -30,7 +30,7 @@ from tokenizers import Tokenizer, models
 from scripts import build_qwen_live_route as builder
 from scripts import qwen_phone_builder as phone
 from mycelium_invite import SqliteInviteRegistry, verify_invite_bundle
-from mycelium_membership import ROUTER_ACTIVATION_PROTOCOL
+from mycelium_membership import HEARTBEAT_PROTOCOL, ROUTER_ACTIVATION_PROTOCOL
 from mycelium_node import NodeMembershipSession, load_or_create_node_signer
 from mycelium_seed import SeedCoordinator, SqliteSeedState
 from mycelium_seed import route_assignment as ra
@@ -197,6 +197,37 @@ def elapse_keepalive_interval(fixture):
     with ra._connect(fixture.database) as c:
         c.execute('UPDATE seed_members SET last_liveness_at=last_liveness_at-?,'
                   'next_heartbeat_due_at=next_heartbeat_due_at-?',(elapsed,elapsed))
+
+
+def heartbeat_members(fixture):
+    """Each member sends one scheduled heartbeat through the production seed path.
+
+    The member signs it with its own session, the seed verifies and commits it
+    (renewing liveness and lease exactly as for a live node), and the member
+    accepts the signed renewal. The member's current lifecycle state is kept.
+    """
+    for node_id,session in fixture.sessions.items():
+        state=fixture.seed.member(node_id)['lifecycle_state']
+        envelope=session.heartbeat(lifecycle_state=state,active_requests=0,force=True)
+        message=fixture.seed.receive_member_message(envelope,expected_protocol=HEARTBEAT_PROTOCOL)
+        renewal=fixture.seed.lease_renewal(node_id=node_id,heartbeat_message_id=message['message_id'])
+        session.accept_lease_renewal(renewal,heartbeat_message_id=message['message_id'])
+
+
+def members_heartbeat_during_builds(fixture, monkeypatch):
+    """Members heartbeat while every later build runs, as live members do.
+
+    A live member heartbeats every keepalive interval whatever the operator is
+    doing; these synthetic members only heartbeat when told. Each build now
+    sends one heartbeat per member after copying its runtime closure, the step
+    right before the build reads the seed membership, so the build's outcome
+    no longer depends on how long the test body took to get there.
+    """
+    copy_runtime=builder._copy_runtime_closure
+    def copy_then_heartbeat(*args):
+        copy_runtime(*args)
+        heartbeat_members(fixture)
+    monkeypatch.setattr(builder,'_copy_runtime_closure',copy_then_heartbeat)
 
 
 def synthetic_route_open(fixture, plan, *, mutate=None):
