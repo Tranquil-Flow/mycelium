@@ -235,23 +235,60 @@ test('isolated direct control request delivers only bounded action, case and gra
 test('browser outcome proof requires completed UI stream or truthful failed UI', async () => {
   const observed = [];
   const page = {
+    waitForTimeout: async () => undefined,
     getByRole: (role, options = {}) => ({
-      waitFor: async () => observed.push([role, options.name ?? null]),
-      innerText: async () => role === 'status' ? 'Completed' : 'bounded recovered output',
+      waitFor: async () => observed.push([role, options.name ?? null, options.exact ?? null]),
+      innerText: async () => role === 'status' ? 'Completed\n3 tokens applied' : 'bounded recovered output',
     }),
   };
   await verifyInferenceOutcome(page, 'positive');
   assert.deepEqual(observed, [
-    ['status', null],
-    ['log', 'Decoded output'],
+    ['status', 'Inference outcome', true],
+    ['log', 'Decoded output', null],
   ]);
   const failedPage = {
+    waitForTimeout: async () => undefined,
     getByRole: () => ({
       waitFor: async () => undefined,
       innerText: async () => 'Failed',
     }),
   };
   await verifyInferenceOutcome(failedPage, 'negative');
+});
+
+test('browser outcome proof waits through the restored phase and refuses a different terminal', async () => {
+  const sequence = (texts) => {
+    let index = 0;
+    let waits = 0;
+    return {
+      get waits() { return waits; },
+      page: {
+        waitForTimeout: async () => { waits += 1; },
+        getByRole: (role) => ({
+          waitFor: async () => undefined,
+          innerText: async () => role === 'status'
+            ? texts[Math.min(index++, texts.length - 1)]
+            : 'recovered output',
+        }),
+      },
+    };
+  };
+  const restored = sequence(['Stream interrupted\n1 tokens applied', 'Streaming\n1 tokens applied',
+    'Completed\n3 tokens applied']);
+  await verifyInferenceOutcome(restored.page, 'positive', { interval: 0 });
+  assert.equal(restored.waits, 2);
+  await assert.rejects(
+    verifyInferenceOutcome(sequence(['Stream interrupted', 'Failed']).page, 'positive', { interval: 0 }),
+    /positive_ui_terminal_missing/,
+  );
+  await assert.rejects(
+    verifyInferenceOutcome(sequence(['Completed']).page, 'negative', { interval: 0 }),
+    /negative_ui_terminal_missing/,
+  );
+  await assert.rejects(
+    verifyInferenceOutcome(sequence(['Stream interrupted']).page, 'positive', { interval: 0, timeout: 0 }),
+    /positive_ui_terminal_missing/,
+  );
 });
 
 test('live workspace proof requires route-specific bounded recovery fields', () => {

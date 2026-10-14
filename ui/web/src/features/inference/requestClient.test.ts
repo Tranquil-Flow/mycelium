@@ -366,4 +366,38 @@ describe('ProductInferenceClient', () => {
       }),
     );
   });
+
+  it('reports an accepted resume subscription only after the gateway answers with an event stream', async () => {
+    const accepted = {
+      protocol: PRODUCT_INFERENCE_PROTOCOL,
+      request_id: 'request-a',
+      accepted: true,
+      event_path: '/api/v1/inference/request-a/events',
+      cancel_path: '/api/v1/inference/request-a/cancel',
+    } as const;
+    const fetch: InferenceFetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(bootstrap()))
+      .mockResolvedValueOnce(jsonResponse(qualification()))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { protocol: PRODUCT_ERROR_PROTOCOL, code: 'stream_already_attached', retryable: false },
+          409,
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response('', { headers: { 'Content-Type': 'text/event-stream' } }),
+      );
+    const client = new ProductInferenceClient({ fetch });
+    await client.loadQualification();
+    const opened = vi.fn();
+
+    await expect(client.stream(accepted, 3, () => undefined, undefined, 2, opened)).rejects.toMatchObject({
+      code: 'stream_already_attached',
+    });
+    expect(opened).not.toHaveBeenCalled();
+    await client.stream(accepted, 3, () => undefined, undefined, 2, opened);
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(headers(vi.mocked(fetch).mock.calls[3][1]).get('Last-Event-ID')).toBe('2:3');
+  });
 });

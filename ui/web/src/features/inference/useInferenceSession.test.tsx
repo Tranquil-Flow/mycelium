@@ -662,3 +662,17 @@ describe('consumer bootstrap ordering', () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('stream_opened publisher generation', () => {
+  it('records the generation the gateway advanced to for an accepted resume only', () => {
+    const interrupted = { ...stateFor('interrupted'), publisher_generation: 1 };
+    const opened = inferenceSessionReducer(interrupted, { type: 'stream_opened', publisher_generation: 2 });
+    expect(opened.publisher_generation).toBe(2);
+    expect(opened.phase).toBe('interrupted');
+    // Never skips a generation and never rewinds.
+    expect(inferenceSessionReducer(interrupted, { type: 'stream_opened', publisher_generation: 3 })).toBe(interrupted);
+    expect(inferenceSessionReducer(opened, { type: 'stream_opened', publisher_generation: 2 })).toBe(opened);
+    const completed = { ...stateFor('completed'), publisher_generation: 1 };
+    expect(inferenceSessionReducer(completed, { type: 'stream_opened', publisher_generation: 2 })).toBe(completed);
+  });
+});
