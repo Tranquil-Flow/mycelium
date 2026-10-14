@@ -76,6 +76,12 @@ def _source_failure_matches(
 #: for a synchronously refused recovery happens before a controlled-fault
 #: observer can poll; the bounded map keeps that one transition observable.
 _RETAINED_SOURCE_FAILURES_MAX = 256
+# Finished requests carried in the public recovery projection across a
+# qualification binding change (cold route replacement or idle renewal), so a
+# refresh still reconstructs a recovery that ended just before the change.
+# Bounded by count (oldest finished first) and by age since the change
+# (_ROTATED_TERMINAL_RECORD_MAX_AGE_MS, below the recovery deadline bound).
+_ROTATED_TERMINAL_RECORDS_MAX = _RETAINED_SOURCE_FAILURES_MAX
 
 # A withheld terminal is the route's most consequential refusal: the client sees a stream that simply ends.
 # Until round p78r1 (ERRATA-23) the reason lived only in ``LiveRoute._incidents`` -- in memory -- so it died
@@ -212,6 +218,10 @@ _A6_COMPLETION_CLEANUP_HOLD_SECONDS = 30.0
 #: Largest accepted recovery deadline: the successor command inherits the
 #: source command's absolute deadline, which is one hour after admission.
 _MAX_RECOVERY_DEADLINE_MS = 3_600_000
+# A carried terminal record outlives the binding change by at most the longest
+# admissible recovery, so an observer that reloads during the bounded window a
+# recovery may take still reconstructs how it ended.
+_ROTATED_TERMINAL_RECORD_MAX_AGE_MS = _MAX_RECOVERY_DEADLINE_MS
 #: Environment overrides (seconds) for the frozen per-phase recovery deadlines.
 _RECOVERY_DEADLINE_ENVIRONMENT = (
     ("qualification_ms", "MYCELIUM_A6_RECOVERY_QUALIFICATION_SECONDS"),
@@ -496,10 +506,19 @@ class LiveRouterPort:
         self._recovery_tokenizer_digest = recovery_tokenizer_digest
         self._recovery_a4_atomic_commit = recovery_a4_atomic_commit
         self._recovery_qualification_digest: str | None = None
-        # The public recovery document has one current binding. Retain only
-        # request IDs admitted under that binding in its projection; older
-        # terminal records remain in coordinator history, never relabelled.
+        # The public recovery document has one current binding. Live recovery
+        # state is listed only for request IDs admitted under that binding;
+        # a request that finished just before the binding changed is carried
+        # below (bounded) with its terminal facts only, so a refresh still
+        # reconstructs it (A6 spec section 7). Older ones remain in
+        # coordinator history only.
         self._recovery_current_request_ids: set[str] = set()
+        # Released terminal requests admitted under an earlier binding of this
+        # same deployment and graph, carried when the binding changed (request
+        # ID -> carry time in recovery-clock ms). Bounded by
+        # _ROTATED_TERMINAL_RECORDS_MAX and _ROTATED_TERMINAL_RECORD_MAX_AGE_MS;
+        # listed only while the coordinator reports them terminal.
+        self._recovery_rotated_terminal_ids: OrderedDict[str, int] = OrderedDict()
         # Qualifier-owned source of the *current* deployment qualification,
         # shared with the request gateway's qualification gate. Admission
         # binds the digest on first use; an idle projection (the browser polls
@@ -574,7 +593,7 @@ class LiveRouterPort:
                 if self._closed or self._pending:
                     raise M16AdmissionError("qualification_binding_changed")
                 if self._recovery_qualification_digest != digest:
-                    self._recovery_current_request_ids.clear()
+                    self._carry_terminal_requests_across_binding_locked()
                 self._recovery_qualification_digest = digest
 
     def a10_target_verify(
@@ -2166,9 +2185,42 @@ class LiveRouterPort:
             or self._replacement_binding_digest(candidate) != candidate
         ):
             return False
-        self._recovery_current_request_ids.clear()
+        self._carry_terminal_requests_across_binding_locked()
         self._recovery_qualification_digest = candidate
         return True
+
+    def _carry_terminal_requests_across_binding_locked(self) -> None:
+        """Start a new binding's request set, keeping finished requests visible.
+
+        Caller holds ``self._lock`` and changes the binding only with no
+        admitted request, so every listed request has been released; only
+        those released with a terminal status are carried (in the order they
+        finished), never in-flight state. Carried records stay this router's
+        own deployment and graph (a binding changes only within them) and
+        report the same terminal facts, never a new admission.
+        """
+
+        current = self._recovery_current_request_ids
+        if not current:
+            return  # nothing to carry; projection reads prune the carried set
+        now_ms = self._recovery_clock_ms()
+        carried = self._recovery_rotated_terminal_ids
+        for request_id in self._retained_terminal_statuses:
+            if request_id in current:
+                carried.pop(request_id, None)
+                carried[request_id] = now_ms
+        current.clear()
+        self._prune_rotated_terminal_requests_locked(now_ms)
+
+    def _prune_rotated_terminal_requests_locked(self, now_ms: int) -> None:
+        """Drop carried records past the age bound, then the oldest past the count."""
+
+        carried = self._recovery_rotated_terminal_ids
+        for request_id, carried_ms in list(carried.items()):
+            if not 0 <= now_ms - carried_ms <= _ROTATED_TERMINAL_RECORD_MAX_AGE_MS:
+                carried.pop(request_id)
+        while len(carried) > _ROTATED_TERMINAL_RECORDS_MAX:
+            carried.popitem(last=False)
 
     def _replacement_binding_digest(self, candidate: str | None) -> str | None:
         """The candidate digest iff it is the qualifier's current authority.
@@ -2299,7 +2351,9 @@ class LiveRouterPort:
         with self._lock:
             if self._recovery_qualification_digest not in (None, qualification_digest):
                 raise M16AdmissionError("recovery_projection_binding_mismatch")
+            self._prune_rotated_terminal_requests_locked(self._recovery_clock_ms())
             visible_request_ids = frozenset(self._recovery_current_request_ids)
+            carried_request_ids = frozenset(self._recovery_rotated_terminal_ids)
         if qualification_digest is None:
             raise M16AdmissionError("recovery_projection_unavailable")
         if (
@@ -2312,7 +2366,13 @@ class LiveRouterPort:
         requests: list[dict[str, Any]] = []
         for item in status["requests"]:
             request_id = item["request_id"]
-            if request_id not in visible_request_ids or request_id not in committed_token_counts:
+            if request_id not in committed_token_counts:
+                continue
+            if request_id not in visible_request_ids and not (
+                # Finished under an earlier binding of this deployment: listed
+                # with its terminal facts, never as live recovery state.
+                request_id in carried_request_ids and item["terminal_state"] is not None
+            ):
                 continue
             committed_count = committed_token_counts[request_id]
             if type(committed_count) is not int or committed_count < 0:

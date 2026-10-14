@@ -125,7 +125,17 @@ def test_real_port_rotates_recovery_binding_after_signed_idle_renewal():
         assert owner.current() is renewed  # genuine signed record, not a fake timestamp
         after = port.recovery_public_projection({first_id: 1})
         assert after['binding']['qualification_digest'] == qualification_digest(renewed)
-        assert after['requests'] == []  # old terminal history is not re-labelled new
+        # REVERSAL: this asserted ``after['requests'] == []`` ("old terminal
+        # history is not re-labelled new"). Dropping the record made a request
+        # that finished just before a renewal or a cold-restart rotation vanish
+        # from the public projection (the A6 browser matrix on f9a8d961 never
+        # saw a completed recovery's cutover after reload), against A6 spec
+        # section 7: a refresh reconstructs public recovery state. The finished
+        # record is carried, bounded, with its own unchanged terminal facts; it
+        # is never relabelled as live state or as an admission under the new
+        # binding.
+        assert after['requests'] == before['requests']
+        assert [item['terminal'] for item in after['requests']] == ['completed']
 
         second_id = 'qualification-second'
         port.admit(_request(second_id), _Sink(), qualification_binding=qualification_binding(renewed))
@@ -134,7 +144,8 @@ def test_real_port_rotates_recovery_binding_after_signed_idle_renewal():
         assert port.decode_one(second_id) is False
         port.release_request(second_id)
         current = port.recovery_public_projection({first_id: 1, second_id: 1})
-        assert [item['request_id'] for item in current['requests']] == [second_id]
+        assert [item['request_id'] for item in current['requests']] == [first_id, second_id]
+        assert current['requests'][0] == before['requests'][0]
         assert port._coordinator.route_identity(first_id)['request_id'] == first_id
     finally:
         port.close()
