@@ -42,6 +42,7 @@ from mycelium_qualification import (
 from mycelium_qualification.contracts import RouteQualificationV1
 from mycelium_request_gateway.asgi import MAX_REQUEST_BODY_BYTES
 from mycelium_request_gateway.contracts import (
+    AdmissionError,
     qualification_digest,
     safe_qualification_projection,
 )
@@ -1722,6 +1723,30 @@ def start_live_openai_shim(
     return LiveOpenAIShim(server=server, thread=thread, model_id=resolved_model_id)
 
 
+def _follow_replica_reader(route: Any, name: str) -> Callable[[], Any] | None:
+    """A replica reader that reads the route that serves now, or ``None``.
+
+    A cold-restart owner swaps in a new route and closes the old one, so a
+    method bound at build time would keep reading the retired route's replica
+    qualifications and losses. Look the reader up again on every call. While
+    the owner restarts (or after its restart failed) there is no route to
+    read: refuse the request with the owner's bounded code, which the request
+    gateway reports as the failed terminal's code.
+    """
+
+    if not callable(getattr(route, name, None)):
+        return None
+
+    def read() -> Any:
+        try:
+            reader = getattr(route, name)
+        except ColdRouteRestartError as exc:
+            raise AdmissionError(_route_restart_code(exc)) from None
+        return reader()
+
+    return read
+
+
 def build_live_stack(
     *,
     route: LiveRoute,
@@ -1825,15 +1850,11 @@ def build_live_stack(
         product_app_factory=product_app_factory,
         swarm_coordinator=LiveSwarmCoordinator(route, health, seed_url=seed_url),
         request_bearer_token=bearer_token,
-        replica_qualifications_factory=(
-            route.replica_track_qualifications
-            if callable(getattr(route, "replica_track_qualifications", None))
-            else None
+        replica_qualifications_factory=_follow_replica_reader(
+            route, "replica_track_qualifications"
         ),
-        replica_loss_placement_ids_factory=(
-            route.replica_loss_placement_ids
-            if callable(getattr(route, "replica_loss_placement_ids", None))
-            else None
+        replica_loss_placement_ids_factory=_follow_replica_reader(
+            route, "replica_loss_placement_ids"
         ),
         public_origin=public_origin,
         trusted_https_proxy=trusted_https_proxy,
