@@ -261,16 +261,25 @@ def _hold_source_eof_for_a_status_read(monkeypatch, owner) -> dict:
     """Hold node-a's reader EOF (once, when armed) until a status read finished."""
 
     lock = threading.Lock()
-    state: dict = {"armed": False, "eof_held": False, "observer": None,
-                   "lost_peer_cancelled": False, "observer_error": None,
+    state: dict = {"armed": False, "eof_held": False, "eof_released": False,
+                   "observer": None, "lost_peer_cancelled": False,
+                   "cancelled_by": None, "observer_error": None,
                    "source_exit_status": None}
 
     original_cancel = route_module.PhysicalLiveRoute.cancel_request
 
     def cancel_request(self, request_id, **kwargs):
         accepted = original_cancel(self, request_id, **kwargs)
-        if accepted and threading.get_ident() == state["observer"]:
+        # The ordering under test is "the route cancels while the source's EOF is
+        # still undelivered". Either the status read or the product's own liveness
+        # monitor (50 ms) may be the one that finds the exited process first; both
+        # take the same lost-peer path, so either counts.
+        with lock:
+            in_hold_window = state["eof_held"] and not state["eof_released"]
+        if accepted and in_hold_window and not state["lost_peer_cancelled"]:
             state["lost_peer_cancelled"] = True
+            state["cancelled_by"] = ("status_read" if threading.get_ident() == state["observer"]
+                                     else threading.current_thread().name)
         return accepted
 
     def observe() -> None:
@@ -300,6 +309,8 @@ def _hold_source_eof_for_a_status_read(monkeypatch, owner) -> dict:
             observer = threading.Thread(target=observe, name="a6-status-observer", daemon=True)
             observer.start()
             observer.join(30)
+            with lock:
+                state["eof_released"] = True
         return original_fail_waiters(self, item)
 
     monkeypatch.setattr(route_module.PhysicalLiveRoute, "cancel_request", cancel_request)
