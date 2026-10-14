@@ -1120,8 +1120,8 @@
         },
         {
           "path": "mycelium_node/membership.py",
-          "sha256": "e5ecc47e168324006692f1dc93b4ead231dca5d7b93942961c15d439d59866e4",
-          "size_bytes": 38691
+          "sha256": "2bc7531d9f83227358bf255e7f204e3012e679b07dc5c3eb17f3a8eedac824b2",
+          "size_bytes": 39028
         },
         {
           "path": "mycelium_seed/coordinator.py",
@@ -1150,8 +1150,8 @@
         },
         {
           "path": "mycelium_node/membership.py",
-          "sha256": "e5ecc47e168324006692f1dc93b4ead231dca5d7b93942961c15d439d59866e4",
-          "size_bytes": 38691
+          "sha256": "2bc7531d9f83227358bf255e7f204e3012e679b07dc5c3eb17f3a8eedac824b2",
+          "size_bytes": 39028
         },
         {
           "path": "mycelium_seed/coordinator.py",
@@ -1160,8 +1160,8 @@
         },
         {
           "path": "mycelium_seed/http.py",
-          "sha256": "032445fddb707f82b62d2e1471e637332c59663b6549e57487609dfb1f4bfc99",
-          "size_bytes": 44507
+          "sha256": "b39a81c0ffa79983ee62d426225a989787f96958292182fdb7e8a2fe30487c41",
+          "size_bytes": 45080
         }
       ],
       "protocol": "mycelium.membership.resume_request.v1"
@@ -1180,8 +1180,8 @@
         },
         {
           "path": "mycelium_node/membership.py",
-          "sha256": "e5ecc47e168324006692f1dc93b4ead231dca5d7b93942961c15d439d59866e4",
-          "size_bytes": 38691
+          "sha256": "2bc7531d9f83227358bf255e7f204e3012e679b07dc5c3eb17f3a8eedac824b2",
+          "size_bytes": 39028
         },
         {
           "path": "mycelium_seed/state.py",
