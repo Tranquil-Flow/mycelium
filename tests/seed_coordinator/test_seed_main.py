@@ -127,6 +127,75 @@ def test_seed_module_starts_real_listener_and_reuses_private_identity(
     assert "private" not in second_stdout.lower() + second_stderr.lower()
 
 
+# Runs the real seed entrypoint, but once ``seed_started`` has been emitted it
+# raises SIGTERM on the main thread at every Python/C call boundary (where
+# CPython runs pending signal handlers) for as long as the seed's own stop
+# handler is installed.  A signal can arrive at any such boundary in
+# production; whichever one it lands on, the seed must stop.
+_SIGTERM_AT_EVERY_CALL_BOUNDARY = """
+import signal
+import sys
+
+import mycelium_seed.__main__ as seed_main
+
+inherited = signal.getsignal(signal.SIGTERM)
+emit_status = seed_main._emit_status
+remaining = [20_000]
+
+
+def deliver(_frame, _event, _arg):
+    handler = signal.getsignal(signal.SIGTERM)
+    if remaining[0] <= 0 or handler in (inherited, signal.SIG_DFL, signal.SIG_IGN, None):
+        return
+    remaining[0] -= 1
+    signal.raise_signal(signal.SIGTERM)
+
+
+def emit(status):
+    emit_status(status)
+    if status.get("event") == "seed_started":
+        sys.setprofile(deliver)
+
+
+seed_main._emit_status = emit
+seed_main.main()
+"""
+
+
+def test_seed_stops_when_sigterm_lands_on_any_call_boundary_after_start(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "seed-sigterm"
+    _initialize(data_dir)
+    command = _command(data_dir)
+    command[1:3] = ["-c", _SIGTERM_AT_EVERY_CALL_BOUNDARY]
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        assert _read_status(process)["event"] == "seed_started"
+        stdout, stderr = process.communicate(timeout=15)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.communicate(timeout=10)
+        raise AssertionError(
+            "seed did not exit after SIGTERM landed on a call boundary"
+        ) from None
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate(timeout=10)
+
+    assert process.returncode == 0, stderr
+    assert stdout == ""
+    assert stderr == ""
+
+
 def test_seed_service_refuses_implicit_initialization(tmp_path: Path) -> None:
     completed = subprocess.run(
         _command(tmp_path / "missing-seed"),

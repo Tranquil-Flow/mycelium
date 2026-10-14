@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import signal
 import sys
 import threading
 import time
@@ -23,6 +24,7 @@ import mycelium_service_runner as runner
 from mycelium_host_platform import _win32_api as w
 
 from tests.host_platform.fake_win32 import simulate_win32
+from tests.host_platform.signal_probe import guard_signal_handlers
 
 
 REAL_INTERPRETER = sys.executable
@@ -252,3 +254,40 @@ def test_stop_is_windows_only(tmp_path, monkeypatch) -> None:
     )
     assert runner.main(["--config", str(config), "--stop"]) == 2
     assert os.listdir(state) == []
+
+
+@pytest.mark.skipif(not hasattr(signal, "pthread_kill"), reason="needs a POSIX test host")
+def test_sigterm_stops_the_runner_without_its_handler_taking_a_lock(
+    tmp_path, host, monkeypatch
+) -> None:
+    # The handler runs on the main thread between bytecodes, while that thread
+    # sits in the runner's stop wait; a handler that takes the wait's lock
+    # (Event.set under Event.wait) deadlocks the runner on its own thread.
+    fake, python, sentinel = host
+    config = _config(tmp_path, python, _child(sentinel, obey=True))
+    installed = guard_signal_handlers(monkeypatch)
+    before = signal.getsignal(signal.SIGTERM)
+    main_thread = threading.main_thread().ident
+
+    def deliver() -> None:
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            try:
+                if _status(config)["state"] == "running":
+                    break
+            except (OSError, ValueError, KeyError):
+                pass
+            time.sleep(0.02)
+        time.sleep(0.2)
+        if signal.SIGTERM in installed and signal.getsignal(signal.SIGTERM) is not before:
+            signal.pthread_kill(main_thread, signal.SIGTERM)
+
+    sender = threading.Thread(target=deliver, daemon=True)
+    sender.start()
+    assert runner.run_service(config) == 0
+    sender.join(10)
+    status = _status(config)
+    assert status["state"] == "stopped_by_manager"
+    assert status["child_exit_code"] == 0
+    assert set(installed) == {signal.SIGINT, signal.SIGTERM}
+    assert signal.getsignal(signal.SIGTERM) is before

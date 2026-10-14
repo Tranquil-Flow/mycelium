@@ -191,3 +191,55 @@ def test_origin_must_be_canonical_https(tmp_path: Path) -> None:
             state_root=tmp_path / "bad",
             port=0,
         )
+
+
+def test_rehearsal_seed_stops_on_sigterm_without_taking_a_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # CPython runs the handler on the main thread, which parks in the stop
+    # wait: a handler that takes that wait's lock (Event.set) or closes the
+    # server (which locks and joins) can deadlock the seed on its own thread.
+    import signal
+    from types import SimpleNamespace
+
+    import scripts.a8_run_rehearsal_seed as rehearsal
+    from tests.host_platform.signal_probe import guard_signal_handlers
+
+    events: list[str] = []
+
+    class FakeServer:
+        base_url = "http://127.0.0.1:1"
+
+        def start(self) -> None:
+            events.append("start")
+            # Deliver SIGTERM to the installed handler on the main thread.
+            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+
+        def close(self) -> None:
+            events.append("close")
+
+    monkeypatch.setattr(
+        rehearsal,
+        "build_rehearsal_seed",
+        lambda **_kwargs: (
+            FakeServer(),
+            SimpleNamespace(),
+            SimpleNamespace(canonical_origin=ORIGIN),
+        ),
+    )
+    monkeypatch.setattr(rehearsal, "_owner_console", lambda _coordinator, _stop: None)
+    before = {
+        signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)
+    }
+    installed = guard_signal_handlers(monkeypatch)
+    try:
+        outcome = rehearsal.main(
+            ["--origin", ORIGIN, "--port", "0", "--state-root", str(tmp_path / "state")]
+        )
+    finally:
+        for signum, handler in before.items():
+            signal.signal(signum, handler)
+
+    assert outcome == 0
+    assert events == ["start", "close"]
+    assert set(installed) == {signal.SIGINT, signal.SIGTERM}
