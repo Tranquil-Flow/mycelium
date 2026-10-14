@@ -267,6 +267,33 @@ def _operator_plan(
     return plan
 
 
+def _free_dynamic_port() -> int:
+    """A loopback port that is free now and that ``RegistryLaunch.run`` accepts.
+
+    ``run`` really binds the port it is given (``_assert_loopback_port_free``),
+    so a constant such as 49152 collides under pytest-xdist when two workers
+    reach that bind together (``OSError: [Errno 48] Address already in use``).
+    The port is released before use, so another process could take it in
+    between; ``run`` then fails closed with ``dynamic_loopback_port_unavailable``.
+    That window is microseconds wide on a port the kernel just chose, unlike a
+    constant every worker shares.  Ports below 49152 are refused by ``run``
+    (``dynamic_loopback_port_required``), so an ephemeral port outside that range
+    (Linux defaults start at 32768) is not returned.
+    """
+    import random
+    import socket
+    for candidate in (0, *random.sample(range(49_152, 65_536), 64)):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("127.0.0.1", candidate))
+            except OSError:
+                continue
+            port = probe.getsockname()[1]
+        if 49_152 <= port <= 65_535:
+            return port
+    raise RuntimeError("no free dynamic loopback port")
+
+
 def _prepared(tmp_path: Path):
     return prepare_local_source(
         _snapshot(tmp_path), compiler=lambda _source: _compiled_manifest(CANDIDATE_MODEL)
@@ -310,14 +337,15 @@ def test_registry_launch_calls_native_qualification_registry_supervisor(
         seed_state_root=seed._seed_root,
         runner=runner,
     )
-    result = launch.run(approval=_approval(launch), port=49152)
+    port = _free_dynamic_port()
+    result = launch.run(approval=_approval(launch), port=port)
 
     assert result == 17
     assert len(calls) == 1
     assert calls[0] == {
         "operator_plans": (plan.resolve(),),
         "host": "127.0.0.1",
-        "port": 49152,
+        "port": port,
         "registry_state": (private_root / "registry-state.json").resolve(),
         "seed_state_root": seed._seed_root.resolve(),
         "product_state_root": (private_root / "product").resolve(),
@@ -404,17 +432,17 @@ def test_execution_is_bound_to_exact_plan_and_two_hosts(tmp_path,seed):
     calls=[]
     launch=prepare_registry_launch(prepared=prepared,operator_plan=plan,
         private_state_root=tmp_path/'private',seed_state_root=seed._seed_root,runner=lambda **kw:calls.append(kw) or 0)
-    approval=_approval(launch)
+    approval=_approval(launch);port=_free_dynamic_port()
     assert len(set(launch.physical_host_ids))==2
     with pytest.raises(ServingPreparationError,match='model_execution_topology_mismatch'):
-        launch.run(approval=replace(approval,physical_host_ids=('unapproved-a','unapproved-b')),port=49152)
+        launch.run(approval=replace(approval,physical_host_ids=('unapproved-a','unapproved-b')),port=port)
     with pytest.raises(ServingPreparationError,match='model_execution_topology_mismatch'):
-        launch.run(approval=replace(approval,operator_plan_digest='sha256:'+'0'*64),port=49152)
+        launch.run(approval=replace(approval,operator_plan_digest='sha256:'+'0'*64),port=port)
     value=json.loads(plan.read_text())
     value['controller']['peers'][1]['ssh_target']='unapproved@other-host'
     plan.write_text(json.dumps(value))
     with pytest.raises(ServingPreparationError,match='operator_plan_changed'):
-        launch.run(approval=approval,port=49152)
+        launch.run(approval=approval,port=port)
     assert calls==[]
 
 
@@ -456,7 +484,7 @@ def test_seed_binding_is_read_only_and_rechecked_at_execution(tmp_path,seed):
     # Remove a key in this disposable test installation, never a seed DB edit.
     (seed._seed_root/'identity'/'seed.key').unlink()
     with pytest.raises(ServingPreparationError,match='operator_plan_seed_binding_invalid'):
-        launch.run(approval=_approval(launch),port=49152)
+        launch.run(approval=_approval(launch),port=_free_dynamic_port())
     assert calls==[]
 
 

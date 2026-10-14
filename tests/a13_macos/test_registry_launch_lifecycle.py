@@ -2,7 +2,7 @@
 import socket
 import threading
 import pytest
-from test_serving import seed, private_fixture_identity, _prepared, _operator_plan, _approval
+from test_serving import seed, private_fixture_identity, _prepared, _operator_plan, _approval, _free_dynamic_port
 from mycelium_a13_macos.serving import prepare_registry_launch, ServingPreparationError
 
 
@@ -27,5 +27,5 @@ def test_invalid_lifecycle_hooks_never_reach_runner(tmp_path,seed):
         runner=lambda **kw:calls.append(kw) or 0)
     for hooks in ({'stop_event':object()},{'on_started':7}):
         with pytest.raises(ServingPreparationError,match='registry_lifecycle_invalid'):
-            launch.run(approval=_approval(launch),port=49152,api_only=True,**hooks)
+            launch.run(approval=_approval(launch),port=_free_dynamic_port(),api_only=True,**hooks)
     assert calls==[]

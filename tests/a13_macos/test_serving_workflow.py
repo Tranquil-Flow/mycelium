@@ -60,10 +60,10 @@ def test_compiled_plan_binds_real_members_and_inert_serving_composition(tmp_path
         assert actual['controller']['membership_snapshot']['swarm_id']==authority.coordinator.swarm_id
         assert set(actual['controller']['prepositioned_artifacts']['members'])==set(nodes)
         assert all(authority.control_mailbox.pending_offer(authority.coordinator.member(node)) is None for node in nodes)
-        from test_serving import _approval
+        from test_serving import _approval, _free_dynamic_port
         from mycelium_a13_macos.serving import ServingPreparationError
         with pytest.raises(ServingPreparationError,match='approval_required'):
-            workflow.run(approval=None,port=49152)
+            workflow.run(approval=None,port=_free_dynamic_port())
         assert all(authority.control_mailbox.pending_offer(authority.coordinator.member(node)) is None for node in nodes)
         # Inert execution seams only. Real TLS/native staging is exercised by
         # test_workflow; this pins the complete owner dispatch and grant order.

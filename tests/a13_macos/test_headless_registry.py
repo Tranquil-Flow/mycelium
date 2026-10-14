@@ -17,7 +17,7 @@ from urllib.request import urlopen
 import pytest
 
 import mycelium_live.supervisor as supervisor
-from tests.a13_macos.test_serving import _operator_plan, _prepared, _approval, seed  # noqa: F401
+from tests.a13_macos.test_serving import _free_dynamic_port, _operator_plan, _prepared, _approval, seed  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -249,12 +249,14 @@ def test_registry_launch_run_threads_api_only_to_runner(tmp_path: Path, seed):  
         seed_state_root=seed._seed_root,
         runner=runner,
     )
-    assert launch.run(approval=_approval(launch), port=49152, api_only=True) == 5
+    port = _free_dynamic_port()
+    assert launch.run(approval=_approval(launch), port=port, api_only=True) == 5
     assert calls[0]["api_only"] is True
+    assert calls[0]["port"] == port
     # Default remains UI mode: api_only must be absent, not False.
-    assert launch.run(approval=_approval(launch), port=49152) == 5
+    assert launch.run(approval=_approval(launch), port=port) == 5
     assert "api_only" not in calls[1]
     # Invalid value fails closed before the runner is called.
     with pytest.raises(Exception, match="api_only_invalid"):
-        launch.run(approval=_approval(launch), port=49152, api_only="yes")
+        launch.run(approval=_approval(launch), port=port, api_only="yes")
     assert len(calls) == 2
