@@ -1243,8 +1243,8 @@
     },
     {
       "path": "mycelium_node/__main__.py",
-      "sha256": "sha256:007b8be08ad6c864862f5dbf9ae7e15e5ea42f6529976997f7c6b5c94f06550b",
-      "size_bytes": 45483
+      "sha256": "sha256:254a2627d546b71ce313f4338c8db599dce7485757135105afe4a910c31203a8",
+      "size_bytes": 46651
     },
     {
       "path": "mycelium_node/durable_membership.py",
@@ -3513,8 +3513,8 @@
     },
     {
       "path": "tests/node_agent/test_node_main.py",
-      "sha256": "sha256:24d9c39020e1d72ae3d2bedc93599f752766ae5110fe108019f71d526fde9279",
-      "size_bytes": 133750
+      "sha256": "sha256:6dcd3e4fdb8f7a79a59be71333241fd59fbd19eacfcd4303e860da49d9d8282e",
+      "size_bytes": 137381
     },
     {
       "path": "tests/node_agent/test_node_win32_seam.py",
@@ -3978,5 +3978,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:1a1b4b77376cd46ba5e18ec718b80e69f19cbc058d4b405aee655d6a324f8e00"
+  "source_digest": "sha256:bc1ddaae893c6e10e32712639cb32dba02da54438212cc289183dee8f021f387"
 }
