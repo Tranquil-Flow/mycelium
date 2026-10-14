@@ -287,3 +287,32 @@ def test_concurrent_process_resume_is_serialized(tmp_path):
         assert worker.exitcode == 0
     assert [queue.get(timeout=2) for _ in workers] == ['committed', 'committed']
     assert store.read()['node-a']['generation'] == 6
+
+
+# Each member signs its migration profile on its own host (run_a9_gate member-sign);
+# the seed host executes the migration. Allow the seed host to be up to
+# MAX_CLOCK_SKEW_SECONDS behind a member's clock; the lease stays strict.
+def _profile_issued_at(tmp_path, issued_at, **overrides):
+    store, envelope, signer = fixture(tmp_path)
+    declared = {**envelope['profile'], 'issued_at': issued_at, **overrides}
+    return store, sign_peer_profile(signer=signer, profile=PeerProfile.from_mapping(declared))
+
+@pytest.mark.parametrize('ahead', [0.2, 29.0])
+def test_profile_signed_on_a_member_clock_up_to_30_s_ahead_migrates(tmp_path, ahead):
+    store, signed = _profile_issued_at(tmp_path, NOW + ahead)
+    assert MigrationExecutor(store).execute(request(signed), now=NOW) == 'committed'
+    assert store.read()['node-a']['generation'] == 6
+
+def test_profile_signed_on_a_member_clock_31_s_ahead_is_refused(tmp_path):
+    store, signed = _profile_issued_at(tmp_path, NOW + 31.0)
+    before = (store.root / 'members.json').read_bytes()
+    with pytest.raises(MigrationError, match='profile_build_or_lease_mismatch'):
+        MigrationExecutor(store).execute(request(signed), now=NOW)
+    assert (store.root / 'members.json').read_bytes() == before
+    assert not (store.root / 'journal.json').exists()
+
+def test_profile_lease_gets_no_clock_skew_allowance(tmp_path):
+    store, signed = _profile_issued_at(tmp_path, NOW - 2.0, lease_expires_at=NOW - 0.5)
+    with pytest.raises(MigrationError, match='profile_build_or_lease_mismatch'):
+        MigrationExecutor(store).execute(request(signed), now=NOW)
+    assert not (store.root / 'journal.json').exists()

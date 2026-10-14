@@ -677,3 +677,102 @@ def test_ready_and_failed_terminal_states_are_mutually_truthful() -> None:
         SwarmArtifactContractError, match="artifact_acquisition_status_invalid"
     ):
         validate_acquisition_status(invalid)
+
+
+# A chunk request is signed on the recipient's clock and verified on the
+# source member's host: allow the source to be up to MAX_CLOCK_SKEW_SECONDS
+# behind the recipient, never extend the request's expiry.
+_SKEW_NOW_MS = 1_000_000
+
+
+def _skewed_chunk_request(*, issued_ms: int, expires_ms: int) -> tuple:
+    manifest = _manifest()
+    provisioner = generate_ed25519_signer(endpoint_id="provisioner")
+    recipient = generate_ed25519_signer(endpoint_id="recipient-member-3")
+    grant = sign_grant(
+        {
+            "protocol": GRANT_PROTOCOL,
+            "grant_id": "grant-skew-1",
+            "nonce": "grant-skew-nonce-1",
+            "provisioner_generation": 11,
+            "recipient_member_id": "member-3",
+            "recipient_membership_generation": 9,
+            "manifest_digest": manifest["manifest_digest"],
+            "assignment_digest": manifest["assignment_digest"],
+            "representation_digest": manifest["representation_digest"],
+            "feasibility_digest": manifest["feasibility_digest"],
+            "allowed_chunk_digests": sorted(
+                item["content_digest"] for item in manifest["chunks"]
+            ),
+            "maximum_total_bytes": manifest["total_size_bytes"],
+            "maximum_concurrency": 2,
+            "maximum_bytes_per_second": 1_000_000,
+            "authorized_source_member_ids": ["member-a"],
+            "origin_fallback_allowed": False,
+            "issued_at_unix_ms": _SKEW_NOW_MS - 100_000,
+            "not_before_unix_ms": _SKEW_NOW_MS - 50_000,
+            "expires_at_unix_ms": _SKEW_NOW_MS + 600_000,
+        },
+        provisioner,
+    )
+    request = sign_chunk_request(
+        {
+            "protocol": CHUNK_REQUEST_PROTOCOL,
+            "request_id": "request-skew-1",
+            "request_nonce": "request-skew-nonce-1",
+            "grant": grant,
+            "source_member_id": "member-a",
+            "recipient_member_id": "member-3",
+            "recipient_membership_generation": 9,
+            "manifest_digest": manifest["manifest_digest"],
+            "chunk_digest": manifest["chunks"][0]["content_digest"],
+            "offset_bytes": 0,
+            "length_bytes": 2,
+            "issued_at_unix_ms": issued_ms,
+            "expires_at_unix_ms": expires_ms,
+        },
+        recipient,
+    )
+    arguments = {
+        "provisioner_verifier": build_ed25519_verifier(
+            [provisioner.public_key_record()]
+        ),
+        "recipient_verifier": build_ed25519_verifier([recipient.public_key_record()]),
+        "now_unix_ms": _SKEW_NOW_MS,
+        "expected_source_member_id": "member-a",
+        "expected_manifest": manifest,
+        "expected_provisioner_generation": 11,
+    }
+    return request, arguments
+
+
+@pytest.mark.parametrize("ahead_ms", [200, 29_000])
+def test_chunk_request_from_a_recipient_clock_up_to_30_s_ahead_is_accepted(
+    ahead_ms: int,
+) -> None:
+    issued = _SKEW_NOW_MS + ahead_ms
+    request, arguments = _skewed_chunk_request(
+        issued_ms=issued, expires_ms=issued + 60_000
+    )
+    assert validate_chunk_request(request, **arguments) == request
+
+
+def test_chunk_request_from_a_recipient_clock_31_s_ahead_is_refused() -> None:
+    issued = _SKEW_NOW_MS + 31_000
+    request, arguments = _skewed_chunk_request(
+        issued_ms=issued, expires_ms=issued + 60_000
+    )
+    with pytest.raises(
+        SwarmArtifactContractError, match="artifact_chunk_request_ineligible"
+    ):
+        validate_chunk_request(request, **arguments)
+
+
+def test_chunk_request_expiry_gets_no_clock_skew_allowance() -> None:
+    request, arguments = _skewed_chunk_request(
+        issued_ms=_SKEW_NOW_MS - 60_000, expires_ms=_SKEW_NOW_MS - 1
+    )
+    with pytest.raises(
+        SwarmArtifactContractError, match="artifact_chunk_request_ineligible"
+    ):
+        validate_chunk_request(request, **arguments)
