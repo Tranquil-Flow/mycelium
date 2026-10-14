@@ -37,6 +37,8 @@ export interface InferenceClient {
     onEvent: (event: InferenceEvent) => void,
     signal?: AbortSignal,
     publisherGeneration?: number,
+    /** Called once the gateway accepted the subscription (200 event stream). */
+    onOpen?: () => void,
   ): Promise<void>;
   cancel(
     request: InferenceAcceptedResponse,
@@ -358,6 +360,7 @@ export class ProductInferenceClient implements InferenceClient {
     onEvent: (event: InferenceEvent) => void,
     signal?: AbortSignal,
     publisherGeneration?: number,
+    onOpen?: () => void,
   ): Promise<void> {
     let accepted: InferenceAcceptedResponse;
     try {
@@ -394,6 +397,7 @@ export class ProductInferenceClient implements InferenceClient {
       throw clientError('invalid_event_stream', false, response.status);
     }
     if (response.body === null) throw clientError('invalid_event_stream', false, response.status);
+    onOpen?.();
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8', { fatal: true });

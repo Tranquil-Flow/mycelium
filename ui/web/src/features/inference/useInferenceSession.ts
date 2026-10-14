@@ -58,6 +58,7 @@ type SessionAction =
   | { readonly type: 'event'; readonly event: InferenceEvent; readonly now: number }
   | { readonly type: 'interrupted'; readonly code: string | null }
   | { readonly type: 'stream_reopened' }
+  | { readonly type: 'stream_opened'; readonly publisher_generation: number }
   | { readonly type: 'cancelling' }
   | { readonly type: 'cancel_unconfirmed' }
   | { readonly type: 'cancel_failed'; readonly code: string }
@@ -363,6 +364,15 @@ export function inferenceSessionReducer(
             phase: state.cancellation_requested ? 'cancelling' : 'streaming',
             error_code: null,
           });
+    case 'stream_opened':
+      // The gateway accepted a resume and advanced the publisher generation by
+      // exactly one (A4 reconnect contract). Record it now: the replay may be
+      // empty until the recovered route publishes, and a reload before that
+      // event must resume under the server's current generation, not ours.
+      return isTerminalInferencePhase(state.phase)
+        || action.publisher_generation !== state.publisher_generation + 1
+        ? state
+        : Object.freeze({ ...state, publisher_generation: action.publisher_generation });
     case 'cancelling':
       return isTerminalInferencePhase(state.phase)
         ? state
@@ -519,6 +529,7 @@ export function useInferenceSession({
       streamAbortRef.current = controller;
       dispatch({ type: 'stream_reopened' });
       const operation = (async () => {
+        const resumedGeneration = cursor === null ? undefined : stateRef.current.publisher_generation;
         try {
           await client.stream(
             request,
@@ -528,7 +539,10 @@ export function useInferenceSession({
               if (isTerminalInferencePhase(stateRef.current.phase)) controller.abort();
             },
             controller.signal,
-            cursor === null ? undefined : stateRef.current.publisher_generation,
+            resumedGeneration,
+            resumedGeneration === undefined
+              ? undefined
+              : () => dispatch({ type: 'stream_opened', publisher_generation: resumedGeneration + 1 }),
           );
           const latest = stateRef.current;
           if (!isTerminalInferencePhase(latest.phase)) {

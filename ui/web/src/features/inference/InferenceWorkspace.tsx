@@ -582,7 +582,12 @@ export function InferenceWorkspace({
             <p className={styles.eyebrow}>In-memory decoded stream</p>
             <h2 id="output-title">Output</h2>
           </div>
-          <div className={styles.terminal} role="status" aria-live="polite">
+          <div
+            className={styles.terminal}
+            role="status"
+            aria-live="polite"
+            aria-label="Inference outcome"
+          >
             <strong>{phaseLabel(session.phase)}</strong>
             <span>{session.token_count.toLocaleString()} tokens applied</span>
           </div>
