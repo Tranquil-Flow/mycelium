@@ -355,8 +355,11 @@ def test_the_marker_is_the_apps_own_last_write_before_it_reports_compiled(transp
     workflow = (REPO / 'mycelium_a13_macos/workflow.py').read_text()
     assert "root=_private_directory(authority.state_root/'serving-runs'/run_id,create=True)" in workflow
     assert "path=root/'operator-plan.json'" in workflow
-    assert 'return ManagedServingWorkflow(' in workflow
-    assert workflow.index("path=root/'operator-plan.json'") < workflow.index('return ManagedServingWorkflow(')
+    # The workflow is built (and handed back) only after the marker is written.
+    built = 'workflow=ManagedServingWorkflow('
+    assert built in workflow and workflow.count(built) == 1
+    assert workflow.index("_atomic_private_json(path,bound)") < workflow.index(built)
+    assert workflow.index(built) < workflow.index('    return workflow\n')
 
     chain = (REPO / 'mycelium_a13_macos/chain_compile.py').read_text()
     assert chain.index('prepare_serving_workflow(') < chain.index("{'state':'compiled'"), \
