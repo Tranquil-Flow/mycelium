@@ -1,4 +1,4 @@
-import { backgroundFetch } from '../app/backgroundFetch';
+import { backgroundEventStream, backgroundFetch } from '../app/backgroundFetch';
 import scenarioFixture from '../../../tests/fixtures/source/hypothetical-six-node.json';
 import simulationFixture from '../../../tests/fixtures/source/planner-simulation.json';
 import geographyFixture from '../../../tests/fixtures/source/synthetic-geo.json';
@@ -185,7 +185,7 @@ export interface LiveObservatorySourceOptions {
 
 export const browserFetch: LiveFetch = async (url, init) => backgroundFetch(url, init);
 export const browserEventStreamFactory: LiveEventStreamFactory = (url) =>
-  new EventSource(url) as unknown as LiveEventStream;
+  backgroundEventStream(url) as unknown as LiveEventStream;
 const browserSchedule: Schedule = (callback, delayMs) => setTimeout(callback, delayMs);
 const browserCancelSchedule: CancelSchedule = (handle) => clearTimeout(handle);
 

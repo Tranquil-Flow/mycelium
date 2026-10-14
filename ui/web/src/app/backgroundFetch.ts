@@ -21,6 +21,15 @@
  * A read that fails while the page is live is returned exactly as `fetch`
  * returns it, so the product's degraded/offline states still show real
  * failures. Non-GET requests (user mutations) always pass straight through.
+ *
+ * `backgroundEventStream` does the same for server-sent event streams: the
+ * browser reconnects a native EventSource by itself, and a reconnect the old
+ * document starts while a navigation is pending is refused (and logged) the
+ * same way. The wrapper closes the native stream when the page starts leaving
+ * (`beforeunload`/`pagehide`), opens none while it is leaving, and reopens it
+ * with the same handlers and listeners once the page is active again (the
+ * navigation did not happen, or a back/forward restore). Live stream errors
+ * pass through unchanged.
  */
 
 export type BackgroundFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -67,10 +76,28 @@ function readKey(input: RequestInfo | URL, init: RequestInit | undefined): strin
   return JSON.stringify([url, init?.cache ?? null, init?.credentials ?? null, init?.redirect ?? null, headers]);
 }
 
+/** The part of a native EventSource the wrapper drives. */
+export interface BackgroundEventSourceLike {
+  onopen: ((event: Event) => void) | null;
+  onerror: ((event: Event) => void) | null;
+  addEventListener(type: string, listener: (event: MessageEvent<string>) => void): void;
+  removeEventListener(type: string, listener: (event: MessageEvent<string>) => void): void;
+  close(): void;
+}
+
+export type OpenEventSource = (url: string) => BackgroundEventSourceLike;
+
 export interface PageActivity {
   /** True when a background read may start now. */
   readonly active: () => boolean;
   readonly fetch: BackgroundFetch;
+  /** A lifecycle-aware event stream; see the module comment. */
+  readonly eventStream: (url: string, open: OpenEventSource) => BackgroundEventSourceLike;
+}
+
+interface LifecycleListener {
+  readonly leave: () => void;
+  readonly resume: () => void;
 }
 
 export function createPageActivity(
@@ -82,6 +109,10 @@ export function createPageActivity(
   let resumeTimer: number | null = null;
   const deferred = new Map<string, DeferredRead>();
   const inFlight = new Set<AbortController>();
+  const lifecycle = new Set<LifecycleListener>();
+  const notifyLeave = () => {
+    for (const listener of [...lifecycle]) listener.leave();
+  };
 
   const active = () => !leaving && doc.visibilityState !== 'hidden';
 
@@ -128,16 +159,19 @@ export function createPageActivity(
     if (resumeTimer !== null) win.clearTimeout(resumeTimer);
     resumeTimer = null;
     leaving = false;
+    for (const listener of [...lifecycle]) listener.resume();
     flush();
   };
 
   win.addEventListener('beforeunload', () => {
     leaving = true;
+    notifyLeave();
     if (resumeTimer !== null) win.clearTimeout(resumeTimer);
     resumeTimer = win.setTimeout(resume, NAVIGATION_PENDING_RESUME_MS);
   });
   win.addEventListener('pagehide', () => {
     leaving = true;
+    notifyLeave();
     if (resumeTimer !== null) win.clearTimeout(resumeTimer);
     resumeTimer = null;
     for (const controller of inFlight) controller.abort(abortError());
@@ -174,7 +208,52 @@ export function createPageActivity(
     });
   };
 
-  return Object.freeze({ active, fetch: backgroundFetch });
+  const eventStream = (url: string, open: OpenEventSource): BackgroundEventSourceLike => {
+    const listeners = new Map<string, Set<(event: MessageEvent<string>) => void>>();
+    let source: BackgroundEventSourceLike | null = null;
+    let closed = false;
+    const stream: BackgroundEventSourceLike = {
+      onopen: null,
+      onerror: null,
+      addEventListener(type, listener) {
+        if (!listeners.has(type)) listeners.set(type, new Set());
+        listeners.get(type)?.add(listener);
+        source?.addEventListener(type, listener);
+      },
+      removeEventListener(type, listener) {
+        listeners.get(type)?.delete(listener);
+        source?.removeEventListener(type, listener);
+      },
+      close() {
+        closed = true;
+        detach();
+        lifecycle.delete(watcher);
+      },
+    };
+    const attach = () => {
+      if (closed || source !== null || leaving) return;
+      const next = open(url);
+      next.onopen = (event) => stream.onopen?.(event);
+      next.onerror = (event) => stream.onerror?.(event);
+      for (const [type, set] of listeners) for (const listener of set) next.addEventListener(type, listener);
+      source = next;
+    };
+    const detach = () => {
+      if (source === null) return;
+      const current = source;
+      source = null;
+      current.onopen = null;
+      current.onerror = null;
+      for (const [type, set] of listeners) for (const listener of set) current.removeEventListener(type, listener);
+      current.close();
+    };
+    const watcher: LifecycleListener = { leave: detach, resume: attach };
+    lifecycle.add(watcher);
+    attach();
+    return stream;
+  };
+
+  return Object.freeze({ active, fetch: backgroundFetch, eventStream });
 }
 
 let browserActivity: PageActivity | null = null;
@@ -188,6 +267,13 @@ function browserPageActivity(): PageActivity | null {
     (input, init) => globalThis.fetch(input, init),
   );
   return browserActivity;
+}
+
+/** Server-sent event stream for background updates; see the module comment. */
+export function backgroundEventStream(url: string): BackgroundEventSourceLike {
+  const open: OpenEventSource = (target) => new EventSource(target) as unknown as BackgroundEventSourceLike;
+  const activity = browserPageActivity();
+  return activity === null ? open(url) : activity.eventStream(url, open);
 }
 
 /** `fetch` for background reads; see the module comment. */
