@@ -821,6 +821,102 @@ def test_node_join_rejection_has_distinct_exit_and_redacts_token(
     assert bundle["token"] not in rejected.stdout + rejected.stderr
 
 
+# Runs the real node entrypoint, but once ``node_started`` has been emitted it
+# raises SIGTERM on the main thread at every Python/C call boundary (where
+# CPython runs pending signal handlers) for as long as the node's own stop
+# handler is installed.  A signal can arrive at any such boundary in
+# production; whichever one it lands on, the node must stop.
+_SIGTERM_AT_EVERY_CALL_BOUNDARY = """
+import signal
+import sys
+
+import mycelium_node.__main__ as node_main
+
+inherited = signal.getsignal(signal.SIGTERM)
+emit_status = node_main._emit_status
+remaining = [20_000]
+
+
+def deliver(_frame, _event, _arg):
+    handler = signal.getsignal(signal.SIGTERM)
+    if remaining[0] <= 0 or handler in (inherited, signal.SIG_DFL, signal.SIG_IGN, None):
+        return
+    remaining[0] -= 1
+    signal.raise_signal(signal.SIGTERM)
+
+
+def emit(status):
+    emit_status(status)
+    if status.get("event") == "node_started":
+        sys.setprofile(deliver)
+
+
+node_main._emit_status = emit
+node_main.main()
+"""
+
+
+@_POSIX_NODE_CLI_FIXTURE
+def test_node_stops_when_sigterm_lands_on_any_call_boundary_after_start(
+    tmp_path: Path,
+    node_main_sidecar_binary: Path,  # noqa: F811
+) -> None:
+    coordinator = SeedCoordinator(
+        swarm_id="swarm-node-main-sigterm",
+        seed_node_id="seed-node",
+        seed_url=None,
+        signer=generate_ed25519_signer(endpoint_id="seed-endpoint-sigterm"),
+        invite_registry=SqliteInviteRegistry(
+            tmp_path / "seed-sigterm" / "state.sqlite3"
+        ),
+        incarnation="seed-main-test",
+        id_source=_ids(),
+    )
+    bundle_file = tmp_path / "sigterm-bundle.json"
+    with SeedHTTPServer(coordinator, host="127.0.0.1", port=0):
+        bundle = coordinator.mint_invite(nonce="node-main-sigterm", ttl_seconds=120)
+        _write_bundle(bundle_file, bundle)
+        command = _node_command(
+            data_dir=tmp_path / "node-sigterm",
+            node_id="node-main-sigterm",
+            sidecar=node_main_sidecar_binary,
+            bundle_file=bundle_file,
+        )
+        command[command.index("--join-bundle-file")] = "--seed-invite"
+        module_flag = command.index("-m")
+        command[module_flag : module_flag + 2] = [
+            "-c",
+            _SIGTERM_AT_EVERY_CALL_BOUNDARY,
+        ]
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            assert _read_status(process)["event"] == "node_started"
+            # The child's own cleanup is bounded by its 5 s shutdown timeout;
+            # a node that is still running after this budget is wedged.
+            stdout, stderr = process.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate(timeout=10)
+            raise AssertionError(
+                "node did not exit after SIGTERM landed on a call boundary"
+            ) from None
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate(timeout=10)
+
+    assert process.returncode == 0, stderr
+    assert stdout == ""
+    assert stderr == ""
+
+
 def test_node_runtime_failure_has_distinct_exit_status(
     tmp_path: Path,
     node_main_sidecar_binary: Path,  # noqa: F811
