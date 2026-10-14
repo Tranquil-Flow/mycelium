@@ -3718,8 +3718,8 @@
     },
     {
       "path": "tests/swarm_directory/test_two_swarms_integration.py",
-      "sha256": "sha256:13f57fab301ccf854b0fd5d42bcfc6e2722fe7f2b6b47f889d33bb07ede563eb",
-      "size_bytes": 13223
+      "sha256": "sha256:81b980e97bdcaf514ce64c8cebacd2d5388e7ce56de8add80cebe8abb3bd4399",
+      "size_bytes": 14314
     },
     {
       "path": "tests/swarm_directory/test_web_ui_browser.py",
@@ -3978,5 +3978,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:7c4b0b0e72ff7bd56614475c9ce05e6028340d4c61111d5e4f8752c46ca39a26"
+  "source_digest": "sha256:1a1b4b77376cd46ba5e18ec718b80e69f19cbc058d4b405aee655d6a324f8e00"
 }
