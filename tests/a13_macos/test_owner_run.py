@@ -152,6 +152,75 @@ def test_rebuild_async_returns_at_once_and_ends_serving_a_fresh_run():
     assert status['reason'] == 'rebuild' and chain.rebuild_flags == [False, True]
 
 
+def hold_caller_stop_until_the_fresh_run_started(run):
+    """Force the ordering the rehearsal flake needed, without timing.
+
+    rebuild_async started its worker thread and only then called stop() from
+    the caller.  stop() ends whatever run is current, so when the worker got
+    through stop -> join -> start('rebuild') first, the caller's stop() hit the
+    fresh run: it sat in 'stopped' with reason 'rebuild' and never served.
+    Hold the caller's stop() until the worker has started the fresh run, but
+    only if that worker already exists (a stop issued before it is untouched).
+    """
+    caller = threading.get_ident()
+    earlier = {t for t in threading.enumerate() if t.name == 'a13-owner-rebuild'}
+    fresh_started = threading.Event()
+    holds = []
+    original_start, original_stop = run.start, run.stop
+
+    def start(reason='start'):
+        try:
+            return original_start(reason)
+        finally:
+            if reason == 'rebuild': fresh_started.set()
+
+    def stop():
+        if threading.get_ident() == caller:
+            worker = [t for t in threading.enumerate() if t.name == 'a13-owner-rebuild' and t not in earlier]
+            if worker:
+                assert fresh_started.wait(5)
+                holds.append('fresh_run_started_before_caller_stop')
+            else:
+                holds.append('caller_stop_before_worker')
+        return original_stop()
+    run.start, run.stop = start, stop
+    return holds
+
+
+def wait_for_the_rebuilt_run(run, first):
+    # Settles on serving, or on a terminal state once the rebuild worker is done.
+    return wait_for(run, lambda s: s['run_id'] != first and (
+        s['state'] == 'serving' or (s['state'] in {'stopped', 'failed'} and not run._rebuilding)))
+
+
+def test_rebuild_async_never_stops_the_fresh_run_it_started():
+    chain = FakeChain(); run = OwnerRun(chain)
+    run.start(); chain.release_all()
+    first = wait_for(run, lambda s: s['state'] == 'serving')['run_id']
+    holds = hold_caller_stop_until_the_fresh_run_started(run)
+    value = run.rebuild_async()
+    assert value['rebuild_requested'] is True and holds
+    status = wait_for_the_rebuilt_run(run, first)
+    assert (status['state'], status['reason'], status['error_code']) == ('serving', 'rebuild', None)
+    assert chain.teardowns == [(first, False)] and chain.rebuild_flags == [False, True]
+
+
+def test_rebuild_async_after_a_failed_run_serves_a_fresh_run():
+    # The owner's Rebuild button after a failed run: the old run has already
+    # torn down, so the worker has nothing to wait for and starts the fresh run
+    # at once - the widest window for the caller's late stop().
+    chain = FakeChain(fail_at='compile', fail_code='two_distinct_hosts_required'); run = OwnerRun(chain)
+    run.start(); chain.release_all()
+    first = wait_for(run, lambda s: s['state'] == 'failed')['run_id']
+    chain.fail_at = None
+    holds = hold_caller_stop_until_the_fresh_run_started(run)
+    assert run.rebuild_async()['rebuild_requested'] is True and holds
+    status = wait_for_the_rebuilt_run(run, first)
+    assert (status['state'], status['reason'], status['error_code'], status['failed_step']) == (
+        'serving', 'rebuild', None, None)
+    assert chain.teardowns == [(first, True)] and chain.rebuild_flags == [False, True]
+
+
 def test_step_budget_expiry_fails_with_timeout_code():
     class Slow(FakeChain):
         def run_step(self, name, ctx):
