@@ -23,7 +23,10 @@ public test prompt over the live physical route → clean quit.
 The five files `app_rpc.py`, `round14_start_and_activate.py`, `round14_stream.py`,
 `packaged_app_daemon.py`, `round15_quit.py` are **byte-identical** to the lane source
 (sha256 equality verified; see the run evidence). Everything else carries exactly the
-de-laning edits listed in the ledger below, and nothing more.
+de-laning edits listed in the ledger below, and nothing more. Since then
+`packaged_app_daemon.py` also stops its app when its controlling channel is gone
+(keepalive line on stdout; a failed write, SIGTERM or SIGHUP quits the app; interval
+`A13_DAEMON_KEEPALIVE_SECONDS`, default 15 s), so it is no longer byte-identical.
 
 ## Env contract (authoritative)
 
