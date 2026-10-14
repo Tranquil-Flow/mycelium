@@ -1315,7 +1315,21 @@ class EntryCoordinator:
       remembered = self._remember_failure_report(report, source_node_id)
       record = self._requests.get(report.request_id)
       if record is None:
-         return False
+         pending = self._pending_prefills.get(report.request_id)
+         if pending is None:
+            return False
+         applied = self._fail_pending_prefill(
+            pending,
+            report,
+            source_node_id,
+            remembered,
+         )
+         if applied is not None:
+            return applied
+         # ManifestLocked won the race: the request is a locked record now.
+         record = self._requests.get(report.request_id)
+         if record is None:
+            return False
       terminal_failure = False
       excluded_placements: frozenset[str] = frozenset()
       excluded_edges: frozenset[str] = frozenset()
@@ -1538,6 +1552,125 @@ class EntryCoordinator:
       if outcome.token_event is not None:
          return self.receive_token_event(outcome.token_event)
       return True
+
+   def _fail_pending_prefill(
+      self,
+      pending: PendingPrefill,
+      report: FailureReport,
+      source_node_id: str | None,
+      remembered: dict[str, Any] | None,
+   ) -> bool | None:
+      """Apply a FailureReport to a progressive prefill still awaiting its lock.
+
+      A downstream stage can fail chunk 0 before the final stage locks the
+      manifest (runtime failure, route extension, manifest lock).  The request
+      fails at once with the reported cause instead of waiting for the node's
+      prefill watchdog; the entry releases what it holds for the path, as for a
+      terminal post-lock failure.  Returns ``None`` when ``ManifestLocked``
+      already turned the request into a locked record (the caller applies the
+      report there), else ``False`` (never a recovery).
+      """
+
+      with pending.lock:
+         state = pending.state_machine.state
+         if state != "PREFILL":
+            return None if state in {"LOCKED", "DECODING"} else False
+         if not self._failure_identity_matches_pending_prefill(
+            pending,
+            report,
+            source_node_id,
+         ):
+            return False
+         if remembered is not None:
+            remembered["applied"] = True
+         pending.state_machine.transition(
+            "FAILED",
+            path_attempt=pending.build.path_attempt,
+         )
+      try:
+         self.builder.abort(pending.build)
+      finally:
+         self.relay.release_path(
+            pending.build.path_id,
+            path_attempt=pending.build.path_attempt,
+         )
+      return False
+
+   def _failure_identity_matches_pending_prefill(
+      self,
+      pending: PendingPrefill,
+      report: FailureReport,
+      source_node_id: str | None,
+   ) -> bool:
+      """The same binding a locked path gets, limited to what the entry knows.
+
+      Before the lock the entry knows the path identity and the hops it chose
+      itself; later hops are chosen downstream.  A report must name this
+      request's path and attempt and the first-chunk prefill (``-1``), and a
+      placement that can be on the path: one of the entry's own hops, or a
+      placement of a stage not yet built.  An authenticated origin must host
+      that placement (``DEVICE``: be the reported node).
+      """
+
+      build = pending.build
+      if (
+         report.path_id != build.path_id
+         or report.path_attempt != build.path_attempt
+         or report.token_index != -1
+      ):
+         return False
+      graph = pending.graph
+      known = len(build.ordered_hops)
+      candidates = {hop.placement_id for hop in build.ordered_hops}
+      candidates.update(
+         placement.placement_id
+         for stage in graph.stages[known:]
+         for placement in stage.placements
+      )
+      placement_by_id = {
+         placement.placement_id: placement
+         for stage in graph.stages
+         for placement in stage.placements
+         if placement.placement_id in candidates
+      }
+      if report.scope == "DEVICE":
+         if not report.node_id:
+            return False
+         if source_node_id is not None and report.node_id != source_node_id:
+            return False
+         return report.node_id == self.node_id or any(
+            placement.node_id == report.node_id
+            for placement in placement_by_id.values()
+         )
+      if report.scope not in {"PLACEMENT", "EDGE"}:
+         return False
+      placement = placement_by_id.get(report.placement_id)
+      if placement is None:
+         return False
+      if report.scope == "EDGE":
+         edge = next(
+            (
+               edge
+               for edge in (*graph.edges, *graph.loopback_edges)
+               if edge.edge_id == report.edge_id
+            ),
+            None,
+         )
+         if (
+            edge is None
+            or report.placement_id not in {
+               edge.from_placement_id,
+               edge.to_placement_id,
+            }
+            or edge.from_placement_id not in candidates
+            or edge.to_placement_id not in candidates
+         ):
+            return False
+      if source_node_id is None:
+         return True
+      return placement.node_id == source_node_id and (
+         not report.node_id or report.node_id == source_node_id
+      )
 
    def _failure_identity_matches_locked_path(
       self,
