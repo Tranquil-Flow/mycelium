@@ -4,6 +4,7 @@ from collections.abc import Callable
 import os
 from pathlib import Path
 import signal
+import subprocess
 import sys
 import time
 
@@ -284,3 +285,142 @@ def test_supervised_target_still_launches_when_it_runs_ahead_of_the_owner(
             os.killpg(supervised.pid, signal.SIGKILL)
             supervised._process.wait(timeout=2.0)
         supervised.close()
+
+
+def _group_members(process_group: int) -> list[str]:
+    output = subprocess.run(
+        ["/bin/ps", "-axo", "pid=,pgid=,command="],
+        check=True, capture_output=True, text=True, timeout=10,
+    ).stdout
+    return [line for line in output.splitlines() if line.split()[1:2] == [str(process_group)]]
+
+
+def _hold_until_image(
+    monkeypatch: pytest.MonkeyPatch, image: Path, spawned: list[subprocess.Popen[bytes]]
+) -> list[str]:
+    """Hold the owner after the target exec until the child runs ``image``.
+
+    The child then changes its executable before the owner's first identity
+    observation.  The hold releases on that observed image, never on time.
+    """
+
+    real_await_target_exec = process_module._await_target_exec
+    held: list[str] = []
+
+    def target_runs_ahead(exec_read: int, process, deadline: float) -> None:
+        spawned.append(process)
+        real_await_target_exec(exec_read, process, deadline)
+        while True:
+            try:
+                observed = Path(process_module._inventory_process(process.pid).executable.path)
+            except ProcessLookupError:
+                observed = None
+            held.append(str(observed))
+            if observed is not None and observed.resolve() == image.resolve():
+                return
+            assert time.monotonic() < deadline, f"target never ran {image}: {held[-3:]}"
+            time.sleep(0.005)
+
+    monkeypatch.setattr(process_module, "_await_target_exec", target_runs_ahead)
+    return held
+
+
+def _assert_refused_and_nothing_left(
+    error: process_module.NodeProcessError, child: subprocess.Popen[bytes]
+) -> dict:
+    record = error.start_failure.as_record()
+    # The start is still refused for the changed executable ...
+    assert (record["phase"], record["kind"]) == ("identity", "identity_invalid")
+    assert record["inner_code"] == "node_process_identity_invalid"
+    # Cleanup stopped and reaped our own child: nothing of it is left.
+    assert error.code == "node_process_start_failed"
+    assert error.cleanup_owner is None
+    assert child.returncode is not None
+    assert record["launcher_reaped"] is True
+    with pytest.raises(ProcessLookupError):
+        os.kill(child.pid, 0)
+    assert _group_members(child.pid) == []
+    # The bounded record says the owned child's identity had changed.
+    assert record["identity_changed"] is True
+    return record
+
+
+def _kill_leftover(child: list[subprocess.Popen[bytes]]) -> None:
+    # The base tree leaves the child running: never leak it from the test.
+    for process in child:
+        if process.returncode is None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait(timeout=5.0)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or _SELECTED_SHELL == Path("/bin/sh").resolve(),
+    reason="macOS /bin/sh re-exec shim",
+)
+def test_failed_start_stops_and_reaps_a_shim_child_that_changed_executable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused start must not orphan the child it spawned.
+
+    The /bin/sh shim execs the selected shell before the owner's first
+    observation, so the start is refused with node_process_identity_invalid.
+    The child is still ours and unreaped (its pid cannot be reused), so
+    cleanup must stop and reap its group rather than leave the busy-looping
+    shell to be reparented to PID 1.
+    """
+
+    launcher_path = process_module._inventory_process(os.getpid()).executable.path
+    _ready, _release, target = _write_exec_transition_target(tmp_path, launcher_path)
+    spawned: list[subprocess.Popen[bytes]] = []
+    held = _hold_until_image(monkeypatch, _SELECTED_SHELL, spawned)
+    try:
+        with pytest.raises(process_module.NodeProcessError) as caught:
+            process_module.PhysicalNodeProcess(
+                command=("/bin/sh", str(target)),
+                node_id="node-native-cleanup",
+                run_id="run-native-cleanup",
+                deployment_id="deployment-native-cleanup",
+                response_timeout_seconds=0.05,
+                shutdown_timeout_seconds=1.0,
+            )
+        assert held and Path(held[-1]).resolve() == _SELECTED_SHELL
+        assert len(spawned) == 1
+        record = _assert_refused_and_nothing_left(caught.value, spawned[0])
+        assert record["launcher_returncode"] in {-signal.SIGTERM, -signal.SIGKILL}
+    finally:
+        _kill_leftover(spawned)
+
+
+@pytest.mark.skipif(sys.platform not in {"darwin", "linux"}, reason="POSIX process groups")
+def test_failed_start_kills_a_term_ignoring_child_that_changed_executable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TERM then KILL inside the budget, even after the child exec'd away."""
+
+    sleep_binary = Path("/bin/sleep")
+    target = tmp_path / "exec-away.sh"
+    target.write_text(f"trap '' TERM\nexec {str(sleep_binary)!r} 60\n", encoding="utf-8")
+    spawned: list[subprocess.Popen[bytes]] = []
+    held = _hold_until_image(monkeypatch, sleep_binary, spawned)
+    try:
+        with pytest.raises(process_module.NodeProcessError) as caught:
+            process_module.PhysicalNodeProcess(
+                command=(str(_SELECTED_SHELL), str(target)),
+                node_id="node-native-cleanup",
+                run_id="run-native-cleanup",
+                deployment_id="deployment-native-cleanup",
+                response_timeout_seconds=0.05,
+                shutdown_timeout_seconds=1.0,
+            )
+        assert held and Path(held[-1]).resolve() == sleep_binary.resolve()
+        assert len(spawned) == 1
+        record = _assert_refused_and_nothing_left(caught.value, spawned[0])
+        assert record["launcher_returncode"] == -signal.SIGKILL
+    finally:
+        _kill_leftover(spawned)

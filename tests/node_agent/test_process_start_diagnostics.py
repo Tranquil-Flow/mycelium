@@ -29,7 +29,7 @@ import mycelium_node.process as process_module
 _RECORD_KEYS = {
     "phase", "kind", "elapsed_ms", "budget_ms", "popen_ms", "exception_type",
     "errno", "inner_code", "launcher_exited", "launcher_returncode",
-    "launcher_reaped", "phase_ms",
+    "launcher_reaped", "identity_changed", "phase_ms",
 }
 
 

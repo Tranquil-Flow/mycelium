@@ -1539,6 +1539,85 @@ def test_process_verified_signal_refuses_changed_or_protected_identity(
 
 
 @_POSIX_PROCESS_GROUPS
+def test_process_signal_stops_own_unreaped_child_after_its_executable_changed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the executable may differ, and only while the child is unreaped.
+
+    An unreaped child's pid cannot be reused, so cleanup signals it even after
+    it exec'd an unpinned image, and records that.  A changed incarnation
+    (start token) is still refused, and so is a reaped child's group with a
+    foreign session: pid-reuse protection is unchanged.
+    """
+
+    process_module = importlib.import_module("mycelium_node.process")
+
+    def executable(path: str, inode: int) -> Any:
+        return process_module._ExecutableIdentity(
+            path=path, device=1, inode=inode, mode=stat.S_IFREG | 0o755,
+            uid=os.getuid(), size=10, mtime_ns=11, ctime_ns=12,
+        )
+
+    launch = process_module._ProcessIdentity(
+        pid=4242, parent_pid=os.getpid(), process_group=4242, session_id=4242,
+        start_token="launch", executable=executable("/trusted/python", 2),
+    )
+    foreign_image = executable("/bin/bash", 3)
+    observed = [
+        process_module._ProcessIdentity(
+            pid=4242, parent_pid=os.getpid(), process_group=4242, session_id=4242,
+            start_token="launch", executable=foreign_image,
+        )
+    ]
+    returncode: list[int | None] = [None]
+
+    class FakePopen:
+        pid = 4242
+
+        def poll(self) -> int | None:
+            return returncode[0]
+
+    supervised = process_module.PhysicalNodeProcess.__new__(
+        process_module.PhysicalNodeProcess
+    )
+    supervised._process = FakePopen()
+    supervised._launch_identity = launch
+    supervised.shutdown_timeout_seconds = 1.0
+    sent: list[tuple[int, int]] = []
+    members: list[Any] = [
+        (process_module._ProcessGroupMember(pid=4242, process_group=4242, session_id=4242),)
+    ]
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: sent.append((pgid, sig)))
+    monkeypatch.setattr(process_module, "_inventory_process", lambda _pid: observed[0])
+    monkeypatch.setattr(process_module, "_inventory_process_group", lambda *_a: members[0])
+    monkeypatch.setattr(process_module, "_protected_process_groups", lambda _d: {9999})
+
+    assert supervised._signal_process_group(signal.SIGTERM) is True
+    assert sent == [(4242, signal.SIGTERM)]
+    assert supervised._owned_group_state(time.monotonic() + 1.0) == "owned"
+    assert supervised.owned_identity_changed is True
+
+    # A changed incarnation is never our child: refused, whatever its image.
+    sent.clear()
+    observed[0] = process_module._ProcessIdentity(
+        pid=4242, parent_pid=os.getpid(), process_group=4242, session_id=4242,
+        start_token="reused", executable=foreign_image,
+    )
+    assert supervised._signal_process_group(signal.SIGKILL) is False
+    assert supervised._owned_group_state(time.monotonic() + 1.0) == "unsafe"
+    assert sent == []
+
+    # Once reaped, the group must still prove its own session.
+    returncode[0] = -signal.SIGTERM
+    members[0] = (
+        process_module._ProcessGroupMember(pid=5151, process_group=4242, session_id=7777),
+    )
+    assert supervised._signal_process_group(signal.SIGKILL) is False
+    assert supervised._owned_group_state(time.monotonic() + 1.0) == "unsafe"
+    assert sent == []
+
+
+@_POSIX_PROCESS_GROUPS
 def test_reader_thread_start_failure_reaps_launched_child(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
