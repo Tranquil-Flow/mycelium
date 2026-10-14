@@ -3404,13 +3404,33 @@ class PhysicalLiveRoute:
                 if cleanup_complete():
                     return
                 continue
+            # A participant whose process has exited can never answer a cleanup
+            # snapshot, and asking it fails at once (``node_process_closed``).
+            # That failure must not end the wait while a live participant is
+            # still converging (a survivor busy on its stage answers the
+            # cancellation after the inline-receipt grace): the router's
+            # dead-peer proof needs every survivor's exact receipt, so ending
+            # here strands the request in ``request_cleanup_unproven`` even
+            # though the survivor proves clean moments later.  Keep proving the
+            # live participants inside the same owner deadline; once only
+            # exited participants lack a receipt, report exactly that.  An
+            # exited peer's receipt is never waived here: the route still
+            # raises, and only the router's identity-bound dead-peer proof can
+            # seal its cleanup.
+            exited_node_ids = self._exited_participant_ids(missing_node_ids)
+            live_missing_node_ids = missing_node_ids - exited_node_ids
+            if not live_missing_node_ids:
+                raise RuntimeError(
+                    "route_cleanup_participant_exited|"
+                    f"{self._cleanup_blockers(participating_node_ids, cleanup_subject)}"
+                )
             try:
                 attempt_deadline = min(
                     deadline_monotonic_s,
                     time.monotonic() + _CLEANUP_SNAPSHOT_SLICE_SECONDS,
                 )
                 self._snapshot_nodes_before(
-                    missing_node_ids,
+                    live_missing_node_ids,
                     deadline_monotonic_s=attempt_deadline,
                     cleanup_subject=cleanup_subject,
                     receipt_only=receipt_only,
@@ -3450,6 +3470,14 @@ class PhysicalLiveRoute:
                             max(0.0, deadline_monotonic_s - time.monotonic()),
                         )
                     )
+                    continue
+                # A participant that exited during this attempt answered with
+                # its closed control channel, not with a cleanup verdict; the
+                # next round proves the remaining live participants (above).
+                if (
+                    self._exited_participant_ids(live_missing_node_ids)
+                    and time.monotonic() < deadline_monotonic_s
+                ):
                     continue
                 raise RuntimeError(
                     f"{str(error)[:128]}|"
@@ -5024,7 +5052,30 @@ class PhysicalLiveRoute:
                     cleanup_already_proven = (
                         request_id in self._request_cleanup_receipts
                     )
-                if cancellation_requested and (
+                    lost_peer_node_ids = frozenset(
+                        ()
+                        if active_request is None
+                        else active_request.get("lost_peer_node_ids", ())
+                    )
+                # The route's own lost-peer detection (a status read or the
+                # liveness monitor) can linearize this cancellation before the
+                # exited peer's response reader delivers EOF; the in-flight
+                # command is then interrupted as ``request_cancelled``.  That
+                # is the participant's process exit, not an owner
+                # cancellation: record it exactly as the EOF ordering does, so
+                # the request-scoped ``node_process_exited`` incident (the
+                # dead peer's cleanup proof and the A6 source-failure fact)
+                # exists in both orderings.
+                lost_peer_exit_ids = (
+                    self._exited_participant_ids(lost_peer_node_ids)
+                    if (
+                        cancellation_requested
+                        and reason == "request_cancelled"
+                        and not cleanup_already_proven
+                    )
+                    else frozenset()
+                )
+                if cancellation_requested and not lost_peer_exit_ids and (
                     reason == "request_cancelled" or cleanup_already_proven
                 ):
                     # The cooperative interrupt retired this request's inflight
@@ -5035,7 +5086,16 @@ class PhysicalLiveRoute:
                     # a retired inference response cannot reopen it as a
                     # runtime failure.
                     exc = InferenceCancelled("inference_cancelled")
-                if not isinstance(exc, InferenceCancelled):
+                if lost_peer_exit_ids:
+                    for lost_node_id in sorted(lost_peer_exit_ids):
+                        self._record_scoped_runtime_incident(
+                            request_id=request_id,
+                            subject_id=lost_node_id,
+                            scope="request",
+                            reason="node_process_exited",
+                        )
+                    reason = "node_process_exited"
+                elif not isinstance(exc, InferenceCancelled):
                     if not self._record_response_reader_failure_once(
                         request_id=request_id,
                         node_id=entry_node_id,
@@ -5884,6 +5944,22 @@ class PhysicalLiveRoute:
                 return fallback
             return frozenset(active["participating_node_ids"])
 
+    def _exited_participant_ids(self, node_ids: frozenset[str]) -> frozenset[str]:
+        """The given participants whose node process has exited (returncode set).
+
+        Only an observed exit status counts: a peer that is merely disconnected,
+        stalled (SIGSTOP) or slow still has a live process and must prove its
+        own cleanup.
+        """
+
+        with self._lock:
+            sessions = dict(getattr(self, "_sessions", None) or {})
+        return frozenset(
+            node_id
+            for node_id in node_ids
+            if type(getattr(sessions.get(node_id), "returncode", None)) is int
+        )
+
     def _bind_covered_peer_exit(
         self,
         authority: Callable[..., bool],
@@ -6025,6 +6101,22 @@ class PhysicalLiveRoute:
             for request_id in active_tracks:
                 if request_id in covered:
                     continue
+                with self._lock:
+                    # The interruption below is this route observing a
+                    # participant's process exit, not an owner cancellation.
+                    # The request's worker may see its in-flight command
+                    # interrupted (``request_cancelled``) before that peer's
+                    # response reader delivers EOF; it records the exit as
+                    # the request's runtime failure from this mark.
+                    active = self._active_route_requests.get(request_id)
+                    if (
+                        active is not None
+                        and active.get("terminal") is not True
+                        and active.get("cancellation_requested") is not True
+                    ):
+                        active["lost_peer_node_ids"] = frozenset(
+                            active.get("lost_peer_node_ids", ())
+                        ) | {node_id}
                 try:
                     self.cancel_request(
                         request_id,
