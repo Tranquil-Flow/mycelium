@@ -219,8 +219,10 @@ class OwnerRun:
             finally:
                 with self._lock:
                     self._rebuilding = False
-        threading.Thread(target=work, name='a13-owner-rebuild', daemon=True).start()
+        # Stop before the worker exists: stop() ends whatever run is current, so
+        # a later call could land on the fresh run the worker already started.
         self.stop()
+        threading.Thread(target=work, name='a13-owner-rebuild', daemon=True).start()
         value = self.status()
         value['rebuild_requested'] = True
         return value
