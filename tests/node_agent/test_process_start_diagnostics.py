@@ -17,6 +17,7 @@ from __future__ import annotations
 import errno
 import json
 from pathlib import Path
+import subprocess
 import sys
 from typing import Any
 
@@ -27,7 +28,8 @@ import mycelium_node.process as process_module
 
 _RECORD_KEYS = {
     "phase", "kind", "elapsed_ms", "budget_ms", "popen_ms", "exception_type",
-    "errno", "inner_code", "launcher_exited", "launcher_returncode", "phase_ms",
+    "errno", "inner_code", "launcher_exited", "launcher_returncode",
+    "launcher_reaped", "phase_ms",
 }
 
 
@@ -108,7 +110,121 @@ def test_launcher_that_dies_before_ready_records_exit_and_returncode(
     assert (record["phase"], record["kind"]) == ("launcher_ready", "exited")
     assert record["launcher_exited"] is True
     assert record["launcher_returncode"] == 3
+    assert record["launcher_reaped"] is True
     assert error.public_code == "node_process_cleanup_failed_launcher_ready_exited"
+
+
+class _ExitStatusNotYetWaitable(subprocess.Popen):  # type: ignore[type-arg]
+    """The launcher closed its ready pipe, but its exit status is not waitable yet.
+
+    A dying process closes its descriptors before the kernel turns it into a
+    waitable zombie.  Under load the owner can see ``EOF`` on the ready pipe in
+    that gap, and ``poll()`` (``waitpid(WNOHANG)``) then still answers "running".
+    This seam holds exactly that answer: ``poll()`` reports no status while the
+    hold is active.  A blocking ``wait`` is what a real owner would do to collect
+    the status, so it ends the hold (``release_on_wait``) -- or, to model a
+    status that never becomes waitable within the bound, it reports the timeout
+    without consuming the status.  No sleep decides the order.
+
+    Only the launcher is held: every other child (the product's own ``ps``
+    inventory runs, for one) is an ordinary ``Popen``.
+    """
+
+    release_on_wait = True
+    held_polls = 0
+    wait_timeouts: list[float | None] = []
+
+    def __init__(self, args: Any, *rest: Any, **kwargs: Any) -> None:
+        self._held = process_module._LAUNCHER_SOURCE in tuple(args)
+        super().__init__(args, *rest, **kwargs)
+
+    def poll(self) -> int | None:
+        if self._held and self.returncode is None:
+            type(self).held_polls += 1
+            return None
+        return super().poll()
+
+    def wait(self, timeout: float | None = None) -> int:
+        if self._held:
+            type(self).wait_timeouts.append(timeout)
+            if not type(self).release_on_wait:
+                raise subprocess.TimeoutExpired(
+                    self.args, timeout if timeout is not None else 0.0,
+                )
+            self._held = False
+        return super().wait(timeout)
+
+    def reap(self) -> int:
+        self._held = False
+        return super().wait(timeout=10)
+
+
+def _hold_exit_status(
+    monkeypatch: pytest.MonkeyPatch, *, release_on_wait: bool,
+) -> type[_ExitStatusNotYetWaitable]:
+    seam = type("HeldExitStatus", (_ExitStatusNotYetWaitable,), {
+        "release_on_wait": release_on_wait, "held_polls": 0, "wait_timeouts": [],
+    })
+    monkeypatch.setattr(process_module, "_LAUNCHER_SOURCE", "import os\nos._exit(3)\n")
+    monkeypatch.setattr(process_module.subprocess, "Popen", seam)
+    return seam
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX launcher handshake")
+def test_launcher_exit_seen_before_its_status_is_waitable_still_records_returncode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """L2 rehearsal #4 (08781b7): ``launcher_returncode`` was None under load.
+
+    The ready pipe hit EOF (the launcher is gone) while ``poll()`` still had no
+    status, and with no pre-exec ownership nothing later reaps the launcher, so
+    the record lost the exit code exactly when the launcher crashed.
+    """
+
+    seam = _hold_exit_status(monkeypatch, release_on_wait=True)
+    error = _failure(tmp_path)
+    launcher = error.cleanup_owner._process
+    try:
+        assert isinstance(launcher, seam)
+        assert seam.held_polls >= 1  # the product really observed the unwaitable gap
+        assert error.code == "node_process_cleanup_failed"  # verdict unchanged
+        record = error.start_failure.as_record()
+        assert (record["phase"], record["kind"]) == ("launcher_ready", "exited")
+        assert record["launcher_exited"] is True
+        assert record["launcher_returncode"] == 3
+        assert record["launcher_reaped"] is True
+        _assert_bounded(record, str(tmp_path))
+        assert seam.wait_timeouts and all(
+            timeout is not None
+            and 0 < timeout <= process_module._LAUNCHER_EXIT_STATUS_SECONDS
+            for timeout in seam.wait_timeouts
+        )
+    finally:
+        assert launcher.reap() == 3  # the launcher really exited with 3
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX launcher handshake")
+def test_launcher_status_not_waitable_within_the_bound_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a status that stays unwaitable for the whole bound is recorded as
+    None -- and then the record says the launcher was not reaped."""
+
+    seam = _hold_exit_status(monkeypatch, release_on_wait=False)
+    error = _failure(tmp_path)
+    launcher = error.cleanup_owner._process
+    try:
+        assert seam.held_polls >= 1
+        assert error.code == "node_process_cleanup_failed"
+        record = error.start_failure.as_record()
+        assert (record["phase"], record["kind"]) == ("launcher_ready", "exited")
+        assert record["launcher_exited"] is True
+        assert record["launcher_returncode"] is None
+        assert record.get("launcher_reaped") is False
+        _assert_bounded(record, str(tmp_path))
+        assert seam.wait_timeouts == [process_module._LAUNCHER_EXIT_STATUS_SECONDS]
+    finally:
+        assert launcher.reap() == 3
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX launcher handshake")
