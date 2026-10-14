@@ -77,8 +77,11 @@ def _write_exec_transition_target(tmp_path: Path, launcher_path: str) -> tuple[P
 
 
 def _supervise(target: Path) -> process_module.PhysicalNodeProcess:
+    # Launch the selected shell itself, not the /bin/sh shim: the shim's own
+    # re-exec is not an owned transition and the launch identity check would
+    # refuse it whenever it lands before the owner's first observation.
     return process_module.PhysicalNodeProcess(
-        command=("/bin/sh", str(target)),
+        command=(str(_SELECTED_SHELL), str(target)),
         node_id="node-native-cleanup",
         run_id="run-native-cleanup",
         deployment_id="deployment-native-cleanup",
