@@ -685,7 +685,12 @@ def test_ready_and_failed_terminal_states_are_mutually_truthful() -> None:
 _SKEW_NOW_MS = 1_000_000
 
 
-def _skewed_chunk_request(*, issued_ms: int, expires_ms: int) -> tuple:
+def _skewed_chunk_request(
+    *, issued_ms: int, expires_ms: int, grant_not_before_ms: int | None = None
+) -> tuple:
+    not_before = (
+        _SKEW_NOW_MS - 50_000 if grant_not_before_ms is None else grant_not_before_ms
+    )
     manifest = _manifest()
     provisioner = generate_ed25519_signer(endpoint_id="provisioner")
     recipient = generate_ed25519_signer(endpoint_id="recipient-member-3")
@@ -709,8 +714,8 @@ def _skewed_chunk_request(*, issued_ms: int, expires_ms: int) -> tuple:
             "maximum_bytes_per_second": 1_000_000,
             "authorized_source_member_ids": ["member-a"],
             "origin_fallback_allowed": False,
-            "issued_at_unix_ms": _SKEW_NOW_MS - 100_000,
-            "not_before_unix_ms": _SKEW_NOW_MS - 50_000,
+            "issued_at_unix_ms": not_before - 50_000,
+            "not_before_unix_ms": not_before,
             "expires_at_unix_ms": _SKEW_NOW_MS + 600_000,
         },
         provisioner,
@@ -785,3 +790,98 @@ def test_chunk_request_clock_allowance_is_the_membership_allowance() -> None:
     assert mycelium_swarm_artifacts.MAX_CLOCK_SKEW_MS == round(
         MAX_CLOCK_SKEW_SECONDS * 1000
     )
+
+
+# A grant is issued with not_before = now on the provisioner's host and
+# verified on the recipient (and on each source member): allow the verifier to
+# be up to MAX_CLOCK_SKEW_SECONDS behind the provisioner, never extend expiry.
+_GRANT_ISSUED_MS = 2_000_000
+_GRANT_EXPIRES_MS = _GRANT_ISSUED_MS + 600_000
+
+
+def _issued_now_grant() -> tuple:
+    signer = generate_ed25519_signer(endpoint_id="provisioner")
+    signed = sign_grant(
+        {
+            "protocol": GRANT_PROTOCOL,
+            "grant_id": "grant-issued-now-1",
+            "nonce": "grant-issued-now-nonce-1",
+            "provisioner_generation": 8,
+            "recipient_member_id": "member-3",
+            "recipient_membership_generation": 9,
+            "manifest_digest": DIGEST_A,
+            "assignment_digest": DIGEST_B,
+            "representation_digest": DIGEST_C,
+            "feasibility_digest": DIGEST_D,
+            "allowed_chunk_digests": [DIGEST_A, DIGEST_B],
+            "maximum_total_bytes": 131_072,
+            "maximum_concurrency": 2,
+            "maximum_bytes_per_second": 1_000_000,
+            "authorized_source_member_ids": ["member-a"],
+            "origin_fallback_allowed": False,
+            "issued_at_unix_ms": _GRANT_ISSUED_MS,
+            "not_before_unix_ms": _GRANT_ISSUED_MS,
+            "expires_at_unix_ms": _GRANT_EXPIRES_MS,
+        },
+        signer,
+    )
+    arguments = {
+        "verifier": build_ed25519_verifier([signer.public_key_record()]),
+        "expected_recipient_member_id": "member-3",
+        "expected_recipient_membership_generation": 9,
+        "expected_provisioner_generation": 8,
+        "expected_manifest_digest": DIGEST_A,
+        "expected_assignment_digest": DIGEST_B,
+        "expected_representation_digest": DIGEST_C,
+        "expected_feasibility_digest": DIGEST_D,
+    }
+    return signed, arguments
+
+
+@pytest.mark.parametrize("behind_ms", [200, 29_000])
+def test_grant_on_a_verifier_clock_up_to_30_s_behind_the_provisioner_is_accepted(
+    behind_ms: int,
+) -> None:
+    signed, arguments = _issued_now_grant()
+    checked = validate_grant(
+        signed, now_unix_ms=_GRANT_ISSUED_MS - behind_ms, **arguments
+    )
+    assert checked == signed
+
+
+def test_grant_on_a_verifier_clock_31_s_behind_the_provisioner_is_refused() -> None:
+    signed, arguments = _issued_now_grant()
+    with pytest.raises(SwarmArtifactContractError, match="artifact_grant_ineligible"):
+        validate_grant(signed, now_unix_ms=_GRANT_ISSUED_MS - 31_000, **arguments)
+
+
+def test_grant_expiry_gets_no_clock_skew_allowance() -> None:
+    signed, arguments = _issued_now_grant()
+    assert validate_grant(signed, now_unix_ms=_GRANT_EXPIRES_MS, **arguments)
+    with pytest.raises(SwarmArtifactContractError, match="artifact_grant_ineligible"):
+        validate_grant(signed, now_unix_ms=_GRANT_EXPIRES_MS + 1, **arguments)
+
+
+@pytest.mark.parametrize("behind_ms", [200, 29_000])
+def test_chunk_request_on_a_source_clock_behind_the_provisioner_is_accepted(
+    behind_ms: int,
+) -> None:
+    # The grant inside the request was issued "now" on the provisioner; the
+    # source member's clock is behind both the provisioner and the recipient.
+    request, arguments = _skewed_chunk_request(
+        issued_ms=_SKEW_NOW_MS + behind_ms,
+        expires_ms=_SKEW_NOW_MS + behind_ms + 60_000,
+        grant_not_before_ms=_SKEW_NOW_MS + behind_ms,
+    )
+    assert validate_chunk_request(request, **arguments) == request
+
+
+def test_chunk_request_on_a_source_clock_31_s_behind_the_provisioner_is_refused() -> None:
+    request, arguments = _skewed_chunk_request(
+        issued_ms=_SKEW_NOW_MS + 29_000,
+        expires_ms=_SKEW_NOW_MS + 89_000,
+        grant_not_before_ms=_SKEW_NOW_MS + 31_000,
+    )
+    with pytest.raises(SwarmArtifactContractError, match="artifact_grant_ineligible"):
+        validate_chunk_request(request, **arguments)
+
