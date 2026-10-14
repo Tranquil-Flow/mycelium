@@ -16,6 +16,13 @@ import mycelium_node.process as process_module
 # child's own exec transition, never the test's outer wait (see _wait_until).
 _OWNED_OBSERVATION_SECONDS = 0.5
 _READY_WAIT_SECONDS = 2.0
+# macOS /bin/sh is a re-exec shim: it execs the shell selected by
+# /private/var/select/sh.  This is the image that the shim ends up running.
+_SELECTED_SHELL = (
+    Path("/private/var/select/sh").resolve()
+    if Path("/private/var/select/sh").exists()
+    else Path("/bin/bash")
+)
 
 
 def _wait_until(predicate: Callable[[], bool], *, timeout: float = 2.0) -> None:
@@ -224,5 +231,53 @@ def test_owned_observation_retries_the_exec_transition_and_still_rejects_unowned
                 os.killpg(ownership.process_group, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+            supervised._process.wait(timeout=2.0)
+        supervised.close()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS libproc regression")
+def test_supervised_target_still_launches_when_it_runs_ahead_of_the_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The launch identity check must see the image the target keeps.
+
+    Under -n8 with load, both tests above failed 3 times in 150 runs with
+    ``node_process_identity_invalid`` from ``_supervise``.  The launch check
+    compares the child's image with the command's first element right after
+    the target exec.  A target that execs once more on its own - as the macOS
+    ``/bin/sh`` shim does into the selected shell - is then refused whenever it
+    runs ahead of that observation.  The owner is held here, after the target
+    exec, until the child runs the selected shell image, which is the ordering
+    a loaded host produces by chance.  The hold releases on that observed fact
+    in both trees, never on elapsed time.
+    """
+
+    launcher_path = process_module._inventory_process(os.getpid()).executable.path
+    _ready, _release, target = _write_exec_transition_target(tmp_path, launcher_path)
+    real_await_target_exec = process_module._await_target_exec
+    held: list[str] = []
+
+    def target_runs_ahead(exec_read: int, process, deadline: float) -> None:
+        real_await_target_exec(exec_read, process, deadline)
+        while True:
+            try:
+                image = process_module._darwin_executable_path(process.pid)
+            except ProcessLookupError:
+                image = None
+            held.append(str(image))
+            if image == _SELECTED_SHELL:
+                return
+            assert time.monotonic() < deadline, f"target never ran {_SELECTED_SHELL}: {held[-3:]}"
+            time.sleep(0.005)
+
+    monkeypatch.setattr(process_module, "_await_target_exec", target_runs_ahead)
+    supervised = _supervise(target)
+    try:
+        assert held and held[-1] == str(_SELECTED_SHELL)
+        assert supervised._launch_identity is not None
+        assert Path(supervised._launch_identity.executable.path) == _SELECTED_SHELL
+    finally:
+        if supervised._process.poll() is None:
+            os.killpg(supervised.pid, signal.SIGKILL)
             supervised._process.wait(timeout=2.0)
         supervised.close()
