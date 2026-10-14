@@ -184,6 +184,21 @@ def fixture_build(tmp_path, *, native=None, observe=None, staged_local=False):
                            member=member,profile=profile,golden=golden,receipt=receipt)
 
 
+def elapse_keepalive_interval(fixture):
+    """Model a slow host: one seed keepalive interval passes before the next step.
+
+    Only the members' liveness is aged (``last_liveness_at`` and
+    ``next_heartbeat_due_at``), by one interval plus a second. Every other
+    window the build checks (lease, invite, applied assignment, authorization)
+    is many intervals long, so this is what a test body that ran one interval
+    longer looks like to the seed authority. No member heartbeats here.
+    """
+    elapsed=fixture.seed._keepalive_interval_seconds+1
+    with ra._connect(fixture.database) as c:
+        c.execute('UPDATE seed_members SET last_liveness_at=last_liveness_at-?,'
+                  'next_heartbeat_due_at=next_heartbeat_due_at-?',(elapsed,elapsed))
+
+
 def synthetic_route_open(fixture, plan, *, mutate=None):
     """Phone records of one route open, signed by the SYNTHETIC member key.
 

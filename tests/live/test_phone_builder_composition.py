@@ -93,11 +93,17 @@ def test_actual_build_with_real_native_fixture_executor(tmp_path, record_propert
     monkeypatch.setattr(subprocess, 'run', fixture_ssh)
     from pathlib import Path
     from phone_composition_fixture import (
-        SYNTHETIC_LOAD, fixture_build, qualify_fixture_plan, restoring, synthetic_route_open)
+        SYNTHETIC_LOAD, elapse_keepalive_interval, fixture_build, qualify_fixture_plan, restoring,
+        synthetic_route_open)
     from mycelium_qualification import LiveRouteQualificationError
     from mycelium_seed import route_assignment as ra
     fixture = fixture_build(tmp_path)
     preparation = copy.deepcopy(fixture.document)
+    # The outcome must not depend on host speed: each build below runs as if
+    # one seed keepalive interval had passed since the members last heartbeated
+    # (a loaded host took ~34 s here and the final build refused with
+    # seed_member_liveness_stale instead of the withdrawal's code).
+    elapse_keepalive_interval(fixture)
     report = builder.build(fixture.args)
     assert report['route_ready'] is False
     plan_path = Path(report['operator_plan'])
@@ -296,6 +302,7 @@ def test_actual_build_with_real_native_fixture_executor(tmp_path, record_propert
             connection.execute('UPDATE seed_route_assignments SET withdrawn=1')
     monkeypatch.setattr(builder, '_copy_runtime_closure', withdraw_during_build)
     fixture.args.output_root = tmp_path/'refused-after-withdrawal'
+    elapse_keepalive_interval(fixture)
     with pytest.raises(Exception, match='phone_applied_assignment_required'):
         builder.build(fixture.args)
     assert not (fixture.args.output_root/'operator-plan.json').exists()

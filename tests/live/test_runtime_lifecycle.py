@@ -10,7 +10,7 @@ import zipfile
 
 import pytest
 from scripts import build_qwen_live_route as builder
-from phone_composition_fixture import fixture_build
+from phone_composition_fixture import elapse_keepalive_interval, fixture_build
 from test_qwen_route_builder import _topology_node, _write_topology
 from physical_inference_qualification import NodeProcessSession
 
@@ -33,7 +33,10 @@ def test_emitted_node_full_lifecycle(tmp_path,monkeypatch,record_property,mixed,
         fixture.args.topology=_write_topology(tmp_path/'desktop-topology.json',nodes)
         fixture.args.output_root=tmp_path/'desktop-build'
     # The mixed bundle is the unpatched production build over a synthetic-signer
-    # phone record; this test claims the desktop lifecycle only.
+    # phone record; this test claims the desktop lifecycle only. It must not
+    # depend on host speed: the build runs as if one seed keepalive interval
+    # had passed since the members last heartbeated.
+    elapse_keepalive_interval(fixture)
     report=builder.build(fixture.args)
     plan=json.loads(Path(report['operator_plan']).read_text())
     run=plan['controller']['run_plan'];bundle=fixture.args.output_root/'transfer-bundle'
