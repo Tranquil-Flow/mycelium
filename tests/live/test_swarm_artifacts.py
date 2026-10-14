@@ -776,3 +776,12 @@ def test_chunk_request_expiry_gets_no_clock_skew_allowance() -> None:
         SwarmArtifactContractError, match="artifact_chunk_request_ineligible"
     ):
         validate_chunk_request(request, **arguments)
+
+
+def test_chunk_request_clock_allowance_is_the_membership_allowance() -> None:
+    import mycelium_swarm_artifacts
+    from mycelium_membership import MAX_CLOCK_SKEW_SECONDS
+
+    assert mycelium_swarm_artifacts.MAX_CLOCK_SKEW_MS == round(
+        MAX_CLOCK_SKEW_SECONDS * 1000
+    )
