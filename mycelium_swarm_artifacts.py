@@ -18,8 +18,9 @@ from typing import Any
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import Ed25519EvidenceSigner, SIGNATURE_FIELDS
 
-# A chunk request or grant signed on another host's clock may be issued (or
-# start) up to this far in the verifier's future:
+# Two hosts' clocks may differ by up to this much: a time on a statement
+# signed on another host's clock (chunk request, grant, availability,
+# receipt) may be this far ahead of the verifier's clock; expiry gets none.
 # mycelium_membership.MAX_CLOCK_SKEW_SECONDS (30 s) in ms. Kept as a literal
 # so the closed member runtime (mycelium_member_runtime RUNTIME_PATHS) does
 # not have to carry mycelium_membership; a test pins it.
@@ -693,7 +694,8 @@ def validate_availability(
         value.get("transfer_health") not in _HEALTH
         or valid_until <= observed
         or valid_until < now_unix_ms
-        or observed > now_unix_ms
+        # observed is the source member's clock; validity gets no allowance.
+        or observed > now_unix_ms + MAX_CLOCK_SKEW_MS
         or manifest_digest != expected_manifest_digest
         or (
             expected_membership_generation is not None
@@ -744,7 +746,8 @@ def validate_availability_bundle(
         value.get("protocol") != AVAILABILITY_BUNDLE_PROTOCOL
         or source != expected_source_member_id
         or generation != expected_membership_generation
-        or published > now_unix_ms
+        # published is the source member's clock.
+        or published > now_unix_ms + MAX_CLOCK_SKEW_MS
         or not isinstance(raw_advertisements, list)
         or len(raw_advertisements) > 1_024
     ):
@@ -1012,7 +1015,9 @@ def validate_chunk_receipt(
         or value["source_member_id"] != availability.get("source_member_id")
         or value["manifest_digest"] != availability.get("manifest_digest")
         or value["chunk_digest"] not in availability.get("available_chunk_digests", [])
-        or responded < request.get("issued_at_unix_ms", 0)
+        # responded is the source's clock, issued the recipient's; the
+        # request's expiry gets no allowance.
+        or responded < request.get("issued_at_unix_ms", 0) - MAX_CLOCK_SKEW_MS
         or responded > request.get("expires_at_unix_ms", 0)
     ):
         _fail("artifact_chunk_receipt_mismatch")
