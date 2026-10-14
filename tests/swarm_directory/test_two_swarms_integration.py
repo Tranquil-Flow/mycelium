@@ -103,7 +103,7 @@ def listing(world):
     return {row['swarm_id']: row for row in value['swarms']}
 
 
-def test_01_web_created_swarm_attaches_the_mac_by_owner_signature(world):
+def _step_01_web_created_swarm_attaches_the_mac_by_owner_signature(world):
     b = world['b']
     link = docs.swarm_link(world['directory'].origin, b['id'], b['owner'].public_key)
     state = b['publisher'].publish({'link': link})
@@ -121,7 +121,7 @@ def test_01_web_created_swarm_attaches_the_mac_by_owner_signature(world):
     assert b['publisher'].tick()['attached'] is True
 
 
-def test_02_every_swarm_is_listed_with_live_status(world):
+def _step_02_every_swarm_is_listed_with_live_status(world):
     rows = listing(world)
     a_id = world['a']['publisher'].state['swarm_id']
     assert set(rows) == {a_id, world['b']['id']}
@@ -131,7 +131,7 @@ def test_02_every_swarm_is_listed_with_live_status(world):
     assert all('seen by this swarm' in row['privacy'] for row in rows.values())
 
 
-def test_03_request_access_owner_approves_in_app_and_chat_returns_tokens(world):
+def _step_03_request_access_owner_approves_in_app_and_chat_returns_tokens(world):
     a = world['a']
     a_id = a['publisher'].state['swarm_id']
     carol = Ed25519Signer.generate()
@@ -148,7 +148,7 @@ def test_03_request_access_owner_approves_in_app_and_chat_returns_tokens(world):
     assert a['backend'].inference_posts[-1]['prompt'] == 'Capital of Germany?'
 
 
-def test_04_denied_request_is_reported_and_has_no_grant(world):
+def _step_04_denied_request_is_reported_and_has_no_grant(world):
     a = world['a']
     a_id = a['publisher'].state['swarm_id']
     dave = Ed25519Signer.generate()
@@ -159,7 +159,7 @@ def test_04_denied_request_is_reported_and_has_no_grant(world):
     assert mine['grants'] == [] and mine['denied'] == [a_id]
 
 
-def test_05_without_a_grant_the_entry_refuses_even_if_the_directory_is_bypassed(world):
+def _step_05_without_a_grant_the_entry_refuses_even_if_the_directory_is_bypassed(world):
     a = world['a']
     a_id = a['publisher'].state['swarm_id']
     mallory = Ed25519Signer.generate()
@@ -175,7 +175,7 @@ def test_05_without_a_grant_the_entry_refuses_even_if_the_directory_is_bypassed(
     assert len(a['backend'].inference_posts) == before  # nothing reached the model
 
 
-def test_06_forged_and_expired_grants_are_refused_at_the_entry(world):
+def _step_06_forged_and_expired_grants_are_refused_at_the_entry(world):
     a = world['a']
     a_id = a['publisher'].state['swarm_id']
     erin = Ed25519Signer.generate()
@@ -189,7 +189,7 @@ def test_06_forged_and_expired_grants_are_refused_at_the_entry(world):
     assert chat(a['proxy'], erin, a_id, expired, 'hi', 'ip:67') == (403, {'error': 'entry_grant_expired'})
 
 
-def test_07_quota_exhausted_is_refused(world):
+def _step_07_quota_exhausted_is_refused(world):
     a = world['a']
     a_id = a['publisher'].state['swarm_id']
     finn = Ed25519Signer.generate()
@@ -201,7 +201,7 @@ def test_07_quota_exhausted_is_refused(world):
     assert chat(a['proxy'], finn, a_id, grant, 'two', 'ip:68') == (429, {'error': 'entry_quota_exhausted'})
 
 
-def test_08_open_swarm_auto_grant_chat_and_grants_do_not_cross_swarms(world):
+def _step_08_open_swarm_auto_grant_chat_and_grants_do_not_cross_swarms(world):
     a, b = world['a'], world['b']
     gina = Ed25519Signer.generate()
     now = int(time.time())
@@ -216,7 +216,7 @@ def test_08_open_swarm_auto_grant_chat_and_grants_do_not_cross_swarms(world):
     assert (status, value) == (403, {'error': 'entry_swarm_not_open'})
 
 
-def test_09_relay_answers_the_cors_preflight_only_for_the_entry(world):
+def _step_09_relay_answers_the_cors_preflight_only_for_the_entry(world):
     proxy = world['a']['proxy']
     status, _, headers = request(proxy.origin, '/swarm-entry/v1/send', method='OPTIONS',
                                  headers={'Origin': 'https://swarms.example', 'Access-Control-Request-Method': 'POST'})
@@ -227,7 +227,7 @@ def test_09_relay_answers_the_cors_preflight_only_for_the_entry(world):
     assert status == 200 and state['available'] is True and headers['Access-Control-Allow-Origin'] == '*'
 
 
-def test_10_status_follows_the_owner_run_and_unpublish_goes_offline(world):
+def _step_10_status_follows_the_owner_run_and_unpublish_goes_offline(world):
     a = world['a']
     a_id = a['publisher'].state['swarm_id']
     a['app'].owner_run.state = 'running'
@@ -239,7 +239,7 @@ def test_10_status_follows_the_owner_run_and_unpublish_goes_offline(world):
     assert entry_post(a['proxy'], 'state', {}, 'ip:70')[0] == 503
 
 
-def test_11_refusal_probe_reports_refused_without_grant(world):
+def _step_11_refusal_probe_reports_refused_without_grant(world):
     from mycelium_swarm_directory.probe import probe
     b = world['b']  # still published and serving
     before = len(b['backend'].inference_posts)
@@ -247,3 +247,26 @@ def test_11_refusal_probe_reports_refused_without_grant(world):
     assert result['verdict'] == 'refused_without_grant', result
     assert tuple(result['self_signed_grant']) == (403, 'entry_grant_issuer_invalid')
     assert len(b['backend'].inference_posts) == before
+
+
+_SCENARIO = (
+    _step_01_web_created_swarm_attaches_the_mac_by_owner_signature,
+    _step_02_every_swarm_is_listed_with_live_status,
+    _step_03_request_access_owner_approves_in_app_and_chat_returns_tokens,
+    _step_04_denied_request_is_reported_and_has_no_grant,
+    _step_05_without_a_grant_the_entry_refuses_even_if_the_directory_is_bypassed,
+    _step_06_forged_and_expired_grants_are_refused_at_the_entry,
+    _step_07_quota_exhausted_is_refused,
+    _step_08_open_swarm_auto_grant_chat_and_grants_do_not_cross_swarms,
+    _step_09_relay_answers_the_cors_preflight_only_for_the_entry,
+    _step_10_status_follows_the_owner_run_and_unpublish_goes_offline,
+    _step_11_refusal_probe_reports_refused_without_grant,
+)
+
+
+def test_two_swarm_scenario_runs_its_steps_in_order(world):
+    """One scenario, one test: the steps share the module world and build on each
+    other (step 01 attaches swarm B, step 10 unpublishes), so pytest-xdist must not
+    spread them across workers. The failing step is named in the traceback."""
+    for step in _SCENARIO:
+        step(world)
