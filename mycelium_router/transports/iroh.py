@@ -104,6 +104,175 @@ _NON_DELIVERED_SCOPED_ERRORS = frozenset(
 _HOP_BATCH_WAKE = object()
 
 
+# -- Prefill stall detection and recovery (A14 class D) ----------------------
+#
+# Under --a8-force-relay on a degraded mobile hotspot the relay connection
+# flapped: prefill chunk 0 was confirmed and chunk 1 never crossed.  The chunk's
+# confirmed send would have waited its whole delivery budget (240 s), but the
+# node's equally long prefill wait had started earlier, so it expired first
+# with the generic ``prefill_completion_timeout``.  Owner policy: slow links
+# are never refused - deadlines scale with the measured link - but a link that
+# makes *no* progress is detected, recovered where possible and otherwise
+# reported with its own code.
+#
+# Only prefill-phase frames get the resend recovery; everything else keeps the
+# single-attempt delivery contract byte for byte.
+_PREFILL_STALL_HOP_PHASES = frozenset({"PREFILL", "PREFILL_CHUNK"})
+#: Confirmed deliveries kept per peer endpoint for the in-product link estimate.
+_LINK_SAMPLE_LIMIT = 64
+#: A confirmed frame at least this large measures goodput (bytes / seconds).
+_GOODPUT_SAMPLE_MIN_BYTES = 16 * 1024
+#: A confirmed frame at most this large measures round-trip time.
+_RTT_SAMPLE_MAX_BYTES = 4 * 1024
+#: Requests whose prefill progress is tracked at once (bounded LRU).
+_PREFILL_PROGRESS_LIMIT = 256
+#: Upper bound on the one synchronous exact-message cancel a stall resend issues.
+_STALL_CANCEL_TIMEOUT_SECONDS = 1.0
+
+
+@dataclass(frozen=True)
+class LinkEstimate:
+    """Measured (or floor) link figures that scale the prefill deadlines.
+
+    ``goodput_source`` / ``rtt_source`` name where each figure came from:
+    ``transport_observation:relay`` (the sidecar's per-peer activation-plane
+    rows - the rows the product transport history records - restricted to the
+    relay path when the peer has relay rows), ``transport_observation:direct``,
+    ``delivery_samples`` (this adapter's own confirmed deliveries) or
+    ``unmeasured`` (policy floor).  Several sources combine conservatively:
+    the lowest goodput and the highest RTT win.
+    """
+
+    goodput_bytes_per_second: float
+    rtt_p95_seconds: float
+    goodput_source: str
+    rtt_source: str
+
+
+@dataclass(frozen=True)
+class PrefillStallPolicy:
+    """Every number the prefill stall/deadline logic uses, in one place.
+
+    * stall window  ``S = clamp(8 x rtt_p95 + chunk_bytes / goodput x 4,
+      30 s, 120 s)`` - one confirmed-send attempt for one prefill frame;
+    * resends       at most ``max_resends`` (2) after the first attempt, each
+      also bounded by the frame's remaining delivery deadline;
+    * watchdog      ``W = (max_resends + 1) x S + 4 x rtt_p95`` - the node's
+      no-progress bound for a request, long enough for either end's transport
+      to finish its own recovery first;
+    * total         ``clamp(remaining_bytes / goodput x 3 + chunks x 4 x
+      rtt_p95, 60 s, command_timeout x 0.8)``; the ceiling wins when
+      ``command_timeout x 0.8`` is below the floor;
+    * ordering      a frame of a watched request must expire
+      ``ordering_margin_seconds`` before the prefill wait does.
+
+    Unmeasured links use 4 KiB/s and 1 s.
+    """
+
+    stall_floor_seconds: float = 30.0
+    stall_ceiling_seconds: float = 120.0
+    stall_rtt_multiplier: float = 8.0
+    stall_transfer_multiplier: float = 4.0
+    total_floor_seconds: float = 60.0
+    total_command_fraction: float = 0.8
+    total_transfer_multiplier: float = 3.0
+    total_rtt_per_chunk_multiplier: float = 4.0
+    unmeasured_goodput_bytes_per_second: float = 4096.0
+    unmeasured_rtt_seconds: float = 1.0
+    max_resends: int = 2
+    ordering_margin_seconds: float = 2.0
+    watchdog_rtt_multiplier: float = 4.0
+
+    def __post_init__(self) -> None:
+        for name in (
+            "stall_floor_seconds",
+            "stall_ceiling_seconds",
+            "total_floor_seconds",
+            "total_command_fraction",
+            "unmeasured_goodput_bytes_per_second",
+            "unmeasured_rtt_seconds",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, (int, float)) or not value > 0:
+                raise ValueError(f"{name} must be positive")
+        for name in (
+            "stall_rtt_multiplier",
+            "stall_transfer_multiplier",
+            "total_transfer_multiplier",
+            "total_rtt_per_chunk_multiplier",
+            "ordering_margin_seconds",
+            "watchdog_rtt_multiplier",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, (int, float)) or value < 0:
+                raise ValueError(f"{name} must not be negative")
+        if self.stall_floor_seconds > self.stall_ceiling_seconds:
+            raise ValueError("stall floor must not exceed the stall ceiling")
+        if type(self.max_resends) is not int or self.max_resends < 0:
+            raise ValueError("max_resends must be a non-negative integer")
+
+    def stall_seconds(self, chunk_bytes: int, link: Any) -> float:
+        raw = (
+            self.stall_rtt_multiplier * float(link.rtt_p95_seconds)
+            + max(0, int(chunk_bytes))
+            / float(link.goodput_bytes_per_second)
+            * self.stall_transfer_multiplier
+        )
+        return min(self.stall_ceiling_seconds, max(self.stall_floor_seconds, raw))
+
+    def watchdog_seconds(self, chunk_bytes: int, link: Any) -> float:
+        return (self.max_resends + 1) * self.stall_seconds(
+            chunk_bytes, link
+        ) + self.watchdog_rtt_multiplier * float(link.rtt_p95_seconds)
+
+    def total_seconds(
+        self,
+        *,
+        remaining_bytes: int,
+        chunks: int,
+        link: Any,
+        command_timeout: float,
+    ) -> float:
+        raw = (
+            max(0, int(remaining_bytes))
+            / float(link.goodput_bytes_per_second)
+            * self.total_transfer_multiplier
+            + max(0, int(chunks))
+            * self.total_rtt_per_chunk_multiplier
+            * float(link.rtt_p95_seconds)
+        )
+        ceiling = float(command_timeout) * self.total_command_fraction
+        return min(ceiling, max(self.total_floor_seconds, raw))
+
+
+DEFAULT_PREFILL_STALL_POLICY = PrefillStallPolicy()
+
+
+def _prefill_stall_frame(message: Any) -> bool:
+    """Frames whose stalled delivery is detected and resent (same message id)."""
+
+    if isinstance(message, HopHeader):
+        return message.phase in _PREFILL_STALL_HOP_PHASES
+    return isinstance(
+        message, (ProgressivePrefillMessage, PrefillChunkCompleted, ManifestLocked)
+    )
+
+
+def _positive_number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not number > 0 or number != number or number == float("inf"):
+        return None
+    return number
+
+
+def _p95(values: Sequence[float]) -> float:
+    ordered = sorted(values)
+    index = max(0, -(-95 * len(ordered) // 100) - 1)
+    return ordered[min(index, len(ordered) - 1)]
+
+
 class IrohTransportError(RuntimeError):
     """Fail-closed adapter error with a stable code."""
 
@@ -530,6 +699,25 @@ class _ForwardFenceScope:
     path_attempt: int
 
 
+@dataclass
+class _PrefillProgress:
+    """Per-request link progress for one watched prefill (cheap counters only).
+
+    Progress is any confirmed outbound frame or dispatched inbound frame of
+    the request.  ``deadline`` is the node's prefill-wait deadline: frames of
+    the request expire ``ordering_margin_seconds`` before it.
+    """
+
+    started_at: float
+    last_progress_at: float
+    deadline: float | None = None
+    progress_events: int = 0
+    bytes_confirmed: int = 0
+    max_frame_bytes: int = 0
+    stall_resends: int = 0
+    failure_code: str | None = None
+
+
 class IrohTransport:
     """Authenticated iroh adapter implementing ``TransportPort``.
 
@@ -557,6 +745,7 @@ class IrohTransport:
         delivery_timeout_seconds: float = 5.0,
         poll_interval_seconds: float = 0.05,
         client_factory: ClientFactory = SidecarClient,
+        stall_policy: PrefillStallPolicy | None = None,
     ):
         if not node_id or not expected_endpoint_id:
             raise ValueError("node and expected endpoint ids must not be empty")
@@ -689,6 +878,22 @@ class IrohTransport:
         self._participant_nodes_by_path: dict[str, frozenset[str]] = {}
         self._entry_nodes: dict[str, str] = {}
         self.manifest_deltas: list[ManifestDelta] = []
+        # A14 class D: prefill stall detection, recovery and link estimate.
+        # The module default is read at construction so a test can scale it.
+        self._stall_policy: PrefillStallPolicy = (
+            DEFAULT_PREFILL_STALL_POLICY if stall_policy is None else stall_policy
+        )
+        self._prefill_progress: OrderedDict[str, _PrefillProgress] = OrderedDict()
+        # peer endpoint id -> recent (frame bytes, seconds) confirmed deliveries
+        self._delivery_samples: dict[str, deque[tuple[int, float]]] = {}
+        # Last activation-plane rows ``evidence()`` projected (no extra query).
+        self._path_observation_cache: tuple[Mapping[str, Any], ...] = ()
+        self._prefill_stall_resends = 0
+        self._prefill_stall_failures = 0
+
+    @property
+    def stall_policy(self) -> PrefillStallPolicy:
+        return self._stall_policy
 
     @property
     def peer_binding(self) -> PeerBinding:
@@ -1256,6 +1461,7 @@ class IrohTransport:
             path_id=path_id,
             path_attempt=path_attempt,
             peer_node_id=destination_node_id,
+            frame_bytes=len(frame),
         )
         return receipt
 
@@ -1280,12 +1486,33 @@ class IrohTransport:
                 "malformed_router_frame",
                 error.code,
             ) from error
+        request_id, path_id, path_attempt = self._fence_scope(decoded)
+        # Deadline ordering (A14 class D): a frame of a request whose prefill
+        # wait is registered must expire before that wait does, so a stuck hop
+        # reports its own code while the wait can still observe it.
+        deadline = time.monotonic() + self.delivery_timeout_seconds
+        if request_id is not None:
+            with self._state_lock:
+                watched = self._prefill_progress.get(request_id)
+                watched_deadline = None if watched is None else watched.deadline
+            if watched_deadline is not None:
+                deadline = min(
+                    deadline,
+                    watched_deadline - self._stall_policy.ordering_margin_seconds,
+                )
+                if deadline <= time.monotonic():
+                    raise IrohTransportError("delivery_deadline_exceeded")
+        stall_seconds = (
+            self._stall_policy.stall_seconds(
+                len(frame), self.link_estimate(destination_node_id)
+            )
+            if _prefill_stall_frame(decoded.message)
+            else None
+        )
         if not self._send_slots.acquire(blocking=False):
             raise IrohTransportError("adapter_queue_full")
 
         message_id = uuid.uuid4().bytes
-        deadline = time.monotonic() + self.delivery_timeout_seconds
-        request_id, path_id, path_attempt = self._fence_scope(decoded)
         pending = _PendingSend(
             peer.generation,
             request_id,
@@ -1334,7 +1561,7 @@ class IrohTransport:
                     raise IrohTransportError("transport_not_running")
                 self._pending[message_id] = pending
             cancel_timer = threading.Timer(
-                self.delivery_timeout_seconds,
+                max(0.0, deadline - time.monotonic()),
                 self._expire_pending,
                 args=(message_id, pending, "delivery_deadline_exceeded"),
             )
@@ -1377,15 +1604,17 @@ class IrohTransport:
                 # sidecar. If it wins after, exact-message sidecar cancellation is
                 # required and retried across the admission crossing.
                 pending.admission_started = True
-            self._send_confirmed(
+            self._send_confirmed_recovering(
                 client,
                 frame,
                 message_id,
-                expected_generation=pending.generation,
-                timeout=self._remaining(deadline),
-                destination_endpoint_id=(
-                    peer.endpoint_id if peer.node_id != self._peer.node_id else None
-                ),
+                pending=pending,
+                peer=peer,
+                destination_node_id=destination_node_id,
+                deadline=deadline,
+                stall_seconds=stall_seconds,
+                send_client_override=_send_client_override,
+                request_id=request_id,
             )
             with self._state_lock:
                 current = self._lookup_destination_peer(destination_node_id)
@@ -1489,6 +1718,7 @@ class IrohTransport:
         path_attempt: int | None,
         peer_node_id: str,
         code: str | None = None,
+        frame_bytes: int = 0,
     ) -> bool:
         if (
             event not in {"receipt", "failure"}
@@ -1502,6 +1732,14 @@ class IrohTransport:
                 peer = self._lookup_destination_peer(peer_node_id)
             except IrohTransportError:
                 return False
+            if event == "receipt":
+                self._note_prefill_progress_locked(
+                    request_id, frame_bytes, confirmed=True
+                )
+            else:
+                progress = self._prefill_progress.get(request_id)
+                if progress is not None and progress.failure_code is None:
+                    progress.failure_code = code
             self._scoped_event_sequence += 1
             self._scoped_events.append(
                 _ScopedTransportEvent(
@@ -1527,6 +1765,7 @@ class IrohTransport:
         timeout: float,
         destination_endpoint_id: str | None = None,
     ) -> None:
+        started = time.monotonic()
         if destination_endpoint_id is None:
             client.send_confirmed(
                 frame,
@@ -1544,6 +1783,397 @@ class IrohTransport:
                 expected_generation=expected_generation,
                 source_generation=self.local_generation,
             )
+        elapsed = time.monotonic() - started
+        if elapsed > 0:
+            endpoint = (
+                destination_endpoint_id
+                if destination_endpoint_id is not None
+                else self._peer.endpoint_id
+            )
+            with self._state_lock:
+                samples = self._delivery_samples.get(endpoint)
+                if samples is None:
+                    if len(self._delivery_samples) >= _PREFILL_PROGRESS_LIMIT:
+                        self._delivery_samples.pop(next(iter(self._delivery_samples)))
+                    samples = deque(maxlen=_LINK_SAMPLE_LIMIT)
+                    self._delivery_samples[endpoint] = samples
+                samples.append((len(frame), elapsed))
+
+    def _send_confirmed_recovering(
+        self,
+        client: Any,
+        frame: bytes,
+        message_id: bytes,
+        *,
+        pending: _PendingSend,
+        peer: PeerBinding,
+        destination_node_id: str,
+        deadline: float,
+        stall_seconds: float | None,
+        send_client_override: Any | None,
+        request_id: str | None,
+    ) -> None:
+        """One confirmed delivery, with stall recovery for prefill frames.
+
+        Without a stall window this is exactly one ``_send_confirmed`` bounded
+        by the frame deadline.  With one, each attempt is bounded by the
+        window; an attempt that times out *because of the window* (not the
+        frame deadline) is a stall: the stuck sidecar item is withdrawn by its
+        exact message id, the data client whose session the timeout
+        invalidated is replaced, and the same frame is resent under the same
+        message id - the receiving sidecar and transport de-duplicate by it.
+        After ``max_resends`` resends the frame fails as
+        ``prefill_transport_stalled``.  The frame deadline still bounds every
+        attempt, so a deadline expiry stays ``delivery_deadline_exceeded``.
+        """
+
+        destination_endpoint_id = (
+            peer.endpoint_id if peer.node_id != self._peer.node_id else None
+        )
+        if stall_seconds is None:
+            self._send_confirmed(
+                client,
+                frame,
+                message_id,
+                expected_generation=pending.generation,
+                timeout=self._remaining(deadline),
+                destination_endpoint_id=destination_endpoint_id,
+            )
+            return
+        resends = 0
+        while True:
+            remaining = self._remaining(deadline)
+            window_bound = stall_seconds < remaining
+            try:
+                self._send_confirmed(
+                    client,
+                    frame,
+                    message_id,
+                    expected_generation=pending.generation,
+                    timeout=min(stall_seconds, remaining),
+                    destination_endpoint_id=destination_endpoint_id,
+                )
+                return
+            except TimeoutError:
+                if not window_bound:
+                    raise
+            with self._state_lock:
+                if pending.cancelled:
+                    raise IrohTransportError(pending.reason or "delivery_cancelled")
+            if resends >= self._stall_policy.max_resends:
+                with self._state_lock:
+                    self._prefill_stall_failures += 1
+                self._emit_stall_event(
+                    "prefill_stall_exhausted",
+                    attempts=resends + 1,
+                    stall_seconds=stall_seconds,
+                )
+                self._expire_pending(message_id, pending, "prefill_transport_stalled")
+                raise IrohTransportError("prefill_transport_stalled")
+            resends += 1
+            with self._state_lock:
+                self._prefill_stall_resends += 1
+                progress = (
+                    None
+                    if request_id is None
+                    else self._prefill_progress.get(request_id)
+                )
+                if progress is not None:
+                    progress.stall_resends += 1
+            self._emit_stall_event(
+                "prefill_stall_resend",
+                attempts=resends,
+                stall_seconds=stall_seconds,
+            )
+            try:
+                client = self._recover_stalled_send(
+                    client,
+                    message_id,
+                    pending=pending,
+                    destination_node_id=destination_node_id,
+                    deadline=deadline,
+                    send_client_override=send_client_override,
+                )
+            except (IrohTransportError, TimeoutError):
+                raise
+            except BaseException as error:
+                self._expire_pending(message_id, pending, "prefill_transport_stalled")
+                raise self._map_sidecar_error(
+                    "prefill_transport_stalled", error
+                ) from error
+
+    def _recover_stalled_send(
+        self,
+        client: Any,
+        message_id: bytes,
+        *,
+        pending: _PendingSend,
+        destination_node_id: str,
+        deadline: float,
+        send_client_override: Any | None,
+    ) -> Any:
+        # 1. Withdraw the stuck sidecar outbound item so the resend is a fresh
+        #    attempt instead of attaching to it as a duplicate.  A failed or
+        #    ``unknown_message`` cancel is not fatal: the item was then already
+        #    terminal (possibly delivered - the receiver de-duplicates).
+        self._cancel_stalled_outbound(message_id, deadline=deadline)
+        # 2. The timed-out attempt invalidated the client's local session.
+        if send_client_override is None:
+            self._reconnect_send_client(deadline=deadline)
+            with self._state_lock:
+                replacement = self._send_client
+            if replacement is None:
+                raise IrohTransportError("transport_not_running")
+        else:
+            replacement = self._replace_forward_client(client, deadline=deadline)
+        # 3. The same fences as the first admission.
+        with self._state_lock:
+            self._require_running()
+            current = self._lookup_destination_peer(destination_node_id)
+            if pending.cancelled or current.generation != pending.generation:
+                raise IrohTransportError(pending.reason or "peer_rotated")
+        return replacement
+
+    def _cancel_stalled_outbound(self, message_id: bytes, *, deadline: float) -> bool | str:
+        timeout = min(_STALL_CANCEL_TIMEOUT_SECONDS, self._remaining(deadline))
+        with self._state_lock:
+            pooled = bool(self._cancellation_clients)
+            control = self._control_client
+        if not pooled:
+            return self._cancel_with_client(control, message_id, timeout=timeout)
+        try:
+            lane = self._available_cancellation_clients.get(timeout=timeout)
+        except Empty:
+            return False
+        try:
+            outcome = self._cancel_with_client(lane, message_id, timeout=timeout)
+            if outcome == "replace":
+                try:
+                    lane.close()
+                except BaseException:
+                    pass
+                if self._reconnect_cancellation_client(
+                    lane,
+                    deadline=min(deadline, time.monotonic() + timeout),
+                ):
+                    outcome = self._cancel_with_client(
+                        lane, message_id, timeout=timeout
+                    )
+            return outcome
+        finally:
+            with self._state_lock:
+                reusable = not self._closed and lane in self._cancellation_clients
+            if reusable:
+                self._available_cancellation_clients.put_nowait(lane)
+
+    def _replace_forward_client(self, previous: Any, *, deadline: float) -> Any:
+        with self._rotation_lock:
+            replacement = self._new_client(timeout=self._remaining(deadline))
+            try:
+                replacement.connect(deadline=deadline)
+                if replacement.endpoint_id != self.expected_endpoint_id:
+                    raise IrohTransportError("local_endpoint_mismatch_after_reconnect")
+                self._configure_current_peers(
+                    replacement,
+                    timeout=self._remaining(deadline),
+                )
+            except BaseException:
+                try:
+                    replacement.close()
+                except BaseException:
+                    pass
+                raise
+            with self._state_lock:
+                if self._closed or not self._running:
+                    rejected = True
+                    displaced = None
+                else:
+                    rejected = False
+                    displaced = self._forward_client
+                    self._forward_client = replacement
+        if rejected:
+            try:
+                replacement.close()
+            except BaseException:
+                pass
+            raise IrohTransportError("transport_not_running")
+        for retired in {id(previous): previous, id(displaced): displaced}.values():
+            if retired is not None and retired is not replacement:
+                try:
+                    retired.close()
+                except BaseException:
+                    pass
+        return replacement
+
+    #: Optional ``observer(event, fields)`` told about prefill stall recovery
+    #: (``prefill_stall_resend`` / ``prefill_stall_exhausted``).  Fields are
+    #: bounded numbers only.  A physical node installs one that prints an
+    #: allowlisted stderr line, so a peer's own recovery reaches the route's
+    #: per-node stderr tails.  ``None`` changes nothing.
+    stall_event_observer = None
+
+    def _emit_stall_event(self, event: str, *, attempts: int, stall_seconds: float) -> None:
+        observer = self.stall_event_observer
+        if observer is None:
+            return
+        try:
+            observer(
+                event,
+                {
+                    "attempts": int(attempts),
+                    "stall_window_ms": int(round(stall_seconds * 1000)),
+                },
+            )
+        except BaseException:
+            pass
+
+    # -- prefill progress / link estimate (A14 class D) -----------------------
+
+    def watch_prefill(self, request_id: str, *, deadline_monotonic: float) -> None:
+        """Track ``request_id``'s link progress and order its frames' deadlines.
+
+        Repeated calls update the deadline (the node re-derives it as bytes
+        complete) and keep the counters.
+        """
+
+        if not isinstance(request_id, str) or not request_id:
+            raise ValueError("request_id must be a non-empty string")
+        now = time.monotonic()
+        with self._state_lock:
+            progress = self._prefill_progress.get(request_id)
+            if progress is None:
+                progress = _PrefillProgress(started_at=now, last_progress_at=now)
+                self._prefill_progress[request_id] = progress
+                while len(self._prefill_progress) > _PREFILL_PROGRESS_LIMIT:
+                    self._prefill_progress.popitem(last=False)
+            progress.deadline = float(deadline_monotonic)
+            self._prefill_progress.move_to_end(request_id)
+
+    def release_prefill_watch(self, request_id: str) -> None:
+        with self._state_lock:
+            self._prefill_progress.pop(request_id, None)
+
+    def prefill_progress(self, request_id: str) -> dict[str, Any] | None:
+        """Snapshot of a watched request's progress (no sidecar query)."""
+
+        with self._state_lock:
+            progress = self._prefill_progress.get(request_id)
+            if progress is None:
+                return None
+            return {
+                "started_at": progress.started_at,
+                "last_progress_at": progress.last_progress_at,
+                "deadline": progress.deadline,
+                "progress_events": progress.progress_events,
+                "bytes_confirmed": progress.bytes_confirmed,
+                "max_frame_bytes": progress.max_frame_bytes,
+                "stall_resends": progress.stall_resends,
+                "failure_code": progress.failure_code,
+            }
+
+    def stall_recovery_snapshot(self) -> dict[str, int]:
+        with self._state_lock:
+            return {
+                "stall_resends": self._prefill_stall_resends,
+                "stall_failures": self._prefill_stall_failures,
+            }
+
+    def _note_prefill_progress_locked(
+        self, request_id: str | None, frame_bytes: int, *, confirmed: bool
+    ) -> None:
+        if request_id is None:
+            return
+        progress = self._prefill_progress.get(request_id)
+        if progress is None:
+            return
+        progress.progress_events += 1
+        progress.last_progress_at = time.monotonic()
+        if confirmed:
+            progress.bytes_confirmed += frame_bytes
+            progress.max_frame_bytes = max(progress.max_frame_bytes, frame_bytes)
+
+    def link_estimate(self, destination_node_id: str | None = None) -> LinkEstimate:
+        """Conservative goodput / p95 RTT for one peer, or for all peers.
+
+        Sources, never queried here (this is on the send path):
+
+        * the activation-plane rows ``evidence()`` last projected for the peer
+          - relay rows when the peer has any, else its other resolved rows;
+          RTT p95 is approximated as ``warm_rtt_ms + 2 x jitter_ms``;
+        * this adapter's own confirmed deliveries to the peer: frames of at
+          least 16 KiB give goodput (median of bytes / confirm time; the
+          confirm includes the remote dispatch, so this under-states goodput),
+          frames of at most 4 KiB give RTT samples (their p95).
+
+        The lowest goodput and the highest RTT win; a figure with no source
+        takes the policy floor (4 KiB/s, 1 s).
+        """
+
+        policy = self._stall_policy
+        with self._state_lock:
+            peers = self._peers.snapshot()
+            observations = self._path_observation_cache
+            samples = {
+                endpoint: tuple(values)
+                for endpoint, values in self._delivery_samples.items()
+            }
+        if destination_node_id is None:
+            bindings = list(peers.values())
+        else:
+            binding = peers.get(destination_node_id)
+            bindings = [] if binding is None else [binding]
+        goodputs: list[tuple[float, str]] = []
+        rtts: list[tuple[float, str]] = []
+        for binding in bindings:
+            rows = [
+                row
+                for row in observations
+                if row.get("remote_endpoint_id") == binding.endpoint_id
+                and row.get("path_class") in {"relay", "direct"}
+            ]
+            relay_rows = [row for row in rows if row.get("path_class") == "relay"]
+            for row in relay_rows or rows:
+                source = f"transport_observation:{row.get('path_class')}"
+                goodput = _positive_number(row.get("observed_goodput_Bps"))
+                if goodput is not None:
+                    goodputs.append((goodput, source))
+                warm = _positive_number(row.get("warm_rtt_ms"))
+                if warm is not None:
+                    jitter = _positive_number(row.get("jitter_ms")) or 0.0
+                    rtts.append(((warm + 2.0 * jitter) / 1000.0, source))
+            confirmed = samples.get(binding.endpoint_id, ())
+            large = sorted(
+                size / seconds
+                for size, seconds in confirmed
+                if size >= _GOODPUT_SAMPLE_MIN_BYTES and seconds > 0
+            )
+            if large:
+                # The median: one confirm that waited on a slow remote stage
+                # must not pin the estimate for the next 64 frames.
+                goodputs.append((large[len(large) // 2], "delivery_samples"))
+            small = [
+                seconds
+                for size, seconds in confirmed
+                if size <= _RTT_SAMPLE_MAX_BYTES and seconds > 0
+            ]
+            if small:
+                rtts.append((_p95(small), "delivery_samples"))
+        if goodputs:
+            goodput, goodput_source = min(goodputs)
+        else:
+            goodput = float(policy.unmeasured_goodput_bytes_per_second)
+            goodput_source = "unmeasured"
+        if rtts:
+            rtt, rtt_source = max(rtts)
+        else:
+            rtt = float(policy.unmeasured_rtt_seconds)
+            rtt_source = "unmeasured"
+        return LinkEstimate(
+            goodput_bytes_per_second=goodput,
+            rtt_p95_seconds=rtt,
+            goodput_source=goodput_source,
+            rtt_source=rtt_source,
+        )
 
     @staticmethod
     def _reconnectable(error: BaseException) -> bool:
@@ -2245,13 +2875,17 @@ class IrohTransport:
                 self._ack_after_dispatch(message_id)
                 with self._state_lock:
                     self._dispatcher_phase = "idle"
-                    self._inflight_received.pop(message_id, None)
+                    dispatched = self._inflight_received.pop(message_id, None)
                     self._seen[message_id] = digest
                     self._seen.move_to_end(message_id)
                     while len(self._seen) > _SEEN_LIMIT:
                         self._seen.popitem(last=False)
                     self._remote_frames_received += 1
                     self._router_frames_dispatched += 1
+                    if dispatched is not None:
+                        self._note_prefill_progress_locked(
+                            dispatched.request_id, 0, confirmed=False
+                        )
             except BaseException as error:
                 with self._state_lock:
                     inbound = self._inflight_received.get(message_id)
@@ -3696,6 +4330,10 @@ class IrohTransport:
                             }
                         )
                     observations = tuple(projected)
+                    with self._state_lock:
+                        # The link estimate reads these rows instead of
+                        # querying the sidecar on the send path.
+                        self._path_observation_cache = observations
                 except IrohTransportError:
                     raise
                 except BaseException as error:
@@ -3955,12 +4593,15 @@ IrohTransportPort = IrohTransport
 
 
 __all__ = [
+    "DEFAULT_PREFILL_STALL_POLICY",
     "DELIVERY_SEMANTICS",
     "DeliveryReceipt",
     "IrohTransport",
     "IrohTransportError",
     "IrohTransportPort",
+    "LinkEstimate",
     "PROCESS_LIFETIME_LIMITATION",
     "PeerBinding",
+    "PrefillStallPolicy",
     "TransportEvidence",
 ]

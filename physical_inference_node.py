@@ -28,6 +28,7 @@ import sys
 import threading
 import time
 import traceback
+from types import SimpleNamespace
 from typing import Any, Callable, Mapping
 import uuid
 
@@ -435,6 +436,281 @@ def _emit_prefill_transport_diagnostic(transport: Any) -> None:
 
 
 _LOAD_PROOF_DIAGNOSTIC_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+
+
+# -- prefill wait on a measured link (A14 class D) -----------------------------
+#
+# The wait used to be a fixed ``min(command_timeout x 0.8, 240 s)`` that only
+# watched ``transport.fatal_error``: a chunk that stopped crossing a degraded
+# relay surfaced 240 s later as the generic ``prefill_completion_timeout``, and
+# a long prompt on a slow but healthy link was refused by the same number.
+# Every figure below comes from ``PrefillStallPolicy`` (the transport's own
+# policy when it has one) and the transport's measured ``link_estimate``.
+
+#: JSON envelope of one chunk hop frame on top of its activation payload
+#: (graph / build header): used only until a real frame size is observed.
+_PREFILL_FRAME_ENVELOPE_BYTES = 4096
+#: Re-read the link estimate at least this often while nothing progresses.
+_PREFILL_LINK_REFRESH_SECONDS = 1.0
+_PREFILL_STALL_SOURCE = re.compile(r"[a-z][a-z0-9_:]{0,60}\Z")
+
+
+_STDERR_LINE_LOCK = threading.Lock()
+
+
+def _emit_stderr_line(text: str) -> None:
+    """Write one whole diagnostic line; threads never interleave inside it."""
+
+    with _STDERR_LINE_LOCK:
+        sys.stderr.write(text + "\n")
+        sys.stderr.flush()
+
+
+def _bounded_ms(seconds: float) -> int:
+    value = int(round(max(0.0, float(seconds)) * 1000))
+    return min(value, 10**12)
+
+
+class _PrefillWaitBudget:
+    """Deadlines of one prefill wait, re-derived as bytes complete.
+
+    * total    ``clamp(remaining_bytes / goodput x 3 + chunks x crossings x 4
+      x rtt_p95, 60 s, command_timeout x 0.8)`` from the last progress; the
+      deadline only ever moves later and never past ``start + command_timeout
+      x 0.8``;
+    * stall    ``S = clamp(8 x rtt_p95 + chunk_bytes / goodput x 4, 30, 120)``;
+    * watchdog ``W = (max_resends + 1) x S + 4 x rtt_p95`` of no progress.
+
+    ``chunk_bytes`` is the largest observed frame of the request, or until
+    one is observed ``chunk_tokens x hidden_size x activation_bytes + 4 KiB``;
+    the total starts from the activation payload alone.  ``crossings`` is
+    ``max(1, stages - 1)``: every stage boundary may be a remote hop.
+    """
+
+    def __init__(
+        self,
+        *,
+        transport: Any,
+        request_id: str,
+        prompt_tokens: int,
+        chunk_size_tokens: int,
+        graph: Any,
+        command_timeout: float,
+    ) -> None:
+        from mycelium_router.transports import iroh as iroh_transport_module
+
+        self.transport = transport
+        self.request_id = request_id
+        policy = getattr(transport, "stall_policy", None)
+        if policy is None:
+            policy = iroh_transport_module.DEFAULT_PREFILL_STALL_POLICY
+        self.policy = policy
+        tokens = max(1, int(prompt_tokens))
+        chunk_tokens = (
+            tokens
+            if chunk_size_tokens <= 0 or chunk_size_tokens >= tokens
+            else int(chunk_size_tokens)
+        )
+        self.chunks = -(-tokens // chunk_tokens)
+        hidden = getattr(graph, "hidden_size", 0)
+        width = getattr(graph, "activation_bytes", 0)
+        payload = (
+            chunk_tokens * hidden * width
+            if type(hidden) is int and type(width) is int and hidden > 0 and width > 0
+            else 0
+        )
+        self.chunk_payload_bytes = payload
+        stages = getattr(graph, "stages", ()) or ()
+        try:
+            stage_count = len(stages)
+        except TypeError:
+            stage_count = 0
+        self.crossings = max(1, stage_count - 1)
+        self.command_timeout = float(command_timeout)
+        self.started = time.monotonic()
+        self.hard_deadline = self.started + self.command_timeout * float(
+            policy.total_command_fraction
+        )
+        self.progress_source = callable(getattr(transport, "prefill_progress", None))
+        self.link = self._read_link()
+        self.link_read_at = self.started
+        self.progress_events = -1
+        self.last_progress_at = self.started
+        self.progress: Mapping[str, Any] = {}
+        self.deadline = self.started + policy.total_seconds(
+            remaining_bytes=self.chunks * self.crossings * payload,
+            chunks=self.chunks * self.crossings,
+            link=self.link,
+            command_timeout=self.command_timeout,
+        )
+        self._register()
+
+    def _read_link(self) -> Any:
+        reader = getattr(self.transport, "link_estimate", None)
+        if callable(reader):
+            try:
+                link = reader(None)
+                if (
+                    float(link.goodput_bytes_per_second) > 0
+                    and float(link.rtt_p95_seconds) > 0
+                ):
+                    return link
+            except Exception:
+                pass
+        return SimpleNamespace(
+            goodput_bytes_per_second=float(
+                self.policy.unmeasured_goodput_bytes_per_second
+            ),
+            rtt_p95_seconds=float(self.policy.unmeasured_rtt_seconds),
+            goodput_source="unmeasured",
+            rtt_source="unmeasured",
+        )
+
+    def _register(self) -> None:
+        watch = getattr(self.transport, "watch_prefill", None)
+        if callable(watch):
+            watch(self.request_id, deadline_monotonic=self.deadline)
+
+    def release(self) -> None:
+        release = getattr(self.transport, "release_prefill_watch", None)
+        if callable(release):
+            try:
+                release(self.request_id)
+            except Exception:
+                pass
+
+    def chunk_bytes(self) -> int:
+        observed = self.progress.get("max_frame_bytes", 0) if self.progress else 0
+        if type(observed) is not int:
+            observed = 0
+        estimate = (
+            self.chunk_payload_bytes + _PREFILL_FRAME_ENVELOPE_BYTES
+            if self.chunk_payload_bytes
+            else 0
+        )
+        return max(observed, estimate)
+
+    def stall_seconds(self) -> float:
+        return self.policy.stall_seconds(self.chunk_bytes(), self.link)
+
+    def watchdog_seconds(self) -> float:
+        return self.policy.watchdog_seconds(self.chunk_bytes(), self.link)
+
+    def idle_seconds(self) -> float:
+        return time.monotonic() - self.last_progress_at
+
+    def observe(self) -> str | None:
+        """Refresh progress; return the transport's verdict code, if any."""
+
+        if not self.progress_source:
+            return None
+        now = time.monotonic()
+        try:
+            progress = self.transport.prefill_progress(self.request_id)
+        except Exception:
+            progress = None
+        if not isinstance(progress, Mapping):
+            return None
+        self.progress = progress
+        events = progress.get("progress_events")
+        if type(events) is int and events != self.progress_events:
+            self.progress_events = events
+            last = progress.get("last_progress_at")
+            if isinstance(last, (int, float)) and not isinstance(last, bool):
+                self.last_progress_at = max(self.started, float(last))
+            self.link = self._read_link()
+            self.link_read_at = now
+            if events > 0:
+                self._extend()
+        elif now - self.link_read_at >= _PREFILL_LINK_REFRESH_SECONDS:
+            self.link = self._read_link()
+            self.link_read_at = now
+        code = progress.get("failure_code")
+        if isinstance(code, str) and _PREFILL_DIAGNOSTIC_CODE.fullmatch(code):
+            return code
+        return None
+
+    def _extend(self) -> None:
+        chunk = max(1, self.chunk_bytes())
+        total = self.chunks * self.crossings * chunk
+        confirmed = self.progress.get("bytes_confirmed", 0)
+        if type(confirmed) is not int or confirmed < 0:
+            confirmed = 0
+        remaining = max(0, total - confirmed)
+        candidate = self.last_progress_at + self.policy.total_seconds(
+            remaining_bytes=remaining,
+            chunks=-(-remaining // chunk),
+            link=self.link,
+            command_timeout=self.command_timeout,
+        )
+        extended = min(self.hard_deadline, max(self.deadline, candidate))
+        if extended > self.deadline:
+            self.deadline = extended
+            self._register()
+
+    def stalled(self) -> bool:
+        return self.progress_source and self.idle_seconds() >= self.watchdog_seconds()
+
+    def expiry_code(self) -> str:
+        if self.progress_source and self.idle_seconds() >= self.stall_seconds():
+            return "prefill_transport_stalled"
+        return "prefill_completion_timeout"
+
+    def emit_diagnostic(self, code: str) -> None:
+        """One allowlisted stderr line; never changes control flow."""
+
+        try:
+            link = self.link
+            fields = {
+                "code": code if _PREFILL_DIAGNOSTIC_CODE.fullmatch(code) else "none",
+                "idle_ms": _bounded_ms(self.idle_seconds()),
+                "elapsed_ms": _bounded_ms(time.monotonic() - self.started),
+                "deadline_ms": _bounded_ms(self.deadline - self.started),
+                "stall_window_ms": _bounded_ms(self.stall_seconds()),
+                "watchdog_ms": _bounded_ms(self.watchdog_seconds()),
+                "chunks": int(self.chunks),
+                "chunk_bytes": int(self.chunk_bytes()),
+            }
+            for name in ("progress_events", "bytes_confirmed", "stall_resends"):
+                value = self.progress.get(name, 0) if self.progress else 0
+                fields[name] = (
+                    value if type(value) is int and 0 <= value <= 10**12 else 0
+                )
+            fields["goodput_Bps"] = int(min(float(link.goodput_bytes_per_second), 1e12))
+            fields["rtt_p95_ms"] = _bounded_ms(float(link.rtt_p95_seconds))
+            for name in ("goodput_source", "rtt_source"):
+                value = getattr(link, name, "unmeasured")
+                fields[name] = (
+                    value
+                    if isinstance(value, str) and _PREFILL_STALL_SOURCE.fullmatch(value)
+                    else "unknown"
+                )
+            _emit_stderr_line(
+                "MYCELIUM-PREFILL-STALL-DIAG "
+                + " ".join(f"{key}={value}" for key, value in fields.items())
+            )
+        except BaseException:
+            pass
+
+
+def _print_transport_stall_event(event: str, fields: Mapping[str, Any]) -> None:
+    """Stall-recovery observer: a bounded stderr line in the node's own tail.
+
+    The route prints every node's stderr tail when startup qualification
+    fails, so a *peer's* recovery attempts become visible there too.
+    """
+
+    try:
+        if _PREFILL_DIAGNOSTIC_CODE.fullmatch(event) is None:
+            return
+        parts = [f"event={event}"]
+        for name in ("attempts", "stall_window_ms"):
+            value = fields.get(name)
+            if type(value) is int and 0 <= value <= 10**12:
+                parts.append(f"{name}={value}")
+        _emit_stderr_line("MYCELIUM-TRANSPORT-STALL " + " ".join(parts))
+    except BaseException:
+        pass
 
 
 def _emit_load_proof_diagnostic(
@@ -895,6 +1171,70 @@ class _CaptureSink:
         }
 
 
+#: Distinct sidecar event names tracked per process; more fold into "other".
+_SIDECAR_EVENT_NAMES_LIMIT = 64
+#: One sidecar output line is read in at most this many characters.
+_SIDECAR_LINE_LIMIT = 65_536
+_SIDECAR_EVENT_NAME = re.compile(r"[a-z][a-z0-9_]{0,60}\Z")
+
+
+def _drain_sidecar_stream(
+    stream: Any,
+    counts: dict[str, int],
+    lock: threading.Lock,
+) -> None:
+    """Read one sidecar output stream to EOF; forward bounded event lines.
+
+    The sidecar writes ``address_changed`` records to stdout and one JSON
+    line per transport event to stderr for its whole life.  Left unread, a
+    full pipe blocks the sidecar's next write - inside its outbound worker for
+    connection events - and every outbound frame stops.  Each JSON ``event``
+    is forwarded to this node's stderr as ``MYCELIUM-SIDECAR-EVENT
+    event=<name> [connection_generation=<n>] [count=<n>]`` on its 1st, 2nd,
+    4th, 8th ... occurrence: bounded under a flood, and only the event name
+    and generation - never endpoint ids, addresses or free text (a line that
+    is not such a record counts as ``unparsed``).
+    """
+
+    try:
+        while True:
+            raw = stream.readline(_SIDECAR_LINE_LIMIT)
+            if not raw:
+                return
+            line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+            name = "unparsed"
+            generation: int | None = None
+            try:
+                document = json.loads(line)
+            except ValueError:
+                document = None
+            if isinstance(document, dict):
+                event = document.get("event")
+                if isinstance(event, str) and _SIDECAR_EVENT_NAME.fullmatch(event):
+                    name = event
+                    value = document.get("connection_generation")
+                    if type(value) is int and 0 <= value <= (1 << 64) - 1:
+                        generation = value
+            with lock:
+                if name not in counts and len(counts) >= _SIDECAR_EVENT_NAMES_LIMIT:
+                    name = "other"
+                count = counts.get(name, 0) + 1
+                counts[name] = count
+            if count & (count - 1):
+                continue
+            parts = [f"event={name}"]
+            if generation is not None:
+                parts.append(f"connection_generation={generation}")
+            if count > 1:
+                parts.append(f"count={count}")
+            try:
+                _emit_stderr_line("MYCELIUM-SIDECAR-EVENT " + " ".join(parts))
+            except Exception:
+                pass
+    except Exception:
+        return
+
+
 class NativeSidecarProcess:
     """Launch native sidecar with bootstrap bytes inherited through a pipe only."""
 
@@ -935,6 +1275,28 @@ class NativeSidecarProcess:
         self._socket_root_created = False
         self.process: subprocess.Popen[str] | None = None
         self.ready: dict[str, Any] | None = None
+        self._stream_drains: dict[int, threading.Thread] = {}
+        self._event_counts: dict[str, int] = {}
+        self._event_lock = threading.Lock()
+
+    def _start_stream_drains(self, process: Any) -> None:
+        """Keep both output pipes drained for the sidecar's lifetime."""
+
+        for label, stream in (("stdout", process.stdout), ("stderr", process.stderr)):
+            if stream is None:
+                continue
+            thread = threading.Thread(
+                target=_drain_sidecar_stream,
+                args=(stream, self._event_counts, self._event_lock),
+                name=f"mycelium-sidecar-{label}",
+                daemon=True,
+            )
+            self._stream_drains[id(stream)] = thread
+            thread.start()
+
+    def sidecar_event_counts(self) -> dict[str, int]:
+        with self._event_lock:
+            return dict(self._event_counts)
 
     @property
     def bootstrap_material(self) -> bytes:
@@ -1027,6 +1389,7 @@ class NativeSidecarProcess:
                 and type(ready.get("local_port")) is int,
                 "invalid_sidecar_ready_record",
             )
+            self._start_stream_drains(process)
             try:
                 endpoint = LoopbackEndpoint(ready["local_port"])
             except ValueError:
@@ -1106,6 +1469,7 @@ class NativeSidecarProcess:
                 and ready["endpoint_addr"].get("id") == ready["endpoint_id"],
                 "invalid_sidecar_ready_record",
             )
+            self._start_stream_drains(process)
             client = SidecarClient(
                 self.socket_path, material, timeout=self.startup_timeout
             )
@@ -1148,7 +1512,18 @@ class NativeSidecarProcess:
                         except subprocess.TimeoutExpired:
                             pass
                 for stream in (process.stdout, process.stderr):
-                    if stream is not None and not stream.closed:
+                    if stream is None:
+                        continue
+                    drain = self._stream_drains.pop(id(stream), None)
+                    if drain is not None:
+                        # The child has exited, so the pipe reaches EOF and the
+                        # drain returns.  Closing under a blocked reader would
+                        # wait on the reader's buffer lock: if a descendant
+                        # still holds the pipe, leave the closed-at-exit to GC.
+                        drain.join(1.0)
+                        if drain.is_alive():
+                            continue
+                    if not stream.closed:
                         try:
                             stream.close()
                         except OSError:
@@ -2521,6 +2896,9 @@ class PhysicalNodeService:
         )
         try:
             transport.bind_router(router)
+            # A14 class D: this node's own prefill stall recovery reaches its
+            # stderr tail, which the route prints for every node on failure.
+            transport.stall_event_observer = _print_transport_stall_event
             self._a7_attach(router, transport)
             if self._a11_wiring is not None:
                 self._a11_wiring.attach(router)
@@ -3615,6 +3993,45 @@ class PhysicalNodeService:
                         },
                     )
         sink = _CaptureSink()
+        # Register the wait's deadline with the transport *before* the first
+        # chunk leaves, so every hop of this request is ordered inside it.
+        budget = _PrefillWaitBudget(
+            transport=getattr(self, "transport", None),
+            request_id=request.request_id,
+            prompt_tokens=len(request.prompt_token_ids),
+            chunk_size_tokens=getattr(
+                getattr(self, "_router_config", None),
+                "prefill_chunk_size_tokens",
+                0,
+            ),
+            graph=getattr(self, "graph", None),
+            command_timeout=self.command_timeout,
+        )
+        try:
+            return self._infer_start_and_wait(
+                request,
+                sink,
+                budget=budget,
+                control=control if control_data is not None else None,
+                control_data=control_data,
+                data=data,
+                excluded_placement_ids=excluded_placement_ids,
+            )
+        finally:
+            budget.release()
+
+    def _infer_start_and_wait(
+        self,
+        request: RequestContext,
+        sink: "_CaptureSink",
+        *,
+        budget: _PrefillWaitBudget,
+        control: Any,
+        control_data: Any,
+        data: Mapping[str, Any],
+        excluded_placement_ids: list[str],
+    ) -> dict[str, Any]:
+        assert self.router is not None
         if control_data is None:
             request_id = self.router.start_distributed_prefill(
                 request,
@@ -3658,23 +4075,37 @@ class PhysicalNodeService:
             )
         _require(request_id == request.request_id, "request_id_changed")
         self._sinks[request_id] = sink
-        deadline = time.monotonic() + min(
-            self.command_timeout * 0.8,
-            _MAX_INFERENCE_COMPLETION_TIMEOUT_SECONDS,
-        )
+        # A14 class D: the wait follows the request's link progress instead
+        # of a fixed number.  It ends with the transport's own verdict for the
+        # request (e.g. ``prefill_transport_stalled`` after its bounded
+        # resends, or ``delivery_deadline_exceeded``), with
+        # ``prefill_transport_stalled`` when nothing progressed for the
+        # watchdog, and otherwise at the deadline that scales with the bytes
+        # still to move.
         status = self.router.request_status(request_id)
-        while status in {"PREFILL", "LOCKED"} and time.monotonic() < deadline:
+        failure: str | None = None
+        while status in {"PREFILL", "LOCKED"}:
             if self.transport is not None and self.transport.fatal_error is not None:
                 raise NodeCommandError(self.transport.fatal_error.code)
+            failure = budget.observe()
+            if failure is not None:
+                break
+            if budget.stalled():
+                failure = "prefill_transport_stalled"
+                break
+            if time.monotonic() >= budget.deadline:
+                failure = budget.expiry_code()
+                break
             time.sleep(0.01)
             status = self.router.request_status(request_id)
         if status in {"PREFILL", "LOCKED"}:
-            # The wait above observes only transport.fatal_error, so a hop that
-            # failed in the deferred forward path leaves no visible cause here.
-            # Report the transport's own bounded verdict before raising the
-            # generic symptom.
+            # Report the transport's own bounded verdict and the wait's link
+            # figures before raising.
+            code = failure or "prefill_completion_timeout"
             _emit_prefill_transport_diagnostic(self.transport)
-        _require(status not in {"PREFILL", "LOCKED"}, "prefill_completion_timeout")
+            budget.emit_diagnostic(code)
+            raise NodeCommandError(code)
+        deadline = budget.deadline
         self._require_started_status(
             request_id,
             status,

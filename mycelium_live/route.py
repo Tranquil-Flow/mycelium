@@ -1603,6 +1603,7 @@ class PhysicalLiveRoute:
             "delivery_cancelled",
             "path_cancelled",
             "peer_rotated",
+            "prefill_transport_stalled",
             "sidecar_queue_full",
             "transport_not_running",
         } or reason.startswith(("sidecar_", "transport_"))
