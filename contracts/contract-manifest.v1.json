@@ -135,8 +135,8 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "f216224b0c9257dc373e66186258cdccc0456a8ce1869dc79ab17ed06e5cdaee",
-          "size_bytes": 157884
+          "sha256": "c8fb476009c551595507a8faecc3cf21ad571abdce2bcea5c6c44a80047ad2f7",
+          "size_bytes": 161350
         },
         {
           "path": "ui/web/src/features/liveRoute/m16Runtime.ts",
@@ -450,8 +450,8 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "f216224b0c9257dc373e66186258cdccc0456a8ce1869dc79ab17ed06e5cdaee",
-          "size_bytes": 157884
+          "sha256": "c8fb476009c551595507a8faecc3cf21ad571abdce2bcea5c6c44a80047ad2f7",
+          "size_bytes": 161350
         },
         {
           "path": "mycelium_live/supervisor.py",
@@ -670,13 +670,13 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "f216224b0c9257dc373e66186258cdccc0456a8ce1869dc79ab17ed06e5cdaee",
-          "size_bytes": 157884
+          "sha256": "c8fb476009c551595507a8faecc3cf21ad571abdce2bcea5c6c44a80047ad2f7",
+          "size_bytes": 161350
         },
         {
           "path": "physical_inference_node.py",
-          "sha256": "603b52235087d1d9a0126fd076385edc6925e51d4c88631fce561cd04d55e82a",
-          "size_bytes": 254418
+          "sha256": "78f8ea86674b42b6368b021db3d8824152262588531875afb1ae61a5e0109141",
+          "size_bytes": 261552
         }
       ],
       "protocol": "mycelium.interruptible_stage_command.v1"
@@ -1960,8 +1960,8 @@
         },
         {
           "path": "mycelium_router/transports/iroh.py",
-          "sha256": "b89df24ff6c4cc787418f48d6fa69d17cc2447c9322ba906ceb40d40934e76d5",
-          "size_bytes": 211513
+          "sha256": "6cb944104fa12623978c0321535f977ad818f54b9cdbd8f481eac0c0c32d8407",
+          "size_bytes": 217422
         }
       ],
       "protocol": "mycelium.traffic_liveness.v1"
@@ -1980,8 +1980,8 @@
         },
         {
           "path": "mycelium_router/transports/iroh.py",
-          "sha256": "b89df24ff6c4cc787418f48d6fa69d17cc2447c9322ba906ceb40d40934e76d5",
-          "size_bytes": 211513
+          "sha256": "6cb944104fa12623978c0321535f977ad818f54b9cdbd8f481eac0c0c32d8407",
+          "size_bytes": 217422
         },
         {
           "path": "native/iroh_transport/src/sidecar.rs",
