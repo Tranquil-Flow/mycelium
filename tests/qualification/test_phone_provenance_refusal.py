@@ -229,8 +229,8 @@ def test_final_authority_ignores_the_preparation_window_only_when_told(evidence)
     with pytest.raises(RuntimeError, match="phone_authority_stale"):
         phone.PhoneEvidence(doc, now=later, **kw)
     assert phone.PhoneEvidence(doc, now=later, preparation_window=False, **kw).native_load_generation == 3
-    with pytest.raises(RuntimeError, match="phone_authority_stale"):  # from the future
-        phone.PhoneEvidence(doc, now=doc["authorization"]["message"]["issued_at"] - 1, preparation_window=False, **kw)
+    with pytest.raises(RuntimeError, match="phone_authority_stale"):  # beyond the clock allowance
+        phone.PhoneEvidence(doc, now=doc["authorization"]["message"]["issued_at"] - 31, preparation_window=False, **kw)
     doc["authorization"]["message"]["node_id"] = "another"
     with pytest.raises(RuntimeError, match="phone_authority_signature_invalid"):
         phone.PhoneEvidence(doc, now=later, preparation_window=False, **kw)

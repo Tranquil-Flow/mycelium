@@ -245,6 +245,35 @@ def test_tamper_and_stale_authority_refused(evidence):
         admit(evidence)
 
 
+# The authorization is signed on the seed's clock and checked on the
+# controller host (build_qwen_live_route): allow the controller to be up to
+# MAX_CLOCK_SKEW_SECONDS behind the seed, never extend the expiry.
+def _admit_at(evidence, now):
+    doc, seed, _ = evidence
+    doc["authorization"]["signature"] = seed.sign(doc["authorization"]["message"])
+    return phone.PhoneEvidence(doc, seed_key_digest=seed.verification_key_digest, node=topology()[1],
+                               run_id="synthetic-run", deployment_id="11111111-1111-4111-8111-111111111111",
+                               now=now)
+
+
+@pytest.mark.parametrize("behind", [0.2, 29.0])
+def test_authority_on_a_controller_clock_up_to_30_s_behind_the_seed_is_accepted(evidence, behind):
+    issued = evidence[0]["authorization"]["message"]["issued_at"]
+    assert _admit_at(evidence, issued - behind).statement["issued_at"] == issued
+
+
+def test_authority_on_a_controller_clock_31_s_behind_the_seed_is_refused(evidence):
+    issued = evidence[0]["authorization"]["message"]["issued_at"]
+    with pytest.raises(RuntimeError, match="phone_authority_stale"):
+        _admit_at(evidence, issued - 31.0)
+
+
+def test_authority_expiry_gets_no_clock_skew_allowance(evidence):
+    expires = evidence[0]["authorization"]["message"]["expires_at"]
+    with pytest.raises(RuntimeError, match="phone_authority_stale"):
+        _admit_at(evidence, expires)
+
+
 def test_wrong_seed_and_member_key_refused(evidence):
     doc, seed, _ = evidence
     with pytest.raises(RuntimeError, match="phone_authority_key_mismatch"):
