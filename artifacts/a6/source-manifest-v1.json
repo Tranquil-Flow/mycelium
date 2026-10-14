@@ -2997,6 +2997,11 @@
       "size_bytes": 13165
     },
     {
+      "path": "tests/contracts/test_contract_fixtures.py",
+      "sha256": "sha256:b031febdd7b9b537dd2da0eae52743e70cd400686554edd94232f7ff1d4d0f6e",
+      "size_bytes": 35360
+    },
+    {
       "path": "tests/contracts/test_phone_node_control_golden.py",
       "sha256": "sha256:18ba7cdda5ae0f7cb11235631a20846955b1d12025967468550f5598cf7bc399",
       "size_bytes": 1413
@@ -4068,5 +4073,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:c62fc9515268e9b2b8501ee8bdcbc885c054b84f35176fd7e5218fff292a3703"
+  "source_digest": "sha256:ffd769185fb14cb91f1de46c885e24ead914fc2f540cdb8b95c9d1c4fc2cc8ab"
 }
