@@ -30,6 +30,7 @@ Local multi-process session only; never physical or browser qualification.
 """
 from __future__ import annotations
 
+import signal
 import threading
 import time
 
@@ -206,6 +207,7 @@ def test_status_read_cancelling_before_the_reader_sees_eof_still_records_the_exi
         # The forced interleaving really happened: the status read cancelled
         # the request while the source's EOF was still undelivered.
         assert state["eof_held"] is True, state
+        assert state["source_exit_status"] == -signal.SIGKILL, state
         assert state["observer_error"] is None, state
         assert state["lost_peer_cancelled"] is True, state
         assert "refusal" not in outcome, (outcome, state)
@@ -235,6 +237,7 @@ def test_status_read_ordering_still_recovers_on_the_disjoint_successor(
         state["armed"] = True
         request_id, outcome = _run_case(service, owner, target, _CASE)
         assert state["eof_held"] is True, state
+        assert state["source_exit_status"] == -signal.SIGKILL, state
         assert state["observer_error"] is None, state
         assert state["lost_peer_cancelled"] is True, state
         assert "refusal" not in outcome, (outcome, state)
@@ -259,7 +262,8 @@ def _hold_source_eof_for_a_status_read(monkeypatch, owner) -> dict:
 
     lock = threading.Lock()
     state: dict = {"armed": False, "eof_held": False, "observer": None,
-                   "lost_peer_cancelled": False, "observer_error": None}
+                   "lost_peer_cancelled": False, "observer_error": None,
+                   "source_exit_status": None}
 
     original_cancel = route_module.PhysicalLiveRoute.cancel_request
 
@@ -286,6 +290,13 @@ def _hold_source_eof_for_a_status_read(monkeypatch, owner) -> dict:
                 state["eof_held"] = True
                 hold = True
         if hold:
+            # The pipe closes while the killed process exits; its exit status
+            # can become observable a moment later. Let the status read run
+            # only once the exit is observable, as it is when it wins for real.
+            try:
+                state["source_exit_status"] = self._process.wait(timeout=10)
+            except Exception as error:  # noqa: BLE001 - asserted by the caller
+                state["source_exit_status"] = repr(error)
             observer = threading.Thread(target=observe, name="a6-status-observer", daemon=True)
             observer.start()
             observer.join(30)
