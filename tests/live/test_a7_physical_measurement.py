@@ -243,6 +243,61 @@ def test_plug_in_measures_a_final_decode_step_cutover_from_product_evidence(tmp_
     assert len(scoped) == 1
 
 
+def _install_node_outruns_measurement(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Make the local node always faster than the measurement's freeze.
+
+    The measurement freezes the source only after an unfrozen settle read
+    (``_await_unfrozen_settle``).  This seam holds that read until the measured
+    request has ended, which is what a quiet host does on the ~ms local model
+    when only one decode step is killable, unless the harness holds the
+    request's next decode step until the kill lands (``decode_hold`` engaged).
+    Bounded, so a hang still fails instead of wedging the test.
+    """
+
+    import mycelium_a7_physical_measurement as measurement
+
+    real = measurement._await_unfrozen_settle
+    seen: dict[str, Any] = {"calls": 0, "request_done": 0, "decode_held": 0}
+
+    def outrun(evidence: Any, request_id: str, running: RunningRequest, settings: MeasurementSettings) -> None:
+        seen["calls"] += 1
+        hold = getattr(running, "decode_hold", None)
+        deadline = time.monotonic() + 60.0
+        while time.monotonic() < deadline:
+            if running.done.is_set():
+                seen["request_done"] += 1
+                break
+            if hold is not None and hold.engaged.is_set():
+                seen["decode_held"] += 1
+                break
+            time.sleep(0.01)
+        real(evidence, request_id, running, settings)
+
+    monkeypatch.setattr(measurement, "_await_unfrozen_settle", outrun)
+    return seen
+
+
+@needs_sidecar
+@pytest.mark.parametrize("kill_after_committed", [pytest.param(2, id="mid_request"), pytest.param(_MAX_NEW - 1, id="final_decode_step")])
+def test_harness_measurement_kills_before_the_request_ends_when_the_node_outruns_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kill_after_committed: int
+) -> None:
+    """A node faster than the freeze must not end the measured request before the kill."""
+
+    seen = _install_node_outruns_measurement(monkeypatch)
+    record, observations, _plan, scoped = _measure_with_harness(
+        tmp_path, monkeypatch, qualification_expired=False, kill_after_committed=kill_after_committed
+    )
+    assert seen["calls"] >= 1 and seen["request_done"] == 0, seen
+    assert record["outcome"] == "fenced_kv_successor", record
+    assert record["committed_before_failure"] == record["acknowledged_before_failure"] == kill_after_committed
+    assert observations["fault"]["tokens_received_at_kill"] == kill_after_committed
+    assert record["successor_decode_operations"] == _MAX_NEW - kill_after_committed
+    assert record["reference_parity"] is True
+    assert record["duplicate_tokens"] == record["missing_tokens"] == 0
+    assert len(scoped) == 1
+
+
 @needs_sidecar
 def test_plug_in_measures_the_truthful_fallback_from_product_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     record, observations, plan, scoped = _measure_with_harness(tmp_path, monkeypatch, qualification_expired=True)
