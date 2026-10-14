@@ -401,3 +401,19 @@ def test_member_reports_stay_live_while_a_download_is_unchanged(world):
     assert len(state['reports']) == sent
     now[0] = 11.0; agent.tick()
     assert len(state['reports']) == sent + 1
+
+
+@pytest.mark.parametrize('acquiring, phase', [('verifying', 'model_verifying'), ('compiling', 'model_compiling')])
+def test_whole_mode_verification_is_reported_as_its_own_phase(whole, acquiring, phase):
+    # Every byte is here (done == total) while the snapshot is verified and
+    # compiled: the owner must see that phase, not a download with flat bytes
+    # (its byte-stall rule would judge a big model's verification a stall).
+    app, agent, gate, state, calls = whole
+    state['a'] = announcement('collect', slice_mode=False)
+    agent.tick()
+    app.acquisition.downloaded = app.acquisition.total
+    app.acquisition.state = acquiring
+    status = agent.tick()
+    assert (status['state'], status['detail']) == ('downloading_model', phase), status
+    assert status['progress'] == {'done_bytes': 1_519_209_243, 'total_bytes': 1_519_209_243}
+    assert (state['reports'][-1]['state'], state['reports'][-1]['detail']) == ('downloading_model', phase)
