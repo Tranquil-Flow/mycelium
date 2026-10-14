@@ -4182,14 +4182,19 @@
       "size_bytes": 22324
     },
     {
+      "path": "ui/web/src/app/backgroundEventStream.test.ts",
+      "sha256": "sha256:33f2abfa7c2c7fa4d3091f962fd0db8b9e6d980dd2734742518d1f3306c36e45",
+      "size_bytes": 4413
+    },
+    {
       "path": "ui/web/src/app/backgroundFetch.test.ts",
       "sha256": "sha256:db3a7049b4b68a132764d0bbba478f1a51478e1cc2bf6cbc58f56cea06edaf2e",
       "size_bytes": 5230
     },
     {
       "path": "ui/web/src/app/backgroundFetch.ts",
-      "sha256": "sha256:aa53304b7388851e71eb93ea367ff2d517c81d9c56f56c9fb9cf3bfc05ac517c",
-      "size_bytes": 7993
+      "sha256": "sha256:e3c91d308ef0f103c811b6cb5e6a471a128fc8a7f43ba18f0351cf524e3cb342",
+      "size_bytes": 11568
     },
     {
       "path": "ui/web/src/app/contracts.test.ts",
@@ -4203,8 +4208,8 @@
     },
     {
       "path": "ui/web/src/data/observatorySource.ts",
-      "sha256": "sha256:e21ca8ea9570bb1fe824c567d97a765f8861cc6e6c5e03f043b33d8dfca909ec",
-      "size_bytes": 18164
+      "sha256": "sha256:f365f4e54f9e1e4160600f0f3a3b4ae614eb92c8abc8751b8716600f22001b19",
+      "size_bytes": 18193
     },
     {
       "path": "ui/web/src/features/a7Recovery/A7RecoveryStatusBar.test.tsx",
@@ -4403,5 +4408,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:70d03c33d041663d87dc12510b86aab88cef3585382cbcf44bd4ff0dc175bbe0"
+  "source_digest": "sha256:535ad6266d83799ef83907ac405b8bcd3a08a0278e65504bc99cac4d1208e7a7"
 }
