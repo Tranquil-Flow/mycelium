@@ -187,7 +187,11 @@ class NodeStartFailure:
     budget does not cover.  ``launcher_reaped`` says whether the launcher's
     exit status was collected when the record was made: ``False`` means
     ``launcher_returncode`` is unknown (not "no exit"), ``None`` that no
-    launcher was spawned or the caller did not say.
+    launcher was spawned or the caller did not say.  ``identity_changed`` is
+    ``True`` when the spawned, still unreaped child was seen running an image
+    other than the pinned one (the launch check refused it, or cleanup
+    stopped it anyway), ``None`` when no child was spawned or the caller did
+    not say.
     """
 
     phase: str
@@ -201,6 +205,7 @@ class NodeStartFailure:
     launcher_exited: bool | None
     launcher_returncode: int | None
     launcher_reaped: bool | None
+    identity_changed: bool | None
     phase_ms: tuple[tuple[str, int], ...]
 
     @classmethod
@@ -217,6 +222,7 @@ class NodeStartFailure:
         launcher_exited: bool | None,
         failed_at: float | None = None,
         launcher_reaped: bool | None = None,
+        identity_changed: bool | None = None,
     ) -> "NodeStartFailure":
         if phase not in NODE_START_FAILURE_PHASES:
             phase = "unknown"
@@ -283,6 +289,9 @@ class NodeStartFailure:
             launcher_reaped=(
                 launcher_reaped if isinstance(launcher_reaped, bool) else None
             ),
+            identity_changed=(
+                identity_changed if isinstance(identity_changed, bool) else None
+            ),
             phase_ms=marks,
         )
 
@@ -305,6 +314,7 @@ class NodeStartFailure:
             "launcher_exited": self.launcher_exited,
             "launcher_returncode": self.launcher_returncode,
             "launcher_reaped": self.launcher_reaped,
+            "identity_changed": self.identity_changed,
             "phase_ms": dict(self.phase_ms),
         }
 
@@ -1527,17 +1537,28 @@ def _capture_pre_exec_ownership(
     )
 
 
-def _identity_matches_pre_exec_ownership(
+def _identity_matches_owned_incarnation(
     current: _ProcessIdentity,
     ownership: _PreExecOwnership,
-    target_executable: _ExecutableIdentity,
 ) -> bool:
+    """Same process incarnation as the pinned one, whatever image it runs."""
+
     return (
         current.pid == ownership.pid
         and current.parent_pid == ownership.parent_pid
         and current.process_group == ownership.process_group
         and current.session_id == ownership.session_id
         and current.start_token == ownership.start_token
+    )
+
+
+def _identity_matches_pre_exec_ownership(
+    current: _ProcessIdentity,
+    ownership: _PreExecOwnership,
+    target_executable: _ExecutableIdentity,
+) -> bool:
+    return (
+        _identity_matches_owned_incarnation(current, ownership)
         and current.executable in {ownership.launcher_executable, target_executable}
     )
 
@@ -1960,6 +1981,7 @@ class PhysicalNodeProcess:
         self._launcher_executable_identity = launcher_identity
         self._pre_exec_ownership: _PreExecOwnership | None = None
         self._launch_identity: _ProcessIdentity | None = None
+        self._owned_identity_changed = False
         self._stdout_thread: threading.Thread | None = None
         self._stderr_thread: threading.Thread | None = None
         self._win32_job: Any = None
@@ -2103,6 +2125,15 @@ class PhysicalNodeProcess:
                 )
                 or launch.executable != command_identity
             ):
+                if (
+                    launch.pid == self._process.pid
+                    and _identity_matches_owned_incarnation(
+                        launch, self._pre_exec_ownership
+                    )
+                ):
+                    # Our own child, already running another image: refuse
+                    # the start, but cleanup below still stops and reaps it.
+                    self._owned_identity_changed = True
                 raise NodeProcessError("node_process_identity_invalid")
             phase = mark("identity", "reader_threads")
             self._launch_identity = launch
@@ -2169,6 +2200,7 @@ class PhysicalNodeProcess:
                     launcher_returncode=self._process.returncode,
                     launcher_exited=launcher_exited, failed_at=failed_at,
                     launcher_reaped=self._process.returncode is not None,
+                    identity_changed=self._owned_identity_changed,
                 ),
             ) from exc
         finally:
@@ -2182,6 +2214,35 @@ class PhysicalNodeProcess:
             self._process.wait(timeout=timeout)
         except (subprocess.TimeoutExpired, OSError):
             pass
+
+    @property
+    def owned_identity_changed(self) -> bool:
+        """Whether our unreaped child was seen running an unpinned image."""
+
+        return bool(getattr(self, "_owned_identity_changed", False))
+
+    def _is_own_unreaped_child(
+        self,
+        current: _ProcessIdentity,
+        ownership: _PreExecOwnership,
+    ) -> bool:
+        """Accept our own unreaped child after it exec'd an unpinned image.
+
+        The caller has just seen ``poll()`` return no status, and only this
+        owner reaps the child it spawned, so its pid -- and therefore its
+        process group and session, which it leads -- cannot have been reused.
+        Only the executable may differ: the incarnation must still be the
+        pinned one.  A reaped child, or one this owner did not spawn, never
+        reaches here and keeps every identity check.
+        """
+
+        if (
+            current.pid != self._process.pid
+            or not _identity_matches_owned_incarnation(current, ownership)
+        ):
+            return False
+        self._owned_identity_changed = True
+        return True
 
     @property
     def launch_timing(self) -> dict[str, Any] | None:
@@ -2512,7 +2573,7 @@ class PhysicalNodeProcess:
                         current,
                         ownership,
                         target_executable,
-                    ):
+                    ) and not self._is_own_unreaped_child(current, ownership):
                         return False
             if members is not None:
                 _deadline_remaining(deadline)
@@ -2596,7 +2657,7 @@ class PhysicalNodeProcess:
                         current,
                         ownership,
                         target_executable,
-                    ):
+                    ) and not self._is_own_unreaped_child(current, ownership):
                         return "unsafe"
             members = _inventory_process_group(ownership.process_group, deadline)
             if not members and not stopped:
