@@ -18,10 +18,11 @@ from typing import Any
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import Ed25519EvidenceSigner, SIGNATURE_FIELDS
 
-# A request signed on another member's clock may be issued up to this far in
-# the verifier's future: mycelium_membership.MAX_CLOCK_SKEW_SECONDS (30 s) in
-# ms. Kept as a literal so the closed member runtime (mycelium_member_runtime
-# RUNTIME_PATHS) does not have to carry mycelium_membership; a test pins it.
+# A chunk request or grant signed on another host's clock may be issued (or
+# start) up to this far in the verifier's future:
+# mycelium_membership.MAX_CLOCK_SKEW_SECONDS (30 s) in ms. Kept as a literal
+# so the closed member runtime (mycelium_member_runtime RUNTIME_PATHS) does
+# not have to carry mycelium_membership; a test pins it.
 MAX_CLOCK_SKEW_MS = 30_000
 
 
@@ -848,7 +849,9 @@ def validate_grant(
         type(value.get("origin_fallback_allowed")) is not bool
         or issued > not_before
         or expires <= not_before
-        or not not_before <= now_unix_ms <= expires
+        # not_before is the provisioner's clock; expiry gets no allowance.
+        or not_before > now_unix_ms + MAX_CLOCK_SKEW_MS
+        or now_unix_ms > expires
         or value["recipient_member_id"] != expected_recipient_member_id
         or recipient_generation != expected_recipient_membership_generation
         or provisioner_generation != expected_provisioner_generation
