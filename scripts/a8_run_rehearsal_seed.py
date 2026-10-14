@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from mycelium_host_platform import StopRequest  # noqa: E402
 from mycelium_invite import SqliteInviteRegistry  # noqa: E402
 from mycelium_node.identity import (  # noqa: E402
     load_node_signer,
@@ -223,7 +224,7 @@ def _probe_unqualified_member(
     }
 
 
-def _owner_console(coordinator, stop: threading.Event) -> None:
+def _owner_console(coordinator, stop: StopRequest) -> None:
     """Read owner administration commands from stdin while the seed serves."""
 
     for line in sys.stdin:
@@ -316,11 +317,13 @@ def main(argv: list[str] | None = None) -> int:
         "'members' lists, 'revoke <node_id>' fences one member, "
         "'probe-unqualified <node_id>' exercises serve admission"
     )
-    stop = threading.Event()
+    # The handler runs on the main thread between bytecodes, while that
+    # thread waits on ``stop``: it only requests the stop (no lock, unlike
+    # threading.Event.set()); the main thread closes the server below.
+    stop = StopRequest()
 
     def _stop(_signum: int, _frame: object) -> None:
         stop.set()
-        server.close()
 
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)

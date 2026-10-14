@@ -184,7 +184,9 @@ def _win32_run_service(config_path: Path) -> int:
     if existed:
         api.close(stop_handle)
         raise ValueError("service_runner_already_running")
-    stopping = threading.Event()
+    # Set from the SIGINT/SIGTERM handler while this (main) thread waits on
+    # it: never a threading.Event, whose set() takes the lock wait() holds.
+    stopping = mycelium_host_platform.StopRequest()
     finished = threading.Event()
 
     def request_stop(_signum: int, _frame: Any) -> None:

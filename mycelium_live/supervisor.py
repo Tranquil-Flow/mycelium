@@ -27,6 +27,7 @@ from mycelium_a6_m16 import M16RecoveryAuthority
 from mycelium_a6_recovery import ReplayCheckpoint
 from mycelium_evidence import EvidenceProjectionRegistry, sealed_evidence_projection
 from mycelium_governance import governance_readiness
+from mycelium_host_platform import StopRequest
 from mycelium_product_spine import (
     ProductEvidenceApplication, ProductEvidenceStateError, ProductProjector,
 )
@@ -3894,7 +3895,9 @@ def run_registry_server(
             api_only=api_only,
         )
         startup_complete = True
-        stop = stop_event if stop_event is not None else threading.Event()
+        # The signal handler below runs on the main thread between bytecodes:
+        # its stop flag must take no lock (threading.Event.set() does).
+        stop = stop_event if stop_event is not None else StopRequest()
 
         def request_stop(_signum: int, _frame: Any) -> None:
             stop.set()
@@ -4215,7 +4218,8 @@ def run_physical_server(
             route=route,
             model_id=getattr(deployment, "model_id", None),
         )
-        stop = threading.Event()
+        # Set from the SIGINT/SIGTERM handler: must take no lock.
+        stop = StopRequest()
         if a6_fault_control_port is not None:
             a6_fault_control = _mount_a6_product_fault_control(
                 stack=stack,

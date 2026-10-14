@@ -46,7 +46,6 @@ import argparse
 import json
 from pathlib import Path
 import signal
-import threading
 import webbrowser
 from mycelium_a13_macos.app import DemoApp, DemoError, bounded_failure_locus, preflight, reopen_native, model_contract, public_failure_code
 
@@ -157,7 +156,10 @@ def main():
             launch=reopen_native(args.state_root)
             if not args.headless: webbrowser.open(launch.as_uri())
             print(json.dumps({'event':'private_browser_reopened','model_contract':model_contract()})); return 0
-        done=threading.Event()
+        # Set from the signal handler while this (main) thread waits on it: a
+        # threading.Event would take the lock its own wait() holds.
+        from mycelium_host_platform import StopRequest
+        done=StopRequest()
         def stop(signum,frame): done.set()
         signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
         if not args.headless: webbrowser.open(app.launch_file.as_uri())

@@ -10,13 +10,13 @@ from pathlib import Path
 import signal
 import stat
 import sys
-import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from mycelium_host_platform import StopRequest
 from physical_inference_node import NativeSidecarProcess
 
 
@@ -87,9 +87,11 @@ def main() -> int:
         startup_timeout=30.0,
         endpoint_secret_file=endpoint_secret,
     )
-    stopping = threading.Event()
+    # Set from the SIGINT/SIGTERM handler while the main thread waits on it:
+    # never a threading.Event, whose set() takes the lock wait() holds.
+    stopping = StopRequest()
     prior = {
-        signum: signal.signal(signum, lambda _signum, _frame: stopping.set())
+        signum: signal.signal(signum, stopping.handle_signal)
         for signum in (signal.SIGINT, signal.SIGTERM)
     }
     try:

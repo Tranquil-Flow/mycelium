@@ -27,6 +27,7 @@ from ._common import (
     FileIdentity,
     HostPlatformError,
 )
+from .stop_request import StopRequest
 
 
 _API_LOCK = threading.Lock()
@@ -251,6 +252,7 @@ __all__ = [
     "private_directory",
     "process_resident_bytes",
     "start_stop_event_watcher",
+    "StopRequest",
     "read_owner_file",
     "use_win32_api",
     "win32_api",

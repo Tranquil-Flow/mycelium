@@ -14,6 +14,7 @@ import threading
 import stat
 from typing import NoReturn, Sequence
 
+from mycelium_host_platform import StopRequest
 from mycelium_internet.bootstrap import PublicBootstrapPolicy, canonical_https_origin
 from mycelium_invite import SqliteInviteRegistry
 from mycelium_mobile.android_onboarding import validate_android_quota
@@ -283,7 +284,9 @@ def _run_bound(
 
     server: SeedHTTPServer | None = None
     pairing: AndroidPairingChannel | None = None
-    stopping = threading.Event()
+    # Set from the SIGINT/SIGTERM handler: never a threading.Event, whose
+    # set() takes the lock its own wait() holds on this (the main) thread.
+    stopping = StopRequest()
 
     def request_stop(_signum: int, _frame: object) -> None:
         stopping.set()

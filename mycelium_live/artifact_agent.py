@@ -11,10 +11,10 @@ import signal
 import ssl
 import stat
 import sys
-import threading
 import time
 from typing import Any, Callable, Mapping, Sequence
 
+from mycelium_host_platform import StopRequest
 from mycelium_node.identity import load_node_signer
 from mycelium_qualification.signing import build_ed25519_verifier
 from mycelium_swarm_artifacts import (
@@ -550,7 +550,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     agent = load_artifact_source_agent(args.config)
     agent.publish_availability()
-    stop = threading.Event()
+    # Set from the SIGINT/SIGTERM handler: must take no lock.
+    stop = StopRequest()
 
     def request_stop(_signum: int, _frame: Any) -> None:
         stop.set()
