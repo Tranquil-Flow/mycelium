@@ -24,6 +24,7 @@
     "test:a6-live-matrix": "node scripts/a6-serve-receiver-factory.mjs",
     "test:a14-live-browser": "node scripts/a14-live-browser.mjs",
     "test:a14-live-browser-harness": "node --test scripts/a14-live-browser.test.mjs",
+    "test:navigation-polls": "node scripts/navigation-poll-browser.mjs",
     "test:a10-browser-sessions": "node scripts/a10-browser-sessions.mjs",
     "test:a10-browser-sessions-harness": "node --test scripts/a10-browser-sessions.test.mjs",
     "test:e2e": "PLAYWRIGHT_NO_COPY_PROMPT=1 VITE_OBSERVATORY_SOURCE_MODE=fixture npm run build && PLAYWRIGHT_NO_COPY_PROMPT=1 playwright test",

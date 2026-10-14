@@ -180,6 +180,51 @@ export function harnessPlan() {
   };
 }
 
+const DIAGNOSTIC_TEXT_LIMIT = 300;
+const DIAGNOSTIC_ENTRY_LIMIT = 200;
+
+// Timing diagnostics for a decisive rerun: every page error is still a
+// failure, but it is recorded with its wall-clock time, its offset from the
+// gate start and the navigation step that was active, next to the page's
+// console errors/warnings and failed requests (path only, no query).
+export function createPageDiagnostics({ now = Date.now, failures = [] } = {}) {
+  const started = now();
+  const entries = { page_errors: [], console: [], request_failures: [] };
+  let step = 'start';
+  const record = (kind, value) => {
+    if (entries[kind].length >= DIAGNOSTIC_ENTRY_LIMIT) return;
+    const at = now();
+    entries[kind].push({ at: new Date(at).toISOString(), t_ms: at - started, step, ...value });
+  };
+  const clip = (text) => String(text).slice(0, DIAGNOSTIC_TEXT_LIMIT);
+  return {
+    failures,
+    entries,
+    get step() { return step; },
+    set step(value) { step = String(value); },
+    attach(page, label) {
+      page.on('pageerror', (error) => {
+        failures.push(`pageerror:${error.message}`);
+        record('page_errors', { page: label, message: clip(error.message) });
+      });
+      page.on('console', (message) => {
+        if (['error', 'warning'].includes(message.type())) {
+          record('console', { page: label, type: message.type(), text: clip(message.text()) });
+        }
+      });
+      page.on('requestfailed', (request) => {
+        let target;
+        try {
+          target = new URL(request.url()).pathname;
+        } catch {
+          target = 'invalid_url';
+        }
+        record('request_failures', { page: label, path: clip(target), failure: clip(request.failure()?.errorText ?? 'unknown') });
+      });
+    },
+  };
+}
+
 async function snapshotFrom(page) {
   return page.evaluate(async () => {
     const response = await fetch('/api/v1/product/snapshot', { cache: 'no-store' });
@@ -194,14 +239,15 @@ export async function runLive(config) {
   const checks = [];
   const failures = [];
   const requests = [];
+  const diagnostics = createPageDiagnostics({ failures });
   let browser;
   let transitions = [];
   try {
     browser = await playwright[config.engine].launch({ headless: true });
     const context = await browser.newContext({ viewport: { width: 1440, height: 1100 },
       reducedMotion: 'reduce', serviceWorkers: 'block' });
-    const instrument = async (page) => {
-      page.on('pageerror', (error) => failures.push(`pageerror:${error.message}`));
+    const instrument = async (page, label) => {
+      diagnostics.attach(page, label);
       page.on('request', (request) => {
         const url = new URL(request.url());
         requests.push({ method: request.method(), path: url.pathname, same_origin: url.origin === config.origin });
@@ -210,7 +256,8 @@ export async function runLive(config) {
         ? route.continue() : route.abort()));
     };
     const page = await context.newPage();
-    await instrument(page);
+    await instrument(page, 'main');
+    diagnostics.step = 'goto:network';
     await page.goto(`${config.origin}/#network`);
     const table = page.getByRole('table', { name: 'Route timeline', exact: true });
     await expect(table).toBeVisible({ timeout: 20_000 });
@@ -232,6 +279,7 @@ export async function runLive(config) {
     await expect(page.getByRole('region', { name: 'Peer regions and unknown-region peers', exact: true }))
       .toContainText(`All ${first.route_explorer.nodes.length} public peers`);
     checks.push('regions_owner_declared_or_unknown');
+    diagnostics.step = 'reload:network';
     await page.reload();
     await expect(table).toBeVisible();
     const refreshed = await snapshotFrom(page);
@@ -240,25 +288,34 @@ export async function runLive(config) {
     checks.push('refresh_retains_immutable_history');
     for (const route of WORKSPACES) {
       const active = () => page.locator(`nav a[href="#${route}"][aria-current="page"]`);
+      diagnostics.step = `goto:${route}`;
       await page.goto(`${config.origin}/#${route}`);
       await expect(active()).toBeVisible();
+      diagnostics.step = `reload:${route}`;
       await page.reload();
       await expect(active()).toBeVisible();
       const away = route === 'network' ? 'nodes' : 'network';
+      diagnostics.step = `click:${route}->${away}`;
       await page.locator(`nav a[href="#${away}"]`).click();
+      diagnostics.step = `back:${route}`;
       await page.goBack();
       await expect(active()).toBeVisible();
+      diagnostics.step = `forward:${route}`;
       await page.goForward();
+      diagnostics.step = `back_again:${route}`;
       await page.goBack();
       await expect(active()).toBeVisible();
+      diagnostics.step = `privacy:${route}`;
       assertPrivacy(await page.locator('body').innerText(), config.canaries);
     }
+    diagnostics.step = 'goto:network_final';
     await page.goto(`${config.origin}/#network`);
     await expect(table).toBeVisible();
     checks.push('eight_workspaces_navigation_refresh_back_forward_privacy');
     const second = await browser.newContext({ serviceWorkers: 'block', reducedMotion: 'reduce' });
     const other = await second.newPage();
-    await instrument(other);
+    await instrument(other, 'second_session');
+    diagnostics.step = 'second_session:goto:network';
     await other.goto(`${config.origin}/#network`);
     await expect(other.getByRole('table', { name: 'Route timeline', exact: true })).toBeVisible({ timeout: 20_000 });
     const clean = await snapshotFrom(other);
@@ -267,10 +324,13 @@ export async function runLive(config) {
     assertPrivacy(JSON.stringify(clean), config.canaries);
     assertPrivacy(await other.locator('body').innerText(), config.canaries);
     checks.push('second_session_same_history_privacy');
+    diagnostics.step = 'second_session:close';
     await second.close();
+    diagnostics.step = 'evidence:network';
     await writeFile(path.join(config.evidence, 'network-dom.txt'), await page.locator('body').innerText());
     await page.screenshot({ path: path.join(config.evidence, 'network.png'), fullPage: true });
     if (config.globe) {
+      diagnostics.step = 'globe';
       const facts = async () => ({ rows: await equivalent(),
         peers: await page.getByRole('region', { name: 'Peer regions and unknown-region peers', exact: true }).innerText() });
       const toggle = page.getByRole('checkbox', { name: /Show schematic region globe/ });
@@ -315,18 +375,20 @@ export async function runLive(config) {
       assert.deepEqual(await facts(), before);
       checks.push('a14b_globe_default_off_equivalent_keyboard_privacy');
     }
+    diagnostics.step = 'context:close';
     await context.close();
     if (!requests.every((request) => request.same_origin && request.method === 'GET')) fail('non_same_origin_or_mutating_request');
     checks.push('same_origin_read_only');
   } catch (error) {
     failures.push(error instanceof Error ? error.message : 'a14_live_browser_failed');
   } finally {
+    diagnostics.step = 'browser:close';
     await browser?.close();
   }
   const passed = failures.length === 0 && checks.length === (config.globe ? 7 : 6);
   const report = { protocol: PROTOCOL, engine: config.engine, origin: config.origin, checks, failures,
     transitions, request_count: requests.length, live_evidence: passed, qualification_claim: false,
-    physical_claim: false };
+    physical_claim: false, diagnostics: diagnostics.entries };
   await writeFile(path.join(config.evidence, 'browser-report.json'), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
   return report;
 }
@@ -339,7 +401,8 @@ async function main(args) {
   if (args.length !== 1 || !args[0].startsWith('--engine=')) fail('browser_engine_selection_required');
   const config = validateLiveConfig(process.env, args[0].slice('--engine='.length));
   const report = await runLive(config);
-  process.stdout.write(`${JSON.stringify({ engine: report.engine, checks: report.checks, failures: report.failures, live_evidence: report.live_evidence })}\n`);
+  process.stdout.write(`${JSON.stringify({ engine: report.engine, checks: report.checks, failures: report.failures,
+    page_errors: report.diagnostics.page_errors, live_evidence: report.live_evidence })}\n`);
   if (!report.live_evidence) process.exitCode = 1;
 }
 

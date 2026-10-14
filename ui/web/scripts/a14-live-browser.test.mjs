@@ -14,6 +14,7 @@ import {
   assertPrivacy,
   assertRegionRows,
   assertSegmentsRetained,
+  createPageDiagnostics,
   harnessPlan,
   validateLiveConfig,
 } from './a14-live-browser.mjs';
@@ -152,4 +153,29 @@ test('the A14b globe check is opt-in and its counts must equal the published reg
   assert.throws(() => assertGlobeCounts(explorer, { ...shown, unknown: 0, asia: 1 }), /globe_count_mismatch/);
   assert.throws(() => assertGlobeCounts(explorer, { ...shown, unknown_cell: 1 }), /unknown_region_on_globe/);
   assert.throws(() => assertGlobeCounts({ nodes: [node('d', 'us-east-1')] }, shown), /region_outside_vocabulary/);
+});
+
+test('every page error stays a failure and is recorded with time, step, console and failed requests', () => {
+  let clock = Date.parse('2026-10-14T17:00:00.000Z');
+  const failures = [];
+  const diagnostics = createPageDiagnostics({ now: () => clock, failures });
+  const handlers = {};
+  diagnostics.attach({ on: (event, handler) => { handlers[event] = handler; } }, 'main');
+  diagnostics.step = 'reload:inference';
+  clock += 1_250;
+  handlers.console({ type: () => 'log', text: () => 'ignored' });
+  handlers.console({ type: () => 'error', text: () => 'Failed to load resource: 404' });
+  handlers.pageerror(new Error('/127.0.0.1:8787/__mycelium/live-status due to access control checks.'));
+  diagnostics.step = 'back:inference';
+  clock += 10;
+  handlers.requestfailed({ url: () => 'http://127.0.0.1:8787/__mycelium/models/operation?x=1',
+    failure: () => ({ errorText: 'Load request cancelled' }) });
+  assert.deepEqual(failures, ['pageerror:/127.0.0.1:8787/__mycelium/live-status due to access control checks.']);
+  assert.deepEqual(diagnostics.entries.page_errors, [{ at: '2026-10-14T17:00:01.250Z', t_ms: 1_250,
+    step: 'reload:inference', page: 'main',
+    message: '/127.0.0.1:8787/__mycelium/live-status due to access control checks.' }]);
+  assert.deepEqual(diagnostics.entries.console, [{ at: '2026-10-14T17:00:01.250Z', t_ms: 1_250,
+    step: 'reload:inference', page: 'main', type: 'error', text: 'Failed to load resource: 404' }]);
+  assert.deepEqual(diagnostics.entries.request_failures, [{ at: '2026-10-14T17:00:01.260Z', t_ms: 1_260,
+    step: 'back:inference', page: 'main', path: '/__mycelium/models/operation', failure: 'Load request cancelled' }]);
 });
