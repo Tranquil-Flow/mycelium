@@ -339,3 +339,48 @@ def test_a_member_that_never_stages_is_named_when_publish_times_out(tmp_path, mo
     publish = next(step for step in status['steps'] if step['name'] == 'publish')
     assert publish['detail'].startswith('timed out; still waiting for Joined Mac')
     assert publish['detail'].endswith(': work_not_accepted')
+
+
+class Downloading(Acquisition):
+    """The joined Mac's acquisition: downloading (bytes rising) until ``seconds`` pass."""
+    def __init__(self, source, seconds):
+        super().__init__(source)
+        self.started, self.seconds = time.monotonic(), seconds
+    def status(self):
+        elapsed = time.monotonic() - self.started
+        if elapsed >= self.seconds:
+            return {'state': 'prepared'}
+        return {'state': 'downloading', 'downloaded_bytes': int(elapsed * 1000) + 1, 'total_bytes': 10**9}
+
+
+def test_a_long_joiner_download_does_not_expire_this_macs_descriptor(tmp_path, monkeypatch):
+    """Two-Mac run 18b (2026-10-14): this Mac signed its installation descriptor
+    51 s in; the joined Mac downloaded Qwen3-0.6B over a phone hotspot for ~25 min;
+    observe then verified the owner's own descriptor, expired since 351 s, and the
+    run failed ``installation_descriptor_invalid``.  Scaled: descriptors live 1 s,
+    the joined Mac downloads for 2.5 s."""
+    ttl = 1.0
+    owner, ops, actors, run = make(tmp_path, monkeypatch)
+    def card(app, **k):
+        now = time.time()
+        return {'statement': {'target_node_id': app_node(app), 'issued_at': now, 'expires_at': now + ttl}}
+    monkeypatch.setattr('mycelium_a13_macos.installation_descriptor.installation_descriptor', card)
+    run.chain.budgets['descriptor_margin'] = 0.2
+    joined = run.chain.remote
+    joined.acquisition = Downloading(owner.acquisition.source, 2.5)
+    joined.action = lambda path, body: {} if path in {'/api/run-model', '/api/model/download'} else _route(
+        joined.authority, path, body)
+    seen = []
+    prepare = ops.prepare_observation
+    def verify_then_prepare(app, *, run_id, deployment_id, descriptors):
+        now = time.time()
+        seen.extend(c['statement']['expires_at'] - now for c in descriptors)
+        if any(c['statement']['expires_at'] <= now for c in descriptors):
+            raise ValueError('installation_descriptor_expired')  # verify_installation_descriptor
+        return prepare(app, run_id=run_id, deployment_id=deployment_id, descriptors=descriptors)
+    ops.prepare_observation = verify_then_prepare
+    run.start()
+    status = wait(run, lambda s: s['state'] in {'serving', 'failed'})
+    assert (status['state'], status['failed_step'], status['error_code']) == ('serving', None, None), status
+    assert len(seen) == 2 and min(seen) >= 0.2, seen
+    run.stop(); wait(run, lambda s: s['state'] == 'stopped')

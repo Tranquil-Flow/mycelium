@@ -309,3 +309,35 @@ def test_whole_mode_member_reports_work_running_before_the_owner_configures(whol
     app.authority.native = {'state': 'blocked', 'error_code': 'runtime_member_stale',
                             'model_load_authorized': False, 'work_admitted': True}
     assert (agent.tick()['state'], agent.status()['detail']) == ('reported', 'runtime_member_stale')
+
+
+def test_collect_reissues_its_descriptor_before_it_expires(tmp_path, monkeypatch):
+    """Two-Mac run 18b: this Mac reported at 51 s, the joined Mac downloaded for
+    25 min, and the owner then verified a descriptor that had expired at 351 s.
+    While the run still collects, a member keeps its signed descriptor fresh;
+    each one keeps its own short expiry."""
+    (tmp_path / 'target').mkdir()
+    app = App(tmp_path)
+    now = [1000.0]
+    issued = []
+    def card(app, **k):
+        issued.append(now[0])
+        return {'statement': {'target_node_id': 'node-b', 'issued_at': now[0], 'expires_at': now[0] + 300},
+                'n': len(issued)}
+    monkeypatch.setattr('mycelium_a13_macos.installation_descriptor.installation_descriptor', card)
+    reports = []
+    state = {'a': announcement('collect')}
+    agent = DemoTargetAgent(app, consent=Gate(), source=lambda: state['a'], sink=reports.append,
+                            clock=lambda: now[0], report_interval=10)
+    assert agent.tick()['state'] == 'reported' and issued == [1000.0]
+    now[0] = 1140.0; agent.tick()
+    assert issued == [1000.0]                     # most of its life left: not re-signed
+    now[0] = 1160.0; agent.tick()                 # under half its life left: re-signed now
+    assert issued == [1000.0, 1160.0]
+    assert reports[-1]['descriptor']['n'] == 2 and reports[-1]['state'] == 'reported'
+    now[0] = 1600.0; agent.tick()                 # a long wait keeps it fresh
+    assert issued[-1] == 1600.0
+    count = len(issued)
+    state['a'] = announcement('observe', bootstrap_offer_id='boot-1')
+    now[0] = 2000.0; agent.tick()                 # the owner has verified it: never re-signed after collect
+    assert len(issued) == count

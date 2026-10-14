@@ -374,3 +374,55 @@ def test_a_stalled_download_is_dropped_after_the_base_wait(tmp_path):
     run.start()
     status = wait(run, lambda s: s['state'] == 'failed', timeout=20)
     assert (status['failed_step'], status['error_code']) == ('descriptors', 'two_macs_required')
+
+
+class AgingMembers(Members):
+    """Members whose signed descriptors carry their real expiry.  This Mac's card
+    has only ``stale_for`` seconds of life left until it is re-signed at ``fresh_after``."""
+    def __init__(self, *args, fresh_after, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.start = time.monotonic(); self.fresh_after = fresh_after
+    def tick(self):
+        super().tick()
+        a = self.exchange.announcement(LOCAL)
+        if a['phase'] != 'collect':
+            return
+        now = time.time()
+        fresh = time.monotonic() - self.start >= self.fresh_after
+        report = dict(self.exchange.reports()[LOCAL])
+        report.pop('received_at', None)
+        report['descriptor'] = {'statement': {'target_node_id': LOCAL, 'issued_at': now - 299.9 + (299.9 if fresh else 0),
+                                              'expires_at': now + (300 if fresh else 0.1)}}
+        self.exchange.submit_local(LOCAL, report)
+
+
+def make_aging(tmp_path, *, fresh_after):
+    app, ops, members, run = make(tmp_path)
+    def factory(app, local, exchange):
+        members['m'] = AgingMembers(app, exchange, [LOCAL, REMOTE], fresh_after=fresh_after)
+        return members['m']
+    run.chain._agent_factory = factory
+    run.chain.budgets.update({'descriptors': 1.0, 'download_stall': 0.6, 'descriptor_margin': 5.0})
+    cards = []
+    prepare = ops.prepare_observation
+    def capture(app, **k):
+        cards.extend(k['descriptors']); return prepare(app, **k)
+    ops.prepare_observation = capture
+    return app, ops, members, run, cards
+
+
+def test_observe_waits_for_a_descriptor_that_outlives_its_use(tmp_path):
+    app, ops, members, run, cards = make_aging(tmp_path, fresh_after=0.4)
+    run.start()
+    status = wait(run, lambda s: s['state'] in {'serving', 'failed'}, timeout=20)
+    assert status['state'] == 'serving', status
+    local = next(c for c in cards if c['statement']['target_node_id'] == LOCAL)
+    assert local['statement']['expires_at'] - time.time() > 60  # the re-signed card, not the 0.1 s one
+
+
+def test_a_descriptor_never_refreshed_is_named_not_sent_to_observe(tmp_path):
+    app, ops, members, run, cards = make_aging(tmp_path, fresh_after=60)
+    run.start()
+    status = wait(run, lambda s: s['state'] == 'failed', timeout=20)
+    assert (status['failed_step'], status['error_code']) == ('descriptors', 'member_descriptor_stale')
+    assert cards == [] and not any(c[0] == 'prepare' for c in ops.calls)
