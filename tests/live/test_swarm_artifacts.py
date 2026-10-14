@@ -885,3 +885,165 @@ def test_chunk_request_on_a_source_clock_31_s_behind_the_provisioner_is_refused(
     with pytest.raises(SwarmArtifactContractError, match="artifact_grant_ineligible"):
         validate_chunk_request(request, **arguments)
 
+
+# Availability is signed on the source member's clock and checked by the
+# provisioner and the recipient; a receipt's responded_at is the source's
+# clock and is compared with the recipient's request issued_at. Allow up to
+# MAX_CLOCK_SKEW_SECONDS between those hosts; expiry gets no allowance.
+_SOURCE_NOW_MS = 3_000_000
+
+
+def _source_availability(**overrides) -> tuple:
+    signer = generate_ed25519_signer(endpoint_id="source-endpoint")
+    statement = {
+        **_availability("member-a", [DIGEST_A], rate=10_000, priority=2),
+        "observed_at_unix_ms": _SOURCE_NOW_MS,
+        "valid_until_unix_ms": _SOURCE_NOW_MS + 600_000,
+        **overrides,
+    }
+    return (
+        sign_availability(statement, signer),
+        build_ed25519_verifier([signer.public_key_record()]),
+    )
+
+
+def _check_availability(signed, verifier, now: int) -> dict:
+    return validate_availability(
+        signed,
+        verifier=verifier,
+        now_unix_ms=now,
+        expected_manifest_digest=DIGEST_A,
+        expected_membership_generation=3,
+    )
+
+
+def _check_bundle(signed, verifier, now: int) -> dict:
+    bundle = {
+        "protocol": AVAILABILITY_BUNDLE_PROTOCOL,
+        "source_member_id": "member-a",
+        "membership_generation": 3,
+        "advertisements": [signed],
+        "published_at_unix_ms": _SOURCE_NOW_MS,
+    }
+    return validate_availability_bundle(
+        bundle,
+        verifier=verifier,
+        now_unix_ms=now,
+        expected_source_member_id="member-a",
+        expected_membership_generation=3,
+    )
+
+
+@pytest.mark.parametrize("behind_ms", [200, 29_000])
+def test_availability_on_a_verifier_clock_up_to_30_s_behind_the_source_is_accepted(
+    behind_ms: int,
+) -> None:
+    signed, verifier = _source_availability()
+    assert _check_availability(signed, verifier, _SOURCE_NOW_MS - behind_ms) == signed
+    bundle = _check_bundle(signed, verifier, _SOURCE_NOW_MS - behind_ms)
+    assert bundle["advertisements"] == [signed]
+
+
+def test_availability_on_a_verifier_clock_31_s_behind_the_source_is_refused() -> None:
+    signed, verifier = _source_availability()
+    with pytest.raises(
+        SwarmArtifactContractError, match="artifact_availability_ineligible"
+    ):
+        _check_availability(signed, verifier, _SOURCE_NOW_MS - 31_000)
+    early, early_verifier = _source_availability(
+        observed_at_unix_ms=_SOURCE_NOW_MS - 60_000
+    )
+    with pytest.raises(
+        SwarmArtifactContractError, match="artifact_availability_bundle_invalid"
+    ):
+        # The bundle itself was published 31 s in the verifier's future.
+        _check_bundle(early, early_verifier, _SOURCE_NOW_MS - 31_000)
+
+
+def test_availability_expiry_gets_no_clock_skew_allowance() -> None:
+    signed, verifier = _source_availability()
+    with pytest.raises(
+        SwarmArtifactContractError, match="artifact_availability_ineligible"
+    ):
+        _check_availability(signed, verifier, _SOURCE_NOW_MS + 600_001)
+
+
+def _receipt_for(request: dict, *, responded_ms: int) -> tuple:
+    source = generate_ed25519_signer(endpoint_id="source-member-a")
+    availability = sign_availability(
+        {
+            "protocol": AVAILABILITY_PROTOCOL,
+            "advertisement_id": "advertisement-member-a",
+            "source_member_id": "member-a",
+            "membership_generation": 3,
+            "manifest_digest": request["manifest_digest"],
+            "available_chunk_digests": [request["chunk_digest"]],
+            "verified_bytes": 65_536,
+            "max_concurrent_streams": 2,
+            "max_bytes_per_second": 1_000_000,
+            "serving_priority": 1,
+            "transfer_health": "healthy",
+            "observed_at_unix_ms": _SKEW_NOW_MS - 120_000,
+            "valid_until_unix_ms": _SKEW_NOW_MS + 600_000,
+        },
+        source,
+    )
+    returned = b"ab"
+    receipt = sign_chunk_receipt(
+        {
+            "protocol": CHUNK_RECEIPT_PROTOCOL,
+            "request_id": request["request_id"],
+            "source_member_id": "member-a",
+            "source_membership_generation": 3,
+            "recipient_member_id": "member-3",
+            "manifest_digest": request["manifest_digest"],
+            "chunk_digest": request["chunk_digest"],
+            "offset_bytes": request["offset_bytes"],
+            "length_bytes": request["length_bytes"],
+            "range_content_digest": _content_digest(returned),
+            "advertisement_id": "advertisement-member-a",
+            "responded_at_unix_ms": responded_ms,
+        },
+        source,
+    )
+    arguments = {
+        "source_verifier": build_ed25519_verifier([source.public_key_record()]),
+        "request": request,
+        "availability": availability,
+        "returned_bytes": returned,
+    }
+    return receipt, arguments
+
+
+@pytest.mark.parametrize("behind_ms", [200, 29_000])
+def test_receipt_from_a_source_clock_up_to_30_s_behind_the_recipient_is_accepted(
+    behind_ms: int,
+) -> None:
+    request, _ = _skewed_chunk_request(
+        issued_ms=_SKEW_NOW_MS, expires_ms=_SKEW_NOW_MS + 60_000
+    )
+    receipt, arguments = _receipt_for(request, responded_ms=_SKEW_NOW_MS - behind_ms)
+    assert validate_chunk_receipt(receipt, **arguments) == receipt
+
+
+def test_receipt_from_a_source_clock_31_s_behind_the_recipient_is_refused() -> None:
+    request, _ = _skewed_chunk_request(
+        issued_ms=_SKEW_NOW_MS, expires_ms=_SKEW_NOW_MS + 60_000
+    )
+    receipt, arguments = _receipt_for(request, responded_ms=_SKEW_NOW_MS - 31_000)
+    with pytest.raises(
+        SwarmArtifactContractError, match="artifact_chunk_receipt_mismatch"
+    ):
+        validate_chunk_receipt(receipt, **arguments)
+
+
+def test_receipt_after_the_request_expiry_gets_no_clock_skew_allowance() -> None:
+    request, _ = _skewed_chunk_request(
+        issued_ms=_SKEW_NOW_MS, expires_ms=_SKEW_NOW_MS + 60_000
+    )
+    receipt, arguments = _receipt_for(request, responded_ms=_SKEW_NOW_MS + 60_001)
+    with pytest.raises(
+        SwarmArtifactContractError, match="artifact_chunk_receipt_mismatch"
+    ):
+        validate_chunk_receipt(receipt, **arguments)
+
