@@ -38,7 +38,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:b351613aa49cb1aff800c59fe720bb9f18bd4bb5a842dcb2da0beaf0ee6121f7",
+      "sha256": "sha256:4e24cf27747078bb21ebdd148fb704e7880cc30bf6fde39a45f0acc3ee4e8bc7",
       "size_bytes": 71574
     },
     {
@@ -548,8 +548,8 @@
     },
     {
       "path": "mycelium_a13_macos/app.py",
-      "sha256": "sha256:7ae31e3ec49ef15afbc661ee07cbce2db700292c176386718c14199c4c658555",
-      "size_bytes": 87399
+      "sha256": "sha256:72090a9f6271d9ac59eb2c9852827765e2649511d1dba8e48bece85241d98f36",
+      "size_bytes": 87894
     },
     {
       "path": "mycelium_a13_macos/assignment_provisioning.py",
@@ -603,13 +603,13 @@
     },
     {
       "path": "mycelium_a13_macos/demo_chain.py",
-      "sha256": "sha256:0703bc447fafaab43584a5c538fc0f2af6b127286938904efe303c60e66a1914",
-      "size_bytes": 33617
+      "sha256": "sha256:a1fd56c3418f35d4ab2f21aae494bd4abda3ec23cfc491dc42d132372136cdbb",
+      "size_bytes": 48008
     },
     {
       "path": "mycelium_a13_macos/demo_target.py",
-      "sha256": "sha256:5b14240f05a676e80daddc33ba0545f2a132fcf36ee54fc52095564dd39a2988",
-      "size_bytes": 28020
+      "sha256": "sha256:5c1cac59a7001ffffc5f472af1572cbc5bc946ca14c8c91b2045e4dfef3176ae",
+      "size_bytes": 30058
     },
     {
       "path": "mycelium_a13_macos/install_source.py",
@@ -683,8 +683,8 @@
     },
     {
       "path": "mycelium_a13_macos/owner_run.py",
-      "sha256": "sha256:cfa72a150ad2bcdce7a030954623ab4dc137ad3bd3413946af65bcadbebaaac4",
-      "size_bytes": 12277
+      "sha256": "sha256:5587d8a2ce5d697fddb823b1a59a3fcaf0221ec961a83beefad48faefd309fd9",
+      "size_bytes": 12437
     },
     {
       "path": "mycelium_a13_macos/package_manifest.py",
@@ -2017,6 +2017,16 @@
       "size_bytes": 20943
     },
     {
+      "path": "scripts/a13_operator/README.md",
+      "sha256": "sha256:ba965d10b9c1d9100e9d54c6e9b6548971672759f70493a9714a18402604dee1",
+      "size_bytes": 19556
+    },
+    {
+      "path": "scripts/a13_operator/packaged_app_daemon.py",
+      "sha256": "sha256:0fc2236efa68c28e9642b397a058c2062fc82df3ca2b68ce10b046d304097b1c",
+      "size_bytes": 2149
+    },
+    {
       "path": "scripts/a13_operator/single_mac_rehearsal.py",
       "sha256": "sha256:b00780091c1b6c702f4c16a464fd16846632aabe56aa26f4a0a1d64c5007a767",
       "size_bytes": 10743
@@ -2377,6 +2387,11 @@
       "size_bytes": 5795
     },
     {
+      "path": "tests/a13_macos/test_app_heartbeat_guard.py",
+      "sha256": "sha256:02581c3d9fe8d651bf159c872a0ab8fabe89d8cd5c838a6c0a6d08a24e723dcd",
+      "size_bytes": 2022
+    },
+    {
       "path": "tests/a13_macos/test_browser.py",
       "sha256": "sha256:45f4b1591825daa3b5866c5c02c46a21f5872df3d27daaa30566164a7107cc66",
       "size_bytes": 5141
@@ -2418,8 +2433,13 @@
     },
     {
       "path": "tests/a13_macos/test_demo_chain.py",
-      "sha256": "sha256:64fd8ac24a3d99921a878a0b1d7fc72d1f011fd2c890eedc083ea0d4f53f0505",
-      "size_bytes": 21758
+      "sha256": "sha256:c7288d0a173a4aad093209c3340db8da60e9a03aa8bffce358f5a46a9c4f5e7f",
+      "size_bytes": 27372
+    },
+    {
+      "path": "tests/a13_macos/test_demo_chain_step_budgets.py",
+      "sha256": "sha256:4cc9c115e84c44f478e3c89de349600e115a59c06b91ffea37c481d91643f8ce",
+      "size_bytes": 11636
     },
     {
       "path": "tests/a13_macos/test_demo_chat.py",
@@ -2433,8 +2453,8 @@
     },
     {
       "path": "tests/a13_macos/test_demo_target.py",
-      "sha256": "sha256:aecbb1b3b2797170a020812eaad0eb7d1441d3734bc2f93eb6122a0223ea8c49",
-      "size_bytes": 16780
+      "sha256": "sha256:6800cedb948d551f71242ca62c70098746d03125cf43e8661578357cf92780f9",
+      "size_bytes": 20573
     },
     {
       "path": "tests/a13_macos/test_demo_whole_work.py",
@@ -2558,13 +2578,18 @@
     },
     {
       "path": "tests/a13_macos/test_owner_run.py",
-      "sha256": "sha256:d34da8e6b7e4eb7c7e2a66e8fc8ed68c3f9afefdd9a10533d03bd839c9f09d47",
-      "size_bytes": 8345
+      "sha256": "sha256:e22452adb15bd247d7aff8b3e96dc3042e25eae14f8f49ae6057698a8d5d16f8",
+      "size_bytes": 11630
     },
     {
       "path": "tests/a13_macos/test_package.py",
       "sha256": "sha256:3f77d69db0550cc710ff1f6caa0e5bb50895ce2a6615a8fe5c1b1bec426e2c7f",
       "size_bytes": 11740
+    },
+    {
+      "path": "tests/a13_macos/test_packaged_app_daemon_channel.py",
+      "sha256": "sha256:0397c8ee7f7b2d6809c32f9151fd31d4febc04dadfe268c30faadb87e85c5974",
+      "size_bytes": 2812
     },
     {
       "path": "tests/a13_macos/test_pairing_window.py",
@@ -2770,6 +2795,11 @@
       "path": "tests/a13_windows/test_work_authorization_win32.py",
       "sha256": "sha256:87cced8cae65a9acf289bc38ee4202cf90eeed43ccd11a61a38d61128b00dfda",
       "size_bytes": 2079
+    },
+    {
+      "path": "tests/a14_acceptance/serve_navigation_polls.py",
+      "sha256": "sha256:1f7b2c0e507e5d264deefbc66d263be163e6733719b68652a013d5b81a04d1e2",
+      "size_bytes": 2231
     },
     {
       "path": "tests/a14b_acceptance/__init__.py",
@@ -4098,8 +4128,8 @@
     },
     {
       "path": "ui/web/package.json",
-      "sha256": "sha256:8beb0c16b1e5fa98efb1b6e552675a260b116a160d4cf5fc5c8b26fee7fe53c8",
-      "size_bytes": 2894
+      "sha256": "sha256:26b3dc5e9eefab216c96980115afaa2920aebe1dff70174707865e082fbae3a3",
+      "size_bytes": 2967
     },
     {
       "path": "ui/web/scripts/a10-browser-sessions.mjs",
@@ -4118,28 +4148,43 @@
     },
     {
       "path": "ui/web/scripts/a14-live-browser.mjs",
-      "sha256": "sha256:8c2a3fc5686c6106f8cb14d35a76b5696ff764f49927662712f0f3a9b05de2fb",
-      "size_bytes": 17850
+      "sha256": "sha256:ae8865b5bf897f2dfc7e68931dbcd35e20e2375065cf1e3c20274a6a76722593",
+      "size_bytes": 20433
     },
     {
       "path": "ui/web/scripts/a14-live-browser.test.mjs",
-      "sha256": "sha256:88811595569916228c2a049178d47d5ae6446fc4628a8b328c874d76e25d79d4",
-      "size_bytes": 8693
+      "sha256": "sha256:fd058efb3c36c967690b024760c8270d1bbe6ae94f819856d661cb94201f351c",
+      "size_bytes": 10401
     },
     {
       "path": "ui/web/scripts/a6-product-browser-e2e.mjs",
-      "sha256": "sha256:fb581e989ce5269c9eec0a9a1b1526c8afee3dd9f2c24a73e0d20b1f6d646269",
-      "size_bytes": 27389
+      "sha256": "sha256:347f8e80da539468bc5a4bf34dd27ffe2a187bd66194e31287461a476926f7e8",
+      "size_bytes": 28528
     },
     {
       "path": "ui/web/scripts/a6-product-browser-e2e.test.mjs",
-      "sha256": "sha256:4c822882b3f9a471329d64ba125c5c3fe379e13921a332d90b80a312d47bab8d",
-      "size_bytes": 27550
+      "sha256": "sha256:d91ae6f56a95921e69fd5f4b5ef2de87b1f4a1412aded8b797712bd2778864de",
+      "size_bytes": 29197
+    },
+    {
+      "path": "ui/web/scripts/navigation-poll-browser.mjs",
+      "sha256": "sha256:767c6cc134224441b18c2676b54f50a4161b18842872f5fc08a92d090c1a3825",
+      "size_bytes": 8301
     },
     {
       "path": "ui/web/src/App.tsx",
       "sha256": "sha256:9396f7a736ea992663f54971f3c8de04ae341354a89a6337e0e84fa1310f4f02",
       "size_bytes": 22324
+    },
+    {
+      "path": "ui/web/src/app/backgroundFetch.test.ts",
+      "sha256": "sha256:db3a7049b4b68a132764d0bbba478f1a51478e1cc2bf6cbc58f56cea06edaf2e",
+      "size_bytes": 5230
+    },
+    {
+      "path": "ui/web/src/app/backgroundFetch.ts",
+      "sha256": "sha256:aa53304b7388851e71eb93ea367ff2d517c81d9c56f56c9fb9cf3bfc05ac517c",
+      "size_bytes": 7993
     },
     {
       "path": "ui/web/src/app/contracts.test.ts",
@@ -4150,6 +4195,11 @@
       "path": "ui/web/src/app/contracts.ts",
       "sha256": "sha256:8c11371980c5a997af2669fdb4030ea8ac94168b2ce9dedb1a2dea9390f7d2fa",
       "size_bytes": 38899
+    },
+    {
+      "path": "ui/web/src/data/observatorySource.ts",
+      "sha256": "sha256:e21ca8ea9570bb1fe824c567d97a765f8861cc6e6c5e03f043b33d8dfca909ec",
+      "size_bytes": 18164
     },
     {
       "path": "ui/web/src/features/a7Recovery/A7RecoveryStatusBar.test.tsx",
@@ -4172,29 +4222,64 @@
       "size_bytes": 1117
     },
     {
+      "path": "ui/web/src/features/consumer/consumerObservatory.ts",
+      "sha256": "sha256:89532e62b9135cbe926e275c887089a2b24e905f8230fa86910640ecf65c24ac",
+      "size_bytes": 7280
+    },
+    {
+      "path": "ui/web/src/features/deviceLab/deviceLabClient.ts",
+      "sha256": "sha256:6cfd2cb11dde39f21af2a3732a653ea9b96560e0920d446c05a8ed6fedc57174",
+      "size_bytes": 12297
+    },
+    {
+      "path": "ui/web/src/features/evidence/evidenceProjection.ts",
+      "sha256": "sha256:10eb3e0dcb2b0fa64343adadd229b69b70da7b2fcad796cdfd2a668ad03b9544",
+      "size_bytes": 8954
+    },
+    {
+      "path": "ui/web/src/features/governance/governanceReadiness.ts",
+      "sha256": "sha256:f9429b0519f684eb1be5c610c94133000f0e5fc729bcd33d026098a1b6d7477b",
+      "size_bytes": 3848
+    },
+    {
       "path": "ui/web/src/features/inference/InferenceWorkspace.test.tsx",
       "sha256": "sha256:7a1bc037cf4718957036204ce691063e27c7231ebdb422e26cea4b0dad65a96e",
       "size_bytes": 21540
     },
     {
       "path": "ui/web/src/features/inference/InferenceWorkspace.tsx",
-      "sha256": "sha256:41599eee9f585e6134880c294c2cd630c415c238b4167779bfa3f441c39198b2",
-      "size_bytes": 30029
+      "sha256": "sha256:cbafda7e9c61df24d6c91906eca4ecbc41c4a00af0b61b36523c7ba846ad1530",
+      "size_bytes": 30119
+    },
+    {
+      "path": "ui/web/src/features/inference/deploymentClient.ts",
+      "sha256": "sha256:0490e688eee0d6a15ba24000ff031c78b27e23e2fa0ae7cf2982be01cdbb6a9d",
+      "size_bytes": 3867
+    },
+    {
+      "path": "ui/web/src/features/inference/reloadRecovery.test.tsx",
+      "sha256": "sha256:31f9ed0df37b9b3ff5919bf95e643cf90cd0d7e8c699cefd104d452913ad16d6",
+      "size_bytes": 9976
     },
     {
       "path": "ui/web/src/features/inference/requestClient.test.ts",
-      "sha256": "sha256:e2b133e9b6444990a7a9a4fd6a5718a59ebcb610df3b154658910849dfd2d3e3",
-      "size_bytes": 12719
+      "sha256": "sha256:0d6c25577401bedf64bc1391408450b11b7c4565f61d65e6209ed1406db444f5",
+      "size_bytes": 14092
     },
     {
       "path": "ui/web/src/features/inference/requestClient.ts",
-      "sha256": "sha256:41cfee470e977b1b02732e3078b7fed8a4052a8d04d0ac5a86531b9799b49a40",
-      "size_bytes": 17209
+      "sha256": "sha256:73c23076980b31350aaeda0ec35accbdc22cca4586f0832fa3b76605d07f9c36",
+      "size_bytes": 17696
+    },
+    {
+      "path": "ui/web/src/features/inference/useInferenceSession.test.tsx",
+      "sha256": "sha256:8dc4fd8780cdf80272f630888c6c38e7ffdde2bfb378f64ac4321de0bcc2f583",
+      "size_bytes": 27034
     },
     {
       "path": "ui/web/src/features/inference/useInferenceSession.ts",
-      "sha256": "sha256:412291ceaace065917d38b2f482aaecf7dff889c895c46d0dc6efdaa9f774dfc",
-      "size_bytes": 28449
+      "sha256": "sha256:b6f97d451a49ff7b35d2c324fa09677913f9164f95fcf49f2462b9d5b8f2e7bd",
+      "size_bytes": 29323
     },
     {
       "path": "ui/web/src/features/liveRoute/LiveRouteWorkspace.test.tsx",
@@ -4207,19 +4292,64 @@
       "size_bytes": 17284
     },
     {
+      "path": "ui/web/src/features/liveRoute/deploymentActivation.ts",
+      "sha256": "sha256:8d4ffdb7861ddf9a6c213d621ebce5547d6e670ee2b7da47866e282885f805a4",
+      "size_bytes": 8014
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/m15Comparison.ts",
+      "sha256": "sha256:e545b32530d6efe84bcaec755a1ae9c6d1a5a1bdfa83486970b280fc9f615457",
+      "size_bytes": 23795
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/m16Runtime.ts",
+      "sha256": "sha256:aa203b882e47e9535df6a6802169f541e840db8e70b27ef011835d88bbb9c2cb",
+      "size_bytes": 14127
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/m17ModelOperation.ts",
+      "sha256": "sha256:c61ec6f04298c1296d64cb0da94ec753c2900210ef6fd14b4762c5d0f6fd91a3",
+      "size_bytes": 28019
+    },
+    {
       "path": "ui/web/src/features/liveRoute/routeStatus.test.ts",
       "sha256": "sha256:417ecd6e8945915fc80102404b8f9b535ca5bd777927fa086b2abfb9c98ad065",
       "size_bytes": 9746
     },
     {
       "path": "ui/web/src/features/liveRoute/routeStatus.ts",
-      "sha256": "sha256:4c32c6576e21e7ea8faf9102fc048cfc10c6825a04b05c48ac8b408ec36c3388",
-      "size_bytes": 55623
+      "sha256": "sha256:bb235694faf1426d827516d41a28e6e4136a6a6b1c6568a1a593714c09cd1053",
+      "size_bytes": 55666
+    },
+    {
+      "path": "ui/web/src/features/membership/membershipClient.ts",
+      "sha256": "sha256:17bd5e73cb6b3405fc6c2ec28f738e346550069ef34661874d31a21135129698",
+      "size_bytes": 7675
+    },
+    {
+      "path": "ui/web/src/features/models/artifactAcquisition.ts",
+      "sha256": "sha256:10335cd7c423028f3f83f00105c03c3b4dfe18ac7fdc8fb347bf2b8c12cf1bd8",
+      "size_bytes": 13920
+    },
+    {
+      "path": "ui/web/src/features/models/modelCapacityRefresh.ts",
+      "sha256": "sha256:8dc2088b65fbd2dfdfd2f514d7e62ffbfca19077256cee28434a5077e7ddd694",
+      "size_bytes": 4858
+    },
+    {
+      "path": "ui/web/src/features/models/modelPreparation.ts",
+      "sha256": "sha256:3544fa7299f316f6204648d1afad3693049f1e30b485e42ed352a7f393d63ec0",
+      "size_bytes": 3632
     },
     {
       "path": "ui/web/src/features/productEvidence/contracts.ts",
       "sha256": "sha256:f0cca441cbbced0e2d7fd54b49b1092a2c9def756577b0bd1a48437a0513f2b2",
       "size_bytes": 45584
+    },
+    {
+      "path": "ui/web/src/features/productEvidence/source.ts",
+      "sha256": "sha256:0c99c2f711eeef2a5b491678736114d2ce15894dfea015d7e1e251abc75fcdd8",
+      "size_bytes": 13125
     },
     {
       "path": "ui/web/src/features/routeExplorer/RegionGlobe.tsx",
@@ -4247,6 +4377,11 @@
       "size_bytes": 4809
     },
     {
+      "path": "ui/web/src/features/swarm/SwarmClient.ts",
+      "sha256": "sha256:e6a403ac8ca5865dbb8c5ec8e45e5f9f5d0ed9e85f8ccf51366f0018a402332f",
+      "size_bytes": 6534
+    },
+    {
       "path": "ui/web/vite.config.ts",
       "sha256": "sha256:c91fed1a10a226e123fb5a4baf5018f54bfc6a440761093cb7d9c2ef04933864",
       "size_bytes": 569
@@ -4263,5 +4398,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:b212e1218b5a4b7835bc9fc8be991c278d6de8faacd0edb0c46188f93c4faca0"
+  "source_digest": "sha256:cad6faff4f262d12b3fdf9fefe4377824a51ad5d25a425deb1ad03b5713606b7"
 }

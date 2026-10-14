@@ -140,8 +140,8 @@
         },
         {
           "path": "ui/web/src/features/liveRoute/m16Runtime.ts",
-          "sha256": "143fb810e4daf4312d1122119827dc2fce1118f7a518dbd94abf7b190349ac66",
-          "size_bytes": 14084
+          "sha256": "aa203b882e47e9535df6a6802169f541e840db8e70b27ef011835d88bbb9c2cb",
+          "size_bytes": 14127
         },
         {
           "path": "ui/web/src/features/liveRoute/M16RuntimePanel.tsx",
@@ -205,8 +205,8 @@
         },
         {
           "path": "ui/web/src/features/liveRoute/deploymentActivation.ts",
-          "sha256": "6dc86b5e7faa31b1b4629b1235048e672144bd6428e8f17f292682f0777fc690",
-          "size_bytes": 7943
+          "sha256": "8d4ffdb7861ddf9a6c213d621ebce5547d6e670ee2b7da47866e282885f805a4",
+          "size_bytes": 8014
         },
         {
           "path": "ui/web/src/features/liveRoute/PreparedDeploymentsPanel.tsx",
@@ -245,8 +245,8 @@
         },
         {
           "path": "ui/web/src/features/liveRoute/deploymentActivation.ts",
-          "sha256": "6dc86b5e7faa31b1b4629b1235048e672144bd6428e8f17f292682f0777fc690",
-          "size_bytes": 7943
+          "sha256": "8d4ffdb7861ddf9a6c213d621ebce5547d6e670ee2b7da47866e282885f805a4",
+          "size_bytes": 8014
         },
         {
           "path": "ui/web/src/features/models/ModelCatalogControlPanel.tsx",
@@ -280,8 +280,8 @@
         },
         {
           "path": "ui/web/src/features/evidence/evidenceProjection.ts",
-          "sha256": "16128981e833319276be543ba32e1d21bd1409fda5470122e898f7e7fbd4c4ba",
-          "size_bytes": 8911
+          "sha256": "10eb3e0dcb2b0fa64343adadd229b69b70da7b2fcad796cdfd2a668ad03b9544",
+          "size_bytes": 8954
         },
         {
           "path": "ui/web/src/features/evidence/EvidenceProvenanceSource.tsx",
@@ -315,8 +315,8 @@
         },
         {
           "path": "ui/web/src/features/evidence/evidenceProjection.ts",
-          "sha256": "16128981e833319276be543ba32e1d21bd1409fda5470122e898f7e7fbd4c4ba",
-          "size_bytes": 8911
+          "sha256": "10eb3e0dcb2b0fa64343adadd229b69b70da7b2fcad796cdfd2a668ad03b9544",
+          "size_bytes": 8954
         },
         {
           "path": "ui/web/src/features/evidence/EvidenceProvenanceSource.tsx",
@@ -380,8 +380,8 @@
         },
         {
           "path": "ui/web/scripts/a6-product-browser-e2e.mjs",
-          "sha256": "fb581e989ce5269c9eec0a9a1b1526c8afee3dd9f2c24a73e0d20b1f6d646269",
-          "size_bytes": 27389
+          "sha256": "347f8e80da539468bc5a4bf34dd27ffe2a187bd66194e31287461a476926f7e8",
+          "size_bytes": 28528
         }
       ],
       "protocol": "mycelium.full_context_recovery_gate.v1"
@@ -595,8 +595,8 @@
         },
         {
           "path": "ui/web/src/features/governance/governanceReadiness.ts",
-          "sha256": "5f6459e0cb060186efe16bf4653073ea5365dedd99a35a873a3cd62369f5cae1",
-          "size_bytes": 3777
+          "sha256": "f9429b0519f684eb1be5c610c94133000f0e5fc729bcd33d026098a1b6d7477b",
+          "size_bytes": 3848
         },
         {
           "path": "ui/web/src/features/governance/GovernanceReadinessSource.tsx",
@@ -845,8 +845,8 @@
         },
         {
           "path": "ui/web/src/features/liveRoute/routeStatus.ts",
-          "sha256": "4c32c6576e21e7ea8faf9102fc048cfc10c6825a04b05c48ac8b408ec36c3388",
-          "size_bytes": 55623
+          "sha256": "bb235694faf1426d827516d41a28e6e4136a6a6b1c6568a1a593714c09cd1053",
+          "size_bytes": 55666
         }
       ],
       "protocol": "mycelium.live_route_status.v1"
@@ -865,8 +865,8 @@
         },
         {
           "path": "ui/web/src/features/liveRoute/routeStatus.ts",
-          "sha256": "4c32c6576e21e7ea8faf9102fc048cfc10c6825a04b05c48ac8b408ec36c3388",
-          "size_bytes": 55623
+          "sha256": "bb235694faf1426d827516d41a28e6e4136a6a6b1c6568a1a593714c09cd1053",
+          "size_bytes": 55666
         },
         {
           "path": "ui/web/src/features/liveRoute/M13PlacementPanel.tsx",
@@ -890,8 +890,8 @@
         },
         {
           "path": "ui/web/src/features/liveRoute/routeStatus.ts",
-          "sha256": "4c32c6576e21e7ea8faf9102fc048cfc10c6825a04b05c48ac8b408ec36c3388",
-          "size_bytes": 55623
+          "sha256": "bb235694faf1426d827516d41a28e6e4136a6a6b1c6568a1a593714c09cd1053",
+          "size_bytes": 55666
         },
         {
           "path": "ui/web/src/features/liveRoute/M14TopologyPanel.tsx",
@@ -915,8 +915,8 @@
         },
         {
           "path": "ui/web/src/features/liveRoute/m15Comparison.ts",
-          "sha256": "9fc4211be0dbfc56314447d1d030b01105e160b42e3f22cc602560f46274d158",
-          "size_bytes": 23752
+          "sha256": "e545b32530d6efe84bcaec755a1ae9c6d1a5a1bdfa83486970b280fc9f615457",
+          "size_bytes": 23795
         },
         {
           "path": "ui/web/src/features/liveRoute/M15WorkloadPanel.tsx",
@@ -1235,8 +1235,8 @@
         },
         {
           "path": "ui/web/src/features/models/modelPreparation.ts",
-          "sha256": "1904c19fcf7fbc728a3373aa04a5797421a4770a360aea471e995bf1406b4984",
-          "size_bytes": 3561
+          "sha256": "3544fa7299f316f6204648d1afad3693049f1e30b485e42ed352a7f393d63ec0",
+          "size_bytes": 3632
         }
       ],
       "protocol": "mycelium.model_preparation_authorization.v2"
@@ -1405,8 +1405,8 @@
         },
         {
           "path": "ui/web/src/features/inference/useInferenceSession.ts",
-          "sha256": "412291ceaace065917d38b2f482aaecf7dff889c895c46d0dc6efdaa9f774dfc",
-          "size_bytes": 28449
+          "sha256": "b6f97d451a49ff7b35d2c324fa09677913f9164f95fcf49f2462b9d5b8f2e7bd",
+          "size_bytes": 29323
         }
       ],
       "protocol": "mycelium.product_concurrency_liveness_qualification.v1"
