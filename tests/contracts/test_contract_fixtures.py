@@ -563,21 +563,32 @@ def test_atomic_write_keeps_replacement_inside_opened_parent_descriptor(
     assert (displaced_parent / target.name).read_bytes() == b"replacement"
 
 
-def test_fixture_check_rejects_unexpected_files() -> None:
-    unexpected = FIXTURES / "unexpected-contract.json"
-    unexpected.write_text("{}\n", encoding="utf-8")
-    try:
-        completed = subprocess.run(
-            [sys.executable, "scripts/generate_contract_fixtures.py", "--check"],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        assert completed.returncode != 0
-        assert "unexpected fixture" in (completed.stderr + completed.stdout)
-    finally:
-        unexpected.unlink(missing_ok=True)
+def test_fixture_check_rejects_unexpected_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Check a private copy of the fixture directory: writing the stray file into the
+    # checked-in directory made concurrent drift/audit tests (pytest-xdist) see it.
+    import importlib.util
+
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    spec = importlib.util.spec_from_file_location(
+        "generate_contract_fixtures_under_test", ROOT / "scripts" / "generate_contract_fixtures.py"
+    )
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    private = tmp_path / "compatibility-fixtures"
+    private.mkdir()
+    for source in FIXTURES.iterdir():
+        if source.name.endswith(".json"):
+            (private / source.name).write_bytes(source.read_bytes())
+    (private / "unexpected-contract.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(generator, "FIXTURE_DIR", private)
+    monkeypatch.setattr(sys, "argv", ["generate_contract_fixtures.py", "--check"])
+    before = sorted(path.name for path in FIXTURES.iterdir())
+
+    assert generator.main() != 0
+    assert "unexpected fixture: unexpected-contract.json" in capsys.readouterr().err
+    assert sorted(path.name for path in FIXTURES.iterdir()) == before
 
 
 def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
