@@ -14,6 +14,7 @@ from mycelium_membership import (
     LEASE_RENEWAL_PROTOCOL,
     JOIN_ACCEPTANCE_PROTOCOL,
     LINK_PROBE_REPORT_PROTOCOL,
+    MAX_CLOCK_SKEW_SECONDS,
     MembershipContractError,
     sign_membership_message,
     verify_join_request,
@@ -926,3 +927,65 @@ def test_valid_activation_receipt_suppresses_exactly_one_scheduled_heartbeat(
             lifecycle_state="RUNNING",
             active_requests=1,
         )
+
+
+@pytest.mark.parametrize(
+    ("seed_ahead_by", "accepted"),
+    [(0.2, True), (29.0, True), (MAX_CLOCK_SKEW_SECONDS, True), (31.0, False)],
+)
+def test_a_seed_signed_peer_record_tolerates_the_codebase_clock_skew(
+    tmp_path: Path, seed_ahead_by: float, accepted: bool
+) -> None:
+    """`valid_from` is the seed host's clock; this node may be slightly behind it.
+
+    The same MAX_CLOCK_SKEW_SECONDS future allowance the offer itself was
+    admitted under (verify_membership_message); `valid_until` stays strict.
+    """
+    session, seed, _request = _joined(tmp_path)
+    offer = sign_membership_message(
+        signer=seed,
+        message={
+            "protocol": ASSIGNMENT_OFFER_PROTOCOL,
+            "message_id": "offer-skew-1",
+            "swarm_id": "swarm-a",
+            "sender_node_id": "seed-node",
+            "sender_endpoint_id": seed.endpoint_id,
+            "recipient_node_id": "node-a",
+            "incarnation": "seed-incarnation",
+            "generation": 1,
+            "issued_at": NOW,
+            "expires_at": NOW + 60.0,
+            "deployment_id": "deployment-skew",
+            "deployment_epoch": 1,
+            "assignment_id": "assignment-skew-1",
+            "assignment_digest": "sha256:" + "1" * 64,
+            "stage_pack_digest": "sha256:" + "2" * 64,
+            "graph_digest": "sha256:" + "3" * 64,
+            "load_generation": 1,
+            "placement_provenance": "frozen_fixture",
+            "peer_endpoint_records": [
+                {
+                    "node_id": "node-b",
+                    "endpoint_id": "endpoint-node-b-v1",
+                    "deployment_epoch": 1,
+                    "membership_generation": 1,
+                    "valid_from": NOW,
+                    "valid_until": NOW + 60.0,
+                }
+            ],
+        },
+    )
+    session.accept_assignment_offer(offer)
+    resolve = lambda now: session.resolve_peer_endpoint(  # noqa: E731
+        assignment_id="assignment-skew-1", peer_node_id="node-b", now=now
+    )
+    if accepted:
+        assert resolve(NOW - seed_ahead_by) == "endpoint-node-b-v1"
+    else:
+        with pytest.raises(NodeMembershipError, match="assignment_peer_record_expired"):
+            resolve(NOW - seed_ahead_by)
+    # Expiry unchanged: no skew is added after valid_until.
+    assert resolve(NOW + 59.999) == "endpoint-node-b-v1"
+    for late in (NOW + 60.0, NOW + 60.2, NOW + 89.0):
+        with pytest.raises(NodeMembershipError, match="assignment_peer_record_expired"):
+            resolve(late)

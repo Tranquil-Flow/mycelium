@@ -5,11 +5,13 @@ was unrecoverable afterwards: `identity()` raises before returning it, so the ru
 left only the bare code, and the cause had to be reconstructed by reading source
 (four hypotheses, none provable from disk; the tunnels were dead by then).
 
-The window CONDITION is deliberately strict and is pinned by
-`test_seed_response_clock_parent` (`test_signed_http_delayed_identity_and_expiry_
-are_enforced`: a validator clock behind the issuer IS rejected). Nothing here
-changes that. This test pins the other half: the rejection carries the numbers,
-so the next occurrence explains itself instead of needing archaeology.
+The window CONDITION follows the codebase's cross-host semantics, pinned by
+`tests/seed_coordinator/test_seed_identity_clock_skew.py`: a validator behind the
+issuer by up to MAX_CLOCK_SKEW_SECONDS (30 s) is accepted, beyond it rejected,
+and expiry is strict. (Until two-Mac run #19 the future side had zero tolerance
+and a 0.18 s inter-host skew was refused.) This test pins the other half: the
+rejection carries the numbers, so the next occurrence explains itself instead
+of needing archaeology.
 """
 import pytest
 
@@ -31,24 +33,26 @@ def test_a_validator_behind_the_issuer_is_rejected_and_the_evidence_names_it(tmp
         request = client._request
 
         def delayed(*args):
-            current[0] = 3003.0          # the seed mints the statement at 3003
+            current[0] = 3033.0          # the seed mints the statement at 3033
             return request(*args)
 
         client._request = delayed
         with pytest.raises(SeedHTTPError, match='seed_http_seed_time_invalid') as caught:
-            client.identity(now=3001.0)  # the validator's clock is 2 s behind
+            client.identity(now=3001.0)  # the validator's clock is 32 s behind
 
         window = caught.value.window
         assert window is not None
         assert window['now'] == 3001.0
-        assert window['issued_at'] == 3003.0
+        assert window['issued_at'] == 3033.0
         assert window['expires_at'] > window['issued_at']
         # Positive == the validator was this far BEHIND the issuer.
-        assert window['seconds_before_issued'] == pytest.approx(2.0)
+        assert window['seconds_before_issued'] == pytest.approx(32.0)
         assert window['seconds_after_expires'] < 0
+        assert window['max_clock_skew_seconds'] == 30.0
 
-        # Strict semantics preserved: a validator that samples at/after the issue
-        # time, and before expiry, is accepted.
+        # A validator within the skew, or at/after the issue time and before
+        # expiry, is accepted.
+        assert client.identity(now=3031.0)['seed_endpoint_id'] == 'clock-endpoint'
         accepted = client.identity(now=lambda: current[0])
         assert accepted['seed_endpoint_id'] == 'clock-endpoint'
 

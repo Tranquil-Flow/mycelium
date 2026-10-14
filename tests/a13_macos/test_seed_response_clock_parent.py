@@ -34,11 +34,14 @@ def test_signed_http_delayed_identity_and_expiry_are_enforced(tmp_path):
         client=SeedHTTPClient.from_invite_bundle(bundle,now=current[0],timeout=2)
         request=client._request
         def delayed(*args):
-            current[0]=3003.0
+            current[0]=3033.0
             return request(*args)
         client._request=delayed
+        # Beyond MAX_CLOCK_SKEW_SECONDS (30 s) behind the issuer: rejected.
         with pytest.raises(SeedHTTPError,match='seed_http_seed_time_invalid'):
             client.identity(now=3001.0)
+        # Within it (2 s behind, the class two-Mac run #19 hit at 0.18 s): accepted.
+        assert client.identity(now=3031.0)['seed_endpoint_id']=='clock-endpoint'
         assert client.identity(now=lambda:current[0])['seed_endpoint_id']=='clock-endpoint'
         with pytest.raises(SeedHTTPError,match='seed_http_seed_time_invalid'):
             client.identity(now=lambda:10000.0)
