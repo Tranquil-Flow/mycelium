@@ -43,6 +43,19 @@ def _code(error: BaseException, default: str) -> str:
     return code if isinstance(code, str) and _CODE_RE.fullmatch(code) else default
 
 
+def _descriptor_left(card: Any, now: float) -> float | None:
+    """Seconds until a signed descriptor expires, or ``None`` when unreadable.
+
+    Liveness only: ``None`` passes the card on to verification, which refuses
+    it by name (installation_descriptor.verify_installation_descriptor).
+    """
+    statement = card.get('statement') if isinstance(card, Mapping) else None
+    expires = statement.get('expires_at') if isinstance(statement, Mapping) else None
+    if type(expires) not in (int, float) or expires != expires:
+        return None
+    return float(expires) - now
+
+
 def _owner_compiled_bundle(app):
     """The owner's compiled transfer bundle for the current run, if any.
 
@@ -164,7 +177,8 @@ class AppDemoChain:
         self.ops = ops or ChainOps()
         self.interval = interval
         self._agent_factory = agent_factory
-        self.budgets = {'model': 5.0, 'descriptors': 180.0, 'descriptors_download': 1800.0, 'download_stall': 120.0, 'bootstrap': 180.0, 'collect': 180.0,
+        self.budgets = {'model': 5.0, 'descriptors': 180.0, 'descriptors_download': 1800.0, 'download_stall': 120.0,
+                        'descriptor_margin': 60.0, 'bootstrap': 180.0, 'collect': 180.0,
                         'cleanup': 120.0, 'compile': 3600.0, 'slices': 7200.0, 'publish': 600.0,
                         'targets': 280.0, 'serving': 900.0, **(budgets or {})}
         self._local_device = local_device
@@ -342,14 +356,40 @@ class AppDemoChain:
         class _GiveUp(Exception):
             pass
 
+        margin = self.budgets.get('descriptor_margin', 60.0)
+        stale: set[str] = set()
+        stale_since: dict[str, float] = {}
+
+        def usable(report) -> bool:
+            # A descriptor must outlive its use: observe verifies it right after
+            # this step.  An aging one is not ready; its member re-signs it
+            # while the run collects (DemoTargetAgent).  Two-Mac run 18b: this
+            # Mac's descriptor, signed 51 s in, was verified 1585 s in, after
+            # the joined Mac's download -- expired.
+            card = (report or {}).get('descriptor')
+            if card is None:
+                return False
+            left = _descriptor_left(card, time.time())
+            return left is None or left >= margin
+
         def have():
             reports = self._reports(ctx)
-            ready = [n for n in expected if (reports.get(n) or {}).get('descriptor') is not None]
+            ready = [n for n in expected if usable(reports.get(n))]
+            stale.clear()
+            stale.update(n for n in expected if n not in ready and (reports.get(n) or {}).get('descriptor'))
             self._publish_participants(ctx)
             now = clock()
-            active = False
+            active = resigning = False
             for node in expected:
                 report = reports.get(node) or {}
+                if node in stale:
+                    # A live member re-signs within half a descriptor's life;
+                    # one stale for a whole stall budget is not coming back.
+                    since = stale_since.setdefault(node, now)
+                    if now - since < stall:
+                        resigning = True
+                    continue
+                stale_since.pop(node, None)
                 if node in ready or report.get('state') != 'downloading_model':
                     continue
                 done = (report.get('progress') or {}).get('done_bytes')
@@ -360,10 +400,11 @@ class AppDemoChain:
                 if now - seen[node][1] < stall:
                     active = True
             ctx.progress('%d of %d Macs reported%s' % (len(ready), len(expected),
-                         '; waiting for a Mac that is downloading the model' if active else ''))
+                         '; waiting for a Mac that is downloading the model' if active else
+                         '; waiting for a Mac to re-sign its descriptor' if resigning else ''))
             if len(ready) == len(expected):
                 return True
-            if now - started >= base and not active:
+            if now - started >= base and not (active or resigning):
                 raise _GiveUp()
             return False
         try:
@@ -371,11 +412,14 @@ class AppDemoChain:
         except (OwnerRunError, _GiveUp):
             pass  # proceed with the Macs that reported; the compiler decides if enough
         reports = self._reports(ctx)
-        cards = [reports[n]['descriptor'] for n in expected if (reports.get(n) or {}).get('descriptor')]
+        fresh = [n for n in expected if usable(reports.get(n))]
+        cards = [reports[n]['descriptor'] for n in fresh]
         ctx.state['participants'] = sorted(c['statement']['target_node_id'] for c in cards)
         ctx.state['descriptors'] = sorted(cards, key=lambda c: c['statement']['target_node_id'])
         self._publish_participants(ctx)
         if len(cards) < 2:
+            if any((reports.get(n) or {}).get('descriptor') for n in expected if n not in fresh):
+                raise OwnerRunError('member_descriptor_stale')
             raise OwnerRunError('two_macs_required')
 
     def _step_observe(self, ctx):

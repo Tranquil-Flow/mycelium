@@ -26,6 +26,7 @@ the bootstrap offer or while this member's slice is not verified yet
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import threading
 import time
@@ -346,6 +347,16 @@ class DemoTargetAgent:
             self._slice_stop = threading.Event()
             self._set('reported')
             self._report(a, force=True)
+        elif phase == 'collect' and self._descriptor_aging():
+            # 1b. While the owner still collects, re-sign before half the
+            # descriptor's life is gone: another Mac's long model download
+            # must not expire this one before observe verifies it (two-Mac
+            # run 18b).  Each descriptor keeps its own short expiry.
+            if not self._consent('installation_descriptor'):
+                return
+            self._descriptor = self._make_descriptor(a)
+            self._set('reported')
+            self._report(a, force=True)
         # 2. Owner-requested cleanup (bootstrap after observation, or teardown).
         if self._cleanup_if_requested(actor):
             return
@@ -397,6 +408,15 @@ class DemoTargetAgent:
             self._set('slice_ready', None, self.progress)
         else:
             self._set('reported', self._work_waiting(offer, run_id, bootstrap, native))
+
+    def _descriptor_aging(self) -> bool:
+        """True once less than half of this member's descriptor's life is left."""
+        statement = (self._descriptor or {}).get('statement')
+        issued = statement.get('issued_at') if isinstance(statement, Mapping) else None
+        expires = statement.get('expires_at') if isinstance(statement, Mapping) else None
+        if not all(type(v) in (int, float) and math.isfinite(v) for v in (issued, expires)) or expires <= issued:
+            return False  # no readable expiry: the owner's verification decides
+        return self._clock() >= issued + (expires - issued) / 2
 
     def _work_waiting(self, offer: Mapping[str, Any] | None, run_id: str, bootstrap: str | None,
                       native: Mapping[str, Any]) -> str:
