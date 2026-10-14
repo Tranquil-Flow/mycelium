@@ -572,12 +572,20 @@ COLD_ROUTE_RESTART_EXHAUSTED_CODE = "cold_route_restart_budget_exhausted"
 COLD_ROUTE_RESTART_FAILED_CODE = "cold_route_restart_failed"
 
 
-class ColdRouteRestartError(RuntimeError):
-    """Bounded public error raised for requests that hit a cold restart seam."""
+class RouteUnavailableError(RuntimeError):
+    """Bounded public error: the route owner has no route to serve.
+
+    Its ``code`` is ``route_not_open`` before the owner opens, ``route_closed``
+    after it closes, and a ``ColdRouteRestartError`` code while it restarts.
+    """
 
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
+
+
+class ColdRouteRestartError(RouteUnavailableError):
+    """Bounded public error raised for requests that hit a cold restart seam."""
 
 
 class ColdRouteRestartOwner:
@@ -1294,9 +1302,9 @@ class ColdRouteRestartOwner:
                     self._last_error_code or COLD_ROUTE_RESTART_FAILED_CODE
                 )
             if self._closed:
-                raise RuntimeError("route_closed")
+                raise RouteUnavailableError("route_closed")
             if self._state != "ready" or self._current is None:
-                raise RuntimeError("route_not_open")
+                raise RouteUnavailableError("route_not_open")
             return self._current, self._generation
 
     def _current_route_or_raise(self) -> LiveRoute:
@@ -1729,9 +1737,9 @@ def _follow_replica_reader(route: Any, name: str) -> Callable[[], Any] | None:
     A cold-restart owner swaps in a new route and closes the old one, so a
     method bound at build time would keep reading the retired route's replica
     qualifications and losses. Look the reader up again on every call. While
-    the owner restarts (or after its restart failed) there is no route to
-    read: refuse the request with the owner's bounded code, which the request
-    gateway reports as the failed terminal's code.
+    the owner restarts (or after its restart failed, or once it closed) there
+    is no route to read: refuse the request with the owner's bounded code,
+    which the request gateway reports as the failed terminal's code.
     """
 
     if not callable(getattr(route, name, None)):
@@ -1740,8 +1748,8 @@ def _follow_replica_reader(route: Any, name: str) -> Callable[[], Any] | None:
     def read() -> Any:
         try:
             reader = getattr(route, name)
-        except ColdRouteRestartError as exc:
-            raise AdmissionError(_route_restart_code(exc)) from None
+        except RouteUnavailableError as exc:
+            raise AdmissionError(_route_unavailable_code(exc)) from None
         return reader()
 
     return read
@@ -2085,19 +2093,24 @@ class LiveHTTPServer(ThreadingHTTPServer):
     trusted_https_proxy: bool
 
 
-def _route_restart_code(exc: ColdRouteRestartError) -> str:
+def _route_unavailable_code(exc: RouteUnavailableError) -> str:
     """The bounded public code for a request that found no route to read.
 
-    While the cold-restart owner restarts (or after its restart failed) it has
-    no route, and every reader through it raises ``ColdRouteRestartError``.
-    The code is the one the product snapshot publishes for the same state
-    (``ProductSourceUnavailable``), so it is validated the same way.
+    While the cold-restart owner restarts (or after its restart failed), and
+    before it opens or after it closes, it has no route, and every reader
+    through it raises ``RouteUnavailableError``. The code is validated the way
+    the product snapshot validates its reason codes
+    (``ProductSourceUnavailable``).
     """
 
     try:
         return ProductSourceUnavailable(exc.code).reason_code
     except ValueError:
-        return COLD_ROUTE_RESTART_FAILED_CODE
+        return (
+            COLD_ROUTE_RESTART_FAILED_CODE
+            if isinstance(exc, ColdRouteRestartError)
+            else "route_not_open"
+        )
 
 
 def _handler() -> type[BaseHTTPRequestHandler]:
@@ -2185,13 +2198,14 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             body = _json_bytes(document)
             self._send_bytes(200, body, "application/json; charset=utf-8")
 
-        def _route_restarting(self, status: int, exc: ColdRouteRestartError) -> None:
-            # A route reader looked up through a restarting owner raises; a
-            # getattr default does not catch it. Answer the bounded restart
-            # code instead of letting the handler thread drop the connection.
+        def _route_unavailable(self, status: int, exc: RouteUnavailableError) -> None:
+            # A route reader looked up through an owner with no route (it is
+            # restarting, not open yet, or closed) raises; a getattr default
+            # does not catch it. Answer the owner's bounded code instead of
+            # letting the handler thread drop the connection.
             self._send_bytes(
                 status,
-                _json_bytes({"error": _route_restart_code(exc)}),
+                _json_bytes({"error": _route_unavailable_code(exc)}),
                 "application/json; charset=utf-8",
             )
 
@@ -2206,8 +2220,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                     )
                     return
                 document = registry_status()
-            except ColdRouteRestartError as exc:
-                self._route_restarting(503, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(503, exc)
                 return
             self._send_bytes(
                 200,
@@ -2601,8 +2615,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             try:
                 source = getattr(self.server.route, "m15_plan_comparison", None)
                 document = source() if callable(source) else None
-            except ColdRouteRestartError as exc:
-                self._route_restarting(503, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(503, exc)
                 return
             if document is None:
                 self._send_bytes(
@@ -2621,8 +2635,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             try:
                 source = getattr(self.server.route, "m16_runtime_status", None)
                 document = source() if callable(source) else None
-            except ColdRouteRestartError as exc:
-                self._route_restarting(503, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(503, exc)
                 return
             if document is None:
                 self._send_bytes(
@@ -2641,8 +2655,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             try:
                 source = getattr(self.server.route, "m17_model_operation", None)
                 document = source() if callable(source) else None
-            except ColdRouteRestartError as exc:
-                self._route_restarting(503, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(503, exc)
                 return
             if document is None:
                 self._send_bytes(
@@ -2660,8 +2674,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
         def _m17_swarm_evidence(self) -> None:
             try:
                 source = getattr(self.server.route, "m17_swarm_evidence", None)
-            except ColdRouteRestartError as exc:
-                self._route_restarting(503, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(503, exc)
                 return
             if not callable(source):
                 self._send_bytes(
@@ -2672,8 +2686,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 return
             try:
                 document = source()
-            except ColdRouteRestartError as exc:
-                self._route_restarting(503, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(503, exc)
                 return
             except RuntimeError as exc:
                 self._send_bytes(
@@ -2691,8 +2705,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
         def _select_deployment(self) -> None:
             try:
                 select = getattr(self.server.route, "select", None)
-            except ColdRouteRestartError as exc:
-                self._route_restarting(409, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(409, exc)
                 return
             if not callable(select):
                 self._send_bytes(
@@ -2726,8 +2740,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 ):
                     raise ValueError
                 status = select(document["deployment_id"])
-            except ColdRouteRestartError as exc:
-                self._route_restarting(409, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(409, exc)
                 return
             except DeploymentSelectionError as exc:
                 self._send_bytes(
@@ -2765,8 +2779,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 install = getattr(
                     self.server.route, "set_replica_track_qualification", None
                 )
-            except ColdRouteRestartError as exc:
-                self._route_restarting(409, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(409, exc)
                 return
             if not callable(install):
                 self._send_bytes(
@@ -2824,8 +2838,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                     for item in document["documents"]
                 ]
                 install(validated)
-            except ColdRouteRestartError as exc:
-                self._route_restarting(409, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(409, exc)
                 return
             except (TypeError, ValueError, json.JSONDecodeError):
                 self._send_bytes(
@@ -2843,8 +2857,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
         def _promote_candidate(self) -> None:
             try:
                 promote = getattr(self.server.route, "promote_candidate", None)
-            except ColdRouteRestartError as exc:
-                self._route_restarting(409, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(409, exc)
                 return
             if not callable(promote):
                 self._send_bytes(
@@ -2866,8 +2880,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             try:
                 document = json.loads(body)
                 status = promote(document)
-            except ColdRouteRestartError as exc:
-                self._route_restarting(409, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(409, exc)
                 return
             except DeploymentSelectionError as exc:
                 self._send_bytes(
@@ -2890,8 +2904,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
         def _canary_candidate(self) -> None:
             try:
                 canary = getattr(self.server.route, "canary_candidate", None)
-            except ColdRouteRestartError as exc:
-                self._route_restarting(409, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(409, exc)
                 return
             if not callable(canary):
                 self._send_bytes(
@@ -2925,8 +2939,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                     prompt=document["prompt"],
                     max_new_tokens=document["max_new_tokens"],
                 )
-            except ColdRouteRestartError as exc:
-                self._route_restarting(409, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(409, exc)
                 return
             except DeploymentSelectionError as exc:
                 self._send_bytes(
@@ -2949,8 +2963,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
         def _rollback_candidate(self) -> None:
             try:
                 rollback = getattr(self.server.route, "rollback_candidate", None)
-            except ColdRouteRestartError as exc:
-                self._route_restarting(409, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(409, exc)
                 return
             if not callable(rollback):
                 self._send_bytes(
@@ -2976,8 +2990,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 status = rollback(
                     document["candidate_deployment_id"], reason=document["reason"]
                 )
-            except ColdRouteRestartError as exc:
-                self._route_restarting(409, exc)
+            except RouteUnavailableError as exc:
+                self._route_unavailable(409, exc)
                 return
             except DeploymentSelectionError as exc:
                 self._send_bytes(
@@ -5378,6 +5392,7 @@ __all__ = [
     "ColdRouteRestartError",
     "ColdRouteRestartOwner",
     "LiveStack",
+    "RouteUnavailableError",
     "build_live_stack",
     "build_registry_stack",
     "create_server",
