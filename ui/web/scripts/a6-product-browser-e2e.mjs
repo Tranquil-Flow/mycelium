@@ -385,7 +385,9 @@ async function verifyWorkspaces(page, privateCanaries) {
   return visited;
 }
 
-const UI_TERMINAL_LABEL = /\b(Completed|Cancelled|Failed)\b/;
+// The phase label leads the region text; the token count follows it with or
+// without a separator ("Completed\n3 tokens applied" / "Completed3 tokens…").
+const UI_TERMINAL_LABEL = /^\s*(Completed|Cancelled|Failed)(?![A-Za-z])/;
 
 // The inference workspace renders several role=status regions (route activity,
 // catalog, acquisition, evidence); only the named outcome region is the request

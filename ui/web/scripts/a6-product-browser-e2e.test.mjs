@@ -274,7 +274,7 @@ test('browser outcome proof waits through the restored phase and refuses a diffe
     };
   };
   const restored = sequence(['Stream interrupted\n1 tokens applied', 'Streaming\n1 tokens applied',
-    'Completed\n3 tokens applied']);
+    'Completed3 tokens applied']);
   await verifyInferenceOutcome(restored.page, 'positive', { interval: 0 });
   assert.equal(restored.waits, 2);
   await assert.rejects(
@@ -284,6 +284,11 @@ test('browser outcome proof waits through the restored phase and refuses a diffe
   await assert.rejects(
     verifyInferenceOutcome(sequence(['Completed']).page, 'negative', { interval: 0 }),
     /negative_ui_terminal_missing/,
+  );
+  await assert.rejects(
+    verifyInferenceOutcome(sequence(['Cancellation pending', 'Cancelled\n1 tokens applied']).page, 'positive',
+      { interval: 0 }),
+    /positive_ui_terminal_missing/,
   );
   await assert.rejects(
     verifyInferenceOutcome(sequence(['Stream interrupted']).page, 'positive', { interval: 0, timeout: 0 }),
