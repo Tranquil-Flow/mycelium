@@ -5000,8 +5000,18 @@ def main() -> int:
         print(f"physical-node startup rejected: {type(exc).__name__}", file=sys.stderr)
         return 2
 
+    # CPython runs this handler on the main thread between bytecodes.  It
+    # must take no lock: closing the service here (transport, runtime and
+    # sidecar locks) can wait on a lock the interrupted main thread holds.
+    # It only records the stop and unwinds; the main thread closes the
+    # service first thing in the ``finally`` below.  A repeated signal does
+    # not interrupt that cleanup.
+    stop_signalled = mycelium_host_platform.StopRequest()
+
     def stop_on_signal(signum: int, _frame: Any) -> None:
-        service.close()
+        if stop_signalled.is_set():
+            return
+        stop_signalled.set()
         raise SystemExit(128 + signum)
 
     prior_signal_handlers = {
@@ -5221,6 +5231,13 @@ def main() -> int:
                 )
         return 0
     finally:
+        if stop_signalled.is_set():
+            # Abort in-flight commands before draining the executors; a close
+            # failure here is reported by the final close below.
+            try:
+                service.close()
+            except Exception:
+                pass
         inference_executor.shutdown(wait=True, cancel_futures=False)
         control_executor.shutdown(wait=True, cancel_futures=False)
         cleanup_executor.shutdown(wait=True, cancel_futures=False)
