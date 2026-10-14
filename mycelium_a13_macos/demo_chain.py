@@ -61,10 +61,21 @@ def _mb(value: int) -> str:
     return '%d MB' % (value // 1_000_000)
 
 
-def _download_note(progress: Any, first: tuple[int, float], now: float) -> str:
+#: A member's whole-model acquisition after its last byte (demo_target): every
+#: byte is here (done == total) and the snapshot is verified, then compiled.
+#: Not a download: it has its own window (verify_stall / verify_rate), never
+#: the byte-stall rule -- a big model's verification on a slow disk is not a
+#: stalled download.
+_VERIFY_PHASES = {'model_verifying': 'verifying', 'model_compiling': 'compiling'}
+
+
+def _download_note(progress: Any, first: tuple[int, float], now: float, *, phase: str | None = None) -> str:
     """'the joined Mac is downloading the model: 412 of 1519 MB, 1.1 MB/s, about 17 min left'."""
     progress = progress if isinstance(progress, Mapping) else {}
     done, total = progress.get('done_bytes'), progress.get('total_bytes')
+    if phase is not None:
+        size = ' (%s)' % _mb(total) if type(total) is int and total > 0 else ''
+        return 'waiting for a Mac that is %s the downloaded model%s' % (_VERIFY_PHASES[phase], size)
     text = 'waiting for a Mac that is downloading the model'
     if type(done) is not int or type(total) is not int or total <= 0:
         return text
@@ -78,7 +89,8 @@ def _download_note(progress: Any, first: tuple[int, float], now: float) -> str:
     return text
 
 
-def _member_failure_message(code: str, report: Any, *, stall: float, silent_max: float) -> str | None:
+def _member_failure_message(code: str, report: Any, *, stall: float, silent_max: float,
+                            verify: float | None = None) -> str | None:
     progress = (report or {}).get('progress') if isinstance(report, Mapping) else None
     done = (progress or {}).get('done_bytes') if isinstance(progress, Mapping) else None
     total = (progress or {}).get('total_bytes') if isinstance(progress, Mapping) else None
@@ -87,6 +99,9 @@ def _member_failure_message(code: str, report: Any, *, stall: float, silent_max:
     if code == 'member_download_stalled':
         return 'The joined Mac kept reporting, but its model download made no progress for %d s%s.' % (
             stall, where)
+    if code == 'member_model_verify_stalled':
+        return ('The joined Mac has the whole model%s but did not finish verifying and compiling it '
+                'within %d s.' % (where.replace('downloaded', 'here'), verify or 0))
     if code == 'member_unreachable':
         return ('The joined Mac stopped answering while downloading the model and did not come back '
                 'within %d s%s. Check its network, then press Start again; its download resumes.' % (
@@ -216,9 +231,14 @@ class AppDemoChain:
         self.interval = interval
         self._agent_factory = agent_factory
         # descriptors: base wait; download_stall / report_silence / member_silence
-        # bound a joined Mac's model download (_step_descriptors) -- no total cap.
+        # bound a joined Mac's model download (_step_descriptors) -- no total cap;
+        # its verification/compile after the last byte gets
+        # max(verify_stall, total bytes / verify_rate) instead of download_stall.
+        # bootstrap, collect, cleanup, targets, serving: windows WITHOUT visible
+        # progress, renewed by it, with the same link-drop rule (_progress_wait).
         self.budgets = {'model': 5.0, 'descriptors': 180.0, 'download_stall': 120.0,
                         'report_silence': 30.0, 'member_silence': 300.0,
+                        'verify_stall': 600.0, 'verify_rate': 25e6,
                         'descriptor_margin': 60.0, 'bootstrap': 180.0, 'collect': 180.0,
                         'cleanup': 120.0, 'compile': 3600.0, 'slices': 7200.0, 'publish': 600.0,
                         'targets': 280.0, 'serving': 900.0, **(budgets or {})}
@@ -243,6 +263,92 @@ class AppDemoChain:
             self._tick_local()
             return predicate()
         return ctx.wait_until(check, budget=self.budgets[budget], code=code, interval=self.interval)
+
+    _STEP_WHAT = {'bootstrap': 'starting native hello', 'collect': 'observing hosts',
+                  'cleanup': 'cleaning up the hello workers', 'targets': 'starting the work on every Mac',
+                  'serving': 'qualifying the route'}
+
+    def _progress_wait(self, ctx, predicate, *, budget, code, step,
+                       waiting: Callable[[Mapping[str, Any]], list[str]] | None = None,
+                       observed: Callable[[], Any] | None = None):
+        """``predicate`` under a budget that renews on this step's visible progress.
+
+        ``budgets[budget]`` bounds a stretch WITHOUT progress (it was a fixed
+        total: a joined Mac on a ~1 MB/s phone hotspot is slow, not stuck).
+        Progress is a value not seen before in this step of what it observes:
+        the (state, detail, progress) report of each Mac it still waits for
+        (``waiting(reports)``, default every participant) and ``observed()``,
+        the step's own signal (the collect retry code, the workflow state).
+        A report re-sent unchanged every report_interval, or a Mac flapping
+        between two states, is not progress.
+
+        Link drops as in the descriptors step: a joined Mac it waits for that
+        is not heard from for report_silence is waited for while its seed lease
+        is live, up to member_silence.  Silences neither count as no progress
+        nor reset it; idle time since the last progress is bounded by
+        member_silence + the budget.  Ends with ``code`` (stuck; the message
+        names the Macs it waits for) or ``<step>_member_unreachable`` (naming
+        the silent Mac).
+        """
+        clock = time.monotonic
+        window = self.budgets[budget]
+        silence = self.budgets.get('report_silence', 30.0)
+        silent_max = self.budgets.get('member_silence', 300.0)
+        what = self._STEP_WHAT[step]
+        local = ctx.state.get('local_node')
+        seen: set[tuple] = set()
+        start = clock()
+        track = {'rose': start, 'flat': 0.0, 'polled': start}
+
+        def label(node: str) -> str:
+            return '%s …%s' % ('This Mac (owner)' if node == local else 'Joined Mac', node[-8:])
+
+        def check():
+            self._tick_local()
+            value = predicate()
+            if value:
+                return value
+            now, wall = clock(), time.time()
+            reports = self._reports(ctx)
+            nodes = list(waiting(reports) if waiting is not None else self._participants(ctx))
+            values = {('member', node, (reports.get(node) or {}).get('state'),
+                       (reports.get(node) or {}).get('detail'),
+                       json.dumps((reports.get(node) or {}).get('progress'), sort_keys=True, default=str))
+                      for node in nodes}
+            if observed is not None:
+                values.add(('step', json.dumps(observed(), sort_keys=True, default=str)))
+            silent = {}
+            for node in nodes:
+                heard = (reports.get(node) or {}).get('received_at')
+                if node != local and type(heard) in (int, float) and wall - heard >= silence:
+                    silent[node] = wall - heard
+            if values - seen:
+                seen.update(values)
+                track.update(rose=now, flat=0.0)
+            elif not silent:
+                track['flat'] += now - track['polled']
+            track['polled'] = now
+            idle = now - track['rose']
+            if silent:
+                live = set(self._remote_members())
+                gone = sorted(n for n in silent if n not in live)
+                node = gone[0] if gone else max(silent, key=silent.get)
+                if gone or silent[node] >= silent_max or idle >= silent_max + window:
+                    raise OwnerRunError(step + '_member_unreachable', (
+                        '%s stopped answering while %s and did not come back within %d s%s. Check its '
+                        'network, then press Start again.' % (label(node), what, silent_max,
+                                                               ' (its seed lease lapsed)' if gone else '')))
+                ctx.progress('%s: %s has not been heard from for %d s (link drop?); waiting up to %d s'
+                             % (what, label(node), silent[node], silent_max))
+                return False
+            if track['flat'] >= window or idle >= silent_max + window:
+                why = '; '.join('%s: %s' % (label(n), (reports.get(n) or {}).get('detail')
+                                            or (reports.get(n) or {}).get('state') or 'no_report')
+                                for n in sorted(nodes, key=lambda n: n == local))
+                raise OwnerRunError(code, 'Nothing advanced for %d s while %s%s.' % (
+                    window, what, '; still waiting for ' + why if why else ''))
+            return False
+        return ctx.wait_until(check, budget=float('inf'), code=code, interval=self.interval)
 
     def _participants(self, ctx) -> list[str]:
         return list(ctx.state.get('participants', []))
@@ -399,8 +505,15 @@ class AppDemoChain:
         stall = self.budgets.get('download_stall', 120.0)
         silence = self.budgets.get('report_silence', 30.0)
         silent_max = self.budgets.get('member_silence', 300.0)
+        verify_min = self.budgets.get('verify_stall', 600.0)
+        verify_rate = self.budgets.get('verify_rate', 25e6)
         seen: dict[str, dict[str, Any]] = {}
         reasons: dict[str, str] = {}
+        windows: dict[str, float] = {}
+
+        def verify_window(progress: Any) -> float:
+            total = (progress or {}).get('total_bytes') if isinstance(progress, Mapping) else None
+            return max(verify_min, (total if type(total) is int else 0) / verify_rate)
 
         class _GiveUp(Exception):
             pass
@@ -453,12 +566,20 @@ class AppDemoChain:
                 done = done if type(done) is int else -1
                 heard = report.get('received_at')
                 silent_for = wall - heard if type(heard) in (int, float) else 0.0
-                # Per member: last byte rise, and the time it was HEARD without
-                # one (silences do not count as a stall, and do not reset it).
-                track = seen.setdefault(node, {'done': done, 'rose': now, 'flat': 0.0,
+                # Verifying/compiling after the last byte: its own phase and
+                # window (bytes stay flat at the total by design).
+                phase = report.get('detail') if report.get('detail') in _VERIFY_PHASES \
+                    and report.get('state') == 'downloading_model' else None
+                limit = stall if phase is None else verify_window(report.get('progress'))
+                if phase is not None:
+                    windows[node] = limit
+                # Per member: last byte rise (or phase change), and the time it
+                # was HEARD without one (silences do not count as a stall, and
+                # do not reset it).
+                track = seen.setdefault(node, {'done': done, 'rose': now, 'flat': 0.0, 'phase': phase,
                                                'polled': now, 'heard': True, 'first': (done, now)})
-                if done > track['done']:
-                    track.update(done=done, rose=now, flat=0.0)
+                if done > track['done'] or phase != track['phase']:
+                    track.update(done=max(done, track['done']), rose=now, flat=0.0, phase=phase)
                 elif silent_for < silence and track['heard']:
                     track['flat'] += now - track['polled']
                 track['polled'], track['heard'] = now, silent_for < silence
@@ -467,16 +588,18 @@ class AppDemoChain:
                     # Not heard from: a link drop, not a stalled download.
                     if live is None:
                         live = set(self._remote_members())
-                    if node in live and silent_for < silent_max and idle < silent_max + stall:
+                    if node in live and silent_for < silent_max and idle < silent_max + limit:
                         active = True
                         notes.append('the joined Mac has not been heard from for %d s (link drop?); '
                                      'waiting up to %d s' % (silent_for, silent_max))
                     else:
                         reasons[node] = 'member_unreachable'
                     continue
-                if track['flat'] < stall and idle < silent_max + stall:
+                if track['flat'] < limit and idle < silent_max + limit:
                     active = True
-                    notes.append(_download_note(report.get('progress'), track['first'], now))
+                    notes.append(_download_note(report.get('progress'), track['first'], now, phase=phase))
+                elif phase is not None:
+                    reasons[node] = 'member_model_verify_stalled'
                 else:
                     reasons[node] = ('member_download_stalled' if report.get('state') != 'error'
                                      else report.get('detail') or 'member_download_stalled')
@@ -504,7 +627,8 @@ class AppDemoChain:
                 # Keep the joined Mac on the page with its state and progress.
                 self._publish_participants(ctx)
                 raise OwnerRunError(reasons[missing[0]], _member_failure_message(
-                    reasons[missing[0]], reports.get(missing[0]), stall=stall, silent_max=silent_max))
+                    reasons[missing[0]], reports.get(missing[0]), stall=stall, silent_max=silent_max,
+                    verify=windows.get(missing[0])))
         ctx.state['participants'] = sorted(c['statement']['target_node_id'] for c in cards)
         ctx.state['descriptors'] = sorted(cards, key=lambda c: c['statement']['target_node_id'])
         self._publish_participants(ctx)
@@ -520,7 +644,8 @@ class AppDemoChain:
                     state = self.ops.rebuild(app, run_id=ctx.run_id, deployment_id=ctx.deployment_id,
                                              descriptors=cards)
                     return state.get('state') == 'awaiting_bootstrap_workers'
-                self._wait(ctx, rebuilt, budget='cleanup', code='rebuild_member_cleanup_timeout')
+                self._progress_wait(ctx, rebuilt, budget='cleanup', code='rebuild_member_cleanup_timeout',
+                                    step='cleanup')
             else:
                 self.ops.prepare_observation(app, run_id=ctx.run_id, deployment_id=ctx.deployment_id,
                                              descriptors=cards)
@@ -533,8 +658,11 @@ class AppDemoChain:
         self._announce(ctx, 'observe', per_node={n: {'bootstrap_offer_id': o['offer_id']}
                                                  for n, o in context.offers.items()})
         ctx.progress('starting native hello (no model load) on every Mac')
-        self._wait(ctx, lambda: self._publish_participants(ctx) or self._all_in(ctx, {'bootstrap_running'}),
-                   budget='bootstrap', code='member_bootstrap_timeout')
+        # Progress: a member's report advancing towards bootstrap_running.
+        self._progress_wait(ctx, lambda: self._publish_participants(ctx) or self._all_in(ctx, {'bootstrap_running'}),
+                            budget='bootstrap', code='member_bootstrap_timeout', step='bootstrap',
+                            waiting=lambda reports: [n for n in self._participants(ctx)
+                                                     if (reports.get(n) or {}).get('state') != 'bootstrap_running'])
 
         last = [None]
 
@@ -554,16 +682,23 @@ class AppDemoChain:
                     ctx.progress('observing hosts (retrying after %s)' % code)
                 return False
         ctx.progress('observing hosts')
-        self._wait(ctx, collected, budget='collect', code='member_observation_timeout')
+        # One hello attempt covers every Mac and has no partial result: progress
+        # is a new retry code (a further stage reached) or a member's report.
+        self._progress_wait(ctx, collected, budget='collect', code='member_observation_timeout', step='collect',
+                            observed=lambda: last[0])
         hosts = [o.get('host_id') for o in (context.observations or {}).get('observations', [])]
         ctx.progress('%d Macs observed, %d distinct hosts' % (len(hosts), len(set(hosts))))
+
+        retire_code = [None]
 
         def retired():
             try:
                 context.retire_bootstrap(); return True
-            except Exception:
+            except Exception as error:
+                retire_code[0] = _code(error, 'bootstrap_retire_failed')
                 return False
-        self._wait(ctx, retired, budget='cleanup', code='member_cleanup_timeout')
+        self._progress_wait(ctx, retired, budget='cleanup', code='member_cleanup_timeout', step='cleanup',
+                            observed=lambda: retire_code[0])
 
     def _step_compile(self, ctx):
         app = self.app
@@ -696,7 +831,13 @@ class AppDemoChain:
                     ctx.progress('waiting for ' + '; '.join(waiting))
             return done
         try:
-            self._wait(ctx, running, budget='targets', code='member_work_timeout')
+            # Progress: a member's report advancing towards work_running
+            # (work offer published -> accepted -> staged -> worker running).
+            self._progress_wait(ctx, running, budget='targets', code='member_work_timeout', step='targets',
+                                waiting=lambda reports: [n for n in self._participants(ctx)
+                                                         if (reports.get(n) or {}).get('state') not in ready],
+                                observed=lambda: {k: (self._workflow_state() or {}).get(k)
+                                                  for k in ('state', 'error_code')})
         except OwnerRunError as error:
             if error.code == 'member_work_timeout':
                 self._name_waiting(ctx, 'timed out')
@@ -715,7 +856,11 @@ class AppDemoChain:
             if state.get('state') in {'failed', 'stopped'}:
                 raise OwnerRunError(state.get('error_code') or 'managed_workflow_failed')
             return state.get('state') == 'api_running'
-        self._wait(ctx, up, budget='serving', code='route_qualification_timeout')
+        # Progress: the workflow's state or a member's report changing.  The
+        # supervisor's startup route challenge itself shows no progress here.
+        self._progress_wait(ctx, up, budget='serving', code='route_qualification_timeout', step='serving',
+                            observed=lambda: {k: (self._workflow_state() or {}).get(k)
+                                              for k in ('state', 'error_code')})
         startup = self._workflow_state().get('startup') or {}
         # 'api_running' only means the registry API is up: it also starts when
         # the startup route challenge failed (two-Mac run 14: the joined Mac

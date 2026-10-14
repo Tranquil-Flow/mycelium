@@ -453,6 +453,7 @@ class DemoTargetAgent:
         return 'work_not_accepted'
 
     _ACQUIRING = frozenset({'starting', 'resolving_metadata', 'downloading', 'verifying', 'compiling'})
+    _VERIFY_DETAIL = {'verifying': 'model_verifying', 'compiling': 'model_compiling'}
 
     def _ensure_whole_model(self, a: Mapping[str, Any]) -> bool:
         """Adopt the owner's announced model and fetch its whole snapshot here.
@@ -474,7 +475,10 @@ class DemoTargetAgent:
                 return False
             return True
         if state in self._ACQUIRING:
-            self._set('downloading_model', None,
+            # After the last byte the snapshot is verified, then compiled:
+            # report that phase, so the owner does not judge a big model's
+            # verification (bytes flat at the total) a stalled download.
+            self._set('downloading_model', self._VERIFY_DETAIL.get(state),
                       {'done_bytes': int(status.get('downloaded_bytes') or 0),
                        'total_bytes': int(status.get('total_bytes') or 0)})
             return False
