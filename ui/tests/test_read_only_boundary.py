@@ -84,13 +84,19 @@ def test_browser_network_is_confined_to_read_only_source_and_typed_action_client
         (UI_ROOT / "web" / "src" / "features" / "observatory" / "live" / "productGatewaySession.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "productEvidence" / "source.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "swarm" / "SwarmClient.ts").resolve(),
+        # Page-lifecycle gate over globalThis.fetch for background reads; it owns no endpoint (asserted below).
+        (UI_ROOT / "web" / "src" / "app" / "backgroundFetch.ts").resolve(),
     }
     forbidden_browser_writes = ("WebSocket", "XMLHttpRequest", "sendBeacon", "WebTransport")
     for path in production_source_files():
         text = path.read_text(encoding="utf-8")
         assert all(surface not in text for surface in forbidden_browser_writes), path
-        if re.search(r"\bfetch\s*\(|\bEventSource\s*\(", text):
+        # Direct calls of the background-read gate count as transport use too.
+        if re.search(r"\bfetch\s*\(|\bbackgroundFetch\s*\(|\bEventSource\s*\(", text):
             assert path.resolve() in allowed_transports, path
+    gate = (UI_ROOT / "web" / "src" / "app" / "backgroundFetch.ts").read_text(encoding="utf-8")
+    assert not re.search(r"['\"`]/(?:api|__mycelium|v1)\b", gate), "the background-read gate must not own an endpoint"
+    assert "globalThis.fetch(" in gate and "XMLHttpRequest" not in gate
 
 
 def test_elk_remains_lazy_and_confined_to_graph_layout() -> None:
