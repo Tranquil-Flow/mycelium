@@ -68,10 +68,16 @@ def test_packaged_native_app_in_clean_working_directory(tmp_path,role):
         started=json.loads(first)
         assert started['event']=='launcher_started'
         # Demo default since the run-model picker (run_model.py): the largest
-        # Qwen3 whose snapshot fits the consent ceiling, not the 7B candidate.
-        assert started['model_contract']['model_id']=='Qwen/Qwen3-8B'
+        # Qwen3 whose owner storage need fits the consent ceiling, not the 7B
+        # candidate. Derive it from the product rule so the package and the
+        # rule cannot drift apart again; the rule itself picks Qwen3-14B.
+        from mycelium_a13_macos.run_model import choice, demo_default_choice
+        default=demo_default_choice()
+        assert default=='qwen3-14b'
+        expected=choice(default).model
+        assert started['model_contract']['model_id']==expected.model_id=='Qwen/Qwen3-14B'
         assert started['model_contract']['model_id']!=CANDIDATE_MODEL.model_id
-        assert started['model_contract']['resolved_commit']=='b968826d9c46dd6066d109eabc6255188de91218'
+        assert started['model_contract']['resolved_commit']==expected.resolved_commit
         assert started['model_contract']['runtime_quantization']=='int8-weight-only'
         assert started['model_contract']['sampling_seed']==0
         with sync_playwright() as p:
