@@ -40,7 +40,9 @@ STEPS: tuple[tuple[str, str], ...] = (
 )
 STEP_NAMES = tuple(name for name, _ in STEPS)
 _CODE = re.compile(r'[a-z][a-z0-9_]{0,79}\Z')
-_ACTIVE = frozenset({'running', 'serving', 'stopping'})
+# 'failing' too: a failed run is still tearing down (announcing 'stopped',
+# ticking this Mac's contributor) until it settles on 'failed'.
+_ACTIVE = frozenset({'running', 'serving', 'stopping', 'failing'})
 
 
 class OwnerRunError(RuntimeError):
