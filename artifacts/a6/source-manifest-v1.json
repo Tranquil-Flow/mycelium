@@ -1513,8 +1513,8 @@
     },
     {
       "path": "mycelium_swarm_artifacts.py",
-      "sha256": "sha256:6758f2e14570407249f8c1f5a188c4b5df96c764a9038c698ddcdac60ffeee68",
-      "size_bytes": 50359
+      "sha256": "sha256:b9aa0b6db800eba1395ef15b4c1fa71d91be25e1fe8f3e007b6b54f520092514",
+      "size_bytes": 50894
     },
     {
       "path": "mycelium_swarm_directory/__init__.py",
@@ -2123,8 +2123,8 @@
     },
     {
       "path": "scripts/qwen_phone_builder.py",
-      "sha256": "sha256:ae227b5056868fa1cdad13dc125834a595b44d44c84d2bd6ad5a3585137fe4a8",
-      "size_bytes": 25074
+      "sha256": "sha256:eb552bf00951d6f47f9b0a0fc805b319bc3ad15ac394333babd8d6b13a084f67",
+      "size_bytes": 25307
     },
     {
       "path": "scripts/report_a11_request_bootstrap.py",
@@ -3488,8 +3488,8 @@
     },
     {
       "path": "tests/live/test_qwen_phone_builder.py",
-      "sha256": "sha256:338a29b3eaafe64242ce508fa508326a9ea6eae837817546936ac88e5262c735",
-      "size_bytes": 22162
+      "sha256": "sha256:3a014bdfc0c2e8cfc7eadaa00d2e3c2c94cb9a785e35460612b6c70090d141ca",
+      "size_bytes": 23570
     },
     {
       "path": "tests/live/test_qwen_route_builder.py",
@@ -3518,8 +3518,8 @@
     },
     {
       "path": "tests/live/test_swarm_artifacts.py",
-      "sha256": "sha256:02caec1d86de5ec4addf4b8c44b8256fd01bb9b1e1d7b64caf0c4b3387fa7e0f",
-      "size_bytes": 27680
+      "sha256": "sha256:bdf4305b419ecd9b6fb57a5b7b0358e24534127595e7e48a5fc104fb0f9fed1a",
+      "size_bytes": 37743
     },
     {
       "path": "tests/live/test_transport_probe_sidecar_signal_stop.py",
@@ -3713,8 +3713,8 @@
     },
     {
       "path": "tests/qualification/test_phone_provenance_refusal.py",
-      "sha256": "sha256:dab5d9f94d178bb7789cc5caf641ebb9c0aa954bf1fd2027a54706beb105d816",
-      "size_bytes": 14444
+      "sha256": "sha256:56269bd38834195e30474834e3d363af29376e6bdd3b9437557f0c82ca40d20b",
+      "size_bytes": 14456
     },
     {
       "path": "tests/router/test_instrument_and_analyze.py",
@@ -4113,5 +4113,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:d9cdf6c42085ae2eee99813a9cb6823cdbca9cd0f8256e836ba61d0eac9f579c"
+  "source_digest": "sha256:9fd2df34fee91d76605ff6fad139684bacd15a297c6dab4cbc96553e213e93d0"
 }
