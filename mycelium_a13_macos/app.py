@@ -351,7 +351,51 @@ def bounded_action_failure(path, error, public_code):
         record['status'] = status
     if isinstance(request_path, str) and re.fullmatch(r'/[A-Za-z0-9_./-]{0,160}', request_path):
         record['request_path'] = request_path
+    window = seed_time_window(error)
+    if window is not None:
+        record['seed_window'] = window
     return record
+
+
+_SEED_WINDOW_FIELDS = ('now', 'issued_at', 'expires_at', 'seconds_before_issued',
+                       'seconds_after_expires', 'max_clock_skew_seconds')
+
+
+def seed_time_window(error):
+    """The window numbers of a `seed_http_seed_time_invalid`, or None.
+
+    `SeedHTTPClient` attaches them to the SeedHTTPError it raises, but the peer
+    layer re-raises a code-only error `from` it, so walk the (bounded) cause
+    chain. Only allowlisted keys, each a finite float or None: never text.
+    """
+    import math
+    seen = 0
+    current = error
+    while current is not None and seen < 8:
+        window = getattr(current, 'window', None)
+        if isinstance(window, dict):
+            out = {}
+            for key in _SEED_WINDOW_FIELDS:
+                if key in window:
+                    value = window[key]
+                    out[key] = (float(value) if type(value) in (int, float) and math.isfinite(value)
+                                else None)
+            return out
+        current = current.__cause__ or current.__context__
+        seen += 1
+    return None
+
+
+def seed_time_refusal_event(path, public_code, record):
+    """One bounded daemon-log line for a seed window refusal; None otherwise."""
+    window = record.get('seed_window') if isinstance(record, dict) else None
+    if window is None:
+        return None
+    from mycelium_membership import MAX_CLOCK_SKEW_SECONDS
+    return {'event': 'seed_time_refused', 'path': record.get('path', '/invalid'),
+            'public_code': record.get('public_code', 'action_not_completed'),
+            **({'error_code': record['error_code']} if 'error_code' in record else {}),
+            'max_clock_skew_seconds': MAX_CLOCK_SKEW_SECONDS, 'seed_window': window}
 
 
 def _swarm_status(app):
@@ -1522,9 +1566,19 @@ class _Handler(BaseHTTPRequestHandler):
             # Record WHY before answering. The public body stays a closed code;
             # this private one-line identity is what makes the next failure
             # self-describing instead of another generic 409 investigation.
+            record=None
             try:
+                record=bounded_action_failure(self.path,error,code)
                 private_write(self.app.root/'last-action-error.private.json',
-                    json.dumps(bounded_action_failure(self.path,error,code),sort_keys=True).encode())
+                    json.dumps(record,sort_keys=True).encode())
+            except BaseException:
+                pass
+            # A seed window refusal also names its numbers in the daemon log
+            # (the app's stdout): two-Mac run 19's 409 left only the code.
+            try:
+                event=seed_time_refusal_event(self.path,code,record)
+                if event is not None:
+                    print(json.dumps(event,sort_keys=True),flush=True)
             except BaseException:
                 pass
             self.fail(409,code); return
