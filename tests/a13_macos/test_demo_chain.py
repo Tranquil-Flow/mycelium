@@ -369,11 +369,15 @@ def test_a_mac_still_downloading_with_progress_is_waited_for(tmp_path):
     assert status['state'] == 'serving', status
 
 
-def test_a_stalled_download_is_dropped_after_the_base_wait(tmp_path):
+def test_a_stalled_download_is_named_after_the_stall_window(tmp_path):
+    # Still reporting, bytes flat: the run ends with its own code, and the page
+    # keeps showing the joined Mac with its state (not 'two_macs_required').
     app, ops, members, run = make_slow(tmp_path, seconds=30, stalled=True)
     run.start()
     status = wait(run, lambda s: s['state'] == 'failed', timeout=20)
-    assert (status['failed_step'], status['error_code']) == ('descriptors', 'two_macs_required')
+    assert (status['failed_step'], status['error_code']) == ('descriptors', 'member_download_stalled')
+    joined = [p for p in status['participants'] if p['node_id'] == REMOTE]
+    assert joined and joined[0]['state'] == 'downloading_model', status['participants']
 
 
 class AgingMembers(Members):
@@ -426,3 +430,116 @@ def test_a_descriptor_never_refreshed_is_named_not_sent_to_observe(tmp_path):
     status = wait(run, lambda s: s['state'] == 'failed', timeout=20)
     assert (status['failed_step'], status['error_code']) == ('descriptors', 'member_descriptor_stale')
     assert cards == [] and not any(c[0] == 'prepare' for c in ops.calls)
+
+
+class ScriptedJoiner(Members):
+    """The remote Mac follows ``script`` [(seconds, mode)] while the owner collects:
+    'progress' reports rising bytes, 'flat' reports the same bytes, 'silent' sends
+    nothing (a phone-hotspot link drop: two-Mac run 21 lost every report and seed
+    heartbeat from the laptop ~110 s in).  After the script it reports normally."""
+    def __init__(self, *args, script, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.script = list(script)
+        self.start = None
+        self.done = 0
+    def mode(self):
+        elapsed = time.monotonic() - self.start
+        for seconds, mode in self.script:
+            if elapsed < seconds:
+                return mode
+            elapsed -= seconds
+        return None
+    def tick(self):
+        a = self.exchange.announcement(REMOTE)
+        if a['phase'] != 'collect':
+            return super().tick()
+        if self.start is None:
+            self.start = time.monotonic()
+        mode = self.mode()
+        if mode is None:
+            return super().tick()
+        if mode == 'progress':
+            self.done = min(self.done + 10**5, 10**9 - 1)
+        if mode in {'progress', 'flat'}:
+            self.exchange.submit_local(REMOTE, {'protocol': MEMBER_REPORT, 'run_id': a['run_id'],
+                'deployment_id': a['deployment_id'], 'state': 'downloading_model', 'detail': None,
+                'model': None, 'progress': {'done_bytes': self.done, 'total_bytes': 10**9},
+                'descriptor': None, 'issued_at': time.time()})
+        saved, self.nodes = self.nodes, [LOCAL]
+        try:
+            super().tick()
+        finally:
+            self.nodes = saved
+
+
+def make_scripted(tmp_path, script, **budgets):
+    app, ops, members, run = make(tmp_path)
+    def factory(app, local, exchange):
+        members['m'] = ScriptedJoiner(app, exchange, [LOCAL, REMOTE], script=script)
+        return members['m']
+    run.chain._agent_factory = factory
+    run.chain.budgets.update({'descriptors': 1.0, 'download_stall': 0.6, 'descriptors_download': 1.5,
+                              'report_silence': 0.3, 'member_silence': 3.0, **budgets})
+    return app, ops, members, run
+
+
+def test_a_download_back_after_a_link_drop_longer_than_the_stall_window_is_waited_for(tmp_path):
+    # Run 21: the joined Mac went silent mid-download for longer than the stall
+    # window while its seed lease was still live; the owner must keep waiting.
+    app, ops, members, run = make_scripted(tmp_path, [(0.5, 'progress'), (1.8, 'silent'), (0.5, 'progress')])
+    run.start()
+    status = wait(run, lambda s: s['state'] in {'serving', 'failed'}, timeout=20)
+    assert status['state'] == 'serving', status
+
+
+def test_a_progressing_download_renews_its_budget_past_the_download_total(tmp_path):
+    # Budgets scale with measured progress: a download that keeps advancing is
+    # waited for past 'descriptors_download' (run 18b needed 1585 s of 1800).
+    app, ops, members, run = make_scripted(tmp_path, [(3.0, 'progress')])
+    run.start()
+    status = wait(run, lambda s: s['state'] in {'serving', 'failed'}, timeout=20)
+    assert status['state'] == 'serving', status
+
+
+def test_a_member_silent_past_the_silence_window_is_named_unreachable(tmp_path):
+    app, ops, members, run = make_scripted(tmp_path, [(0.3, 'progress'), (60, 'silent')], member_silence=1.5)
+    run.start()
+    started = time.monotonic()
+    status = wait(run, lambda s: s['state'] == 'failed', timeout=20)
+    assert (status['failed_step'], status['error_code']) == ('descriptors', 'member_unreachable')
+    assert time.monotonic() - started < 10  # bounded, not the download total
+    joined = [p for p in status['participants'] if p['node_id'] == REMOTE]
+    assert joined and joined[0]['state'] == 'downloading_model', status['participants']
+
+
+def test_a_silent_member_whose_seed_lease_lapsed_is_not_waited_for(tmp_path):
+    app, ops, members, run = make_scripted(tmp_path, [(0.3, 'progress'), (60, 'silent')], member_silence=30.0)
+    lapsed = app.authority.coordinator
+    real = lapsed.members
+    def members_with_lapsed_lease():
+        rows = real()
+        if members.get('m') is not None and members['m'].start is not None \
+                and time.monotonic() - members['m'].start > 0.6:
+            rows = [dict(r, lease_expires_at=time.time() - 1) if r['node_id'] == REMOTE else r for r in rows]
+        return rows
+    lapsed.members = members_with_lapsed_lease
+    run.start()
+    started = time.monotonic()
+    status = wait(run, lambda s: s['state'] == 'failed', timeout=20)
+    assert (status['failed_step'], status['error_code']) == ('descriptors', 'member_unreachable')
+    assert time.monotonic() - started < 10
+
+
+def test_the_descriptors_step_shows_download_bytes_rate_and_time_left(tmp_path):
+    app, ops, members, run = make_scripted(tmp_path, [(1.2, 'progress')])
+    run.start()
+    seen = []
+    def look(s):
+        step = next(x for x in s['steps'] if x['name'] == 'descriptors')
+        if step['detail']:
+            seen.append(step['detail'])
+        return s['state'] in {'serving', 'failed'}
+    wait(run, look, timeout=20)
+    shown = [d for d in seen if ' MB' in d]
+    assert shown, seen
+    assert any(' of 1000 MB' in d and 'MB/s' in d and 'left' in d for d in shown), shown

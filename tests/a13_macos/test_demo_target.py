@@ -341,3 +341,63 @@ def test_collect_reissues_its_descriptor_before_it_expires(tmp_path, monkeypatch
     state['a'] = announcement('observe', bootstrap_offer_id='boot-1')
     now[0] = 2000.0; agent.tick()                 # the owner has verified it: never re-signed after collect
     assert len(issued) == count
+
+
+def test_whole_mode_download_cut_by_a_link_drop_is_retried_and_resumes(whole):
+    # Run 21: a hotspot link drop exhausts every byte source (owner LAN, owner
+    # relay, Hugging Face) and the acquisition fails with a transport code.  The
+    # member must not sit in 'error' for the rest of the run: it backs off, keeps
+    # reporting 'downloading_model', then restarts (safe partials resume).
+    app, agent, gate, state, calls = whole
+    now = [1000.0]
+    agent._clock = lambda: now[0]
+    state['a'] = announcement('collect', slice_mode=False)
+    agent.tick()
+    app.acquisition.downloaded = 300_000_000
+    app.acquisition.state, app.acquisition.error = 'failed', 'managed_control_unreachable'
+    status = agent.tick()
+    assert (status['state'], status['detail']) == ('downloading_model', 'model_download_retrying'), status
+    assert status['progress'] == {'done_bytes': 300_000_000, 'total_bytes': 1_519_209_243}
+    assert state['reports'][-1]['state'] == 'downloading_model'
+    downloads = lambda: len([p for p, _ in app.actions if p == '/api/model/download'])
+    assert downloads() == 1  # backing off, not hammering a dead link
+    now[0] += 120
+    status = agent.tick()
+    assert downloads() == 2 and status['state'] == 'downloading_model', status
+    app.acquisition.state = 'prepared'
+    assert agent.tick()['state'] == 'reported'
+
+
+def test_whole_mode_retries_back_off_between_attempts(whole):
+    app, agent, gate, state, calls = whole
+    now = [1000.0]
+    agent._clock = lambda: now[0]
+    state['a'] = announcement('collect', slice_mode=False)
+    agent.tick()
+    downloads = lambda: len([p for p, _ in app.actions if p == '/api/model/download'])
+    starts = []
+    for _ in range(40):
+        app.acquisition.state, app.acquisition.error = 'failed', 'network_error'
+        before = downloads()
+        agent.tick()
+        if downloads() > before:
+            starts.append(now[0])
+        now[0] += 1
+    gaps = [b - a for a, b in zip(starts, starts[1:])]
+    assert len(starts) >= 2 and gaps == sorted(gaps), (starts, gaps)  # growing, bounded backoff
+
+
+def test_member_reports_stay_live_while_a_download_is_unchanged(world):
+    # Characterization: an unchanged report is re-sent every report_interval,
+    # so the owner keeps hearing from a Mac whose bytes are momentarily flat.
+    app, agent, gate, state, calls = world
+    app.acquisition = Acquisition(); app.acquisition.state = 'downloading'
+    now = [0.0]
+    agent._clock = lambda: now[0]; agent._report_interval = 10.0
+    agent._download_for = ('Qwen/Qwen3-0.6B', 'c' * 40)
+    state['a'] = announcement('collect', slice_mode=False)
+    agent.tick(); sent = len(state['reports'])
+    now[0] = 5.0; agent.tick()
+    assert len(state['reports']) == sent
+    now[0] = 11.0; agent.tick()
+    assert len(state['reports']) == sent + 1
