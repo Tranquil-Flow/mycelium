@@ -795,7 +795,14 @@ def test_node_join_rejection_has_distinct_exit_and_redacts_token(
         finally:
             if first.poll() is None:
                 first.terminate()
-            first.communicate(timeout=10)
+            try:
+                first.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                # Still fail, but do not leave a wedged node and its owned
+                # child running after the test.
+                os.killpg(first.pid, signal.SIGKILL)
+                first.communicate(timeout=10)
+                raise
         assert first.returncode == 0
 
         rejected_command = _node_command(
