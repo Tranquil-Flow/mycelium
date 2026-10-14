@@ -28,6 +28,7 @@ from mycelium_internet.bootstrap import (
 from mycelium_membership import (
     HEARTBEAT_PROTOCOL,
     LEASE_RENEWAL_PROTOCOL,
+    MAX_CLOCK_SKEW_SECONDS,
     MembershipContractError,
     verify_membership_message,
 )
@@ -254,6 +255,8 @@ def _seed_time_invalid(*, now: Any, issued: Any, expires: Any) -> SeedHTTPError:
     if None not in numbers.values():
         numbers["seconds_before_issued"] = numbers["issued_at"] - numbers["now"]
         numbers["seconds_after_expires"] = numbers["now"] - numbers["expires_at"]
+    # The future-side allowance the rejected statement was measured against.
+    numbers["max_clock_skew_seconds"] = MAX_CLOCK_SKEW_SECONDS
     error.window = numbers
     return error
 
@@ -972,7 +975,12 @@ class SeedHTTPClient:
             or not math.isfinite(float(now))
             or not math.isfinite(float(issued))
             or not math.isfinite(float(expires))
-            or float(now) < float(issued)
+            # The statement is signed on the seed host's clock. Like every
+            # other cross-host verifier (verify_membership_message,
+            # route_assignment, managed_control), accept a statement issued up
+            # to MAX_CLOCK_SKEW_SECONDS in this host's future; expiry is strict.
+            # Zero tolerance refused a 0.18 s two-Mac skew (runs 16 and 19).
+            or float(now) + MAX_CLOCK_SKEW_SECONDS < float(issued)
             or float(now) > float(expires)
         ):
             raise _seed_time_invalid(now=now, issued=issued, expires=expires)

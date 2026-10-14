@@ -22,6 +22,7 @@ from mycelium_membership import (
     JOIN_REQUEST_PROTOCOL,
     LEASE_RENEWAL_PROTOCOL,
     LINK_PROBE_REPORT_PROTOCOL,
+    MAX_CLOCK_SKEW_SECONDS,
     MAX_MESSAGE_TTL_SECONDS,
     RESUME_ACCEPTANCE_PROTOCOL,
     RESUME_REQUEST_PROTOCOL,
@@ -726,7 +727,13 @@ class NodeMembershipSession:
             if record is None:
                 raise NodeMembershipError("assignment_peer_unauthorized")
             current = self._now() if now is None else _finite_now(now)
-            if not float(record["valid_from"]) <= current < float(record["valid_until"]):
+            # valid_from is the seed host's clock: allow this node to be up to
+            # MAX_CLOCK_SKEW_SECONDS behind it, as the offer itself was admitted
+            # (verify_membership_message). valid_until stays strict.
+            if (
+                current + MAX_CLOCK_SKEW_SECONDS < float(record["valid_from"])
+                or current >= float(record["valid_until"])
+            ):
                 raise NodeMembershipError("assignment_peer_record_expired")
             if self._peer_generations.get(peer_node_id) != int(
                 record["membership_generation"]
