@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 import {
   PRODUCT_API_PATHS,
   ProductContractError,
@@ -220,6 +221,9 @@ function withoutSpeculationPreference(submission: InferenceSubmission): Inferenc
 
 export class ProductInferenceClient implements InferenceClient {
   private readonly fetchImplementation: InferenceFetch;
+  // Session bootstrap and qualification reads are also polled in the
+  // background; the event stream and mutations always use plain fetch.
+  private readonly readFetchImplementation: InferenceFetch;
   private readonly now: () => number;
   private readonly submissionProtocol: 'mycelium.request_gateway.v1' | 'mycelium.request_gateway.v2';
   private bootstrap: ProductBootstrap | null = null;
@@ -227,6 +231,7 @@ export class ProductInferenceClient implements InferenceClient {
 
   constructor(options: ProductInferenceClientOptions = {}) {
     this.fetchImplementation = options.fetch ?? globalThis.fetch.bind(globalThis);
+    this.readFetchImplementation = options.fetch ?? backgroundFetch;
     this.now = options.now ?? Date.now;
     this.submissionProtocol = options.submissionProtocol ?? 'mycelium.request_gateway.v2';
     if (this.submissionProtocol !== 'mycelium.request_gateway.v1' &&
@@ -240,7 +245,7 @@ export class ProductInferenceClient implements InferenceClient {
     if (this.bootstrapPromise !== null) return this.bootstrapPromise;
     this.bootstrapPromise = (async () => {
       const response = await fetchSafe(
-        this.fetchImplementation,
+        this.readFetchImplementation,
         exactSameOriginPath(PRODUCT_BOOTSTRAP_PATH, PRODUCT_BOOTSTRAP_PATH),
         {
           method: 'GET',
@@ -276,7 +281,7 @@ export class ProductInferenceClient implements InferenceClient {
         PRODUCT_API_PATHS.qualification_current,
       );
       const response = await fetchSafe(
-        this.fetchImplementation,
+        this.readFetchImplementation,
         path,
         {
           method: 'GET',

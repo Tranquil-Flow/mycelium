@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 import {
   decodeA5ReplicaTrackQualifications,
   type A5ReplicaTrackQualification,
@@ -1045,7 +1046,7 @@ export interface LiveRouteStatusClient {
 export class HttpLiveRouteStatusClient implements LiveRouteStatusClient {
   readonly #fetcher: typeof fetch;
 
-  constructor(fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {
+  constructor(fetcher: typeof fetch = backgroundFetch) {
     this.#fetcher = fetcher;
   }
 

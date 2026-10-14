@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 export const MODEL_CAPACITY_REFRESH_PATH = '/__mycelium/model-capacity-refresh';
 export const MODEL_CAPACITY_REFRESH_START_PATH = '/__mycelium/model-capacity-refresh/start';
 
@@ -64,7 +65,7 @@ export function decodeModelCapacityRefreshStatus(value: unknown): ModelCapacityR
 }
 
 async function request(path: string, init: RequestInit): Promise<ModelCapacityRefreshStatus> {
-  const response = await fetch(path, { ...init, cache: 'no-store', credentials: 'same-origin', redirect: 'error', referrerPolicy: 'no-referrer', headers: { accept: 'application/json', ...init.headers } });
+  const response = await backgroundFetch(path, { ...init, cache: 'no-store', credentials: 'same-origin', redirect: 'error', referrerPolicy: 'no-referrer', headers: { accept: 'application/json', ...init.headers } });
   if (!response.ok) {
     let code = `model_capacity_refresh_${response.status}`;
     try { const body = object(await response.json()); if (typeof body.error === 'string' && SAFE_CODE.test(body.error)) code = body.error; } catch { /* bounded fallback */ }

@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 export const RUNTIME_EVIDENCE_PATH = '/__mycelium/evidence/runtime';
 export const HISTORICAL_EVIDENCE_PATH = '/__mycelium/evidence/history';
 
@@ -125,7 +126,7 @@ export interface EvidenceProjectionClient {
 }
 
 export class HttpEvidenceProjectionClient implements EvidenceProjectionClient {
-  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
+  constructor(private readonly fetcher: typeof fetch = backgroundFetch) {}
   private async request(path: string, signal?: AbortSignal): Promise<unknown> {
     const response = await this.fetcher(path, { method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error', headers: { Accept: 'application/json' }, signal });
     if (!response.ok) throw new Error(`evidence_source_${response.status}`);

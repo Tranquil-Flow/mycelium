@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 import {
   decodeObservatoryAdapterEvent,
   type ObservatoryAdapterBundle,
@@ -156,8 +157,7 @@ export function projectConsumerRouteStatus(
  */
 export class ConsumerRouteStatusClient {
   constructor(
-    private readonly fetchImplementation: ConsumerRouteStatusFetch =
-      globalThis.fetch.bind(globalThis),
+    private readonly fetchImplementation: ConsumerRouteStatusFetch = backgroundFetch,
   ) {}
 
   async load(signal?: AbortSignal): Promise<ConsumerRouteStatusFacts> {

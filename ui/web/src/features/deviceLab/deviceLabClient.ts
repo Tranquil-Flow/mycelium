@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 export interface DeviceLabPeer {
   readonly peer_id: string;
   readonly state: string;
@@ -235,7 +236,7 @@ function decodeCancel(value: unknown): boolean {
 export class HttpDeviceLabClient implements DeviceLabClient {
   constructor(
     private readonly operatorToken: string,
-    private readonly fetcher: typeof fetch = fetch,
+    private readonly fetcher: typeof fetch = backgroundFetch,
   ) {
     if (operatorToken.length === 0) {
       throw new DeviceLabClientError('operator_capability_missing');
@@ -327,7 +328,7 @@ export interface OperatorDeviceLabClientOptions {
 
 /** Named compatibility surface for operator-facing call sites and direct contract tests. */
 export class OperatorDeviceLabClient extends HttpDeviceLabClient {
-  constructor({ operatorToken, fetcher = fetch }: OperatorDeviceLabClientOptions) {
+  constructor({ operatorToken, fetcher = backgroundFetch }: OperatorDeviceLabClientOptions) {
     super(operatorToken, fetcher);
   }
 }

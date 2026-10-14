@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 export const GOVERNANCE_READINESS_PATH = '/__mycelium/governance-readiness';
 
 export interface GovernanceReadiness {
@@ -56,7 +57,7 @@ export interface GovernanceReadinessClient {
 
 export class HttpGovernanceReadinessClient implements GovernanceReadinessClient {
   async load(signal?: AbortSignal): Promise<GovernanceReadiness> {
-    const response = await fetch(GOVERNANCE_READINESS_PATH, { signal, cache: 'no-store', credentials: 'same-origin', redirect: 'error', referrerPolicy: 'no-referrer', headers: { accept: 'application/json' } });
+    const response = await backgroundFetch(GOVERNANCE_READINESS_PATH, { signal, cache: 'no-store', credentials: 'same-origin', redirect: 'error', referrerPolicy: 'no-referrer', headers: { accept: 'application/json' } });
     if (!response.ok) throw new Error(`governance_readiness_${response.status}`);
     if (!(response.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) throw new Error('governance_readiness_content_type_invalid');
     return decodeGovernanceReadiness(await response.json());

@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 export const M17_MODEL_OPERATION_PATH = '/__mycelium/models/operation';
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
@@ -512,7 +513,7 @@ export interface M17ModelOperationClient {
 
 export class HttpM17ModelOperationClient implements M17ModelOperationClient {
   async load(signal?: AbortSignal): Promise<M17ModelOperation> {
-    const response = await fetch(M17_MODEL_OPERATION_PATH, {
+    const response = await backgroundFetch(M17_MODEL_OPERATION_PATH, {
       method: 'GET', signal, cache: 'no-store', credentials: 'same-origin', redirect: 'error',
       headers: { accept: 'application/json' },
     });

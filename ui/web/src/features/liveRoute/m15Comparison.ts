@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 export const M15_COMPARISON_PATH = '/__mycelium/planning/workload-comparison';
 export const M15_COMPARISON_PROTOCOL = 'mycelium.m15_plan_comparison.v1' as const;
 
@@ -370,7 +371,7 @@ export interface M15ComparisonClient { load(): Promise<M15PlanComparison> }
 
 export class HttpM15ComparisonClient implements M15ComparisonClient {
   readonly #fetcher: typeof fetch;
-  constructor(fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) { this.#fetcher = fetcher; }
+  constructor(fetcher: typeof fetch = backgroundFetch) { this.#fetcher = fetcher; }
   async load(): Promise<M15PlanComparison> {
     const response = await this.#fetcher(M15_COMPARISON_PATH, { method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error', headers: { Accept: 'application/json' } });
     if (!response.ok) throw new Error(`m15_comparison_${response.status}`);

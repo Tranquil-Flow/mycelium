@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 export const DEPLOYMENT_ACTIVATION_PATH = '/__mycelium/deployment-activation';
 export const DEPLOYMENT_ACTIVATION_START_PATH = '/__mycelium/deployment-activation/start';
 export const DEPLOYMENT_ACTIVATION_UNLOAD_PATH = '/__mycelium/deployment-activation/unload';
@@ -169,7 +170,7 @@ export class HttpDeploymentActivationClient implements DeploymentActivationClien
   }
 
   private async request(path: string, init: RequestInit): Promise<DeploymentActivationStatus> {
-    const response = await fetch(path, {
+    const response = await backgroundFetch(path, {
       ...init,
       cache: 'no-store',
       credentials: 'same-origin',

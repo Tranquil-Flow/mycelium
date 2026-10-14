@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 import {
   buildSwarmInviteRequest,
   buildSwarmJoinRequest,
@@ -64,7 +65,7 @@ export class HttpSwarmClient implements SwarmClient {
   #bootstrapPromise: Promise<ProductBootstrap> | null = null;
 
   constructor(options: HttpSwarmClientOptions = {}) {
-    this.#fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis);
+    this.#fetcher = options.fetcher ?? backgroundFetch;
     this.#now = options.now ?? Date.now;
     this.#maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
   }

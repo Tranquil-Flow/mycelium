@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 export interface QualifiedDeploymentSummary {
   readonly deployment_id: string;
   readonly model_id: string;
@@ -70,7 +71,7 @@ export class HttpDeploymentRegistryClient implements DeploymentRegistryClient {
   }
 
   private async request(path: string, init: RequestInit): Promise<DeploymentRegistryStatus> {
-    const response = await fetch(path, {
+    const response = await backgroundFetch(path, {
       ...init,
       cache: 'no-store',
       credentials: 'same-origin',

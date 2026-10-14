@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 export const MODEL_PREPARATION_PATH = '/__mycelium/model-preparation';
 export const MODEL_PREPARATION_START_PATH = '/__mycelium/model-preparation/start';
 export const MODEL_REACQUISITION_START_PATH = '/__mycelium/model-preparation/reacquire';
@@ -58,7 +59,7 @@ async function decode(response: Response): Promise<ModelPreparationStatus> {
 
 export class HttpModelPreparationClient implements ModelPreparationClient {
   async status(signal?: AbortSignal): Promise<ModelPreparationStatus> {
-    return decode(await fetch(MODEL_PREPARATION_PATH, { signal, cache: 'no-store', credentials: 'same-origin' }));
+    return decode(await backgroundFetch(MODEL_PREPARATION_PATH, { signal, cache: 'no-store', credentials: 'same-origin' }));
   }
 
   async start(decision: ModelRepresentationDecision): Promise<ModelPreparationStatus> {

@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 import { PRODUCT_API_PATHS } from '../../app/contracts';
 import {
   decodeProductSnapshot,
@@ -45,7 +46,7 @@ export interface ProductEvidenceSourceOptions {
   readonly cancelSchedule?: (handle: ReturnType<typeof setTimeout> | number) => void;
 }
 
-const browserFetch: ProductEvidenceFetch = (url, init) => fetch(url, init);
+const browserFetch: ProductEvidenceFetch = (url, init) => backgroundFetch(url, init);
 const browserSchedule = (callback: () => void, delayMs: number) => setTimeout(callback, delayMs);
 const browserCancelSchedule = (handle: ReturnType<typeof setTimeout> | number) => clearTimeout(handle);
 

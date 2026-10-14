@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 export const M16_RUNTIME_PATH = '/__mycelium/runtime/admission-status';
 export const M16_RUNTIME_PROTOCOL = 'mycelium.concurrent_request_runtime.v1' as const;
 
@@ -190,7 +191,7 @@ export function decodeM16RuntimeStatus(value: unknown): M16RuntimeStatus {
 export interface M16RuntimeClient { load(signal?: AbortSignal): Promise<M16RuntimeStatus> }
 
 export class HttpM16RuntimeClient implements M16RuntimeClient {
-  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
+  constructor(private readonly fetcher: typeof fetch = backgroundFetch) {}
   async load(signal?: AbortSignal): Promise<M16RuntimeStatus> {
     const response = await this.fetcher(M16_RUNTIME_PATH, { method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error', headers: { Accept: 'application/json' }, signal });
     if (!response.ok) throw new Error(`m16_runtime_${response.status}`);

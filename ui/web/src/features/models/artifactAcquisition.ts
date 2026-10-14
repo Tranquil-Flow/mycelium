@@ -1,3 +1,4 @@
+import { backgroundFetch } from '../../app/backgroundFetch';
 export const ARTIFACT_ACQUISITION_PATH = '/__mycelium/artifacts/acquisitions';
 
 const digest = /^sha256:[0-9a-f]{64}$/;
@@ -167,7 +168,7 @@ export interface ArtifactAcquisitionClient { load(signal?: AbortSignal): Promise
 
 export class HttpArtifactAcquisitionClient implements ArtifactAcquisitionClient {
   async load(signal?: AbortSignal): Promise<ArtifactAcquisitionLedger> {
-    const response = await fetch(ARTIFACT_ACQUISITION_PATH, { method: 'GET', signal, cache: 'no-store', credentials: 'same-origin', redirect: 'error', referrerPolicy: 'no-referrer', headers: { accept: 'application/json' } });
+    const response = await backgroundFetch(ARTIFACT_ACQUISITION_PATH, { method: 'GET', signal, cache: 'no-store', credentials: 'same-origin', redirect: 'error', referrerPolicy: 'no-referrer', headers: { accept: 'application/json' } });
     if (!response.ok) throw new Error(`artifact_acquisition_http_${response.status}`);
     if (!(response.headers.get('content-type')?.toLowerCase().startsWith('application/json') ?? false)) throw new Error('artifact_acquisition_content_type_invalid');
     return decodeArtifactAcquisitionLedger(await response.json());
