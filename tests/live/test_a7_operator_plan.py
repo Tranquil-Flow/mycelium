@@ -33,7 +33,7 @@ import pytest
 
 from mycelium_a7_operator_plan import A7PlanError, extend_operator_plan, parity_worker_argv
 from mycelium_a7_parity_measurement import CONFIG_PROTOCOL, measure_parity
-from mycelium_a7_physical_measurement import MeasurementSettings, SourceProcessGroupTarget, measure
+from mycelium_a7_physical_measurement import MeasurementSettings, measure
 from mycelium_live.route import PhysicalLiveRoute, _ConcurrentNodeSession
 from mycelium_physical_runner.remote_probe import derive_local_run_scoped_identity
 from mycelium_qualification.physical_deployment import (
@@ -48,7 +48,7 @@ from runtime_loader import load_assignment_stage
 from scripts.build_qwen_live_route import _bytes, _digest, _physical_graph_document, _transfer_manifest, _write_document
 from tests.live import test_a7_product_path as harness
 from tests.live.test_a7_physical_measurement import _MAX_NEW as _MEASURED_MAX_NEW
-from tests.live.test_a7_physical_measurement import _RouteDriver, gate
+from tests.live.test_a7_physical_measurement import _DecodeHold, _HoldReleasingTarget, _RouteDriver, assert_hold_fired, gate
 from tests.physical_qualification.test_node_service import NODE_SCRIPT, ROOT, SIDECAR_BINARY
 
 pytestmark = pytest.mark.skipif(not SIDECAR_BINARY.is_file(), reason="native iroh sidecar not built")
@@ -296,29 +296,26 @@ def test_extension_stages_measures_and_serves_each_case_variant(tmp_path: Path, 
         _stage(plan)
 
         from mycelium_a7_evidence_control import RouteA7Evidence
-        from mycelium_a7_physical_measurement import MeasurementRefused
 
-        # Even with that headroom, host load can let the request finish before
-        # a freeze settles.  That refusal injects no fault and makes no claim,
-        # so the staged plan is opened and measured again on a fresh route
-        # (bounded); any other refusal or assertion still fails the test.
-        for attempt in range(3):
-            state = _route_from_plan(plan, root / f"route-{attempt}")
-            harness._open_with_a7_authority(state)
-            state.route._deployment_qualification = SimpleNamespace(route_ready=True)
-            try:
-                fields, observations = measure(
-                    driver=_RouteDriver(state),
-                    evidence=RouteA7Evidence(state.route),
-                    fault=SourceProcessGroupTarget(transport="local", process_pattern=re.escape(str(NODE_SCRIPT)) + r" .*--run-id " + re.escape(plan["run_id"]) + r" .*--node-id " + re.escape(_NODES[1]) + r"(\s|$)"),
-                    settings=MeasurementSettings(kill_after_committed=2, settle_timeout_s=10.0, result_timeout_s=20.0, terminal_timeout_s=120.0),
-                )
-                break
-            except MeasurementRefused as exc:
-                if exc.code != "a7_request_ended_before_fault" or attempt == 2:
-                    raise
-                state.route.close()
-                state = None
+        # Measured once, never retried: the request is held after the second
+        # token until the kill lands (``_DecodeHold``), so the request cannot
+        # end before the fault however fast the local node decodes.  A lagging
+        # standby's entry has already recorded its ack lag at that point (the
+        # second token's decode waited out the ack window for the first).
+        state = _route_from_plan(plan, root / "route")
+        harness._open_with_a7_authority(state)
+        state.route._deployment_qualification = SimpleNamespace(route_ready=True)
+        hold = _DecodeHold(2)
+        try:
+            fields, observations = measure(
+                driver=_RouteDriver(state, hold=hold),
+                evidence=RouteA7Evidence(state.route),
+                fault=_HoldReleasingTarget(transport="local", process_pattern=re.escape(str(NODE_SCRIPT)) + r" .*--run-id " + re.escape(plan["run_id"]) + r" .*--node-id " + re.escape(_NODES[1]) + r"(\s|$)", hold=hold),
+                settings=MeasurementSettings(kill_after_committed=2, settle_timeout_s=10.0, result_timeout_s=20.0, terminal_timeout_s=120.0),
+            )
+        finally:
+            hold.release("measurement_returned")
+        assert_hold_fired(hold, observations, 2)
         outcome, reason = _EXPECTED[variant]
         assert fields["outcome"] == outcome, observations["a7_result"]
         if reason is not None:

@@ -26,6 +26,7 @@ import sys
 import threading
 import time
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -65,13 +66,70 @@ _HARNESS_ONLY = {"not_an_ordinary_browser_request", "workspaces"}
 needs_sidecar = pytest.mark.skipif(not SIDECAR_BINARY.is_file(), reason="native iroh sidecar not built")
 
 
+class _DecodeHold:
+    """Hold the measured request's next decode step until the measurement's kill lands.
+
+    ``PhysicalLiveRoute.infer`` emits each token to its sink before it sends the
+    next ``infer_decode``, so blocking the sink after ``after`` tokens leaves the
+    request exactly at that watermark.  On the ~ms local model the measurement's
+    freeze (evidence reads, SIGSTOP, quiescence reads) is slower than one decode
+    step, so without the hold a quiet host ends the request before the fault
+    whenever few steps are killable (only the final step at 11 of 12).  The hold
+    is released by the kill (``_HoldReleasingTarget``), by the harness when the
+    measurement returns without one, or by its own bound; ``released_by`` says
+    which.
+    """
+
+    def __init__(self, after: int, *, timeout_s: float = 120.0) -> None:
+        self.after = after
+        self.timeout_s = timeout_s
+        self.engaged = threading.Event()
+        self.released = threading.Event()
+        self.released_by: str | None = None
+        self.tokens_at_hold: int | None = None
+        self._lock = threading.Lock()
+
+    def hold(self, tokens_seen: int) -> None:
+        if self.engaged.is_set():
+            return  # one hold per measured request
+        self.tokens_at_hold = tokens_seen
+        self.engaged.set()
+        if not self.released.wait(self.timeout_s):
+            self.release("timeout")
+
+    def release(self, by: str) -> None:
+        with self._lock:
+            if self.released_by is None:
+                self.released_by = by
+        self.released.set()
+
+
+@dataclass(frozen=True)
+class _HoldReleasingTarget(SourceProcessGroupTarget):
+    """The plug-in's own fault target; its kill releases the harness decode hold."""
+
+    hold: Any = field(default=None, compare=False, repr=False)
+
+    def kill(self, group: Any) -> Any:
+        try:
+            return super().kill(group)
+        finally:
+            if self.hold is not None:
+                self.hold.release("kill")
+
+
 class _RouteDriver:
-    """Drive ``PhysicalLiveRoute.infer`` (not the browser gateway) into a RunningRequest."""
+    """Drive ``PhysicalLiveRoute.infer`` (not the browser gateway) into a RunningRequest.
+
+    With ``hold`` the request labelled ``measured`` is held after ``hold.after``
+    tokens (see ``_DecodeHold``); the baseline request is never held.
+    """
 
     ordinary_browser_request = False
 
-    def __init__(self, state: Any) -> None:
+    def __init__(self, state: Any, *, hold: _DecodeHold | None = None) -> None:
         self._state = state
+        self._hold = hold
         self.request_ids: list[str] = []
 
     def start(self, label: str) -> RunningRequest:
@@ -80,10 +138,14 @@ class _RouteDriver:
         running.request_id = request_id
         self.request_ids.append(request_id)
         manifest, route_identity, command_identity = harness._product_identity(self._state.graph, request_id)
+        hold = self._hold if label == "measured" else None
+        running.decode_hold = hold  # type: ignore[attr-defined]
 
         class _Sink:
             def emit(self, token_index: int, token_id: int) -> None:
                 running.on_token(token_index, token_id, publisher_generation=command_identity["publisher_generation"])
+                if hold is not None and token_index == hold.after - 1:
+                    hold.hold(len(running.snapshot()[0]))
 
         def run() -> None:
             route = self._state.route
@@ -121,36 +183,33 @@ def _token_file(tmp_path: Path) -> Path:
     return directory / "a7-evidence.token"
 
 
-def _source_target(state: Any) -> SourceProcessGroupTarget:
+def _source_target(state: Any, *, hold: _DecodeHold | None = None) -> SourceProcessGroupTarget:
     run_id = state.route._plan["run_id"]
-    return SourceProcessGroupTarget(
+    return _HoldReleasingTarget(
         transport="local",
         process_pattern=re.escape(str(NODE_SCRIPT)) + r" .*--run-id " + re.escape(run_id) + r" .*--node-id " + re.escape(harness._SOURCE_NODE_ID) + r"(\s|$)",
+        hold=hold,
     )
 
 
+def assert_hold_fired(hold: _DecodeHold, observations: dict[str, Any], kill_after_committed: int) -> None:
+    """The kill landed while the measured request was held at the configured watermark."""
+
+    assert hold.engaged.is_set(), "the measured request was never held"
+    assert hold.released_by == "kill", hold.released_by
+    assert hold.tokens_at_hold == kill_after_committed
+    assert observations["fault"]["tokens_received_at_kill"] == kill_after_committed
+
+
 def _measure_with_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, qualification_expired: bool, kill_after_committed: int = 2) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], Any]:
-    # Under host load the ~ms local request can finish before the freeze lands.
-    # That refusal (a7_request_ended_before_fault) injects no fault and makes no
-    # claim, so a fresh route measures again (bounded); any other refusal or
-    # assertion still fails the test.
-    for attempt in range(3):
-        root = tmp_path / f"measure-{attempt}"
-        root.mkdir()
-        try:
-            return _measure_once(root, monkeypatch, qualification_expired=qualification_expired, kill_after_committed=kill_after_committed)
-        except MeasurementRefused as exc:
-            if exc.code != "a7_request_ended_before_fault" or attempt == 2:
-                raise
-    raise AssertionError("unreachable")
-
-
-def _measure_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, qualification_expired: bool, kill_after_committed: int) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], Any]:
-    # Long enough that the measured request is still decoding when the
-    # measurement (HTTP evidence reads, freeze, kill) acts on the ~ms local model.
+    # Measured once, never retried: the request is held after
+    # ``kill_after_committed`` tokens until the kill lands (``_DecodeHold``), so
+    # a7_request_ended_before_fault is a real failure here, not host timing.
+    # Long enough that a final decode step is distinct from the mid-request kill.
     monkeypatch.setattr(harness, "_MAX_NEW", _MAX_NEW)
     state = harness._build_r7_staged_route(tmp_path, monkeypatch, qualification_expired=qualification_expired)
     control = None
+    hold = _DecodeHold(kill_after_committed)
     try:
         harness._open_with_a7_authority(state)
         state.route._deployment_qualification = type("Qualified", (), {"route_ready": True})()
@@ -158,11 +217,12 @@ def _measure_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, qualificat
         control.start()
         evidence = HttpEvidence(f"http://127.0.0.1:{control.port}/a7/evidence", grant=EXACT_FLEET_GRANT, token_file=control.token_file)
         fields, observations = measure(
-            driver=_RouteDriver(state),
+            driver=_RouteDriver(state, hold=hold),
             evidence=evidence,
-            fault=_source_target(state),
+            fault=_source_target(state, hold=hold),
             settings=MeasurementSettings(kill_after_committed=kill_after_committed, settle_timeout_s=10.0, result_timeout_s=20.0, terminal_timeout_s=120.0),
         )
+        assert_hold_fired(hold, observations, kill_after_committed)
         plan = gate.build_plan(CANDIDATE)
         case = gate.INCOMPATIBLE if qualification_expired else gate.POSITIVE
         record = runner._measured_record(plan, case, fields)
@@ -170,6 +230,8 @@ def _measure_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, qualificat
         observations["_product_evidence"] = RouteA7Evidence(state.route).product()
         return record, observations, plan, scoped
     finally:
+        # A measurement that refused before its kill must not leave the request held.
+        hold.release("measurement_returned")
         if control is not None:
             control.close()
         state.close()
@@ -288,7 +350,7 @@ def test_harness_measurement_kills_before_the_request_ends_when_the_node_outruns
     record, observations, _plan, scoped = _measure_with_harness(
         tmp_path, monkeypatch, qualification_expired=False, kill_after_committed=kill_after_committed
     )
-    assert seen["calls"] >= 1 and seen["request_done"] == 0, seen
+    assert seen["calls"] >= 1 and seen["request_done"] == 0 and seen["decode_held"] == seen["calls"], seen
     assert record["outcome"] == "fenced_kv_successor", record
     assert record["committed_before_failure"] == record["acknowledged_before_failure"] == kill_after_committed
     assert observations["fault"]["tokens_received_at_kill"] == kill_after_committed
