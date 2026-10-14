@@ -66,8 +66,10 @@ def _admitted_macos(os_version):
     return int(parts[0]) >= 26
 
 
-#: The packaged app's real floor: its bundled Python/OpenSSL/sqlite are built
-#: for macOS 26.0 (Mach-O minos), and Info.plist LSMinimumSystemVersion says so.
+#: The open-ended floor the refusal message names: macOS 26.0 and later are
+#: admitted, plus 15.6.1 as an exact target.  Info.plist LSMinimumSystemVersion
+#: is the lowest admitted release (build_a13_macos.py), so Finder opens the app
+#: on 15.6.1 even though the bundled Homebrew runtime is stamped minos 26.0.
 MACOS_FLOOR = '26.0'
 
 

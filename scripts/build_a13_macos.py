@@ -139,22 +139,41 @@ def bundle_macho_floor(app):
     return floor
 
 
-def set_bundle_minimum_system_version(app,*,minimum='26.0'):
+def set_bundle_minimum_system_version(app,*,admitted_versions=None):
     """Write Info.plist LSMinimumSystemVersion so Finder refuses older macOS cleanly.
 
-    Without it, a Mac below the bundled runtime's minos would crash at dyld load
-    with no message. The declared floor must cover every bundled Mach-O.
+    The floor is the lower of the bundle's highest Mach-O minos and the lowest
+    macOS the product admits (package_manifest.ADMITTED_VERSIONS): it never sits
+    above an admitted release, or Finder would refuse the app on a Mac the
+    preflight accepts. Homebrew-built runtimes carry their build host's minos
+    (26.0) without needing it; every such stamp above the declared floor is
+    listed so the package records it rather than hiding it.
     """
     import plistlib
+    if admitted_versions is None:
+        from mycelium_a13_macos.package_manifest import ADMITTED_VERSIONS as admitted_versions
+    if not admitted_versions:raise SystemExit('admitted_macos_versions_missing')
+    admitted_floor=min(admitted_versions,key=_version_key)
     floor=bundle_macho_floor(app)
     if floor is None:raise SystemExit('bundle_macho_floor_unknown')
-    declared=floor if minimum is None else minimum
-    if _version_key(declared)<_version_key(floor):raise SystemExit('bundle_floor_below_macho_minos')
+    declared=min(floor,admitted_floor,key=_version_key)
     plist=Path(app)/'Contents/Info.plist'
     with plist.open('rb') as f:info=plistlib.load(f)
     info['LSMinimumSystemVersion']=declared
     with plist.open('wb') as f:plistlib.dump(info,f)
-    return declared
+    return {'declared':declared,'macho_minos_max':floor,'admitted_floor':admitted_floor,
+            'macho_minos_above_declared':macho_minos_above(app,declared)}
+
+
+def macho_minos_above(app,declared):
+    """Bundle-relative paths of Mach-O files stamped with a minos above ``declared``."""
+    above=[]
+    for path in sorted(Path(app).rglob('*')):
+        if path.is_symlink() or not path.is_file():continue
+        version=macho_minimum_version(path)
+        if version is not None and _version_key(version)>_version_key(declared):
+            above.append(str(path.relative_to(app)))
+    return above
 
 
 def stage_compiler_sources(destination):
@@ -234,8 +253,12 @@ def main():
     provenance.write_text(json.dumps(runtime_wheels,indent=2)+'\n')
     (provenance.parent/'compiler-source-identity.json').write_text(
         json.dumps(build_identity(compiler_identity),sort_keys=True,indent=2)+'\n')
-    macos_floor=set_bundle_minimum_system_version(output/'Mycelium A13 Demo.app',minimum='26.0')
+    floor=set_bundle_minimum_system_version(output/'Mycelium A13 Demo.app')
+    macos_floor=floor['declared']
     expat=vendor_expat(output/'Mycelium A13 Demo.app')
+    # Vendored Expat lands after the plist edit (its codesign must cover it): re-list the stamps.
+    floor['macho_minos_max']=bundle_macho_floor(output/'Mycelium A13 Demo.app')
+    floor['macho_minos_above_declared']=macho_minos_above(output/'Mycelium A13 Demo.app',macos_floor)
     executable=output/'Mycelium A13 Demo.app/Contents/MacOS/Mycelium A13 Demo'
     preflight=subprocess.run([str(executable),'--preflight'],capture_output=True,text=True,check=True)
     report={'platform':'macos-arm64','signing':'ad-hoc-only, no publisher certificate; NOT notarized',
@@ -243,7 +266,8 @@ def main():
             'preflight':json.loads(preflight.stdout),
             'resource_probe_sha256':hashlib.sha256(probe.read_bytes()).hexdigest(),
             'sidecar_source_sha256':hashlib.sha256(sidecar.read_bytes()).hexdigest(),
-            'version':output.name,'vendored_expat':expat,'macos_floor':macos_floor}
+            'version':output.name,'vendored_expat':expat,'macos_floor':macos_floor,
+            'macos_floor_derivation':floor}
     (output/'artifact-identity.json').write_text(json.dumps(report,indent=2)+'\n')
     launcher=output/'Open Mycelium.command'
     launcher.write_text('#!/bin/sh\nset -eu\nHERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nexec "$HERE/Mycelium A13 Demo.app/Contents/MacOS/Mycelium A13 Demo" "$@"\n')
