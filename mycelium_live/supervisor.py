@@ -3814,14 +3814,21 @@ def _route_node_stderr_tails(route: Any) -> dict[str, str]:
 
 
 def _emit_serve_diagnostic(
-    exc: BaseException, *, stage: str, route: Any = None
+    exc: BaseException,
+    *,
+    stage: str,
+    route: Any = None,
+    evidence_root: Path | None = None,
 ) -> None:
     """Surface the node-side reason a physical route open was rejected.
 
     Printed BEFORE any failure-path cleanup can replace the exception,
     so the serve log keeps the real rejection (and the rejecting node's
     stderr tail) even when cleanup afterwards reports its own error.
-    With ``route``, every node's bounded stderr tail is printed too.
+    With ``route``, every node's bounded stderr tail is printed too.  With
+    ``route`` and ``evidence_root`` every node is also asked for its evidence
+    bundle, and the bundles and redacted tails are written below
+    ``evidence_root`` before teardown (``_write_route_evidence``).
     """
     document = {
         "protocol": _SERVE_DIAGNOSTIC_PROTOCOL,
@@ -3833,6 +3840,139 @@ def _emit_serve_diagnostic(
     if tails:
         document["node_stderr_tails"] = tails
     print(_json_bytes(document).decode("utf-8"), flush=True)
+    if route is not None and evidence_root is not None:
+        try:
+            _write_route_evidence(route, stage=stage, root=Path(evidence_root), tails=tails)
+        except Exception as error:  # noqa: BLE001 - diagnostics never mask exc
+            print(
+                _json_bytes(
+                    {
+                        "protocol": _SERVE_EVIDENCE_PROTOCOL,
+                        "stage": stage,
+                        "error": type(error).__name__[:64],
+                    }
+                ).decode("utf-8"),
+                flush=True,
+            )
+
+
+_SERVE_EVIDENCE_PROTOCOL = "mycelium.live_serve_evidence.v1"
+#: One node's bundle request; nodes are asked in parallel.
+_SERVE_EVIDENCE_TIMEOUT_SECONDS = 20.0
+
+
+def _route_node_ids(route: Any) -> list[str]:
+    graph = getattr(route, "execution_graph", None)
+    return sorted(
+        {
+            placement.node_id
+            for stage in getattr(graph, "stages", ())
+            for placement in getattr(stage, "placements", ())
+            if isinstance(getattr(placement, "node_id", None), str)
+        }
+    )
+
+
+def _write_private(path: Path, data: bytes) -> None:
+    descriptor = os.open(
+        path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
+    )
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(data)
+
+
+def _write_route_evidence(
+    route: Any, *, stage: str, root: Path, tails: Mapping[str, str]
+) -> Path:
+    """Persist every route node's evidence for a failed startup.
+
+    ``<root>/<stage>-<unix ms>/`` (0700) holds, per node, the redacted
+    parent-side stderr tail (``<node id>.stderr-tail.txt``) and the bundle the
+    node returned (``<node id>.evidence.json``), plus ``index.json``.  Nodes
+    are asked in parallel with a bounded timeout, so one wedged node cannot
+    delay the others or the teardown by more than that bound.
+    """
+
+    from physical_inference_node import redact_evidence_text
+
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory = root / f"{stage}-{int(time.time() * 1_000)}"
+    directory.mkdir(mode=0o700)
+    os.chmod(directory, 0o700)
+    node_ids = _route_node_ids(route)
+    reader = getattr(route, "diagnostic_evidence", None)
+    results: dict[str, Any] = {}
+
+    def collect(node_id: str) -> None:
+        try:
+            results[node_id] = reader(
+                node_id,
+                reason=stage,
+                timeout_seconds=_SERVE_EVIDENCE_TIMEOUT_SECONDS,
+            )
+        except Exception as error:  # noqa: BLE001
+            results[node_id] = error
+
+    workers = []
+    if callable(reader):
+        for node_id in node_ids:
+            worker = threading.Thread(
+                target=collect,
+                args=(node_id,),
+                name=f"mycelium-serve-evidence-{node_id}",
+                daemon=True,
+            )
+            worker.start()
+            workers.append(worker)
+    give_up_at = time.monotonic() + _SERVE_EVIDENCE_TIMEOUT_SECONDS + 5.0
+    for worker in workers:
+        worker.join(max(0.0, give_up_at - time.monotonic()))
+    index: dict[str, Any] = {
+        "protocol": _SERVE_EVIDENCE_PROTOCOL,
+        "stage": stage,
+        "nodes": {},
+    }
+    files: list[str] = []
+    for node_id in node_ids:
+        safe = "".join(
+            character if character.isalnum() or character in "-_" else "_"
+            for character in node_id
+        )[:64]
+        entry: dict[str, Any] = {"stderr_tail": None, "evidence": None}
+        tail = tails.get(node_id)
+        if isinstance(tail, str) and tail:
+            name = f"{safe}.stderr-tail.txt"
+            _write_private(directory / name, redact_evidence_text(tail).encode("utf-8"))
+            entry["stderr_tail"] = name
+            files.append(name)
+        result = results.get(node_id)
+        if isinstance(result, Mapping):
+            name = f"{safe}.evidence.json"
+            _write_private(directory / name, _json_bytes(dict(result)))
+            entry["evidence"] = name
+            node_file = result.get("file")
+            entry["node_file"] = node_file if isinstance(node_file, str) else None
+            files.append(name)
+        elif isinstance(result, BaseException):
+            entry["evidence_error"] = type(result).__name__[:64]
+        elif node_id in results:
+            entry["evidence_error"] = "no_evidence"
+        else:
+            entry["evidence_error"] = "timeout"
+        index["nodes"][node_id] = entry
+    _write_private(directory / "index.json", _json_bytes(index))
+    print(
+        _json_bytes(
+            {
+                "protocol": _SERVE_EVIDENCE_PROTOCOL,
+                "stage": stage,
+                "directory": str(directory),
+                "files": sorted(files + ["index.json"]),
+            }
+        ).decode("utf-8"),
+        flush=True,
+    )
+    return directory
 
 
 def _record_unavailable_deployment(
@@ -4206,6 +4346,10 @@ def run_physical_server(
 ) -> int:
     deployment = native_deployment_projection(operator_plan)
     selected_deployment_dir: Path | None = None
+    # A failed startup keeps each node's evidence bundle here (A14 class D).
+    evidence_root = (
+        None if product_state_root is None else Path(product_state_root) / "diagnostics"
+    )
 
     def route_factory() -> LiveRoute:
         return PhysicalLiveRoute.from_operator_plan(
@@ -4220,13 +4364,17 @@ def run_physical_server(
             identity = concrete.open()
         except ControllerError as exc:
             safe_code = exc.remote_code or exc.code
-            _emit_serve_diagnostic(exc, stage="route_open", route=concrete)
+            _emit_serve_diagnostic(
+                exc, stage="route_open", route=concrete, evidence_root=evidence_root
+            )
             raise RuntimeError(f"startup_route_open_rejected:{safe_code}") from exc
         except Exception as exc:
             # A node-process rejection (NodeProcessError) is NOT a
             # ControllerError: surface its node stderr before re-raising
             # with the same public shape as the controller path.
-            _emit_serve_diagnostic(exc, stage="route_open", route=concrete)
+            _emit_serve_diagnostic(
+                exc, stage="route_open", route=concrete, evidence_root=evidence_root
+            )
             raise RuntimeError(
                 f"startup_route_open_rejected:{_startup_reason(exc)}"
             ) from exc
@@ -4243,7 +4391,9 @@ def run_physical_server(
         except Exception as exc:
             # The startup challenge failed inside an open route: print every
             # node's stderr tail before cleanup closes the route.
-            _emit_serve_diagnostic(exc, stage="route_qualify", route=concrete)
+            _emit_serve_diagnostic(
+                exc, stage="route_qualify", route=concrete, evidence_root=evidence_root
+            )
             raise
         concrete.set_deployment_qualification(
             qualification,

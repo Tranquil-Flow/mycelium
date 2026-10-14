@@ -248,6 +248,66 @@ def test_prefill_chunk_behind_a_short_send_waits_and_is_delivered_without_a_stal
         _close_quiesced(sender, receiver)
 
 
+class _HandOffLock:
+    """A send lock that changes hands between windows ``hand_offs`` times."""
+
+    def __init__(self, transport: Any, hand_offs: int) -> None:
+        self._lock = threading.Lock()
+        self.transport = transport
+        self.hand_offs = hand_offs
+        self.waits: list[float | None] = []
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        if self.hand_offs > 0:
+            self.waits.append(timeout)
+            time.sleep(timeout)
+            self.hand_offs -= 1
+            # Another send took the client during this window.
+            with self.transport._state_lock:
+                self.transport._send_operation_holder = (
+                    "HopHeader:PREFILL_CHUNK",
+                    b"\x00" * 16,
+                    time.monotonic(),
+                )
+            return False
+        return self._lock.acquire(blocking, timeout)
+
+    def release(self) -> None:
+        self._lock.release()
+
+    def locked(self) -> bool:
+        return self._lock.locked()
+
+
+def test_waiting_behind_sends_that_keep_completing_is_not_a_stall(
+    scaled_policy: Any,
+) -> None:
+    """Only a window in which one send held the client throughout counts.
+
+    Here the client changes hands in every window (other sends progress), for
+    more windows than the stall budget: the chunk keeps waiting and is then
+    delivered, with no stall event.
+    """
+
+    wire = _Wire()
+    sender, receiver, _, receiver_router, events = _pair(wire)
+    try:
+        lock = _HandOffLock(sender, hand_offs=scaled_policy.max_resends + 2)
+        sender._send_operation_lock = lock  # type: ignore[assignment]
+
+        sender.send_router_frame(_chunk_frame(chunk_index=1), destination_node_id="node-b")
+
+        assert len(lock.waits) == scaled_policy.max_resends + 2
+        assert all(
+            wait is not None and wait <= scaled_policy.stall_floor_seconds + 1e-6
+            for wait in lock.waits
+        )
+        assert [event for event, _ in events] == []
+        assert [header.token_index for header in receiver_router.hops] == [1]
+    finally:
+        _close_quiesced(sender, receiver)
+
+
 # -- c2a: the prefill's first token rides the prefill completion ----------------
 
 

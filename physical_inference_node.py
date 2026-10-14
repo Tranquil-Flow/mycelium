@@ -656,6 +656,33 @@ class _PrefillWaitBudget:
             return "prefill_transport_stalled"
         return "prefill_completion_timeout"
 
+    def snapshot(self) -> dict[str, Any]:
+        """The wait's figures for an evidence bundle (bounded ints only)."""
+
+        snapshot: dict[str, Any] = {
+            "idle_ms": _bounded_ms(self.idle_seconds()),
+            "elapsed_ms": _bounded_ms(time.monotonic() - self.started),
+            "deadline_ms": _bounded_ms(self.deadline - self.started),
+            "stall_window_ms": _bounded_ms(self.stall_seconds()),
+            "watchdog_ms": _bounded_ms(self.watchdog_seconds()),
+            "chunks": int(self.chunks),
+            "chunk_bytes": int(self.chunk_bytes()),
+        }
+        for name in (
+            "progress_events",
+            "bytes_confirmed",
+            "max_frame_bytes",
+            "stall_resends",
+            "send_lock_stalls",
+        ):
+            value = self.progress.get(name, 0) if self.progress else 0
+            snapshot[name] = value if type(value) is int and 0 <= value <= 10**12 else 0
+        code = self.progress.get("failure_code") if self.progress else None
+        snapshot["failure_code"] = (
+            code if isinstance(code, str) and _PREFILL_DIAGNOSTIC_CODE.fullmatch(code) else None
+        )
+        return snapshot
+
     def emit_diagnostic(self, code: str) -> None:
         """One allowlisted stderr line; never changes control flow."""
 
@@ -671,7 +698,12 @@ class _PrefillWaitBudget:
                 "chunks": int(self.chunks),
                 "chunk_bytes": int(self.chunk_bytes()),
             }
-            for name in ("progress_events", "bytes_confirmed", "stall_resends"):
+            for name in (
+                "progress_events",
+                "bytes_confirmed",
+                "stall_resends",
+                "send_lock_stalls",
+            ):
                 value = self.progress.get(name, 0) if self.progress else 0
                 fields[name] = (
                     value if type(value) is int and 0 <= value <= 10**12 else 0
@@ -708,9 +740,207 @@ def _print_transport_stall_event(event: str, fields: Mapping[str, Any]) -> None:
             value = fields.get(name)
             if type(value) is int and 0 <= value <= 10**12:
                 parts.append(f"{name}={value}")
+        # A send-lock stall names the frame kind holding the shared data
+        # client (a message type name) and how long it has held it.
+        holder_kind = fields.get("holder_kind")
+        holder_age = fields.get("holder_age_ms")
+        if (
+            isinstance(holder_kind, str)
+            and _EVIDENCE_FRAME_KIND.fullmatch(holder_kind)
+            and type(holder_age) is int
+            and 0 <= holder_age <= 10**12
+        ):
+            parts.append(f"holder_kind={holder_kind}")
+            parts.append(f"holder_age_ms={holder_age}")
         _emit_stderr_line("MYCELIUM-TRANSPORT-STALL " + " ".join(parts))
     except BaseException:
         pass
+
+
+# -- evidence bundle (A14 class D, round 2) -------------------------------------
+#
+# A failed startup tears the nodes down; their stderr lived only in the
+# parent's 16 KiB pipe ring and no thread dump existed.  A node therefore keeps
+# its own stderr ring and, on a prefill stall of its own or when the route asks
+# (``diagnostic_evidence``), writes one bounded, privacy-reduced bundle *beside*
+# its staging root: ``<staging_root>.evidence/`` is touched neither by the
+# controller's remote cleanup (which removes exactly the staging root) nor by
+# the next staging.
+
+_EVIDENCE_PROTOCOL = "mycelium.node_evidence_bundle.v1"
+#: Bytes of this process's own stderr kept for a bundle (most recent).
+_STDERR_RING_BYTES = 256 * 1024
+#: One bundle file / one ``diagnostic_evidence`` result at most (the control
+#: channel carries frames of up to 1 MiB).
+_EVIDENCE_BUNDLE_MAX_BYTES = 768 * 1024
+#: Bundles kept per node; older ones are pruned.
+_EVIDENCE_BUNDLES_KEPT = 8
+_EVIDENCE_STACK_FRAMES = 48
+_EVIDENCE_STACK_BYTES = 192 * 1024
+_EVIDENCE_FRAME_KIND = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,63}\Z")
+
+_REDACT_HOME = re.compile(r"/(Users|home)/[^/\s\"']+")
+_REDACT_IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?\b")
+_REDACT_IPV6 = re.compile(
+    r"(?i)(?<![\w:])(?:[0-9a-f]{1,4}:){4,7}[0-9a-f]{1,4}(?![\w:])"
+    r"|(?<![\w:])[0-9a-f]{0,4}(?::[0-9a-f]{1,4})*::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*)?(?![\w:])"
+)
+_REDACT_HEX = re.compile(r"(?i)(?<![0-9a-z])[0-9a-f]{16,}(?![0-9a-z])")
+# Endpoint ids (z-base-32), base64 keys: long runs without "_" (so long
+# Python identifiers in stacks stay readable).
+_REDACT_TOKEN = re.compile(r"(?<![0-9A-Za-z+/=_-])[0-9A-Za-z+/=-]{40,}(?![0-9A-Za-z+/=_-])")
+_EVIDENCE_SEQUENCE = iter(range(1, 1 << 62))
+_EVIDENCE_SEQUENCE_LOCK = threading.Lock()
+_REDACT_FRAME_LINE = re.compile(r'\s+File "[^"\n]*", line \d+, in [\w<>.]+\Z')
+_REDACT_EXCEPTION_LINE = re.compile(r"([A-Za-z_][\w.]{0,200})(?::\s?(.*))?\Z")
+_REDACT_KEPT_PREFIXES = (
+    "MYCELIUM-",
+    "Traceback (most recent call last):",
+    "physical-node ",
+    "During handling of the above exception",
+    "The above exception was the direct cause",
+)
+
+
+def _scrub_identifiers(line: str) -> str:
+    line = _REDACT_HOME.sub(lambda match: f"/{match.group(1)}/<user>", line)
+    line = _REDACT_IPV6.sub("<ipv6>", line)
+    line = _REDACT_IPV4.sub("<ipv4>", line)
+    line = _REDACT_HEX.sub("<hex>", line)
+    return _REDACT_TOKEN.sub("<id>", line)
+
+
+def redact_evidence_text(text: str) -> str:
+    """Privacy-reduce process output for an evidence bundle.
+
+    The same allowlist idea as ``MYCELIUM-SIDECAR-EVENT`` forwarding: only
+    output whose shape the product controls is kept - its own ``MYCELIUM-*``
+    diagnostic lines (built from bounded fields), fixed node lines, and
+    Python traceback structure (frame lines, the source lines under them and
+    the exception *type*).  An exception message and any other line are
+    replaced by their length.  Every kept line is then scrubbed of anything
+    shaped like an endpoint id, key, digest, IP address or home directory.
+    """
+
+    out: list[str] = []
+    previous = ""
+    for line in str(text).splitlines():
+        kept: str | None = None
+        kind = "other"
+        if line.startswith(_REDACT_KEPT_PREFIXES):
+            kept, kind = line, "fixed"
+        elif _REDACT_FRAME_LINE.fullmatch(line):
+            kept, kind = line, "frame"
+        elif line[:1].isspace() and previous in {"frame", "source"}:
+            kept, kind = line, "source"
+        else:
+            match = _REDACT_EXCEPTION_LINE.fullmatch(line)
+            if match is not None and line.strip():
+                message = match.group(2)
+                kept = match.group(1) + (
+                    "" if message is None else f": <redacted {len(message)} chars>"
+                )
+                kind = "exception"
+        if kept is None:
+            out.append(f"<redacted line {len(line)} chars>")
+        else:
+            out.append(_scrub_identifiers(kept))
+        previous = kind
+    return "\n".join(out) + ("\n" if out else "")
+
+
+class _StderrRing:
+    """The most recent bytes this process wrote to its stderr (bounded)."""
+
+    def __init__(self, limit_bytes: int = _STDERR_RING_BYTES) -> None:
+        self.limit_bytes = int(limit_bytes)
+        self._buffer = bytearray()
+        self._lock = threading.Lock()
+        self.total_bytes = 0
+
+    def append(self, text: str) -> None:
+        data = text.encode("utf-8", errors="replace")
+        with self._lock:
+            self.total_bytes += len(data)
+            self._buffer.extend(data)
+            excess = len(self._buffer) - self.limit_bytes
+            if excess > 0:
+                del self._buffer[:excess]
+
+    def text(self) -> str:
+        with self._lock:
+            data = bytes(self._buffer)
+        return data.decode("utf-8", errors="replace")
+
+
+class _StderrTee:
+    """``sys.stderr`` replacement that also feeds the ring."""
+
+    def __init__(self, stream: Any, ring: _StderrRing) -> None:
+        self._stream = stream
+        self._ring = ring
+
+    def write(self, text: str) -> int:
+        try:
+            self._ring.append(text)
+        except Exception:
+            pass
+        return self._stream.write(text)
+
+    def flush(self) -> None:
+        self._stream.flush()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
+
+
+_STDERR_RING: _StderrRing | None = None
+
+
+def _install_stderr_ring(limit_bytes: int = _STDERR_RING_BYTES) -> _StderrRing:
+    """Tee this process's ``sys.stderr`` into a bounded ring; return the ring."""
+
+    global _STDERR_RING
+    ring = _StderrRing(limit_bytes)
+    sys.stderr = _StderrTee(sys.stderr, ring)
+    _STDERR_RING = ring
+    return ring
+
+
+def _thread_stacks() -> list[dict[str, Any]]:
+    """All threads' Python stacks (file, line, function, source line).
+
+    No local variable values are captured: a stack names code, never data.
+    """
+
+    frames = sys._current_frames()
+    threads = {thread.ident: thread for thread in threading.enumerate()}
+    stacks: list[dict[str, Any]] = []
+    budget = _EVIDENCE_STACK_BYTES
+    for ident, frame in sorted(frames.items(), key=lambda item: str(item[0])):
+        thread = threads.get(ident)
+        lines: list[str] = []
+        for entry in traceback.format_stack(frame)[-_EVIDENCE_STACK_FRAMES:]:
+            lines.extend(entry.rstrip("\n").splitlines())
+        lines = [_scrub_identifiers(line) for line in lines]
+        size = sum(len(line) + 1 for line in lines)
+        if size > budget:
+            lines = lines[-max(1, budget // 160):]
+            size = sum(len(line) + 1 for line in lines)
+        budget = max(0, budget - size)
+        stacks.append(
+            {
+                "name": "unknown" if thread is None else thread.name[:96],
+                "daemon": None if thread is None else bool(thread.daemon),
+                "stack": lines,
+            }
+        )
+    return stacks
+
+
+def _safe_evidence_token(value: Any) -> str:
+    text = re.sub(r"[^A-Za-z0-9_-]", "_", str(value))[:64]
+    return text or "none"
 
 
 def _emit_load_proof_diagnostic(
@@ -4104,6 +4334,14 @@ class PhysicalNodeService:
             code = failure or "prefill_completion_timeout"
             _emit_prefill_transport_diagnostic(self.transport)
             budget.emit_diagnostic(code)
+            # The stalled state itself - every thread's stack, who holds the
+            # data client, what is outstanding - before the failure unwinds it.
+            prefill = None
+            try:
+                prefill = budget.snapshot()
+            except Exception:
+                pass
+            self.write_evidence_bundle(code, request_id=request_id, prefill=prefill)
             raise NodeCommandError(code)
         deadline = budget.deadline
         self._require_started_status(
@@ -5132,10 +5370,144 @@ class PhysicalNodeService:
             "a7_snapshot": self._a7_snapshot,
             "a7_source_lost": self._a7_source_lost,
             "a11_snapshot": self._a11_snapshot,
+            "diagnostic_evidence": self._diagnostic_evidence,
         }
         handler = handlers.get(document["command"])
         _require(handler is not None, "unsupported_command")
         return handler(document["payload"])
+
+    def evidence_directory(self) -> Path:
+        """``<staging_root>.evidence``: beside the staging root, never inside it."""
+
+        root = Path(self.artifact_root)
+        return root.parent / f"{root.name}.evidence"
+
+    def _evidence_document(
+        self,
+        reason: str,
+        *,
+        request_id: str | None,
+        prefill: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        ring = _STDERR_RING
+        stderr_text = "" if ring is None else redact_evidence_text(ring.text())
+        transport_state: Any
+        reader = getattr(getattr(self, "transport", None), "diagnostic_state", None)
+        if callable(reader):
+            try:
+                transport_state = _plain_json(reader())
+            except Exception as exc:  # noqa: BLE001 - evidence never raises
+                transport_state = {"unavailable": type(exc).__name__[:64]}
+        else:
+            transport_state = {"unavailable": "no_diagnostic_state"}
+        try:
+            threads = _thread_stacks()
+        except Exception as exc:  # noqa: BLE001
+            threads = [{"name": "unavailable", "daemon": None, "stack": [type(exc).__name__]}]
+        return {
+            "protocol": _EVIDENCE_PROTOCOL,
+            "node_id": self.node_id,
+            "reason": reason,
+            "request_id": request_id,
+            "emitted_at_unix_ms": int(time.time() * 1000),
+            "state": str(getattr(self, "state", "unknown"))[:32],
+            "stderr": {
+                "ring_limit_bytes": None if ring is None else ring.limit_bytes,
+                "bytes_seen": None if ring is None else ring.total_bytes,
+                "text": stderr_text,
+            },
+            "threads": threads,
+            "transport": transport_state,
+            "prefill": None if prefill is None else dict(prefill),
+        }
+
+    def write_evidence_bundle(
+        self,
+        reason: str,
+        *,
+        request_id: str | None = None,
+        prefill: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Write one bounded evidence bundle; never raises.
+
+        Returns ``{"file": <name or None>, "document": <bundle>}`` and prints
+        one ``MYCELIUM-EVIDENCE-BUNDLE`` pointer line (file name only).
+        """
+
+        document: dict[str, Any] = {"protocol": _EVIDENCE_PROTOCOL, "reason": reason}
+        try:
+            document = self._evidence_document(
+                reason, request_id=request_id, prefill=prefill
+            )
+            encoded = canonical_json_bytes(document)
+            if len(encoded) > _EVIDENCE_BUNDLE_MAX_BYTES:
+                # Keep the most recent stderr that fits; stacks and state stay.
+                text = document["stderr"]["text"]
+                overflow = len(encoded) - _EVIDENCE_BUNDLE_MAX_BYTES + 1024
+                document["stderr"]["text"] = text.encode("utf-8")[overflow:].decode(
+                    "utf-8", errors="ignore"
+                )
+                encoded = canonical_json_bytes(document)
+            if len(encoded) > _EVIDENCE_BUNDLE_MAX_BYTES:
+                document["threads"] = document["threads"][:4]
+                encoded = canonical_json_bytes(document)
+        except Exception:  # noqa: BLE001 - evidence never changes control flow
+            return {"file": None, "document": document}
+        with _EVIDENCE_SEQUENCE_LOCK:
+            sequence = next(_EVIDENCE_SEQUENCE)
+        name = (
+            f"evidence-{_safe_evidence_token(self.node_id)}-"
+            f"{int(time.time() * 1000)}-{sequence:04d}-"
+            f"{_safe_evidence_token(reason)}.json"
+        )
+        try:
+            directory = self.evidence_directory()
+            directory.mkdir(mode=0o700, exist_ok=True)
+            metadata = directory.lstat()
+            if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid():
+                raise OSError("evidence directory unsafe")
+            os.chmod(directory, 0o700)
+            temporary = directory / f".{name}.{uuid.uuid4().hex}.tmp"
+            descriptor = os.open(
+                temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
+            )
+            try:
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(encoded)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except BaseException:
+                temporary.unlink(missing_ok=True)
+                raise
+            os.replace(temporary, directory / name)
+            bundles = sorted(
+                directory.glob("evidence-*.json"),
+                key=lambda path: (path.stat().st_mtime_ns, path.name),
+            )
+            for stale in bundles[:-_EVIDENCE_BUNDLES_KEPT]:
+                stale.unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001
+            return {"file": None, "document": document}
+        _emit_stderr_line(
+            f"MYCELIUM-EVIDENCE-BUNDLE reason={_safe_evidence_token(reason)} file={name}"
+        )
+        return {"file": name, "document": document}
+
+    def _diagnostic_evidence(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Write and return this node's evidence bundle (route diagnostics).
+
+        Read-only towards the request and transport state; runs on the
+        control lane so a wedged inference command cannot block it.
+        """
+
+        _exact_fields(payload, {"reason"}, "invalid_diagnostic_evidence_fields")
+        reason = payload["reason"]
+        _require(
+            isinstance(reason, str) and _PREFILL_DIAGNOSTIC_CODE.fullmatch(reason) is not None,
+            "invalid_diagnostic_evidence_reason",
+        )
+        written = self.write_evidence_bundle(reason)
+        return {**written["document"], "file": written["file"]}
 
     def _a10_target_verify(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Run one A10 target-verification operation on this node's own runtime.
@@ -5411,6 +5783,8 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    # The node's own stderr ring for evidence bundles (A14 class D, round 2).
+    _install_stderr_ring()
     args = _parse_args()
     try:
         service = PhysicalNodeService(

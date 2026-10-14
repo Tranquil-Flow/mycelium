@@ -6812,6 +6812,36 @@ class PhysicalLiveRoute:
                 return ""
             return session.stderr.decode("utf-8", errors="replace")[-4_096:]
 
+    def diagnostic_evidence(
+        self,
+        node_id: str,
+        *,
+        reason: str,
+        timeout_seconds: float = 15.0,
+    ) -> Mapping[str, Any] | None:
+        """Ask one node for its evidence bundle over its control channel.
+
+        Used only after a failed startup, before teardown.  The node writes the
+        bundle beside its staging root and returns it; this is how a remote
+        node's thread dump and transport state reach the operator.  ``None``
+        when the node has no command process (managed/external sessions).
+        """
+
+        with self._lock:
+            session = self._sessions.get(node_id)
+        process = getattr(session, "_process", None)
+        command = getattr(process, "command", None)
+        if not callable(command):
+            return None
+        result = command(
+            "diagnostic_evidence",
+            {"reason": reason},
+            timeout_seconds=timeout_seconds,
+            terminate_on_timeout=False,
+            command_id=self._command_id(node_id, "diagnostic-evidence"),
+        )
+        return result if isinstance(result, Mapping) else None
+
     def is_alive(self) -> bool:
         return (
             self._open

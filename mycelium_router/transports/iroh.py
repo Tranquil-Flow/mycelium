@@ -249,13 +249,46 @@ DEFAULT_PREFILL_STALL_POLICY = PrefillStallPolicy()
 
 
 def _prefill_stall_frame(message: Any) -> bool:
-    """Frames whose stalled delivery is detected and resent (same message id)."""
+    """Frames whose stalled delivery is detected and resent (same message id).
+
+    The first generated token (``TokenEvent`` index 0) belongs to the prefill:
+    the final stage sends it synchronously inside the dispatch of the frame
+    that completed the prefill, so the entry's own prefill frame is confirmed
+    only after this token is.  Decode tokens (index >= 1) keep the
+    single-attempt contract.
+    """
 
     if isinstance(message, HopHeader):
         return message.phase in _PREFILL_STALL_HOP_PHASES
+    if isinstance(message, TokenEvent):
+        return message.token_index == 0
     return isinstance(
         message, (ProgressivePrefillMessage, PrefillChunkCompleted, ManifestLocked)
     )
+
+
+#: Per-peer ring of recent frame kinds kept for an evidence bundle.
+_PEER_FRAME_HISTORY = 16
+#: Pending sends listed in one ``diagnostic_state`` snapshot.
+_DIAGNOSTIC_PENDING_LIMIT = 32
+
+
+def _frame_kind(message: Any) -> str:
+    """The message type name, plus the hop phase for a hop (never ids)."""
+
+    name = type(message).__name__
+    if isinstance(message, HopHeader):
+        return f"{name}:{message.phase}"
+    header = getattr(message, "header", None)
+    if isinstance(header, HopHeader):
+        return f"{name}:{header.phase}"
+    return name
+
+
+def _age_ms(since: float | None, now: float) -> int | None:
+    if since is None:
+        return None
+    return max(0, min(int(round((now - since) * 1000)), 10**12))
 
 
 def _positive_number(value: Any) -> float | None:
@@ -651,6 +684,10 @@ class _PendingSend:
     path_id: str | None = None
     path_attempt: int | None = None
     cancellable_forward: bool = False
+    # Diagnostics only (evidence bundle): frame kind, peer node, start time.
+    kind: str = ""
+    peer_node_id: str = ""
+    started_at: float = 0.0
     admission_started: bool = False
     admission_finished: bool = False
     cancelled: bool = False
@@ -673,6 +710,9 @@ class _InboundFrame:
     request_id: str | None
     path_id: str | None
     path_attempt: int | None
+    # Diagnostics only (evidence bundle).
+    kind: str = ""
+    received_at: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -715,6 +755,7 @@ class _PrefillProgress:
     bytes_confirmed: int = 0
     max_frame_bytes: int = 0
     stall_resends: int = 0
+    send_lock_stalls: int = 0
     failure_code: str | None = None
 
 
@@ -890,10 +931,30 @@ class IrohTransport:
         self._path_observation_cache: tuple[Mapping[str, Any], ...] = ()
         self._prefill_stall_resends = 0
         self._prefill_stall_failures = 0
+        self._prefill_send_lock_stalls = 0
+        # Evidence-bundle diagnostics (bounded, ids never included): who holds
+        # the shared data client, since when the dispatcher is in its phase,
+        # the active forward, and the last frame kinds per peer.
+        self._send_operation_holder: tuple[str, bytes, float] | None = None
+        self._send_operation_waiters = 0
+        self._active_forward: tuple[str, float] | None = None
+        self._peer_inbound: dict[str, deque[tuple[str, float, str]]] = {}
+        self._peer_outbound: dict[str, deque[tuple[str, float, str]]] = {}
 
     @property
     def stall_policy(self) -> PrefillStallPolicy:
         return self._stall_policy
+
+    @property
+    def _dispatcher_phase(self) -> str:
+        return self.__dict__.get("_dispatcher_phase_value", "idle")
+
+    @_dispatcher_phase.setter
+    def _dispatcher_phase(self, phase: str) -> None:
+        # Every assignment happens under ``_state_lock``; the time it entered
+        # the phase is what an evidence bundle reports for a stuck dispatcher.
+        self.__dict__["_dispatcher_phase_value"] = phase
+        self.__dict__["_dispatcher_phase_since"] = time.monotonic()
 
     @property
     def peer_binding(self) -> PeerBinding:
@@ -1513,6 +1574,7 @@ class IrohTransport:
             raise IrohTransportError("adapter_queue_full")
 
         message_id = uuid.uuid4().bytes
+        frame_kind = _frame_kind(decoded.message)
         pending = _PendingSend(
             peer.generation,
             request_id,
@@ -1522,6 +1584,8 @@ class IrohTransport:
         )
         cancel_timer: threading.Timer | None = None
         send_operation_acquired = False
+        stalled_windows = 0
+        outcome = "failed"
         try:
             with self._state_lock:
                 self._require_running()
@@ -1551,6 +1615,9 @@ class IrohTransport:
                     path_id,
                     path_attempt,
                     cancellable_forward=_cancellable_forward,
+                    kind=frame_kind,
+                    peer_node_id=destination_node_id,
+                    started_at=time.monotonic(),
                 )
                 client = (
                     self._send_client
@@ -1568,11 +1635,20 @@ class IrohTransport:
             cancel_timer.daemon = True
             cancel_timer.start()
             if _send_client_override is None:
-                if not self._send_operation_lock.acquire(
-                    timeout=self._remaining(deadline)
-                ):
-                    raise TimeoutError("delivery deadline exceeded")
+                stalled_windows = self._acquire_send_operation(
+                    message_id,
+                    pending,
+                    deadline=deadline,
+                    stall_seconds=stall_seconds,
+                    request_id=request_id,
+                )
                 send_operation_acquired = True
+                with self._state_lock:
+                    self._send_operation_holder = (
+                        frame_kind,
+                        message_id,
+                        time.monotonic(),
+                    )
             with self._state_lock:
                 self._require_running()
                 current = self._lookup_destination_peer(destination_node_id)
@@ -1615,6 +1691,7 @@ class IrohTransport:
                 stall_seconds=stall_seconds,
                 send_client_override=_send_client_override,
                 request_id=request_id,
+                stalled_windows=stalled_windows,
             )
             with self._state_lock:
                 current = self._lookup_destination_peer(destination_node_id)
@@ -1622,6 +1699,7 @@ class IrohTransport:
                     raise IrohTransportError(pending.reason or "peer_rotated")
                 pending.completed = True
                 self._remote_frames_sent += 1
+            outcome = "confirmed"
             return DeliveryReceipt(
                 message_id=message_id,
                 peer_endpoint_id=peer.endpoint_id,
@@ -1677,6 +1755,7 @@ class IrohTransport:
                             raise IrohTransportError(pending.reason or "peer_rotated")
                         pending.completed = True
                         self._remote_frames_sent += 1
+                    outcome = "confirmed"
                     return DeliveryReceipt(
                         message_id=message_id,
                         peer_endpoint_id=peer.endpoint_id,
@@ -1705,9 +1784,105 @@ class IrohTransport:
             with self._state_lock:
                 pending.admission_finished = True
                 self._pending.pop(message_id, None)
+                if send_operation_acquired:
+                    self._send_operation_holder = None
+                self._note_peer_frame_locked(
+                    self._peer_outbound,
+                    destination_node_id,
+                    frame_kind,
+                    outcome if outcome == "confirmed" else pending.reason or outcome,
+                )
             if send_operation_acquired:
                 self._send_operation_lock.release()
             self._send_slots.release()
+
+    def _acquire_send_operation(
+        self,
+        message_id: bytes,
+        pending: _PendingSend,
+        *,
+        deadline: float,
+        stall_seconds: float | None,
+        request_id: str | None,
+    ) -> int:
+        """Take the shared data client; return the stall windows spent waiting.
+
+        A frame without a stall window waits up to its deadline, as before.  A
+        prefill frame's wait is a stall like a stalled attempt (A14 r1, c1):
+        it waits at most one window at a time, every window during which
+        one other send held the client throughout is counted, reported with
+        the holder's frame kind and age, and charged to the frame's stall budget,
+        and after ``max_resends + 1`` windows the frame fails as
+        ``prefill_transport_stalled`` instead of waiting out a deadline of up
+        to ``command_timeout x 0.8``.
+        """
+
+        lock = self._send_operation_lock
+        with self._state_lock:
+            self._send_operation_waiters += 1
+        try:
+            if stall_seconds is None:
+                if not lock.acquire(timeout=self._remaining(deadline)):
+                    raise TimeoutError("delivery deadline exceeded")
+                return 0
+            windows = 0
+            while True:
+                remaining = self._remaining(deadline)
+                window_bound = stall_seconds < remaining
+                window_started = time.monotonic()
+                if lock.acquire(timeout=min(stall_seconds, remaining)):
+                    return windows
+                if not window_bound:
+                    raise TimeoutError("delivery deadline exceeded")
+                now = time.monotonic()
+                with self._state_lock:
+                    if pending.cancelled:
+                        raise IrohTransportError(pending.reason or "delivery_cancelled")
+                    holder = self._send_operation_holder
+                    if holder is None or holder[2] > window_started:
+                        # The client changed hands during the window: other
+                        # sends are progressing; waiting behind them is not
+                        # a stall (still bounded by the frame deadline).
+                        continue
+                    exhausted = windows >= self._stall_policy.max_resends
+                    if exhausted:
+                        self._prefill_stall_failures += 1
+                    else:
+                        windows += 1
+                        self._prefill_send_lock_stalls += 1
+                        progress = (
+                            None
+                            if request_id is None
+                            else self._prefill_progress.get(request_id)
+                        )
+                        if progress is not None:
+                            progress.send_lock_stalls += 1
+                holder_fields = (
+                    {}
+                    if holder is None
+                    else {
+                        "holder_kind": holder[0],
+                        "holder_age_ms": _age_ms(holder[2], now) or 0,
+                    }
+                )
+                if exhausted:
+                    self._emit_stall_event(
+                        "prefill_stall_exhausted",
+                        attempts=windows + 1,
+                        stall_seconds=stall_seconds,
+                        **holder_fields,
+                    )
+                    self._expire_pending(message_id, pending, "prefill_transport_stalled")
+                    raise IrohTransportError("prefill_transport_stalled")
+                self._emit_stall_event(
+                    "prefill_stall_send_lock",
+                    attempts=windows,
+                    stall_seconds=stall_seconds,
+                    **holder_fields,
+                )
+        finally:
+            with self._state_lock:
+                self._send_operation_waiters -= 1
 
     def _record_scoped_event(
         self,
@@ -1812,6 +1987,7 @@ class IrohTransport:
         stall_seconds: float | None,
         send_client_override: Any | None,
         request_id: str | None,
+        stalled_windows: int = 0,
     ) -> None:
         """One confirmed delivery, with stall recovery for prefill frames.
 
@@ -1825,6 +2001,8 @@ class IrohTransport:
         After ``max_resends`` resends the frame fails as
         ``prefill_transport_stalled``.  The frame deadline still bounds every
         attempt, so a deadline expiry stays ``delivery_deadline_exceeded``.
+        ``stalled_windows`` already spent waiting for the shared data client
+        count against the same budget.
         """
 
         destination_endpoint_id = (
@@ -1840,7 +2018,7 @@ class IrohTransport:
                 destination_endpoint_id=destination_endpoint_id,
             )
             return
-        resends = 0
+        resends = stalled_windows
         while True:
             remaining = self._remaining(deadline)
             window_bound = stall_seconds < remaining
@@ -2012,18 +2190,29 @@ class IrohTransport:
     #: per-node stderr tails.  ``None`` changes nothing.
     stall_event_observer = None
 
-    def _emit_stall_event(self, event: str, *, attempts: int, stall_seconds: float) -> None:
+    def _emit_stall_event(
+        self,
+        event: str,
+        *,
+        attempts: int,
+        stall_seconds: float,
+        holder_kind: str | None = None,
+        holder_age_ms: int | None = None,
+    ) -> None:
         observer = self.stall_event_observer
         if observer is None:
             return
+        fields: dict[str, Any] = {
+            "attempts": int(attempts),
+            "stall_window_ms": int(round(stall_seconds * 1000)),
+        }
+        if holder_kind is not None:
+            # The kind of the send that holds the shared data client (a
+            # message type name, never an id) and how long it has held it.
+            fields["holder_kind"] = holder_kind.split(":", 1)[0]
+            fields["holder_age_ms"] = int(holder_age_ms or 0)
         try:
-            observer(
-                event,
-                {
-                    "attempts": int(attempts),
-                    "stall_window_ms": int(round(stall_seconds * 1000)),
-                },
-            )
+            observer(event, fields)
         except BaseException:
             pass
 
@@ -2068,6 +2257,7 @@ class IrohTransport:
                 "bytes_confirmed": progress.bytes_confirmed,
                 "max_frame_bytes": progress.max_frame_bytes,
                 "stall_resends": progress.stall_resends,
+                "send_lock_stalls": progress.send_lock_stalls,
                 "failure_code": progress.failure_code,
             }
 
@@ -2076,7 +2266,136 @@ class IrohTransport:
             return {
                 "stall_resends": self._prefill_stall_resends,
                 "stall_failures": self._prefill_stall_failures,
+                "send_lock_stalls": self._prefill_send_lock_stalls,
             }
+
+    def _note_peer_frame_locked(
+        self,
+        history: dict[str, deque[tuple[str, float, str]]],
+        peer_node_id: str,
+        kind: str,
+        outcome: str,
+    ) -> None:
+        """Remember one frame kind for a peer (bounded; node ids only)."""
+
+        if not isinstance(peer_node_id, str) or not peer_node_id:
+            return
+        ring = history.get(peer_node_id)
+        if ring is None:
+            if len(history) >= _PREFILL_PROGRESS_LIMIT:
+                history.pop(next(iter(history)))
+            ring = deque(maxlen=_PEER_FRAME_HISTORY)
+            history[peer_node_id] = ring
+        ring.append((kind[:96], time.monotonic(), outcome[:96]))
+
+    def diagnostic_state(self) -> dict[str, Any]:
+        """Bounded transport state for a node's evidence bundle.
+
+        It names who holds the shared data client and since when, every
+        outstanding send (frame kind, peer node, age, first 8 hex of its
+        message id - the receiving node's bundle lists the same prefix, which
+        correlates the two sides), the dispatcher's phase and its age, the
+        active forward, frames still waiting for local dispatch, and the
+        last frame kinds sent to and received from each peer.  Peers are
+        named by node id; endpoint ids, addresses, payloads and request ids
+        are never included.  No sidecar query is made.
+        """
+
+        now = time.monotonic()
+        with self._state_lock:
+            holder = self._send_operation_holder
+            pending = sorted(
+                self._pending.items(), key=lambda item: item[1].started_at
+            )[:_DIAGNOSTIC_PENDING_LIMIT]
+            inflight = list(self._inflight_received.items())[:_DIAGNOSTIC_PENDING_LIMIT]
+            active_forward = self._active_forward
+            peers: dict[str, dict[str, list[dict[str, Any]]]] = {}
+            for name, history in (
+                ("inbound", self._peer_inbound),
+                ("outbound", self._peer_outbound),
+            ):
+                for peer_node_id, ring in history.items():
+                    peers.setdefault(peer_node_id, {"inbound": [], "outbound": []})[
+                        name
+                    ] = [
+                        {"kind": kind, "age_ms": _age_ms(at, now), "outcome": outcome}
+                        for kind, at, outcome in ring
+                    ]
+            state = {
+                "send_operation": {
+                    "held": self._send_operation_lock.locked(),
+                    "holder_kind": None if holder is None else holder[0],
+                    "holder_message": None if holder is None else holder[1][:4].hex(),
+                    "holder_age_ms": None if holder is None else _age_ms(holder[2], now),
+                    "waiters": self._send_operation_waiters,
+                },
+                "pending_sends": [
+                    {
+                        "kind": record.kind,
+                        "peer": record.peer_node_id,
+                        "message": message_id[:4].hex(),
+                        "age_ms": _age_ms(record.started_at or None, now),
+                        "forward": record.cancellable_forward,
+                        "admission_started": record.admission_started,
+                        "cancelled": record.cancelled,
+                    }
+                    for message_id, record in pending
+                ],
+                "pending_send_count": len(self._pending),
+                "dispatcher": {
+                    "phase": self._dispatcher_phase,
+                    "phase_age_ms": _age_ms(
+                        self.__dict__.get("_dispatcher_phase_since"), now
+                    ),
+                    "queued": self._dispatch_queue.qsize(),
+                },
+                "inflight_received": [
+                    {
+                        "kind": record.kind,
+                        "message": message_id[:4].hex(),
+                        "age_ms": _age_ms(record.received_at or None, now),
+                    }
+                    for message_id, record in inflight
+                ],
+                "forward": {
+                    "queued": self._forward_queue.qsize(),
+                    "active_kind": None if active_forward is None else active_forward[0],
+                    "active_age_ms": None
+                    if active_forward is None
+                    else _age_ms(active_forward[1], now),
+                    "thread_alive": bool(
+                        self._forward_thread is not None
+                        and self._forward_thread.is_alive()
+                    ),
+                },
+                "threads": {
+                    "dispatcher_alive": bool(
+                        self._dispatcher_thread is not None
+                        and self._dispatcher_thread.is_alive()
+                    ),
+                    "receiver_alive": bool(
+                        self._receiver_thread is not None
+                        and self._receiver_thread.is_alive()
+                    ),
+                },
+                "peers": peers,
+                "counters": self._counter_snapshot_locked(),
+                "stall_recovery": {
+                    "stall_resends": self._prefill_stall_resends,
+                    "stall_failures": self._prefill_stall_failures,
+                    "send_lock_stalls": self._prefill_send_lock_stalls,
+                },
+                "fatal_error": None
+                if self._fatal_error is None
+                else self._fatal_error.code,
+                "last_dispatch_error": None
+                if self._last_dispatch_error is None
+                else {
+                    "code": self._last_dispatch_error.get("code"),
+                    "exception_type": self._last_dispatch_error.get("exception_type"),
+                },
+            }
+        return state
 
     def _note_prefill_progress_locked(
         self, request_id: str | None, frame_bytes: int, *, confirmed: bool
@@ -2809,6 +3128,8 @@ class IrohTransport:
                     inbound_scope[0],
                     inbound_scope[1],
                     inbound_scope[2],
+                    kind="duplicate" if decoded is None else _frame_kind(decoded.message),
+                    received_at=time.monotonic(),
                 )
             try:
                 self._dispatch_queue.put_nowait(
@@ -2862,6 +3183,9 @@ class IrohTransport:
                     with self._state_lock:
                         self._dispatcher_phase = "idle"
                         self._inflight_received.pop(message_id, None)
+                        self._note_peer_frame_locked(
+                            self._peer_inbound, source_node_id, "duplicate", "acknowledged"
+                        )
                     continue
                 with self._state_lock:
                     self._dispatcher_phase = (
@@ -2886,6 +3210,12 @@ class IrohTransport:
                         self._note_prefill_progress_locked(
                             dispatched.request_id, 0, confirmed=False
                         )
+                    self._note_peer_frame_locked(
+                        self._peer_inbound,
+                        source_node_id,
+                        _frame_kind(decoded.message),
+                        "dispatched",
+                    )
             except BaseException as error:
                 with self._state_lock:
                     inbound = self._inflight_received.get(message_id)
@@ -2905,6 +3235,14 @@ class IrohTransport:
                         "exception_type": type(error).__name__[:64],
                         "detail": str(error)[:128],
                     }
+                    self._note_peer_frame_locked(
+                        self._peer_inbound,
+                        source_node_id,
+                        "unknown"
+                        if not isinstance(decoded, DecodedFrame)
+                        else _frame_kind(decoded.message),
+                        f"failed:{error_code}",
+                    )
                 scoped = (
                     inbound is not None
                     and inbound.request_id is not None
@@ -2926,26 +3264,41 @@ class IrohTransport:
                         peer_node_id=source_node_id,
                         code=error_code,
                     )
-                    if isinstance(decoded, DecodedFrame) and isinstance(
-                        decoded.message,
-                        HopHeader,
-                    ):
-                        failed_hop = decoded.message
-                        self._send_or_dispatch(
-                            source_node_id,
-                            encode_frame(
-                                FailureReport(
-                                    request_id=failed_hop.request_id,
-                                    path_id=failed_hop.path_id,
-                                    path_attempt=failed_hop.path_attempt,
-                                    token_index=failed_hop.token_index,
-                                    scope="PLACEMENT",
-                                    reason=error_code,
-                                    placement_id=failed_hop.destination_placement_id,
-                                    node_id=self.node_id,
-                                )
-                            ),
-                        )
+                    failed_hop = (
+                        None
+                        if not isinstance(decoded, DecodedFrame)
+                        else decoded.message
+                        if isinstance(decoded.message, HopHeader)
+                        else decoded.message.header
+                        if isinstance(decoded.message, ProgressivePrefillMessage)
+                        else None
+                    )
+                    if failed_hop is not None:
+                        # A progressive prefill hop is a hop: its sender (the
+                        # entry for A14's chunk 0) must hear of the failure
+                        # instead of waiting for its watchdog.  The hand-off
+                        # to the forward worker can itself fail (a full
+                        # forward queue behind stalled sends); the scoped
+                        # incident above is the durable signal, and the
+                        # dispatcher must survive to acknowledge this frame.
+                        try:
+                            self._send_or_dispatch(
+                                source_node_id,
+                                encode_frame(
+                                    FailureReport(
+                                        request_id=failed_hop.request_id,
+                                        path_id=failed_hop.path_id,
+                                        path_attempt=failed_hop.path_attempt,
+                                        token_index=failed_hop.token_index,
+                                        scope="PLACEMENT",
+                                        reason=error_code,
+                                        placement_id=failed_hop.destination_placement_id,
+                                        node_id=self.node_id,
+                                    )
+                                ),
+                            )
+                        except BaseException:
+                            pass
                     if error_code in _NON_DELIVERED_SCOPED_ERRORS:
                         # These local sinks explicitly rejected the frame. Preserve
                         # its request-scoped incident without acknowledging delivery
@@ -3037,6 +3390,12 @@ class IrohTransport:
                             self._active_forward_scope = scope
                     if cancelled:
                         continue
+                    with self._state_lock:
+                        try:
+                            kind = _frame_kind(decode_frame(frame).message)
+                        except WireError:
+                            kind = "unknown"
+                        self._active_forward = (kind, time.monotonic())
                     self._send_or_dispatch(
                         destination,
                         frame,
@@ -3078,6 +3437,7 @@ class IrohTransport:
                         return
             finally:
                 with self._state_lock:
+                    self._active_forward = None
                     if self._active_forward_scope == scope:
                         self._active_forward_scope = None
                 if (
