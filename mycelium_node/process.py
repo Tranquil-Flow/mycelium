@@ -1353,7 +1353,56 @@ def _deadline_remaining(deadline: float) -> float:
     return remaining
 
 
+class _DarwinBSDShortInfo(ctypes.Structure):
+    _fields_ = [
+        ("pid", ctypes.c_uint32),
+        ("ppid", ctypes.c_uint32),
+        ("pgid", ctypes.c_uint32),
+        ("status", ctypes.c_uint32),
+        ("comm", ctypes.c_char * 16),
+        ("flags", ctypes.c_uint32),
+        ("uid", ctypes.c_uint32),
+        ("gid", ctypes.c_uint32),
+        ("ruid", ctypes.c_uint32),
+        ("rgid", ctypes.c_uint32),
+        ("svuid", ctypes.c_uint32),
+        ("svgid", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32),
+    ]
+
+
+def _darwin_short_parent_and_group(pid: int) -> tuple[int, int] | None:
+    """Parent and group of ``pid`` via PROC_PIDT_SHORTBSDINFO, without a fork.
+
+    PROC_PIDTBSDINFO refuses processes of another user (a root-owned
+    ``login`` above a Terminal shell); the short flavour does not.
+    """
+
+    library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+    proc_pidinfo = library.proc_pidinfo
+    proc_pidinfo.argtypes = [
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_uint64,
+        ctypes.c_void_p,
+        ctypes.c_int,
+    ]
+    proc_pidinfo.restype = ctypes.c_int
+    information = _DarwinBSDShortInfo()
+    size = ctypes.sizeof(information)
+    received = proc_pidinfo(pid, 13, 0, ctypes.byref(information), size)
+    if received != size or information.pid != pid:
+        return None
+    return int(information.ppid), int(information.pgid)
+
+
 def _darwin_parent_and_group(pid: int, deadline: float) -> tuple[int, int]:
+    # Cleanup walks the ancestors on every 20 ms poll. Forking /bin/ps for
+    # each one the full flavour refuses cost up to the whole bounded budget
+    # under process churn, so ps is only the last resort.
+    short = _darwin_short_parent_and_group(pid)
+    if short is not None:
+        return short
     output = subprocess.check_output(
         ["/bin/ps", "-o", "pid=,ppid=,pgid=", "-p", str(pid)],
         text=True,
@@ -1643,6 +1692,16 @@ def _inventory_darwin_process_group(
     process_group: int,
     deadline: float,
 ) -> tuple[_ProcessGroupMember, ...]:
+    # ESRCH from a group-wide null signal is the kernel saying no process is
+    # in the group: nothing to list, nothing to signal. It needs no fork, so a
+    # reaped child's empty group is confirmed even when /bin/ps cannot finish
+    # inside the remaining cleanup budget. Any other answer takes the listing.
+    try:
+        os.kill(-process_group, 0)
+    except ProcessLookupError:
+        return ()
+    except OSError:
+        pass
     output = subprocess.check_output(
         ["/bin/ps", "-axo", "pid=,pgid=,state="],
         text=True,
@@ -2640,7 +2699,8 @@ class PhysicalNodeProcess:
             protected_groups = _protected_process_groups(deadline)
             stopped = self._process.poll() is not None
             _deadline_remaining(deadline)
-            members: tuple[_ProcessGroupMember, ...] | None = None
+            members: tuple[_ProcessGroupMember, ...] = ()
+            leader_owned_and_live = False
             if not stopped:
                 try:
                     current = _inventory_process(self._process.pid)
@@ -2650,7 +2710,9 @@ class PhysicalNodeProcess:
                     subprocess.SubprocessError,
                     ValueError,
                 ):
-                    pass
+                    # A just-killed leader is a zombie libproc cannot read;
+                    # reaping it now lets an empty group be confirmed below.
+                    stopped = self._process.poll() is not None
                 else:
                     _deadline_remaining(deadline)
                     if not _identity_matches_pre_exec_ownership(
@@ -2659,10 +2721,17 @@ class PhysicalNodeProcess:
                         target_executable,
                     ) and not self._is_own_unreaped_child(current, ownership):
                         return "unsafe"
-            members = _inventory_process_group(ownership.process_group, deadline)
-            if not members and not stopped:
-                stopped = self._process.poll() is not None
-                _deadline_remaining(deadline)
+                    leader_owned_and_live = True
+            # Our live, unreaped leader keeps its group non-empty, so listing
+            # the group cannot turn this poll into "empty"; signalling such a
+            # leader's group needs no listing either.  The /bin/ps fork could
+            # overrun the remaining budget under process churn, so list only
+            # once the leader is gone or could not be observed.
+            if not leader_owned_and_live:
+                members = _inventory_process_group(ownership.process_group, deadline)
+                if not members and not stopped:
+                    stopped = self._process.poll() is not None
+                    _deadline_remaining(deadline)
         except (
             OSError,
             RuntimeError,
