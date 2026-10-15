@@ -1278,8 +1278,8 @@
     },
     {
       "path": "mycelium_node/process.py",
-      "sha256": "sha256:c09f2fdf8508d2c12d3f28206d4824584a344c90d19846ea264b41d24e1daf66",
-      "size_bytes": 123458
+      "sha256": "sha256:2765ceb2b3f889cfd1c3f7d823ea7d211636dc6b80d7a0a5e4bd2361fdb35502",
+      "size_bytes": 126318
     },
     {
       "path": "mycelium_physical_runner/config.py",
@@ -3772,6 +3772,11 @@
       "size_bytes": 47604
     },
     {
+      "path": "tests/node_agent/test_process_cleanup_discovery.py",
+      "sha256": "sha256:9b27365f4b6475564c202fb153c3b2151791cda99b28c682aa1ecf39e26f869c",
+      "size_bytes": 8569
+    },
+    {
       "path": "tests/node_agent/test_process_start_diagnostics.py",
       "sha256": "sha256:94dc43d49042367c3334fda2ce071247c8c323bf308c77e5a31aa5bb7a761cac",
       "size_bytes": 14322
@@ -4408,5 +4413,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:535ad6266d83799ef83907ac405b8bcd3a08a0278e65504bc99cac4d1208e7a7"
+  "source_digest": "sha256:3a9251c6cada49f62dc03033804cb79cd72ef40ac6a9aecf3a5e0762d078ddcb"
 }
