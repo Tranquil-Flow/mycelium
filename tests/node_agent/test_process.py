@@ -233,26 +233,38 @@ def test_correlated_waiters_allow_out_of_order_concurrent_responses(
         response_timeout_seconds=1.0,
     )
     results: dict[str, object] = {}
+    fast_returned = threading.Event()
+    resume_fast = threading.Event()
+
+    def fast_command() -> None:
+        value = process.command("configure", {"value": "fast", "delay": 0.01})
+        # Model a descheduled caller *after* the correctly correlated reply.
+        # The old join oracle must not turn that scheduling delay into failure.
+        fast_returned.set()
+        if not resume_fast.wait(timeout=1.0):
+            raise AssertionError("fast caller was not released")
+        results["fast"] = value
+
     slow = threading.Thread(
         target=lambda: results.setdefault(
             "slow", process.command("configure", {"value": "slow", "delay": 0.2})
         )
     )
-    fast = threading.Thread(
-        target=lambda: results.setdefault(
-            "fast", process.command("configure", {"value": "fast", "delay": 0.01})
-        )
-    )
+    fast = threading.Thread(target=fast_command)
     try:
         slow.start()
         time.sleep(0.02)
         fast.start()
+        assert fast_returned.wait(timeout=2.0), "fast reply not delivered"
         fast.join(timeout=0.1)
         assert not fast.is_alive()
         assert slow.is_alive()
         slow.join(timeout=1.0)
         assert results == {"fast": {"value": "fast"}, "slow": {"value": "slow"}}
     finally:
+        resume_fast.set()
+        fast.join(timeout=1.0) if fast.ident is not None else None
+        slow.join(timeout=1.0) if slow.ident is not None else None
         process.close()
 
 
