@@ -143,6 +143,17 @@ class QualifyingApp:
         self.run_root.mkdir(parents=True, exist_ok=True)
         self.compile_marker.parent.mkdir(parents=True, exist_ok=True)
         self.compile_marker.write_text(json.dumps({'protocol': 'mycelium.operator_plan.v1'}))
+        # This phase starts after compilation has released app.guard. Supply the
+        # producer's post-guard identity, not merely its earlier workflow plan.
+        from mycelium_a13_macos.authority import _atomic_private_json
+        identity = {'run_id': RUN_ID,
+                    'deployment_id': '5d0e3c1a-0000-4000-8000-000000000001',
+                    'epoch': 0}
+        _atomic_private_json(self.run_root / 'compile-start.private.json',
+                             {'protocol': 'mycelium.chain_compile_start.v1', **identity})
+        _atomic_private_json(self.run_root / 'compile-complete.private.json',
+                             {'protocol': 'mycelium.chain_compile_complete.v1',
+                              **identity, 'state': 'compiled'})
         # `serving.py:596-598` creates these at COMPILE time (`prepare_registry_launch`), so their
         # presence is NOT evidence that the serving phase ended.
         self.serving_root.mkdir(parents=True, exist_ok=True)
