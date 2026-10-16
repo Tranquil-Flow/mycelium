@@ -103,6 +103,8 @@ class CompilingApp:
         self.round_dir = pathlib.Path(round_dir)
         self.run_root = self.owner / 'chain-runs' / RUN_ID
         self.marker = self.owner / 'authority' / 'serving-runs' / RUN_ID / 'operator-plan.json'
+        self.completion = self.run_root / 'compile-complete.private.json'
+        self.observed_held = threading.Event()
         self.compile_seconds = compile_seconds
         self.hold_after_marker = hold_after_marker
         self._marker_handshake = threading.Event()
@@ -136,6 +138,9 @@ class CompilingApp:
         """`chain_compile.py:31-44`: the run root and its START records, then the compile thread."""
         self.run_root.mkdir(parents=True, exist_ok=True)
         (self.run_root / 'template.json').write_text('{}')
+        (self.run_root / 'compile-start.private.json').write_text(json.dumps({
+            'protocol':'mycelium.chain_compile_start.v1','run_id':RUN_ID,
+            'deployment_id':'5d0e3c1a-0000-4000-8000-000000000001','epoch':0}))
         self.compiling = True
         threading.Thread(target=self._compile, name='simulated-chain-compile', daemon=True).start()
 
@@ -149,10 +154,15 @@ class CompilingApp:
         # until the first post-marker handshake witnesses the still-busy app.
         if self.hold_after_marker:
             if not self._marker_handshake.wait(timeout=15):
-                raise AssertionError('post-marker handshake was never observed')
+                raise AssertionError('post-marker observation was never observed')
         with self._lock:
             self.events.append('evidence_completed')
             self.compiling = False
+        self.completion.write_text(json.dumps({
+            'protocol':'mycelium.chain_compile_complete.v1','run_id':RUN_ID,
+            'deployment_id':'5d0e3c1a-0000-4000-8000-000000000001',
+            'epoch':0,'state':'compiled'}))
+        self.completion.chmod(0o600)
 
     # -- the app's own reports -----------------------------------------------------------------------
     def _report(self):
@@ -321,10 +331,19 @@ def test_marker_published_before_compile_unlock_is_not_a_finished_compile(monkey
     """Force the real ordering: marker, still-held guard, then compiled state."""
     module, owner_root = transport
     app = _app(owner_root, module, hold_after_marker=True)
+    original = module._compile_evidence
+    def observed(run_id):
+        result = original(run_id)
+        if app.marker.exists() and result is None:
+            app.observed_held.set()
+            app._marker_handshake.set()  # observation releases both buggy and fixed paths
+        return result
+    monkeypatch.setattr(module, '_compile_evidence', observed)
 
     _drive_the_pinned_step(monkeypatch, module, app)
 
-    assert app._marker_handshake.is_set(), 'the held post-marker interval was exercised'
+    assert app.observed_held.is_set() or app.handshake_refusals > 0, 'the post-marker interval was exercised'
+    assert app._marker_handshake.is_set(), 'the held post-marker interval was released'
     assert app.activations == 1
     assert app.handshake_refusals == 0, 'no RPC while the compile still holds the app guard'
 
@@ -396,6 +415,31 @@ def test_the_marker_is_the_apps_own_last_write_before_it_reports_compiled(transp
 
     assert module._marker_path(RUN_ID) == (module.OWNER/'authority'/'serving-runs'/RUN_ID/'operator-plan.json')
     assert module._run_root(RUN_ID) == module.OWNER/'chain-runs'/RUN_ID
+
+
+def test_only_exact_current_start_and_completion_are_success(monkeypatch, transport):
+    module, owner_root = transport
+    app = CompilingApp(owner_root, module.PRIVATE, compile_seconds=10_000)
+    app.surface();app.scope();app.run_root.mkdir(parents=True)
+    start={'protocol':'mycelium.chain_compile_start.v1','run_id':RUN_ID,
+           'deployment_id':'5d0e3c1a-0000-4000-8000-000000000001','epoch':2}
+    complete={'protocol':'mycelium.chain_compile_complete.v1','run_id':RUN_ID,
+              'deployment_id':start['deployment_id'],'epoch':2,'state':'compiled'}
+    def write(path,doc):path.write_text(json.dumps(doc));path.chmod(0o600)
+    write(app.run_root/'compile-start.private.json',start)
+    write(app.completion,complete)
+    assert module._compile_evidence(RUN_ID)=='completed'
+    for change in ({'run_id':'other-run'},{'deployment_id':'other-deployment'},
+                   {'epoch':1},{'epoch':'2'},{'state':'failed'},{'extra':'unrecognized'}):
+        write(app.completion,{**complete,**change})
+        assert module._compile_evidence(RUN_ID) is None, change
+    app.completion.write_text('{broken')
+    assert module._compile_evidence(RUN_ID) is None
+    write(app.completion,complete)
+    write(app.run_root/'compile-start.private.json',{**start,'epoch':3})
+    assert module._compile_evidence(RUN_ID) is None, 'superseded epoch rejects an old completion'
+    (app.run_root/'compile-start.private.json').unlink()
+    assert module._compile_evidence(RUN_ID) is None
 
 
 def test_progress_artifacts_are_not_evidence_the_compile_ended(monkeypatch, transport):

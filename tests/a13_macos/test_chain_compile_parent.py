@@ -1,6 +1,6 @@
 """Compiler orchestration unit seams; not model execution or hardware proof."""
 from types import SimpleNamespace as NS
-import time,threading
+import json,time,threading
 import pytest
 from test_serving import _native_snapshot
 from mycelium_a13_macos.serving import prepare_local_source
@@ -30,6 +30,50 @@ def fixture_app(tmp_path,monkeypatch):
     monkeypatch.setattr(cc,'prepare_serving_workflow',prepare)
     monkeypatch.setattr(cc,'owner_channel',lambda *args:(_ for _ in ()).throw(AssertionError('second_owner_channel')))
     return app,prepared
+
+
+def test_completion_is_private_and_only_published_after_real_producer_guard_exits(tmp_path,monkeypatch):
+    app,_=fixture_app(tmp_path,monkeypatch)
+    entered=threading.Event();release=threading.Event();lock=app.guard
+    class Guard:
+        def __enter__(self):
+            lock.acquire();entered.set();return self
+        def __exit__(self,*args):lock.release()
+    app.guard=Guard()
+    original=cc.prepare_serving_workflow
+    def held(**kwargs):
+        assert release.wait(10), 'test did not release actual compiler guard'
+        return original(**kwargs)
+    monkeypatch.setattr(cc,'prepare_serving_workflow',held)
+    root=app.root/'chain-runs/test-compile'
+    try:
+        cc.start_compile(app,acknowledged=True)
+        assert entered.wait(10)
+        assert app._chain_compile_state['state']=='compiling'
+        assert not (root/'compile-complete.private.json').exists()
+    finally:
+        release.set();app._chain_compile_thread.join(10)
+    assert not app._chain_compile_thread.is_alive()
+    assert app._chain_compile_state['state']=='compiled'
+    marker=root/'compile-complete.private.json'
+    assert marker.stat().st_mode & 0o777 == 0o600
+    assert json.loads(marker.read_text()) == {
+        'protocol':'mycelium.chain_compile_complete.v1','run_id':'test-compile',
+        'deployment_id':'test-deployment','epoch':0,'state':'compiled'}
+
+
+def test_completion_publication_failure_is_not_compiled(tmp_path,monkeypatch):
+    app,_=fixture_app(tmp_path,monkeypatch)
+    original=cc._atomic_private_json
+    def fail(path,document):
+        if path.name=='compile-complete.private.json':raise OSError('injected publication failure')
+        return original(path,document)
+    monkeypatch.setattr(cc,'_atomic_private_json',fail)
+    cc.start_compile(app,acknowledged=True);app._chain_compile_thread.join(10)
+    assert app._chain_compile_state['state']=='failed'
+    root=app.root/'chain-runs/test-compile'
+    assert not (root/'compile-complete.private.json').exists()
+    assert (root/'compile-error.private.log').exists()
 
 
 def test_compilation_reuses_existing_owned_channel(tmp_path,monkeypatch):
