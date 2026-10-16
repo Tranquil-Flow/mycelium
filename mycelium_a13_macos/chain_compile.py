@@ -250,9 +250,10 @@ def start_compile(app,*,acknowledged):
                     state['slice_plan_digest']=slice_plan['plan_digest']
                     state['node_slice_plan_digests']={n:node_slice_plan(slice_plan,n)['node_plan_digest']
                                                       for n in sorted(slice_plan['nodes'])}
-                app._chain_compile_state=state
             # Only this point proves the compiler's app.guard has been released.
             # The workflow's earlier operator-plan publication does not prove it.
+            # Keep public compilation in progress until durable publication succeeds;
+            # start_serving must not admit a workflow whose completion write can fail.
             if app.closed.is_set() or not app.running or getattr(app,'_chain_epoch',0)!=epoch:
                 raise ValueError('compiler_superseded')
             _atomic_private_json(root/'compile-complete.private.json',{
@@ -261,6 +262,7 @@ def start_compile(app,*,acknowledged):
             if app.closed.is_set() or not app.running or getattr(app,'_chain_epoch',0)!=epoch:
                 (root/'compile-complete.private.json').unlink()
                 raise ValueError('compiler_superseded')
+            app._chain_compile_state=state
         except Exception:
             # A failed publication is never silently promoted to successful completion.
             (root/'compile-complete.private.json').unlink(missing_ok=True)

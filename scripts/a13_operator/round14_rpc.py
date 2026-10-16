@@ -262,7 +262,8 @@ def await_ready(root, path):
 # compile blocks is issued, whose exit condition is the APP'S OWN ON-DISK STATE and never a clock:
 #
 #   SUCCESS  `{OWNER}/chain-runs/{run_id}/compile-complete.private.json`, written atomically
-#            by chain_compile AFTER `app.guard` releases and compiled state is set. Match the
+#            by chain_compile AFTER workflow preparation succeeds and `app.guard` releases.
+#            Public compiled state is set only after this durable publication succeeds. Match the
 #            start record, round scope, exact schema and epoch. An early operator-plan marker
 #            cannot show guard release, even if it is the last workflow write.
 #   FAILURE  `{OWNER}/chain-runs/{run_id}/compile-error.private.log`.
