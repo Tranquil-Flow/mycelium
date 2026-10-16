@@ -135,7 +135,7 @@ def start_compile(app,*,acknowledged):
         raise ValueError('model_preparation_consent_required')
     context=getattr(app,'_observation_context',None)
     doc=None if context is None else context.observations
-    if doc is None:raise ValueError('two_distinct_hosts_required')
+    if context is None or doc is None:raise ValueError('two_distinct_hosts_required')
     node_ids=_compile_hosts(context,doc)
     if getattr(app,'_chain_compile_state',None) is not None:raise ValueError('compiler_already_started')
     # Current local source, consent and current members must still bind.
@@ -180,6 +180,12 @@ def start_compile(app,*,acknowledged):
     context.retire_bootstrap()
     root=_private_directory(app.root/'chain-runs'/context.run_id,create=True)
     epoch=getattr(app,'_chain_epoch',0);app._chain_epoch=epoch
+    # An earlier completion for this run must never certify a new attempt.
+    if (root/'compile-complete.private.json').exists() or (root/'compile-complete.private.json').is_symlink():
+        raise ValueError('compiler_run_reused')
+    _atomic_private_json(root/'compile-start.private.json',{
+        'protocol':'mycelium.chain_compile_start.v1','run_id':context.run_id,
+        'deployment_id':context.deployment_id,'epoch':epoch})
     app._chain_compile_state={'state':'compiling','route_ready':False}
     def work():
         try:
@@ -245,7 +251,19 @@ def start_compile(app,*,acknowledged):
                     state['node_slice_plan_digests']={n:node_slice_plan(slice_plan,n)['node_plan_digest']
                                                       for n in sorted(slice_plan['nodes'])}
                 app._chain_compile_state=state
+            # Only this point proves the compiler's app.guard has been released.
+            # The workflow's earlier operator-plan publication does not prove it.
+            if app.closed.is_set() or not app.running or getattr(app,'_chain_epoch',0)!=epoch:
+                raise ValueError('compiler_superseded')
+            _atomic_private_json(root/'compile-complete.private.json',{
+                'protocol':'mycelium.chain_compile_complete.v1','run_id':context.run_id,
+                'deployment_id':context.deployment_id,'epoch':epoch,'state':'compiled'})
+            if app.closed.is_set() or not app.running or getattr(app,'_chain_epoch',0)!=epoch:
+                (root/'compile-complete.private.json').unlink()
+                raise ValueError('compiler_superseded')
         except Exception:
+            # A failed publication is never silently promoted to successful completion.
+            (root/'compile-complete.private.json').unlink(missing_ok=True)
             (root/'compile-error.private.log').write_text(traceback.format_exc())
             (root/'compile-error.private.log').chmod(0o600)
             if getattr(app,'_chain_epoch',0)==epoch:
@@ -317,6 +335,9 @@ def stop_serving(app,*,timeout=30.0):
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout)
             if thread.is_alive():raise ValueError('rebuild_stop_timeout')
+    context=getattr(app,'_observation_context',None)
+    if context is not None:
+        (app.root/'chain-runs'/context.run_id/'compile-complete.private.json').unlink(missing_ok=True)
     for name in _CHAIN_FIELDS:setattr(app,name,None)
     return {'state':'stopped','route_ready':False}
 

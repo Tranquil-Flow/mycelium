@@ -13,7 +13,7 @@ absence means "the app is not running" - never "bad credentials". Without this g
 `surface_lost:<owner|target>:<state>:daemon=<evidence>`.
 """
 from pathlib import Path
-import json,os,re,socket,subprocess,shlex,time,urllib.error,uuid,sys
+import json,os,re,socket,stat,subprocess,shlex,time,urllib.error,uuid,sys
 HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE))
 from app_rpc import AppClient
@@ -261,19 +261,14 @@ def await_ready(root, path):
 # `require_local/require_remote` stay exactly as they were. What is added is a wait BEFORE a call the
 # compile blocks is issued, whose exit condition is the APP'S OWN ON-DISK STATE and never a clock:
 #
-#   SUCCESS  `{OWNER}/authority/serving-runs/{run_id}/operator-plan.json`, written by
-#            `mycelium_a13_macos/workflow.py:357-360` (`_atomic_private_json`, which refuses a
-#            pre-existing one at `:359`). It is the app's LAST disk write before `chain_compile.py:69`
-#            sets `state='compiled'` -- in memory only, so this file is the only durable form of that
-#            verdict and its absence cannot coexist with an app that reports 'compiled'.
-#   FAILURE  `{OWNER}/chain-runs/{run_id}/compile-error.private.log` (`chain_compile.py:71`).
+#   SUCCESS  `{OWNER}/chain-runs/{run_id}/compile-complete.private.json`, written atomically
+#            by chain_compile AFTER `app.guard` releases and compiled state is set. Match the
+#            start record, round scope, exact schema and epoch. An early operator-plan marker
+#            cannot show guard release, even if it is the last workflow write.
+#   FAILURE  `{OWNER}/chain-runs/{run_id}/compile-error.private.log`.
 #
-# WHY NOT `compiled/build-report.json`, the last write of `build()` (build_qwen_live_route.py:2157)?
-# Because `chain_compile.py:54-69` then takes `app.guard` and runs `prepare_serving_workflow`, which may
-# spend up to `_BOOT_ID_OBSERVATION_BUDGET_SECONDS=180` in a bounded retry (workflow.py:38, :316-330)
-# while holding it -- and every session-taking request, the handshake POST included (app.py:872), blocks
-# on that same guard. Waking there would put the round's first read inside a window as long as the very
-# budget it must survive. The terminal marker is what the app writes last before it can answer again.
+# Neither `compiled/build-report.json` nor the serving-run operator plan proves the compiler
+# has exited the guard. The latter is published inside prepare_serving_workflow under the guard.
 #
 # THE RUN ID IS THE ROUND'S OWN, not a guess: step 1 writes it to `{OWNER}/{ROUND}/current-scope.json`
 # before it asks the app to compile (round14_bootstrap_compile.py:242-244, :275) and both steps run
@@ -302,7 +297,7 @@ def _run_root(run_id):
 
 
 def _marker_path(run_id):
-    """`mycelium_a13_macos/workflow.py:357-360`: the app's own last write before it reports 'compiled'."""
+    """Early workflow artifact, retained for diagnostics; never compile completion."""
     return OWNER/'authority'/'serving-runs'/run_id/'operator-plan.json'
 
 
@@ -316,11 +311,36 @@ def _compile_run_id():
     return run_id if isinstance(run_id,str) and _RUN_ID_SEGMENT.fullmatch(run_id) else None
 
 
+def _private_compile_record(path):
+    """Accept only the producer's private regular, bounded, atomically published JSON."""
+    try:
+        metadata=path.lstat()
+        if (not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode)!=0o600
+                or metadata.st_uid!=os.getuid() or metadata.st_size>4096):return None
+        document=json.loads(path.read_text('utf-8'))
+    except (OSError,ValueError,UnicodeError):
+        return None
+    return document if isinstance(document,dict) else None
+
+
 def _compile_evidence(run_id):
-    """The app's OWN on-disk verdict for this run: 'failed' | 'completed' | None while still compiling."""
-    if (_run_root(run_id)/_COMPILE_ERROR_LOG).exists():return 'failed'
-    if _marker_path(run_id).exists():return 'completed'
-    return None
+    """Only an exact post-guard completion for the scoped run/epoch is success."""
+    root=_run_root(run_id)
+    if (root/_COMPILE_ERROR_LOG).exists():return 'failed'
+    try:scope=json.loads((PRIVATE/_RUN_SCOPE).read_text('utf-8'))
+    except (OSError,ValueError):return None
+    if not isinstance(scope,dict) or scope.get('run_id')!=run_id:return None
+    deployment=scope.get('deployment_id')
+    if not isinstance(deployment,str) or not deployment:return None
+    start=_private_compile_record(root/'compile-start.private.json')
+    complete=_private_compile_record(root/'compile-complete.private.json')
+    if start is None or complete is None:return None
+    epoch=start.get('epoch')
+    if type(epoch) is not int or epoch<0:return None
+    identity={'run_id':run_id,'deployment_id':deployment,'epoch':epoch}
+    if start!={'protocol':'mycelium.chain_compile_start.v1',**identity}:return None
+    if complete!={'protocol':'mycelium.chain_compile_complete.v1',**identity,'state':'compiled'}:return None
+    return 'completed'
 
 
 def await_compile_end():
@@ -328,8 +348,8 @@ def await_compile_end():
 
     Issues no RPC of any kind, so it cannot expire inside a read deadline and costs the handshake budget
     nothing. Returns the evidence it stopped on:
-      'completed' the app's own marker (workflow.py:360) exists -- the compile is over
-      'failed'    the app's own failure record (chain_compile.py:71) exists
+      'completed' exact post-guard producer completion matched to this round's run/deployment/epoch
+      'failed'    the app's own failure record exists
       'absent'    no run to watch, or the control surface is gone (app.py:794): the caller's EXISTING
                   path decides, in its own vocabulary (`surface_lost`, `compiler_not_ready`, ...)
       'expired'   the app's own declared wall bound elapsed: the caller's existing path runs unchanged

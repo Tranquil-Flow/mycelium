@@ -18,15 +18,13 @@ WHAT THE APP ACTUALLY WRITES, AND WHEN (read off source, not guessed):
     the stage packs (`:1692`, `:1752`), `compiled/control/*.json` (`:1888-1904`), the local challenge
     checkpoint (`:1870`), then `compiled/operator-plan.json` (`:2084`) and `compiled/build-report.json`
     (`:2157`) -- the last write of `build()`;
-  * compile END (success) -- `mycelium_a13_macos/workflow.py:357-360` writes
-    `{app.root}/authority/serving-runs/{run_id}/operator-plan.json` ATOMICALLY
-    (`_atomic_private_json`, `authority.py:130-172`), refusing a pre-existing one (`workflow.py:359`);
-    and only THEN does `chain_compile.py:69` set `state='compiled'` -- in memory.
-  * compile END (failure) -- `chain_compile.py:71` writes `{run_root}/compile-error.private.log`.
+  * compile END (success) -- `workflow.py` publishes an EARLY operator-plan marker inside
+    `app.guard`; `chain_compile.py` sets compiled state, releases that guard, then atomically
+    publishes private `chain-runs/{run_id}/compile-complete.private.json`.
+  * compile END (failure) -- private `compile-error.private.log`, not a success marker.
 
-So there is no "compiled" state file, but there IS a sound terminal marker: `workflow.py:360` is the
-app's own last disk write before it reports `compiled`, so its ABSENCE cannot coexist with an app that
-reports `compiled`, and its PRESENCE means the compile is over. The run's identity is operator-known:
+Only the private post-guard completion matched to the start record, scoped run/deployment and
+compiler epoch is successful observational evidence. The early operator-plan file alone is not.
 step 1 writes `{A13_OWNER_ROOT}/{A13_RPC_ROUND}/current-scope.json` with the run id
 (`round14_bootstrap_compile.py:242-244`) before it requests the compile (`:275`), and both steps run
 under one `A13_RPC_ROUND` (`run_a13_attempt.sh:34`, `:49-50`).
@@ -44,10 +42,10 @@ WHAT THESE TESTS PIN.
     at all while the app is unresponsive (the `handshake_attempts == 0` assertions);
   * the pre-fix transport -- the same pinned step with the observational wait disabled -- still dies by
     `handshake_timeout`, kept as a witness so the defect cannot return unnoticed;
-  * the marker is the one the app itself writes last before `compiled`, derived from the round's own
-    scope record, and a progress artifact (`template.json`, `build-report.json`) is NOT evidence;
-  * the wait is bounded by the app's OWN declared wall bound and reuses the existing constants: no
-    timeout, deadline, window, retry count or identity check is changed anywhere.
+  * the early marker is not a terminal verdict; only the post-guard completion matched to
+    the scoped run/deployment and compiler epoch can wake the observer;
+  * the wait is bounded by the app's OWN declared wall bound and reuses the existing constants:
+    no timeout, deadline, window or retry count is changed.
 
 RUN RED (the pre-fix tree, this file added but `await_compile_end` absent):
     env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV /opt/homebrew/bin/python3 -B -m pytest -q \
@@ -91,10 +89,8 @@ class CompilingApp:
       it raises the exact shape the real rounds recorded, a bare `TimeoutError('timed out')` out of
       `app_rpc.py:15`'s fixed deadline. Everything above it is the real transport: `_client`'s bounded
       busy retry, `_busy_reason`'s classification, and the `HandshakeTimeout` that ends the round.
-    * the disk half -- `start_compile()` creates the run root and `template.json`
-      (`chain_compile.py:31`, `:39`) and, when the compile ends, writes the terminal marker
-      (`workflow.py:357-360`) BEFORE it starts answering. The marker is written by the simulated chain
-      thread on its own schedule, never by the code under test.
+    * the disk half -- `start_compile()` creates the run root and start record; `_compile` writes
+      the early workflow plan, then the completion only after it stops blocking the app.
     """
 
     def __init__(self, owner_root, round_dir, *, compile_seconds=COMPILE_SECONDS,
@@ -141,12 +137,13 @@ class CompilingApp:
         (self.run_root / 'compile-start.private.json').write_text(json.dumps({
             'protocol':'mycelium.chain_compile_start.v1','run_id':RUN_ID,
             'deployment_id':'5d0e3c1a-0000-4000-8000-000000000001','epoch':0}))
+        (self.run_root / 'compile-start.private.json').chmod(0o600)
         self.compiling = True
         threading.Thread(target=self._compile, name='simulated-chain-compile', daemon=True).start()
 
     def _compile(self):
         _REAL_SLEEP(self.compile_seconds)
-        # `workflow.py:360`: the app's own last write before it reports `compiled` (chain_compile.py:69).
+        # Workflow publishes the plan under app.guard; this is not post-guard evidence.
         self.marker.parent.mkdir(parents=True, exist_ok=True)
         self.marker.write_text(json.dumps({'protocol': 'mycelium.operator_plan.v1'}))
         # The real workflow writes this inside app.guard, BEFORE registry preparation,
@@ -312,9 +309,8 @@ def _fake_clock(monkeypatch, module):
 def test_the_round_survives_a_compile_that_outlasts_the_handshake_budget(monkeypatch, transport):
     """GREEN: the compile is still running when step 2 starts; the round must not spend its budget.
 
-    The app answers nothing until its own marker exists, so the assertions are about the transport: the
-    round reached activation while the app was asked NOTHING during the compile, and the first thing it
-    asked came after the app's own evidence said the compile had ended.
+    The app answers nothing until its own completion exists, so the assertions concern transport:
+    activation succeeds without asking the app while the producer still holds the guard.
     """
     module, owner_root = transport
     app = _app(owner_root, module)
@@ -387,12 +383,11 @@ def test_without_the_observational_wait_the_same_compile_ends_the_round(monkeypa
 
 # ───────────────────────── the evidence itself ─────────────────────────
 
-def test_the_marker_is_the_apps_own_last_write_before_it_reports_compiled(transport):
-    """The marker is not invented here: it is `workflow.py:357-360`, and it precedes `chain_compile.py:69`.
+def test_early_marker_precedes_compiled_state_and_is_not_completion(transport):
+    """The workflow plan is a real early artifact, not the compiler's post-guard completion.
 
-    Checked against the app's own source and its own identifier rule, so the operator cannot drift from
-    the app: `_segment(run['run_id'])` (`workflow.py:356`) leaves this round's run id unchanged
-    (`managed_control.py:207`, `:283-285`), and `state='compiled'` is set only AFTER the write.
+    The serving-runs directory uses the run id (`managed_control._segment`), while
+    chain_compile publishes completion in the separately scoped chain-runs root.
     """
     module, _ = transport
     workflow = (REPO / 'mycelium_a13_macos/workflow.py').read_text()
@@ -427,6 +422,9 @@ def test_only_exact_current_start_and_completion_are_success(monkeypatch, transp
               'deployment_id':start['deployment_id'],'epoch':2,'state':'compiled'}
     def write(path,doc):path.write_text(json.dumps(doc));path.chmod(0o600)
     write(app.run_root/'compile-start.private.json',start)
+    app.marker.parent.mkdir(parents=True)
+    app.marker.write_text('{}')
+    assert module._compile_evidence(RUN_ID) is None, 'early operator plan is not completion'
     write(app.completion,complete)
     assert module._compile_evidence(RUN_ID)=='completed'
     for change in ({'run_id':'other-run'},{'deployment_id':'other-deployment'},
@@ -435,6 +433,10 @@ def test_only_exact_current_start_and_completion_are_success(monkeypatch, transp
         assert module._compile_evidence(RUN_ID) is None, change
     app.completion.write_text('{broken')
     assert module._compile_evidence(RUN_ID) is None
+    app.completion.unlink()
+    app.completion.symlink_to(app.run_root/'compile-start.private.json')
+    assert module._compile_evidence(RUN_ID) is None, 'symlink is not private producer evidence'
+    app.completion.unlink()
     write(app.completion,complete)
     write(app.run_root/'compile-start.private.json',{**start,'epoch':3})
     assert module._compile_evidence(RUN_ID) is None, 'superseded epoch rejects an old completion'
@@ -449,7 +451,7 @@ def test_progress_artifacts_are_not_evidence_the_compile_ended(monkeypatch, tran
     `chain_compile.py:54-69` then runs `prepare_serving_workflow` UNDER `app.guard`, with a bounded retry
     of up to 180 s inside it (`workflow.py:38`, `:316-330`) -- and the handshake POST needs that guard
     (`app.py:872`). Waking there would put the round's first read inside a window as long as the budget
-    it must survive, so only the terminal marker counts.
+    it must survive. The early workflow plan is also not terminal; only post-guard evidence counts.
     """
     module, owner_root = transport
     app = _app(owner_root, module, compile_seconds=10_000.0)
