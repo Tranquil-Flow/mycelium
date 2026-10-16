@@ -97,12 +97,15 @@ class CompilingApp:
       thread on its own schedule, never by the code under test.
     """
 
-    def __init__(self, owner_root, round_dir, *, compile_seconds=COMPILE_SECONDS):
+    def __init__(self, owner_root, round_dir, *, compile_seconds=COMPILE_SECONDS,
+                 hold_after_marker=False):
         self.owner = pathlib.Path(owner_root)
         self.round_dir = pathlib.Path(round_dir)
         self.run_root = self.owner / 'chain-runs' / RUN_ID
         self.marker = self.owner / 'authority' / 'serving-runs' / RUN_ID / 'operator-plan.json'
         self.compile_seconds = compile_seconds
+        self.hold_after_marker = hold_after_marker
+        self._marker_handshake = threading.Event()
         self.compiling = False
         self.events = []
         self.calls = []
@@ -141,6 +144,12 @@ class CompilingApp:
         # `workflow.py:360`: the app's own last write before it reports `compiled` (chain_compile.py:69).
         self.marker.parent.mkdir(parents=True, exist_ok=True)
         self.marker.write_text(json.dumps({'protocol': 'mycelium.operator_plan.v1'}))
+        # The real workflow writes this inside app.guard, BEFORE registry preparation,
+        # approval construction and the in-memory 'compiled' state. Hold that ordering
+        # until the first post-marker handshake witnesses the still-busy app.
+        if self.hold_after_marker:
+            if not self._marker_handshake.wait(timeout=15):
+                raise AssertionError('post-marker handshake was never observed')
         with self._lock:
             self.events.append('evidence_completed')
             self.compiling = False
@@ -200,6 +209,8 @@ class CompilingApp:
         if busy:
             with self._lock:
                 self.handshake_refusals += 1
+            if self.hold_after_marker and self.marker.exists():
+                self._marker_handshake.set()
             raise TimeoutError('timed out')          # app_rpc.py:15 -- the p82r1/p82r3/p83r1 shape
         return _Client(self)
 
@@ -244,9 +255,10 @@ def transport(tmp_path, monkeypatch):
         sys.modules.pop(name, None)
 
 
-def _app(owner_root, module, *, compile_seconds=COMPILE_SECONDS):
+def _app(owner_root, module, *, compile_seconds=COMPILE_SECONDS, hold_after_marker=False):
     """The owner's on-disk state as step 1 leaves it when step 2 begins."""
-    app = CompilingApp(owner_root, module.PRIVATE, compile_seconds=compile_seconds)
+    app = CompilingApp(owner_root, module.PRIVATE, compile_seconds=compile_seconds,
+                       hold_after_marker=hold_after_marker)
     app.surface()
     app.scope()
     app.start_compile()
@@ -303,6 +315,18 @@ def test_the_round_survives_a_compile_that_outlasts_the_handshake_budget(monkeyp
     assert app.handshake_refusals == 0, 'no RPC was attempted while the app could not answer'
     assert app.events.index('evidence_completed') < app.events.index('handshake_answered'), \
         'the app was asked only after its own evidence said the compile had ended'
+
+
+def test_marker_published_before_compile_unlock_is_not_a_finished_compile(monkeypatch, transport):
+    """Force the real ordering: marker, still-held guard, then compiled state."""
+    module, owner_root = transport
+    app = _app(owner_root, module, hold_after_marker=True)
+
+    _drive_the_pinned_step(monkeypatch, module, app)
+
+    assert app._marker_handshake.is_set(), 'the held post-marker interval was exercised'
+    assert app.activations == 1
+    assert app.handshake_refusals == 0, 'no RPC while the compile still holds the app guard'
 
 
 def test_the_observation_costs_the_round_no_transport_attempt(monkeypatch, transport):
