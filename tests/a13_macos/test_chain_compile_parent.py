@@ -82,6 +82,44 @@ def test_completion_publication_failure_is_not_compiled(tmp_path,monkeypatch):
     assert (root/'compile-error.private.log').exists()
 
 
+@pytest.mark.parametrize('publication_fails',[False,True])
+def test_serving_cannot_start_before_completion_publication(tmp_path,monkeypatch,publication_fails):
+    """A published workflow must not grant serving before the durable write succeeds."""
+    app,_=fixture_app(tmp_path,monkeypatch)
+    entered=threading.Event();release=threading.Event();launched=threading.Event()
+    original=cc._atomic_private_json
+    def held(path,document):
+        if path.name=='compile-complete.private.json':
+            entered.set()
+            assert release.wait(10), 'publication seam not released'
+            if publication_fails:raise OSError('injected completion publication failure')
+        return original(path,document)
+    monkeypatch.setattr(cc,'_atomic_private_json',held)
+    try:
+        cc.start_compile(app,acknowledged=True)
+        assert entered.wait(10)
+        app._chain_workflow.run=lambda **kwargs:launched.set()
+        proposal=json.loads(json.dumps(cc.asdict(app._chain_approval)))
+        with app.guard:
+            with pytest.raises(ValueError,match='model_execution_proposal_changed'):
+                cc.start_serving(app,proposal=proposal,acknowledged=True)
+        assert not launched.is_set()
+        assert getattr(app,'_chain_serving_thread',None) is None
+    finally:
+        release.set();app._chain_compile_thread.join(10)
+        serving=getattr(app,'_chain_serving_thread',None)
+        if serving is not None:serving.join(10)
+    assert not app._chain_compile_thread.is_alive()
+    if publication_fails:
+        assert app._chain_compile_state['state']=='failed'
+        assert not launched.is_set()
+    else:
+        assert app._chain_compile_state['state']=='compiled'
+        cc.start_serving(app,proposal=proposal,acknowledged=True)
+        app._chain_serving_thread.join(10)
+        assert launched.is_set(), 'successful publication still admits serving'
+
+
 def test_superseded_compile_never_publishes_completion(tmp_path,monkeypatch):
     app,_=fixture_app(tmp_path,monkeypatch)
     entered=threading.Event();release=threading.Event()
