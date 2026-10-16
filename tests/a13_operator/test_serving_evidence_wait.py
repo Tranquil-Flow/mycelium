@@ -283,6 +283,14 @@ def _app(owner_root, module, *, qualify_seconds=QUALIFY_SECONDS):
     return app
 
 
+def test_completed_compile_fixture_has_current_post_guard_evidence(transport):
+    """Serving-phase tests begin only after the real compile completion contract."""
+    module, owner_root = transport
+    app = _app(owner_root, module)
+    assert module._compile_evidence(RUN_ID) == 'completed'
+    assert app.answering is True
+
+
 def _drive_the_pinned_step(monkeypatch, rpc, app):
     """Run the PINNED `round14_start_and_activate.main()` against the scripted app.
 
