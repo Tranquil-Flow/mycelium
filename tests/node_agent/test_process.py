@@ -192,11 +192,13 @@ def test_correlated_waiters_allow_out_of_order_concurrent_responses(
             import json
             import sys
             import threading
-            import time
 
             write_lock = threading.Lock()
+            release_slow = threading.Event()
             def respond(command):
-                time.sleep(float(command["payload"].get("delay", 0)))
+                if command["payload"].get("value") == "slow":
+                    if not release_slow.wait(timeout=3.0):
+                        return
                 response = {{
                     "protocol": {PROTOCOL!r},
                     "command_id": command["command_id"],
@@ -213,6 +215,8 @@ def test_correlated_waiters_allow_out_of_order_concurrent_responses(
             workers = []
             for raw in sys.stdin.buffer:
                 command = json.loads(raw)
+                if command["command"] in ("release", "stop"):
+                    release_slow.set()
                 worker = threading.Thread(target=respond, args=(command,))
                 worker.start()
                 workers.append(worker)
@@ -233,39 +237,62 @@ def test_correlated_waiters_allow_out_of_order_concurrent_responses(
         response_timeout_seconds=1.0,
     )
     results: dict[str, object] = {}
+    errors: list[BaseException] = []
+    slow_written = threading.Event()
     fast_returned = threading.Event()
     resume_fast = threading.Event()
 
-    def fast_command() -> None:
-        value = process.command("configure", {"value": "fast", "delay": 0.01})
-        # Model a descheduled caller *after* the correctly correlated reply.
-        # The old join oracle must not turn that scheduling delay into failure.
-        fast_returned.set()
-        if not resume_fast.wait(timeout=1.0):
-            raise AssertionError("fast caller was not released")
-        results["fast"] = value
+    def recording_writer(stdin: object, frame: bytes, deadline: float) -> None:
+        process_module._write_control_frame_before(stdin, frame, deadline)
+        if json.loads(frame)["payload"].get("value") == "slow":
+            slow_written.set()
 
-    slow = threading.Thread(
-        target=lambda: results.setdefault(
-            "slow", process.command("configure", {"value": "slow", "delay": 0.2})
-        )
-    )
+    process._control_frame_writer = recording_writer
+
+    def slow_command() -> None:
+        try:
+            results["slow"] = process.command("configure", {"value": "slow"})
+        except BaseException as exc:
+            errors.append(exc)
+
+    def fast_command() -> None:
+        try:
+            value = process.command("configure", {"value": "fast"})
+            # A returned, correctly correlated reply need not mean the caller
+            # has been scheduled to finish. This was the rehearsal's bad oracle.
+            fast_returned.set()
+            if not resume_fast.wait(timeout=2.0):
+                raise AssertionError("fast caller was not released")
+            results["fast"] = value
+        except BaseException as exc:
+            errors.append(exc)
+
+    slow = threading.Thread(target=slow_command)
     fast = threading.Thread(target=fast_command)
     try:
         slow.start()
-        time.sleep(0.02)
+        assert slow_written.wait(timeout=2.0), "slow frame not written"
         fast.start()
-        assert fast_returned.wait(timeout=2.0), "fast reply not delivered"
-        fast.join(timeout=0.1)
-        assert not fast.is_alive()
-        assert slow.is_alive()
+        # The child cannot emit slow's response until it reads 'release'. If
+        # exchanges serialize, or responses go to the wrong waiter, this
+        # cannot observe the fast result while the slow gate is still closed.
+        assert fast_returned.wait(timeout=2.0), f"fast reply missing: {errors!r}"
+        assert "slow" not in results
+        assert not errors
+        assert process.command("release", {"value": "release"}) == {"value": "release"}
+        resume_fast.set()
+        fast.join(timeout=1.0)
         slow.join(timeout=1.0)
+        assert not fast.is_alive() and not slow.is_alive()
+        assert not errors
         assert results == {"fast": {"value": "fast"}, "slow": {"value": "slow"}}
     finally:
         resume_fast.set()
-        fast.join(timeout=1.0) if fast.ident is not None else None
-        slow.join(timeout=1.0) if slow.ident is not None else None
         process.close()
+        if fast.ident is not None:
+            fast.join(timeout=2.0)
+        if slow.ident is not None:
+            slow.join(timeout=2.0)
 
 
 def test_request_scoped_timeout_does_not_terminate_shared_node(tmp_path: Path) -> None:
