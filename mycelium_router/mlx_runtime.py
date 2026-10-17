@@ -471,6 +471,54 @@ INT8_EXECUTION_PER_CALL_MATERIALIZATION = "per_call_float32_materialization"
 #: ``int8_execution`` of a port that holds no row-wise int8 weights.
 INT8_EXECUTION_NONE = "none"
 
+# A11 VERIFY arithmetic.  A VERIFY span fed as ONE multi-row call is not
+# bit-identical to the same tokens fed as serial single-row DECODEs: MLX picks
+# different kernels / reduction groupings for a 4-row query over a masked
+# ``position + 4`` key axis than for a 1-row query over ``position + 1`` keys.
+# The rows it commits (the accepted prefix) are KV that serial decode would have
+# written, so strict K/V parity needs the serial arithmetic for every row.
+#   row_attention   -- projections / MLP stay batched over the span (their rows
+#                      are call-independent by the packed-int8 construction
+#                      check); only attention runs once per row with the exact
+#                      single-row shapes serial decode uses.
+#   sequential_rows -- every row runs the complete single-row stage arithmetic.
+#   auto            -- row_attention only where row independence of the linears
+#                      is verified (qwen2/qwen3 + persistent packed int8),
+#                      otherwise sequential_rows.
+VERIFY_ARITHMETIC_AUTO = "auto"
+VERIFY_ARITHMETIC_ROW_ATTENTION = "row_attention"
+VERIFY_ARITHMETIC_SEQUENTIAL_ROWS = "sequential_rows"
+_VERIFY_ARITHMETIC_MODES = frozenset(
+   {
+      VERIFY_ARITHMETIC_AUTO,
+      VERIFY_ARITHMETIC_ROW_ATTENTION,
+      VERIFY_ARITHMETIC_SEQUENTIAL_ROWS,
+   }
+)
+
+
+def _verify_arithmetic_mode(setting: Any, architecture: Any, int8_execution: Any) -> str:
+   if setting not in _VERIFY_ARITHMETIC_MODES:
+      _reject("invalid_verify_arithmetic")
+   if setting != VERIFY_ARITHMETIC_AUTO:
+      return str(setting)
+   if (
+      architecture in {"qwen2", "qwen3"}
+      and int8_execution == INT8_EXECUTION_PERSISTENT_PACKED
+   ):
+      return VERIFY_ARITHMETIC_ROW_ATTENTION
+   return VERIFY_ARITHMETIC_SEQUENTIAL_ROWS
+
+
+def _verify_rows(span: int, step: Any, carried: Any) -> tuple[list[Any], Any]:
+   """Feed ``span`` rows one at a time, each row seeing the previous row's state."""
+
+   outputs: list[Any] = []
+   for row in range(span):
+      output, carried = step(row, carried)
+      outputs.append(output)
+   return outputs, carried
+
 # Persistent packed int8 execution (A9 ``persistent_int8_execution``): the row-wise
 # int8 values are packed ONCE, by the loader, into MLX's unsigned 8-bit affine
 # layout with group scale 1 and group bias -128
@@ -817,6 +865,31 @@ def _qwen2_attend(
    return mx.matmul(probabilities, attention_value), all_key, all_value
 
 
+def _qwen2_attend_rows(
+   query: mx.array,
+   key: mx.array,
+   value: mx.array,
+   past: tuple[mx.array, mx.array] | None,
+   position: int,
+   config: Mapping[str, Any],
+) -> tuple[mx.array, mx.array, mx.array]:
+   """Attend a span one row at a time with serial decode's single-row shapes."""
+
+   def step(row: int, carried: Any) -> tuple[mx.array, Any]:
+      attended, all_key, all_value = _qwen2_attend(
+         query[:, :, row : row + 1, :],
+         key[:, :, row : row + 1, :],
+         value[:, :, row : row + 1, :],
+         carried,
+         position + row,
+         config,
+      )
+      return attended, (all_key, all_value)
+
+   rows, carried = _verify_rows(int(query.shape[2]), step, past)
+   return mx.concatenate(rows, axis=2), carried[0], carried[1]
+
+
 def _qwen2_block_with_kv(
    hidden: mx.array,
    tensors: Mapping[str, Any],
@@ -825,6 +898,7 @@ def _qwen2_block_with_kv(
    position: int | tuple[int, ...],
    past: tuple[mx.array, mx.array] | list[tuple[mx.array, mx.array] | None] | None,
    architecture: str = "qwen2",
+   row_serial_attention: bool = False,
 ) -> tuple[mx.array, Any]:
    n_head = int(config["n_head"])
    n_kv_head = int(config["n_kv_head"])
@@ -891,7 +965,12 @@ def _qwen2_block_with_kv(
    else:
       if not isinstance(position, int) or isinstance(position, bool):
          _reject("invalid_kv_position")
-      attended, all_key, all_value = _qwen2_attend(
+      attend = (
+         _qwen2_attend_rows
+         if row_serial_attention and sequence > 1
+         else _qwen2_attend
+      )
+      attended, all_key, all_value = attend(
          query, key, value, past, position, config
       )
       layer_kv = (all_key, all_value)
@@ -1039,6 +1118,8 @@ class MLXRuntimePort:
          if INT8_EXECUTION_PER_CALL_MATERIALIZATION in int8_modes
          else (int8_modes.pop() if int8_modes else INT8_EXECUTION_NONE)
       )
+      #: A11 VERIFY span arithmetic (see ``_verify_arithmetic_mode``).
+      self.verify_arithmetic = VERIFY_ARITHMETIC_AUTO
       if self.int8_execution == INT8_EXECUTION_PER_CALL_MATERIALIZATION:
          for _stage, _placement, loaded, _runtime in bound.values():
             self._execution_tensors[id(loaded)] = _per_call_int8_tensors(loaded.tensors)
@@ -2027,6 +2108,39 @@ class MLXRuntimePort:
             produce_logits=produce_logits,
             all_positions=all_positions,
          )
+      verify_mode = None
+      if all_positions:
+         span = int((token_ids if token_ids is not None else hidden_states).shape[1])
+         if span > 1:
+            verify_mode = _verify_arithmetic_mode(
+               self.verify_arithmetic, runtime["architecture"], self.int8_execution
+            )
+            if verify_mode == VERIFY_ARITHMETIC_SEQUENTIAL_ROWS:
+               if not isinstance(position, int) or isinstance(position, bool):
+                  _reject("invalid_kv_position")
+
+               def step(row: int, layers: Any) -> tuple[mx.array, Any]:
+                  return self._execute_stage_with_kv(
+                     stage=stage,
+                     loaded=loaded,
+                     runtime=runtime,
+                     token_ids=None if token_ids is None else token_ids[:, row : row + 1],
+                     hidden_states=(
+                        None
+                        if hidden_states is None
+                        else hidden_states[:, row : row + 1, :]
+                     ),
+                     position=position + row,
+                     past_layers=layers,
+                     path_id=path_id,
+                     produce_logits=produce_logits,
+                     all_positions=False,
+                  )
+
+               outputs, layers = _verify_rows(span, step, past_layers)
+               hidden = mx.concatenate(outputs, axis=1)
+               mx.eval(hidden)
+               return hidden, layers
       if runtime["architecture"] in {"qwen2", "qwen3"}:
          if "input_embedding" in stage.component_roles:
             if token_ids is None or hidden_states is not None:
@@ -2050,6 +2164,7 @@ class MLXRuntimePort:
                position,
                past_layers.get(layer),
                runtime["architecture"],
+               row_serial_attention=verify_mode == VERIFY_ARITHMETIC_ROW_ATTENTION,
             )
             next_layers[layer] = layer_kv
             mx.eval(hidden, *layer_kv)
