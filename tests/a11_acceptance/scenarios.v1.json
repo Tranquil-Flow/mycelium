@@ -1,6 +1,15 @@
 {
   "protocol": "mycelium.a11_acceptance_scenarios.v1",
   "claim_boundary": "frozen acceptance inputs only; no product implementation, speculative decoding, benefit, enabled decision, measured-disabled evaluation, or qualification claim",
+  "dependency_requirements": {
+    "a10_physically_closed_required": true,
+    "exact_a10_target_runtime_and_verifier_binding_required": true,
+    "local_inspection_may_close_a11": false,
+    "fixtures_or_synthetic_workers_may_close_a11": false,
+    "generic_a12_depends_on_a11": false,
+    "optional_mobile_speculative_draft_worker_depends_on_a11": true,
+    "mobile_draft_requires_a11_qualified_enabled_for_exact_target_workload": true
+  },
   "identity_compatibility_requirements": {
     "target_identity_fields": [
       "model",
@@ -52,6 +61,49 @@
     "target_and_draft_kv_may_alias": false,
     "target_and_draft_kv_may_transfer": false,
     "draft_cleanup_may_rollback_target_kv": false
+  },
+  "physical_evidence_requirements": {
+    "qualifying_source_kind": "physical_runtime",
+    "ordinary_gateway_same_route_product_session_required": true,
+    "target_authority_fields": [
+      "target_runtime_incarnation",
+      "a10_verifier_binding",
+      "target_logits_and_sampler_authority",
+      "output_released_after_target_commit"
+    ],
+    "cycle_accounting_fields": [
+      "proposed_positions",
+      "target_verified_positions",
+      "accepted_positions",
+      "rejected_positions",
+      "target_correction_positions",
+      "rolled_back_target_positions",
+      "committed_target_positions",
+      "emitted_target_positions",
+      "target_authorized_positions",
+      "start_target_watermark",
+      "rollback_from_watermark",
+      "rollback_to_watermark",
+      "end_target_watermark",
+      "fallback_cycles"
+    ],
+    "cycle_conservation_rules": [
+      "accepted_plus_rejected_equals_target_verified",
+      "commit_equals_accepted_plus_target_corrections",
+      "emission_equals_commit_after_target_authorization"
+    ],
+    "rollback_watermarks_and_rejected_suffix_required": true,
+    "nonzero_rejection_or_fallback_required": true,
+    "parity_fields": [
+      "complete_target_token_id_sequence",
+      "terminal_status",
+      "finish_reason",
+      "target_committed_kv_watermark"
+    ],
+    "materiality_metric": "gateway_admission_to_terminal_wall_clock_per_target_committed_token",
+    "draft_only_predicted_fixture_or_local_timing_may_count": false,
+    "failed_timeout_cancelled_fallback_and_rejected_work_remains_in_denominator": true,
+    "local_inspection_or_fixture_measurement_may_qualify": false
   },
   "adaptive_policy_requirements": {
     "deadline_formula": "min(100_ms,max(5_ms,0.75*warm_target_only_p95_tpot))",
@@ -240,6 +292,7 @@
         "cycle_starts_from_exact_target_committed_watermark",
         "a10_target_verifier_evaluates_bounded_proposal_in_one_real_call",
         "all_matching_positions_are_target_verified",
+        "target_logits_and_sampler_decisions_authorize_every_released_token",
         "target_commit_is_atomic_monotonic_and_idempotent",
         "output_releases_only_after_target_commit",
         "next_cycle_starts_from_resulting_target_watermark",
@@ -258,6 +311,8 @@
         "tentative_target_state_after_first_mismatch_rolls_back",
         "accepted_prefix_plus_one_target_correction_commits_atomically",
         "remaining_draft_suffix_is_rejected",
+        "verified_equals_accepted_plus_rejected_for_each_cycle",
+        "rollback_count_and_watermarks_match_rejected_suffix",
         "draft_commits_only_target_confirmed_prefix_and_consumes_correction",
         "browser_output_matches_target_only_execution_without_duplicate_or_gap",
         "committed_target_kv_position_matches_target_only_execution"
@@ -394,6 +449,8 @@
         "paired_ninety_five_percent_lower_bound_is_at_least_ten_percent",
         "interactive_p95_ttft_regresses_no_more_than_ten_percent",
         "target_only_output_parity_and_reliability_hold",
+        "complete_token_ids_terminal_status_and_target_kv_match_target_only",
+        "speedup_uses_end_to_end_wall_clock_not_draft_or_fixture_timing",
         "proposal_verification_acceptance_and_rejection_or_fallback_are_nonzero",
         "zero_target_kv_corruption_cross_request_state_and_residue"
       ],
@@ -409,6 +466,7 @@
         "route_qualification_incarnation_thermal_power_or_software_drift_invalidates_pair",
         "missing_sample_invalidates_pair_instead_of_becoming_zero",
         "error_timeout_cancellation_fallback_and_rejection_remain_in_accounting",
+        "missing_rejection_or_rollback_counters_invalidate_pair",
         "confidence_uses_paired_windows",
         "posthoc_threshold_workload_width_deadline_and_exclusion_changes_are_rejected",
         "invalid_pair_cannot_publish_enabled_or_benefit_decision"

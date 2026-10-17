@@ -9,11 +9,24 @@ SPECIFICATION = (
     Path(__file__).parents[2]
     / "docs/superpowers/specs/2026-08-18-mycelium-a11-target-authoritative-speculative-decoding.md"
 )
+A12_SPECIFICATION = (
+    Path(__file__).parents[2]
+    / "docs/superpowers/specs/2026-08-18-mycelium-a12-generic-mobile-activation.md"
+)
 PROTOCOL = "mycelium.a11_acceptance_scenarios.v1"
 CLAIM_BOUNDARY = (
     "frozen acceptance inputs only; no product implementation, speculative decoding, "
     "benefit, enabled decision, measured-disabled evaluation, or qualification claim"
 )
+DEPENDENCY_REQUIREMENTS = {
+    "a10_physically_closed_required": True,
+    "exact_a10_target_runtime_and_verifier_binding_required": True,
+    "local_inspection_may_close_a11": False,
+    "fixtures_or_synthetic_workers_may_close_a11": False,
+    "generic_a12_depends_on_a11": False,
+    "optional_mobile_speculative_draft_worker_depends_on_a11": True,
+    "mobile_draft_requires_a11_qualified_enabled_for_exact_target_workload": True,
+}
 ALL_WORKSPACES = {
     "inference",
     "device_lab",
@@ -119,6 +132,51 @@ KV_AUTHORITY_REQUIREMENTS = {
     "target_and_draft_kv_may_alias": False,
     "target_and_draft_kv_may_transfer": False,
     "draft_cleanup_may_rollback_target_kv": False,
+}
+PHYSICAL_EVIDENCE_REQUIREMENTS = {
+    "qualifying_source_kind": "physical_runtime",
+    "ordinary_gateway_same_route_product_session_required": True,
+    "target_authority_fields": [
+        "target_runtime_incarnation",
+        "a10_verifier_binding",
+        "target_logits_and_sampler_authority",
+        "output_released_after_target_commit",
+    ],
+    "cycle_accounting_fields": [
+        "proposed_positions",
+        "target_verified_positions",
+        "accepted_positions",
+        "rejected_positions",
+        "target_correction_positions",
+        "rolled_back_target_positions",
+        "committed_target_positions",
+        "emitted_target_positions",
+        "target_authorized_positions",
+        "start_target_watermark",
+        "rollback_from_watermark",
+        "rollback_to_watermark",
+        "end_target_watermark",
+        "fallback_cycles",
+    ],
+    "cycle_conservation_rules": [
+        "accepted_plus_rejected_equals_target_verified",
+        "commit_equals_accepted_plus_target_corrections",
+        "emission_equals_commit_after_target_authorization",
+    ],
+    "rollback_watermarks_and_rejected_suffix_required": True,
+    "nonzero_rejection_or_fallback_required": True,
+    "parity_fields": [
+        "complete_target_token_id_sequence",
+        "terminal_status",
+        "finish_reason",
+        "target_committed_kv_watermark",
+    ],
+    "materiality_metric": (
+        "gateway_admission_to_terminal_wall_clock_per_target_committed_token"
+    ),
+    "draft_only_predicted_fixture_or_local_timing_may_count": False,
+    "failed_timeout_cancelled_fallback_and_rejected_work_remains_in_denominator": True,
+    "local_inspection_or_fixture_measurement_may_qualify": False,
 }
 ADAPTIVE_POLICY_REQUIREMENTS = {
     "deadline_formula": "min(100_ms,max(5_ms,0.75*warm_target_only_p95_tpot))",
@@ -249,12 +307,15 @@ REQUIRED_CONCERN_INVARIANTS = {
     },
     "target_authoritative_all_match_commit": {
         "all_matching_positions_are_target_verified",
+        "target_logits_and_sampler_decisions_authorize_every_released_token",
         "target_commit_is_atomic_monotonic_and_idempotent",
         "output_releases_only_after_target_commit",
     },
     "target_mismatch_correction_rollback": {
         "tentative_target_state_after_first_mismatch_rolls_back",
         "accepted_prefix_plus_one_target_correction_commits_atomically",
+        "verified_equals_accepted_plus_rejected_for_each_cycle",
+        "rollback_count_and_watermarks_match_rejected_suffix",
         "browser_output_matches_target_only_execution_without_duplicate_or_gap",
     },
     "adaptive_deadline_target_fallback": {
@@ -276,6 +337,8 @@ REQUIRED_CONCERN_INVARIANTS = {
         "wall_clock_per_target_committed_token_improves_at_least_ten_percent",
         "paired_ninety_five_percent_lower_bound_is_at_least_ten_percent",
         "target_only_output_parity_and_reliability_hold",
+        "complete_token_ids_terminal_status_and_target_kv_match_target_only",
+        "speedup_uses_end_to_end_wall_clock_not_draft_or_fixture_timing",
     },
     "measured_disabled_outcome": {
         "failed_applicable_gate_publishes_measured_disabled_not_enabled",
@@ -303,8 +366,10 @@ def test_a11_acceptance_manifest_is_closed_bounded_and_complete() -> None:
     assert set(manifest) == {
         "protocol",
         "claim_boundary",
+        "dependency_requirements",
         "identity_compatibility_requirements",
         "kv_authority_requirements",
+        "physical_evidence_requirements",
         "adaptive_policy_requirements",
         "benchmark_requirements",
         "decision_requirements",
@@ -349,6 +414,7 @@ def test_a11_acceptance_manifest_is_closed_bounded_and_complete() -> None:
 
 def test_a11_exact_identity_tokenizer_and_position_requirements_are_frozen() -> None:
     manifest = _manifest()
+    assert manifest["dependency_requirements"] == DEPENDENCY_REQUIREMENTS
     assert (
         manifest["identity_compatibility_requirements"]
         == IDENTITY_COMPATIBILITY_REQUIREMENTS
@@ -370,6 +436,7 @@ def test_a11_exact_identity_tokenizer_and_position_requirements_are_frozen() -> 
 def test_a11_separate_kv_target_commit_and_rollback_are_frozen() -> None:
     manifest = _manifest()
     assert manifest["kv_authority_requirements"] == KV_AUTHORITY_REQUIREMENTS
+    assert manifest["physical_evidence_requirements"] == PHYSICAL_EVIDENCE_REQUIREMENTS
     scenarios = _scenarios_by_id()
     for scenario_id in (
         "separate_target_draft_kv",
@@ -422,6 +489,7 @@ def test_a11_target_only_baseline_confidence_and_decisions_are_frozen() -> None:
         )
     assert {
         "missing_sample_invalidates_pair_instead_of_becoming_zero",
+        "missing_rejection_or_rollback_counters_invalidate_pair",
         "posthoc_threshold_workload_width_deadline_and_exclusion_changes_are_rejected",
         "invalid_pair_cannot_publish_enabled_or_benefit_decision",
     } <= set(scenarios["invalid_benchmark_pair"]["required_invariants"])
@@ -448,5 +516,17 @@ def test_a11_workspace_inventory_is_closed_and_private() -> None:
 def test_a11_specification_remains_design_only_and_names_the_inventory() -> None:
     specification = SPECIFICATION.read_text("utf-8")
     assert "**Status:** `design_only`; dependency-ready acceptance boundary" in specification
+    assert "production integration\nwaits for A10 closure" in specification
+    assert "result is\n`design_input_only`" in specification
     assert "capability remains `design_only`" in specification
     assert all(f"`{scenario_id}`" in specification for scenario_id in REQUIRED_SCENARIOS)
+
+
+def test_a12_generic_closure_is_independent_of_a11_but_mobile_draft_is_not() -> None:
+    specification = A12_SPECIFICATION.read_text("utf-8")
+    assert "A11 is not a blanket gate prerequisite" in specification
+    assert (
+        "This is a conditional claim prerequisite, not a dependency of generic A12 closure"
+        in specification
+    )
+    assert "Generic A12 closure does not grant `speculative_draft_worker`" in specification
