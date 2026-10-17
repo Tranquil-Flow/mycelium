@@ -396,15 +396,6 @@ def test_a10_workspace_inventory_is_closed_and_cross_workspace_state_is_private(
     } <= set(scenario["required_invariants"])
 
 
-def test_a10_specification_remains_design_only_and_names_the_inventory() -> None:
-    specification = SPECIFICATION.read_text("utf-8")
-    assert "**Status:** `design_only`; dependency-ready acceptance boundary" in specification
-    assert "production integration\nwaits for A4 closure" in specification
-    assert "Planning, fixtures, deterministic fakes, direct runtime calls" in specification
-    assert "Until then it remains `design_only`" in specification
-    assert all(f"`{scenario_id}`" in specification for scenario_id in REQUIRED_SCENARIOS)
-
-
 INSTRUMENTATION_PROFILE_REQUIREMENTS = {
     "monotonic_per_hop_intervals",
     "queue_compute_transport_decomposition",

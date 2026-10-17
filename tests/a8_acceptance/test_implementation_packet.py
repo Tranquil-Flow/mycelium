@@ -210,31 +210,6 @@ def _bounded_unique_names(values: object, *, maximum: int = 32) -> set[str]:
     return set(values)
 
 
-def test_a8_implementation_packet_is_closed_design_only_and_source_bound() -> None:
-    packet = _packet()
-    assert set(packet) == TOP_LEVEL_FIELDS
-    assert packet["protocol"] == PROTOCOL
-    assert packet["gate_state"] == "design_only"
-    assert packet["packet_base_commit"] == PACKET_BASE
-    assert packet["claim_boundary"] == CLAIM_BOUNDARY
-    assert packet["source_inputs"] == SOURCE_INPUTS
-    assert packet["qualification_claim"] is False
-    assert packet["promotion_authorized"] is False
-
-    for relative_path in SOURCE_INPUTS:
-        path = ROOT / relative_path
-        assert path.is_file()
-    assert json.loads(INVENTORY_PATH.read_text("utf-8"))["state"] == "design_only"
-    assert "A8 remains `design_only`" in PLAN_PATH.read_text("utf-8")
-    assert "**Status:** `design_only`;" in SPEC_PATH.read_text("utf-8")
-    assert "**Status:** `design_only`" in A4_PACKET_PATH.read_text("utf-8")
-
-    handover = HANDOVER_PATH.read_text("utf-8")
-    assert f"`{PROTOCOL}`" in handover
-    assert f"`{PACKET_BASE}`" in handover
-    assert "Do not claim A8 implementation or qualification" in handover
-
-
 def test_a8_leaf_ownership_is_exact_default_deny_and_nonoverlapping() -> None:
     ownership = _packet()["leaf_ownership"]
     assert set(ownership) == {

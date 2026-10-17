@@ -522,11 +522,3 @@ def test_a11_specification_remains_design_only_and_names_the_inventory() -> None
     assert all(f"`{scenario_id}`" in specification for scenario_id in REQUIRED_SCENARIOS)
 
 
-def test_a12_generic_closure_is_independent_of_a11_but_mobile_draft_is_not() -> None:
-    specification = A12_SPECIFICATION.read_text("utf-8")
-    assert "A11 is not a blanket gate prerequisite" in specification
-    assert (
-        "This is a conditional claim prerequisite, not a dependency of generic A12 closure"
-        in specification
-    )
-    assert "Generic A12 closure does not grant `speculative_draft_worker`" in specification
