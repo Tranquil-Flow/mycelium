@@ -417,3 +417,77 @@ def test_whole_mode_verification_is_reported_as_its_own_phase(whole, acquiring, 
     assert (status['state'], status['detail']) == ('downloading_model', phase), status
     assert status['progress'] == {'done_bytes': 1_519_209_243, 'total_bytes': 1_519_209_243}
     assert (state['reports'][-1]['state'], state['reports'][-1]['detail']) == ('downloading_model', phase)
+
+
+A9 = {'choice': None, 'model_id': 'Qwen/Qwen2.5-0.5B-Instruct',
+      'resolved_commit': '7ae557604adf67be50417f59c2c2f167def9a775'}
+
+
+def _a9_world(whole, monkeypatch, tmp_path, env='a9-route', model=None, **extra):
+    app, agent, gate, state, calls = whole
+    app.acquisition = Acquisition(A9['model_id'], A9['resolved_commit'])
+    if env:
+        monkeypatch.setenv('MYCELIUM_A13_RUN_MODEL', env)
+    else:
+        monkeypatch.delenv('MYCELIUM_A13_RUN_MODEL', raising=False)
+    orig = app.action
+    def action(path, body):
+        if path == '/api/run-model':  # the app's real picker handler
+            from mycelium_a13_macos.app import DemoApp
+            DemoApp._choose_run_model(type('R', (), {'root': app.root})(), body)
+        return orig(path, body)
+    app.action = action
+    state['a'] = announcement('collect', slice_mode=False, model=model or dict(A9))
+    return app, agent, gate, state, calls
+
+
+def test_a9_producer_has_no_picker_choice():
+    from mycelium_a13_macos.run_model import choice_for_model
+    from mycelium_a13_macos.serving import A9_ROUTE_MODEL
+    assert choice_for_model(A9_ROUTE_MODEL) is None
+
+
+def test_environment_selected_a9_model_downloads_without_a_picker_post(whole, monkeypatch, tmp_path):
+    app, agent, gate, state, calls = _a9_world(whole, monkeypatch, tmp_path)
+    assert agent.tick()['state'] == 'downloading_model'
+    assert [p for p, _ in app.actions] == ['/api/model/download']
+    app.acquisition.state = 'prepared'
+    assert agent.tick()['state'] == 'reported' and len(calls) == 1
+
+
+def test_a9_without_the_environment_lock_stays_unknown_and_posts_nothing(whole, monkeypatch, tmp_path):
+    app, agent, gate, state, calls = _a9_world(whole, monkeypatch, tmp_path, env=None)
+    status = agent.tick()
+    assert (status['state'], status['detail']) == ('error', 'demo_model_choice_unknown')
+    assert app.actions == []
+
+
+@pytest.mark.parametrize('bad', [
+    {'model_id': 'Qwen/Qwen2.5-0.5B-Instruct', 'resolved_commit': 'b' * 40},   # revision
+    {'model_id': 'Qwen/Qwen2.5-7B-Instruct', 'resolved_commit': 'a09a35458c702b33eeacc393d103063234e8bc28'},
+    {'model_id': 'Qwen/Qwen3-0.6B', 'resolved_commit': 'c' * 40},               # unregistered
+])
+def test_environment_lock_never_accepts_another_announced_model(whole, monkeypatch, tmp_path, bad):
+    app, agent, gate, state, calls = _a9_world(whole, monkeypatch, tmp_path, model={'choice': None, **bad})
+    status = agent.tick()
+    assert (status['state'], status['detail']) == ('error', 'demo_model_choice_unknown')
+    assert app.actions == []
+
+
+def test_environment_lock_refuses_a_different_picker_choice(whole, monkeypatch, tmp_path):
+    app, agent, gate, state, calls = _a9_world(whole, monkeypatch, tmp_path, model={
+        'choice': 'qwen3-0.6b', 'model_id': 'Qwen/Qwen3-0.6B', 'resolved_commit': 'c' * 40})
+    status = agent.tick()
+    assert (status['state'], status['detail']) == ('error', 'run_model_locked_by_environment')
+    assert app.actions == []  # the app's picker refused it; no download was started
+
+
+def test_environment_model_with_another_quantization_is_not_the_registered_contract(whole, monkeypatch, tmp_path):
+    import dataclasses
+    from mycelium_a13_macos import serving
+    app, agent, gate, state, calls = _a9_world(whole, monkeypatch, tmp_path)
+    drifted = dataclasses.replace(serving.A9_ROUTE_MODEL, runtime_quantization='none')
+    monkeypatch.setitem(serving._RUN_MODEL_NAMES, 'a9-route', drifted)
+    status = agent.tick()
+    assert (status['state'], status['detail']) == ('error', 'demo_model_choice_unknown')
+    assert app.actions == []

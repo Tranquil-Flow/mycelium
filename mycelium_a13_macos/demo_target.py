@@ -504,12 +504,13 @@ class DemoTargetAgent:
             self._retry_at = None
         if not self._consent('model_download'):
             return False
-        choice = model.get('choice')
-        if not choice:
-            self._set('error', 'demo_model_choice_unknown')
-            return False
         cap = int(self.consent.storage_cap(self.app))
-        self.app.action('/api/run-model', {'choice': choice})
+        if not self._environment_selects(model):
+            choice = model.get('choice')
+            if not choice:
+                self._set('error', 'demo_model_choice_unknown')
+                return False
+            self.app.action('/api/run-model', {'choice': choice})
         # Same consent and cap; only where the bytes come from (the owner's Mac
         # first, Hugging Face as the pinned fallback -- peer_model_source.py).
         setter = getattr(self.app.acquisition, 'set_byte_source', None)
@@ -520,6 +521,23 @@ class DemoTargetAgent:
         self._download_for = want
         self._set('downloading_model', None, {'done_bytes': 0, 'total_bytes': 0})
         return False
+
+    def _environment_selects(self, model: Mapping[str, Any]) -> bool:
+        """True when the environment already pins exactly the announced registered model.
+
+        An environment-selected model (``MYCELIUM_A13_RUN_MODEL``) locks the
+        picker and may have no picker choice (a9-route), so there is nothing to
+        POST.  Any other case -- no lock, another revision, or a contract that
+        differs from the registered one -- keeps the picker path and its refusals.
+        """
+        from .run_model import app_run_model
+        from .serving import registered_model_contract
+        try:
+            _, source, current = app_run_model(self.app.root)
+            registered = registered_model_contract(model.get('model_id'), model.get('resolved_commit'))
+        except Exception:
+            return False
+        return source == 'environment' and current == registered
 
     def _peer_source(self, a: Mapping[str, Any]) -> Any:
         """The owner-served byte source for this run, or ``None`` (pinned origin only)."""
