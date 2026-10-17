@@ -52,14 +52,23 @@ Subcommands (every output is an owner-private file under ``--out``, mode 0700/06
 
 ``negatives``
     Executes the runtime-batch negatives the product API can drive
-    (cancellation isolation, queue overflow, slow consumer) and records every other
-    required negative as ``not_executed`` with its reason, which blocks
-    qualification until a fault hook executes it.
+    (cancellation isolation, queue overflow, slow consumer) and, under the exact
+    fleet grant, the other nine through the opt-in fault hooks of
+    ``mycelium_router.a10_fault_hooks`` (timeout, incompatible member, stale prefix,
+    partial member failure, shared backend failure, wrong result count, runtime
+    exit, shutdown, verifier rollback).  A hook negative is executed on CPU and is
+    recorded ``surface = cpu_fault_hook``, ``physical_pending = true``; without the
+    grant (or with ``--no-fault-hooks``) it is recorded ``not_executed`` with its
+    reason, which blocks qualification.
 
 ``qualify``
     Assembles the evidence written by the other subcommands and decides it with
     ``qualify_runtime_batch``; ``gate-decision.json`` binds that sealed bundle to
-    gate 1's browser-session evidence and is qualified only when both are.
+    gate 1's browser-session evidence and is qualified only when both are.  A
+    negative executed only through a CPU fault hook is listed in
+    ``physical_negatives_pending`` and blocks the decision
+    (``physical_negative_execution_pending:<case>``) unless the owner passes
+    ``--accept-cpu-fault-hook-negatives``; the list is never hidden.
 
 No output contains a prompt, decoded text, token IDs, cookies, hostnames,
 addresses, private paths or exception strings.
@@ -93,6 +102,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
    sys.path.insert(0, str(REPO_ROOT))
 
+from mycelium_router.a10_fault_hooks import FAULT_KINDS, A10FaultHookRefused, A10FaultHooks
+from mycelium_router.a10_fault_negatives import CPU_SURFACE, run_fault_negative
 from mycelium_router.a10_qualification import (
    REQUIRED_RUNTIME_BATCH_NEGATIVES,
    RESIDUAL_RESOURCE_FIELDS,
@@ -1361,8 +1372,29 @@ class BrowserSessionsPhase:
 # ---------------------------------------------------------------------------
 
 
-def run_product_negatives(client: Any, *, out: Path) -> dict[str, Any]:
-   """Execute the negatives the product API can drive; record the rest honestly."""
+def fault_negative_runner(grant: object) -> Callable[[str], dict[str, Any]]:
+   """The CPU fault-hook executor for one gate run; refuses without the exact grant."""
+
+   try:
+      A10FaultHooks(grant=grant)
+   except A10FaultHookRefused:
+      raise GateError("explicit_fleet_grant_required") from None
+   return lambda kind: run_fault_negative(kind, grant=grant)
+
+
+def run_product_negatives(
+   client: Any,
+   *,
+   out: Path,
+   fault_runner: Callable[[str], Mapping[str, Any]] | None = None,
+   fault_unavailable_reason: str = "requires_fault_hook",
+) -> dict[str, Any]:
+   """Execute the negatives the product API drives, then the fault-hook negatives.
+
+   Every required negative is recorded.  One that has no executor stays
+   ``not_executed`` with its reason (never a pass); a hook that raises is recorded
+   ``violated`` by code only, never by exception text.
+   """
 
    results: dict[str, dict[str, Any]] = {}
    shape = RequestShape(0, "prompt_short", "output_long", "interactive", 0.0)
@@ -1375,10 +1407,21 @@ def run_product_negatives(client: Any, *, out: Path) -> dict[str, Any]:
    if hasattr(client, "slow_consumer"):
       results["slow_consumer"] = client.slow_consumer(shape)
    for case_id in REQUIRED_RUNTIME_BATCH_NEGATIVES:
-      results.setdefault(
-         case_id,
-         {"outcome": "not_executed", "reason": "requires_fault_hook", "residue": None},
-      )
+      if case_id in results:
+         continue
+      if fault_runner is not None and case_id in FAULT_KINDS:
+         try:
+            results[case_id] = dict(fault_runner(case_id))
+         except Exception:  # noqa: BLE001 - a hook failure is recorded by code only
+            results[case_id] = {
+               "outcome": "violated",
+               "reason": "fault_hook_raised",
+               "residue": None,
+               "surface": CPU_SURFACE,
+               "physical_pending": True,
+            }
+         continue
+      results[case_id] = {"outcome": "not_executed", "reason": fault_unavailable_reason, "residue": None}
    write_private_json(out / "negatives.json", results)
    return results
 
@@ -1443,23 +1486,41 @@ def assemble_and_qualify(out: Path, *, benchmark_manifest_digest: str, cross_hos
    return bundle
 
 
-def gate_decision(out: Path, bundle: Mapping[str, Any]) -> dict[str, Any]:
+def gate_decision(
+   out: Path,
+   bundle: Mapping[str, Any],
+   *,
+   accept_cpu_fault_hook_negatives: bool = False,
+) -> dict[str, Any]:
    """Gate-level decision: the runtime-batch bundle plus gate 1's browser sessions.
 
    The sealed runtime-batch bundle is left untouched; this document binds it and
-   the gate-1 browser evidence, and is ``qualified`` only when both are.
+   the gate-1 browser evidence, and is ``qualified`` only when both are.  A negative
+   that was executed only through a CPU fault hook (``physical_pending``) is listed
+   in ``physical_negatives_pending`` and blocks the decision unless the owner
+   explicitly accepted CPU hook execution; the list is recorded either way.
    """
 
    summary = read_json(out / "benchmark-summary.json") if (out / "benchmark-summary.json").is_file() else {}
    browser = summary.get("browser_sessions") if isinstance(summary, Mapping) else None
+   negatives = read_json(out / "negatives.json") if (out / "negatives.json").is_file() else {}
+   pending = sorted(
+      case_id
+      for case_id, result in (negatives.items() if isinstance(negatives, Mapping) else ())
+      if isinstance(result, Mapping) and result.get("physical_pending") is True
+   )
    blockers = list(bundle.get("blockers", []))
    if not isinstance(browser, Mapping) or browser.get("passed") is not True:
       blockers.append("browser_sessions_not_proven")
+   if not accept_cpu_fault_hook_negatives:
+      blockers.extend(f"physical_negative_execution_pending:{case_id}" for case_id in pending)
    decision = {
       "protocol": GATE_PROTOCOL,
       "subcommand": "qualify",
       "runtime_batch_qualification_binding": bundle.get("qualification_binding"),
       "browser_sessions_digest": _sha256_json(browser) if isinstance(browser, Mapping) else None,
+      "physical_negatives_pending": pending,
+      "cpu_fault_hook_negatives_accepted": bool(accept_cpu_fault_hook_negatives),
       "decision": "qualified" if bundle.get("decision") == "qualified" and not blockers else "not_qualified",
       "blockers": sorted(set(blockers)),
    }
@@ -1651,11 +1712,21 @@ def parser() -> argparse.ArgumentParser:
    negative = sub.add_parser("negatives")
    negative.add_argument("--base-url", required=True)
    negative.add_argument("--out", type=Path, required=True)
+   negative.add_argument(
+      "--no-fault-hooks",
+      action="store_true",
+      help="record the nine fault-hook negatives as not_executed instead of running them on CPU",
+   )
    qualify = sub.add_parser("qualify")
    qualify.add_argument("--out", type=Path, required=True)
    qualify.add_argument("--benchmark-manifest-digest", required=True)
    qualify.add_argument("--cross-host-clock-uncertainty", type=float, required=True)
    qualify.add_argument("--provenance", choices=("live", "fixture"), default="live")
+   qualify.add_argument(
+      "--accept-cpu-fault-hook-negatives",
+      action="store_true",
+      help="owner acceptance of negatives executed only through the CPU fault hooks",
+   )
    return root
 
 
@@ -1747,7 +1818,19 @@ def main(argv: Sequence[str] | None = None) -> int:
          )
          return 0
       if arguments.command == "negatives":
-         results = run_product_negatives(client, out=out)
+         fault_runner: Callable[[str], Mapping[str, Any]] | None = None
+         unavailable = "requires_fault_hook"
+         if not arguments.no_fault_hooks:
+            from mycelium_a10_verify_control import grant_from_environment
+
+            grant = grant_from_environment()
+            if grant is None:
+               unavailable = "fault_hook_grant_missing"
+            else:
+               fault_runner = fault_negative_runner(grant)
+         results = run_product_negatives(
+            client, out=out, fault_runner=fault_runner, fault_unavailable_reason=unavailable
+         )
          print(json.dumps({case: item["outcome"] for case, item in sorted(results.items())}, sort_keys=True))
          return 0
       bundle = assemble_and_qualify(
@@ -1756,8 +1839,19 @@ def main(argv: Sequence[str] | None = None) -> int:
          cross_host_clock_uncertainty=arguments.cross_host_clock_uncertainty,
          provenance=arguments.provenance,
       )
-      decision = gate_decision(out, bundle)
-      print(json.dumps({"decision": decision["decision"], "blockers": decision["blockers"]}, sort_keys=True))
+      decision = gate_decision(
+         out, bundle, accept_cpu_fault_hook_negatives=arguments.accept_cpu_fault_hook_negatives
+      )
+      print(
+         json.dumps(
+            {
+               "decision": decision["decision"],
+               "blockers": decision["blockers"],
+               "physical_negatives_pending": decision["physical_negatives_pending"],
+            },
+            sort_keys=True,
+         )
+      )
       return 0 if decision["decision"] == "qualified" else 1
    except GateError as error:
       print(json.dumps({"error": str(error)}), file=sys.stderr)

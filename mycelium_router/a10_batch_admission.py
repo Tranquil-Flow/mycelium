@@ -630,11 +630,14 @@ class RuntimeBatchAdmission:
       if not self._queue:
          _reject("empty_batch_queue")
       batch_ref = f"batch:{self._batch_sequence + 1}"
+      # Taken before cancellation removal: every queued member may be removed below,
+      # and the empty collection still names the phase and key of what was queued.
+      head = self._queue[0]
       eligible, cancelled = self._eligible(now=now)
       if not eligible:
          return self._collection(
             batch_ref=batch_ref,
-            anchor=self._queue[0],
+            anchor=head,
             selected=(),
             excluded=cancelled,
             reason="no_eligible_members",
