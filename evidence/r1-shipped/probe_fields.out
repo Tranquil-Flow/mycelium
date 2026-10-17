@@ -1,0 +1,119 @@
+<module>: differing fields = ['co_code', 'co_names', 'co_linetable', 'co_consts(non-code)']
+    names added: ['BUSY_BODY', 'BUSY_RESPONSE', 'encode', 'len', 'socket', 'str']  removed: []
+    co_code len 360 -> 472
+    consts added: ['ascii', b'HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: ', b'\r\nConnection: close\r\nCache-Control: no-store\r\nRetry-After: 1\r\n\r\n', b'{"error":"server_busy"}']
+    consts removed: []
+<module>.DemoApp: differing fields = ['co_code', 'co_firstlineno']
+    co_code len 148 -> 148
+    firstlineno 206 -> 229
+<module>.DemoApp.__init__: differing fields = ['co_firstlineno']
+    firstlineno 207 -> 230
+<module>.DemoApp._cancel_acquisition: differing fields = ['co_firstlineno']
+    firstlineno 367 -> 390
+<module>.DemoApp._open_acquisition: differing fields = ['co_firstlineno']
+    firstlineno 305 -> 328
+<module>.DemoApp._policy_loop: differing fields = ['co_firstlineno']
+    firstlineno 372 -> 395
+<module>.DemoApp._renew_loop: differing fields = ['co_firstlineno']
+    firstlineno 342 -> 365
+<module>.DemoApp._resource_check: differing fields = ['co_firstlineno']
+    firstlineno 353 -> 376
+<module>.DemoApp._resource_check.<genexpr>: differing fields = ['co_firstlineno']
+    firstlineno 360 -> 383
+<module>.DemoApp._start_local_contributor: differing fields = ['co_firstlineno']
+    firstlineno 330 -> 353
+<module>.DemoApp._stop_local_contributor: differing fields = ['co_firstlineno']
+    firstlineno 337 -> 360
+<module>.DemoApp.action: differing fields = ['co_code', 'co_firstlineno', 'co_linetable', 'co_exceptiontable']
+    co_code len 13026 -> 13030
+    firstlineno 414 -> 437
+<module>.DemoApp.action.admitted: differing fields = ['co_firstlineno']
+    firstlineno 548 -> 571
+<module>.DemoApp.action.authorize: differing fields = ['co_firstlineno']
+    firstlineno 595 -> 618
+<module>.DemoApp.close: differing fields = ['co_firstlineno']
+    firstlineno 743 -> 766
+<module>.DemoApp.make_launch_file: differing fields = ['co_firstlineno']
+    firstlineno 318 -> 341
+<module>.DemoApp.origin: differing fields = ['co_firstlineno']
+    firstlineno 240 -> 263
+<module>.DemoApp.port: differing fields = ['co_firstlineno']
+    firstlineno 238 -> 261
+<module>.DemoApp.start: differing fields = ['co_firstlineno']
+    firstlineno 243 -> 266
+<module>.DemoApp.status: differing fields = ['co_firstlineno']
+    firstlineno 393 -> 416
+<module>.DemoError: differing fields = ['co_code', 'co_firstlineno']
+    co_code len 22 -> 22
+    firstlineno 31 -> 42
+<module>._Handler: differing fields = ['co_firstlineno', 'co_consts(non-code)']
+    consts added: [799]
+    consts removed: [776]
+    firstlineno 776 -> 799
+<module>._Handler.app: differing fields = ['co_firstlineno']
+    firstlineno 781 -> 804
+<module>._Handler.authorized: differing fields = ['co_firstlineno']
+    firstlineno 799 -> 822
+<module>._Handler.base_guard: differing fields = ['co_firstlineno']
+    firstlineno 793 -> 816
+<module>._Handler.do_GET: differing fields = ['co_firstlineno']
+    firstlineno 809 -> 832
+<module>._Handler.do_POST: differing fields = ['co_firstlineno']
+    firstlineno 824 -> 847
+<module>._Handler.do_POST.<lambda>: differing fields = ['co_firstlineno']
+    firstlineno 882 -> 905
+<module>._Handler.do_POST.<lambda>.<genexpr>: differing fields = ['co_firstlineno']
+    firstlineno 882 -> 905
+<module>._Handler.do_POST.pairs: differing fields = ['co_firstlineno']
+    firstlineno 876 -> 899
+<module>._Handler.fail: differing fields = ['co_firstlineno']
+    firstlineno 792 -> 815
+<module>._Handler.log_message: differing fields = ['co_firstlineno']
+    firstlineno 780 -> 803
+<module>._Handler.send_value: differing fields = ['co_firstlineno']
+    firstlineno 783 -> 806
+<module>._Handler.setup: differing fields = ['co_firstlineno']
+    firstlineno 778 -> 801
+<module>._Server: differing fields = ['co_code', 'co_names', 'co_firstlineno', 'co_linetable']
+    names added: ['answer_busy']  removed: []
+    co_code len 82 -> 88
+    firstlineno 185 -> 196
+<module>._Server.__init__: differing fields = ['co_firstlineno']
+    firstlineno 189 -> 200
+<module>._Server.answer_busy: ADDED in .83 (absent in .82)
+<module>._Server.handle_error: differing fields = ['co_firstlineno']
+    firstlineno 201 -> 224
+<module>._Server.process_request: differing fields = ['co_code', 'co_names', 'co_firstlineno', 'co_linetable', 'co_exceptiontable']
+    names added: ['answer_busy']  removed: []
+    co_code len 228 -> 262
+    firstlineno 192 -> 215
+<module>._Server.process_request_thread: differing fields = ['co_firstlineno']
+    firstlineno 198 -> 221
+<module>.bounded_action_failure: differing fields = ['co_firstlineno']
+    firstlineno 153 -> 164
+<module>.bounded_failure_locus: differing fields = ['co_firstlineno']
+    firstlineno 129 -> 140
+<module>.consent_valid: differing fields = ['co_firstlineno']
+    firstlineno 75 -> 86
+<module>.model_contract: differing fields = ['co_firstlineno']
+    firstlineno 27 -> 38
+<module>.preflight: differing fields = ['co_firstlineno']
+    firstlineno 35 -> 46
+<module>.private_dir: differing fields = ['co_firstlineno']
+    firstlineno 50 -> 61
+<module>.private_write: differing fields = ['co_firstlineno']
+    firstlineno 61 -> 72
+<module>.public_failure_code: differing fields = ['co_firstlineno']
+    firstlineno 143 -> 154
+<module>.read_resource_policy: differing fields = ['co_firstlineno']
+    firstlineno 91 -> 102
+<module>.reopen_native: differing fields = ['co_firstlineno']
+    firstlineno 106 -> 117
+
+bytes consts present in BOTH builds: 2
+  samples: [b'', b'{}']
+bytes consts ONLY in .83: 3
+    b'HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: '
+    b'\r\nConnection: close\r\nCache-Control: no-store\r\nRetry-After: 1\r\n\r\n'
+    b'{"error":"server_busy"}'
+bytes consts ONLY in .82: 0

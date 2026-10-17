@@ -1,0 +1,121 @@
+====================================================================================================
+VARIANT: bare (this task's NEW/OLD)
+  NEW: /Users/evinova-self/Documents/mycelium-core-program/runs/wp8-02-g1/dist/0.1.0-preview.83/Mycelium A13 Demo/Mycelium A13 Demo
+  OLD: /Users/evinova-self/Documents/mycelium-core-program/runs/wp8-02-g1/dist/0.1.0-preview.82/Mycelium A13 Demo/Mycelium A13 Demo
+  sha256 NEW: 81cfa0c8b25a017ea52bb735dfdb0d8d61be1f990a45e9be6df18e3d302af299
+  sha256 OLD: f6cfb56c8f8d7c9cdf517825c50058be2516ae3a0706dea19275668b75dd1ad9
+  PYZ magic at offset 119947 (new) / 119947 (old); modules in TOC: .83=1888 .82=1888
+
+  module                                     role       identical?  verdict   (decompressed bytes)
+  ----------------------------------------------------------------------------------------------
+  mycelium_a13_macos.app                     TOUCHED    False       DIFFERS as expected   (71255 -> 72286)
+  mycelium_a13_macos.serving                 control    True        identical as expected   (33504 -> 33504)
+  mycelium_a13_macos.workflow                control    True        identical as expected   (23086 -> 23086)
+  mycelium_a13_macos.control_session         control    True        identical as expected   (39431 -> 39431)
+  mycelium_a13_macos.managed_observations    control    True        identical as expected   (14505 -> 14505)
+  mycelium_live.route                        control    True        identical as expected   (279375 -> 279375)
+  mycelium_seed.http                         control    True        identical as expected   (61179 -> 61179)
+
+  FULL SWEEP over every TOC module: compared=1888 differing=1 unreadable=0 only_in_.83=(none) only_in_.82=(none)
+    DIFFERS: mycelium_a13_macos.app   <-- R1 (touched)
+    -> ONLY the touched app module differs, across all 1888 modules
+
+  ATTRIBUTION on mycelium_a13_macos.app: are the changes R1's own?
+    name    answer_busy      .83=True  .82=False OK (new in .83, absent in .82)
+    name    BUSY_BODY        .83=True  .82=False OK (new in .83, absent in .82)
+    name    BUSY_RESPONSE    .83=True  .82=False OK (new in .83, absent in .82)
+    name    MSG_DONTWAIT     .83=True  .82=False OK (new in .83, absent in .82)
+    name    sendall          .83=True  .82=False OK (new in .83, absent in .82)
+    bytes   b'HTTP/1.1 503 Service Unavailable'  .83=True  .82=False OK
+    bytes   b'Content-Type: application/json'    .83=True  .82=False OK
+    bytes   b'Cache-Control: no-store'           .83=True  .82=False OK
+    bytes   b'Retry-After: 1'                    .83=True  .82=False OK
+    bytes   b'{"error":"server_busy"}'           .83=True  .82=False OK
+    ctrl-nm process_request  .83=True  .82=True  OK (present in both)
+    ctrl-nm shutdown_request .83=True  .82=True  OK (present in both)
+    ctrl-nm BoundedSemaphore .83=True  .82=True  OK (present in both)
+    ctrl-nm MAX_BODY         .83=True  .82=True  OK (present in both)
+    ctrl-by b'{}'                                .83=True  .82=True  OK (present in both)
+
+  SEMANTIC changes (name/const level; these ARE the diff's real content) -- 4:
+    <module>  [+names ['BUSY_BODY', 'BUSY_RESPONSE', 'encode', 'len', 'socket', 'str']]
+    <module>._Server  [+names ['answer_busy']]
+    <module>._Server.answer_busy  [ADDED]
+    <module>._Server.process_request  [+names ['answer_busy']]
+  code objects differing only below name/const level -- 4:
+    <module>.DemoApp
+    <module>.DemoApp.action
+    <module>.DemoError
+    <module>._Handler  [line-number const [776] -> [799]]
+    (co_firstlineno shifts from R1 inserting lines above them, and -- verified in
+     probe_import_repro.py -- CPython 3.14 emitting the plain LOAD_ATTR;PUSH_NULL;CALL
+     form instead of the method form for socket.socket() inside DemoApp.action, which
+     the compiler does once a MODULE-LEVEL `import socket` exists.  Same source line,
+     no R1 semantics.)
+
+====================================================================================================
+VARIANT: app bundle (.app) -- the file the chain's ledger read
+  NEW: /Users/evinova-self/Documents/mycelium-core-program/runs/wp8-02-g1/dist/0.1.0-preview.83/Mycelium A13 Demo.app/Contents/MacOS/Mycelium A13 Demo
+  OLD: /Users/evinova-self/Documents/mycelium-core-program/runs/wp8-02-g1/dist/0.1.0-preview.82/Mycelium A13 Demo.app/Contents/MacOS/Mycelium A13 Demo
+  sha256 NEW: 3508354d4173a12058f370d994cbba7def8b973382c82d13f24bb7825c97f777
+  sha256 OLD: e6b53da909ce0303a4e3198e9dd80ce7aef1e72ce5278bd2285d900fc55639c3
+  PYZ magic at offset 119947 (new) / 119947 (old); modules in TOC: .83=1888 .82=1888
+
+  module                                     role       identical?  verdict   (decompressed bytes)
+  ----------------------------------------------------------------------------------------------
+  mycelium_a13_macos.app                     TOUCHED    False       DIFFERS as expected   (71255 -> 72286)
+  mycelium_a13_macos.serving                 control    True        identical as expected   (33504 -> 33504)
+  mycelium_a13_macos.workflow                control    True        identical as expected   (23086 -> 23086)
+  mycelium_a13_macos.control_session         control    True        identical as expected   (39431 -> 39431)
+  mycelium_a13_macos.managed_observations    control    True        identical as expected   (14505 -> 14505)
+  mycelium_live.route                        control    True        identical as expected   (279375 -> 279375)
+  mycelium_seed.http                         control    True        identical as expected   (61179 -> 61179)
+
+  FULL SWEEP over every TOC module: compared=1888 differing=1 unreadable=0 only_in_.83=(none) only_in_.82=(none)
+    DIFFERS: mycelium_a13_macos.app   <-- R1 (touched)
+    -> ONLY the touched app module differs, across all 1888 modules
+
+  ATTRIBUTION on mycelium_a13_macos.app: are the changes R1's own?
+    name    answer_busy      .83=True  .82=False OK (new in .83, absent in .82)
+    name    BUSY_BODY        .83=True  .82=False OK (new in .83, absent in .82)
+    name    BUSY_RESPONSE    .83=True  .82=False OK (new in .83, absent in .82)
+    name    MSG_DONTWAIT     .83=True  .82=False OK (new in .83, absent in .82)
+    name    sendall          .83=True  .82=False OK (new in .83, absent in .82)
+    bytes   b'HTTP/1.1 503 Service Unavailable'  .83=True  .82=False OK
+    bytes   b'Content-Type: application/json'    .83=True  .82=False OK
+    bytes   b'Cache-Control: no-store'           .83=True  .82=False OK
+    bytes   b'Retry-After: 1'                    .83=True  .82=False OK
+    bytes   b'{"error":"server_busy"}'           .83=True  .82=False OK
+    ctrl-nm process_request  .83=True  .82=True  OK (present in both)
+    ctrl-nm shutdown_request .83=True  .82=True  OK (present in both)
+    ctrl-nm BoundedSemaphore .83=True  .82=True  OK (present in both)
+    ctrl-nm MAX_BODY         .83=True  .82=True  OK (present in both)
+    ctrl-by b'{}'                                .83=True  .82=True  OK (present in both)
+
+  SEMANTIC changes (name/const level; these ARE the diff's real content) -- 4:
+    <module>  [+names ['BUSY_BODY', 'BUSY_RESPONSE', 'encode', 'len', 'socket', 'str']]
+    <module>._Server  [+names ['answer_busy']]
+    <module>._Server.answer_busy  [ADDED]
+    <module>._Server.process_request  [+names ['answer_busy']]
+  code objects differing only below name/const level -- 4:
+    <module>.DemoApp
+    <module>.DemoApp.action
+    <module>.DemoError
+    <module>._Handler  [line-number const [776] -> [799]]
+    (co_firstlineno shifts from R1 inserting lines above them, and -- verified in
+     probe_import_repro.py -- CPython 3.14 emitting the plain LOAD_ATTR;PUSH_NULL;CALL
+     form instead of the method form for socket.socket() inside DemoApp.action, which
+     the compiler does once a MODULE-LEVEL `import socket` exists.  Same source line,
+     no R1 semantics.)
+
+====================================================================================================
+OVERALL RESULT: the R1 module differs by exactly R1 and every control is identical, in BOTH exe variants
+
+WHAT THIS DOES NOT PROVE:
+  * NOT that the copy deployed to the laptop carries R1 -- only these two dist trees
+    were read.  (The chain's [6/6] digest compare covers the COPY, not the content.)
+  * NOT that the app EXERCISES the 503 path at runtime, nor that the refusal is
+    correct under a real saturated accept loop; that needs a live round, which was
+    not run.  This is a statement about bytes at rest.
+  * NOT that the R1 hunk is sufficient for the round it was written for.
+  * NOT anything about the previews' retained evidence beyond these two executables.

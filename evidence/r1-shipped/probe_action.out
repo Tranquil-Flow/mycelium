@@ -1,0 +1,17 @@
+DemoApp.action opname-only sequences identical? False
+  instruction counts: .82=2672  .83=2674
+  first differing opname indices: [767, 768, 769, 770, 772, 773, 774, 775, 776, 777, 778, 779, 780, 781, 782, 783, 784, 785, 786, 789]
+    idx 767: .82=CALL .83=PUSH_NULL
+    idx 768: .82=COPY .83=CALL
+    idx 769: .82=LOAD_SPECIAL .83=COPY
+    idx 770: .82=SWAP .83=LOAD_SPECIAL
+    idx 772: .82=LOAD_SPECIAL .83=SWAP
+    idx 773: .82=CALL .83=LOAD_SPECIAL
+    idx 774: .82=STORE_FAST .83=CALL
+    idx 775: .82=LOAD_FAST_BORROW .83=STORE_FAST
+    idx 776: .82=LOAD_ATTR .83=LOAD_FAST_BORROW
+    idx 777: .82=LOAD_CONST .83=LOAD_ATTR
+DemoApp.action opcode-number sequences identical? False
+DemoApp.action relative code-const line offsets identical? True
+  .82 offsets: [('admitted', 134), ('authorize', 181)]
+  .83 offsets: [('admitted', 134), ('authorize', 181)]
