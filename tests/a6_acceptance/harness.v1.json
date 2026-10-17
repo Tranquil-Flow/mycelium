@@ -1,0 +1,50 @@
+{
+  "protocol": "mycelium.a6_deterministic_recovery_harness.v1",
+  "gate_state": "design_only",
+  "evidence_kind": "deterministic_fixture",
+  "claim_boundary": "test-only reference behavior; never replay implementation, product integration, physical recovery evidence, qualification, or promotion",
+  "depends_on": ["A4"],
+  "coverage": [
+    "committed_delivery_authority",
+    "full_context_replay",
+    "exact_request_attempt_fencing",
+    "duplicate_output_prevention",
+    "failure_scope",
+    "cleanup"
+  ],
+  "production_interfaces_required_after_a4": [
+    {
+      "interface_id": "a6.gateway_private_replay_checkpoint_and_delivery_cas.v1",
+      "owner": "request_gateway",
+      "capability": "freeze canonical prompt, settings, exact committed prefix and atomic delivery-ledger watermark"
+    },
+    {
+      "interface_id": "a6.observed_failure_input.v1",
+      "owner": "a4_liveness_authority",
+      "capability": "supply observed request, path and attempt scoped failure without recovery-authored widening"
+    },
+    {
+      "interface_id": "a6.current_successor_qualification.v1",
+      "owner": "qualifier",
+      "capability": "admit one current exact compatible complete successor path"
+    },
+    {
+      "interface_id": "a6.request_recovery_cutover_cas.v1",
+      "owner": "router",
+      "capability": "advance exactly one request attempt and path generation while fencing the source"
+    },
+    {
+      "interface_id": "mycelium.full_context_recovery_runtime.v1",
+      "owner": "runtime",
+      "capability": "reconstruct from prompt plus committed prefix, suppress replay output and expose only the next position"
+    },
+    {
+      "interface_id": "a6.terminal_and_owner_cleanup_cas.v1",
+      "owner": "request_gateway_router_runtime",
+      "capability": "publish one terminal result and release each source and successor live resource exactly once"
+    }
+  ],
+  "physical_recovery_evidence": false,
+  "qualification_claim": false,
+  "promotion_authorized": false
+}
