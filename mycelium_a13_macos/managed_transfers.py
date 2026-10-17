@@ -5,14 +5,17 @@ fetch files, authorize a load, write a plan or claim remote cache readiness.
 Targets independently confine, hash and authorize every local copy. Only the
 unchanged pinned BF16 source is supported; transformed/sharded sources need a
 separate explicit representation contract rather than an implicit fallback.
-The source may be the Qwen2.5 7B candidate or any registered demo run model
-(run_model.py); the member roots must be that model's pinned snapshot path.
+The source may be any model in ``serving.REGISTERED_MODELS`` (the 7B candidate, the
+A9 0.5B route model, the Qwen3 demo sizes) -- the same registry every sibling gate
+uses; the member roots must be that model's pinned snapshot path.  The demo-picker
+``run_model.CHOICES`` is a UI subset of that registry and must not gate binding
+(attempt09: the A9 route model was registered but had no picker choice).
 """
 from __future__ import annotations
 import json
 from pathlib import PurePosixPath
 
-from .serving import CANDIDATE_MODEL, PreparedSource
+from .serving import REGISTERED_MODELS, PreparedSource
 
 
 def bind_hf_prepositions(controller, *, prepared, target_source_roots):
@@ -24,11 +27,10 @@ def bind_hf_prepositions(controller, *, prepared, target_source_roots):
     required before signing/publishing and at the receiving target.
     """
     import model_manifest as mm
-    from .run_model import choice_for_model
     try:
         model = getattr(prepared, 'model', None)
         if (not isinstance(prepared, PreparedSource)
-                or (model != CANDIDATE_MODEL and choice_for_model(model) is None)
+                or model not in REGISTERED_MODELS
                 or not mm.verify_manifest_digest(prepared.manifest)
                 or mm.manifest_digest_ref(prepared.manifest) != prepared.manifest_digest
                 or prepared.manifest['model_id'] != model.model_id
