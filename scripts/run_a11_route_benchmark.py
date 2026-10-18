@@ -26,7 +26,7 @@ Subcommands (every output is an owner-private file under ``--out``, mode 0700/06
     reason when a threshold is missed.  The result is validated by
     ``mycelium_speculative_decode.validate_speculative_decode_benchmark``.
 
-The frozen protocol (pre-registration draft ``runs/v2/pm-a11/PREREG-R9.md``): one
+The frozen protocol (pre-registration ``runs/v2/pm-a11/PREREG-R10.md``): one
 unscored warmup per mode, then windows A B B A A B (A = target-only), each window
 12 completed requests over two prompt-length and two output-length buckets and at
 least 384 target-committed tokens.  Requests run one at a time (interactive,
@@ -567,7 +567,7 @@ def _speculation_totals(requests: Sequence[Mapping[str, Any]]) -> dict[str, Any]
 
 
 def run_product(args: argparse.Namespace) -> dict[str, Any]:
-    from scripts.run_a5_benchmark_gate import ProductSession
+    from scripts.run_a5_benchmark_gate import ProductSession, RotatingProductSessions
 
     out = _private_directory(Path(args.out))
     session = ProductSession(args.base_url)
@@ -575,10 +575,11 @@ def run_product(args: argparse.Namespace) -> dict[str, Any]:
     features = bootstrap.get("features") if isinstance(bootstrap, Mapping) else None
     if not isinstance(features, Mapping) or features.get("speculation_preference") is not True:
         raise RunError("product_speculation_unavailable")
+    sessions = RotatingProductSessions(session, args.base_url)
     shapes = window_workload(quick=args.quick)
 
     def run(shape: RequestShape, mode: str) -> RequestResult:
-        child = session.fork()
+        child = sessions.fork_for_submission()
         submitted = time.monotonic()
         body = {
             "protocol": "mycelium.request_gateway.v2",

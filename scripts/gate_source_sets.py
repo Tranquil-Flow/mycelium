@@ -452,7 +452,7 @@ GATE_DEFINITIONS: tuple[GateDefinition, ...] = (
         external=(
             "runday/a11/a11_window.sh",
             "runday/a11/RUNDAY-A11.md",
-            "runday/a11/PREREG-R9.sha256",
+            "runday/a11/PREREG-R10.sha256",
             *_PREP_EXTERNAL,
         ),
         rationale="runday/a11/a11_window.sh: target-authoritative speculative route benchmark.",
