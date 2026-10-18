@@ -1,0 +1,182 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+"""Owned private-fleet stop/commit/adopt/restart transaction with readback.
+
+Deterministic fakes only: no fleet, no seed, no devices.  The fence tests use tmp
+decoy roots, never the production seed root.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+
+import pytest
+
+from mycelium_platform_neutral import seed_cutover_transaction as tx
+
+BEFORE = {"owned": True, "seed_pid": 100, "seed_birth": "b1", "listener_up": True,
+          "contract": "v1", "seed_key_digest": "sha256:" + "a" * 64, "swarm_id": "swarm",
+          "incumbent_digest": "sha256:" + "1" * 64,
+          "members": {"node-0": {"generation": 4, "pid": 101, "birth": "m0", "key_digest": "k0"},
+                      "node-2": {"generation": 7, "pid": 102, "birth": "m2", "key_digest": "k2"}}}
+
+
+def _after(**over):
+    doc = json.loads(json.dumps(BEFORE))
+    doc.update(seed_pid=200, seed_birth="b2", contract="v2", incumbent_digest="sha256:" + "2" * 64)
+    for node in doc["members"].values():
+        node["generation"] += 1
+        node["pid"] += 100
+    doc.update(over)
+    return doc
+
+
+class FakeFleet:
+    def __init__(self, tmp_path, *, stopped_ok=True, after=None, owned=True, rollback_after=None):
+        self.calls, self.stopped_ok, self.owned = [], stopped_ok, owned
+        self.after, self.rollback_after = after or _after(), rollback_after
+        self.committed = False
+        self.root = tmp_path / "fleet"
+
+    def readback(self):
+        self.calls.append("readback")
+        base = json.loads(json.dumps(BEFORE)) | {"owned": self.owned}
+        return json.loads(json.dumps(self.after)) if self.committed else base
+
+    def stop(self):
+        self.calls.append("stop")
+        return {"seed_listener_absent": self.stopped_ok, "owned_pids_alive": [] if self.stopped_ok else [100]}
+
+    def start(self, epoch):
+        self.calls.append(f"start:{epoch.name}")
+        assert epoch.is_dir()
+        return self.readback() if self.committed else (
+            self.rollback_after or json.loads(json.dumps(BEFORE)) | {"seed_pid": 300, "seed_birth": "b3"})
+
+
+def _run(fleet, tmp_path, cutover=None, adopt=None, **kw):
+    def commit():
+        fleet.calls.append("cutover")
+        if cutover:
+            cutover()
+        fleet.committed = True
+    return tx.run_seed_cutover(
+        fleet, cutover=commit, adopt=adopt or {"node-0": lambda: fleet.calls.append("adopt:node-0"),
+                                               "node-2": lambda: fleet.calls.append("adopt:node-2")},
+        epoch_parent=tmp_path / "epochs", forbidden_roots=(tmp_path / "production",), owned_root=fleet.root, **kw)
+
+
+def test_happy_path_orders_stop_commit_adopt_restart_and_reads_back_identity(tmp_path):
+    fleet = FakeFleet(tmp_path)
+    receipt = _run(fleet, tmp_path)
+    assert fleet.calls == ["readback", "stop", "cutover", "adopt:node-0", "adopt:node-2", "start:restart-1", "readback"] or \
+        fleet.calls == ["readback", "stop", "cutover", "adopt:node-0", "adopt:node-2", "start:restart-1"]
+    assert receipt["status"] == "COMMITTED_VERIFIED"
+    assert receipt["after"]["seed_pid"] != receipt["before"]["seed_pid"]
+    assert receipt["checks"]["member_generations_advanced_by_one"] is True
+    assert receipt["checks"]["identity_preserved"] is True
+    assert receipt["restart_epoch"] == "restart-1"
+
+
+def test_unconfirmed_stop_refuses_before_any_cutover(tmp_path):
+    fleet = FakeFleet(tmp_path, stopped_ok=False)
+    receipt = _run(fleet, tmp_path)
+    assert receipt["status"] == "REFUSED" and receipt["reason"] == "stop_not_confirmed"
+    assert "cutover" not in fleet.calls and not any(c.startswith("start") for c in fleet.calls)
+
+
+def test_unowned_fleet_is_never_stopped(tmp_path):
+    fleet = FakeFleet(tmp_path, owned=False)
+    receipt = _run(fleet, tmp_path)
+    assert receipt["status"] == "REFUSED" and receipt["reason"] == "fleet_not_owned"
+    assert "stop" not in fleet.calls
+
+
+def test_cutover_failure_restarts_the_unchanged_incumbent_and_proves_it(tmp_path):
+    fleet = FakeFleet(tmp_path)
+    def boom():
+        raise RuntimeError("cutover refused")
+    receipt = _run(fleet, tmp_path, cutover=boom)
+    assert receipt["status"] == "ROLLED_BACK" and receipt["reason"] == "cutover_failed:RuntimeError"
+    assert receipt["checks"]["incumbent_unchanged"] is True
+    assert fleet.calls[-1].startswith("start:") and "adopt:node-0" not in fleet.calls
+
+
+def test_rollback_that_diverges_from_the_incumbent_is_reported_not_hidden(tmp_path):
+    diverged = json.loads(json.dumps(BEFORE)) | {"contract": "v2", "seed_pid": 300}
+    fleet = FakeFleet(tmp_path, rollback_after=diverged)
+    receipt = _run(fleet, tmp_path, cutover=lambda: (_ for _ in ()).throw(RuntimeError("x")))
+    assert receipt["status"] == "ROLLBACK_DIVERGED" and receipt["checks"]["incumbent_unchanged"] is False
+
+
+@pytest.mark.parametrize("mutation, failed", [
+    (lambda d: d.update(seed_pid=100, seed_birth="b1"), "seed_process_replaced"),
+    (lambda d: d.update(contract="v1"), "contract_v2"),
+    (lambda d: d.update(seed_key_digest="sha256:" + "f" * 64), "identity_preserved"),
+    (lambda d: d["members"]["node-2"].update(generation=7), "member_generations_advanced_by_one"),
+    (lambda d: d.update(listener_up=False), "seed_listening"),
+])
+def test_post_restart_readback_failures_are_named(tmp_path, mutation, failed):
+    bad = _after()
+    mutation(bad)
+    fleet = FakeFleet(tmp_path, after=bad)
+    receipt = _run(fleet, tmp_path)
+    assert receipt["status"] == "POST_RESTART_READBACK_FAILED"
+    assert receipt["checks"][failed] is False
+
+
+def test_negative_cutover_expects_failure_and_proves_the_incumbent_untouched(tmp_path):
+    fleet = FakeFleet(tmp_path)
+    def refused():
+        raise RuntimeError("tampered chain")
+    receipt = _run(fleet, tmp_path, cutover=refused, expect_refusal=True)
+    assert receipt["status"] == "NEGATIVE_PRESERVED" and receipt["checks"]["incumbent_unchanged"] is True
+    ok = _run(FakeFleet(tmp_path / "other"), tmp_path / "other2", expect_refusal=True)
+    assert ok["status"] == "NEGATIVE_NOT_REFUSED"
+
+
+def test_restart_never_reuses_a_spent_epoch_root(tmp_path):
+    parent = tmp_path / "epochs"
+    first = tx.claim_restart_epoch(parent)
+    second = tx.claim_restart_epoch(parent)
+    assert (first.name, second.name) == ("restart-1", "restart-2")
+    assert oct(first.stat().st_mode & 0o777) == "0o700"
+    (parent / "restart-3").symlink_to(parent / "restart-1")
+    with pytest.raises(tx.CutoverRefused, match="restart_epoch_exists"):
+        tx.claim_restart_epoch(parent, number=3)
+
+
+def test_production_root_and_decoys_are_refused_before_anything_runs(tmp_path):
+    production = tmp_path / "production"
+    production.mkdir()
+    decoy = tmp_path / "decoy"
+    decoy.symlink_to(production)
+    for candidate in (production, decoy, production / "seed"):
+        with pytest.raises(tx.CutoverRefused, match="owned_root_forbidden"):
+            tx.require_owned_root(candidate, forbidden_roots=(production,))
+    fleet = FakeFleet(tmp_path)
+    fleet.root = decoy
+    receipt = _run(fleet, tmp_path)
+    assert receipt["status"] == "REFUSED" and receipt["reason"] == "owned_root_forbidden"
+    assert fleet.calls == []
+
+
+def test_default_forbidden_root_is_the_production_physical_run(tmp_path):
+    assert any(str(p).endswith("mycelium-physical-run") for p in tx.PRODUCTION_ROOTS)
+
+
+def test_command_fleet_adapter_runs_listed_argv_only_and_parses_json(tmp_path):
+    marker = tmp_path / "marker"
+    script = f"import json,sys,pathlib; pathlib.Path({str(marker)!r}).write_text(sys.argv[1]); print(json.dumps({{'owned': True}}))"
+    fleet = tx.CommandOwnedFleet({"readback": [sys.executable, "-c", script, "rb"],
+                                  "stop": [sys.executable, "-c", script, "st"],
+                                  "start": [sys.executable, "-c", script, "go"]}, timeout_s=20)
+    assert fleet.readback() == {"owned": True} and marker.read_text() == "rb"
+    assert fleet.stop() == {"owned": True}
+    epoch = tx.claim_restart_epoch(tmp_path / "epochs")
+    assert fleet.start(epoch) == {"owned": True} and marker.read_text() == "go"
+    with pytest.raises(tx.CutoverRefused, match="fleet_command_invalid"):
+        tx.CommandOwnedFleet({"readback": "echo hi", "stop": [], "start": []})
+    bad = tx.CommandOwnedFleet({k: [sys.executable, "-c", "print('not json')"] for k in ("readback", "stop", "start")})
+    with pytest.raises(tx.CutoverRefused, match="fleet_command_output_invalid"):
+        bad.readback()
