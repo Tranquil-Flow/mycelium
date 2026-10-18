@@ -490,8 +490,8 @@
         },
         {
           "path": "mycelium_ui_gateway/app.py",
-          "sha256": "c314d061d413f15474d88ae2e2783b143551f05eed082cfa6148b5a9f23c3865",
-          "size_bytes": 41304
+          "sha256": "2fb03d337e8b7766c8999d4cc0c761f2a05026cbfd7d025c15c9fa151f710c22",
+          "size_bytes": 43131
         },
         {
           "path": "ui/web/src/features/productEvidence/contracts.ts",
@@ -1455,8 +1455,8 @@
       "owner_sources": [
         {
           "path": "mycelium_ui_gateway/app.py",
-          "sha256": "c314d061d413f15474d88ae2e2783b143551f05eed082cfa6148b5a9f23c3865",
-          "size_bytes": 41304
+          "sha256": "2fb03d337e8b7766c8999d4cc0c761f2a05026cbfd7d025c15c9fa151f710c22",
+          "size_bytes": 43131
         },
         {
           "path": "ui/contracts/product/product-ui-bootstrap-v1.schema.json",

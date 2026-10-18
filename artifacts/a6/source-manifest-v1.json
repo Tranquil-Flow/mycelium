@@ -53,7 +53,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:96c9b577899f9d86125086a226688ce526f5c512af0557320485fe89d306bb11",
+      "sha256": "sha256:3b204febfd8fb97f6576ee593bdbbe5e61b1a5436b0f047980ff8a1a6fe5c415",
       "size_bytes": 71574
     },
     {
@@ -1542,6 +1542,11 @@
       "size_bytes": 61972
     },
     {
+      "path": "mycelium_request_gateway/asgi.py",
+      "sha256": "sha256:14c482598eed0440cdeb47421d3431af8a1e6561c6f8cbc51a5b8085ab0e6fb8",
+      "size_bytes": 13983
+    },
+    {
       "path": "mycelium_request_gateway/backend.py",
       "sha256": "sha256:d86f85f298a9df943a36ef9b76f363ce048777411dd35c5161cdc4bf56631ed9",
       "size_bytes": 29609
@@ -1803,13 +1808,18 @@
     },
     {
       "path": "mycelium_ui_gateway/app.py",
-      "sha256": "sha256:c314d061d413f15474d88ae2e2783b143551f05eed082cfa6148b5a9f23c3865",
-      "size_bytes": 41304
+      "sha256": "sha256:2fb03d337e8b7766c8999d4cc0c761f2a05026cbfd7d025c15c9fa151f710c22",
+      "size_bytes": 43131
     },
     {
       "path": "mycelium_ui_gateway/config.py",
       "sha256": "sha256:0979ea1488b3985ea2fb9add8c8adbbeef80dacacc52aa0a17065f00348eb713",
       "size_bytes": 5298
+    },
+    {
+      "path": "mycelium_ui_gateway/upstream.py",
+      "sha256": "sha256:b16b520a438d900ed2bac56cce48299ca40800a060a1677be41c4719ec14371c",
+      "size_bytes": 16782
     },
     {
       "path": "mycelium_ui_gateway/validation.py",
@@ -2363,8 +2373,8 @@
     },
     {
       "path": "scripts/gate_source_sets.py",
-      "sha256": "sha256:2663bda0a7b3920eb63e79da1fa1ff5a4040cff0394b07f541645451596e8966",
-      "size_bytes": 57450
+      "sha256": "sha256:21fac6b8e16aac3d8c3a9f0ea413e1a8db8fad433acacc4d26ceea7de2152850",
+      "size_bytes": 57451
     },
     {
       "path": "scripts/generate_phone_node_control_golden.py",
@@ -2408,13 +2418,13 @@
     },
     {
       "path": "scripts/run_a10_physical_gate.py",
-      "sha256": "sha256:57f95517256f168fcba564af04a97ce3ed7b50662fee59047400027522c2c80d",
-      "size_bytes": 78906
+      "sha256": "sha256:af47754c6b6f16fdc85e31b6d66233ed98d5bbd394150e982503062018d65312",
+      "size_bytes": 79629
     },
     {
       "path": "scripts/run_a11_route_benchmark.py",
-      "sha256": "sha256:728247f02ad8192fbb26743610a944ce2d513f5361f2eba71afcd04e7440e17d",
-      "size_bytes": 30491
+      "sha256": "sha256:52771f899d366e15e7abb01e9f06d30e2f7c23ca5270681bab18c9b566985cca",
+      "size_bytes": 30889
     },
     {
       "path": "scripts/run_a12_mobile_physical_gate.py",
@@ -2438,8 +2448,8 @@
     },
     {
       "path": "scripts/run_a5_benchmark_gate.py",
-      "sha256": "sha256:e21c376d82b2cd7c1739c1758165f02048aaecc743a84561c2a69bcecfd30ab0",
-      "size_bytes": 55860
+      "sha256": "sha256:3afc43f217e1c210360722684e28468a8bff383cad4c25c774dd6a01a6b1b62b",
+      "size_bytes": 57207
     },
     {
       "path": "scripts/run_a5_replica_loss_gate.py",
@@ -2563,8 +2573,8 @@
     },
     {
       "path": "tests/a10_deterministic/test_a10_fault_hooks.py",
-      "sha256": "sha256:b838928e15da3e48764c3a090d78acf8093cec300dc2464c48a8382c7a2d0b26",
-      "size_bytes": 12899
+      "sha256": "sha256:d9ab5f5e7e1d222ec678bb991a7b30c8aa7b6636103adfae6d1812ec634653f3",
+      "size_bytes": 13583
     },
     {
       "path": "tests/a10_deterministic/test_a10_fault_hooks_real_runtime.py",
@@ -2583,13 +2593,13 @@
     },
     {
       "path": "tests/a10_deterministic/test_product_client_http_loopback.py",
-      "sha256": "sha256:171acf1e30b5416fa39d1682984190cf86c3695a3560a9bb4b1915904deecda1",
-      "size_bytes": 11653
+      "sha256": "sha256:8a2ff716c4670ed248918626a514ba22a7e79c789ca464965706fa182b40b78c",
+      "size_bytes": 12462
     },
     {
       "path": "tests/a10_deterministic/test_request_diagnostics.py",
-      "sha256": "sha256:97c3263b5599962eecfc27ad56c8399e96b2b7a814014f4666627c53952b18d8",
-      "size_bytes": 7081
+      "sha256": "sha256:84c7ab2f218d041042b4a5ce2445af45c7fa9a0eba6e9ebbf17dad1591edc89e",
+      "size_bytes": 7791
     },
     {
       "path": "tests/a10_deterministic/test_request_diagnostics_composition.py",
@@ -3300,6 +3310,11 @@
       "path": "tests/a5_acceptance/test_http_error_cleanup_review.py",
       "sha256": "sha256:edfad71f0067d662b1755e9f69c69bb78b3205a6176b467e653ca189bf2d39a4",
       "size_bytes": 3993
+    },
+    {
+      "path": "tests/a5_acceptance/test_product_benchmark_gate.py",
+      "sha256": "sha256:9dff9953b778ce0c7dcbc8ff4744158a597f5f8d59cc93a086a0177ab77a2d77",
+      "size_bytes": 25226
     },
     {
       "path": "tests/a6_acceptance/a6_measured_stack.py",
@@ -4367,6 +4382,11 @@
       "size_bytes": 14456
     },
     {
+      "path": "tests/request_gateway/test_core.py",
+      "sha256": "sha256:77e3ab7e118d76c9fdca17a25a07869fdc21850b44836ca90a31f726fec71088",
+      "size_bytes": 11920
+    },
+    {
       "path": "tests/router/test_failure_report_diagnosability.py",
       "sha256": "sha256:47ceaf117500500de90cdbf2ee0510fd3f962ae1c42b710cf4d70e7a7cf87041",
       "size_bytes": 8810
@@ -4517,6 +4537,11 @@
       "size_bytes": 10052
     },
     {
+      "path": "tests/speculation/test_a11_product_session_rotation.py",
+      "sha256": "sha256:7d6afbd992ffeb7e3249cf89ee5f6844ddffb0c965cda3b0989f20fa338617ad",
+      "size_bytes": 4921
+    },
+    {
       "path": "tests/speculation/test_a11_request_bootstrap.py",
       "sha256": "sha256:86ee6a92c9fed9b2fe210c67c9e093d429d8a7e85af9a96bf603fba6e72e5c4d",
       "size_bytes": 6556
@@ -4607,9 +4632,14 @@
       "size_bytes": 4045
     },
     {
+      "path": "tests/ui_gateway/test_abandoned_inference.py",
+      "sha256": "sha256:41b3832f330cc1e777af901fd8ff30fcbbe9ce0fd2e3595380658b1d88164332",
+      "size_bytes": 5416
+    },
+    {
       "path": "tests/ui_gateway/test_inference.py",
-      "sha256": "sha256:61fb29cb78b3e6753ac703dca07eac1234df4c673b1fa45d84b55f0bd0762866",
-      "size_bytes": 10906
+      "sha256": "sha256:2b6a08b5bcba07440d8e595c3f15127faae7091f20f8a432dfd0bec0b612e385",
+      "size_bytes": 12027
     },
     {
       "path": "tests/ui_gateway/test_observatory.py",
@@ -4938,5 +4968,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:003e7d96432c38b8c6117994dc99d152e32d91a7ea28668237bdd3d9d45d587c"
+  "source_digest": "sha256:57039ca858fc9ab500e2a3407f4eaf7897f151c990d9293b4e94134c71616945"
 }
