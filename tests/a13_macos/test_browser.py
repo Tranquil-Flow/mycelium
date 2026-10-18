@@ -42,9 +42,13 @@ def test_real_browser_enrollment_lifecycle_and_privacy(tmp_path):
                 page.reload()
                 expect(page.locator('#ladder')).to_contain_text('current')
             page.go_back(); page.go_forward()
-            page.get_by_role('button',name='Stop & retain private state',exact=True).click()
+            with page.expect_response(lambda r: r.url.endswith('/api/stop') and r.request.method == 'POST') as stop_response:
+                page.get_by_role('button',name='Stop & retain private state',exact=True).click()
+            assert stop_response.value.ok, stop_response.value.text()
             expect(page.locator('#ladder')).to_contain_text('Stopped')
-            page.get_by_role('button',name='Start / reconnect',exact=True).click()
+            with page.expect_response(lambda r: r.url.endswith('/api/start') and r.request.method == 'POST') as start_response:
+                page.get_by_role('button',name='Start / reconnect',exact=True).click()
+            assert start_response.value.ok, start_response.value.text()
             expect(page.locator('#ladder')).to_contain_text('current')
             assert app.authority.member.signer.verification_key_digest==identity
             assert app.authority.member.generation>generation

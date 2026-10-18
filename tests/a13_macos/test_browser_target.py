@@ -1,15 +1,18 @@
 """Chromium owner/target pairing through real local TLS, no physical inference."""
 import json
 import os
+import threading
 from pathlib import Path
 
+import pytest
 from playwright.sync_api import sync_playwright, expect
 from mycelium_a13_macos.app import DemoApp
 from mycelium_a13_macos.peer import RemoteMacMember
 from mycelium_a13_macos.tls import pinned_seed_client, pinned_seed_client_from_invite
 
 
-def test_browser_owner_target_encrypted_pairing(tmp_path, monkeypatch):
+@pytest.mark.parametrize('_stress_run', range(int(os.environ.get('A13_CONTROL_STRESS_COUNT', '1'))))
+def test_browser_owner_target_encrypted_pairing(tmp_path, monkeypatch, _stress_run):
     owner=DemoApp(tmp_path/'owner',check_platform=False).start()
     target=None
     try:
@@ -81,18 +84,38 @@ def test_browser_owner_target_encrypted_pairing(tmp_path, monkeypatch):
             tp.locator('#accept-stage').click()
             expect(tp.locator('#stage-state')).to_contain_text('Staged and verified')
             assert target.authority._runtime is None
-            import pytest
             from mycelium_a13_macos.peer import RemoteMacMemberError
             with pytest.raises(RemoteMacMemberError,match='peer_member_not_current'):
                 target.authority.peer.managed_control_snapshot()
             expect(tp.locator('#submit')).to_be_disabled()
             expect(tp.locator('#start-control')).to_be_disabled()
             tp.locator('#control-consent').check()
-            tp.locator('#start-control').click()
+            # Hold the actual start handler before it attaches a runtime. A click
+            # only queues the POST; it does not establish a completed action.
+            entered, release = threading.Event(), threading.Event()
+            real_start = target.authority.start_control
+            def held_start(*args, **kwargs):
+                entered.set()
+                if not release.wait(20):
+                    raise AssertionError('held control start was not released')
+                return real_start(*args, **kwargs)
+            monkeypatch.setattr(target.authority, 'start_control', held_start)
+            try:
+                with tp.expect_response(lambda r: r.url.endswith('/api/control/start') and r.request.method == 'POST') as start_response:
+                    tp.locator('#start-control').click()
+                    assert entered.wait(10), 'start POST never entered its handler'
+                    assert target.authority._runtime is None
+                    assert 'stopped' in tp.locator('#control-state').inner_text()
+                    release.set()
+                assert start_response.value.ok, start_response.value.text()
+            finally:
+                release.set()
             expect(tp.locator('#control-state')).to_contain_text('running')
             managed=target.authority._runtime
             assert managed is not None and managed.worker.status()['model_load_authorized'] is False
-            tp.locator('#stop-control').click()
+            with tp.expect_response(lambda r: r.url.endswith('/api/control/stop') and r.request.method == 'POST') as stop_response:
+                tp.locator('#stop-control').click()
+            assert stop_response.value.ok, stop_response.value.text()
             expect(tp.locator('#control-state')).to_contain_text('stopped')
             assert not managed.worker.process_group_present()
             owner.authority._control_mailbox.request_stage_cleanup(offered)
