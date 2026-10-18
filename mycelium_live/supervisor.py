@@ -4360,6 +4360,7 @@ def run_physical_server(
     persist_transport_history: bool = False,
     a7_evidence_control_port: int | None = None,
     a11_evidence_control_port: int | None = None,
+    a11_draft_loss_control_port: int | None = None,
 ) -> int:
     deployment = native_deployment_projection(operator_plan)
     selected_deployment_dir: Path | None = None
@@ -4466,6 +4467,7 @@ def run_physical_server(
     a10_batch_policy_control: Any | None = None
     a7_evidence_control: Any | None = None
     a11_evidence_control: Any | None = None
+    a11_draft_loss_control: Any | None = None
     try:
         representation_authorization = _representation_authorization(
             representation_authorization_file
@@ -4596,6 +4598,12 @@ def run_physical_server(
                 public_origin=public_origin,
                 trusted_https_proxy=trusted_https_proxy,
             )
+        if a11_draft_loss_control_port is not None:
+            a11_draft_loss_control = _mount_a11_draft_loss_control(
+                route=route, product_state_root=product_state_root,
+                product_port=port, control_port=a11_draft_loss_control_port,
+                public_origin=public_origin, trusted_https_proxy=trusted_https_proxy,
+            )
         startup_complete = True
 
         def request_stop(_signum: int, _frame: Any) -> None:
@@ -4644,6 +4652,10 @@ def run_physical_server(
                         if a11_evidence_control is None
                         else {"a11_evidence_control": a11_evidence_control.status()}
                     ),
+                    **(
+                        {} if a11_draft_loss_control is None
+                        else {"a11_draft_loss_control": a11_draft_loss_control.status()}
+                    ),
                 }
             ).decode("utf-8"),
             flush=True,
@@ -4661,6 +4673,8 @@ def run_physical_server(
         )
         if a11_evidence_control is not None:
             a11_evidence_control.close()
+        if a11_draft_loss_control is not None:
+            a11_draft_loss_control.close()
         if a7_evidence_control is not None:
             a7_evidence_control.close()
         if a10_batch_policy_control is not None:
@@ -4888,6 +4902,26 @@ def _mount_a11_evidence_control(
         raise RuntimeError(f"startup_a11_evidence_control_refused:{exc}") from exc
     except OSError as exc:
         raise RuntimeError("startup_a11_evidence_control_bind_failed") from exc
+    return control
+
+
+def _mount_a11_draft_loss_control(
+    *, route: Any, product_state_root: Path | None, product_port: int,
+    control_port: int, public_origin: str | None, trusted_https_proxy: bool,
+) -> Any:
+    """Explicit A11-only direct-loopback fault mount, absent on normal serves."""
+    from mycelium_a11_draft_loss_control import DraftLossControl, RouteDraftLoss, DraftLossRefused
+
+    if product_state_root is None:
+        raise DraftLossRefused("a11_draft_loss_product_state_root_required")
+    control = DraftLossControl(
+        grant=os.environ.get("MYCELIUM_A11_FLEET_GRANT"),
+        source=RouteDraftLoss(route),
+        token_file=Path(product_state_root) / "a11-draft-loss.token",
+        product_port=product_port, port=control_port,
+        public_origin=public_origin, trusted_https_proxy=trusted_https_proxy,
+    )
+    control.start()
     return control
 
 
@@ -5376,6 +5410,8 @@ def build_parser() -> argparse.ArgumentParser:
             "127.0.0.1 port (0 = ephemeral); requires MYCELIUM_A11_FLEET_GRANT"
         ),
     )
+    parser.add_argument("--a11-draft-loss-control-port", type=int,
+                        help="grant-gated A11 request-scoped draft loss on direct loopback")
     return parser
 
 
@@ -5419,6 +5455,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         or 1_024 <= args.a11_evidence_control_port <= 65_535
     ):
         raise SystemExit("--a11-evidence-control-port must be 0 or from 1024 through 65535")
+    if args.a11_draft_loss_control_port is not None and not (
+        args.a11_draft_loss_control_port == 0
+        or 1_024 <= args.a11_draft_loss_control_port <= 65_535
+    ):
+        raise SystemExit("--a11-draft-loss-control-port must be 0 or from 1024 through 65535")
     trusted_proxy_capability = None
     if args.trusted_proxy_capability_file is not None:
         try:
@@ -5499,6 +5540,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if args.a11_evidence_control_port is None
                 else {"a11_evidence_control_port": args.a11_evidence_control_port}
             ),
+            **(
+                {} if args.a11_draft_loss_control_port is None
+                else {"a11_draft_loss_control_port": args.a11_draft_loss_control_port}
+            ),
         )
     if args.persist_transport_history:
         raise SystemExit("--persist-transport-history is valid only with one --operator-plan")
@@ -5518,6 +5563,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("--a7-evidence-control-port is valid only with one --operator-plan")
     if args.a11_evidence_control_port is not None:
         raise SystemExit("--a11-evidence-control-port is valid only with one --operator-plan")
+    if args.a11_draft_loss_control_port is not None:
+        raise SystemExit("--a11-draft-loss-control-port is valid only with one --operator-plan")
     if args.deployment_dir is not None:
         raise SystemExit("--deployment-dir is valid only with one --operator-plan")
     return run_registry_server(

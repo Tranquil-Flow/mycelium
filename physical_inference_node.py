@@ -2859,6 +2859,40 @@ class PhysicalNodeService:
         }
         return self._signed_result("a11_snapshot", details)
 
+    def _a11_draft_loss(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Grant-checked, request-scoped draft failure; target stage stays alive."""
+        import hmac
+        from mycelium_a11_route_speculation import RouteSpeculationError
+
+        grant = "FLEET GRANTED TO A11"
+        _require(
+            os.environ.get("MYCELIUM_A11_FLEET_GRANT") == grant
+            and isinstance(payload, dict)
+            and isinstance(payload.get("grant"), str)
+            and hmac.compare_digest(payload["grant"], grant),
+            "explicit_fleet_grant_required",
+        )
+        _require(
+            set(payload) == {"grant", "request_id", "after_accepted"}
+            and isinstance(payload["request_id"], str)
+            and 1 <= len(payload["request_id"]) <= 128
+            and type(payload["after_accepted"]) is int
+            and 1 <= payload["after_accepted"] <= 512,
+            "invalid_a11_draft_loss_fields",
+        )
+        _require(self.state == "RUNNING", "a11_draft_loss_request_unavailable")
+        wiring = getattr(self, "_a11_wiring", None)
+        _require(wiring is not None, "a11_draft_loss_request_unavailable")
+        try:
+            wiring.controller.arm_draft_loss(payload["request_id"], payload["after_accepted"])
+        except RouteSpeculationError as exc:
+            raise NodeCommandError(exc.code) from exc
+        return self._signed_result("a11_draft_loss", {
+            "request_id": payload["request_id"],
+            "after_accepted": payload["after_accepted"],
+            "outcome": "armed",  # NOT a claim that loss has fired
+        })
+
     def _defer_after_response(self, action: Callable[[], Any], *, name: str) -> None:
         pending = getattr(self._after_response, "actions", None)
         if pending is None:
@@ -5557,6 +5591,7 @@ class PhysicalNodeService:
             "a7_snapshot": self._a7_snapshot,
             "a7_source_lost": self._a7_source_lost,
             "a11_snapshot": self._a11_snapshot,
+            "a11_draft_loss": self._a11_draft_loss,
             "diagnostic_evidence": self._diagnostic_evidence,
         }
         handler = handlers.get(document["command"])

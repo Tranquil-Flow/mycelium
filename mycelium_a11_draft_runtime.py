@@ -352,6 +352,13 @@ class MLXDraftRuntime:
     def mark_lost(self) -> None:
         self._lost = True
 
+    def close(self) -> None:
+        """Release only this request's draft KV; never mutate the target cache."""
+        self._cache.clear()
+        self._context = ()
+        self._proposal = ()
+        self._fed = 0
+
     def committed_context(self) -> tuple[int, ...]:
         return self._context
 

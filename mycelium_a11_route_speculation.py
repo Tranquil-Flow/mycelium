@@ -282,6 +282,7 @@ class _RequestState:
     deadline: dict[str, Any]
     warm_target_tpot_p50_ms: float | None = None
     active: bool = True
+    draft_closed: bool = False
     stop_reason: str | None = None
     rounds: int = 0
     decode_rounds: int = 0
@@ -323,6 +324,8 @@ class RouteSpeculationController:
         self._preferences: dict[str, str] = {}
         self._states: dict[str, _RequestState] = {}
         self._admissions: dict[str, dict[str, Any]] = {}
+        # Empty unless an explicitly granted node control armed this request.
+        self._draft_loss_after_accepted: dict[str, int] = {}
         self._revoked = False
         self._cooldown_until = 0.0
         self.completed: list[dict[str, Any]] = []
@@ -417,14 +420,38 @@ class RouteSpeculationController:
             state = self._states.get(request_id)
             return state is not None and state.active
 
+    def arm_draft_loss(self, request_id: str, after_accepted: int) -> None:
+        """One-shot request-bound loss at the next proposal after the threshold.
+
+        This is deliberately not an authorization surface. Only the node's
+        grant-checked control command may call it; normal routes never arm it.
+        The check and consumption share the controller lock with release.
+        """
+        with self._lock:
+            state = self._states.get(request_id)
+            if (state is None or not state.active or request_id in self._draft_loss_after_accepted
+                    or type(after_accepted) is not int or not 1 <= after_accepted <= 512
+                    or state.accepted >= after_accepted):
+                raise RouteSpeculationError("a11_draft_loss_request_unavailable")
+            self._draft_loss_after_accepted[request_id] = after_accepted
+
     # -- one round ----------------------------------------------------------------
     def propose(self, request_id: str, context: Sequence[int], width: int) -> tuple[int, ...] | None:
         """The draft's bounded proposal, or ``None`` for an ordinary DECODE round."""
 
-        state = self._states.get(request_id)
-        if state is None or not state.active:
-            return None
-        width = min(int(width), self.policy.width)
+        with self._lock:
+            state = self._states.get(request_id)
+            if state is None or not state.active:
+                return None
+            threshold = self._draft_loss_after_accepted.get(request_id)
+            if threshold is not None and state.accepted >= threshold:
+                del self._draft_loss_after_accepted[request_id]
+                self._stop(state, "draft_lost")
+                return None
+            # Do not overshoot the requested accepted-token trigger in a
+            # multi-token VERIFY: cap only this armed request's next proposal.
+            width = min(int(width), self.policy.width,
+                        threshold - state.accepted if threshold is not None else self.policy.width)
         if width < 1:
             return None
         started = self._clock()
@@ -551,13 +578,37 @@ class RouteSpeculationController:
         if state.active:
             state.active = False
             state.stop_reason = reason
+            if reason in {"draft_lost", "draft_not_reproducible"}:
+                self._close_draft(state)
+
+    @staticmethod
+    def _close_draft(state: _RequestState) -> None:
+        if state.draft_closed:
+            return
+        state.draft_closed = True
+        if state.stop_reason == "draft_lost":
+            mark_lost = getattr(state.draft, "mark_lost", None)
+            if callable(mark_lost):
+                try:
+                    mark_lost()
+                except Exception:  # noqa: BLE001 - target owns continuation
+                    pass
+        close = getattr(state.draft, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:  # noqa: BLE001 - draft loss must not abort target DECODE
+                pass
 
     # -- lifecycle ----------------------------------------------------------------
     def release(self, request_id: str) -> dict[str, Any] | None:
         with self._lock:
+            self._draft_loss_after_accepted.pop(request_id, None)
             state = self._states.pop(request_id, None)
             admission = self._admissions.pop(request_id, None)
             preference = self._preferences.pop(request_id, None)
+        if state is not None:
+            self._close_draft(state)
         summary = None if state is None else self._summary(state, admission)
         with self._lock:
             self._history_sequence += 1

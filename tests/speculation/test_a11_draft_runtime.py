@@ -205,6 +205,19 @@ def test_lost_runtime_reports_loss_without_touching_state(model):
     proposal = runtime.propose(prefix_position=3, prefix_digest=DIGEST, width=2, deadline_ms=1e6)
     assert proposal.lost and not proposal.tokens
     assert runtime.snapshot()["kv_positions"] == 2
+    runtime.close()
+    assert runtime.snapshot()["kv_positions"] == 0
+    assert runtime.snapshot()["lost"] is True
+
+
+def test_closed_draft_releases_its_kv_only(model):
+    runtime = dr.MLXDraftRuntime(model, incarnation="sha256:" + "1" * 64)
+    runtime.sync((1, 2, 3))
+    assert runtime.snapshot()["kv_positions"] > 0
+    runtime.close()
+    assert runtime.snapshot()["kv_positions"] == 0
+    assert runtime.snapshot()["tentative_tokens"] == 0
+    assert runtime.snapshot()["lost"] is False
 
 
 def test_quantized_model_keeps_cache_parity_with_its_own_full_forward():
