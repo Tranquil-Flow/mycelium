@@ -1963,6 +1963,16 @@ def _transport_history_binding(
     return deployment_id
 
 
+def _a9_overlaid(reader: Callable[[], Any]) -> Callable[[], Any]:
+    """Identity unless the grant-gated A9 publisher wrote to the passive ledger."""
+    from mycelium_a9_authority_ledger import overlay_membership
+
+    def read() -> Any:
+        return overlay_membership(reader())
+
+    return read
+
+
 def _product_application(
     route: Any,
     qualification_source: Any,
@@ -2022,7 +2032,7 @@ def _product_application(
     return ProductEvidenceApplication(
         projector=projector,
         coarse_region_source=coarse_region_source,
-        membership_source=_follow("product_membership_records"),
+        membership_source=_a9_overlaid(_follow("product_membership_records")),
         assignment_source=(
             _follow("product_assignment_records") if callable(assignments) else None
         ),
@@ -4361,6 +4371,7 @@ def run_physical_server(
     a7_evidence_control_port: int | None = None,
     a11_evidence_control_port: int | None = None,
     a11_draft_loss_control_port: int | None = None,
+    a9_authority_fault_control_port: int | None = None,
 ) -> int:
     deployment = native_deployment_projection(operator_plan)
     selected_deployment_dir: Path | None = None
@@ -4468,6 +4479,7 @@ def run_physical_server(
     a7_evidence_control: Any | None = None
     a11_evidence_control: Any | None = None
     a11_draft_loss_control: Any | None = None
+    a9_authority_fault_control: Any | None = None
     try:
         representation_authorization = _representation_authorization(
             representation_authorization_file
@@ -4604,6 +4616,12 @@ def run_physical_server(
                 product_port=port, control_port=a11_draft_loss_control_port,
                 public_origin=public_origin, trusted_https_proxy=trusted_https_proxy,
             )
+        if a9_authority_fault_control_port is not None:
+            a9_authority_fault_control = _mount_a9_authority_fault_control(
+                route=route, product_state_root=product_state_root,
+                product_port=port, control_port=a9_authority_fault_control_port,
+                public_origin=public_origin, trusted_https_proxy=trusted_https_proxy,
+            )
         startup_complete = True
 
         def request_stop(_signum: int, _frame: Any) -> None:
@@ -4656,6 +4674,10 @@ def run_physical_server(
                         {} if a11_draft_loss_control is None
                         else {"a11_draft_loss_control": a11_draft_loss_control.status()}
                     ),
+                    **(
+                        {} if a9_authority_fault_control is None
+                        else {"a9_authority_fault_control": a9_authority_fault_control.status()}
+                    ),
                 }
             ).decode("utf-8"),
             flush=True,
@@ -4675,6 +4697,8 @@ def run_physical_server(
             a11_evidence_control.close()
         if a11_draft_loss_control is not None:
             a11_draft_loss_control.close()
+        if a9_authority_fault_control is not None:
+            a9_authority_fault_control.close()
         if a7_evidence_control is not None:
             a7_evidence_control.close()
         if a10_batch_policy_control is not None:
@@ -4918,6 +4942,29 @@ def _mount_a11_draft_loss_control(
         grant=os.environ.get("MYCELIUM_A11_FLEET_GRANT"),
         source=RouteDraftLoss(route),
         token_file=Path(product_state_root) / "a11-draft-loss.token",
+        product_port=product_port, port=control_port,
+        public_origin=public_origin, trusted_https_proxy=trusted_https_proxy,
+    )
+    control.start()
+    return control
+
+
+def _mount_a9_authority_fault_control(
+    *, route: Any, product_state_root: Path | None, product_port: int,
+    control_port: int, public_origin: str | None, trusted_https_proxy: bool,
+) -> Any:
+    """Explicit A9-only direct-loopback fault mount, absent on normal serves."""
+    from mycelium_a9_authority_fault_control import (
+        AuthorityFaultControl, AuthorityFaultRefused, RouteAuthorityFault,
+    )
+    from mycelium_a9_authority_ledger import GRANT_ENV
+
+    if product_state_root is None:
+        raise AuthorityFaultRefused("a9_authority_fault_product_state_root_required")
+    control = AuthorityFaultControl(
+        grant=os.environ.get(GRANT_ENV),
+        source=RouteAuthorityFault(route),
+        token_file=Path(product_state_root) / "a9-authority-fault.token",
         product_port=product_port, port=control_port,
         public_origin=public_origin, trusted_https_proxy=trusted_https_proxy,
     )
@@ -5412,6 +5459,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--a11-draft-loss-control-port", type=int,
                         help="grant-gated A11 request-scoped draft loss on direct loopback")
+    parser.add_argument("--a9-authority-fault-control-port", type=int,
+                        help="grant-gated A9 authority fault publisher on direct loopback; "
+                             "requires MYCELIUM_A9_FLEET_GRANT")
     return parser
 
 
@@ -5460,6 +5510,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         or 1_024 <= args.a11_draft_loss_control_port <= 65_535
     ):
         raise SystemExit("--a11-draft-loss-control-port must be 0 or from 1024 through 65535")
+    if args.a9_authority_fault_control_port is not None and not (
+        args.a9_authority_fault_control_port == 0
+        or 1_024 <= args.a9_authority_fault_control_port <= 65_535
+    ):
+        raise SystemExit("--a9-authority-fault-control-port must be 0 or from 1024 through 65535")
     trusted_proxy_capability = None
     if args.trusted_proxy_capability_file is not None:
         try:
@@ -5544,6 +5599,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 {} if args.a11_draft_loss_control_port is None
                 else {"a11_draft_loss_control_port": args.a11_draft_loss_control_port}
             ),
+            **(
+                {} if args.a9_authority_fault_control_port is None
+                else {"a9_authority_fault_control_port": args.a9_authority_fault_control_port}
+            ),
         )
     if args.persist_transport_history:
         raise SystemExit("--persist-transport-history is valid only with one --operator-plan")
@@ -5565,6 +5624,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("--a11-evidence-control-port is valid only with one --operator-plan")
     if args.a11_draft_loss_control_port is not None:
         raise SystemExit("--a11-draft-loss-control-port is valid only with one --operator-plan")
+    if args.a9_authority_fault_control_port is not None:
+        raise SystemExit("--a9-authority-fault-control-port is valid only with one --operator-plan")
     if args.deployment_dir is not None:
         raise SystemExit("--deployment-dir is valid only with one --operator-plan")
     return run_registry_server(
