@@ -59,6 +59,7 @@ RUN RED (the pre-fix tree, this file added but `await_serving_end` absent):
         -p no:cacheprovider tests/a13_operator/test_serving_evidence_wait.py
 """
 
+import ast
 import importlib
 import json
 import pathlib
@@ -435,20 +436,59 @@ def test_the_marker_is_the_apps_own_write_before_it_reports_api_running(transpor
     assert module._serving_error_path(RUN_ID) == module.OWNER/'chain-runs'/RUN_ID/'serve-error.private.json'
 
 
-def test_the_serving_phase_takes_no_app_guard_a_read_would_have_to_wait_on(transport):
-    """WHY THE MARKER DOES NOT FIRE BEFORE THE APP CAN ANSWER -- the compile's own discriminator.
+def _assert_serving_guard_partition(source):
+    """Reject a serving-worker guard or a blocking wait while retiring under one."""
+    sites = []
+    class GuardVisitor(ast.NodeVisitor):
+        scopes: tuple[str, ...] = ()
 
-    The compile marker had to be the app's LAST write because `chain_compile.py:54` holds `app.guard`
-    (and every session-taking request, the handshake POST included, blocks on it -- `app.py:872`) for
-    up to `_BOOT_ID_OBSERVATION_BUDGET_SECONDS=180` after `build-report.json`. The serving phase has no
-    such holder: the only `with app.guard` outside `app.py` is that compile one, and it is in
-    `start_compile`, not in what runs after activation. So a read issued when this marker appears is
-    not queued behind a guard the app is holding.
+        def visit_FunctionDef(self, node):
+            previous = self.scopes
+            self.scopes = (*previous, node.name)
+            self.generic_visit(node)
+            self.scopes = previous
+
+        def visit_With(self, node):
+            if any(isinstance(item.context_expr, ast.Attribute)
+                   and isinstance(item.context_expr.value, ast.Name)
+                   and item.context_expr.value.id == 'app'
+                   and item.context_expr.attr == 'guard' for item in node.items):
+                sites.append((self.scopes, node.lineno))
+                assert self.scopes[0] in {'start_compile', 'stop_serving'}, \
+                    f'app.guard in serving path: {self.scopes}'
+                assert 'serve' not in self.scopes, 'serving worker cannot hold app.guard'
+                if self.scopes[0] == 'stop_serving':
+                    assert not any(isinstance(call, ast.Call)
+                        and isinstance(call.func, ast.Attribute)
+                        and call.func.attr in {'join', 'wait', 'run'}
+                        for stmt in node.body for call in ast.walk(stmt)), \
+                        'retirement may not wait for a worker under app.guard'
+            self.generic_visit(node)
+
+    GuardVisitor().visit(ast.parse(source))
+    assert any(scope == ('start_compile', 'work') for scope, _ in sites)
+    assert any(scope == ('stop_serving',) for scope, _ in sites)
+    return sites
+
+
+def test_the_serving_phase_takes_no_app_guard_a_read_would_have_to_wait_on(transport):
+    """Compile owns its long guard; serving owns none; retirement never joins under guard.
+
+    The added compile publication guards only validate epoch/state and assign memory;
+    retirement's two short critical sections fence epoch/state, while its potentially
+    long thread joins are outside the guard. An activated serving worker runs the
+    workflow without app.guard, so the operator's status read cannot queue behind
+    the model qualification. Inspect AST, not a raw count of compile/retirement sites.
     """
     chain = (REPO / 'mycelium_a13_macos/chain_compile.py').read_text()
-    assert chain.count('with app.guard') == 1, 'exactly one guard site in the chain module'
-    assert chain.index('with app.guard') < chain.index('def start_serving'), \
-        'app.guard is taken by the COMPILE worker, not by the serving thread'
+    sites = _assert_serving_guard_partition(chain)
+    assert {scope[0] for scope, _ in sites} == {'start_compile', 'stop_serving'}
+    # Deterministic RED control: a guard injected into the serving worker must fail.
+    changed = chain.replace('def serve():\n        try:',
+                            'def serve():\n        with app.guard: pass\n        try:', 1)
+    assert changed != chain
+    with pytest.raises(AssertionError, match='serving path'):
+        _assert_serving_guard_partition(changed)
     workflow = (REPO / 'mycelium_a13_macos/workflow.py').read_text()
     assert 'app.guard' not in workflow, 'the workflow never takes the application guard'
     app = (REPO / 'mycelium_a13_macos/app.py').read_text()

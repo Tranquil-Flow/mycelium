@@ -148,23 +148,51 @@ def _request(member_refs):
    )
 
 
-def test_production_modules_never_import_the_fault_hooks():
+def _fault_hook_importers(repo):
    allowed = {
-      REPO / "mycelium_router" / "a10_fault_hooks.py",
-      REPO / "mycelium_router" / "a10_fault_negatives.py",
-      REPO / "scripts" / "run_a10_physical_gate.py",
+      repo / "mycelium_router" / "a10_fault_hooks.py",
+      repo / "mycelium_router" / "a10_fault_negatives.py",
+      repo / "scripts" / "run_a10_physical_gate.py",
    }
    pattern = re.compile(r"\ba10_fault_(hooks|negatives)\b")
    offenders = []
-   for path in REPO.rglob("*.py"):
-      relative = path.relative_to(REPO)
+   for path in repo.rglob("*.py"):
+      relative = path.relative_to(repo)
       if relative.parts[0] in {"tests", "runs", "node_modules", ".build-native"} or ".venv" in relative.parts:
          continue
       if path in allowed:
          continue
+      # Packaging copies the allowlisted modules into compiler-sources. They
+      # remain allowed only while their shipped bytes equal the source bytes;
+      # a modified copy or any new production importer still fails closed.
+      if (len(relative.parts) >= 5 and relative.parts[0] == "build"
+            and relative.parts[2] == "compiler-sources"):
+         source = repo.joinpath(*relative.parts[3:])
+         if source in allowed and path.read_bytes() == source.read_bytes():
+            continue
       if pattern.search(path.read_text("utf-8", "replace")):
          offenders.append(str(relative))
-   assert offenders == []
+   return offenders
+
+
+def test_production_modules_never_import_the_fault_hooks():
+   assert _fault_hook_importers(REPO) == []
+
+
+def test_packaged_fault_hooks_are_allowed_only_as_exact_source_copies(tmp_path):
+   source = tmp_path / "mycelium_router" / "a10_fault_hooks.py"
+   shipped = tmp_path / "build" / "preview" / "compiler-sources" / "mycelium_router" / source.name
+   rogue = tmp_path / "mycelium_router" / "normal_runtime.py"
+   for path in (source, shipped, rogue):
+      path.parent.mkdir(parents=True, exist_ok=True)
+   source.write_text("from mycelium_router.a10_fault_negatives import fault\n")
+   shipped.write_bytes(source.read_bytes())
+   assert _fault_hook_importers(tmp_path) == []
+   shipped.write_text("from mycelium_router.a10_fault_negatives import changed\n")
+   assert _fault_hook_importers(tmp_path) == [str(shipped.relative_to(tmp_path))]
+   shipped.write_bytes(source.read_bytes())
+   rogue.write_text("from mycelium_router.a10_fault_hooks import fault\n")
+   assert _fault_hook_importers(tmp_path) == [str(rogue.relative_to(tmp_path))]
 
 
 # ---------------------------------------------------------------------------
