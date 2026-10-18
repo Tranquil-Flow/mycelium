@@ -180,6 +180,30 @@ def _wait_ready(owner, seconds):
     return owner.public_status()["cold_route_restart"]
 
 
+_ROUTE_THREAD_PREFIXES = ("m16-dispatch-", "live-route-worker-")
+
+
+@pytest.fixture(autouse=True)
+def no_route_threads_survive():
+    """Every LiveRouterPort the test composes must be closed with the test.
+
+    A surviving dispatch loop or route worker keeps running in the xdist
+    worker and opens descriptors asynchronously, racing process-wide fd
+    inventory tests in the same worker.
+    """
+
+    before = {thread.ident for thread in threading.enumerate()}
+    yield
+    survivors = sorted(
+        thread.name
+        for thread in threading.enumerate()
+        if thread.ident not in before
+        and thread.is_alive()
+        and thread.name.startswith(_ROUTE_THREAD_PREFIXES)
+    )
+    assert survivors == [], survivors
+
+
 @pytest.fixture
 def watchdog():
     faulthandler.dump_traceback_later(300, exit=False, file=sys.stderr)

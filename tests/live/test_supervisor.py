@@ -272,6 +272,34 @@ def test_build_live_stack_returns_app_and_health_source(
     assert all(node["membership_state"] == "assigned" for node in swarm["native_nodes"])
 
 
+def test_live_stack_close_router_stops_the_dispatch_thread(
+    live_graph, deployment_dir
+) -> None:
+    before = {thread.ident for thread in threading.enumerate()}
+    route = FakeLiveRoute(scripted_tokens=(4599,))
+    route.open()
+    stack = build_live_stack(
+        route=route,
+        deployment_dir=deployment_dir,
+        execution_graph=live_graph,
+        bearer_token="test-token",
+    )
+
+    def dispatchers() -> list:
+        return [
+            thread
+            for thread in threading.enumerate()
+            if thread.ident not in before
+            and thread.is_alive()
+            and thread.name.startswith("m16-dispatch-")
+        ]
+
+    assert len(dispatchers()) == 1
+    stack.close_router()
+    assert dispatchers() == []
+    stack.close_router()
+
+
 def test_build_live_stack_wires_private_a6_checkpoint_store(
     tmp_path, live_graph, deployment_dir
 ) -> None:

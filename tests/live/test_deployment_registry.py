@@ -437,3 +437,73 @@ def test_registry_defers_renewal_until_active_request_is_released() -> None:
     registry.release_request(request.request_id)
     assert registry.current() is renewed
     assert refreshes == ["refresh"]
+
+
+class _SpyRouter:
+    def __init__(self, events: list, name: str) -> None:
+        self._events = events
+        self._name = name
+
+    def close(self) -> None:
+        self._events.append(("router", self._name))
+
+
+def _spy_registry(monkeypatch, runtimes, events):
+    for runtime in runtimes:
+        route = runtime.route
+        original_close = route.close
+
+        def close(original_close=original_close, name=runtime.deployment_id):
+            events.append(("route", name))
+            original_close()
+
+        route.close = close
+    monkeypatch.setattr(
+        LiveDeploymentRegistry,
+        "_router_for",
+        staticmethod(lambda runtime: _SpyRouter(events, runtime.deployment_id)),
+    )
+    return LiveDeploymentRegistry(runtimes)
+
+
+def test_registry_unload_closes_the_router_before_its_route(monkeypatch) -> None:
+    events: list = []
+    registry = _spy_registry(monkeypatch, [_runtime(0), _runtime(1)], events)
+
+    registry.unload_qualified_runtime("deployment-1")
+
+    assert events == [("router", "deployment-1"), ("route", "deployment-1")]
+
+
+def test_registry_close_closes_every_router_before_its_route(monkeypatch) -> None:
+    events: list = []
+    registry = _spy_registry(monkeypatch, [_runtime(0), _runtime(1)], events)
+
+    registry.close()
+
+    assert events == [
+        ("router", "deployment-0"),
+        ("route", "deployment-0"),
+        ("router", "deployment-1"),
+        ("route", "deployment-1"),
+    ]
+
+
+def test_registry_close_still_closes_routes_when_a_router_close_fails(
+    monkeypatch,
+) -> None:
+    events: list = []
+    registry = _spy_registry(monkeypatch, [_runtime(0), _runtime(1)], events)
+
+    def failing_close() -> None:
+        events.append(("router", "deployment-0"))
+        raise RuntimeError("router_port_shutdown_cancellation_timeout")
+
+    registry._routers["deployment-0"].close = failing_close
+
+    with pytest.raises(RuntimeError, match="router_port_shutdown_cancellation_timeout"):
+        registry.close()
+
+    assert ("route", "deployment-0") in events
+    assert ("router", "deployment-1") in events
+    assert ("route", "deployment-1") in events
