@@ -720,7 +720,13 @@ class AppDemoChain:
             return state.get('state') == 'compiled'
         self._wait(ctx, compiled, budget='compile', code='chain_compile_timeout')
         state = app._chain_compile_state
-        ctx.state['proposal'] = state['execution_proposal']
+        proposal = state.get('execution_proposal')
+        ceiling = ctx.state.get('execution_ceiling')
+        if ceiling is not None:
+            from .execution_admission import proposal_within_ceiling
+            if not proposal_within_ceiling(proposal, ceiling):
+                raise OwnerRunError('execution_proposal_outside_ceiling')
+        ctx.state['proposal'] = proposal
         ctx.state['compile_state'] = {'resource_plan': state.get('resource_plan')}
         ctx.state['layers'] = {s['node_id']: [s['start'], s['end']]
                                for s in (state.get('layer_split') or {}).get('stages', [])}

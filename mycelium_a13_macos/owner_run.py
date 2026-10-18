@@ -158,14 +158,20 @@ class OwnerRun:
                 'route_ready': self._state == 'serving',
             }
 
-    def start(self, reason: str = 'start') -> dict[str, Any]:
+    def start(self, reason: str = 'start', *, execution_ceiling: dict | None = None) -> dict[str, Any]:
         if reason not in {'start', 'rebuild'}:
             raise OwnerRunError('owner_run_reason_invalid')
+        if execution_ceiling is not None:
+            from .execution_admission import checked_ceiling
+            try: execution_ceiling = checked_ceiling(execution_ceiling)
+            except ValueError: raise OwnerRunError('execution_ceiling_invalid') from None
         with self._lock:
             if self._state in _ACTIVE:
                 raise OwnerRunError('owner_run_active')
             run_id, deployment_id = self._identities()
             ctx = RunContext(self, run_id, deployment_id, reason)
+            if execution_ceiling is not None:
+                ctx.state['execution_ceiling'] = execution_ceiling
             self._ctx = ctx
             self._state = 'running'
             self._steps = {name: {'state': 'pending', 'detail': None} for name in STEP_NAMES}
@@ -193,12 +199,15 @@ class OwnerRun:
             if not self._ever_started:
                 raise OwnerRunError('owner_run_rebuild_requires_run')
             thread = self._thread
+            ceiling = None if self._ctx is None else self._ctx.state.get('execution_ceiling')
         self.stop()
         if thread is not None and thread is not threading.current_thread():
             thread.join(join_seconds)
             if thread.is_alive():
                 raise OwnerRunError('owner_run_stop_incomplete')
-        return self.start('rebuild')
+        if ceiling is None:
+            return self.start('rebuild')
+        return self.start('rebuild', execution_ceiling=ceiling)
 
     def rebuild_async(self) -> dict[str, Any]:
         """Rebuild without blocking the caller (an HTTP handler must not wait)."""

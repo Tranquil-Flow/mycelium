@@ -67,14 +67,19 @@ def action(app: Any, path: str, body: Any) -> dict:
     from .owner_run import OwnerRunError
     if app.installation_role != 'owner':
         raise DemoError('owner_role_required')
-    if body:
+    ceiling = None
+    if path == '/api/demo/start' and type(body) is dict and set(body) == {'execution_ceiling'}:
+        from .execution_admission import checked_ceiling
+        try: ceiling = checked_ceiling(body['execution_ceiling'])
+        except ValueError: raise DemoError('execution_ceiling_invalid') from None
+    elif body:
         raise DemoError('invalid_request')
     if ensure_exchange(app) is None:
         raise DemoError('owner_swarm_required')
     run = owner_run(app)
     try:
         if path == '/api/demo/start':
-            return run.start()
+            return run.start() if ceiling is None else run.start(execution_ceiling=ceiling)
         if path == '/api/demo/stop':
             return run.stop()
         return run.rebuild_async()
