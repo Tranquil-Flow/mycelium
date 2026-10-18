@@ -442,6 +442,11 @@ def _qualification_facts(
         failures.append("class_qualification_generation_stale")
     if inputs.profile is not None and not qualification.matches_profile(inputs.profile):
         failures.append("class_qualification_profile_stale")
+    if inputs.report is not None:
+        if qualification.evidence_generation != inputs.report.evidence_generation:
+            failures.append("class_qualification_evidence_generation_stale")
+        if qualification.evidence_profile_digest != inputs.report.profile_digest:
+            failures.append("class_qualification_report_profile_stale")
     if qualification.exact_class.has_unknown_member:
         failures.append("unknown_qualification_class_ineligible")
 

@@ -851,6 +851,50 @@ def test_artifact_eligibility_cannot_grant_chunks_without_an_assignment_grant() 
     )
 
 
+def test_authority_dimension_independence_rejects_new_evidence_generation() -> None:
+    """A new report cannot borrow a prior generation's stage qualification."""
+    subject = profile()
+    old = qualification(subject)
+    newer = report(subject, evidence_generation=old.evidence_generation + 1)
+    stage = eligibility.derive_eligibility(
+        "qualified_model_stage",
+        full_ladder_inputs(subject, report=newer, qualification=old),
+        now=NOW,
+    )
+    assert stage.state == "ineligible"
+    assert "class_qualification_evidence_generation_stale" in stage.blockers
+    member = eligibility.derive_eligibility(
+        "signed_member", full_ladder_inputs(subject, report=newer, qualification=old), now=NOW
+    )
+    assert member.state == "eligible"
+    assert not stage.grants_placement()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda original: {"platform_family": "linux"},
+        lambda original: {"transports": [transport_mapping(build_digest=D("9"))]},
+        lambda original: {"runtimes": [runtime_mapping(build_digest=D("8"))]},
+    ],
+)
+def test_authority_dimension_independence_profile_change_withdraws_stage_only(change) -> None:
+    original = profile()
+    changed = profile(**change(original))
+    old = qualification(original)
+    stage = eligibility.derive_eligibility(
+        "qualified_model_stage",
+        full_ladder_inputs(changed, report=report(changed), qualification=old), now=NOW,
+    )
+    assert stage.state == "ineligible"
+    assert "class_qualification_profile_stale" in stage.blockers
+    member = eligibility.derive_eligibility(
+        "signed_member", full_ladder_inputs(changed, report=report(changed), qualification=old), now=NOW
+    )
+    assert member.state == "eligible"
+    assert stage.grants_placement() is False
+
+
 def test_role_independence_and_performance_failure_keeps_other_roles() -> None:
     subject = profile()
     draft = eligibility.derive_eligibility(
