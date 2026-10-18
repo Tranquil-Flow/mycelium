@@ -14,6 +14,23 @@ async function api(path, body) {
   if (!response.ok) throw new Error(value.error || 'request_failed');
   return value;
 }
+const ADAPTIVE_TEXT={off:'Off. Mycelium follows only your power, heat and network limits.',
+  active:'On · normal. New work is accepted within your limits.',reduced:'On · reduced. Taking fewer new requests while this Mac is busy.',
+  drain:'On · draining. No new work; finishing, handing off or ending running work.',withdraw:'On · stopped. Model memory released; no work from this Mac.',
+  error:'Adaptive policy could not be read. New work is refused until you turn it off or on again.'};
+const ADAPTIVE_REASON={owner_game_mode:'Game mode',owner_stop:'you pressed Stop',host_memory_pressure:'this Mac is low on memory',
+  host_cpu_saturation:'this Mac is under heavy load',none:''};
+function renderAdaptive(value){
+  const a=value.adaptive_host||{state:'off'};
+  $('adaptive-enable').checked=!!a.enabled;$('adaptive-game').checked=!!a.game_mode;
+  const reason=ADAPTIVE_REASON[a.reason]||'';
+  $('adaptive-status').textContent=(ADAPTIVE_TEXT[a.state]||ADAPTIVE_TEXT.off)+(reason?` Reason: ${reason}.`:'')
+    +(a.enabled&&a.expires_in_s!==undefined?` Status refreshes every few seconds (valid ${a.expires_in_s}s).`:'')
+    +(a.withdraw_overdue?' Running work has not finished within the expected time.':'');
+  $('adaptive-game').disabled=busy||!a.enabled;
+  $('adaptive-stop').disabled=busy||!a.enabled||!!a.stopped;
+  $('adaptive-resume').disabled=busy||!a.enabled||!a.stopped;
+}
 function notice(text) { $('notice').textContent=text; }
 function rung(label, value) {
   const dt=document.createElement('dt'); dt.textContent=label;
@@ -43,6 +60,7 @@ function render(value) {
   $('join').hidden=target && a.membership_state==='current';
   $('revoke-consent').hidden=target;
   applyResources(value);
+  renderAdaptive(value);
   if(value.resource_policy){
     for(const key of ['power','network','storage']){
       $(key).value=String(value.resource_policy[key==='storage'?'storage_bytes':key]);
@@ -371,3 +389,7 @@ window.addEventListener('pageshow',()=>void refresh(false));
 window.addEventListener('online',()=>void refresh());
 void refresh();
 setInterval(()=>{if(!busy&&connected)void refresh(false);},5000);
+$('adaptive-enable').addEventListener('change',()=>void perform('/api/adaptive/policy',{enabled:$('adaptive-enable').checked,game_mode:$('adaptive-enable').checked&&$('adaptive-game').checked,acknowledged:$('adaptive-ack').checked},$('adaptive-enable').checked?'Adaptive host resources on.':'Adaptive host resources off.'));
+$('adaptive-game').addEventListener('change',()=>void perform('/api/adaptive/policy',{enabled:true,game_mode:$('adaptive-game').checked,acknowledged:$('adaptive-ack').checked},$('adaptive-game').checked?'Game mode on: no new work.':'Game mode off. Serving returns only after the calm period.'));
+$('adaptive-stop').addEventListener('click',()=>void perform('/api/adaptive/stop',{},'Stopped taking new work on this Mac.'));
+$('adaptive-resume').addEventListener('click',()=>void perform('/api/adaptive/resume',{},'Serving allowed again after the calm period.'));

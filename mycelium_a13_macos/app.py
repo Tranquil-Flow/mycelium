@@ -930,6 +930,7 @@ class DemoApp:
                 {'node_id':m['node_id'],'generation':m['generation'],'lifecycle_state':m['lifecycle_state']}
                 for m in coordinator.members()]}
         from .run_model import document as run_model_document
+        from .adaptive_owner import adaptive_status, adaptive_publication
         return {'label':'macOS A13 hackathon demo','role':'not_yet_serving',
                 'model_contract':asdict(self.run_model_contract()),
                 'run_model':run_model_document(self.root),
@@ -942,6 +943,7 @@ class DemoApp:
                 'recovery_error':self.recovery_error,
                 'distribution':'unsigned development software; not notarized',
                 'join_flow':self._join_flow_status(),
+                'adaptive_host':adaptive_status(self),'adaptive_host_publication':adaptive_publication(self),
                 'owner_run':_demo_status(self,'owner'),'demo_target':_demo_status(self,'target'),
                 'chat':_demo_status(self,'chat'),'swarm':_swarm_status(self),
                 'serving':{'state':'not_yet_serving','route_ready':False,
@@ -953,6 +955,9 @@ class DemoApp:
             if self.installation_role == 'target' and path in {'/api/create','/api/revoke','/api/revoke-self','/api/pair/approve','/api/pair/preview',
                     '/api/pair/window/open','/api/pair/window/list','/api/pair/window/approve','/api/pair/window/revoke'}:
                 raise DemoError('owner_role_required')
+            from .adaptive_owner import ADAPTIVE_ROUTES, adaptive_action
+            if path in ADAPTIVE_ROUTES:
+                return adaptive_action(self, path, body)
             if path == '/api/run-model':
                 return self._choose_run_model(body)
             from .demo_app import OWNER_ROUTES as _DEMO_ROUTES
