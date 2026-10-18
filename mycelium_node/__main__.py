@@ -34,6 +34,7 @@ from mycelium_seed.http import (
 )
 
 from . import membership as membership_module
+from ._failure_diagnostics import FailureRecord, describe_failure, open_failure_sink, write_failure
 from .identity import load_or_create_node_signer
 from .durable_membership import (
     PROTOCOL as MEMBERSHIP_STATE_PROTOCOL,
@@ -145,7 +146,12 @@ class _EntrypointFailure(RuntimeError):
     def __init__(self, code: str, exit_status: int) -> None:
         self.code = code
         self.exit_status = exit_status
+        self._diagnostic: FailureRecord | None = None
         super().__init__(code)
+
+def _diagnosed(failure: _EntrypointFailure, phase: str, exc: BaseException) -> _EntrypointFailure:
+    failure._diagnostic = describe_failure(phase, exc)
+    return failure
 
 
 def _aggregate_cleanup_failures(
@@ -409,6 +415,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--reconnect-base-seconds", type=float, default=0.5)
     parser.add_argument("--reconnect-max-seconds", type=float, default=15.0)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--failure-diagnostics", metavar="PATH",
+        help="one-use private exclusive JSONL target; supply a new path on each restart",
+    )
     return parser
 
 
@@ -699,7 +709,7 @@ def _preflight(
                 cleanup_phases.append("state_root")
         if cleanup_phases:
             _aggregate_cleanup_failures(failure, cleanup_phases)
-        raise failure from exc
+        raise _diagnosed(failure, "preflight", exc) from exc
 
 
 def _join_rejected(exc: SeedHTTPError) -> bool:
@@ -829,10 +839,10 @@ def _run_bound(
             rotation_method(now=time.time())
         seed_identity = client.identity(now=time.time() + 1.0)
     except Exception as exc:
-        raise _EntrypointFailure(
+        raise _diagnosed(_EntrypointFailure(
             "node_runtime_failed",
             EXIT_RUNTIME_FAILURE,
-        ) from exc
+        ), "initial_identity", exc) from exc
 
     temporary_root: _TemporaryRoot | None = None
     artifact_root: PrivateDirectoryLease | None = None
@@ -907,7 +917,7 @@ def _run_bound(
                 cleanup_phases.append("artifact_root")
         if cleanup_phases:
             _aggregate_cleanup_failures(failure, cleanup_phases)
-        raise failure from exc
+        raise _diagnosed(failure, "local_setup", exc) from exc
 
     process: PhysicalNodeProcess | None = None
     # Set from the SIGINT/SIGTERM handler: a threading.Event would take the
@@ -921,6 +931,7 @@ def _run_bound(
         stopping.set()
 
     stop_watch: threading.Event | None = None
+    phase = "runtime"
     try:
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous[signum] = signal.signal(signum, request_stop)
@@ -1039,19 +1050,19 @@ def _run_bound(
                 )
         except SeedHTTPError as exc:
             if _join_rejected(exc):
-                raise _EntrypointFailure(
+                raise _diagnosed(_EntrypointFailure(
                     "node_join_rejected",
                     EXIT_JOIN_REJECTION,
-                ) from exc
-            raise _EntrypointFailure(
+                ), "membership_exchange", exc) from exc
+            raise _diagnosed(_EntrypointFailure(
                 "node_runtime_failed",
                 EXIT_RUNTIME_FAILURE,
-            ) from exc
+            ), "membership_exchange", exc) from exc
         except Exception as exc:
-            raise _EntrypointFailure(
+            raise _diagnosed(_EntrypointFailure(
                 "node_runtime_failed",
                 EXIT_RUNTIME_FAILURE,
-            ) from exc
+            ), "membership_exchange", exc) from exc
 
         renewal_policy = RenewalRetryPolicy(
             heartbeat_interval_seconds=args.heartbeat_interval,
@@ -1060,6 +1071,7 @@ def _run_bound(
             reconnect_max_seconds=args.reconnect_max_seconds,
             lease_risk_window_seconds=max(args.heartbeat_interval, 1.0),
         )
+        phase = "lease_renewal"
         if not _renew_lease(
             client=client,
             session=session,
@@ -1068,6 +1080,7 @@ def _run_bound(
             policy=renewal_policy,
         ):
             return EXIT_SUCCESS
+        phase = "runtime"
         lease_expires_at = session.lease_expires_at
         assert lease_expires_at is not None
         observed_at = time.time()
@@ -1117,6 +1130,7 @@ def _run_bound(
                         now=time.time() + 1.0,
                     )
                     acknowledged_authority_generation = authority_generation
+            phase = "lease_renewal"
             if not _renew_lease(
                 client=client,
                 session=session,
@@ -1125,13 +1139,14 @@ def _run_bound(
                 policy=renewal_policy,
             ):
                 break
+            phase = "runtime"
     except _EntrypointFailure as exc:
         failure = exc
-    except Exception:
-        failure = _EntrypointFailure(
+    except Exception as exc:
+        failure = _diagnosed(_EntrypointFailure(
             "node_runtime_failed",
             EXIT_RUNTIME_FAILURE,
-        )
+        ), phase, exc)
     finally:
         cleanup_phases = []
         if stop_watch is not None:
@@ -1163,9 +1178,13 @@ def _run_bound(
     return EXIT_SUCCESS
 
 
-def run(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
-    state_root, bundle, verified, client, sidecar, identities, persisted = _preflight(args)
+def _run_dispatch(args: argparse.Namespace) -> int:
+    try:
+        state_root, bundle, verified, client, sidecar, identities, persisted = _preflight(args)
+    except _EntrypointFailure as failure:
+        if failure._diagnostic is None:
+            failure._diagnostic = describe_failure("preflight", None)
+        raise
     failure: _EntrypointFailure | None = None
     result = EXIT_SUCCESS
     try:
@@ -1191,11 +1210,11 @@ def run(argv: Sequence[str] | None = None) -> int:
                 )
     except _EntrypointFailure as exc:
         failure = exc
-    except Exception:
-        failure = _EntrypointFailure(
+    except Exception as exc:
+        failure = _diagnosed(_EntrypointFailure(
             "node_runtime_failed",
             EXIT_RUNTIME_FAILURE,
-        )
+        ), "state_scope", exc)
     finally:
         try:
             state_root.close()
@@ -1207,6 +1226,36 @@ def run(argv: Sequence[str] | None = None) -> int:
     if failure is not None:
         raise failure from None
     return result
+
+def run(argv: Sequence[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    if args.failure_diagnostics is None:
+        return _run_dispatch(args)
+    try:
+        fd = open_failure_sink(args.failure_diagnostics)
+    except (OSError, ValueError) as exc:
+        raise _EntrypointFailure("node_preflight_failed", EXIT_PREFLIGHT_FAILURE) from exc
+    try:
+        try:
+            return _run_dispatch(args)
+        except _EntrypointFailure as failure:
+            record = failure._diagnostic or describe_failure("runtime", None)
+            try:
+                write_failure(fd, record)
+            except Exception:
+                pass  # Never replace the primary exit contract with a sink failure.
+            raise
+        except Exception as exc:
+            try:
+                write_failure(fd, describe_failure("runtime", exc))
+            except Exception:
+                pass
+            raise
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 
 def main() -> None:
