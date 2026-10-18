@@ -375,3 +375,9 @@ def test_live_router_dispatches_interactive_ahead_of_queued_batch_and_cleans_can
     cleanup.join(timeout=1.0)
     assert not cleanup.is_alive()
     assert "batch-queued" in route.released
+
+    # Teardown: stop the router's dispatch and worker threads. Closing releases
+    # the finished requests through the scoped path, which the fake forbids only
+    # while the body checks that the queued cancellation never reached the route.
+    route.release_request_scoped = lambda *_args, **_kwargs: None
+    port.close()

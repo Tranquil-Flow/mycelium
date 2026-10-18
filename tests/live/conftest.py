@@ -7,6 +7,8 @@ import sys
 from typing import Any
 
 import pytest
+import functools
+import weakref
 
 from mycelium_qualification.evidence import sha256_bytes
 from mycelium_qualification.qualifier import qualify_route
@@ -102,3 +104,47 @@ def qualified_route():
     )
     graph = execution_graph_from_dict(json.loads(files["router/execution-graph.json"]))
     return qualification, graph
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _close_composed_live_routers():
+    """Close every LiveRouterPort a test module composed and left open.
+
+    An unclosed router keeps its m16-dispatch loop and live-route-worker pool
+    running in the xdist worker, where they open descriptors at arbitrary
+    moments and race process-wide fd-inventory tests in other modules (L2
+    rehearsal of 3e761ed1: test_private_directory_walkers_keep_fd_inventory_
+    stable_for_200_cycles). Module scope: tests in a module may share routers,
+    and pytest tears module fixtures down before the worker runs another
+    module's test. Product owners close their routers themselves (see
+    test_deployment_registry and test_live_stack_close_router_stops_the_
+    dispatch_thread); this only tears down routers composed directly by tests.
+    """
+    from mycelium_live import router_port
+
+    created: "weakref.WeakSet[router_port.LiveRouterPort]" = weakref.WeakSet()
+    original_init = router_port.LiveRouterPort.__init__
+
+    # wraps(): tests read inspect.signature(LiveRouterPort.__init__) to detect
+    # constructor parameters; the tracking wrapper must keep that signature.
+    @functools.wraps(original_init)
+    def tracking_init(self, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        created.add(self)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(router_port.LiveRouterPort, "__init__", tracking_init)
+        yield
+    for port in list(created):
+        try:
+            port.close()
+        except RuntimeError as error:
+            # close() joins the dispatcher and workers before it fails closed on
+            # requests whose cleanup was never proven or whose cancellation a test
+            # made fail on purpose; the threads are stopped either way. Shutdown
+            # timeouts mean threads still run, and are real failures.
+            if str(error) not in (
+                "router_port_shutdown_cleanup_unproven",
+                "router_port_shutdown_cancellation_failed",
+            ):
+                raise
