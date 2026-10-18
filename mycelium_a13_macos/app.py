@@ -686,7 +686,12 @@ class DemoApp:
         except Exception:
             observation = dict(UNKNOWN_OBSERVATION)
         self.resource_observation = observation
-        return policy_violation(read_resource_policy(self.root) or {}, observation)
+        violation = policy_violation(read_resource_policy(self.root) or {}, observation)
+        if violation:
+            return violation  # A13 power/thermal/network gates are never softened
+        # A16 optional adaptive host-resource admission (off unless opted in).
+        from .adaptive_host import adaptive_resource_check
+        return adaptive_resource_check(self)
 
     def _cancel_acquisition(self):
         if self.acquisition is not None:
