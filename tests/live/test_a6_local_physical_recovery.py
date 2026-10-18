@@ -250,8 +250,11 @@ def test_single_path_source_kill_is_observed_then_route_cold_restarts(
         assert local.session_factory.launches == ["node-a", "node-b", "node-a", "node-b"]
     finally:
         service.close()
-        owner.close()
-        local.close()
+        try:
+            router.close()
+        finally:
+            owner.close()
+            local.close()
 
 
 def test_full_replica_source_kill_recovers_on_the_disjoint_successor(tmp_path, watchdog) -> None:
@@ -288,8 +291,11 @@ def test_full_replica_source_kill_recovers_on_the_disjoint_successor(tmp_path, w
         assert after["kinds"] == ["completed"], after
     finally:
         service.close()
-        owner.close()
-        local.close()
+        try:
+            router.close()
+        finally:
+            owner.close()
+            local.close()
 
 
 def test_full_replica_recovery_after_committed_prefix_reaches_cutover_inside_default_phases(
@@ -339,5 +345,8 @@ def test_full_replica_recovery_after_committed_prefix_reaches_cutover_inside_def
         assert router.recovery_failure_reason(request_id) is None
     finally:
         service.close()
-        owner.close()
-        local.close()
+        try:
+            router.close()
+        finally:
+            owner.close()
+            local.close()

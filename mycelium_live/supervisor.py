@@ -566,6 +566,15 @@ class LiveStack:
     router: LiveRouterPort | None = None
     observatory: Any | None = None
 
+    def close_router(self) -> None:
+        """Stop the router's dispatch and worker threads (idempotent).
+
+        Call before closing the route: closing cancels owned requests through it.
+        """
+
+        if self.router is not None:
+            self.router.close()
+
 
 COLD_ROUTE_RESTART_ERROR_CODE = "cold_route_restart_in_progress"
 COLD_ROUTE_RESTART_EXHAUSTED_CODE = "cold_route_restart_budget_exhausted"
@@ -4719,7 +4728,11 @@ def run_physical_server(
             stack.health.drop()
         if server is not None:
             server.server_close()
-        route.close()
+        try:
+            if stack is not None:
+                stack.close_router()
+        finally:
+            route.close()
         if a6_fault_control is not None and stack is not None:
             a6_fault_control.finalize(
                 product_port=port,

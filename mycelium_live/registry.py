@@ -237,7 +237,12 @@ class LiveDeploymentRegistry:
             self._draining.add(deployment_id)
         error: BaseException | None = None
         try:
-            runtime.route.close()
+            # The router owns a dispatch thread and a worker pool; stop them
+            # before the route they cancel through is closed.
+            try:
+                self._routers[deployment_id].close()
+            finally:
+                runtime.route.close()
         except BaseException as exc:
             error = exc
         with self._lock:
@@ -969,9 +974,21 @@ class LiveDeploymentRegistry:
 
     def close(self) -> None:
         with self._lock:
-            runtimes = tuple(self._runtimes.values())
-        for runtime in runtimes:
-            runtime.route.close()
+            owned = tuple(
+                (self._routers.get(deployment_id), runtime)
+                for deployment_id, runtime in self._runtimes.items()
+            )
+        first_error: BaseException | None = None
+        for router, runtime in owned:
+            try:
+                if router is not None:
+                    router.close()
+            except BaseException as exc:
+                first_error = first_error or exc
+            finally:
+                runtime.route.close()
+        if first_error is not None:
+            raise first_error
 
     def cleanup(self) -> None:
         with self._lock:
