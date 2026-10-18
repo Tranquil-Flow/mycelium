@@ -266,3 +266,54 @@ def test_full_replica_source_kill_recovers_on_the_disjoint_successor(tmp_path, w
         service.close()
         owner.close()
         local.close()
+
+
+def test_full_replica_recovery_after_committed_prefix_reaches_cutover_inside_default_phases(
+        tmp_path, watchdog) -> None:
+    """A6 live a6mbd12 shape: the source fails after >= 1 committed token.
+
+    The gateway freezes a checkpoint that carries the committed prefix, the
+    disjoint complete replica is qualified and prefills the replayed context
+    (prompt + committed prefix), the suffix cuts over, and the request completes
+    on the default (unwidened) phase deadlines. Observed through the production
+    ``recover_full_context`` seam; no sleeps are added and no deadline is changed.
+    """
+
+    local, owner, router, service, target = _compose(tmp_path, "full_replica")
+    try:
+        _baseline_id, baseline = _run_without_fault(service, owner)
+        assert baseline["kinds"] == ["completed"], baseline
+        seen: dict = {}
+        recover_returned = threading.Event()
+        real_recover = router.recover_full_context
+
+        def observed_recover(request_id, checkpoint):
+            seen["committed_token_count"] = checkpoint.committed_token_count
+            seen["prefix"] = tuple(checkpoint.committed_prefix_tokens)
+            seen["prompt_len"] = len(checkpoint.encoded_prompt)
+            try:
+                seen["result"] = real_recover(request_id, checkpoint)
+            except BaseException as error:  # noqa: BLE001 - recorded, re-raised
+                seen["error"] = repr(error)
+                raise
+            finally:
+                recover_returned.set()
+            return seen["result"]
+
+        router.recover_full_context = observed_recover
+        request_id, outcome = _run_case(
+            service, owner, target, "ordinary_browser_source_failure_recovery")
+        assert "refusal" not in outcome, outcome
+        assert seen.get("committed_token_count", 0) >= 1, seen
+        assert seen["prefix"] and len(seen["prefix"]) == seen["committed_token_count"], seen
+        assert outcome["kinds"] == ["completed"], (outcome, seen)
+        # The terminal event is published before recover_full_context returns.
+        assert recover_returned.wait(60), (seen, outcome)
+        assert seen["result"] is True, seen
+        assert outcome["kinds"] == ["completed"], outcome
+        assert outcome["tokens"] == baseline["tokens"], outcome
+        assert router.recovery_failure_reason(request_id) is None
+    finally:
+        service.close()
+        owner.close()
+        local.close()
