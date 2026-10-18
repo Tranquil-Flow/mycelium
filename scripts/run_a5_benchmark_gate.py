@@ -502,6 +502,35 @@ def _join_workers_until(workers: list[threading.Thread], *, deadline: float) -> 
     return not any(worker.is_alive() for worker in workers)
 
 
+class RotatingProductSessions:
+    """Bound browser ownership by submission count and age, not stream lifetime.
+
+    Fork and reserve under one lock; the child keeps its original cookie for
+    streaming and cancellation after a fresh ProductSession bootstraps.
+    """
+
+    MAX_SUBMISSIONS = 32
+    MAX_AGE_SECONDS = 1800
+
+    def __init__(self, session: ProductSession, base_url: str) -> None:
+        self._session = session
+        self._base_url = base_url
+        self._born = time.monotonic()
+        self._submissions = 0
+        self._lock = threading.Lock()
+
+    def fork_for_submission(self) -> ProductSession:
+        with self._lock:
+            if (self._submissions >= self.MAX_SUBMISSIONS
+                    or time.monotonic() - self._born >= self.MAX_AGE_SECONDS):
+                self._session = ProductSession(self._base_url)
+                self._born = time.monotonic()
+                self._submissions = 0
+            child = self._session.fork()
+            self._submissions += 1
+            return child
+
+
 class _WindowDriver:
     """Drives one measured window: Poisson arrivals, bounded concurrency,
     60+ terminal requests counted after the warmup span."""
@@ -512,7 +541,7 @@ class _WindowDriver:
         rng: random.Random,
         arrival_rate: float | None = None,
     ) -> None:
-        self._session = session
+        self._sessions = RotatingProductSessions(session, getattr(session, "base_url", ""))
         self._rng = rng
         self._arrival_rate = ARRIVAL_RATE if arrival_rate is None else arrival_rate
         # Arrivals the offered schedule produced inside the measured span but
@@ -591,7 +620,7 @@ class _WindowDriver:
         terminal: str | None = None
         token_count = 0
         outcome = "error"
-        request_session = self._session.fork()
+        request_session = self._sessions.fork_for_submission()
         try:
             accepted = request_session.submit(
                 prompt=shape.prompt,

@@ -578,12 +578,12 @@ class ProductClient:
    """Submit one request through the ordinary gateway and stream it to terminal."""
 
    def __init__(self, base_url: str, *, diagnostic_limit: int = 0) -> None:
-      from scripts.run_a5_benchmark_gate import ProductSession
+      from scripts.run_a5_benchmark_gate import ProductSession, RotatingProductSessions
 
       if type(diagnostic_limit) is not int or not 0 <= diagnostic_limit <= 4096:
          raise ValueError("diagnostic_limit_invalid")
       self.base_url = base_url
-      self._session = ProductSession(base_url)
+      self._sessions = RotatingProductSessions(ProductSession(base_url), base_url)
       self._diagnostics: deque[RequestDiagnostic] | None = deque(maxlen=diagnostic_limit) if diagnostic_limit else None
       self._diagnostics_lock = threading.Lock()
 
@@ -600,7 +600,7 @@ class ProductClient:
          self._diagnostics.append(record)
 
    def run(self, shape: RequestShape) -> RequestResult:
-      session = self._session.fork()
+      session = self._sessions.fork_for_submission()
       submitted = time.monotonic()
       try:
          accepted = session.submit(
@@ -690,7 +690,7 @@ class ProductClient:
    def cancellation_isolation(self, shape: RequestShape) -> dict[str, Any]:
       """Cancel one of two concurrent requests; only the cancelled one may stop."""
 
-      victim_session = self._session.fork()
+      victim_session = self._sessions.fork_for_submission()
       victim = victim_session.submit(
          prompt=prompt_text(shape),
          maximum_new_tokens=OUTPUT_BUCKETS["output_long"],
@@ -733,7 +733,7 @@ class ProductClient:
    def slow_consumer(self, shape: RequestShape) -> dict[str, Any]:
       """A consumer that stops reading must not block another request."""
 
-      stalled_session = self._session.fork()
+      stalled_session = self._sessions.fork_for_submission()
       stalled = stalled_session.submit(
          prompt=prompt_text(shape),
          maximum_new_tokens=OUTPUT_BUCKETS["output_long"],
