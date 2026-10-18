@@ -13,8 +13,10 @@ seed root and never kills by pattern: stopping is the fleet's own owned stop.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import socket
 import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -87,6 +89,68 @@ class CommandOwnedFleet:
 
     def start(self, epoch: Path) -> dict[str, Any]:
         return self._run("start", [str(epoch)])
+
+
+def _canonical_digest(value: Any) -> str:
+    raw = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def state_readback(*, seed_db: Path, seed_key: Path, swarm_id: str) -> dict[str, Any]:
+    """Identity, contract and member generations read from the seed's own durable state.
+
+    ``incumbent_digest`` covers the contract, the identity binding and each member's
+    generation, key digest and incarnation: it is equal across a faithful rollback
+    and changes at a cutover.  Process facts (pids, births, listener) are the fleet's.
+    """
+    from mycelium_node.identity import load_node_signer
+    from mycelium_seed.state import SqliteSeedState
+
+    signer = load_node_signer(Path(seed_key))
+    state = SqliteSeedState(Path(seed_db))
+    binding = state.identity_binding()
+    if binding["seed_key_digest"] != signer.verification_key_digest or binding["swarm_id"] != swarm_id:
+        raise CutoverRefused("seed_not_bound_to_this_key_and_swarm")
+    contract = state.membership_contract()
+    members = {
+        str(m["node_id"]): {"generation": int(m["generation"]), "key_digest": str(m["verification_key_digest"]),
+                            "incarnation": str(m["incarnation"])}
+        for m in state.load_members()}
+    return {
+        "contract": contract["version"], "seed_key_digest": binding["seed_key_digest"], "swarm_id": binding["swarm_id"],
+        "members": {n: {"generation": v["generation"], "key_digest": v["key_digest"]} for n, v in members.items()},
+        "incumbent_digest": _canonical_digest({"contract": contract, "binding": dict(binding), "members": members}),
+    }
+
+
+def merge_process_facts(state: Mapping[str, Any], facts: Mapping[str, Any]) -> dict[str, Any]:
+    """Join the fleet's process facts onto the seed-state readback (unknown members refused)."""
+    members = {n: dict(v) for n, v in _members(state).items()}
+    for node, process in _members(facts).items():
+        if node not in members or not isinstance(process, Mapping):
+            raise CutoverRefused("process_facts_unknown_member")
+        members[node].update(pid=process.get("pid"), birth=process.get("birth"))
+    if set(members) != set(_members(facts)):
+        raise CutoverRefused("process_facts_member_set_mismatch")
+    return {**state, "members": members,
+            **{k: facts.get(k) for k in ("owned", "listener_up", "seed_pid", "seed_birth")}}
+
+
+def stop_evidence(*, seed_port: int, pids: list[int], host: str = "127.0.0.1") -> dict[str, Any]:
+    """Observe that nothing listens on the seed port and the owned pids are gone."""
+    with socket.socket() as probe:
+        probe.settimeout(2.0)
+        listening = probe.connect_ex((host, seed_port)) == 0
+    alive = []
+    for pid in pids:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            continue
+        except PermissionError:
+            pass
+        alive.append(pid)
+    return {"seed_listener_absent": not listening, "owned_pids_alive": alive}
 
 
 def _members(doc: Mapping[str, Any]) -> Mapping[str, Mapping[str, Any]]:

@@ -15,7 +15,35 @@ Seed host (macOS, the seed's own machine):
   negatives       Deterministic negative battery on private copies of the gate
                   state (stale v1 after cutover, changed key, revoked member,
                   foreign request, forged request, substituted seed copy).
-  summary         Collect every receipt into one A9 gate summary.
+  summary         Collect every receipt into one A9 gate summary (product-piece
+                  receipts 06/13/20/21 are listed under ``product_pieces``).
+  seed-cutover-transaction
+                  Private fleet only.  Owned stop -> seed-commit -> adoptions ->
+                  fresh ``restart-N`` epoch -> readback (receipt
+                  ``06-seed-cutover-transaction.json``); ``--expect-refusal`` is the
+                  negative mode (``06-seed-cutover-negative.json``).  Exit 0 for
+                  COMMITTED_VERIFIED / NEGATIVE_PRESERVED, 2 for REFUSED (stop not
+                  confirmed, unowned fleet, production root), 1 otherwise.
+                  ``--fleet-commands`` is JSON of fixed argv lists (no shell):
+                    readback  -> one JSON line: owned, listener_up, seed_pid,
+                                 seed_birth, contract, seed_key_digest, swarm_id,
+                                 incumbent_digest, members{node: generation, pid,
+                                 birth, key_digest}; build it with the
+                                 ``seed-cutover-readback`` hook.
+                    stop      -> the fleet's own owned stop, then one JSON line
+                                 ``{seed_listener_absent, owned_pids_alive}``;
+                                 build it with the ``seed-cutover-stop-check`` hook.
+                    start     -> ``<argv> <epoch root>``: bring the fleet up with the
+                                 EPOCH as its fresh attempt root, then print the
+                                 readback line.
+                    adopt_remote (optional) -> {node: argv}; ``<argv>
+                                 <gate>/adoptions/<node>.json`` adopts a member on
+                                 another host.  Local members use ``--adopt-local``.
+  seed-cutover-readback
+                  Run-day hook: seed-state facts (contract, identity, member
+                  generations, incumbent digest) joined with ``--process-facts``.
+  seed-cutover-stop-check
+                  Run-day hook: seed listener absent + owned pids gone evidence.
 
 Member hosts (macOS laptop, Linux SB2, Windows):
   member-sign     Verify the seed-signed request against the member's own durable
@@ -44,8 +72,10 @@ from pathlib import Path
 import platform
 import shutil
 import sqlite3
+import subprocess
 import sys
 import time
+from collections.abc import Callable
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,6 +87,14 @@ SPEC = ROOT / "docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-pe
 CONTRACT_MANIFEST = ROOT / "contracts/contract-manifest.v1.json"
 ACCEPTANCE_INVENTORY = ROOT / "tests/a9_acceptance/inventory.v1.json"
 WINDOWS_BACKEND_ID = "windows_native_provider"
+#: Product-piece receipts: listed in the summary, not part of the required set.
+PIECE_RECEIPTS = {
+    "06-seed-cutover-transaction.json": "seed cutover transaction (owned stop/commit/adopt/restart)",
+    "06-seed-cutover-negative.json": "seed cutover negative (incumbent preserved)",
+    "13-mac-benchmark.json": "Mac MLX/INT8 stage benchmark",
+    "20-codec-frames.json": "adjacent-host codec emit",
+    "21-codec-adjacent.json": "adjacent-host codec verify",
+}
 
 
 class GateError(RuntimeError):
@@ -464,6 +502,99 @@ def cmd_member_adopt(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fenced(label: str, path: Path) -> Path:
+    from mycelium_platform_neutral import seed_cutover_transaction as tx
+
+    try:
+        return tx.require_owned_root(path, forbidden_roots=tuple(tx.PRODUCTION_ROOTS))
+    except tx.CutoverRefused:
+        raise GateError(f"{label} is inside a forbidden production root: {path}") from None
+
+
+def cmd_seed_cutover_transaction(args: argparse.Namespace) -> int:
+    """Owned stop -> seed-commit -> adoptions -> restart epoch -> readback (private fleet only).
+
+    The seed-commit runs only inside the transaction, after the fleet's own stop is
+    confirmed (listener absent, owned pids gone); there is no operator flag for it.
+    """
+    from mycelium_platform_neutral import seed_cutover_transaction as tx
+
+    gate = _fenced("--gate-dir", Path(args.gate_dir).resolve())
+    owned = _fenced("--owned-root", Path(args.owned_root))
+    seed_db = _fenced("--seed-db", Path(args.seed_db).resolve())
+    parent = _fenced("--epoch-parent", Path(args.epoch_parent))
+    _fenced("--seed-key", Path(args.seed_key).resolve())
+    spec = _read(Path(args.fleet_commands))
+    if not isinstance(spec, dict):
+        raise GateError("--fleet-commands must be a JSON object")
+    remote = spec.pop("adopt_remote", {})
+    try:
+        fleet = tx.CommandOwnedFleet(spec)
+    except tx.CutoverRefused as refused:
+        raise GateError(f"--fleet-commands invalid: {refused.code}") from None
+    if not isinstance(remote, dict) or not all(
+            isinstance(v, list) and v and all(isinstance(a, str) for a in v) for v in remote.values()):
+        raise GateError("--fleet-commands adopt_remote must map node ids to argv lists")
+    local = {node: (Path(profile), Path(data_dir)) for node, profile, data_dir in args.adopt_local}
+    if set(local) & set(remote):
+        raise GateError("a member cannot be adopted both locally and by the fleet")
+    adoptions = gate / "adoptions"
+
+    def commit() -> None:
+        cmd_seed_commit(argparse.Namespace(gate_dir=str(gate), seed_db=str(seed_db), seed_key=args.seed_key,
+                                           swarm_id=args.swarm_id, seed_stopped=True))
+
+    def adopt_local(node: str) -> Callable[[], None]:
+        profile, data_dir = local[node]
+        return lambda: cmd_member_adopt(argparse.Namespace(
+            adoption=str(adoptions / f"{node}.json"), profile=str(profile), data_dir=str(data_dir)))
+
+    def adopt_remote(node: str) -> Callable[[], None]:
+        def run() -> None:
+            done = subprocess.run([*remote[node], str(adoptions / f"{node}.json")], capture_output=True, text=True,
+                                  timeout=600, check=False, shell=False)
+            if done.returncode != 0:
+                raise GateError(f"remote adoption of {node} failed")
+        return run
+
+    callables = {**{n: adopt_local(n) for n in local}, **{n: adopt_remote(n) for n in remote}}
+    result = tx.run_seed_cutover(
+        fleet, cutover=commit, adopt=callables, epoch_parent=parent, owned_root=owned,
+        expect_refusal=args.expect_refusal, forbidden_roots=tuple(tx.PRODUCTION_ROOTS))
+    name = "06-seed-cutover-negative.json" if args.expect_refusal else "06-seed-cutover-transaction.json"
+    _write(gate / name, _receipt(
+        "seed_cutover_negative" if args.expect_refusal else "seed_cutover_transaction",
+        "owned private-fleet stop/commit/adopt/restart with identity, contract, generation and process readback; "
+        "the production seed root is fenced out, and this alone closes no A9 case",
+        source=_source_identity(), transaction=result))
+    print(json.dumps({"status": result["status"], "reason": result.get("reason"), "receipt": name}))
+    if result["status"] == "REFUSED":
+        return 2
+    return 0 if result["status"] in {"COMMITTED_VERIFIED", "NEGATIVE_PRESERVED"} else 1
+
+
+def cmd_seed_cutover_readback(args: argparse.Namespace) -> int:
+    """Run-day readback hook: seed-state facts joined with the fleet's own process facts."""
+    from mycelium_platform_neutral import seed_cutover_transaction as tx
+
+    try:
+        facts = _read(Path(args.process_facts))
+        state = tx.state_readback(seed_db=Path(args.seed_db), seed_key=Path(args.seed_key), swarm_id=args.swarm_id)
+        doc = tx.merge_process_facts(state, facts)
+    except tx.CutoverRefused as refused:
+        raise GateError(f"readback refused: {refused.code}") from None
+    print(json.dumps(doc, sort_keys=True))
+    return 0
+
+
+def cmd_seed_cutover_stop_check(args: argparse.Namespace) -> int:
+    """Run-day stop hook evidence, printed after the fleet's own owned stop."""
+    from mycelium_platform_neutral import seed_cutover_transaction as tx
+
+    print(json.dumps(tx.stop_evidence(seed_port=args.seed_port, pids=list(args.pid or []))))
+    return 0
+
+
 def cmd_member_declare(args: argparse.Namespace) -> int:
     """v2 declaration for a member that first joins after the cutover (no v1 history)."""
 
@@ -732,10 +863,11 @@ def cmd_summary(args: argparse.Namespace) -> int:
         "all eight UI workspaces live verification",
         "one atomic A9 feature commit",
     ]
+    pieces = {label: (name in receipts) for name, label in PIECE_RECEIPTS.items()}
     _write(gate / "99-summary.json", _receipt(
         "a9_gate_summary", "an index of receipts; A9 is closed only by the spec section 11 conditions",
-        receipts=sorted(receipts), status=status, remaining=remaining))
-    print(json.dumps({"status": status, "remaining": remaining}, indent=2))
+        receipts=sorted(receipts), status=status, remaining=remaining, product_pieces=pieces))
+    print(json.dumps({"status": status, "product_pieces": pieces, "remaining": remaining}, indent=2))
     return 0
 
 
@@ -774,6 +906,35 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--swarm-id", required=True)
     p.add_argument("--seed-stopped", action="store_true", help="confirm the seed process is stopped")
     p.set_defaults(func=cmd_seed_commit)
+
+    p = sub.add_parser("seed-cutover-transaction")
+    p.add_argument("--gate-dir", required=True)
+    p.add_argument("--seed-db", required=True, help="the private fleet's seed state.sqlite3 (never the production seed)")
+    p.add_argument("--seed-key", required=True)
+    p.add_argument("--swarm-id", required=True)
+    p.add_argument("--fleet-commands", required=True,
+                   help='JSON {"readback": argv, "stop": argv, "start": argv[, "adopt_remote": {node: argv}]}; '
+                        "start gets the fresh epoch root appended, adopt_remote gets the adoption envelope path appended")
+    p.add_argument("--owned-root", required=True, help="the private fleet run root (production roots are refused)")
+    p.add_argument("--epoch-parent", required=True, help="parent of the fresh restart-N roots, e.g. <run root>/restarts")
+    p.add_argument("--adopt-local", nargs=3, action="append", default=[], metavar=("NODE", "PROFILE", "DATA_DIR"),
+                   help="adopt NODE on this host with its signed profile and data dir (repeatable)")
+    p.add_argument("--expect-refusal", action="store_true",
+                   help="negative mode: the cutover must be refused and the incumbent restart identical")
+    p.set_defaults(func=cmd_seed_cutover_transaction)
+
+    p = sub.add_parser("seed-cutover-readback")
+    p.add_argument("--seed-db", required=True)
+    p.add_argument("--seed-key", required=True)
+    p.add_argument("--swarm-id", required=True)
+    p.add_argument("--process-facts", required=True,
+                   help='fleet JSON {"owned", "listener_up", "seed_pid", "seed_birth", "members": {node: {"pid", "birth"}}}')
+    p.set_defaults(func=cmd_seed_cutover_readback)
+
+    p = sub.add_parser("seed-cutover-stop-check")
+    p.add_argument("--seed-port", type=int, required=True)
+    p.add_argument("--pid", type=int, action="append", help="an owned pid that must be gone (repeatable)")
+    p.set_defaults(func=cmd_seed_cutover_stop_check)
 
     p = sub.add_parser("member-adopt")
     p.add_argument("--adoption", required=True, help="seed-signed adoptions/<node>.json")
