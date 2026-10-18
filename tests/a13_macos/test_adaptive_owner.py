@@ -179,8 +179,12 @@ def test_browser_opt_in_game_mode_stop_and_status_panel(tmp_path):
         expect(page.locator("#private")).to_be_visible()
         expect(page.locator("#adaptive-status")).to_contain_text("Off.")
         assert page.locator("#adaptive-stop").is_disabled() and page.locator("#adaptive-game").is_disabled()
-        page.locator("#adaptive-enable").check()  # without acknowledgement: refused, stays off
+        # Without acknowledgement the owner refuses. The UI must then show the real
+        # state again at once: a checkbox left ticked would claim "on" while the host
+        # is off (and Locator.check() raced that revert under load in L2).
+        page.locator("#adaptive-enable").click()
         expect(page.locator("#notice")).to_contain_text("acknowledgement required")
+        expect(page.locator("#adaptive-enable")).not_to_be_checked(timeout=2000)
         expect(page.locator("#adaptive-status")).to_contain_text("Off.")
         page.locator("#adaptive-ack").check()
         page.locator("#adaptive-enable").check()
