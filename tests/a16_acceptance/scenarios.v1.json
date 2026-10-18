@@ -211,10 +211,12 @@
       "physical_evidence": null,
       "deterministic_coverage": [
         "tests/a13_macos/test_adaptive_drain.py",
+        "tests/a13_macos/test_adaptive_drain_hooks.py",
         "tests/a13_macos/test_adaptive_host.py"
       ],
       "known_gaps": [
-        "a4_abort_and_a6_handoff_hooks_are_gateway_owned_and_not_wired",
+        "a4_abort_wired_to_existing_cancel_command_reaches_only_requests_this_node_is_entry_for",
+        "a6_handoff_and_successor_hooks_unwired_no_target_side_seam_owner_authority_only",
         "two_mac_run_not_executed"
       ]
     },

@@ -705,9 +705,12 @@ class DemoApp:
         adaptive = getattr(self, '_adaptive_runtime', None)
         if adaptive is None or not adaptive.controller.enabled:
             return
-        from .adaptive_drain import drain_step
+        from .adaptive_drain import drain_step, product_hooks
         from .adaptive_reentry import ReentryFeed
-        drain_step(adaptive.controller, runtime)
+        cached = getattr(self, '_adaptive_hooks', None)
+        if cached is None or cached[0] is not runtime:
+            cached = self._adaptive_hooks = (runtime, product_hooks(runtime))
+        drain_step(adaptive.controller, runtime, hooks=cached[1])
         feed = getattr(self, '_adaptive_reentry', None)
         if feed is None:
             feed = self._adaptive_reentry = ReentryFeed(

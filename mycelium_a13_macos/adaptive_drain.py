@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -43,6 +44,62 @@ class DrainHooks:
 
 class _Unobservable(Exception):
     pass
+
+
+ABORT_DEADLINE_S = 2.0  # one bounded wait per abort command; never extends a request deadline
+_MAX_ABORTED = 256
+
+
+def _cancel_ended_request(response: Any) -> bool:
+    """True only when the node reports it moved the request into its terminal CANCELLED state."""
+    try:
+        if response["ok"] is not True:
+            return False
+        result = response["result"]["observation"]["details"]["result"]
+        return result["cancelled"] is True
+    except (KeyError, TypeError):
+        return False
+
+
+def product_hooks(runtime: Any) -> DrainHooks:
+    """Hooks over seams that already exist in the product.
+
+    * ``abort`` (A4): the node's existing ``cancel`` worker command (the entry router's
+      cancellation, the same command the owner control pump delivers), one bounded call per
+      request.  Success = the node reports it cancelled that request; a request this node
+      cannot cancel (not entry-owned, unknown, already terminal elsewhere) is *not* a success,
+      so the unload keeps blocking exactly as without a hook.  A request once ended is
+      remembered (its ledger row is released by the normal path teardown) and not re-sent.
+    * ``handoff``/``successor`` (A6): intentionally absent.  A6 recovery needs the owner-side
+      authority (grants, replay checkpoint, qualified successor binding); the target has no
+      seam to start or prove one, so it must not claim one.  ``cancelled`` is absent as well:
+      owner cancellation already reaches the ledger through the ordinary path release.
+    """
+    ended: dict[str, None] = {}
+
+    def abort(row: Mapping[str, Any]) -> bool:
+        request_id = row.get("request_id")
+        if not isinstance(request_id, str) or not request_id:
+            return False
+        if request_id in ended:
+            return True
+        try:
+            response = runtime.worker.send_before(
+                command_id="a16-abort-" + uuid.uuid4().hex,
+                command="cancel",
+                payload={"request_id": request_id},
+                deadline_monotonic_s=time.monotonic() + ABORT_DEADLINE_S,
+            )
+        except Exception:
+            return False
+        if not _cancel_ended_request(response):
+            return False
+        ended[request_id] = None
+        while len(ended) > _MAX_ABORTED:
+            ended.pop(next(iter(ended)))
+        return True
+
+    return DrainHooks(abort=abort)
 
 
 def target_runtime(app: Any) -> Any | None:
