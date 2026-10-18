@@ -32,6 +32,7 @@ from tests.a10_deterministic import ensure_worktree_imports
 ensure_worktree_imports()
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,7 @@ from mycelium_router.a10_fault_negatives import (
 from mycelium_router.a10_qualification import REQUIRED_RUNTIME_BATCH_NEGATIVES
 
 REPO = Path(__file__).resolve().parents[2]
+FROZEN_PACKAGE_SOURCE = "f905d54a5e0b9816729aa587d2423a6d30675e73"
 PRODUCT_DRIVEN = ("cancellation_isolation", "queue_overflow", "slow_consumer")
 
 EXPECTED_ERROR = {
@@ -170,6 +172,16 @@ def _fault_hook_importers(repo):
          source = repo.joinpath(*relative.parts[3:])
          if source in allowed and path.read_bytes() == source.read_bytes():
             continue
+         # The L2 train exercises the frozen F package build beside newer
+         # source. Only this exact candidate's original allowlisted runner
+         # is an additional valid compiler-sources copy; arbitrary edits and
+         # production importers remain offenders.
+         if repo == REPO and source == repo / "scripts" / "run_a10_physical_gate.py":
+            frozen = subprocess.check_output(
+               ["git", "-C", str(repo), "show", f"{FROZEN_PACKAGE_SOURCE}:scripts/run_a10_physical_gate.py"]
+            )
+            if path.read_bytes() == frozen:
+               continue
       if pattern.search(path.read_text("utf-8", "replace")):
          offenders.append(str(relative))
    return offenders

@@ -27,7 +27,7 @@ SHAPE = a10.RequestShape(7, "prompt_short", "output_short", "interactive", 0.0)
 REF = "fixture-request-7"
 EVENT_PATH = "/api/v1/inference/fixture-request-7/events?private=" + CANARY
 EXPECTED_REF = "sha256:" + hashlib.sha256(REF.encode("ascii")).hexdigest()
-ALLOWED_FIELDS = {"shape_index", "request_ref", "stage", "outcome", "status", "token_events", "terminal_kind"}
+ALLOWED_FIELDS = {"shape_index", "request_ref", "stage", "outcome", "status", "token_events", "terminal_kind", "cancel_outcome", "gateway_code"}
 
 
 class FixtureHTTPServer(ThreadingHTTPServer):
@@ -131,7 +131,15 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if self.server.mode in {"post429", "post503"}:
             self.json_response(int(self.server.mode[4:]), {"private": CANARY})
         else:
-            self.json_response(200, {"request_id": REF, "event_path": EVENT_PATH})
+            self.json_response(200, {"request_id": REF, "event_path": EVENT_PATH,
+                                     "cancel_path": "/api/v1/inference/fixture-request-7/cancel"})
+
+    def do_DELETE(self):
+        path = urlsplit(self.path).path
+        self.server.record("DELETE", path)
+        assert path == "/api/v1/inference/fixture-request-7/cancel"
+        assert self.headers.get("Cookie") == COOKIE
+        self.json_response(202, {"cancelled": True})
 
 
 @contextmanager
@@ -186,6 +194,9 @@ class ProductClientLoopbackTests(unittest.TestCase):
                                   record.terminal_kind),
                                  (SHAPE.index, None if stage == "submit_error" else EXPECTED_REF,
                                   stage, outcome, status, tokens, terminal))
+                self.assertEqual(record.cancel_outcome,
+                                 "sent" if mode in {"eof", "invalid_utf8", "get404", "abrupt"} else None)
+                self.assertIsNone(record.gateway_code)
                 self.assertNotIn(CANARY, repr(record))
                 self.assertNotIn(CANARY, json.dumps(asdict(record)))
                 self.assertNotIn(origin, repr(record))
@@ -200,6 +211,8 @@ class ProductClientLoopbackTests(unittest.TestCase):
                 expected_run = [("POST", "/api/v1/inference")]
                 if not mode.startswith("post"):
                     expected_run.append(("GET", urlsplit(EVENT_PATH).path))
+                    if mode in {"eof", "invalid_utf8", "get404", "abrupt"}:
+                        expected_run.append(("DELETE", "/api/v1/inference/fixture-request-7/cancel"))
                 self.assertEqual(server.calls, expected_bootstrap * 2 + expected_run * 2)
 
     def test_real_public_and_operator_error_responses_are_closed(self):
