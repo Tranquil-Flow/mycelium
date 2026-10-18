@@ -53,6 +53,41 @@ child still fails closed instead of hanging ``start()``.
 """
 _NATIVE_PROTOCOL = "mycelium.physical_node_control.v1"
 
+# Closed private-diagnostic vocabulary; unknown/free-form errors remain unrecorded.
+_PRIVATE_CAUSE_CODES = frozenset({
+    'model_execution_not_authorized',
+    'model_load_not_admitted',
+    'resource_network_policy_violation',
+    'resource_observation_invalid',
+    'resource_policy_invalid',
+    'resource_power_policy_violation',
+    'resource_thermal_policy_violation',
+    'worker_artifact_root_invalid',
+    'worker_capacity_root_invalid',
+    'worker_command_invalid',
+    'worker_command_limit_exceeded',
+    'worker_command_not_allowed',
+    'worker_command_reconciliation_required',
+    'worker_configuration_invalid',
+    'worker_disk_limit_exceeded',
+    'worker_guard_failed',
+    'worker_identity_invalid',
+    'worker_limits_invalid',
+    'worker_membership_not_current',
+    'worker_memory_limit_exceeded',
+    'worker_memory_observation_failed',
+    'worker_native_exited',
+    'worker_native_response_invalid',
+    'worker_native_start_failed',
+    'worker_not_running',
+    'worker_owner_stopped',
+    'worker_replacement_state_unavailable',
+    'worker_resource_observation_failed',
+    'worker_restart_requires_new_instance',
+    'worker_storage_observation_failed',
+    'worker_wall_limit_exceeded',
+})
+
 
 class WorkerError(RuntimeError):
     """Stable local worker admission/supervision error."""
@@ -507,6 +542,14 @@ class _ConcurrentNativeSession:
         return self._process.pid
 
     @property
+    def birth_token(self) -> str | None:
+        # PhysicalNodeProcess already captures PID birth for ownership checks;
+        # reuse that captured token, never inventory an arbitrary PID here.
+        owner = getattr(self._process, "_pre_exec_ownership", None)
+        value = getattr(owner, "start_token", None)
+        return value if isinstance(value, str) and re.fullmatch(r"[0-9]{1,20}(?::[0-9]{1,20})?", value) else None
+
+    @property
     def launch_timing(self) -> dict[str, Any] | None:
         return getattr(self._process, "launch_timing", None)
 
@@ -683,6 +726,13 @@ class ManagedWorker:
         self._started_at: float | None = None
         self._error: str | None = None
         self._error_detail: dict[str, Any] | None = None
+        # Private provenance only. The first terminal observer captures the
+        # pre-cleanup return code; close() may subsequently reap the process.
+        self._started_at_utc_ms: int | None = None
+        self._birth_token: str | None = None
+        self._shutdown_actor: str | None = None
+        self._shutdown_error_code: str | None = None
+        self._observed_returncode: int | None = None
         self._command_count = 0
         self._commands: set[str] = set()
         self._pending_commands: set[str] = set()
@@ -949,6 +999,7 @@ class ManagedWorker:
                 timeout_seconds=response_timeout,
             )
             self.pid = self._session.pid
+            self._birth_token = getattr(self._session, "birth_token", None)
             with self._close_lock:
                 if self._closed.is_set():
                     raise WorkerError("worker_not_running")
@@ -968,6 +1019,7 @@ class ManagedWorker:
             if hello.get("ok") is not True or not group_owned:
                 raise WorkerError("worker_native_start_failed")
             self._group_owned = True
+            self._started_at_utc_ms = int(time.time() * 1000)
             self._record_start_timing()
             if self._budget_owner is self:
                 # One admitted execution owns the wall budget, and that budget
@@ -1271,8 +1323,10 @@ class ManagedWorker:
             return validated
         except BaseException as exc:
             if committed and getattr(session, "returncode", None) is not None:
+                terminal_code = getattr(exc, "code", "worker_native_exited")
                 with self._account_lock:
-                    self._error = getattr(exc, "code", "worker_native_exited")
+                    self._error = terminal_code
+                self._mark_shutdown_actor("native_send_exit", terminal_code)
                 self.close()
             raise
         finally:
@@ -1327,6 +1381,7 @@ class ManagedWorker:
     def _expire(self) -> None:
         if not self._closed.is_set():
             self._error = "worker_wall_limit_exceeded"
+            self._mark_shutdown_actor("expiry", "worker_wall_limit_exceeded")
             self.close()
 
     def _watch(self) -> None:
@@ -1336,8 +1391,16 @@ class ManagedWorker:
                 if self._session is None or self._session.returncode is not None:
                     raise WorkerError("worker_native_exited")
             except WorkerError as error:
-                self._error = str(error)
+                terminal_code = str(error)
+                self._error = terminal_code
                 self._error_detail = getattr(error, "limit_detail", None)
+                # Historical diagnostic tests bind _watch to a minimal guard stub;
+                # real workers always own the accounting lock and actor snapshot.
+                if hasattr(self, "_account_lock"):
+                    self._mark_shutdown_actor(
+                        "native_exit" if terminal_code == "worker_native_exited" else "guard",
+                        terminal_code,
+                    )
                 # Capture the bounded cause BEFORE closing: after close the
                 # stderr tail is the only surviving evidence of the exit.
                 try: self._record_native_exit(self._session)
@@ -1346,8 +1409,41 @@ class ManagedWorker:
                 return
             except Exception:
                 self._error = "worker_guard_failed"
+                self._mark_shutdown_actor("guard", "worker_guard_failed")
                 self.close()
                 return
+
+    def _mark_shutdown_actor(self, actor: str, error_code: str | None) -> None:
+        """Keep the first terminal observation before cleanup changes returncode."""
+        with self._account_lock:
+            if self._shutdown_actor is None:
+                self._shutdown_actor = actor
+                self._shutdown_error_code = error_code
+                session = self._session
+                rc = getattr(session, "returncode", None)
+                self._observed_returncode = rc if type(rc) is int else None
+
+    def private_cause_snapshot(self) -> dict[str, Any]:
+        """Closed, bounded process attribution for a cold-restart refusal."""
+        with self._account_lock:
+            code = self._shutdown_error_code if self._shutdown_actor is not None else self._error
+            rc = (self._observed_returncode if self._shutdown_actor is not None
+                  else getattr(self._session, "returncode", None))
+            actor = self._shutdown_actor if self._shutdown_actor in {
+                "guard", "expiry", "native_exit", "native_send_exit", "explicit_close"
+            } else None
+            return {
+                "previous_error_code": code if isinstance(code, str) and code in _PRIVATE_CAUSE_CODES else None,
+                "previous_shutdown_actor": actor or (
+                    "native_exit_observed_without_guard" if type(rc) is int else None),
+                "previous_returncode": rc if type(rc) is int else None,
+                "previous_pid": self.pid if type(self.pid) is int and self.pid > 0 else None,
+                "previous_birth_token": self._birth_token if isinstance(self._birth_token, str)
+                    and re.fullmatch(r"[0-9]{1,20}(?::[0-9]{1,20})?", self._birth_token) else None,
+                "previous_started_at_utc_ms": self._started_at_utc_ms
+                    if type(self._started_at_utc_ms) is int and 0 < self._started_at_utc_ms < 10**15
+                    else None,
+            }
 
     def replacement_refusal(self) -> str | None:
         """Expired/stopped authority never mints another native process."""
@@ -1419,6 +1515,7 @@ class ManagedWorker:
 
     def close(self) -> None:
         with self._close_lock:
+            self._mark_shutdown_actor("explicit_close", None)
             with self._account_lock:
                 self._closed.set()
             if self._deadline_timer is not None:

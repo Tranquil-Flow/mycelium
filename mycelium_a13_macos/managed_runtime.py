@@ -239,6 +239,9 @@ class ManagedTargetRuntime:
         # state could exist. A concurrent configure either committed before close
         # (and requires cold restart), or cannot commit after close.
         previous=self.worker
+        # Capture the *current* worker before close/reap changes its return code.
+        # The older native-exit.private.json can belong to a bootstrap lifetime.
+        previous_cause=previous.private_cause_snapshot()
         try:
             previous.close()
             if not previous.cleanup_proven() or previous.process_group_present():
@@ -249,7 +252,8 @@ class ManagedTargetRuntime:
                 'protocol':_WORKER_REPLACEMENT_PROTOCOL,'run_id':self.run_id,
                 'attempt':self._worker_replacements,'outcome':'failed',
                 'error_code':'runtime_replacement_cleanup_unproven',
-                'max_attempts':_MAX_WORKER_REPLACEMENTS})
+                'max_attempts':_MAX_WORKER_REPLACEMENTS,
+                'recorded_at_utc_ms':int(time.time()*1000),**previous_cause})
             raise RuntimeErrorCode('runtime_replacement_cleanup_unproven')
         if previous.requires_cold_restart():
             with self._lock:
@@ -259,7 +263,8 @@ class ManagedTargetRuntime:
                 'protocol':_WORKER_REPLACEMENT_PROTOCOL,'run_id':self.run_id,
                 'attempt':self._worker_replacements,'outcome':'refused',
                 'error_code':'runtime_cold_restart_required',
-                'max_attempts':_MAX_WORKER_REPLACEMENTS})
+                'max_attempts':_MAX_WORKER_REPLACEMENTS,
+                'recorded_at_utc_ms':int(time.time()*1000),**previous_cause})
             raise RuntimeErrorCode('runtime_cold_restart_required')
         refusal=self.worker.replacement_refusal()
         if refusal is not None:
@@ -267,7 +272,8 @@ class ManagedTargetRuntime:
                 _atomic_private_json(self.root/'worker-replacement.private.json',{
                     'protocol':_WORKER_REPLACEMENT_PROTOCOL,'run_id':self.run_id,
                     'attempt':self._worker_replacements,'outcome':'refused',
-                    'error_code':refusal,'max_attempts':_MAX_WORKER_REPLACEMENTS})
+                    'error_code':refusal,'max_attempts':_MAX_WORKER_REPLACEMENTS,
+                    'recorded_at_utc_ms':int(time.time()*1000),**previous_cause})
                 self._replacement_refusal_recorded=refusal
             return
         with self._lock:
@@ -277,7 +283,7 @@ class ManagedTargetRuntime:
             self._worker_replacements+=1
             attempt=self._worker_replacements
         record={'protocol':_WORKER_REPLACEMENT_PROTOCOL,'run_id':self.run_id,'attempt':attempt,
-            'previous_error_code':status.get('error_code') if isinstance(status.get('error_code'),str) else None,
+            'recorded_at_utc_ms':int(time.time()*1000),**previous_cause,
             'max_attempts':_MAX_WORKER_REPLACEMENTS}
         previous=self.worker
         replacement=None
