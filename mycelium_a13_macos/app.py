@@ -706,7 +706,13 @@ class DemoApp:
         if adaptive is None or not adaptive.controller.enabled:
             return
         from .adaptive_drain import drain_step
+        from .adaptive_reentry import ReentryFeed
         drain_step(adaptive.controller, runtime)
+        feed = getattr(self, '_adaptive_reentry', None)
+        if feed is None:
+            feed = self._adaptive_reentry = ReentryFeed(
+                clock=lambda: getattr(self, '_adaptive_clock', time.monotonic)())
+        feed.tick(adaptive.controller, self.authority)
 
     def _cancel_acquisition(self):
         if self.acquisition is not None:

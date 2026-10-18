@@ -440,6 +440,26 @@ class AdaptiveHostController:
         """Whether the latest sample classified as critical memory pressure."""
         return self._classification == "critical"
 
+    @property
+    def sample_interval_s(self) -> float:
+        return self._timings["sample_interval_s"]
+
+    def recovery_ready(self) -> bool:
+        """True once only authority evidence is missing for leaving a non-normal mode."""
+        with self._lock:
+            if not self.enabled or self.mode == "normal" or self.stopped or self._policy["game_mode"]:
+                return False
+            now = self._clock()
+            return (
+                self._classification == "healthy" and self._healthy_since is not None
+                and now - self._healthy_since >= self._timings["recovery_s"]
+                and now - self._entered_at >= self._dwell()
+            )
+
+    def needs_requalification(self) -> bool:
+        with self._lock:
+            return self.mode == "withdraw" and not self._requalified
+
     def stop_serving(self) -> None:
         with self._lock:
             self.stopped = True
