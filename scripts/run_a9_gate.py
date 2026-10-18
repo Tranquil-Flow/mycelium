@@ -664,6 +664,56 @@ def cmd_windows_benchmark(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mac_benchmark(args: argparse.Namespace) -> int:
+    from mycelium_platform_neutral import mac_mlx_int8
+
+    gate = _private_dir(Path(args.gate_dir).resolve())
+    try:
+        manifest, fields = mac_mlx_int8.run_mac_stage_benchmark(
+            snapshot=Path(args.snapshot), profile_digest=args.profile_digest,
+            thermal_state=args.thermal_state, paired_windows=args.paired_windows,
+            output_lengths=tuple(args.output_lengths), prompt_lengths=tuple(args.prompt_lengths),
+            repeats_per_cell=args.repeats_per_cell, conformance_host=args.conformance_host,
+            evidence_generation=args.evidence_generation, log_path=gate / "13-mac-benchmark.log",
+        )
+    except mac_mlx_int8.MacMlxUnavailable as refused:
+        print(f"refused: {refused.code} (not an Apple-silicon host with MLX)")
+        return 2
+    _write(gate / "14-mac-benchmark-manifest.json", manifest)
+    decision = fields["efficiency_qualification"]
+    _write(gate / "13-mac-benchmark.json", _receipt(
+        "mac_stage_benchmark",
+        "single-host Qwen2.5-0.5B int8 stage pre-qualification on the exact Apple MLX provider build; "
+        "never a Windows receipt, and the product-route two-host gate through the browser is still required for A9",
+        **fields))
+    print(json.dumps({"decision": decision["decision"]["state"], "blockers": decision["decision"]["blockers"],
+                      "median_tok_s": fields["result"]["median_decode_tokens_per_second"],
+                      "ratio": fields["result"]["median_decode_ratio"],
+                      "parity_mismatches": len(fields["result"]["token_parity_mismatches"])}))
+    return 0
+
+
+def cmd_codec_emit(args: argparse.Namespace) -> int:
+    from mycelium_platform_neutral import adjacent_codec
+
+    document = adjacent_codec.emit(host_id=args.host_id, generation=args.generation, dtype=args.dtype,
+                                   seed=args.seed, hidden_size=args.hidden_size)
+    _write(Path(args.gate_dir).resolve() / "20-codec-frames.json", document)
+    print(json.dumps({"frames": len(document["frames"]), "host_id": args.host_id}))
+    return 0
+
+
+def cmd_codec_verify(args: argparse.Namespace) -> int:
+    from mycelium_platform_neutral import adjacent_codec
+
+    result = adjacent_codec.verify(_read(Path(args.frames)), host_id=args.host_id,
+                                   generation=args.generation, conformance_host=args.conformance_host)
+    _write(Path(args.gate_dir).resolve() / "21-codec-adjacent.json", _receipt(
+        "adjacent_codec_qualification", adjacent_codec.CLAIM_BOUNDARY, **result))
+    print(json.dumps({"qualified": result["qualified"], "blockers": result["blockers"]}))
+    return 0 if result["qualified"] else 1
+
+
 def cmd_summary(args: argparse.Namespace) -> int:
     gate = Path(args.gate_dir).resolve()
     receipts = {path.name: _read(path) for path in sorted(gate.glob("[0-9][0-9]-*.json")) if "private" not in path.name}
@@ -764,6 +814,36 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--prompt-lengths", type=int, nargs=2, default=[16, 128])
             p.add_argument("--output-lengths", type=int, nargs=2, default=[16, 48])
             p.add_argument("--repeats-per-cell", type=int, default=2)
+
+    p = sub.add_parser("mac-benchmark")
+    p.add_argument("--gate-dir", required=True)
+    p.add_argument("--snapshot", required=True, help=".../snapshots/7ae557604adf67be50417f59c2c2f167def9a775")
+    p.add_argument("--profile-digest", required=True, help="the Mac member's v2 profile digest, or 'local-declaration'")
+    p.add_argument("--thermal-state", choices=("nominal", "fair", "serious", "critical", "unknown"))
+    p.add_argument("--paired-windows", type=int, default=3)
+    p.add_argument("--prompt-lengths", type=int, nargs=2, default=[16, 128])
+    p.add_argument("--output-lengths", type=int, nargs=2, default=[16, 48])
+    p.add_argument("--repeats-per-cell", type=int, default=2)
+    p.add_argument("--evidence-generation", type=int, default=1)
+    p.add_argument("--conformance-host", action="store_true", help="allow a non-Apple smoke run (never evidence)")
+    p.set_defaults(func=cmd_mac_benchmark)
+
+    p = sub.add_parser("codec-emit")
+    p.add_argument("--gate-dir", required=True)
+    p.add_argument("--host-id", required=True, help="the emitting member's node id")
+    p.add_argument("--generation", type=int, required=True)
+    p.add_argument("--dtype", choices=("float16", "bfloat16"), default="float16")
+    p.add_argument("--seed", type=int, default=20261018)
+    p.add_argument("--hidden-size", type=int, default=896)
+    p.set_defaults(func=cmd_codec_emit)
+
+    p = sub.add_parser("codec-verify")
+    p.add_argument("--gate-dir", required=True)
+    p.add_argument("--frames", required=True, help="20-codec-frames.json copied from the emitting host")
+    p.add_argument("--host-id", required=True, help="the verifying member's node id (must differ)")
+    p.add_argument("--generation", type=int, required=True)
+    p.add_argument("--conformance-host", action="store_true")
+    p.set_defaults(func=cmd_codec_verify)
 
     p = sub.add_parser("summary")
     p.add_argument("--gate-dir", required=True)
