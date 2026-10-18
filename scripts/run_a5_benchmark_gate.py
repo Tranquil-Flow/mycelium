@@ -170,6 +170,14 @@ class _RequestShape:
     qos_class: str
 
 
+def _close_refused_response(error: urllib.error.HTTPError) -> None:
+    """Release the response without replacing its primary HTTP failure."""
+    try:
+        error.close()
+    except Exception:
+        pass
+
+
 class ProductSession:
     """Minimal ordinary-browser-gateway client (bootstrap + inference)."""
 
@@ -244,6 +252,7 @@ class ProductSession:
             opener = self._control_opener if control else self._opener
             return opener.open(request, timeout=timeout)
         except urllib.error.HTTPError as error:
+            _close_refused_response(error)
             raise GateError(f"http_{method.lower()}_{error.code}") from error
         except (OSError, TimeoutError) as error:
             raise GateError(f"http_{method.lower()}_unavailable") from error
@@ -318,7 +327,10 @@ def public_json(base_url: str, path: str) -> dict[str, Any]:
             base_url.rstrip("/") + path, timeout=10.0
         ) as response:
             document = json.load(response)
-    except (OSError, urllib.error.HTTPError, TimeoutError) as error:
+    except urllib.error.HTTPError as error:
+        _close_refused_response(error)
+        raise GateError("public_status_unavailable") from error
+    except (OSError, TimeoutError) as error:
         raise GateError("public_status_unavailable") from error
     if not isinstance(document, dict):
         raise GateError("public_status_not_object")
@@ -349,6 +361,7 @@ def install_replica_qualification(
         with urllib.request.urlopen(request, timeout=10.0) as response:
             document = json.load(response)
     except urllib.error.HTTPError as error:
+        _close_refused_response(error)
         raise GateError(f"qualification_install_http_{error.code}") from error
     except (OSError, TimeoutError) as error:
         raise GateError("qualification_install_unavailable") from error

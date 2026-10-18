@@ -66,9 +66,12 @@ def switch_policy(
             document = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
         try:
-            code = json.loads(error.read().decode("utf-8")).get("code")
-        except (ValueError, AttributeError):
-            code = None
+            try:
+                code = json.loads(error.read().decode("utf-8")).get("code")
+            except (ValueError, AttributeError):
+                code = None
+        finally:
+            error.close()
         raise SystemExit(f"a10_batch_policy_refused:{code or error.code}") from None
     except (urllib.error.URLError, OSError, ValueError):
         raise SystemExit("a10_batch_policy_control_unreachable") from None

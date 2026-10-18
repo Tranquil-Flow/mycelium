@@ -92,7 +92,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -542,14 +542,62 @@ class RequestResult:
    output_digest: str | None
 
 
+@dataclass(frozen=True)
+class RequestDiagnostic:
+   """Opt-in client observation; not product admission or terminal evidence."""
+
+   shape_index: int
+   request_ref: str | None
+   stage: str
+   outcome: str
+   status: int | None
+   token_events: int
+   terminal_kind: str | None = None
+
+
+_DIAGNOSTIC_REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,127}\Z")
+_DIAGNOSTIC_HTTP_STATUS = re.compile(r"http_(?:post|get)_([1-5][0-9]{2})\Z")
+
+
+def _diagnostic_status(error: Exception) -> int | None:
+   # Only the coded ProductSession error, never free-form exception text.
+   from scripts.run_a5_benchmark_gate import GateError as SessionError
+
+   match = _DIAGNOSTIC_HTTP_STATUS.fullmatch(str(error)) if type(error) is SessionError else None
+   return int(match[1]) if match else None
+
+
+def _diagnostic_request_ref(accepted: object) -> str | None:
+   identifier = accepted.get("request_id") if isinstance(accepted, Mapping) else None
+   if not isinstance(identifier, str) or not _DIAGNOSTIC_REQUEST_ID.fullmatch(identifier):
+      return None
+   return "sha256:" + hashlib.sha256(identifier.encode("ascii")).hexdigest()
+
+
 class ProductClient:
    """Submit one request through the ordinary gateway and stream it to terminal."""
 
-   def __init__(self, base_url: str) -> None:
+   def __init__(self, base_url: str, *, diagnostic_limit: int = 0) -> None:
       from scripts.run_a5_benchmark_gate import ProductSession
 
+      if type(diagnostic_limit) is not int or not 0 <= diagnostic_limit <= 4096:
+         raise ValueError("diagnostic_limit_invalid")
       self.base_url = base_url
       self._session = ProductSession(base_url)
+      self._diagnostics: deque[RequestDiagnostic] | None = deque(maxlen=diagnostic_limit) if diagnostic_limit else None
+      self._diagnostics_lock = threading.Lock()
+
+   def request_diagnostics(self) -> tuple[RequestDiagnostic, ...]:
+      """Return a bounded immutable snapshot; diagnostics do no file I/O."""
+      with self._diagnostics_lock:
+         return tuple(self._diagnostics) if self._diagnostics is not None else ()
+
+   def _observe(self, shape: RequestShape, accepted: object, stage: str, outcome: str, status: int | None, tokens: int, terminal_kind: str | None = None) -> None:
+      if self._diagnostics is None:
+         return
+      record = RequestDiagnostic(shape.index, _diagnostic_request_ref(accepted), stage, outcome, status, tokens, terminal_kind)
+      with self._diagnostics_lock:
+         self._diagnostics.append(record)
 
    def run(self, shape: RequestShape) -> RequestResult:
       session = self._session.fork()
@@ -564,10 +612,15 @@ class ProductClient:
       except Exception as error:  # noqa: BLE001 - only the code is recorded
          code = str(error)
          outcome = "overflowed" if code.endswith("_429") or code.endswith("_503") else "failed"
+         if self._diagnostics is not None:
+            self._observe(shape, None, "submit_error", outcome, _diagnostic_status(error), 0)
          return RequestResult(shape, outcome, submitted, None, time.monotonic(), 0, None)
       first = None
       tokens = 0
       terminal = None
+      observed_terminal = None
+      stream_exception = False
+      stream_status = None
       output = hashlib.sha256()
       try:
          with session.request("GET", accepted["event_path"]) as response:
@@ -578,15 +631,24 @@ class ProductClient:
                   kind = line[7:]
                   if kind in TERMINAL_KINDS:
                      terminal = kind
+                     observed_terminal = kind
                      break
                elif line.startswith("data: ") and kind == "token":
                   tokens += 1
                   if first is None:
                      first = time.monotonic()
                   output.update(line[6:].encode("utf-8"))
-      except Exception:  # noqa: BLE001
+      except Exception as error:  # noqa: BLE001
          terminal = "failed"
+         stream_exception = True
+         if self._diagnostics is not None:
+            stream_status = _diagnostic_status(error)
       outcome = {"completed": "completed", "cancelled": "cancelled"}.get(terminal or "", "failed")
+      self._observe(
+         shape, accepted,
+         "stream_exception" if stream_exception else "terminal" if terminal is not None else "stream_eof",
+         outcome, stream_status, tokens, observed_terminal,
+      )
       return RequestResult(
          shape,
          outcome,
