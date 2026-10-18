@@ -134,6 +134,20 @@ class RunExchange:
                  per_node: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
         if phase not in PHASES:
             raise ValueError('demo_announcement_invalid')
+        prepared = self.prepare_announcement(phase=phase, run_id=run_id,
+            deployment_id=deployment_id, model=model, slice_mode=slice_mode,
+            manifest_digest=manifest_digest, work_limits=work_limits, per_node=per_node)
+        self.commit_announcement(prepared)
+        return self.announcement()
+
+    def prepare_announcement(self, *, phase: str, run_id: str | None = None,
+            deployment_id: str | None = None, model: Mapping[str, Any] | None = None,
+            slice_mode: bool = False, manifest_digest: str | None = None,
+            work_limits: Mapping[str, int] | None = None,
+            per_node: Mapping[str, Mapping[str, Any]] | None = None):
+        """Validate and serialize outside a lifecycle lock; no transport on commit."""
+        if phase not in PHASES:
+            raise ValueError('demo_announcement_invalid')
         document = {'protocol': ANNOUNCEMENT, 'phase': phase, 'run_id': run_id,
                     'deployment_id': deployment_id, 'model': None if model is None else dict(model),
                     'slice_mode': bool(slice_mode), 'manifest_digest': manifest_digest,
@@ -142,10 +156,26 @@ class RunExchange:
         nodes = {node: dict(extra) for node, extra in (per_node or {}).items()}
         for extra in nodes.values():
             _check_node_extra(extra)
+        return (json.loads(json.dumps(document, allow_nan=False)),
+                json.loads(json.dumps(nodes, allow_nan=False)))
+
+    def commit_announcement(self, prepared, *, idle_refresh: bool = False) -> bool:
+        """In-memory swap; an idle refresh is conditional at the swap itself.
+
+        Caller holds app.guard then the current OwnerRun lock for idle refresh.
+        No announcement()/provider, serialization, clock or transport here.
+        """
+        document, nodes = prepared
         with self._lock:
-            self._announcement = json.loads(json.dumps(document, allow_nan=False))
-            self._per_node = json.loads(json.dumps(nodes, allow_nan=False))
-        return self.announcement()
+            if idle_refresh:
+                if (document['phase'] != 'idle'
+                        or self._announcement.get('phase') not in {'idle', 'stopped'}
+                        or (self._announcement.get('phase') == 'idle'
+                            and self._announcement.get('model') == document['model'])):
+                    return False
+            self._announcement = document
+            self._per_node = nodes
+            return True
 
     def set_model_source_provider(self, provider) -> None:
         """``provider() -> hint | None``: where members may read the pinned bytes.

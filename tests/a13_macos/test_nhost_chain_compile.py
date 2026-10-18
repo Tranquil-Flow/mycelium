@@ -64,7 +64,12 @@ def _app(tmp_path, monkeypatch, memories, *, capabilities=True, layers=12, model
 
     def prepare(**kwargs):
         captured["workflow"] = kwargs
-        return NS(launch=NS(operator_plan_digest="unit", physical_host_ids=tuple(nodes)))
+        def bind_progress_identity(**identity):
+            assert identity == {"run_id":context.run_id,"deployment_id":context.deployment_id,
+                                "epoch":getattr(app,"_chain_epoch",0)}
+            captured["progress_identity"] = identity
+        return NS(launch=NS(operator_plan_digest="unit", physical_host_ids=tuple(nodes)),
+                  bind_progress_identity=bind_progress_identity)
 
     monkeypatch.setattr(cc, "prepare_serving_workflow", prepare)
     return app, captured, nodes, snapshot

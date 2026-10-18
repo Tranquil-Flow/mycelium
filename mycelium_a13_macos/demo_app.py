@@ -43,10 +43,34 @@ def ensure_exchange(app: Any):
     if (run is None or not run.active()) and exchange.announcement()['phase'] in {'idle', 'stopped'}:
         from .run_model import app_run_model
         name, _, model = app_run_model(app.root)
-        current = exchange.announcement()
         wanted = {'choice': name, 'model_id': model.model_id, 'resolved_commit': model.resolved_commit}
-        if current['phase'] != 'idle' or current.get('model') != wanted:
-            exchange.announce(phase='idle', model=wanted)
+        # Model lookup, clock and JSON preparation can invoke arbitrary code;
+        # none belongs under a lifecycle lock.
+        from .run_exchange import RunExchange
+        if type(exchange) is RunExchange:
+            prepared = exchange.prepare_announcement(phase='idle', model=wanted)
+            from .owner_run import OwnerRun
+            from contextlib import nullcontext
+            # The app guard also serializes owner installation; its Start takes
+            # OwnerRun._lock. Serving takes app.guard -> owner -> workflow ->
+            # exchange, so the idle authorization and swap are one ordered act.
+            with getattr(app, 'guard', nullcontext()):
+                if (getattr(app, 'authority', None) is not None
+                        and app.authority.control_mailbox is mailbox
+                        and getattr(app, 'run_exchange', None) is exchange
+                        and getattr(app, 'model_source_server', None) is source
+                        and getattr(app, 'owner_run', None) is run):
+                    with (run._lock if type(run) is OwnerRun else nullcontext()):
+                        if run is None or (type(run) is OwnerRun and run._state not in
+                                           {'running', 'serving', 'stopping', 'failing'}):
+                            exchange.commit_announcement(prepared, idle_refresh=True)
+        else:
+            # Callback-only injected exchanges retain observational behaviour;
+            # they cannot offer an atomic conditional publication contract.
+            current = exchange.announcement()
+            if (run is None or not run.active()) and current['phase'] in {'idle', 'stopped'} and (
+                    current['phase'] != 'idle' or current.get('model') != wanted):
+                exchange.announce(phase='idle', model=wanted)
     return exchange
 
 
@@ -55,10 +79,17 @@ def owner_run(app: Any):
     if run is None:
         from .demo_chain import AppDemoChain
         from .owner_run import OwnerRun
+        from contextlib import nullcontext
+        # Construct outside the guard; only the identity installation is a
+        # lifecycle act. This closes the no-owner idle-commit/Start gap.
         chain = AppDemoChain(app)
-        run = OwnerRun(chain)
-        chain.run = run
-        app.owner_run = run
+        candidate = OwnerRun(chain)
+        with getattr(app, 'guard', nullcontext()):
+            run = getattr(app, 'owner_run', None)
+            if run is None:
+                chain.run = candidate
+                app.owner_run = candidate
+                run = candidate
     return run
 
 

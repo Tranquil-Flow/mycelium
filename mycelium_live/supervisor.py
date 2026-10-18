@@ -3616,25 +3616,34 @@ def _explicit_historical_evidence(
     return tuple(records)
 
 
-def _qualify_open_route(route: Any) -> Any:
+def _qualify_open_route(route: Any, *, on_challenge_event=None) -> Any:
     """Renew authority by rerunning the exact physical startup challenge."""
 
     startup_prompt, startup_output = route.startup_challenge
     request_id = f"startup-{uuid.uuid4().hex}"
+    def report(kind: str, index: int) -> None:
+        if on_challenge_event is not None:
+            try:
+                on_challenge_event(route.execution_graph.deployment_id,
+                                   request_id, kind, index, len(startup_output))
+            except Exception:
+                # Telemetry cannot change inference or request release.
+                pass
     try:
+        report("begin", -1)  # Registration, not progress.
         try:
             exact_challenge = getattr(route, "infer_startup_challenge", None)
             if callable(exact_challenge):
                 result = exact_challenge(
                     request_id=request_id,
-                    sink=_DiscardSink(),
+                    sink=_DiscardSink(lambda index: report("token", index)),
                 )
             else:
                 result = route.infer(
                     startup_prompt,
                     max_new_tokens=len(startup_output),
                     request_id=request_id,
-                    sink=_DiscardSink(),
+                    sink=_DiscardSink(lambda index: report("token", index)),
                 )
         except ControllerError as exc:
             safe_code = exc.remote_code or exc.code
@@ -3659,6 +3668,7 @@ def _qualified_runtime(
     deployment_dir: Path | None = None,
     model_operation_file: Path | None = None,
     progress: Callable[[str], None] | None = None,
+    on_challenge_event=None,
     force_relay: bool = False,
     session_factory=None,
     external_session_factory=None,
@@ -3686,7 +3696,10 @@ def _qualified_runtime(
             raise RuntimeError("startup_representation_identity_mismatch")
         if progress is not None:
             progress("qualifying_route")
-        qualification = _qualify_open_route(route)
+        # Pass the observer only when one was supplied: existing callers and
+        # test doubles of _qualify_open_route take just the route.
+        qualification = (_qualify_open_route(route) if on_challenge_event is None
+                         else _qualify_open_route(route, on_challenge_event=on_challenge_event))
         # The physical command path revalidates the exact qualifier-owned
         # digest at every mutation boundary. Registry-backed serving must bind
         # that authority just like the single-deployment server does.
@@ -4034,6 +4047,7 @@ def run_registry_server(
     external_session_factory=None,
     stop_event: threading.Event | None = None,
     on_started=None,
+    on_challenge_event=None,
     api_only: bool = False,
     governance_root: Path | None = ROOT,
 ) -> int:
@@ -4047,6 +4061,8 @@ def run_registry_server(
         raise ValueError("registry_stop_event_invalid")
     if on_started is not None and not callable(on_started):
         raise ValueError("registry_start_observer_invalid")
+    if on_challenge_event is not None and not callable(on_challenge_event):
+        raise ValueError("registry_challenge_observer_invalid")
     if type(api_only) is not bool:
         raise ValueError("api_only_invalid")
     if not operator_plans:
@@ -4073,6 +4089,7 @@ def run_registry_server(
                         seed_state_root=seed_state_root,
                         model_operation_file=model_operation_file,
                         force_relay=force_relay,
+                        on_challenge_event=on_challenge_event,
                         **({"session_factory": session_factory} if session_factory is not None else {}),
                         **({"external_session_factory": external_session_factory} if external_session_factory is not None else {}),
                     )
@@ -5127,8 +5144,15 @@ def _mount_a6_product_fault_control(
 
 
 class _DiscardSink:
+    def __init__(self, on_verified_index=None):
+        self._on_verified_index = on_verified_index
+
     def emit(self, _token_index: int, _token_id: int) -> None:
-        return
+        if self._on_verified_index is not None:
+            try:
+                self._on_verified_index(_token_index)
+            except Exception:
+                pass
 
 
 def _a4_evidence_from_args(args: argparse.Namespace) -> Mapping[str, Any] | None:

@@ -173,17 +173,62 @@ class ManagedServingWorkflow:
         self._startup=None
         self._error=None
         self.node_slice_plans=None
+        self._progress_identity=None
+        self._challenge_request=None
+        self._challenge_limit=0
+        self._challenge_count=0
+
+    def bind_progress_identity(self, *, run_id, deployment_id, epoch):
+        """Private compile authority; called before durable compile publication."""
+        if (not isinstance(run_id,str) or not run_id or not isinstance(deployment_id,str)
+                or not deployment_id or type(epoch) is not int or epoch < 0):
+            raise ValueError('managed_progress_identity_invalid')
+        with self._lock:
+            if self._state!='prepared' or self._progress_identity is not None:
+                raise ValueError('managed_progress_identity_reused')
+            self._progress_identity=(run_id,deployment_id,epoch)
+
+    def _challenge_event(self, deployment_id, request_id, kind, index, limit):
+        # Only the supervisor's verified-route sink supplies token indices.
+        # Never call a user callback, do RPC, or retain token values under this lock.
+        import re
+        with self._lock:
+            if (self.stop_event.is_set() or self._state!='starting'
+                    or self._progress_identity is None
+                    or deployment_id!=self._progress_identity[1]
+                    or type(request_id) is not str
+                    or len(request_id)!=40
+                    or re.fullmatch(r'startup-[0-9a-f]{32}',request_id) is None
+                    or type(limit) is not int or not 0 < limit <= 4096):
+                return
+            if kind=='begin' and index == -1:
+                if self._challenge_request is None:
+                    self._challenge_request=request_id
+                    self._challenge_limit=limit
+                return
+            if (kind=='token' and request_id==self._challenge_request
+                    and limit==self._challenge_limit and type(index) is int
+                    and index==self._challenge_count and index<limit):
+                self._challenge_count+=1
 
     def status(self):
         with self._lock:
             return {'state':self._state,'error_code':self._error,
                 'startup':None if self._startup is None else dict(self._startup),
+                'challenge_progress':({'verified_token_count':self._challenge_count}
+                    if self._state=='starting' and not self.stop_event.is_set()
+                    and self._challenge_count else None),
                 # Startup is historical. Current qualification/selection must
                 # be read from the live registry API, never cached in this adapter.
                 'readiness_source':'registry_api'}
 
     def stop(self):
-        self.stop_event.set()
+        # The lock is also the serving-announcement commit boundary.  A stop
+        # completed before that commit cannot be overtaken by stale startup.
+        with self._lock:
+            self.stop_event.set()
+            self._challenge_request=None
+            self._challenge_count=0
 
     def run(self, *, approval, port, on_started=None, activation_event=None):
         """Publish -> target-owned stage -> actual native qualification -> API.
@@ -210,11 +255,16 @@ class ManagedServingWorkflow:
             self._state='publishing'
         def started(document):
             with self._lock:
+                if self.stop_event.is_set() or self._state!='starting':
+                    return
                 self._startup=dict(document)
                 self._state='api_running'
             if on_started is not None:on_started(dict(document))
         try:
             run=self.controller._run_plan
+            if (self._progress_identity is not None
+                    and (run.get('run_id'),run.get('deployment_id'))!=self._progress_identity[:2]):
+                raise ValueError('managed_progress_identity_changed')
             offers,adapter=publish_controller_offers(self.controller,authority=self.authority,
                 run_id=run['run_id'],deployment_id=run['deployment_id'])
             with self._lock:
@@ -232,7 +282,9 @@ class ManagedServingWorkflow:
             if self.stop_event.is_set():raise ValueError('managed_workflow_stopped')
             with self._lock:self._state='starting'
             result=self.launch.run(approval=approval,port=port,api_only=True,
-                stop_event=self.stop_event,on_started=started)
+                stop_event=self.stop_event,on_started=started,
+                **({'on_challenge_event':self._challenge_event}
+                   if self._progress_identity is not None else {}))
             with self._lock:self._state='stopped'
             return result
         except Exception as exc:

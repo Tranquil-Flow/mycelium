@@ -229,6 +229,8 @@ def start_compile(app,*,acknowledged):
                     operator_plan=root/'compiled/operator-plan.json',
                     target_source_roots={node:f['source_root'] for node,f in context.facts.items()},
                     **({} if slice_plan is None else {'slice_plan':slice_plan}))
+                workflow.bind_progress_identity(run_id=context.run_id,
+                    deployment_id=context.deployment_id,epoch=epoch)
                 model=prepared.model;p=prepared.resource_proposal
                 approval=ExecutionApproval(model_id=model.model_id,resolved_commit=model.resolved_commit,
                     source_representation=model.source_representation,runtime_dtype=model.runtime_dtype,
@@ -238,7 +240,8 @@ def start_compile(app,*,acknowledged):
                     operator_plan_digest=workflow.launch.operator_plan_digest,
                     physical_host_ids=workflow.launch.physical_host_ids)
                 app._chain_workflow=workflow;app._chain_approval=approval
-                state={'state':'compiled','route_ready':False,'execution_proposal':json.loads(json.dumps(asdict(approval)))}
+                state={'state':'compiled','route_ready':False,'epoch':epoch,
+                       'execution_proposal':json.loads(json.dumps(asdict(approval)))}
                 if resource_plan is not None:
                     from .model_resources import public_member_resources
                     state['resource_plan']={'members':[public_member_resources(r) for r in resource_plan['members']]}
@@ -259,17 +262,23 @@ def start_compile(app,*,acknowledged):
             _atomic_private_json(root/'compile-complete.private.json',{
                 'protocol':'mycelium.chain_compile_complete.v1','run_id':context.run_id,
                 'deployment_id':context.deployment_id,'epoch':epoch,'state':'compiled'})
-            if app.closed.is_set() or not app.running or getattr(app,'_chain_epoch',0)!=epoch:
-                (root/'compile-complete.private.json').unlink()
-                raise ValueError('compiler_superseded')
-            app._chain_compile_state=state
+            with app.guard:
+                if (app.closed.is_set() or not app.running
+                        or getattr(app,'_chain_epoch',0)!=epoch
+                        or getattr(app,'_chain_workflow',None) is not workflow
+                        or (getattr(workflow,'stop_event',None) is not None
+                            and workflow.stop_event.is_set())):
+                    (root/'compile-complete.private.json').unlink()
+                    raise ValueError('compiler_superseded')
+                app._chain_compile_state=state
         except Exception:
             # A failed publication is never silently promoted to successful completion.
             (root/'compile-complete.private.json').unlink(missing_ok=True)
             (root/'compile-error.private.log').write_text(traceback.format_exc())
             (root/'compile-error.private.log').chmod(0o600)
-            if getattr(app,'_chain_epoch',0)==epoch:
-                app._chain_compile_state={'state':'failed','error_code':'chain_compile_failed','route_ready':False}
+            with app.guard:
+                if getattr(app,'_chain_epoch',0)==epoch:
+                    app._chain_compile_state={'state':'failed','error_code':'chain_compile_failed','route_ready':False}
     app._chain_compile_thread=threading.Thread(target=work,name='a13-chain-compile',daemon=True)
     app._chain_compile_thread.start()
     return dict(app._chain_compile_state)
@@ -329,18 +338,25 @@ def stop_serving(app,*,timeout=30.0):
     epoch bump and can no longer publish a workflow for the old member set.
     Refuses (leaving the old state) if a thread does not exit within ``timeout``.
     """
-    workflow=getattr(app,'_chain_workflow',None)
-    if workflow is not None:workflow.stop()
-    app._chain_epoch=getattr(app,'_chain_epoch',0)+1
+    # Retirement linearizes with the app workflow/epoch writer and the final
+    # serving commit. Never join a worker while holding this guard here.
+    with app.guard:
+        workflow=getattr(app,'_chain_workflow',None)
+        if workflow is not None:workflow.stop()
+        app._chain_epoch=getattr(app,'_chain_epoch',0)+1
+        retired_epoch=app._chain_epoch
     for name in ('_chain_serving_thread','_chain_compile_thread'):
         thread=getattr(app,name,None)
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout)
             if thread.is_alive():raise ValueError('rebuild_stop_timeout')
-    context=getattr(app,'_observation_context',None)
-    if context is not None:
-        (app.root/'chain-runs'/context.run_id/'compile-complete.private.json').unlink(missing_ok=True)
-    for name in _CHAIN_FIELDS:setattr(app,name,None)
+    with app.guard:
+        if (getattr(app,'_chain_epoch',None)==retired_epoch
+                and getattr(app,'_chain_workflow',None) is workflow):
+            context=getattr(app,'_observation_context',None)
+            if context is not None:
+                (app.root/'chain-runs'/context.run_id/'compile-complete.private.json').unlink(missing_ok=True)
+            for name in _CHAIN_FIELDS:setattr(app,name,None)
     return {'state':'stopped','route_ready':False}
 
 

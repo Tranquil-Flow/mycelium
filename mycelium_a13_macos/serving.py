@@ -430,7 +430,7 @@ class RegistryLaunch:
     )
 
     def run(self, *, approval: ExecutionApproval | None, port: int, api_only: bool = False,
-            stop_event=None, on_started=None) -> int:
+            stop_event=None, on_started=None, on_challenge_event=None) -> int:
         """Execute the real native startup chain and block in its supervisor.
 
         Calling this method loads/probes the model.  Source preparation never
@@ -441,7 +441,8 @@ class RegistryLaunch:
 
         import threading
         if ((stop_event is not None and not isinstance(stop_event,threading.Event))
-                or (on_started is not None and not callable(on_started))):
+                or (on_started is not None and not callable(on_started))
+                or (on_challenge_event is not None and not callable(on_challenge_event))):
             raise ServingPreparationError("registry_lifecycle_invalid")
         if type(api_only) is not bool:
             raise ServingPreparationError("api_only_invalid")
@@ -475,6 +476,7 @@ class RegistryLaunch:
             **({"api_only": api_only} if api_only else {}),
             **({"stop_event": stop_event} if stop_event is not None else {}),
             **({"on_started": on_started} if on_started is not None else {}),
+            **({"on_challenge_event": on_challenge_event} if on_challenge_event is not None else {}),
             **({"session_factory": self.session_factory} if self.session_factory is not None else {}),
             **({"external_session_factory": self.external_session_factory} if self.external_session_factory is not None else {}),
         )

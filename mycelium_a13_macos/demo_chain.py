@@ -29,7 +29,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from .owner_run import OwnerRunError
+from .owner_run import OwnerRunError, _Stopped
 
 _CODE_RE = __import__('re').compile(r'[a-z][a-z0-9_]{0,79}\Z')
 
@@ -354,7 +354,8 @@ class AppDemoChain:
         return list(ctx.state.get('participants', []))
 
     def _reports(self, ctx) -> dict[str, dict]:
-        return {n: r for n, r in self._exchange().reports().items() if r.get('run_id') == ctx.run_id}
+        return {n: r for n, r in self._exchange().reports().items()
+                if r.get('run_id') == ctx.run_id and r.get('deployment_id') == ctx.deployment_id}
 
     def _all_in(self, ctx, states) -> bool:
         reports = self._reports(ctx)
@@ -378,7 +379,7 @@ class AppDemoChain:
         return bool(nodes)
 
     def _publish_participants(self, ctx) -> None:
-        reports = self._exchange().reports()
+        reports = self._reports(ctx)
         local = ctx.state.get('local_node')
         ctx.result['participants'] = [
             {'node_id': node, 'label': 'This Mac (owner)' if node == local else 'Joined Mac',
@@ -727,7 +728,8 @@ class AppDemoChain:
             if not proposal_within_ceiling(proposal, ceiling):
                 raise OwnerRunError('execution_proposal_outside_ceiling')
         ctx.state['proposal'] = proposal
-        ctx.state['compile_state'] = {'resource_plan': state.get('resource_plan')}
+        ctx.state['compile_state'] = {'resource_plan': state.get('resource_plan'),
+                                      'epoch': state.get('epoch')}
         ctx.state['layers'] = {s['node_id']: [s['start'], s['end']]
                                for s in (state.get('layer_split') or {}).get('stages', [])}
         self._publish_participants(ctx)
@@ -857,17 +859,49 @@ class AppDemoChain:
         ctx.progress('qualifying the route (startup challenge)')
 
     def _step_serving(self, ctx):
+        def needs_identity(workflow):
+            compiled = getattr(self.app, '_chain_compile_state', None) or {}
+            return ((ctx.state.get('compile_state') or {}).get('epoch') is not None
+                    or 'epoch' in compiled
+                    or getattr(workflow, '_progress_identity', None) is not None)
+        def current(workflow):
+            compiled = getattr(self.app, '_chain_compile_state', None) or {}
+            epoch = (ctx.state.get('compile_state') or {}).get('epoch')
+            app_epoch = getattr(self.app, '_chain_epoch', None)
+            stop = getattr(workflow, 'stop_event', None)
+            return (workflow is not None and workflow is getattr(self.app,'_chain_workflow',None)
+                    and type(epoch) is int and type(compiled.get('epoch')) is int
+                    and type(app_epoch) is int and compiled.get('state') == 'compiled'
+                    and epoch == compiled.get('epoch') == app_epoch
+                    and getattr(workflow,'_progress_identity',None)
+                        == (ctx.run_id,ctx.deployment_id,epoch)
+                    and stop is not None and not stop.is_set())
+        def observed():
+            workflow = getattr(self.app, '_chain_workflow', None)
+            state = {} if workflow is None else workflow.status()
+            view = {k:state.get(k) for k in ('state','error_code')}
+            if current(workflow):
+                progress = state.get('challenge_progress') or {}
+                count = progress.get('verified_token_count')
+                if type(count) is int and 0 < count <= 4096:
+                    view['verified_token_count'] = count
+            return view
         def up():
-            state = self._workflow_state() or {}
+            workflow = getattr(self.app, '_chain_workflow', None)
+            state = {} if workflow is None else workflow.status()
             if state.get('state') in {'failed', 'stopped'}:
                 raise OwnerRunError(state.get('error_code') or 'managed_workflow_failed')
+            if needs_identity(workflow) and not current(workflow):
+                raise OwnerRunError('serving_workflow_identity_changed')
             return state.get('state') == 'api_running'
-        # Progress: the workflow's state or a member's report changing.  The
-        # supervisor's startup route challenge itself shows no progress here.
+        # Only strictly new, verified, identity-bound indices renew this wait.
+        # Prefill before the first verified response is still unobserved.
         self._progress_wait(ctx, up, budget='serving', code='route_qualification_timeout', step='serving',
-                            observed=lambda: {k: (self._workflow_state() or {}).get(k)
-                                              for k in ('state', 'error_code')})
-        startup = self._workflow_state().get('startup') or {}
+                             observed=observed)
+        workflow = getattr(self.app, '_chain_workflow', None)
+        if workflow is None or (needs_identity(workflow) and not current(workflow)):
+            raise OwnerRunError('serving_workflow_identity_changed')
+        startup = (workflow.status().get('startup') or {})
         # 'api_running' only means the registry API is up: it also starts when
         # the startup route challenge failed (two-Mac run 14: the joined Mac
         # refused configure with placement_load_proof_mismatch, the registry
@@ -883,9 +917,65 @@ class AppDemoChain:
         # The supervisor reports 'http://127.0.0.1:<port>/'; chat and status
         # carry the bare origin (chat.RegistryClient accepts exactly that).
         origin = startup.get('url') or ctx.state.get('registry_origin')
-        ctx.result['registry_origin'] = origin.rstrip('/') if isinstance(origin, str) else origin
-        self._announce(ctx, 'serving', work_limits=ctx.state.get('work_limits'),
-                       per_node=ctx.state.get('work_nodes'))
+        origin = origin.rstrip('/') if isinstance(origin, str) else origin
+        from .workflow import ManagedServingWorkflow
+        if not isinstance(workflow, ManagedServingWorkflow):
+            # Existing injected/legacy workflow doubles do not expose the
+            # production lifecycle lock. Preserve their old observational path;
+            # no atomicity claim is made for an unrelated callback-only double.
+            ctx.result['registry_origin'] = origin
+            self._announce(ctx, 'serving', work_limits=ctx.state.get('work_limits'),
+                           per_node=ctx.state.get('work_nodes'))
+            self._publish_participants(ctx)
+            ctx.progress('route ready: open the chat')
+            return
+        # Prepare potentially callback-bearing/serializing work before locking.
+        exchange = self._exchange()
+        from .run_exchange import RunExchange
+        prepared = (exchange.prepare_announcement(
+            phase='serving', run_id=ctx.run_id, deployment_id=ctx.deployment_id,
+            model=ctx.state['model'], slice_mode=ctx.state['slice_mode'],
+            manifest_digest=ctx.state['manifest_digest'],
+            work_limits=ctx.state.get('work_limits'), per_node=ctx.state.get('work_nodes'))
+            if type(exchange) is RunExchange else None)
+        from contextlib import nullcontext
+        # Lock order: app.guard -> OwnerRun._lock -> workflow._lock -> exchange._lock.
+        # None of these scopes invokes RPC, a progress callback, or the exchange's
+        # model-source provider. App writers install/retire under app.guard;
+        # workflow.stop and run-return write under workflow._lock; OwnerRun.stop
+        # writes under OwnerRun._lock. A mere final recheck outside this scope
+        # would move, not close, the stale-publication window.
+        with getattr(self.app, 'guard', nullcontext()):
+            owner = getattr(ctx, '_run', None)
+            with (owner._lock if owner is not None else nullcontext()):
+                if owner is not None and ctx.stop_event.is_set():
+                    # Preserve OwnerRun's existing cancellation contract: an
+                    # explicit Stop is not an authority/qualification failure.
+                    raise _Stopped()
+                with workflow._lock:
+                    if (workflow is not getattr(self.app, '_chain_workflow', None)
+                            or workflow.stop_event.is_set()
+                            or workflow._state != 'api_running'
+                            or (needs_identity(workflow) and not current(workflow))
+                            or (owner is not None and (owner._ctx is not ctx
+                                or owner._state != 'running' or ctx.stop_event.is_set()))):
+                        raise OwnerRunError('serving_workflow_identity_changed')
+                    # Revalidate the same actual startup, not historical data from
+                    # a previous status snapshot. Only local in-memory commit here.
+                    live = workflow._startup or {}
+                    if (live.get('startup_qualification_complete') is not True
+                            or live.get('unavailable_deployment_count') != 0):
+                        raise OwnerRunError('route_qualification_failed')
+                    if prepared is not None:
+                        exchange.commit_announcement(prepared)
+                    ctx.result['registry_origin'] = origin
+        if prepared is None:
+            # Legacy injected exchange implementations have only announce();
+            # never call an arbitrary callback under lifecycle locks. Production
+            # RunExchange takes the fenced branch above. This adapter path is
+            # compatibility only, not a publication-atomicity claim.
+            self._announce(ctx, 'serving', work_limits=ctx.state.get('work_limits'),
+                           per_node=ctx.state.get('work_nodes'))
         self._publish_participants(ctx)
         ctx.progress('route ready: open the chat')
 
