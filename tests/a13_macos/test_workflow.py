@@ -39,7 +39,13 @@ def _compose_publish_run_cleanup(tmp_path):
             assert capture.returncode==0
             session=sender.session(node_id=peer.node_id,run_id=RUN_ID,
                 deployment_id=DEPLOYMENT_ID,timeout_seconds=10)
-            reply=session.send(command_id='workflow-hello',command='hello',payload={})
+            try:reply=session.send(command_id='workflow-hello',command='hello',payload={})
+            except ControllerError:
+                # A target worker that died before serving leaves the owner waiting
+                # until the response deadline; report the worker's cause, not the wait.
+                thread.join(1)
+                if errors:raise AssertionError(f'target worker failed: {errors[0]!r}') from errors[0]
+                raise
             assert reply['ok'] is True and reply['result']['state']=='NEW'
             assert reply['route_ready'] is False
             session.close()
