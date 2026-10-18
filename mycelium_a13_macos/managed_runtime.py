@@ -96,11 +96,15 @@ def _current_binding(member, run_id, deployment_id):
 
 
 class ManagedTargetRuntime:
+    # A16 defaults (also for partially-constructed runtimes): never withdrawn, no drain tick.
+    _withdrawn=False
+    _adaptive_drain=None
+
     def __init__(self, state_root, *, client, current_member, run_id, deployment_id,
                  staging:TargetStaging, archive:bytes, archive_digest,
                  resource_policy, limits, sidecar_binary, authorize_load,
                  preposition=None, endpoint_secret_file=None, sequence_root=None, _test_observer=None,
-                 adaptive_overlay=None):
+                 adaptive_overlay=None, adaptive_drain=None):
         if not callable(current_member) or not isinstance(staging,TargetStaging):
             raise RuntimeErrorCode('runtime_configuration_invalid')
         self._current_member=current_member
@@ -120,6 +124,9 @@ class ManagedTargetRuntime:
         self.root=_private_directory(Path(state_root),create=True)
         # A16 optional adaptive host-resource overlay; None (default) publishes nothing.
         self._adaptive=None
+        # A16 drain-to-withdraw tick (callable taking this runtime); None = never unloads.
+        self._adaptive_drain=adaptive_drain
+        self._withdrawn=False
         if adaptive_overlay is not None:
             from .adaptive_host import OverlayPublisher
             self._adaptive=OverlayPublisher(self.root,adaptive_overlay)
@@ -230,8 +237,8 @@ class ManagedTargetRuntime:
         re-qualify after configure has been dispatched, even if its reply was lost.
         """
 
-        if self._stop.is_set():
-            return
+        if self._stop.is_set() or self._withdrawn:
+            return  # an A16 withdrawal is deliberate: never mint a replacement model process
         with self._lock:
             if self._state!='running':
                 return
@@ -346,11 +353,39 @@ class ManagedTargetRuntime:
             return
 
 
+    @property
+    def model_unloaded(self):
+        return self._withdrawn
+
+    def unload_model(self):
+        """A16 withdraw: close the model worker with cleanup proof; membership and control stay up.
+
+        Only the caller (the drain tick) decides *when*; it calls this once no request is in
+        flight.  A closed, configured worker needs a fresh run to serve again (cold restart).
+        """
+        with self._lock:
+            if self._withdrawn:
+                return True
+            if self._stop.is_set() or self._state!='running':
+                return False
+            worker=self.worker
+        try:
+            worker.close()
+            proven=bool(worker.cleanup_proven()) and not worker.process_group_present()
+        except Exception:
+            return False
+        if proven:
+            with self._lock: self._withdrawn=True
+        return proven
+
     def _serve(self):
         try:
             while not self._stop.is_set():
                 self._member()
                 if self._adaptive is not None: self._adaptive.tick()
+                if self._adaptive_drain is not None:
+                    try: self._adaptive_drain(self)
+                    except Exception: pass  # a drain fault leaves the model loaded; it never kills control
                 self._replace_worker_if_dead()
                 step=self.pump.step()
                 # A retrying outbound is a bounded recovery, not a death: back off a

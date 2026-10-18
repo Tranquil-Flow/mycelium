@@ -435,6 +435,11 @@ class AdaptiveHostController:
             elif self._policy["game_mode"]:
                 self._escalate("drain", "owner_game_mode")
 
+    @property
+    def critical(self) -> bool:
+        """Whether the latest sample classified as critical memory pressure."""
+        return self._classification == "critical"
+
     def stop_serving(self) -> None:
         with self._lock:
             self.stopped = True
@@ -723,6 +728,11 @@ class AdaptiveHostRuntime:
         return self._controller.admission()
 
 
+def _drain() -> Any:
+    from . import adaptive_drain
+    return adaptive_drain
+
+
 def adaptive_resource_check(app: Any) -> str | None:
     """A16 admission boundary for ``DemoApp._resource_check`` (after A13 passes)."""
     root = getattr(app, "root", None)
@@ -734,6 +744,8 @@ def adaptive_resource_check(app: Any) -> str | None:
             policy_loader=lambda: read_adaptive_policy(root),
             sampler=lambda: getattr(app, "_adaptive_sampler", sample_host_memory)(),
             clock=lambda: getattr(app, "_adaptive_clock", time.monotonic)(),
+            footprint_bytes=lambda: _drain().footprint_bytes(_drain().target_runtime(app)),
+            inflight=lambda: _drain().inflight_count(_drain().target_runtime(app)),
         )
         try:
             app._adaptive_runtime = runtime

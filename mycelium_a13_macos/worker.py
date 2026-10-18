@@ -1508,6 +1508,13 @@ class ManagedWorker:
                 "route_ready": False,
             }
 
+    def resident_bytes(self) -> int:
+        """Resident bytes of this worker's process group while it runs, else 0 (numbers only)."""
+        with self._account_lock:
+            session = self._session
+            running = session is not None and session.returncode is None
+        return int(self._group_rss()) if running else 0
+
     def cleanup_proven(self) -> bool:
         """A pre-hello ownership refusal is not proof that no process survives."""
         with self._close_lock:
