@@ -151,6 +151,35 @@ RETAINED_OUTCOMES = tuple(PROTOCOL["retained_outcomes"])
 TERMINAL_KINDS = {"completed", "cancelled", "failed"}
 PROMPT_BUCKETS = {"prompt_short": 16, "prompt_long": 96}
 OUTPUT_BUCKETS = {"output_short": 8, "output_long": 32}
+#: ``RequestGatewayService`` default admission bound.  A queue-overflow burst only
+#: proves refusal when it EXCEEDS this bound; one that merely reaches it is admitted.
+GATEWAY_MAX_PENDING_REQUESTS = 64
+QUEUE_OVERFLOW_EXCESS = 8
+
+
+def _token_content(data: str) -> bytes:
+   """The request-independent content of one SSE token ``data:`` payload.
+
+   A real token event carries ``request_id`` and ``sequence``, which differ per
+   request, so hashing the raw line makes equal token streams compare unequal.
+   Only token position, text and id are output; any other payload hashes as-is.
+   """
+
+   try:
+      document = json.loads(data)
+   except ValueError:
+      return data.encode("utf-8")
+   if (
+      isinstance(document, dict)
+      and document.get("type") == "token"
+      and isinstance(document.get("text"), str)
+      and isinstance(document.get("token_index"), int)
+   ):
+      content = {"token_index": document["token_index"], "text": document["text"]}
+      if "token_id" in document:
+         content["token_id"] = document["token_id"]
+      return json.dumps(content, sort_keys=True, separators=(",", ":")).encode("utf-8")
+   return data.encode("utf-8")
 
 
 class GateError(RuntimeError):
@@ -642,7 +671,7 @@ class ProductClient:
                   tokens += 1
                   if first is None:
                      first = time.monotonic()
-                  output.update(line[6:].encode("utf-8"))
+                  output.update(_token_content(line[6:]))
       except Exception as error:  # noqa: BLE001
          terminal = "failed"
          stream_exception = True
@@ -724,7 +753,8 @@ class ProductClient:
    def queue_overflow(self, shape: RequestShape) -> dict[str, Any]:
       """A burst beyond the admission bound is refused before dispatch, not queued."""
 
-      burst = [RequestShape(index, "prompt_short", "output_short", "batch", 0.0) for index in range(64)]
+      size = GATEWAY_MAX_PENDING_REQUESTS + QUEUE_OVERFLOW_EXCESS
+      burst = [RequestShape(index, "prompt_short", "output_short", "batch", 0.0) for index in range(size)]
       results: list[RequestResult] = []
       lock = threading.Lock()
 
