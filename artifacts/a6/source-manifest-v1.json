@@ -1472,6 +1472,11 @@
       "size_bytes": 15532
     },
     {
+      "path": "mycelium_platform_neutral/eligibility.py",
+      "sha256": "sha256:22a805b47eec894bfeb1a71a2fd3770ee1699d504a5b6e9eb8d9d5280b6c2c88",
+      "size_bytes": 18192
+    },
+    {
       "path": "mycelium_platform_neutral/int8_stage_benchmark.py",
       "sha256": "sha256:61395da6f57248ef2c4d9fdc4bf1ff75640e2c11cc3a427bf0e6f11b221bf114",
       "size_bytes": 17148
@@ -2753,8 +2758,8 @@
     },
     {
       "path": "tests/a13_macos/test_browser.py",
-      "sha256": "sha256:45f4b1591825daa3b5866c5c02c46a21f5872df3d27daaa30566164a7107cc66",
-      "size_bytes": 5141
+      "sha256": "sha256:07348b5bbb15e9c5006e753ff6f2a24641c2e7dba2c3780eaff2860723b17f9a",
+      "size_bytes": 5545
     },
     {
       "path": "tests/a13_macos/test_browser_demo_run.py",
@@ -2775,6 +2780,11 @@
       "path": "tests/a13_macos/test_browser_swarm_publish.py",
       "sha256": "sha256:b596b38fcac43d53a29ac2d348271b5f395c7e7df41f21232ed660f909a9ad73",
       "size_bytes": 3706
+    },
+    {
+      "path": "tests/a13_macos/test_browser_target.py",
+      "sha256": "sha256:d47689e78cce8dc48615bdd83d7975ca6d1dbe816237c4adb7129f159f4aaf23",
+      "size_bytes": 9037
     },
     {
       "path": "tests/a13_macos/test_capability_link.py",
@@ -2993,8 +3003,8 @@
     },
     {
       "path": "tests/a13_macos/test_peer_model_source.py",
-      "sha256": "sha256:55bb7a09d2b80767452345c5a1ad30749daf20f74d77a3f7e4d4bae02204c134",
-      "size_bytes": 30843
+      "sha256": "sha256:2f4d0b5fd35890796dd9ad7a017807789aae237f5db9a788c1c5e659ba40673c",
+      "size_bytes": 32825
     },
     {
       "path": "tests/a13_macos/test_phase_writer_ordering_review.py",
@@ -3575,6 +3585,11 @@
       "path": "tests/a9_acceptance/test_native_peer_class_decomposition.py",
       "sha256": "sha256:0148a590d5c8ed43996d425261623b831a75528c6f8e56f91e80b84adf7f5c7e",
       "size_bytes": 2876
+    },
+    {
+      "path": "tests/a9_acceptance/test_platform_neutral_contracts.py",
+      "sha256": "sha256:f2065dfb4da87e119a70f77e0c5912d3b8504cafa6f1520eb5433ef84c3d5bc7",
+      "size_bytes": 47310
     },
     {
       "path": "tests/a9_acceptance/test_seed_membership_migration.py",
@@ -4968,5 +4983,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:57039ca858fc9ab500e2a3407f4eaf7897f151c990d9293b4e94134c71616945"
+  "source_digest": "sha256:7a0afb1aa551d59cadcbf1d66033989d4284aa523d3573611775136d953d1881"
 }
