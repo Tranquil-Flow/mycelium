@@ -7,11 +7,12 @@ from test_controller_managed_staging import setup_controller
 from test_managed_control import RUN_ID, DEPLOYMENT_ID
 from test_worker import POLICY, SAFE
 from mycelium_a13_macos.target_app import TargetApplication
+from physical_inference_qualification import ControllerError
 from mycelium_a13_macos.worker import WorkerLimits
 from mycelium_a13_macos.workflow import owner_channel, publish_controller_offers, run_target_offer
 
 
-def test_owner_publish_target_run_and_requested_cleanup_compose(tmp_path):
+def _compose_publish_run_cleanup(tmp_path):
     with _world(tmp_path/'world') as w:
         authority=w['authority']
         controller,peer=setup_controller(tmp_path,w)
@@ -54,6 +55,17 @@ def test_owner_publish_target_run_and_requested_cleanup_compose(tmp_path):
             stop.set();thread.join(5)
             app.stop_control();sender.close()
         assert not thread.is_alive()
+
+
+def test_owner_publish_target_run_and_requested_cleanup_compose(tmp_path):
+    _compose_publish_run_cleanup(tmp_path)
+
+
+def test_compose_reports_a_dead_target_worker_cause_not_the_owner_wait(tmp_path,monkeypatch):
+    def broken(self):raise ValueError('native_sidecar_installation_invalid')
+    monkeypatch.setattr(TargetApplication,'_installed_sidecar',broken)
+    with pytest.raises(AssertionError,match='native_sidecar_installation_invalid'):
+        _compose_publish_run_cleanup(tmp_path)
 
 
 def test_archive_budget_rejection_precedes_any_offer_publication(tmp_path):
