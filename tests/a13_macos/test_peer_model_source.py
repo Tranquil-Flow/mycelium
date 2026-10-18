@@ -489,24 +489,60 @@ def test_lan_direct_listener_serves_members_with_pinned_tls(owner):
         lan.close()
 
 
-def test_lan_listener_refuses_non_members_and_oversized_frames(owner):
+def test_lan_listener_refuses_non_members_and_oversized_frames(owner, monkeypatch):
     import http.client
     import ssl
+    import threading
     _, actor, source, _, _, _ = owner
+    # Hold the oversized-body write until the listener has refused its header.
+    # A client still writing at that point can receive EPIPE rather than a status.
+    refused = threading.Event()
+    original_send_response = pms._LanHandler._send
+    original_client_send = http.client.HTTPSConnection.send
+
+    def observed_response(handler, status, document):
+        original_send_response(handler, status, document)
+        if document.get("error", {}).get("code") == "model_source_frame_invalid":
+            refused.set()
+
+    def race_body_write(connection, data):
+        if len(data) > pms.MAX_LAN_REQUEST_BYTES:
+            assert refused.wait(5), "listener did not refuse the oversized header"
+            raise BrokenPipeError(32, "server already refused and closed")
+        return original_client_send(connection, data)
+
+    monkeypatch.setattr(pms._LanHandler, "_send", observed_response)
+    monkeypatch.setattr(http.client.HTTPSConnection, "send", race_body_write)
     lan = pms.OwnerLanModelSource(source, host="127.0.0.1").start()
     try:
         context = ssl.create_default_context(cadata=lan.certificate_pem)
         port = int(lan.origin.rsplit(":", 1)[1])
-        for body, path in ((b"{}", pms.PATH_READ), (b"x" * (pms.MAX_LAN_REQUEST_BYTES + 1), pms.PATH_READ),
+        for body, path in ((b"{}", pms.PATH_READ), (None, pms.PATH_READ),
                            (b"{}", "/managed-control/poll")):
             connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=5)
             try:
-                connection.request("POST", path, body=body, headers={"Content-Type": "application/json"})
+                if body is None:
+                    # The listener refuses solely from Content-Length. Sending
+                    # an oversized body after that header races its close and
+                    # tests the client's write, not the listener's refusal.
+                    connection.putrequest("POST", path)
+                    connection.putheader("Content-Type", "application/json")
+                    connection.putheader("Content-Length", str(pms.MAX_LAN_REQUEST_BYTES + 1))
+                    connection.endheaders()
+                else:
+                    connection.request("POST", path, body=body,
+                                       headers={"Content-Type": "application/json"})
                 response = connection.getresponse()
-                assert response.status in {400, 401, 404}
-                assert "data_base64" not in response.read().decode()
+                document = json.loads(response.read())
+                assert response.status == (404 if path != pms.PATH_READ else 400)
+                assert "data_base64" not in json.dumps(document)
+                if body is None:
+                    assert refused.is_set()
+                    assert document == {"error": {"code": "model_source_frame_invalid"}}
             finally:
                 connection.close()
+        assert source.served_bytes(actor.member.node_id) == 0
+        assert source._seen == {}  # no oversized/non-member request reached the signed handler
     finally:
         lan.close()
 
