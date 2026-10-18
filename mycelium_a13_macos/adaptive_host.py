@@ -16,6 +16,7 @@ import copy
 import json
 import math
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -275,7 +276,106 @@ def sample_host_memory(
             result["available_bytes"] = pages * page
     except Exception:
         pass
+    try:  # secondary, independent view: only a parseable value is used, prose drift is "absent"
+        cross = parse_memory_pressure(runner(["memory_pressure"]))
+    except Exception:
+        cross = None
+    if cross is not None:
+        result["pressure_crosscheck"] = cross
     return result
+
+
+# Provisional, unmeasured cross-check bands (flag only extreme contradictions with the kernel
+# level; the middle band can never contradict because ``classify_sample`` needs a 2-step gap).
+CROSSCHECK_NORMAL_FREE_PERCENT: Final = 50
+CROSSCHECK_CRITICAL_FREE_PERCENT: Final = 5
+_FREE_PERCENT = re.compile(r"System-wide memory free percentage:\s*(\d{1,3})%")
+
+
+def parse_memory_pressure(text: object) -> str | None:
+    """Coarse level from ``memory_pressure`` output, or ``None`` if the line is not found."""
+    match = _FREE_PERCENT.search(text) if isinstance(text, str) else None
+    if match is None or int(match.group(1)) > 100:
+        return None
+    free = int(match.group(1))
+    if free >= CROSSCHECK_NORMAL_FREE_PERCENT:
+        return "normal"
+    if free <= CROSSCHECK_CRITICAL_FREE_PERCENT:
+        return "critical"
+    return "warn"
+
+
+def read_cpu_ticks() -> tuple[int, int, int, int]:
+    """Cumulative (user, system, idle, nice) ticks via ``host_statistics`` (macOS, unprivileged)."""
+    import ctypes
+    libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    libc.mach_host_self.restype = ctypes.c_uint
+    ticks = (ctypes.c_uint * 4)()
+    count = ctypes.c_uint(4)
+    status = libc.host_statistics(libc.mach_host_self(), 3, ticks, ctypes.byref(count))  # HOST_CPU_LOAD_INFO
+    if status != 0 or count.value != 4:
+        raise OSError("host_statistics")
+    return int(ticks[0]), int(ticks[1]), int(ticks[2]), int(ticks[3])
+
+
+class CpuMeter:
+    """Aggregate host CPU utilization from tick deltas; ``None`` means unknown, never zero."""
+
+    def __init__(self, read: Callable[[], tuple[int, ...]] = read_cpu_ticks) -> None:
+        self._read = read
+        self._previous: tuple[int, ...] | None = None
+
+    def utilization(self) -> float | None:
+        try:
+            current = tuple(int(value) for value in self._read())
+        except Exception:
+            self._previous = None
+            return None
+        previous, self._previous = self._previous, current
+        if previous is None or len(current) != 4 or len(previous) != 4:
+            return None
+        deltas = [now - before for now, before in zip(current, previous)]
+        total = sum(deltas)
+        if any(delta < 0 for delta in deltas) or total <= 0:
+            return None
+        return max(0.0, min(1.0, 1.0 - deltas[2] / total))
+
+
+class HostSampler:
+    """The default live sampler: memory signals plus aggregate CPU.  GPU is not collected (unknown)."""
+
+    def __init__(
+        self,
+        *,
+        runner: Callable[[list[str]], str] = _default_runner,
+        clock: Callable[[], float] = time.monotonic,
+        meter: CpuMeter | None = None,
+    ) -> None:
+        self._runner = runner
+        self._clock = clock
+        self._meter = meter if meter is not None else CpuMeter()
+
+    def __call__(self) -> dict[str, Any]:
+        sample = sample_host_memory(self._runner, self._clock)
+        cpu = self._meter.utilization()
+        if cpu is not None:
+            sample["cpu_utilization"] = cpu
+        return sample
+
+
+def sampler_for(app: Any) -> Callable[[], Mapping[str, Any]]:
+    """``app._adaptive_sampler`` when set (tests, overrides), else one ``HostSampler`` per app."""
+    override = getattr(app, "_adaptive_sampler", None)
+    if override is not None:
+        return override
+    sampler = getattr(app, "_adaptive_host_sampler", None)
+    if sampler is None:
+        sampler = HostSampler()
+        try:
+            app._adaptive_host_sampler = sampler
+        except AttributeError:
+            pass
+    return sampler
 
 
 # --------------------------------------------------------------- capacity
@@ -762,7 +862,7 @@ def adaptive_resource_check(app: Any) -> str | None:
     if runtime is None:
         runtime = AdaptiveHostRuntime(
             policy_loader=lambda: read_adaptive_policy(root),
-            sampler=lambda: getattr(app, "_adaptive_sampler", sample_host_memory)(),
+            sampler=lambda: sampler_for(app)(),
             clock=lambda: getattr(app, "_adaptive_clock", time.monotonic)(),
             footprint_bytes=lambda: _drain().footprint_bytes(_drain().target_runtime(app)),
             inflight=lambda: _drain().inflight_count(_drain().target_runtime(app)),
