@@ -2483,8 +2483,8 @@
     },
     {
       "path": "scripts/run_a10_physical_gate.py",
-      "sha256": "sha256:af47754c6b6f16fdc85e31b6d66233ed98d5bbd394150e982503062018d65312",
-      "size_bytes": 79629
+      "sha256": "sha256:25666d625c0d6be7900992967d5599f59ceec4ae1a3ecef2b7e7c08fd562b90b",
+      "size_bytes": 80867
     },
     {
       "path": "scripts/run_a11_route_benchmark.py",
@@ -2660,6 +2660,11 @@
       "path": "tests/a10_deterministic/test_gateway_session_rotation.py",
       "sha256": "sha256:c047a5089a8b7cb72ed920b1b106a05e02dd81f2a98506f0bdd5823d1c679f33",
       "size_bytes": 6176
+    },
+    {
+      "path": "tests/a10_deterministic/test_live_parity_and_overflow_probe.py",
+      "sha256": "sha256:530f7519e472b33ce4fc23be12cba25df7210f2b26a4aa0d8cab8cd004694b90",
+      "size_bytes": 3943
     },
     {
       "path": "tests/a10_deterministic/test_product_client_http_loopback.py",
@@ -5148,5 +5153,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:f89bac3eab4e948aecf89cdd82c11e8637307bb095fc90fcdee18d6745e41c8a"
+  "source_digest": "sha256:4f289f8b2f43ca815e8e83c410dadfc06df88b8204a32f130853eecc36d32db6"
 }
