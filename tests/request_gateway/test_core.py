@@ -327,6 +327,24 @@ def test_post_inference_uses_authenticated_service_contract(runtime, qualificati
     assert backend.started_event.wait(timeout=1)
 
 
+def test_capacity_refusal_is_retryable_overload_not_bad_submission(runtime, qualification, monkeypatch):
+    _source, _backend, service = runtime
+    app = RequestGatewayASGIApplication(
+        service, authenticator=StaticBearerAuthenticator(AUTH_TOKEN)
+    )
+    document = _submission(qualification).to_dict()
+
+    def exhausted(_submission, *, owner_token=None):
+        raise AdmissionError("gateway_capacity_exhausted")
+
+    monkeypatch.setattr(service, "submit", exhausted)
+    status, _headers, body = asyncio.run(ASGIHarness.request(
+        app, "/v1/inference", method="POST", token=AUTH_TOKEN, document=document
+    ))
+    assert status == 503
+    assert body == {"error": "gateway_capacity_exhausted"}
+
+
 def test_authenticator_denies_malformed_asgi_header_shapes():
     authenticator = StaticBearerAuthenticator(AUTH_TOKEN)
 

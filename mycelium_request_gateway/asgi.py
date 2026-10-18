@@ -257,7 +257,7 @@ class RequestGatewayASGIApplication:
             owner_token = self._session_token_source()
             request_id = self._service.submit(submission, owner_token=owner_token)
         except AdmissionError as exc:
-            status = 409 if exc.code in {
+            status = 503 if exc.code == "gateway_capacity_exhausted" else 409 if exc.code in {
                 "deployment_epoch_changed",
                 "path_changed",
                 "qualification_mismatch",

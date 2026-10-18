@@ -106,6 +106,29 @@ def test_inference_submit_adapts_only_paths_and_binds_request_to_session(
     assert denied.json()["code"] == "request_not_found"
 
 
+def test_capacity_overload_preserves_retryable_status_and_safe_code(upstreams, coordinator) -> None:
+    observatory, _gateway = upstreams
+
+    async def exhausted(scope, body):
+        if scope["method"] == "POST" and scope["path"] == "/v1/inference":
+            return 503, [(b"content-type", b"application/json")], [
+                json_body({"error": "gateway_capacity_exhausted"})]
+        return await default_request(scope, body)
+
+    app = create_product_gateway_application(
+        config=GatewayConfig(), observatory_app=observatory,
+        request_gateway_app=FakeUpstream(exhausted), swarm_coordinator=coordinator,
+        request_gateway_bearer_token="private-request-bearer",
+    )
+    boot = request(app, "/api/v1/bootstrap")
+    response = request(app, "/api/v1/inference", method="POST",
+                       body=json_body(submission()), headers=session_headers(boot, csrf=True)
+                       + [(b"content-type", b"application/json")])
+    assert response.status == 503
+    assert response.json()["code"] == "gateway_capacity_exhausted"
+    assert response.json()["retryable"] is True
+
+
 def test_inference_body_content_type_duplicate_fields_and_size_are_bounded(
     app, bootstrap, upstreams
 ) -> None:
