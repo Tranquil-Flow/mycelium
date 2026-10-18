@@ -553,6 +553,8 @@ class RequestDiagnostic:
    status: int | None
    token_events: int
    terminal_kind: str | None = None
+   cancel_outcome: str | None = None
+   gateway_code: str | None = None
 
 
 _DIAGNOSTIC_REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,127}\Z")
@@ -593,10 +595,10 @@ class ProductClient:
       with self._diagnostics_lock:
          return tuple(self._diagnostics) if self._diagnostics is not None else ()
 
-   def _observe(self, shape: RequestShape, accepted: object, stage: str, outcome: str, status: int | None, tokens: int, terminal_kind: str | None = None) -> None:
+   def _observe(self, shape: RequestShape, accepted: object, stage: str, outcome: str, status: int | None, tokens: int, terminal_kind: str | None = None, cancel_outcome: str | None = None, gateway_code: str | None = None) -> None:
       if self._diagnostics is None:
          return
-      record = RequestDiagnostic(shape.index, _diagnostic_request_ref(accepted), stage, outcome, status, tokens, terminal_kind)
+      record = RequestDiagnostic(shape.index, _diagnostic_request_ref(accepted), stage, outcome, status, tokens, terminal_kind, cancel_outcome, gateway_code)
       with self._diagnostics_lock:
          self._diagnostics.append(record)
 
@@ -612,9 +614,11 @@ class ProductClient:
          )
       except Exception as error:  # noqa: BLE001 - only the code is recorded
          code = str(error)
-         outcome = "overflowed" if code.endswith("_429") or code.endswith("_503") else "failed"
+         from scripts.run_a5_benchmark_gate import GateError as SessionError
+         gateway_code = getattr(error, "gateway_code", None) if type(error) is SessionError else None
+         outcome = "overflowed" if code.endswith("_429") or code.endswith("_503") or gateway_code == "gateway_capacity_exhausted" else "failed"
          if self._diagnostics is not None:
-            self._observe(shape, None, "submit_error", outcome, _diagnostic_status(error), 0)
+            self._observe(shape, None, "submit_error", outcome, _diagnostic_status(error), 0, gateway_code=gateway_code)
          return RequestResult(shape, outcome, submitted, None, time.monotonic(), 0, None)
       first = None
       tokens = 0
@@ -644,11 +648,18 @@ class ProductClient:
          stream_exception = True
          if self._diagnostics is not None:
             stream_status = _diagnostic_status(error)
+      cancel_outcome = None
+      if observed_terminal is None:
+         try:
+            session.cancel(accepted)
+            cancel_outcome = "sent"
+         except Exception:  # noqa: BLE001 - best effort, never retain private transport text
+            cancel_outcome = "failed"
       outcome = {"completed": "completed", "cancelled": "cancelled"}.get(terminal or "", "failed")
       self._observe(
          shape, accepted,
          "stream_exception" if stream_exception else "terminal" if terminal is not None else "stream_eof",
-         outcome, stream_status, tokens, observed_terminal,
+         outcome, stream_status, tokens, observed_terminal, cancel_outcome,
       )
       return RequestResult(
          shape,

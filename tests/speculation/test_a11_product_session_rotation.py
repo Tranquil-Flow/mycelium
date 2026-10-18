@@ -19,6 +19,8 @@ class CappedGateway:
         self.lock = threading.Lock()
         self.stream_owners = []
         self.advance_after = None
+        self.stream_ending = b"event: completed\n"
+        self.cancelled = []
 
     def session(self, base_url):
         gateway = self
@@ -55,13 +57,17 @@ class CappedGateway:
                     serial = sum(session.attempts for session in gateway.sessions)
                     if serial == gateway.advance_after:
                         gateway.now += 1800
-                    return {"event_path": f"{owner.number}:{owner.attempts}"}
+                    path = f"{owner.number}:{owner.attempts}"
+                    return {"event_path": path, "cancel_path": path + "/cancel"}
+
+            def cancel(self, accepted):
+                gateway.cancelled.append(accepted["cancel_path"])
 
             @contextmanager
             def request(self, method, path):
                 assert method == "GET" and path.startswith(f"{self.owner.number}:")
                 gateway.stream_owners.append((path, self.owner.number))
-                yield iter((b"event: token\n", b"data: 1\n", b"event: completed\n"))
+                yield iter((b"event: token\n", b"data: 1\n", gateway.stream_ending))
 
         return Session(base_url)
 
@@ -87,6 +93,7 @@ def test_product_rotates_during_frozen_96_submission_protocol(gateway, tmp_path)
     assert [session.attempts for session in gateway.sessions] == [32, 32, 32]
     assert len(gateway.stream_owners) == 96
     assert all(path.startswith(f"{owner}:") for path, owner in gateway.stream_owners)
+    assert gateway.cancelled == []
 
 
 def test_product_rotates_at_half_ttl_before_expiry(gateway, tmp_path):
@@ -96,3 +103,11 @@ def test_product_rotates_at_half_ttl_before_expiry(gateway, tmp_path):
     a11.run_product(args)
     assert [session.attempts for session in gateway.sessions] == [2, 30]
     assert all(path.startswith(f"{owner}:") for path, owner in gateway.stream_owners)
+
+
+def test_product_cancels_each_premature_stream_eof(gateway, tmp_path):
+    gateway.stream_ending = b"event: token\n"
+    args = Namespace(base_url="http://fixture.invalid", out=tmp_path, quick=True,
+                     plan_digest="sha256:" + "a" * 64)
+    a11.run_product(args)
+    assert gateway.cancelled == [path + "/cancel" for path, _owner in gateway.stream_owners]

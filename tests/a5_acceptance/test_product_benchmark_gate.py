@@ -346,11 +346,23 @@ def test_request_shapes_are_seeded_and_uniform_within_bucket() -> None:
 
 
 def test_raw_stream_timeout_is_counted_and_releases_in_flight() -> None:
-    driver = benchmark_gate._WindowDriver(_StreamTimeoutSession(), random.Random(165))
+    class CancellingTimeoutSession(_StreamTimeoutSession):
+        def __init__(self):
+            self.cancel_paths = []
+        def cancel(self, accepted):
+            self.cancel_paths.append(accepted["cancel_path"])
+        def submit(self, **kwargs):
+            accepted = super().submit(**kwargs)
+            accepted["cancel_path"] = "/api/v1/inference/request-1/cancel"
+            return accepted
+    session = CancellingTimeoutSession()
+    driver = benchmark_gate._WindowDriver(session, random.Random(165))
     driver._in_flight = 1
     driver._measured_start = time.monotonic() - 1
 
     driver._submit_one(1)
+
+    assert session.cancel_paths == ["/api/v1/inference/request-1/cancel"]
 
     assert driver._measured_outcomes["timeout"] == 1
     assert driver._measured_terminals == 1
@@ -377,12 +389,12 @@ def test_client_stream_timeout_does_not_suppress_queued_server_cancel(
     worker = threading.Thread(target=driver._submit_one, args=(1,))
     try:
         worker.start()
-        worker.join(timeout=2.0)
-        assert not worker.is_alive()
-        assert not session.cancelled.is_set()
+        assert not session.cancelled.wait(timeout=0.05)
     finally:
         driver._cancellation_lock.release()
 
+    worker.join(timeout=2.0)
+    assert not worker.is_alive()
     assert session.cancelled.wait(timeout=1.0)
 
 

@@ -52,6 +52,7 @@ import http.cookiejar
 import json
 import math
 import os
+import re
 from pathlib import Path
 import random
 import signal
@@ -127,6 +128,7 @@ ROUTE_ZERO_RESOURCE_TIMEOUT_SECONDS = 240.0
 
 class GateError(RuntimeError):
     """Stable gate failure without response bodies or private material."""
+    gateway_code: str | None = None
 
 
 class ExternalTermination(GateError):
@@ -252,8 +254,19 @@ class ProductSession:
             opener = self._control_opener if control else self._opener
             return opener.open(request, timeout=timeout)
         except urllib.error.HTTPError as error:
+            gateway_code = None
+            if error.code == 400:
+                try:
+                    value = json.loads(error.read(1025))
+                    code = value.get("code") if isinstance(value, dict) else None
+                    if isinstance(code, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,79}", code):
+                        gateway_code = code
+                except (ValueError, OSError, TimeoutError):
+                    pass
             _close_refused_response(error)
-            raise GateError(f"http_{method.lower()}_{error.code}") from error
+            failure = GateError(f"http_{method.lower()}_{error.code}")
+            failure.gateway_code = gateway_code
+            raise failure from error
         except (OSError, TimeoutError) as error:
             raise GateError(f"http_{method.lower()}_unavailable") from error
 
@@ -558,6 +571,7 @@ class _WindowDriver:
             tuple[ProductSession, dict[str, Any], threading.Event],
         ] = {}
         self._cancellation_lock = threading.Lock()
+        self._cancel_issued: set[threading.Event] = set()
         self._cancellation_watchdogs: list[threading.Thread] = []
         self._cancellation_errors: list[str] = []
         self._stop = threading.Event()
@@ -659,9 +673,12 @@ class _WindowDriver:
             cancellation_watchdog.start()
             try:
                 counts, terminal = request_session.stream_summary(accepted)
+                if terminal in TERMINAL_KINDS:
+                    terminal_observed.set()
                 token_count = counts.get("token", 0)
                 if terminal is None:
                     outcome = "cleanup_failure"
+                    self._cancel_and_wait(request_session, accepted, terminal_observed, wait_for_terminal=False)
                 elif terminal == "completed":
                     outcome = "completed"
                 elif terminal == "cancelled":
@@ -670,8 +687,10 @@ class _WindowDriver:
                     outcome = "error"
             except (GateError, OSError, TimeoutError):
                 outcome = "timeout"
+                self._cancel_and_wait(request_session, accepted, terminal_observed, wait_for_terminal=False)
             except Exception:
                 outcome = "error"
+                self._cancel_and_wait(request_session, accepted, terminal_observed, wait_for_terminal=False)
             finally:
                 if terminal in TERMINAL_KINDS:
                     terminal_observed.set()
@@ -697,6 +716,8 @@ class _WindowDriver:
         session: ProductSession,
         accepted: dict[str, Any],
         terminal_observed: threading.Event,
+        *,
+        wait_for_terminal: bool = True,
     ) -> None:
         """Serialize control calls while allowing terminal waits to overlap.
 
@@ -713,14 +734,16 @@ class _WindowDriver:
 
         try:
             with self._cancellation_lock:
-                if terminal_observed.is_set():
+                if terminal_observed.is_set() or terminal_observed in self._cancel_issued:
                     return
+                self._cancel_issued.add(terminal_observed)
                 session.cancel(accepted)
-        except GateError as error:
+        except Exception as error:  # best effort; preserve coded diagnostics only
             with self._lock:
-                self._cancellation_errors.append(str(error))
+                self._cancellation_errors.append(str(error) if isinstance(error, GateError) else "cancel_unavailable")
             return
-        terminal_observed.wait(REQUEST_CLEANUP_SERIALIZATION_SECONDS)
+        if wait_for_terminal:
+            terminal_observed.wait(REQUEST_CLEANUP_SERIALIZATION_SECONDS)
 
     def run(
         self,

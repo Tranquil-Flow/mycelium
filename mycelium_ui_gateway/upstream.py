@@ -178,11 +178,14 @@ class BoundedSSEProxy:
         client_receive: Receive,
         client_send: Send,
         validate_frame: FrameValidator,
+        is_terminal: Callable[[bytes], bool] | None = None,
+        on_abandoned: Callable[[], Awaitable[None]] | None = None,
     ) -> UpstreamResponse | None:
         queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue(maxsize=self._queue_chunks)
         disconnect = asyncio.Event()
         supplied = False
         response_started = False
+        terminal_delivered = False
 
         async def upstream_receive() -> dict[str, Any]:
             nonlocal supplied
@@ -284,11 +287,12 @@ class BoundedSSEProxy:
                     ],
                 }
             )
-            await self._relay_started_stream(
+            terminal_delivered = await self._relay_started_stream(
                 queue,
                 disconnect_task,
                 client_send,
                 validate_frame,
+                is_terminal,
             )
             return None
         finally:
@@ -301,6 +305,17 @@ class BoundedSSEProxy:
                 upstream_task.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await upstream_task
+            # The upstream SSE connection is not the inference request. Its
+            # cancellation only detaches the subscriber; release server work too.
+            if not terminal_delivered and on_abandoned is not None:
+                async def release_request() -> None:
+                    with suppress(Exception):
+                        await on_abandoned()
+
+                # An ASGI server can cancel this task on disconnect. Shield the
+                # bounded control request so that it survives that cancellation.
+                cleanup = asyncio.create_task(release_request())
+                await asyncio.shield(cleanup)
 
     async def _collect_error_response(
         self,
@@ -335,14 +350,16 @@ class BoundedSSEProxy:
         disconnect_task: asyncio.Task[None],
         send: Send,
         validate_frame: FrameValidator,
-    ) -> None:
+        is_terminal: Callable[[bytes], bool] | None,
+    ) -> bool:
+        terminal_delivered = False
         buffer = bytearray()
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._stream_timeout_seconds
         stream_closed = False
         while not stream_closed:
             if disconnect_task.done():
-                return
+                return terminal_delivered
             remaining = deadline - loop.time()
             if remaining <= 0:
                 break
@@ -356,7 +373,7 @@ class BoundedSSEProxy:
                 get_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await get_task
-                return
+                return terminal_delivered
             if get_task not in done:
                 get_task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -387,6 +404,11 @@ class BoundedSSEProxy:
                 await send(
                     {"type": "http.response.body", "body": safe_frame, "more_body": True}
                 )
+                if is_terminal is not None and is_terminal(safe_frame):
+                    terminal_delivered = True
+                    break
+            if terminal_delivered:
+                break
             if len(buffer) > self._frame_limit:
                 stream_closed = True
             if not more_body:
@@ -394,6 +416,7 @@ class BoundedSSEProxy:
                     stream_closed = True
                 break
         await send({"type": "http.response.body", "body": b"", "more_body": False})
+        return terminal_delivered
 
 
 __all__ = [

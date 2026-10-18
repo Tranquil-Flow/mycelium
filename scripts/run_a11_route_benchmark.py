@@ -593,19 +593,26 @@ def run_product(args: argparse.Namespace) -> dict[str, Any]:
         accepted = child.json("POST", "/api/v1/inference", body=body, mutate=True)
         first, tokens, terminal = None, 0, None
         digest = hashlib.sha256()
-        with child.request("GET", accepted["event_path"]) as response:
-            kind = None
-            for raw in response:
-                line = raw.decode("utf-8", "strict").rstrip("\r\n")
-                if line.startswith("event: "):
-                    kind = line[7:]
-                    if kind in {"completed", "failed", "cancelled"}:
-                        terminal = kind
-                        break
-                elif line.startswith("data: ") and kind == "token":
-                    tokens += 1
-                    first = first or time.monotonic()
-                    digest.update(line[6:].encode())
+        try:
+            with child.request("GET", accepted["event_path"]) as response:
+                kind = None
+                for raw in response:
+                    line = raw.decode("utf-8", "strict").rstrip("\r\n")
+                    if line.startswith("event: "):
+                        kind = line[7:]
+                        if kind in {"completed", "failed", "cancelled"}:
+                            terminal = kind
+                            break
+                    elif line.startswith("data: ") and kind == "token":
+                        tokens += 1
+                        first = first or time.monotonic()
+                        digest.update(line[6:].encode())
+        finally:
+            if terminal is None:
+                try:
+                    child.cancel(accepted)
+                except Exception:
+                    pass  # Preserve the stream failure; cancellation is best effort.
         outcome = terminal or "failed"
         return RequestResult(shape, mode, outcome, submitted, first, time.monotonic(), tokens,
                              "sha256:" + digest.hexdigest() if outcome == "completed" else None)

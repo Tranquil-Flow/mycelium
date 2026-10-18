@@ -145,6 +145,19 @@ def test_observed_terminals(monkeypatch, terminal, outcome):
    assert CANARY not in repr(observed)
 
 
+def test_stream_timeout_cancels_before_return_and_records_outcome(monkeypatch):
+   session = FakeSession(stream_error=TimeoutError("read timed out"),
+                         accepted={"request_id": "request-7", "event_path": "/api/v1/inference/request-7/events",
+                                   "cancel_path": "/api/v1/inference/request-7/cancel"})
+   def cancel(accepted):
+      session.calls.append(("cancel", accepted["cancel_path"]))
+   session.cancel = cancel
+   product = client(monkeypatch, session, diagnostic_limit=8)
+   assert product.run(SHAPE).outcome == "failed"
+   assert session.calls[-1] == ("cancel", "/api/v1/inference/request-7/cancel")
+   assert row(product).cancel_outcome == "sent"
+
+
 def test_stream_open_refusal_retains_only_safe_status(monkeypatch):
    product = client(monkeypatch, FakeSession(stream_error=a5.GateError("http_get_404")), diagnostic_limit=8)
    result = product.run(SHAPE)

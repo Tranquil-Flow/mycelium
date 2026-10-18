@@ -271,6 +271,8 @@ class ProductGatewayASGIApplication:
         )
         self._request_owner_tokens: dict[str, bytes] = {}
         self._request_owner_tokens_lock = threading.RLock()
+        self._cancel_dispatched: set[str] = set()
+        self._terminal_requests: set[str] = set()
         self._access_policy = access_policy
         self._sessions = ProductSessionStore(
             clock=clock,
@@ -751,26 +753,44 @@ class ProductGatewayASGIApplication:
         if not self._sessions.owns_request(session, identifier):
             raise BrowserRequestError(404, "request_not_found")
 
-    async def _inference_cancel(
-        self, send: Send, session: ProductSession, identifier: str
-    ) -> None:
-        self._require_owned_request(session, identifier)
+    async def _cancel_owned_inference(self, identifier: str) -> tuple[int, bool]:
+        # One dispatch for concurrent explicit DELETE, disconnect and stream
+        # shutdown. The ownership check is performed by each public caller.
         with self._request_owner_tokens_lock:
             owner_token = self._request_owner_tokens.get(identifier)
-        if owner_token is None:
-            raise BrowserRequestError(404, "request_not_found")
-        status, document = await self._json_upstream(
-            self._request_gateway_app,
-            method="DELETE",
-            path=f"/v1/inference/{identifier}",
-            token=self._request_token,
-            session_token=owner_token,
+            if owner_token is None:
+                raise BrowserRequestError(404, "request_not_found")
+            if identifier in self._cancel_dispatched or identifier in self._terminal_requests:
+                return 200, False
+            self._cancel_dispatched.add(identifier)
+        async def dispatch() -> tuple[int, Mapping[str, Any]]:
+            return await self._json_upstream(
+                self._request_gateway_app,
+                method="DELETE",
+                path=f"/v1/inference/{identifier}",
+                token=self._request_token,
+                session_token=owner_token,
+            )
+
+        # Both explicit DELETE and disconnect can be cancelled by their ASGI
+        # parent. Once the dispatch is reserved, finish its bounded control call.
+        operation = asyncio.create_task(dispatch())
+        operation.add_done_callback(
+            lambda done: done.exception() if not done.cancelled() else None
         )
+        status, document = await asyncio.shield(operation)
         cancelled = validate_cancel_response(document, identifier)
         if cancelled and status != 202:
             raise UpstreamFailure("invalid_upstream_response")
         if not cancelled and status != 200:
             raise UpstreamFailure("invalid_upstream_response")
+        return status, cancelled
+
+    async def _inference_cancel(
+        self, send: Send, session: ProductSession, identifier: str
+    ) -> None:
+        self._require_owned_request(session, identifier)
+        status, cancelled = await self._cancel_owned_inference(identifier)
         await self._send_json(
             send,
             status,
@@ -860,6 +880,16 @@ class ProductGatewayASGIApplication:
                 + b"\n\n"
             )
 
+        def is_terminal(frame: bytes) -> bool:
+            terminal = any(b"\nevent: " + kind + b"\n" in frame for kind in (b"completed", b"cancelled", b"failed"))
+            if terminal:
+                with self._request_owner_tokens_lock:
+                    self._terminal_requests.add(identifier)
+            return terminal
+
+        async def cancel_abandoned() -> None:
+            await self._cancel_owned_inference(identifier)
+
         await self._forward_sse(
             self._request_gateway_app,
             path=f"/v1/inference/{identifier}/events",
@@ -869,6 +899,8 @@ class ProductGatewayASGIApplication:
             send=send,
             validator=validate,
             session_token=owner_token,
+            is_terminal=is_terminal,
+            on_abandoned=cancel_abandoned,
         )
 
     async def _forward_sse(
@@ -882,6 +914,8 @@ class ProductGatewayASGIApplication:
         send: Send,
         validator: Callable[[bytes], bytes],
         session_token: bytes | None = None,
+        is_terminal: Callable[[bytes], bool] | None = None,
+        on_abandoned: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         response = await self._sse.forward(
             app,
@@ -894,6 +928,8 @@ class ProductGatewayASGIApplication:
             client_receive=receive,
             client_send=send,
             validate_frame=validator,
+            is_terminal=is_terminal,
+            on_abandoned=on_abandoned,
         )
         if response is not None:
             self._check_no_credentials(response.body)
