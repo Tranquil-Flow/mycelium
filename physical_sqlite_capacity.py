@@ -51,7 +51,15 @@ class SQLiteQualificationCapacityPort(CapacityPort):
         clock,
         id_source,
         maximum_imported_lease_seconds: float,
+        adaptive_gate=None,
+        adaptive_node_id: str | None = None,
     ) -> None:
+        # A16 optional adaptive host-resource gate.  ``None`` (the default, and the
+        # whole behaviour when the owner has not opted in) leaves this port unchanged.
+        self._adaptive_gate = adaptive_gate
+        self._adaptive_node_id = adaptive_node_id
+        self._adaptive_epoch = None
+        self._adaptive_spent = 0
         self._database = Path(database).resolve()
         self._database.parent.mkdir(parents=True, exist_ok=True)
         self._topology = topology
@@ -199,6 +207,12 @@ class SQLiteQualificationCapacityPort(CapacityPort):
                     )
                     connection.execute("COMMIT")
                     return result
+                gate = self._gate(placement.node_id)
+                if gate is not None:
+                    refusal = self._gate_refusal(gate, request.kv_bytes)
+                    if refusal:
+                        connection.execute("COMMIT")
+                        return ReservationResult(False, reason=refusal)
                 charged = connection.execute(
                     """
                     SELECT COALESCE(SUM(kv_bytes), 0) AS charged
@@ -234,6 +248,8 @@ class SQLiteQualificationCapacityPort(CapacityPort):
                         request.lease_expires_at,
                     ),
                 )
+                if gate is not None and gate["new_kv_budget_bytes"] is not None:
+                    self._adaptive_spent += request.kv_bytes
                 connection.execute("COMMIT")
                 return ReservationResult(
                     True,
@@ -523,6 +539,15 @@ class SQLiteQualificationCapacityPort(CapacityPort):
             node_id: self._capacities[node_id] - reserved[node_id]
             for node_id in self._capacities
         }
+        gate = self._gate(self._adaptive_node_id)
+        if gate is not None:
+            # Published capacity is only ever reduced (never above the qualified value).
+            local = self._adaptive_node_id
+            if not gate["admit"]:
+                available[local] = 0
+            elif gate["new_kv_budget_bytes"] is not None:
+                remaining = max(0, gate["new_kv_budget_bytes"] - self._spent_for(gate["epoch"]))
+                available[local] = min(available[local], remaining)
         return CapacitySnapshot(
             claim_boundary=self.claim_boundary,
             deployment_id=graph.deployment_id,
@@ -534,6 +559,36 @@ class SQLiteQualificationCapacityPort(CapacityPort):
             node_available_kv_bytes=MappingProxyType(available),
             reservations=MappingProxyType(reservations),
         )
+
+    def _gate(self, node_id: str | None):
+        """The A16 gate for the local node, or ``None`` (A16 off / another host's node)."""
+        if self._adaptive_gate is None or node_id is None or node_id != self._adaptive_node_id:
+            return None
+        try:
+            gate = self._adaptive_gate()
+        except Exception:
+            return {"admit": False, "refusal": "adaptive_controller_stale",
+                    "new_kv_budget_bytes": 0, "epoch": None}
+        return gate
+
+    def _spent_for(self, epoch) -> int:
+        if epoch != self._adaptive_epoch:
+            self._adaptive_epoch = epoch
+            self._adaptive_spent = 0
+        return self._adaptive_spent
+
+    def _gate_refusal(self, gate, kv_bytes: int) -> str:
+        """Whole-context accept/refuse against the A16 budget; ``""`` means admit."""
+        if not gate["admit"]:
+            return gate["refusal"] or "adaptive_capacity_reduced"
+        budget = gate["new_kv_budget_bytes"]
+        if budget is None:
+            return ""
+        if kv_bytes > budget:
+            return "adaptive_context_exceeds_budget"
+        if self._spent_for(gate["epoch"]) + kv_bytes > budget:
+            return "adaptive_capacity_reduced"
+        return ""
 
     @staticmethod
     def _validate_request(request: ReservationRequest) -> str:

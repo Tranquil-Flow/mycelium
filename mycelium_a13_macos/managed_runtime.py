@@ -99,7 +99,8 @@ class ManagedTargetRuntime:
     def __init__(self, state_root, *, client, current_member, run_id, deployment_id,
                  staging:TargetStaging, archive:bytes, archive_digest,
                  resource_policy, limits, sidecar_binary, authorize_load,
-                 preposition=None, endpoint_secret_file=None, sequence_root=None, _test_observer=None):
+                 preposition=None, endpoint_secret_file=None, sequence_root=None, _test_observer=None,
+                 adaptive_overlay=None):
         if not callable(current_member) or not isinstance(staging,TargetStaging):
             raise RuntimeErrorCode('runtime_configuration_invalid')
         self._current_member=current_member
@@ -117,6 +118,11 @@ class ManagedTargetRuntime:
         self.staging=staging
         self._verify_stage()
         self.root=_private_directory(Path(state_root),create=True)
+        # A16 optional adaptive host-resource overlay; None (default) publishes nothing.
+        self._adaptive=None
+        if adaptive_overlay is not None:
+            from .adaptive_host import OverlayPublisher
+            self._adaptive=OverlayPublisher(self.root,adaptive_overlay)
         self._state='prepared'; self._error=None
         # Consecutive retriable-outbound backoff, bounded at 1.0 s.  Loop-local
         # pacing only; it never gates a disposition or a terminal state.
@@ -344,6 +350,7 @@ class ManagedTargetRuntime:
         try:
             while not self._stop.is_set():
                 self._member()
+                if self._adaptive is not None: self._adaptive.tick()
                 self._replace_worker_if_dead()
                 step=self.pump.step()
                 # A retrying outbound is a bounded recovery, not a death: back off a

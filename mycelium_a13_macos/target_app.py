@@ -10,6 +10,9 @@ CONSENT = {'cooperative_peer_visibility_acknowledged': True,
 
 
 class TargetApplication:
+    #: A16: ``overlay(wall_clock=...)`` provider set by the owning app; None = no publication.
+    adaptive_overlay = None
+
     def __init__(self, root, *, _test_peer_factory=None):
         self.peer = (_test_peer_factory or RemoteMacMember)(root)
         self.capability = None
@@ -229,7 +232,8 @@ class TargetApplication:
             archive=archive,archive_digest=archive_digest,preposition=preposition,
             resource_policy=resource_policy,limits=limits,sidecar_binary=sidecar_binary,
             authorize_load=authorize_load,endpoint_secret_file=endpoint_secret_file,
-            sequence_root=self.peer.state_root,_test_observer=_test_observer)
+            sequence_root=self.peer.state_root,_test_observer=_test_observer,
+            adaptive_overlay=self.adaptive_overlay)
 
     def activate_runtime(self, runtime):
         """Attach an already admitted target-local runtime, never a web payload."""

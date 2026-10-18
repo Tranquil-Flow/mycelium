@@ -61,6 +61,7 @@ from mycelium_router.live_ports import (
     PublishedDeviceStateProvider,
     PublishedTopologyProvider,
 )
+from mycelium_router.adaptive_overlay import read_gate as _read_adaptive_gate
 from mycelium_router.layer_builder import layer_load_proof_digest
 from mycelium_router.router import Router
 from mycelium_router.transports.iroh import (
@@ -3176,6 +3177,9 @@ class PhysicalNodeService:
             maximum_imported_lease_seconds=_maximum_imported_lease_seconds(
                 self._router_config
             ),
+            # A16: absent overlay file (owner not opted in) -> None -> unchanged behaviour.
+            adaptive_gate=lambda: _read_adaptive_gate(self.capacity_root),
+            adaptive_node_id=placement.node_id,
         )
         runtime = self._build_runtime_port(
             placement,

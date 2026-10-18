@@ -551,6 +551,7 @@ class DemoApp:
                 from .target_app import TargetApplication
                 self.installation_role = 'target'
                 self.authority = TargetApplication(self.root / 'target', _test_peer_factory=self._test_peer_factory)
+                self.authority.adaptive_overlay = self._adaptive_overlay
             else:
                 if (self.root / 'target').exists():
                     raise DemoError('installation_role_missing')
@@ -693,6 +694,11 @@ class DemoApp:
         from .adaptive_host import adaptive_resource_check
         return adaptive_resource_check(self)
 
+    def _adaptive_overlay(self, *, wall_clock=time.time):
+        """A16 node overlay for the managed runtime's publisher (None while A16 is off)."""
+        from .adaptive_host import adaptive_overlay_provider
+        return adaptive_overlay_provider(self)(wall_clock=wall_clock)
+
     def _cancel_acquisition(self):
         if self.acquisition is not None:
             self.acquisition.cancel()
@@ -803,6 +809,7 @@ class DemoApp:
             from .target_app import TargetApplication
             self.installation_role = 'target'
             self.authority = TargetApplication(self.root / 'target',_test_peer_factory=self._test_peer_factory)
+            self.authority.adaptive_overlay = self._adaptive_overlay
         if not self.running:
             self.authority.start()
             self.running = True

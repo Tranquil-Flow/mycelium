@@ -24,6 +24,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Final, Mapping
 
+from mycelium_router import adaptive_overlay as _overlay
+
 POLICY_FILENAME: Final = "adaptive-host-policy.json"
 MAX_POLICY_BYTES: Final = 4096
 MODES: Final = ("normal", "reduced", "drain", "withdraw")
@@ -409,6 +411,7 @@ class AdaptiveHostController:
         self._entered_at = clock()
         self._last_tick: float | None = None
         self._classification = "unknown"
+        self._available: int | None = None
         self._healthy_since: float | None = None
         self._moderate_since: float | None = None
         self._cpu_since: float | None = None
@@ -505,6 +508,8 @@ class AdaptiveHostController:
                 reserve_bytes=self._policy["reserve_bytes"],
             )
             self._classification = cls
+            available = raw.get("available_bytes") if isinstance(raw, Mapping) else None
+            self._available = available if cls != "unknown" and type(available) is int else None
             cpu_sustained = self._track_cpu(raw, cls, now)
             self._healthy_since = (self._healthy_since or now) if cls == "healthy" and not cpu_sustained else None
             memory_moderate = cls == "moderate"
@@ -609,6 +614,34 @@ class AdaptiveHostController:
                 "capacity_scale": scale,
             }
 
+    def overlay(self, *, wall_now: float) -> dict[str, Any] | None:
+        """The node-facing overlay document, or ``None`` while A16 is off.
+
+        Its lease is anchored to the last *sample*, so a stalled controller cannot keep a
+        fresh-looking permission alive.  The byte budget is the measured headroom minus
+        the owner's reserve; it only ever bounds *new* reservations.
+        """
+        with self._lock:
+            if not self.enabled:
+                return None
+            now = self._clock()
+            refusal = self.admission()
+            stale = self._timings["stale_after_s"]
+            age = stale if self._last_tick is None else max(0.0, now - self._last_tick)
+            if refusal is not None:
+                budget: int | None = 0
+            elif self._available is None:
+                budget = 0 if self.mode == "reduced" else None
+            else:
+                budget = max(0, self._available - self._policy["reserve_bytes"])
+            return {
+                "schema": 1, "mode": self.mode, "reason": self.reason,
+                "generation": self.generation, "admit": refusal is None, "refusal": refusal,
+                "capacity_scale": self._scale(now), "new_kv_budget_bytes": budget,
+                "epoch": float(self._last_tick) if self._last_tick is not None else 0.0,
+                "issued_at": wall_now, "expires_at": wall_now + max(0.0, stale - age),
+            }
+
     def status(self) -> dict[str, Any]:
         with self._lock:
             now = self._clock()
@@ -647,6 +680,7 @@ class AdaptiveHostRuntime:
             DEFAULT_POLICY, clock=clock, footprint_bytes=footprint_bytes, inflight=inflight)
         self._last_policy: dict[str, Any] | None = None
         self._last_sample_at: float | None = None
+        self._lock = threading.RLock()
 
     @property
     def controller(self) -> AdaptiveHostController:
@@ -655,6 +689,19 @@ class AdaptiveHostRuntime:
     def check(self, hard_gate_reason: str | None = None) -> str | None:
         if hard_gate_reason:
             return hard_gate_reason
+        with self._lock:
+            return self._check()
+
+    def overlay(self, *, wall_clock: Callable[[], float] = time.time) -> dict[str, Any] | None:
+        """Sample if due and return the node overlay; ``None`` while A16 is off."""
+        with self._lock:
+            reason = self._check()
+            wall = wall_clock()
+            if reason == "adaptive_policy_invalid":
+                return _overlay.fence_document(reason, wall_now=wall)
+            return self._controller.overlay(wall_now=wall)
+
+    def _check(self) -> str | None:
         try:
             policy = self._load()
         except AdaptiveHostError:
@@ -693,3 +740,48 @@ def adaptive_resource_check(app: Any) -> str | None:
         except AttributeError:
             pass
     return runtime.check()
+
+
+def adaptive_overlay_provider(app: Any) -> Callable[..., dict[str, Any] | None]:
+    """``overlay(wall_clock=...)`` for ``app``: the same lazily-created runtime A13 admission uses."""
+    adaptive_resource_check(app)  # ensure the shared runtime exists (no sampling while off)
+    runtime = getattr(app, "_adaptive_runtime", None)
+    if runtime is None:
+        return lambda *, wall_clock=time.time: None
+    return runtime.overlay
+
+
+class OverlayPublisher:
+    """Throttled writer of the node overlay into a node's private ``capacity_root``."""
+
+    def __init__(
+        self,
+        directory: str | os.PathLike[str],
+        provider: Callable[..., dict[str, Any] | None],
+        *,
+        wall_clock: Callable[[], float] = time.time,
+        interval_s: float = 1.0,
+    ) -> None:
+        self._directory = directory
+        self._provider = provider
+        self._wall = wall_clock
+        self._interval = interval_s
+        self._last: float | None = None
+
+    def tick(self) -> None:
+        now = self._wall()
+        if self._last is not None and 0 <= now - self._last < self._interval:
+            return
+        self._last = now
+        try:
+            doc = self._provider(wall_clock=self._wall)
+            if doc is None:
+                _overlay.clear_overlay(self._directory)
+            else:
+                _overlay.write_overlay(self._directory, doc)
+        except Exception:
+            try:  # a broken controller must fence, never leave a stale permission
+                _overlay.write_overlay(
+                    self._directory, _overlay.fence_document("adaptive_controller_stale", wall_now=now))
+            except Exception:
+                pass
