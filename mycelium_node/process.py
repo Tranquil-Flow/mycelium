@@ -2701,6 +2701,7 @@ class PhysicalNodeProcess:
             _deadline_remaining(deadline)
             members: tuple[_ProcessGroupMember, ...] = ()
             leader_owned_and_live = False
+            awaiting_reap = False
             if not stopped:
                 try:
                     current = _inventory_process(self._process.pid)
@@ -2710,9 +2711,14 @@ class PhysicalNodeProcess:
                     subprocess.SubprocessError,
                     ValueError,
                 ):
-                    # A just-killed leader is a zombie libproc cannot read;
-                    # reaping it now lets an empty group be confirmed below.
+                    # A just-killed child can be a zombie that libproc cannot
+                    # inspect, while Popen.poll() has not reaped it yet. Its
+                    # PID is still reserved. Do not fork /bin/ps for that
+                    # transient observation: wait for the next bounded poll,
+                    # then census the group after reaping. Neither call it
+                    # empty nor signal an identity we could not observe.
                     stopped = self._process.poll() is not None
+                    awaiting_reap = not stopped
                 else:
                     _deadline_remaining(deadline)
                     if not _identity_matches_pre_exec_ownership(
@@ -2726,8 +2732,11 @@ class PhysicalNodeProcess:
             # the group cannot turn this poll into "empty"; signalling such a
             # leader's group needs no listing either.  The /bin/ps fork could
             # overrun the remaining budget under process churn, so list only
-            # once the leader is gone or could not be observed.
-            if not leader_owned_and_live:
+            # once the leader is gone (or was already reaped).
+            # While our child is unreaped, a failed identity read gives no
+            # permission to signal or claim emptiness. Retest within the
+            # existing deadline instead of making an unbounded ps fork.
+            if not leader_owned_and_live and not awaiting_reap:
                 members = _inventory_process_group(ownership.process_group, deadline)
                 if not members and not stopped:
                     stopped = self._process.poll() is not None
@@ -2756,6 +2765,8 @@ class PhysicalNodeProcess:
             )
         ):
             return "unsafe"
+        if awaiting_reap:
+            return "unobserved"
         if stopped and not members:
             return "empty"
         return "owned"
