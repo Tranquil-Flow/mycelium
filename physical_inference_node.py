@@ -1285,8 +1285,12 @@ def _runtime_build_digest(backend: str) -> str:
     ]
     digest = hashlib.sha256()
     digest.update(sys.version.encode("utf-8"))
+    # PyInstaller imports the node from its PYZ, but ships canonical source as
+    # a13-runtime-source data; __file__'s sibling is not a shipped .py file.
+    source_root = (Path(sys._MEIPASS) / "a13-runtime-source"
+                   if getattr(sys, "frozen", False) else Path(__file__).resolve().parent)
     for name in names:
-        path = Path(__file__).resolve().parent / name
+        path = source_root / name
         digest.update(name.encode("utf-8"))
         try:
             digest.update(path.read_bytes())
