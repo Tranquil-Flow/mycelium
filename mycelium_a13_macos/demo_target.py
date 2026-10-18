@@ -373,7 +373,16 @@ class DemoTargetAgent:
         # 2. Owner-requested cleanup (bootstrap after observation, or teardown).
         if self._cleanup_if_requested(actor):
             return
-        offer = actor.pending_stage()
+        try:
+            offer = actor.pending_stage()
+        except Exception as error:
+            # The owner can request cleanup between the separate cleanup and
+            # stage reads. Confirm the request through its signed cleanup lane;
+            # any unmatched stage failure remains an error.
+            if (_code(error, '') != 'offer_cleanup_requested'
+                    or not self._cleanup_if_requested(actor)):
+                raise
+            return
         # 3. Bootstrap (hello-only, model load denied).
         bootstrap = a.get('bootstrap_offer_id')
         if (offer is not None and bootstrap and offer['offer_id'] == bootstrap
@@ -571,8 +580,10 @@ class DemoTargetAgent:
         if not self._consent('cleanup'):
             return True
         self._set('cleaning_up')
-        if (actor.status().get('native_control') or {}).get('state') == 'running':
-            self.app.action('/api/control/stop', {})
+        # A native process may have exited while its runtime is still attached.
+        # Stop detaches it even when status is no longer `running`, before the
+        # staging cleanup admission rejects an attached runtime.
+        self.app.action('/api/control/stop', {})
         self.app.action('/api/staging/cleanup/accept', {'offer_id': requested['offer_id'],
             'archive_digest': requested['archive_digest'], 'cleanup_acknowledged': True})
         return True
