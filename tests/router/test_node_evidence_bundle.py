@@ -84,6 +84,29 @@ class _DiagnosableTransport(_Transport):
         }
 
 
+def test_busy_thread_capture_keeps_the_emitting_thread_within_the_existing_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A prior live route may leave workers; evidence must retain its emitter."""
+    current = threading.current_thread()
+    assert current.ident is not None
+    frame = sys._getframe()
+    # Put a long-stack worker first in the previous lexicographic ident order.
+    earlier_idents = [
+        ident for ident in range(1, 1000)
+        if str(ident) < str(current.ident)
+    ][:4]
+    assert len(earlier_idents) == 4
+    monkeypatch.setattr(node_module.sys, "_current_frames", lambda: {
+        **{ident: frame for ident in earlier_idents}, current.ident: frame,
+    })
+    monkeypatch.setattr(node_module, "_EVIDENCE_STACK_BYTES", 1024)
+    stacks = node_module._thread_stacks()
+    emitter = next(thread for thread in stacks if thread["name"] == current.name)
+    assert any("test_busy_thread_capture_keeps_the_emitting_thread" in line
+               for line in emitter["stack"])
+
+
 def test_prefill_stall_writes_an_evidence_bundle_outside_the_staging_root(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

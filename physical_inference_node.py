@@ -1026,7 +1026,12 @@ def _thread_stacks() -> list[dict[str, Any]]:
     threads = {thread.ident: thread for thread in threading.enumerate()}
     stacks: list[dict[str, Any]] = []
     budget = _EVIDENCE_STACK_BYTES
-    for ident, frame in sorted(frames.items(), key=lambda item: str(item[0])):
+    # Capture the emitting thread before other workers consume the fixed byte
+    # budget. Thread IDs have no diagnostic priority and may sort ahead of it.
+    current_ident = threading.get_ident()
+    for ident, frame in sorted(
+        frames.items(), key=lambda item: (item[0] != current_ident, str(item[0]))
+    ):
         thread = threads.get(ident)
         lines: list[str] = []
         for entry in traceback.format_stack(frame)[-_EVIDENCE_STACK_FRAMES:]:

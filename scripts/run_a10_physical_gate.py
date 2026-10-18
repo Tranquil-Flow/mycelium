@@ -583,7 +583,8 @@ class ProductClient:
       if type(diagnostic_limit) is not int or not 0 <= diagnostic_limit <= 4096:
          raise ValueError("diagnostic_limit_invalid")
       self.base_url = base_url
-      self._sessions = RotatingProductSessions(ProductSession(base_url), base_url)
+      self._session = ProductSession(base_url)
+      self._sessions = RotatingProductSessions(self._session, base_url)
       self._diagnostics: deque[RequestDiagnostic] | None = deque(maxlen=diagnostic_limit) if diagnostic_limit else None
       self._diagnostics_lock = threading.Lock()
 
