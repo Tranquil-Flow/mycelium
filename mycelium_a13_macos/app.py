@@ -695,10 +695,14 @@ class DemoApp:
         from .adaptive_host import adaptive_resource_check
         return adaptive_resource_check(self)
 
-    def _adaptive_overlay(self, *, wall_clock=time.time):
-        """A16 node overlay for the managed runtime's publisher (None while A16 is off)."""
+    def _adaptive_overlay(self, *, wall_clock=time.time, capacity_root=None):
+        """A16 node overlay for the managed runtime's publisher (None while A16 is off).
+
+        ``capacity_root`` (the node's private directory) lets the controller restore and keep
+        current the persisted withdraw marker stored beside the overlay.
+        """
         from .adaptive_host import adaptive_overlay_provider
-        return adaptive_overlay_provider(self)(wall_clock=wall_clock)
+        return adaptive_overlay_provider(self)(wall_clock=wall_clock, capacity_root=capacity_root)
 
     def _adaptive_drain(self, runtime):
         """A16 drain-to-withdraw tick from the managed runtime's control loop (no-op while off)."""

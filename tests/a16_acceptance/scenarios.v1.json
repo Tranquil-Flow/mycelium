@@ -284,10 +284,12 @@
       "deterministic_coverage": [
         "tests/a13_macos/test_adaptive_reentry.py",
         "tests/a13_macos/test_adaptive_drain.py",
-        "tests/a13_macos/test_adaptive_host.py"
+        "tests/a13_macos/test_adaptive_host.py",
+        "tests/a13_macos/test_adaptive_withdraw_marker.py"
       ],
       "known_gaps": [
-        "restart_persistence_of_withdraw_state_not_implemented",
+        "withdraw_marker_persistence_deterministic_only_no_real_process_restart",
+        "restart_while_withdrawn_unloads_the_fresh_run_and_needs_another_cold_run_on_reentry",
         "two_mac_run_not_executed"
       ]
     },

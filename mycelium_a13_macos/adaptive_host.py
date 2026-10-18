@@ -13,6 +13,7 @@ measurements.  See ``status/DRAFT-A16-ADAPTIVE-HOST-RESOURCES-20261018.md``.
 from __future__ import annotations
 
 import copy
+import inspect
 import json
 import math
 import os
@@ -489,6 +490,10 @@ def publication_admissible(
 
 
 # -------------------------------------------------------------- controller
+_MARKER_REASONS = frozenset(
+    {"none", "owner_game_mode", "owner_stop", "host_memory_pressure", "host_cpu_saturation"})
+
+
 class AdaptiveHostController:
     """Clock-injected state machine; all inputs are coarse and local."""
 
@@ -569,6 +574,21 @@ class AdaptiveHostController:
     def resume_serving(self) -> None:
         with self._lock:
             self.stopped = False
+
+    def restore_withdrawn(self, reason: object) -> None:
+        """Start fenced after a restart that follows a withdraw (persisted marker).
+
+        The fresh process holds no in-flight work and no model it must still drain, so cleanup
+        counts as complete; everything else is the ordinary withdraw exit: a full healthy
+        ``recovery_s`` window measured from *this* process's samples, the dwell, fresh
+        authority observations and requalification.  An unknown reason is recorded as ``none``.
+        """
+        with self._lock:
+            if self.mode == "withdraw":
+                return
+            self._enter("withdraw", reason if reason in _MARKER_REASONS else "none")
+            self._cleanup_complete = True
+            self._healthy_since = None
 
     def mark_cleanup_complete(self) -> None:
         with self._lock:
@@ -806,6 +826,7 @@ class AdaptiveHostRuntime:
         self._last_policy: dict[str, Any] | None = None
         self._last_sample_at: float | None = None
         self._lock = threading.RLock()
+        self._synced_roots: set[str] = set()
 
     @property
     def controller(self) -> AdaptiveHostController:
@@ -817,23 +838,66 @@ class AdaptiveHostRuntime:
         with self._lock:
             return self._check()
 
-    def overlay(self, *, wall_clock: Callable[[], float] = time.time) -> dict[str, Any] | None:
-        """Sample if due and return the node overlay; ``None`` while A16 is off."""
+    def sync_capacity_root(self, root: str | os.PathLike[str], *, wall_clock: Callable[[], float] = time.time) -> None:
+        """Once per node ``capacity_root``: a withdraw marker left there means start fenced.
+
+        Idempotent and read-only.  Any marker (valid, expired, malformed, unsafe) restores the
+        withdraw state; it never grants anything.
+        """
+        key = os.fspath(root)
         with self._lock:
+            if key in self._synced_roots:
+                return
+            policy = self._apply_policy()
+            if policy is None or not policy["enabled"]:
+                return  # nothing to restore while A16 is off or its policy is unreadable; retry later
+            self._synced_roots.add(key)
+            marker = _overlay.read_marker(root, wall_clock=wall_clock)
+            if marker is not None:
+                self._controller.restore_withdrawn(marker["reason"])
+
+    def overlay(
+        self, *, wall_clock: Callable[[], float] = time.time,
+        capacity_root: str | os.PathLike[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """Sample if due and return the node overlay; ``None`` while A16 is off.
+
+        With ``capacity_root`` the withdraw marker there is restored before the first sample and
+        kept current: written (refreshed) while withdrawn, removed once back to ``normal`` or
+        when A16 is off.  A marker write failure raises so the publisher fences.
+        """
+        with self._lock:
+            if capacity_root is not None:
+                self.sync_capacity_root(capacity_root, wall_clock=wall_clock)
             reason = self._check()
             wall = wall_clock()
             if reason == "adaptive_policy_invalid":
                 return _overlay.fence_document(reason, wall_now=wall)
+            if capacity_root is not None:
+                self._persist_marker(capacity_root, wall)
             return self._controller.overlay(wall_now=wall)
 
-    def _check(self) -> str | None:
+    def _persist_marker(self, root: str | os.PathLike[str], wall: float) -> None:
+        controller = self._controller
+        if not controller.enabled or controller.mode == "normal":
+            _overlay.clear_marker(root)
+        elif controller.mode == "withdraw":
+            _overlay.write_marker(root, reason=controller.reason, wall_now=wall)
+
+    def _apply_policy(self) -> Mapping[str, Any] | None:
         try:
             policy = self._load()
         except AdaptiveHostError:
-            return "adaptive_policy_invalid"
+            return None
         if policy != self._last_policy:
             self._controller.apply_policy(policy)
             self._last_policy = copy.deepcopy(dict(policy))
+        return policy
+
+    def _check(self) -> str | None:
+        policy = self._apply_policy()
+        if policy is None:
+            return "adaptive_policy_invalid"
         if not policy["enabled"]:
             return None
         now = self._clock()
@@ -871,6 +935,10 @@ def adaptive_resource_check(app: Any) -> str | None:
             app._adaptive_runtime = runtime
         except AttributeError:
             pass
+    attached = _drain().target_runtime(app)
+    node_root = getattr(attached, "root", None)
+    if node_root is not None:  # a restart after a withdraw must already be fenced here
+        runtime.sync_capacity_root(node_root)
     return runtime.check()
 
 
@@ -899,6 +967,10 @@ class OverlayPublisher:
         self._wall = wall_clock
         self._interval = interval_s
         self._last: float | None = None
+        try:
+            self._wants_root = "capacity_root" in inspect.signature(provider).parameters
+        except (TypeError, ValueError):
+            self._wants_root = False
 
     def tick(self) -> None:
         now = self._wall()
@@ -906,7 +978,10 @@ class OverlayPublisher:
             return
         self._last = now
         try:
-            doc = self._provider(wall_clock=self._wall)
+            if self._wants_root:
+                doc = self._provider(wall_clock=self._wall, capacity_root=self._directory)
+            else:
+                doc = self._provider(wall_clock=self._wall)
             if doc is None:
                 _overlay.clear_overlay(self._directory)
             else:
