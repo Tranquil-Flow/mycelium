@@ -94,6 +94,7 @@ PIECE_RECEIPTS = {
     "13-mac-benchmark.json": "Mac MLX/INT8 stage benchmark",
     "20-codec-frames.json": "adjacent-host codec emit",
     "21-codec-adjacent.json": "adjacent-host codec verify",
+    "30-withdrawal-browser.json": "two-session browser withdrawal",
 }
 
 

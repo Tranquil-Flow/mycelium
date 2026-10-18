@@ -267,6 +267,10 @@ def test_summary_lists_the_product_piece_receipts(swarm, tmp_path, capsys):
     assert pieces["seed cutover transaction (owned stop/commit/adopt/restart)"] is True
     assert pieces["Mac MLX/INT8 stage benchmark"] is True
     assert pieces["adjacent-host codec emit"] is False
+    assert pieces["two-session browser withdrawal"] is False
+    (gate / "30-withdrawal-browser.json").write_text(json.dumps({"kind": "a9_two_session_withdrawal"}))
+    assert _run("summary", "--gate-dir", gate) == 0
+    assert json.loads((gate / "99-summary.json").read_text())["product_pieces"]["two-session browser withdrawal"] is True
     assert pieces["adjacent-host codec verify"] is False
     assert pieces["seed cutover negative (incumbent preserved)"] is False
     assert summary["status"]["migration + cutover + reader removal"] is True  # existing keys unchanged
