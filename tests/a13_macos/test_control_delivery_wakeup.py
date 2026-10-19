@@ -556,6 +556,70 @@ def test_a_command_whose_window_is_shorter_than_the_delivery_interval_still_comp
             sender.close()
 
 
+#: How long the stalled native execution below holds a woken command.  It models a host
+#: that is `SLOW_HOST_STALL_SECONDS / 0.08` times slower than an idle one (the whole
+#: owner->target->worker->owner round trip of this test costs ~0.08 s idle), which is
+#: what the L2 rehearsal's full-suite load did to the old 0.7 s window.
+SLOW_HOST_STALL_SECONDS = 1.2
+
+
+def test_a_woken_command_is_not_failed_by_a_slow_host_inside_its_window(
+    tmp_path, monkeypatch
+) -> None:
+    """The window of the end-to-end shape must not be a race against host speed.
+
+    ``test_a_command_whose_window_is_shorter_than_the_delivery_interval_still_completes``
+    failed once in an L2 rehearsal (``TimeoutError: command_deadline_exceeded``, full
+    suite under load ~10) although the delivery path behaved: the owner's window there is
+    a real-clock budget for the *whole* round trip (Ed25519 signing, a
+    ``synchronous=FULL`` commit, loopback TLS, the native worker, the owner's 50 ms result
+    polls), which costs ~0.08 s idle against a 0.7 s window -- 8.7x of headroom, which a
+    loaded host consumes.  Idle, 0 in 30 runs fail it even under ``yes`` burners, so this
+    pins the mechanism instead of the rate: stall only the **native execution** of the
+    command (after the wake-up has already delivered it) and the command must still
+    complete inside its window.  Nothing in the delivery path is delayed, so the wake-up is
+    asserted to have done its job on the stall-independent evidence.
+    """
+
+    _production_poll_defaults_are_untouched()
+    with _world(
+        tmp_path / "swarm", mailbox_options={"long_poll_step": OBSERVABLE_POLL_STEP_SECONDS}
+    ) as world:
+        record = _delivery_wake_evidence(monkeypatch)
+        target = runtime(tmp_path / "target", world)
+        sender = owner(tmp_path / "sender", world)
+        control = session(sender, world)
+        try:
+            assert target.start()["state"] == "running"
+            real_send = target.worker.send
+            stalled = threading.Event()
+
+            def slow_host(**kwargs):
+                if kwargs["command_id"] == "windowed-hello":
+                    stalled.set()
+                    time.sleep(SLOW_HOST_STALL_SECONDS)
+                return real_send(**kwargs)
+
+            monkeypatch.setattr(target.worker, "send", slow_host)
+            assert record["parked"].wait(5.0), "the control loop never reached its first park"
+            started_at = time.monotonic()
+            reply = control.send_before(
+                command_id="windowed-hello",
+                command="hello",
+                payload={},
+                deadline_monotonic_s=started_at + COMMAND_WINDOW_SECONDS,
+            )
+
+            assert stalled.is_set(), "the test never stalled its native execution"
+            assert reply["ok"] is True, reply
+            assert world["mailbox"].command_receipt("windowed-hello")["state"] == "completed"
+            assert record["generation_bumps"] >= 1
+        finally:
+            control.close()
+            target.close()
+            sender.close()
+
+
 def test_native_completion_wakes_the_control_loop_before_its_interval_expires(
     tmp_path, monkeypatch
 ) -> None:
