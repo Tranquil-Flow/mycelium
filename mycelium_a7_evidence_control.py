@@ -258,6 +258,21 @@ class RouteA7Evidence:
             self._last_route = current
         return current
 
+    def _retire_unresolvable_route(self) -> list[dict[str, Any]]:
+        """Treat the last resolved route as retired when no route resolves now.
+
+        The owner has no current route only after it retired the previous one
+        (cold restart pending or failed), so the cached route's entry process
+        is reported with its exit status although no replacement exists yet.
+        """
+
+        with self._routes_lock:
+            if self._last_route is not None:
+                self._retired_routes.append(self._last_route)
+                del self._retired_routes[:-_RETIRED_ROUTES_KEPT]
+                self._last_route = None
+        return self._retired_entry_processes()
+
     def _retired_entry_processes(self) -> list[dict[str, Any]]:
         """Entry processes of routes this door saw replaced, with their exit status.
 
@@ -421,7 +436,27 @@ class RouteA7Evidence:
         cleanup proof (A6 precedent), and nothing is invented for it.
         """
 
-        concrete = self._concrete()
+        try:
+            concrete = self._concrete()
+        except A7EvidenceUnavailable as exc:
+            retired = self._retire_unresolvable_route() if exc.code == "a7_evidence_route_unavailable" else []
+            if not retired:
+                raise
+            # No route is open (a cold restart is pending or failed), but the
+            # route this door last read was retired: its entry process exit is
+            # the cleanup proof and is reported without inventing any live
+            # counter for a route that does not exist.
+            return {
+                "protocol": EVIDENCE_PROTOCOL,
+                "kind": "resources",
+                "observed_at_monotonic_ms": self._clock_ms(),
+                "entry_node_id": retired[-1].get("node_id"),
+                "nodes": {},
+                "exited_nodes": [],
+                "retired_entry_processes": retired,
+                "route_request_registrations": None,
+                "gateway_reservations": None,
+            }
         status = concrete.public_status() if callable(getattr(concrete, "public_status", None)) else None
         peers = {}
         if isinstance(status, Mapping):

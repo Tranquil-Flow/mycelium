@@ -760,6 +760,8 @@ def _entry_process_replaced(
         return ENTRY_PROCESS_REPLACED
     nodes = after.get("nodes")
     if not isinstance(nodes, Mapping) or not isinstance(nodes.get(entry_node), Mapping):
+        if any(isinstance(item, Mapping) for item in (after.get("retired_entry_processes") or ())):
+            return ENTRY_PROCESS_REPLACED  # the route was retired and none replaced it yet
         return None  # no live entry to read: the delta refuses exactly as before
     identities = [
         _entry_process(before, entry_node),
