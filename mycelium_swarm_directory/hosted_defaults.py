@@ -22,6 +22,8 @@ DIRECTORY_MAX_BODY_BYTES = 16 * 1024
 #: Open-mode guard rails enforced by the swarm's entry (per UTC day, whole swarm, all keys together).
 SWARM_DAILY_REQUESTS = 200
 SWARM_DAILY_TOKENS = 40_000
+#: Access modes the swarm-wide budget applies to (owner-approved modes are bounded by their own grants).
+SWARM_CAP_ACCESS_MODES = ('open',)
 
 #: launchd labels of the prepared (not installed) units.
 DIRECTORY_LAUNCHD_LABEL = 'now.mycelium.swarm-directory'

@@ -26,6 +26,7 @@ GRANTEE_QUERY = 'mycelium.swarm.grantee_query.v1'
 ENTRY_OFFER = 'mycelium.swarm.entry_offer.v1'
 ENTRY_SEND = 'mycelium.swarm.entry_send.v1'
 OPEN_GRANT_REQUEST = 'mycelium.swarm.open_grant_request.v1'
+KILL_SWITCH = 'mycelium.swarm.kill_switch.v1'
 LINK = 'mycelium.swarm.link.v1'
 LINK_SCHEME = 'mycelium-swarm:'
 
@@ -62,6 +63,7 @@ _KEYS = {
     ENTRY_OFFER: frozenset({'protocol', 'swarm_id', 'entry_key', 'origin', 'at', 'sig'}),
     ENTRY_SEND: frozenset({'protocol', 'swarm_id', 'key', 'grant', 'prompt', 'max_new_tokens', 'at', 'nonce', 'sig'}),
     OPEN_GRANT_REQUEST: frozenset({'protocol', 'swarm_id', 'key', 'at', 'nonce', 'sig'}),
+    KILL_SWITCH: frozenset({'protocol', 'swarm_id', 'owner_key', 'engaged', 'seq', 'at', 'sig'}),
 }
 _QUOTA_KEYS = frozenset({'max_requests', 'max_tokens', 'ttl_seconds'})
 DEFAULT_OPEN_QUOTA = {'max_requests': 20, 'max_tokens': 4000, 'ttl_seconds': 86400}
@@ -142,6 +144,12 @@ def entry_send(requester, swarm_id, grant_document, prompt, max_new_tokens, *, a
 def open_grant_request(requester, swarm_id, *, at, nonce=None) -> dict[str, Any]:
     return sign(requester, {'protocol': OPEN_GRANT_REQUEST, 'swarm_id': swarm_id, 'key': requester.public_key,
                             'at': at, 'nonce': nonce or new_nonce()})
+
+
+def kill_switch(owner, swarm_id, *, engaged, seq, at) -> dict[str, Any]:
+    """Owner-signed switch for new admissions; ``seq`` must grow so an old document cannot replay."""
+    return sign(owner, {'protocol': KILL_SWITCH, 'swarm_id': swarm_id, 'owner_key': owner.public_key,
+                        'engaged': engaged, 'seq': seq, 'at': at})
 
 
 def swarm_link(directory_origin: str, swarm_id: str, owner_key: str) -> str:
@@ -285,6 +293,11 @@ def check(document: Any, protocol: str, verifier: Verifier, *, allow_loopback: b
         signer = _key(document['key'], 'key_invalid')
     elif protocol == OPEN_GRANT_REQUEST:
         signer = _key(document['key'], 'key_invalid')
+    elif protocol == KILL_SWITCH:
+        if type(document['engaged']) is not bool:
+            raise WireError('kill_engaged_invalid')
+        integer(document['seq'], low=1, high=2 ** 40, code='seq_invalid')
+        signer = _key(document['owner_key'], 'owner_key_invalid')
     else:  # pragma: no cover - closed set
         raise WireError('protocol_invalid')
     verify_document(document, signer, verifier)

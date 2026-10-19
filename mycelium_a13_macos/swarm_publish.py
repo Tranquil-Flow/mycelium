@@ -37,7 +37,7 @@ from mycelium_swarm_directory.entry import EntryGateway, EntryGuard, EntryPolicy
 from mycelium_swarm_directory.wire import WireError, fingerprint
 
 ROUTES = frozenset({'/api/swarm/publish', '/api/swarm/unpublish', '/api/swarm/inbox', '/api/swarm/approve',
-                    '/api/swarm/deny', '/api/swarm/revoke'})
+                    '/api/swarm/deny', '/api/swarm/revoke', '/api/swarm/kill'})
 HEARTBEAT_SECONDS = 30
 OFFER_SECONDS = 300
 _CODE = re.compile(r'[a-z][a-z0-9_]{0,79}\Z')
@@ -318,6 +318,21 @@ class SwarmPublisher:
         self.ledger.revoke(body['grant_id'], self.now())
         return {'revoked': body['grant_id']}
 
+    def kill(self, body: Any) -> dict[str, Any]:
+        """Engage or release the owner kill switch (new admissions only; the document is owner-signed)."""
+        if not isinstance(body, dict) or set(body) != {'engaged'} or type(body['engaged']) is not bool:
+            raise SwarmPublishError('invalid_request')
+        with self._op:
+            self._owner_only()
+            swarm_id = self.state['swarm_id']
+            document = docs.kill_switch(self.signer, swarm_id, engaged=body['engaged'],
+                                        seq=self.ledger.kill_state(swarm_id)[1] + 1, at=self.now())
+            try:
+                self.gateway.guard.apply_kill(json.dumps(document).encode(), 'owner-app')
+            except WireError as error:
+                raise SwarmPublishError('swarm_' + error.code) from None
+            return self.status()
+
     # -- periodic work -------------------------------------------------------------
     def tick(self) -> dict[str, Any]:
         with self._op:
@@ -436,7 +451,8 @@ class SwarmPublisher:
                 'entry_fingerprint': fingerprint(self.signer.public_key),
                 'attached': policy is not None, 'entry_origin': entry.get('origin'),
                 'heartbeat': None if self._last_heartbeat is None else self._last_heartbeat[2],
-                'error_code': self._error, 'link': link}
+                'error_code': self._error, 'link': link,
+                'killed': bool(state.get('swarm_id')) and self.ledger.kill_state(state['swarm_id'])[0]}
 
 
 # -- app hooks ---------------------------------------------------------------------
@@ -472,7 +488,8 @@ def action(app: Any, path: str, body: Any) -> dict[str, Any]:
     publisher = service(app)
     handler = {'/api/swarm/publish': publisher.publish, '/api/swarm/unpublish': publisher.unpublish,
                '/api/swarm/inbox': publisher.inbox, '/api/swarm/approve': publisher.approve,
-               '/api/swarm/deny': publisher.deny, '/api/swarm/revoke': publisher.revoke}.get(path)
+               '/api/swarm/deny': publisher.deny, '/api/swarm/revoke': publisher.revoke,
+               '/api/swarm/kill': publisher.kill}.get(path)
     if handler is None:
         raise SwarmPublishError('route_unknown')
     return handler(body)

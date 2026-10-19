@@ -28,17 +28,18 @@ import os
 import sqlite3
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import docs
+from . import docs, hosted_defaults
 from .directory import PRIVACY_NOTE
 from .ratelimit import WindowLimiter
 from .wire import Verifier, WireError, fingerprint, parse_json_object
 
 PREFIX = '/swarm-entry/v1/'
-ROUTES = frozenset({'state', 'open-grant', 'send', 'events'})
+ROUTES = frozenset({'state', 'open-grant', 'send', 'events', 'kill'})
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,9 @@ class EntryLimits:
     events_per_ip_per_minute: int = 240
     open_grants_per_ip_per_hour: int = 6
     max_nonces: int = 50000
+    # Swarm-wide budget per UTC day over all keys and addresses (open swarms); None = unlimited.
+    swarm_daily_requests: int | None = hosted_defaults.SWARM_DAILY_REQUESTS
+    swarm_daily_tokens: int | None = hosted_defaults.SWARM_DAILY_TOKENS
 
 
 @dataclass(frozen=True)
@@ -90,10 +94,19 @@ class UsageLedger:
             'tokens INTEGER NOT NULL);'
             'CREATE TABLE IF NOT EXISTS revoked (grant_id TEXT PRIMARY KEY, at INTEGER NOT NULL);'
             'CREATE TABLE IF NOT EXISTS open_grants (swarm_id TEXT NOT NULL, grantee TEXT NOT NULL, '
-            'grant TEXT NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY (swarm_id, grantee));')
+            'grant TEXT NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY (swarm_id, grantee));'
+            'CREATE TABLE IF NOT EXISTS swarm_usage (swarm_id TEXT NOT NULL, day INTEGER NOT NULL, '
+            'requests INTEGER NOT NULL, tokens INTEGER NOT NULL, PRIMARY KEY (swarm_id, day));'
+            'CREATE TABLE IF NOT EXISTS kill_switch (swarm_id TEXT PRIMARY KEY, engaged INTEGER NOT NULL, '
+            'seq INTEGER NOT NULL, at INTEGER NOT NULL);')
 
-    def charge(self, grant: dict[str, Any], wanted_tokens: int) -> tuple[int, dict[str, int]]:
-        """Atomically take one request and up to ``wanted_tokens``; returns (tokens, left)."""
+    def charge(self, grant: dict[str, Any], wanted_tokens: int,
+               swarm: tuple[str, int, int | None, int | None] | None = None) -> tuple[int, dict[str, int]]:
+        """Atomically take one request and up to ``wanted_tokens``; returns (tokens, left).
+
+        ``swarm`` = (swarm_id, utc_day, max_requests, max_tokens) also charges the swarm-wide daily
+        budget in the same transaction (None = unlimited); nothing is charged when either side refuses.
+        """
         with self._lock:
             self._db.execute('BEGIN IMMEDIATE')
             try:
@@ -104,18 +117,66 @@ class UsageLedger:
                 if requests >= grant['max_requests'] or tokens_left < 1:
                     raise WireError('entry_quota_exhausted', 429)
                 taken = min(wanted_tokens, tokens_left)
+                swarm_left: dict[str, int] = {}
+                if swarm is not None:
+                    swarm_id, day, max_requests, max_tokens = swarm
+                    used_r, used_t = self._db.execute(
+                        'SELECT requests, tokens FROM swarm_usage WHERE swarm_id=? AND day=?',
+                        (swarm_id, day)).fetchone() or (0, 0)
+                    if (max_requests is not None and used_r >= max_requests) or \
+                            (max_tokens is not None and used_t >= max_tokens):
+                        raise WireError('entry_swarm_daily_cap', 429)
+                    if max_tokens is not None:
+                        taken = min(taken, max_tokens - used_t)
+                        swarm_left['swarm_tokens_left'] = max_tokens - used_t - taken
+                    if max_requests is not None:
+                        swarm_left['swarm_requests_left'] = max_requests - used_r - 1
+                    self._db.execute('INSERT OR REPLACE INTO swarm_usage (swarm_id, day, requests, tokens) '
+                                     'VALUES (?, ?, ?, ?)', (swarm_id, day, used_r + 1, used_t + taken))
+                    self._db.execute('DELETE FROM swarm_usage WHERE swarm_id=? AND day<?', (swarm_id, day - 7))
                 self._db.execute('INSERT OR REPLACE INTO usage (grant_id, requests, tokens) VALUES (?, ?, ?)',
                                  (grant['grant_id'], requests + 1, tokens + taken))
                 self._db.execute('COMMIT')
             except BaseException:
                 self._db.execute('ROLLBACK')
                 raise
-        return taken, {'requests_left': grant['max_requests'] - requests - 1, 'tokens_left': tokens_left - taken}
+        return taken, {'requests_left': grant['max_requests'] - requests - 1, 'tokens_left': tokens_left - taken,
+                       **swarm_left}
 
-    def refund(self, grant_id: str, tokens: int) -> None:
+    def refund(self, grant_id: str, tokens: int, swarm: tuple[str, int] | None = None) -> None:
         with self._lock:
             self._db.execute('UPDATE usage SET requests=MAX(requests-1, 0), tokens=MAX(tokens-?, 0) '
                              'WHERE grant_id=?', (tokens, grant_id))
+            if swarm is not None:
+                self._db.execute('UPDATE swarm_usage SET requests=MAX(requests-1, 0), tokens=MAX(tokens-?, 0) '
+                                 'WHERE swarm_id=? AND day=?', (tokens, swarm[0], swarm[1]))
+
+    def swarm_usage(self, swarm_id: str, day: int) -> tuple[int, int]:
+        with self._lock:
+            row = self._db.execute('SELECT requests, tokens FROM swarm_usage WHERE swarm_id=? AND day=?',
+                                   (swarm_id, day)).fetchone()
+        return row if row else (0, 0)
+
+    def kill_state(self, swarm_id: str) -> tuple[bool, int]:
+        with self._lock:
+            row = self._db.execute('SELECT engaged, seq FROM kill_switch WHERE swarm_id=?', (swarm_id,)).fetchone()
+        return (bool(row[0]), row[1]) if row else (False, 0)
+
+    def set_kill(self, swarm_id: str, engaged: bool, seq: int, at: int) -> bool:
+        """Store the owner's switch; False (nothing changed) unless ``seq`` is newer than the stored one."""
+        with self._lock:
+            self._db.execute('BEGIN IMMEDIATE')
+            try:
+                row = self._db.execute('SELECT seq FROM kill_switch WHERE swarm_id=?', (swarm_id,)).fetchone()
+                fresh = row is None or seq > row[0]
+                if fresh:
+                    self._db.execute('INSERT OR REPLACE INTO kill_switch (swarm_id, engaged, seq, at) '
+                                     'VALUES (?, ?, ?, ?)', (swarm_id, int(engaged), seq, at))
+                self._db.execute('COMMIT')
+            except BaseException:
+                self._db.execute('ROLLBACK')
+                raise
+        return fresh
 
     def usage(self, grant_id: str) -> tuple[int, int]:
         with self._lock:
@@ -155,6 +216,7 @@ class Admission:
     max_new_tokens: int
     clamped: bool
     left: dict
+    swarm: tuple[str, int] | None = None
 
 
 class EntryGuard:
@@ -171,6 +233,7 @@ class EntryGuard:
         self._events = WindowLimiter(limits.events_per_ip_per_minute)
         self._open_ip = WindowLimiter(limits.open_grants_per_ip_per_hour, 3600)
         self._nonces: dict[str, int] = {}
+        self._cut: OrderedDict[str, None] = OrderedDict()  # requests ended by the kill switch
         self._lock = threading.Lock()
         self.limits = limits
 
@@ -211,6 +274,57 @@ class EntryGuard:
             raise WireError('entry_rate_limited_key', 429)
         return document
 
+    # -- swarm-wide budget and owner kill switch --------------------------------------
+    def _cap(self, policy: EntryPolicy, now: int) -> tuple[str, int, int | None, int | None] | None:
+        limits = self.limits
+        if policy.access_mode not in hosted_defaults.SWARM_CAP_ACCESS_MODES or \
+                (limits.swarm_daily_requests is None and limits.swarm_daily_tokens is None):
+            return None
+        return policy.swarm_id, now // 86400, limits.swarm_daily_requests, limits.swarm_daily_tokens
+
+    def killed(self, policy: EntryPolicy) -> bool:
+        return self.ledger.kill_state(policy.swarm_id)[0]
+
+    def budget(self, policy: EntryPolicy) -> dict[str, Any] | None:
+        now = int(self.clock())
+        cap = self._cap(policy, now)
+        if cap is None:
+            return None
+        used_r, used_t = self.ledger.swarm_usage(cap[0], cap[1])
+        return {'requests_left': None if cap[2] is None else max(cap[2] - used_r, 0),
+                'tokens_left': None if cap[3] is None else max(cap[3] - used_t, 0),
+                'resets_at': (cap[1] + 1) * 86400}
+
+    def apply_kill(self, raw: bytes, client: str) -> dict[str, Any]:
+        """Apply an owner-signed kill switch document (engage or release); replays are refused."""
+        policy = self.current()
+        now = int(self.clock())
+        if not self._ip.allow(client, now):
+            raise WireError('entry_rate_limited_ip', 429)
+        document = docs.check(parse_json_object(raw, limit=self.limits.max_body), docs.KILL_SWITCH, self.verifier)
+        if document['swarm_id'] != policy.swarm_id:
+            raise WireError('entry_swarm_mismatch', 404)
+        if document['owner_key'] != policy.owner_key:
+            raise WireError('entry_kill_not_owner', 403)
+        if abs(document['at'] - now) > self.limits.skew:
+            raise WireError('entry_clock_skew', 400)
+        if not self.ledger.set_kill(policy.swarm_id, document['engaged'], document['seq'], now):
+            raise WireError('entry_kill_seq_stale', 409)
+        return {'engaged': document['engaged'], 'seq': document['seq']}
+
+    def settle_events(self, request_id: Any, page: dict[str, Any], policy: EntryPolicy) -> dict[str, Any]:
+        """After a kill, a request still running ends with an explicit terminal (and stays ended)."""
+        with self._lock:
+            ended = request_id in self._cut
+            if not ended and not page.get('done') and self.killed(policy) and isinstance(request_id, str):
+                self._cut[request_id] = None
+                while len(self._cut) > 512:
+                    self._cut.popitem(last=False)
+                ended = True
+        if not ended:
+            return page
+        return {**page, 'done': True, 'error': 'entry_killed_by_owner', 'killed': True}
+
     def check_grant(self, grant: Any, key: str, policy: EntryPolicy, now: int) -> dict[str, Any]:
         try:
             grant = docs.check(grant, docs.GRANT, self.verifier)
@@ -235,22 +349,28 @@ class EntryGuard:
     def admit(self, raw: bytes, client: str) -> tuple[Admission, str]:
         policy = self.current()
         now = int(self.clock())
+        if self.killed(policy):
+            raise WireError('entry_killed_by_owner', 403)
         document = self._signed(raw, docs.ENTRY_SEND, client, policy, now)
         grant = self.check_grant(document['grant'], document['key'], policy, now)
         wanted = min(document['max_new_tokens'], self.limits.max_new_tokens)
-        taken, left = self.ledger.charge(grant, wanted)
+        cap = self._cap(policy, now)
+        taken, left = self.ledger.charge(grant, wanted, cap)
         return Admission(grant_id=grant['grant_id'], key=document['key'],
                          client_key='swarm:' + fingerprint(document['key']), max_new_tokens=taken,
-                         clamped=taken != document['max_new_tokens'], left=left), document['prompt']
+                         clamped=taken != document['max_new_tokens'], left=left,
+                         swarm=None if cap is None else (cap[0], cap[1])), document['prompt']
 
     def refund(self, admission: Admission) -> None:
-        self.ledger.refund(admission.grant_id, admission.max_new_tokens)
+        self.ledger.refund(admission.grant_id, admission.max_new_tokens, admission.swarm)
 
     def open_grant(self, raw: bytes, client: str) -> dict[str, Any]:
         policy = self.current()
         now = int(self.clock())
         if policy.access_mode != 'open' or not policy.open_quota:
             raise WireError('entry_swarm_not_open', 403)
+        if self.killed(policy):
+            raise WireError('entry_killed_by_owner', 403)
         document = self._signed(raw, docs.OPEN_GRANT_REQUEST, client, policy, now)
         existing = self.ledger.open_grant(policy.swarm_id, document['key'], now)
         if existing is not None:
@@ -303,7 +423,10 @@ class EntryGateway:
                     'limits': {'max_prompt_chars': docs.MAX_PROMPT_CHARS, 'max_new_tokens': limits.max_new_tokens,
                                'per_key_per_minute': limits.per_key_per_minute,
                                'per_ip_per_minute': limits.per_ip_per_minute},
+                    'killed': self.guard.killed(policy), 'swarm_budget': self.guard.budget(policy),
                     'privacy': PRIVACY_NOTE}
+        if route == 'kill':
+            return self.guard.apply_kill(body, client)
         if route == 'open-grant':
             return {'grant': self.guard.open_grant(body, client)}
         if route == 'events':
@@ -311,7 +434,8 @@ class EntryGateway:
             if not self.guard.allow_events(client):
                 raise WireError('entry_rate_limited_ip', 429)
             document = parse_json_object(body, limit=1024)
-            return self._chat_call(lambda: self.chat().events(document))
+            page = self._chat_call(lambda: self.chat().events(document))
+            return self.guard.settle_events(document.get('request_id'), page, self.guard.current())
         admission, prompt = self.guard.admit(body, client)
         try:
             accepted = self._chat_call(lambda: self.chat().send(
