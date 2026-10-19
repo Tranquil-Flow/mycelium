@@ -36,6 +36,7 @@ from mycelium_router.contracts import HopHeader
 from mycelium_router.idempotency import hop_idempotency_key
 from mycelium_router.wire import encode_frame
 from mycelium_router.payloads import encode_token_ids
+from mycelium_router.transports import iroh as iroh_transport
 from tests.a10_deterministic.test_a10_live_hop_batching import (
    PROMPT,
    _GateRuntime,
@@ -93,20 +94,57 @@ def _shared_batch_ref(runtime):
    return [tuple(sorted(item.request_id for item in batch.items)) for batch in runtime.executed_batches]
 
 
+class _WindowClock:
+   """The collection window's clock, advanced only by the test.
+
+   The dispatcher measures the live collection window against ``time.monotonic`` as seen
+   by ``mycelium_router.transports.iroh``.  A gap of ``g`` ms between two hops is a
+   statement about that clock: ``g`` of the window has elapsed when the second hop
+   arrives.  Driving the gap with ``time.sleep(g)`` on the wall clock instead makes the
+   statement a race against the host -- a descheduled test thread overshoots a 40 ms
+   sleep past the 46 ms window (it failed three L2 rehearsal attempts under load) and the
+   second hop then meets a window that has already closed.  Everything else the module
+   reads from ``time`` (``sleep``, ``time``, ...) is the real thing; the window is
+   closed only by ``advance``.
+   """
+
+   def __init__(self) -> None:
+      self._now = time.monotonic()
+
+   def monotonic(self) -> float:
+      return self._now
+
+   def advance(self, seconds: float) -> None:
+      self._now += seconds
+
+   def __getattr__(self, name):
+      return getattr(time, name)
+
+
 @pytest.mark.parametrize("gap_ms", [0.0, 1.0, 10.0, 40.0])
 def test_interactive_prefill_hops_within_the_window_form_one_batch(
    runtime_case,  # noqa: F811 - pytest fixture
    gap_ms,
+   monkeypatch,
 ):
+   window_clock = _WindowClock()
+   monkeypatch.setattr(iroh_transport, "time", window_clock)
    runtime = _GateRuntime()
    hub, transport, router = _start(runtime_case, runtime, ("a", "b"))
    _policy(router, f"candidate@{int(WINDOW_MS)}")
    assert router.hop_collection_window_seconds() == pytest.approx(WINDOW_S)
    try:
       _deliver_prefill(runtime_case, hub, "a", b"\x01")
-      if gap_ms:
-         time.sleep(gap_ms / 1_000.0)
+      # The window is open once the dispatcher has queued a's hop and armed it; the
+      # gap then elapses on the window's own clock, not on the host's.
+      _wait(lambda: transport._hop_collection_deadline is not None)
+      assert gap_ms / 1_000.0 < WINDOW_S
+      window_clock.advance(gap_ms / 1_000.0)
       _deliver_prefill(runtime_case, hub, "b", b"\x02")
+      # A candidate hop is acknowledged once the dispatcher has queued it: both hops are
+      # queued inside the one window; now it closes.
+      _wait(lambda: b"\x02" * 16 in hub.acks)
+      window_clock.advance(WINDOW_S)
       _wait(lambda: len(runtime.executed_batches) >= 1)
       time.sleep(WINDOW_S * 2)
       assert _shared_batch_ref(runtime) == [("request-a", "request-b")], _shared_batch_ref(runtime)
