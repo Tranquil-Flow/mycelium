@@ -121,6 +121,10 @@ const MESSAGES = {
   entry_grant_swarm_mismatch: 'This grant is for a different swarm.',
   entry_swarm_not_open: 'This swarm is not open to everyone.',
   chat_cancelled: 'Cancelled before it finished.',
+  cancelled_by_requester: 'You stopped this prompt; the swarm stopped generating.',
+  entry_cancel_not_requester: 'Only the browser key that sent a prompt can stop it.',
+  entry_request_unknown: 'The swarm no longer knows this prompt (it may have finished).',
+  entry_cancel_unsupported: 'This swarm cannot stop a running prompt.',
   rate_limited_ip: 'Too many requests from your network. Wait a minute.',
   rate_limited_key: 'Too many requests from your key. Wait a minute.',
 };
@@ -222,18 +226,19 @@ async function getOpenAccess(s) {
 // -- chat (same polling contract and failure codes as the A13 chat page) ------------
 const POLL_MS = 400;  // 150 polls a minute: inside the entry's 240/min per-address limit
 function line(kind, text) { const div = el('div', {class: 'msg ' + kind}, text); $('log').append(div); div.scrollIntoView({block: 'end'}); return div; }
-// Every end of a prompt is one of these six; each is named on the page (data-terminal) and never guessed.
+// Every end of a prompt is one of these seven; each is named on the page (data-terminal) and never guessed.
 function classify(code, page) {
   if (code === 'entry_killed_by_owner' || (page && page.killed)) return 'killed';
   if (code === 'entry_quota_exhausted' || code === 'entry_swarm_daily_cap') return 'quota';
   if (code && (code.startsWith('entry_grant_') || code === 'swarm_invite_only' || code === 'entry_swarm_not_open')) return 'not_granted';
+  if (code === 'cancelled_by_requester') return 'cancelled_by_you';
   if (code === 'chat_cancelled' || (page && page.terminal === 'cancelled')) return 'cancelled';
   return code ? 'failed' : 'completed';
 }
 function terminalLine(kind, code, seconds) {
   const text = {completed: 'Completed' + (seconds !== null && seconds !== undefined ? ` in ${seconds} s` : '') + '.',
     failed: 'Failed: ' + say(code), cancelled: 'Cancelled: ' + say(code === 'chat_cancelled' ? code : 'chat_cancelled'),
-    killed: say('entry_killed_by_owner'), quota: 'Quota used up. ' + say(code), not_granted: 'Not granted. ' + say(code)}[kind];
+    cancelled_by_you: 'Cancelled by you. ' + say('cancelled_by_requester'), killed: say('entry_killed_by_owner'), quota: 'Quota used up. ' + say(code), not_granted: 'Not granted. ' + say(code)}[kind];
   return el('div', {class: 'msg terminal', 'data-terminal': kind}, text);
 }
 async function openChat(s, grant) {
@@ -247,6 +252,16 @@ async function openChat(s, grant) {
       state.available ? `Serving ${state.model_id || ''}${state.busy ? ' · busy' : ' · ready'}` : say(state.warming_up ? 'chat_warming_up' : 'chat_not_ready');
   } catch (error) { $('chat-state').textContent = say(error.message); }
   $('chat-card').scrollIntoView();
+}
+let running = null;  // the prompt in flight: {swarm, requestId}, so Stop can name it
+async function stop() {
+  if (!running) return;
+  const {swarm, requestId} = running; $('stop').disabled = true;
+  try {
+    const value = await entry(swarm.entry_origin, 'cancel', await sign({protocol: 'mycelium.swarm.entry_cancel.v1',
+      swarm_id: swarm.swarm_id, key: me.key, request_id: requestId, at: now(), nonce: randomText(18)}));
+    $('chat-state').textContent = value.cancelled ? 'Stopping…' : 'It had already finished.';
+  } catch (error) { $('chat-state').textContent = 'Not stopped: ' + say(error.message); if (running) $('stop').disabled = false; }
 }
 async function send(event) {
   event.preventDefault();
@@ -263,6 +278,7 @@ async function send(event) {
     if (served.length) line('meta', 'Served by: ' + served.join(', '));
     meta.textContent = (accepted.clamped ? `capped at ${accepted.max_new_tokens} tokens · ` : '') +
       `left on your grant: ${accepted.quota.requests_left} requests, ${accepted.quota.tokens_left} tokens`;
+    running = {swarm, requestId: accepted.request_id}; $('stop').disabled = false; $('stop').hidden = false;
     $('chat-state').textContent = 'Generating… tokens appear as the route makes them.';
     $('prompt').value = '';
     let next = 0;
@@ -280,7 +296,7 @@ async function send(event) {
   finally {
     if (!text) answer.textContent = outcome && outcome.kind === 'completed' ? '(empty answer)' : '(no answer)';
     if (outcome) { $('log').append(terminalLine(outcome.kind, outcome.code, outcome.seconds)); $('chat-state').textContent = 'Done.'; }
-    sending = false; $('send').disabled = false;
+    running = null; $('stop').hidden = true; sending = false; $('send').disabled = false;
   }
 }
 
@@ -491,6 +507,7 @@ async function main() {
   $('forget').addEventListener('click', forget);
   $('create-form').addEventListener('submit', create);
   $('chat-form').addEventListener('submit', send);
+  $('stop').addEventListener('click', stop);
   $('chat-close').addEventListener('click', () => { $('chat-card').hidden = true; chatTarget = null; });
   document.body.dataset.ready = '1';
   await refresh();

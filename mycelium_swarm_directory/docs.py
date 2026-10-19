@@ -27,6 +27,7 @@ ENTRY_OFFER = 'mycelium.swarm.entry_offer.v1'
 ENTRY_SEND = 'mycelium.swarm.entry_send.v1'
 OPEN_GRANT_REQUEST = 'mycelium.swarm.open_grant_request.v1'
 KILL_SWITCH = 'mycelium.swarm.kill_switch.v1'
+ENTRY_CANCEL = 'mycelium.swarm.entry_cancel.v1'
 LINK = 'mycelium.swarm.link.v1'
 LINK_SCHEME = 'mycelium-swarm:'
 
@@ -34,6 +35,7 @@ ACCESS_MODES = ('open', 'request', 'invite')
 STATUSES = ('serving', 'warming', 'offline')
 SWARM_ID = re.compile(r'sw-[a-z0-9]{20}\Z')
 GRANT_ID = re.compile(r'gr-[A-Za-z0-9_-]{22}\Z')
+REQUEST_ID = re.compile(r'[A-Za-z0-9_-]{16,64}\Z')  # the chat service's request ids
 NONCE = re.compile(r'[A-Za-z0-9_-]{16,43}\Z')
 MODEL = re.compile(r'[A-Za-z0-9._/:+-]{1,96}\Z')
 MAX_RECORD_BYTES = 4096
@@ -64,6 +66,7 @@ _KEYS = {
     ENTRY_SEND: frozenset({'protocol', 'swarm_id', 'key', 'grant', 'prompt', 'max_new_tokens', 'at', 'nonce', 'sig'}),
     OPEN_GRANT_REQUEST: frozenset({'protocol', 'swarm_id', 'key', 'at', 'nonce', 'sig'}),
     KILL_SWITCH: frozenset({'protocol', 'swarm_id', 'owner_key', 'engaged', 'seq', 'at', 'sig'}),
+    ENTRY_CANCEL: frozenset({'protocol', 'swarm_id', 'key', 'request_id', 'at', 'nonce', 'sig'}),
 }
 _QUOTA_KEYS = frozenset({'max_requests', 'max_tokens', 'ttl_seconds'})
 DEFAULT_OPEN_QUOTA = {'max_requests': 20, 'max_tokens': 4000, 'ttl_seconds': 86400}
@@ -139,6 +142,12 @@ def entry_send(requester, swarm_id, grant_document, prompt, max_new_tokens, *, a
     return sign(requester, {'protocol': ENTRY_SEND, 'swarm_id': swarm_id, 'key': requester.public_key,
                             'grant': grant_document, 'prompt': prompt, 'max_new_tokens': max_new_tokens, 'at': at,
                             'nonce': nonce or new_nonce()})
+
+
+def entry_cancel(requester, swarm_id, request_id, *, at, nonce=None) -> dict[str, Any]:
+    """The requester's own stop for one running prompt; the id is inside the signature."""
+    return sign(requester, {'protocol': ENTRY_CANCEL, 'swarm_id': swarm_id, 'key': requester.public_key,
+                            'request_id': request_id, 'at': at, 'nonce': nonce or new_nonce()})
 
 
 def open_grant_request(requester, swarm_id, *, at, nonce=None) -> dict[str, Any]:
@@ -292,6 +301,9 @@ def check(document: Any, protocol: str, verifier: Verifier, *, allow_loopback: b
             raise WireError('grant_invalid', 403)
         signer = _key(document['key'], 'key_invalid')
     elif protocol == OPEN_GRANT_REQUEST:
+        signer = _key(document['key'], 'key_invalid')
+    elif protocol == ENTRY_CANCEL:
+        ident(document['request_id'], REQUEST_ID, 'entry_request_invalid')
         signer = _key(document['key'], 'key_invalid')
     elif protocol == KILL_SWITCH:
         if type(document['engaged']) is not bool:

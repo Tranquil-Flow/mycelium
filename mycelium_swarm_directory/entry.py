@@ -40,7 +40,9 @@ from .wire import Verifier, WireError, fingerprint, parse_json_object
 
 PREFIX = '/swarm-entry/v1/'
 KILLED = 'entry_killed_by_owner'
-ROUTES = frozenset({'state', 'open-grant', 'send', 'events', 'kill'})
+ROUTES = frozenset({'state', 'open-grant', 'send', 'events', 'kill', 'cancel'})
+CANCELLED_BY_REQUESTER = 'cancelled_by_requester'
+MAX_REMEMBERED_REQUESTS = 512
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,7 @@ class EntryLimits:
     per_key_per_minute: int = 6
     per_ip_per_minute: int = 12
     events_per_ip_per_minute: int = 240
+    cancels_per_ip_per_minute: int = 60
     open_grants_per_ip_per_hour: int = 6
     max_nonces: int = 50000
     # Swarm-wide budget per UTC day over all keys and addresses (open swarms); None = unlimited.
@@ -233,8 +236,10 @@ class EntryGuard:
         self._key = WindowLimiter(limits.per_key_per_minute)
         self._events = WindowLimiter(limits.events_per_ip_per_minute)
         self._open_ip = WindowLimiter(limits.open_grants_per_ip_per_hour, 3600)
+        self._cancel_ip = WindowLimiter(limits.cancels_per_ip_per_minute)
         self._nonces: dict[str, int] = {}
         self._cut: OrderedDict[str, None] = OrderedDict()  # requests ended by the kill switch
+        self._requesters: OrderedDict[str, str] = OrderedDict()  # request id -> key that signed the prompt
         self._lock = threading.Lock()
         #: Called (best effort, never raises into the kill) when the owner engages the kill switch; the gateway
         #: points it at the chat backend so the running generation is cancelled, not only hidden.
@@ -250,6 +255,7 @@ class EntryGuard:
         self._limits = value  # counters survive a limit change
         self._ip.limit, self._key.limit = value.per_ip_per_minute, value.per_key_per_minute
         self._events.limit, self._open_ip.limit = value.events_per_ip_per_minute, value.open_grants_per_ip_per_hour
+        self._cancel_ip.limit = value.cancels_per_ip_per_minute
 
     def current(self) -> EntryPolicy:
         policy = self.policy()
@@ -257,8 +263,9 @@ class EntryGuard:
             raise WireError('entry_not_published', 503)
         return policy
 
-    def _signed(self, raw: bytes, protocol: str, client: str, policy: EntryPolicy, now: int) -> dict[str, Any]:
-        if not self._ip.allow(client, now):
+    def _signed(self, raw: bytes, protocol: str, client: str, policy: EntryPolicy, now: int, *,
+                ip: WindowLimiter | None = None, key_limit: bool = True) -> dict[str, Any]:
+        if not (ip or self._ip).allow(client, now):
             raise WireError('entry_rate_limited_ip', 429)
         document = parse_json_object(raw, limit=self.limits.max_body)
         document = docs.check(document, protocol, self.verifier)
@@ -274,9 +281,36 @@ class EntryGuard:
                 if len(self._nonces) >= self.limits.max_nonces:
                     raise WireError('entry_busy', 503)
             self._nonces[document['nonce']] = now + 2 * self.limits.skew + 1
-        if not self._key.allow(document['key'], now):
+        if key_limit and not self._key.allow(document['key'], now):
             raise WireError('entry_rate_limited_key', 429)
         return document
+
+    # -- the requester's own stop ---------------------------------------------------------
+    def remember(self, request_id: Any, key: str) -> None:
+        """Note which key signed the prompt behind ``request_id`` (in memory: a request does not outlive the app)."""
+        if not isinstance(request_id, str):
+            return
+        with self._lock:
+            self._requesters[request_id] = key
+            while len(self._requesters) > MAX_REMEMBERED_REQUESTS:
+                self._requesters.popitem(last=False)
+
+    def apply_cancel(self, raw: bytes, client: str) -> str:
+        """Verify a requester-signed cancel and return the request id it may stop.
+
+        Only the key that signed the prompt may stop it (not the owner: that is the kill switch).  No grant and
+        no send budget is needed to stop your own prompt; the cancel has its own per-address budget.
+        """
+        policy = self.current()
+        now = int(self.clock())
+        document = self._signed(raw, docs.ENTRY_CANCEL, client, policy, now, ip=self._cancel_ip, key_limit=False)
+        with self._lock:
+            requester = self._requesters.get(document['request_id'])
+        if requester is None:
+            raise WireError('entry_request_unknown', 404)
+        if requester != document['key']:
+            raise WireError('entry_cancel_not_requester', 403)
+        return document['request_id']
 
     # -- swarm-wide budget and owner kill switch --------------------------------------
     def _cap(self, policy: EntryPolicy, now: int) -> tuple[str, int, int | None, int | None] | None:
@@ -441,6 +475,13 @@ class EntryGateway:
             return self.guard.apply_kill(body, client)
         if route == 'open-grant':
             return {'grant': self.guard.open_grant(body, client)}
+        if route == 'cancel':
+            request_id = self.guard.apply_cancel(body, client)
+            cancel = getattr(self.chat(), 'cancel', None)
+            if not callable(cancel):
+                raise WireError('entry_cancel_unsupported', 501)
+            return {'cancelled': bool(self._chat_call(lambda: cancel(request_id, CANCELLED_BY_REQUESTER))),
+                    'request_id': request_id}
         if route == 'events':
             self.guard.current()
             if not self.guard.allow_events(client):
@@ -458,6 +499,7 @@ class EntryGateway:
         except BaseException:
             self.guard.refund(admission)
             raise
+        self.guard.remember(accepted.get('request_id'), admission.key)
         return {**accepted, 'clamped': bool(accepted.get('clamped')) or admission.clamped, 'quota': admission.left}
 
     def _live(self) -> dict[str, Any]:
