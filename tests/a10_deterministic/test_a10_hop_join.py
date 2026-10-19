@@ -134,3 +134,24 @@ def test_a_registered_path_is_expected_once_and_registration_never_yields_a_peri
    # A later registration of a known path changes nothing.
    tracker.record_registration("path-b", at=12.6)
    assert _due(tracker, now=12.6, window=0.05) == 0
+
+
+def test_an_admission_in_flight_is_a_partner_until_it_registers_ends_or_goes_stale():
+   tracker = HopArrivalTracker(join_horizon_seconds=5.0)
+   tracker.begin_admission("request-b", at=10.0)
+   assert _due(tracker, now=10.001, active=frozenset()) == 1
+   # Registration is the same request id ending its admission.
+   tracker.end_admission("request-b")
+   assert _due(tracker, now=10.002, active=frozenset()) == 0
+   # An admission nobody ended is dropped at the join horizon.
+   tracker.begin_admission("request-c", at=10.0)
+   assert _due(tracker, now=14.9, active=frozenset()) == 1
+   assert _due(tracker, now=15.1, active=frozenset()) == 0
+   assert tracker.admitting() == 0
+
+
+def test_admissions_are_bounded():
+   tracker = HopArrivalTracker(join_horizon_seconds=5.0, maximum_paths=3)
+   for index in range(10):
+      tracker.begin_admission(f"request-{index}", at=1.0)
+   assert tracker.admitting() == 3

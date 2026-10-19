@@ -1,5 +1,7 @@
 """Public composition facade for the standalone Mycelium Router."""
 
+from contextlib import contextmanager
+
 from mycelium_router.entry import EntryCoordinator
 from mycelium_router.relay import RelayEngine
 from mycelium_router.routing import ProgressivePathBuilder, RoutePolicy
@@ -54,6 +56,21 @@ class Router:
       )
       self.relay = relay
 
+   @contextmanager
+   def _admission(self, request):
+      """Announce an accepted request to the relay until its path is in place.
+
+      A prefill hop queued meanwhile may wait (inside its collection window)
+      for it instead of racing past it; registration or its own hop ends the
+      announcement, and so does a failed or finished start.
+      """
+
+      self.relay.begin_admission(request.request_id)
+      try:
+         yield
+      finally:
+         self.relay.end_admission(request.request_id)
+
    def current_deployment(self):
       return self.entry.topology.snapshot()
 
@@ -65,26 +82,29 @@ class Router:
       pinned_deployment=None,
       **kwargs,
    ):
-      return self.entry.admit(
-         request,
-         client_sink,
-         pinned_deployment=pinned_deployment,
-         **kwargs,
-      )
+      with self._admission(request):
+         return self.entry.admit(
+            request,
+            client_sink,
+            pinned_deployment=pinned_deployment,
+            **kwargs,
+         )
 
    def start_distributed_prefill(self, request, client_sink, **kwargs):
-      return self.entry.start_distributed_prefill(
-         request,
-         client_sink,
-         **kwargs,
-      )
+      with self._admission(request):
+         return self.entry.start_distributed_prefill(
+            request,
+            client_sink,
+            **kwargs,
+         )
 
    def start_locked_distributed_prefill(self, request, client_sink, **kwargs):
-      return self.entry.start_locked_distributed_prefill(
-         request,
-         client_sink,
-         **kwargs,
-      )
+      with self._admission(request):
+         return self.entry.start_locked_distributed_prefill(
+            request,
+            client_sink,
+            **kwargs,
+         )
 
    def request_status(self, request_id):
       return self.entry.request_status(request_id)

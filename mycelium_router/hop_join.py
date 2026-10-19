@@ -12,8 +12,17 @@ not terminal, it was seen within the join horizon, and its next hop is predicted
 no later than the end of the collection window.  An overdue partner still counts:
 while this node executes a batch, the next hops of its peers wait in the inbound
 transport, so "late" usually means "already here".  A request seen only once has
-no period yet; it is a partner while that arrival is inside the horizon.  The tracker is bounded and holds no payload,
-token or KV material: only path identity, two timestamps and a terminal flag.
+no period yet; it is a partner while that arrival is inside the horizon.
+
+A request the entry node has *accepted but not yet registered* (its infer
+command is in flight, its path is not known to the relay) is announced with
+``begin_admission`` and counts as a partner until its path registers, the
+admission ends, or the join horizon passes.  Without this a request accepted a
+millisecond after another would be invisible when the first one's hop is
+queued, and pairing would be a race.  Waiting for an announced admission is
+still bounded by the collection window.  The tracker is bounded and holds no
+payload, token or KV material: only path identity, two timestamps and a
+terminal flag, plus request identities of in-flight admissions.
 """
 
 from __future__ import annotations
@@ -50,7 +59,27 @@ class HopArrivalTracker:
       self._horizon = float(join_horizon_seconds)
       self._maximum = int(maximum_paths)
       self._paths: OrderedDict[str, _Arrivals] = OrderedDict()
+      self._admitting: OrderedDict[str, float] = OrderedDict()
       self._lock = Lock()
+
+   def begin_admission(self, request_id: str, *, at: float) -> None:
+      """A request was accepted here and its path is about to register."""
+
+      with self._lock:
+         self._admitting.pop(request_id, None)
+         self._admitting[request_id] = float(at)
+         while len(self._admitting) > self._maximum:
+            self._admitting.popitem(last=False)
+
+   def end_admission(self, request_id: str) -> None:
+      """The request registered its path, failed, or was withdrawn."""
+
+      with self._lock:
+         self._admitting.pop(request_id, None)
+
+   def admitting(self) -> int:
+      with self._lock:
+         return len(self._admitting)
 
    def record(self, path_id: str, *, at: float, terminal: bool) -> None:
       """Note one accepted hop arrival for ``path_id`` at monotonic time ``at``."""
@@ -108,6 +137,13 @@ class HopArrivalTracker:
       window = max(0.0, float(window_seconds))
       due = 0
       with self._lock:
+         for request_id in [
+            request_id
+            for request_id, began in self._admitting.items()
+            if now - began > self._horizon
+         ]:
+            self._admitting.pop(request_id, None)
+         due += len(self._admitting)
          stale = [
             path_id
             for path_id, arrivals in self._paths.items()

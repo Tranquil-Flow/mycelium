@@ -1096,6 +1096,7 @@ class RelayEngine:
             self._hop_arrivals.record_registration(
                manifest.path_id, at=self.clock.now()
             )
+            self._hop_arrivals.end_admission(manifest.request_id)
             self._provisional_paths.pop(manifest.path_id, None)
             self._path_busy.pop(manifest.path_id, None)
             self._advance_generation_locked(manifest.path_id)
@@ -2213,6 +2214,8 @@ class RelayEngine:
          self.batch_scheduler.withdraw(work)
          return HopReceiveResult("REJECTED", "path_cancelled")
       self._hop_arrivals.record(header.path_id, at=now, terminal=bool(work.terminal))
+      # A request whose hop is queued here is past admission: never its own partner.
+      self._hop_arrivals.end_admission(header.request_id)
       return HopReceiveResult("QUEUED")
 
    def drain_ready_batches(
@@ -2397,6 +2400,17 @@ class RelayEngine:
 
    def pending_batch_hops(self) -> int:
       return self.batch_scheduler.queue_depth()
+
+   def begin_admission(self, request_id: str) -> None:
+      """Announce a request accepted here whose path has not registered yet.
+
+      A hop queued meanwhile may wait (at most the collection window) for it.
+      """
+
+      self._hop_arrivals.begin_admission(request_id, at=self.clock.now())
+
+   def end_admission(self, request_id: str) -> None:
+      self._hop_arrivals.end_admission(request_id)
 
    def hop_join_partners_due(self) -> int:
       """Active requests, not queued now, predicted to send a hop in the window.

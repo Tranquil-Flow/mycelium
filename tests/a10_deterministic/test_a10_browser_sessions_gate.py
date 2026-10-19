@@ -309,3 +309,29 @@ def test_the_phase_refuses_an_unknown_engine_or_mode_and_a_reused_evidence_direc
    phase = gate.BrowserSessionsPhase(base_url="http://127.0.0.1:9", out=tmp_path, live_status=dict)
    with pytest.raises(gate.GateError, match="browser_evidence_directory_exists"):
       phase.preflight()
+
+
+def test_two_browser_requests_sharing_a_runtime_batch_ref_are_in_a_true_batch():
+   """Live finding f7b2: one pair of browser requests in one batch is enough."""
+
+   refs = [pseudonym("request", f"request-{n}") for n in (1, 2)]
+   shared = [
+      _publication([_interval(refs[0], "batch-prefill", 1), _interval(refs[1], "batch-prefill", 2)]),
+      _publication([_interval(refs[0], "batch-prefill-2", 3), _interval(refs[1], "batch-prefill-2", 4)]),
+   ]
+   evidence = gate.browser_runtime_evidence(shared, refs)
+   assert evidence["in_true_runtime_batch"] == 2
+   assert evidence["browser_pair_in_one_batch"] is True
+   assert gate.browser_runtime_blockers(evidence) == []
+   # One request repeating a batch ref across stages is not a batch of two.
+   one = gate.browser_runtime_evidence(
+      [_publication([_interval(refs[0], "batch-x", 1)]), _publication([_interval(refs[0], "batch-x", 2)])],
+      refs,
+   )
+   assert one["in_true_runtime_batch"] == 0
+   # Two requests whose intervals carry different refs (the f7b2 outcome) are not.
+   split = gate.browser_runtime_evidence(
+      [_publication([_interval(refs[0], "batch-a", 1), _interval(refs[1], "batch-b", 2)])], refs
+   )
+   assert split["in_true_runtime_batch"] == 0
+   assert "browser_requests_not_in_true_runtime_batch" in gate.browser_runtime_blockers(split)
