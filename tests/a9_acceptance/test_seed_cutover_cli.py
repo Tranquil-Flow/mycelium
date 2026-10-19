@@ -63,15 +63,12 @@ if cmd == "stop":
 if cmd == "start":
     assert Path(sys.argv[2]).is_dir()
     state.update(alive=True, gen=state["gen"] + 1)
-    # Owned members that were not adopted re-register on restart, as real members do: generation + 1 and a new
-    # incarnation.  A cutover that committed has already advanced and re-bound them (adopted profile), so they resume.
+    # Every owned restart re-registers the members (generation + 1, new incarnation), as real members do.  A
+    # cutover that committed has already advanced them once (commit), so the restart makes it two.
     import sqlite3
     with sqlite3.connect(cfg["db"]) as conn:
-        committed = conn.execute(
-            "SELECT 1 FROM seed_metadata WHERE key = 'membership_contract_version' AND value = 'v2'").fetchone() is not None
-        if not committed:
-            conn.execute("UPDATE seed_members SET generation = generation + 1, incarnation = incarnation || ?",
-                         (f"-restart{{state['gen']}}",))
+        conn.execute("UPDATE seed_members SET generation = generation + 1, incarnation = incarnation || ?",
+                     (f"-restart{{state['gen']}}",))
     state_path.write_text(json.dumps(state))
     raise SystemExit(readback())
 '''

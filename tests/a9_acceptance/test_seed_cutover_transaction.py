@@ -34,10 +34,11 @@ def _restarted_incumbent(**over):
 
 
 def _after(**over):
+    """A committed cutover after its restart: the commit binds generation + 1 and the owned restart re-registers (+ 1)."""
     doc = json.loads(json.dumps(BEFORE))
     doc.update(seed_pid=200, seed_birth="b2", contract="v2", incumbent_digest="sha256:" + "2" * 64)
     for node in doc["members"].values():
-        node["generation"] += 1
+        node["generation"] += 2
         node["pid"] += 100
     doc.update(over)
     return doc
@@ -160,6 +161,10 @@ def test_rollback_divergence_is_named_per_check(tmp_path, mutation, failed):
     (lambda d: d.update(contract="v1"), "contract_v2"),
     (lambda d: d.update(seed_key_digest="sha256:" + "f" * 64), "identity_preserved"),
     (lambda d: d["members"]["node-2"].update(generation=7), "member_generations_advanced_by_one"),
+    (lambda d: d["members"]["node-2"].update(generation=8), "member_generations_advanced_by_one"),
+    (lambda d: d["members"]["node-2"].update(generation=10), "member_generations_advanced_by_one"),
+    (lambda d: d["members"]["node-0"].update(generation=True), "member_generations_advanced_by_one"),
+    (lambda d: d["members"]["node-2"].pop("generation"), "member_generations_advanced_by_one"),
     (lambda d: d.update(listener_up=False), "seed_listening"),
 ])
 def test_post_restart_readback_failures_are_named(tmp_path, mutation, failed):
@@ -228,3 +233,16 @@ def test_command_fleet_adapter_runs_listed_argv_only_and_parses_json(tmp_path):
     bad = tx.CommandOwnedFleet({k: [sys.executable, "-c", "print('not json')"] for k in ("readback", "stop", "start")})
     with pytest.raises(tx.CutoverRefused, match="fleet_command_output_invalid"):
         bad.readback()
+
+
+def test_committed_cutover_judges_the_hardware_70_to_72_advance_and_refuses_unexplained_jumps(tmp_path):
+    """A9 hardware: adopt + restart took both members 70 -> 72 (commit n+1, restart n+2) and is correct."""
+    for advance, status in ((2, "COMMITTED_VERIFIED"), (0, "POST_RESTART_READBACK_FAILED"),
+                            (1, "POST_RESTART_READBACK_FAILED"), (3, "POST_RESTART_READBACK_FAILED")):
+        before = json.loads(json.dumps(BEFORE))
+        after = _after()
+        for node, member in after["members"].items():
+            member["generation"] = before["members"][node]["generation"] + advance
+        receipt = _run(FakeFleet(tmp_path / str(advance), after=after), tmp_path / str(advance))
+        assert receipt["status"] == status, advance
+        assert receipt["checks"]["member_generations_advanced_by_one"] is (advance == 2), advance
