@@ -16,9 +16,21 @@ from mycelium_platform_neutral import seed_cutover_transaction as tx
 
 BEFORE = {"owned": True, "seed_pid": 100, "seed_birth": "b1", "listener_up": True,
           "contract": "v1", "seed_key_digest": "sha256:" + "a" * 64, "swarm_id": "swarm",
-          "incumbent_digest": "sha256:" + "1" * 64,
-          "members": {"node-0": {"generation": 4, "pid": 101, "birth": "m0", "key_digest": "k0"},
-                      "node-2": {"generation": 7, "pid": 102, "birth": "m2", "key_digest": "k2"}}}
+          "incumbent_digest": "sha256:" + "1" * 64, "authority_digest": "sha256:" + "9" * 64,
+          "authority_epoch": 3,
+          "members": {"node-0": {"generation": 4, "pid": 101, "birth": "m0", "key_digest": "k0", "incarnation": "i0-a"},
+                      "node-2": {"generation": 7, "pid": 102, "birth": "m2", "key_digest": "k2", "incarnation": "i2-a"}}}
+
+
+def _restarted_incumbent(**over):
+    """The unchanged incumbent after an owned restart: members re-register (generation + 1, new incarnation)."""
+    doc = json.loads(json.dumps(BEFORE))
+    doc.update(seed_pid=300, seed_birth="b3")
+    for node, member in doc["members"].items():
+        member.update(generation=member["generation"] + 1, pid=member["pid"] + 200, birth=member["birth"] + "r",
+                      incarnation=member["incarnation"].replace("-a", "-b"))
+    doc.update(over)
+    return doc
 
 
 def _after(**over):
@@ -50,8 +62,7 @@ class FakeFleet:
     def start(self, epoch):
         self.calls.append(f"start:{epoch.name}")
         assert epoch.is_dir()
-        return self.readback() if self.committed else (
-            self.rollback_after or json.loads(json.dumps(BEFORE)) | {"seed_pid": 300, "seed_birth": "b3"})
+        return self.readback() if self.committed else (self.rollback_after or _restarted_incumbent())
 
 
 def _run(fleet, tmp_path, cutover=None, adopt=None, **kw):
@@ -102,11 +113,46 @@ def test_cutover_failure_restarts_the_unchanged_incumbent_and_proves_it(tmp_path
     assert fleet.calls[-1].startswith("start:") and "adopt:node-0" not in fleet.calls
 
 
+def _boom():
+    raise RuntimeError("x")
+
+
 def test_rollback_that_diverges_from_the_incumbent_is_reported_not_hidden(tmp_path):
-    diverged = json.loads(json.dumps(BEFORE)) | {"contract": "v2", "seed_pid": 300}
-    fleet = FakeFleet(tmp_path, rollback_after=diverged)
-    receipt = _run(fleet, tmp_path, cutover=lambda: (_ for _ in ()).throw(RuntimeError("x")))
+    fleet = FakeFleet(tmp_path, rollback_after=_restarted_incumbent(contract="v2"))
+    receipt = _run(fleet, tmp_path, cutover=_boom)
     assert receipt["status"] == "ROLLBACK_DIVERGED" and receipt["checks"]["incumbent_unchanged"] is False
+
+
+def test_rollback_requires_each_restarted_member_generation_to_advance_by_exactly_one(tmp_path):
+    ok = _run(FakeFleet(tmp_path), tmp_path, cutover=_boom)
+    assert ok["status"] == "ROLLED_BACK" and ok["checks"]["member_generations_advanced_by_one"] is True
+    for bad_generation in (7, 9):  # unchanged (not restarted) and jumped by 2
+        after = _restarted_incumbent()
+        after["members"]["node-2"]["generation"] = bad_generation
+        receipt = _run(FakeFleet(tmp_path / str(bad_generation), rollback_after=after), tmp_path / str(bad_generation),
+                       cutover=_boom)
+        assert receipt["status"] == "ROLLBACK_DIVERGED"
+        assert receipt["checks"]["incumbent_unchanged"] is False
+        assert receipt["checks"]["member_generations_advanced_by_one"] is False
+
+
+@pytest.mark.parametrize("mutation, failed", [
+    (lambda d: d.update(authority_digest="sha256:" + "8" * 64), "incumbent_authority_preserved"),
+    (lambda d: d.update(authority_epoch=4), "incumbent_authority_preserved"),
+    (lambda d: d.update(incumbent_digest="sha256:" + "2" * 64), "incumbent_authority_preserved"),
+    (lambda d: d.update(contract="v2"), "incumbent_authority_preserved"),
+    (lambda d: d.update(swarm_id="other"), "incumbent_authority_preserved"),
+    (lambda d: d["members"]["node-0"].update(key_digest="kx"), "incumbent_authority_preserved"),
+    (lambda d: d["members"].pop("node-2"), "incumbent_authority_preserved"),
+    (lambda d: d["members"]["node-0"].update(incarnation="i0-a"), "member_incarnations_restarted"),
+    (lambda d: d["members"]["node-0"].pop("incarnation"), "member_incarnations_restarted"),
+])
+def test_rollback_divergence_is_named_per_check(tmp_path, mutation, failed):
+    after = _restarted_incumbent()
+    mutation(after)
+    receipt = _run(FakeFleet(tmp_path, rollback_after=after), tmp_path, cutover=_boom)
+    assert receipt["status"] == "ROLLBACK_DIVERGED"
+    assert receipt["checks"][failed] is False and receipt["checks"]["incumbent_unchanged"] is False
 
 
 @pytest.mark.parametrize("mutation, failed", [
@@ -131,6 +177,8 @@ def test_negative_cutover_expects_failure_and_proves_the_incumbent_untouched(tmp
         raise RuntimeError("tampered chain")
     receipt = _run(fleet, tmp_path, cutover=refused, expect_refusal=True)
     assert receipt["status"] == "NEGATIVE_PRESERVED" and receipt["checks"]["incumbent_unchanged"] is True
+    assert all(receipt["after"]["members"][n]["generation"] == BEFORE["members"][n]["generation"] + 1
+               for n in BEFORE["members"])
     ok = _run(FakeFleet(tmp_path / "other"), tmp_path / "other2", expect_refusal=True)
     assert ok["status"] == "NEGATIVE_NOT_REFUSED"
 
