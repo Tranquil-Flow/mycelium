@@ -1543,8 +1543,8 @@
     },
     {
       "path": "mycelium_platform_neutral/seed_cutover_transaction.py",
-      "sha256": "sha256:80353ce685bda8c5c1b2fa005cae74aae8c6ae60a4c27642e05655aa836aad4b",
-      "size_bytes": 12875
+      "sha256": "sha256:dc42296d97cd07b85c54f6501156d50d37903a4b4508bf361f217c02837dc0c3",
+      "size_bytes": 13366
     },
     {
       "path": "mycelium_platform_neutral/seed_migration.py",
@@ -3788,13 +3788,13 @@
     },
     {
       "path": "tests/a9_acceptance/test_seed_cutover_cli.py",
-      "sha256": "sha256:38bd713938f652d8f2bdb42ee375e7db74f7507c9223cef696a616dfd5e96642",
-      "size_bytes": 15730
+      "sha256": "sha256:c3d18d6ffee094c89cd7d7e4034f1f23fcc8193f2b9899a09e833c704ef7b8d6",
+      "size_bytes": 15515
     },
     {
       "path": "tests/a9_acceptance/test_seed_cutover_transaction.py",
-      "sha256": "sha256:16ccec6f65bea161e8821353da7929a01605c97e8222bde0a33bb3c38cbda65b",
-      "size_bytes": 11195
+      "sha256": "sha256:655afbb22a7e4c78b4207d1df7598bb04190a6f43f61329ebd1bbf1baf2b0ce1",
+      "size_bytes": 12687
     },
     {
       "path": "tests/a9_acceptance/test_seed_membership_migration.py",
@@ -5238,5 +5238,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:74c4f53304549be97e97d5d9684465e7904e43a93d3adb1a2ad26d1628566246"
+  "source_digest": "sha256:cff4542a568b386f574fa648e73a9200de12fe436af722af23f2b3eaf29e3366"
 }
