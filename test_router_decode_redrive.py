@@ -11,9 +11,43 @@ import threading
 import time
 import unittest
 from dataclasses import replace
+from unittest import mock
 
 from mycelium_router import entry as entry_module
 import test_router_inprocess_mesh
+
+
+class _RedriveClock:
+   """The entry module's clock for the redrive wait, advanced only by its polls.
+
+   ``_await_decode_progress`` reads ``time.monotonic()`` for its deadline and
+   sleeps one poll between looks at the record.  Here the deadline is measured
+   in *polls*: ``monotonic`` returns a counter that only ``sleep`` advances, so
+   a host that is slow to schedule either thread can neither expire the wait
+   early nor let the token land before the waiter is parked.  ``sleep`` also
+   reports that the waiter is parked (its first look found no token) and, on
+   that first poll, holds until the test has delivered the token, which models
+   a token that arrives while the redrive is waiting.
+   """
+
+   def __init__(self, hold_first_poll=False):
+      self.now = 0.0
+      self.sleeps = []
+      self.parked = threading.Event()
+      self.delivered = threading.Event()
+      self._hold_first_poll = hold_first_poll
+
+   def monotonic(self):
+      return self.now
+
+   def sleep(self, seconds):
+      first = not self.sleeps
+      self.sleeps.append(seconds)
+      if first:
+         self.parked.set()
+         if self._hold_first_poll:
+            self.delivered.wait()  # set by the deliverer's finally: never a hang
+      self.now += seconds
 
 
 class DecodeRedriveTests(unittest.TestCase):
@@ -71,23 +105,36 @@ class DecodeRedriveTests(unittest.TestCase):
 
       transport.send_hop = counting
       errors = []
+      clock = _RedriveClock(hold_first_poll=True)
 
-      def deliver_soon():
-         time.sleep(0.01)
+      def deliver_when_parked():
+         # The token arrives only once the redrive is provably waiting for it.
          try:
+            clock.parked.wait()
             original(*held[0])
          except BaseException as error:  # surfaced below
             errors.append(error)
+         finally:
+            clock.delivered.set()
 
-      deliverer = threading.Thread(target=deliver_soon)
+      deliverer = threading.Thread(target=deliver_when_parked)
       deliverer.start()
-      started = time.monotonic()
-      self.assertTrue(self.entry.decode_one_distributed(request_id))
-      waited = time.monotonic() - started
-      deliverer.join(timeout=5)
+      try:
+         with mock.patch.object(entry_module, "time", clock):
+            started = clock.monotonic()
+            self.assertTrue(self.entry.decode_one_distributed(request_id))
+            waited = clock.monotonic() - started
+      finally:
+         clock.parked.set()
+         deliverer.join()
       self.assertEqual(errors, [])
       self.assertEqual(self.sink.token_ids, [101])
       self.assertLess(waited, entry_module._DECODE_REDRIVE_WAIT_SECONDS)
+      self.assertEqual(
+         clock.sleeps,
+         [entry_module._DECODE_REDRIVE_POLL_SECONDS],
+         "the wait kept polling after the token arrived",
+      )
       self.assertEqual(
          [header for header in sends if header.hop_index == 0],
          [],
