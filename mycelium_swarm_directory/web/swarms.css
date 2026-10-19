@@ -33,3 +33,4 @@ button.danger{background:var(--bad);color:#190808}
 .owner-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.6rem 1rem}.owner-grid>div{border:1px solid var(--line);border-radius:8px;padding:.4rem .6rem}
 
 .row label:has(.access-mode){width:19rem}
+a{color:var(--accent)}a:hover{text-decoration:none}
