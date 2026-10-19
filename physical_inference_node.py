@@ -1916,6 +1916,14 @@ class NativeSidecarProcess:
                 return
             self._socket_root_created = False
 
+    #: How long a fresh start waits for a previous owner of the same socket
+    #: root to finish exiting. A cold route restart relaunches the node while
+    #: the retired route's sidecar (or a worker behind a dropped control link)
+    #: is still draining; this is the cancel-and-cleanup budget an owner is
+    #: allowed to take. A live owner that outlasts it is a real conflict.
+    socket_conflict_grace_seconds: float = mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS
+    _SOCKET_CONFLICT_POLL_SECONDS = 0.25
+
     def _prepare_socket_root(self) -> None:
         """Create the sidecar socket root, clearing crashed-cycle residue.
 
@@ -1923,8 +1931,25 @@ class NativeSidecarProcess:
         must not wedge a fresh configure. A LIVE sidecar — an accepting
         socket — still fails closed: the create-exclusive mkdir that
         follows the cleanup preserves the original mutual exclusion
-        between two node instances.
+        between two node instances. A live owner gets a bounded grace to
+        finish exiting (its socket stops accepting and is removed) before
+        the conflict is raised; a live owner that outlasts it is never
+        touched.
         """
+        deadline = time.monotonic() + max(0.0, self.socket_conflict_grace_seconds)
+        while True:
+            try:
+                self._prepare_socket_root_once()
+                return
+            except NodeCommandError as exc:
+                if (
+                    exc.code != "sidecar_socket_conflict"
+                    or time.monotonic() >= deadline
+                ):
+                    raise
+            time.sleep(self._SOCKET_CONFLICT_POLL_SECONDS)
+
+    def _prepare_socket_root_once(self) -> None:
         try:
             self.socket_root.mkdir(parents=True, exist_ok=False)
         except FileExistsError:

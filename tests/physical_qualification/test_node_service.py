@@ -1611,7 +1611,9 @@ def test_native_sidecar_start_rejects_live_socket() -> None:
         socket_path = socket_root / "i.sock"
         listener = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
         listener.bind(str(socket_path))
-        listener.listen(1)
+        # The start probes the socket repeatedly while it waits; a listener
+        # that never accepts needs a backlog that outlasts those probes.
+        listener.listen(128)
         try:
             sidecar = NativeSidecarProcess(
                 binary=Path("/usr/bin/false"),
@@ -1620,6 +1622,7 @@ def test_native_sidecar_start_rejects_live_socket() -> None:
                 queue_capacity=1,
                 startup_timeout=1.0,
             )
+            sidecar.socket_conflict_grace_seconds = 0.2  # a live owner never exits
 
             with pytest.raises(NodeCommandError, match="sidecar_socket_conflict"):
                 sidecar.start()
