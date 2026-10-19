@@ -56,6 +56,27 @@ _CASE = "ordinary_browser_source_failure_recovery"
 _HOLD_BOUND_S = 6.0
 
 
+def _router_state_of(router, owner, request_id) -> dict:
+    """What the router and the owner say about a request that did not complete.
+
+    Evaluated only when the assertion above fails: a failed second request names
+    its router status, recovery reason and the owner's restart state instead of
+    only the gateway's generic ``backend_failed``.
+    """
+
+    state: dict = {}
+    for name, read in (
+        ("request_status", lambda: router.request_status(request_id)),
+        ("recovery_failure_reason", lambda: router.recovery_failure_reason(request_id)),
+        ("owner_status", owner.public_status),
+    ):
+        try:
+            state[name] = read()
+        except Exception as error:  # noqa: BLE001 - diagnostic only
+            state[name] = f"unreadable: {error!r}"
+    return state
+
+
 def _assert_source_failure_recovered_then_cold_restarted(
     local, owner, router, service, request_id, outcome, first_route,
 ) -> None:
@@ -68,8 +89,9 @@ def _assert_source_failure_recovered_then_cold_restarted(
     status = _wait_ready(owner, 120)
     assert status["state"] == "ready" and status["generation"] == 2, status
     assert owner._current is not first_route
-    _second, second = _run_without_fault(service, owner)
-    assert second["kinds"] == ["completed"], second
+    second_id, second = _run_without_fault(service, owner)
+    assert second["kinds"] == ["completed"], (
+        second, _router_state_of(router, owner, second_id))
     assert local.session_factory.launches == ["node-a", "node-b", "node-a", "node-b"]
 
 
