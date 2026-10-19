@@ -418,3 +418,101 @@ def test_an_overlap_record_without_causal_binding_is_refused():
          )
       )
    assert raised.value.code == "incomplete_overlap_trace"
+
+
+# ---------------------------------------------------------------------------
+# A dependency edge that runs backwards by no more than the clock uncertainty
+# ---------------------------------------------------------------------------
+
+
+def _skewed_chain(microbatch, request, *, start, skew, uncertainty):
+   """Two stages whose second compute starts ``skew`` before the first finishes."""
+
+   chain = _chain(microbatch, request, stages=2, start=start)
+   hops, edges = chain
+   first_finish = start + 1.0
+   hops = [
+      dataclasses.replace(
+         hop,
+         clock_uncertainty=uncertainty,
+         **(
+            {"started_at": first_finish - skew, "finished_at": first_finish - skew + 1.0}
+            if hop.interval_ref == f"compute:{microbatch}:s1"
+            else {}
+         ),
+      )
+      for hop in hops
+   ]
+   return hops, edges
+
+
+def test_an_edge_violation_within_the_clock_uncertainty_is_unresolved_not_rejected():
+   chain = _skewed_chain("microbatch:one", "request:one", start=0.0, skew=0.25, uncertainty=0.25)
+
+   verdict = observe_stage_compute_overlap(_trace((chain,), stage_count=2))
+
+   assert verdict.observed is False
+   assert verdict.reason == "unresolved_dependency_edge_within_uncertainty"
+   assert verdict.unresolved_edges == (
+      ("compute:microbatch:one:s0", "compute:microbatch:one:s1"),
+   )
+
+
+def test_an_edge_violation_exactly_at_the_uncertainty_bound_is_unresolved():
+   chain = _skewed_chain("microbatch:one", "request:one", start=0.0, skew=0.5, uncertainty=0.25)
+
+   verdict = observe_stage_compute_overlap(_trace((chain,), stage_count=2))
+
+   assert verdict.unresolved_edges == (
+      ("compute:microbatch:one:s0", "compute:microbatch:one:s1"),
+   )
+
+
+def test_an_edge_violation_beyond_the_clock_uncertainty_is_still_rejected():
+   chain = _skewed_chain("microbatch:one", "request:one", start=0.0, skew=0.5625, uncertainty=0.25)
+
+   with pytest.raises(scaffold.A10ContractError) as raised:
+      observe_stage_compute_overlap(_trace((chain,), stage_count=2))
+   assert _code(raised) == "same_request_dependency_overlap"
+
+
+def test_a_clean_trace_reports_no_unresolved_edges():
+   verdict = observe_stage_compute_overlap(_trace())
+
+   assert verdict.unresolved_edges == ()
+
+
+def test_an_unresolved_edge_never_counts_as_overlap_evidence():
+   """The second request overlaps only compute hops of the unresolved edge."""
+
+   skewed = _skewed_chain("microbatch:one", "request:one", start=0.0, skew=0.125, uncertainty=0.0625)
+   other = _chain("microbatch:two", "request:two", stages=2, start=0.5)
+   other = (_with_uncertainty(other, 0.0625), other[1])
+
+   verdict = observe_stage_compute_overlap(_trace((skewed, other), stage_count=2))
+
+   assert verdict.observed is False
+   assert verdict.pair is None
+   assert verdict.intersection_seconds == 0.0
+   assert verdict.reason == "unresolved_dependency_edge_within_uncertainty"
+   assert verdict.unresolved_edges
+
+
+def test_overlap_between_hops_outside_an_unresolved_edge_is_still_observed():
+   skewed = _skewed_chain("microbatch:one", "request:one", start=0.0, skew=0.125, uncertainty=0.0625)
+   second = _chain("microbatch:two", "request:two", stages=2, start=10.0)
+   third = _chain("microbatch:three", "request:three", stages=2, start=10.5)
+
+   verdict = observe_stage_compute_overlap(_trace((skewed, second, third), stage_count=2))
+
+   assert verdict.observed is True
+   assert verdict.reason == "observed_stage_compute_intersection"
+   assert set(verdict.pair) <= {
+      "compute:microbatch:two:s0",
+      "compute:microbatch:two:s1",
+      "compute:microbatch:three:s0",
+      "compute:microbatch:three:s1",
+   }
+   assert verdict.unresolved_edges == (
+      ("compute:microbatch:one:s0", "compute:microbatch:one:s1"),
+   )

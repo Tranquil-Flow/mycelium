@@ -167,6 +167,10 @@ class OverlapVerdict:
    reason: str
    pair: tuple[str, str] | None
    intersection_seconds: float
+   #: Causal edges whose successor started before its predecessor finished by no
+   #: more than the two hops' clock uncertainty: neither a dependency violation
+   #: nor ordering evidence.  Hops of these edges never count as overlap evidence.
+   unresolved_edges: tuple[tuple[str, str], ...] = ()
 
 
 def _intersection_after_uncertainty(
@@ -195,9 +199,14 @@ def observe_stage_compute_overlap(trace: OverlapTrace) -> OverlapVerdict:
    _check_causal_edges(trace, compute_by_microbatch)
    _check_stage_clocks(trace)
    _check_final_loopback(trace)
-   _check_dependency_timing(trace)
+   unresolved_edges = _check_dependency_timing(trace)
+   unresolved_refs = {ref for edge in unresolved_edges for ref in edge}
 
-   compute = [hop for hop in trace.hops if hop.is_compute]
+   compute = [
+      hop
+      for hop in trace.hops
+      if hop.is_compute and hop.interval_ref not in unresolved_refs
+   ]
    for index, first in enumerate(compute):
       for second in compute[index + 1 :]:
          if first.request_ref == second.request_ref:
@@ -209,6 +218,7 @@ def observe_stage_compute_overlap(trace: OverlapTrace) -> OverlapVerdict:
                reason="observed_stage_compute_intersection",
                pair=(first.interval_ref, second.interval_ref),
                intersection_seconds=intersection,
+               unresolved_edges=unresolved_edges,
             )
 
    for index, first in enumerate(trace.hops):
@@ -225,13 +235,19 @@ def observe_stage_compute_overlap(trace: OverlapTrace) -> OverlapVerdict:
                reason="queue_serialization_or_ui_overlap_only",
                pair=None,
                intersection_seconds=0.0,
+               unresolved_edges=unresolved_edges,
             )
 
    return OverlapVerdict(
       observed=False,
-      reason="no_positive_stage_compute_intersection",
+      reason=(
+         "unresolved_dependency_edge_within_uncertainty"
+         if unresolved_edges
+         else "no_positive_stage_compute_intersection"
+      ),
       pair=None,
       intersection_seconds=0.0,
+      unresolved_edges=unresolved_edges,
    )
 
 
@@ -323,13 +339,28 @@ def _check_final_loopback(trace: OverlapTrace) -> None:
          _reject("final_loopback_before_commit")
 
 
-def _check_dependency_timing(trace: OverlapTrace) -> None:
+def _check_dependency_timing(
+   trace: OverlapTrace,
+) -> tuple[tuple[str, str], ...]:
+   """Reject dependency overlap; return the edges that cannot be resolved.
+
+   A successor that starts before its predecessor finished by more than the two
+   hops' summed clock uncertainty is a dependency violation.  By no more than
+   that bound, the clocks cannot say which came first: the edge is *unresolved*,
+   neither a violation nor ordering evidence (the same uncertainty the overlap
+   arithmetic subtracts).
+   """
+
    by_ref = {hop.interval_ref: hop for hop in trace.hops}
+   unresolved: list[tuple[str, str]] = []
    for predecessor_ref, successor_ref in trace.causal_edges:
       predecessor = by_ref[predecessor_ref]
       successor = by_ref[successor_ref]
-      if successor.started_at < predecessor.finished_at:
-         _reject("same_request_dependency_overlap")
+      backwards = predecessor.finished_at - successor.started_at
+      if backwards > 0.0:
+         if backwards > predecessor.clock_uncertainty + successor.clock_uncertainty:
+            _reject("same_request_dependency_overlap")
+         unresolved.append((predecessor_ref, successor_ref))
    compute = [hop for hop in trace.hops if hop.is_compute]
    for index, first in enumerate(compute):
       for second in compute[index + 1 :]:
@@ -337,3 +368,4 @@ def _check_dependency_timing(trace: OverlapTrace) -> None:
             continue
          if _intersection_after_uncertainty(first, second) > 0.0:
             _reject("same_request_dependency_overlap")
+   return tuple(unresolved)
