@@ -485,8 +485,8 @@
         },
         {
           "path": "mycelium_request_gateway/service.py",
-          "sha256": "b2819f4ebb56352712d9d72dd80ab67a0f19b79f553ea39b8c6f1416630dc286",
-          "size_bytes": 60646
+          "sha256": "43abd819e3ae0aba31b2f40fd603df5ac8e526693a423c856259ef0d23b9bf3f",
+          "size_bytes": 61648
         },
         {
           "path": "mycelium_ui_gateway/app.py",
@@ -1370,8 +1370,8 @@
         },
         {
           "path": "mycelium_request_gateway/service.py",
-          "sha256": "b2819f4ebb56352712d9d72dd80ab67a0f19b79f553ea39b8c6f1416630dc286",
-          "size_bytes": 60646
+          "sha256": "43abd819e3ae0aba31b2f40fd603df5ac8e526693a423c856259ef0d23b9bf3f",
+          "size_bytes": 61648
         }
       ],
       "protocol": "mycelium.private_request_replay_checkpoint.v1"
@@ -1400,8 +1400,8 @@
         },
         {
           "path": "mycelium_request_gateway/service.py",
-          "sha256": "b2819f4ebb56352712d9d72dd80ab67a0f19b79f553ea39b8c6f1416630dc286",
-          "size_bytes": 60646
+          "sha256": "43abd819e3ae0aba31b2f40fd603df5ac8e526693a423c856259ef0d23b9bf3f",
+          "size_bytes": 61648
         },
         {
           "path": "ui/web/src/features/inference/useInferenceSession.ts",
@@ -1635,8 +1635,8 @@
         },
         {
           "path": "mycelium_request_gateway/service.py",
-          "sha256": "b2819f4ebb56352712d9d72dd80ab67a0f19b79f553ea39b8c6f1416630dc286",
-          "size_bytes": 60646
+          "sha256": "43abd819e3ae0aba31b2f40fd603df5ac8e526693a423c856259ef0d23b9bf3f",
+          "size_bytes": 61648
         },
         {
           "path": "mycelium_ui_gateway/validation.py",
