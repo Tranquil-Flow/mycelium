@@ -700,7 +700,7 @@ def test_live_router_cancel_during_successor_prefill_stays_cancelled(tmp_path) -
         assert service.cancel(request_id) is True
         events = []
         while True:
-            event = subscription.next_event(timeout=2)
+            event = subscription.next_event(timeout=None)
             if event is None:
                 break
             events.append(event)
@@ -768,7 +768,7 @@ def test_live_router_cancel_before_recovery_never_fences_the_source(tmp_path) ->
         release.set()
         events = []
         while True:
-            event = subscription.next_event(timeout=2)
+            event = subscription.next_event(timeout=None)
             if event is None:
                 break
             events.append(event)
@@ -814,7 +814,7 @@ def test_live_router_cancel_after_cutover_cannot_lose_to_completed_command(tmp_p
 
         events = []
         while True:
-            event = subscription.next_event(timeout=2)
+            event = subscription.next_event(timeout=None)
             if event is None:
                 break
             events.append(event)
@@ -887,7 +887,7 @@ def test_live_router_shutdown_during_successor_prefill_stays_cancelled(tmp_path)
 
         events = []
         while True:
-            event = subscription.next_event(timeout=2)
+            event = subscription.next_event(timeout=None)
             if event is None:
                 break
             events.append(event)

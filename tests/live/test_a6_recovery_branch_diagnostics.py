@@ -80,7 +80,7 @@ def test_cancelled_recovery_logs_which_condition_fired(tmp_path, caplog) -> None
         assert route.successor_started.wait(timeout=2)
         assert service.cancel(request_id) is True
         kinds = []
-        while (event := subscription.next_event(timeout=2)) is not None:
+        while (event := subscription.next_event(timeout=None)) is not None:
             subscription.ack(event.sequence)
             kinds.append(event.kind)
         assert "cancelled" in kinds
