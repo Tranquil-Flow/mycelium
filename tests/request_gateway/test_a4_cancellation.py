@@ -152,6 +152,106 @@ def test_backend_missing_total_bound_fails_closed() -> None:
         service.close()
 
 
+def test_release_time_after_a_proven_cancel_is_not_charged_to_the_cancel_budget() -> None:
+    """Route replacement inside ``release`` (peer loss) is not cancellation cleanup.
+
+    The router linearized the cancel and proved cleanup before ``run`` returned. The release
+    that follows may cold-restart the route for far longer than the cancel-and-cleanup budget;
+    that bookkeeping must not turn a proven cancel into ``failed``.
+    """
+
+    qualification = _synthetic_qualification()
+    now = [10.0]
+
+    class Backend:
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.stop = threading.Event()
+            self.released = threading.Event()
+
+        def run(self, request_id, submission, emit_token, is_cancelled):
+            self.started.set()
+            self.stop.wait(timeout=1.0)
+            return "cancelled"
+
+        def cancel(self, request_id):
+            raise AssertionError("product cancellation must carry the owner deadline")
+
+        def cancel_with_deadline(self, request_id, *, deadline_monotonic_s):
+            self.stop.set()
+            return True
+
+        def release(self, request_id):
+            now[0] += mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS + 1.0
+            self.released.set()
+
+    backend = Backend()
+    service = RequestGatewayService(
+        qualification_source=MutableQualificationSource(qualification),
+        backend=backend,
+        request_id_source=lambda: "a4-release-not-charged",
+        clock=lambda: now[0],
+    )
+    try:
+        request_id = service.submit(_submission(qualification))
+        assert backend.started.wait(timeout=1.0)
+        assert service.cancel(request_id) is True
+        terminal = _terminal(service, request_id)
+        assert backend.released.is_set()
+        assert terminal.kind == "cancelled"
+        assert service._sessions[request_id].cancellation_within_bound is True
+    finally:
+        backend.stop.set()
+        service.close()
+
+
+def test_cancel_proof_resolving_after_the_budget_still_fails_closed() -> None:
+    """The proof itself landing past the bound is still a failure."""
+
+    qualification = _synthetic_qualification()
+    now = [10.0]
+
+    class Backend:
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.stop = threading.Event()
+
+        def run(self, request_id, submission, emit_token, is_cancelled):
+            self.started.set()
+            self.stop.wait(timeout=1.0)
+            return "cancelled"
+
+        def cancel(self, request_id):
+            raise AssertionError("product cancellation must carry the owner deadline")
+
+        def cancel_with_deadline(self, request_id, *, deadline_monotonic_s):
+            now[0] += mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS + 1.0
+            self.stop.set()
+            return True
+
+        def release(self, request_id):
+            return None
+
+    backend = Backend()
+    service = RequestGatewayService(
+        qualification_source=MutableQualificationSource(qualification),
+        backend=backend,
+        request_id_source=lambda: "a4-proof-late",
+        clock=lambda: now[0],
+    )
+    try:
+        request_id = service.submit(_submission(qualification))
+        assert backend.started.wait(timeout=1.0)
+        assert service.cancel(request_id) is True
+        terminal = _terminal(service, request_id)
+        assert terminal.kind == "failed"
+        assert terminal.code == "cancellation_cleanup_deadline_exceeded"
+        assert service._sessions[request_id].cancellation_within_bound is False
+    finally:
+        backend.stop.set()
+        service.close()
+
+
 def test_gateway_propagates_one_original_absolute_cancellation_deadline() -> None:
     qualification = _synthetic_qualification()
     now = [10.0]
