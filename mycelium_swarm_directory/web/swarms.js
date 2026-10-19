@@ -113,6 +113,14 @@ const MESSAGES = {
   entry_clock_skew: 'Your computer clock is off by more than two minutes.',
   entry_prompt_too_long: 'That prompt is too long (2,000 characters at most).',
   swarm_invite_only: 'This swarm is invite only.',
+  entry_killed_by_owner: 'Stopped by the swarm owner (kill switch).',
+  entry_swarm_daily_cap: 'This swarm reached its daily limit for open access. Try again tomorrow (UTC).',
+  entry_grant_invalid: 'This swarm did not accept your access (no valid grant).',
+  entry_grant_not_for_key: 'This grant belongs to a different browser key.',
+  entry_grant_not_yet_valid: 'This grant is not valid yet.',
+  entry_grant_swarm_mismatch: 'This grant is for a different swarm.',
+  entry_swarm_not_open: 'This swarm is not open to everyone.',
+  chat_cancelled: 'Cancelled before it finished.',
   rate_limited_ip: 'Too many requests from your network. Wait a minute.',
   rate_limited_key: 'Too many requests from your key. Wait a minute.',
 };
@@ -133,7 +141,7 @@ function grantFor(swarmId) { return mine.grants.find((g) => g.swarm_id === swarm
 function renderSwarm(s) {
   const grant = grantFor(s.swarm_id);
   const actions = el('div', {class: 'actions'});
-  const note = el('p', {class: 'meta'});
+  const note = el('p', {class: 'meta', 'data-access-note': ''});
   const usable = s.entry_origin && s.status === 'serving';
   if (grant && grant.expires_at > now()) {
     actions.append(el('button', {type: 'button', on: () => openChat(s, grant), ...(usable ? {} : {disabled: ''})}, 'Chat'));
@@ -145,19 +153,22 @@ function renderSwarm(s) {
     actions.append(el('button', {type: 'button', on: () => getOpenAccess(s), ...(s.entry_origin ? {} : {disabled: ''})}, 'Get open access'));
     if (s.open_quota) note.textContent = `Automatic access: ${s.open_quota.max_requests} requests, ${s.open_quota.max_tokens} tokens per key.`;
   } else if (s.access_mode === 'request') {
-    if (mine.denied.includes(s.swarm_id)) note.textContent = 'The owner declined your request.';
-    else if (mine.pending.includes(s.swarm_id)) note.textContent = 'Request sent. Waiting for the owner.';
+    if (mine.denied.includes(s.swarm_id)) note.textContent = 'Not granted: the owner declined your request.';
+    else if (mine.pending.includes(s.swarm_id)) note.textContent = 'Not granted yet. Request sent. Waiting for the owner.';
+    else note.textContent = 'Not granted: ask for access and the owner decides.';
     const input = el('input', {maxlength: '140', placeholder: 'Optional note to the owner (140 characters)', 'aria-label': 'Note to the owner'});
     actions.append(input, el('button', {type: 'button', on: () => requestAccess(s, input.value.trim())}, 'Request access'));
   } else {
-    note.textContent = `Invite only. Ask the owner (key ${s.owner_fingerprint}) to grant your key ${me.fp}.`;
+    note.textContent = `Invite only. Not granted: ask the owner (key ${s.owner_fingerprint}) to grant your key ${me.fp}.`;
   }
+  const live = el('div', {class: 'live'}, el('h4', {}, 'Live status'), el('div', {class: 'live-holder'}, 'Loading…'));
+  loadLive(s, live.querySelector('.live-holder'));
   return el('div', {class: 'swarm', 'data-swarm': s.swarm_id},
     el('h3', {}, s.name, el('span', {class: 'status ' + s.status}, s.status)),
     el('p', {class: 'meta'}, `Model ${s.served_model || s.model} · ${s.members} Mac${s.members === 1 ? '' : 's'} · access ${s.access_mode} · owner ${s.owner_fingerprint}` +
       (s.entry_fingerprint ? ` · entry ${s.entry_fingerprint}` : ' · no entry Mac yet')),
     s.description ? el('p', {}, s.description) : null,
-    el('p', {class: 'privacy'}, s.privacy), note, actions);
+    el('p', {class: 'privacy'}, s.privacy), note, actions, live);
 }
 
 async function refresh() {
@@ -172,6 +183,22 @@ async function refresh() {
     $('list-state').textContent = swarms.length ? `${swarms.length} swarm${swarms.length === 1 ? '' : 's'} (all visible for this demo).` : 'No swarms yet. Create one below.';
     renderOwned();
   } catch (error) { $('list-state').textContent = 'Cannot reach the directory right now (the demo host may be asleep).'; }
+}
+
+// -- helper app download (the Mac that serves or helps a swarm) -------------------------------------
+function renderDownload(download) {
+  const card = $('helper-card'); const body = $('download-body');
+  const ok = download && download.available === true && typeof download.url === 'string' && /^[a-f0-9]{64}$/.test(download.sha256 || '');
+  card.dataset.downloadState = ok ? 'available' : 'unavailable';
+  if (!ok) {
+    body.replaceChildren(el('p', {}, 'The Mycelium helper app for Mac is not published yet, so there is nothing to download from this page. ' +
+      'Until it is, ask the swarm owner for the app directly. This page will show the link and its checksum here once it exists.'));
+    return;
+  }
+  body.replaceChildren(
+    el('p', {}, el('a', {id: 'download-link', href: download.url}, `Download Mycelium for Mac ${download.version || ''}`.trim()), ' (Apple silicon).'),
+    el('p', {class: 'meta'}, 'SHA-256 (compare before opening): ', el('span', {id: 'download-sha', class: 'mono'}, download.sha256)),
+    el('p', {class: 'privacy'}, download.notarized ? 'Signed and notarized.' : 'This app is not notarized by Apple. macOS will warn you: right-click the installer and choose Open, then confirm. Only do that if the checksum above matches.'));
 }
 
 // -- visitor actions -------------------------------------------------------------------
@@ -193,7 +220,22 @@ async function getOpenAccess(s) {
 }
 
 // -- chat (same polling contract and failure codes as the A13 chat page) ------------
+const POLL_MS = 400;  // 150 polls a minute: inside the entry's 240/min per-address limit
 function line(kind, text) { const div = el('div', {class: 'msg ' + kind}, text); $('log').append(div); div.scrollIntoView({block: 'end'}); return div; }
+// Every end of a prompt is one of these six; each is named on the page (data-terminal) and never guessed.
+function classify(code, page) {
+  if (code === 'entry_killed_by_owner' || (page && page.killed)) return 'killed';
+  if (code === 'entry_quota_exhausted' || code === 'entry_swarm_daily_cap') return 'quota';
+  if (code && (code.startsWith('entry_grant_') || code === 'swarm_invite_only' || code === 'entry_swarm_not_open')) return 'not_granted';
+  if (code === 'chat_cancelled' || (page && page.terminal === 'cancelled')) return 'cancelled';
+  return code ? 'failed' : 'completed';
+}
+function terminalLine(kind, code, seconds) {
+  const text = {completed: 'Completed' + (seconds !== null && seconds !== undefined ? ` in ${seconds} s` : '') + '.',
+    failed: 'Failed: ' + say(code), cancelled: 'Cancelled: ' + say(code === 'chat_cancelled' ? code : 'chat_cancelled'),
+    killed: say('entry_killed_by_owner'), quota: 'Quota used up. ' + say(code), not_granted: 'Not granted. ' + say(code)}[kind];
+  return el('div', {class: 'msg terminal', 'data-terminal': kind}, text);
+}
 async function openChat(s, grant) {
   chatTarget = {swarm: s, grant};
   $('chat-card').hidden = false; $('log').replaceChildren();
@@ -201,7 +243,8 @@ async function openChat(s, grant) {
   $('chat-privacy').textContent = s.privacy;
   try {
     const state = await entry(s.entry_origin, 'state', {});
-    $('chat-state').textContent = state.available ? `Serving ${state.model_id || ''}${state.busy ? ' · busy' : ' · ready'}` : say(state.warming_up ? 'chat_warming_up' : 'chat_not_ready');
+    $('chat-state').textContent = state.killed ? say('entry_killed_by_owner') :
+      state.available ? `Serving ${state.model_id || ''}${state.busy ? ' · busy' : ' · ready'}` : say(state.warming_up ? 'chat_warming_up' : 'chat_not_ready');
   } catch (error) { $('chat-state').textContent = say(error.message); }
   $('chat-card').scrollIntoView();
 }
@@ -211,26 +254,72 @@ async function send(event) {
   sending = true; $('send').disabled = true;
   line('you', prompt); const answer = line('swarm', '…'); const meta = line('meta', '');
   const {swarm, grant} = chatTarget;
+  let text = ''; let outcome = null;
   try {
     const accepted = await entry(swarm.entry_origin, 'send', await sign({protocol: 'mycelium.swarm.entry_send.v1',
       swarm_id: swarm.swarm_id, key: me.key, grant, prompt, max_new_tokens: Number($('tokens').value) || 128,
       at: now(), nonce: randomText(18)}));
     meta.textContent = (accepted.clamped ? `capped at ${accepted.max_new_tokens} tokens · ` : '') +
       `left on your grant: ${accepted.quota.requests_left} requests, ${accepted.quota.tokens_left} tokens`;
+    $('chat-state').textContent = 'Generating… tokens appear as the route makes them.';
     $('prompt').value = '';
-    let next = 0; let text = '';
+    let next = 0;
     for (;;) {
       const page = await entry(swarm.entry_origin, 'events', {request_id: accepted.request_id, after: next});
       next = page.next; text += page.tokens.join(''); answer.textContent = text || '…';
       if (page.done) {
-        if (page.error) answer.textContent = (text ? text + '\n' : '') + `[stopped: ${say(page.error)}]`;
-        if (page.seconds !== null) meta.textContent += ` · ${page.seconds} s`;
+        if (page.seconds !== null && page.seconds !== undefined) meta.textContent += ` · ${page.seconds} s`;
+        outcome = {kind: classify(page.error, page), code: page.error, seconds: page.seconds};
         break;
       }
-      await new Promise((resolve) => setTimeout(resolve, 600));
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     }
-  } catch (error) { answer.textContent = 'Not sent: ' + say(error.message); }
-  finally { sending = false; $('send').disabled = false; }
+  } catch (error) { outcome = {kind: classify(error.message), code: error.message, seconds: null}; }
+  finally {
+    if (!text) answer.textContent = outcome && outcome.kind === 'completed' ? '(empty answer)' : '(no answer)';
+    if (outcome) { $('log').append(terminalLine(outcome.kind, outcome.code, outcome.seconds)); $('chat-state').textContent = 'Done.'; }
+    sending = false; $('send').disabled = false;
+  }
+}
+
+// -- live status of a published swarm (from the entry Mac's own documents; a missing source says so) --------
+function sec(name, available, ...children) {
+  return el('div', {class: 'sec', 'data-live': name, 'data-available': String(!!available)}, ...children);
+}
+function unavailable(name, label, reason) { return sec(name, false, el('b', {}, label + ': '), 'Unavailable (' + reason + ')'); }
+function renderLive(state) {
+  const live = state && state.live;
+  const box = el('div', {class: 'live-body'});
+  if (state && state.killed) box.append(el('p', {class: 'error', 'data-live': 'killed'}, say('entry_killed_by_owner') + ' New prompts are refused.'));
+  if (!live || live.available === false) {
+    box.append(unavailable('route', 'Live status', (live && live.reason) || 'entry did not send it'));
+    return box;
+  }
+  const r = live.route;
+  box.append(sec('route', r.available, el('b', {}, 'Route: '), `${r.state}${r.step ? ' · step ' + r.step : ''}${r.failed_step ? ' · failed at ' + r.failed_step : ''}` +
+    `${r.error_code ? ' · ' + r.error_code : ''}${r.run ? ' · run ' + r.run : ''}`));
+  const h = live.helpers;
+  if (!h.available) box.append(unavailable('helpers', 'Helper Macs', h.reason));
+  else box.append(sec('helpers', true, el('b', {}, `Helper Macs (${h.count}${h.withdrawn ? ', ' + h.withdrawn + ' withdrawn' : ''}): `),
+    el('ul', {}, ...h.rows.map((row) => el('li', {class: row.withdrawn ? 'withdrawn' : ''},
+      `${row.label}${row.layers ? ' · layers ' + row.layers.join('-') : ''} · ${rowState(row)}${row.detail ? ' · ' + row.detail : ''}`)))));
+  const t = live.transport;
+  box.append(t.available ? sec('transport', true, el('b', {}, 'Observed paths: '), `${t.direct} direct, ${t.relay} relay, ${t.unknown} unknown`) :
+    unavailable('transport', 'Observed paths', t.reason));
+  const rc = live.recovery;
+  box.append(rc.available ? sec('recovery', true, el('b', {}, 'Recovery: '), `${rc.requests} request${rc.requests === 1 ? '' : 's'} · ${rc.recovered} recovered · ${rc.aborted} aborted · ` +
+    `${rc.recovering} recovering · breaker ${rc.breaker}`) : unavailable('recovery', 'Recovery', rc.reason));
+  const o = live.host;
+  box.append(o.available ? sec('host', true, el('b', {}, 'Entry Mac resources: '), `${o.state}${o.reason ? ' (' + o.reason + ')' : ''} · capacity ${o.capacity_scale === null ? '?' : o.capacity_scale}` +
+    ` · new work ${o.new_admissions_allowed ? 'accepted' : 'paused'}${o.withdraw_overdue ? ' · withdrawal overdue' : ''}`) : unavailable('host', 'Entry Mac resources', o.reason));
+  const s = live.sessions;
+  box.append(sec('sessions', s.available, el('b', {}, 'Concurrent prompts: '), `${s.max_concurrent} (${s.policy})${s.busy ? ' · busy right now' : ''}`));
+  return box;
+}
+async function loadLive(s, holder) {
+  if (!s.entry_origin || s.status === 'offline') { holder.replaceChildren(sec('route', false, 'Live status unavailable: no entry Mac is serving this swarm.')); return null; }
+  try { const state = await entry(s.entry_origin, 'state', {}); holder.replaceChildren(renderLive(state)); return state; }
+  catch (error) { holder.replaceChildren(sec('route', false, 'Live status unavailable: ' + say(error.message))); return null; }
 }
 
 // -- owner actions -------------------------------------------------------------------------
@@ -280,6 +369,33 @@ async function remove(s) {
   refresh();
 }
 
+let killSeq = 0;
+async function killSwitch(s, engaged) {  // owner-signed mycelium.swarm.kill_switch.v1 posted to the entry Mac
+  killSeq = Math.max(killSeq + 1, Math.floor(Date.now() / 100));  // grows; 100 ms resolution stays below 2**40
+  return entry(s.entry_origin, 'kill', await sign({protocol: 'mycelium.swarm.kill_switch.v1', swarm_id: s.swarm_id,
+    owner_key: me.key, engaged, seq: killSeq, at: now()}));
+}
+async function saveAccess(s, mode, output) {
+  const quota = mode === 'open' ? (s.record.open_quota || {max_requests: 20, max_tokens: 4000, ttl_seconds: 86400}) : null;
+  try { await resign(s, {access_mode: mode, open_quota: quota}); delete pendingMode[s.swarm_id]; accessNotice[s.swarm_id] = `Saved: access is now ${mode}. The entry Mac picks it up within a minute.`; }
+  catch (error) { accessNotice[s.swarm_id] = 'Not saved: ' + say(error.message); }
+  await refresh(); output.textContent = accessNotice[s.swarm_id];
+}
+const pendingMode = {};  // an unsaved choice survives the periodic re-render
+const accessNotice = {};  // survives the re-render that follows a save
+const rowState = (row) => row.withdrawn && row.state !== 'withdrawn' ? `${row.state} (capacity withdrawn)` : row.state;
+function ownerHelpers(state) {
+  const h = state && state.live && state.live.helpers;
+  if (!h || !h.available) return el('p', {class: 'meta'}, 'Unavailable: ' + ((h && h.reason) || 'the entry Mac did not report its helpers') + '.');
+  return el('ul', {}, ...h.rows.map((row) => el('li', {}, `${row.label} · layers ${row.layers ? row.layers.join('-') : '?'} · ${rowState(row)}`)));
+}
+function ownerUsage(state) {
+  const b = state && state.swarm_budget;
+  return el('div', {}, el('p', {class: 'meta'}, b ? `Open-access budget left today: ${b.requests_left === null ? 'unlimited' : b.requests_left} requests, ${b.tokens_left === null ? 'unlimited' : b.tokens_left} tokens (resets ${new Date(b.resets_at * 1000).toLocaleString()}).` :
+    'No swarm-wide daily budget applies to this access mode.'),
+    el('p', {class: 'meta'}, 'Per-key usage is not shown here: it is counted on the entry Mac and each visitor sees their own remaining quota.'));
+}
+
 async function renderOwned() {
   const owned = swarms.filter((s) => s.owner_key === me.key);
   $('owned-card').hidden = !owned.length;
@@ -287,23 +403,60 @@ async function renderOwned() {
   for (const s of owned) {
     const link = swarmLink(s.swarm_id);
     const box = el('div', {class: 'swarm', 'data-owned': s.swarm_id}, el('h3', {}, s.name, el('span', {class: 'status ' + s.status}, s.status)),
-      el('p', {}, 'Attach a Mac: in the Mycelium app on the Mac that runs the swarm, choose "Publish this run as a swarm" and paste this link (or scan the QR). Then attach it here when its fingerprint appears.'),
+      el('p', {'data-step-help': 'helper'}, 'Step 2, add a helper Mac: install the Mycelium app (see the download above), choose "Publish this run as a swarm" and paste this link (or scan the QR). ' +
+        'Then use "Invite a Mac" in the app to send the join link to each person who helps, and approve them there. Attach the serving Mac here when its fingerprint appears.'),
       el('img', {class: 'qr', src: `${API}/swarms/${s.swarm_id}/link.svg`, alt: 'QR code of the swarm link'}),
       el('p', {class: 'mono link', 'data-link': ''}, link));
+    // step 3: who may use it
+    const mode = el('select', {class: 'access-mode', 'aria-label': 'Access mode'},
+      ...[['request', 'Request access (you approve)'], ['open', 'Open (automatic, with a quota)'], ['invite', 'Invite only']].map(
+        ([value, label]) => el('option', {value, ...(value === (pendingMode[s.swarm_id] || s.access_mode) ? {selected: ''} : {})}, label)));
+    mode.addEventListener('change', () => { pendingMode[s.swarm_id] = mode.value; });
+    const saved = el('span', {class: 'access-state meta', role: 'status'}, accessNotice[s.swarm_id] || '');
+    box.append(el('div', {class: 'row'}, el('label', {}, 'Access', mode),
+      el('button', {type: 'button', class: 'save-access', on: () => saveAccess(s, mode.value, saved)}, 'Save access'), saved));
     const self = el('button', {type: 'button', on: async () => { await approve(s, me.key, 24, 50, 10000); refresh(); }}, 'Grant myself access (24 h)');
     box.append(self, el('button', {type: 'button', class: 'secondary', on: () => remove(s)}, 'Delete swarm'));
-    const list = el('div', {}, el('p', {class: 'meta'}, 'Loading requests…'));
-    box.append(list); blocks.push(box);
+    // what the owner can see and do while it runs
+    const helpers = el('div', {'data-owner-helpers': ''}, el('p', {class: 'meta'}, 'Loading helpers…'));
+    const grants = el('div', {'data-owner-grants': ''}, el('p', {class: 'meta'}, 'Loading grants…'));
+    const usage = el('div', {'data-owner-usage': ''}, el('p', {class: 'meta'}, 'Loading usage…'));
+    const killState = el('p', {'data-kill-state': ''}, '…');
+    const kill = el('button', {type: 'button', class: 'danger', 'data-kill': '', disabled: ''}, 'Kill switch');
+    const offers = el('div', {});
+    box.append(el('div', {class: 'owner-grid'},
+      el('div', {}, el('h4', {}, 'Helper Macs'), helpers),
+      el('div', {}, el('h4', {}, 'Grants'), grants),
+      el('div', {}, el('h4', {}, 'Usage'), usage),
+      el('div', {}, el('h4', {}, 'Kill switch'), killState,
+        el('p', {class: 'meta'}, 'Engaged: new prompts and new open grants are refused and any running generation is stopped on the route. Release to reopen. Revoking one grant is done in the Mycelium app on the entry Mac.'), kill)),
+      offers);
+    blocks.push(box);
+    entry(s.entry_origin || 'http://invalid.invalid', 'state', {}).then((state) => {
+      helpers.replaceChildren(ownerHelpers(state)); usage.replaceChildren(ownerUsage(state));
+      killState.textContent = state.killed ? 'Kill switch ENGAGED' : 'Kill switch off'; killState.className = state.killed ? 'on' : '';
+      kill.textContent = state.killed ? 'Release kill switch' : 'Engage kill switch';
+      kill.disabled = false;
+      kill.addEventListener('click', async () => {
+        kill.disabled = true;
+        try { await killSwitch(s, !state.killed); } catch (error) { killState.textContent = 'Kill switch not changed: ' + say(error.message); kill.disabled = false; return; }
+        renderOwned();
+      });
+    }).catch((error) => {
+      const why = s.entry_origin ? say(error.message) : 'no entry Mac is attached yet';
+      for (const node of [helpers, usage]) node.replaceChildren(el('p', {class: 'meta'}, 'Unavailable: ' + why + '.'));
+      killState.textContent = 'Kill switch unavailable: ' + why + '.';
+    });
     inbox(s).then((value) => {
-      const rows = [];
-      if (s.entry_fingerprint) rows.push(el('p', {class: 'meta', 'data-attached': s.entry_fingerprint},
+      if (s.entry_fingerprint) offers.append(el('p', {class: 'meta', 'data-attached': s.entry_fingerprint},
         `Attached Mac: fingerprint ${s.entry_fingerprint} at ${s.entry_origin}.`));
       for (const offer of value.entry_offers) {
         const attached = s.record.entry && s.record.entry.key === offer.entry_key;
-        rows.push(el('div', {class: 'offer'}, el('p', {}, `Mac offering to serve: fingerprint ${offer.entry_fingerprint} at ${offer.origin}. Check the app shows the same fingerprint.`),
+        offers.append(el('div', {class: 'offer'}, el('p', {}, `Mac offering to serve: fingerprint ${offer.entry_fingerprint} at ${offer.origin}. Check the app shows the same fingerprint.`),
           attached ? el('p', {class: 'meta'}, 'Attached.') : el('button', {type: 'button', 'data-attach': offer.entry_fingerprint, on: async () => {
             await resign(s, {entry: {key: offer.entry_key, origin: offer.origin}}); refresh(); }}, 'Attach this Mac')));
       }
+      const rows = [];
       for (const r of value.requests) {
         const hours = el('input', {type: 'number', min: '1', max: '720', value: '24', 'aria-label': 'Hours'});
         const reqs = el('input', {type: 'number', min: '1', max: '10000', value: '20', 'aria-label': 'Requests'});
@@ -313,8 +466,8 @@ async function renderOwned() {
             el('button', {type: 'button', 'data-approve': r.requester_fingerprint, on: async () => { await approve(s, r.requester_key, Number(hours.value), Number(reqs.value), Number(toks.value)); refresh(); }}, 'Approve'),
             el('button', {type: 'button', class: 'secondary', on: async () => { await deny(s, r.requester_key); refresh(); }}, 'Decline')) : null));
       }
-      list.replaceChildren(...(rows.length ? rows : [el('p', {class: 'meta'}, 'No access requests or Mac offers yet.')]));
-    }).catch((error) => { list.replaceChildren(el('p', {class: 'error'}, 'Inbox unavailable: ' + say(error.message))); });
+      grants.replaceChildren(...(rows.length ? rows : [el('p', {class: 'meta'}, 'No grants yet. Open-mode keys get an automatic grant at the entry Mac and are not listed here.')]));
+    }).catch((error) => { grants.replaceChildren(el('p', {class: 'error'}, 'Inbox unavailable: ' + say(error.message))); });
   }
   $('owned').replaceChildren(...blocks);
 }
@@ -331,7 +484,7 @@ async function main() {
     $('identity').textContent = 'This browser cannot create an Ed25519 key (needs a current Chrome, Safari or Firefox).'; return;
   }
   $('identity').textContent = 'Fingerprint ' + me.fp;
-  try { config = await directory('/config'); $('demo').textContent = config.demo; $('privacy').textContent = config.privacy; } catch (error) { config = {directory: location.origin}; }
+  try { config = await directory('/config'); $('demo').textContent = config.demo; $('privacy').textContent = config.privacy; renderDownload(config.download); } catch (error) { config = {directory: location.origin}; renderDownload(null); }
   $('refresh').addEventListener('click', refresh);
   $('forget').addEventListener('click', forget);
   $('create-form').addEventListener('submit', create);

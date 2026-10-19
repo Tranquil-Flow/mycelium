@@ -31,3 +31,8 @@ DIRECTORY_WATCHDOG_LAUNCHD_LABEL = 'now.mycelium.swarm-directory-watchdog'
 #: Seconds between watchdog probes, and consecutive failures before a restart is requested.
 WATCHDOG_INTERVAL_SECONDS = 60
 WATCHDOG_FAILURES_BEFORE_RESTART = 3
+
+#: The packaged helper app shown on the page.  Unavailable until a signed package is actually served somewhere:
+#: the page then says "not published yet" instead of linking nothing.  Owner decision 8 (un-notarized
+#: right-click-Open download) is the ``notarized: False`` here; set ``available``/``url``/``sha256`` to publish.
+HELPER_DOWNLOAD = {'available': False, 'url': None, 'sha256': None, 'version': '0.1.0-preview.2', 'notarized': False}

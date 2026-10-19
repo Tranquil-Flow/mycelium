@@ -136,6 +136,7 @@ def create_swarm(owner, stack, name, mode='open', requests=20, tokens=4000):
     owner.click('[data-attach="%s"]' % state['entry_fingerprint'])
     owner.wait_for_selector('[data-attached="%s"]' % state['entry_fingerprint'])
     assert stack['publisher'].tick()['attached'] is True
+    owner.click('#refresh')
     return state
 
 
@@ -150,6 +151,16 @@ def terminal(visitor, kind, timeout=15000):
     node = visitor.locator('.msg.terminal[data-terminal="%s"]' % kind).last
     node.wait_for(timeout=timeout)
     return node
+
+
+def poll_text(locator, predicate, timeout=10.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        text = locator.text_content() or ''
+        if predicate(text):
+            return text
+        time.sleep(0.05)
+    raise AssertionError('text never matched; last: %r' % locator.text_content())
 
 
 def get_open_access(visitor, name):
@@ -229,9 +240,10 @@ def test_owner_changes_access_mode_and_sees_helpers_grants_usage_and_the_kill_sw
                 owner.click('[data-owned] button.save-access')
                 expect(owner.locator('[data-owned] .access-state')).to_contain_text('Saved')
                 stack['publisher'].tick()
-                visitor.click('#refresh')
-                expect(visitor.locator('.swarm', has_text='Hosted demo')).to_contain_text(expected)
-            shot(visitor, '04-visitor-invite-only')
+                newcomer = open_page(browser, stack)  # a visitor with no grant sees the new mode
+                expect(newcomer.locator('.swarm', has_text='Hosted demo')).to_contain_text(expected)
+                expect(newcomer.locator('.swarm', has_text='Hosted demo')).to_contain_text('access ' + mode)
+            shot(newcomer, '04-visitor-invite-only')
         finally:
             browser.close()
 
@@ -273,7 +285,7 @@ def test_inference_streams_tokens_and_every_terminal_state_is_named(stack):
         browser = p.chromium.launch()
         try:
             owner = open_page(browser, stack)
-            create_swarm(owner, stack, 'Hosted demo', 'open', requests=4, tokens=2000)
+            create_swarm(owner, stack, 'Hosted demo', 'open', requests=3, tokens=2000)
             visitor = open_page(browser, stack)
             get_open_access(visitor, 'Hosted demo')
 
@@ -311,10 +323,9 @@ def test_tokens_arrive_progressively_and_the_owner_kill_switch_ends_it_and_cance
             get_open_access(visitor, 'Hosted demo')
             chat(visitor, 'Hosted demo', 'slow story')
             answer = visitor.locator('.msg.swarm').last
-            visitor.wait_for_function("document.querySelectorAll('.msg.swarm')[0].textContent.includes('tok1 ')", timeout=10000)
-            first = answer.text_content()
-            visitor.wait_for_function("document.querySelectorAll('.msg.swarm')[0].textContent.length > %d" % len(first), timeout=10000)
-            assert len(answer.text_content()) > len(first)  # still growing: live streaming, not one final paint
+            first = poll_text(answer, lambda text: 'tok1 ' in text)  # CSP forbids eval, so poll from Python
+            later = poll_text(answer, lambda text: len(text) > len(first))
+            assert len(later) > len(first)  # still growing: live streaming, not one final paint
             assert visitor.locator('.msg.terminal').count() == 0  # no terminal while it runs
 
             owner.click('#refresh')

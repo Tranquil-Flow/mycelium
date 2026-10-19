@@ -121,7 +121,8 @@ def _relay_origin(app: Any) -> str | None:
 class SwarmPublisher:
     def __init__(self, app: Any, *, origin: Callable[[], str | None] | None = None,
                  client_factory: Callable[[str], Any] = DirectoryClient, clock: Callable[[], float] = time.time,
-                 chat: Callable[[], Any] | None = None, network_mode: NetworkMode = NetworkMode.INTERNET) -> None:
+                 chat: Callable[[], Any] | None = None, live: Callable[[], Any] | None = None,
+                 network_mode: NetworkMode = NetworkMode.INTERNET) -> None:
         self.network_mode = network_mode
         self._allow_private = network_mode.allows_private_origins
         if self._allow_private and client_factory is DirectoryClient:
@@ -148,7 +149,10 @@ class SwarmPublisher:
         if chat is None:
             from .chat import service as _chat_service
             chat = lambda: _chat_service(app)  # noqa: E731
-        self.gateway = EntryGateway(EntryGuard(self.policy, self.signer, verify, self.ledger, clock=clock), chat)
+        if live is None:
+            from .swarm_live import live_state
+            live = lambda: live_state(app)  # noqa: E731
+        self.gateway = EntryGateway(EntryGuard(self.policy, self.signer, verify, self.ledger, clock=clock), chat, live)
 
     # -- persistence -----------------------------------------------------------
     def _path(self) -> Path:

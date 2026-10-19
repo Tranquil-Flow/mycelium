@@ -405,9 +405,11 @@ class EntryGateway:
     ``status``/``code``).  Returns ``(status, json_document)``.
     """
 
-    def __init__(self, guard: EntryGuard, chat: Callable[[], Any]) -> None:
+    def __init__(self, guard: EntryGuard, chat: Callable[[], Any],
+                 live: Callable[[], dict[str, Any]] | None = None) -> None:
         self.guard = guard
         self.chat = chat
+        self.live = live
         guard.on_kill = lambda: self._cancel_backend(None)
 
     def handle(self, path: str, body: bytes, client: str) -> tuple[int, dict[str, Any]]:
@@ -434,7 +436,7 @@ class EntryGateway:
                                'per_key_per_minute': limits.per_key_per_minute,
                                'per_ip_per_minute': limits.per_ip_per_minute},
                     'killed': self.guard.killed(policy), 'swarm_budget': self.guard.budget(policy),
-                    'privacy': PRIVACY_NOTE}
+                    'live': self._live(), 'privacy': PRIVACY_NOTE}
         if route == 'kill':
             return self.guard.apply_kill(body, client)
         if route == 'open-grant':
@@ -457,6 +459,14 @@ class EntryGateway:
             self.guard.refund(admission)
             raise
         return {**accepted, 'clamped': bool(accepted.get('clamped')) or admission.clamped, 'quota': admission.left}
+
+    def _live(self) -> dict[str, Any]:
+        if self.live is None:
+            return {'available': False, 'reason': 'live_source_not_wired'}
+        try:
+            return self.live()
+        except Exception:  # noqa: BLE001 - the state route must never fail because a live source did
+            return {'available': False, 'reason': 'live_source_failed'}
 
     def _cancel_backend(self, request_id: Any) -> None:
         """Ask the chat backend to stop one request (or all in flight); a backend without cancel is left alone."""

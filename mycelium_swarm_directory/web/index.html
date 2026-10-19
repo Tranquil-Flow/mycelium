@@ -6,6 +6,16 @@
 <header><div class="brand">✳ Mycelium <span>public swarms</span></div>
 <p class="badge" id="demo">Demo. Hosted on one volunteer Mac: it may sleep. No accounts, no tracking.</p></header>
 <main>
+<section class="card" id="flow-card"><h2>How it works</h2>
+<ol id="flow"><li data-step="create"><strong>Create a swarm</strong> with a name and a model. You own it with this browser's key.</li>
+<li data-step="helper"><strong>Add a helper Mac.</strong> The Mac that runs the Mycelium app serves the swarm; more Macs join it with an invite.</li>
+<li data-step="access"><strong>Choose who may use it:</strong> open to anyone (with a quota), by request (you approve), or invite only.</li>
+<li data-step="run"><strong>Run inference</strong> here in the browser. Tokens appear as the route makes them, and the end of every prompt is named.</li></ol></section>
+
+<section class="card" id="helper-card" data-download-state="unavailable"><h2>Add a Mac that helps run a swarm</h2>
+<div id="download-body"><p>Checking for the helper app…</p></div>
+<p class="meta">The invite itself comes from the app, not from this page: on the swarm owner's Mac choose <strong>Invite a Mac</strong>, then send the join link or QR to the person who helps. The owner approves each Mac.</p></section>
+
 <section class="card" id="identity-card"><h2>Your browser key</h2>
 <p>This browser made an Ed25519 key that never leaves it (non-extractable, stored in this browser only). No email, no password, no account. Owners grant access to this key's fingerprint.</p>
 <p class="mono" id="identity">Creating your key…</p>

@@ -67,8 +67,9 @@ class DirectoryServer(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, directory: Directory, *, port: int = 0, public_origin: str | None = None,
-                 trusted_proxy: bool = False) -> None:
+                 trusted_proxy: bool = False, download: dict | None = None) -> None:
         self.directory = directory
+        self.download = dict(hosted_defaults.HELPER_DOWNLOAD if download is None else download)
         self.trusted_proxy = trusted_proxy
         self.slots = threading.BoundedSemaphore(32)
         super().__init__(('127.0.0.1', port), _Handler)
@@ -148,7 +149,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, (WEB / name).read_bytes(), kind)
         if path == API + '/config':
             return self._json(200, {'directory': self.server.public_origin, 'privacy': PRIVACY_NOTE,
-                                    'demo': DEMO_LABEL, 'limits': {'max_prompt_chars': docs.MAX_PROMPT_CHARS,
+                                    'demo': DEMO_LABEL, 'download': self.server.download, 'limits': {'max_prompt_chars': docs.MAX_PROMPT_CHARS,
                                                                    'max_new_tokens': docs.MAX_NEW_TOKENS}})
         match = re.fullmatch(API + r'/swarms/(sw-[a-z0-9]{20})/link\.svg', path)
         if match:

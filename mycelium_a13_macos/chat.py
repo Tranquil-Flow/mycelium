@@ -135,6 +135,12 @@ class RegistryClient:
                 'deployment_id': qualification['binding'].get('deployment_id'),
                 'model_id': qualification['binding'].get('model_id')}
 
+    def read(self, path: str) -> Any:
+        """A plain authenticated GET of one registry API document (bootstraps its own session)."""
+        session = self._json('/api/v1/bootstrap')['session']
+        self._csrf = {session['csrf_header']: session['csrf_token']}
+        return self._json(path)
+
     # -- cancel: the gateway's own DELETE /api/v1/inference/<id>/cancel ---------------------
     def _arm_cancel(self, accepted: dict[str, Any]) -> None:
         path = accepted.get('cancel_path')
