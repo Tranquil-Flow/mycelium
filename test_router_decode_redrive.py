@@ -158,14 +158,16 @@ class DecodeRedriveTests(unittest.TestCase):
          return True
 
       self.entry.entry.relay.dispatch_if_current = recording_dispatch
+      clock = _RedriveClock()
       try:
-         started = time.monotonic()
-         self.assertTrue(self.entry.decode_one_distributed(request_id))
-         self.assertLess(
-            time.monotonic() - started, entry_module._DECODE_REDRIVE_WAIT_SECONDS
-         )
+         with mock.patch.object(entry_module, "time", clock):
+            started = clock.monotonic()
+            self.assertTrue(self.entry.decode_one_distributed(request_id))
+            waited = clock.monotonic() - started
       finally:
          self.entry.entry.relay.dispatch_if_current = original_dispatch
+      self.assertLess(waited, entry_module._DECODE_REDRIVE_WAIT_SECONDS)
+      self.assertEqual(clock.sleeps, [], "a new path attempt waited instead of dispatching")
       self.assertEqual(dispatched, [record.manifest.path_attempt])
 
 
