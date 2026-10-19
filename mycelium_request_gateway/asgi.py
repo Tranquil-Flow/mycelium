@@ -337,6 +337,12 @@ class RequestGatewayASGIApplication:
                 event = await asyncio.to_thread(subscription.next_event, timeout=0.1)
             except TimeoutError:
                 continue
+            except AdmissionError:
+                # The consumer's replay prefix was reclaimed: end the stream
+                # without a terminal frame so the client sees an interrupted
+                # stream (and a refused resume), never a gapped continuation.
+                await send({"type": "http.response.body", "body": b"", "more_body": False})
+                return
             if event is None:
                 await send({"type": "http.response.body", "body": b"", "more_body": False})
                 return

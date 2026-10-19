@@ -1154,8 +1154,15 @@ class RequestGatewayService:
             self._append_event_locked(session, event)
             session.emitted_phases.add(phase)
 
-    @staticmethod
-    def _append_event_locked(session: _Session, event: StreamEvent) -> None:
+    def _append_event_locked(self, session: _Session, event: StreamEvent) -> None:
+        if session.active_subscription and session.latest_sequence <= session.acknowledged_through:
+            # Nothing was owed to the attached consumer until this event: its
+            # acknowledgement clock starts now.  Otherwise a healthy consumer
+            # that was idle (an A6 recovery buffers the whole successor
+            # continuation and publishes it in one burst after a long silence)
+            # would be judged by the age of its last ack and reclaimed as
+            # stalled the moment the burst fills the buffer.
+            session.last_ack_at = self._clock()
         session.events.append(event)
         session.latest_sequence = event.sequence
         session.maximum_buffered = max(session.maximum_buffered, len(session.events))
@@ -1174,6 +1181,12 @@ class RequestGatewayService:
         deadline = None if timeout is None else time.monotonic() + float(timeout)
         with session.condition:
             while True:
+                if cursor < session.discarded_through:
+                    # The prefix after this subscription's acknowledged cursor
+                    # was reclaimed (stalled-consumer drop).  Serving the
+                    # surviving tail would silently skip sequences; fail
+                    # closed exactly as a reconnect into the dropped prefix.
+                    raise AdmissionError("resume_cursor_expired")
                 for event in session.events:
                     if event.sequence > cursor:
                         return event
