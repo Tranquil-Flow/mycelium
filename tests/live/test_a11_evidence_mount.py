@@ -86,3 +86,20 @@ def test_demo_cli_forwards_a11_draft_loss_port_only_when_requested():
     forwarded = _live_arguments(enabled)
     assert forwarded[forwarded.index("--a11-draft-loss-control-port") + 1] == "18812"
     assert _fixture_has_live_only_arguments(enabled)
+
+
+def test_demo_serve_cli_forwards_every_supervisor_control_port():
+    """Class check: a control port the live supervisor mounts but the demo serve CLI refuses can only
+    surface on hardware (f7b2: A11 draft loss; the A9 authority-fault port had the same gap)."""
+    from mycelium_demo.cli import build_parser, _live_arguments, _fixture_has_live_only_arguments
+    from mycelium_live.supervisor import build_parser as supervisor_parser
+
+    flags = sorted(o for a in supervisor_parser()._actions for o in a.option_strings if o.endswith("-control-port"))
+    assert flags
+    parser = build_parser()
+    for i, flag in enumerate(flags):
+        port = str(18900 + i)
+        args = parser.parse_args(["serve", "--mode", "live", flag, port])
+        forwarded = _live_arguments(args)
+        assert flag in forwarded and forwarded[forwarded.index(flag) + 1] == port, flag
+        assert _fixture_has_live_only_arguments(args), flag
