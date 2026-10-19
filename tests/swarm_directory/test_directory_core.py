@@ -256,3 +256,32 @@ def test_unknown_routes_and_methods(env):
     directory, _ = env
     assert call(directory, 'GET', '/nope') == (404, {'error': 'route_unknown'})
     assert call(directory, 'DELETE', '/swarms') == (405, {'error': 'method_not_allowed'})
+
+
+def test_signed_read_queries_have_their_own_budget_and_never_spend_the_write_budget():
+    """The page polls /my-grants and /owner-inbox every few seconds; that must not lock a key or a shared address out of writing."""
+    clock = Clock()
+    directory = Directory(MemoryStore(), verify, clock=clock, limits=Limits(writes_per_ip_per_minute=3, writes_per_key_per_minute=2))
+    alice = Ed25519Signer.generate()
+    swarm = 'sw-aaaaaaaaaaaaaaaaaaaa'
+    call(directory, 'POST', '/records', record(alice), client='ip:9')
+    for i in range(30):  # far above both write budgets
+        assert call(directory, 'POST', '/my-grants', docs.grantee_query(alice, at=clock.t), client='ip:9')[0] == 200, i
+        assert call(directory, 'POST', '/owner-inbox', docs.owner_query(alice, swarm, at=clock.t), client='ip:9')[0] == 200, i
+    # the write budget is untouched: the second write is still allowed, the third is the limit
+    assert call(directory, 'POST', '/access-requests', docs.access_request(Ed25519Signer.generate(), swarm, note='', at=clock.t),
+                client='ip:9')[0] == 200
+    assert call(directory, 'POST', '/access-requests', docs.access_request(Ed25519Signer.generate(), swarm, note='', at=clock.t),
+                client='ip:9') == (429, {'error': 'rate_limited_ip'})
+
+
+def test_signed_read_queries_are_still_bounded():
+    clock = Clock()
+    directory = Directory(MemoryStore(), verify, clock=clock, limits=Limits(queries_per_key_per_minute=5, queries_per_ip_per_minute=100))
+    alice = Ed25519Signer.generate()
+    outcomes = [call(directory, 'POST', '/my-grants', docs.grantee_query(alice, at=clock.t), client='ip:9')[0] for _ in range(7)]
+    assert outcomes == [200] * 5 + [429, 429]
+    other = Ed25519Signer.generate()
+    ip_limited = Directory(MemoryStore(), verify, clock=clock, limits=Limits(queries_per_key_per_minute=100, queries_per_ip_per_minute=3))
+    codes = [call(ip_limited, 'POST', '/my-grants', docs.grantee_query(other, at=clock.t), client='ip:4')[0] for _ in range(5)]
+    assert codes == [200] * 3 + [429, 429]
