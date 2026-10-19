@@ -20,6 +20,8 @@ import stat
 from typing import Iterable
 from urllib.parse import urlsplit
 
+from mycelium_swarm_directory import hosted_defaults as _hosted
+
 
 _CAPABILITY_BYTES = frozenset(b"0123456789abcdef")
 _SAFE_TOKEN = re.compile(r"[A-Za-z0-9._~-]{1,64}")
@@ -40,6 +42,31 @@ _PUBLIC_GET_API_PATHS = frozenset(
         "/api/v1/product/events",
         "/api/v1/product/export",
         "/api/v1/swarm/status",
+    }
+)
+_DIRECTORY_ASSET_PATHS = frozenset(
+    {
+        _hosted.DIRECTORY_MOUNT_PREFIX,
+        _hosted.DIRECTORY_MOUNT_PREFIX + "/",
+        _hosted.DIRECTORY_MOUNT_PREFIX + "/swarms.js",
+        _hosted.DIRECTORY_MOUNT_PREFIX + "/swarms.css",
+    }
+)
+_DIRECTORY_API_PREFIX = _hosted.DIRECTORY_MOUNT_PREFIX + "/api/v1/"
+_DIRECTORY_API_PATH = re.compile(re.escape(_DIRECTORY_API_PREFIX) + r"[A-Za-z0-9._/-]{1,200}")
+_DIRECTORY_FORBIDDEN_PATH_PARTS = ("..", "%", "\\", "?", "#", "//")
+# Client-supplied identity and credentials never reach the directory; the one
+# client address it sees is the validated Cf-Connecting-Ip set below.
+_DIRECTORY_STRIPPED_REQUEST_HEADERS = frozenset(
+    {
+        "cookie",
+        "cf-connecting-ip",
+        "content-length",
+        "forwarded",
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "x-real-ip",
+        "true-client-ip",
     }
 )
 _INFERENCE_PREFIX = "/api/v1/inference/"
@@ -88,6 +115,11 @@ class ProxyConfig:
     max_header_bytes: int = 16_384
     max_body_bytes: int = 2 * 1024 * 1024
     upstream_timeout_seconds: float = 30.0
+    # Optional path mount of the swarm directory at /swarms (off unless set).
+    directory_host: str | None = None
+    directory_port: int | None = None
+    directory_require_client_ip: bool = True
+    directory_max_body_bytes: int = _hosted.DIRECTORY_MAX_BODY_BYTES
 
     def __post_init__(self) -> None:
         if not _is_loopback_host(self.listen_host):
@@ -111,6 +143,18 @@ class ProxyConfig:
             0 < float(self.upstream_timeout_seconds) <= 300
         ):
             raise PublicOriginProxyError("invalid_upstream_timeout_seconds")
+        if (self.directory_host is None) != (self.directory_port is None):
+            raise PublicOriginProxyError("directory_incomplete")
+        if self.directory_host is not None:
+            if not _is_loopback_host(self.directory_host):
+                raise PublicOriginProxyError("non_loopback_directory_host")
+            _validate_port("directory_port", self.directory_port)
+        if not isinstance(self.directory_require_client_ip, bool):
+            raise PublicOriginProxyError("invalid_directory_require_client_ip")
+        if not isinstance(self.directory_max_body_bytes, int) or not (
+            1 <= self.directory_max_body_bytes <= 1024 * 1024
+        ):
+            raise PublicOriginProxyError("invalid_directory_max_body_bytes")
 
 
 class PublicOriginProxyServer(ThreadingHTTPServer):
@@ -161,6 +205,9 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
     def _handle_public_request(self) -> None:
         parsed = urlsplit(self.path)
         path = parsed.path
+        if self._config.directory_host is not None and _is_directory_mount(path):
+            self._handle_directory_request()
+            return
         allowed, status, code = _route_decision(self.command, path)
         if not allowed:
             self._send_json_error(status, code)
@@ -177,6 +224,67 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
         except (OSError, http.client.HTTPException, TimeoutError):
             self._send_json_error(502, "upstream_unavailable")
 
+    def _handle_directory_request(self) -> None:
+        config = self._config
+        allowed, status, code = _directory_route_decision(self.command, self.path)
+        if not allowed:
+            self._send_json_error(status, code)
+            return
+        try:
+            self._reject_oversized_headers()
+            client_ip = self._directory_client_ip()
+            body = self._read_bounded_body(
+                max_bytes=config.directory_max_body_bytes, allow_chunked=True
+            )
+            headers = self._directory_headers(len(body), client_ip)
+            self._proxy_to_upstream(
+                self.path,
+                headers,
+                body,
+                target=(config.directory_host, config.directory_port),
+            )
+        except PublicOriginProxyError as exc:
+            status = 413 if exc.code in {"request_headers_too_large", "request_body_too_large"} else 400
+            self._send_json_error(status, exc.code)
+        except (OSError, http.client.HTTPException, TimeoutError):
+            self._send_json_error(502, "upstream_unavailable")
+
+    def _directory_client_ip(self) -> str | None:
+        """The one validated client address, or None when allowed to be absent."""
+
+        values = self.headers.get_all("Cf-Connecting-Ip") or []
+        if len(values) > 1:
+            raise PublicOriginProxyError("client_ip_invalid")
+        if not values:
+            if self._config.directory_require_client_ip:
+                raise PublicOriginProxyError("client_ip_missing")
+            return None
+        value = values[0]
+        if not value or "%" in value or value != value.strip():
+            raise PublicOriginProxyError("client_ip_invalid")
+        try:
+            return str(ipaddress.ip_address(value))
+        except ValueError:
+            raise PublicOriginProxyError("client_ip_invalid") from None
+
+    def _directory_headers(self, body_length: int, client_ip: str | None) -> dict[str, str]:
+        outbound: dict[str, str] = {}
+        for name, value in self.headers.items():
+            lower = name.lower()
+            if (
+                lower in _HOP_BY_HOP_HEADERS
+                or lower in _STRIPPED_REQUEST_HEADERS
+                or lower in _DIRECTORY_STRIPPED_REQUEST_HEADERS
+            ):
+                continue
+            outbound[name] = value
+        outbound["Host"] = self._config.public_host
+        outbound["X-Forwarded-Proto"] = "https"
+        outbound["Content-Length"] = str(body_length)
+        if client_ip is not None:
+            outbound["Cf-Connecting-Ip"] = client_ip
+        return outbound
+
     def _reject_oversized_headers(self) -> None:
         total = 0
         for name, value in self.headers.items():
@@ -186,9 +294,40 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
         if total > self._config.max_header_bytes:
             raise PublicOriginProxyError("request_headers_too_large")
 
-    def _read_bounded_body(self) -> bytes:
-        if self.headers.get("Transfer-Encoding") is not None:
+    def _read_bounded_chunked_body(self, max_bytes: int) -> bytes:
+        codings = self.headers.get_all("Transfer-Encoding") or []
+        if (
+            len(codings) != 1
+            or codings[0].strip().lower() != "chunked"
+            or self.headers.get("Content-Length") is not None
+        ):
             raise PublicOriginProxyError("unsupported_transfer_encoding")
+        body = bytearray()
+        while True:
+            line = self.rfile.readline(12)
+            if not re.fullmatch(rb"[0-9A-Fa-f]{1,8}\r\n", line):
+                raise PublicOriginProxyError("invalid_chunked_body")
+            size = int(line[:-2], 16)
+            if size == 0:
+                break
+            if len(body) + size > max_bytes:
+                raise PublicOriginProxyError("request_body_too_large")
+            data = self.rfile.read(size)
+            if len(data) != size or self.rfile.read(2) != b"\r\n":
+                raise PublicOriginProxyError("invalid_chunked_body")
+            body += data
+        if self.rfile.read(2) != b"\r\n":
+            raise PublicOriginProxyError("invalid_chunked_body")
+        return bytes(body)
+
+    def _read_bounded_body(
+        self, *, max_bytes: int | None = None, allow_chunked: bool = False
+    ) -> bytes:
+        limit = self._config.max_body_bytes if max_bytes is None else max_bytes
+        if self.headers.get("Transfer-Encoding") is not None:
+            if not allow_chunked:
+                raise PublicOriginProxyError("unsupported_transfer_encoding")
+            return self._read_bounded_chunked_body(limit)
         values = self.headers.get_all("Content-Length") or []
         if len(values) > 1:
             raise PublicOriginProxyError("invalid_content_length")
@@ -200,7 +339,7 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
             raise PublicOriginProxyError("invalid_content_length") from None
         if length < 0:
             raise PublicOriginProxyError("invalid_content_length")
-        if length > self._config.max_body_bytes:
+        if length > limit:
             raise PublicOriginProxyError("request_body_too_large")
         return self.rfile.read(length)
 
@@ -220,11 +359,17 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
         return outbound
 
     def _proxy_to_upstream(
-        self, path: str, headers: dict[str, str], body: bytes
+        self,
+        path: str,
+        headers: dict[str, str],
+        body: bytes,
+        *,
+        target: tuple[str, int] | None = None,
     ) -> None:
+        host, port = target or (self._config.upstream_host, self._config.upstream_port)
         connection = http.client.HTTPConnection(
-            self._config.upstream_host,
-            self._config.upstream_port,
+            host,
+            port,
             timeout=float(self._config.upstream_timeout_seconds),
         )
         try:
@@ -322,6 +467,7 @@ def build_config_from_args(argv: Iterable[str] | None = None) -> ProxyConfig:
             max_header_bytes=args.max_header_bytes,
             max_body_bytes=args.max_body_bytes,
             upstream_timeout_seconds=args.upstream_timeout_seconds,
+            **_directory_kwargs(args),
         )
     except PublicOriginProxyError as exc:
         parser.error(exc.code)
@@ -353,7 +499,42 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-header-bytes", type=int, default=16_384)
     parser.add_argument("--max-body-bytes", type=int, default=2 * 1024 * 1024)
     parser.add_argument("--upstream-timeout-seconds", type=float, default=30.0)
+    parser.add_argument(
+        "--directory-upstream",
+        default=None,
+        help=(
+            "loopback swarm directory to mount at /swarms (off when omitted), "
+            f"e.g. http://127.0.0.1:{_hosted.DIRECTORY_PORT}"
+        ),
+    )
+    parser.add_argument(
+        "--directory-allow-missing-client-ip",
+        action="store_true",
+        help="forward /swarms requests that carry no Cf-Connecting-Ip (local testing only)",
+    )
+    parser.add_argument(
+        "--directory-max-body-bytes", type=int, default=_hosted.DIRECTORY_MAX_BODY_BYTES
+    )
     return parser
+
+
+def _directory_kwargs(args: argparse.Namespace) -> dict[str, object]:
+    if args.directory_upstream is None:
+        return {"directory_max_body_bytes": args.directory_max_body_bytes}
+    try:
+        host, port = _parse_upstream(args.directory_upstream)
+    except PublicOriginProxyError as exc:
+        raise PublicOriginProxyError(
+            "non_loopback_directory_host"
+            if exc.code == "non_loopback_upstream_host"
+            else "invalid_directory_upstream"
+        ) from None
+    return {
+        "directory_host": host,
+        "directory_port": port,
+        "directory_require_client_ip": not args.directory_allow_missing_client_ip,
+        "directory_max_body_bytes": args.directory_max_body_bytes,
+    }
 
 
 def _port_argument(value: str) -> int:
@@ -464,6 +645,33 @@ def _route_decision(method: str, path: str) -> tuple[bool, int, str]:
     if method == "DELETE" and _is_inference_cancel_path(path):
         return True, 200, "ok"
     if method not in {"GET", "HEAD", "POST", "DELETE"}:
+        return False, 403, "public_method_not_allowed"
+    return False, 404, "public_route_not_found"
+
+
+def _is_directory_mount(path: str) -> bool:
+    prefix = _hosted.DIRECTORY_MOUNT_PREFIX
+    return path == prefix or path.startswith(prefix + "/")
+
+
+def _directory_route_decision(method: str, raw_path: str) -> tuple[bool, int, str]:
+    """Allow only the directory's own page assets and ``/swarms/api/v1/*``.
+
+    Judged on the raw request target: no dot segments, escapes, queries,
+    fragments, backslashes or empty segments ever reach the directory.
+    """
+
+    if not raw_path.startswith("/") or any(
+        part in raw_path for part in _DIRECTORY_FORBIDDEN_PATH_PARTS
+    ):
+        return False, 404, "public_route_not_found"
+    if method in {"GET", "HEAD"}:
+        if raw_path in _DIRECTORY_ASSET_PATHS or _DIRECTORY_API_PATH.fullmatch(raw_path):
+            return True, 200, "ok"
+    elif method == "POST":
+        if _DIRECTORY_API_PATH.fullmatch(raw_path):
+            return True, 200, "ok"
+    elif method not in {"DELETE"}:
         return False, 403, "public_method_not_allowed"
     return False, 404, "public_route_not_found"
 

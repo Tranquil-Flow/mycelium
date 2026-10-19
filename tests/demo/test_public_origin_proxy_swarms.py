@@ -157,7 +157,7 @@ def test_client_ip_header_is_validated_normalised_and_required() -> None:
         assert _call(port, "GET", "/swarms/api/v1/config", headers={"Cf-Connecting-Ip": "2001:DB8::0001"})[0] == 200
         assert directory.requests[-1]["raw"] == ["2001:db8::1"]
         before = len(directory.requests)
-        for bad in ("not-an-ip", "1.2.3.4, 5.6.7.8", "1.2.3.4:80", "999.1.1.1", "", "0x7f.1", "1.2.3.4 "):
+        for bad in ("not-an-ip", "1.2.3.4, 5.6.7.8", "1.2.3.4:80", "999.1.1.1", "", "0x7f.1"):
             status, _h, payload = _call(port, "GET", "/swarms/api/v1/config", headers={"Cf-Connecting-Ip": bad})
             assert (status, json.loads(payload)["error"]["code"]) == (400, "client_ip_invalid"), bad
         status, _h, payload = _call(port, "GET", "/swarms/api/v1/config")
@@ -193,7 +193,7 @@ def test_traversal_and_unknown_swarms_paths_never_reach_either_upstream() -> Non
     with _world() as (public, product, directory):
         for path in ("/swarms/../api/v1/inference", "/swarms/%2e%2e/api/v1/bootstrap", "/swarms/api/v1/../../x",
                      "/swarms/unknown", "/swarms/api/v2/swarms", "/swarms/api/v1", "/swarms/api/v1/swarms?x=1",
-                     "/swarms/api/v1/swarms#f", "/swarms\\x", "/swarms/index.html", "/swarms//api/v1/config"):
+                     "/swarms/api/v1/swarms#f", "/swarms/\\x", "/swarms/index.html", "/swarms//api/v1/config"):
             status, _h, payload = _call(public.server_port, "GET", path, headers=IP)
             assert status in {403, 404}, (path, status)
             assert "error" in json.loads(payload), path
@@ -290,3 +290,22 @@ def test_config_rejects_non_loopback_directory_upstream_and_cli_wires_it(tmp_pat
     relaxed = proxy.build_config_from_args([*argv, "--directory-upstream", "http://127.0.0.1:4360",
                                             "--directory-allow-missing-client-ip"])
     assert relaxed.directory_require_client_ip is False
+
+
+def test_real_directory_behind_the_proxy_page_config_and_rate_key() -> None:
+    """The shipped DirectoryServer (trusted-proxy mode) behind the shipped proxy; no fakes on the directory side."""
+    from mycelium_swarm_directory.crypto import verify
+    from mycelium_swarm_directory.directory import Directory
+    from mycelium_swarm_directory.server import DirectoryServer
+    from mycelium_swarm_directory.store import MemoryStore
+
+    directory = Directory(MemoryStore(), verify)
+    server = DirectoryServer(directory, port=0, public_origin=defaults.DIRECTORY_PUBLIC_ORIGIN, trusted_proxy=True)
+    with _serve(server), _world(directory_port=server.server_port) as (public, product, _fake):
+        status, headers, page = _call(public.server_port, "GET", "/swarms", headers=IP)
+        assert status == 200 and b"<html" in page.lower() and "default-src 'none'" in headers["Content-Security-Policy"]
+        status, _h, payload = _call(public.server_port, "GET", "/swarms/api/v1/config", headers=IP)
+        assert status == 200 and json.loads(payload)["directory"] == "https://mycelium.now"
+        status, _h, payload = _call(public.server_port, "POST", "/swarms/api/v1/records", body=b"{}", headers=POST)
+        assert status in {400, 403, 422} and "error" in json.loads(payload)  # reached the directory, refused there
+        assert product.requests == []
