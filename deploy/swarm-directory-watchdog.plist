@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  TEMPLATE. Not installed, not loaded by anything in this repo.
+
+  now.mycelium.swarm-directory-watchdog: one probe round every minute of the
+  directory unit (and of the apex proxy path). After repeated failures it
+  would ask launchd to restart now.mycelium.swarm-directory. As shipped it only
+  PRINTS that restart: add the apply flag to ProgramArguments to let it run.
+  A failing proxy is reported but never restarts the directory.
+
+  Render every double-underscore placeholder with mycelium_swarm_directory.unit.render_unit,
+  then install like the directory unit (owner only, deployment step).
+-->
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>__MYCELIUM_HOME__</string>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>Label</key>
+	<string>now.mycelium.swarm-directory-watchdog</string>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/bin/env</string>
+		<string>-u</string>
+		<string>PYTHONPATH</string>
+		<string>-u</string>
+		<string>PYTHONHOME</string>
+		<string>-u</string>
+		<string>VIRTUAL_ENV</string>
+		<string>PYTHONDONTWRITEBYTECODE=1</string>
+		<string>__MYCELIUM_PYTHON__</string>
+		<string>-B</string>
+		<string>-m</string>
+		<string>mycelium_swarm_directory.watchdog</string>
+		<string>--hosted</string>
+		<string>--state-file</string>
+		<string>__SWARM_DIR_STATE_DIR__/watchdog.json</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>__MYCELIUM_LOG_DIR__/swarm-directory-watchdog.err.log</string>
+	<key>StandardOutPath</key>
+	<string>__MYCELIUM_LOG_DIR__/swarm-directory-watchdog.log</string>
+	<key>StartInterval</key>
+	<integer>60</integer>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>WorkingDirectory</key>
+	<string>__MYCELIUM_REPO_ROOT__</string>
+</dict>
+</plist>

@@ -28,7 +28,7 @@ from typing import Any
 
 from mycelium_platform_neutral import network_mode
 
-from . import docs
+from . import docs, hosted_defaults
 from .crypto import verify
 from .directory import Directory, Limits, PRIVACY_NOTE
 from .store import SqliteStore
@@ -226,8 +226,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='python -m mycelium_swarm_directory', allow_abbrev=False,
                                      description='Serve the swarm directory on 127.0.0.1 (behind a tunnel).')
     parser.add_argument('--db', required=True, help='sqlite file (created 0600)')
-    parser.add_argument('--port', type=int, default=4360)
+    parser.add_argument('--port', type=int, default=None, help='default %d' % hosted_defaults.DIRECTORY_PORT)
     parser.add_argument('--public-origin', default=None, help='e.g. https://swarms.mycelium.now')
+    parser.add_argument('--hosted', action='store_true',
+                        help='the hosted-demo defaults (hosted_defaults.py): public origin %s and --trusted-proxy; '
+                             'explicit flags still win' % hosted_defaults.DIRECTORY_PUBLIC_ORIGIN)
     parser.add_argument('--trusted-proxy', action='store_true', help='rate-key on Cf-Connecting-Ip (cloudflared)')
     parser.add_argument('--allow-loopback-entries', action='store_true', help='local testing only')
     network_mode.add_network_mode_argument(parser)
@@ -244,8 +247,20 @@ def build_directory(args: argparse.Namespace, environ: Any = None) -> Directory:
                      allow_loopback_entries=args.allow_loopback_entries, allow_private_entries=private)
 
 
+def resolve(args: argparse.Namespace) -> argparse.Namespace:
+    """Fill in port/origin/proxy trust from the named defaults (``--hosted`` adds the public ones)."""
+    resolved = argparse.Namespace(**vars(args))
+    if resolved.port is None:
+        resolved.port = hosted_defaults.DIRECTORY_PORT
+    if resolved.hosted:
+        resolved.trusted_proxy = True
+        if resolved.public_origin is None:
+            resolved.public_origin = hosted_defaults.DIRECTORY_PUBLIC_ORIGIN
+    return resolved
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    args = resolve(build_parser().parse_args(argv))
     directory = build_directory(args)
     server = DirectoryServer(directory, port=args.port, public_origin=args.public_origin,
                              trusted_proxy=args.trusted_proxy)
