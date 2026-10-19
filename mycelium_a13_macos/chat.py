@@ -37,6 +37,7 @@ PER_CLIENT_PER_MINUTE = 4
 GLOBAL_PER_MINUTE = 30
 MAX_KEPT_REQUESTS = 64
 _ID = re.compile(r'[A-Za-z0-9_-]{16,64}\Z')
+_CANCEL_PATH = re.compile(r'/api/v1/inference/[A-Za-z0-9_-]{1,128}/cancel\Z')
 # Owner-run steps during which the route is being activated/qualified.
 _WARMING_STEPS = frozenset({'activate', 'serving'})
 _ASSETS = {'/chat': ('chat.html', 'text/html; charset=utf-8'),
@@ -65,8 +66,12 @@ class RegistryClient:
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         self._csrf: dict[str, str] = {}
+        self._cancel_lock = threading.Lock()
+        self._cancel_path: str | None = None  # set while a request is accepted and running
+        self._cancel_wanted = False
+        self._cancel_sent = False
 
-    def _open(self, path, body=None, *, accept='application/json'):
+    def _open(self, path, body=None, *, accept='application/json', method=None):
         """GETs are plain reads; only the POST carries CSRF, Origin and a JSON body
         (the gateway's rules; mycelium_ui_gateway/app.py)."""
         headers = {'Accept': accept}
@@ -74,8 +79,10 @@ class RegistryClient:
         if body is not None:
             headers.update({'Content-Type': 'application/json', 'Origin': self.origin, **self._csrf})
             data = json.dumps(body, sort_keys=True, separators=(',', ':')).encode()
+        elif method == 'DELETE':
+            headers.update({'Origin': self.origin, **self._csrf})
         request = urllib.request.Request(self.origin + path, data=data, headers=headers,
-                                         method='GET' if body is None else 'POST')
+                                         method=method or ('GET' if body is None else 'POST'))
         try:
             return self._opener.open(request, timeout=self.timeout)
         except urllib.error.HTTPError as error:
@@ -106,6 +113,7 @@ class RegistryClient:
             'workload_profile_id': 'interactive_chat_v1', 'qos_class': 'interactive'})
         terminal = None
         kind = None
+        self._arm_cancel(accepted)
         with self._open(accepted['event_path'], accept='text/event-stream') as response:
             for raw in response:
                 line = raw.decode('utf-8', 'strict').rstrip('\r\n')
@@ -120,10 +128,39 @@ class RegistryClient:
                         break
                 elif line == '':
                     kind = None
+        with self._cancel_lock:
+            self._cancel_path = None
         return {'terminal': None if terminal is None else terminal['type'],
                 'code': None if terminal is None else terminal.get('code'),
                 'deployment_id': qualification['binding'].get('deployment_id'),
                 'model_id': qualification['binding'].get('model_id')}
+
+    # -- cancel: the gateway's own DELETE /api/v1/inference/<id>/cancel ---------------------
+    def _arm_cancel(self, accepted: dict[str, Any]) -> None:
+        path = accepted.get('cancel_path')
+        if not isinstance(path, str) or not _CANCEL_PATH.fullmatch(path):
+            path = None
+        with self._cancel_lock:
+            self._cancel_path = path
+            wanted = self._cancel_wanted
+        if wanted:  # the owner cancelled before the gateway had accepted the request
+            self.cancel()
+
+    def request_cancel(self) -> None:
+        """Remember a cancel that arrived before the request was accepted; it is sent on acceptance."""
+        with self._cancel_lock:
+            self._cancel_wanted = True
+
+    def cancel(self) -> bool:
+        """Cancel the running request (once).  False: nothing running, already sent, or already terminal."""
+        with self._cancel_lock:
+            path = self._cancel_path
+            if path is None or self._cancel_sent:
+                return False
+            self._cancel_sent = True
+        with self._open(path, method='DELETE') as response:
+            document = json.load(response)
+        return isinstance(document, dict) and document.get('cancelled') is True
 
 
 _CODE_PART = re.compile(r'[^a-z0-9]+')
@@ -218,7 +255,8 @@ class ChatService:
                 raise ChatError(429, 'chat_busy')
             self._rate(client)
             request_id = secrets.token_urlsafe(18)
-            record = {'id': request_id, 'tokens': [], 'done': False, 'error': None,
+            record = {'id': request_id, 'tokens': [], 'done': False, 'error': None, 'terminal': None,
+                      'client': None, 'cancel_reason': None,
                       'max_new_tokens': max_new_tokens, 'clamped': wanted != max_new_tokens,
                       'served_by': [{'label': p.get('label'), 'node': (p.get('node_id') or '')[:12],
                                      'layers': p.get('layers')} for p in (serving.get('participants') or [])],
@@ -237,23 +275,81 @@ class ChatService:
     def _work(self, record, origin, prompt):
         try:
             client = self._client_factory(origin)
+            with self._lock:
+                record['client'] = client
+                early = record['cancel_reason'] is not None
+            if early:  # cancelled before the backend client existed
+                request = getattr(client, 'request_cancel', None)
+                if request is not None:
+                    request()
             def token(text):
                 with self._lock:
                     record['tokens'].append(text)
             result = client.stream(prompt, record['max_new_tokens'], token)
             with self._lock:
-                if result.get('terminal') == 'failed':
+                terminal = result.get('terminal')
+                record['terminal'] = terminal
+                if terminal == 'failed':
                     record['error'] = result.get('code') or 'chat_generation_failed'
+                elif terminal == 'cancelled':
+                    record['error'] = record['cancel_reason'] or 'chat_cancelled'
         except ChatError as error:
-            with self._lock: record['error'] = error.code
+            with self._lock:
+                record['terminal'] = 'cancelled' if record['cancel_reason'] else 'failed'
+                record['error'] = record['cancel_reason'] or error.code
         except Exception as error:
-            with self._lock: record['error'] = failure_code(error)
+            with self._lock:
+                record['terminal'] = 'cancelled' if record['cancel_reason'] else 'failed'
+                record['error'] = record['cancel_reason'] or failure_code(error)
         finally:
             with self._lock:
                 record['done'] = True
+                record['client'] = None
                 record['finished'] = self._clock()
                 if self._busy == record['id']:
                     self._busy = None
+
+    def cancel(self, request_id: Any, code: str = 'chat_cancelled') -> bool:
+        """Stop a running generation on the route.  The request ends with ``terminal: cancelled`` and ``code``.
+
+        True: a cancel was dispatched (or will be, the moment the backend request exists).  False: already
+        finished/cancelled, or the backend could not be told (the generation then runs on; never raised).
+        """
+        if not isinstance(request_id, str) or not _ID.fullmatch(request_id):
+            raise ChatError(400, 'chat_request_invalid')
+        with self._lock:
+            record = self._requests.get(request_id)
+            if record is None:
+                raise ChatError(404, 'chat_request_unknown')
+            if record['done'] or record['cancel_reason'] is not None:
+                return False
+            record['cancel_reason'] = code
+            client = record['client']
+        if client is None:
+            return True
+        try:
+            sent = bool(client.cancel())
+            if not sent:
+                request = getattr(client, 'request_cancel', None)
+                if request is None:
+                    raise RuntimeError('nothing_to_cancel')
+                request()
+            return True
+        except Exception:
+            with self._lock:
+                record['cancel_reason'] = None
+            return False
+
+    def cancel_all(self, code: str = 'chat_cancelled') -> int:
+        with self._lock:
+            running = [rid for rid, record in self._requests.items() if not record['done']]
+        return sum(1 for rid in running if self._cancel_quietly(rid, code))
+
+    def _cancel_quietly(self, request_id: str, code: str) -> bool:
+        try:
+            return self.cancel(request_id, code)
+        except ChatError:
+            return False
 
     def events(self, body: Any) -> dict[str, Any]:
         if (not isinstance(body, dict) or set(body) != {'request_id', 'after'}
@@ -269,7 +365,8 @@ class ChatService:
             if record['finished'] is not None:
                 seconds = round(record['finished'] - record['started'], 2)
             return {'tokens': tokens, 'next': body['after'] + len(tokens), 'done': record['done'],
-                    'error': record['error'], 'served_by': record['served_by'], 'seconds': seconds}
+                    'error': record['error'], 'terminal': record['terminal'], 'served_by': record['served_by'],
+                    'seconds': seconds}
 
     def state(self) -> dict[str, Any]:
         serving = self._serving()

@@ -39,6 +39,7 @@ from .ratelimit import WindowLimiter
 from .wire import Verifier, WireError, fingerprint, parse_json_object
 
 PREFIX = '/swarm-entry/v1/'
+KILLED = 'entry_killed_by_owner'
 ROUTES = frozenset({'state', 'open-grant', 'send', 'events', 'kill'})
 
 
@@ -235,6 +236,9 @@ class EntryGuard:
         self._nonces: dict[str, int] = {}
         self._cut: OrderedDict[str, None] = OrderedDict()  # requests ended by the kill switch
         self._lock = threading.Lock()
+        #: Called (best effort, never raises into the kill) when the owner engages the kill switch; the gateway
+        #: points it at the chat backend so the running generation is cancelled, not only hidden.
+        self.on_kill: Callable[[], None] | None = None
         self.limits = limits
 
     @property
@@ -310,6 +314,11 @@ class EntryGuard:
             raise WireError('entry_clock_skew', 400)
         if not self.ledger.set_kill(policy.swarm_id, document['engaged'], document['seq'], now):
             raise WireError('entry_kill_seq_stale', 409)
+        if document['engaged'] and self.on_kill is not None:
+            try:
+                self.on_kill()
+            except Exception:  # noqa: BLE001 - the kill is already durable; cancelling is best effort
+                pass
         return {'engaged': document['engaged'], 'seq': document['seq']}
 
     def settle_events(self, request_id: Any, page: dict[str, Any], policy: EntryPolicy) -> dict[str, Any]:
@@ -321,9 +330,9 @@ class EntryGuard:
                 while len(self._cut) > 512:
                     self._cut.popitem(last=False)
                 ended = True
-        if not ended:
+        if not ended and page.get('error') != KILLED:
             return page
-        return {**page, 'done': True, 'error': 'entry_killed_by_owner', 'killed': True}
+        return {**page, 'done': True, 'error': KILLED, 'killed': True}
 
     def check_grant(self, grant: Any, key: str, policy: EntryPolicy, now: int) -> dict[str, Any]:
         try:
@@ -399,6 +408,7 @@ class EntryGateway:
     def __init__(self, guard: EntryGuard, chat: Callable[[], Any]) -> None:
         self.guard = guard
         self.chat = chat
+        guard.on_kill = lambda: self._cancel_backend(None)
 
     def handle(self, path: str, body: bytes, client: str) -> tuple[int, dict[str, Any]]:
         try:
@@ -435,7 +445,10 @@ class EntryGateway:
                 raise WireError('entry_rate_limited_ip', 429)
             document = parse_json_object(body, limit=1024)
             page = self._chat_call(lambda: self.chat().events(document))
-            return self.guard.settle_events(document.get('request_id'), page, self.guard.current())
+            settled = self.guard.settle_events(document.get('request_id'), page, self.guard.current())
+            if settled.get('killed') and not page.get('done'):
+                self._cancel_backend(document.get('request_id'))  # the bulk cancel missed it (or failed): retry here
+            return settled
         admission, prompt = self.guard.admit(body, client)
         try:
             accepted = self._chat_call(lambda: self.chat().send(
@@ -444,6 +457,21 @@ class EntryGateway:
             self.guard.refund(admission)
             raise
         return {**accepted, 'clamped': bool(accepted.get('clamped')) or admission.clamped, 'quota': admission.left}
+
+    def _cancel_backend(self, request_id: Any) -> None:
+        """Ask the chat backend to stop one request (or all in flight); a backend without cancel is left alone."""
+        chat = self.chat()
+        if request_id is None:
+            cancel_all = getattr(chat, 'cancel_all', None)
+            if callable(cancel_all):
+                cancel_all(KILLED)
+            return
+        cancel = getattr(chat, 'cancel', None)
+        if callable(cancel) and isinstance(request_id, str):
+            try:
+                cancel(request_id, KILLED)
+            except Exception:  # noqa: BLE001
+                pass
 
     @staticmethod
     def _chat_call(function):

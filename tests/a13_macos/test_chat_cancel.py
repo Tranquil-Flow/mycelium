@@ -63,7 +63,7 @@ class Gateway(BaseHTTPRequestHandler):
                                 'cancel_path': '/api/v1/inference/r1/cancel'})
 
     def do_DELETE(self):
-        self.seen.append(('DELETE', self.path, dict(self.headers)))
+        self.seen.append(('DELETE', self.path, {k.lower(): v for k, v in self.headers.items()}))
         if self.headers.get('X-Mycelium-CSRF') != 't0k':
             return self._json(403, {'error': {'code': 'csrf_required'}})
         if self.headers.get('Origin') != f'http://127.0.0.1:{self.server.server_address[1]}':
@@ -101,7 +101,7 @@ def test_registry_client_cancel_sends_an_authorised_delete_to_the_accepted_cance
     assert result['terminal'] == 'cancelled' and tokens == ['Ber']
     [(method, path, headers)] = Gateway.seen
     assert (method, path) == ('DELETE', '/api/v1/inference/r1/cancel')
-    assert headers['X-Mycelium-CSRF'] == 't0k' and headers['Origin'] == origin_of(gateway)
+    assert headers['x-mycelium-csrf'] == 't0k' and headers['origin'] == origin_of(gateway)
 
 
 def test_registry_client_cancel_with_nothing_running_is_a_noop(gateway):
