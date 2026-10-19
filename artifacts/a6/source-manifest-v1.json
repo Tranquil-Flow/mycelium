@@ -1,5 +1,5 @@
 {
-  "base_commit": "53d1222b05f1a9c565e32071e16d33ecadfcdd06",
+  "base_commit": "53d1222b",
   "files": [
     {
       "path": ".github/workflows/windows-a13.yml",
@@ -53,7 +53,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:8dbc501ddc1eb8d742eb034bbcc5a5cb0891877bba15ce30b4162514fee32c56",
+      "sha256": "sha256:df7414d5ed0d564c137099226cf7b49341701b326ada3e3f7cb8898d91a9b68e",
       "size_bytes": 71574
     },
     {
@@ -1618,8 +1618,8 @@
     },
     {
       "path": "mycelium_request_gateway/service.py",
-      "sha256": "sha256:43abd819e3ae0aba31b2f40fd603df5ac8e526693a423c856259ef0d23b9bf3f",
-      "size_bytes": 61648
+      "sha256": "sha256:bdfedbb0cad5dc93f0e82e3dbe6518ea13fc78533de5f680d796dfc3bd5febec",
+      "size_bytes": 63715
     },
     {
       "path": "mycelium_router/a10_batch_admission.py",
@@ -4637,6 +4637,11 @@
       "size_bytes": 14456
     },
     {
+      "path": "tests/request_gateway/test_a4_cancellation.py",
+      "sha256": "sha256:33743e2a246a5c374de3cc56c5ff59e7ba3ad80fcc14c1294726c96fae165c29",
+      "size_bytes": 17486
+    },
+    {
       "path": "tests/request_gateway/test_a6_recovery_burst_gap.py",
       "sha256": "sha256:e04fc34ca62364a5ca9c983578ae25e2405b965dec6a605aed4ac672973d1e7b",
       "size_bytes": 6573
@@ -5233,5 +5238,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:6de73e32cae61cf2733bd610ab9fae2050ee4c1cf7da1aedac60a6d294283a09"
+  "source_digest": "sha256:74c4f53304549be97e97d5d9684465e7904e43a93d3adb1a2ad26d1628566246"
 }
