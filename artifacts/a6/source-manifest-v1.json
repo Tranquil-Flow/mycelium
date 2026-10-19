@@ -1637,6 +1637,11 @@
       "size_bytes": 22042
     },
     {
+      "path": "mycelium_router/a10_overlap_trace.py",
+      "sha256": "sha256:74c661947f36405a18a4d933355428aebeba7317581979fbd35e3238c9ea5777",
+      "size_bytes": 13234
+    },
+    {
       "path": "mycelium_router/adaptive_overlay.py",
       "sha256": "sha256:b746f4a39f3e4bcc3881ca8c864e7aeadc06a28ec72f14d25c95eed2bfefb528",
       "size_bytes": 9957
@@ -1660,6 +1665,11 @@
       "path": "mycelium_router/fakes.py",
       "sha256": "sha256:fad1cb387eed2ec9810d6e13c73c41fbb2414526a02f08b6c09116f2dcb4161b",
       "size_bytes": 18690
+    },
+    {
+      "path": "mycelium_router/hop_join.py",
+      "sha256": "sha256:640739451d1092abf0e8b57782ba818e1b1259ed1c370564eb647ddc9ac10b79",
+      "size_bytes": 6005
     },
     {
       "path": "mycelium_router/idempotency.py",
@@ -1688,13 +1698,13 @@
     },
     {
       "path": "mycelium_router/relay.py",
-      "sha256": "sha256:4ac79785de6a704a0a95a1fe64432b9898eddccf26439c1ba1f848af160ccec7",
-      "size_bytes": 138002
+      "sha256": "sha256:645d443b4b89d10ff2fb20510514038f270fb2d550aaeb0cd1e14ecb68ad88cb",
+      "size_bytes": 138613
     },
     {
       "path": "mycelium_router/router.py",
-      "sha256": "sha256:e41ff0f869207aaeca41d3895b6a90a0f52fdb4f665ee493564c8d75c7f0c622",
-      "size_bytes": 8070
+      "sha256": "sha256:86f2db6b8b8893b4a59b9721e469609a3882ae739f6b2fe316acefd2bcc775e3",
+      "size_bytes": 8775
     },
     {
       "path": "mycelium_router/routing.py",
@@ -2643,8 +2653,8 @@
     },
     {
       "path": "tests/a10_deterministic/test_a10_browser_sessions_gate.py",
-      "sha256": "sha256:e72f75bf9d381df9307e1de7cf5767d053baeb2e34bff1f394c74e951f5fd495",
-      "size_bytes": 15104
+      "sha256": "sha256:aa654b25bee53d3fd2fd4006de432bcdd1e9cf8542149032fa1f822c2d45e079",
+      "size_bytes": 16433
     },
     {
       "path": "tests/a10_deterministic/test_a10_fault_hooks.py",
@@ -2662,6 +2672,21 @@
       "size_bytes": 8983
     },
     {
+      "path": "tests/a10_deterministic/test_a10_hop_join.py",
+      "sha256": "sha256:52d528cb6ef4183b08ac5c880cb715acc54881d35f240061f1a4855b5496f63d",
+      "size_bytes": 6135
+    },
+    {
+      "path": "tests/a10_deterministic/test_a10_infer_admission_announce.py",
+      "sha256": "sha256:07ad814c3e3b573c105431d252c5842a1187606e56ca0e946abdcf7387085c59",
+      "size_bytes": 1937
+    },
+    {
+      "path": "tests/a10_deterministic/test_a10_interactive_prefill_batching.py",
+      "sha256": "sha256:ea8ce30ecf5af606b4d251fbc12413ae8e7dd5f7f350ef528b0c516d591ce163",
+      "size_bytes": 9846
+    },
+    {
       "path": "tests/a10_deterministic/test_gateway_session_rotation.py",
       "sha256": "sha256:c047a5089a8b7cb72ed920b1b106a05e02dd81f2a98506f0bdd5823d1c679f33",
       "size_bytes": 6176
@@ -2670,6 +2695,11 @@
       "path": "tests/a10_deterministic/test_live_parity_and_overflow_probe.py",
       "sha256": "sha256:530f7519e472b33ce4fc23be12cba25df7210f2b26a4aa0d8cab8cd004694b90",
       "size_bytes": 3943
+    },
+    {
+      "path": "tests/a10_deterministic/test_overlap_trace_rejection.py",
+      "sha256": "sha256:2556b0060c2cf196fd2ba41be84657a3a2f2d55c4a86d33349a1e82638fffd9e",
+      "size_bytes": 17524
     },
     {
       "path": "tests/a10_deterministic/test_product_client_http_loopback.py",
@@ -5188,5 +5218,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:0d8c286db6a9d6f6644d5e91da95b69187e2e2ba1d36c508d54b871cd638441e"
+  "source_digest": "sha256:aca4de315e833d3a651f13b3f59bbb56695a94a4623762d8f6dc2c721faacf4d"
 }
