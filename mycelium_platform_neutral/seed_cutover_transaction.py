@@ -194,6 +194,13 @@ def _rollback_checks(before: Mapping[str, Any], after: Mapping[str, Any]) -> dic
     return {**checks, "incumbent_unchanged": all(checks.values())}
 
 
+# A committed cutover moves each member's generation exactly twice: the seed commit binds
+# generation + 1 (``prepare_seed_cutover``: ``post_generation == generation + 1``) and the owned
+# restart re-registers the member once more (+ 1).  Adoption is member-side and does not touch
+# the seed's generation.  Anything else is unexplained.
+COMMITTED_GENERATION_ADVANCE = 2
+
+
 def _committed_checks(before: Mapping[str, Any], after: Mapping[str, Any]) -> dict[str, bool]:
     b, a = _members(before), _members(after)
     return {
@@ -202,8 +209,9 @@ def _committed_checks(before: Mapping[str, Any], after: Mapping[str, Any]) -> di
         "contract_v2": after.get("contract") == "v2",
         "identity_preserved": all(before.get(k) == after.get(k) for k in _IDENTITY_FIELDS) and set(a) == set(b)
         and all(a[n].get("key_digest") == b[n].get("key_digest") for n in b),
-        "member_generations_advanced_by_one": set(a) == set(b) and bool(b) and all(
-            a[n].get("generation") == b[n].get("generation") + 1 for n in b),
+        "member_generations_advanced_by_commit_and_restart": set(a) == set(b) and bool(b) and all(
+            _is_int(b[n].get("generation")) and _is_int(a[n].get("generation"))
+            and a[n]["generation"] == b[n]["generation"] + COMMITTED_GENERATION_ADVANCE for n in b),
         "member_processes_replaced": all(
             (a[n].get("pid"), a[n].get("birth")) != (b[n].get("pid"), b[n].get("birth")) for n in b if n in a),
     }

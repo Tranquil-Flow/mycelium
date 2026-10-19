@@ -85,7 +85,7 @@ def test_happy_path_orders_stop_commit_adopt_restart_and_reads_back_identity(tmp
         fleet.calls == ["readback", "stop", "cutover", "adopt:node-0", "adopt:node-2", "start:restart-1"]
     assert receipt["status"] == "COMMITTED_VERIFIED"
     assert receipt["after"]["seed_pid"] != receipt["before"]["seed_pid"]
-    assert receipt["checks"]["member_generations_advanced_by_one"] is True
+    assert receipt["checks"]["member_generations_advanced_by_commit_and_restart"] is True
     assert receipt["checks"]["identity_preserved"] is True
     assert receipt["restart_epoch"] == "restart-1"
 
@@ -160,11 +160,11 @@ def test_rollback_divergence_is_named_per_check(tmp_path, mutation, failed):
     (lambda d: d.update(seed_pid=100, seed_birth="b1"), "seed_process_replaced"),
     (lambda d: d.update(contract="v1"), "contract_v2"),
     (lambda d: d.update(seed_key_digest="sha256:" + "f" * 64), "identity_preserved"),
-    (lambda d: d["members"]["node-2"].update(generation=7), "member_generations_advanced_by_one"),
-    (lambda d: d["members"]["node-2"].update(generation=8), "member_generations_advanced_by_one"),
-    (lambda d: d["members"]["node-2"].update(generation=10), "member_generations_advanced_by_one"),
-    (lambda d: d["members"]["node-0"].update(generation=True), "member_generations_advanced_by_one"),
-    (lambda d: d["members"]["node-2"].pop("generation"), "member_generations_advanced_by_one"),
+    (lambda d: d["members"]["node-2"].update(generation=7), "member_generations_advanced_by_commit_and_restart"),
+    (lambda d: d["members"]["node-2"].update(generation=8), "member_generations_advanced_by_commit_and_restart"),
+    (lambda d: d["members"]["node-2"].update(generation=10), "member_generations_advanced_by_commit_and_restart"),
+    (lambda d: d["members"]["node-0"].update(generation=True), "member_generations_advanced_by_commit_and_restart"),
+    (lambda d: d["members"]["node-2"].pop("generation"), "member_generations_advanced_by_commit_and_restart"),
     (lambda d: d.update(listener_up=False), "seed_listening"),
 ])
 def test_post_restart_readback_failures_are_named(tmp_path, mutation, failed):
@@ -245,4 +245,4 @@ def test_committed_cutover_judges_the_hardware_70_to_72_advance_and_refuses_unex
             member["generation"] = before["members"][node]["generation"] + advance
         receipt = _run(FakeFleet(tmp_path / str(advance), after=after), tmp_path / str(advance))
         assert receipt["status"] == status, advance
-        assert receipt["checks"]["member_generations_advanced_by_one"] is (advance == 2), advance
+        assert receipt["checks"]["member_generations_advanced_by_commit_and_restart"] is (advance == 2), advance
