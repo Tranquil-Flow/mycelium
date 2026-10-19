@@ -259,6 +259,8 @@ async function send(event) {
     const accepted = await entry(swarm.entry_origin, 'send', await sign({protocol: 'mycelium.swarm.entry_send.v1',
       swarm_id: swarm.swarm_id, key: me.key, grant, prompt, max_new_tokens: Number($('tokens').value) || 128,
       at: now(), nonce: randomText(18)}));
+    const served = (accepted.served_by || []).map((row) => `${row.label}${row.layers ? ' (layers ' + row.layers.join('-') + ')' : ''}`);
+    if (served.length) line('meta', 'Served by: ' + served.join(', '));
     meta.textContent = (accepted.clamped ? `capped at ${accepted.max_new_tokens} tokens · ` : '') +
       `left on your grant: ${accepted.quota.requests_left} requests, ${accepted.quota.tokens_left} tokens`;
     $('chat-state').textContent = 'Generating… tokens appear as the route makes them.';

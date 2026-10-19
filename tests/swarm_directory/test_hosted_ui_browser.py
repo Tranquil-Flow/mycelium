@@ -292,6 +292,7 @@ def test_inference_streams_tokens_and_every_terminal_state_is_named(stack):
             chat(visitor, 'Hosted demo', 'capital of Germany?')
             expect(visitor.locator('.msg.swarm').last).to_have_text('Berlin.', timeout=10000)
             expect(terminal(visitor, 'completed')).to_contain_text('Completed')
+            expect(visitor.locator('#log')).to_contain_text('Served by: This Mac (owner) (layers 0-14), MacBook helper (layers 14-28)')
             shot(visitor, '06-chat-completed')
 
             visitor.fill('#prompt', 'fail please')
