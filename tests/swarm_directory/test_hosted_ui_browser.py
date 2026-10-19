@@ -353,6 +353,40 @@ def test_tokens_arrive_progressively_and_the_owner_kill_switch_ends_it_and_cance
             browser.close()
 
 
+def test_a_visitor_can_stop_their_own_prompt_and_is_told_it_was_cancelled_by_them(stack):
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        try:
+            owner = open_page(browser, stack)
+            create_swarm(owner, stack, 'Hosted demo', 'open', requests=3, tokens=2000)
+            visitor = open_page(browser, stack)
+            get_open_access(visitor, 'Hosted demo')
+            visitor.locator('.swarm', has_text='Hosted demo').locator('button', has_text='Chat').click()
+            expect(visitor.locator('#stop')).to_be_hidden()  # nothing to stop yet
+
+            visitor.fill('#prompt', 'slow story')
+            visitor.click('#send')
+            expect(visitor.locator('#stop')).to_be_visible(timeout=10000)
+            poll_text(visitor.locator('.msg.swarm').last, lambda text: 'tok1 ' in text)
+            assert visitor.locator('.msg.terminal').count() == 0
+            shot(visitor, '14-chat-stop-button-while-generating')
+
+            visitor.click('#stop')
+            expect(terminal(visitor, 'cancelled_by_you')).to_contain_text('Cancelled by you')
+            assert visitor.locator('.msg.terminal[data-terminal="killed"], .msg.terminal[data-terminal="failed"]').count() == 0
+            expect(visitor.locator('#stop')).to_be_hidden()
+            expect(visitor.locator('#send')).to_be_enabled()
+            assert Script.instances[-1].cancelled.is_set()  # the generation on the route was stopped
+            shot(visitor, '15-chat-cancelled-by-you')
+
+            visitor.fill('#prompt', 'capital of Germany?')  # the single-flight slot is free again
+            visitor.click('#send')
+            expect(terminal(visitor, 'completed')).to_be_visible()
+            expect(visitor.locator('#stop')).to_be_hidden()
+        finally:
+            browser.close()
+
+
 def test_a_revoked_grant_is_reported_as_not_granted(stack):
     with sync_playwright() as p:
         browser = p.chromium.launch()
