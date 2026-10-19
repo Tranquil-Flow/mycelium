@@ -24,6 +24,7 @@ from typing import Any, Protocol
 
 PRODUCTION_ROOTS = (Path("/Users/evinova-self/mycelium-physical-run"),)
 _IDENTITY_FIELDS = ("seed_key_digest", "swarm_id")
+_AUTHORITY_FIELDS = ("authority_epoch", "authority_digest")
 
 
 class CutoverRefused(RuntimeError):
@@ -97,11 +98,15 @@ def _canonical_digest(value: Any) -> str:
 
 
 def state_readback(*, seed_db: Path, seed_key: Path, swarm_id: str) -> dict[str, Any]:
-    """Identity, contract and member generations read from the seed's own durable state.
+    """Identity, contract, authority and member generations read from the seed's own durable state.
 
-    ``incumbent_digest`` covers the contract, the identity binding and each member's
-    generation, key digest and incarnation: it is equal across a faithful rollback
-    and changes at a cutover.  Process facts (pids, births, listener) are the fleet's.
+    ``incumbent_digest`` covers what defines the prior authority: the contract, the identity
+    binding, the authority state (epoch and rotation) and the member set with each member's
+    key digest.  A member's ``generation`` and ``incarnation`` are deliberately *not* in it:
+    an owned restart re-registers every member (generation + 1, new incarnation), so the digest
+    is equal across a faithful rollback and changes at a cutover.  Generation and incarnation
+    are reported per member and checked on their own.  Process facts (pids, births, listener)
+    are the fleet's.
     """
     from mycelium_node.identity import load_node_signer
     from mycelium_seed.state import SqliteSeedState
@@ -112,14 +117,19 @@ def state_readback(*, seed_db: Path, seed_key: Path, swarm_id: str) -> dict[str,
     if binding["seed_key_digest"] != signer.verification_key_digest or binding["swarm_id"] != swarm_id:
         raise CutoverRefused("seed_not_bound_to_this_key_and_swarm")
     contract = state.membership_contract()
+    authority = state.authority_state()
     members = {
         str(m["node_id"]): {"generation": int(m["generation"]), "key_digest": str(m["verification_key_digest"]),
                             "incarnation": str(m["incarnation"])}
         for m in state.load_members()}
+    authority_digest = _canonical_digest(authority)
     return {
         "contract": contract["version"], "seed_key_digest": binding["seed_key_digest"], "swarm_id": binding["swarm_id"],
-        "members": {n: {"generation": v["generation"], "key_digest": v["key_digest"]} for n, v in members.items()},
-        "incumbent_digest": _canonical_digest({"contract": contract, "binding": dict(binding), "members": members}),
+        "authority_epoch": authority["authority_generation"], "authority_digest": authority_digest,
+        "members": {n: dict(v) for n, v in members.items()},
+        "incumbent_digest": _canonical_digest({
+            "contract": contract, "binding": dict(binding), "authority": authority_digest,
+            "members": {n: {"key_digest": v["key_digest"]} for n, v in sorted(members.items())}}),
     }
 
 
@@ -158,13 +168,30 @@ def _members(doc: Mapping[str, Any]) -> Mapping[str, Mapping[str, Any]]:
     return value if isinstance(value, Mapping) else {}
 
 
-def _unchanged(before: Mapping[str, Any], after: Mapping[str, Any]) -> bool:
-    if any(before.get(k) != after.get(k) for k in (*_IDENTITY_FIELDS, "contract", "incumbent_digest")):
-        return False
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _rollback_checks(before: Mapping[str, Any], after: Mapping[str, Any]) -> dict[str, bool]:
+    """The incumbent after an owned restart: same authority, each member restarted exactly once.
+
+    Equal generations are never required: every owned restart re-registers the members.
+    """
     b, a = _members(before), _members(after)
-    return set(b) == set(a) and all(
-        b[n].get("generation") == a[n].get("generation") and b[n].get("key_digest") == a[n].get("key_digest")
-        for n in b)
+    same_members = bool(b) and set(b) == set(a)
+    authority = (
+        all(before.get(k) == after.get(k) for k in (*_IDENTITY_FIELDS, "contract", "incumbent_digest", *_AUTHORITY_FIELDS))
+        and bool(after.get("incumbent_digest")) and same_members
+        and all(b[n].get("key_digest") == a[n].get("key_digest") for n in b))
+    advanced = same_members and all(
+        _is_int(b[n].get("generation")) and _is_int(a[n].get("generation"))
+        and a[n]["generation"] == b[n]["generation"] + 1 for n in b)
+    restarted = same_members and all(
+        isinstance(a[n].get("incarnation"), str) and a[n]["incarnation"] and isinstance(b[n].get("incarnation"), str)
+        and b[n]["incarnation"] and a[n]["incarnation"] != b[n]["incarnation"] for n in b)
+    checks = {"incumbent_authority_preserved": authority, "member_generations_advanced_by_one": advanced,
+              "member_incarnations_restarted": restarted, "seed_listening": after.get("listener_up") is True}
+    return {**checks, "incumbent_unchanged": all(checks.values())}
 
 
 def _committed_checks(before: Mapping[str, Any], after: Mapping[str, Any]) -> dict[str, bool]:
@@ -227,8 +254,8 @@ def run_seed_cutover(
     receipt["after"] = after
     if failure is None or failure.startswith("cutover_failed"):
         if "committed" not in receipt["phases"]:
-            unchanged = _unchanged(before, after) and after.get("listener_up") is True
-            receipt["checks"]["incumbent_unchanged"] = unchanged
+            receipt["checks"] = _rollback_checks(before, after)
+            unchanged = receipt["checks"]["incumbent_unchanged"]
             receipt["reason"] = failure
             receipt["status"] = ("NEGATIVE_PRESERVED" if expect_refusal else "ROLLED_BACK") if unchanged else "ROLLBACK_DIVERGED"
             return receipt
