@@ -100,6 +100,7 @@ from mycelium_a13_macos.concurrent_pump import ConcurrentTargetControlPump
 from mycelium_a13_macos.managed_control import (
     ManagedControlMailbox,
     _LONG_POLL_HOLD_SECONDS,
+    _LONG_POLL_MAX_HOLD_SECONDS,
     _LONG_POLL_STEP_SECONDS,
     _empty_poll_delivery,
 )
@@ -108,7 +109,24 @@ from mycelium_a13_macos.managed_runtime import ManagedTargetRuntime
 #: The window THIS test's owner waits for one command, in this offline reproduction.
 #: Not a production constant: it stands in for the measured ~4.0-4.5 s cleanup window
 #: and keeps the test bounded, exactly as p81r1's route waiter did.
-COMMAND_WINDOW_SECONDS = 0.7
+#:
+#: It is a real-clock budget for the *whole* owner->target->worker->owner round trip
+#: (~0.08 s idle), so what matters is its headroom over that trip, not its size: at 0.7 s
+#: the headroom was 8.7x, which the L2 rehearsal's full-suite load consumed once
+#: (``command_deadline_exceeded``).  4.0 s is ~50x.  It must stay *shorter than the
+#: interval it is tested against* (``E2E_POLL_STEP_SECONDS`` / ``E2E_POLL_HOLD_SECONDS``,
+#: asserted below), because that inversion is the whole point: an interval-gated claim
+#: lands at about one step (~5 s) and cannot fit in this window at any load.
+COMMAND_WINDOW_SECONDS = 4.0
+
+#: Poll step and park hold of the end-to-end test's mailbox: the largest values the
+#: validated constructor accepts (``_LONG_POLL_MAX_HOLD_SECONDS``).  The window above
+#: scales with them instead of the interval shrinking toward the window.  Both bound the
+#: no-wake-up claim latency: the park ends at the hold and the pump re-polls ~50 ms later,
+#: so the hold must be as long as the step or an interval-gated path would still land
+#: inside the window.
+E2E_POLL_STEP_SECONDS = 5.0
+E2E_POLL_HOLD_SECONDS = 5.0
 
 #: Test configuration of ``ManagedControlMailbox(long_poll_step=...)``, an existing
 #: validated parameter (``0 < step <= _LONG_POLL_MAX_HOLD_SECONDS``).  The defect class
@@ -157,6 +175,39 @@ def _production_poll_defaults_are_untouched() -> None:
 
     assert _LONG_POLL_HOLD_SECONDS == 1.5
     assert _LONG_POLL_STEP_SECONDS == 0.02
+
+
+_E2E_MAILBOX_OPTIONS = {
+    "long_poll_step": E2E_POLL_STEP_SECONDS,
+    "long_poll_hold": E2E_POLL_HOLD_SECONDS,
+}
+
+
+def _the_window_is_shorter_than_the_interval_it_is_tested_against() -> None:
+    """The inversion under test: the window cannot fit a poll interval or a park."""
+
+    assert COMMAND_WINDOW_SECONDS < E2E_POLL_STEP_SECONDS
+    assert COMMAND_WINDOW_SECONDS < E2E_POLL_HOLD_SECONDS
+    assert E2E_POLL_STEP_SECONDS <= _LONG_POLL_MAX_HOLD_SECONDS
+    assert E2E_POLL_HOLD_SECONDS <= _LONG_POLL_MAX_HOLD_SECONDS
+
+
+def _the_window_command_was_woken_not_polled(record: dict) -> None:
+    """Load-independent evidence that the window command was delivered by the wake-up.
+
+    The latency of a woken command is host speed; whether an *interval* ended its park is
+    not.  The enqueue signalled in a way the parked poll can observe, and no interval wait
+    started after that signal slept itself out.
+    """
+
+    signals = record["signals"]
+    assert signals, "no delivery signal: the command could only be claimed by an interval attempt"
+    assert record["generation_bumps"] >= 1
+    slept_out = [w for w in record["waits"] if not w[0] and w[1] >= signals[0]]
+    assert not slept_out, (
+        f"{len(slept_out)} poll-interval wait(s) started after the command was durable "
+        "and timed out: the claim path waited out its interval instead of the wake-up"
+    )
 
 
 def _delivery_wake_evidence(monkeypatch) -> dict:
@@ -513,7 +564,7 @@ def test_an_enqueue_that_lands_during_an_attempt_is_not_a_lost_wakeup(
 
 
 def test_a_command_whose_window_is_shorter_than_the_delivery_interval_still_completes(
-    tmp_path,
+    tmp_path, monkeypatch
 ) -> None:
     """The p81r1 end-to-end shape, fleet-free.
 
@@ -525,16 +576,18 @@ def test_a_command_whose_window_is_shorter_than_the_delivery_interval_still_comp
     """
 
     _production_poll_defaults_are_untouched()
-    with _world(
-        tmp_path / "swarm", mailbox_options={"long_poll_step": OBSERVABLE_POLL_STEP_SECONDS}
-    ) as world:
+    _the_window_is_shorter_than_the_interval_it_is_tested_against()
+    with _world(tmp_path / "swarm", mailbox_options=_E2E_MAILBOX_OPTIONS) as world:
+        record = _delivery_wake_evidence(monkeypatch)
         target = runtime(tmp_path / "target", world)
         sender = owner(tmp_path / "sender", world)
         control = session(sender, world)
         try:
             assert target.start()["state"] == "running"
-            # Let the control loop reach its first idle poll (parked, no claims yet).
-            time.sleep(0.2)
+            # Let the control loop reach its first idle poll: provably parked (it has
+            # entered its first interval wait), not "0.2 s later", which a starved
+            # control-loop thread need not have reached.
+            assert record["parked"].wait(5.0), "the control loop never reached its first park"
             started_at = time.monotonic()
             reply = control.send_before(
                 command_id="windowed-hello",
@@ -550,6 +603,7 @@ def test_a_command_whose_window_is_shorter_than_the_delivery_interval_still_comp
                 f"{COMMAND_WINDOW_SECONDS}s window"
             )
             assert world["mailbox"].command_receipt("windowed-hello")["state"] == "completed"
+            _the_window_command_was_woken_not_polled(record)
         finally:
             control.close()
             target.close()
@@ -582,15 +636,15 @@ def test_a_woken_command_is_not_failed_by_a_slow_host_inside_its_window(
     """
 
     _production_poll_defaults_are_untouched()
-    with _world(
-        tmp_path / "swarm", mailbox_options={"long_poll_step": OBSERVABLE_POLL_STEP_SECONDS}
-    ) as world:
+    _the_window_is_shorter_than_the_interval_it_is_tested_against()
+    with _world(tmp_path / "swarm", mailbox_options=_E2E_MAILBOX_OPTIONS) as world:
         record = _delivery_wake_evidence(monkeypatch)
         target = runtime(tmp_path / "target", world)
         sender = owner(tmp_path / "sender", world)
         control = session(sender, world)
         try:
             assert target.start()["state"] == "running"
+            assert SLOW_HOST_STALL_SECONDS < COMMAND_WINDOW_SECONDS
             real_send = target.worker.send
             stalled = threading.Event()
 
@@ -613,7 +667,7 @@ def test_a_woken_command_is_not_failed_by_a_slow_host_inside_its_window(
             assert stalled.is_set(), "the test never stalled its native execution"
             assert reply["ok"] is True, reply
             assert world["mailbox"].command_receipt("windowed-hello")["state"] == "completed"
-            assert record["generation_bumps"] >= 1
+            _the_window_command_was_woken_not_polled(record)
         finally:
             control.close()
             target.close()
