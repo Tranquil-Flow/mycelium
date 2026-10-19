@@ -205,8 +205,8 @@ def test_release_time_after_a_proven_cancel_is_not_charged_to_the_cancel_budget(
         service.close()
 
 
-def test_cancel_proof_resolving_after_the_budget_still_fails_closed() -> None:
-    """The proof itself landing past the bound is still a failure."""
+def test_cancel_proof_resolving_after_the_budget_still_fails_closed(caplog) -> None:
+    """The proof itself landing past the bound is still a failure, and the branch is logged."""
 
     qualification = _synthetic_qualification()
     now = [10.0]
@@ -240,13 +240,20 @@ def test_cancel_proof_resolving_after_the_budget_still_fails_closed() -> None:
         clock=lambda: now[0],
     )
     try:
-        request_id = service.submit(_submission(qualification))
-        assert backend.started.wait(timeout=1.0)
-        assert service.cancel(request_id) is True
-        terminal = _terminal(service, request_id)
+        with caplog.at_level("WARNING", logger="mycelium_request_gateway.service"):
+            request_id = service.submit(_submission(qualification))
+            assert backend.started.wait(timeout=1.0)
+            assert service.cancel(request_id) is True
+            terminal = _terminal(service, request_id)
         assert terminal.kind == "failed"
         assert terminal.code == "cancellation_cleanup_deadline_exceeded"
         assert service._sessions[request_id].cancellation_within_bound is False
+        lines = [
+            r.getMessage() for r in caplog.records if "gateway_cancellation_failure" in r.getMessage()
+        ]
+        assert lines == [
+            "gateway_cancellation_failure branch=proof_after_budget elapsed_ms=9000 budget_ms=8000"
+        ]
     finally:
         backend.stop.set()
         service.close()

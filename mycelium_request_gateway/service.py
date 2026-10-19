@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from dataclasses import replace
 import hashlib
 import hmac
+import logging
 import os
 from pathlib import Path
 import threading
@@ -38,6 +39,7 @@ _MAX_BACKEND_TOKEN_TEXT_BYTES = 1 << 20
 # cleanup budget has one owner, so the gateway stamp cannot drift from the
 # route's fanout window derivation (cancel_and_cleanup_budget_seconds).
 _MAX_CANCELLATION_AND_CLEANUP_SECONDS = mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS
+_LOGGER = logging.getLogger(__name__)
 
 
 class InferenceBackend(Protocol):
@@ -94,6 +96,9 @@ class _Session:
     active_subscription: bool = False
     cancellation_started: bool = False
     cancellation_started_at: float | None = None
+    # Gateway clock reading at which the backend's cancellation proof was already
+    # resolved when the backend stopped; later release bookkeeping is not charged.
+    cancellation_resolved_at: float | None = None
     cancellation_deadline_at: float | None = None
     cancellation_wall_deadline_at: float | None = None
     cancellation_within_bound: bool | None = None
@@ -601,6 +606,7 @@ class RequestGatewayService:
                 if session.terminal_event is None:
                     session.cancellation_started = False
                     session.cancellation_started_at = None
+                    session.cancellation_resolved_at = None
                     session.cancellation_deadline_at = None
                     session.cancellation_wall_deadline_at = None
                 session.condition.notify_all()
@@ -797,6 +803,7 @@ class RequestGatewayService:
                 _GatewayEmission(self, session),
                 session.stop.is_set,
             )
+            self._stamp_cancellation_resolved(session)
             self._release_backend_once(session)
             if outcome == "completed":
                 cancellation_resolution = self._await_backend_cancellation(session)
@@ -828,6 +835,7 @@ class RequestGatewayService:
                 session.outcome = outcome
         except AdmissionError as exc:
             if exc.code == "request_cancelled" and session.stop.is_set():
+                self._stamp_cancellation_resolved(session)
                 self._release_backend_once(session)
                 self._append_cancellation_terminal(session)
             else:
@@ -1066,18 +1074,53 @@ class RequestGatewayService:
         if started_at is None:
             self._append_terminal(session, "cancelled")
             return
-        within_bound = (
-            self._clock() - started_at
-            <= _MAX_CANCELLATION_AND_CLEANUP_SECONDS
-        )
+        with session.condition:
+            resolved_at = session.cancellation_resolved_at
+        # The bound covers cancellation and its cleanup proof.  When the proof was already
+        # resolved as the backend stopped, the release that follows (which may replace a route
+        # after a peer loss) is bookkeeping and is not charged to it.
+        finished_at = self._clock() if resolved_at is None else resolved_at
+        within_bound = finished_at - started_at <= _MAX_CANCELLATION_AND_CLEANUP_SECONDS
         with session.condition:
             session.cancellation_within_bound = within_bound
         if within_bound:
             self._append_terminal(session, "cancelled")
         else:
-            self._append_cancellation_failure(session)
+            self._append_cancellation_failure(
+                session,
+                branch="proof_after_budget",
+                elapsed_s=finished_at - started_at,
+            )
 
-    def _append_cancellation_failure(self, session: _Session) -> None:
+    def _stamp_cancellation_resolved(self, session: _Session) -> None:
+        """Record when the backend's cancellation proof was resolved, before release runs."""
+
+        with session.condition:
+            if (
+                session.cancellation_started
+                and session.backend_cancellation_complete
+                and session.cancellation_resolved_at is None
+            ):
+                session.cancellation_resolved_at = self._clock()
+
+    def _append_cancellation_failure(
+        self,
+        session: _Session,
+        *,
+        branch: str = "proof_unproven",
+        elapsed_s: float | None = None,
+    ) -> None:
+        with session.condition:
+            started_at = session.cancellation_started_at
+        if elapsed_s is None and started_at is not None:
+            elapsed_s = self._clock() - started_at
+        # Bounded and non-disclosing: fixed branch name and two integers, no identifiers.
+        _LOGGER.warning(
+            "gateway_cancellation_failure branch=%s elapsed_ms=%d budget_ms=%d",
+            branch,
+            int(max(0.0, elapsed_s or 0.0) * 1000),
+            int(_MAX_CANCELLATION_AND_CLEANUP_SECONDS * 1000),
+        )
         with session.condition:
             session.cancellation_within_bound = False
         self._append_terminal(
