@@ -119,6 +119,31 @@ def _raw(port: int, head: bytes) -> tuple[int, dict[str, Any]]:
         return status, json.loads(reader.read(length))
 
 
+def _slow_upload(port: int, path: str, headers: dict[str, str], pieces: list[bytes]) -> tuple[int, dict[str, Any]]:
+    """Deterministic race: the client uploads slower than the proxy refuses (a real client behind a slow link).
+
+    Each piece is sent after a pause, so the proxy has refused and closed before the later pieces leave.  A proxy
+    that closes with its peer still sending makes the kernel answer with a reset: the client's next send raises
+    (BrokenPipe/ConnectionReset) and the refusal is never read.  A lingering close keeps reading and discarding,
+    so every send succeeds and the client reads the refusal.
+    """
+    import time
+
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        connection.putrequest("POST", path)
+        for name, value in headers.items():
+            connection.putheader(name, value)
+        connection.endheaders()
+        for piece in pieces:
+            time.sleep(0.15)
+            connection.send(piece)  # must not raise: the proxy lingers rather than resetting
+        response = connection.getresponse()
+        return response.status, json.loads(response.read())
+    finally:
+        connection.close()
+
+
 IP = {"Cf-Connecting-Ip": "203.0.113.7"}
 POST = {"Content-Type": "application/json", "X-Mycelium-Swarms": "1", **IP}
 
@@ -285,6 +310,23 @@ def test_directory_body_cap_and_chunked_reframing() -> None:
                                     chunks=[b"{}"])
         assert (status, json.loads(payload)["error"]["code"]) == (400, "unsupported_transfer_encoding")
         assert product.requests == []
+
+
+def test_refusal_survives_a_body_uploaded_after_the_response() -> None:
+    """Lingering close: an early refusal must reach a client that is still sending its (unread) body."""
+    with _world() as (public, product, directory):
+        port = public.server_port
+        over = defaults.DIRECTORY_MAX_BODY_BYTES + 1
+        status, document = _slow_upload(
+            port, "/swarms/api/v1/records",
+            {**POST, "Content-Length": str(over)}, [b"x" * 16384, b"x" * 16384, b"x" * 16384])
+        assert (status, document["error"]["code"]) == (413, "request_body_too_large")
+        status, document = _slow_upload(
+            port, "/api/v1/inference",
+            {"Content-Type": "application/json", "Transfer-Encoding": "chunked"},
+            [b"2\r\n{}\r\n", b"2\r\n{}\r\n", b"2\r\n{}\r\n", b"0\r\n\r\n"])
+        assert (status, document["error"]["code"]) == (400, "unsupported_transfer_encoding")
+        assert product.requests == [] and directory.requests == []
 
 
 def test_config_rejects_non_loopback_directory_upstream_and_cli_wires_it(tmp_path) -> None:
