@@ -268,9 +268,10 @@ def test_signed_read_queries_have_their_own_budget_and_never_spend_the_write_bud
     for i in range(30):  # far above both write budgets
         assert call(directory, 'POST', '/my-grants', docs.grantee_query(alice, at=clock.t), client='ip:9')[0] == 200, i
         assert call(directory, 'POST', '/owner-inbox', docs.owner_query(alice, swarm, at=clock.t), client='ip:9')[0] == 200, i
-    # the write budget is untouched: the second write is still allowed, the third is the limit
-    assert call(directory, 'POST', '/access-requests', docs.access_request(Ed25519Signer.generate(), swarm, note='', at=clock.t),
-                client='ip:9')[0] == 200
+    # the write budget is untouched: three writes in all fit per address, the fourth is the limit
+    for _ in range(2):
+        assert call(directory, 'POST', '/access-requests', docs.access_request(Ed25519Signer.generate(), swarm, note='', at=clock.t),
+                    client='ip:9')[0] == 200
     assert call(directory, 'POST', '/access-requests', docs.access_request(Ed25519Signer.generate(), swarm, note='', at=clock.t),
                 client='ip:9') == (429, {'error': 'rate_limited_ip'})
 

@@ -24,6 +24,8 @@ from .wire import Verifier, WireError, fingerprint, parse_json_object
 
 PRIVACY_NOTE = ('Your prompt is seen by this swarm\'s nodes (the Macs that run it). It is not end-to-end '
                 'encrypted from them. The directory never sees prompts and keeps no logs or analytics.')
+#: Signed read-only queries: own budgets, not the write budgets.
+QUERY_ROUTES = frozenset({'/owner-inbox', '/my-grants'})
 API_ROUTES = frozenset({'/records', '/delete', '/heartbeat', '/access-requests', '/owner-inbox', '/grants', '/deny',
                         '/my-grants', '/entry-offers'})
 _STATUS_ORDER = {'serving': 0, 'warming': 1, 'offline': 2}
@@ -44,6 +46,9 @@ class Limits:
     writes_per_ip_per_minute: int = 30
     writes_per_key_per_minute: int = 20
     reads_per_ip_per_minute: int = 240
+    #: signed read-only queries (/my-grants, /owner-inbox): the page repeats them, so they do not spend the write budgets
+    queries_per_ip_per_minute: int = 240
+    queries_per_key_per_minute: int = 90
     writes_per_minute: int = 600
 
 
@@ -60,6 +65,8 @@ class Directory:
         self._ip_writes = WindowLimiter(limits.writes_per_ip_per_minute)
         self._key_writes = WindowLimiter(limits.writes_per_key_per_minute)
         self._ip_reads = WindowLimiter(limits.reads_per_ip_per_minute)
+        self._ip_queries = WindowLimiter(limits.queries_per_ip_per_minute)
+        self._key_queries = WindowLimiter(limits.queries_per_key_per_minute)
         self._writes = WindowLimiter(limits.writes_per_minute, max_keys=1)
         self._nonce_inserts = 0
 
@@ -96,7 +103,7 @@ class Directory:
             raise WireError('route_unknown', 404)
         if len(body) > self.limits.max_body:
             raise WireError('body_too_large', 413)
-        if not self._ip_writes.allow(client, now):
+        if not (self._ip_queries if path in QUERY_ROUTES else self._ip_writes).allow(client, now):
             raise WireError('rate_limited_ip', 429)
         if not self._writes.allow('*', now):
             raise WireError('directory_busy', 503)
@@ -109,6 +116,10 @@ class Directory:
 
     def _key_rate(self, key: str, now: int) -> None:
         if not self._key_writes.allow(key, now):
+            raise WireError('rate_limited_key', 429)
+
+    def _query_rate(self, key: str, now: int) -> None:
+        if not self._key_queries.allow(key, now):
             raise WireError('rate_limited_key', 429)
 
     def _owned(self, swarm_id: str, owner_key: str) -> dict[str, Any]:
@@ -286,7 +297,7 @@ class Directory:
         document = docs.check(document, docs.OWNER_QUERY, self.verifier)
         docs.fresh(document['at'], now, self.limits.skew)
         self._owned(document['swarm_id'], document['owner_key'])
-        self._key_rate(document['owner_key'], now)
+        self._query_rate(document['owner_key'], now)
         self._consume_nonce(document['nonce'], now)
         swarm_id = document['swarm_id']
         requests = [{'requester_key': v['request']['requester_key'],
@@ -303,7 +314,7 @@ class Directory:
     def _my_grants(self, document, now):
         document = docs.check(document, docs.GRANTEE_QUERY, self.verifier)
         docs.fresh(document['at'], now, self.limits.skew)
-        self._key_rate(document['grantee_key'], now)
+        self._query_rate(document['grantee_key'], now)
         self._consume_nonce(document['nonce'], now)
         grants, denied, pending = [], [], []
         for _key, value in self.store.scan('grant', document['grantee_key'] + '/'):
