@@ -368,7 +368,13 @@ def _submit_and_drain(service, qualification):
     events = []
     try:
         while True:
-            event = subscription.next_event(timeout=2)
+            # Wait on the stream itself, not on a wall-clock gap between events:
+            # ``next_event`` returns when an event is published and returns None
+            # once the stream is terminal (or the worker is done with a blocked
+            # terminal).  A bounded gap measured the host's scheduling, not the
+            # router: a machine-wide stall of a few seconds ended the drain with
+            # ``stream_event_timeout`` while the recovery was still progressing.
+            event = subscription.next_event(timeout=None)
             if event is None:
                 break
             events.append(event)
