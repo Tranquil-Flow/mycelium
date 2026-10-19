@@ -103,6 +103,21 @@ def _call(port: int, method: str, path: str, *, body: bytes = b"", headers: dict
         connection.close()
 
 
+def _raw(port: int, head: bytes) -> tuple[int, dict[str, Any]]:
+    """Send only a request head (an over-cap body is refused before it is read: no racy upload)."""
+    import socket
+
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as connection:
+        connection.sendall(head)
+        reader = connection.makefile("rb")
+        status = int(reader.readline().split()[1])
+        length = 0
+        while (line := reader.readline().strip()):
+            if line.lower().startswith(b"content-length:"):
+                length = int(line.split(b":")[1])
+        return status, json.loads(reader.read(length))
+
+
 IP = {"Cf-Connecting-Ip": "203.0.113.7"}
 POST = {"Content-Type": "application/json", "X-Mycelium-Swarms": "1", **IP}
 
@@ -253,16 +268,17 @@ def test_directory_down_is_a_502_not_a_product_fallback() -> None:
 def test_directory_body_cap_and_chunked_reframing() -> None:
     with _world() as (public, product, directory):
         port = public.server_port
-        big = b"x" * (defaults.DIRECTORY_MAX_BODY_BYTES + 1)
-        status, _h, payload = _call(port, "POST", "/swarms/api/v1/records", body=big, headers=POST)
-        assert (status, json.loads(payload)["error"]["code"]) == (413, "request_body_too_large")
+        over = defaults.DIRECTORY_MAX_BODY_BYTES + 1
+        head = (b"POST /swarms/api/v1/records HTTP/1.1\r\nHost: x\r\nCf-Connecting-Ip: 203.0.113.7\r\n"
+                b"Content-Type: application/json\r\n")
+        status, document = _raw(port, head + b"Content-Length: %d\r\n\r\n" % over)
+        assert (status, document["error"]["code"]) == (413, "request_body_too_large")
         assert _call(port, "POST", "/swarms/api/v1/records", headers=POST, chunks=[b"x" * 10, b"y" * 10])[0] == 200
         assert directory.requests[-1]["body"] == b"x" * 10 + b"y" * 10
         assert directory.requests[-1]["headers"]["content-length"] == "20"
         assert "transfer-encoding" not in directory.requests[-1]["headers"]
-        status, _h, payload = _call(port, "POST", "/swarms/api/v1/records", headers=POST,
-                                    chunks=[big[:9000], big[9000:]])
-        assert (status, json.loads(payload)["error"]["code"]) == (413, "request_body_too_large")
+        status, document = _raw(port, head + b"Transfer-Encoding: chunked\r\n\r\n%x\r\n" % over)
+        assert (status, document["error"]["code"]) == (413, "request_body_too_large")
         # chunked stays refused on the product route
         status, _h, payload = _call(port, "POST", "/api/v1/inference", headers={"Content-Type": "application/json"},
                                     chunks=[b"{}"])
