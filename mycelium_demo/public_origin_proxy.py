@@ -17,13 +17,18 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import re
+import socket
 import stat
+import time
 from typing import Callable, Iterable
 from urllib.parse import urlsplit
 
 from mycelium_swarm_directory import hosted_defaults as _hosted
 
 
+# Lingering close after an early refusal: bounded time and bytes of discarded upload (slowloris-safe).
+_LINGER_SECONDS = 2.0
+_LINGER_MAX_BYTES = 1024 * 1024
 _CAPABILITY_BYTES = frozenset(b"0123456789abcdef")
 _SAFE_TOKEN = re.compile(r"[A-Za-z0-9._~-]{1,64}")
 _BLOCKED_PREFIXES = (
@@ -251,6 +256,10 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "MyceliumPublicOriginProxy/1"
     sys_version = ""
+
+    def parse_request(self) -> bool:
+        self._body_consumed = False
+        return super().parse_request()
 
     def do_GET(self) -> None:  # noqa: N802 - http.server API
         self._handle_public_request()
@@ -505,6 +514,7 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
             body += data
         if self.rfile.read(2) != b"\r\n":
             raise PublicOriginProxyError("invalid_chunked_body")
+        self._body_consumed = True
         return bytes(body)
 
     def _read_bounded_body(
@@ -519,6 +529,7 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
         if len(values) > 1:
             raise PublicOriginProxyError("invalid_content_length")
         if not values:
+            self._body_consumed = True
             return b""
         try:
             length = int(values[0], 10)
@@ -528,7 +539,9 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
             raise PublicOriginProxyError("invalid_content_length")
         if length > limit:
             raise PublicOriginProxyError("request_body_too_large")
-        return self.rfile.read(length)
+        data = self.rfile.read(length)
+        self._body_consumed = True
+        return data
 
     def _forward_headers(self, body_length: int | None) -> dict[str, str]:
         outbound: dict[str, str] = {}
@@ -613,6 +626,32 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
         self.close_connection = True
+        self._linger_if_body_unread()
+
+    def _linger_if_body_unread(self) -> None:
+        """Lingering close: after an early refusal, read and discard what the client is still sending.
+
+        Closing a socket with unread inbound bytes makes the kernel answer with a reset, which can destroy the
+        refusal before the client reads it (and breaks the client's next send).  So: send FIN after the response,
+        discard the peer's remaining upload for a bounded time and number of bytes, and let the normal close follow.
+        """
+        if getattr(self, "_body_consumed", True):
+            return
+        if self.headers.get("Content-Length") in (None, "0") and self.headers.get("Transfer-Encoding") is None:
+            return
+        connection = self.connection
+        try:
+            connection.shutdown(socket.SHUT_WR)
+            deadline = time.monotonic() + _LINGER_SECONDS
+            remaining = _LINGER_MAX_BYTES
+            while remaining > 0 and (left := deadline - time.monotonic()) > 0:
+                connection.settimeout(left)
+                chunk = connection.recv(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except (OSError, ValueError):
+            pass  # peer gone or timed out: the connection closes next
 
 
 def load_proxy_capability(path: Path | str) -> str:
