@@ -128,6 +128,30 @@ OBSERVABLE_POLL_STEP_SECONDS = 1.0
 WAKE_BOUND_SECONDS = 0.1
 
 
+class _HoldClock:
+    """The mailbox's own clock for the park's hold, advanced only by the test.
+
+    ``ManagedControlMailbox(monotonic=...)`` is the clock ``poll`` measures its
+    ``long_poll_hold`` against.  The test parks a poll and enqueues "from inside the
+    hold"; on the wall clock that is a race against the owner-side enqueue (signing, a
+    ``synchronous=FULL`` commit and a loopback-TLS round trip), which a loaded host can
+    stretch past the whole 1.5 s hold, so the hold would end the park empty before the
+    command exists.  On this clock the hold cannot end until ``expire`` -- which the test
+    calls only on teardown, so a wake-up that never comes ends the poll rather than
+    leaving its thread parked.  The hold constant itself is untouched (asserted above)
+    and ``long_poll_step`` still bounds each interval wait on the real clock.
+    """
+
+    def __init__(self) -> None:
+        self._now = 0.0
+
+    def __call__(self) -> float:
+        return self._now
+
+    def expire(self) -> None:
+        self._now = float("inf")
+
+
 def _production_poll_defaults_are_untouched() -> None:
     """The fix is the delivery path.  These are the shipped numbers, unchanged."""
 
@@ -160,7 +184,11 @@ def _delivery_wake_evidence(monkeypatch) -> dict:
 
     real_signal = ManagedControlMailbox._signal_delivery
     real_wait = ManagedControlMailbox._wait_for_delivery
-    record: dict = {"signals": [], "generation_bumps": 0, "waits": []}
+    record: dict = {
+        "signals": [], "generation_bumps": 0, "waits": [],
+        # Set when the poll has entered its first interval wait, i.e. is provably parked.
+        "parked": threading.Event(),
+    }
 
     def signal(self):
         before = self._delivery_generation_now()
@@ -171,6 +199,7 @@ def _delivery_wake_evidence(monkeypatch) -> dict:
 
     def wait(self, timeout, *, observed=None):
         started = time.monotonic()
+        record["parked"].set()
         released = real_wait(self, timeout, observed=observed)
         record["waits"].append((bool(released), started, time.monotonic()))
         return released
@@ -390,19 +419,28 @@ def test_enqueue_wakes_a_parked_poll_instead_of_waiting_for_the_poll_interval(
     """
 
     _production_poll_defaults_are_untouched()
-    with _world(tmp_path, mailbox_options={"long_poll_step": step_seconds}) as world:
+    hold_clock = _HoldClock()
+    with _world(
+        tmp_path,
+        mailbox_options={"long_poll_step": step_seconds, "monotonic": hold_clock},
+    ) as world:
         record = _delivery_wake_evidence(monkeypatch)
         thread, box = _poll_in_background(
             world, sequence=1, request_id="parked-poll-1", step_seconds=step_seconds
         )
-        # Enqueue from *inside* the hold, not before it: the poll is parked for
-        # _LONG_POLL_HOLD_SECONDS, and 0.2 s of that is spent first.
-        time.sleep(0.2)
-        enqueued_at = time.monotonic()
-        _enqueue(world, "woken-1")
-        owner_enqueue_cost = time.monotonic() - enqueued_at
-        thread.join(5)
-        assert not thread.is_alive()
+        try:
+            # Enqueue from *inside* the hold, not before it: only once the poll has
+            # provably entered its first interval wait, and the hold (measured on
+            # ``hold_clock``) cannot have ended by the time the enqueue lands.
+            assert record["parked"].wait(60), "the poll never parked"
+            enqueued_at = time.monotonic()
+            _enqueue(world, "woken-1")
+            owner_enqueue_cost = time.monotonic() - enqueued_at
+            thread.join(5)
+            assert not thread.is_alive()
+        finally:
+            hold_clock.expire()  # never leave a parked poll behind a failed assertion
+            thread.join(5)
 
         assert box["delivery"]["delivery_kind"] == "command", box
         assert box["delivery"]["command_id"] == "woken-1"
