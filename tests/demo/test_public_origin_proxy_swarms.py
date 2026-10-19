@@ -66,7 +66,7 @@ def _serve(server: ThreadingHTTPServer) -> Iterator[Any]:
 
 @contextmanager
 def _world(*, mount: bool = True, directory_port: int | None = None,
-           require_ip: bool | None = None) -> Iterator[tuple[Any, _Recording, _Recording]]:
+           require_ip: bool | None = None, redirect_root: bool = True) -> Iterator[tuple[Any, _Recording, _Recording]]:
     product, directory = _Recording("product"), _Recording("directory")
     with _serve(product), _serve(directory):
         extra: dict[str, Any] = {}
@@ -74,6 +74,7 @@ def _world(*, mount: bool = True, directory_port: int | None = None,
             extra = {"directory_host": "127.0.0.1", "directory_port": directory_port or directory.server_port}
             if require_ip is not None:
                 extra["directory_require_client_ip"] = require_ip
+            extra["redirect_root_to_swarms"] = redirect_root
         config = proxy.ProxyConfig(
             listen_host="127.0.0.1", listen_port=4350, upstream_host="127.0.0.1",
             upstream_port=product.server_port, public_host="mycelium.now", capability=CAPABILITY,
@@ -230,7 +231,7 @@ def test_swarms_methods_are_limited_to_get_head_post() -> None:
 
 
 def test_existing_allowlist_and_blocklist_are_unchanged_with_the_mount_on() -> None:
-    with _world() as (public, product, directory):
+    with _world(redirect_root=False) as (public, product, directory):
         port = public.server_port
         assert _call(port, "GET", "/")[0] == 200
         assert _call(port, "GET", "/assets/app.js")[0] == 200
