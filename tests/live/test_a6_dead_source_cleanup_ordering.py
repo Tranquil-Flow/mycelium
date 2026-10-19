@@ -39,6 +39,7 @@ import pytest
 from mycelium_live import route as route_module
 from mycelium_live.router_port import LiveRouterPort
 from mycelium_node import process as process_module
+from mycelium_request_gateway.backend import RouterSessionBackend
 from tests.live.test_a6_local_physical_recovery import (
     _compose,
     _run_case,
@@ -56,18 +57,51 @@ _CASE = "ordinary_browser_source_failure_recovery"
 _HOLD_BOUND_S = 6.0
 
 
-def _router_state_of(router, owner, request_id) -> dict:
+def _record_failures(monkeypatch) -> list:
+    """Collect every failure the router and the backend raise while a test runs.
+
+    The router retains a request's bounded error code only until the gateway
+    releases the request, which is before the assertion below can ask for it. A
+    recorder installed up front keeps what actually ended a request: the router
+    command's exception (with its cause) and any exception out of the backend run.
+    """
+
+    failures: list = []
+    original_code = LiveRouterPort._bounded_error_code
+
+    def bounded_error_code(error):
+        failures.append({"router_command": repr(error), "cause": repr(error.__cause__)})
+        return original_code(error)
+
+    original_run = RouterSessionBackend.run
+
+    def run(self, request_id, submission, emit_token, is_cancelled):
+        try:
+            return original_run(self, request_id, submission, emit_token, is_cancelled)
+        except BaseException as error:
+            failures.append({"backend_run": repr(error), "request_id": request_id})
+            raise
+
+    monkeypatch.setattr(LiveRouterPort, "_bounded_error_code", staticmethod(bounded_error_code))
+    monkeypatch.setattr(RouterSessionBackend, "run", run)
+    return failures
+
+
+def _router_state_of(router, owner, request_id, failures) -> dict:
     """What the router and the owner say about a request that did not complete.
 
     Evaluated only when the assertion above fails: a failed second request names
-    its router status, recovery reason and the owner's restart state instead of
-    only the gateway's generic ``backend_failed``.
+    its router status, recovery reason, the failures recorded while the test ran
+    and the owner's restart state instead of only the gateway's generic
+    ``backend_failed``.
     """
 
-    state: dict = {}
+    state: dict = {"recorded_failures": list(failures)}
     for name, read in (
         ("request_status", lambda: router.request_status(request_id)),
+        ("request_error_code", lambda: router.request_error_code(request_id)),
         ("recovery_failure_reason", lambda: router.recovery_failure_reason(request_id)),
+        ("scoped_incidents", lambda: owner._current.a4_scoped_runtime_incidents()),
         ("owner_status", owner.public_status),
     ):
         try:
@@ -78,7 +112,7 @@ def _router_state_of(router, owner, request_id) -> dict:
 
 
 def _assert_source_failure_recovered_then_cold_restarted(
-    local, owner, router, service, request_id, outcome, first_route,
+    local, owner, router, service, request_id, outcome, first_route, failures,
 ) -> None:
     assert "refusal" not in outcome, outcome
     assert outcome["post_state"]["source_failure_observed"] is True
@@ -91,7 +125,7 @@ def _assert_source_failure_recovered_then_cold_restarted(
     assert owner._current is not first_route
     second_id, second = _run_without_fault(service, owner)
     assert second["kinds"] == ["completed"], (
-        second, _router_state_of(router, owner, second_id))
+        second, _router_state_of(router, owner, second_id, failures))
     assert local.session_factory.launches == ["node-a", "node-b", "node-a", "node-b"]
 
 
@@ -106,6 +140,7 @@ def test_survivor_cleanup_proven_after_the_dead_source_channel_failed(
     already attempted the source command's FAILED terminal (it gave up).
     """
 
+    failures = _record_failures(monkeypatch)
     local, owner, router, service, target = _compose(tmp_path, "single")
     lock = threading.Lock()
     release = threading.Event()
@@ -201,7 +236,7 @@ def test_survivor_cleanup_proven_after_the_dead_source_channel_failed(
         assert state["released_by"] == "survivor_asked_again", (state, outcome)
         assert state["survivor_proven_at_terminal"] is True, state
         _assert_source_failure_recovered_then_cold_restarted(
-            local, owner, router, service, request_id, outcome, first_route)
+            local, owner, router, service, request_id, outcome, first_route, failures)
     finally:
         release.set()
         service.close()
@@ -220,6 +255,7 @@ def test_status_read_cancelling_before_the_reader_sees_eof_still_records_the_exi
     ``node_process_exited``.
     """
 
+    failures = _record_failures(monkeypatch)
     local, owner, router, service, target = _compose(tmp_path, "single")
     state = _hold_source_eof_for_a_status_read(monkeypatch, owner)
     try:
@@ -234,7 +270,7 @@ def test_status_read_cancelling_before_the_reader_sees_eof_still_records_the_exi
         assert state["lost_peer_cancelled"] is True, state
         assert "refusal" not in outcome, (outcome, state)
         _assert_source_failure_recovered_then_cold_restarted(
-            local, owner, router, service, request_id, outcome, first_route)
+            local, owner, router, service, request_id, outcome, first_route, failures)
     finally:
         service.close()
         owner.close()
