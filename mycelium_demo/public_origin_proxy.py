@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import http.client
+import hashlib
 import ipaddress
 import json
 import os
@@ -17,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import re
 import stat
-from typing import Iterable
+from typing import Callable, Iterable
 from urllib.parse import urlsplit
 
 from mycelium_swarm_directory import hosted_defaults as _hosted
@@ -53,6 +54,13 @@ _DIRECTORY_ASSET_PATHS = frozenset(
     }
 )
 _DIRECTORY_API_PREFIX = _hosted.DIRECTORY_MOUNT_PREFIX + "/api/v1/"
+_DIRECTORY_CONFIG_PATH = _DIRECTORY_API_PREFIX + "config"
+_DIRECTORY_DOWNLOAD_PREFIX = _hosted.DIRECTORY_MOUNT_PREFIX + "/download/"
+# The helper package: a regular, non-empty, non-symlink file no larger than this is hashed at startup.
+_HELPER_ZIP_MAX_BYTES = 1024 * 1024 * 1024
+_HELPER_ZIP_NAME = re.compile(r"[A-Za-z0-9._-]{1,100}\.zip")
+_HELPER_VERSION = re.compile(r"[A-Za-z0-9._+-]{1,40}")
+_CONFIG_REWRITE_MAX_BYTES = 1024 * 1024
 _DIRECTORY_API_PATH = re.compile(re.escape(_DIRECTORY_API_PREFIX) + r"[A-Za-z0-9._/-]{1,200}")
 _DIRECTORY_FORBIDDEN_PATH_PARTS = ("..", "%", "\\", "?", "#", "//")
 # Client-supplied identity and credentials never reach the directory; the one
@@ -120,6 +128,11 @@ class ProxyConfig:
     directory_port: int | None = None
     directory_require_client_ip: bool = True
     directory_max_body_bytes: int = _hosted.DIRECTORY_MAX_BODY_BYTES
+    # Helper app zip served at /swarms/download/<name> (needs the mount); None = nothing to serve.
+    helper_zip_path: str | None = None
+    helper_version: str = _hosted.HELPER_DOWNLOAD["version"]
+    # '/' redirects to the swarms page while the mount is on.  Owner decision 5 is still open: default ON.
+    redirect_root_to_swarms: bool = True
 
     def __post_init__(self) -> None:
         if not _is_loopback_host(self.listen_host):
@@ -155,6 +168,68 @@ class ProxyConfig:
             1 <= self.directory_max_body_bytes <= 1024 * 1024
         ):
             raise PublicOriginProxyError("invalid_directory_max_body_bytes")
+        if not isinstance(self.redirect_root_to_swarms, bool):
+            raise PublicOriginProxyError("invalid_redirect_root_to_swarms")
+        if not isinstance(self.helper_version, str) or _HELPER_VERSION.fullmatch(self.helper_version) is None:
+            raise PublicOriginProxyError("invalid_helper_version")
+        if self.helper_zip_path is not None:
+            candidate = self.helper_zip_path
+            if (
+                not isinstance(candidate, str)
+                or not candidate.startswith("/")
+                or _HELPER_ZIP_NAME.fullmatch(os.path.basename(candidate)) is None
+            ):
+                raise PublicOriginProxyError("invalid_helper_zip_path")
+            if self.directory_host is None:
+                raise PublicOriginProxyError("helper_zip_requires_directory")
+
+
+@dataclass(frozen=True, slots=True)
+class HelperDownload:
+    """The helper zip as it was when it was hashed (identity is re-checked on every use)."""
+
+    path: str
+    name: str
+    sha256: str
+    size: int
+    identity: tuple[int, int, int, int]
+
+    @property
+    def url(self) -> str:
+        return _DIRECTORY_DOWNLOAD_PREFIX + self.name
+
+
+def _file_identity(info: os.stat_result) -> tuple[int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+
+def load_helper_download(path: str) -> HelperDownload | None:
+    """Hash the helper zip, or None when it is missing, unreadable, empty, too large or not a plain file."""
+
+    try:
+        named = os.lstat(path)
+        if not stat.S_ISREG(named.st_mode) or not (0 < named.st_size <= _HELPER_ZIP_MAX_BYTES):
+            return None
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            opened = os.fstat(descriptor)
+            if _file_identity(opened) != _file_identity(named):
+                return None
+            digest = hashlib.sha256()
+            total = 0
+            with os.fdopen(descriptor, "rb", closefd=False) as handle:
+                while chunk := handle.read(1024 * 1024):
+                    total += len(chunk)
+                    if total > _HELPER_ZIP_MAX_BYTES:
+                        return None
+                    digest.update(chunk)
+            if total != opened.st_size or _file_identity(os.fstat(descriptor)) != _file_identity(opened):
+                return None
+        finally:
+            os.close(descriptor)
+    except OSError:
+        return None
+    return HelperDownload(path, os.path.basename(path), digest.hexdigest(), total, _file_identity(named))
 
 
 class PublicOriginProxyServer(ThreadingHTTPServer):
@@ -165,6 +240,10 @@ class PublicOriginProxyServer(ThreadingHTTPServer):
 
     def __init__(self, server_address: tuple[str, int], config: ProxyConfig) -> None:
         self.proxy_config = config
+        # Hashed once, here; None = configured but not publishable (the page then says "not published yet").
+        self.helper_download = (
+            load_helper_download(config.helper_zip_path) if config.helper_zip_path is not None else None
+        )
         super().__init__(server_address, PublicOriginProxyHandler)
 
 
@@ -205,6 +284,14 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
     def _handle_public_request(self) -> None:
         parsed = urlsplit(self.path)
         path = parsed.path
+        if (
+            self._config.directory_host is not None
+            and self._config.redirect_root_to_swarms
+            and path == "/"
+            and self.command in {"GET", "HEAD"}
+        ):
+            self._send_redirect(_hosted.DIRECTORY_MOUNT_PREFIX + "/")
+            return
         if self._config.directory_host is not None and _is_directory_mount(path):
             self._handle_directory_request()
             return
@@ -226,6 +313,9 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
 
     def _handle_directory_request(self) -> None:
         config = self._config
+        if self._config.helper_zip_path is not None and self.command in {"GET", "HEAD"}:
+            if self.path.startswith(_DIRECTORY_DOWNLOAD_PREFIX) and self._serve_helper_download():
+                return
         allowed, status, code = _directory_route_decision(self.command, self.path)
         if not allowed:
             self._send_json_error(status, code)
@@ -237,17 +327,114 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
                 max_bytes=config.directory_max_body_bytes, allow_chunked=True
             )
             headers = self._directory_headers(len(body), client_ip)
+            rewrite = (
+                self._rewrite_config_download
+                if config.helper_zip_path is not None
+                and self.command == "GET"
+                and self.path == _DIRECTORY_CONFIG_PATH
+                else None
+            )
             self._proxy_to_upstream(
                 self.path,
                 headers,
                 body,
                 target=(config.directory_host, config.directory_port),
+                transform=rewrite,
             )
         except PublicOriginProxyError as exc:
             status = 413 if exc.code in {"request_headers_too_large", "request_body_too_large"} else 400
             self._send_json_error(status, exc.code)
         except (OSError, http.client.HTTPException, TimeoutError):
             self._send_json_error(502, "upstream_unavailable")
+
+    def _current_helper(self) -> HelperDownload | None:
+        """The hashed helper zip if the file on disk is still the one that was hashed."""
+
+        helper = self.server.helper_download  # type: ignore[attr-defined]
+        if helper is None:
+            return None
+        try:
+            if _file_identity(os.lstat(helper.path)) != helper.identity:
+                return None
+        except OSError:
+            return None
+        return helper
+
+    def _rewrite_config_download(self, payload: bytes) -> bytes:
+        """Replace the directory's ``download`` claim with what this proxy actually holds."""
+
+        try:
+            document = json.loads(payload)
+        except ValueError:
+            return payload
+        if not isinstance(document, dict):
+            return payload
+        helper = self._current_helper()
+        document["download"] = (
+            {
+                "available": True,
+                "url": helper.url,
+                "sha256": helper.sha256,
+                "version": self._config.helper_version,
+                "notarized": False,
+                "size": helper.size,
+            }
+            if helper is not None
+            else {
+                "available": False,
+                "url": None,
+                "sha256": None,
+                "version": self._config.helper_version,
+                "notarized": False,
+            }
+        )
+        return json.dumps(document, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+    def _serve_helper_download(self) -> bool:
+        """Serve the hashed helper zip; True when this request was answered here."""
+
+        declared = self.server.helper_download  # type: ignore[attr-defined]
+        if declared is None or self.path != declared.url:
+            return False
+        if self._current_helper() is None:
+            self._send_json_error(503, "download_changed")
+            return True
+        try:
+            descriptor = os.open(declared.path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        except OSError:
+            self._send_json_error(503, "download_changed")
+            return True
+        try:
+            if _file_identity(os.fstat(descriptor)) != declared.identity:
+                self._send_json_error(503, "download_changed")
+                return True
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Length", str(declared.size))
+            self.send_header("Content-Disposition", f'attachment; filename="{declared.name}"')
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            if self.command != "HEAD":
+                with os.fdopen(descriptor, "rb", closefd=False) as handle:
+                    while chunk := handle.read(256 * 1024):
+                        self.wfile.write(chunk)
+        except OSError:
+            pass  # the client went away or the disk failed mid-stream: the connection just closes
+        finally:
+            os.close(descriptor)
+            self.close_connection = True
+        return True
+
+    def _send_redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
 
     def _directory_client_ip(self) -> str | None:
         """The one validated client address, or None when allowed to be absent."""
@@ -365,6 +552,7 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
         body: bytes,
         *,
         target: tuple[str, int] | None = None,
+        transform: Callable[[bytes], bytes] | None = None,
     ) -> None:
         host, port = target or (self._config.upstream_host, self._config.upstream_port)
         connection = http.client.HTTPConnection(
@@ -375,6 +563,18 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
         try:
             connection.request(self.command, path, body=body, headers=headers)
             response = connection.getresponse()
+            if transform is not None and response.status == 200:
+                payload = transform(response.read(_CONFIG_REWRITE_MAX_BYTES + 1)[:_CONFIG_REWRITE_MAX_BYTES])
+                self.send_response(response.status, response.reason)
+                for name, value in response.getheaders():
+                    if name.lower() not in _HOP_BY_HOP_HEADERS | {"content-length"}:
+                        self.send_header(name, value)
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                if self.command != "HEAD":
+                    self.wfile.write(payload)
+                return
             self.send_response(response.status, response.reason)
             for name, value in response.getheaders():
                 lower = name.lower()
@@ -467,6 +667,9 @@ def build_config_from_args(argv: Iterable[str] | None = None) -> ProxyConfig:
             max_header_bytes=args.max_header_bytes,
             max_body_bytes=args.max_body_bytes,
             upstream_timeout_seconds=args.upstream_timeout_seconds,
+            helper_zip_path=args.helper_zip,
+            helper_version=args.helper_version,
+            redirect_root_to_swarms=args.redirect_root_to_swarms,
             **_directory_kwargs(args),
         )
     except PublicOriginProxyError as exc:
@@ -511,6 +714,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--directory-allow-missing-client-ip",
         action="store_true",
         help="forward /swarms requests that carry no Cf-Connecting-Ip (local testing only)",
+    )
+    parser.add_argument(
+        "--helper-zip",
+        default=None,
+        help=(
+            "absolute path of the helper app zip to serve at /swarms/download/<name> "
+            "(hashed at startup; needs --directory-upstream; missing file = 'not published yet')"
+        ),
+    )
+    parser.add_argument("--helper-version", default=_hosted.HELPER_DOWNLOAD["version"])
+    parser.add_argument(
+        "--redirect-root-to-swarms",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="redirect GET / to /swarms/ while the directory is mounted (default on; owner decision 5)",
     )
     parser.add_argument(
         "--directory-max-body-bytes", type=int, default=_hosted.DIRECTORY_MAX_BODY_BYTES
