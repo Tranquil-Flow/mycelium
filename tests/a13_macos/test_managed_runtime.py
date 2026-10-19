@@ -124,6 +124,22 @@ def test_a_dead_native_worker_is_replaced_while_the_runtime_is_running(tmp_path)
     """
     import os
     import signal
+    import threading
+
+    from mycelium_a13_macos import managed_runtime as managed_runtime_module
+
+    # The runtime publishes the replacement worker first and writes the replacement
+    # diagnostic after it (``_replace_worker_if_dead``), so "the worker changed" does not
+    # yet mean "the diagnostic exists".  Observe the write itself instead of racing it.
+    recorded = threading.Event()
+    real_write = managed_runtime_module._atomic_private_json
+
+    def observing_write(path, *args, **kwargs):
+        try:
+            return real_write(path, *args, **kwargs)
+        finally:
+            if os.path.basename(path) == 'worker-replacement.private.json':
+                recorded.set()
 
     with _world(tmp_path / 'world') as world:
         target = runtime(tmp_path / 'target', world)
@@ -131,6 +147,7 @@ def test_a_dead_native_worker_is_replaced_while_the_runtime_is_running(tmp_path)
             assert target.start()['state'] == 'running'
             first = target.worker
             assert first.status()['running'] is True
+            managed_runtime_module._atomic_private_json = observing_write
             os.killpg(os.getpgid(first.pid), signal.SIGTERM)
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline and target.worker is first:
@@ -139,7 +156,9 @@ def test_a_dead_native_worker_is_replaced_while_the_runtime_is_running(tmp_path)
                 'the runtime did not replace its native worker: a killed worker was never followed by a '
                 'replacement, which is the measured p79r1 defect (no worker supervision exists)')
             assert target.worker.status()['running'] is True
+            assert recorded.wait(20), 'the replacement never wrote its diagnostic'
             assert (target.root / 'worker-replacement.private.json').exists(), (
                 'the replacement must be recorded as its own bounded diagnostic')
         finally:
+            managed_runtime_module._atomic_private_json = real_write
             target.close()
