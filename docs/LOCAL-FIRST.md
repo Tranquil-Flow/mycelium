@@ -46,8 +46,11 @@ arguments it produced before this lane (TESTED (unit): `test_node_internet_runti
 overrides that, and the CLI flag beats the environment, which beats the
 implied default. With nothing set in `internet` mode the behaviour is exactly
 the old one (TESTED (unit): default paths still download). `--offline` is accepted
-by `python -m mycelium_node` and the A13 launcher (`python -m mycelium_a13_macos`);
-they export the resolved value so the code below sees it.
+by `python -m mycelium_node`, `python -m mycelium_seed`, `python -m mycelium_demo serve`
+(`--network-mode` is accepted there too, only to imply the switch) and the A13
+launcher (`python -m mycelium_a13_macos`); they export the resolved value so the code
+below sees it. `serve` does not forward either flag to the live supervisor; the
+supervisor reads the exported value. TESTED (unit).
 
 Every Hugging Face site is guarded, and a refusal names the local/LAN source to use
 (error code `offline_model_source_required`):
@@ -62,6 +65,63 @@ Every Hugging Face site is guarded, and a refusal names the local/LAN source to 
 TESTED (unit, every network opener replaced by one that fails the test). Not
 covered: scripts under `scripts/` and the owner-side build tools that call the
 library directly, other than through the guarded functions above.
+
+### Fully offline model transfer (owner to member)
+
+What works offline, TESTED (the real owner `DemoApp` managed-control plane, a real
+member and `SelectedModelAcquisition` in one process, with the owner's LAN HTTPS
+listener on loopback; no second machine, no hardware):
+
+- The owner serves its verified, pinned manifest (file list, sizes, digests, model id
+  and model commit) to live members on a second signed route,
+  `/managed-control/model-source/manifest`, next to the byte-range route. It uses the
+  same checks as a byte read: a member statement signed with the member's key and
+  checked against the current member record, a still-live member, replay refusal, and
+  the exact pinned model and commit. It is served on the relay path and on the
+  owner's LAN-direct HTTPS listener (TLS pinned to the certificate in the owner-signed
+  announcement).
+- With `--offline` (or `lan`/`local`) a member's acquisition takes the file list from
+  the owner instead of from Hugging Face metadata, then downloads and hash-verifies
+  every file from the owner as before. A manifest for another model or another commit
+  is refused with `model_manifest_commit_mismatch` before any byte is requested; a
+  malformed one with `model_manifest_invalid`. Online behaviour is unchanged
+  (Hugging Face metadata first).
+- Trust, stated plainly: offline, the digests come from the owner (signed, and bound to
+  the pinned model id and commit), not from Hugging Face. Every received byte is
+  checked against them, so a damaged or tampered file fails. A malicious owner could
+  serve a self-consistent but different file set under the pinned commit and the
+  member could not detect it offline, because the commit is not recomputed from the
+  files. The owner is already the swarm authority, so this adds no new party, but it is
+  weaker than checking against Hugging Face.
+
+What this does not give you yet: the A13 multi-device flow still reaches the owner's
+control plane through the Cloudflare relay (section 3), and inference across machines
+still needs the Rust LanDirect sidecar. So today "fully offline" holds for the model
+transfer logic, not for an end-to-end two-Mac run.
+
+### Model from a local folder
+
+```sh
+# once, on a machine that is online (writes a new file, never overwrites):
+python -m mycelium_demo models fetch-manifest --model <id> --commit <40-hex> --out pinned.manifest.json
+# on the offline machine, with the model files in a folder (USB stick, shared drive):
+python -m mycelium_demo models import <folder> --model <id> --commit <40-hex> \
+  --manifest pinned.manifest.json --cache-root "<app state folder>/model-source"
+```
+
+The import checks every file in the folder against the pinned manifest first (exact
+set of files, exact sizes, exact SHA-256 or git blob id), refuses the whole import if
+anything is missing, unexpected, a link, the wrong size or the wrong content, and lists
+every offending file in plain English. Nothing is written to the cache on a refusal.
+Otherwise the files are copied (hashed again while copying), installed read-only
+(mode 0400) in the layout the app's own download uses, so the next download of that
+model finds it and fetches nothing. It refuses to replace a model that is already in
+the cache. Only registered models are accepted. Offline (`--offline`, or `lan`/`local`)
+it needs `--manifest`; it never contacts Hugging Face. `--cache-root` must be the
+app's `model-source` folder (a non-default run model uses
+`model-source-<first 12 of the commit>`; a target uses `serving/model-source...`
+under its own state folder). There is no picker in the app UI. TESTED (unit,
+temporary folders only).
 
 ### `doctor --lan`
 
@@ -114,13 +174,13 @@ is unchanged.
   `--sidecar-force-relay`; the operator plans use `ssh_target`.
 - **Discovery.** There is no mDNS/Bonjour. Peers learn each other's addresses from
   the membership exchange; you pass or auto-derive the seed address.
-- **Fully offline model transfer to a member.** `--offline` stops every Hugging Face
-  contact (section 2), but a member still obtains the pinned file list from the
-  Hugging Face metadata API or an injected manifest, and the owner does not serve
-  that manifest to members yet. So in `lan`/`local` mode a member's A13 model
-  download fails closed with the offline message instead of completing; only
-  paths that start from a local cache (`weight_provisioning`) or an injected
-  manifest work. There is no "model from a local folder" picker.
+- **A fully offline two-device run.** The model transfer no longer needs Hugging Face
+  (section 2: the owner serves the pinned manifest and the bytes, and a folder can be
+  imported), but the rest of the A13 flow still does not run without hosted
+  services: reaching the owner's control plane uses the Cloudflare relay, and the
+  stage runtime needs the Rust LanDirect sidecar (design only). Nothing in this
+  lane has been run on two machines. The app UI has no "model from a folder" picker;
+  use the command above.
 - **Transport security of the seed.** The seed endpoint is plain `http`. Use it
   only on a network you control; invites are single-use and signed but the
   channel is not encrypted. TLS for LAN origins is not implemented.
