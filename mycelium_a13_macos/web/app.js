@@ -31,6 +31,30 @@ function renderAdaptive(value){
   $('adaptive-stop').disabled=busy||!a.enabled||!!a.stopped;
   $('adaptive-resume').disabled=busy||!a.enabled||!a.stopped;
 }
+// Plain-language sentences for the error codes a person can actually meet; anything else
+// falls back to the code in words so nothing is hidden.
+const HUMAN_ERRORS={
+  membership_required:'Create or join a swarm first, then try again.',
+  consent_required:'Tick the consent box in step 01 first.',
+  download_consent_required:'Tick the authorization box and choose a download limit first.',
+  download_consent_invalid:'The download limit must be a positive number of bytes, no larger than your storage limit.',
+  acquisition_already_active:'A download is already running. Wait for it to finish or cancel it.',
+  pairing_window_relay_required:'Join codes need the public relay, which can only be started before the swarm is created.',
+  pairing_window_swarm_required:'Create the swarm first, then invite a Mac.',
+  network_requires_fresh_owner:'The public relay can only be started once, before the swarm is created.',
+  owner_role_required:'Only the owner Mac can do this.',
+  target_role_required:'Only a Mac that joined a swarm can do this.',
+  revoke_confirmation_required:'Tick the revoke confirmation box first.',
+  standing_consent_required:'Tick the standing-consent box before joining.',
+  download_limit_exceeded:'The model needs more bytes than the limit allows. Raise “Maximum bytes to fetch” (up to your storage limit) and press Download again.',
+  storage_limit_exceeded:'The model does not fit in this Mac’s storage limit. Choose a smaller model, or use a fresh installation with a larger storage limit.',
+  insufficient_disk:'This Mac does not have enough free disk space for the download. Free some space and press Download again.',
+  network_error:'The download source could not be reached. Check your internet connection and press Download again; partial files are kept.',
+  resource_power_policy_violation:'Your power limit is not met right now. Plug in to AC power and try again.',
+  resource_thermal_policy_violation:'This Mac is too hot right now. Let it cool down and try again.',
+  resource_network_policy_violation:'Your network limit is not met right now (for example a metered connection). Switch networks and try again.',
+};
+function humanError(code){return HUMAN_ERRORS[code]||`${String(code).replaceAll('_',' ')}.`;}
 function notice(text) { $('notice').textContent=text; }
 function rung(label, value) {
   const dt=document.createElement('dt'); dt.textContent=label;
@@ -94,10 +118,16 @@ function render(value) {
   const canDownload=value.running && a.membership_state==='current' && !!value.resource_policy;
   $('download-weights').disabled=busy || !canDownload || downloading || acquisition?.state==='prepared' || !$('download-consent').checked;
   $('cancel-download').disabled=busy || !downloading;
+  $('download-hint').textContent=downloading || acquisition?.state==='prepared' ? ''
+    : !value.running ? 'This Mac is stopped. Press “Start / reconnect” (Pause, restart, or leave) first.'
+    : !canDownload ? 'Create or join a swarm first; the download unlocks once this Mac is enrolled.'
+    : !$('download-consent').checked ? 'Tick the authorization box above to enable the download.' : '';
+  $('leave-hint').textContent=target && a.membership_state==='current'
+    ? 'This Mac joined as a member, so it has no “Revoke this Mac” button: only the owner revokes membership. To leave, press “Withdraw standing consent” (Invite or join with a code) so no more work is accepted, then press “Stop & retain private state”.' : '';
   $('download-consent').disabled=busy || downloading;
   $('download-limit').disabled=busy || downloading;
   if(acquisition){
-    $('acquisition-state').textContent=`Source: ${acquisition.state.replaceAll('_',' ')}${acquisition.error_code ? ' · '+acquisition.error_code.replaceAll('_',' ') : ''}${value.acquisition_policy_error ? ' · '+value.acquisition_policy_error.replaceAll('_',' ') : ''}`;
+    $('acquisition-state').textContent=`Source: ${acquisition.state.replaceAll('_',' ')}${acquisition.error_code ? ' · '+acquisition.error_code.replaceAll('_',' ') : ''}${value.acquisition_policy_error ? ' · '+value.acquisition_policy_error.replaceAll('_',' ') : ''}${HUMAN_ERRORS[acquisition.error_code]||HUMAN_ERRORS[value.acquisition_policy_error] ? ' — '+(HUMAN_ERRORS[acquisition.error_code]||HUMAN_ERRORS[value.acquisition_policy_error]) : ''}`;
     $('acquisition-bytes').textContent=`${acquisition.downloaded_bytes.toLocaleString()} / ${acquisition.total_bytes.toLocaleString()} bytes · ${acquisition.state==='prepared' ? 'source verified; no model loaded' : 'not source-ready'}`;
     $('acquisition-progress').max=Math.max(1,acquisition.total_bytes);
     $('acquisition-progress').value=acquisition.downloaded_bytes;
@@ -138,7 +168,7 @@ async function perform(path, body, success) {
   busy=true;
   for(const button of document.querySelectorAll('button'))button.disabled=true;
   try {const result=await api(path,body);await refresh(false);notice(success);return result;}
-  catch(error){notice(`Action not completed: ${error.message.replaceAll('_',' ')}. Existing identity and evidence are retained.`);}
+  catch(error){notice(`Action not completed: ${humanError(error.message)} Existing identity and evidence are retained.`);}
   finally{
     busy=false;
     for(const button of document.querySelectorAll('button'))button.disabled=false;
@@ -224,7 +254,7 @@ $('pair-request').addEventListener('click',async()=>{
   try {
     const value=await api('/api/pair/request',{});
     showRequest(value);
-  }catch(error){notice(`Pairing request not completed: ${error.message.replaceAll('_',' ')}.`);}
+  }catch(error){notice(`Pairing request not completed: ${humanError(error.message)}`);}
 });
 $('infer-form').addEventListener('submit',(event)=>event.preventDefault());
 function showRequest(value){
@@ -305,9 +335,10 @@ function applyResources(value){
   }
   if(sel){
     const preStaged=sel.label==='Qwen2.5-7B';
+    const snapshot=sel.snapshot_bytes.toLocaleString('en-US');
     $('acquisition-detail').textContent=preStaged
-      ?"Model bytes are provisioned from a local seed (the pinned 7B snapshot, a LAN copy); this installation only ever fetches the pinned repository's small metadata/text files (11,535,382 bytes) and refuses instead of downloading model bytes."
-      :`Downloads the pinned ${sel.label} snapshot (${sel.snapshot_bytes.toLocaleString('en-US')} bytes) from Hugging Face on this owner Mac; it needs a storage limit of at least ${gb(sel.owner_storage_bytes)}. Joined Macs never download the whole model: each fetches only its own verified slice.`;
+      ?`The pinned ${sel.label} snapshot is ${snapshot} bytes. If a verified copy is already on this Mac (a retained or LAN-seeded snapshot) the default limit of 11,535,382 bytes is enough: only the small metadata/text files are fetched from Hugging Face. With no copy here, the default limit makes acquisition stop with “download limit exceeded” before any model byte is fetched. To download the model from Hugging Face instead, raise the limit below to at least ${snapshot} bytes (it needs a storage limit of at least ${gb(sel.owner_storage_bytes)}). Joined Macs never download the whole model: each fetches only its own verified slice.`
+      :`Tick the authorization box, then press “Download / resume source” to download the pinned ${sel.label} snapshot (${snapshot} bytes) from Hugging Face onto this owner Mac; it needs a storage limit of at least ${gb(sel.owner_storage_bytes)}. Joined Macs never download the whole model: each fetches only its own verified slice.`;
     const limit=$('download-limit');
     limit.max=String(Math.max(sel.snapshot_bytes,11535382));
     // The grant may not exceed the storage limit (app.py download_consent_invalid).
@@ -327,6 +358,14 @@ function renderJoinFlow(value,target,a){
   const waiting=!!flow.join_window;
   $('join-with-code').disabled=busy || joined || waiting || !$('standing-confirm').checked || !$('visibility').checked;
   $('join-cancel').hidden=!waiting;
+  $('join-hint').textContent=joined || waiting || (owner && !!a.swarm_created) ? ''
+    : !$('visibility').checked ? 'Tick the cooperative-peer visibility box in step 01 to enable “Join with code”.'
+    : !$('standing-confirm').checked ? 'Tick the standing-consent box above to enable “Join with code”.' : '';
+  const origin=!!value.network?.public_origin;
+  $('invite-hint').textContent=!owner || (a.swarm_created && origin) ? ''
+    : !a.swarm_created ? (origin ? 'Create the swarm (step 01) to unlock “Invite a Mac”.'
+      : 'Start the public relay (button above) before creating the swarm, then create it to unlock “Invite a Mac”.')
+    : 'Join codes need the public relay, which can only be started before the swarm is created. To add a Mac now, use “Pair another authorized Mac” under Device readiness.';
   $('join-fingerprint').textContent=waiting?`Waiting for the owner. Check that the owner sees this fingerprint: ${flow.join_window.fingerprint}`:'';
   const standing=flow.standing_consent;
   $('standing-withdraw').hidden=!target || !standing || standing.state==='withdrawn';
@@ -364,6 +403,7 @@ $('relay-start').addEventListener('click',()=>{
 });
 $('window-open').addEventListener('click',()=>void perform('/api/pair/window/open',{ttl_seconds:Number($('window-ttl').value)},'Join code opened. Show it to one person; approve their Mac when it appears.'));
 $('standing-confirm').addEventListener('change',()=>{if(latest&&connected)render(latest);});
+$('visibility').addEventListener('change',()=>{if(latest&&connected)render(latest);});
 $('join-with-code').addEventListener('click',()=>{
   const disclosure=latest?.join_flow?.standing_disclosure;
   if(!disclosure || !$('standing-confirm').checked)return;
@@ -382,7 +422,7 @@ setInterval(async()=>{
   if(busy||!connected||joinPolling||!latest?.join_flow?.join_window)return;
   joinPolling=true;
   try{const value=await api('/api/join/window/poll',{});if(value.state==='joined'){notice('Joined. Capability and relay link reported to the owner automatically.');}await refresh(false);}
-  catch(error){notice(`Join not completed: ${error.message.replaceAll('_',' ')}.`);await refresh(false);}
+  catch(error){notice(`Join not completed: ${humanError(error.message)}`);await refresh(false);}
   finally{joinPolling=false;}
 },3000);
 window.addEventListener('pageshow',()=>void refresh(false));

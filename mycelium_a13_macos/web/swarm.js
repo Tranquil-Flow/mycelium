@@ -20,7 +20,7 @@
     swarm_record_owner_mismatch: 'The directory returned a swarm with a different owner than the link. Not attached.',
     swarm_link_invalid: 'That is not a swarm link (it starts with mycelium-swarm:).',
   };
-  const explain = (code) => (ERRORS[code] ? `${ERRORS[code]} (${code})` : code);
+  const explain = (code) => (ERRORS[code] ? `${ERRORS[code]} (${code})` : `Action not completed: ${String(code).replaceAll('_', ' ')} (${code}).`);
   let lastError = null;  // the last refused action stays visible until the next one succeeds
   function render(status) {
     const card = $('swarm-publish'); if (!card) return;
