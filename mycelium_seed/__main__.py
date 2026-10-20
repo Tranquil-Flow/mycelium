@@ -28,6 +28,7 @@ from mycelium_node.process import (
 )
 from mycelium_platform_neutral import network_mode as network_mode_module
 from mycelium_platform_neutral.network_mode import NetworkMode
+from mycelium_platform_neutral.offline import add_offline_argument, apply_offline
 from mycelium_qualification.evidence import canonical_json_bytes
 
 from .authority import load_bound_seed_signer
@@ -129,6 +130,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--init-only", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     network_mode_module.add_network_mode_argument(parser)
+    add_offline_argument(parser)
     return parser
 
 
@@ -173,6 +175,8 @@ def _resolve_network(
 ) -> NetworkMode:
     """Apply the network mode to bind/advertise; internet keeps today's values."""
     mode = network_mode_module.resolve_network_mode(args.network_mode, environ)
+    # lan/local imply offline unless overridden; internet leaves the environment alone.
+    apply_offline(args.offline, mode, os.environ if environ is None else environ)
     if mode is NetworkMode.INTERNET:
         if args.bind is None:
             args.bind = "127.0.0.1"

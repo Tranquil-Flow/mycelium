@@ -198,6 +198,8 @@ def build_parser() -> argparse.ArgumentParser:
             "qualified physical route"
         ),
     )
+    network_mode_module.add_network_mode_argument(serve)
+    add_offline_argument(serve)
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=_serve_port)
     serve.add_argument("--state-root", type=Path)
@@ -669,6 +671,13 @@ def main(
 
     if args.action != "serve":
         raise AssertionError(f"unsupported action: {args.action}")
+    # lan/local imply --offline unless overridden; internet leaves the environment alone.
+    try:
+        apply_offline(
+            args.offline, args.network_mode, os.environ if environ is None else environ
+        )
+    except (OfflineSettingError, ValueError) as exc:
+        parser.error(str(exc))
     if args.mode == "live":
         if args.operator_plan is None:
             parser.error("live mode requires --operator-plan")
