@@ -306,6 +306,79 @@ def parse_memory_pressure(text: object) -> str | None:
     return "warn"
 
 
+# Provisional, unmeasured Linux PSI bands over the ``avg10`` window (percent of the last 10 s that
+# tasks stalled on memory).  Like the macOS cross-check bands they are not a measurement; an
+# unreadable or malformed file is ``unknown``, never ``normal``.
+PSI_WARN_SOME_AVG10: Final = 10.0
+PSI_WARN_FULL_AVG10: Final = 1.0
+PSI_CRITICAL_SOME_AVG10: Final = 40.0
+PSI_CRITICAL_FULL_AVG10: Final = 5.0
+LINUX_MEMINFO_PATH: Final = "/proc/meminfo"
+LINUX_PSI_MEMORY_PATH: Final = "/proc/pressure/memory"
+_MAX_PROC_BYTES: Final = 16384
+_PSI_ROW = re.compile(r"^(some|full) avg10=(\d{1,3}(?:\.\d{1,2})?) avg60=\S+ avg300=\S+ total=\d+$")
+_MEMINFO_KB = re.compile(r"^(MemTotal|MemAvailable):\s+(\d+) kB$", re.MULTILINE)
+
+
+def _read_proc_text(path: str) -> str:
+    with open(path, "r", encoding="ascii", errors="strict") as handle:
+        return handle.read(_MAX_PROC_BYTES)
+
+
+def parse_linux_psi(text: object) -> str | None:
+    """``normal`` | ``warn`` | ``critical`` from ``/proc/pressure/memory``, or ``None`` if malformed."""
+    if not isinstance(text, str):
+        return None
+    rows: dict[str, float] = {}
+    for line in text.splitlines():
+        match = _PSI_ROW.match(line.strip())
+        if match is not None:
+            rows[match.group(1)] = float(match.group(2))
+    if set(rows) != {"some", "full"} or any(not 0 <= value <= 100 for value in rows.values()):
+        return None
+    if rows["some"] >= PSI_CRITICAL_SOME_AVG10 or rows["full"] >= PSI_CRITICAL_FULL_AVG10:
+        return "critical"
+    if rows["some"] >= PSI_WARN_SOME_AVG10 or rows["full"] >= PSI_WARN_FULL_AVG10:
+        return "warn"
+    return "normal"
+
+
+def sample_linux_memory(
+    read: Callable[[str], str] = _read_proc_text,
+    clock: Callable[[], float] = time.monotonic,
+) -> dict[str, Any]:
+    """Linux counterpart of :func:`sample_host_memory`, same sample shape and levels.
+
+    Pressure is PSI ``some``/``full`` ``avg10`` from ``/proc/pressure/memory`` (an unreadable or
+    malformed file, or a kernel without PSI, yields ``unknown``).  Headroom is ``MemAvailable``
+    from ``/proc/meminfo`` (never ``MemFree`` alone); its share of ``MemTotal`` is the independent
+    cross-check using the macOS bands.  No process or application information is read.
+    """
+    result: dict[str, Any] = {"observed_at": clock(), "pressure": "unknown"}
+    try:
+        level = parse_linux_psi(read(LINUX_PSI_MEMORY_PATH))
+    except Exception:
+        return result
+    if level is None:
+        return result
+    result["pressure"] = level
+    try:
+        fields = {name: int(kb) for name, kb in _MEMINFO_KB.findall(read(LINUX_MEMINFO_PATH))}
+        available, total = fields["MemAvailable"], fields["MemTotal"]
+        if 0 <= available <= total and total > 0:
+            result["available_bytes"] = available * 1024
+            cross_percent = available * 100 // total
+            if cross_percent >= CROSSCHECK_NORMAL_FREE_PERCENT:
+                result["pressure_crosscheck"] = "normal"
+            elif cross_percent <= CROSSCHECK_CRITICAL_FREE_PERCENT:
+                result["pressure_crosscheck"] = "critical"
+            else:
+                result["pressure_crosscheck"] = "warn"
+    except Exception:
+        pass
+    return result
+
+
 def read_cpu_ticks() -> tuple[int, int, int, int]:
     """Cumulative (user, system, idle, nice) ticks via ``host_statistics`` (macOS, unprivileged)."""
     import ctypes
@@ -343,7 +416,11 @@ class CpuMeter:
 
 
 class HostSampler:
-    """The default live sampler: memory signals plus aggregate CPU.  GPU is not collected (unknown)."""
+    """The default live sampler: memory signals plus aggregate CPU.  GPU is not collected (unknown).
+
+    Memory comes from ``sample_linux_memory`` on Linux and ``sample_host_memory`` on macOS;
+    Windows has no sampler and reports ``pressure: unknown``.  CPU ticks are macOS-only for now.
+    """
 
     def __init__(
         self,
@@ -351,13 +428,20 @@ class HostSampler:
         runner: Callable[[list[str]], str] = _default_runner,
         clock: Callable[[], float] = time.monotonic,
         meter: CpuMeter | None = None,
+        platform: str | None = None,
+        file_reader: Callable[[str], str] = _read_proc_text,
     ) -> None:
+        self._platform = sys.platform if platform is None else platform
+        self._file_reader = file_reader
         self._runner = runner
         self._clock = clock
         self._meter = meter if meter is not None else CpuMeter()
 
     def __call__(self) -> dict[str, Any]:
-        sample = sample_host_memory(self._runner, self._clock)
+        if self._platform.startswith("linux"):
+            sample = sample_linux_memory(self._file_reader, self._clock)
+        else:  # macOS tools; elsewhere (Windows) the runner fails and the sample stays ``unknown``
+            sample = sample_host_memory(self._runner, self._clock)
         cpu = self._meter.utilization()
         if cpu is not None:
             sample["cpu_utilization"] = cpu
