@@ -123,6 +123,8 @@ def _owner_compiled_bundle(app):
     return Path(app.root) / 'chain-runs' / run_id / 'compiled' / 'transfer-bundle'
 
 
+CLEANUP_UNPROVEN = 'router_port_shutdown_cleanup_unproven'
+
 #: Acquisition states in which a download/verify/compile is genuinely running (acquisition.py ``status()['state']``).
 ACQUISITION_ACTIVE_STATES = frozenset({'starting', 'resolving_metadata', 'checking_capacity', 'downloading',
                                        'verifying', 'compiling'})
@@ -1029,10 +1031,19 @@ class AppDemoChain:
                 self._announce(ctx, 'stopped')
         except Exception:
             pass
+        from .chain_observation import release_owner_channel
+        unproven = None
         try:
-            self.ops.stop(app)
+            state = self._workflow_state() or {}
+            if state.get('error_code') == CLEANUP_UNPROVEN:
+                unproven = CLEANUP_UNPROVEN
         except Exception:
             pass
+        try:
+            self.ops.stop(app)
+        except Exception as error:
+            if CLEANUP_UNPROVEN in (getattr(error, 'code', None), str(error)):
+                unproven = CLEANUP_UNPROVEN
         context = getattr(app, '_observation_context', None)
         if context is not None:
             for offer in getattr(context, 'offers', {}).values():
@@ -1048,6 +1059,17 @@ class AppDemoChain:
                 break
         if self.agent is not None:
             self.agent.close()
+        # An unproven route cleanup stays recorded and reported (run error, status); what is released is only this
+        # process's owner.lock, so a Stop/Start does not need the app to be quit (live demo 2026-10-20).
+        released = False
+        if context is not None:
+            try:
+                release_owner_channel(context)
+                released = True
+            except Exception:
+                pass
+        if unproven is not None:
+            ctx.result['cleanup_unproven'] = {'code': unproven, 'owner_lock_released': released}
         app._observation_context = None
         app._chain_target_keys = None
         app._chain_rebuild = None

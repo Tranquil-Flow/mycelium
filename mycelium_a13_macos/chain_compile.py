@@ -24,6 +24,7 @@ from .layer_split import (MAX_HOSTS,MIN_HOSTS,SplitRefused,memory_proportional_s
                           model_layer_profile,policy_for_runtime)
 from .serving import ExecutionApproval,slice_fetch_permitted
 from .workflow import owner_channel,prepare_serving_workflow
+from .chain_observation import release_owner_channel
 
 
 def _capability_rows(reports:Mapping[str,Any],node_ids:Sequence[str],*,members=None,now=None):
@@ -421,6 +422,9 @@ def rebuild_with_current_members(app,*,acknowledged,run_id,deployment_id,descrip
     if waiting:
         app._chain_rebuild={**base,'state':'awaiting_member_cleanup','waiting_node_ids':sorted(waiting)}
         return dict(app._chain_rebuild)
+    if context is not None:
+        try:release_owner_channel(context)  # the next observation opens its own owner channel (owner.lock)
+        except Exception:pass
     app._observation_context=None
     order=sorted(range(len(kept)),key=lambda i:members[i]['node_id'])
     kept=[kept[i] for i in order]
