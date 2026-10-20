@@ -5,7 +5,7 @@ no hosted directory and no third-party relay. This page says what works **today*
 what the new `--network-mode lan` adds in this lane, and what is **not possible
 yet**. Labels used below:
 
-- **TESTED (unit)** - covered by tests in `tests/network_mode/`; no socket was opened.
+- **TESTED (unit)** - covered by tests in `tests/network_mode/` and `tests/a13_macos/test_app_relay_order.py`; no real network connection was made.
 - **SOURCE-READ** - read in the code, not executed.
 - **UNVERIFIED** - not run on hardware. Treat as a plan, not a result.
 
@@ -39,6 +39,50 @@ arguments it produced before this lane (TESTED (unit): `test_node_internet_runti
 | `mycelium_swarm_directory` | `--network-mode lan` lets the directory accept `http(s)://<RFC 1918 address>[:port]` entry origins. | TESTED (unit) |
 | A13 `SwarmPublisher` | `network_mode=NetworkMode.LAN` accepts a private directory origin and a private entry origin. The default is `internet`; the A13 app does not pass `lan` yet. | TESTED (unit) |
 
+### Offline model source
+
+`--offline` (or `MYCELIUM_OFFLINE=1`) means Hugging Face is never contacted.
+`--network-mode lan` and `local` imply it; `--no-offline` or `MYCELIUM_OFFLINE=0`
+overrides that, and the CLI flag beats the environment, which beats the
+implied default. With nothing set in `internet` mode the behaviour is exactly
+the old one (TESTED (unit): default paths still download). `--offline` is accepted
+by `python -m mycelium_node` and the A13 launcher (`python -m mycelium_a13_macos`);
+they export the resolved value so the code below sees it.
+
+Every Hugging Face site is guarded, and a refusal names the local/LAN source to use
+(error code `offline_model_source_required`):
+
+| site | offline behaviour |
+|---|---|
+| `mycelium_a13_macos/acquisition.py` (`_HTTPRepositoryTransport`, metadata and ranged/streamed bytes) | refuses the public origin before any request; a private mirror passed as `api_origin`/`download_origin` is still allowed |
+| `mycelium_a13_macos/peer_model_source.py` (`joiner_model_source`, `MultiSourceTransport`) | no Hugging Face source is built: owner LAN, then owner relay only |
+| `weight_provisioning.py` (`fetch_huggingface_file`) | reads the local Hugging Face cache only; a missing file fails closed |
+| `model_manifest.py` (`resolve_huggingface_manifest`) | refused (it needs the Hub) |
+
+TESTED (unit, every network opener replaced by one that fails the test). Not
+covered: scripts under `scripts/` and the owner-side build tools that call the
+library directly, other than through the guarded functions above.
+
+### `doctor --lan`
+
+`python -m mycelium_demo doctor --lan` (no `--state-dir` needed) prints one line
+per check and, for each failing one, a plain-English `Fix:` line. Exit status 0
+means ready, 1 means not. `--json` prints the report, `--network-mode`,
+`--offline/--no-offline`, `--port` (repeatable; default 8765 and 8766) and
+`--origin URL` (repeatable, an origin you plan to use) adjust it.
+
+1. network mode is `lan`;
+2. a private (RFC 1918) address was found for this device;
+3. the ports are free (a loopback-only bind test; nothing listens on the LAN);
+4. nothing hosted is configured: no `trycloudflare.com`, `mycelium.now`, n0
+   relay/DNS, `--force-relay`/`--relay-url`, or public HTTPS origin in `MYCELIUM_*`,
+   `IROH_*`, `HF_ENDPOINT` environment variables or `--origin`;
+5. the offline switch is on.
+
+Names of variables and flags are reported, never their values. TESTED (unit,
+probes injected); the default probes were run once on a development Mac. The
+doctor does not detect Wi-Fi client isolation or firewall blocks (see section 7).
+
 Private-origin rule (swarm directory/entry): exactly `http` or `https`, a
 canonical IPv4 literal in 10/8, 172.16/12 or 192.168/16, optional port, no path,
 no user info. Hostnames, public addresses, link-local, loopback and IPv6 are
@@ -57,13 +101,26 @@ is unchanged.
   (SOURCE-READ: `mycelium_a13_macos/app.py`, `pairing.py`). Do not start the
   "public relay" if you want zero hosted services; the single-machine path works
   without it.
+- **Order trap, now handled for new swarms.** The relay has to exist before the
+  swarm does, because the swarm's identity records its origin. The create form has
+  a "Let other Macs join" box that starts the relay and then creates the swarm in one
+  step, and closes the relay again if creation fails (TESTED (unit); the page itself
+  is not driven by a browser test). A swarm that was already created without a relay
+  still cannot get one: `/api/network/start` answers `network_requires_fresh_owner`
+  with a message and `fix: create_with_relay`, and the page shows the message and a
+  note. Adding a relay to an existing swarm (a relocation of its identity) is not
+  implemented.
 - **Route bring-up over LAN.** `mycelium_live/route.py` forwards only
   `--sidecar-force-relay`; the operator plans use `ssh_target`.
 - **Discovery.** There is no mDNS/Bonjour. Peers learn each other's addresses from
   the membership exchange; you pass or auto-derive the seed address.
-- **Offline model bytes.** Hugging Face is the last fallback after owner LAN and
-  relay sources. There is no `--offline` flag yet. Pre-seed the model and set
-  `HF_HUB_OFFLINE=1` (library behaviour, UNVERIFIED in this tree).
+- **Fully offline model transfer to a member.** `--offline` stops every Hugging Face
+  contact (section 2), but a member still obtains the pinned file list from the
+  Hugging Face metadata API or an injected manifest, and the owner does not serve
+  that manifest to members yet. So in `lan`/`local` mode a member's A13 model
+  download fails closed with the offline message instead of completing; only
+  paths that start from a local cache (`weight_provisioning`) or an injected
+  manifest work. There is no "model from a local folder" picker.
 - **Transport security of the seed.** The seed endpoint is plain `http`. Use it
   only on a network you control; invites are single-use and signed but the
   channel is not encrypted. TLS for LAN origins is not implemented.
@@ -73,9 +130,11 @@ is unchanged.
 SOURCE-READ across product code: no telemetry, analytics, crash reporting,
 update check, NTP, external CDN or font. The things that can leave your network
 are: n0 relays/DNS (`internet` sidecar), Cloudflare (A13 public relay and its
-DoH fallback), Hugging Face (model download fallback), and package indexes at
-install time. In `lan`/`local` mode none of these is configured by the commands
-below, but until the sidecar LAN mode exists that is only true for membership.
+DoH fallback), Hugging Face (model downloads, off with `--offline` and in
+`lan`/`local` mode), and package indexes at install time. In `lan`/`local` mode
+none of these is configured by the commands below, but until the sidecar LAN
+mode exists that is only true for membership. `doctor --lan` checks the
+configuration side of this.
 
 ## 5. Runbook: a private seed and a membership-only node on one LAN
 
@@ -84,10 +143,16 @@ Use whichever `python` your OS provides, via `python -m`, rather than a
 hard-coded path. State directories must be owner-only (`chmod 700` on macOS and
 Linux; the Windows installer applies ACLs).
 
-On the seed machine:
+On each machine, first:
 
 ```sh
 export MYCELIUM_NETWORK_MODE=lan                      # or pass --network-mode lan
+python -m mycelium_demo doctor --lan                   # fix every line that says [fix]
+```
+
+On the seed machine:
+
+```sh
 mkdir -m 700 "$HOME/mycelium-seed"
 python -m mycelium_seed --data-dir "$HOME/mycelium-seed" --swarm-id my-lan --seed-node-id seed-node --init-only
 python -m mycelium_seed --data-dir "$HOME/mycelium-seed" --swarm-id my-lan --seed-node-id seed-node --port 8765
@@ -181,6 +246,9 @@ Windows and Linux installers have only run against test seams.
    `python -m mycelium_a13_linux.service_install`.
 
 ## 7. If a LAN peer cannot be reached
+
+Run `python -m mycelium_demo doctor --lan` first; it covers the configuration
+causes. The items below are what it cannot see.
 
 - Wi-Fi "client isolation" (guest networks, hotels) blocks device-to-device
   traffic. There is no relay fallback in `lan` mode by design.

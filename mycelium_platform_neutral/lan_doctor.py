@@ -210,7 +210,8 @@ def render_report(report: Mapping[str, Any]) -> str:
             lines.append(f"  [fix] {item['name']}: {item['detail']}")
             lines.append(f"        Fix: {item['fix']}")
     lines.append(
-        "READY: this device can join a swarm on your network with no hosted service."
+        ("READY: the configuration keeps everything on your network. Membership works; inference "
+         "between devices needs the sidecar LAN mode, which is not available yet.")
         if report["ok"]
         else f"NOT READY: {failing} of {len(report['checks'])} checks need attention."
     )
