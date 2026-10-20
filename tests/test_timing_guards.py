@@ -17,12 +17,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 #: bare wall-clock literals in a wait / join / deadline / probe-timeout position
+_SECONDS = r"(?:[1-9]|0\.[2-9])"  # a guard, not a sub-200 ms poll interval
 BARE = re.compile(
-    r"\.(?:wait|join|wait_for_wake|next_event)\(\s*(?:timeout\s*=\s*)?\d"
-    r"|[a-z_]*timeout\w*\s*=\s*\d"
+    rf"\.(?:wait|join|wait_for_wake|next_event)\(\s*(?:timeout\s*=\s*)?{_SECONDS}"
+    rf"|[a-z_]*timeout\w*\s*=\s*{_SECONDS}"
     r"|monotonic\(\)\s*\+\s*(?:\d|timeout\b|seconds\b)"
-    r"|\bsleep\(\s*\d"
-    r"|_wait_ready\(\s*\w+\s*,\s*\d"
+    rf"|\bsleep\(\s*{_SECONDS}"
 )
 
 GUARDED = {
@@ -57,8 +57,9 @@ GUARDED = {
         "test_native_completion_wakes_the_control_loop_before_its_interval_expires"),
 }
 
-#: product inputs under test, not guards: they stay literal
-ALLOWED = ("response_timeout_seconds=0.05",)
+#: product inputs under test, and Playwright's default restored in milliseconds: not guards; they stay literal
+#: (_wait_ready scales its own argument, so its call sites pass the base seconds)
+ALLOWED = ("response_timeout_seconds=0.05", "expect.set_options(timeout=5000)")  # input / reset in ms
 
 
 def _functions(tree: ast.AST):

@@ -2,6 +2,7 @@
 import threading
 import time
 import pytest
+from tests.host_speed import scaled
 from test_control_pump import _world
 from test_managed_control import _enqueue,RUN_ID,DEPLOYMENT_ID
 from test_worker import worker
@@ -15,7 +16,7 @@ def make_pump(root,world,w):
 
 
 def until_ack(pump,command_id):
-    deadline=time.monotonic()+5
+    deadline=time.monotonic()+scaled(5)
     while time.monotonic()<deadline:
         result=pump.step()
         if result.get('command_id')==command_id and result['state']=='completed':return result
@@ -29,14 +30,14 @@ def test_polling_and_control_continue_while_one_dispatch_is_blocked(tmp_path,mon
         w=worker(root,node_id=world['member']['node_id'],run_id=RUN_ID,deployment_id=DEPLOYMENT_ID)
         entered=threading.Event();release=threading.Event();original=w.send
         def dispatch(**kwargs):
-            if kwargs['command_id']=='blocked-dispatch':entered.set();release.wait(5)
+            if kwargs['command_id']=='blocked-dispatch':entered.set();release.wait(scaled(5))
             return original(**kwargs)
         monkeypatch.setattr(w,'send',dispatch)
         pump=make_pump(tmp_path/'pump',world,w)
         try:
             w.start();_enqueue(world,'blocked-dispatch')
             assert pump.step()['state']=='dispatched'
-            assert entered.wait(1)
+            assert entered.wait(scaled(1))
             _enqueue(world,'independent-control',sequence=2)
             second=until_ack(pump,'independent-control')
             assert second['native_response']['ok'] is True

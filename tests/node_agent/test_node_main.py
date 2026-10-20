@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+from tests.host_speed import scaled
 from contextlib import nullcontext
 import gc
 import hashlib
@@ -3104,20 +3105,20 @@ os._exit(0)
                 run_id="run-dead-leader",
                 deployment_id="deployment-dead-leader",
                 response_timeout_seconds=0.05,
-                shutdown_timeout_seconds=1.0,
+                shutdown_timeout_seconds=scaled(1.0),
             )
         except process_module.NodeProcessError as exc:
             assert exc.code == "node_process_start_failed"
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + scaled(2.0)
         while not pid_file.exists() and time.monotonic() < deadline:
             threading.Event().wait(0.01)
         leader_pid, sidecar_pid = [
             int(value) for value in pid_file.read_text().split()
         ]
         if supervised is not None:
-            supervised._process.wait(timeout=2.0)
+            supervised._process.wait(timeout=scaled(2.0))
             supervised.close()
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + scaled(2.0)
         while _pid_exists(sidecar_pid) and time.monotonic() < deadline:
             threading.Event().wait(0.01)
         assert _pid_exists(leader_pid) is False
@@ -3132,7 +3133,7 @@ os._exit(0)
             except ProcessLookupError:
                 pass
         if supervised is not None and supervised._process.poll() is None:
-            supervised._process.wait(timeout=2.0)
+            supervised._process.wait(timeout=scaled(2.0))
 
 
 @_POSIX_DESCRIPTORS
@@ -3241,7 +3242,7 @@ def test_handshake_release_failure_closes_fds_and_reaps_blocked_launcher(
             run_id="run-release-failure",
             deployment_id="deployment-release-failure",
             response_timeout_seconds=0.05,
-            shutdown_timeout_seconds=1.0,
+            shutdown_timeout_seconds=scaled(1.0),
         )
 
     assert caught.value.code == "node_process_start_failed"

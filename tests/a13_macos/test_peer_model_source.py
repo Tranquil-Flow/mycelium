@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from tests.host_speed import scaled
 import json
 import os
 from pathlib import Path
@@ -507,7 +508,7 @@ def test_lan_listener_refuses_non_members_and_oversized_frames(owner, monkeypatc
 
     def race_body_write(connection, data):
         if len(data) > pms.MAX_LAN_REQUEST_BYTES:
-            assert refused.wait(5), "listener did not refuse the oversized header"
+            assert refused.wait(scaled(5)), "listener did not refuse the oversized header"
             raise BrokenPipeError(32, "server already refused and closed")
         return original_client_send(connection, data)
 
@@ -519,7 +520,7 @@ def test_lan_listener_refuses_non_members_and_oversized_frames(owner, monkeypatc
         port = int(lan.origin.rsplit(":", 1)[1])
         for body, path in ((b"{}", pms.PATH_READ), (None, pms.PATH_READ),
                            (b"{}", "/managed-control/poll")):
-            connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=5)
+            connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=scaled(5))
             try:
                 if body is None:
                     # The listener refuses solely from Content-Length. Sending

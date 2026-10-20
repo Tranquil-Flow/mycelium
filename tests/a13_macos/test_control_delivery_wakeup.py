@@ -88,6 +88,7 @@ from __future__ import annotations
 import inspect
 import threading
 import time
+from tests.host_speed import scaled
 
 import pytest
 
@@ -117,7 +118,7 @@ from mycelium_a13_macos.managed_runtime import ManagedTargetRuntime
 #: interval it is tested against* (``E2E_POLL_STEP_SECONDS`` / ``E2E_POLL_HOLD_SECONDS``,
 #: asserted below), because that inversion is the whole point: an interval-gated claim
 #: lands at about one step (~5 s) and cannot fit in this window at any load.
-COMMAND_WINDOW_SECONDS = 4.0
+COMMAND_WINDOW_SECONDS = scaled(4.0, ceiling=4.9)  # below E2E_POLL_STEP_SECONDS: the inversion under test
 
 #: Poll step and park hold of the end-to-end test's mailbox: the largest values the
 #: validated constructor accepts (``_LONG_POLL_MAX_HOLD_SECONDS``).  The window above
@@ -144,6 +145,12 @@ OBSERVABLE_POLL_STEP_SECONDS = 1.0
 #: moved from before the owner-side enqueue (which is not the delivery path and which
 #: dominated this number under load) onto the delivery path -- see the module docstring.
 WAKE_BOUND_SECONDS = 0.1
+
+
+def _wake_bound(interval_seconds: float) -> float:
+    """The wake-up bound on a slow host: scaled, but always under half the interval it must beat."""
+
+    return scaled(WAKE_BOUND_SECONDS, ceiling=0.5 * interval_seconds)
 
 
 class _HoldClock:
@@ -302,7 +309,7 @@ def _assert_the_enqueue_woke_the_park(
     )
 
     claim_latency = box["returned_at"] - woke_at
-    assert claim_latency < WAKE_BOUND_SECONDS, (
+    assert claim_latency < _wake_bound(step_seconds), (
         f"claim latency {claim_latency:.3f}s measured from the delivery signal at poll "
         f"step {step_seconds}s (owner-side enqueue cost {owner_enqueue_cost:.3f}s, "
         "excluded: it is Ed25519 + BEGIN IMMEDIATE + synchronous=FULL + loopback TLS, "
@@ -410,7 +417,7 @@ def _assert_the_completion_woke_the_control_loop(
     )
 
     wake_latency = released[-1][2] - woke_at
-    assert wake_latency < WAKE_BOUND_SECONDS, (
+    assert wake_latency < _wake_bound(2.0), (
         f"wake-up latency {wake_latency:.6f}s measured from the pump's own delivery signal "
         f"(native command's own cost {native_send_cost:.3f}s, excluded: it is unblocking "
         "the stub plus the real native send, not the wake-up): the control loop's wait was "
@@ -449,7 +456,7 @@ def _poll_in_background(world, *, sequence: int, request_id: str, step_seconds: 
 
     thread = threading.Thread(target=run)
     thread.start()
-    assert started.wait(1.0)
+    assert started.wait(scaled(1.0))
     return thread, box
 
 
@@ -483,15 +490,15 @@ def test_enqueue_wakes_a_parked_poll_instead_of_waiting_for_the_poll_interval(
             # Enqueue from *inside* the hold, not before it: only once the poll has
             # provably entered its first interval wait, and the hold (measured on
             # ``hold_clock``) cannot have ended by the time the enqueue lands.
-            assert record["parked"].wait(60), "the poll never parked"
+            assert record["parked"].wait(scaled(60)), "the poll never parked"
             enqueued_at = time.monotonic()
             _enqueue(world, "woken-1")
             owner_enqueue_cost = time.monotonic() - enqueued_at
-            thread.join(5)
+            thread.join(scaled(5))
             assert not thread.is_alive()
         finally:
             hold_clock.expire()  # never leave a parked poll behind a failed assertion
-            thread.join(5)
+            thread.join(scaled(5))
 
         assert box["delivery"]["delivery_kind"] == "command", box
         assert box["delivery"]["command_id"] == "woken-1"
@@ -550,7 +557,7 @@ def test_an_enqueue_that_lands_during_an_attempt_is_not_a_lost_wakeup(
             request_id="parked-poll-during-attempt",
             step_seconds=step_seconds,
         )
-        thread.join(5)
+        thread.join(scaled(5))
         assert not thread.is_alive()
         assert signal_landed.is_set(), "the test never landed its enqueue"
 
@@ -587,7 +594,7 @@ def test_a_command_whose_window_is_shorter_than_the_delivery_interval_still_comp
             # Let the control loop reach its first idle poll: provably parked (it has
             # entered its first interval wait), not "0.2 s later", which a starved
             # control-loop thread need not have reached.
-            assert record["parked"].wait(5.0), "the control loop never reached its first park"
+            assert record["parked"].wait(scaled(5.0)), "the control loop never reached its first park"
             started_at = time.monotonic()
             reply = control.send_before(
                 command_id="windowed-hello",
@@ -655,7 +662,7 @@ def test_a_woken_command_is_not_failed_by_a_slow_host_inside_its_window(
                 return real_send(**kwargs)
 
             monkeypatch.setattr(target.worker, "send", slow_host)
-            assert record["parked"].wait(5.0), "the control loop never reached its first park"
+            assert record["parked"].wait(scaled(5.0)), "the control loop never reached its first park"
             started_at = time.monotonic()
             reply = control.send_before(
                 command_id="windowed-hello",
@@ -721,7 +728,7 @@ def test_native_completion_wakes_the_control_loop_before_its_interval_expires(
             if kwargs["command_id"] != "slow-hello":
                 return original(**kwargs)
             entered.set()
-            release.wait(5)
+            release.wait(scaled(5))
             unblocked_at = time.monotonic()
             response = original(**kwargs)
             # Reported for diagnosis only: this is the cost the wake-up bound
@@ -734,16 +741,16 @@ def test_native_completion_wakes_the_control_loop_before_its_interval_expires(
             native.start()
             _enqueue(world, "slow-hello")
             assert pump.step()["state"] == "dispatched"
-            assert entered.wait(2.0)
+            assert entered.wait(scaled(2.0))
             # Nothing has completed: the wake-up must not have fired yet -- "not merely
             # not observed", which a signal consumed before the park would also satisfy.
-            assert pump.wait_for_wake(0.3) is False
+            assert pump.wait_for_wake(scaled(0.3)) is False
             assert not wake.signals, (
                 "the pump signalled a delivery wake-up before the native command had "
                 "finished: the wake-up is not wired to the completion"
             )
             release.set()
-            assert pump.wait_for_wake(2.0) is True
+            assert pump.wait_for_wake(scaled(2.0)) is True
             assert native_send_cost, "the test never ran its native command"
             _assert_the_completion_woke_the_control_loop(
                 wake, native_send_cost=native_send_cost[0]

@@ -2,6 +2,7 @@
 import json
 import os
 import threading
+from tests.host_speed import scaled
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,8 @@ from mycelium_a13_macos.tls import pinned_seed_client, pinned_seed_client_from_i
 
 @pytest.mark.parametrize('_stress_run', range(int(os.environ.get('A13_CONTROL_STRESS_COUNT', '1'))))
 def test_browser_owner_target_encrypted_pairing(tmp_path, monkeypatch, _stress_run):
+    # Playwright's expect() waits 5 s by default; scale that guard with the host (assertions unchanged).
+    expect.set_options(timeout=scaled(5)*1000)
     owner=DemoApp(tmp_path/'owner',check_platform=False).start()
     target=None
     try:
@@ -96,14 +99,14 @@ def test_browser_owner_target_encrypted_pairing(tmp_path, monkeypatch, _stress_r
             real_start = target.authority.start_control
             def held_start(*args, **kwargs):
                 entered.set()
-                if not release.wait(20):
+                if not release.wait(scaled(20)):
                     raise AssertionError('held control start was not released')
                 return real_start(*args, **kwargs)
             monkeypatch.setattr(target.authority, 'start_control', held_start)
             try:
                 with tp.expect_response(lambda r: r.url.endswith('/api/control/start') and r.request.method == 'POST') as start_response:
                     tp.locator('#start-control').click()
-                    assert entered.wait(10), 'start POST never entered its handler'
+                    assert entered.wait(scaled(10)), 'start POST never entered its handler'
                     assert target.authority._runtime is None
                     assert 'stopped' in tp.locator('#control-state').inner_text()
                     release.set()
@@ -143,5 +146,6 @@ def test_browser_owner_target_encrypted_pairing(tmp_path, monkeypatch, _stress_r
             assert errors==[]
             browser.close()
     finally:
+        expect.set_options(timeout=5000)
         if target is not None:target.close()
         owner.close()

@@ -11,6 +11,7 @@ Local multi-process session only; never physical or browser qualification.
 from __future__ import annotations
 
 import faulthandler
+from tests.host_speed import scaled
 import json
 import logging
 import sys
@@ -121,7 +122,7 @@ def _drain(service, request_id, events, first_token):
     subscription = service.subscribe(request_id, last_event_id=None)
     try:
         while True:
-            event = subscription.next_event(timeout=120)
+            event = subscription.next_event(timeout=scaled(120))
             if event is None:
                 return
             events.append(event)
@@ -142,7 +143,7 @@ def _run_case(service, owner, target, case_id):
     reader = threading.Thread(
         target=_drain, args=(service, request_id, events, first_token), daemon=True)
     reader.start()
-    assert first_token.wait(60), "request never produced a token"
+    assert first_token.wait(scaled(60)), "request never produced a token"
     seam = ProductCaseSeam(case_id, target)
     outcome: dict = {}
     try:
@@ -150,7 +151,7 @@ def _run_case(service, owner, target, case_id):
         outcome["post_state"] = dict(seam.apply(case_id=case_id))
     except Exception as error:  # noqa: BLE001 - measured, asserted by caller
         outcome["refusal"] = str(error)
-    reader.join(timeout=180)
+    reader.join(timeout=scaled(180))
     outcome["kinds"] = [event.kind for event in events if event.kind in _TERMINALS]
     outcome["events"] = [(event.kind, event.code) for event in events if event.kind != "token"]
     outcome["tokens"] = [event.text for event in events if event.kind == "token"]
@@ -169,7 +170,7 @@ def _run_without_fault(service, owner):
 
 
 def _wait_ready(owner, seconds):
-    deadline = time.monotonic() + seconds
+    deadline = time.monotonic() + scaled(seconds)
     while time.monotonic() < deadline:
         status = owner.public_status()
         if status["cold_route_restart"]["state"] == "failed":
@@ -206,7 +207,7 @@ def no_route_threads_survive():
 
 @pytest.fixture
 def watchdog():
-    faulthandler.dump_traceback_later(300, exit=False, file=sys.stderr)
+    faulthandler.dump_traceback_later(scaled(300), exit=False, file=sys.stderr)
     yield
     faulthandler.cancel_dump_traceback_later()
 
