@@ -93,6 +93,18 @@ def owner_run(app: Any):
     return run
 
 
+def relay_gate(app: Any) -> None:
+    """Serving only with the relay up: joined members are waiting for it (R23 6a); never a bare failure."""
+    count = app.members_joined_without_relay()
+    if count:
+        from .app import DemoActionError
+        raise DemoActionError(
+            'relay_required',
+            message=(f"{count} member{'' if count == 1 else 's'} joined, but the public relay is not running, so "
+                     "they cannot serve yet. Start the public relay, then try again."),
+            fix={'action': 'start_relay'})
+
+
 def action(app: Any, path: str, body: Any) -> dict:
     from .app import DemoError
     from .owner_run import OwnerRunError
@@ -107,6 +119,8 @@ def action(app: Any, path: str, body: Any) -> dict:
         raise DemoError('invalid_request')
     if ensure_exchange(app) is None:
         raise DemoError('owner_swarm_required')
+    if path in {'/api/demo/start', '/api/demo/rebuild'}:
+        relay_gate(app)
     run = owner_run(app)
     try:
         if path == '/api/demo/start':

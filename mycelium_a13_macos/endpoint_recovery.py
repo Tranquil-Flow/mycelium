@@ -58,6 +58,33 @@ def relocate_authority(authority,*,public_origin,port,acknowledged):
         return card
 
 
+def attach_public_endpoint(authority,*,public_origin,port,acknowledged):
+    """First public origin for a swarm created without a relay (a private, retained seed).
+
+    Same stop/reopen as ``relocate_authority`` but with no previous origin to sign a card from: only
+    the owner's own enrolled member can exist on a private swarm, and the resume at restart re-pins
+    its membership to the new seed address.  A failure removes the new configuration and reopens the
+    authority exactly as it was, so a failed relay start never strands the swarm.
+    """
+    from .authority import DemoAuthorityError
+    with authority._lock:
+        authority._require_started()
+        if acknowledged is not True or authority.coordinator is None or authority._network_configuration() is not None:
+            raise DemoAuthorityError('network_attach_requires_private_swarm')
+        origin=canonical_https_origin(public_origin)
+        if type(port) is not int or not 49152<=port<=65535:raise DemoAuthorityError('network_configuration_invalid')
+        path=authority.state_root/'network.json'
+        authority.stop()
+        try:
+            _atomic_private_json(path,{'protocol':'mycelium.a13.public_endpoint.v1','public_origin':origin,'port':port})
+            authority.start()
+        except BaseException:
+            path.unlink(missing_ok=True)
+            authority.stop()
+            authority.start()
+            raise
+
+
 def reconnect_peer(peer,*,card,acknowledged):
     """Verify the same seed at its new TLS address before persisting relocation."""
     from mycelium_node.durable_membership import load_membership_state,save_membership_state

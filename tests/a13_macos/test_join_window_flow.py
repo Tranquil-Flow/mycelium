@@ -190,12 +190,13 @@ def test_short_code_join_is_refused_once_the_owner_revokes_the_window(tmp_path, 
         owner.close()
 
 
-def test_window_requires_a_running_public_relay(tmp_path):
+def test_window_without_a_running_public_relay_waits_for_the_relay(tmp_path):
     owner = DemoApp(tmp_path / "owner", check_platform=False).start()
     try:
         owner.action("/api/create", {"consent": CONSENT})
-        with pytest.raises(Exception, match="pairing_window_relay_required"):
-            owner.action("/api/pair/window/open", {"ttl_seconds": 600})
+        value = owner.action("/api/pair/window/open", {"ttl_seconds": 600})
+        assert value["state"] == "waiting_for_relay"  # no redeemable window until an origin exists
+        assert owner.pairing_windows.list() == []
     finally:
         owner.close()
 

@@ -48,9 +48,10 @@ const HUMAN_ERRORS={
   download_consent_required:'Tick the authorization box and choose a download limit first.',
   download_consent_invalid:'The download limit must be a positive number of bytes, no larger than your storage limit.',
   acquisition_already_active:'A download is already running. Wait for it to finish or cancel it.',
-  pairing_window_relay_required:'Join codes need the public relay, which can only be started before the swarm is created.',
+  pairing_window_relay_required:'Start the public relay to make join codes redeemable; codes can be asked for before that.',
   pairing_window_swarm_required:'Create the swarm first, then invite a Mac.',
-  network_requires_fresh_owner:'The public relay can only be started once, before the swarm is created.',
+  network_requires_fresh_owner:'A public relay is already running, or this Mac is not the owner.',
+  relay_required:'Members joined, but the public relay is not running. Press “Start public relay”, then try again.',
   owner_role_required:'Only the owner Mac can do this.',
   target_role_required:'Only a Mac that joined a swarm can do this.',
   revoke_confirmation_required:'Tick the revoke confirmation box first.',
@@ -177,7 +178,7 @@ async function perform(path, body, success) {
   busy=true;
   for(const button of document.querySelectorAll('button'))button.disabled=true;
   try {const result=await api(path,body);await refresh(false);notice(success);return result;}
-  catch(error){notice(error.userMessage ? `Action not completed: ${error.userMessage}` : `Action not completed: ${humanError(error.message)} Existing identity and evidence are retained.`);}
+  catch(error){notice(error.userMessage ? `Action not completed: ${error.userMessage}${error.fix?.action==='start_relay'?' Use “Start public relay” in the invite section.':''}` : `Action not completed: ${humanError(error.message)} Existing identity and evidence are retained.`);}
   finally{
     busy=false;
     for(const button of document.querySelectorAll('button'))button.disabled=false;
@@ -362,9 +363,12 @@ function renderJoinFlow(value,target,a){
   const owner=!target;
   $('invite-owner').hidden=!owner;
   $('join-target').hidden=owner && !!a.swarm_created;
-  $('relay-start').hidden=!owner || !!a.swarm_created || value.network?.state!=='private';
-  $('relay-order-note').hidden=!owner || !a.swarm_created || value.network?.state!=='private';
-  $('window-open').disabled=busy || !owner || !a.swarm_created || !value.network?.public_origin;
+  const relayUp=!!value.network?.public_origin;
+  $('relay-start').hidden=!owner || relayUp;
+  $('relay-order-note').hidden=!owner || relayUp;
+  $('window-open').disabled=busy || !owner || !a.swarm_created;
+  const waitingMembers=value.relay_wait?.state==='waiting_for_relay'?value.relay_wait.members_joined:0;  // line: "N members joined, waiting for relay to serve"
+  $('relay-wait').textContent=owner&&waitingMembers?`${waitingMembers} member${waitingMembers===1?'':'s'} joined, waiting for relay to serve. Press “Start public relay”.`:'';
   $('standing-text').textContent=flow.standing_disclosure?.text ?? '';
   const joined=a.membership_state==='current';
   const waiting=!!flow.join_window;
@@ -375,14 +379,21 @@ function renderJoinFlow(value,target,a){
     : !$('standing-confirm').checked ? 'Tick the standing-consent box above to enable “Join with code”.' : '';
   const origin=!!value.network?.public_origin;
   $('invite-hint').textContent=!owner || (a.swarm_created && origin) ? ''
-    : !a.swarm_created ? (origin ? 'Create the swarm (step 01) to unlock “Invite a Mac”.'
-      : 'Start the public relay (button above) before creating the swarm, then create it to unlock “Invite a Mac”.')
-    : 'Join codes need the public relay, which can only be started before the swarm is created. To add a Mac now, use “Pair another authorized Mac” under Device readiness.';
+    : !a.swarm_created ? 'Create the swarm (step 01) to unlock “Invite a Mac”.'
+    : 'No relay is running yet: a code you ask for now is “ready to share once the relay starts” and becomes redeemable then.';
   $('join-fingerprint').textContent=waiting?`Waiting for the owner. Check that the owner sees this fingerprint: ${flow.join_window.fingerprint}`:'';
   const standing=flow.standing_consent;
   $('standing-withdraw').hidden=!target || !standing || standing.state==='withdrawn';
   $('standing-state').textContent=standing?`Standing consent: ${standing.state.replaceAll('_',' ')}${standing.last?` · last offer ${standing.last.state}${standing.last.reason?' ('+standing.last.reason.replaceAll('_',' ')+')':''}`:''}${flow.last_report?` · last report ${flow.last_report.purpose} ${flow.last_report.state}`:''}`:'';
   $('windows').replaceChildren();
+  for(const w of flow.pending_windows ?? []){  // asked for before the relay: no address exists yet
+    const row=document.createElement('div');row.className='member';
+    const label=document.createElement('pre');
+    label.textContent=`Code ${w.pending_id} · ${w.state.replaceAll('_',' ')} · ${w.note}`;row.append(label);
+    const cancel=document.createElement('button');cancel.type='button';cancel.className='secondary';cancel.textContent='Cancel code';
+    cancel.addEventListener('click',()=>void perform('/api/pair/window/revoke',{window_id:w.pending_id},'Code cancelled.'));
+    row.append(cancel);$('windows').append(row);
+  }
   for(const w of flow.pairing_windows ?? []){
     const row=document.createElement('div');row.className='member';
     const label=document.createElement('pre');
@@ -411,9 +422,9 @@ function currentConsent(){
 }
 $('relay-start').addEventListener('click',()=>{
   if(!window.confirm('Start a temporary Cloudflare quick tunnel? The relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh.'))return;
-  void perform('/api/network/start',{relay_acknowledged:true,max_seconds:1800},'Public relay started. Now create the swarm, then invite Macs.');
+  void perform('/api/network/start',{relay_acknowledged:true,max_seconds:1800},'Public relay started. Codes you asked for are now ready to share; approve each Mac when it appears.');
 });
-$('window-open').addEventListener('click',()=>void perform('/api/pair/window/open',{ttl_seconds:Number($('window-ttl').value)},'Join code opened. Show it to one person; approve their Mac when it appears.'));
+$('window-open').addEventListener('click',()=>void perform('/api/pair/window/open',{ttl_seconds:Number($('window-ttl').value)},latest?.network?.public_origin?'Join code opened. Show it to one person; approve their Mac when it appears.':'Code requested. It is ready to share once the relay starts: press “Start public relay”.'));
 $('standing-confirm').addEventListener('change',()=>{if(latest&&connected)render(latest);});
 $('visibility').addEventListener('change',()=>{if(latest&&connected)render(latest);});
 $('join-with-code').addEventListener('click',()=>{

@@ -515,6 +515,7 @@ class DemoApp:
         self.thread = None
         self.lock_fd = None
         self.guard = threading.RLock()
+        self._pending_windows = []
         self.closed = threading.Event()
         self.running = False
         self.renew_error = None
@@ -641,12 +642,13 @@ class DemoApp:
     # -- demo run: model picker, owner one-click run, target auto loop, chat ---
 
     def _start_public_relay(self, body):
-        """Start the temporary public relay; only a fresh owner (no swarm yet) may."""
-        if self.installation_role=='owner' and self.public_relay is None and self.authority.status().get('swarm_created'):
-            raise DemoActionError('network_requires_fresh_owner',
-                message=('This swarm was created without the public relay, and a relay has to start before '
-                    'the swarm exists. Start over with a new owner and tick “Let other Macs join” before creating.'),
-                fix={'action':'create_with_relay'})
+        """Start the temporary public relay: before the swarm exists, or later (R23: join codes any time).
+
+        A swarm created without a relay keeps its identity: the retained authority is reopened on the new
+        origin (``endpoint_recovery.attach_public_endpoint``; an earlier relay's origin goes through the
+        existing ``relocate_authority``), then the same route binding as a fresh start runs.  Any failure
+        closes the relay and leaves the swarm exactly as it was.
+        """
         if self.installation_role!='owner' or self.public_relay is not None:
             raise DemoError('network_requires_fresh_owner')
         if (set(body) not in ({'relay_acknowledged','max_seconds'},{'relay_acknowledged','max_seconds','provider'})
@@ -654,20 +656,84 @@ class DemoApp:
             or body['relay_acknowledged'] is not True
             or type(body['max_seconds']) is not int or not 30<=body['max_seconds']<=1800):
             raise DemoError('network_consent_required')
+        existing=bool(self.authority.status().get('swarm_created'))
+        if existing and getattr(self,'local_contributor',None) is not None:
+            raise DemoError('network_stop_local_contributor_required')
         from .public_relay import TemporaryHttpsRelay
+        from . import endpoint_recovery
         import socket
         relay=TemporaryHttpsRelay(self.root/'public-relay',provider=body.get('provider','cloudflare'))
         try:
             relay.start(acknowledged=True,max_seconds=body['max_seconds'])
             with socket.socket() as listener:
                 listener.bind(('127.0.0.1',0));port=listener.getsockname()[1]
-            self.authority.configure_public_endpoint(public_origin=relay.public_origin,
-                port=port,acknowledged=True)
+            if not existing:
+                self.authority.configure_public_endpoint(public_origin=relay.public_origin,
+                    port=port,acknowledged=True)
+            else:
+                if self.authority._network_configuration() is None:
+                    endpoint_recovery.attach_public_endpoint(self.authority,public_origin=relay.public_origin,
+                        port=port,acknowledged=True)
+                else:
+                    endpoint_recovery.relocate_authority(self.authority,public_origin=relay.public_origin,
+                        port=port,acknowledged=True)
+                relay.proxy.bind_seed(self.authority.seed_server)
+                self.running=True
             self.public_relay=relay
             self._bind_public_routes()
+            self._materialize_pending_windows()
             return relay.status()
         except BaseException:
+            self.public_relay=None
             relay.close();raise
+
+    # -- join codes issued before the relay exists --------------------------------------------
+    def _open_pending_window(self, ttl_seconds):
+        """A code asked for while no relay runs: kept as 'ready to share once the relay starts'.
+
+        The code text and link embed the relay origin, which (quick tunnel) exists only once the relay
+        starts, so the real window is opened then (``_materialize_pending_windows``) and the code is
+        redeemable from that moment.  Same capacity and TTL bounds as a live window.
+        """
+        from .pairing import _MAX_WINDOWS, _WINDOW_TTL_MAX, _WINDOW_TTL_MIN
+        if type(ttl_seconds) is not int or not _WINDOW_TTL_MIN<=ttl_seconds<=_WINDOW_TTL_MAX:
+            raise DemoError('pairing_window_ttl_invalid')
+        live=sum(1 for w in self.pairing_windows.list() if w['state'] in {'open','claimed','approved'})
+        if live+len(self._pending_windows)>=_MAX_WINDOWS:
+            raise DemoError('pairing_window_capacity')
+        pending={'pending_id':'pending-'+secrets.token_hex(3),'ttl_seconds':ttl_seconds,
+                 'state':'waiting_for_relay','note':'ready to share once the relay starts'}
+        self._pending_windows.append(pending)
+        return {'state':'waiting_for_relay','pending_id':pending['pending_id'],
+                'message':'Ready to share once the relay starts: start the public relay and this code becomes redeemable.',
+                'fix':{'action':'start_relay'}}
+
+    def _materialize_pending_windows(self):
+        pending,self._pending_windows=list(self._pending_windows),[]
+        origin=None if self.public_relay is None else self.public_relay.status().get('public_origin')
+        coordinator=getattr(self.authority,'coordinator',None)
+        if not origin or coordinator is None: self._pending_windows=pending;return
+        from .pairing import PairingError
+        for item in pending:
+            try:
+                self.pairing_windows.open(origin=origin,seed_key_digest=coordinator.signer.verification_key_digest,
+                    ttl_seconds=item['ttl_seconds'])
+            except PairingError:
+                continue  # capacity or an invalid TTL: the owner can open a fresh code
+
+    def members_joined_without_relay(self):
+        """Joined members (the owner excluded) of a swarm whose relay is not running; 0 otherwise."""
+        if self.installation_role!='owner' or self.public_relay is not None: return 0
+        coordinator=getattr(self.authority,'coordinator',None)
+        if coordinator is None or not self.authority.status().get('swarm_created'): return 0
+        try: return max(0,len(coordinator.members())-1)
+        except Exception: return 0
+
+    def _relay_wait_status(self):
+        count=self.members_joined_without_relay()
+        if count<1: return None
+        return {'state':'waiting_for_relay','members_joined':count,
+                'line':f"{count} member{'' if count==1 else 's'} joined, waiting for relay to serve"}
 
     def run_model_contract(self):
         """The model this installation's runs pin (picker choice, env override)."""
@@ -987,6 +1053,7 @@ class DemoApp:
         value = {'standing_disclosure':{'text':DISCLOSURE_TEXT,'digest':DISCLOSURE_DIGEST}}
         if self.installation_role == 'owner':
             value['pairing_windows'] = self.pairing_windows.list()
+            value['pending_windows'] = [dict(p) for p in self._pending_windows]
             value['member_reports'] = self.member_reports.latest()
             return value
         try: grant = load_standing_consent(self.root)
@@ -1027,11 +1094,18 @@ class DemoApp:
                 'distribution':'unsigned development software; not notarized',
                 'join_flow':self._join_flow_status(),
                 'adaptive_host':adaptive_status(self),'adaptive_host_publication':adaptive_publication(self),
-                'sharing':_sharing_status(self),
+                'sharing':_sharing_status(self),'relay_wait':self._relay_wait_status(),
                 'owner_run':_demo_status(self,'owner'),'demo_target':_demo_status(self,'target'),
                 'chat':_demo_status(self,'chat'),'swarm':_swarm_status(self),
-                'serving':{'state':'not_yet_serving','route_ready':False,
-                           'next_action':'Native route preparation and exact model execution approval required.'}}
+                'serving':self._serving_block()}
+
+    def _serving_block(self):
+        wait=self._relay_wait_status()
+        if wait is not None:
+            return {'state':'waiting_for_relay','route_ready':False,'members_joined':wait['members_joined'],
+                    'next_action':'Start the public relay so the joined Macs can serve.'}
+        return {'state':'not_yet_serving','route_ready':False,
+                'next_action':'Native route preparation and exact model execution approval required.'}
 
     _CONSENT_ROUTES = frozenset({'/api/create','/api/join/request','/api/join/window'})
 
@@ -1082,6 +1156,9 @@ class DemoApp:
                     if set(body)!={'model_preparation_acknowledged'}:raise DemoError('model_preparation_consent_required')
                     from .chain_compile import start_compile
                     return start_compile(self,acknowledged=body['model_preparation_acknowledged'])
+                if path in {'/api/serving/activate','/api/serving/start'}:
+                    from .demo_app import relay_gate
+                    relay_gate(self)
                 if path=='/api/serving/activate':
                     if set(body)!={'execution_proposal','activation_acknowledged'}:raise DemoError('model_execution_consent_required')
                     from .chain_compile import activate_serving
@@ -1373,6 +1450,10 @@ class DemoApp:
             return {'windows':self.pairing_windows.list()}
         if path == '/api/pair/window/revoke':
             if set(body) != {'window_id'}: raise DemoError('invalid_request')
+            for item in list(self._pending_windows):
+                if item['pending_id'] == body['window_id']:
+                    self._pending_windows.remove(item)
+                    return {'window_id':item['pending_id'],'state':'revoked'}
             return self.pairing_windows.revoke(body['window_id'])
         if path == '/api/pair/window/open':
             if set(body) != {'ttl_seconds'}: raise DemoError('invalid_request')
@@ -1382,9 +1463,10 @@ class DemoApp:
             relay = self.public_relay
             origin = None if relay is None else relay.status().get('public_origin')
             if relay is None or not origin:
-                # Relay-only by design: venue Wi-Fi isolates clients, so a
-                # target can reach the owner only through the public relay.
-                raise DemoError('pairing_window_relay_required')
+                # Relay-only by design: venue Wi-Fi isolates clients, so a target can reach the
+                # owner only through the public relay.  The code can still be asked for now; it
+                # becomes redeemable when the relay starts (_materialize_pending_windows).
+                return self._open_pending_window(body['ttl_seconds'])
             self._bind_public_routes()
             if self.authority.coordinator.seed_url != origin:
                 raise DemoError('pairing_window_origin_stale')

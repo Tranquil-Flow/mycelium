@@ -496,7 +496,16 @@ def action(app: Any, path: str, body: Any) -> dict[str, Any]:
                '/api/swarm/kill': publisher.kill}.get(path)
     if handler is None:
         raise SwarmPublishError('route_unknown')
-    return handler(body)
+    try:
+        return handler(body)
+    except SwarmPublishError as error:
+        if error.code != 'swarm_relay_required':
+            raise
+        from .app import DemoActionError  # the page gets the code plus what to do
+        raise DemoActionError(
+            'swarm_relay_required',
+            message='Publishing needs the public relay. Start it first, then publish again.',
+            fix={'action': 'start_relay'}) from None
 
 
 def status(app: Any) -> dict[str, Any] | None:

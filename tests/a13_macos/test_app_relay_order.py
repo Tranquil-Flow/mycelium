@@ -85,17 +85,15 @@ def test_plain_create_is_unchanged_and_private(app, tunnels) -> None:
     assert app.authority.status()["membership_state"] == "current"
 
 
-def test_relay_after_creation_is_refused_with_an_actionable_error(app, tunnels) -> None:
+def test_relay_after_creation_is_no_longer_a_dead_end(app, tunnels) -> None:
     app.action("/api/create", {"consent": CONSENT})
-    with pytest.raises(DemoError) as caught:
+    value = app.action("/api/network/start", RELAY)  # R23: the relay can start after the swarm exists
+    assert value["public_origin"] == "https://relay-fixture.invalid"
+    assert app.authority.coordinator.seed_url == "https://relay-fixture.invalid"
+    with pytest.raises(DemoError) as caught:  # a second one while one runs is still refused
         app.action("/api/network/start", RELAY)
-    error = caught.value
-    assert str(error) == "network_requires_fresh_owner"
-    body = action_error_body(error)
-    assert body["error"] == "network_requires_fresh_owner"
-    assert "relay" in body["message"] and "before" in body["message"]
-    assert body["fix"] == {"action": "create_with_relay"}
-    assert tunnels == []
+    assert str(caught.value) == "network_requires_fresh_owner"
+    assert len(tunnels) == 1
 
 
 def test_plain_errors_keep_the_closed_code_only_body() -> None:

@@ -184,14 +184,21 @@ def test_download_hint_clears_once_download_is_possible():
 
 @needs_node
 @pytest.mark.parametrize("kw,needle", [
-    (dict(created=False, origin=None), "Start the public relay"),
+    (dict(created=False, origin=None), "Create the swarm"),
     (dict(created=False, origin="https://x.example"), "Create the swarm"),
-    (dict(created=True, member="current", origin=None), "only be started before the swarm is created"),
 ])
 def test_invite_button_hint(kw, needle):
     out = run_ui({"status": status(**kw), "read": ["invite-hint", "window-open"]})
     assert out["disabled"]["window-open"] is True
     assert needle in out["text"]["invite-hint"]
+
+
+@needs_node
+def test_invite_available_before_the_relay_with_a_ready_once_relay_starts_hint():
+    out = run_ui({"status": status(created=True, member="current", origin=None),
+                  "read": ["invite-hint", "window-open"]})
+    assert out["disabled"]["window-open"] is False  # codes can be asked for any time
+    assert "once the relay starts" in out["text"]["invite-hint"]
 
 
 @needs_node
