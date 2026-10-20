@@ -68,7 +68,9 @@ from typing import Any
 from urllib.parse import urlsplit
 from urllib.request import HTTPSHandler, ProxyHandler, build_opener
 
-from .acquisition import AcquisitionError, _validate_manifest
+from mycelium_platform_neutral.offline import offline_enabled
+
+from .acquisition import AcquisitionError, OfflineAcquisitionError, _validate_manifest
 from .managed_control import (
     _BINDING_FIELDS,
     _REQUEST_COMMON_FIELDS,
@@ -738,12 +740,14 @@ class MultiSourceTransport:
     """
 
     def __init__(self, sources: list[_Source], *, fallback: Any | None,
+                 offline: bool = False,
                  clock: Callable[[], float] = time.monotonic,
                  probe_bytes: int = 16 * 1024 * 1024,
                  slow_bytes_per_second: float = 4 * 1024 * 1024,
                  switch_ratio: float = 1.25, max_strikes: int = 3) -> None:
         self._order: list[_Source] = list(sources)
         self._fallback = fallback
+        self._offline = offline
         self._hf: _HuggingFaceSource | None = None
         if fallback is not None:
             self._hf = _HuggingFaceSource(fallback)
@@ -770,6 +774,8 @@ class MultiSourceTransport:
     # -- trusted metadata stays on the pinned origin ---------------------
     def resolve(self, model: Any) -> dict[str, Any]:
         if self._fallback is None:
+            if self._offline:
+                raise OfflineAcquisitionError("the pinned model metadata")
             raise AcquisitionError("source_unavailable")
         return self._fallback.resolve(model)
 
@@ -1001,10 +1007,12 @@ def joiner_model_source(app: Any, announcement: Mapping[str, Any] | None, *,
             peer, _test_ca_certificate=_test_ca_certificate), chunk_bytes=RELAY_CHUNK_BYTES))
     if not sources:
         return None
-    if fallback is None:
+    offline = offline_enabled()
+    if fallback is None and not offline:
         from .acquisition import _HTTPRepositoryTransport
         fallback = _HTTPRepositoryTransport()
-    return MultiSourceTransport(sources, fallback=fallback)
+    # Offline: owner LAN / relay bytes only, no Hugging Face source at all.
+    return MultiSourceTransport(sources, fallback=fallback, offline=offline)
 
 
 __all__ = [

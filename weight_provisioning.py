@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 from layer_assignment import validate_assignment_identity, validate_target_cache_root
+from mycelium_platform_neutral.offline import OfflineModelSourceError, offline_enabled
 from route_contract import validate_manual_provisioning_route_v1
 
 
@@ -153,6 +154,10 @@ def fetch_huggingface_file(
    except ImportError as exc:
       raise RuntimeError("huggingface_hub is required for Hub downloads") from exc
 
+   # Offline mode (and the lan/local network modes) read the local cache only.
+   offline = offline_enabled()
+   if offline:
+      local_files_only = True
    cache_dir = str(Path(cache_root).expanduser().resolve())
    cached = try_to_load_from_cache(
       repo_id=model_id,
@@ -161,13 +166,21 @@ def fetch_huggingface_file(
       cache_dir=cache_dir,
    )
    cache_hit = isinstance(cached, str) and Path(cached).is_file()
-   resolved = hf_hub_download(
-      repo_id=model_id,
-      filename=filename,
-      revision=revision,
-      cache_dir=cache_dir,
-      local_files_only=local_files_only,
-   )
+   try:
+      resolved = hf_hub_download(
+         repo_id=model_id,
+         filename=filename,
+         revision=revision,
+         cache_dir=cache_dir,
+         local_files_only=local_files_only,
+      )
+   except Exception as exc:
+      if offline and (
+         isinstance(exc, FileNotFoundError)
+         or type(exc).__name__ == "LocalEntryNotFoundError"
+      ):
+         raise OfflineModelSourceError(f"the model file {filename}") from exc
+      raise
    return Path(resolved), cache_hit
 
 

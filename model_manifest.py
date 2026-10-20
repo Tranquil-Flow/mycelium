@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from mycelium_platform_neutral.offline import require_online_model_source
 from model_adapters import adapter_for_config
 from runtime_contracts import (
    normalize_gpt2_model_config,
@@ -315,6 +316,7 @@ def resolve_huggingface_manifest(
    cache_root: str | Path | None = None,
 ) -> dict[str, Any]:
    """Resolve metadata online, pin commit, then invoke pure manifest compiler."""
+   require_online_model_source("the model metadata")
    try:
       from huggingface_hub import HfApi, hf_hub_download
    except ImportError as exc:

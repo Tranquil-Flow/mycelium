@@ -35,6 +35,12 @@ except ImportError:  # win32: LockFileEx through mycelium_host_platform
     fcntl = None  # type: ignore[assignment]
 
 import mycelium_host_platform
+from mycelium_platform_neutral.offline import (
+    OFFLINE_ERROR_CODE,
+    OfflineModelSourceError,
+    offline_enabled,
+    offline_message,
+)
 
 from .serving import (
     CANDIDATE_MODEL,
@@ -89,6 +95,14 @@ class AcquisitionError(RuntimeError):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
+
+
+class OfflineAcquisitionError(AcquisitionError, OfflineModelSourceError):
+    """Hugging Face was refused because offline mode is on (``.code`` is stable)."""
+
+    def __init__(self, what: str = "the model files") -> None:
+        RuntimeError.__init__(self, offline_message(what))
+        self.code = OFFLINE_ERROR_CODE
 
 
 def _raise(code: str, cause: BaseException | None = None) -> NoReturn:
@@ -406,6 +420,10 @@ class _HTTPRepositoryTransport:
         )
 
     def _open(self, request: urllib.request.Request) -> Any:
+        # Lowest boundary: offline mode never reaches the public Hugging Face
+        # origin; a private mirror configured through the origins is unaffected.
+        if request.full_url.startswith(_HF_ORIGIN + "/") and offline_enabled():
+            raise OfflineAcquisitionError("the model files")
         try:
             response = self._opener.open(request, timeout=self.timeout_seconds)
         except urllib.error.HTTPError as exc:
