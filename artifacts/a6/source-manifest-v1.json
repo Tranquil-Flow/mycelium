@@ -1973,8 +1973,8 @@
     },
     {
       "path": "mycelium_swarm_directory/surface_probe.py",
-      "sha256": "sha256:d4f73c890375800419ecd78d5382b4cd96efc66a7515f41ec5ce8e7613b7a891",
-      "size_bytes": 5159
+      "sha256": "sha256:5daba33a4c200d22064489e43b4d1a808d081174590f4d058c689b2131345440",
+      "size_bytes": 5343
     },
     {
       "path": "mycelium_swarm_directory/unit.py",
@@ -5262,6 +5262,11 @@
       "size_bytes": 5821
     },
     {
+      "path": "tests/swarm_directory/test_surface_probe_user_agent.py",
+      "sha256": "sha256:87560199ef431c99461aa509e6034604e7be18311ae336a989f71d0baa75179c",
+      "size_bytes": 822
+    },
+    {
       "path": "tests/swarm_directory/test_two_swarms_integration.py",
       "sha256": "sha256:81b980e97bdcaf514ce64c8cebacd2d5388e7ce56de8add80cebe8abb3bd4399",
       "size_bytes": 14314
@@ -5643,5 +5648,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:22c4ec34f4a20a71cc7f2384ac2c5f95e9a38d64a89699179a5e2523527bf96e"
+  "source_digest": "sha256:95b5f7ec12bf2ab4d1b2875be23c700c6ba705ef4108fa0f181fe523b4061c17"
 }
