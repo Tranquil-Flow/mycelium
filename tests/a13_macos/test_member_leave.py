@@ -196,10 +196,10 @@ def test_leave_requires_confirm_and_strict_keys(tmp_path, monkeypatch):
                            ({}, "invalid_request")]:
             with pytest.raises(Exception) as caught:
                 target.action("/api/leave", body)
-            assert getattr(caught.value, "code", None) == code, body
+            assert str(caught.value) == code, body
         with pytest.raises(Exception) as caught:
             owner.action("/api/leave", {"mode": "instant", "confirm": True})
-        assert getattr(caught.value, "code", None) == "target_role_required"
+        assert str(caught.value) == "target_role_required"
         assert target.status()["authority"]["membership_state"] == "current"   # nothing happened
     finally:
         target.close(); owner.close()

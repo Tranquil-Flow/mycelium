@@ -613,6 +613,7 @@ class DemoApp:
             self.policy_thread.start()
             self.standing_thread = threading.Thread(target=self._standing_loop, daemon=True)
             self.standing_thread.start()
+            if self.installation_role == 'target': self._resume_leave()
             return self
         except BaseException:
             self.close(); raise
@@ -777,6 +778,23 @@ class DemoApp:
         return {'created':True,'physical_hosts':1,'node_id':self.local_contributor.member.node_id,
                 'membership_state':'current','route_ready':False}
 
+    #: Member leave (member_leave.py): fence new work / stop lease renewal once leaving.
+    _leave_fence = False
+    _left = False
+    _leave_thread = None
+
+    def _leave_status(self):
+        if self.installation_role != 'target': return None
+        from .member_leave import leave_status
+        return leave_status(self)
+
+    def _resume_leave(self):
+        try:
+            from .member_leave import resume_leave
+            return resume_leave(self)
+        except Exception:
+            return None  # a leave that cannot resume never blocks the app from starting
+
     def _stop_local_contributor(self):
         if self.local_contributor is not None:
             self.local_contributor.stop()
@@ -789,7 +807,7 @@ class DemoApp:
         # The authority and the contributor serialize their own state (their
         # renew() runs under their own lock); read the current ones and renew.
         while not self.closed.wait(20):
-            if self.closed.is_set() or not self.running: continue
+            if self.closed.is_set() or not self.running or self._left: continue
             authority, contributor = self.authority, self.local_contributor
             if authority is None: continue
             try:
@@ -801,6 +819,7 @@ class DemoApp:
                     self.renew_error = 'renewal_unavailable'
 
     def _resource_check(self):
+        if self._leave_fence: return 'owner_stop'  # member leave: no new work (existing A16 reason)
         from .resources import policy_violation, UNKNOWN_OBSERVATION
         try:
             observation = self._policy_observer()
@@ -1095,6 +1114,7 @@ class DemoApp:
                 'running':self.running,'authority':value,'renewal_error':self.renew_error,
                 'recovery_error':self.recovery_error,
                 'distribution':'unsigned development software; not notarized',
+                'leave':self._leave_status(),
                 'join_flow':self._join_flow_status(),
                 'adaptive_host':adaptive_status(self),'adaptive_host_publication':adaptive_publication(self),
                 'sharing':_sharing_status(self),'relay_wait':self._relay_wait_status(),
@@ -1131,6 +1151,9 @@ class DemoApp:
             if self.installation_role == 'target' and path in {'/api/create','/api/revoke','/api/revoke-self','/api/pair/approve','/api/pair/preview',
                     '/api/pair/window/open','/api/pair/window/list','/api/pair/window/approve','/api/pair/window/revoke'}:
                 raise DemoError('owner_role_required')
+            if path == '/api/leave':
+                from .member_leave import leave_action
+                return leave_action(self, body)
             from .adaptive_owner import ADAPTIVE_ROUTES, adaptive_action
             if path in ADAPTIVE_ROUTES:
                 return adaptive_action(self, path, body)
