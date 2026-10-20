@@ -109,8 +109,10 @@ def test_concurrent_helper_downloads_are_capped(tmp_path: Path) -> None:
                 sock.close()
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:  # slots come back once the holders are gone
-            if call(port, "HEAD", URL)[0] == 200:
-                break
+            with socket.create_connection(("127.0.0.1", port)) as probe:
+                probe.sendall(request)
+                if probe.recv(64).startswith(b"HTTP/1.1 200"):
+                    break
             time.sleep(0.1)
         else:
             raise AssertionError("download slots were never released")

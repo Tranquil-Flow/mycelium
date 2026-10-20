@@ -16,6 +16,11 @@ DIRECTORY_PORT = 4360
 DIRECTORY_PUBLIC_ORIGIN = 'https://mycelium.now'
 #: Loopback port of ``mycelium_demo.public_origin_proxy`` (the tunnel's apex origin).
 PROXY_PORT = 4350
+#: Apex proxy bounds, matching the directory behind it (32 slots, 10 s): live connections, per-socket-operation
+#: timeout, and helper-zip downloads streaming at once (each can be up to 1 GiB over the owner's uplink).
+PROXY_CONNECTION_SLOTS = 32
+PROXY_SOCKET_TIMEOUT_SECONDS = 10
+PROXY_MAX_CONCURRENT_DOWNLOADS = 2
 #: Largest request body the proxy forwards to the directory (the directory itself allows 8 KiB).
 DIRECTORY_MAX_BODY_BYTES = 16 * 1024
 

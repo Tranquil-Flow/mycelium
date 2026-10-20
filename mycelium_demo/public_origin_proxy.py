@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 import socket
 import stat
+import threading
 import time
 from typing import Callable, Iterable
 from urllib.parse import urlsplit
@@ -142,6 +143,11 @@ class ProxyConfig:
     # has no per-IP limit, no daily cap and no kill switch, and the proxy stamps its callers as the owner.
     # Only an explicit opt-in serves it next to the directory.
     enable_product_routes: bool = False
+    # Bounds on the proxy itself (slowloris): live connections, seconds per socket operation (header, body and
+    # response writes alike), and helper-zip downloads streaming at once.  Defaults match the directory behind it.
+    connection_slots: int = _hosted.PROXY_CONNECTION_SLOTS
+    socket_timeout_seconds: float = _hosted.PROXY_SOCKET_TIMEOUT_SECONDS
+    max_concurrent_downloads: int = _hosted.PROXY_MAX_CONCURRENT_DOWNLOADS
 
     def __post_init__(self) -> None:
         if not _is_loopback_host(self.listen_host):
@@ -181,6 +187,18 @@ class ProxyConfig:
             raise PublicOriginProxyError("invalid_redirect_root_to_swarms")
         if not isinstance(self.enable_product_routes, bool):
             raise PublicOriginProxyError("invalid_enable_product_routes")
+        for name, value, high in (
+            ("connection_slots", self.connection_slots, 4096),
+            ("max_concurrent_downloads", self.max_concurrent_downloads, 64),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or not (1 <= value <= high):
+                raise PublicOriginProxyError(f"invalid_{name}")
+        if (
+            isinstance(self.socket_timeout_seconds, bool)
+            or not isinstance(self.socket_timeout_seconds, (int, float))
+            or not (0 < float(self.socket_timeout_seconds) <= 120)
+        ):
+            raise PublicOriginProxyError("invalid_socket_timeout_seconds")
         if not isinstance(self.helper_version, str) or _HELPER_VERSION.fullmatch(self.helper_version) is None:
             raise PublicOriginProxyError("invalid_helper_version")
         if self.helper_zip_path is not None:
@@ -255,7 +273,31 @@ class PublicOriginProxyServer(ThreadingHTTPServer):
         self.helper_download = (
             load_helper_download(config.helper_zip_path) if config.helper_zip_path is not None else None
         )
+        self.slots = threading.BoundedSemaphore(config.connection_slots)
+        self.download_slots = threading.BoundedSemaphore(config.max_concurrent_downloads)
         super().__init__(server_address, PublicOriginProxyHandler)
+
+    def process_request(self, request, client_address):  # type: ignore[no-untyped-def]
+        # A bounded number of live connections, each on a socket timeout: a stalled client (no head, a half body,
+        # a reader that never drains) holds one slot for at most the timeout, and the slot after the cap is refused.
+        request.settimeout(float(self.proxy_config.socket_timeout_seconds))
+        if not self.slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self.slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):  # type: ignore[no-untyped-def]
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.slots.release()
+
+    def handle_error(self, request, client_address):  # type: ignore[no-untyped-def]
+        return  # no tracebacks (they could carry request data); the connection just closes
 
 
 class PublicOriginProxyHandler(BaseHTTPRequestHandler):
@@ -417,6 +459,18 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
         if self._current_helper() is None:
             self._send_json_error(503, "download_changed")
             return True
+        capped = self.command != "HEAD"
+        download_slots = self.server.download_slots  # type: ignore[attr-defined]
+        if capped and not download_slots.acquire(blocking=False):
+            self._send_json_error(503, "download_busy")
+            return True
+        try:
+            return self._stream_helper(declared)
+        finally:
+            if capped:
+                download_slots.release()
+
+    def _stream_helper(self, declared: HelperDownload) -> bool:
         try:
             descriptor = os.open(declared.path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         except OSError:
@@ -717,6 +771,9 @@ def build_config_from_args(argv: Iterable[str] | None = None) -> ProxyConfig:
             upstream_timeout_seconds=args.upstream_timeout_seconds,
             helper_zip_path=args.helper_zip,
             helper_version=args.helper_version,
+            connection_slots=args.connection_slots,
+            socket_timeout_seconds=args.socket_timeout_seconds,
+            max_concurrent_downloads=args.max_concurrent_downloads,
             redirect_root_to_swarms=args.redirect_root_to_swarms,
             enable_product_routes=args.enable_product_routes,
             **_directory_kwargs(args),
@@ -779,6 +836,9 @@ def _build_parser() -> argparse.ArgumentParser:
         default=True,
         help="redirect GET / to /swarms/ while the directory is mounted (default on; owner decision 5)",
     )
+    parser.add_argument("--connection-slots", type=int, default=_hosted.PROXY_CONNECTION_SLOTS)
+    parser.add_argument("--socket-timeout-seconds", type=float, default=_hosted.PROXY_SOCKET_TIMEOUT_SECONDS)
+    parser.add_argument("--max-concurrent-downloads", type=int, default=_hosted.PROXY_MAX_CONCURRENT_DOWNLOADS)
     parser.add_argument(
         "--enable-product-routes",
         action="store_true",
