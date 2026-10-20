@@ -145,3 +145,50 @@ def test_the_owner_role_never_shifts_its_clock_and_reports_inactive(tmp_path, mo
         assert status['test_seams']['clock_offset_seconds'] is None
     finally:
         app.close()
+
+
+def test_the_owners_own_local_contributor_is_never_shifted_or_announced(tmp_path, monkeypatch, capsys):
+    from mycelium_a13_macos.app import DemoApp
+    from mycelium_a13_macos.local_contributor import create_local_contributor
+    from test_app_authority import CONSENT
+    monkeypatch.setenv(GATE, '1')
+    monkeypatch.setenv(OFFSET, '9')
+    app = DemoApp(tmp_path / 'owner', check_platform=False).start()
+    actor = None
+    try:
+        app.action('/api/create', {'consent': CONSENT})
+        actor = create_local_contributor(app)
+        assert actor.test_clock_offset_seconds is None
+        assert abs(actor.peer._clock() - time.time()) < 1.0
+        assert 'a13_test_seams_active' not in capsys.readouterr().out
+    finally:
+        if actor:
+            actor.stop()
+        app.close()
+
+
+@pytest.mark.parametrize('offset', [9.0, -9.0])
+def test_a_seamed_member_still_exchanges_and_the_owner_measures_the_forced_offset(tmp_path, offset):
+    """The point of the seam: the owner's own view shows ~the forced offset and the exchange still completes."""
+    from mycelium_a13_macos.app import DemoApp
+    from mycelium_a13_macos.local_contributor import create_local_contributor
+    from mycelium_a13_macos.run_exchange import RunExchange, RunExchangeClient
+    from test_app_authority import CONSENT
+    app = DemoApp(tmp_path / 'owner', check_platform=False).start()
+    actor = None
+    try:
+        app.action('/api/create', {'consent': CONSENT})
+        actor = create_local_contributor(app)
+        exchange = RunExchange(app.authority.control_mailbox).install()
+        app.run_exchange = exchange
+        # what TargetApplication installs on a member when both variables are set
+        actor.peer._clock_source = seams.member_clock({GATE: '1', OFFSET: str(offset)})
+        client = RunExchangeClient(actor.peer)
+        assert client.read()['phase'] == 'idle'
+        measured = exchange.clock_offsets.view(actor.member.node_id)
+        assert abs(measured['offset_seconds'] - offset) < 1.5
+        assert measured['exceeds_tolerance'] is False
+    finally:
+        if actor:
+            actor.stop()
+        app.close()

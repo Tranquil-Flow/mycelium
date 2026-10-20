@@ -25,6 +25,7 @@ import time
 import urllib.parse
 from dataclasses import asdict
 import mycelium_host_platform
+from . import a13_test_seams as _test_seams
 from .serving import RESOURCE_PROPOSAL
 
 MAX_BODY = 65536
@@ -52,6 +53,11 @@ def model_contract(root=None):
     if RUN_MODEL_ENVIRONMENT in os.environ:
         return asdict(selected_run_model())
     return asdict(choice(demo_default_choice()).model)
+
+
+def _test_seam_offset(app):
+    """The forced member clock offset actually in force (target role only); None = no seam (the normal case)."""
+    return getattr(app.authority, 'test_clock_offset_seconds', None) if app.installation_role == 'target' else None
 
 
 class DemoError(RuntimeError):
@@ -1211,7 +1217,9 @@ class DemoApp:
                 'sharing':_sharing_status(self),'relay_wait':self._relay_wait_status(),
                 'owner_run':_demo_status(self,'owner'),'demo_target':_demo_status(self,'target'),
                 'chat':_demo_status(self,'chat'),'swarm':_swarm_status(self),
-                'serving':self._serving_block(),'peer_liveness':_peer_liveness()}
+                'serving':self._serving_block(),'peer_liveness':_peer_liveness(),
+                'test_seams_active':_test_seam_offset(self) is not None,
+                'test_seams':_test_seams.status(_test_seam_offset(self))}
 
     def _serving_block(self):
         wait=self._relay_wait_status()

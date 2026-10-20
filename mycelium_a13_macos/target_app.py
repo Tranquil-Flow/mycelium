@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Application adapter for a target-owned Mac; never creates a seed."""
 import time
+from . import a13_test_seams as _seams
 from .peer import RemoteMacMember
 from .capability import observe_mac
 from .managed_classes import managed_runtime_backend
@@ -14,9 +15,18 @@ class TargetApplication:
     adaptive_overlay = None
     #: A16: ``drain(runtime)`` tick set by the owning app; None = the model is never unloaded.
     adaptive_drain = None
+    #: A13 gate test seam: only a joined (member) role honours it; the owner's own local contributor sets False.
+    HONOURS_TEST_CLOCK_SEAM = True
 
     def __init__(self, root, *, _test_peer_factory=None):
-        self.peer = (_test_peer_factory or RemoteMacMember)(root)
+        # A13 gate test seam (inert unless MYCELIUM_A13_TEST_SEAMS=1 and an offset is set; see a13_test_seams).
+        self.test_clock_offset_seconds = _seams.clock_offset_seconds() if self.HONOURS_TEST_CLOCK_SEAM else None
+        factory = _test_peer_factory or RemoteMacMember
+        if self.test_clock_offset_seconds is None:
+            self.peer = factory(root)
+        else:
+            _seams.announce(self.test_clock_offset_seconds)
+            self.peer = factory(root, clock=_seams.member_clock())
         self.capability = None
         self._runtime = None
 
