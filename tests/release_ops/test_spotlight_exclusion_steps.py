@@ -83,3 +83,10 @@ def test_relative_paths_are_refused():
     done = subprocess.run([sys.executable, str(SCRIPT), "--path", "relative/dir"], capture_output=True, text=True,
                           timeout=30)
     assert done.returncode == 2 and "absolute" in done.stderr
+
+
+@pytest.mark.skipif(not Path("/System/Volumes/Data").is_dir(), reason="macOS Data volume only")
+def test_user_folders_resolve_to_the_data_volume_not_the_sealed_system_volume(tmp_path):
+    mod = _load()
+    assert mod.mount_point(Path.home() / "Documents") == Path("/System/Volumes/Data")
+    assert mod.mount_point(tmp_path / "not-created-yet" / "deeper") == Path("/System/Volumes/Data")
