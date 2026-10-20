@@ -85,7 +85,10 @@ from .managed_control import (
 READ = "mycelium.a13_model_source_read.v1"
 RESPONSE = "mycelium.a13_model_source_bytes.v1"
 HINT = "mycelium.a13_model_source_hint.v1"
+MANIFEST_READ = "mycelium.a13_model_source_manifest_read.v1"
+MANIFEST_RESPONSE = "mycelium.a13_model_source_manifest.v1"
 PATH_READ = "/managed-control/model-source/read"
+PATH_MANIFEST = "/managed-control/model-source/manifest"
 DISCOVERY = "demo-run-discovery"
 ENVIRONMENT = "MYCELIUM_A13_PEER_MODEL_SOURCE"  # on (default) | relay | off
 
@@ -118,6 +121,12 @@ _RESP_FIELDS = frozenset(
     _RESPONSE_COMMON_FIELDS | _BINDING_FIELDS
     | {"model_id", "resolved_commit", "path", "offset", "length", "file_size",
        "chunk_sha256", "data_base64"}
+)
+_MANIFEST_REQ_FIELDS = frozenset(
+    _REQUEST_COMMON_FIELDS | _BINDING_FIELDS | {"model_id", "resolved_commit"}
+)
+_MANIFEST_RESP_FIELDS = frozenset(
+    _RESPONSE_COMMON_FIELDS | _BINDING_FIELDS | {"model_id", "resolved_commit", "manifest"}
 )
 _CODE_RE = re.compile(r"[a-z][a-z0-9_]{0,95}\Z")
 _SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -210,6 +219,7 @@ class OwnerModelSource:
     def install(self) -> "OwnerModelSource":
         routes = dict(getattr(self.mailbox, "route_extensions", None) or {})
         routes[PATH_READ] = self.handle
+        routes[PATH_MANIFEST] = self.handle_manifest
         self.mailbox.route_extensions = routes
         return self
 
@@ -249,15 +259,7 @@ class OwnerModelSource:
                  "model_source_request_invalid")
         # A revoked member keeps a verifiable binding (STOPPED); it gets no bytes.
         _require(_member_live(member), "model_source_member_not_live")
-        # Reads carry no durable sequence; a captured request (the relay sees
-        # control traffic) is refused on replay inside its freshness window.
-        with self._lock:
-            now = self.mailbox._clock()
-            if len(self._seen) >= _MAX_SEEN_REQUESTS:
-                self._seen = {key: until for key, until in self._seen.items() if until > now}
-            _require(len(self._seen) < _MAX_SEEN_REQUESTS, "model_source_busy")
-            _require(statement["request_id"] not in self._seen, "model_source_request_replayed")
-            self._seen[statement["request_id"]] = statement["expires_at"]
+        self._admit(statement)
         path, offset, length = statement["path"], statement["offset"], statement["length"]
         _require(isinstance(statement["model_id"], str) and isinstance(statement["resolved_commit"], str)
                  and isinstance(path, str) and type(offset) is int and type(length) is int
@@ -299,6 +301,51 @@ class OwnerModelSource:
             "model_id": model.model_id, "resolved_commit": model.resolved_commit,
             "path": path, "offset": offset, "length": length, "file_size": size,
             "chunk_sha256": _sha(data), "data_base64": base64.b64encode(data).decode("ascii")})
+
+    def _admit(self, statement: Mapping[str, Any]) -> None:
+        # Reads carry no durable sequence; a captured request (the relay sees
+        # control traffic) is refused on replay inside its freshness window.
+        with self._lock:
+            now = self.mailbox._clock()
+            if len(self._seen) >= _MAX_SEEN_REQUESTS:
+                self._seen = {key: until for key, until in self._seen.items() if until > now}
+            _require(len(self._seen) < _MAX_SEEN_REQUESTS, "model_source_busy")
+            _require(statement["request_id"] not in self._seen, "model_source_request_replayed")
+            self._seen[statement["request_id"]] = statement["expires_at"]
+
+    def handle_manifest(self, envelope: Any) -> dict[str, Any]:
+        """Serve the pinned file list (paths, sizes, digests, commit) to a live member.
+
+        The same checks as a byte read (signed member statement against the
+        CURRENT member record, live member, replay refusal, exact model and
+        commit).  The answer is the owner's already-verified manifest, owner
+        signed; the member still pins the commit and digest-verifies every file.
+        """
+        statement, member = self.mailbox._verify_target(
+            envelope, protocol=MANIFEST_READ, fields=_MANIFEST_REQ_FIELDS)
+        _require(statement["run_id"] == DISCOVERY and statement["deployment_id"] == DISCOVERY,
+                 "model_source_request_invalid")
+        _require(_member_live(member), "model_source_member_not_live")
+        self._admit(statement)
+        _require(isinstance(statement["model_id"], str)
+                 and isinstance(statement["resolved_commit"], str), "model_source_request_invalid")
+        value = None
+        try:
+            value = self._source()
+        except Exception:
+            value = None
+        _require(value is not None, "model_source_unavailable")
+        model, _root, manifest = value
+        snapshot = self.snapshot()
+        _require(snapshot is not None, "model_source_unavailable")
+        _require((model.model_id, model.resolved_commit)
+                 == (statement["model_id"], statement["resolved_commit"]),
+                 "model_source_model_mismatch")
+        checked = _validate_manifest(manifest, model=model)
+        return self.mailbox._response(MANIFEST_RESPONSE, statement["request_id"], {
+            **{key: statement[key] for key in _BINDING_FIELDS},
+            "model_id": model.model_id, "resolved_commit": model.resolved_commit,
+            "manifest": checked})
 
     @staticmethod
     def _read(root: Path, path: str, offset: int, length: int, size: int) -> bytes:
@@ -477,7 +524,7 @@ class _LanHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         try:
-            _require(self.path == PATH_READ, "model_source_route_unknown")
+            _require(self.path in {PATH_READ, PATH_MANIFEST}, "model_source_route_unknown")
             lengths = self.headers.get_all("Content-Length", [])
             _require(self.headers.get("Content-Type") == "application/json"
                      and self.headers.get("Transfer-Encoding") is None
@@ -486,7 +533,9 @@ class _LanHandler(BaseHTTPRequestHandler):
                      and len(lengths) == 1 and lengths[0].isdigit()
                      and 0 < int(lengths[0]) <= MAX_LAN_REQUEST_BYTES, "model_source_frame_invalid")
             body = _canonical_loads(self.rfile.read(int(lengths[0])))
-            self._send(200, self.server.source.handle(body))
+            route = (self.server.source.handle_manifest if self.path == PATH_MANIFEST
+                     else self.server.source.handle)
+            self._send(200, route(body))
         except ManagedControlError as exc:
             status = 401 if exc.code in {"managed_control_signature_invalid",
                                          "managed_control_key_pin_mismatch",
@@ -607,6 +656,25 @@ class PeerRangeClient:
         lan._opener = build_opener(ProxyHandler({}), _NoRedirect(), HTTPSHandler(context=context))
         return lan
 
+    def read_manifest(self, model_id: str, resolved_commit: str) -> dict[str, Any]:
+        """The owner's pinned manifest for exactly this model and commit (not yet trusted)."""
+        client = self._client()
+        member = self.peer.staging_control_snapshot()
+        binding = _binding_from_member(member, DISCOVERY, DISCOVERY)
+        now = client._clock()
+        request_id = uuid.uuid4().hex
+        statement = {**binding, "protocol": MANIFEST_READ, "swarm_id": client.swarm_id,
+                     "request_id": request_id, "sequence": 1, "nonce": uuid.uuid4().hex,
+                     "issued_at": now, "expires_at": now + 30, "model_id": model_id,
+                     "resolved_commit": resolved_commit}
+        response = client._request(PATH_MANIFEST, client._signed_outbound(statement))
+        result = client._verified_response(response, protocol=MANIFEST_RESPONSE,
+                                           fields=_MANIFEST_RESP_FIELDS, request_id=request_id,
+                                           target=member, run_id=DISCOVERY, deployment_id=DISCOVERY)
+        _require(result["model_id"] == model_id and result["resolved_commit"] == resolved_commit
+                 and isinstance(result["manifest"], Mapping), "model_source_response_invalid")
+        return dict(result["manifest"])
+
     def read(self, model_id: str, resolved_commit: str, path: str, offset: int, length: int) -> bytes:
         client = self._client()
         member = self.peer.staging_control_snapshot()
@@ -639,12 +707,14 @@ class PeerRangeClient:
 class _Source:
     def __init__(self, name: str, *, chunk_bytes: int, trusted: bool,
                  read: Callable[[str, str, str, int, int], bytes],
-                 fatal: tuple[str, ...] = ()) -> None:
+                 fatal: tuple[str, ...] = (),
+                 read_manifest: Callable[[str, str], Mapping[str, Any]] | None = None) -> None:
         self.name = name
         self.fatal = frozenset(fatal)
         self.chunk_bytes = chunk_bytes
         self.trusted = trusted
         self._read = read
+        self.read_manifest = read_manifest
         self.enabled = True
         self.strikes = 0
         self.rate: float | None = None
@@ -665,7 +735,8 @@ class _Source:
 def peer_source(name: str, client: PeerRangeClient, *, chunk_bytes: int,
                 fatal: tuple[str, ...] = ()) -> _Source:
     """``fatal``: extra codes that disable at once (an unreachable LAN path)."""
-    return _Source(name, chunk_bytes=chunk_bytes, trusted=False, read=client.read, fatal=fatal)
+    return _Source(name, chunk_bytes=chunk_bytes, trusted=False, read=client.read, fatal=fatal,
+                   read_manifest=getattr(client, "read_manifest", None))
 
 
 class _HuggingFaceSource(_Source):
@@ -724,7 +795,7 @@ _FATAL = frozenset({
     "model_source_path_refused", "model_source_budget_exhausted", "model_source_member_not_live",
     "model_source_request_invalid", "model_source_range_invalid", "model_source_file_unsafe",
     "model_source_request_replayed",
-    "source_response_invalid",
+    "source_response_invalid", "model_manifest_commit_mismatch", "model_manifest_invalid",
 })
 
 
@@ -773,11 +844,40 @@ class MultiSourceTransport:
 
     # -- trusted metadata stays on the pinned origin ---------------------
     def resolve(self, model: Any) -> dict[str, Any]:
-        if self._fallback is None:
-            if self._offline:
-                raise OfflineAcquisitionError("the pinned model metadata")
-            raise AcquisitionError("source_unavailable")
-        return self._fallback.resolve(model)
+        if self._fallback is not None:
+            return self._fallback.resolve(model)
+        return self._resolve_from_owner(model)
+
+    def _resolve_from_owner(self, model: Any) -> dict[str, Any]:
+        """No pinned origin: take the pinned file list from the owner, never trust it blindly.
+
+        The manifest must name exactly the pinned model and commit; the file
+        digests in it are then enforced on every received byte by the
+        acquisition, as with a Hugging Face manifest.
+        """
+        last: str | None = None
+        for source in list(self._order):
+            reader = source.read_manifest
+            if reader is None or not source.enabled:
+                continue
+            try:
+                document = reader(model.model_id, model.resolved_commit)
+                if (not isinstance(document, Mapping)
+                        or document.get("model_id") != model.model_id
+                        or document.get("resolved_commit") != model.resolved_commit):
+                    raise AcquisitionError("model_manifest_commit_mismatch")
+                return _validate_manifest(document, model=model)
+            except Exception as error:
+                self._failed(source, error)
+                code = getattr(error, "code", None)
+                last = code if isinstance(code, str) and _CODE_RE.fullmatch(code) else "source_unavailable"
+                if last in {"model_manifest_commit_mismatch", "model_manifest_invalid"}:
+                    raise AcquisitionError(last) from None
+        if last is not None:
+            raise AcquisitionError(last)
+        if self._offline:
+            raise OfflineAcquisitionError("the pinned model metadata")
+        raise AcquisitionError("source_unavailable")
 
     def status(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -1017,6 +1117,6 @@ def joiner_model_source(app: Any, announcement: Mapping[str, Any] | None, *,
 
 __all__ = [
     "HINT", "LAN_CHUNK_BYTES", "MAX_CHUNK_BYTES", "MultiSourceTransport", "OwnerLanModelSource",
-    "OwnerModelSource", "PATH_READ", "PeerRangeClient", "RELAY_CHUNK_BYTES", "READ", "RESPONSE",
+    "MANIFEST_READ", "MANIFEST_RESPONSE", "OwnerModelSource", "PATH_MANIFEST", "PATH_READ", "PeerRangeClient", "RELAY_CHUNK_BYTES", "READ", "RESPONSE",
     "choose_lan_host", "joiner_model_source", "owner_snapshot", "peer_source", "validate_hint",
 ]

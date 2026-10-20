@@ -22,6 +22,11 @@ from test_peer_model_source import _relay, owner  # noqa: F401  (pytest fixture)
 MODEL = CANDIDATE_MODEL
 
 
+def _normal(manifest):
+    """The owner serves the validated manifest: files sorted by path."""
+    return {**manifest, "files": sorted(manifest["files"], key=lambda row: row["path"])}
+
+
 def _code(error: BaseException) -> str:
     return getattr(error, "code", str(error))
 
@@ -38,9 +43,8 @@ def _offline(monkeypatch):
 def test_member_reads_the_pinned_manifest_from_the_owner(owner):  # noqa: F811
     _, actor, _, _, _, manifest = owner
     served = pms.PeerRangeClient(actor.peer).read_manifest(MODEL.model_id, MODEL.resolved_commit)
-    assert served == manifest
+    assert served == _normal(manifest)
     assert served["resolved_commit"] == MODEL.resolved_commit
-    assert [row["path"] for row in served["files"]] == sorted(row["path"] for row in manifest["files"])
 
 
 def test_owner_refuses_a_manifest_for_another_commit(owner):  # noqa: F811
@@ -64,7 +68,7 @@ def test_owner_without_a_prepared_snapshot_serves_no_manifest(owner):  # noqa: F
 def test_offline_transport_resolves_the_manifest_from_the_owner(owner):  # noqa: F811
     _, actor, _, _, _, manifest = owner
     transport = pms.MultiSourceTransport([_relay(actor)], fallback=None, offline=True)
-    assert transport.resolve(MODEL) == manifest
+    assert transport.resolve(MODEL) == _normal(manifest)
 
 
 def test_online_fallback_still_resolves_from_the_pinned_origin(owner):  # noqa: F811
@@ -170,3 +174,18 @@ def test_offline_member_refuses_a_foreign_commit_manifest_before_any_byte(owner,
         assert source.served_bytes(actor.member.node_id) == 0
     finally:
         acquisition.close()
+
+
+def test_lan_direct_listener_serves_the_manifest_with_pinned_tls(owner):  # noqa: F811
+    _, actor, source, _, _, manifest = owner
+    lan = pms.OwnerLanModelSource(source, host="127.0.0.1").start()
+    try:
+        client = pms.PeerRangeClient(actor.peer, lan_origin=lan.origin,
+                                     tls_certificate_pem=lan.certificate_pem)
+        assert client.read_manifest(MODEL.model_id, MODEL.resolved_commit) == _normal(manifest)
+        transport = pms.MultiSourceTransport(
+            [pms.peer_source("owner_lan", client, chunk_bytes=pms.LAN_CHUNK_BYTES)],
+            fallback=None, offline=True)
+        assert transport.resolve(MODEL) == _normal(manifest)
+    finally:
+        lan.close()

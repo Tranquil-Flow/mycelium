@@ -1028,10 +1028,14 @@ class SelectedModelAcquisition:
         if self._injected_manifest is not None:
             manifest = _validate_manifest(self._injected_manifest, model=self.model)
         else:
+            # Offline, the pinned file list comes from the owner (through the
+            # byte source); it is validated and digest-enforced exactly as a
+            # Hugging Face manifest would be.
+            source = self._transport
+            if offline_enabled() and callable(getattr(self._byte_source, "resolve", None)):
+                source = self._byte_source
             try:
-                manifest = _validate_manifest(
-                    self._transport.resolve(self.model), model=self.model
-                )
+                manifest = _validate_manifest(source.resolve(self.model), model=self.model)
             except AcquisitionError:
                 raise
             except BaseException as exc:
