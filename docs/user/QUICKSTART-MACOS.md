@@ -99,6 +99,68 @@ Nothing is served until the route passes its start-up check. While it is checkin
 - On the owner page, the "Adaptive sharing" card (on by default once you consent). See [WHAT-MYCELIUM-DOES](WHAT-MYCELIUM-DOES.md).
 - If a Mac leaves during an answer, either the answer continues or it ends with an explicit failure. It never ends with a fake success.
 
+## Use your own address (advanced, optional)
+
+By default, letting another Mac join uses a temporary Cloudflare address that changes every
+time the relay starts. If you own a domain you can use a fixed address instead, for example
+`https://demo.mycelium.now`, so join links and the swarm listing keep working after a restart.
+
+1. Point the hostname at this Mac yourself. Mycelium does not do this for you. A Cloudflare
+   named tunnel is the simplest way (example below).
+2. In the app, under **Invite a Mac**, open **Use my own address**. Enter the address
+   (`https://` and a domain name, no port or path) and a local port such as `8787`. Tick the
+   Cloudflare box only if a Cloudflare tunnel serves the address. Start the relay.
+3. Open an invitation and send the **join link** (the short typed code works only for the
+   temporary addresses).
+
+**The Cloudflare named-tunnel example (`demo.mycelium.now`)**
+
+This is what you run on the owner Mac. It is your own Cloudflare setup, separate from
+Mycelium; Mycelium never reads or writes it, and no secret belongs in this document or in a
+message to anyone. It needs a free Cloudflare account that manages the `mycelium.now` zone.
+
+```sh
+cloudflared tunnel login                          # opens your browser; stores a cert in ~/.cloudflared
+cloudflared tunnel create mycelium-demo           # prints the tunnel UUID and writes <UUID>.json (a secret)
+cloudflared tunnel route dns mycelium-demo demo.mycelium.now
+```
+
+`~/.cloudflared/config.yml` (replace `<TUNNEL-UUID>` and `<you>`; pick the same port you type in
+the app):
+
+```yaml
+tunnel: <TUNNEL-UUID>
+credentials-file: /Users/<you>/.cloudflared/<TUNNEL-UUID>.json
+protocol: http2
+ingress:
+  - hostname: demo.mycelium.now
+    service: http://127.0.0.1:8787
+  - service: http_status:404
+```
+
+Then `cloudflared tunnel run mycelium-demo` and keep it running while the swarm is up. In
+Mycelium press **Use my own address**, enter `https://demo.mycelium.now`, port `8787`, tick
+"served by a Cloudflare tunnel", and start the relay.
+
+Rules the app enforces: `https://` plus a real DNS name only (no port, path, login details,
+IP number or `.local` name), and a local port from 1024 to 65535. The typed short code
+(`quiet-river-apple-stone ABCD-EFGH-JKLM`) still works only for `*.trycloudflare.com`; for your
+own address send the **join link**, which carries the address and the owner's key digest.
+
+What stays the same after the relay stops and starts again (the 30-minute limit, a quit and
+reopen): the address, the swarm and its members, the join links and the swarm listing. Press
+**Use my own address** again, or restart the relay with the same address (the app remembers it),
+and nothing has to be republished. The app only opens the local port; if the tunnel is not
+running, visitors see a Cloudflare error page and the app still works locally.
+
+Who can see what: whichever front serves your hostname terminates HTTPS and sees control
+traffic, visitor IP addresses and timing, and web chat prompts and replies. With a Cloudflare
+tunnel that is Cloudflare; with your own server it is you. Only inference between the Macs
+uses Iroh. The public chat page and swarm entry follow exactly the same checks on your address
+as on a quick tunnel (kill switch, access mode, daily caps, per-visitor rate limit). The
+per-visitor rate limit reads Cloudflare's visitor-address header only when you tick the
+Cloudflare box; for any other front all visitors share one limit.
+
 ## How to stop
 
 From gentlest to most final:

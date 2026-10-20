@@ -52,6 +52,61 @@ swarm is private from those three.
 4. Send the **join link** to the friend through a message app. Compare the fingerprint
    shown on both Macs, then approve the request.
 
+## Use your own address (stable hostname)
+
+Instead of a random quick-tunnel hostname you can serve the swarm on a fixed `https://` address you
+own, for example `https://demo.mycelium.now`. Mycelium does not create it: **you must point the
+hostname at this Mac yourself**. On the owner page open **Use my own address**, enter the address and
+a local port; the app listens on `127.0.0.1:<port>` and your front forwards to it.
+
+### The Cloudflare named-tunnel example (`demo.mycelium.now`)
+
+This is what you run on the owner Mac. It is your own Cloudflare setup, separate from
+Mycelium; Mycelium never reads or writes it, and no secret belongs in this document or in a
+message to anyone. It needs a free Cloudflare account that manages the `mycelium.now` zone.
+
+```sh
+cloudflared tunnel login                          # opens your browser; stores a cert in ~/.cloudflared
+cloudflared tunnel create mycelium-demo           # prints the tunnel UUID and writes <UUID>.json (a secret)
+cloudflared tunnel route dns mycelium-demo demo.mycelium.now
+```
+
+`~/.cloudflared/config.yml` (replace `<TUNNEL-UUID>` and `<you>`; pick the same port you type in
+the app):
+
+```yaml
+tunnel: <TUNNEL-UUID>
+credentials-file: /Users/<you>/.cloudflared/<TUNNEL-UUID>.json
+protocol: http2
+ingress:
+  - hostname: demo.mycelium.now
+    service: http://127.0.0.1:8787
+  - service: http_status:404
+```
+
+Then `cloudflared tunnel run mycelium-demo` and keep it running while the swarm is up. In
+Mycelium press **Use my own address**, enter `https://demo.mycelium.now`, port `8787`, tick
+"served by a Cloudflare tunnel", and start the relay.
+
+Rules the app enforces: `https://` plus a real DNS name only (no port, path, login details,
+IP number or `.local` name), and a local port from 1024 to 65535. The typed short code
+(`quiet-river-apple-stone ABCD-EFGH-JKLM`) still works only for `*.trycloudflare.com`; for your
+own address send the **join link**, which carries the address and the owner's key digest.
+
+What stays the same after the relay stops and starts again (the 30-minute limit, a quit and
+reopen): the address, the swarm and its members, the join links and the swarm listing. Press
+**Use my own address** again, or restart the relay with the same address (the app remembers it),
+and nothing has to be republished. The app only opens the local port; if the tunnel is not
+running, visitors see a Cloudflare error page and the app still works locally.
+
+Who can see what: whichever front serves your hostname terminates HTTPS and sees control
+traffic, visitor IP addresses and timing, and web chat prompts and replies. With a Cloudflare
+tunnel that is Cloudflare; with your own server it is you. Only inference between the Macs
+uses Iroh. The public chat page and swarm entry follow exactly the same checks on your address
+as on a quick tunnel (kill switch, access mode, daily caps, per-visitor rate limit). The
+per-visitor rate limit reads Cloudflare's visitor-address header only when you tick the
+Cloudflare box; for any other front all visitors share one limit.
+
 ## Friend steps
 
 1. **Paste the join link rather than typing the short code.** The link carries the
@@ -108,6 +163,8 @@ revoke it from the owner screen.
 
 - Cloudflare quick tunnels have no uptime guarantee and a lifetime set by the owner
   (at most 30 minutes in the app); this is a session tool, not an always-on service.
+  Your own address keeps the same hostname across restarts, but the relay in the app still
+  has the same 30-minute limit and must be restarted.
 - A direct (hole-punched) Iroh path is not guaranteed; carrier-grade NAT often leaves
   the n0 relay as the path. A relay path is acceptable for small models.
 - There is no self-hosted relay and no zero-third-party rendezvous in this build.
