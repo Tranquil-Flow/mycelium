@@ -142,6 +142,9 @@ class RouterSessionBackend:
         self._cancellation_deadlines: dict[str, float] = {}
         self._publisher_generations: dict[str, int] = {}
         self._router_admitted: set[str] = set()
+        #: The router's own bounded terminal error code, read before the gateway releases the request (the
+        #: router drops its record on release).  Bounded FIFO; read once by ``terminal_failure_code``.
+        self._terminal_error_codes: dict[str, str] = {}
 
     def run(
         self,
@@ -318,6 +321,8 @@ class RouterSessionBackend:
                 status = self._router.request_status(request_id)
                 if status in ("COMPLETED", "CANCELLED", "FAILED"):
                     self._capture_terminal_attempt(request_id, emit_token)
+                if status == "FAILED":
+                    self._capture_router_error_code(request_id)
                 if status == "COMPLETED":
                     return "completed"
                 if status == "CANCELLED":
@@ -353,6 +358,8 @@ class RouterSessionBackend:
                         recovery_status = self._router.request_status(request_id)
                         if recovery_status in ("CANCELLED", "FAILED"):
                             self._capture_terminal_attempt(request_id, emit_token)
+                        if recovery_status == "FAILED":
+                            self._capture_router_error_code(request_id)
                         if recovery_status == "CANCELLED":
                             return "cancelled"
                         if recovery_status == "TERMINAL_BLOCKED":
@@ -374,6 +381,24 @@ class RouterSessionBackend:
             if admitted:
                 self._cancel_once(request_id)
             raise
+
+    def _capture_router_error_code(self, request_id: str) -> None:
+        """Keep the router's bounded error code for the gateway's terminal event (V1.1 g)."""
+        reader = getattr(self._router, "request_error_code", None)
+        if not callable(reader):
+            return
+        try:
+            code = reader(request_id)
+        except Exception:
+            return
+        if not is_safe_error_code(code):
+            return
+        with self._lock:
+            codes = self._terminal_error_codes
+            codes.pop(request_id, None)
+            codes[request_id] = code
+            while len(codes) > 256:
+                codes.pop(next(iter(codes)))
 
     def _capture_terminal_attempt(self, request_id: str, emit_token: TokenEmitter) -> None:
         """Bind the command that owns this terminal before release."""
@@ -599,18 +624,24 @@ class RouterSessionBackend:
     def terminal_failure_code(self, request_id: str) -> str | None:
         """The bounded recovery failure code for a failed request, if any.
 
-        Only the router's retained, non-disclosing recovery code is surfaced;
-        every other failure keeps the generic gateway code.
+        The router's retained recovery code, else its own bounded terminal error code; anything missing or
+        unsafe keeps the generic gateway code.
         """
 
+        reason = None
         reason_of = getattr(self._router, "recovery_failure_reason", None)
-        if not callable(reason_of):
-            return None
-        try:
-            reason = reason_of(request_id)
-        except Exception:
-            return None
-        return reason if is_safe_error_code(reason) else None
+        if callable(reason_of):
+            try:
+                reason = reason_of(request_id)
+            except Exception:
+                reason = None
+        if is_safe_error_code(reason):
+            return reason
+        # No recovery reason: the router's own terminal code (``affected_peer_quarantined``, ...) beats the
+        # generic ``backend_failed`` -- the live demo ended every chat that way with no cause named.
+        with self._lock:
+            code = self._terminal_error_codes.pop(request_id, None)
+        return code if is_safe_error_code(code) else None
 
     def update_publisher_generation(
         self,
