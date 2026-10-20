@@ -274,3 +274,21 @@ def test_fit_gate_does_not_apply_to_an_environment_override_or_a_single_mac(app,
     monkeypatch.delenv('MYCELIUM_A13_RUN_MODEL')
     _members(app, monkeypatch)
     app.model_fit_gate()  # nothing joined yet: fit unknown
+
+
+def test_every_choice_round_trips_so_members_can_follow_the_announced_model():
+    # The owner announces choice_for_model(model).name; a member resolves that name to the same
+    # pinned contract (demo_target posts it to its own /api/run-model).
+    for c in run_model.CHOICES:
+        announced = run_model.choice_for_model(c.model)
+        assert announced is c
+        assert run_model.choice(announced.name).model == c.model
+        assert registered_model_contract(c.model.model_id, c.model.resolved_commit) is c.model
+
+
+def test_a_member_follows_the_owners_qwen25_choice_through_its_own_picker(app):
+    announced = run_model.choice_for_model(registered_model_contract(
+        'Qwen/Qwen2.5-7B-Instruct', 'a09a35458c702b33eeacc393d103063234e8bc28')).name
+    assert announced == 'qwen2.5-7b'
+    app.action('/api/run-model', {'choice': announced})
+    assert app.status()['model_contract']['resolved_commit'] == 'a09a35458c702b33eeacc393d103063234e8bc28'

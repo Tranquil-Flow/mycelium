@@ -154,8 +154,8 @@ def document(root: Path | str, *, environ: Mapping[str, str] | None = None,
     if fits is not None:
         best = fits['suggested']
         suggestion = {'name': best, 'members': fits['members'], 'usable_bytes': fits['usable_bytes'],
-                      'line': (f"Largest that fits: {choice(best).label.split(' (')[0]}, "
-                               f"{fit_of[best]['line']}") if best else
+                      'line': (f"Largest that fits: {choice(best).label.split(' (')[0]} - "
+                               f"{fit_of[best]['line'].removeprefix('fits: ')}") if best else
                       ('Invite a Mac to see which models fit.' if fits['members'] < 2 else
                        'No registered model fits these Macs; add a Mac.')}
     return {'selected': name, 'source': source, 'locked': source == 'environment',
