@@ -639,8 +639,12 @@ class RouterSessionBackend:
             return reason
         # No recovery reason: the router's own terminal code (``affected_peer_quarantined``, ...) beats the
         # generic ``backend_failed`` -- the live demo ended every chat that way with no cause named.
-        with self._lock:
-            code = self._terminal_error_codes.pop(request_id, None)
+        codes = getattr(self, "_terminal_error_codes", None)
+        lock = getattr(self, "_lock", None)
+        if codes is None or lock is None:
+            return None
+        with lock:
+            code = codes.pop(request_id, None)
         return code if is_safe_error_code(code) else None
 
     def update_publisher_generation(
