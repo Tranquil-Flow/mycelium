@@ -632,6 +632,11 @@ class DemoApp:
             self.standing_thread = threading.Thread(target=self._standing_loop, daemon=True)
             self.standing_thread.start()
             if self.installation_role == 'target': self._resume_leave()
+            else:
+                try:
+                    from .openai_api import start as _openai_start
+                    _openai_start(self)  # the owner's OpenAI-compatible API, only if the owner turned it on
+                except Exception: self.cleanup_error = 'openai_api_start_failed'
             return self
         except BaseException:
             self.close(); raise
@@ -1054,6 +1059,8 @@ class DemoApp:
                     self, method, path, headers, body, via_relay=True))
             from .swarm_entry import bind as _bind_swarm_entry
             _bind_swarm_entry(self, self.public_relay.proxy)
+            from .openai_api import bind_relay as _bind_openai
+            _bind_openai(self)  # /v1/* on the relay only while the owner's expose_via_relay setting is on
 
     def _join_client(self, origin):
         from .pairing import JoinWindowClient
@@ -1281,6 +1288,9 @@ class DemoApp:
             if path in _DEMO_ROUTES:
                 from .demo_app import action as _demo_action
                 return _demo_action(self, path, body)
+            if path.startswith('/api/openai/'):
+                from .openai_api import action as _openai_action
+                return _openai_action(self, path, body)
             if path.startswith('/api/swarm/'):
                 from .swarm_publish import action as _swarm_action
                 return _swarm_action(self, path, body)
@@ -1734,6 +1744,11 @@ class DemoApp:
                 _swarm_close(self)
             except Exception:
                 pass
+            try:
+                from .openai_api import close as _openai_close
+                _openai_close(self)
+            except Exception:
+                self.cleanup_error='openai_api_stop_failed'
         with self.guard:
             if self.closed.is_set(): return
             self.closed.set()
@@ -1804,11 +1819,11 @@ class _Handler(BaseHTTPRequestHandler):
         return valid
     def do_GET(self):
         if not self.base_guard(): return
-        if self.path in {'/','/app.js','/style.css','/run.js','/swarm.js'}:
-            name={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/run.js':'run.js','/swarm.js':'swarm.js'}[self.path]
+        if self.path in {'/','/app.js','/style.css','/run.js','/swarm.js','/openai.js'}:
+            name={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/run.js':'run.js','/swarm.js':'swarm.js','/openai.js':'openai.js'}[self.path]
             path=Path(__file__).parent/'web'/name
             if not path.is_file(): self.fail(503,'assets_unavailable'); return
-            kind={'/':'text/html; charset=utf-8','/app.js':'text/javascript; charset=utf-8','/run.js':'text/javascript; charset=utf-8','/swarm.js':'text/javascript; charset=utf-8','/style.css':'text/css; charset=utf-8'}[self.path]
+            kind={'/':'text/html; charset=utf-8','/app.js':'text/javascript; charset=utf-8','/run.js':'text/javascript; charset=utf-8','/swarm.js':'text/javascript; charset=utf-8','/openai.js':'text/javascript; charset=utf-8','/style.css':'text/css; charset=utf-8'}[self.path]
             self.send_value(200,path.read_bytes(),content_type=kind); return
         if self.path == '/chat' or self.path.startswith('/chat/'):
             self.chat_route(b''); return

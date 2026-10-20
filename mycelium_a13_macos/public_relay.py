@@ -40,6 +40,11 @@ _LOCAL_TYPES=frozenset({'application/json','text/html; charset=utf-8','image/svg
 #: with ``handler(method, path, headers, body) -> (status, 'application/json', raw)``.
 #: Cross-origin (the directory page is another origin): CORS ``*``, no credentials.
 _SWARM_PREFIX='/swarm-entry/v1/'
+#: The owner's OpenAI-compatible API (openai_api.py), only while the owner has turned on ``expose_via_relay``:
+#: ``SeedRelayProxy.bind_openai(handler)`` with ``handler(method, path, headers, body) -> (status, type, raw, headers)``.
+#: Unbound it answers 404 like any unknown route.  It is the one in-process route that accepts ``Authorization``
+#: (the owner's Bearer key); the answer is buffered whole (a stream is returned as one SSE body).
+_OPENAI_PREFIX='/v1/'
 _SWARM_CORS=(('Access-Control-Allow-Origin','*'),('Access-Control-Allow-Methods','POST'),
              ('Access-Control-Allow-Headers','Content-Type'),('Access-Control-Max-Age','600'))
 
@@ -55,6 +60,7 @@ class _RelayServer(ThreadingHTTPServer):
         self.local=None
         self.chat=None
         self.swarm=None
+        self.openai=None
         #: Whether ``Cf-Connecting-Ip`` was set by a Cloudflare edge we trust (quick tunnel, or an owner
         #: front declared to be a Cloudflare tunnel).  Otherwise a visitor could pick its own rate-limit key.
         self.trust_client_ip=trust_client_ip
@@ -88,11 +94,14 @@ class _RelayHandler(BaseHTTPRequestHandler):
         self.end_headers();self.wfile.write(raw);self.close_connection=True
     def _forward(self):
         self.connection.settimeout(5)
-        if ((not self.path.startswith(('/seed/','/managed-control/',_SWARM_PREFIX)+_LOCAL_PREFIXES)
+        if ((not self.path.startswith(('/seed/','/managed-control/',_SWARM_PREFIX,_OPENAI_PREFIX)+_LOCAL_PREFIXES)
                 and not _chat_path(self.path))
                 or any(value in self.path for value in ('..','%','?','#','\\'))):
             return self._reply(404,b'{"error":"relay_route_unknown"}')
         if _chat_path(self.path):return self._local(chat=True)
+        if self.path.startswith(_OPENAI_PREFIX):
+            if self.server.openai is None:return self._reply(404,b'{"error":"relay_route_unknown"}')
+            return self._local(openai=True)
         if self.path.startswith(_SWARM_PREFIX):return self._local(swarm=True)
         if self.path.startswith(_LOCAL_PREFIXES):return self._local()
         if (self.headers.get('Transfer-Encoding') is not None
@@ -139,7 +148,7 @@ class _RelayHandler(BaseHTTPRequestHandler):
             body+=data
         if self.rfile.read(2)!=b'\r\n':raise ValueError()
         return bytes(body)
-    def _local(self,chat=False,swarm=False):
+    def _local(self,chat=False,swarm=False,openai=False):
         # Cloudflare's tunnel re-frames a body whose length its edge did not
         # forward (observed: every empty-body POST) as ``Transfer-Encoding:
         # chunked`` without Content-Length.  Only the in-process routes accept
@@ -150,7 +159,7 @@ class _RelayHandler(BaseHTTPRequestHandler):
         if ((codings and (not chunked or self.command!='POST'
                           or self.headers.get_all('Content-Length',[])))
                 or self.headers.get('Cookie') is not None
-                or self.headers.get('Authorization') is not None):
+                or (self.headers.get('Authorization') is not None and not openai)):
             return self._reply(400,b'{"error":"relay_headers_invalid"}')
         try:
             if chunked:body=self._read_chunked()
@@ -162,6 +171,16 @@ class _RelayHandler(BaseHTTPRequestHandler):
                 body=self.rfile.read(length)
                 if len(body)!=length:raise ValueError()
         except (ValueError,OSError):return self._reply(400,b'{"error":"relay_frame_invalid"}')
+        if openai:
+            handler=self.server.openai
+            if handler is None:return self._reply(404,b'{"error":"relay_route_unknown"}')
+            try:
+                status,kind,raw,extra=handler(self.command,self.path,self._public_headers(),body)
+                if (type(status) is not int or not 200<=status<=599 or not isinstance(raw,bytes)
+                        or len(raw)>_MAX_FRAME or not isinstance(kind,str)):
+                    raise ValueError()
+            except Exception:return self._reply(500,b'{"error":"relay_openai_failed"}')
+            return self._reply(status,raw,kind,extra=extra)
         if swarm:
             handler=self.server.swarm
             if handler is None:return self._reply(503,b'{"error":"relay_swarm_entry_not_bound"}',extra=_SWARM_CORS)
@@ -227,6 +246,9 @@ class SeedRelayProxy:
     def bind_chat(self,handler):
         if handler is not None and not callable(handler):raise ValueError('relay_chat_invalid')
         self.server.chat=handler
+    def bind_openai(self,handler):
+        if handler is not None and not callable(handler):raise ValueError('relay_openai_invalid')
+        self.server.openai=handler
     def bind_swarm_entry(self,handler):
         if handler is not None and not callable(handler):raise ValueError('relay_swarm_entry_invalid')
         self.server.swarm=handler
