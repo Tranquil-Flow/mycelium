@@ -429,6 +429,16 @@ class AppDemoChain:
         # Refuse at once without a prepared model; wait (bounded) only while a download is really running,
         # so a harness that starts the run as the download finishes still passes.
         if not prepared() and not downloading():
+            # After a relaunch the acquisition reads 'closed' although the verified snapshot is on disk: re-hash it
+            # (nothing is fetched) rather than make the owner repeat the download (live demo 2026-10-21).
+            reverify = getattr(app, 'reverify_model_snapshot', None)
+            if callable(reverify):
+                ctx.progress('checking the model files already on this Mac')
+                try:
+                    reverify()
+                except Exception:
+                    pass
+        if not prepared() and not downloading():
             raise OwnerRunError('owner_model_not_prepared', MODEL_NOT_PREPARED_MESSAGE, MODEL_NOT_PREPARED_FIX)
         ctx.wait_until(lambda: prepared() or not downloading(), budget=self.budgets['model'],
                        code='owner_model_not_prepared', interval=min(self.interval, 1.0))

@@ -904,6 +904,31 @@ class DemoApp:
         from .adaptive_host import adaptive_detached_tick
         adaptive_detached_tick(self)
 
+    def reverify_model_snapshot(self):
+        """Owner Start after a relaunch: re-hash a snapshot already on disk instead of asking for a new download.
+
+        Uses only the standing storage consent, fetches nothing (see ``reverify_closed_snapshot``), keeps every
+        power/thermal/network gate, and returns whether a verification is now running.
+        """
+        with self.guard:
+            policy = read_resource_policy(self.root)
+            if (self.closed.is_set() or policy is None or not self.running or self.acquisition is None
+                    or self._acquisition_active or self.authority.status().get('membership_state') != 'current'):
+                return False
+            if self.acquisition.status().get('state') not in {'closed', 'idle', 'failed', 'cancelled'}:
+                return False
+            reason = self._resource_check()
+            if reason:
+                self.acquisition_policy_error = reason
+                return False
+            try:
+                self.acquisition.reverify_closed_snapshot(storage_limit_bytes=policy['storage_bytes'])
+            except Exception:
+                return False
+            self.acquisition_policy_error = None
+            self._acquisition_active = True
+            return True
+
     def _cancel_acquisition(self):
         if self.acquisition is not None:
             self.acquisition.cancel()
