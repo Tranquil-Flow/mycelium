@@ -139,7 +139,11 @@ def main():
     probes=parser.add_mutually_exclusive_group()
     probes.add_argument('--preflight',action='store_true',help='Check platform without creating identity or state')
     probes.add_argument('--runtime-probe',action='store_true',help='Explicit tiny GPU arithmetic probe; no model or identity')
+    from mycelium_platform_neutral.offline import add_offline_argument, apply_offline
+    add_offline_argument(parser)
     args=parser.parse_args()
+    # --offline / MYCELIUM_OFFLINE / MYCELIUM_NETWORK_MODE=lan|local: no Hugging Face contact.
+    apply_offline(args.offline,None)
     app=None
     try:
         report=preflight()

@@ -24,6 +24,7 @@ import mycelium_host_platform
 from mycelium_host_platform import HostPlatformError
 from mycelium_platform_neutral import network_mode as network_mode_module
 from mycelium_platform_neutral.network_mode import NetworkMode
+from mycelium_platform_neutral.offline import add_offline_argument, apply_offline
 from mycelium_invite import verify_invite_bundle
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import generate_ed25519_signer
@@ -400,6 +401,8 @@ def _runtime_network(
 ) -> _RuntimeNetwork:
     """Resolve the network mode and advertised endpoints; internet is unchanged."""
     mode = network_mode_module.resolve_network_mode(args.network_mode, environ)
+    # lan/local imply offline unless overridden; internet leaves the environment alone.
+    apply_offline(args.offline, mode, os.environ if environ is None else environ)
     advertise = args.advertise
     if advertise is None:
         if mode is not NetworkMode.LAN:
@@ -455,6 +458,7 @@ def _parser() -> argparse.ArgumentParser:
         help="port of the auto-derived --advertise in --network-mode lan",
     )
     network_mode_module.add_network_mode_argument(parser)
+    add_offline_argument(parser)
     parser.add_argument(
         "--sidecar-path",
         help="required for inference peers and forbidden for source-only peers",
