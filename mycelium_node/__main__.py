@@ -22,6 +22,8 @@ from urllib.parse import urlsplit
 
 import mycelium_host_platform
 from mycelium_host_platform import HostPlatformError
+from mycelium_platform_neutral import network_mode as network_mode_module
+from mycelium_platform_neutral.network_mode import NetworkMode
 from mycelium_invite import verify_invite_bundle
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import generate_ed25519_signer
@@ -372,6 +374,60 @@ def _validate_advertised_endpoint(value: str) -> str:
     return value
 
 
+_LAN_ADVERTISE_PORT = 8766
+
+
+def _advertise_port(value: str) -> int:
+    if not value.isascii() or not value.isdigit() or not 1 <= int(value) <= 65535:
+        raise argparse.ArgumentTypeError("port is invalid")
+    return int(value)
+
+
+@dataclass(frozen=True)
+class _RuntimeNetwork:
+    mode: NetworkMode
+    advertise: list[str]
+    sidecar_local_only: bool
+    sidecar_lan: bool
+
+
+def _runtime_network(
+    args: argparse.Namespace,
+    *,
+    environ: Any = None,
+    stage_runtime: bool,
+    lan_address: Any = None,
+) -> _RuntimeNetwork:
+    """Resolve the network mode and advertised endpoints; internet is unchanged."""
+    mode = network_mode_module.resolve_network_mode(args.network_mode, environ)
+    advertise = args.advertise
+    if advertise is None:
+        if mode is not NetworkMode.LAN:
+            raise ValueError("advertised endpoint is required")
+        lookup = lan_address or network_mode_module.first_private_lan_address
+        address = lookup()
+        if address is None:
+            raise ValueError("no private LAN address is available")
+        advertise = [f"http://{address}:{args.advertise_port}"]
+    if (
+        mode is NetworkMode.LAN
+        and stage_runtime
+        and not network_mode_module.SIDECAR_LAN_SUPPORTED
+    ):
+        raise ValueError("the sidecar has no LAN mode yet")
+    return _RuntimeNetwork(
+        mode=mode,
+        advertise=list(advertise),
+        sidecar_local_only=mode.sidecar_local_only,
+        sidecar_lan=mode.sidecar_lan,
+    )
+
+
+def _lan_kwargs(args: argparse.Namespace) -> dict[str, bool]:
+    # internet and local launches pass exactly today's arguments
+    return {"sidecar_lan": True} if args.runtime_network.sidecar_lan else {}
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = _SafeArgumentParser(prog="python -m mycelium_node")
     parser.add_argument("--data-dir", required=True)
@@ -389,7 +445,16 @@ def _parser() -> argparse.ArgumentParser:
         default="mac_mlx_iroh",
     )
     parser.add_argument("--membership-endpoint-id")
-    parser.add_argument("--advertise", action="append", required=True)
+    # Required unless --network-mode lan can derive it; enforced right after
+    # parsing (see _runtime_network) with the same failure as a missing option.
+    parser.add_argument("--advertise", action="append")
+    parser.add_argument(
+        "--advertise-port",
+        type=_advertise_port,
+        default=_LAN_ADVERTISE_PORT,
+        help="port of the auto-derived --advertise in --network-mode lan",
+    )
+    network_mode_module.add_network_mode_argument(parser)
     parser.add_argument(
         "--sidecar-path",
         help="required for inference peers and forbidden for source-only peers",
@@ -631,7 +696,8 @@ def _preflight(
                 deployment_id=args.deployment_id,
                 node_id=args.node_id,
                 sidecar_binary=sidecar,
-                sidecar_local_only=False,
+                sidecar_local_only=args.runtime_network.sidecar_local_only,
+                **_lan_kwargs(args),
             )
         validation_signer = generate_ed25519_signer(
             endpoint_id=args.membership_endpoint_id or "node-preflight-endpoint"
@@ -894,8 +960,9 @@ def _run_bound(
                     artifact_root=Path("artifacts"),
                     socket_root=temporary_root.path,
                     sidecar_binary=sidecar,
-                    sidecar_local_only=False,
+                    sidecar_local_only=args.runtime_network.sidecar_local_only,
                     descriptor_relative_artifact_root=True,
+                    **_lan_kwargs(args),
                 )
             state_root.revalidate()
             artifact_root.revalidate()
@@ -1228,7 +1295,20 @@ def _run_dispatch(args: argparse.Namespace) -> int:
     return result
 
 def run(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    try:
+        runtime_network = _runtime_network(
+            args,
+            stage_runtime=(
+                args.peer_class not in _SOURCE_ONLY_PEER_CLASSES
+                and not args.membership_control_only
+            ),
+        )
+    except ValueError:
+        parser.error("")
+    args.advertise = runtime_network.advertise
+    args.runtime_network = runtime_network
     if args.failure_diagnostics is None:
         return _run_dispatch(args)
     try:

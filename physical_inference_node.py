@@ -1598,11 +1598,14 @@ class NativeSidecarProcess:
         endpoint_secret_file: Path | None = None,
         force_relay: bool = False,
         loopback: bool | None = None,
+        lan: bool = False,
     ) -> None:
         _require(
             isinstance(local_only, bool)
             and isinstance(force_relay, bool)
-            and not (local_only and force_relay),
+            and isinstance(lan, bool)
+            and not (local_only and force_relay)
+            and not (lan and (local_only or force_relay)),
             "invalid_sidecar_network_mode",
         )
         # Windows has no Unix-domain sidecar socket: the sidecar serves the
@@ -1614,6 +1617,7 @@ class NativeSidecarProcess:
         self.socket_root = socket_root
         self.local_only = local_only
         self.force_relay = force_relay
+        self.lan = lan
         self.queue_capacity = queue_capacity
         self.startup_timeout = startup_timeout
         self.endpoint_secret_file = _validated_endpoint_secret_file(
@@ -1677,6 +1681,8 @@ class NativeSidecarProcess:
             command.append("--local-only")
         if self.force_relay:
             command.append("--force-relay")
+        if self.lan:
+            command.append("--lan")
         if self.endpoint_secret_file is not None:
             command.extend(["--endpoint-secret-file", str(self.endpoint_secret_file)])
         return command
@@ -1695,6 +1701,8 @@ class NativeSidecarProcess:
             command.append("--local-only")
         if self.force_relay:
             command.append("--force-relay")
+        if self.lan:
+            command.append("--lan")
         if self.endpoint_secret_file is not None:
             command.extend(["--endpoint-secret-file", str(self.endpoint_secret_file)])
         return command
@@ -1994,6 +2002,7 @@ class PhysicalNodeService:
         requested_decode_mode: str | None = None,
         sidecar_force_relay: bool = False,
         capacity_root: Path | None = None,
+        sidecar_lan: bool = False,
     ) -> None:
         for value, code in (
             (run_id, "invalid_run_id"),
@@ -2007,7 +2016,9 @@ class PhysicalNodeService:
         _require(
             isinstance(sidecar_local_only, bool)
             and isinstance(sidecar_force_relay, bool)
-            and not (sidecar_local_only and sidecar_force_relay),
+            and isinstance(sidecar_lan, bool)
+            and not (sidecar_local_only and sidecar_force_relay)
+            and not (sidecar_lan and (sidecar_local_only or sidecar_force_relay)),
             "invalid_sidecar_network_mode",
         )
         _require(
@@ -2032,6 +2043,7 @@ class PhysicalNodeService:
         self.sidecar_binary = sidecar_binary.resolve(strict=False)
         self.sidecar_local_only = sidecar_local_only
         self.sidecar_force_relay = sidecar_force_relay
+        self.sidecar_lan = sidecar_lan
         self.command_timeout = command_timeout
         self.endpoint_secret_file = _validated_endpoint_secret_file(
             endpoint_secret_file
@@ -2337,6 +2349,7 @@ class PhysicalNodeService:
             queue_capacity=128,
             startup_timeout=min(self.command_timeout, 30.0),
             endpoint_secret_file=self.endpoint_secret_file,
+            lan=self.sidecar_lan,
         )
 
     @staticmethod
@@ -6024,6 +6037,7 @@ def _parse_args() -> argparse.Namespace:
     network_mode = parser.add_mutually_exclusive_group()
     network_mode.add_argument("--sidecar-local-only", action="store_true")
     network_mode.add_argument("--sidecar-force-relay", action="store_true")
+    network_mode.add_argument("--sidecar-lan", action="store_true")
     parser.add_argument("--endpoint-secret-file", type=Path)
     parser.add_argument("--command-timeout", type=float, default=30.0)
     parser.add_argument(
@@ -6048,6 +6062,7 @@ def main() -> int:
             sidecar_binary=args.sidecar_binary,
             sidecar_local_only=args.sidecar_local_only,
             sidecar_force_relay=args.sidecar_force_relay,
+            sidecar_lan=getattr(args, "sidecar_lan", False),
             command_timeout=args.command_timeout,
             endpoint_secret_file=args.endpoint_secret_file,
             requested_decode_mode=args.decode_mode,

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -12,7 +13,8 @@ import signal
 import sys
 import threading
 import stat
-from typing import NoReturn, Sequence
+from typing import Any, NoReturn, Sequence
+from urllib.parse import urlsplit
 
 from mycelium_host_platform import StopRequest
 from mycelium_internet.bootstrap import PublicBootstrapPolicy, canonical_https_origin
@@ -24,6 +26,8 @@ from mycelium_node.process import (
     private_directory_lease,
     private_directory_path,
 )
+from mycelium_platform_neutral import network_mode as network_mode_module
+from mycelium_platform_neutral.network_mode import NetworkMode
 from mycelium_qualification.evidence import canonical_json_bytes
 
 from .authority import load_bound_seed_signer
@@ -103,7 +107,9 @@ def _canonical_port(value: str) -> int:
 
 def _parser() -> argparse.ArgumentParser:
     parser = _SafeArgumentParser(prog="python -m mycelium_seed")
-    parser.add_argument("--bind", default="127.0.0.1")
+    # Default 127.0.0.1 (or the private interface in --network-mode lan),
+    # applied by _resolve_network.
+    parser.add_argument("--bind", default=None)
     parser.add_argument("--port", type=_canonical_port, default=8765)
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--advertised-url")
@@ -122,6 +128,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--incarnation", default="seed-main")
     parser.add_argument("--init-only", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    network_mode_module.add_network_mode_argument(parser)
     return parser
 
 
@@ -158,9 +165,55 @@ def _pairing_preflight(args: argparse.Namespace) -> None:
     args.pairing_quota = validate_android_quota(json.loads(raw))
 
 
+def _resolve_network(
+    args: argparse.Namespace,
+    *,
+    environ: Any = None,
+    lan_address: Any = None,
+) -> NetworkMode:
+    """Apply the network mode to bind/advertise; internet keeps today's values."""
+    mode = network_mode_module.resolve_network_mode(args.network_mode, environ)
+    if mode is NetworkMode.INTERNET:
+        if args.bind is None:
+            args.bind = "127.0.0.1"
+        return mode
+    if mode is NetworkMode.LOCAL:
+        if args.bind is None:
+            args.bind = "127.0.0.1"
+        if args.bind not in _LOOPBACK_BINDS:
+            raise ValueError("local mode binds loopback only")
+        return mode
+    lookup = lan_address or network_mode_module.first_private_lan_address
+    if args.trusted_https_proxy:
+        raise ValueError("lan mode has no hosted proxy")
+    if args.bind is None:
+        address = lookup()
+        if address is None:
+            raise ValueError("no private LAN address is available")
+        args.bind = address
+    elif args.bind != "0.0.0.0" and not network_mode_module.is_rfc1918(args.bind):
+        raise ValueError("lan mode binds a private interface")
+    if args.advertised_url is None:
+        if args.bind == "0.0.0.0":
+            address = lookup()
+            if address is None or args.port == 0:
+                raise ValueError("advertised URL cannot be derived")
+            args.advertised_url = f"http://{address}:{args.port}"
+    else:
+        host = urlsplit(args.advertised_url).hostname
+        try:
+            literal = ipaddress.ip_address(host) if host else None
+        except ValueError:
+            literal = None
+        if literal is not None and not network_mode_module.is_rfc1918(str(literal)):
+            raise ValueError("lan mode advertises a private address")
+    return mode
+
+
 def _preflight(args: argparse.Namespace) -> PrivateDirectoryLease:
     state_root: PrivateDirectoryLease | None = None
     try:
+        _resolve_network(args)
         _segment(args.swarm_id, "swarm_id")
         _segment(args.seed_node_id, "seed_node_id")
         _segment(args.incarnation, "incarnation")

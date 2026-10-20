@@ -1805,6 +1805,13 @@ def _existing_path(value: str | Path, field: str, *, directory: bool) -> Path:
     return path
 
 
+def _check_sidecar_lan(sidecar_lan: bool, sidecar_local_only: bool) -> None:
+    if not isinstance(sidecar_lan, bool):
+        raise ValueError("sidecar_lan must be a boolean")
+    if sidecar_lan and sidecar_local_only:
+        raise ValueError("sidecar_lan and sidecar_local_only are mutually exclusive")
+
+
 def validate_physical_node_launch_shape(
     *,
     python_executable: str | Path,
@@ -1815,6 +1822,7 @@ def validate_physical_node_launch_shape(
     sidecar_binary: str | Path,
     sidecar_local_only: bool,
     command_timeout_seconds: float = 30.0,
+    sidecar_lan: bool = False,
 ) -> tuple[_ExecutableIdentity, _ExecutableIdentity, _ExecutableIdentity]:
     """Apply the same side-effect-free launch validators used by real startup."""
 
@@ -1834,6 +1842,7 @@ def validate_physical_node_launch_shape(
     _positive_seconds(command_timeout_seconds, "command_timeout_seconds")
     if not isinstance(sidecar_local_only, bool):
         raise ValueError("sidecar_local_only must be a boolean")
+    _check_sidecar_lan(sidecar_lan, sidecar_local_only)
     return python_identity, service_identity, sidecar_identity
 
 
@@ -1850,6 +1859,7 @@ def build_physical_node_command(
     sidecar_local_only: bool,
     command_timeout_seconds: float = 30.0,
     descriptor_relative_artifact_root: bool = False,
+    sidecar_lan: bool = False,
 ) -> tuple[str, ...]:
     """Build an argv-only physical-node launch command with no secret material."""
 
@@ -1866,6 +1876,7 @@ def build_physical_node_command(
     timeout = _positive_seconds(command_timeout_seconds, "command_timeout_seconds")
     if not isinstance(sidecar_local_only, bool):
         raise ValueError("sidecar_local_only must be a boolean")
+    _check_sidecar_lan(sidecar_lan, sidecar_local_only)
     if not isinstance(descriptor_relative_artifact_root, bool):
         raise ValueError("descriptor_relative_artifact_root must be a boolean")
     artifact_argument = artifacts
@@ -1899,6 +1910,8 @@ def build_physical_node_command(
     ]
     if sidecar_local_only:
         command.append("--sidecar-local-only")
+    if sidecar_lan:
+        command.append("--sidecar-lan")
     return tuple(command)
 
 
