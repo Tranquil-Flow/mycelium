@@ -57,6 +57,23 @@ class DemoError(RuntimeError):
     pass
 
 
+class DemoActionError(DemoError):
+    """A refusal whose response also says what to do (``message`` and ``fix``)."""
+
+    def __init__(self, code, *, message, fix):
+        super().__init__(code)
+        self.message = message
+        self.fix = fix
+
+
+def action_error_body(error):
+    """The public JSON body of a refused action: a closed code, plus advice if any."""
+    body = {'error': str(error)}
+    if isinstance(error, DemoActionError):
+        body.update(message=error.message, fix=dict(error.fix))
+    return body
+
+
 def _admitted_macos(os_version):
     if os_version == '15.6.1':
         return True
@@ -614,6 +631,35 @@ class DemoApp:
 
     # -- demo run: model picker, owner one-click run, target auto loop, chat ---
 
+    def _start_public_relay(self, body):
+        """Start the temporary public relay; only a fresh owner (no swarm yet) may."""
+        if self.installation_role=='owner' and self.public_relay is None and self.authority.status().get('swarm_created'):
+            raise DemoActionError('network_requires_fresh_owner',
+                message=('This swarm was created without the public relay, and a relay has to start before '
+                    'the swarm exists. Start over with a new owner and tick “Let other Macs join” before creating.'),
+                fix={'action':'create_with_relay'})
+        if self.installation_role!='owner' or self.public_relay is not None:
+            raise DemoError('network_requires_fresh_owner')
+        if (set(body) not in ({'relay_acknowledged','max_seconds'},{'relay_acknowledged','max_seconds','provider'})
+            or body.get('provider','cloudflare')!='cloudflare'
+            or body['relay_acknowledged'] is not True
+            or type(body['max_seconds']) is not int or not 30<=body['max_seconds']<=1800):
+            raise DemoError('network_consent_required')
+        from .public_relay import TemporaryHttpsRelay
+        import socket
+        relay=TemporaryHttpsRelay(self.root/'public-relay',provider=body.get('provider','cloudflare'))
+        try:
+            relay.start(acknowledged=True,max_seconds=body['max_seconds'])
+            with socket.socket() as listener:
+                listener.bind(('127.0.0.1',0));port=listener.getsockname()[1]
+            self.authority.configure_public_endpoint(public_origin=relay.public_origin,
+                port=port,acknowledged=True)
+            self.public_relay=relay
+            self._bind_public_routes()
+            return relay.status()
+        except BaseException:
+            relay.close();raise
+
     def run_model_contract(self):
         """The model this installation's runs pin (picker choice, env override)."""
         from .run_model import app_run_model
@@ -1090,28 +1136,7 @@ class DemoApp:
                 self._bind_public_routes()
                 return {'network':relay.status(),'recovery_card':card}
             if path == '/api/network/start':
-                if (self.installation_role!='owner' or self.public_relay is not None
-                    or self.authority.status().get('swarm_created')):
-                    raise DemoError('network_requires_fresh_owner')
-                if (set(body) not in ({'relay_acknowledged','max_seconds'},{'relay_acknowledged','max_seconds','provider'})
-                    or body.get('provider','cloudflare')!='cloudflare'
-                    or body['relay_acknowledged'] is not True
-                    or type(body['max_seconds']) is not int or not 30<=body['max_seconds']<=1800):
-                    raise DemoError('network_consent_required')
-                from .public_relay import TemporaryHttpsRelay
-                import socket
-                relay=TemporaryHttpsRelay(self.root/'public-relay',provider=body.get('provider','cloudflare'))
-                try:
-                    relay.start(acknowledged=True,max_seconds=body['max_seconds'])
-                    with socket.socket() as listener:
-                        listener.bind(('127.0.0.1',0));port=listener.getsockname()[1]
-                    self.authority.configure_public_endpoint(public_origin=relay.public_origin,
-                        port=port,acknowledged=True)
-                    self.public_relay=relay
-                    self._bind_public_routes()
-                    return relay.status()
-                except BaseException:
-                    relay.close();raise
+                return self._start_public_relay(body)
             if path in {'/api/work/preview','/api/work/accept'}:
                 if actor is None or not self.running:raise DemoError('target_role_required')
                 policy=read_resource_policy(self.root)
@@ -1224,31 +1249,42 @@ class DemoApp:
             if path in {'/api/join/window','/api/join/window/poll','/api/join/window/cancel','/api/consent/standing/withdraw'}:
                 return self._target_join_action(path, body)
             if path == '/api/create':
-                if set(body) != {'consent'} or not consent_valid(body['consent']):
+                with_relay = set(body) == {'consent','relay_acknowledged','max_seconds'}
+                if (set(body) != {'consent'} and not with_relay) or not consent_valid(body['consent']):
                     raise DemoError('consent_required')
-                consent = body['consent']
-                saved=read_resource_policy(self.root)
-                if saved is not None and saved!=consent: raise DemoError('consent_retry_changed')
-                if saved is None:
-                    private_write(self.root / 'resource-policy.json',json.dumps(consent,sort_keys=True).encode())
-                current=self.authority.status()
-                if current.get('swarm_created'):
-                    if current.get('membership_state')=='current': return current
-                    if current.get('membership_state')!='unenrolled': raise DemoError('membership_cannot_reenroll')
-                else:
-                    self.authority.create_swarm({
-                        'cooperative_peer_visibility_acknowledged':True,
-                        'resource_use_acknowledged':True,'contribution_enabled':False})
-                if self.public_relay is not None:
-                    self.public_relay.proxy.bind_seed(self.authority.seed_server)
-                request = self.authority.pair_request()
-                handoff = self.authority.approve_pairing(request, ttl_seconds=120, quota={
-                    'storage_bytes':consent['storage_bytes'],
-                    'network_bytes_per_day':consent['storage_bytes'],
-                    'background_allowed':False})
-                result = self.authority.accept_pairing(handoff)
-                self.running = True
-                return result
+                started = None
+                if with_relay:
+                    # Right order, automatically: the relay precedes the swarm.
+                    started = self._start_public_relay(
+                        {'relay_acknowledged':body['relay_acknowledged'],'max_seconds':body['max_seconds']})
+                try:
+                    consent = body['consent']
+                    saved=read_resource_policy(self.root)
+                    if saved is not None and saved!=consent: raise DemoError('consent_retry_changed')
+                    if saved is None:
+                        private_write(self.root / 'resource-policy.json',json.dumps(consent,sort_keys=True).encode())
+                    current=self.authority.status()
+                    if current.get('swarm_created'):
+                        if current.get('membership_state')=='current': return current
+                        if current.get('membership_state')!='unenrolled': raise DemoError('membership_cannot_reenroll')
+                    else:
+                        self.authority.create_swarm({
+                            'cooperative_peer_visibility_acknowledged':True,
+                            'resource_use_acknowledged':True,'contribution_enabled':False})
+                    if self.public_relay is not None:
+                        self.public_relay.proxy.bind_seed(self.authority.seed_server)
+                    request = self.authority.pair_request()
+                    handoff = self.authority.approve_pairing(request, ttl_seconds=120, quota={
+                        'storage_bytes':consent['storage_bytes'],
+                        'network_bytes_per_day':consent['storage_bytes'],
+                        'background_allowed':False})
+                    result = self.authority.accept_pairing(handoff)
+                    self.running = True
+                    return result
+                except BaseException:
+                    if started is not None and self.public_relay is not None:
+                        self.public_relay.close();self.public_relay=None
+                    raise
             if path == '/api/stop':
                 if body: raise DemoError('invalid_request')
                 self._cancel_acquisition()
@@ -1612,7 +1648,7 @@ class _Handler(BaseHTTPRequestHandler):
             if not isinstance(body,dict): raise ValueError
         except (ValueError,UnicodeError): self.fail(400,'invalid_request'); return
         try: result=self.app.action(self.path,body)
-        except DemoError as e: self.fail(400,str(e)); return
+        except DemoError as e: self.send_value(400,action_error_body(e)); return
         except Exception as error:
             code=public_failure_code(error)
             # Record WHY before answering. The public body stays a closed code;

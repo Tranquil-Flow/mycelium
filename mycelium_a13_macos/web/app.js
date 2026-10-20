@@ -11,7 +11,7 @@ async function api(path, body) {
     headers:body === undefined ? {} : {'Content-Type':'application/json','X-Mycelium-Action':'1'},
     body:body === undefined ? undefined : JSON.stringify(body)});
   const value = await response.json();
-  if (!response.ok) throw new Error(value.error || 'request_failed');
+  if (!response.ok) {const error = new Error(value.error || 'request_failed'); error.userMessage = value.message; error.fix = value.fix; throw error;}
   return value;
 }
 const ADAPTIVE_TEXT={off:'Off. Mycelium follows only your power, heat and network limits.',
@@ -168,7 +168,7 @@ async function perform(path, body, success) {
   busy=true;
   for(const button of document.querySelectorAll('button'))button.disabled=true;
   try {const result=await api(path,body);await refresh(false);notice(success);return result;}
-  catch(error){notice(`Action not completed: ${humanError(error.message)} Existing identity and evidence are retained.`);}
+  catch(error){notice(error.userMessage ? `Action not completed: ${error.userMessage}` : `Action not completed: ${humanError(error.message)} Existing identity and evidence are retained.`);}
   finally{
     busy=false;
     for(const button of document.querySelectorAll('button'))button.disabled=false;
@@ -179,9 +179,11 @@ async function perform(path, body, success) {
 $('create-form').addEventListener('submit',async(event)=>{
   event.preventDefault();
   const join=event.submitter?.id==='join';
+  const withRelay=!join && $('create-with-relay').checked;
+  if(withRelay && !window.confirm('Start a temporary Cloudflare quick tunnel, then create the swarm? The relay terminates HTTPS and can observe control traffic; inference stays on Iroh.'))return;
   const result=await perform(join?'/api/join/request':'/api/create',{consent:{peer_visibility:$('visibility').checked,power:$('power').value,
     storage_bytes:Number($('storage').value),network:$('network').value,background:false,diagnostics:false,
-    thermal:'stop_on_serious'}},join?'Target identity created. Send the public request to the owner. No seed was created on this Mac.':
+    thermal:'stop_on_serious'},...(withRelay?{relay_acknowledged:true,max_seconds:1800}:{})},join?'Target identity created. Send the public request to the owner. No seed was created on this Mac.':
     'Owner authority created and this Mac enrolled. Membership alone does not enable serving.');
   if(join && result && connected)showRequest(result);
 });
@@ -352,6 +354,7 @@ function renderJoinFlow(value,target,a){
   $('invite-owner').hidden=!owner;
   $('join-target').hidden=owner && !!a.swarm_created;
   $('relay-start').hidden=!owner || !!a.swarm_created || value.network?.state!=='private';
+  $('relay-order-note').hidden=!owner || !a.swarm_created || value.network?.state!=='private';
   $('window-open').disabled=busy || !owner || !a.swarm_created || !value.network?.public_origin;
   $('standing-text').textContent=flow.standing_disclosure?.text ?? '';
   const joined=a.membership_state==='current';
