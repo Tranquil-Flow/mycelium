@@ -20,6 +20,7 @@ Mycelium's aim is that you run models on your own machines. This page says what 
 | The app's launch page | Private, opened only on your Mac; removed when you quit | The page talks to the app on your Mac only. |
 | Telemetry | None | Code review found no telemetry, analytics, crash reporting, update check, external fonts or CDN in the product code. This was a read of the code, not a network capture. |
 | Which apps you run | Never read | The host-protection feature reads only coarse memory pressure and overall CPU. It refuses any request that names an application. |
+| Diagnostics card and support bundle | Computed on demand, shown only in the app on your Mac | Counts, error codes, timings and versions. The bundle is a zip you download yourself, redacted of keys, tokens, join links, prompts and chat text, paths and host names; nothing is sent anywhere. |
 
 ## Who can see what
 
