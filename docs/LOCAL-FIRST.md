@@ -316,3 +316,5 @@ causes. The items below are what it cannot see.
 - Firewalls: allow the seed port (TCP 8765 by default), and later the sidecar's UDP.
 - Clock skew: leases are time-based and there is no NTP client in the product;
   keep the machines' clocks within a few seconds.
+
+A private swarm across different networks (join link, third parties, time limits): see [FRIEND-SWARM.md](FRIEND-SWARM.md).
