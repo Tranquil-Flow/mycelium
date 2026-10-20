@@ -30,6 +30,7 @@ membership projection.  No verifier-specific protocol is involved.
 
 from __future__ import annotations
 
+from mycelium_http_identity import with_user_agent
 from collections.abc import Mapping
 from contextlib import contextmanager
 import json
@@ -2049,7 +2050,7 @@ class ManagedControlClient:
             self.base_url + path,
             data=raw,
             method="POST",
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            headers=with_user_agent({"Content-Type": "application/json", "Accept": "application/json"}),
         )
         try:
             with self._opener.open(request, timeout=self._transport_timeout()) as response:

@@ -8,6 +8,7 @@ seams; the production composition is Web-PKI HTTPS and the fixed public commit.
 """
 from __future__ import annotations
 
+from mycelium_http_identity import with_user_agent
 from collections.abc import Callable, Mapping
 import copy
 from dataclasses import asdict
@@ -461,11 +462,10 @@ class _HTTPRepositoryTransport:
         request = urllib.request.Request(
             self.api_origin + path,
             method="GET",
-            headers={
+            headers=with_user_agent({
                 "Accept": "application/json",
                 "Accept-Encoding": "identity",
-                "User-Agent": "MyceliumA13Acquisition/1",
-            },
+            }),
         )
         with self._open(request) as response:
             content_encoding = response.headers.get("Content-Encoding")
@@ -553,12 +553,11 @@ class _HTTPRepositoryTransport:
         headers = {
             "Accept": "application/octet-stream",
             "Accept-Encoding": "identity",
-            "User-Agent": "MyceliumA13Acquisition/1",
         }
         if offset:
             headers["Range"] = f"bytes={offset}-"
         request = urllib.request.Request(
-            self.download_origin + path, method="GET", headers=headers
+            self.download_origin + path, method="GET", headers=with_user_agent(headers)
         )
         return self._open(request)
 
@@ -603,12 +602,11 @@ class _HTTPRepositoryTransport:
         request = urllib.request.Request(
             url,
             method="GET",
-            headers={
+            headers=with_user_agent({
                 "Accept": "application/octet-stream",
                 "Accept-Encoding": "identity",
                 "Range": f"bytes={offset}-{end}",
-                "User-Agent": "MyceliumA13SliceAcquisition/1",
-            },
+            }),
         )
         with self._open(request) as response:
             content_range = response.headers.get("Content-Range") or ""

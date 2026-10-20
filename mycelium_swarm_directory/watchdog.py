@@ -14,6 +14,7 @@ state file.
 """
 from __future__ import annotations
 
+from mycelium_http_identity import with_user_agent
 import argparse
 import json
 import os
@@ -46,7 +47,7 @@ class DirectoryProbe:
         headers = {'Accept': '*/*'}
         if self.client_ip:
             headers['Cf-Connecting-Ip'] = self.client_ip
-        request = urllib.request.Request(self.base + path, headers=headers, method='GET')
+        request = urllib.request.Request(self.base + path, headers=with_user_agent(headers), method='GET')
         with self.opener(request, timeout=self.timeout) as response:
             if getattr(response, 'status', 200) != 200:
                 raise OSError('status')

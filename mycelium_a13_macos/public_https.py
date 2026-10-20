@@ -8,6 +8,7 @@ Relay/network consent includes this resolver disclosure. Other hosts retain
 normal system resolution. Private DNS answers fail closed.
 """
 from __future__ import annotations
+from mycelium_http_identity import with_user_agent
 import http.client
 import ipaddress
 import json
@@ -79,7 +80,7 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 def _dns_document(host,*,timeout):
-    request=Request('https://cloudflare-dns.com/dns-query?'+urlencode({'name':host,'type':'A'}),headers={'Accept':'application/dns-json'})
+    request=Request('https://cloudflare-dns.com/dns-query?'+urlencode({'name':host,'type':'A'}),headers=with_user_agent({'Accept':'application/dns-json'}))
     opener=build_opener(ProxyHandler({}),_NoRedirect())
     with opener.open(request,timeout=timeout) as response:
         raw=response.read(16385)

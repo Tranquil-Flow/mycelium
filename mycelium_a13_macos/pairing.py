@@ -881,8 +881,10 @@ class JoinWindowClient:
         from urllib.error import HTTPError, URLError
         from urllib.request import Request
 
+        from mycelium_http_identity import with_user_agent
+
         request = Request(self._base + path, data=body, method="POST",
-                          headers={"Content-Type": content_type})
+                          headers=with_user_agent({"Content-Type": content_type}))
         try:
             with self._opener.open(request, timeout=self._timeout) as response:
                 self._note_clock(getattr(response, "headers", None))

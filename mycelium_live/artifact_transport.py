@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from mycelium_http_identity import with_user_agent
 import base64
 from collections.abc import Callable, Mapping
 import copy
@@ -581,7 +582,7 @@ class ArtifactHTTPSChunkReader:
                 "POST",
                 _READ_PATH,
                 body=body,
-                headers={"Content-Type": "application/json"},
+                headers=with_user_agent({"Content-Type": "application/json"}),
             )
             response = connection.getresponse()
             payload = response.read(length + 1)

@@ -5,6 +5,7 @@ into this process is loopback HTTP; the canonical seed hop is verified TLS.
 Inference still uses Iroh. This relay grants no membership or execution rights.
 """
 from __future__ import annotations
+from mycelium_http_identity import with_user_agent
 from collections import deque
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -112,7 +113,7 @@ class _RelayHandler(BaseHTTPRequestHandler):
             port,context=backend
             connection=http.client.HTTPSConnection('127.0.0.1',port,timeout=5,context=context)
             headers={'Content-Type':self.headers.get('Content-Type','application/json')}
-            connection.request(self.command,self.path,body=body if self.command=='POST' else None,headers=headers)
+            connection.request(self.command,self.path,body=body if self.command=='POST' else None,headers=with_user_agent(headers))
             response=connection.getresponse();raw=response.read(_MAX_FRAME+1)
             if len(raw)>_MAX_FRAME:raise ValueError()
             self._reply(response.status,raw,response.getheader('Content-Type','application/json'))

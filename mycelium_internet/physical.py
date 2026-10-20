@@ -11,6 +11,7 @@ itself; sealing is a separate explicit step.
 
 from __future__ import annotations
 
+from mycelium_http_identity import with_user_agent
 import hashlib
 import json
 import math
@@ -693,7 +694,7 @@ def probe_bootstrap_over_cleartext(
     opener = urllib.request.build_opener(_NoRedirectHandler())
     request = urllib.request.Request(
         cleartext + "/seed/identity",
-        headers={"Accept": "application/json"},
+        headers=with_user_agent({"Accept": "application/json"}),
     )
     try:
         with opener.open(request, timeout=timeout) as response:

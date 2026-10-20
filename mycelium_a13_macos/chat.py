@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from mycelium_swarm_directory.wire import WireError
+from mycelium_http_identity import with_user_agent
 
 MAX_PROMPT_CHARS = 2000
 MAX_NEW_TOKENS_CAP = 256
@@ -89,7 +90,7 @@ class RegistryClient:
             data = json.dumps(body, sort_keys=True, separators=(',', ':')).encode()
         elif method == 'DELETE':
             headers.update({'Origin': self.origin, **self._csrf})
-        request = urllib.request.Request(self.origin + path, data=data, headers=headers,
+        request = urllib.request.Request(self.origin + path, data=data, headers=with_user_agent(headers),
                                          method=method or ('GET' if body is None else 'POST'))
         try:
             return self._opener.open(request, timeout=self.timeout)

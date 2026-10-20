@@ -6,6 +6,7 @@ try:  # instance lock; win32 goes through mycelium_host_platform
     import fcntl
 except ImportError:  # pragma: no cover - win32
     fcntl = None
+from mycelium_http_identity import with_user_agent
 import hashlib
 import html
 import http.client
@@ -307,8 +308,8 @@ def reopen_native(root):
         raise DemoError('native_control_unavailable')
     connection = http.client.HTTPConnection('127.0.0.1',control['port'],timeout=3)
     try:
-        connection.request('POST','/native-session','{}',headers={
-            'Content-Type':'application/json','X-Native-Authorization':control['credential']})
+        connection.request('POST','/native-session','{}',headers=with_user_agent({
+            'Content-Type':'application/json','X-Native-Authorization':control['credential']}))
         response=connection.getresponse(); response.read(4096)
         if response.status != 200: raise DemoError('native_control_unavailable')
     finally: connection.close()
