@@ -45,14 +45,14 @@ Legend: **works** = branch exists for the OS; **degraded** = runs but a signal o
 | Component | macOS | Linux | Windows | Evidence |
 |---|---|---|---|---|
 | `mycelium_node` process supervision | works | works (procfs inventory) | degraded: the control-frame write has a win32 branch (`:410`), but process and group inventory raises `ProcessLookupError` off Linux/Darwin; Windows supervision goes through `mycelium_service_runner` and `mycelium_host_platform` job objects instead | `process.py:1342-1349`, `:1747-1752` (Linux/Darwin dispatch), `:1407,1706` (`/bin/ps`, Darwin helpers), `:2683` (`killpg`) |
-| `mycelium_node` interpreter identity | works (Homebrew `/opt/homebrew/bin/python3` assumed) | works (falls back to `sys.executable`) | works (host platform) | `process.py:1185-1187`; hard-coded path is Apple Silicon Homebrew, Intel Homebrew is `/usr/local` |
+| `mycelium_node` interpreter identity | works: framework `Python.app` image derived from `MYCELIUM_PHYSICAL_SERVICE_PYTHON` (macOS only), then `sys.executable`; Apple Silicon Homebrew `/opt/homebrew/bin/python3` is only the last fallback (`_MACOS_LEGACY_PYTHON`) | works (`sys.executable`) | works (`sys.executable`, host platform) | `process.py:1186-1225`; tests `tests/node_agent/test_physical_interpreter_identity.py` |
 | Node identity key and durable membership files | works | works | missing: needs `os.getuid`, `os.fchmod`, `O_NOFOLLOW`; Windows ACL path is `mycelium_a13_windows/acl.py` | `identity.py:154,160,176,188,249,313,324`; `durable_membership.py:162,168,216,221` |
 | `mycelium_seed` (coordinator, state, authority, operator) | works | works | degraded: seed files use the same POSIX owner/mode checks; a Windows seed is not a stated goal | `authority.py:51,57,95`; `operator.py:59,66,260`; `invite_batch.py:61,72`; `__main__.py:305` |
 | `mycelium_membership` | works | works | works (no OS calls) | no platform references |
 | `mycelium_request_gateway` | works | works | works (no OS calls; HTTP/ASGI only) | no platform references in the package |
 | `mycelium_platform_neutral` | works | works | works (`windows_provider.py`) | `native_int8.py:63` selects `WinDLL`; `thermal.py:126` per-OS dispatch |
 | Resource and memory probes (`physical_inference_node`) | `vm_stat`, `sysctl vm.swapusage`, `pmset -g batt`, `ps` | `/proc/meminfo`, `/proc/self/statm`, `/sys/class/thermal`, `/sys/class/power_supply` | memory and RSS via host platform; swap, thermal and power fall through to unknown | `physical_inference_node.py:1172,1231,1260` (macOS), `:1156,1199,1216,1241,1268` (Linux), `:1153,1197` (Windows); thermal returns `None` off Linux (`:1252`) |
-| A16 adaptive signals: host memory pressure | works | **missing**: `sysctl kern.memorystatus_vm_pressure_level`, `vm_stat`, `memory_pressure` do not exist; the sampler returns `pressure: unknown` | **missing** (same) | `mycelium_a13_macos/adaptive_host.py:251-290`, sole caller `:360` |
+| A16 adaptive signals: host memory pressure | works (`sysctl`, `vm_stat`, `memory_pressure`) | works: `sample_linux_memory` reads PSI `some`/`full` `avg10` from `/proc/pressure/memory`, `MemAvailable` from `/proc/meminfo`, and cross-checks `MemAvailable/MemTotal` with the macOS bands; unreadable or malformed PSI (or a kernel without PSI) fails closed to `pressure: unknown`. PSI band thresholds are provisional, unmeasured | **missing by design**: no sampler, `HostSampler` reports `pressure: unknown` (fail closed) | `mycelium_a13_macos/adaptive_host.py:251` (macOS), `:328-380` (Linux), `HostSampler` `:418` dispatches on platform; tests `tests/host_platform/test_linux_memory_sampler.py` (fake file contents). CPU ticks stay macOS-only, so `cpu_utilization` is absent (unknown) on Linux |
 | A16 signals: power, thermal, network policy | Objective-C probe `native/resource_probe.m` | `mycelium_a13_linux/managed_host/resources.py` (sysfs, NetworkManager) | `mycelium_a13_windows/managed_host/resources.py` (PowerShell/CIM) | `mycelium_a13_macos/resources.py:114-124` (dispatch), `:185-200` (build, darwin only) |
 | Resource probe used by `probe.py` (dev tooling, not shipped node) | `sysctl`, `system_profiler`, `pmset` | partial (`/proc`, `rocm-smi`, `nvidia-smi`) | missing | `probe.py:91-92,99-163,224-328,436-470,547` |
 | Service packaging | launchd plist rendered, `org.mycelium.<id>.plist` | hardened systemd unit (user service) | Windows SCM package | `mycelium_service_package.py:187,614-623`; `mycelium_a13_linux/service_lifecycle.py:8,165` |
@@ -62,7 +62,7 @@ Legend: **works** = branch exists for the OS; **degraded** = runs but a signal o
 | App install paths | `~/Library/Application Support/Mycelium/programs/<version>` | `${XDG_DATA_HOME:-~/.local/share}/mycelium/<version>` | per `mycelium_a13_windows/installer.py` | `mycelium_a13_macos/installer.py:23-26`; `mycelium_a13_linux/installer.py:15-19` |
 | Packaging and signing | `codesign` ad-hoc, `ditto`, PyInstaller `.app` | PyInstaller on an Ubuntu 24.04 build host; no OS signing, a pinned Ed25519 manifest key instead | PyInstaller; Authenticode not in repo | `scripts/build_a13_macos.py:98-99`; `scripts/finalize_a13_macos.py:10,116`; `scripts/build_a13_linux.py:1-60`; `scripts/build_a13_windows.py` |
 | Secret storage / Keychain | no Keychain use in node, seed, membership or gateway: the Ed25519 key is a 0600 file. Keychain appears only in design docs (signing identity) | same 0600 file | file with ACLs | `mycelium_node/identity.py:313-324`; docs `docs/superpowers/specs/2026-09-27-mycelium-node-app-architecture.md:217,236` |
-| Owner-machine hard-codes | `/Users/evinova-self/...` in cutover default | same code is wrong off the owner's Mac | same | `mycelium_platform_neutral/seed_cutover_transaction.py:25`; R2 also lists watchdog and testbed paths |
+| Owner-machine hard-codes | cutover default forbidden root is `<home>/mycelium-physical-run` plus `MYCELIUM_PRODUCTION_SEED_ROOTS` (fixed); `mycelium_demo_watchdog` and `mycelium_testbed/soak.py:1583-1585` still hard-code owner paths | cutover fixed | cutover fixed | `mycelium_platform_neutral/seed_cutover_transaction.py:29-44`; remaining: `mycelium_demo_watchdog/watchdog.py:34,36,88`, `commands.py:35,37,45`, `mycelium_testbed/soak.py:1583-1585` |
 | Sidecar IPC | Unix socket (path-length limit noted) | Unix socket | loopback TCP with owner check | `mycelium_a13_macos/managed_runtime.py:138-143`; `native/iroh_transport` (not built here) |
 | Single-instance and file locks | `fcntl.flock` | `fcntl.flock` | none (`fcntl = None` fallback, no lock) | `mycelium_a13_macos/control_pump.py:10-12,153`; `control_session.py:11-13,177`; `mycelium_platform_neutral/migration_executor.py:18` |
 | The A13 app itself | works; Apple Silicon and an admitted macOS only | n/a (separate `mycelium_a13_linux` host, but it imports the `mycelium_a13_macos` modules for control logic) | n/a | `mycelium_a13_macos/app.py:96-121`, `capability.py:39,114`, `__main__.py:98` (`osascript`), `:115,178` |
@@ -89,19 +89,18 @@ Evaluated and not selected (`docs/runtime-backend-selection.md`): ONNX Runtime, 
 Ranked by user impact per risk. The first two are the only ones that block a Linux or Windows node from taking
 part in the A16 policy loop or a shipped install.
 
-1. **Linux/Windows A16 memory-pressure sampler.** Add `/proc/pressure/memory` (PSI) with `MemAvailable`
-   headroom on Linux, and a host-platform equivalent on Windows, next to `adaptive_host.sample_host_memory`
-   (`:251`). Today Linux and Windows always report `pressure: unknown`. Small, unit-testable with injected
-   readers. Needs hardware to validate thresholds.
+1. **Windows A16 memory-pressure sampler.** Linux is done (`adaptive_host.sample_linux_memory`: PSI +
+   `MemAvailable`, fake-file tested; thresholds still need hardware to validate). Windows needs a
+   host-platform equivalent; until then it reports `pressure: unknown`.
 2. **Real layer-range executor for non-Mac hosts** (R2 T13). `llama_runtime.py` is a whole-model HTTP client;
    NumPy is the only stage runtime off Apple. Define the backend behind `StageRuntimeBackend` with a NumPy
    conformance test before any engine. Large; numerics risk across backends.
 3. **Windows identity and seed file checks.** `identity.py`, `durable_membership.py` and the seed files call
    `os.getuid`/`os.fchmod`. Route through `mycelium_host_platform.private_directory` or an ACL check, as
    `process.py:879` does. Only matters if a Windows member runs the `mycelium_node` agent directly.
-4. **Remove owner-machine hard-codes** (R2 T15): `seed_cutover_transaction.py:25`, watchdog and testbed paths,
-   and `process.py:1187`'s `/opt/homebrew/bin/python3` assumption (breaks on Intel Homebrew). Use `sys.executable`
-   or config.
+4. **Remove the remaining owner-machine hard-codes** (R2 T15): watchdog and testbed paths. The cutover root
+   and `process.py`'s `/opt/homebrew/bin/python3` assumption are fixed (home-derived root, `sys.executable`
+   or `MYCELIUM_PHYSICAL_SERVICE_PYTHON`, Homebrew kept as the last macOS fallback).
 5. **Wire the Linux import guard into CI** as an `ubuntu-latest` job (R2 T12): run
    `python -B scripts/linux_import_guard.py` and `--all`. Add `cargo check --target x86_64-unknown-linux-gnu`
    (needs the target installed; not run here).
