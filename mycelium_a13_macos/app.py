@@ -807,7 +807,7 @@ class DemoApp:
         # The authority and the contributor serialize their own state (their
         # renew() runs under their own lock); read the current ones and renew.
         while not self.closed.wait(20):
-            if self.closed.is_set() or not self.running or self._left: continue
+            if self.closed.is_set() or not self.running or getattr(self, '_left', False): continue
             authority, contributor = self.authority, self.local_contributor
             if authority is None: continue
             try:
@@ -819,7 +819,7 @@ class DemoApp:
                     self.renew_error = 'renewal_unavailable'
 
     def _resource_check(self):
-        if self._leave_fence: return 'owner_stop'  # member leave: no new work (existing A16 reason)
+        if getattr(self, '_leave_fence', False): return 'owner_stop'  # member leave: no new work (existing A16 reason)
         from .resources import policy_violation, UNKNOWN_OBSERVATION
         try:
             observation = self._policy_observer()
