@@ -237,8 +237,35 @@ MEASURED_ANCHORS: dict[tuple[str, str], MeasuredAnchor] = {
 }
 
 
+#: Shapes built from a pinned snapshot's config.json + safetensors headers
+#: (``model_shape_builder``) instead of a hand-written ``MODEL_SHAPES`` row.
+DERIVED_SHAPES: dict[tuple[str, str], ModelShape] = {}
+
+
 def model_shape(model: Any) -> ModelShape | None:
-    return MODEL_SHAPES.get(_key(model))
+    key = _key(model)
+    return MODEL_SHAPES.get(key) or DERIVED_SHAPES.get(key)
+
+
+def register_shape(model: Any, shape: ModelShape) -> None:
+    """Make a header-derived shape the shape of ``model``.
+
+    Idempotent for an equal shape; a different shape for a model that already
+    has one (hand-written or derived) is refused, never replaced.
+    """
+    existing = model_shape(model)
+    if existing is not None:
+        if existing != shape:
+            raise ResourceRefused("model_shape_conflict")
+        return
+    if not isinstance(shape, ModelShape) or None in _key(model):
+        raise ResourceRefused("model_resources_unregistered")
+    DERIVED_SHAPES[_key(model)] = shape
+
+
+def unregister_shape(model: Any) -> None:
+    """Drop a derived shape (tests); hand-written rows are never removed."""
+    DERIVED_SHAPES.pop(_key(model), None)
 
 
 def require_shape(model: Any) -> ModelShape:
@@ -606,11 +633,11 @@ def consent_document(model: Any = None, *, device_memory_bytes: int | None = Non
 __all__ = [
     "CONTROL_ARCHIVE_ALLOWANCE_BYTES", "DEMO_CONTEXT_TOKENS", "DISK_HEADROOM", "GROUP_FIXED_BYTES", "GUARD_HEADROOM",
     "LOAD_PEAK_FACTOR", "MEASURED_ANCHORS", "MEMBER_PEAK_MEMORY_FRACTION", "MODEL_SHAPES",
-    "MeasuredAnchor", "ModelShape", "RESIDENT_FACTORS", "RUNNER_LIMIT_DIVISOR",
+    "DERIVED_SHAPES", "MeasuredAnchor", "ModelShape", "RESIDENT_FACTORS", "RUNNER_LIMIT_DIVISOR",
     "ResourceRefused", "STAGED_COPY_FACTOR", "aggregate_proposal", "cap_refusal_message",
     "check_member_caps", "check_members", "consent_document", "member_memory_ceiling",
     "member_resources", "memory_cap_options", "model_resource_proposal", "model_shape",
     "model_storage_ceiling", "owner_storage_requirement", "pairing_quota_ceiling",
-    "PUBLIC_RESOURCE_FIELDS", "plan_for_members", "public_member_resources", "refusal_message", "require_shape", "split_resource_proposal",
+    "PUBLIC_RESOURCE_FIELDS", "plan_for_members", "public_member_resources", "refusal_message", "register_shape", "require_shape", "split_resource_proposal", "unregister_shape",
     "storage_consent_ceiling", "whole_model_member", "work_limits_for",
 ]
