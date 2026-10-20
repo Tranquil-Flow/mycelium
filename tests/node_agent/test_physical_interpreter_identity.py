@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""The physical-service interpreter is derived from the running or configured Python.
+"""macOS keeps its interpreter order: configured, legacy Homebrew framework image, then sys.executable.
 
-The macOS framework ``Python.app`` image is found from ``sys.executable`` (or an owner-configured
-interpreter); the Apple Silicon Homebrew path is only the last macOS fallback.
+An owner-configured ``MYCELIUM_PHYSICAL_SERVICE_PYTHON`` is tried first (opt-in); the Apple Silicon
+Homebrew ``Python.app`` image comes next exactly as before; the plain running interpreter is only the
+last fallback.  Linux and Windows use ``sys.executable``.
 """
 from __future__ import annotations
 
@@ -36,35 +37,37 @@ def _identity(**kw):
     return process.physical_service_interpreter_identity(platform="darwin", **kw)
 
 
-def test_macos_derives_the_framework_image_from_the_running_interpreter(tmp_path, monkeypatch):
-    cli, app = _framework(tmp_path / "running", b"running")
-    monkeypatch.setattr(process, "_MACOS_LEGACY_PYTHON", str(tmp_path / "absent" / "python3"))
-    got = _identity(executable=str(cli), environ={})
-    assert got.path == os.path.realpath(app)
-
-
-def test_macos_prefers_the_running_interpreter_over_the_legacy_homebrew_path(tmp_path, monkeypatch):
-    run_cli, run_app = _framework(tmp_path / "running", b"running")
-    legacy_cli, _ = _framework(tmp_path / "legacy", b"legacy")
-    monkeypatch.setattr(process, "_MACOS_LEGACY_PYTHON", str(legacy_cli))
-    assert _identity(executable=str(run_cli), environ={}).path == os.path.realpath(run_app)
-
-
-def test_macos_configured_interpreter_wins(tmp_path, monkeypatch):
+def test_macos_legacy_homebrew_framework_image_wins_over_the_running_interpreter(tmp_path, monkeypatch):
     run_cli, _ = _framework(tmp_path / "running", b"running")
+    legacy_cli, legacy_app = _framework(tmp_path / "legacy", b"legacy")
+    monkeypatch.setattr(process, "_MACOS_LEGACY_PYTHON", str(legacy_cli))
+    assert _identity(executable=str(run_cli), environ={}).path == os.path.realpath(legacy_app)
+
+
+def test_macos_configured_interpreter_wins_over_the_legacy_path(tmp_path, monkeypatch):
+    run_cli, _ = _framework(tmp_path / "running", b"running")
+    legacy_cli, _ = _framework(tmp_path / "legacy", b"legacy")
     conf_cli, conf_app = _framework(tmp_path / "configured", b"configured")
-    monkeypatch.setattr(process, "_MACOS_LEGACY_PYTHON", str(tmp_path / "absent" / "python3"))
+    monkeypatch.setattr(process, "_MACOS_LEGACY_PYTHON", str(legacy_cli))
     got = _identity(executable=str(run_cli), environ={"MYCELIUM_PHYSICAL_SERVICE_PYTHON": str(conf_cli)})
     assert got.path == os.path.realpath(conf_app)
 
 
-def test_macos_legacy_path_is_only_a_fallback_for_a_non_framework_interpreter(tmp_path, monkeypatch):
-    plain = _executable(tmp_path / "venv" / "bin" / "python")
+def test_macos_unusable_configured_interpreter_falls_through_to_the_legacy_path(tmp_path, monkeypatch):
+    run_cli, _ = _framework(tmp_path / "running", b"running")
     legacy_cli, legacy_app = _framework(tmp_path / "legacy", b"legacy")
     monkeypatch.setattr(process, "_MACOS_LEGACY_PYTHON", str(legacy_cli))
-    assert _identity(executable=str(plain), environ={}).path == os.path.realpath(legacy_app)
+    got = _identity(executable=str(run_cli), environ={"MYCELIUM_PHYSICAL_SERVICE_PYTHON": str(tmp_path / "nope")})
+    assert got.path == os.path.realpath(legacy_app)
+
+
+def test_macos_running_interpreter_is_only_the_last_fallback_when_the_legacy_path_is_absent(tmp_path, monkeypatch):
+    plain = _executable(tmp_path / "venv" / "bin" / "python")
     monkeypatch.setattr(process, "_MACOS_LEGACY_PYTHON", str(tmp_path / "absent" / "python3"))
     assert _identity(executable=str(plain), environ={}).path == os.path.realpath(plain)
+    run_cli, _ = _framework(tmp_path / "running", b"running")
+    # the pre-change fallback was the plain running executable, not a derived framework image
+    assert _identity(executable=str(run_cli), environ={}).path == os.path.realpath(run_cli)
 
 
 def test_other_platforms_use_the_running_interpreter_and_ignore_the_macos_paths(tmp_path, monkeypatch):
