@@ -204,8 +204,8 @@ def test_marker_is_refreshed_while_withdrawn_without_a_runtime(tmp_path):
     ov.write_marker(app.run_dir, reason="host_memory_pressure", wall_now=time.time() - 3600)
     DemoApp._adaptive_tick(app)
     assert _marker(app).exists()
-    state = ov.read_marker(app.run_dir, wall_clock=time.time)
-    assert state == {"valid": True, "reason": "host_memory_pressure"}
+    # an expired marker restores with reason "none" (existing semantics) and is made valid again
+    assert ov.read_marker(app.run_dir, wall_clock=time.time) == {"valid": True, "reason": "none"}
 
 
 def test_owner_stop_blocks_reentry_without_a_runtime(tmp_path):

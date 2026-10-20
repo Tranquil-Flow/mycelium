@@ -62,3 +62,12 @@ class ReentryFeed:
             return status.get("membership_state") == "current" and status.get("lease_state") == "fresh"
         except Exception:
             return False
+
+
+def feed_for(app: Any) -> ReentryFeed:
+    """The app's single re-entry feed (shared by the runtime loop and the detached policy tick)."""
+    feed = getattr(app, "_adaptive_reentry", None)
+    if feed is None:
+        feed = app._adaptive_reentry = ReentryFeed(
+            clock=lambda: getattr(app, "_adaptive_clock", time.monotonic)())
+    return feed

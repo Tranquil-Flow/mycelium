@@ -710,16 +710,17 @@ class DemoApp:
         if adaptive is None or not adaptive.controller.enabled:
             return
         from .adaptive_drain import drain_step, product_hooks
-        from .adaptive_reentry import ReentryFeed
+        from .adaptive_reentry import feed_for
         cached = getattr(self, '_adaptive_hooks', None)
         if cached is None or cached[0] is not runtime:
             cached = self._adaptive_hooks = (runtime, product_hooks(runtime))
         drain_step(adaptive.controller, runtime, hooks=cached[1])
-        feed = getattr(self, '_adaptive_reentry', None)
-        if feed is None:
-            feed = self._adaptive_reentry = ReentryFeed(
-                clock=lambda: getattr(self, '_adaptive_clock', time.monotonic)())
-        feed.tick(adaptive.controller, self.authority)
+        feed_for(self).tick(adaptive.controller, self.authority)
+
+    def _adaptive_tick(self):
+        """A16 tick from the policy loop while no managed runtime is attached (restart fence, re-entry)."""
+        from .adaptive_host import adaptive_detached_tick
+        adaptive_detached_tick(self)
 
     def _cancel_acquisition(self):
         if self.acquisition is not None:
@@ -730,6 +731,10 @@ class DemoApp:
         # Native observations, not persisted self-attestations. On a policy or
         # membership failure, cancel the actual acquisition worker, not only UI.
         while not self.closed.wait(1):
+            try:
+                self._adaptive_tick()  # outside the guard: re-entry makes authority round trips
+            except Exception:
+                pass  # an A16 fault never stops the acquisition policy checks
             with self.guard:
                 if self.closed.is_set() or not self._acquisition_active:
                     continue

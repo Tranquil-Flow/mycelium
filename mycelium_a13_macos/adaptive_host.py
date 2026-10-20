@@ -24,7 +24,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Final, Mapping
+from typing import Any, Callable, Final, Iterable, Mapping
 
 from mycelium_router import adaptive_overlay as _overlay
 
@@ -856,6 +856,27 @@ class AdaptiveHostRuntime:
             if marker is not None:
                 self._controller.restore_withdrawn(marker["reason"])
 
+    def refresh_markers(
+        self, roots: Iterable[str | os.PathLike[str]], *, wall_clock: Callable[[], float] = time.time,
+    ) -> None:
+        """Keep the withdraw markers of ``roots`` current when no node publisher is attached.
+
+        Restores the fence from each root first, then rewrites a marker that is present while
+        withdrawn and removes it once back to ``normal`` or while A16 is off.  A root without a
+        marker is never written, and an unreadable policy leaves every marker untouched.
+        """
+        with self._lock:
+            if self._apply_policy() is None:
+                return
+            wall = wall_clock()
+            for root in roots:
+                try:
+                    self.sync_capacity_root(root, wall_clock=wall_clock)
+                    if _overlay.marker_present(root):
+                        self._persist_marker(root, wall)
+                except (OSError, _overlay.AdaptiveOverlayError):
+                    continue  # the in-memory fence stands; the next tick retries
+
     def overlay(
         self, *, wall_clock: Callable[[], float] = time.time,
         capacity_root: str | os.PathLike[str] | None = None,
@@ -935,11 +956,51 @@ def adaptive_resource_check(app: Any) -> str | None:
             app._adaptive_runtime = runtime
         except AttributeError:
             pass
-    attached = _drain().target_runtime(app)
-    node_root = getattr(attached, "root", None)
-    if node_root is not None:  # a restart after a withdraw must already be fenced here
-        runtime.sync_capacity_root(node_root)
+    for capacity_root in capacity_roots(app):  # a restart after a withdraw must already be fenced here
+        runtime.sync_capacity_root(capacity_root)
     return runtime.check()
+
+
+def capacity_roots(app: Any) -> list[Path]:
+    """The attached runtime's node root plus every managed run directory of the target.
+
+    A restarted target has no runtime attached yet, but the withdraw marker its previous
+    process left lives in ``<target state root>/managed/<run id>`` (the runtime's own root).
+    """
+    roots: dict[str, Path] = {}
+    attached = getattr(_drain().target_runtime(app), "root", None)
+    if attached is not None:
+        roots[os.fspath(attached)] = Path(attached)
+    state_root = getattr(getattr(getattr(app, "authority", None), "peer", None), "state_root", None)
+    if state_root is not None:
+        try:
+            for entry in sorted(Path(state_root, "managed").iterdir()):
+                if entry.is_dir() and not entry.is_symlink():
+                    roots.setdefault(os.fspath(entry), entry)
+        except OSError:
+            pass
+    return list(roots.values())
+
+
+def adaptive_detached_tick(app: Any, *, wall_clock: Callable[[], float] = time.time) -> None:
+    """Policy-loop tick for a target with no managed runtime attached (no-op otherwise).
+
+    The managed runtime's control loop normally drives sampling, marker upkeep and re-entry;
+    after a restart nothing does until a runtime attaches.  This keeps the restored withdraw
+    fence sampled and persisted and lets ``ReentryFeed`` run, so the authority observations and
+    requalification that end a withdraw are reachable.  Ordinary route qualification still has
+    to run before any request is placed.
+    """
+    if getattr(app, "installation_role", None) != "target" or _drain().target_runtime(app) is not None:
+        return
+    adaptive_resource_check(app)  # creates the shared runtime, restores the fence, samples if due
+    runtime = getattr(app, "_adaptive_runtime", None)
+    if runtime is None:
+        return
+    runtime.refresh_markers(capacity_roots(app), wall_clock=wall_clock)
+    if runtime.controller.enabled:
+        from .adaptive_reentry import feed_for
+        feed_for(app).tick(runtime.controller, app.authority)
 
 
 def adaptive_overlay_provider(app: Any) -> Callable[..., dict[str, Any] | None]:
