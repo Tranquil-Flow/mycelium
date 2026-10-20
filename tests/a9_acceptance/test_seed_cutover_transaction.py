@@ -219,6 +219,20 @@ def test_default_forbidden_root_is_the_production_physical_run(tmp_path):
     assert any(str(p).endswith("mycelium-physical-run") for p in tx.PRODUCTION_ROOTS)
 
 
+def test_default_forbidden_root_is_derived_from_the_home_not_a_developer_path(tmp_path):
+    assert tx.default_production_roots(home=tmp_path) == (tmp_path / "mycelium-physical-run",)
+    assert Path.home() / "mycelium-physical-run" in tx.PRODUCTION_ROOTS
+    assert "evinova-self" not in Path(tx.__file__).read_text()
+
+
+def test_forbidden_roots_accept_an_explicit_environment_list(tmp_path):
+    extra = tmp_path / "prod-a"
+    other = tmp_path / "prod-b"
+    env = {"MYCELIUM_PRODUCTION_SEED_ROOTS": os.pathsep.join([str(extra), str(other), "relative/ignored", ""])}
+    roots = tx.default_production_roots(home=tmp_path, environ=env)
+    assert roots == (tmp_path / "mycelium-physical-run", extra, other)
+
+
 def test_cutover_failure_reason_keeps_the_error_code_and_bounds_the_message(tmp_path):
     fleet = FakeFleet(tmp_path)
     def refused():
