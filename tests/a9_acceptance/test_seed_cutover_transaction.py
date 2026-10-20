@@ -274,3 +274,42 @@ def test_committed_cutover_judges_the_hardware_70_to_72_advance_and_refuses_unex
         receipt = _run(FakeFleet(tmp_path / str(advance), after=after), tmp_path / str(advance))
         assert receipt["status"] == status, advance
         assert receipt["checks"]["member_generations_advanced_by_commit_and_restart"] is (advance == 2), advance
+
+
+class _CodedError(Exception):
+    """An error whose stable code is not its message (the message is human text)."""
+
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        super().__init__(message)
+
+
+def test_cutover_failure_reason_prefers_the_stable_error_code_over_the_message(tmp_path):
+    fleet = FakeFleet(tmp_path)
+
+    def coded():
+        raise _CodedError("membership_cutover_already_recorded", "the seed already holds a recorded cutover")
+    receipt = _run(fleet, tmp_path, cutover=coded)
+    assert receipt["reason"] == "cutover_failed:_CodedError:membership_cutover_already_recorded"
+    assert "cutover_failed:_CodedError:membership_cutover_already_recorded" in receipt["phases"]
+
+
+def test_cutover_failure_with_an_empty_message_still_names_the_exception_type(tmp_path):
+    fleet = FakeFleet(tmp_path)
+
+    def silent():
+        raise KeyError()
+    receipt = _run(fleet, tmp_path, cutover=silent)
+    assert receipt["reason"] == "cutover_failed:KeyError:no_message"
+
+
+def test_adoption_failure_after_commit_keeps_its_code_and_is_not_reported_as_verified(tmp_path):
+    fleet = FakeFleet(tmp_path)
+
+    def adopt_b():
+        raise tx.CutoverRefused("adoption_key_mismatch")
+    receipt = _run(fleet, tmp_path, adopt={"node-0": lambda: fleet.calls.append("adopt:node-0"), "node-2": adopt_b})
+    assert receipt["reason"] == "cutover_failed:CutoverRefused:adoption_key_mismatch"
+    assert receipt["status"] == "COMMITTED_ADOPTION_FAILED"
+    assert "adopted:node-0" in receipt["phases"] and "adopted:node-2" not in receipt["phases"]
+    assert receipt["checks"]["contract_v2"] is True  # the post-restart readback is still recorded
