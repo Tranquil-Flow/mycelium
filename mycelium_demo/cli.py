@@ -9,6 +9,14 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from .device_lab import DeviceLabError, prepare_device_lab
+from mycelium_platform_neutral import network_mode as network_mode_module
+from mycelium_platform_neutral.lan_doctor import (
+    DEFAULT_PORTS as LAN_DEFAULT_PORTS,
+    render_report as render_lan_report,
+    run_lan_doctor,
+)
+from mycelium_platform_neutral.offline import add_offline_argument
+
 from .doctor import (
     DEFAULT_COMMANDS,
     canonical_json,
@@ -45,7 +53,21 @@ def build_parser() -> argparse.ArgumentParser:
         "doctor", help="run local non-mutating prerequisite checks"
     )
     doctor.add_argument("--repo-root", type=Path, default=ROOT)
-    doctor.add_argument("--state-dir", type=Path, required=True)
+    doctor.add_argument("--state-dir", type=Path)
+    doctor.add_argument(
+        "--lan",
+        action="store_true",
+        help="check this device for a swarm on your own network, with no hosted service",
+    )
+    doctor.add_argument("--json", action="store_true", help="with --lan: print JSON")
+    doctor.add_argument(
+        "--origin",
+        action="append",
+        default=[],
+        help="with --lan: an origin you plan to use, checked for hosted services",
+    )
+    network_mode_module.add_network_mode_argument(doctor)
+    add_offline_argument(doctor)
     doctor.add_argument(
         "--port",
         type=_port_value,
@@ -418,13 +440,33 @@ def main(
     live_server_main=None,
     environ: Mapping[str, str] | None = None,
     fixture_runtime_available=lambda path: path.is_file(),
+    lan_address=network_mode_module.route_lookup_ipv4,
     device_lab_prepare=prepare_device_lab,
     demo_stack_bringup=None,
     demo_stack_inputs_factory=None,
 ) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.action == "doctor" and args.lan:
+        lan_report = run_lan_doctor(
+            environ=os.environ if environ is None else environ,
+            network_mode=args.network_mode,
+            offline=args.offline,
+            flags=tuple(
+                token for origin in args.origin for token in ("--origin", origin)
+            ),
+            ports=tuple(args.port) or LAN_DEFAULT_PORTS,
+            lan_address=lan_address,
+            port_available=port_available,
+        )
+        print(canonical_json(lan_report) if args.json else render_lan_report(lan_report), end="")
+        if args.json:
+            print()
+        return 0 if lan_report["ok"] else 1
+
     if args.action == "doctor":
+        if args.state_dir is None:
+            parser.error("the following arguments are required: --state-dir")
         report = run_preflight(
             repo_root=args.repo_root,
             state_dir=args.state_dir,
