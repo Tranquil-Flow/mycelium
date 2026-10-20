@@ -621,6 +621,9 @@ class AdaptiveHostController:
         self._authority: list[tuple[int, float]] = []
         self._cleanup_complete = False
         self._requalified = False
+        # Set when this Mac pauses (drain/withdraw); cleared once the route is seen ready again, so
+        # the page can say "Rejoining" between a released fence and a ready route (derived, no wire).
+        self.rejoin_pending = False
         self._policy = validate_policy(policy)
         self._timings = resolve_timings(self._policy)
 
@@ -722,10 +725,17 @@ class AdaptiveHostController:
         self._healthy_since = self._moderate_since = self._cpu_since = None
         self._authority.clear()
         self._cleanup_complete = self._requalified = False
+        self.rejoin_pending = False
+
+    def clear_rejoin(self) -> None:
+        with self._lock:
+            self.rejoin_pending = False
 
     def _enter(self, mode: str, reason: str) -> None:
         self.generation += 1
         self.mode, self.reason = mode, reason
+        if mode in ("drain", "withdraw"):
+            self.rejoin_pending = True
         self._entered_at = self._clock()
         self._authority.clear()
         self._requalified = False

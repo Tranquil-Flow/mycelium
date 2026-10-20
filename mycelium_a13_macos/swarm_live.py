@@ -34,12 +34,14 @@ def _unavailable(reason: str) -> dict[str, Any]:
     return {'available': False, 'reason': reason}
 
 
-def _route(run: Any) -> dict[str, Any]:
+def _route(run: Any, sharing_state: Any = None) -> dict[str, Any]:
     if not isinstance(run, dict):
         return {'available': True, 'state': 'offline', 'step': None, 'route_ready': False, 'failed_step': None,
                 'error_code': None, 'run': None, 'started_at': None}
     state = run.get('state')
-    if state == 'serving' and run.get('route_ready') is True:
+    if sharing_state in ('paused', 'rejoining'):  # never "serving" while this Mac is paused or reconnecting
+        shown = sharing_state
+    elif state == 'serving' and run.get('route_ready') is True:
         shown = 'serving'
     elif state == 'running':
         shown = 'warming'
@@ -49,7 +51,7 @@ def _route(run: Any) -> dict[str, Any]:
         shown = 'offline'
     started = run.get('started_at')
     return {'available': True, 'state': shown, 'step': _text(run.get('step'), 32),
-            'route_ready': run.get('route_ready') is True, 'failed_step': _text(run.get('failed_step'), 32),
+            'route_ready': run.get('route_ready') is True and shown == 'serving', 'failed_step': _text(run.get('failed_step'), 32),
             'error_code': _text(run.get('error_code'), 64), 'run': _text(run.get('run_id'), 11),
             'started_at': started if type(started) is int else None}
 
@@ -137,8 +139,10 @@ def _transport(document: Any) -> dict[str, Any]:
     return {'available': True, **counts}
 
 
-def project(*, owner_run: Any, adaptive: Any, recovery: Any, observatory: Any, busy: bool) -> dict[str, Any]:
-    return {'route': _route(owner_run), 'helpers': _helpers(owner_run), 'host': _host(adaptive),
+def project(*, owner_run: Any, adaptive: Any, recovery: Any, observatory: Any, busy: bool,
+            sharing: Any = None) -> dict[str, Any]:
+    shared = sharing.get('state') if isinstance(sharing, dict) else None
+    return {'route': _route(owner_run, shared if shared in ('paused', 'rejoining') else None), 'helpers': _helpers(owner_run), 'host': _host(adaptive),
             'recovery': _recovery(recovery), 'transport': _transport(observatory),
             'sessions': {'available': True, 'max_concurrent': 1, 'busy': bool(busy), 'policy': SESSIONS_POLICY}}
 
@@ -186,5 +190,10 @@ def live_state(app: Any, *, adaptive: Callable[[], Any] | None = None, read_json
         busy = bool(app.chat.state().get('busy'))
     except Exception:  # noqa: BLE001
         busy = False
+    try:
+        from .sharing_state import sharing_state
+        sharing = sharing_state(app)
+    except Exception:  # noqa: BLE001
+        sharing = None
     return project(owner_run=run, adaptive=host, recovery=read(RECOVERY_PATH), observatory=read(OBSERVATORY_PATH),
-                   busy=busy)
+                   busy=busy, sharing=sharing)

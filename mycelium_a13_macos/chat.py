@@ -43,6 +43,11 @@ _ID = re.compile(r'[A-Za-z0-9_-]{16,64}\Z')
 _CANCEL_PATH = re.compile(r'/api/v1/inference/[A-Za-z0-9_-]{1,128}/cancel\Z')
 # Owner-run steps during which the route is being activated/qualified.
 _WARMING_STEPS = frozenset({'activate', 'serving'})
+# A request that arrives while this Mac is Rejoining (fence released, route not ready yet) waits this long
+# for the route instead of being refused at once; kept below the browser and visitor request timeouts.
+REJOIN_WAIT_S = 15
+REJOIN_POLL_S = 0.25
+REJOIN_WAITERS_MAX = 8
 _ASSETS = {'/chat': ('chat.html', 'text/html; charset=utf-8'),
            '/chat/chat.js': ('chat.js', 'text/javascript; charset=utf-8'),
            '/chat/chat.css': ('chat.css', 'text/css; charset=utf-8')}
@@ -51,8 +56,8 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'se
 
 
 class ChatError(RuntimeError):
-    def __init__(self, status: int, code: str) -> None:
-        self.status, self.code = status, code
+    def __init__(self, status: int, code: str, **extra: Any) -> None:
+        self.status, self.code, self.extra = status, code, extra
         super().__init__(code)
 
 
@@ -201,8 +206,11 @@ def failure_code(error: BaseException) -> str:
 
 class ChatService:
     def __init__(self, app: Any, *, client_factory: Callable[[str], Any] = RegistryClient,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic,
+                 sleep: Callable[[float], None] = time.sleep) -> None:
         self.app = app
+        self._sleep = sleep
+        self._rejoin_waiters = 0
         self._client_factory = client_factory
         self._clock = clock
         self._lock = threading.Lock()
@@ -228,6 +236,41 @@ class ChatService:
         run = getattr(self.app, 'owner_run', None)
         status = None if run is None else run.status()
         return bool(status) and status.get('state') == 'running' and status.get('step') in _WARMING_STEPS
+
+    def _rejoining(self) -> bool:
+        from .sharing_state import sharing_state
+        try:
+            return sharing_state(self.app)['state'] == 'rejoining'
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _await_rejoin(self) -> dict[str, Any] | None:
+        """The only wait on the chat path: bounded, capped, and only while the state is ``rejoining``.
+
+        Paused (drain/withdraw/manual fence), idle, warming-from-cold and failed runs never wait; a real
+        failure is never masked.  The waiter slot is released on every exit, including a client that went away.
+        """
+        if not self._rejoining():
+            return None
+        with self._lock:
+            if self._rejoin_waiters >= REJOIN_WAITERS_MAX:
+                raise ChatError(503, 'route_rejoining_busy', retry_after_s=REJOIN_WAIT_S)
+            self._rejoin_waiters += 1
+        try:
+            deadline = self._clock() + REJOIN_WAIT_S
+            while True:
+                serving = self._serving()
+                if serving is not None:
+                    return serving
+                if not self._rejoining() or self._clock() >= deadline:
+                    break
+                self._sleep(min(REJOIN_POLL_S, max(0.0, deadline - self._clock())) or REJOIN_POLL_S)
+            if self._rejoining():
+                raise ChatError(503, 'route_rejoining', retry_after_s=5)
+            return None
+        finally:
+            with self._lock:
+                self._rejoin_waiters -= 1
 
     def _rate(self, key: str) -> None:
         now = self._clock()
@@ -257,6 +300,8 @@ class ChatService:
             raise ChatError(400, 'chat_max_new_tokens_invalid')
         max_new_tokens = min(wanted, MAX_NEW_TOKENS_CAP)
         serving = self._serving()
+        if serving is None:
+            serving = self._await_rejoin()
         if serving is None:
             raise ChatError(503, 'chat_warming_up' if self._warming_up() else 'chat_not_ready')
         with self._lock:
@@ -381,6 +426,7 @@ class ChatService:
         serving = self._serving()
         return {'available': serving is not None, 'busy': self._busy is not None,
                 'warming_up': serving is None and self._warming_up(),
+                'rejoining': serving is None and self._rejoining(),
                 'model_id': None if serving is None else _model_id(self.app),
                 'served_by': [] if serving is None else [
                     {'label': p.get('label'), 'node': (p.get('node_id') or '')[:12], 'layers': p.get('layers')}
@@ -466,7 +512,7 @@ def handle(app: Any, method: str, path: str, headers: Mapping[str, str], body: b
             return _json(200, _send(app, chat, client_key(headers, via_relay=via_relay), document, via_relay))
         return _json(200, chat.events(document))
     except ChatError as error:
-        return _json(error.status, {'error': error.code})
+        return _json(error.status, {'error': error.code, **error.extra})
     except WireError as error:  # the swarm entry's checks (kill switch, access mode, daily cap)
         return _json(error.status, {'error': error.code})
 

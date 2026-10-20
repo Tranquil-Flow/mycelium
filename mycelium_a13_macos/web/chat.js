@@ -14,6 +14,9 @@ const MESSAGES = {
   chat_not_ready:'The swarm is not serving right now. The host starts it from the Mycelium app.',
   chat_warming_up:'Warming up: the swarm is qualifying its route. Chat opens when it is ready.',
   chat_route_not_qualified:'The route is not qualified yet (warming up). Try again in a moment.',
+  route_rejoining:'Rejoining: this Mac is reconnecting its route. Try again in a few seconds.',
+  route_rejoining_busy:'Several messages are already waiting for the route to reconnect. Try again in a few seconds.',
+  chat_rejoining:'Rejoining - connecting route. Your message waits up to 15 seconds.',
   chat_busy:'Someone else\'s prompt is running. Try again in a few seconds.',
   chat_rate_limited:'You sent several prompts this minute. Wait a little.',
   chat_swarm_rate_limited:'The room sent many prompts this minute. Wait a little.',
@@ -27,10 +30,10 @@ async function refresh() {
   try {
     state = await call('/chat/api/state');
     $('state').textContent = state.available ? `Serving ${state.model_id || ''}${state.busy ? ' · busy' : ' · ready'}`
-      : state.warming_up ? MESSAGES.chat_warming_up : MESSAGES.chat_not_ready;
+      : state.rejoining ? MESSAGES.chat_rejoining : state.warming_up ? MESSAGES.chat_warming_up : MESSAGES.chat_not_ready;
     $('served').textContent = servedText(state.served_by);
   } catch (error) { $('state').textContent = 'Cannot reach the host right now.'; state = null; }
-  $('send').disabled = sending || !state || !state.available;
+  $('send').disabled = sending || !state || !(state.available || state.rejoining);
 }
 function entry(kind, text) {
   const div = document.createElement('div'); div.className = 'msg ' + kind; div.textContent = text;

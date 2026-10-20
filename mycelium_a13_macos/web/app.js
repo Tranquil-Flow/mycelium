@@ -21,6 +21,13 @@ const ADAPTIVE_TEXT={off:'Off. Nothing is reduced or paused automatically; your 
   error:'The sharing policy could not be read. New work is refused until you turn it off or on again.'};
 const ADAPTIVE_REASON={owner_game_mode:'you paused sharing',owner_stop:'you pressed Stop',host_memory_pressure:'memory is low',
   host_cpu_saturation:'the CPU is busy',resource_thermal_policy_violation:'this Mac is hot',resource_power_policy_violation:'the battery rules apply',none:''};
+// Derived Paused -> Rejoining (connecting route) -> Sharing; "Sharing" only once the route is ready.
+const SHARING_TEXT={paused:'Paused',rejoining:'Rejoining - connecting route',sharing:'Sharing',idle:'Not sharing yet'};
+function renderSharing(value){
+  const state=(value.sharing||{}).state||'idle';
+  $('sharing-state').textContent=SHARING_TEXT[state]||SHARING_TEXT.idle;
+  $('sharing-state').dataset.state=state;
+}
 function renderAdaptive(value){
   const a=value.adaptive_host||{state:'off'};
   $('adaptive-enable').checked=!!a.adaptive_sharing;$('adaptive-game').checked=!!a.pause_sharing;
@@ -86,7 +93,7 @@ function render(value) {
   $('join').hidden=target && a.membership_state==='current';
   $('revoke-consent').hidden=target;
   applyResources(value);
-  renderAdaptive(value);
+  renderAdaptive(value);renderSharing(value);
   if(value.resource_policy){
     for(const key of ['power','network','storage']){
       $(key).value=String(value.resource_policy[key==='storage'?'storage_bytes':key]);

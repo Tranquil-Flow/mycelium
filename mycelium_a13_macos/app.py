@@ -424,6 +424,15 @@ def _swarm_status(app):
         return {'state':'unavailable'}
 
 
+def _sharing_status(app):
+    """Derived Paused -> Rejoining -> Sharing (additive; never lets it break /api/status)."""
+    try:
+        from .sharing_state import sharing_state
+        return sharing_state(app)
+    except Exception:
+        return {'state':'idle','line':'Not sharing yet'}
+
+
 def _demo_status(app, part):
     """Status of the one-click demo pieces; never lets them break /api/status."""
     try:
@@ -1018,6 +1027,7 @@ class DemoApp:
                 'distribution':'unsigned development software; not notarized',
                 'join_flow':self._join_flow_status(),
                 'adaptive_host':adaptive_status(self),'adaptive_host_publication':adaptive_publication(self),
+                'sharing':_sharing_status(self),
                 'owner_run':_demo_status(self,'owner'),'demo_target':_demo_status(self,'target'),
                 'chat':_demo_status(self,'chat'),'swarm':_swarm_status(self),
                 'serving':{'state':'not_yet_serving','route_ready':False,
