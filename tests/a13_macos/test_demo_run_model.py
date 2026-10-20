@@ -28,13 +28,18 @@ def test_qwen3_8b_and_14b_contracts_are_pinned_and_registered():
         assert registered_model_contract(model.model_id, model.resolved_commit) is model
 
 
-def test_choices_are_the_three_qwen3_sizes_with_pinned_snapshot_bytes():
+def test_choices_are_every_registered_model_with_pinned_snapshot_bytes():
     names = [c.name for c in run_model.CHOICES]
-    assert names == ['qwen3-0.6b', 'qwen3-8b', 'qwen3-14b']
+    assert names == ['qwen2.5-0.5b', 'qwen3-0.6b', 'qwen2.5-7b', 'qwen3-8b', 'qwen3-14b']
+    # The picker lists exactly the registered models (the A9 route model is the 0.5B contract).
+    assert {c.model for c in run_model.CHOICES} == set(REGISTERED_MODELS)
     sizes = {c.name: c.snapshot_bytes for c in run_model.CHOICES}
     # HF tree totals of the pinned revisions (every file of the snapshot).
-    assert sizes == {'qwen3-0.6b': 1_519_209_243, 'qwen3-8b': 16_397_461_266,
-                     'qwen3-14b': 29_552_613_776}
+    assert sizes == {'qwen2.5-0.5b': 999_604_126, 'qwen3-0.6b': 1_519_209_243, 'qwen2.5-7b': 15_242_807_270,
+                     'qwen3-8b': 16_397_461_266, 'qwen3-14b': 29_552_613_776}
+    for c in run_model.CHOICES:  # the choice size is the registered shape's snapshot size
+        from mycelium_a13_macos.model_resources import model_shape
+        assert model_shape(c.model).snapshot_bytes == c.snapshot_bytes
     assert run_model.choice('qwen3-0.6b').model is QWEN3_0_6B_MODEL
 
 
@@ -97,9 +102,10 @@ def test_app_route_changes_model_reopens_acquisition_and_survives_restart(app, t
     assert status['run_model']['selected'] == 'qwen3-14b'
     assert status['run_model']['source'] == 'demo_default'
     assert status['run_model']['locked'] is False
-    assert [c['name'] for c in status['run_model']['choices']] == ['qwen3-0.6b', 'qwen3-8b', 'qwen3-14b']
+    assert [c['name'] for c in status['run_model']['choices']] == [
+        'qwen2.5-0.5b', 'qwen3-0.6b', 'qwen2.5-7b', 'qwen3-8b', 'qwen3-14b']
     assert {c['name']: c['fits_storage_ceiling'] for c in status['run_model']['choices']} == {
-        'qwen3-0.6b': True, 'qwen3-8b': True, 'qwen3-14b': True}
+        'qwen2.5-0.5b': True, 'qwen3-0.6b': True, 'qwen2.5-7b': True, 'qwen3-8b': True, 'qwen3-14b': True}
     result = app.action('/api/run-model', {'choice': 'qwen3-0.6b'})
     assert result['selected'] == 'qwen3-0.6b'
     assert app.acquisition.model is QWEN3_0_6B_MODEL
@@ -150,3 +156,121 @@ def test_local_qwen3_14b_snapshot_sizes_match_the_pinned_table():
     for name, size in present.items():
         assert QWEN3_14B_SNAPSHOT_FILES[name][0] == size, name
     assert all(n in present for n in QWEN3_14B_SNAPSHOT_FILES if n.endswith('.safetensors'))
+
+
+# -- PV6 picker: every registered model, per-member need, refused while a run is active ------------
+
+def test_picker_lists_label_size_and_per_member_disk_and_ram_for_every_model(app):
+    choices = {c['name']: c for c in app.status()['run_model']['choices']}
+    assert set(choices) == {'qwen2.5-0.5b', 'qwen3-0.6b', 'qwen2.5-7b', 'qwen3-8b', 'qwen3-14b'}
+    for c in choices.values():
+        assert c['label'] and c['snapshot_bytes'] > 0 and c['member_disk_bytes'] > 0 and c['member_rss_bytes'] > 0
+    assert choices['qwen3-14b']['member_rss_bytes'] > choices['qwen3-8b']['member_rss_bytes'] \
+        > choices['qwen3-0.6b']['member_rss_bytes']
+
+
+def test_choosing_a_qwen25_model_pins_its_contract_and_survives_restart(app):
+    from mycelium_a13_macos.serving import CANDIDATE_MODEL
+    app.action('/api/run-model', {'choice': 'qwen2.5-7b'})
+    assert app.run_model_contract() is CANDIDATE_MODEL
+    assert app.status()['model_contract']['model_id'] == 'Qwen/Qwen2.5-7B-Instruct'
+    root = app.root
+    app.close()
+    again = DemoApp(root, authority_factory=_Authority, check_platform=False).start()
+    try:
+        assert again.status()['run_model']['selected'] == 'qwen2.5-7b'
+    finally:
+        again.close()
+
+
+def test_model_change_refused_while_an_owner_run_is_active(app):
+    class Run:
+        def active(self): return True
+    app.owner_run = Run()
+    with pytest.raises(DemoError, match='owner_run_active'):
+        app.action('/api/run-model', {'choice': 'qwen3-0.6b'})
+    assert app.status()['run_model']['selected'] == 'qwen3-14b'
+    assert not (app.root / 'run-model.json').exists()
+
+
+def test_environment_override_still_selects_and_locks_every_env_name(tmp_path, monkeypatch):
+    for env, model in (('candidate', 'Qwen/Qwen2.5-7B-Instruct'), ('a9-route', 'Qwen/Qwen2.5-0.5B-Instruct'),
+                       ('qwen3-8b', 'Qwen/Qwen3-8B')):
+        name, source, contract = run_model.app_run_model(tmp_path, environ={'MYCELIUM_A13_RUN_MODEL': env})
+        assert (name, source, contract.model_id) == (env, 'environment', model)
+        doc = run_model.document(tmp_path, environ={'MYCELIUM_A13_RUN_MODEL': env})
+        assert doc['locked'] is True and doc['source'] == 'environment'
+
+
+# -- PV7 suggestion on the owner status and the download gate -------------------------------------
+
+GiB = 1 << 30
+
+
+def _members(app, monkeypatch, *memory_gib):
+    import time
+    monkeypatch.setattr('mycelium_a13_macos.app.host_memory_bytes', lambda: 48 * GiB)
+    reports = {f'node-member-{i}': {'generation': 1, 'expires_at': time.time() + 600,
+                                    'device': {'memory_bytes': m * GiB}} for i, m in enumerate(memory_gib)}
+    monkeypatch.setattr(app, 'member_capability_reports', lambda: reports)
+
+
+def test_status_marks_what_fits_the_joined_macs_and_suggests_the_largest(app, monkeypatch):
+    _members(app, monkeypatch, 8)
+    picker = app.status()['run_model']
+    fits = {c['name']: c['fit']['state'] for c in picker['choices']}
+    assert fits == {'qwen3-14b': 'fits', 'qwen3-8b': 'fits', 'qwen2.5-7b': 'too_large',
+                    'qwen3-0.6b': 'fits', 'qwen2.5-0.5b': 'fits'}
+    line = next(c for c in picker['choices'] if c['name'] == 'qwen3-14b')['fit']['line']
+    assert line.startswith("fits: needs ") and " GB of your swarm's " in line
+    assert picker['suggestion']['name'] == 'qwen3-14b' and picker['suggestion']['members'] == 2
+    assert picker['suggestion']['line'].startswith('Largest that fits: Qwen3-14B')
+
+
+def test_owner_reserve_and_expired_reports_are_taken_into_account(app, monkeypatch):
+    from mycelium_a13_macos import adaptive_host
+    _members(app, monkeypatch, 8, 64)
+    reports = app.member_capability_reports()
+    reports['node-member-1']['expires_at'] = 1  # expired: not counted
+    original = adaptive_host.read_adaptive_policy
+    monkeypatch.setattr(adaptive_host, 'read_adaptive_policy',
+                        lambda root: dict(original(root), reserve_bytes=44 * GiB))
+    picker = app.status()['run_model']
+    assert picker['suggestion']['members'] == 2
+    assert {c['name']: c['fit']['state'] for c in picker['choices']}['qwen3-14b'] == 'too_large'
+
+
+def test_without_a_joined_mac_every_fit_is_unknown_and_nothing_is_refused(app, monkeypatch):
+    _members(app, monkeypatch)
+    picker = app.status()['run_model']
+    assert {c['fit']['state'] for c in picker['choices']} == {'unknown'}
+    assert picker['suggestion']['name'] is None and 'Invite' in picker['suggestion']['line']
+    app.action('/api/run-model', {'choice': 'qwen3-14b'})  # choosing is never refused by fit
+
+
+def test_choosing_a_model_that_does_not_fit_is_allowed_but_flagged(app, monkeypatch):
+    _members(app, monkeypatch, 8)
+    monkeypatch.setattr('mycelium_a13_macos.app.host_memory_bytes', lambda: 8 * GiB)
+    doc = app.action('/api/run-model', {'choice': 'qwen3-14b'})
+    assert doc['selected'] == 'qwen3-14b'
+    assert next(c for c in doc['choices'] if c['name'] == 'qwen3-14b')['fit']['state'] == 'too_large'
+
+
+def test_download_of_a_model_that_does_not_fit_the_joined_macs_is_refused(app, monkeypatch):
+    _members(app, monkeypatch, 8)
+    monkeypatch.setattr('mycelium_a13_macos.app.host_memory_bytes', lambda: 8 * GiB)
+    app.action('/api/run-model', {'choice': 'qwen3-14b'})
+    with pytest.raises(DemoError, match='model_does_not_fit_swarm'):
+        app.model_fit_gate()
+    app.action('/api/run-model', {'choice': 'qwen3-0.6b'})
+    app.model_fit_gate()  # fits: no refusal
+
+
+def test_fit_gate_does_not_apply_to_an_environment_override_or_a_single_mac(app, monkeypatch):
+    _members(app, monkeypatch, 8)
+    monkeypatch.setattr('mycelium_a13_macos.app.host_memory_bytes', lambda: 8 * GiB)
+    monkeypatch.setenv('MYCELIUM_A13_RUN_MODEL', 'qwen3-14b')
+    app.model_fit_gate()  # harness override: flagged only, never refused
+    monkeypatch.delenv('MYCELIUM_A13_RUN_MODEL')
+    _members(app, monkeypatch)
+    app.model_fit_gate()  # nothing joined yet: fit unknown

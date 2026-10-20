@@ -782,6 +782,55 @@ class DemoApp:
         from .run_model import app_run_model
         return app_run_model(self.root)[2]
 
+    def swarm_memory_rows(self):
+        """The owner's view of the Macs for the model-fit suggestion (model_suggestion.py).
+
+        This Mac (less the Adaptive-sharing headroom reserve the owner set) plus every
+        current member with an unexpired verified capability report.  Only owners have
+        a swarm; a target has none.
+        """
+        if self.installation_role != 'owner': return None
+        rows=[]
+        own=host_memory_bytes()
+        if own:
+            from . import adaptive_host
+            try: reserve=adaptive_host.read_adaptive_policy(self.root)['reserve_bytes']
+            except Exception: reserve=0
+            local=getattr(self,'local_contributor',None)
+            node=local.member.node_id if local is not None else 'owner-mac'
+            rows.append({'node_id':node,'memory_bytes':own,'reserve_bytes':reserve})
+        try: reports=self.member_capability_reports() or {}
+        except Exception: reports={}
+        now=time.time()
+        for node,report in sorted(reports.items()):
+            device=report.get('device') if isinstance(report,dict) else None
+            expires=report.get('expires_at') if isinstance(report,dict) else None
+            if (not isinstance(device,dict) or type(device.get('memory_bytes')) is not int
+                    or type(expires) not in (int,float) or expires<=now or any(r['node_id']==node for r in rows)):
+                continue
+            row={'node_id':node,'memory_bytes':device['memory_bytes']}
+            if type(device.get('available_storage_bytes')) is int:
+                row['available_storage_bytes']=device['available_storage_bytes']
+            rows.append(row)
+        return rows
+
+    def model_fit_gate(self):
+        """Refuse a download of a model the joined Macs cannot hold (owner, picker-selected model).
+
+        Judged only when at least two Macs have reported (fewer: the fit is unknown and more
+        may join); an install-time ``MYCELIUM_A13_RUN_MODEL`` override is flagged in the
+        picker, never refused here (A13/A16 harnesses pin their own models).
+        """
+        if self.installation_role!='owner': return
+        from .run_model import app_run_model, choice_for_model
+        _,source,model=app_run_model(self.root)
+        chosen=choice_for_model(model)
+        rows=self.swarm_memory_rows()
+        if source=='environment' or chosen is None or rows is None: return
+        from .model_suggestion import assess_model, TOO_LARGE
+        if assess_model(chosen.model,rows)['state']==TOO_LARGE:
+            raise DemoError('model_does_not_fit_swarm')
+
     def _choose_run_model(self, body):
         from .run_model import app_run_model, save_choice, choice, document
         if set(body) != {'choice'}: raise DemoError('invalid_request')
@@ -795,7 +844,7 @@ class DemoApp:
         save_choice(self.root, body['choice'])
         self.acquisition_policy_error = None
         self._open_acquisition()
-        return document(self.root)
+        return document(self.root, swarm_rows=self.swarm_memory_rows())
 
     def make_launch_file(self):
         self.launch_code = secrets.token_urlsafe(32)
@@ -1143,7 +1192,7 @@ class DemoApp:
         from .adaptive_owner import adaptive_status, adaptive_publication
         return {'label':'macOS A13 hackathon demo','role':'not_yet_serving',
                 'model_contract':asdict(self.run_model_contract()),
-                'run_model':run_model_document(self.root),
+                'run_model':run_model_document(self.root, swarm_rows=self.swarm_memory_rows()),
                 'network':({'state':'private'} if self.public_relay is None else self.public_relay.status()),
                 'acquisition':self.acquisition.status(),
                 'resource_observation':dict(self.resource_observation),
@@ -1406,6 +1455,7 @@ class DemoApp:
                     raise DemoError(reason)
                 if self._acquisition_active:
                     raise DemoError('acquisition_already_active')
+                self.model_fit_gate()
                 result = self.acquisition.start(grant)
                 self.acquisition_policy_error = None
                 self._acquisition_active = True

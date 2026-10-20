@@ -441,10 +441,12 @@ def _a9_world(whole, monkeypatch, tmp_path, env='a9-route', model=None, **extra)
     return app, agent, gate, state, calls
 
 
-def test_a9_producer_has_no_picker_choice():
+def test_a9_route_model_is_the_qwen25_0_5b_picker_choice():
+    # The picker lists every registered model; the A9 route contract is the 0.5B one.  An
+    # announcement that carries no choice (the A9 producer) still stays unknown below.
     from mycelium_a13_macos.run_model import choice_for_model
     from mycelium_a13_macos.serving import A9_ROUTE_MODEL
-    assert choice_for_model(A9_ROUTE_MODEL) is None
+    assert choice_for_model(A9_ROUTE_MODEL).name == 'qwen2.5-0.5b'
 
 
 def test_environment_selected_a9_model_downloads_without_a_picker_post(whole, monkeypatch, tmp_path):

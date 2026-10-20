@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The demo model picker: one pinned Qwen3 size, persisted in app state.
+"""The owner's model picker: one registered model, persisted in app state.
 
 A Finder launch cannot set ``MYCELIUM_A13_RUN_MODEL``, so the coworking demo
 chooses its model in the owner UI and the choice is stored privately as
@@ -18,10 +18,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
-from .serving import (QWEN3_0_6B_MODEL, QWEN3_8B_MODEL, QWEN3_14B_MODEL,
-                      RUN_MODEL_ENVIRONMENT, ModelContract, selected_run_model)
+from .serving import (A9_ROUTE_MODEL, CANDIDATE_MODEL, QWEN3_0_6B_MODEL, QWEN3_8B_MODEL,
+                      QWEN3_14B_MODEL, RUN_MODEL_ENVIRONMENT, ModelContract, selected_run_model)
 
 PROTOCOL = 'mycelium.a13_run_model_choice.v1'
 _FILE = 'run-model.json'
@@ -39,8 +39,12 @@ class Choice:
 
 
 CHOICES: tuple[Choice, ...] = (
+    Choice('qwen2.5-0.5b', 'Qwen2.5-0.5B (smallest, quick check)', A9_ROUTE_MODEL,
+           999_604_126, 495_000_000),
     Choice('qwen3-0.6b', 'Qwen3-0.6B (tests, quick bring-up)', QWEN3_0_6B_MODEL,
            1_519_209_243, 750_000_000),
+    Choice('qwen2.5-7b', 'Qwen2.5-7B (measured 7B route)', CANDIDATE_MODEL,
+           15_242_807_270, 7_630_000_000),
     Choice('qwen3-8b', 'Qwen3-8B (safe fallback)', QWEN3_8B_MODEL,
            16_397_461_266, 8_200_000_000),
     Choice('qwen3-14b', 'Qwen3-14B (target demo model)', QWEN3_14B_MODEL,
@@ -73,7 +77,8 @@ def owner_storage_bytes(c: Choice) -> int:
 
 def demo_default_choice(*, storage_ceiling: int | None = None) -> str | None:
     ceiling = globals()['storage_ceiling']() if storage_ceiling is None else storage_ceiling
-    fitting = [c for c in CHOICES if owner_storage_bytes(c) <= ceiling]
+    fitting = [c for c in CHOICES if c.model.model_id.startswith('Qwen/Qwen3-')
+               and owner_storage_bytes(c) <= ceiling]
     return max(fitting, key=lambda c: c.snapshot_bytes).name if fitting else None
 
 
@@ -118,19 +123,43 @@ def app_run_model(root: Path | str, *, environ: Mapping[str, str] | None = None
     return default, 'demo_default', _BY_NAME[default].model
 
 
-def document(root: Path | str, *, environ: Mapping[str, str] | None = None) -> dict:
-    """The picker state shown by the UI (owner and target)."""
+def document(root: Path | str, *, environ: Mapping[str, str] | None = None,
+             swarm_rows: Sequence[Mapping] | None = None) -> dict:
+    """The picker state shown by the UI (owner and target).
+
+    ``swarm_rows``: the owner's view of the Macs (model_suggestion.py rows).
+    When given, every choice carries its fit against the swarm's usable memory
+    and ``suggestion`` names the largest model that fits.
+    """
     from .app import host_memory_bytes
-    from .model_resources import consent_document
+    from .model_resources import consent_document, whole_model_member
+    from .model_suggestion import suggest_models
     name, source, model = app_run_model(root, environ=environ)
     ceiling = storage_ceiling()
+    fits = None if swarm_rows is None else suggest_models(CHOICES, swarm_rows)
+    fit_of = {} if fits is None else {a['name']: a['fit'] for a in fits['choices']}
+    choices = []
+    for c in CHOICES:
+        whole = whole_model_member(c.model)
+        choices.append({'name': c.name, 'label': c.label, 'model_id': c.model.model_id,
+                        'resolved_commit': c.model.resolved_commit,
+                        'snapshot_bytes': c.snapshot_bytes,
+                        'int8_weight_bytes': c.int8_weight_bytes,
+                        'owner_storage_bytes': owner_storage_bytes(c),
+                        'fits_storage_ceiling': owner_storage_bytes(c) <= ceiling,
+                        # Upper bound for one Mac holding the whole model; a member's real share is smaller.
+                        'member_disk_bytes': whole['max_disk_bytes'], 'member_rss_bytes': whole['max_rss_bytes'],
+                        'fit': fit_of.get(c.name)})
+    suggestion = None
+    if fits is not None:
+        best = fits['suggested']
+        suggestion = {'name': best, 'members': fits['members'], 'usable_bytes': fits['usable_bytes'],
+                      'line': (f"Largest that fits: {choice(best).label.split(' (')[0]}, "
+                               f"{fit_of[best]['line']}") if best else
+                      ('Invite a Mac to see which models fit.' if fits['members'] < 2 else
+                       'No registered model fits these Macs; add a Mac.')}
     return {'selected': name, 'source': source, 'locked': source == 'environment',
             'model_id': model.model_id, 'resolved_commit': model.resolved_commit,
             'demo_default': demo_default_choice(), 'storage_ceiling_bytes': ceiling,
             'resources': consent_document(model, device_memory_bytes=host_memory_bytes()),
-            'choices': [{'name': c.name, 'label': c.label, 'model_id': c.model.model_id,
-                         'resolved_commit': c.model.resolved_commit,
-                         'snapshot_bytes': c.snapshot_bytes,
-                         'int8_weight_bytes': c.int8_weight_bytes,
-                         'owner_storage_bytes': owner_storage_bytes(c),
-                         'fits_storage_ceiling': owner_storage_bytes(c) <= ceiling} for c in CHOICES]}
+            'choices': choices, 'suggestion': suggestion}

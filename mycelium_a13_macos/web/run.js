@@ -28,26 +28,48 @@
     member_disk_insufficient_for_share:'A Mac does not have enough free disk for its share of this model.',
     member_memory_cap_below_share:'A joined Mac agreed to less memory per run than its share of this model needs.',
     member_storage_cap_below_share:'A joined Mac agreed to less storage than its share of this model needs.',
+    model_does_not_fit_swarm:'The selected model is too big for the joined Macs, so nothing was downloaded. Choose a smaller model or add a Mac with more memory.',
     member_cannot_hold_share:'A Mac cannot hold even the smallest share of this model. Add a Mac with more memory, or choose a smaller model.',
     owner_storage_consent_below_model:'This Mac\'s storage limit is below what the selected model needs here.',
     route_qualification_failed:'The route failed its startup qualification, so nothing is served. The owner log names the Mac and reason.',
   };
   function explain(code) { return ERRORS[code] ? `${ERRORS[code]} (${code})` : `Action not completed: ${String(code).replaceAll('_', ' ')} (${code}).`; }
+  // Owner model picker: every registered model with its size, what a Mac needs for its share and
+  // whether it fits the joined Macs' usable memory (run_model.choices[].fit, model_suggestion.py).
+  function fitTag(c) {
+    const f = c.fit; if (!f) return '';
+    return f.state === 'fits' ? ' · fits' : f.state === 'too_large' ? ' · too big for this swarm' : '';
+  }
+  function needText(c) {
+    const members = c.fit && c.fit.members && c.fit.members.length ? c.fit.members : null;
+    if (members) {
+      const ram = Math.max(...members.map((m) => m.max_rss_bytes)), disk = Math.max(...members.map((m) => m.disk_footprint_bytes));
+      return `On the joined Macs the largest share needs up to ${gb(ram)} of memory and ${gb(disk)} of disk.`;
+    }
+    return `One Mac holding the whole model would need ${gb(c.member_rss_bytes)} of memory and ${gb(c.member_disk_bytes)} of disk; with more Macs each share is smaller.`;
+  }
   function renderPicker(status) {
     const picker = status.run_model; if (!picker) return;
-    const key = JSON.stringify([picker.selected, picker.locked]);
+    const key = JSON.stringify([picker.selected, picker.locked, picker.choices.map((c) => c.fit && c.fit.line)]);
     if (key !== pickerKey) {
       pickerKey = key;
       $('run-model').replaceChildren(...picker.choices.map((c) => {
         const o = document.createElement('option'); o.value = c.name;
-        o.textContent = `${c.label} · ${gb(c.snapshot_bytes)} download on this Mac${c.fits_storage_ceiling ? '' : ' · too large for the storage limit'}`;
+        o.textContent = `${c.label} · ${gb(c.snapshot_bytes)} download on this Mac${c.fits_storage_ceiling ? '' : ' · too large for the storage limit'}${fitTag(c)}`;
         o.selected = c.name === picker.selected; return o;
       }));
     }
     const run = status.owner_run || {};
     $('run-model').disabled = busy || picker.locked || ['running','serving','stopping'].includes(run.state);
+    const chosen = picker.choices.find((c) => c.name === picker.selected);
     $('run-model-note').textContent = picker.locked ? `Fixed by MYCELIUM_A13_RUN_MODEL (${picker.selected}).`
-      : `Pinned: ${picker.model_id} @ ${picker.resolved_commit.slice(0, 12)} · ${picker.source === 'saved' ? 'your choice' : 'demo default'}. Joined Macs fetch only their slice of it.`;
+      : `Pinned: ${picker.model_id} @ ${picker.resolved_commit.slice(0, 12)} · ${picker.source === 'saved' ? 'your choice' : 'demo default'}. Joined Macs follow this model and fetch only their slice of it.`;
+    const fit = $('run-model-fit'), hint = $('run-model-suggestion');
+    if (fit) {
+      fit.textContent = chosen ? `${chosen.fit ? chosen.fit.line + '. ' : ''}${needText(chosen)}` : '';
+      fit.classList.toggle('warn', !!(chosen && chosen.fit && chosen.fit.state === 'too_large'));
+    }
+    if (hint) hint.textContent = picker.suggestion ? picker.suggestion.line : '';
   }
   // Start without a prepared model: show where to prepare it (the Inference download step), once per failure.
   let pointedAt = null;
