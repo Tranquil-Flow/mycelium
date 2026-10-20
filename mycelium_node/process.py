@@ -1181,22 +1181,44 @@ def revalidate_executable_identity(identity: _ExecutableIdentity) -> bool:
     return current == identity
 
 
-def physical_service_interpreter_identity() -> _ExecutableIdentity:
-    if sys.platform == "darwin":
-        try:
-            homebrew = capture_executable_identity("/opt/homebrew/bin/python3")
-            framework = (
-                Path(homebrew.path).parent.parent
-                / "Resources"
-                / "Python.app"
-                / "Contents"
-                / "MacOS"
-                / "Python"
-            )
-            return capture_executable_identity(framework)
-        except (OSError, RuntimeError, TypeError, ValueError):
-            pass
-    return capture_executable_identity(sys.executable)
+# Last-resort macOS fallback only: Apple Silicon Homebrew's python3.  It is consulted after the
+# configured and the running interpreter, so Intel Homebrew, python.org and venv layouts never need it.
+_MACOS_LEGACY_PYTHON = "/opt/homebrew/bin/python3"
+PHYSICAL_SERVICE_PYTHON_ENV = "MYCELIUM_PHYSICAL_SERVICE_PYTHON"
+
+
+def _macos_framework_image(interpreter: str | Path) -> _ExecutableIdentity:
+    """The ``Python.app`` image beside a framework ``bin/pythonX`` (raises if absent)."""
+    base = capture_executable_identity(interpreter)
+    framework = (
+        Path(base.path).parent.parent
+        / "Resources"
+        / "Python.app"
+        / "Contents"
+        / "MacOS"
+        / "Python"
+    )
+    return capture_executable_identity(framework)
+
+
+def physical_service_interpreter_identity(
+    *,
+    platform: str | None = None,
+    executable: str | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> _ExecutableIdentity:
+    environment = os.environ if environ is None else environ
+    running = sys.executable if executable is None else executable
+    if (sys.platform if platform is None else platform) == "darwin":
+        candidates = [environment.get(PHYSICAL_SERVICE_PYTHON_ENV), running, _MACOS_LEGACY_PYTHON]
+        for candidate in candidates:
+            if not candidate:
+                continue
+            try:
+                return _macos_framework_image(candidate)
+            except (OSError, RuntimeError, TypeError, ValueError):
+                continue
+    return capture_executable_identity(running)
 
 
 def _inventory_linux_process(pid: int) -> _ProcessIdentity:
