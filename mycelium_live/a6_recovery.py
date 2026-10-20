@@ -596,7 +596,13 @@ class LiveA6RecoveryQualifier:
         finally:
             outcome["emitted_token_count"] = len(emitted)
             try:
-                route.release_request(probe_id)
+                # A route owner must not cold-restart the degraded route this
+                # probe ran on: the recovery that asked for it still runs its
+                # successor there.
+                release = getattr(route, "release_qualification_probe", None)
+                if not callable(release):
+                    release = route.release_request
+                release(probe_id)
             except Exception as error:
                 passed = False
                 outcome["release_error_type"] = type(error).__name__

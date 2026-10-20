@@ -22,6 +22,7 @@ from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import unquote, urlsplit
 import uuid
 
+from mycelium_deadlines import CANCEL_AND_CLEANUP_BUDGET_SECONDS
 from mycelium_demo.product_stack import build_loopback_product_stack
 from mycelium_a6_m16 import M16RecoveryAuthority
 from mycelium_a6_recovery import ReplayCheckpoint
@@ -579,6 +580,9 @@ class LiveStack:
 COLD_ROUTE_RESTART_ERROR_CODE = "cold_route_restart_in_progress"
 COLD_ROUTE_RESTART_EXHAUSTED_CODE = "cold_route_restart_budget_exhausted"
 COLD_ROUTE_RESTART_FAILED_CODE = "cold_route_restart_failed"
+#: How long ``close()`` waits for a background restart to unwind before it
+#: closes the replacement itself; the product's cancel-and-cleanup budget.
+COLD_ROUTE_RESTART_CLOSE_JOIN_SECONDS = float(CANCEL_AND_CLEANUP_BUDGET_SECONDS)
 
 
 class RouteUnavailableError(RuntimeError):
@@ -1007,7 +1011,21 @@ class ColdRouteRestartOwner:
             self._settle_request_authority_locked(request_id, route)
         if route is not None:
             route.release_request(request_id)
-        self._restart_if_idle_after_peer_loss()
+        self._restart_if_idle_after_peer_loss(released_request_id=request_id)
+
+    def release_qualification_probe(self, probe_id: str) -> None:
+        """Release an A6 successor-qualification probe; never restart the route.
+
+        The probe runs on the degraded route while the recovery that asked for
+        it is still to run its successor on that same route, so releasing the
+        probe must not start the idle cold restart. Only the final release of a
+        real request does.
+        """
+
+        with self._lock:
+            route = self._request_routes.pop(probe_id, None)
+        if route is not None:
+            route.release_request(probe_id)
 
     def _settle_request_authority_locked(
         self, request_id: str, route: LiveRoute | None
@@ -1060,7 +1078,7 @@ class ColdRouteRestartOwner:
         with self._lock:
             if self._request_routes.get(request_id) is route:
                 self._request_routes.pop(request_id, None)
-        self._restart_if_idle_after_peer_loss()
+        self._restart_if_idle_after_peer_loss(released_request_id=request_id)
 
     def release_attempt_scoped(
         self,
@@ -1096,12 +1114,37 @@ class ColdRouteRestartOwner:
             cleanup_owner_id=cleanup_owner_id,
         )
 
-    def _restart_if_idle_after_peer_loss(self) -> None:
+    def _recovery_outstanding(self, released_request_id: str | None) -> bool:
+        """True while the M16 runtime still runs a request other than the released one.
+
+        A request in recovery is not mapped to its route between the source
+        attempt's release and its successor's start; the runtime's active set
+        is the authority for it. An unreadable runtime never blocks a restart.
+        """
+
+        with self._lock:
+            source = self._m16_runtime_source
+        if source is None:
+            return False
+        try:
+            document = source()
+            active = document["queue"]["active_request_ids"]  # type: ignore[index]
+            return any(
+                item != released_request_id for item in active
+            )
+        except BaseException:
+            return False
+
+    def _restart_if_idle_after_peer_loss(
+        self, released_request_id: str | None = None
+    ) -> None:
         """Cold-restart a degraded route once no request still runs on it.
 
         Recovery keeps a route that lost a peer open for the successor of the
         request that observed the loss. Once that request is released the
-        route is replaced, so it does not stay unqualified indefinitely.
+        route is replaced, so it does not stay unqualified indefinitely. The
+        restart never starts while the recovery runtime still has another
+        request in flight: that request's successor needs this route.
         """
 
         with self._lock:
@@ -1115,6 +1158,8 @@ class ColdRouteRestartOwner:
             ):
                 return
         if self._route_alive(route):
+            return
+        if self._recovery_outstanding(released_request_id):
             return
 
         def restart() -> None:
@@ -1225,9 +1270,24 @@ class ColdRouteRestartOwner:
             route.close()
         with self._lock:
             restart_threads = tuple(self._restart_threads)
+        deadline = time.monotonic() + COLD_ROUTE_RESTART_CLOSE_JOIN_SECONDS
+        stuck = False
         for thread in restart_threads:
             if thread is not threading.current_thread():
-                thread.join(timeout=30.0)
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+                stuck = stuck or thread.is_alive()
+        if stuck:
+            # The restart did not unwind within the budget (its open ignores
+            # the abort): close the replacement here so no node it started
+            # outlives this call. The restart thread retires it again when it
+            # finally unwinds; closing a route twice is harmless.
+            with self._lock:
+                leftover = self._replacing
+            if leftover is not None:
+                try:
+                    self._retire_route(leftover, cleanup=False)
+                except BaseException:  # pragma: no cover - never mask shutdown
+                    pass
 
     def cleanup(self) -> None:
         with self._lock:
@@ -1387,6 +1447,11 @@ class ColdRouteRestartOwner:
             raise ColdRouteRestartError(COLD_ROUTE_RESTART_EXHAUSTED_CODE)
         replacement: LiveRoute | None = None
         try:
+            with self._lock:
+                closed_before_factory = self._closed
+            if closed_before_factory:
+                # Shut down while the old route retired: build nothing.
+                raise ColdRouteRestartError(COLD_ROUTE_RESTART_FAILED_CODE)
             replacement = self._route_factory()
             with self._lock:
                 if self._closed:
