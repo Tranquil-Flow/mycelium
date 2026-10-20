@@ -107,16 +107,17 @@ def test_directory_accepts_private_entries_only_when_constructed_for_lan() -> No
     assert post(lan, signed_record(owner, "http://8.8.8.8:4350"))[1] == {"error": "entry_origin_invalid"}
 
 
-def test_directory_cli_enables_private_entries_from_the_network_mode() -> None:
+def test_directory_cli_enables_private_entries_from_the_network_mode(tmp_path) -> None:
+    db = str(tmp_path / 'directory.sqlite3')
     parse = server.build_parser().parse_args
-    assert server.build_directory(parse(["--db", "x"]), environ={}).allow_private is False
-    assert server.build_directory(parse(["--db", "x", "--network-mode", "lan"]), environ={}).allow_private is True
-    assert server.build_directory(parse(["--db", "x"]), environ={"MYCELIUM_NETWORK_MODE": "lan"}).allow_private
+    assert server.build_directory(parse(["--db", db]), environ={}).allow_private is False
+    assert server.build_directory(parse(["--db", db, "--network-mode", "lan"]), environ={}).allow_private is True
+    assert server.build_directory(parse(["--db", db]), environ={"MYCELIUM_NETWORK_MODE": "lan"}).allow_private
     assert server.build_directory(
-        parse(["--db", "x", "--network-mode", "local"]), environ={}
+        parse(["--db", db, "--network-mode", "local"]), environ={}
     ).allow_private is False
     with pytest.raises(SystemExit):
-        parse(["--db", "x", "--network-mode", "wan"])
+        parse(["--db", db, "--network-mode", "wan"])
 
 
 def test_directory_client_rejects_lan_origin_unless_opted_in() -> None:
