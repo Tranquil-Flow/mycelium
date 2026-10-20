@@ -497,6 +497,20 @@ class AppDemoChain:
             nodes.append(member['node_id'])
         return sorted(nodes)
 
+    def _refuse_skewed_peers(self, ctx, nodes) -> None:
+        """A peer whose clock is beyond the tolerance would drop the owner's short-TTL commands: refuse the route here."""
+        offsets = getattr(self._exchange(), 'clock_offsets', None)
+        skewed = {} if offsets is None else offsets.exceeded(nodes)
+        if not skewed:
+            return
+        node = max(skewed, key=lambda n: abs(skewed[n]))
+        seconds = skewed[node]
+        raise OwnerRunError('peer_clock_skew_exceeded', (
+            'The clock of the joined Mac …%s is %d s %s this Mac\'s, beyond the %d s the swarm tolerates. Turn on '
+            '“Set time and date automatically” on both Macs (System Settings → General → Date & Time), then press Start '
+            'again.' % (node[-8:], round(abs(seconds)), 'ahead of' if seconds > 0 else 'behind',
+                        round(offsets.tolerance))))
+
     def _step_descriptors(self, ctx):
         exchange = self._exchange()
         exchange.forget_reports()
@@ -551,6 +565,7 @@ class AppDemoChain:
             return left is None or left >= margin
 
         def have():
+            self._refuse_skewed_peers(ctx, expected)
             reports = self._reports(ctx)
             ready = [n for n in expected if usable(reports.get(n))]
             stale.clear()

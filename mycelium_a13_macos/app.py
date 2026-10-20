@@ -1137,8 +1137,10 @@ class DemoApp:
         value = self.authority.status()
         coordinator = getattr(self.authority, 'coordinator', None)
         if self.installation_role == 'owner' and coordinator is not None:
+            offsets = getattr(getattr(self, 'run_exchange', None), 'clock_offsets', None)
             value = {**value, 'members': [
-                {'node_id':m['node_id'],'generation':m['generation'],'lifecycle_state':m['lifecycle_state']}
+                {'node_id':m['node_id'],'generation':m['generation'],'lifecycle_state':m['lifecycle_state'],
+                 'clock':None if offsets is None else offsets.view(m['node_id'])}
                 for m in coordinator.members()]}
         from .run_model import document as run_model_document
         from .adaptive_owner import adaptive_status, adaptive_publication

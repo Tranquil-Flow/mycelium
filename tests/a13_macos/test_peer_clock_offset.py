@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from mycelium_a13_macos.clock_offset import PeerClockOffsets
-from mycelium_a13_macos.managed_control import MAX_CLOCK_SKEW_SECONDS
+from mycelium_a13_macos.managed_control import _BINDING_FIELDS, MAX_CLOCK_SKEW_SECONDS
 from mycelium_a13_macos.run_exchange import (DISCOVERY, MEMBER_REPORT, READ, REPORT, RunExchange,
                                              validate_report)
 from test_demo_chain import LOCAL, REMOTE, make, wait
@@ -78,8 +78,8 @@ def _exchange(clock):
 
 
 def _statement(node, *, issued_at, **extra):
-    return {'statement': {'target_node_id': node, 'run_id': DISCOVERY, 'deployment_id': DISCOVERY, 'request_id': 'r',
-                          'issued_at': issued_at, **extra}}
+    return {'statement': {'request_id': 'r', 'issued_at': issued_at, **{key: 'x' for key in _BINDING_FIELDS},
+                          'target_node_id': node, 'run_id': DISCOVERY, 'deployment_id': DISCOVERY, **extra}}
 
 
 def test_the_exchange_records_the_offset_of_every_peer_request():
@@ -122,9 +122,9 @@ def test_start_refuses_a_peer_beyond_the_tolerance_with_a_bounded_code(tmp_path)
     run.start()
     status = wait(run, lambda s: s['state'] in {'serving', 'failed'})
     assert (status['state'], status['failed_step'], status['error_code']) == ('failed', 'descriptors', 'peer_clock_skew_exceeded')
-    assert ops.calls == []  # no route was prepared over the skewed peer
-    detail = next(step for step in status['steps'] if step['name'] == 'descriptors')['detail'] or ''
-    assert '45' in detail and 'clock' in detail.lower()
+    assert [c[0] for c in ops.calls if c[0] != 'stop'] == []  # no route was prepared over the skewed peer
+    message = status['error_message'] or ''
+    assert '45' in message and 'clock' in message.lower() and 'ahead' in message
 
 
 def test_start_admits_a_peer_with_a_nine_second_offset_and_reports_it(tmp_path):
@@ -150,7 +150,7 @@ def test_api_status_shows_each_members_clock_offset(tmp_path):
         app.run_exchange = exchange
         now = time.time()
         exchange.clock_offsets.observe(actor.member.node_id, signed_at=now + 9.19, received_at=now)
-        members = {m['node_id']: m for m in app.status()['members']}
+        members = {m['node_id']: m for m in app.status()['authority']['members']}
         clock = members[actor.member.node_id]['clock']
         assert clock['offset_seconds'] == pytest.approx(9.19) and clock['exceeds_tolerance'] is False
         assert clock['tolerance_seconds'] == MAX_CLOCK_SKEW_SECONDS

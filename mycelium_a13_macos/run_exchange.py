@@ -24,6 +24,7 @@ import time
 import uuid
 from typing import Any, Mapping
 
+from .clock_offset import PeerClockOffsets
 from .managed_control import (_BINDING_FIELDS, _REQUEST_COMMON_FIELDS, _RESPONSE_COMMON_FIELDS,
                               ManagedControlError, _binding_from_member)
 
@@ -54,6 +55,9 @@ _REPORT_FIELDS = frozenset(_REQ_FIELDS | {'report'})
 _RESP_FIELDS = frozenset(_RESPONSE_COMMON_FIELDS | _BINDING_FIELDS | {'announcement'})
 _REPORT_KEYS = frozenset({'protocol', 'run_id', 'deployment_id', 'state', 'detail', 'model',
                           'progress', 'descriptor', 'issued_at'})
+#: Optional: the member's own measured round trip of its last exchange (corrects the owner's clock-offset estimate).
+_OPTIONAL_REPORT_KEYS = frozenset({'clock_rtt_seconds'})
+MAX_CLOCK_RTT_SECONDS = 60.0
 _CODE = re.compile(r'[a-z][a-z0-9_]{0,95}\Z')
 MAX_REPORT_BYTES = 32 * 1024
 MAX_ANNOUNCEMENT_BYTES = 768 * 1024
@@ -69,13 +73,16 @@ def validate_report(report: Any) -> dict[str, Any]:
         raw = json.dumps(report, allow_nan=False, sort_keys=True)
     except (TypeError, ValueError):
         raise ValueError('demo_report_invalid') from None
-    _require(isinstance(report, dict) and len(raw) <= MAX_REPORT_BYTES and set(report) == _REPORT_KEYS
+    _require(isinstance(report, dict) and len(raw) <= MAX_REPORT_BYTES and _REPORT_KEYS <= set(report) <= _REPORT_KEYS | _OPTIONAL_REPORT_KEYS
              and report['protocol'] == MEMBER_REPORT, 'demo_report_invalid')
     _require(_optional_segment(report['run_id']) and _optional_segment(report['deployment_id'])
              and report['state'] in MEMBER_STATES
              and (report['detail'] is None or (isinstance(report['detail'], str) and _CODE.fullmatch(report['detail'])))
              and type(report['issued_at']) in (int, float) and math.isfinite(report['issued_at']),
              'demo_report_invalid')
+    rtt = report.get('clock_rtt_seconds')
+    _require('clock_rtt_seconds' not in report or (type(rtt) in (int, float) and math.isfinite(rtt)
+                                                   and 0 <= rtt <= MAX_CLOCK_RTT_SECONDS), 'demo_report_invalid')
     model = report['model']
     _require(model is None or (isinstance(model, dict) and set(model) == {'model_id', 'resolved_commit'}
              and all(isinstance(model[k], str) and len(model[k]) <= 128 for k in model)), 'demo_report_invalid')
@@ -117,6 +124,8 @@ class RunExchange:
         self._per_node: dict[str, dict[str, Any]] = {}
         self._reports: dict[str, dict[str, Any]] = {}
         self._issued: dict[str, float] = {}
+        #: Each peer's clock offset from the timestamps it signs (V1.1 a); survives ``forget_reports``.
+        self.clock_offsets = PeerClockOffsets(clock=clock)
         self._model_source = None
         self.announce(phase='idle')
 
@@ -246,12 +255,15 @@ class RunExchange:
 
     def _read(self, envelope: Any) -> dict[str, Any]:
         statement, _ = self._verify(envelope, protocol=READ, fields=_REQ_FIELDS)
+        self.clock_offsets.observe(statement['target_node_id'], signed_at=statement['issued_at'])
         return self._answer(statement)
 
     def _report(self, envelope: Any) -> dict[str, Any]:
         statement, _ = self._verify(envelope, protocol=REPORT, fields=_REPORT_FIELDS)
         report = validate_report(statement['report'])
         node = statement['target_node_id']
+        self.clock_offsets.observe(node, signed_at=statement['issued_at'],
+                                   rtt_seconds=report.get('clock_rtt_seconds'))
         with self._lock:
             # Latest wins; a replayed older report never overwrites a newer one.
             if report['issued_at'] >= self._issued.get(node, float('-inf')):
@@ -266,6 +278,8 @@ class RunExchangeClient:
     def __init__(self, peer: Any, *, _test_ca_certificate=None) -> None:
         self.peer = peer
         self._ca = _test_ca_certificate
+        #: Wall-clock round trip of the last exchange, on this Mac's own clock: told to the owner in the next report.
+        self.last_rtt_seconds: float | None = None
 
     def _call(self, path: str, protocol: str, extra: Mapping[str, Any]) -> dict[str, Any]:
         client = self.peer.staging_control_client(_test_ca_certificate=self._ca)
@@ -277,6 +291,7 @@ class RunExchangeClient:
                      'request_id': request_id, 'sequence': 1, 'nonce': uuid.uuid4().hex,
                      'issued_at': now, 'expires_at': now + 30, **dict(extra)}
         response = client._request(path, client._signed_outbound(statement))
+        self.last_rtt_seconds = max(0.0, client._clock() - now)
         result = client._verified_response(response, protocol=RESPONSE, fields=_RESP_FIELDS,
                                            request_id=request_id, target=member,
                                            run_id=DISCOVERY, deployment_id=DISCOVERY)
@@ -289,4 +304,8 @@ class RunExchangeClient:
         return self._call(PATH_READ, READ, {})
 
     def report(self, report: Mapping[str, Any]) -> dict[str, Any]:
-        return self._call(PATH_REPORT, REPORT, {'report': validate_report(dict(report))})
+        report = dict(report)
+        if self.last_rtt_seconds is not None and 'clock_rtt_seconds' not in report \
+                and self.last_rtt_seconds <= MAX_CLOCK_RTT_SECONDS:
+            report['clock_rtt_seconds'] = round(self.last_rtt_seconds, 4)
+        return self._call(PATH_REPORT, REPORT, {'report': validate_report(report)})
