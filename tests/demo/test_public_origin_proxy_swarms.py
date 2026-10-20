@@ -66,7 +66,8 @@ def _serve(server: ThreadingHTTPServer) -> Iterator[Any]:
 
 @contextmanager
 def _world(*, mount: bool = True, directory_port: int | None = None,
-           require_ip: bool | None = None, redirect_root: bool = True) -> Iterator[tuple[Any, _Recording, _Recording]]:
+           require_ip: bool | None = None, redirect_root: bool = True,
+           product_routes: bool = False) -> Iterator[tuple[Any, _Recording, _Recording]]:
     product, directory = _Recording("product"), _Recording("directory")
     with _serve(product), _serve(directory):
         extra: dict[str, Any] = {}
@@ -75,6 +76,7 @@ def _world(*, mount: bool = True, directory_port: int | None = None,
             if require_ip is not None:
                 extra["directory_require_client_ip"] = require_ip
             extra["redirect_root_to_swarms"] = redirect_root
+            extra["enable_product_routes"] = product_routes
         config = proxy.ProxyConfig(
             listen_host="127.0.0.1", listen_port=4350, upstream_host="127.0.0.1",
             upstream_port=product.server_port, public_host="mycelium.now", capability=CAPABILITY,
@@ -255,8 +257,8 @@ def test_swarms_methods_are_limited_to_get_head_post() -> None:
         assert len(directory.requests) == 1
 
 
-def test_existing_allowlist_and_blocklist_are_unchanged_with_the_mount_on() -> None:
-    with _world(redirect_root=False) as (public, product, directory):
+def test_existing_allowlist_and_blocklist_are_unchanged_with_the_mount_on_and_product_routes_enabled() -> None:
+    with _world(redirect_root=False, product_routes=True) as (public, product, directory):
         port = public.server_port
         assert _call(port, "GET", "/")[0] == 200
         assert _call(port, "GET", "/assets/app.js")[0] == 200
@@ -292,7 +294,7 @@ def test_directory_down_is_a_502_not_a_product_fallback() -> None:
 
 
 def test_directory_body_cap_and_chunked_reframing() -> None:
-    with _world() as (public, product, directory):
+    with _world(product_routes=True) as (public, product, directory):
         port = public.server_port
         over = defaults.DIRECTORY_MAX_BODY_BYTES + 1
         head = (b"POST /swarms/api/v1/records HTTP/1.1\r\nHost: x\r\nCf-Connecting-Ip: 203.0.113.7\r\n"
@@ -314,7 +316,7 @@ def test_directory_body_cap_and_chunked_reframing() -> None:
 
 def test_refusal_survives_a_body_uploaded_after_the_response() -> None:
     """Lingering close: an early refusal must reach a client that is still sending its (unread) body."""
-    with _world() as (public, product, directory):
+    with _world(product_routes=True) as (public, product, directory):
         port = public.server_port
         over = defaults.DIRECTORY_MAX_BODY_BYTES + 1
         status, document = _slow_upload(

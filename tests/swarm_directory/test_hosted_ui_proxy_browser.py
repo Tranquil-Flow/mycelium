@@ -46,7 +46,7 @@ class _Product(ThreadingHTTPServer):
 
 
 @contextmanager
-def apex(tmp_path, *, zip_present, redirect=True):
+def apex(tmp_path, *, zip_present, redirect=True, product_routes=False):
     zip_path = tmp_path / NAME
     if zip_present:
         zip_path.write_bytes(PAYLOAD)
@@ -58,7 +58,8 @@ def apex(tmp_path, *, zip_present, redirect=True):
         listen_host='127.0.0.1', listen_port=4350, upstream_host='127.0.0.1', upstream_port=product.server_port,
         public_host='mycelium.now', capability='a' * 64, directory_host='127.0.0.1',
         directory_port=directory.server_port, directory_require_client_ip=False, helper_zip_path=str(zip_path),
-        helper_version='0.1.0-preview.2', redirect_root_to_swarms=redirect)
+        helper_version='0.1.0-preview.2', redirect_root_to_swarms=redirect,
+        enable_product_routes=product_routes)
     server = proxy.PublicOriginProxyServer(('127.0.0.1', 0), config)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
@@ -121,8 +122,8 @@ def test_the_root_lands_a_visitor_on_the_swarms_page(tmp_path):
             browser.close()
 
 
-def test_with_the_flag_off_the_root_is_still_the_consumer_demo(tmp_path):
-    with apex(tmp_path, zip_present=False, redirect=False) as origin, sync_playwright() as p:
+def test_with_the_redirect_off_the_root_is_the_consumer_demo_only_when_product_routes_are_enabled(tmp_path):
+    with apex(tmp_path, zip_present=False, redirect=False, product_routes=True) as origin, sync_playwright() as p:
         browser = p.chromium.launch()
         try:
             page = browser.new_context().new_page()

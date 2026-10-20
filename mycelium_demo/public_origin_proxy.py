@@ -138,6 +138,10 @@ class ProxyConfig:
     helper_version: str = _hosted.HELPER_DOWNLOAD["version"]
     # '/' redirects to the swarms page while the mount is on.  Owner decision 5 is still open: default ON.
     redirect_root_to_swarms: bool = True
+    # With the directory mounted the legacy product-gateway surface is closed (404, no upstream connection): it
+    # has no per-IP limit, no daily cap and no kill switch, and the proxy stamps its callers as the owner.
+    # Only an explicit opt-in serves it next to the directory.
+    enable_product_routes: bool = False
 
     def __post_init__(self) -> None:
         if not _is_loopback_host(self.listen_host):
@@ -175,6 +179,8 @@ class ProxyConfig:
             raise PublicOriginProxyError("invalid_directory_max_body_bytes")
         if not isinstance(self.redirect_root_to_swarms, bool):
             raise PublicOriginProxyError("invalid_redirect_root_to_swarms")
+        if not isinstance(self.enable_product_routes, bool):
+            raise PublicOriginProxyError("invalid_enable_product_routes")
         if not isinstance(self.helper_version, str) or _HELPER_VERSION.fullmatch(self.helper_version) is None:
             raise PublicOriginProxyError("invalid_helper_version")
         if self.helper_zip_path is not None:
@@ -303,6 +309,9 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
             return
         if self._config.directory_host is not None and _is_directory_mount(path):
             self._handle_directory_request()
+            return
+        if self._config.directory_host is not None and not self._config.enable_product_routes:
+            self._send_json_error(404, "public_route_not_found")
             return
         allowed, status, code = _route_decision(self.command, path)
         if not allowed:
@@ -709,6 +718,7 @@ def build_config_from_args(argv: Iterable[str] | None = None) -> ProxyConfig:
             helper_zip_path=args.helper_zip,
             helper_version=args.helper_version,
             redirect_root_to_swarms=args.redirect_root_to_swarms,
+            enable_product_routes=args.enable_product_routes,
             **_directory_kwargs(args),
         )
     except PublicOriginProxyError as exc:
@@ -768,6 +778,14 @@ def _build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="redirect GET / to /swarms/ while the directory is mounted (default on; owner decision 5)",
+    )
+    parser.add_argument(
+        "--enable-product-routes",
+        action="store_true",
+        help=(
+            "serve the product-gateway routes (/api/v1/*, the app bundle) next to the mounted directory; "
+            "off by default: with --directory-upstream they answer 404 and nothing reaches the gateway"
+        ),
     )
     parser.add_argument(
         "--directory-max-body-bytes", type=int, default=_hosted.DIRECTORY_MAX_BODY_BYTES

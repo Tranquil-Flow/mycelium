@@ -184,8 +184,8 @@ def test_root_redirects_to_swarms_by_default_when_the_mount_is_on() -> None:
         assert product.requests == [] and directory.requests == []
 
 
-def test_everything_but_root_still_reaches_the_product_bundle_and_api() -> None:
-    with world() as (public, product, _):
+def test_everything_but_root_reaches_the_product_bundle_and_api_only_with_product_routes_enabled() -> None:
+    with world(enable_product_routes=True) as (public, product, _):
         for path in ("/index.html", "/assets/app.js", "/swarmsfoo", "/api/v1/bootstrap"):
             assert call(public.server_port, "GET", path)[0] == 200, path
         assert [r["path"] for r in product.requests] == ["/index.html", "/assets/app.js", "/swarmsfoo", "/api/v1/bootstrap"]
@@ -193,9 +193,12 @@ def test_everything_but_root_still_reaches_the_product_bundle_and_api() -> None:
 
 
 def test_the_flag_turns_the_redirect_off() -> None:
-    with world(redirect_root_to_swarms=False) as (public, product, _):
+    with world(redirect_root_to_swarms=False, enable_product_routes=True) as (public, product, _):
         assert call(public.server_port, "GET", "/")[0] == 200
         assert [r["path"] for r in product.requests] == ["/"]
+    with world(redirect_root_to_swarms=False) as (public, product, _):  # product routes closed: nothing at the root
+        assert call(public.server_port, "GET", "/")[0] == 404
+        assert product.requests == []
 
 
 def test_without_the_directory_mount_root_is_the_product_even_with_the_default_flag() -> None:
