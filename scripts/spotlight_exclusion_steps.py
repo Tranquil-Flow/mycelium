@@ -40,14 +40,14 @@ def mount_point(path: Path) -> Path:
     current = Path(os.path.abspath(path))
     while not current.exists() and current != current.parent:
         current = current.parent
-    current = current.resolve()
+    current = existing = current.resolve()
     while not os.path.ismount(current) and current != current.parent:
         current = current.parent
     # macOS: user folders live on the Data volume, which firmlinks into "/" (so "/" is the sealed system volume).
     data = Path("/System/Volumes/Data")
     if current == Path("/") and data.is_dir():  # os.path.ismount() is False for it (shared st_dev)
         try:
-            if (data / Path(os.path.abspath(path)).resolve().relative_to("/")).exists():
+            if (data / existing.relative_to("/")).exists():
                 return data
         except (ValueError, OSError):
             pass
