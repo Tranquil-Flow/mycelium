@@ -4,7 +4,9 @@
 This module decides, from coarse host signals and explicit owner controls,
 whether this Mac may admit *new* Mycelium work (modes ``normal`` -> ``reduced``
 -> ``drain`` -> ``withdraw``).  It is off by default, reads nothing while off,
-never inspects applications (no process names, window titles or bundle IDs),
+never inspects applications on its own (no process names, window titles or bundle IDs;
+the only exception is the owner's opt-in Priority apps list, see ``priority_apps``, which feeds
+the Pause sharing path and publishes no name),
 never softens the A13 power/thermal gates, and never claims A6 recovery,
 A9 qualification or a physical result.  Timings are owner-configurable; the
 defaults are the draft's *unapproved targets* (``DEFAULT_TIMINGS``), not
@@ -624,6 +626,10 @@ class AdaptiveHostController:
         # Set when this Mac pauses (drain/withdraw); cleared once the route is seen ready again, so
         # the page can say "Rejoining" between a released fence and a ready route (derived, no wire).
         self.rejoin_pending = False
+        # PV3: the owner-listed app now running (display name, local only) and the last one that
+        # held this Mac paused until the controller is back to normal.  Never published.
+        self._priority_app: str | None = None
+        self._priority_label: str | None = None
         self._policy = validate_policy(policy)
         self._timings = resolve_timings(self._policy)
 
@@ -643,8 +649,28 @@ class AdaptiveHostController:
             self._timings = resolve_timings(self._policy)
             if not self.enabled:
                 self._reset()
-            elif self._policy["game_mode"]:
+            elif self._pause_requested():
                 self._escalate("drain", "owner_game_mode")
+
+    @property
+    def priority_app(self) -> str | None:
+        """The listed app running now, else ``None`` (PV3; local status only)."""
+        return self._priority_app
+
+    @property
+    def priority_label(self) -> str | None:
+        """The app that last held this Mac paused, until it is back to normal."""
+        return self._priority_label
+
+    def set_priority_app(self, name: str | None) -> None:
+        """PV3: a listed app is running (``name``) or not (``None``); it pauses through the Pause sharing path."""
+        with self._lock:
+            self._priority_app = name
+            if name is not None:
+                self._priority_label = name
+
+    def _pause_requested(self) -> bool:
+        return bool(self._policy["game_mode"]) or self._priority_app is not None
 
     @property
     def critical(self) -> bool:
@@ -658,7 +684,7 @@ class AdaptiveHostController:
     def recovery_ready(self) -> bool:
         """True once only authority evidence is missing for leaving a non-normal mode."""
         with self._lock:
-            if not self.enabled or self.mode == "normal" or self.stopped or self._policy["game_mode"]:
+            if not self.enabled or self.mode == "normal" or self.stopped or self._pause_requested():
                 return False
             now = self._clock()
             return (
@@ -726,6 +752,7 @@ class AdaptiveHostController:
         self._authority.clear()
         self._cleanup_complete = self._requalified = False
         self.rejoin_pending = False
+        self._priority_app = self._priority_label = None
 
     def clear_rejoin(self) -> None:
         with self._lock:
@@ -734,6 +761,8 @@ class AdaptiveHostController:
     def _enter(self, mode: str, reason: str) -> None:
         self.generation += 1
         self.mode, self.reason = mode, reason
+        if mode == "normal":
+            self._priority_label = None
         if mode in ("drain", "withdraw"):
             self.rejoin_pending = True
         self._entered_at = self._clock()
@@ -778,7 +807,7 @@ class AdaptiveHostController:
 
             if self.stopped:
                 self._escalate("drain", "owner_stop")
-            if self._policy["game_mode"]:
+            if self._policy["game_mode"] or (self._priority_app is not None and not self.stopped):
                 self._escalate("drain", "owner_game_mode")
             if cls == "critical":
                 self._escalate("drain", "host_memory_pressure")
@@ -803,7 +832,7 @@ class AdaptiveHostController:
         return now - self._cpu_since >= self._timings["cpu_sustain_s"]
 
     def _pressure_persists(self) -> bool:
-        return self.stopped or self._policy["game_mode"] or self._classification in ("critical", "moderate")
+        return self.stopped or self._pause_requested() or self._classification in ("critical", "moderate")
 
     def _progress(self, now: float) -> None:
         if self.mode == "drain" and self._pressure_persists():
@@ -812,7 +841,7 @@ class AdaptiveHostController:
             return
         if self.mode == "normal" or self._pressure_persists() or self._classification != "healthy":
             return
-        if self._healthy_since is None or self.stopped or self._policy["game_mode"]:
+        if self._healthy_since is None or self.stopped or self._pause_requested():
             return
         if now - self._healthy_since < self._timings["recovery_s"]:
             return
@@ -937,8 +966,12 @@ class AdaptiveHostRuntime:
         clock: Callable[[], float] = time.monotonic,
         footprint_bytes: Callable[[], int] = lambda: 0,
         inflight: Callable[[], int] = lambda: 0,
+        priority_active: Callable[[], str | None] | None = None,
     ) -> None:
         self._load = policy_loader
+        # PV3: ``None`` = the feature is not wired (every caller before it).  The callable observes
+        # running apps, and the app only calls it while the owner's list is non-empty.
+        self._priority_active = priority_active
         self._sampler = sampler
         self._clock = clock
         self._controller = AdaptiveHostController(
@@ -1045,6 +1078,11 @@ class AdaptiveHostRuntime:
         interval = resolve_timings(policy)["sample_interval_s"]
         if self._last_sample_at is None or now - self._last_sample_at >= interval:
             self._last_sample_at = now
+            if self._priority_active is not None:  # PV3: opt-in; sees nothing while the list is empty
+                try:
+                    self._controller.set_priority_app(self._priority_active())
+                except Exception:
+                    self._controller.set_priority_app(None)
             raw: object = None
             if policy_automatic(policy):  # Adaptive sharing off: the sampler is never invoked
                 try:
@@ -1055,9 +1093,28 @@ class AdaptiveHostRuntime:
         return self._controller.admission()
 
 
+def _priority_active(app: Any) -> str | None:
+    from . import priority_apps
+    return priority_apps.active_app(app)
+
+
 def _drain() -> Any:
     from . import adaptive_drain
     return adaptive_drain
+
+
+def effective_policy(root: str | os.PathLike[str]) -> dict[str, Any]:
+    """The stored policy, with the controller switched on (manual, not automatic) while Priority apps are listed.
+
+    The override is never written back: the owner's Adaptive sharing and Pause sharing choices stay
+    exactly as stored.  A priority-apps file that cannot be read adds nothing.
+    """
+    policy = read_adaptive_policy(root)
+    if not policy["enabled"]:
+        from . import priority_apps
+        if priority_apps.has_apps(root):
+            return {**policy, "enabled": True, "automatic": False}
+    return policy
 
 
 def adaptive_resource_check(app: Any) -> str | None:
@@ -1068,11 +1125,12 @@ def adaptive_resource_check(app: Any) -> str | None:
     runtime = getattr(app, "_adaptive_runtime", None)
     if runtime is None:
         runtime = AdaptiveHostRuntime(
-            policy_loader=lambda: read_adaptive_policy(root),
+            policy_loader=lambda: effective_policy(root),
             sampler=lambda: sampler_for(app)(),
             clock=lambda: getattr(app, "_adaptive_clock", time.monotonic)(),
             footprint_bytes=lambda: _drain().footprint_bytes(_drain().target_runtime(app)),
             inflight=lambda: _drain().inflight_count(_drain().target_runtime(app)),
+            priority_active=lambda: _priority_active(app),
         )
         try:
             app._adaptive_runtime = runtime

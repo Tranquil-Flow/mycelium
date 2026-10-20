@@ -211,7 +211,7 @@ def test_a_priority_app_drains_through_the_pause_sharing_path_with_the_pause_rea
     assert "zoom" not in json.dumps(ctl.overlay(wall_now=1.0))
 
 
-def test_leaving_needs_the_app_gone_then_the_ordinary_calm_period():
+def test_leaving_needs_the_app_gone_then_the_ordinary_pause_release_rules():
     ctl, clock, _ = make()
     tick(ctl, clock)
     ctl.set_priority_app("zoom.us")
@@ -219,18 +219,21 @@ def test_leaving_needs_the_app_gone_then_the_ordinary_calm_period():
     for _ in range(80):
         tick(ctl, clock)
         settle_authority(ctl, clock)
-    assert ctl.mode in {"drain", "withdraw"}  # still running: never recovers
+    assert ctl.mode in {"drain", "withdraw"}  # still running: never recovers, however long it takes
     ctl.set_priority_app(None)
-    tick(ctl, clock)
-    assert ctl.mode in {"drain", "withdraw"}  # recovery window not yet elapsed
-    for _ in range(80):
-        tick(ctl, clock)
-        settle_authority(ctl, clock)
-        if ctl.mode == "normal":
-            break
+    clock.advance(10.0)  # the authority observations from the loop above are now stale
+    ctl.observe({"observed_at": clock.now, "pressure": "normal"})
+    # the same release rule as Pause sharing: healthy window, dwell, fresh authority observations
+    # (and requalification after a withdraw); without fresh authority it stays down
+    assert ctl.mode in {"drain", "withdraw"} and ctl.priority_label == "zoom.us"
+    for _ in range(5):
         if ctl.mode == "withdraw":
             ctl.mark_requalified(ctl.generation)
-    assert ctl.mode == "normal" and ctl.priority_app is None
+        settle_authority(ctl, clock)
+        tick(ctl, clock)
+        if ctl.mode == "normal":
+            break
+    assert ctl.mode == "normal" and ctl.priority_app is None and ctl.priority_label is None
 
 
 def test_switching_the_controller_off_forgets_the_app():

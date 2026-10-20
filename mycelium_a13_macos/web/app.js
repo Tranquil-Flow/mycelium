@@ -40,6 +40,22 @@ function renderAdaptive(value){
   $('adaptive-stop').disabled=busy||!a.enabled||!!a.stopped;
   $('adaptive-resume').disabled=busy||!a.enabled||!a.stopped;
 }
+// PV3 Priority apps: the owner's own list; sharing pauses while one of them runs.
+function renderPriorityApps(value){
+  const p=value.priority_apps;
+  if(!p){return;}
+  if(document.activeElement!==$('priority-apps-list')){$('priority-apps-list').value=(p.apps||[]).join('\n');}
+  if(document.activeElement!==$('priority-apps-scope')){$('priority-apps-scope').value=p.scope||'running';}
+  $('priority-apps-ack').checked=(p.apps||[]).length>0||$('priority-apps-ack').checked;
+  $('priority-apps-save').disabled=busy;
+  const paused=p.active&&value.adaptive_host&&value.adaptive_host.line?` ${value.adaptive_host.line}.`:'';
+  $('priority-apps-line').textContent=(p.sentence||'')+paused;
+}
+$('priority-apps-save').addEventListener('click',()=>{
+  const apps=$('priority-apps-list').value.split('\n').map((line)=>line.trim()).filter((line)=>line);
+  void perform('/api/priority-apps',{apps,scope:$('priority-apps-scope').value,acknowledged:$('priority-apps-ack').checked},
+    apps.length?'Priority apps saved. Sharing pauses while one of them runs.':'Priority apps turned off.');
+});
 // PV9 service mode: the mode, its effective knobs in one sentence, and the batch job queue.
 const BATCH_HOLD={interactive_mode:'',sharing_not_allowed:'Queued jobs are waiting: sharing is paused or reduced.',
   route_not_ready:'Queued jobs are waiting for the route to be ready.',interactive_request_running:'Queued jobs are waiting for a chat to finish.'};
@@ -220,7 +236,7 @@ function render(value) {
   $('join').hidden=target && a.membership_state==='current';
   $('revoke-consent').hidden=target;
   applyResources(value);
-  renderAdaptive(value);renderSharing(value);renderServiceMode(value);
+  renderAdaptive(value);renderSharing(value);renderServiceMode(value);renderPriorityApps(value);
   if(value.resource_policy){
     for(const key of ['power','network','storage']){
       $(key).value=String(value.resource_policy[key==='storage'?'storage_bytes':key]);

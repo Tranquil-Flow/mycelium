@@ -433,6 +433,15 @@ def _sharing_status(app):
         return {'state':'idle','line':'Not sharing yet'}
 
 
+def _priority_apps_status(app):
+    """Priority apps block; never lets it break /api/status."""
+    try:
+        from .priority_apps import priority_status
+        return priority_status(app)
+    except Exception:
+        return {'apps':[],'active':None,'supported':False}
+
+
 def _service_mode_status(app):
     """Interactive / Batch mode, its effective knobs and the job queue; never lets it break /api/status."""
     try:
@@ -1170,6 +1179,7 @@ class DemoApp:
                 'join_flow':self._join_flow_status(),
                 'adaptive_host':adaptive_status(self),'adaptive_host_publication':adaptive_publication(self),
                 'service_mode':_service_mode_status(self),
+                'priority_apps':_priority_apps_status(self),
                 'sharing':_sharing_status(self),'relay_wait':self._relay_wait_status(),
                 'owner_run':_demo_status(self,'owner'),'demo_target':_demo_status(self,'target'),
                 'chat':_demo_status(self,'chat'),'swarm':_swarm_status(self),
@@ -1210,6 +1220,9 @@ class DemoApp:
             from .adaptive_owner import ADAPTIVE_ROUTES, adaptive_action
             if path in ADAPTIVE_ROUTES:
                 return adaptive_action(self, path, body)
+            from .priority_apps import PRIORITY_ROUTES, priority_action
+            if path in PRIORITY_ROUTES:
+                return priority_action(self, path, body)
             from .service_mode_owner import MODE_ROUTES, service_mode_action
             if path in MODE_ROUTES:
                 return service_mode_action(self, path, body)

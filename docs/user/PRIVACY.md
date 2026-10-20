@@ -59,7 +59,11 @@ So, today: **nothing in this version gives you a fully offline two-Mac run.** If
 
 ## Adaptive sharing
 
-Mycelium watches this Mac's memory, CPU, heat and battery. When other apps need resources, it automatically shares less, finishes or hands off work in progress, and pauses sharing. It resumes once the Mac has been healthy for a while. Your own apps always come first. It reads only coarse memory pressure and overall CPU load, never which apps you run, and nothing is sampled before you consent. It is on by default at your first consent and you can switch it off. Off means the Mac keeps sharing under pressure until you press **Pause sharing** or **Stop**; your memory limit, disk-space floor and power, heat and network limits stay enforced either way. Turning it off never widens what an owner can do to your Mac.
+Mycelium watches this Mac's memory, CPU, heat and battery. When other apps need resources, it automatically shares less, finishes or hands off work in progress, and pauses sharing. It resumes once the Mac has been healthy for a while. Your own apps always come first. It reads only coarse memory pressure and overall CPU load, and nothing is sampled before you consent. It does not look at which apps you run unless you list **Priority apps** (see below). It is on by default at your first consent and you can switch it off. Off means the Mac keeps sharing under pressure until you press **Pause sharing** or **Stop**; your memory limit, disk-space floor and power, heat and network limits stay enforced either way. Turning it off never widens what an owner can do to your Mac.
+
+### Priority apps (optional, off by default)
+
+If you list apps under **Priority apps**, Mycelium compares the names (and ids) of the apps running on this Mac with your list, on this Mac only, every couple of seconds. While a listed app runs, sharing pauses like Pause sharing and the page says "Adaptive sharing: paused - <app> is running". The list stays in a private file in the app's state folder. The app name is never sent to the swarm, the relay or other Macs: they only see the same "paused" signal as Pause sharing. With the list empty, nothing looks at which apps run. Only macOS can do this today; on Linux and Windows the card says so and nothing pauses.
 
 ## Choices you control
 
