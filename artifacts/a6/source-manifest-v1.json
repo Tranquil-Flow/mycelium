@@ -53,7 +53,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:8625477a6ee72a95b054c7e3dd4981f3b202d0edae40354b0f53f90258745499",
+      "sha256": "sha256:c4ebbdc1e82c8480ce0e0e370385136f9d85805f890060b1f838dbe6d8db5173",
       "size_bytes": 71574
     },
     {
@@ -397,6 +397,41 @@
       "size_bytes": 8315
     },
     {
+      "path": "deploy/swarm-directory-start.sh",
+      "sha256": "sha256:0d230c9677db0acadd9574ed19dcab86285579afad31256c57c9d917efcdc10e",
+      "size_bytes": 1158
+    },
+    {
+      "path": "deploy/swarm-directory-watchdog.plist",
+      "sha256": "sha256:68126050c4d841f962fb6f0a05b321167e212fdf81b726d1818fac270d73e54e",
+      "size_bytes": 2039
+    },
+    {
+      "path": "deploy/swarm-directory.plist",
+      "sha256": "sha256:f4e4352e3a32756ead441ab9fd29fd1e6e108699cacbdcfa9b0b9d406403cf09",
+      "size_bytes": 1862
+    },
+    {
+      "path": "docs/LOCAL-FIRST.md",
+      "sha256": "sha256:eb193205e042535be9403fe1a115788b5f6847709f79f34130c491385be3f465",
+      "size_bytes": 18970
+    },
+    {
+      "path": "docs/design/cross-platform-matrix.md",
+      "sha256": "sha256:a636043b341b2905c61945242fcee0825b3f7c3f3ba28ae59154dd648b2298d4",
+      "size_bytes": 14583
+    },
+    {
+      "path": "docs/design/lan-direct-transport.md",
+      "sha256": "sha256:495ec9939343981d97692804b92a063835bea55a5f177d8266af6f0e39526df7",
+      "size_bytes": 8899
+    },
+    {
+      "path": "docs/design/swarm-ux-walkthrough.md",
+      "sha256": "sha256:2a998969b88f360ea888b429fc57536104db75516c7255b417c13bc93952b548",
+      "size_bytes": 6823
+    },
+    {
       "path": "docs/handover/2026-08-18-mycelium-a8-implementation-packet.md",
       "sha256": "sha256:c1e02b563a643dbd129fa8e66849a2a1adf324bddbba047a067c19fdf4b0b050",
       "size_bytes": 13200
@@ -447,6 +482,11 @@
       "size_bytes": 4285
     },
     {
+      "path": "docs/operations/hosted-demo-hardening.md",
+      "sha256": "sha256:6825fde2d41def389b06c74a474b3607f8a10ed095733ebfba79358cdc671783",
+      "size_bytes": 3405
+    },
+    {
       "path": "docs/operations/red-by-design-suites.md",
       "sha256": "sha256:cb316b0ee1af964d84e60539be626ae028452dac4349e53bd476acbb60a7a858",
       "size_bytes": 5923
@@ -480,6 +520,31 @@
       "path": "docs/superpowers/specs/2026-09-25-mycelium-a6-cleanup-authority-v2.md",
       "sha256": "sha256:d9b40e8aed098f292b84d4ae00e7911c3baffd2993712479fb93377412aec5ee",
       "size_bytes": 4593
+    },
+    {
+      "path": "docs/user/PRIVACY.md",
+      "sha256": "sha256:15ab3e67edbf15dd133955833787851df763c48fb46c30df1411fa7f102ab44a",
+      "size_bytes": 8859
+    },
+    {
+      "path": "docs/user/QUICKSTART-MACOS.md",
+      "sha256": "sha256:eb94ba841e08a52461d7a52a7ba3fbe4381ac408f3dac72975bb14a7d82667d2",
+      "size_bytes": 8693
+    },
+    {
+      "path": "docs/user/README.md",
+      "sha256": "sha256:18d9ae01238e21ef19af25fe6d9192d60ad66bf4f60fea62a61f12fa97978a7e",
+      "size_bytes": 695
+    },
+    {
+      "path": "docs/user/TROUBLESHOOTING.md",
+      "sha256": "sha256:ab46cc519dfcb911a8d9d83a9f06e604e6d89e0d97fd4b414e89037c43911de5",
+      "size_bytes": 14772
+    },
+    {
+      "path": "docs/user/WHAT-MYCELIUM-DOES.md",
+      "sha256": "sha256:07d8ad6136472caec0793c90f32c0fc1006360b5c02ea5ef6af3ef6e1baf84a6",
+      "size_bytes": 10398
     },
     {
       "path": "drafts/a5-amendment-draft/00-README.md",
@@ -603,8 +668,8 @@
     },
     {
       "path": "model_manifest.py",
-      "sha256": "sha256:dcda9ad8bc5ea7a161199554ce5abfc8b17511751b980e2ea2b644505712bcd9",
-      "size_bytes": 14246
+      "sha256": "sha256:8f04eb9a1b70b0bb3fdd48a3bbb3d4baa8fc16a2affb5f8c4e23a24d51ab927e",
+      "size_bytes": 14598
     },
     {
       "path": "mycelium_a11_draft_loss_control.py",
@@ -708,13 +773,13 @@
     },
     {
       "path": "mycelium_a13_macos/__main__.py",
-      "sha256": "sha256:576b511c1fbf0c279ccc72dd02b1f8b05edceb9062b1c1d05f2cb5e04bd5a994",
-      "size_bytes": 8699
+      "sha256": "sha256:5896ffe9e37d58429ac50fe3af2426791887320bdacb10b563dfbb102d8cba75",
+      "size_bytes": 8950
     },
     {
       "path": "mycelium_a13_macos/acquisition.py",
-      "sha256": "sha256:bf4a352feb40f0d37eae688f923e25b0ba0e0091bff8e83117a8b46527c3de42",
-      "size_bytes": 59148
+      "sha256": "sha256:f038b3bc1b1ce77b2ac84a634dfa46ff5fc5ab8874d9a5855d640e8c2f75ccac",
+      "size_bytes": 60242
     },
     {
       "path": "mycelium_a13_macos/adaptive_drain.py",
@@ -723,8 +788,8 @@
     },
     {
       "path": "mycelium_a13_macos/adaptive_host.py",
-      "sha256": "sha256:04013c7890971ba31a2c13d7ba378586ec0e141db9c0d065d72755a23ab073d1",
-      "size_bytes": 42836
+      "sha256": "sha256:98a58e6f4b54ae848d5dd3c19d45a282c4d5b58bc17fc0e4ceac2736fe34bfaf",
+      "size_bytes": 46695
     },
     {
       "path": "mycelium_a13_macos/adaptive_owner.py",
@@ -738,8 +803,8 @@
     },
     {
       "path": "mycelium_a13_macos/app.py",
-      "sha256": "sha256:d692989ba2d849a5a94506828d26e956c7127cfbe6da1412a871802c7f7a00b8",
-      "size_bytes": 90495
+      "sha256": "sha256:03a0720272e817497fa87bde60e24fe2d9fb418b8130f30687a87624ce2eb907",
+      "size_bytes": 92204
     },
     {
       "path": "mycelium_a13_macos/assignment_provisioning.py",
@@ -763,8 +828,8 @@
     },
     {
       "path": "mycelium_a13_macos/chat.py",
-      "sha256": "sha256:40847c98b2c3c1d5973d696eca421a46a98e2b043e8c50dbdec5454f5db1c3fb",
-      "size_bytes": 16994
+      "sha256": "sha256:31d59f461112267fffde52ddef0a9e7abdb52df6b9bf186912f361c0ad188bbe",
+      "size_bytes": 23947
     },
     {
       "path": "mycelium_a13_macos/child_environment.py",
@@ -872,6 +937,11 @@
       "size_bytes": 5728
     },
     {
+      "path": "mycelium_a13_macos/model_import.py",
+      "sha256": "sha256:5ccb4ca90a1a13b8e5c15d88729febf22838e98d09e8cf517096024477d93f4f",
+      "size_bytes": 9143
+    },
+    {
       "path": "mycelium_a13_macos/model_resources.py",
       "sha256": "sha256:17d01f6cbcec5bbae2108e399361d6c101b853d0e821c5f33a1b84062d232db2",
       "size_bytes": 30407
@@ -898,13 +968,13 @@
     },
     {
       "path": "mycelium_a13_macos/peer_model_source.py",
-      "sha256": "sha256:28d4e7b168554ddb0d97e98aa42345f55b0ee6eca64af4d8f52c5711de4e65cf",
-      "size_bytes": 46353
+      "sha256": "sha256:514d6e678e48b7ac6fbb2cfbf3aaa7fe896aa9d6ce35b97cfabd8fd950ac7425",
+      "size_bytes": 52451
     },
     {
       "path": "mycelium_a13_macos/public_relay.py",
-      "sha256": "sha256:79cb7b91366694c46f0b8721e25f03f92756c503e2d3c930d59c3702ed92b98f",
-      "size_bytes": 17953
+      "sha256": "sha256:1c11caebd8d298bf5110d529b8e9898d5b65b844d777efb5484a555a8579164a",
+      "size_bytes": 18079
     },
     {
       "path": "mycelium_a13_macos/resources.py",
@@ -942,9 +1012,14 @@
       "size_bytes": 2818
     },
     {
+      "path": "mycelium_a13_macos/swarm_live.py",
+      "sha256": "sha256:1c8b0e483ccfdde82a70d3991f7f3ee385b51357920949b442e44274b76acaad",
+      "size_bytes": 8973
+    },
+    {
       "path": "mycelium_a13_macos/swarm_publish.py",
-      "sha256": "sha256:c795ac5b9d2fabd8db770e2c1f9cdc9b413499888fb7e4ed3772418441f2f314",
-      "size_bytes": 22347
+      "sha256": "sha256:2bfd4da7dca7a54a34e0be2ea9bba35ba93f311250ae07b6dc5276866aaacf56",
+      "size_bytes": 24226
     },
     {
       "path": "mycelium_a13_macos/target_app.py",
@@ -968,8 +1043,8 @@
     },
     {
       "path": "mycelium_a13_macos/web/app.js",
-      "sha256": "sha256:5439f91b46298927b50d34dc7c77cb5184a31cf2c1c4e977752adc7e1ac388c2",
-      "size_bytes": 28394
+      "sha256": "sha256:1ff1ffb90f8935039222a1801bd62b2fb8b70e0988f1e0a1507a1eadbe1da872",
+      "size_bytes": 33708
     },
     {
       "path": "mycelium_a13_macos/web/chat.css",
@@ -988,13 +1063,13 @@
     },
     {
       "path": "mycelium_a13_macos/web/index.html",
-      "sha256": "sha256:0d34f4247fdf0ffe2c1519bd31e7cab7e516848c9b74893ad1013f6b49c8e349",
-      "size_bytes": 18474
+      "sha256": "sha256:75c173ccc340c926b37eb03eae1e15e9a651aef189933c09c6345f74027fe335",
+      "size_bytes": 19236
     },
     {
       "path": "mycelium_a13_macos/web/run.js",
-      "sha256": "sha256:73ff9007d207b3e3db9359b618c6d57df15bb9517b0e3016bc241560399fea6b",
-      "size_bytes": 9952
+      "sha256": "sha256:e630bc05510b240881795a630d9cb71637311c730d32beeac4bd4f167ad9575b",
+      "size_bytes": 10089
     },
     {
       "path": "mycelium_a13_macos/web/style.css",
@@ -1003,8 +1078,8 @@
     },
     {
       "path": "mycelium_a13_macos/web/swarm.js",
-      "sha256": "sha256:3cf7a4f36f3aae1c5918c07cda00e547a9679fc1c342493344966442b0cddfb6",
-      "size_bytes": 5729
+      "sha256": "sha256:1e5fb247356fb287ca893df0bb738c0b0132d1bb89352f84d687bc1a4c871fbe",
+      "size_bytes": 5796
     },
     {
       "path": "mycelium_a13_macos/work_acceptance.py",
@@ -1147,6 +1222,11 @@
       "size_bytes": 48780
     },
     {
+      "path": "mycelium_a6_recovery.py",
+      "sha256": "sha256:54e970d57103066027d47f64e0ab3892634a2262ec60a63a1710d67cfb85cce3",
+      "size_bytes": 84761
+    },
+    {
       "path": "mycelium_a7_checkpoint_channel.py",
       "sha256": "sha256:7e30888a1aff4d6b3d1bbeb55bbecea41a705c04f3dfe4bfdb7f684eccdac680",
       "size_bytes": 15643
@@ -1233,13 +1313,18 @@
     },
     {
       "path": "mycelium_demo/cli.py",
-      "sha256": "sha256:26e11751591c0011331e1a4855537081acfcc17313401c44960a02b0f3e9fb76",
-      "size_bytes": 22877
+      "sha256": "sha256:c62424657ac33b11a86213ec0e152d638395249c5042978a355de6ad237846fa",
+      "size_bytes": 31096
     },
     {
       "path": "mycelium_demo/product_stack.py",
       "sha256": "sha256:d825b5357af6a44244c6cdbde7525978307fa9626eae6164b5228f30346f008b",
       "size_bytes": 4367
+    },
+    {
+      "path": "mycelium_demo/public_origin_proxy.py",
+      "sha256": "sha256:8f52652a83ecf0f662402744e8db8bf7db2cd139a06452c4a94fd864899a126e",
+      "size_bytes": 42567
     },
     {
       "path": "mycelium_gate_requirements/__init__.py",
@@ -1463,8 +1548,8 @@
     },
     {
       "path": "mycelium_node/__main__.py",
-      "sha256": "sha256:6858a5b443f1d8cc3037828e0242e46b1b610a26fac1695f28c19e134c066954",
-      "size_bytes": 47769
+      "sha256": "sha256:ebb4258102fb2cf9f2e5bf9af1b4f80f6d5d6ea4cdfa1d049c387b6e830ebe90",
+      "size_bytes": 50849
     },
     {
       "path": "mycelium_node/_failure_diagnostics.py",
@@ -1488,8 +1573,8 @@
     },
     {
       "path": "mycelium_node/process.py",
-      "sha256": "sha256:4eafd50396fa962755c9e0f7dc1c49d296bcf85876e05b089fbd42236c865f58",
-      "size_bytes": 127000
+      "sha256": "sha256:a79c62bfdeac97c74df0f4d7e5e2bc671b658e761296dc10d463e7518b42f625",
+      "size_bytes": 128426
     },
     {
       "path": "mycelium_physical_runner/config.py",
@@ -1522,6 +1607,11 @@
       "size_bytes": 17148
     },
     {
+      "path": "mycelium_platform_neutral/lan_doctor.py",
+      "sha256": "sha256:d82b74f60385462bdc5eee468a9f94f62723e957be7b0bd91c42f4ad8f1a29ac",
+      "size_bytes": 8462
+    },
+    {
       "path": "mycelium_platform_neutral/mac_mlx_int8.py",
       "sha256": "sha256:b7a6615d656da12d7ae787b0a388dd9f3f165cb7f194dad71bd265f43ad16966",
       "size_bytes": 10792
@@ -1542,9 +1632,19 @@
       "size_bytes": 8710
     },
     {
+      "path": "mycelium_platform_neutral/network_mode.py",
+      "sha256": "sha256:fda615c2d1a1beaa209287888be03117fa3e665a06da1297b28b842470ec336e",
+      "size_bytes": 4753
+    },
+    {
+      "path": "mycelium_platform_neutral/offline.py",
+      "sha256": "sha256:82ac3a7a567929a744bde683b7c04f2176bff56a33c6f0fc393f99d92b755b35",
+      "size_bytes": 4069
+    },
+    {
       "path": "mycelium_platform_neutral/seed_cutover_transaction.py",
-      "sha256": "sha256:dc42296d97cd07b85c54f6501156d50d37903a4b4508bf361f217c02837dc0c3",
-      "size_bytes": 13366
+      "sha256": "sha256:1444dab170ed95095a37aae0241b71c09334ae0e58bcb3bc95e53899080bde14",
+      "size_bytes": 14219
     },
     {
       "path": "mycelium_platform_neutral/seed_migration.py",
@@ -1618,8 +1718,8 @@
     },
     {
       "path": "mycelium_request_gateway/service.py",
-      "sha256": "sha256:bdfedbb0cad5dc93f0e82e3dbe6518ea13fc78533de5f680d796dfc3bd5febec",
-      "size_bytes": 63715
+      "sha256": "sha256:f9412ac0e4d0ca459b108c240b45791dba04d22f14ee39e769f26e4e4d6f7888",
+      "size_bytes": 63972
     },
     {
       "path": "mycelium_router/a10_batch_admission.py",
@@ -1748,8 +1848,8 @@
     },
     {
       "path": "mycelium_seed/__main__.py",
-      "sha256": "sha256:4fa9b6600f10a5247ce363cffb6f45ca490d2044a48dd27512972a93f4f853d8",
-      "size_bytes": 15943
+      "sha256": "sha256:1d610267d9c736fc43dc2ab85ec85efead5333a3b91505af2b4200df8ae569d1",
+      "size_bytes": 18402
     },
     {
       "path": "mycelium_seed/coordinator.py",
@@ -1813,18 +1913,23 @@
     },
     {
       "path": "mycelium_swarm_directory/directory.py",
-      "sha256": "sha256:0d7ccac49daa55520b537f12757d498749871821d66b74661ff659887efcb441",
-      "size_bytes": 17930
+      "sha256": "sha256:bf6b8508dd63d735fb5c9a21ddf71c8c6cdbe006f2a5ed39e21291913e7a8955",
+      "size_bytes": 19887
     },
     {
       "path": "mycelium_swarm_directory/docs.py",
-      "sha256": "sha256:426c0bc0f6d3444fac85f41dc60dee8237962fdbca3f8bae003858638c914dcb",
-      "size_bytes": 13654
+      "sha256": "sha256:4cabaf75b3f00d2ae50f99670a6585c4083ca8a781fe63bcd6a62aa2666ec862",
+      "size_bytes": 16175
     },
     {
       "path": "mycelium_swarm_directory/entry.py",
-      "sha256": "sha256:ff23ac1d1e0aa794ee3a111c196e080d315ddad53cbada3a8998b89f4f3f3830",
-      "size_bytes": 15813
+      "sha256": "sha256:01ac11860d31e10ad5e5ed697ec5538fa729fe510fd0ba9c97731da08970da59",
+      "size_bytes": 32423
+    },
+    {
+      "path": "mycelium_swarm_directory/hosted_defaults.py",
+      "sha256": "sha256:3c8c635bb7baea70ef261d55f12ef1e781045ec54ec9bafd006781f3e7553c61",
+      "size_bytes": 2737
     },
     {
       "path": "mycelium_swarm_directory/probe.py",
@@ -1833,13 +1938,13 @@
     },
     {
       "path": "mycelium_swarm_directory/ratelimit.py",
-      "sha256": "sha256:17d7ddf2352a4ab8b337f1c1acbf84b789b87f47837b9a3e2870df6c6f05115a",
-      "size_bytes": 1294
+      "sha256": "sha256:66c7bd37e2bf288a6bd7ba4319a648a90a7127d5a3d33d290500dcd46a99b6e3",
+      "size_bytes": 3550
     },
     {
       "path": "mycelium_swarm_directory/server.py",
-      "sha256": "sha256:e5c911f585739444790f19a99724a5ca6e4005ef561be4fe11d9f0713547e7b1",
-      "size_bytes": 11249
+      "sha256": "sha256:e0860bcee914327caa20896dd769aa6cc0cbfcccbf63167b1619e436ce315e80",
+      "size_bytes": 12853
     },
     {
       "path": "mycelium_swarm_directory/store.py",
@@ -1847,19 +1952,34 @@
       "size_bytes": 3641
     },
     {
+      "path": "mycelium_swarm_directory/surface_probe.py",
+      "sha256": "sha256:d4f73c890375800419ecd78d5382b4cd96efc66a7515f41ec5ce8e7613b7a891",
+      "size_bytes": 5159
+    },
+    {
+      "path": "mycelium_swarm_directory/unit.py",
+      "sha256": "sha256:cdb3c14f8fea48db75ae3b3d67831cbfdd7c03329a158f976a31df34ee0d9401",
+      "size_bytes": 1362
+    },
+    {
+      "path": "mycelium_swarm_directory/watchdog.py",
+      "sha256": "sha256:dafe85b74d1ecc2fff0c18218e3b58d81112f6c95da81ed50638ccb7b0896bd5",
+      "size_bytes": 8606
+    },
+    {
       "path": "mycelium_swarm_directory/web/index.html",
-      "sha256": "sha256:b2bb9be8da2350565b23843586fbed24ac372b1785c1accd324f0f280430a822",
-      "size_bytes": 3275
+      "sha256": "sha256:22b5ae169ae243f81d9fbbfec6ecb0a1a2574a6cc96f09489df4fc1fb43d9cb0",
+      "size_bytes": 4780
     },
     {
       "path": "mycelium_swarm_directory/web/swarms.css",
-      "sha256": "sha256:8d1a65db1a04a54228af1760c88c6a815577748866327091e8712e2e84fd3df9",
-      "size_bytes": 2540
+      "sha256": "sha256:4685b1332e82741486100d9006c2c6ffa25fb263d81b69b9e2c326ebf5aa5094",
+      "size_bytes": 3938
     },
     {
       "path": "mycelium_swarm_directory/web/swarms.js",
-      "sha256": "sha256:83d7c37f917207ae4f25231df16dc3a4ee55dcef1a4286944e6130e6aeb5744a",
-      "size_bytes": 20628
+      "sha256": "sha256:69d73a1f4e26f835fb8f31fe35c7b2ef091a40b7fef9eee8e28fd80e2f25b960",
+      "size_bytes": 34451
     },
     {
       "path": "mycelium_swarm_directory/wire.py",
@@ -2253,8 +2373,8 @@
     },
     {
       "path": "physical_inference_node.py",
-      "sha256": "sha256:def4273a3bab5f06331f693e66daca60ca08b6f68a7659d39c7f6da1eb328bb6",
-      "size_bytes": 265270
+      "sha256": "sha256:6dc586088dce44a0ee4d1592cec9f19e86acae40885db44a9dc775a5c8da5e5c",
+      "size_bytes": 265895
     },
     {
       "path": "physical_inference_qualification.py",
@@ -2470,6 +2590,11 @@
       "path": "scripts/inspect_local_speculation_compatibility.py",
       "sha256": "sha256:9749ad38314bfaefde996c38b9c3c7a23e2abe67f41f03fafde6d5a9424a0b34",
       "size_bytes": 11212
+    },
+    {
+      "path": "scripts/linux_import_guard.py",
+      "sha256": "sha256:8e339ea5cab0c2c8c93f5ebaab93c9cd1f20c07bd03d37d1aa3d1807b4fda03e",
+      "size_bytes": 8279
     },
     {
       "path": "scripts/mycelium_completion_audit.py",
@@ -2907,6 +3032,11 @@
       "size_bytes": 2022
     },
     {
+      "path": "tests/a13_macos/test_app_relay_order.py",
+      "sha256": "sha256:22130347518583ec88fdad632f2d47ddb38ca65b8852bfc74e093837753ef9d7",
+      "size_bytes": 4406
+    },
+    {
       "path": "tests/a13_macos/test_browser.py",
       "sha256": "sha256:07348b5bbb15e9c5006e753ff6f2a24641c2e7dba2c3780eaff2860723b17f9a",
       "size_bytes": 5545
@@ -2945,6 +3075,16 @@
       "path": "tests/a13_macos/test_chain_compile_parent.py",
       "sha256": "sha256:a7b26c40c2bf4d216aa54957bc79772514356e6ab24b035ab5c79478e61d43cc",
       "size_bytes": 13982
+    },
+    {
+      "path": "tests/a13_macos/test_chat_cancel.py",
+      "sha256": "sha256:05b857556e26ab64c5d81f3211232ce1edccd268826700d0ed63dc38c5b8ed7d",
+      "size_bytes": 10518
+    },
+    {
+      "path": "tests/a13_macos/test_chat_gated_by_entry.py",
+      "sha256": "sha256:168a672f1acf8b3abe4e8e6d60dc1709749752d2c45c0c6dad7f9a1510e97915",
+      "size_bytes": 6712
     },
     {
       "path": "tests/a13_macos/test_chat_registry_client.py",
@@ -3072,6 +3212,11 @@
       "size_bytes": 2067
     },
     {
+      "path": "tests/a13_macos/test_model_import.py",
+      "sha256": "sha256:2cb730310c9732ce7bab31538ed31ed3ee1c8335b6713718f1acdb1de6103d43",
+      "size_bytes": 11513
+    },
+    {
       "path": "tests/a13_macos/test_model_resources.py",
       "sha256": "sha256:d1bcc2079361c71152bf0725d98236db45333c10c8ab58e0bc2143015639965d",
       "size_bytes": 12365
@@ -3160,6 +3305,11 @@
       "path": "tests/a13_macos/test_parent_post_cleanup_identity.py",
       "sha256": "sha256:49804c98a0d6e6e040f99436bdab7309c4b47b87c4947e906cb623b6c088b85a",
       "size_bytes": 1089
+    },
+    {
+      "path": "tests/a13_macos/test_peer_model_manifest.py",
+      "sha256": "sha256:b4a6aa2d9e86adceeb4405f7f8ea2060a336bc3bde879369801a5bab467397ab",
+      "size_bytes": 8425
     },
     {
       "path": "tests/a13_macos/test_peer_model_source.py",
@@ -3282,9 +3432,19 @@
       "size_bytes": 11581
     },
     {
+      "path": "tests/a13_macos/test_swarm_live.py",
+      "sha256": "sha256:0bfe4b9c0ce49c08bf152d0d5cadb4c9da955053b22e76dde04456e492e5f79b",
+      "size_bytes": 8658
+    },
+    {
       "path": "tests/a13_macos/test_swarm_publish.py",
       "sha256": "sha256:bd35663dd27d4f0404e6a82c64b6807f67ecf22b099e3a1ec3254e375ec4dcb5",
       "size_bytes": 6828
+    },
+    {
+      "path": "tests/a13_macos/test_swarm_ux_copy.py",
+      "sha256": "sha256:4e05f49405f35e37d54af025e925ec019b71719adc74057a6d62b156d270d153",
+      "size_bytes": 10209
     },
     {
       "path": "tests/a13_macos/test_target_acquisition_cache.py",
@@ -3798,8 +3958,8 @@
     },
     {
       "path": "tests/a9_acceptance/test_seed_cutover_transaction.py",
-      "sha256": "sha256:655afbb22a7e4c78b4207d1df7598bb04190a6f43f61329ebd1bbf1baf2b0ce1",
-      "size_bytes": 12687
+      "sha256": "sha256:0a2c9826f0e29ece32c2771f834de12f75c982d581b76be5547bb1b80eadeda8",
+      "size_bytes": 13977
     },
     {
       "path": "tests/a9_acceptance/test_seed_membership_migration.py",
@@ -3865,6 +4025,36 @@
       "path": "tests/contracts/test_phone_stage_wire_golden.py",
       "sha256": "sha256:450852fed9db30bc43961f9e053a663fe1e7fcd74d52751e1569405e435f7b18",
       "size_bytes": 2180
+    },
+    {
+      "path": "tests/demo/_proxy_world.py",
+      "sha256": "sha256:43997e36f262ee72b09be3e3ab1b73c080a176445770d2507bc1005618c1ba6a",
+      "size_bytes": 3359
+    },
+    {
+      "path": "tests/demo/test_public_origin_proxy_bounds.py",
+      "sha256": "sha256:902cb92416cc104b411f3e347e6d42635e63e765edccd67f316e4aa54b190653",
+      "size_bytes": 5689
+    },
+    {
+      "path": "tests/demo/test_public_origin_proxy_helper_download.py",
+      "sha256": "sha256:4e6635821dbfe864a2a5cfed09255259e38c029679d7f7b9715680be0c308ec5",
+      "size_bytes": 10877
+    },
+    {
+      "path": "tests/demo/test_public_origin_proxy_product_closed.py",
+      "sha256": "sha256:6da1cb6dc671e99137cff1caf6effc18b2f5495f5268cfd9e2fe0fc1ae0a4174",
+      "size_bytes": 4713
+    },
+    {
+      "path": "tests/demo/test_public_origin_proxy_swarms.py",
+      "sha256": "sha256:d1cc23b94cd23b2368c7f02e3614aff42462d27364400abb2b535bd8b50df9f1",
+      "size_bytes": 20373
+    },
+    {
+      "path": "tests/demo/test_surface_probe.py",
+      "sha256": "sha256:305658db93fec9ded03703b8aa40e5a8bf1b7d7e86496cd81f6f932d5f228247",
+      "size_bytes": 4674
     },
     {
       "path": "tests/e2e_request_iroh/conftest.py",
@@ -3950,6 +4140,16 @@
       "path": "tests/host_platform/test_exclusive_lock.py",
       "sha256": "sha256:0f98f53cd3a83d92f3f2949ee966e8af3a50d19266be367f3d29b33b3aec2f39",
       "size_bytes": 3594
+    },
+    {
+      "path": "tests/host_platform/test_linux_import_guard.py",
+      "sha256": "sha256:0abc5e5f7596f84355f8f476e07466262a5e3ea23eb2f8f831f14ecd99f5707c",
+      "size_bytes": 3719
+    },
+    {
+      "path": "tests/host_platform/test_linux_memory_sampler.py",
+      "sha256": "sha256:5212067ce6bf8e0a028f38a84d8daf4a1a3dd2a78f2af8163a3df463dc4370ce",
+      "size_bytes": 5585
     },
     {
       "path": "tests/host_platform/test_posix_backend_parity.py",
@@ -4502,6 +4702,51 @@
       "size_bytes": 9542
     },
     {
+      "path": "tests/network_mode/__init__.py",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0
+    },
+    {
+      "path": "tests/network_mode/test_import_order.py",
+      "sha256": "sha256:b7d96687276826b4984da9a264fc939454181453c44c981fd96646bfcd02ac34",
+      "size_bytes": 842
+    },
+    {
+      "path": "tests/network_mode/test_lan_doctor.py",
+      "sha256": "sha256:315cb7d99fdfd76bf5ac713f0ecc8fb8a357d2f544abf0f9d145f605be61d40e",
+      "size_bytes": 8445
+    },
+    {
+      "path": "tests/network_mode/test_mode_wiring.py",
+      "sha256": "sha256:a4288053ad3020b113d831d89ca8610165138283c240d199889c0e4bd4398fa4",
+      "size_bytes": 10532
+    },
+    {
+      "path": "tests/network_mode/test_network_mode.py",
+      "sha256": "sha256:fe86e86fb22dad2ec1f831e079b196fcbc33b2c15d820c083ccfe25d53f9938d",
+      "size_bytes": 4453
+    },
+    {
+      "path": "tests/network_mode/test_offline_cli_wiring.py",
+      "sha256": "sha256:6ff9e8fac7d1b324e31c3a4cf26b52d244d28ebf419799c3da7b1bf4ce4a48b0",
+      "size_bytes": 4717
+    },
+    {
+      "path": "tests/network_mode/test_offline_model_source.py",
+      "sha256": "sha256:2315dfe8c475e29157b8c060ce81200da96415a9b680b1122421b55135a79261",
+      "size_bytes": 11150
+    },
+    {
+      "path": "tests/network_mode/test_offline_wiring.py",
+      "sha256": "sha256:af815143c007bea3ba9ac4a35182a86e47611f5bb66459032545e0424de93b8d",
+      "size_bytes": 2324
+    },
+    {
+      "path": "tests/network_mode/test_private_origins.py",
+      "sha256": "sha256:e91d696d223488cb14ce35fa45def9e1bdd0a1abaa2018458c0ff04385309f7d",
+      "size_bytes": 7903
+    },
+    {
       "path": "tests/node_agent/test_durable_membership.py",
       "sha256": "sha256:63ba69ecb6c0d505a8e13fe5bb4ff7bae1c51ac3cb9c6594bf6d4be9922c4f56",
       "size_bytes": 2173
@@ -4543,13 +4788,18 @@
     },
     {
       "path": "tests/node_agent/test_node_main.py",
-      "sha256": "sha256:948ae745dff94badae6999a226a3ecc254fcd02a34fc0659bfb93813acdf944f",
-      "size_bytes": 140680
+      "sha256": "sha256:14d7aa02221014fc575d81b2d09ec157a418aca53166229938d0facfe7dba1ed",
+      "size_bytes": 141017
     },
     {
       "path": "tests/node_agent/test_node_win32_seam.py",
       "sha256": "sha256:8652ea02aa6350e9b59fed1af8bae0adc31747766a2342e7d8e5da1d668ae4e3",
       "size_bytes": 14847
+    },
+    {
+      "path": "tests/node_agent/test_physical_interpreter_identity.py",
+      "sha256": "sha256:01bab5ab0089e453538e38935ed9c4b95098a6ba6ecae1bd3a14b79bc3aac9f9",
+      "size_bytes": 3868
     },
     {
       "path": "tests/node_agent/test_physical_node_signal_stop.py",
@@ -4660,6 +4910,11 @@
       "path": "tests/request_gateway/test_a6_recovery_burst_gap.py",
       "sha256": "sha256:e04fc34ca62364a5ca9c983578ae25e2405b965dec6a605aed4ac672973d1e7b",
       "size_bytes": 6573
+    },
+    {
+      "path": "tests/request_gateway/test_checkpoint_plaintext_sweep.py",
+      "sha256": "sha256:8ecf1f7a8e59e03e3ed9013047760b31f985d73cc59aa70272802995de0115e9",
+      "size_bytes": 5441
     },
     {
       "path": "tests/request_gateway/test_core.py",
@@ -4863,13 +5118,58 @@
     },
     {
       "path": "tests/swarm_directory/test_directory_core.py",
-      "sha256": "sha256:9c98afe3e9352a5f555855fea0df4a64a003cc457a18ff6b6b2e217c0f9b210b",
-      "size_bytes": 14533
+      "sha256": "sha256:538766b04b97f4cd1f4367ec609d12d40ecbfef9d58c56ea16e15a7c1c5b5b12",
+      "size_bytes": 16627
+    },
+    {
+      "path": "tests/swarm_directory/test_directory_write_budgets.py",
+      "sha256": "sha256:60f762bfabbfc1cd3292ad673209094f6c02565a744de25f0b47880f4c3d286f",
+      "size_bytes": 4619
     },
     {
       "path": "tests/swarm_directory/test_entry_guard.py",
       "sha256": "sha256:759d35891dacf7628482b607f551aee16cb559a12f62234ee6bb650a5b88db6c",
       "size_bytes": 11556
+    },
+    {
+      "path": "tests/swarm_directory/test_hosted_ui_browser.py",
+      "sha256": "sha256:6b63210b73a825bff1417d4e3ca9d4f1c0f284a9f664ae675e0e31f823a83734",
+      "size_bytes": 20757
+    },
+    {
+      "path": "tests/swarm_directory/test_hosted_ui_proxy_browser.py",
+      "sha256": "sha256:188be8bfd6a6b692a9ff9835405c24d7337f556205061f86f4a75f30015da46d",
+      "size_bytes": 5992
+    },
+    {
+      "path": "tests/swarm_directory/test_hosted_unit.py",
+      "sha256": "sha256:b762690a8b421194f6667100007f12865c378dca1ee9d16ff00035e033f4d05e",
+      "size_bytes": 12653
+    },
+    {
+      "path": "tests/swarm_directory/test_kill_cancels_generation.py",
+      "sha256": "sha256:05d59b9c6173ed76eecb0ccee48891aa05cef5db126ccfbde4d1c829ebf2f570",
+      "size_bytes": 4629
+    },
+    {
+      "path": "tests/swarm_directory/test_open_guard_rails.py",
+      "sha256": "sha256:a8a49c2234b5f24e3017669679f438860aac24e6ffb2dd09bbbfefbd322e4998",
+      "size_bytes": 14035
+    },
+    {
+      "path": "tests/swarm_directory/test_open_ip_daily_budget.py",
+      "sha256": "sha256:52a390e73e73f7e67440dd5219d1222d43cf010d5bca345d7f7f7d71e680ee4f",
+      "size_bytes": 8861
+    },
+    {
+      "path": "tests/swarm_directory/test_privacy_disclosure.py",
+      "sha256": "sha256:d292537fb545f7739063dfb902513ddee59b7e1704f9f0ebdb0afada1eed04ac",
+      "size_bytes": 2593
+    },
+    {
+      "path": "tests/swarm_directory/test_requester_cancel.py",
+      "sha256": "sha256:92c64cd34b5d5c1f8a8b12d52310aa987e9c475d40346b96f981323ce8008f2b",
+      "size_bytes": 5821
     },
     {
       "path": "tests/swarm_directory/test_two_swarms_integration.py",
@@ -5243,8 +5543,8 @@
     },
     {
       "path": "weight_provisioning.py",
-      "sha256": "sha256:0a7655014efcb7f4eaa03af7fa0c63479183f8dbd005aaa374224b04ef42deb8",
-      "size_bytes": 21703
+      "sha256": "sha256:8cd7c0309368dd4101984cfa9526d0f5d45553ea05927f3158d3fbf351ef4511",
+      "size_bytes": 22415
     },
     {
       "path": "weight_quantization.py",
@@ -5253,5 +5553,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:3cde2a2813a4db7b561a082cfc4e5f31d4e573883843c89b24b5430ee84b037f"
+  "source_digest": "sha256:5bd0aa6205c4c09ccee4e8c9eba2b235b77ce1f6e07e5f0c37e0f85a68632675"
 }
