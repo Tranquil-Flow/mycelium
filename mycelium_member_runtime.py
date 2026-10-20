@@ -22,6 +22,7 @@ RUNTIME_PATHS = (
     "mycelium_host_platform/_win32.py",
     "mycelium_host_platform/_win32_api.py",
     "mycelium_host_platform/stop_request.py",
+    "mycelium_http_identity.py",
     "mycelium_live/__init__.py",
     "mycelium_live/artifact_provisioner.py",
     "mycelium_live/artifact_transport.py",
