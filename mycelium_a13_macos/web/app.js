@@ -40,6 +40,45 @@ function renderAdaptive(value){
   $('adaptive-stop').disabled=busy||!a.enabled||!!a.stopped;
   $('adaptive-resume').disabled=busy||!a.enabled||!a.stopped;
 }
+// PV9 service mode: the mode, its effective knobs in one sentence, and the batch job queue.
+const BATCH_HOLD={interactive_mode:'',sharing_not_allowed:'Queued jobs are waiting: sharing is paused or reduced.',
+  route_not_ready:'Queued jobs are waiting for the route to be ready.',interactive_request_running:'Queued jobs are waiting for a chat to finish.'};
+function renderServiceMode(value){
+  const m=value.service_mode;
+  if(!m||!m.knobs){return;}
+  $('service-mode-interactive').checked=m.mode==='interactive';$('service-mode-batch').checked=m.mode==='batch';
+  $('service-mode-interactive').disabled=busy;$('service-mode-batch').disabled=busy;
+  $('service-mode-sentence').textContent=m.sentence;
+  const k=m.knobs;
+  $('service-mode-knobs').textContent=`Now: group requests for ${k.live_hop_collection_window_ms} ms, up to ${k.maximum_runtime_batch_size} per batch, ${k.batch_job_concurrency} queued job at a time.`;
+  const hold=m.batch_hold_line||BATCH_HOLD[m.batch_hold]||'';
+  const counts=(m.queue||{}).counts||{};
+  $('service-mode-hold').textContent=(counts.queued&&m.mode==='batch'&&m.batch_hold?hold:'');
+  $('batch-queue').hidden=!k.accepts_queued_batch_jobs;
+  $('batch-submit').disabled=busy;
+  const list=$('batch-jobs');list.textContent='';
+  for(const job of ((m.queue||{}).jobs||[]).slice().reverse()){
+    const row=document.createElement('li');
+    row.textContent=`${job.priority} · ${job.state}${job.error?` (${job.error})`:''} · ${job.tokens} tokens `;
+    if(job.state==='queued'||job.state==='running'){
+      const cancel=document.createElement('button');cancel.type='button';cancel.className='secondary';cancel.textContent='Cancel';
+      cancel.addEventListener('click',()=>void perform('/api/batch/cancel',{id:job.id},'Job cancelled.'));row.append(cancel);
+    }
+    if(job.state==='done'){
+      const show=document.createElement('button');show.type='button';show.className='secondary';show.textContent='Show result';
+      show.addEventListener('click',async()=>{const r=await perform('/api/batch/result',{id:job.id},'Result shown below.');if(r){$('batch-result').textContent=r.result||'';$('batch-result').hidden=false;}});row.append(show);
+    }
+    list.append(row);
+  }
+}
+for(const mode of ['interactive','batch']){
+  $('service-mode-'+mode).addEventListener('change',()=>void perform('/api/service-mode',{mode},mode==='batch'?'Batch / overnight mode on. Queued jobs run only while sharing is allowed.':'Interactive mode on.'));
+}
+$('batch-submit').addEventListener('click',async()=>{
+  const prompt=$('batch-prompt').value;
+  const r=await perform('/api/batch/submit',{prompt,max_new_tokens:256},'Job queued. Its result will be here when it finishes.');
+  if(r)$('batch-prompt').value='';
+});
 // Plain-language sentences for the error codes a person can actually meet; anything else
 // falls back to the code in words so nothing is hidden.
 const HUMAN_ERRORS={
@@ -181,7 +220,7 @@ function render(value) {
   $('join').hidden=target && a.membership_state==='current';
   $('revoke-consent').hidden=target;
   applyResources(value);
-  renderAdaptive(value);renderSharing(value);
+  renderAdaptive(value);renderSharing(value);renderServiceMode(value);
   if(value.resource_policy){
     for(const key of ['power','network','storage']){
       $(key).value=String(value.resource_policy[key==='storage'?'storage_bytes':key]);

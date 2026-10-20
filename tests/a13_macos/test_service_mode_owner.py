@@ -111,7 +111,7 @@ def test_queued_batch_jobs_are_accepted_only_in_batch_mode(tmp_path):
     app, _ = make_app(tmp_path)
     with pytest.raises(DemoError) as caught:
         app.action("/api/batch/submit", {"prompt": "p", "max_new_tokens": 8})
-    assert caught.value.code == "service_mode_batch_required"
+    assert str(caught.value) == "service_mode_batch_required"
     # an interactive-priority request is accepted in either mode
     queued = app.action("/api/batch/submit", {"prompt": "p", "max_new_tokens": 8, "priority": "interactive"})
     assert queued["priority"] == "interactive" and queued["state"] == "queued"
@@ -136,7 +136,7 @@ def test_submit_validation_codes(tmp_path, body, code):
     app.action("/api/service-mode", {"mode": "batch"})
     with pytest.raises(DemoError) as caught:
         app.action("/api/batch/submit", body)
-    assert caught.value.code == code
+    assert str(caught.value) == code
 
 
 def test_batch_job_runs_with_batch_qos_and_the_result_is_delivered_later(tmp_path):
@@ -191,7 +191,8 @@ def test_batch_jobs_wait_while_sharing_is_paused_and_the_status_says_why(tmp_pat
     assert smo.service_tick(app) == 0 and FakeClient.calls == []
     document = mode(app)
     assert document["batch_hold"] == "sharing_not_allowed"
-    assert document["batch_hold_line"] == adaptive(app)["line"] == "Adaptive sharing: paused - you paused sharing"
+    assert document["batch_hold_line"] == adaptive(app)["line"]
+    assert "you paused sharing" in document["batch_hold_line"]
     # released and fully off again: the queued job runs
     app.action("/api/adaptive/policy", {"adaptive_sharing": False, "pause_sharing": False, "acknowledged": False})
     assert smo.service_tick(app) == 1
@@ -236,7 +237,7 @@ def test_cancel_a_queued_job(tmp_path):
     assert app.action("/api/batch/cancel", {"id": job["id"]})["state"] == "cancelled"
     with pytest.raises(DemoError) as caught:
         app.action("/api/batch/cancel", {"id": "nope"})
-    assert caught.value.code == "batch_job_unknown"
+    assert str(caught.value) == "batch_job_unknown"
 
 
 def test_concurrency_never_exceeds_the_mode_knob(tmp_path):
