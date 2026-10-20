@@ -12,7 +12,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 from layer_assignment import validate_assignment_identity, validate_target_cache_root
-from mycelium_platform_neutral.offline import OfflineModelSourceError, offline_enabled
 from route_contract import validate_manual_provisioning_route_v1
 
 
@@ -153,6 +152,10 @@ def fetch_huggingface_file(
       from huggingface_hub import hf_hub_download, try_to_load_from_cache
    except ImportError as exc:
       raise RuntimeError("huggingface_hub is required for Hub downloads") from exc
+
+   # Deferred: importing mycelium_platform_neutral loads mycelium_qualification, which imports this module,
+   # so a top-level import is circular when this module is imported first.
+   from mycelium_platform_neutral.offline import OfflineModelSourceError, offline_enabled
 
    # Offline mode (and the lan/local network modes) read the local cache only.
    offline = offline_enabled()
