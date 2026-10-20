@@ -279,9 +279,10 @@ def test_failed_terminal_does_not_wait_for_a_slow_replacement_route(
         ]
         failed_at, failed = terminals[0]
         assert failed_at - lost_at <= TERMINAL_BOUND_SECONDS
-        # This request's own cleanup was proven: the honest generic code, not
-        # request_cleanup_unproven.
-        assert failed.code == "backend_failed", failed.code
+        # This request's own cleanup was proven, so the terminal carries the
+        # bounded recovery code (the same one it carries when the restart is
+        # fast), never request_cleanup_unproven.
+        assert failed.code == "recovery_successor_unavailable", failed.code
 
         # Recovery is deferred, not dropped.  Until the replacement is ready
         # admission is refused rather than hanging or serving a dead route.

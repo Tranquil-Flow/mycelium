@@ -137,6 +137,14 @@ def test_cold_restart_after_entry_source_kill_reopens_the_route(tmp_path, monkey
         thread = threading.Thread(target=release, daemon=True)
         thread.start()
         thread.join(timeout=180)
+        # The release no longer holds the caller for the replacement's open
+        # (the failed terminal must not wait for it); wait for the restart.
+        restart_deadline = time.monotonic() + 180
+        while (
+            owner.public_status()["cold_route_restart"]["state"] == "restarting"
+            and time.monotonic() < restart_deadline
+        ):
+            time.sleep(0.1)
         status = owner.public_status()["cold_route_restart"]
         sys.stderr.write(f"\nRESTART timings={timings} status={status}\n")
         assert not thread.is_alive(), "cold restart did not finish within 180 s"

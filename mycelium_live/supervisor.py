@@ -646,6 +646,7 @@ class ColdRouteRestartOwner:
         self._last_error_code: str | None = None
         self._last_restart_reason: str | None = None
         self._closed = False
+        self._restart_threads: list[threading.Thread] = []
         self._dropped = False
         self._request_routes: dict[str, LiveRoute] = {}
         self._settled_request_authority: dict[str, Any] = {}
@@ -1115,12 +1116,31 @@ class ColdRouteRestartOwner:
                 return
         if self._route_alive(route):
             return
-        try:
-            self._restart_from(route, generation, reason="route_not_alive")
-        except ColdRouteRestartError:
-            # State and status already name the outcome; the released request
-            # has its terminal and must not be failed by the replacement.
-            pass
+
+        def restart() -> None:
+            try:
+                self._restart_from(route, generation, reason="route_not_alive")
+            except ColdRouteRestartError:
+                # State and status already name the outcome; the released
+                # request has its terminal and must not be failed by the
+                # replacement.
+                pass
+
+        # The gateway releases the backend before it publishes the request's
+        # terminal, so reopening and requalifying the route here would hold the
+        # failed terminal back for the whole restart (minutes for a real
+        # model). Until the replacement is ready the route is not current and
+        # admission is refused honestly.
+        thread = threading.Thread(
+            target=restart, name="cold-route-restart", daemon=True
+        )
+        with self._lock:
+            if self._closed:
+                return
+            self._restart_threads = [
+                t for t in self._restart_threads if t.is_alive()
+            ] + [thread]
+        thread.start()
 
     def counters(self) -> RouteCounters:
         with self._lock:
@@ -1203,6 +1223,11 @@ class ColdRouteRestartOwner:
                     pass
         for route in self._unique_routes(routes):
             route.close()
+        with self._lock:
+            restart_threads = tuple(self._restart_threads)
+        for thread in restart_threads:
+            if thread is not threading.current_thread():
+                thread.join(timeout=30.0)
 
     def cleanup(self) -> None:
         with self._lock:
