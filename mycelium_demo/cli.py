@@ -104,6 +104,16 @@ def build_parser() -> argparse.ArgumentParser:
     network_mode_module.add_network_mode_argument(importer)
     add_offline_argument(importer)
 
+    fetcher = model_commands.add_parser(
+        "fetch-manifest",
+        help="save the pinned manifest (online, once) for later offline imports",
+    )
+    fetcher.add_argument("--model", required=True, help="pinned model id")
+    fetcher.add_argument("--commit", required=True, help="pinned 40-character model commit")
+    fetcher.add_argument("--out", required=True, type=Path, help="new manifest file to write")
+    network_mode_module.add_network_mode_argument(fetcher)
+    add_offline_argument(fetcher)
+
     device_lab = commands.add_parser(
         "device-lab",
         help="prepare trusted LAN HTTPS and launch a bounded physical-browser swarm",
@@ -461,6 +471,52 @@ def _fixture_has_live_only_arguments(args: argparse.Namespace) -> bool:
     )
 
 
+def _resolve_pinned_manifest(model, resolver):
+    if resolver is None:
+        from mycelium_a13_macos.acquisition import _HTTPRepositoryTransport
+
+        resolver = _HTTPRepositoryTransport().resolve
+    return resolver(model)
+
+
+def _fetch_manifest(args, model, offline, resolver, fail) -> int:
+    """``models fetch-manifest``: save the pinned manifest once, while online."""
+    from mycelium_a13_macos.acquisition import AcquisitionError, _validate_manifest
+
+    if offline:
+        return fail(offline_message("the pinned file list"))
+    try:
+        document = _resolve_pinned_manifest(model, resolver)
+        if (
+            not isinstance(document, Mapping)
+            or document.get("model_id") != model.model_id
+            or document.get("resolved_commit") != model.resolved_commit
+        ):
+            return fail(
+                f"the manifest received is not for {model.model_id} at the pinned commit "
+                f"{model.resolved_commit[:12]}, so it was not saved."
+            )
+        manifest = _validate_manifest(document, model=model)
+    except AcquisitionError as exc:
+        return fail(f"the pinned file list could not be used ({exc.code}).")
+    except Exception as exc:
+        return fail(
+            f"the pinned file list could not be fetched ({getattr(exc, 'code', type(exc).__name__)})."
+        )
+    try:
+        descriptor = os.open(args.out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return fail(f"{args.out} already exists; choose a new file name.")
+    except OSError:
+        return fail(f"{args.out} could not be created.")
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(canonical_json(manifest) + "\n")
+    print(canonical_json({"manifest": str(args.out), "model_id": model.model_id,
+                          "resolved_commit": model.resolved_commit,
+                          "files": len(manifest["files"])}))
+    return 0
+
+
 def _models_import(args, environ, resolver) -> int:
     """``models import``: plain-English failures, exit status 1, nothing partial installed."""
     import json
@@ -485,6 +541,8 @@ def _models_import(args, environ, resolver) -> int:
             f"{args.model} at {args.commit[:12]} is not a supported pinned model in this "
             "version, so it cannot be imported."
         )
+    if args.models_action == "fetch-manifest":
+        return _fetch_manifest(args, model, offline, resolver, fail)
     if args.manifest is not None:
         try:
             raw = args.manifest.read_bytes()
@@ -501,11 +559,7 @@ def _models_import(args, environ, resolver) -> int:
         )
     else:
         try:
-            if resolver is None:
-                from mycelium_a13_macos.acquisition import _HTTPRepositoryTransport
-
-                resolver = _HTTPRepositoryTransport().resolve
-            manifest = resolver(model)
+            manifest = _resolve_pinned_manifest(model, resolver)
         except Exception as exc:
             return fail(
                 "the pinned file list could not be fetched "

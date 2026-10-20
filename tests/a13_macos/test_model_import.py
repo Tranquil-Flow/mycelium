@@ -252,7 +252,7 @@ def test_cli_fetch_manifest_writes_the_pinned_manifest_that_import_accepts(stick
                     model_manifest_resolver=lambda model: manifest)
     assert code == 0 and "pinned.manifest.json" in capsys.readouterr().out
     written = json.loads((tmp_path / "pinned.manifest.json").read_text())
-    assert written == manifest
+    assert written == {**manifest, "files": sorted(manifest["files"], key=lambda row: row["path"])}
     code = cli.main(_argv(stick, tmp_path, "--manifest", str(tmp_path / "pinned.manifest.json")),
                     environ={})
     assert code == 0
