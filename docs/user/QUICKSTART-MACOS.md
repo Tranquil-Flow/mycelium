@@ -59,7 +59,7 @@ Open **~/Applications/Mycelium A13.app**. It opens a private page in your defaul
 
 1. **Read and tick the consent box.** It says other Macs in your swarm can see the prompts, outputs or intermediate data they need for their work. Mycelium does not hide your prompt from the Macs that serve it.
 2. **Choose your limits:** power (AC only, or battery allowed), network (unmetered only, or metered allowed), and storage (1, 2, 4 or 23 GB). The defaults are AC only and unmetered only.
-3. **Start the public relay first.** In the card "Invite or join with a code", press **Start public relay (before creating the swarm)**. This starts a temporary Cloudflare tunnel. The order matters: if you create the swarm first, the app refuses to add a relay afterwards (`network_requires_fresh_owner`).
+3. **Start the public relay when you want other Macs to join.** In the card "Invite or join with a code", press **Start public relay**. This starts a temporary Cloudflare tunnel. You can do it before or after creating the swarm. You can ask for join codes at any time: a code asked for before the relay starts shows "ready to share once the relay starts" and becomes redeemable the moment the relay is up. Joined Macs can only serve while the relay is running ("N members joined, waiting for relay to serve").
 4. Press **Create authority & enroll this Mac**. This creates your swarm identity on this Mac. No account and no organizer credentials are needed.
 5. **Get the model ready on this Mac.** If you press Start without a prepared model, the app says: "Download the selected model on this Mac first (Inference → Download / resume source), then press Start again."
 
@@ -123,10 +123,10 @@ Uninstall example (the executable inside the app link):
 ## Sources
 
 - `docs/handover/A13-MACOS-QUICKSTART.md` (earlier preview notes: Gatekeeper, state folder, pairing)
-- `mycelium_a13_macos/web/index.html` (button names, consent text, policy options, "Start public relay (before creating the swarm)")
+- `mycelium_a13_macos/web/index.html` (button names, consent text, policy options, "Start public relay")
 - `mycelium_a13_macos/web/run.js` (run steps; `owner_model_not_prepared` message)
 - `mycelium_a13_macos/web/chat.js` (chat state messages, "Served by")
-- `mycelium_a13_macos/app.py` (`network_requires_fresh_owner`), `mycelium_a13_macos/adaptive_owner.py`
+- `mycelium_a13_macos/app.py` (`relay_required`, `network_requires_fresh_owner`), `mycelium_a13_macos/adaptive_owner.py`
 - `mycelium_a13_macos/__main__.py` (`--install`, `--uninstall`, `--rollback`, `--install-status`), `mycelium_a13_packaging/installer_core.py` (`--delete-identity-and-state`, `refused` output), `mycelium_a13_macos/installer.py` (quarantine kept, paths)
 - `scripts/finalize_a13_macos.py` (what the bundle contains; ad-hoc signature, not notarized)
 - `/Users/evinova-self/Documents/mycelium-core-program/status/A13-OWNER-CHECKLIST-20261020.md` (install, verify, restart, uninstall order; package name and version)

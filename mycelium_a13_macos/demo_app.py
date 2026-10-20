@@ -95,7 +95,8 @@ def owner_run(app: Any):
 
 def relay_gate(app: Any) -> None:
     """Serving only with the relay up: joined members are waiting for it (R23 6a); never a bare failure."""
-    count = app.members_joined_without_relay()
+    counter = getattr(app, 'members_joined_without_relay', None)  # stand-in apps in tests have none
+    count = 0 if counter is None else counter()
     if count:
         from .app import DemoActionError
         raise DemoActionError(

@@ -17,7 +17,7 @@ async function api(path, body) {
 const ADAPTIVE_TEXT={off:'Off. Nothing is reduced or paused automatically; your memory limit, disk floor, power/heat/network limits, Pause sharing and Stop still apply.',
   manual:'Adaptive sharing is off; Pause sharing and Stop are ready. Your memory limit, disk floor and power/heat/network limits still apply.',
   active:'On · normal. New work is accepted within your limits.',reduced:'On · reduced. Taking fewer new requests while this Mac is busy.',
-  drain:'No new work; finishing, handing off or ending running work.',withdraw:'Stopped. Model memory released; no work from this Mac.',
+  drain:'No new work: draining, finishing, handing off or ending running work.',withdraw:'Stopped. Model memory released; no work from this Mac.',
   error:'The sharing policy could not be read. New work is refused until you turn it off or on again.'};
 const ADAPTIVE_REASON={owner_game_mode:'you paused sharing',owner_stop:'you pressed Stop',host_memory_pressure:'memory is low',
   host_cpu_saturation:'the CPU is busy',resource_thermal_policy_violation:'this Mac is hot',resource_power_policy_violation:'the battery rules apply',none:''};

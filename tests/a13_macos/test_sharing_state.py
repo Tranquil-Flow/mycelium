@@ -105,3 +105,13 @@ def test_hosted_page_never_shows_sharing_while_rejoining():
     assert ok["route"]["state"] == "serving"
     old = swarm_live.project(owner_run=run.status(), adaptive=None, recovery=None, observatory=None, busy=False)
     assert old["route"]["state"] == "serving"  # existing callers unchanged
+
+
+def test_hosted_host_section_projects_pause_and_adaptive_flags_as_bools_only():
+    doc = swarm_live.project(owner_run=None, adaptive={"enabled": True, "state": "manual", "mode": "drain",
+                                                       "reason": "owner_game_mode", "capacity_scale": "zero",
+                                                       "pause_sharing": True, "adaptive_sharing": False,
+                                                       "line": "Adaptive sharing: off - you paused sharing"},
+                             recovery=None, observatory=None, busy=False)
+    host = doc["host"]
+    assert host["pause_sharing"] is True and host["adaptive_sharing"] is False and "line" not in host

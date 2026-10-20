@@ -478,6 +478,9 @@ class _Server(ThreadingHTTPServer):
         pass
 
 
+_CONSENT_ROUTES = frozenset({'/api/create','/api/join/request','/api/join/window'})
+
+
 class DemoApp:
     def __init__(self, state_root, *, authority_factory=None, check_platform=True, _test_peer_factory=None,
                  _test_join_base_url=None):
@@ -1107,18 +1110,16 @@ class DemoApp:
         return {'state':'not_yet_serving','route_ready':False,
                 'next_action':'Native route preparation and exact model execution approval required.'}
 
-    _CONSENT_ROUTES = frozenset({'/api/create','/api/join/request','/api/join/window'})
-
     def action(self, path, body):
         # R26: the consent form may carry a top-level optional ``adaptive_sharing`` bool (ticked by
         # default in the UI).  It is split off before every strict key check and applied only after
         # the consent step succeeded; a body without it behaves exactly as before.
         choice = None
-        if path in self._CONSENT_ROUTES and isinstance(body, dict) and 'adaptive_sharing' in body:
+        if path in _CONSENT_ROUTES and isinstance(body, dict) and 'adaptive_sharing' in body:
             choice = body['adaptive_sharing']
             if type(choice) is not bool: raise DemoError('invalid_request')
             body = {k: v for k, v in body.items() if k != 'adaptive_sharing'}
-        result = self._action(path, body)
+        result = DemoApp._action(self, path, body)  # explicit: callers may pass a stand-in ``self``
         if choice is not None:
             from .adaptive_owner import apply_first_consent_choice
             apply_first_consent_choice(self, choice)

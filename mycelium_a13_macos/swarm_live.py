@@ -88,7 +88,9 @@ def _host(adaptive: Any) -> dict[str, Any]:
             'capacity_scale': scale if type(scale) in (int, float) else None,
             'new_admissions_allowed': adaptive.get('new_admissions_allowed') is True,
             'withdraw_overdue': adaptive.get('withdraw_overdue') is True, 'stopped': adaptive.get('stopped') is True,
-            'scope': 'entry_mac'}
+            'scope': 'entry_mac',
+            # additive booleans: the manual "Pause sharing" and the automatic "Adaptive sharing" setting
+            **{key: adaptive[key] is True for key in ('pause_sharing', 'adaptive_sharing') if key in adaptive}}
 
 
 def _recovery(document: Any) -> dict[str, Any]:

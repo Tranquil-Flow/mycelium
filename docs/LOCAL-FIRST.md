@@ -161,15 +161,14 @@ is unchanged.
   (SOURCE-READ: `mycelium_a13_macos/app.py`, `pairing.py`). Do not start the
   "public relay" if you want zero hosted services; the single-machine path works
   without it.
-- **Order trap, now handled for new swarms.** The relay has to exist before the
-  swarm does, because the swarm's identity records its origin. The create form has
-  a "Let other Macs join" box that starts the relay and then creates the swarm in one
-  step, and closes the relay again if creation fails (TESTED (unit); the page itself
-  is not driven by a browser test). A swarm that was already created without a relay
-  still cannot get one: `/api/network/start` answers `network_requires_fresh_owner`
-  with a message and `fix: create_with_relay`, and the page shows the message and a
-  note. Adding a relay to an existing swarm (a relocation of its identity) is not
-  implemented.
+- **Relay order: no longer a trap.** The relay can start before or after the swarm is created.
+  Creating with the "Let other Macs join" box still starts the relay first. For a swarm
+  created without one, `/api/network/start` reopens the retained authority on the relay's
+  origin (`endpoint_recovery.attach_public_endpoint`; same swarm identity, same member), and a
+  failure closes the relay and restores the swarm as it was. Join codes can be asked for at
+  any time: before the relay exists they are kept as "ready to share once the relay starts" and
+  open as real codes when it starts. Serving (`/api/demo/start`, `/api/serving/start`) with
+  joined members and no relay answers `relay_required` with `fix: start_relay`.
 - **Route bring-up over LAN.** `mycelium_live/route.py` forwards only
   `--sidecar-force-relay`; the operator plans use `ssh_target`.
 - **Discovery.** There is no mDNS/Bonjour. Peers learn each other's addresses from

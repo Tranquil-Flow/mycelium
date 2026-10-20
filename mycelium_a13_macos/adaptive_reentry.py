@@ -12,7 +12,7 @@ node sent, never from a local flag:
 
 Traffic starts only once the host has already been calm for the recovery window (so a node in
 trouble does not poll the authority), at most once per sample interval, and never while the
-owner pressed Stop or Game mode is on.  A failure records nothing.  Load proof and route
+owner pressed Stop or Pause sharing (wire key ``game_mode``) is on.  A failure records nothing.  Load proof and route
 qualification are not claimed here: the withdrawn worker was closed, so ordinary
 qualification must run again before any request is placed.
 """

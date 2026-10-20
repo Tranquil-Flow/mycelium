@@ -114,7 +114,7 @@ Write down the exact text on screen and what you pressed before it appeared. The
 - `mycelium_a13_macos/web/swarm.js` (swarm error texts and codes)
 - `mycelium_a13_macos/web/chat.js` (chat messages)
 - `mycelium_a13_macos/web/index.html` (consent and adaptive texts)
-- `mycelium_a13_macos/app.py` (`network_requires_fresh_owner`), `mycelium_a13_macos/acquisition.py` (`insufficient_disk`)
+- `mycelium_a13_macos/app.py` (`relay_required`, `network_requires_fresh_owner`), `mycelium_a13_macos/acquisition.py` (`insufficient_disk`)
 - `mycelium_a13_packaging/installer_core.py`, `mycelium_a13_macos/installer.py` (`refused` codes)
 - `mycelium_a13_macos/adaptive_host.py` (`recovery_s` = 120, `stale_after_s` = 6), `mycelium_a13_macos/adaptive_owner.py`
 - `ui/web/src/features/inference/InferenceWorkspace.tsx` (phase labels), `ui/web/src/features/internetNative/InferencePathBadge.tsx`, `InternetIncidentVocabulary.ts` (incident labels)
