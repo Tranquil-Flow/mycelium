@@ -62,6 +62,7 @@ from mycelium_router.live_ports import (
     PublishedTopologyProvider,
 )
 from mycelium_router.adaptive_overlay import read_gate as _read_adaptive_gate
+from mycelium_router.service_modes import read_service_mode, router_config_for_mode
 from mycelium_router.layer_builder import layer_load_proof_digest
 from mycelium_router.router import Router
 from mycelium_router.transports.iroh import (
@@ -4376,6 +4377,7 @@ class PhysicalNodeService:
             self.state == "RUNNING" and self.router is not None,
             "invalid_state_for_infer_start",
         )
+        self._refresh_service_mode()
         excluded_placement_ids = data.get("excluded_placement_ids", [])
         _require(
             isinstance(excluded_placement_ids, list)
@@ -5794,6 +5796,29 @@ class PhysicalNodeService:
             raise NodeCommandError("a10_target_verify_failed") from None
         return _plain_json(result)
 
+    def _refresh_service_mode(self) -> str | None:
+        """Apply the owner's service mode (PV9) to this node's relay before a request starts.
+
+        The owner app publishes ``service-mode.json`` into this node's private capacity root.
+        Only the relay's batching knobs change (see ``mycelium_router.service_modes``); the
+        route, the runtime and the node's base configuration stay as they are.  An A10
+        benchmark policy in force is never overridden.  Returns the mode now in force, or
+        ``None`` when nothing was applied.
+        """
+
+        if getattr(self, "_a10_batch_policy_applied", False):
+            return None
+        with self._control_lock:
+            if self.state != "RUNNING" or self.router is None:
+                return None
+            mode = read_service_mode(self.capacity_root)
+            config = router_config_for_mode(self._router_config, mode)
+            relay = self.router.relay
+            if relay.batch_controller.config != config:
+                relay.batch_scheduler.config = config
+                relay.batch_controller.config = config
+        return mode
+
     def _a10_batch_policy(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Switch this node's runtime batch policy for the A10 paired benchmark.
 
@@ -5826,6 +5851,9 @@ class PhysicalNodeService:
             relay = self.router.relay
             relay.batch_scheduler.config = config
             relay.batch_controller.config = config
+            # The paired benchmark owns the batch policy from here on; the owner's service
+            # mode (PV9) never overrides it.
+            self._a10_batch_policy_applied = True
         return {
             "protocol": A10_BATCH_POLICY_RECEIPT_PROTOCOL,
             "policy": policy,

@@ -100,9 +100,12 @@ class RegistryClient:
         with self._open(path, body) as response:
             return json.load(response)
 
-    def stream(self, prompt: str, max_new_tokens: int, on_token: Callable[[str], None]) -> dict[str, Any]:
+    def stream(self, prompt: str, max_new_tokens: int, on_token: Callable[[str], None],
+               qos_class: str = 'interactive') -> dict[str, Any]:
         # Same request shape as the client that drove this API on hardware
         # (mycelium_a7_physical_measurement.py): request_gateway v2, interactive.
+        if qos_class not in ('interactive', 'batch'):
+            raise ChatError(400, 'chat_request_invalid')
         session = self._json('/api/v1/bootstrap')['session']
         self._csrf = {session['csrf_header']: session['csrf_token']}
         # 503 is the registry's answer while no route is qualified (runs 13/14
@@ -118,7 +121,8 @@ class RegistryClient:
         accepted = self._json('/api/v1/inference', {
             'protocol': 'mycelium.request_gateway.v2', 'prompt': prompt,
             'max_new_tokens': max_new_tokens, 'qualification': qualification['binding'],
-            'workload_profile_id': 'interactive_chat_v1', 'qos_class': 'interactive'})
+            'workload_profile_id': 'sustained_batch_v1' if qos_class == 'batch' else 'interactive_chat_v1',
+            'qos_class': qos_class})
         terminal = None
         kind = None
         self._arm_cancel(accepted)

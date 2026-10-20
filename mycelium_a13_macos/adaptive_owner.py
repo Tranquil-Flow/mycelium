@@ -38,9 +38,16 @@ def _runtime(app: Any) -> ah.AdaptiveHostRuntime:
     return runtime
 
 
-def status_line(*, automatic: bool, mode: str, reason: str) -> str:
-    """'Adaptive sharing: reduced - <reason>' / 'paused - <reason>' (<= 120 chars, allow-listed text)."""
+def status_line(*, automatic: bool, mode: str, reason: str, priority_app: tuple[str, bool] | None = None) -> str:
+    """'Adaptive sharing: reduced - <reason>' / 'paused - <reason>' (<= 120 chars, allow-listed text).
+
+    ``priority_app`` (PV3) is ``(display name, running now)`` for a pause held by the owner's Priority
+    apps list: 'paused - <app> is running' (or 'was running' while the calm period runs).
+    """
     why = REASON_TEXT.get(reason, "")
+    if priority_app is not None and mode in ("drain", "withdraw"):
+        name, running = priority_app
+        return f"Adaptive sharing: paused - {name} {'is' if running else 'was'} running"[:120]
     if not automatic:
         line = "Adaptive sharing: off" + (f" - {why}" if mode in ("drain", "withdraw") and why else "")
     elif mode == "reduced":
@@ -55,7 +62,7 @@ def status_line(*, automatic: bool, mode: str, reason: str) -> str:
 def adaptive_status(app: Any) -> dict[str, Any]:
     """Coarse owner-visible state; allow-listed fields only."""
     try:
-        policy = ah.read_adaptive_policy(app.root)
+        policy = ah.effective_policy(app.root)  # + the manual controller while Priority apps are listed (PV3)
     except ah.AdaptiveHostError as error:
         return {"enabled": False, "state": "error", "policy_error": error.code,
                 "new_admissions_allowed": False}
@@ -70,11 +77,16 @@ def adaptive_status(app: Any) -> dict[str, Any]:
     status = controller.status()
     publication = controller.publication()
     now = getattr(app, "_adaptive_clock", time.monotonic)()
+    priority = None
+    if status["reason"] == "owner_game_mode" and not policy["game_mode"] and not status["stopped"]:
+        if controller.priority_label is not None:
+            priority = (controller.priority_label, controller.priority_app is not None)
     return {
         "enabled": True, "game_mode": policy["game_mode"], "pause_sharing": policy["game_mode"],
         "adaptive_sharing": automatic, "stopped": status["stopped"],
         "state": ("active" if automatic else "manual") if status["mode"] == "normal" else status["mode"],
-        "line": status_line(automatic=automatic, mode=status["mode"], reason=status["reason"]),
+        "line": status_line(automatic=automatic, mode=status["mode"], reason=status["reason"],
+                            priority_app=priority),
         "mode": status["mode"], "reason": status["reason"], "generation": status["generation"],
         "capacity_scale": publication["capacity_scale"],
         "new_admissions_allowed": publication["new_admissions_allowed"],
@@ -86,7 +98,7 @@ def adaptive_status(app: Any) -> dict[str, Any]:
 def adaptive_publication(app: Any) -> dict[str, Any] | None:
     """The allow-listed A1 projection (``ah.PUBLICATION_KEYS``), or ``None`` while off."""
     try:
-        policy = ah.read_adaptive_policy(app.root)
+        policy = ah.effective_policy(app.root)
     except ah.AdaptiveHostError:
         return None
     if not policy["enabled"]:
@@ -127,7 +139,7 @@ def adaptive_action(app: Any, path: str, body: Any) -> dict[str, Any]:
     if body != {}:
         raise _error("invalid_request")
     try:
-        enabled = ah.read_adaptive_policy(app.root)["enabled"]
+        enabled = ah.effective_policy(app.root)["enabled"]
     except ah.AdaptiveHostError as error:
         raise _error(error.code) from None
     if not enabled:
