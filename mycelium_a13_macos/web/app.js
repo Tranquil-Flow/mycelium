@@ -495,7 +495,9 @@ function renderJoinFlow(value,target,a){
   const waiting=!!flow.join_window;
   $('join-with-code').disabled=busy || joined || waiting || !$('standing-confirm').checked || !$('visibility').checked;
   $('join-cancel').hidden=!waiting;
+  const lapsed=target && ['expired','stale','unknown'].includes(a.membership_state);
   $('join-hint').textContent=joined || waiting || (owner && !!a.swarm_created) ? ''
+    : lapsed && $('visibility').checked && $('standing-confirm').checked ? 'Your membership lapsed. Ask the owner for a new join code: this Mac keeps its identity and the downloaded model.'
     : !$('visibility').checked ? 'Tick the cooperative-peer visibility box in step 01 to enable “Join with code”.'
     : !$('standing-confirm').checked ? 'Tick the standing-consent box above to enable “Join with code”.' : '';
   const origin=!!value.network?.public_origin;

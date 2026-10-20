@@ -594,10 +594,12 @@ class DemoApp:
             except Exception as exc:
                 from .peer import RemoteMacMemberError
                 if (self.installation_role != 'target' or not isinstance(exc, RemoteMacMemberError)
-                    or exc.code not in {'peer_transport_unreachable', 'seed_http_remote_error'}):
+                    or exc.code not in {'peer_transport_unreachable', 'seed_http_remote_error',
+                                        'peer_member_expired', 'peer_generation_stale', 'peer_member_unknown'}):
                     raise
                 # A dead relay must not remove the local authenticated recovery
-                # surface. No member, native worker or contribution is enabled.
+                # surface. No member, native worker or contribution is enabled.  The same holds for a lapsed
+                # membership (V1.1 d): the app starts so the owner's new invite can replace it (``/api/join/window``).
                 self.recovery_error = exc.code
                 self.running = False
             self._open_acquisition()
