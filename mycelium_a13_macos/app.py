@@ -439,6 +439,15 @@ def _sharing_status(app):
         return {'state':'idle','line':'Not sharing yet'}
 
 
+def _peer_liveness():
+    """Per-peer liveness (fresh/stale/quarantined, last seen) of the route open in this process, else None."""
+    try:
+        from mycelium_live.route import open_route_peer_liveness
+        return open_route_peer_liveness()
+    except Exception:
+        return None
+
+
 def _demo_status(app, part):
     """Status of the one-click demo pieces; never lets them break /api/status."""
     try:
@@ -1202,7 +1211,7 @@ class DemoApp:
                 'sharing':_sharing_status(self),'relay_wait':self._relay_wait_status(),
                 'owner_run':_demo_status(self,'owner'),'demo_target':_demo_status(self,'target'),
                 'chat':_demo_status(self,'chat'),'swarm':_swarm_status(self),
-                'serving':self._serving_block()}
+                'serving':self._serving_block(),'peer_liveness':_peer_liveness()}
 
     def _serving_block(self):
         wait=self._relay_wait_status()

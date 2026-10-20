@@ -558,6 +558,11 @@ class ManagedControlOwner:
 
 
 class ManagedNodeSession:
+    #: Lifetime of an idle liveness probe to a peer reached through the mailbox.  The route's own probe budget (0.5 s)
+    #: is shorter than one claim + execute + result round trip over a relay, so every probe expired and a healthy
+    #: remote peer was quarantined (V1.1 h/j).  Active-request liveness is unaffected.
+    idle_probe_floor_seconds = 4.0
+
     def __init__(self, owner, *, node_id, run_id, deployment_id, timeout_seconds):
         if (isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float))
                 or not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= MAX_SESSION_TIMEOUT_SECONDS):
