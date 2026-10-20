@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -109,7 +110,7 @@ def test_cutover_failure_restarts_the_unchanged_incumbent_and_proves_it(tmp_path
     def boom():
         raise RuntimeError("cutover refused")
     receipt = _run(fleet, tmp_path, cutover=boom)
-    assert receipt["status"] == "ROLLED_BACK" and receipt["reason"] == "cutover_failed:RuntimeError"
+    assert receipt["status"] == "ROLLED_BACK" and receipt["reason"] == "cutover_failed:RuntimeError:cutover refused"
     assert receipt["checks"]["incumbent_unchanged"] is True
     assert fleet.calls[-1].startswith("start:") and "adopt:node-0" not in fleet.calls
 
@@ -216,6 +217,19 @@ def test_production_root_and_decoys_are_refused_before_anything_runs(tmp_path):
 
 def test_default_forbidden_root_is_the_production_physical_run(tmp_path):
     assert any(str(p).endswith("mycelium-physical-run") for p in tx.PRODUCTION_ROOTS)
+
+
+def test_cutover_failure_reason_keeps_the_error_code_and_bounds_the_message(tmp_path):
+    fleet = FakeFleet(tmp_path)
+    def refused():
+        raise tx.CutoverRefused("seed_key_mismatch")
+    receipt = _run(fleet, tmp_path, cutover=refused)
+    assert receipt["reason"] == "cutover_failed:CutoverRefused:seed_key_mismatch"
+    long = FakeFleet(tmp_path)
+    def verbose():
+        raise ValueError("x" * 500)
+    receipt = _run(long, tmp_path, cutover=verbose)
+    assert receipt["reason"] == "cutover_failed:ValueError:" + "x" * 120
 
 
 def test_command_fleet_adapter_runs_listed_argv_only_and_parses_json(tmp_path):
