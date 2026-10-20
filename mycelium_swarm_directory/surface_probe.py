@@ -48,7 +48,8 @@ def _default_opener(request: urllib.request.Request, timeout: float) -> Any:
 
 def _fetch(base: str, method: str, path: str, client_ip: str | None, opener: Callable[..., Any],
            timeout: float) -> tuple[int, Any] | None:
-    headers = {'Accept': '*/*'}
+    # Cloudflare's browser integrity check answers 403 to the default Python-urllib agent, so name the probe.
+    headers = {'Accept': '*/*', 'User-Agent': 'mycelium-surface-probe/1 (+https://mycelium.now/swarms/)'}
     if client_ip:
         headers['Cf-Connecting-Ip'] = client_ip  # only for loopback tests; Cloudflare sets it on the real origin
     data = None
