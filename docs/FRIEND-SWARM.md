@@ -89,13 +89,20 @@ The join screen translates these codes; the wording may vary slightly.
 
 ## Leaving a swarm
 
-A member can leave at any time from **Leave swarm**:
+A Mac that joined can leave at any time from **Leave swarm** (tick the confirmation first):
 
-- **Leave smoothly** stops taking new work, lets the swarm finish or hand off what is
-  running, publishes its withdrawal and then removes its consent. If that takes more than
-  30 seconds it leaves instantly instead.
-- **Instant leave** withdraws consent and disconnects now, like losing the internet.
-  The owner's swarm adapts on the next request.
+- **Leave smoothly** stops new work and lets the requests already running on this Mac
+  finish, then unloads the model, withdraws the standing consent and stops renewing the
+  membership. If the number of running requests has not gone down for 30 seconds (or the
+  wait passes 120 seconds) it leaves instantly instead and says so. Running requests are
+  not handed to a successor Mac: a member has no way to start or prove a handoff, so they
+  finish here or end with the swarm's normal failure handling.
+- **Instant leave** withdraws consent and disconnects now, like losing the internet. The
+  owner's swarm adapts on its next request.
+
+A member cannot sign its own removal at the owner: the owner sees a Mac that left the way it
+sees any lost Mac (its lease stops renewing and the control connection closes), and can
+revoke it from the owner screen.
 
 ## Limits
 

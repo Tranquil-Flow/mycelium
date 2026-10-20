@@ -217,6 +217,13 @@ def test_instant_leave_route_withdraws_consent_stops_renewal_and_owner_survives(
         assert target._resource_check() == "owner_stop"      # nothing new is admitted
         assert target._left is True                           # lease renewal has stopped
         assert owner.status()["authority"]["swarm_created"] is True   # owner unaffected
+        # The owner still sees the Mac as a member until its lease ends; revoking it works.
+        [member] = [m for m in owner.status()["authority"]["members"]
+                    if m["node_id"] == target.authority.member.node_id]
+        revoked = owner.action("/api/revoke", {"node_id": member["node_id"],
+                                               "generation": member["generation"]})
+        assert revoked["route_ready"] is False
+        assert owner.status()["authority"]["swarm_created"] is True
     finally:
         target.close(); owner.close()
 
