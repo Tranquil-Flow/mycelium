@@ -180,7 +180,7 @@ $('create-form').addEventListener('submit',async(event)=>{
   event.preventDefault();
   const join=event.submitter?.id==='join';
   const withRelay=!join && $('create-with-relay').checked;
-  if(withRelay && !window.confirm('Start a temporary Cloudflare quick tunnel, then create the swarm? The relay terminates HTTPS and can observe control traffic; inference stays on Iroh.'))return;
+  if(withRelay && !window.confirm('Start a temporary Cloudflare quick tunnel, then create the swarm? The relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh.'))return;
   const result=await perform(join?'/api/join/request':'/api/create',{consent:{peer_visibility:$('visibility').checked,power:$('power').value,
     storage_bytes:Number($('storage').value),network:$('network').value,background:false,diagnostics:false,
     thermal:'stop_on_serious'},...(withRelay?{relay_acknowledged:true,max_seconds:1800}:{})},join?'Target identity created. Send the public request to the owner. No seed was created on this Mac.':
