@@ -163,8 +163,12 @@ revoke it from the owner screen.
 
 - Cloudflare quick tunnels have no uptime guarantee and a lifetime set by the owner
   (at most 30 minutes in the app); this is a session tool, not an always-on service.
-  Your own address keeps the same hostname across restarts, but the relay in the app still
-  has the same 30-minute limit and must be restarted.
+  Your own address keeps the same hostname across restarts. Its relay in the app extends
+  itself shortly before it expires **while a run is serving**, for up to 24 hours in total
+  (`max_renewed_seconds`, at most 7 days; `auto_renew: false` turns it off). A relay that is
+  not serving is never extended. An owner who runs a named tunnel can pass `long_lived: true`
+  to `/api/network/start` or `/api/network/restart` (external provider only) for a relay with
+  no deadline; that is an explicit setting and is shown in the relay status.
 - A direct (hole-punched) Iroh path is not guaranteed; carrier-grade NAT often leaves
   the n0 relay as the path. A relay path is acceptable for small models.
 - There is no self-hosted relay and no zero-third-party rendezvous in this build.

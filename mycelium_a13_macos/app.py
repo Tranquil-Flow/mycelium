@@ -267,6 +267,11 @@ def host_memory_bytes():
     return value if type(value) is int and value > 0 else None
 
 
+#: Optional body keys of an external-provider relay request (public_origin and proxy_port are required).
+_EXTERNAL_OPTIONAL=frozenset({'provider','public_origin','proxy_port','cloudflare_front','auto_renew','long_lived',
+                              'max_renewed_seconds'})
+
+
 def read_resource_policy(root):
     path=root/'resource-policy.json'
     if mycelium_host_platform.is_win32():
@@ -660,7 +665,7 @@ class DemoApp:
             raise DemoError('network_requires_fresh_owner')
         external=body.get('provider')=='external'
         _base={'relay_acknowledged','max_seconds'}
-        shape_ok=(_base|{'provider','public_origin','proxy_port'}<=set(body)<=_base|{'provider','public_origin','proxy_port','cloudflare_front'}
+        shape_ok=(_base|{'provider','public_origin','proxy_port'}<=set(body)<=_base|_EXTERNAL_OPTIONAL
                   if external else
                   set(body) in (_base,_base|{'provider'}) and body.get('provider','cloudflare')=='cloudflare')
         if (not shape_ok or body['relay_acknowledged'] is not True
@@ -705,9 +710,18 @@ class DemoApp:
         from .public_relay import TemporaryHttpsRelay
         if spec.get('provider')!='external':return TemporaryHttpsRelay(root,provider=spec.get('provider','cloudflare'))
         try:
-            return TemporaryHttpsRelay(root,provider='external',public_origin=spec['public_origin'],
-                proxy_port=spec['proxy_port'],cloudflare_front=spec.get('cloudflare_front',False))
+            relay=TemporaryHttpsRelay(root,provider='external',public_origin=spec['public_origin'],
+                proxy_port=spec['proxy_port'],cloudflare_front=spec.get('cloudflare_front',False),
+                auto_renew=spec.get('auto_renew',True),long_lived=spec.get('long_lived',False),
+                **({'max_renewed_seconds':spec['max_renewed_seconds']} if 'max_renewed_seconds' in spec else {}))
         except ValueError as error:raise DemoError(str(error)) from None
+        relay.set_serving_probe(self._relay_is_serving)
+        return relay
+
+    def _relay_is_serving(self):
+        """True while an owner run is active: the external relay may extend itself only then (V1.1 e)."""
+        run=getattr(self,'owner_run',None)
+        return run is not None and run.active() is True
 
     @staticmethod
     def _free_seed_port(avoid=None):
@@ -1311,7 +1325,7 @@ class DemoApp:
                 _base={'relay_acknowledged','max_seconds'}
                 external=body.get('provider')=='external'
                 if (self.installation_role!='owner' or not self.authority.status().get('swarm_created')
-                    or not (set(body)==_base or (external and _base|{'provider'}<=set(body)<=_base|{'provider','public_origin','proxy_port','cloudflare_front'}))
+                    or not (set(body)==_base or (external and _base|{'provider'}<=set(body)<=_base|_EXTERNAL_OPTIONAL))
                     or body['relay_acknowledged'] is not True
                     or type(body['max_seconds']) is not int or not 30<=body['max_seconds']<=1800):
                     raise DemoError('network_consent_required')

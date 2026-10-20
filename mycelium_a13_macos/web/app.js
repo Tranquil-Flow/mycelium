@@ -134,6 +134,7 @@ const HUMAN_ERRORS={
   relay_proxy_closed:'The relay was closed. Start it again to let other Macs reach this one.',
   relay_route_unknown:'That address is not served through the relay.',
   relay_seed_invalid:'The relay could not reach this swarm’s membership service. Stop and start the relay again.',
+  relay_renewal_invalid:'The relay renewal settings are not valid. Use true or false for auto-renew and long-lived, and a total of up to 7 days.',
   relay_start_failed:'The public relay did not start. Check your internet connection, make sure cloudflared is installed, and try again.',
   relay_stop_failed:'The relay did not stop cleanly. Quit and reopen Mycelium if it keeps running.',
   relay_swarm_entry_failed:'The swarm’s public chat could not be reached through the relay. Try again in a moment.',
