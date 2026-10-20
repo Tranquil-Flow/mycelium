@@ -218,7 +218,7 @@ function render(value) {
     : !canDownload ? 'Create or join a swarm first; the download unlocks once this Mac is enrolled.'
     : !$('download-consent').checked ? 'Tick the authorization box above to enable the download.' : '';
   $('leave-hint').textContent=target && a.membership_state==='current'
-    ? 'This Mac joined as a member, so it has no “Revoke this Mac” button: only the owner revokes membership. To leave, press “Withdraw standing consent” (Invite or join with a code) so no more work is accepted, then press “Stop & retain private state”.' : '';
+    ? 'This Mac joined as a member. To leave the swarm, use “Leave swarm” below: “Leave smoothly” lets work in progress finish first; “Instant leave” stops at once. Only the owner can revoke a membership.' : '';
   $('download-consent').disabled=busy || downloading;
   $('download-limit').disabled=busy || downloading;
   if(acquisition){
@@ -562,7 +562,7 @@ let joinPolling=false;
 setInterval(async()=>{
   if(busy||!connected||joinPolling||!latest?.join_flow?.join_window)return;
   joinPolling=true;
-  try{const value=await api('/api/join/window/poll',{});if(value.state==='joined'){notice('Joined. Capability and relay link reported to the owner automatically.');}await refresh(false);}
+  try{const value=await api('/api/join/window/poll',{});if(value.state==='joined'){const skew=(value.warnings||[]).find(w=>w&&w.code==='clock_skew');notice(skew?`Joined. Warning: this Mac's clock differs from the owner's by about ${Math.round(skew.skew_seconds)} s. Turn on “Set time and date automatically” in System Settings, or joining and renewals may fail.`:'Joined. Capability and relay link reported to the owner automatically.');}await refresh(false);}
   catch(error){notice(`Join not completed: ${humanError(error.message)}`);await refresh(false);}
   finally{joinPolling=false;}
 },3000);
