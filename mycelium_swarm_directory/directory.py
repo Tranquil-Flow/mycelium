@@ -49,7 +49,10 @@ class Limits:
     #: signed read-only queries (/my-grants, /owner-inbox): the page repeats them, so they do not spend the write budgets
     queries_per_ip_per_minute: int = 240
     queries_per_key_per_minute: int = 90
+    #: directory-wide budget of *signature-verified* writes (records, deletes, requests, grants, denials, offers)
     writes_per_minute: int = 600
+    #: signature-verified heartbeats have their own budget: a write flood cannot turn live swarms offline
+    heartbeats_per_minute: int = 1200
 
 
 class Directory:
@@ -68,6 +71,7 @@ class Directory:
         self._ip_queries = WindowLimiter(limits.queries_per_ip_per_minute)
         self._key_queries = WindowLimiter(limits.queries_per_key_per_minute)
         self._writes = WindowLimiter(limits.writes_per_minute, max_keys=1)
+        self._beats = WindowLimiter(limits.heartbeats_per_minute, max_keys=1)
         self._nonce_inserts = 0
 
     def now(self) -> int:
@@ -105,14 +109,17 @@ class Directory:
             raise WireError('body_too_large', 413)
         if not (self._ip_queries if path in QUERY_ROUTES else self._ip_writes).allow(client, now):
             raise WireError('rate_limited_ip', 429)
-        if not self._writes.allow('*', now):
-            raise WireError('directory_busy', 503)
         document = parse_json_object(body, limit=self.limits.max_body)
         handler = {'/records': self._put_record, '/delete': self._delete, '/heartbeat': self._heartbeat,
                    '/access-requests': self._access_request, '/owner-inbox': self._owner_inbox,
                    '/grants': self._grant, '/deny': self._deny, '/my-grants': self._my_grants,
                    '/entry-offers': self._entry_offer}[path]
         return handler(document, now)
+
+    def _charge_write(self, now: int) -> None:
+        """Spend the directory-wide write budget; called only once the document's signature has been verified."""
+        if not self._writes.allow('*', now):
+            raise WireError('directory_busy', 503)
 
     def _key_rate(self, key: str, now: int) -> None:
         if not self._key_writes.allow(key, now):
@@ -150,6 +157,7 @@ class Directory:
         record = docs.check_record(document, self.verifier, allow_loopback=self.allow_loopback,
                                     allow_private=self.allow_private)
         self._key_rate(record['owner_key'], now)
+        self._charge_write(now)
         swarm_id = record['swarm_id']
         if self.store.get('tomb', swarm_id) is not None:
             raise WireError('swarm_id_retired', 409)
@@ -181,6 +189,7 @@ class Directory:
     def _delete(self, document, now):
         document = docs.check(document, docs.DELETE, self.verifier)
         self._key_rate(document['owner_key'], now)
+        self._charge_write(now)
         row = self._owned(document['swarm_id'], document['owner_key'])
         if document['seq'] <= row['record']['seq']:
             raise WireError('record_seq_stale', 409)
@@ -206,6 +215,8 @@ class Directory:
         if document['signer_key'] not in allowed:
             raise WireError('heartbeat_signer_not_authorized', 403)
         self._key_rate(document['signer_key'], now)
+        if not self._beats.allow('*', now):  # verified and authorised heartbeats only, on their own budget
+            raise WireError('directory_busy', 503)
         previous = row.get('heartbeat')
         if previous is not None and document['at'] <= previous['at']:
             raise WireError('heartbeat_stale', 409)
@@ -217,6 +228,7 @@ class Directory:
         document = docs.check(document, docs.ACCESS_REQUEST, self.verifier)
         docs.fresh(document['at'], now, self.limits.skew)
         self._key_rate(document['requester_key'], now)
+        self._charge_write(now)
         row = self.store.get('swarm', document['swarm_id'])
         if row is None:
             raise WireError('swarm_unknown', 404)
@@ -251,6 +263,7 @@ class Directory:
         if document['issuer_key'] != row['record']['owner_key']:
             raise WireError('grant_issuer_not_owner', 403)
         self._key_rate(document['issuer_key'], now)
+        self._charge_write(now)
         if document['expires_at'] <= now:
             raise WireError('grant_expired', 403)
         swarm_id, grantee = document['swarm_id'], document['grantee_key']
@@ -265,6 +278,7 @@ class Directory:
         docs.fresh(document['at'], now, self.limits.skew)
         self._owned(document['swarm_id'], document['owner_key'])
         self._key_rate(document['owner_key'], now)
+        self._charge_write(now)
         swarm_id, requester = document['swarm_id'], document['requester_key']
         request = self.store.get('request', swarm_id + '/' + requester)
         if request is None:
@@ -278,6 +292,7 @@ class Directory:
                               allow_private=self.allow_private)
         docs.fresh(document['at'], now, self.limits.skew)
         self._key_rate(document['entry_key'], now)
+        self._charge_write(now)
         swarm_id = document['swarm_id']
         if self.store.get('swarm', swarm_id) is None:
             raise WireError('swarm_unknown', 404)
