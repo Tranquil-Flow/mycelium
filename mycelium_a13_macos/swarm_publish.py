@@ -19,6 +19,7 @@ browsers reach ``/swarm-entry/v1/*`` on this app's relay, where
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -29,6 +30,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
+from mycelium_platform_neutral.network_mode import NetworkMode
 from mycelium_swarm_directory import docs
 from mycelium_swarm_directory.crypto import Ed25519Signer, verify
 from mycelium_swarm_directory.entry import EntryGateway, EntryGuard, EntryPolicy, UsageLedger
@@ -48,9 +50,10 @@ class SwarmPublishError(RuntimeError):
 
 
 class DirectoryClient:
-    def __init__(self, origin: str, *, timeout: float = 8.0) -> None:
+    def __init__(self, origin: str, *, timeout: float = 8.0, allow_private: bool = False) -> None:
         try:
-            docs.origin(origin, allow_loopback=True, code='swarm_directory_origin_invalid')
+            docs.origin(origin, allow_loopback=True, allow_private=allow_private,
+                        code='swarm_directory_origin_invalid')
         except WireError as error:
             raise SwarmPublishError(error.code) from None
         self.origin = origin
@@ -118,7 +121,11 @@ def _relay_origin(app: Any) -> str | None:
 class SwarmPublisher:
     def __init__(self, app: Any, *, origin: Callable[[], str | None] | None = None,
                  client_factory: Callable[[str], Any] = DirectoryClient, clock: Callable[[], float] = time.time,
-                 chat: Callable[[], Any] | None = None) -> None:
+                 chat: Callable[[], Any] | None = None, network_mode: NetworkMode = NetworkMode.INTERNET) -> None:
+        self.network_mode = network_mode
+        self._allow_private = network_mode.allows_private_origins
+        if self._allow_private and client_factory is DirectoryClient:
+            client_factory = functools.partial(DirectoryClient, allow_private=True)
         self.app = app
         self.root = Path(app.root)
         self._origin = origin or (lambda: _relay_origin(app))
@@ -176,7 +183,8 @@ class SwarmPublisher:
         policy = None
         if record is not None:
             try:
-                policy = EntryPolicy.from_record(record, verify, entry_key=self.signer.public_key)
+                policy = EntryPolicy.from_record(record, verify, entry_key=self.signer.public_key,
+                                              allow_private=self._allow_private)
             except WireError:
                 policy = None
         with self._snap:
@@ -211,7 +219,7 @@ class SwarmPublisher:
                                        description=body.get('description', ''), access_mode=body['access_mode'],
                                        open_quota=body.get('open_quota'),
                                        entry={'key': self.signer.public_key, 'origin': origin})
-            docs.check_record(record, verify, allow_loopback=True)
+            docs.check_record(record, verify, allow_loopback=True, allow_private=self._allow_private)
         except WireError as error:
             raise SwarmPublishError('swarm_' + error.code) from None
         self._client_factory(body['directory']).post('/records', record)  # refused -> state unchanged
@@ -227,7 +235,7 @@ class SwarmPublisher:
         if set(body) != {'link'}:
             raise SwarmPublishError('invalid_request')
         try:
-            link = docs.parse_swarm_link(body['link'], allow_loopback=True)
+            link = docs.parse_swarm_link(body['link'], allow_loopback=True, allow_private=self._allow_private)
         except WireError as error:
             raise SwarmPublishError(error.code) from None
         if self._origin() is None:
@@ -345,7 +353,7 @@ class SwarmPublisher:
         value = self._client().get('/swarms/' + swarm_id)
         record = value.get('swarm', {}).get('record') if isinstance(value, dict) else None
         try:
-            record = docs.check_record(record, verify, allow_loopback=True)
+            record = docs.check_record(record, verify, allow_loopback=True, allow_private=self._allow_private)
         except WireError:
             raise SwarmPublishError('swarm_record_invalid') from None
         if record['owner_key'] != self.state['owner_key'] or record['swarm_id'] != swarm_id:

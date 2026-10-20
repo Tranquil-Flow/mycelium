@@ -49,12 +49,14 @@ class Limits:
 
 class Directory:
     def __init__(self, store: Any, verifier: Verifier, *, clock: Callable[[], float] = time.time,
-                 limits: Limits = Limits(), allow_loopback_entries: bool = False) -> None:
+                 limits: Limits = Limits(), allow_loopback_entries: bool = False,
+                 allow_private_entries: bool = False) -> None:
         self.store = store
         self.verifier = verifier
         self.clock = clock
         self.limits = limits
         self.allow_loopback = allow_loopback_entries
+        self.allow_private = allow_private_entries
         self._ip_writes = WindowLimiter(limits.writes_per_ip_per_minute)
         self._key_writes = WindowLimiter(limits.writes_per_key_per_minute)
         self._ip_reads = WindowLimiter(limits.reads_per_ip_per_minute)
@@ -134,7 +136,8 @@ class Directory:
 
     # -- writes ----------------------------------------------------------------
     def _put_record(self, document, now):
-        record = docs.check_record(document, self.verifier, allow_loopback=self.allow_loopback)
+        record = docs.check_record(document, self.verifier, allow_loopback=self.allow_loopback,
+                                    allow_private=self.allow_private)
         self._key_rate(record['owner_key'], now)
         swarm_id = record['swarm_id']
         if self.store.get('tomb', swarm_id) is not None:
@@ -260,7 +263,8 @@ class Directory:
         return {'state': 'denied'}
 
     def _entry_offer(self, document, now):
-        document = docs.check(document, docs.ENTRY_OFFER, self.verifier, allow_loopback=self.allow_loopback)
+        document = docs.check(document, docs.ENTRY_OFFER, self.verifier, allow_loopback=self.allow_loopback,
+                              allow_private=self.allow_private)
         docs.fresh(document['at'], now, self.limits.skew)
         self._key_rate(document['entry_key'], now)
         swarm_id = document['swarm_id']

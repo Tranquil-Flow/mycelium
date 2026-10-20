@@ -26,6 +26,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from mycelium_platform_neutral import network_mode
+
 from . import docs
 from .crypto import verify
 from .directory import Directory, Limits, PRIVACY_NOTE
@@ -228,15 +230,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--public-origin', default=None, help='e.g. https://swarms.mycelium.now')
     parser.add_argument('--trusted-proxy', action='store_true', help='rate-key on Cf-Connecting-Ip (cloudflared)')
     parser.add_argument('--allow-loopback-entries', action='store_true', help='local testing only')
+    network_mode.add_network_mode_argument(parser)
     return parser
+
+
+def build_directory(args: argparse.Namespace, environ: Any = None) -> Directory:
+    """Internet (default): public https entries only; lan: also RFC 1918 http(s) origins."""
+    mode = network_mode.resolve_network_mode(args.network_mode, environ)
+    private = mode.allows_private_origins
+    if args.public_origin is not None:
+        docs.origin(args.public_origin, allow_loopback=True, allow_private=private, code='public_origin_invalid')
+    return Directory(SqliteStore(args.db), verify, limits=Limits(),
+                     allow_loopback_entries=args.allow_loopback_entries, allow_private_entries=private)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.public_origin is not None:
-        docs.origin(args.public_origin, allow_loopback=True, code='public_origin_invalid')
-    directory = Directory(SqliteStore(args.db), verify, limits=Limits(),
-                          allow_loopback_entries=args.allow_loopback_entries)
+    directory = build_directory(args)
     server = DirectoryServer(directory, port=args.port, public_origin=args.public_origin,
                              trusted_proxy=args.trusted_proxy)
     print('swarm directory on %s' % server.origin, flush=True)

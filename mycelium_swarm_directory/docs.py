@@ -7,6 +7,7 @@ returns the document unchanged.  Freshness (``at`` vs. now) and state checks
 """
 from __future__ import annotations
 
+import ipaddress
 import re
 import secrets
 from typing import Any, Mapping
@@ -44,6 +45,8 @@ MAX_NEW_TOKENS = 256
 TIME_MAX = 2 ** 40
 _ORIGIN = re.compile(r'https://(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\Z')
 _LOOPBACK_ORIGIN = re.compile(r'http://127\.0\.0\.1:[1-9][0-9]{1,4}\Z')
+_PRIVATE_ORIGIN = re.compile(r'https?://([0-9.]{7,15})(?::([1-9][0-9]{1,4}))?\Z')
+_RFC1918 = tuple(ipaddress.ip_network(n) for n in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
 
 _KEYS = {
     RECORD: frozenset({'protocol', 'swarm_id', 'owner_key', 'seq', 'name', 'model', 'description',
@@ -147,7 +150,7 @@ def swarm_link(directory_origin: str, swarm_id: str, owner_key: str) -> str:
                                            'owner_key': owner_key}))
 
 
-def parse_swarm_link(value: Any, *, allow_loopback: bool = False) -> dict[str, str]:
+def parse_swarm_link(value: Any, *, allow_loopback: bool = False, allow_private: bool = False) -> dict[str, str]:
     import json
     if not isinstance(value, str) or not value.startswith(LINK_SCHEME) or len(value) > 1024:
         raise WireError('swarm_link_invalid')
@@ -160,14 +163,29 @@ def parse_swarm_link(value: Any, *, allow_loopback: bool = False) -> dict[str, s
         raise WireError('swarm_link_invalid')
     ident(document['swarm_id'], SWARM_ID, 'swarm_link_invalid')
     key_bytes(document['owner_key'])
-    origin(document['directory'], allow_loopback=allow_loopback, code='swarm_link_invalid')
+    origin(document['directory'], allow_loopback=allow_loopback, allow_private=allow_private,
+           code='swarm_link_invalid')
     return document
 
 
 # -- validation -----------------------------------------------------------------
 
-def origin(value: Any, *, allow_loopback: bool, code: str = 'entry_origin_invalid') -> str:
-    if isinstance(value, str) and (_ORIGIN.fullmatch(value) or (allow_loopback and _LOOPBACK_ORIGIN.fullmatch(value))):
+def _private_origin(value: str) -> bool:
+    """``http(s)://<RFC 1918 IPv4>[:port]`` -- the LAN opt-in, never a name or a public literal."""
+    match = _PRIVATE_ORIGIN.fullmatch(value)
+    if match is None or (match[2] is not None and int(match[2]) > 65535):
+        return False
+    try:
+        address = ipaddress.IPv4Address(match[1])
+    except ValueError:
+        return False
+    return any(address in network for network in _RFC1918)
+
+
+def origin(value: Any, *, allow_loopback: bool, allow_private: bool = False,
+           code: str = 'entry_origin_invalid') -> str:
+    if isinstance(value, str) and (_ORIGIN.fullmatch(value) or (allow_loopback and _LOOPBACK_ORIGIN.fullmatch(value))
+                                   or (allow_private and _private_origin(value))):
         return value
     raise WireError(code)
 
@@ -184,7 +202,8 @@ def _time(value: Any) -> int:
     return integer(value, low=0, high=TIME_MAX, code='time_invalid')
 
 
-def check_record(document: Any, verifier: Verifier, *, allow_loopback: bool = False) -> dict[str, Any]:
+def check_record(document: Any, verifier: Verifier, *, allow_loopback: bool = False,
+                 allow_private: bool = False) -> dict[str, Any]:
     exact_keys(document, RECORD, _KEYS[RECORD])
     if len(canonical(document)) > MAX_RECORD_BYTES:
         raise WireError('record_too_large', 413)
@@ -208,12 +227,13 @@ def check_record(document: Any, verifier: Verifier, *, allow_loopback: bool = Fa
         if not isinstance(entry, dict) or set(entry) != {'key', 'origin'}:
             raise WireError('entry_invalid')
         _key(entry['key'], 'entry_invalid')
-        origin(entry['origin'], allow_loopback=allow_loopback)
+        origin(entry['origin'], allow_loopback=allow_loopback, allow_private=allow_private)
     verify_document(document, document['owner_key'], verifier)
     return document
 
 
-def check(document: Any, protocol: str, verifier: Verifier, *, allow_loopback: bool = False) -> dict[str, Any]:
+def check(document: Any, protocol: str, verifier: Verifier, *, allow_loopback: bool = False,
+          allow_private: bool = False) -> dict[str, Any]:
     """Validate any non-record document type and its signature."""
     exact_keys(document, protocol, _KEYS[protocol])
     if 'swarm_id' in document:
@@ -252,7 +272,7 @@ def check(document: Any, protocol: str, verifier: Verifier, *, allow_loopback: b
     elif protocol == GRANTEE_QUERY:
         signer = _key(document['grantee_key'], 'grantee_key_invalid')
     elif protocol == ENTRY_OFFER:
-        origin(document['origin'], allow_loopback=allow_loopback)
+        origin(document['origin'], allow_loopback=allow_loopback, allow_private=allow_private)
         signer = _key(document['entry_key'], 'entry_key_invalid')
     elif protocol == ENTRY_SEND:
         if not isinstance(document['prompt'], str) or not document['prompt'].strip():

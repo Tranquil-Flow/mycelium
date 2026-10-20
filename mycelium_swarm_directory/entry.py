@@ -64,9 +64,10 @@ class EntryPolicy:
     model: str = ''
 
     @classmethod
-    def from_record(cls, record: Any, verifier: Verifier, *, entry_key: str) -> 'EntryPolicy':
+    def from_record(cls, record: Any, verifier: Verifier, *, entry_key: str,
+                    allow_private: bool = False) -> 'EntryPolicy':
         """Verify an owner-signed record and require that it names this entry."""
-        record = docs.check_record(record, verifier, allow_loopback=True)
+        record = docs.check_record(record, verifier, allow_loopback=True, allow_private=allow_private)
         entry = record['entry']
         if entry is None or entry['key'] != entry_key:
             raise WireError('entry_not_attached', 409)
