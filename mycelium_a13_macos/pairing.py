@@ -97,8 +97,10 @@ _QUOTA_FIELDS = frozenset(
 class PairingError(RuntimeError):
     """Fail-closed pairing error carrying no private material."""
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, *, parent: str | None = None) -> None:
         self.code = code
+        #: The older, coarser code this one refines (``None`` when it is not a refinement).
+        self.parent = parent
         super().__init__(code)
 
 
@@ -456,6 +458,34 @@ _WINDOW_ID_RE = re.compile(r"^[23456789ABCDEFGHJKMNPQRSTVWXYZ]{4}$")
 _CODE_RE = re.compile(r"^[23456789ABCDEFGHJKMNPQRSTVWXYZ]{8}$")
 _TUNNEL_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,95}$")
+#: Why the owner's window could not be reached; each refines ``pairing_window_unreachable``.
+UNREACHABLE_CODE = "pairing_window_unreachable"
+UNREACHABLE_CODES = ("pairing_window_dns_failed", "pairing_window_tls_failed",
+                     "pairing_window_timeout")
+#: A warning above this many seconds of HTTPS ``Date`` difference (the hard limit is 30 s).
+CLOCK_SKEW_WARNING_SECONDS = 20
+
+
+def _unreachable(exc: BaseException) -> PairingError:
+    """Classify a transport failure (DNS / TLS / timeout / anything else)."""
+    import socket
+    import ssl
+
+    seen: list[BaseException] = []
+    current: BaseException | None = exc
+    while current is not None and len(seen) < 4:
+        seen.append(current)
+        reason = getattr(current, "reason", None)
+        current = reason if isinstance(reason, BaseException) else None
+    for item in seen:
+        text = str(item)
+        if isinstance(item, socket.gaierror) or text.startswith("relay_dns_"):
+            return PairingError(UNREACHABLE_CODES[0], parent=UNREACHABLE_CODE)
+        if isinstance(item, ssl.SSLError) or text.startswith("relay_tls_"):
+            return PairingError(UNREACHABLE_CODES[1], parent=UNREACHABLE_CODE)
+        if isinstance(item, TimeoutError):
+            return PairingError(UNREACHABLE_CODES[2], parent=UNREACHABLE_CODE)
+    return PairingError(UNREACHABLE_CODE)
 _WINDOW_STATUS = {
     "pairing_window_unknown": 404,
     "pairing_window_expired": 410,
@@ -810,9 +840,13 @@ class JoinWindowClient:
     local-test seam that sends the identical requests to a loopback relay.
     """
 
-    def __init__(self, origin: str, *, timeout: float = 10.0, _test_base_url: str | None = None) -> None:
+    def __init__(self, origin: str, *, timeout: float = 10.0, _test_base_url: str | None = None,
+                 _clock: Callable[[], float] = time.time) -> None:
         self.origin = _window_origin(origin)
         self._timeout = float(timeout)
+        self._clock = _clock
+        #: Advisory only (never blocks a join): ``[{"code": "clock_skew", "skew_seconds": n}]``.
+        self.warnings: list[dict[str, Any]] = []
         if _test_base_url is not None and not re.fullmatch(r"http://127\.0\.0\.1:[0-9]{1,5}", _test_base_url):
             raise ValueError("test base url is invalid")
         self._base = _test_base_url or self.origin
@@ -829,6 +863,20 @@ class JoinWindowClient:
 
             self._opener = build_opener(ProxyHandler({}), _NoRedirect())
 
+    def _note_clock(self, headers: Any) -> None:
+        """Compare the server's HTTPS ``Date`` with this Mac's clock (advisory)."""
+        try:
+            from email.utils import parsedate_to_datetime
+
+            value = headers.get("Date") if headers is not None else None
+            skew = round(parsedate_to_datetime(value).timestamp() - self._clock())
+        except Exception:  # noqa: BLE001 - missing/invalid Date is simply ignored
+            return
+        if abs(skew) > CLOCK_SKEW_WARNING_SECONDS:
+            self.warnings = [{"code": "clock_skew", "skew_seconds": int(skew)}]
+        else:
+            self.warnings = []
+
     def post(self, path: str, body: bytes, *, content_type: str = "application/json") -> bytes:
         from urllib.error import HTTPError, URLError
         from urllib.request import Request
@@ -837,8 +885,10 @@ class JoinWindowClient:
                           headers={"Content-Type": content_type})
         try:
             with self._opener.open(request, timeout=self._timeout) as response:
+                self._note_clock(getattr(response, "headers", None))
                 return response.read(1024 * 1024 + 1)
         except HTTPError as exc:
+            self._note_clock(getattr(exc, "headers", None))
             try:
                 code = json.loads(exc.read(4096)).get("error")
             except Exception:  # noqa: BLE001 - remote body
@@ -849,7 +899,7 @@ class JoinWindowClient:
                 code = "pairing_window_unreachable"
             raise PairingError(code) from None
         except (URLError, OSError, ValueError) as exc:
-            raise PairingError("pairing_window_unreachable") from exc
+            raise _unreachable(exc) from exc
 
     def _json(self, path: str, document: Mapping[str, Any]) -> dict[str, Any]:
         raw = self.post(path, json.dumps(dict(document), separators=(",", ":")).encode())
@@ -884,6 +934,8 @@ class JoinWindowClient:
 
 
 __all__ = [
+    "CLOCK_SKEW_WARNING_SECONDS",
+    "UNREACHABLE_CODES",
     "ENCRYPTED_HANDOFF_PROTOCOL",
     "JOIN_LINK_PROTOCOL",
     "JOIN_LINK_SCHEME",

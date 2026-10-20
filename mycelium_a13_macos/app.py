@@ -1532,8 +1532,10 @@ class DemoApp:
                 'protocol':'mycelium.a13_join_window_state.v1','origin':link['origin'],
                 'window_id':link['window_id'],'code':link['code'],'seed_key_digest':link['seed_key_digest'],
                 'request_digest':request_digest(request),'fingerprint':fingerprint})
-            return {'state':'waiting_for_owner','fingerprint':fingerprint,
-                    'pinned':link['seed_key_digest'] is not None}
+            joined_view = {'state':'waiting_for_owner','fingerprint':fingerprint,
+                           'pinned':link['seed_key_digest'] is not None}
+            if client.warnings: joined_view['warnings'] = list(client.warnings)  # advisory (clock_skew)
+            return joined_view
         # /api/join/window/poll
         if body: raise DemoError('invalid_request')
         state = self._load_join_state()
