@@ -50,13 +50,16 @@ def _chat_path(path):
 
 class _RelayServer(ThreadingHTTPServer):
     daemon_threads=True
-    def __init__(self):
+    def __init__(self,port=0,trust_client_ip=True):
         self.backend=None
         self.local=None
         self.chat=None
         self.swarm=None
+        #: Whether ``Cf-Connecting-Ip`` was set by a Cloudflare edge we trust (quick tunnel, or an owner
+        #: front declared to be a Cloudflare tunnel).  Otherwise a visitor could pick its own rate-limit key.
+        self.trust_client_ip=trust_client_ip
         self.slots=threading.BoundedSemaphore(16)
-        super().__init__(('127.0.0.1',0),_RelayHandler)
+        super().__init__(('127.0.0.1',port),_RelayHandler)
     def process_request(self,request,client_address):
         request.settimeout(5)
         if not self.slots.acquire(blocking=False):
@@ -117,6 +120,11 @@ class _RelayHandler(BaseHTTPRequestHandler):
         except (OSError,http.client.HTTPException):self._reply(502,b'{"error":"relay_backend_unavailable"}')
         finally:
             if connection is not None:connection.close()
+    def _public_headers(self):
+        headers={k:v for k,v in self.headers.items()}
+        if not self.server.trust_client_ip:
+            headers={k:v for k,v in headers.items() if k.lower()!='cf-connecting-ip'}
+        return headers
     def _read_chunked(self):
         """Strict, bounded HTTP/1.1 chunked body (no extensions, no trailers)."""
         body=bytearray()
@@ -158,7 +166,7 @@ class _RelayHandler(BaseHTTPRequestHandler):
             handler=self.server.swarm
             if handler is None:return self._reply(503,b'{"error":"relay_swarm_entry_not_bound"}',extra=_SWARM_CORS)
             try:
-                status,kind,raw=handler(self.command,self.path,{k:v for k,v in self.headers.items()},body)
+                status,kind,raw=handler(self.command,self.path,self._public_headers(),body)
                 if (type(status) is not int or not 200<=status<=599 or not isinstance(raw,bytes)
                         or len(raw)>_MAX_FRAME or kind!='application/json'):
                     raise ValueError()
@@ -168,7 +176,7 @@ class _RelayHandler(BaseHTTPRequestHandler):
             handler=self.server.chat
             if handler is None:return self._reply(503,b'{"error":"relay_chat_not_bound"}')
             try:
-                status,kind,raw=handler(self.command,self.path,{k:v for k,v in self.headers.items()},body)
+                status,kind,raw=handler(self.command,self.path,self._public_headers(),body)
                 if (type(status) is not int or not 200<=status<=599 or not isinstance(raw,bytes)
                         or len(raw)>_MAX_FRAME or not isinstance(kind,str)):
                     raise ValueError()
@@ -198,8 +206,8 @@ class _RelayHandler(BaseHTTPRequestHandler):
 
 
 class SeedRelayProxy:
-    def __init__(self):
-        self.server=_RelayServer()
+    def __init__(self,port=0,trust_client_ip=True):
+        self.server=_RelayServer(port,trust_client_ip)
         self.origin='http://127.0.0.1:'+str(self.server.server_port)
         self.thread=None;self._closed=False
     def start(self):
@@ -244,11 +252,46 @@ def installed_relay_binary():
     return shutil.which('cloudflared')
 
 
+#: Same shape the swarm directory accepts for an entry origin (so a listing can carry it): lowercase
+#: DNS name with at least two labels and an alphabetic TLD, https, default port, nothing else.
+_EXTERNAL_ORIGIN=re.compile(r'https://(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\Z')
+_NON_PUBLIC_SUFFIXES=frozenset({'local','localhost','internal','lan','home','corp','invalid','test','onion','arpa'})
+
+
+def validate_external_origin(value):
+    """The owner-chosen public origin: ``https://<dns-name>`` only (no credentials, port, path or IP literal)."""
+    if not isinstance(value,str) or value!=value.strip():raise ValueError('relay_origin_invalid')
+    candidate=value.lower()
+    try:
+        from mycelium_seed.http import canonical_https_origin
+        canonical=canonical_https_origin(candidate)
+    except (TypeError,ValueError):raise ValueError('relay_origin_invalid') from None
+    if (canonical!=candidate or _EXTERNAL_ORIGIN.fullmatch(candidate) is None
+            or candidate.rsplit('.',1)[1] in _NON_PUBLIC_SUFFIXES):
+        raise ValueError('relay_origin_invalid')
+    return candidate
+
+
+def validate_proxy_port(value):
+    if type(value) is not int or not 1024<=value<=65535:raise ValueError('relay_proxy_port_invalid')
+    return value
+
+
 class TemporaryHttpsRelay:
-    """One explicitly approved, bounded quick tunnel; no account/config reuse."""
-    def __init__(self,state_root,provider='cloudflare'):
-        if provider!='cloudflare':raise ValueError('relay_provider_invalid')
+    """One explicitly approved, bounded relay.
+
+    ``cloudflare``: a quick tunnel; no account/config reuse.  ``external``: the owner's own stable https
+    origin, served by a front the owner runs (for example a named Cloudflare tunnel) that forwards to
+    ``127.0.0.1:<proxy_port>``; this process starts only the in-process relay proxy and spawns nothing.
+    """
+    def __init__(self,state_root,provider='cloudflare',*,public_origin=None,proxy_port=None,cloudflare_front=False):
+        if provider not in ('cloudflare','external'):raise ValueError('relay_provider_invalid')
+        if provider=='cloudflare' and (public_origin is not None or proxy_port is not None or cloudflare_front):
+            raise ValueError('relay_provider_invalid')
         self.provider=provider
+        self._chosen_origin=validate_external_origin(public_origin) if provider=='external' else None
+        self._proxy_port=validate_proxy_port(proxy_port) if provider=='external' else None
+        self._cloudflare_front=cloudflare_front is True
         self.error_code=None
         self.root=Path(state_root)
         self.process=None;self.proxy=None;self.public_origin=None
@@ -257,7 +300,8 @@ class TemporaryHttpsRelay:
     def start(self,*,acknowledged,max_seconds=1800):
         if acknowledged is not True:raise ValueError('relay_approval_required')
         if type(max_seconds) is not int or not 30<=max_seconds<=3600:raise ValueError('relay_budget_invalid')
-        if self.process is not None or self._closed:raise ValueError('relay_not_startable')
+        if self.process is not None or self.proxy is not None or self._closed:raise ValueError('relay_not_startable')
+        if self.provider=='external':return self._start_external(max_seconds)
         binary=installed_relay_binary()
         if binary is None:raise ValueError('relay_client_installation_required')
         self.root=_private_directory(self.root,create=True)
@@ -291,6 +335,14 @@ class TemporaryHttpsRelay:
             self._timer=threading.Timer(max_seconds,self.close);self._timer.daemon=True;self._timer.start()
             return self
         except BaseException:self.close();raise
+    def _start_external(self,max_seconds):
+        self.root=_private_directory(self.root,create=True)
+        try:self.proxy=SeedRelayProxy(self._proxy_port,self._cloudflare_front).start()
+        except OSError:raise ValueError('relay_proxy_port_unavailable') from None
+        self.public_origin=self._chosen_origin
+        self._timer=threading.Timer(max_seconds,self.close);self._timer.daemon=True;self._timer.start()
+        return self
+
     def observe_origin(self,origin):
         if self.public_origin is None:
             self.public_origin=origin;self._ready.set();return True
@@ -301,12 +353,21 @@ class TemporaryHttpsRelay:
         return False
 
     def status(self):
-        running=self.process is not None and self.process.poll() is None and not self._closed and self.error_code is None
-        return {'state':'relay_process_running' if running else 'stopped',
+        if self.provider=='external':running=self.proxy is not None and not self._closed and self.error_code is None
+        else:running=self.process is not None and self.process.poll() is None and not self._closed and self.error_code is None
+        value={'state':'relay_process_running' if running else 'stopped',
             'provider':self.provider,'public_origin':self.public_origin,'error_code':self.error_code,
             'seed_bound':self.proxy is not None and self.proxy.server.backend is not None,
             'privacy':'The selected relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross this relay); only inference between the Macs uses Iroh. If system DNS fails, relay names use Cloudflare HTTPS DNS with unchanged certificate verification.',
             'relay_host_trust':'public_webpki'}
+        if self.provider=='external':
+            host=(self._chosen_origin or '').removeprefix('https://')
+            value['local_forward_target']='http://127.0.0.1:'+str(self._proxy_port)
+            value['privacy']=('Your own address ('+host+') is served by the front you pointed at this Mac (for example a named '
+                'Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP '
+                'addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the '
+                'Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at '+value['local_forward_target']+' yourself.')
+        return value
 
     def close(self):
         with self._lock:

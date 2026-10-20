@@ -655,23 +655,28 @@ class DemoApp:
         """
         if self.installation_role!='owner' or self.public_relay is not None:
             raise DemoError('network_requires_fresh_owner')
-        if (set(body) not in ({'relay_acknowledged','max_seconds'},{'relay_acknowledged','max_seconds','provider'})
-            or body.get('provider','cloudflare')!='cloudflare'
-            or body['relay_acknowledged'] is not True
+        external=body.get('provider')=='external'
+        _base={'relay_acknowledged','max_seconds'}
+        shape_ok=(_base|{'provider','public_origin','proxy_port'}<=set(body)<=_base|{'provider','public_origin','proxy_port','cloudflare_front'}
+                  if external else
+                  set(body) in (_base,_base|{'provider'}) and body.get('provider','cloudflare')=='cloudflare')
+        if (not shape_ok or body['relay_acknowledged'] is not True
             or type(body['max_seconds']) is not int or not 30<=body['max_seconds']<=1800):
             raise DemoError('network_consent_required')
         existing=bool(self.authority.status().get('swarm_created'))
         if existing and getattr(self,'local_contributor',None) is not None:
             raise DemoError('network_stop_local_contributor_required')
-        from .public_relay import TemporaryHttpsRelay
         from . import endpoint_recovery
-        import socket
-        relay=TemporaryHttpsRelay(self.root/'public-relay',provider=body.get('provider','cloudflare'))
+        relay=self._new_relay(self.root/'public-relay',body)
         try:
             relay.start(acknowledged=True,max_seconds=body['max_seconds'])
-            with socket.socket() as listener:
-                listener.bind(('127.0.0.1',0));port=listener.getsockname()[1]
-            if not existing:
+            port=self._free_seed_port(avoid=getattr(relay,'_proxy_port',None))
+            configured=self.authority._network_configuration() if existing else None
+            if external and configured is not None and configured['public_origin']==relay.public_origin:
+                # A stable owner-chosen address that did not change: the retained authority already answers on it.
+                relay.proxy.bind_seed(self.authority.seed_server)
+                self.running=True
+            elif not existing:
                 self.authority.configure_public_endpoint(public_origin=relay.public_origin,
                     port=port,acknowledged=True)
             else:
@@ -684,12 +689,45 @@ class DemoApp:
                 relay.proxy.bind_seed(self.authority.seed_server)
                 self.running=True
             self.public_relay=relay
+            if external:self._remember_external_address(body)
             self._bind_public_routes()
             self._materialize_pending_windows()
             return relay.status()
         except BaseException:
             self.public_relay=None
             relay.close();raise
+
+    def _new_relay(self,root,spec):
+        """A not-yet-started relay for a validated request body; bad owner-chosen values are bounded codes."""
+        from .public_relay import TemporaryHttpsRelay
+        if spec.get('provider')!='external':return TemporaryHttpsRelay(root,provider=spec.get('provider','cloudflare'))
+        try:
+            return TemporaryHttpsRelay(root,provider='external',public_origin=spec['public_origin'],
+                proxy_port=spec['proxy_port'],cloudflare_front=spec.get('cloudflare_front',False))
+        except ValueError as error:raise DemoError(str(error)) from None
+
+    @staticmethod
+    def _free_seed_port(avoid=None):
+        while True:
+            with socket.socket() as listener:
+                listener.bind(('127.0.0.1',0));port=listener.getsockname()[1]
+            if port!=avoid:return port
+
+    def _external_address_path(self):
+        return self.root/'external-origin.json'
+
+    def _remember_external_address(self,spec):
+        """The owner-chosen address is kept so a later restart (budget ran out, app relaunch) reuses it."""
+        value={'public_origin':spec['public_origin'],'proxy_port':spec['proxy_port'],
+               'cloudflare_front':spec.get('cloudflare_front',False) is True}
+        from .authority import _atomic_private_json
+        _atomic_private_json(self._external_address_path(),value)
+
+    def _saved_external_address(self):
+        from .authority import _load_private_json
+        try:value=_load_private_json(self._external_address_path())
+        except Exception:return {}
+        return value if isinstance(value,dict) and set(value)=={'public_origin','proxy_port','cloudflare_front'} else {}
 
     # -- join codes issued before the relay exists --------------------------------------------
     def _open_pending_window(self, ttl_seconds):
@@ -1240,27 +1278,36 @@ class DemoApp:
                 return {'recovery_card':refresh_endpoint_card(self.authority,acknowledged=True,
                     previous_origin=body.get('previous_origin'))}
             if path == '/api/network/restart':
+                _base={'relay_acknowledged','max_seconds'}
+                external=body.get('provider')=='external'
                 if (self.installation_role!='owner' or not self.authority.status().get('swarm_created')
-                    or set(body)!={'relay_acknowledged','max_seconds'}
+                    or not (set(body)==_base or (external and _base|{'provider'}<=set(body)<=_base|{'provider','public_origin','proxy_port','cloudflare_front'}))
                     or body['relay_acknowledged'] is not True
                     or type(body['max_seconds']) is not int or not 30<=body['max_seconds']<=1800):
                     raise DemoError('network_consent_required')
                 if getattr(self,'local_contributor',None) is not None:
                     raise DemoError('network_stop_local_contributor_required')
+                from .endpoint_recovery import relocate_authority
+                spec={**self._saved_external_address(),**body} if external else body
+                if external and not {'public_origin','proxy_port'}<=set(spec):raise DemoError('relay_origin_invalid')
+                fresh=self._new_relay(self.root,spec) if external else None  # validated before the old relay is touched
                 if self.public_relay is not None:
                     self.public_relay.close();self.public_relay=None
-                from .public_relay import TemporaryHttpsRelay
-                from .endpoint_recovery import relocate_authority
-                import socket
-                relay=TemporaryHttpsRelay(self.root).start(acknowledged=True,max_seconds=body['max_seconds'])
+                if fresh is None:
+                    from .public_relay import TemporaryHttpsRelay
+                    fresh=TemporaryHttpsRelay(self.root)
+                relay=fresh.start(acknowledged=True,max_seconds=body['max_seconds'])
                 try:
-                    with socket.socket() as listener:
-                        listener.bind(('127.0.0.1',0));port=listener.getsockname()[1]
-                    card=relocate_authority(self.authority,public_origin=relay.public_origin,port=port,acknowledged=True)
+                    port=self._free_seed_port(avoid=getattr(relay,'_proxy_port',None))
+                    if external and self.authority._network_configuration()['public_origin']==relay.public_origin:
+                        card=None  # the address did not change: members need no recovery card
+                    else:
+                        card=relocate_authority(self.authority,public_origin=relay.public_origin,port=port,acknowledged=True)
                     relay.proxy.bind_seed(self.authority.seed_server)
                 except BaseException:
                     relay.close();raise
                 self.public_relay=relay;self.running=True
+                if external:self._remember_external_address(spec)
                 self._bind_public_routes()
                 return {'network':relay.status(),'recovery_card':card}
             if path == '/api/network/start':

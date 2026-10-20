@@ -104,7 +104,7 @@ def test_external_start_spawns_no_process_and_reports_the_chosen_origin(tmp_path
         assert status['state'] == 'relay_process_running' and status['provider'] == 'external'
         assert status['local_forward_target'] == f'http://127.0.0.1:{port}'
         assert status['relay_host_trust'] == 'public_webpki' and status['error_code'] is None
-        assert 'your own address' in status['privacy'] or 'you chose' in status['privacy']
+        assert 'your own address' in status['privacy'].lower()
         assert relay.proxy.origin == f'http://127.0.0.1:{port}'
         with socket.create_connection(('127.0.0.1', port), timeout=2):
             pass

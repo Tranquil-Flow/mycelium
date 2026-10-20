@@ -125,10 +125,12 @@ const HUMAN_ERRORS={
   relay_local_invalid:'The relay’s local connection is not valid. Stop and start the relay again.',
   relay_not_startable:'The relay cannot start right now. Check your internet connection and that no other relay is running.',
   relay_origin_changed:'The relay’s public address changed. Close open join codes and open new ones.',
-  relay_origin_invalid:'The relay’s public address is not valid. Stop and start the relay again.',
+  relay_origin_invalid:'That address is not valid. Use a plain https address with a real domain name (for example https://demo.mycelium.now): no port, path, login details or IP number.',
   relay_projection_invalid:'The relay status could not be read. Refresh the page.',
   relay_projection_key_invalid:'The relay status contained something unexpected and was ignored. Refresh the page.',
-  relay_provider_invalid:'That relay provider is not supported. Use the Cloudflare quick tunnel.',
+  relay_provider_invalid:'That relay provider is not supported. Use the Cloudflare quick tunnel or your own address.',
+  relay_proxy_port_invalid:'The local port is not valid. Use a number between 1024 and 65535.',
+  relay_proxy_port_unavailable:'That local port is already in use on this Mac. Pick another port, or stop the program using it, then try again.',
   relay_proxy_closed:'The relay was closed. Start it again to let other Macs reach this one.',
   relay_route_unknown:'That address is not served through the relay.',
   relay_seed_invalid:'The relay could not reach this swarm’s membership service. Stop and start the relay again.',
@@ -483,6 +485,7 @@ function renderJoinFlow(value,target,a){
   $('join-target').hidden=owner && !!a.swarm_created;
   const relayUp=!!value.network?.public_origin;
   $('relay-start').hidden=!owner || relayUp;
+  $('own-address').hidden=!owner || relayUp;
   $('relay-order-note').hidden=!owner || relayUp;
   $('window-open').disabled=busy || !owner || !a.swarm_created;
   const waitingMembers=value.relay_wait?.state==='waiting_for_relay'?value.relay_wait.members_joined:0;  // line: "N members joined, waiting for relay to serve"
@@ -538,6 +541,13 @@ function currentConsent(){
   return {peer_visibility:$('visibility').checked,power:$('power').value,storage_bytes:Number($('storage').value),
     network:$('network').value,background:false,diagnostics:false,thermal:'stop_on_serious'};
 }
+$('own-start').addEventListener('click',()=>{
+  const origin=$('own-origin').value.trim(),port=Number($('own-port').value);
+  if(!origin||!Number.isInteger(port)){notice('Enter your https address and the local port first.');return;}
+  if(!window.confirm('Use '+origin+' for this swarm? Mycelium starts no tunnel: you must point this hostname at 127.0.0.1:'+port+' on this Mac yourself (for example a Cloudflare named tunnel). The front you use terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh.'))return;
+  void perform('/api/network/start',{relay_acknowledged:true,max_seconds:1800,provider:'external',public_origin:origin,proxy_port:port,
+    ...($('own-cloudflare').checked?{cloudflare_front:true}:{})},'Relay started on your own address. Make sure your hostname points at this Mac; then open a code and approve each Mac when it appears.');
+});
 $('relay-start').addEventListener('click',()=>{
   if(!window.confirm('Start a temporary Cloudflare quick tunnel? The relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh.'))return;
   void perform('/api/network/start',{relay_acknowledged:true,max_seconds:1800},'Public relay started. Codes you asked for are now ready to share; approve each Mac when it appears.');
