@@ -22,7 +22,26 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
-PRODUCTION_ROOTS = (Path("/Users/evinova-self/mycelium-physical-run"),)
+PRODUCTION_ROOT_NAME = "mycelium-physical-run"
+PRODUCTION_ROOTS_ENV = "MYCELIUM_PRODUCTION_SEED_ROOTS"
+
+
+def default_production_roots(
+    *, home: Path | None = None, environ: Mapping[str, str] | None = None,
+) -> tuple[Path, ...]:
+    """Roots a cutover must never touch: ``<home>/mycelium-physical-run`` plus any
+    absolute paths listed (``os.pathsep``-separated) in ``MYCELIUM_PRODUCTION_SEED_ROOTS``."""
+    base = Path(home) if home is not None else Path.home()
+    roots = [base / PRODUCTION_ROOT_NAME]
+    listed = (os.environ if environ is None else environ).get(PRODUCTION_ROOTS_ENV, "")
+    for item in listed.split(os.pathsep):
+        candidate = Path(item) if item else None
+        if candidate is not None and candidate.is_absolute() and candidate not in roots:
+            roots.append(candidate)
+    return tuple(roots)
+
+
+PRODUCTION_ROOTS = default_production_roots()
 _IDENTITY_FIELDS = ("seed_key_digest", "swarm_id")
 _AUTHORITY_FIELDS = ("authority_epoch", "authority_digest")
 
