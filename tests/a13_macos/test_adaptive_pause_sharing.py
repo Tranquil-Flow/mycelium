@@ -70,9 +70,12 @@ def test_off_means_no_automatic_drain_under_critical_memory(tmp_path):
     app.action("/api/adaptive/policy", {"adaptive_sharing": False, "pause_sharing": True, "acknowledged": False})
     app.action("/api/adaptive/policy", {"adaptive_sharing": False, "pause_sharing": False, "acknowledged": False})
     clock.now += 500
-    status = adaptive(app)
-    assert status["mode"] != "reduced" and status["reason"] in {"owner_game_mode", "none"}
-    assert status.get("adaptive_sharing") is False
+    status = adaptive(app)  # nothing left that needs the controller: fully off, never sampled
+    assert status["state"] == "off" and status["adaptive_sharing"] is False and status["pause_sharing"] is False
+    # pause released while a stale pressure state could linger: still no automatic action
+    app.action("/api/adaptive/policy", {"adaptive_sharing": False, "pause_sharing": True, "acknowledged": False})
+    clock.now += 500
+    assert adaptive(app)["reason"] == "owner_game_mode"
 
 
 def test_on_still_drains_under_critical_memory(tmp_path):
@@ -86,9 +89,11 @@ def test_off_still_honours_pause_sharing_and_stop(tmp_path):
     app, _ = make_app(tmp_path)
     app.action("/api/adaptive/policy", {"adaptive_sharing": False, "pause_sharing": True, "acknowledged": False})
     assert app._resource_check() == "adaptive_host_draining"
-    app.action("/api/adaptive/policy", {"adaptive_sharing": False, "pause_sharing": False, "acknowledged": False})
+    # Stop while only the manual controller exists (Adaptive sharing off) is still enforced
     app.action("/api/adaptive/stop", {})
-    assert adaptive(app)["stopped"] is True and app._resource_check() == "adaptive_host_draining"
+    assert adaptive(app)["stopped"] is True and adaptive(app)["reason"] in {"owner_game_mode", "owner_stop"}
+    app.action("/api/adaptive/policy", {"adaptive_sharing": False, "pause_sharing": False, "acknowledged": False})
+    assert adaptive(app)["state"] == "off"
 
 
 def test_off_never_disables_a13_hard_gates(tmp_path):

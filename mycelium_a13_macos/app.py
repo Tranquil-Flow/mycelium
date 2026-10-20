@@ -1023,7 +1023,24 @@ class DemoApp:
                 'serving':{'state':'not_yet_serving','route_ready':False,
                            'next_action':'Native route preparation and exact model execution approval required.'}}
 
+    _CONSENT_ROUTES = frozenset({'/api/create','/api/join/request','/api/join/window'})
+
     def action(self, path, body):
+        # R26: the consent form may carry a top-level optional ``adaptive_sharing`` bool (ticked by
+        # default in the UI).  It is split off before every strict key check and applied only after
+        # the consent step succeeded; a body without it behaves exactly as before.
+        choice = None
+        if path in self._CONSENT_ROUTES and isinstance(body, dict) and 'adaptive_sharing' in body:
+            choice = body['adaptive_sharing']
+            if type(choice) is not bool: raise DemoError('invalid_request')
+            body = {k: v for k, v in body.items() if k != 'adaptive_sharing'}
+        result = self._action(path, body)
+        if choice is not None:
+            from .adaptive_owner import apply_first_consent_choice
+            apply_first_consent_choice(self, choice)
+        return result
+
+    def _action(self, path, body):
         with self.guard:
             if self.closed.is_set(): raise DemoError('application_closed')
             if self.installation_role == 'target' and path in {'/api/create','/api/revoke','/api/revoke-self','/api/pair/approve','/api/pair/preview',

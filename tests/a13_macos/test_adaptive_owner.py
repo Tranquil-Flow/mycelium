@@ -19,7 +19,7 @@ SAFE = {"power": "external", "thermal": "nominal", "network": "unmetered"}
 FORBIDDEN = re.compile(r"(?i)(process|bundle|window_title|foreground|app_name|pid\b|keystroke)")
 STATUS_KEYS = {"enabled", "game_mode", "stopped", "mode", "reason", "generation", "capacity_scale",
                "new_admissions_allowed", "expires_in_s", "withdraw_overdue", "state", "reserve_bytes",
-               "policy_error", "headroom_known"}
+               "policy_error", "headroom_known", "pause_sharing", "adaptive_sharing", "line"}
 
 
 class Clock:
@@ -162,7 +162,7 @@ def test_assets_have_panel_without_inline_script_or_new_transport():
     assert "/api/adaptive/policy" in js and "/api/adaptive/stop" in js
 
 
-def test_browser_opt_in_game_mode_stop_and_status_panel(tmp_path):
+def test_browser_opt_in_pause_sharing_stop_and_status_panel(tmp_path):
     """Real Chromium over the ordinary A13 page: no app identity in DOM; CSP script-src 'self' holds."""
     from playwright.sync_api import expect, sync_playwright
 
@@ -178,7 +178,7 @@ def test_browser_opt_in_game_mode_stop_and_status_panel(tmp_path):
         page.get_by_role("button", name="Open private demo", exact=True).click()
         expect(page.locator("#private")).to_be_visible()
         expect(page.locator("#adaptive-status")).to_contain_text("Off.")
-        assert page.locator("#adaptive-stop").is_disabled() and page.locator("#adaptive-game").is_disabled()
+        assert page.locator("#adaptive-stop").is_disabled() and page.locator("#adaptive-game").is_enabled()  # Pause works with Adaptive sharing off
         # Without acknowledgement the owner refuses. The UI must then show the real
         # state again at once: a checkbox left ticked would claim "on" while the host
         # is off (and Locator.check() raced that revert under load in L2).
@@ -190,8 +190,8 @@ def test_browser_opt_in_game_mode_stop_and_status_panel(tmp_path):
         page.locator("#adaptive-enable").check()
         expect(page.locator("#adaptive-status")).to_contain_text("On · normal")
         page.locator("#adaptive-game").check()
-        expect(page.locator("#adaptive-status")).to_contain_text("Game mode")
-        expect(page.locator("#adaptive-status")).to_contain_text("draining")
+        expect(page.locator("#adaptive-status")).to_contain_text("you paused sharing")
+        expect(page.locator("#adaptive-line")).to_have_text("Adaptive sharing: paused - you paused sharing")
         page.locator("#adaptive-game").uncheck()
         page.locator("#adaptive-stop").click()
         expect(page.locator("#adaptive-status")).to_contain_text("you pressed Stop")

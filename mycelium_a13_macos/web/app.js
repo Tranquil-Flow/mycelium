@@ -14,20 +14,22 @@ async function api(path, body) {
   if (!response.ok) {const error = new Error(value.error || 'request_failed'); error.userMessage = value.message; error.fix = value.fix; throw error;}
   return value;
 }
-const ADAPTIVE_TEXT={off:'Off. Mycelium follows only your power, heat and network limits.',
+const ADAPTIVE_TEXT={off:'Off. Nothing is reduced or paused automatically; your memory limit, disk floor, power/heat/network limits, Pause sharing and Stop still apply.',
+  manual:'Adaptive sharing is off; Pause sharing and Stop are ready. Your memory limit, disk floor and power/heat/network limits still apply.',
   active:'On · normal. New work is accepted within your limits.',reduced:'On · reduced. Taking fewer new requests while this Mac is busy.',
-  drain:'On · draining. No new work; finishing, handing off or ending running work.',withdraw:'On · stopped. Model memory released; no work from this Mac.',
-  error:'Adaptive policy could not be read. New work is refused until you turn it off or on again.'};
-const ADAPTIVE_REASON={owner_game_mode:'Game mode',owner_stop:'you pressed Stop',host_memory_pressure:'this Mac is low on memory',
-  host_cpu_saturation:'this Mac is under heavy load',none:''};
+  drain:'No new work; finishing, handing off or ending running work.',withdraw:'Stopped. Model memory released; no work from this Mac.',
+  error:'The sharing policy could not be read. New work is refused until you turn it off or on again.'};
+const ADAPTIVE_REASON={owner_game_mode:'you paused sharing',owner_stop:'you pressed Stop',host_memory_pressure:'memory is low',
+  host_cpu_saturation:'the CPU is busy',resource_thermal_policy_violation:'this Mac is hot',resource_power_policy_violation:'the battery rules apply',none:''};
 function renderAdaptive(value){
   const a=value.adaptive_host||{state:'off'};
-  $('adaptive-enable').checked=!!a.enabled;$('adaptive-game').checked=!!a.game_mode;
+  $('adaptive-enable').checked=!!a.adaptive_sharing;$('adaptive-game').checked=!!a.pause_sharing;
   const reason=ADAPTIVE_REASON[a.reason]||'';
+  $('adaptive-line').textContent=a.line||'Adaptive sharing: off';
   $('adaptive-status').textContent=(ADAPTIVE_TEXT[a.state]||ADAPTIVE_TEXT.off)+(reason?` Reason: ${reason}.`:'')
     +(a.enabled&&a.expires_in_s!==undefined?` Status refreshes every few seconds (valid ${a.expires_in_s}s).`:'')
     +(a.withdraw_overdue?' Running work has not finished within the expected time.':'');
-  $('adaptive-game').disabled=busy||!a.enabled;
+  $('adaptive-game').disabled=busy;
   $('adaptive-stop').disabled=busy||!a.enabled||!!a.stopped;
   $('adaptive-resume').disabled=busy||!a.enabled||!a.stopped;
 }
@@ -183,7 +185,7 @@ $('create-form').addEventListener('submit',async(event)=>{
   if(withRelay && !window.confirm('Start a temporary Cloudflare quick tunnel, then create the swarm? The relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh.'))return;
   const result=await perform(join?'/api/join/request':'/api/create',{consent:{peer_visibility:$('visibility').checked,power:$('power').value,
     storage_bytes:Number($('storage').value),network:$('network').value,background:false,diagnostics:false,
-    thermal:'stop_on_serious'},...(withRelay?{relay_acknowledged:true,max_seconds:1800}:{})},join?'Target identity created. Send the public request to the owner. No seed was created on this Mac.':
+    thermal:'stop_on_serious'},...(withRelay?{relay_acknowledged:true,max_seconds:1800}:{}),adaptive_sharing:$('adaptive-sharing-consent').checked},join?'Target identity created. Send the public request to the owner. No seed was created on this Mac.':
     'Owner authority created and this Mac enrolled. Membership alone does not enable serving.');
   if(join && result && connected)showRequest(result);
 });
@@ -410,7 +412,7 @@ $('visibility').addEventListener('change',()=>{if(latest&&connected)render(lates
 $('join-with-code').addEventListener('click',()=>{
   const disclosure=latest?.join_flow?.standing_disclosure;
   if(!disclosure || !$('standing-confirm').checked)return;
-  void perform('/api/join/window',{consent:currentConsent(),join:$('join-code').value,standing_consent:{acknowledged:true,
+  void perform('/api/join/window',{consent:currentConsent(),adaptive_sharing:$('adaptive-sharing-consent').checked,join:$('join-code').value,standing_consent:{acknowledged:true,
     disclosure_digest:disclosure.digest,caps:{storage_bytes:Number($('storage').value),max_memory_bytes:Number($('standing-memory').value),
     max_wall_seconds:Number($('standing-wall').value),max_commands:5000}}},
     'Request sent through the owner’s relay. Waiting for one-click approval.');
@@ -432,7 +434,8 @@ window.addEventListener('pageshow',()=>void refresh(false));
 window.addEventListener('online',()=>void refresh());
 void refresh();
 setInterval(()=>{if(!busy&&connected)void refresh(false);},5000);
-$('adaptive-enable').addEventListener('change',()=>void perform('/api/adaptive/policy',{enabled:$('adaptive-enable').checked,game_mode:$('adaptive-enable').checked&&$('adaptive-game').checked,acknowledged:$('adaptive-ack').checked},$('adaptive-enable').checked?'Adaptive host resources on.':'Adaptive host resources off.'));
-$('adaptive-game').addEventListener('change',()=>void perform('/api/adaptive/policy',{enabled:true,game_mode:$('adaptive-game').checked,acknowledged:$('adaptive-ack').checked},$('adaptive-game').checked?'Game mode on: no new work.':'Game mode off. Serving returns only after the calm period.'));
+function adaptiveBody(){return {adaptive_sharing:$('adaptive-enable').checked,pause_sharing:$('adaptive-game').checked,acknowledged:$('adaptive-ack').checked};}
+$('adaptive-enable').addEventListener('change',()=>void perform('/api/adaptive/policy',adaptiveBody(),$('adaptive-enable').checked?'Adaptive sharing on.':'Adaptive sharing off. Pause sharing and Stop still work.'));
+$('adaptive-game').addEventListener('change',()=>void perform('/api/adaptive/policy',adaptiveBody(),$('adaptive-game').checked?'Sharing paused: no new work.':'Pause sharing released. Sharing returns only after the calm period.'));
 $('adaptive-stop').addEventListener('click',()=>void perform('/api/adaptive/stop',{},'Stopped taking new work on this Mac.'));
 $('adaptive-resume').addEventListener('click',()=>void perform('/api/adaptive/resume',{},'Serving allowed again after the calm period.'));

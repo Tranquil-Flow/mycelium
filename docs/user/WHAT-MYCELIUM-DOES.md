@@ -14,7 +14,7 @@ Mycelium runs a language model across a few computers that you own, so that no s
 | Two-stage split (A5) | The model's layers are split across two Macs | Normal and concurrent runs shown; stage-loss case fixed, re-test pending |
 | Batching (A10) | Several requests share one pass | Feature observed; verdict pending |
 | Speculative decoding (A11) | A small model drafts, the big model checks | Mostly observed; verdict pending |
-| Host resources and Game mode (A16) | A Mac can step back when you need it | Partly shown; verdict pending |
+| Adaptive sharing and Pause sharing (A16) | A Mac can step back when you need it | Partly shown; verdict pending |
 
 All of this is macOS (Apple silicon) only. Windows and Linux packages exist in the source tree but have never been run on real hardware, and they compute on the CPU only.
 
@@ -79,13 +79,17 @@ See [TROUBLESHOOTING](TROUBLESHOOTING.md) for the exact messages.
 
 **What was shown.** Speculation, output parity with the target alone, rollback, a browser response, and loss of the draft model (the system fell back to target-only) were observed. Loss of the target model was not properly tested yet: the test stopped the wrong process, so it is being rerun.
 
-## Host resources and Game mode (A16)
+## Adaptive sharing and Pause sharing (A16)
 
-**What it does.** It is off by default and needs your explicit acknowledgement. When on, a Mac stops accepting **new** work, then frees model memory, when macOS reports memory pressure, when overall CPU is saturated (if you set that), when you press **Stop serving now**, or when you turn on **Game mode**. Work already running finishes, is handed to another qualified Mac, or ends with an explicit failure. It does not look at which apps you run. It reads only coarse memory pressure and overall CPU.
+**What it does.** There are two separate controls. **Adaptive sharing** is automatic and is on by default when you give consent (you can switch it off). Mycelium watches this Mac's memory, CPU, heat and battery. When other apps need resources, it automatically shares less, finishes or hands off work in progress, and pauses sharing. It resumes once the Mac has been healthy for a while. Your own apps always come first. When it acts, the page shows a live line such as "Adaptive sharing: reduced - memory is low" or "Adaptive sharing: paused - the CPU is busy". **Pause sharing** is your manual "I need this Mac" switch: the Mac stops accepting **new** work and frees model memory until you release it. Work already running finishes, is handed to another qualified Mac, or ends with an explicit failure. Neither looks at which apps you run; Adaptive sharing reads only coarse memory pressure and overall CPU.
+
+**Adaptive sharing off.** Nothing is reduced or paused automatically. Your memory limit, the disk-space floor, your power, heat and network limits, **Pause sharing** and **Stop** stay enforced. Pause sharing works with Adaptive sharing on or off.
+
+**Sharing, Rejoining, Paused.** The page shows "Sharing" only once the route to this Mac is ready. After a pause it shows "Rejoining - connecting route" first. A chat request that arrives during Rejoining waits up to 15 seconds for the route instead of being refused.
 
 **Coming back.** The Mac returns only after about two minutes of calm and a fresh check with the swarm. A stop survives an app restart: the Mac restarts "fenced" and does not take work at once.
 
-**What was shown.** On a pre-final build: CPU saturation, loss of the monitoring probe (the app fails closed and recovers), and Game mode passed. The memory-pressure case released model memory and came back, but its check still had a harness problem. The final-build counted run was pending.
+**What was shown.** On a pre-final build: CPU saturation, loss of the monitoring probe (the app fails closed and recovers), and the manual pause switch passed. The memory-pressure case released model memory and came back, but its check still had a harness problem. The final-build counted run was pending.
 
 **Cost.** A short background check every couple of seconds. This Mac may stop serving while you use other apps.
 

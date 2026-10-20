@@ -80,16 +80,16 @@ These are designed behaviours, tested on two Macs. See [WHAT-MYCELIUM-DOES](WHAT
 | The path changes from direct to relay in the Incidents view ("Activation path transition"). | Your Macs lost a direct link and moved to the relay. The prior observations are kept and a new generation is recorded. | Nothing. Expect slower answers on a relay. |
 | "Membership lease stale" (incident). | A Mac's membership lease expired; control is blocked until renewal. | Reconnect the Mac (**Start / reconnect**). |
 
-## Adaptive host resources and Game mode
+## Adaptive sharing and Pause sharing
 
 | What you see | What it means | What to do |
 |---|---|---|
-| "Off. Mycelium follows only your power, heat and network limits." | The feature is off (default). | Turn it on only if you want this Mac to protect itself. You must tick the acknowledgement. |
+| "Off. Nothing is reduced or paused automatically; ..." | Adaptive sharing is off. Your memory limit, disk floor, power/heat/network limits, Pause sharing and Stop still apply. | Switch Adaptive sharing on if you want this Mac to protect itself. You must tick the acknowledgement. |
 | "On · reduced. Taking fewer new requests while this Mac is busy." | The Mac is under some pressure. | Nothing. |
-| "On · draining. No new work; finishing, handing off or ending running work." | Pressure is high or you pressed Stop or turned on Game mode. | Wait. |
-| "On · stopped. Model memory released; no work from this Mac." Reason shown: "Game mode", "you pressed Stop", "this Mac is low on memory", or "this Mac is under heavy load". | The Mac has withdrawn. | **Allow serving again**, or turn Game mode off. Re-entry waits for about two minutes of calm plus a fresh check with the swarm, so it is not instant. |
+| "No new work; finishing, handing off or ending running work." | Pressure is high or you pressed Stop or turned on Pause sharing. | Wait. |
+| "Stopped. Model memory released; no work from this Mac." Reason shown: "you paused sharing", "you pressed Stop", "memory is low", or "the CPU is busy". | The Mac has withdrawn. | **Allow serving again**, or release Pause sharing. Re-entry waits for about two minutes of calm plus a fresh check with the swarm, so it is not instant. |
 | "Running work has not finished within the expected time." | A running request did not end in time after withdrawal started. | Wait; if it persists, quit the app. |
-| "Adaptive policy could not be read. New work is refused until you turn it off or on again." | The saved setting is unreadable. The Mac fails closed. | Switch the feature off and on again. |
+| "The sharing policy could not be read. New work is refused until you turn it off or on again." | The saved setting is unreadable. The Mac fails closed. | Switch Adaptive sharing off and on again. |
 | After restarting the app the Mac does **not** take work immediately. | Fixed in the final candidate: a stop or withdraw now survives an app restart and the Mac starts "fenced". | Wait for the calm period, or press **Allow serving again**. |
 
 ## Developer test harness only

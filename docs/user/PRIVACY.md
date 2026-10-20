@@ -57,6 +57,10 @@ A development branch (`lane/local-first-lan-mode-20261020`, now folded into the 
 
 So, today: **nothing in this version gives you a fully offline two-Mac run.** If this page ever says "released", check it against the code.
 
+## Adaptive sharing
+
+Mycelium watches this Mac's memory, CPU, heat and battery. When other apps need resources, it automatically shares less, finishes or hands off work in progress, and pauses sharing. It resumes once the Mac has been healthy for a while. Your own apps always come first. It reads only coarse memory pressure and overall CPU load, never which apps you run, and nothing is sampled before you consent. It is on by default at your first consent and you can switch it off. Off means the Mac keeps sharing under pressure until you press **Pause sharing** or **Stop**; your memory limit, disk-space floor and power, heat and network limits stay enforced either way. Turning it off never widens what an owner can do to your Mac.
+
 ## Choices you control
 
 - Tick consent only for Macs you trust.

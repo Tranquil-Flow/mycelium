@@ -70,6 +70,16 @@ DEFAULT_POLICY: Final[dict[str, Any]] = {
     "timings": {},
 }
 _POLICY_KEYS: Final = frozenset(DEFAULT_POLICY)
+# Optional (R26 'Adaptive sharing'): whether the *automatic* controller runs.  Absent = the
+# value of ``enabled`` (every file written before this key existed), so DEFAULT_POLICY and the
+# file schema are unchanged.  ``enabled`` stays "the controller exists" (automatic or a manual
+# Pause sharing is on).
+_OPTIONAL_POLICY_KEYS: Final = frozenset({"automatic"})
+
+
+def policy_automatic(policy: Mapping[str, Any]) -> bool:
+    """Whether the automatic (memory/CPU) controller is on for ``policy``."""
+    return bool(policy.get("automatic", policy["enabled"]))
 _SAMPLE_KEYS: Final = frozenset({
     "observed_at", "pressure", "pressure_crosscheck", "available_bytes",
     "cpu_utilization",
@@ -94,7 +104,11 @@ def _is_number(value: object) -> bool:
 def validate_policy(policy: object) -> dict[str, Any]:
     """Return a normalized copy of ``policy`` or raise ``adaptive_policy_invalid``."""
     bad = AdaptiveHostError("adaptive_policy_invalid")
-    if not isinstance(policy, Mapping) or set(policy) != _POLICY_KEYS:
+    if not isinstance(policy, Mapping) or set(policy) - _OPTIONAL_POLICY_KEYS != _POLICY_KEYS:
+        raise bad
+    if "automatic" in policy and (
+        type(policy["automatic"]) is not bool or (policy["automatic"] and policy["enabled"] is not True)
+    ):
         raise bad
     if policy["schema"] != 1 or type(policy["schema"]) is not int:
         raise bad
@@ -615,6 +629,11 @@ class AdaptiveHostController:
     def enabled(self) -> bool:
         return self._policy["enabled"]
 
+    @property
+    def automatic(self) -> bool:
+        """Adaptive sharing: automatic reduce/drain from memory and CPU signals."""
+        return policy_automatic(self._policy)
+
     def apply_policy(self, policy: Mapping[str, Any]) -> None:
         with self._lock:
             self._policy = validate_policy(policy)
@@ -732,10 +751,13 @@ class AdaptiveHostController:
             now = self._clock()
             self._last_tick = now
             timings = self._timings
-            cls = classify_sample(
-                raw, now=now, timings=timings, footprint_bytes=int(self._footprint()),
-                reserve_bytes=self._policy["reserve_bytes"],
-            )
+            if self.automatic:
+                cls = classify_sample(
+                    raw, now=now, timings=timings, footprint_bytes=int(self._footprint()),
+                    reserve_bytes=self._policy["reserve_bytes"],
+                )
+            else:  # Adaptive sharing off: no signal is read; only Pause sharing / Stop act
+                raw, cls = None, "healthy"
             self._classification = cls
             available = raw.get("available_bytes") if isinstance(raw, Mapping) else None
             self._available = available if cls != "unknown" and type(available) is int else None
@@ -807,6 +829,8 @@ class AdaptiveHostController:
                 return "adaptive_host_withdrawn"
             if self.mode == "drain":
                 return "adaptive_host_draining"
+            if not self.automatic:
+                return None
             if self._stale(self._clock()):
                 return "adaptive_controller_stale"
             if self._classification == "unknown":
@@ -814,8 +838,10 @@ class AdaptiveHostController:
             return None
 
     def _scale(self, now: float) -> str:
-        if not self.enabled or self._stale(now) or self._classification == "unknown":
-            return "zero" if self.enabled else "full"
+        if not self.enabled:
+            return "full"
+        if self.automatic and (self._stale(now) or self._classification == "unknown"):
+            return "zero"
         if self.mode == "normal":
             return "full"
         if self.mode == "reduced":
@@ -1009,10 +1035,12 @@ class AdaptiveHostRuntime:
         interval = resolve_timings(policy)["sample_interval_s"]
         if self._last_sample_at is None or now - self._last_sample_at >= interval:
             self._last_sample_at = now
-            try:
-                raw: object = self._sampler()
-            except Exception:
-                raw = None
+            raw: object = None
+            if policy_automatic(policy):  # Adaptive sharing off: the sampler is never invoked
+                try:
+                    raw = self._sampler()
+                except Exception:
+                    raw = None
             self._controller.observe(raw)
         return self._controller.admission()
 

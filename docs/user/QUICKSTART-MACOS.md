@@ -96,7 +96,7 @@ Nothing is served until the route passes its start-up check. While it is checkin
 ## What you will see
 
 - Step list with each step marked as it completes.
-- On the owner page, the "Adaptive host resources" card (off by default). See [WHAT-MYCELIUM-DOES](WHAT-MYCELIUM-DOES.md).
+- On the owner page, the "Adaptive sharing" card (on by default once you consent). See [WHAT-MYCELIUM-DOES](WHAT-MYCELIUM-DOES.md).
 - If a Mac leaves during an answer, either the answer continues or it ends with an explicit failure. It never ends with a fake success.
 
 ## How to stop
@@ -106,7 +106,7 @@ From gentlest to most final:
 | What you want | What to press | What happens |
 |---|---|---|
 | Stop the run | **Stop** (in the run card) | The run stops. Joined Macs stop when the owner stops. |
-| Stop this Mac serving, keep everything | **Stop serving now** (Adaptive host resources card; needs the card switched on) | This Mac takes no new work and frees model memory. **Allow serving again** resumes. |
+| Stop this Mac serving, keep everything | **Stop serving now** (Adaptive sharing card) | This Mac takes no new work and frees model memory. **Allow serving again** resumes. |
 | Pause, keep identity | **Stop & retain private state** | Membership renewal pauses. **Start / reconnect** resumes with the same identity. |
 | Close the app | **Quit launcher** | The app exits and removes its temporary launch page. Reopening makes a new browser authorization. |
 | Leave a swarm | **Withdraw standing consent** (joined Mac) or **Revoke this Mac** (needs its checkbox) | Revoke ends membership. It is different from deleting local files. |
