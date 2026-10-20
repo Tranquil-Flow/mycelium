@@ -103,6 +103,18 @@ These messages come from the project's own two-Mac test scripts, not from the ap
 | Disk below the 20 GiB floor | A harness safety rule: it will not start a stage with less than 20 GiB free on a Mac. |
 | Second Mac on battery | The harness warned that the laptop was discharging during a long run. |
 
+## Diagnostics: finding out what is wrong
+
+Open the **Diagnostics** card at the bottom of the app. It reads only what this Mac already knows and says, in plain words, what is wrong and what to do. It changes nothing.
+
+- **Clock difference.** If the two Macs' clocks differ by more than about a second, short-lived commands expire before they are accepted and everything looks broken while both Macs run. The card says which Mac is ahead or behind and by how much. Fix: run `sudo sntp -sS time.apple.com` on both Macs.
+- **Health checks.** If a joined Mac stops answering health checks it is quarantined and chats are refused. The card names it and says how long it has been quiet.
+- **Command health.** Per joined Mac: how many recent commands completed, expired before being claimed, or were claimed but never confirmed, and how long a claim takes.
+- **Chats, relay, timings, this Mac.** The error codes of the last chats, the relay and when it expires, tokens per second and first-token time of the last request (per-hop times are not recorded by the route and the card says so), and this Mac's load, memory pressure, Spotlight CPU and free disk.
+- **On a joined Mac** the same card shows the owner's clock difference and how long this Mac's calls to the owner take.
+
+**Download support bundle** saves one zip: the numbers above, the end of the app log and the version numbers. Keys, grants, tokens, join links and codes, prompts and chat text, home folder paths, user and host names and IP addresses are replaced with placeholders before it is written. Nothing is uploaded; look through it, then send it to whoever is helping you. The app log is included only if the app was started with its output written to `<state folder>/app.log` (or the `MYCELIUM_A13_APP_LOG` environment variable names the file).
+
 ## Still stuck?
 
 Write down the exact text on screen and what you pressed before it appeared. The app keeps your identity and evidence when it refuses, so retrying is safe.

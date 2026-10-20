@@ -433,6 +433,15 @@ def _sharing_status(app):
         return {'state':'idle','line':'Not sharing yet'}
 
 
+def _diagnostics_probe(app):
+    """PV26: start reading clock/claim timestamps for /api/diagnostics (read-only; never breaks the caller)."""
+    try:
+        from .diagnostics import ensure_installed
+        ensure_installed(app)
+    except Exception:
+        pass
+
+
 def _demo_status(app, part):
     """Status of the one-click demo pieces; never lets them break /api/status."""
     try:
@@ -613,6 +622,7 @@ class DemoApp:
             self.policy_thread.start()
             self.standing_thread = threading.Thread(target=self._standing_loop, daemon=True)
             self.standing_thread.start()
+            _diagnostics_probe(self)
             if self.installation_role == 'target': self._resume_leave()
             return self
         except BaseException:
@@ -1133,6 +1143,7 @@ class DemoApp:
 
     def status(self):
         if self.closed.is_set(): raise DemoError('application_closed')
+        _diagnostics_probe(self)
         value = self.authority.status()
         coordinator = getattr(self.authority, 'coordinator', None)
         if self.installation_role == 'owner' and coordinator is not None:
@@ -1723,11 +1734,11 @@ class _Handler(BaseHTTPRequestHandler):
         return valid
     def do_GET(self):
         if not self.base_guard(): return
-        if self.path in {'/','/app.js','/style.css','/run.js','/swarm.js'}:
-            name={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/run.js':'run.js','/swarm.js':'swarm.js'}[self.path]
+        if self.path in {'/','/app.js','/style.css','/run.js','/swarm.js','/diagnostics.js'}:
+            name={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/run.js':'run.js','/swarm.js':'swarm.js','/diagnostics.js':'diagnostics.js'}[self.path]
             path=Path(__file__).parent/'web'/name
             if not path.is_file(): self.fail(503,'assets_unavailable'); return
-            kind={'/':'text/html; charset=utf-8','/app.js':'text/javascript; charset=utf-8','/run.js':'text/javascript; charset=utf-8','/swarm.js':'text/javascript; charset=utf-8','/style.css':'text/css; charset=utf-8'}[self.path]
+            kind={'/':'text/html; charset=utf-8','/app.js':'text/javascript; charset=utf-8','/run.js':'text/javascript; charset=utf-8','/swarm.js':'text/javascript; charset=utf-8','/diagnostics.js':'text/javascript; charset=utf-8','/style.css':'text/css; charset=utf-8'}[self.path]
             self.send_value(200,path.read_bytes(),content_type=kind); return
         if self.path == '/chat' or self.path.startswith('/chat/'):
             self.chat_route(b''); return
@@ -1748,6 +1759,13 @@ class _Handler(BaseHTTPRequestHandler):
                 try: self.send_value(200,self.app.status())
                 except Exception: self.fail(503,'status_unavailable')
             return
+        if self.path in {'/api/diagnostics','/api/diagnostics/bundle'}:
+            # PV26: read-only owner/member diagnostics behind the local session; never served by the public relay.
+            if not self.authorized(): return
+            from .diagnostics import handle_get
+            try: status,kind,body,extra=handle_get(self.app,self.path)
+            except Exception: self.fail(503,'diagnostics_unavailable'); return
+            self.send_value(status,body,content_type=kind,extra=extra); return
         self.fail(404,'not_found')
     def chat_route(self, body):
         # Shared chat page: no accounts and no session cookie (local UI and the
