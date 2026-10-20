@@ -69,7 +69,7 @@ def test_deep_roots_are_deterministic_distinct_and_pass_the_run_plan_path_rules(
 
 
 def test_multibyte_staging_roots_are_measured_in_bytes_not_characters():
-    staging = "/private/tmp/mycelium-physical-run/" + "é" * 24  # 24 characters, 48 bytes: legacy path is 98 + 9 bytes
+    staging = "/private/tmp/mycelium-physical-run/" + "é" * 40  # 40 characters but 80 bytes: the legacy path is 89 characters, 129 bytes
     assert len(f"{staging}/socket/{SOCKET_FILE_NAME}") < SOCKET_PATH_LIMIT <= len(_socket_path(f"{staging}/socket"))
     assert len(_socket_path(live_socket_root(staging))) < SOCKET_PATH_LIMIT
 
