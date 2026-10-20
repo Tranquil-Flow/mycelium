@@ -20,6 +20,7 @@ from .contracts import (
     is_safe_error_code,
     qualification_binding,
 )
+from .bounded import DEFAULT_MAX_TRACKED_REQUESTS, BoundedIdMap, BoundedIdSet
 from .qualification import QualificationSource
 
 
@@ -107,6 +108,7 @@ class RouterSessionBackend:
         excluded_placements: frozenset[str] = frozenset(),
         sampling_seed: int = 0,
         selected_placements: frozenset[str] | None = None,
+        max_tracked_requests: int = DEFAULT_MAX_TRACKED_REQUESTS,
     ) -> None:
         if not isinstance(excluded_placements, frozenset) or not all(
             isinstance(item, str) and item for item in excluded_placements
@@ -135,12 +137,13 @@ class RouterSessionBackend:
         self._lock = threading.RLock()
         self._active: set[str] = set()
         self._cancelled: set[str] = set()
-        self._pending_cancelled: set[str] = set()
+        # Tables that outlive a request when its cleanup never runs are bounded (oldest evicted first).
+        self._pending_cancelled = BoundedIdSet(max_tracked_requests)
         self._internally_cancelled: set[str] = set()
         self._external_cancellation_observed: set[str] = set()
-        self._awaiting_cancel_ack: set[str] = set()
-        self._cancellation_deadlines: dict[str, float] = {}
-        self._publisher_generations: dict[str, int] = {}
+        self._awaiting_cancel_ack = BoundedIdSet(max_tracked_requests)
+        self._cancellation_deadlines: BoundedIdMap[float] = BoundedIdMap(max_tracked_requests)
+        self._publisher_generations: BoundedIdMap[int] = BoundedIdMap(max_tracked_requests)
         self._router_admitted: set[str] = set()
 
     def run(

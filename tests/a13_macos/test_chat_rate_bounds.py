@@ -33,6 +33,6 @@ def test_the_per_client_limit_and_window_still_hold():
         service._rate("same")
     with pytest.raises(ChatError) as caught:
         service._rate("same")
-    assert caught.value.args or True
+    assert caught.value.code == 'chat_rate_limited'
     clock.now = 61
     service._rate("same")

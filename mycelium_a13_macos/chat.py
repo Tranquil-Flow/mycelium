@@ -283,8 +283,9 @@ class ChatService:
         if len(self._global) >= GLOBAL_PER_MINUTE:
             raise ChatError(429, 'chat_swarm_rate_limited')
         bucket.append(now); self._global.append(now)
-        if len(self._per_client) > 4096:  # bounded memory under many clients
-            self._per_client = {k: v for k, v in self._per_client.items() if v}
+        # Bounded memory under many clients: drop every client whose newest request left the window, not only
+        # empty buckets (a client that never returns keeps its old stamps and would otherwise live forever).
+        self._per_client = {k: v for k, v in self._per_client.items() if v and now - v[-1] < 60}
 
     # -- API ----------------------------------------------------------------
     def send(self, client: str, body: Any) -> dict[str, Any]:

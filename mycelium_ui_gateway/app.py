@@ -12,6 +12,8 @@ from urllib.parse import urlsplit
 
 from mycelium_product_spine import validate_product_event, validate_product_snapshot
 
+from mycelium_request_gateway.bounded import BoundedIdMap, BoundedIdSet
+
 from .config import GatewayConfig
 from .coordinator import CoordinatorError, SwarmCoordinator
 from .sessions import (
@@ -220,6 +222,10 @@ def _retryable_error(code: str, status: int) -> bool:
     }
 
 
+_MIN_TRACKED_REQUESTS = 256
+_STREAM_GRACE_SECONDS = 600
+
+
 class ProductGatewayASGIApplication:
     """A bounded authority-preserving BFF over injected local ASGI services."""
 
@@ -269,10 +275,15 @@ class ProductGatewayASGIApplication:
         self._credential_bytes = tuple(
             value for value in (request_token, observatory_token) if value is not None
         )
-        self._request_owner_tokens: dict[str, bytes] = {}
+        # Per-request tables are bounded: a request needs its owner token only while its session can still
+        # reach it (the session lifetime) plus a grace for a stream that outlives the session.  Requests
+        # owned by live sessions never exceed max_sessions x max_requests_per_session.
+        tracked = max(_MIN_TRACKED_REQUESTS, 2 * config.max_sessions * config.max_requests_per_session)
+        lifetime = float(config.session_ttl_seconds + _STREAM_GRACE_SECONDS)
+        self._request_owner_tokens: BoundedIdMap[bytes] = BoundedIdMap(tracked, ttl_seconds=lifetime, clock=clock)
         self._request_owner_tokens_lock = threading.RLock()
-        self._cancel_dispatched: set[str] = set()
-        self._terminal_requests: set[str] = set()
+        self._cancel_dispatched = BoundedIdSet(tracked, ttl_seconds=lifetime, clock=clock)
+        self._terminal_requests = BoundedIdSet(tracked, ttl_seconds=lifetime, clock=clock)
         self._access_policy = access_policy
         self._sessions = ProductSessionStore(
             clock=clock,
