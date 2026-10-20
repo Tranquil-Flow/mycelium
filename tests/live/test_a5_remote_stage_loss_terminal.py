@@ -223,3 +223,77 @@ def test_lost_remote_stage_while_idle_is_reported_not_ready(
         assert not owner.public_status().get("route_ready")
     finally:
         _teardown(local, owner, router, service)
+
+
+def test_failed_terminal_does_not_wait_for_a_slow_replacement_route(
+    tmp_path, watchdog
+) -> None:
+    # A real model route reloads for minutes.  The gateway releases the
+    # backend before it publishes the request's terminal, so a replacement
+    # opened inside that release held the failed terminal back for the whole
+    # reload and the client saw silence.  The replacement here cannot open
+    # until the test lets it, i.e. it is slower than any bound.
+    local = build_local_physical(tmp_path, shape="single")
+    local.session_factory.step_delay_s = 0.15
+    replacement_may_open = threading.Event()
+    replacement_requested = threading.Event()
+    factory_calls = []
+
+    def new_route():
+        factory_calls.append(time.monotonic())
+        if len(factory_calls) > 1:
+            replacement_requested.set()
+            assert replacement_may_open.wait(180), "replacement never released"
+        return local.new_route()
+
+    owner = ColdRouteRestartOwner(
+        route_factory=new_route,
+        open_and_qualify=_open_and_qualify,
+        restart_budget=1,
+    )
+    try:
+        owner.open()
+        router, service, _target = _stack(tmp_path, owner)
+    except BaseException:
+        replacement_may_open.set()
+        owner.close()
+        owner.cleanup()
+        local.close()
+        raise
+    try:
+        first_route = owner._current
+        events, first_token, finished, reader = _start(service, owner)
+        assert first_token.wait(60), "request never produced a token"
+
+        os.kill(first_route.process_id(REMOTE_STAGE), signal.SIGKILL)
+        lost_at = time.monotonic()
+        assert finished.wait(TERMINAL_BOUND_SECONDS), (
+            f"no terminal within {TERMINAL_BOUND_SECONDS:.0f}s of the remote "
+            f"stage loss while the replacement route was still opening; "
+            f"events={[(e.kind, e.code) for _t, e in events]}"
+        )
+        reader.join(5)
+        terminals = [(t, e) for t, e in events if e.kind in _TERMINALS]
+        assert [e.kind for _t, e in terminals] == ["failed"], [
+            (e.kind, e.code) for _t, e in events
+        ]
+        failed_at, failed = terminals[0]
+        assert failed_at - lost_at <= TERMINAL_BOUND_SECONDS
+        # This request's own cleanup was proven: the honest generic code, not
+        # request_cleanup_unproven.
+        assert failed.code == "backend_failed", failed.code
+
+        # Recovery is deferred, not dropped.  Until the replacement is ready
+        # admission is refused rather than hanging or serving a dead route.
+        assert owner.current() is None
+        assert replacement_requested.wait(60), "the route was never restarted"
+        assert owner.public_status()["cold_route_restart"]["state"] == "restarting"
+        replacement_may_open.set()
+        status = _wait_ready(owner, 120)
+        assert status["state"] == "ready" and status["generation"] == 2, status
+        assert owner._current is not first_route
+        _next_id, after = _run_without_fault(service, owner)
+        assert after["kinds"] == ["completed"], after
+    finally:
+        replacement_may_open.set()
+        _teardown(local, owner, router, service)
