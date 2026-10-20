@@ -811,7 +811,7 @@ class MultiSourceTransport:
     """
 
     def __init__(self, sources: list[_Source], *, fallback: Any | None,
-                 offline: bool = False,
+                 offline: bool = False, prefer_fallback: bool = False,
                  clock: Callable[[], float] = time.monotonic,
                  probe_bytes: int = 16 * 1024 * 1024,
                  slow_bytes_per_second: float = 4 * 1024 * 1024,
@@ -822,7 +822,11 @@ class MultiSourceTransport:
         self._hf: _HuggingFaceSource | None = None
         if fallback is not None:
             self._hf = _HuggingFaceSource(fallback)
-            self._order.append(self._hf)
+            if prefer_fallback:
+                # No owner LAN path: the pinned origin before the owner's uplink.
+                self._order.insert(0, self._hf)
+            else:
+                self._order.append(self._hf)
         if not self._order:
             raise ValueError("model_source_sources_required")
         # Longest single read in flight (the acquisition's close() bound).
@@ -1085,6 +1089,25 @@ class _MultiSourceFile:
         self.close()
 
 
+def lan_reachable(owner_origin: str, joiner_host: str | None) -> bool:
+    """True when this Mac is in the same IPv4 /24 as the owner's LAN listener.
+
+    Anything else (other network, no private address, IPv6, unparsable) is
+    ``False``: the private-IP dial would go nowhere or to an unrelated host.
+    """
+    if not joiner_host:
+        return False
+    try:
+        owner = ipaddress.ip_address(urlsplit(owner_origin).hostname)
+        joiner = ipaddress.ip_address(joiner_host)
+    except (TypeError, ValueError):
+        return False
+    if owner.version != 4 or joiner.version != 4:
+        return False
+    return ipaddress.ip_network(f"{owner}/24", strict=False) == ipaddress.ip_network(
+        f"{joiner}/24", strict=False)
+
+
 def joiner_model_source(app: Any, announcement: Mapping[str, Any] | None, *,
                         fallback: Any | None = None,
                         _test_ca_certificate: Path | None = None) -> MultiSourceTransport | None:
@@ -1096,8 +1119,10 @@ def joiner_model_source(app: Any, announcement: Mapping[str, Any] | None, *,
     if hint is None or peer is None:
         return None
     sources = []
-    if hint["lan_origin"] is not None:
-        # An unreachable LAN path (other network, firewall) falls through at once.
+    offered_lan = hint["lan_origin"] is not None
+    on_owner_lan = offered_lan and lan_reachable(hint["lan_origin"], choose_lan_host())
+    if on_owner_lan:
+        # Same /24 as the owner; a firewall block still falls through at once.
         sources.append(peer_source("owner_lan", PeerRangeClient(
             peer, lan_origin=hint["lan_origin"], tls_certificate_pem=hint["tls_certificate_pem"],
             timeout=LAN_TIMEOUT_SECONDS, _test_ca_certificate=_test_ca_certificate),
@@ -1112,11 +1137,16 @@ def joiner_model_source(app: Any, announcement: Mapping[str, Any] | None, *,
         from .acquisition import _HTTPRepositoryTransport
         fallback = _HTTPRepositoryTransport()
     # Offline: owner LAN / relay bytes only, no Hugging Face source at all.
-    return MultiSourceTransport(sources, fallback=fallback, offline=offline)
+    # The owner offered a LAN path this Mac cannot use (another network): the
+    # Hugging Face origin goes ahead of the owner relay, which stays as the
+    # backup.  Every file digest is still checked, whatever the order.  An owner
+    # that offered no LAN path (relay-only mode) keeps relay, then Hugging Face.
+    return MultiSourceTransport(sources, fallback=fallback, offline=offline,
+                                prefer_fallback=offered_lan and not on_owner_lan)
 
 
 __all__ = [
     "HINT", "LAN_CHUNK_BYTES", "MAX_CHUNK_BYTES", "MultiSourceTransport", "OwnerLanModelSource",
     "MANIFEST_READ", "MANIFEST_RESPONSE", "OwnerModelSource", "PATH_MANIFEST", "PATH_READ", "PeerRangeClient", "RELAY_CHUNK_BYTES", "READ", "RESPONSE",
-    "choose_lan_host", "joiner_model_source", "owner_snapshot", "peer_source", "validate_hint",
+    "choose_lan_host", "joiner_model_source", "lan_reachable", "owner_snapshot", "peer_source", "validate_hint",
 ]

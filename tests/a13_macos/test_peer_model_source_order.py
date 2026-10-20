@@ -22,6 +22,9 @@ class _Origin:
     def resolve(self, model):  # pragma: no cover - not called
         raise AssertionError("resolve is not part of the order test")
 
+    def read_range(self, *args):  # pragma: no cover - not called
+        raise AssertionError("no bytes are read in the order test")
+
 
 def _announcement(*, lan: bool = True, relay: bool = True) -> dict:
     return {"model_source": {
@@ -97,8 +100,8 @@ def test_same_lan_24_helper(owner, joiner, same) -> None:
 def test_prefer_fallback_places_huggingface_before_the_peer_sources() -> None:
     relay = pms.peer_source("owner_relay", types.SimpleNamespace(read=lambda *a: b""), chunk_bytes=8)
     transport = pms.MultiSourceTransport(
-        [relay], fallback=types.SimpleNamespace(timeout_seconds=5.0), prefer_fallback=True)
+        [relay], fallback=_Origin(), prefer_fallback=True)
     assert [row["name"] for row in transport.status()] == ["huggingface", "owner_relay"]
     default = pms.MultiSourceTransport(
-        [relay], fallback=types.SimpleNamespace(timeout_seconds=5.0))
+        [relay], fallback=_Origin())
     assert [row["name"] for row in default.status()] == ["owner_relay", "huggingface"]
