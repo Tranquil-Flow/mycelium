@@ -3397,6 +3397,13 @@ def test_node_run_bound_finally_retains_primary_through_four_cleanup_failures(
             "lifecycle_state": "RUNNING",
             "membership_endpoint_id": None,
             "peer_class": "mac_mlx_iroh",
+            # run() always resolves this; internet is the unchanged default.
+            "runtime_network": node_main._RuntimeNetwork(
+                mode=node_main.NetworkMode.INTERNET,
+                advertise=["https://node.test/control"],
+                sidecar_local_only=False,
+                sidecar_lan=False,
+            ),
         },
     )()
 
