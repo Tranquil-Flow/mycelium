@@ -254,8 +254,8 @@ def run_seed_cutover(
             for node in sorted(adopt):
                 adopt[node]()
                 receipt["phases"].append(f"adopted:{node}")
-    except Exception as exc:  # noqa: BLE001 - recorded by type, restart still proceeds
-        failure = f"cutover_failed:{type(exc).__name__}"
+    except Exception as exc:  # noqa: BLE001 - recorded by type and bounded message, restart still proceeds
+        failure = f"cutover_failed:{type(exc).__name__}:{str(exc)[:120]}"
         receipt["phases"].append("cutover_failed")
     after = fleet.start(epoch)
     receipt["phases"].append("restarted")
