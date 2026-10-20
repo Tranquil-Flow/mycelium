@@ -342,6 +342,39 @@ $('capability-report').addEventListener('click',()=>void perform('/api/capabilit
 $('start').addEventListener('click',()=>void perform('/api/start',{},'Reconnected using retained identity.'));
 $('stop').addEventListener('click',()=>void perform('/api/stop',{},'Stopped. Identity, recovery and evidence retained.'));
 $('quit').addEventListener('click',()=>void perform('/api/quit',{},'Launcher stopped; identity and evidence retained.'));
+// ---- Leave swarm (joined member): self-contained block, keep separate from the rest of the file ----
+Object.assign(HUMAN_ERRORS,{
+  leave_confirmation_required:'Tick “I want this Mac to leave the swarm” first.',
+  leave_mode_invalid:'Choose “Leave smoothly” or “Instant leave”.',
+  target_role_required:'Only a Mac that joined a swarm can leave it. The owner revokes members from the owner screen.',
+  leave_unload_failed:'The model could not be unloaded cleanly; this Mac left anyway.'});
+function renderLeaveSwarm(value){
+  const card=$('leave-swarm'); if(!card)return;
+  const a=value.authority||{}, leave=value.leave||null;
+  card.hidden=!(value.installation_role==='target' && (a.membership_state==='current' || leave));
+  const inProgress=!!leave && leave.state!=='left', left=!!leave && leave.state==='left';
+  const text=!leave ? ''
+    : left ? (leave.fallback==='stall' || leave.fallback==='cap'
+        ? 'The swarm did not finish in time, so this Mac left immediately. It no longer accepts work and its consent is withdrawn.'
+        : 'This Mac has left the swarm: it no longer accepts work and its standing consent is withdrawn. The owner sees it drop out.')
+    : leave.state==='draining' ? 'Leaving smoothly: no new work is accepted; waiting for the work already running to finish (up to 30 seconds).'
+    : 'Leaving…';
+  $('leave-state').textContent=text;
+  const off=busy || inProgress || left;
+  $('leave-confirm').disabled=off;
+  $('leave-smooth').disabled=off || !$('leave-confirm').checked;
+  $('leave-instant').disabled=off || !$('leave-confirm').checked;
+}
+function leaveSwarm(mode){
+  const done=mode==='smooth' ? 'Leaving smoothly: no new work is accepted while running work finishes.'
+    : 'This Mac left the swarm.';
+  return perform('/api/leave',{mode,confirm:true},done);  // buttons are enabled only while the box is ticked
+}
+{const baseRender=render; render=function(value){baseRender(value); renderLeaveSwarm(value);};}
+$('leave-confirm').addEventListener('change',()=>{if(latest)renderLeaveSwarm(latest);});
+$('leave-smooth').addEventListener('click',()=>void leaveSwarm('smooth'));
+$('leave-instant').addEventListener('click',()=>void leaveSwarm('instant'));
+// ---- end Leave swarm ----
 $('revoke').addEventListener('click',()=>{
   if (!$('revoke-confirm').checked) { notice('Confirm that you want to revoke this Mac before continuing.'); return; }
   void perform('/api/revoke-self',{confirm:true},'This Mac is revoked. It cannot renew or resume this membership. Private identity and evidence are retained.');
