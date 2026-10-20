@@ -48,9 +48,10 @@ _ACTIVE = frozenset({'running', 'serving', 'stopping', 'failing'})
 class OwnerRunError(RuntimeError):
     """A closed ``code`` plus, for resource refusals, a human ``message`` with numbers."""
 
-    def __init__(self, code: str, message: str | None = None) -> None:
+    def __init__(self, code: str, message: str | None = None, fix: dict[str, str] | None = None) -> None:
         self.code = code if isinstance(code, str) and _CODE.fullmatch(code) else 'owner_run_step_failed'
         self.message = message[:600] if isinstance(message, str) and message else None
+        self.fix = dict(fix) if isinstance(fix, dict) else None  # what to do next (a pointer, never a secret)
         super().__init__(self.code)
 
 
@@ -113,6 +114,7 @@ class OwnerRun:
         self._failed_step: str | None = None
         self._error: str | None = None
         self._error_message: str | None = None
+        self._error_fix: dict[str, str] | None = None
         self._reason: str | None = None
         self._started_at: float | None = None
         self._ever_started = False
@@ -148,7 +150,7 @@ class OwnerRun:
                 'protocol': 'mycelium.a13_owner_run.v1',
                 'state': self._state, 'reason': self._reason, 'step': self._step,
                 'failed_step': self._failed_step, 'error_code': self._error,
-                'error_message': self._error_message,
+                'error_message': self._error_message, 'error_fix': self._error_fix,
                 'run_id': None if ctx is None else ctx.run_id,
                 'deployment_id': None if ctx is None else ctx.deployment_id,
                 'steps': [{'name': name, 'label': label, **self._steps[name]} for name, label in STEPS],
@@ -179,6 +181,7 @@ class OwnerRun:
             self._failed_step = None
             self._error = None
             self._error_message = None
+            self._error_fix = None
             self._reason = reason
             self._started_at = time.time()
             self._ever_started = True
@@ -247,13 +250,15 @@ class OwnerRun:
             if ctx is self._ctx and self._step is not None:
                 self._steps[self._step]['detail'] = None if detail is None else str(detail)[:200]
 
-    def _fail(self, ctx: RunContext, step: str, code: str, message: str | None = None) -> None:
+    def _fail(self, ctx: RunContext, step: str, code: str, message: str | None = None,
+              fix: dict[str, str] | None = None) -> None:
         with self._lock:
             if ctx is not self._ctx:
                 return
             self._failed_step = step
             self._error = code
             self._error_message = message
+            self._error_fix = fix
             self._steps[step]['state'] = 'failed'
             self._state = 'failing'
 
@@ -270,7 +275,7 @@ class OwnerRun:
                 except _Stopped:
                     raise
                 except OwnerRunError as error:
-                    self._fail(ctx, name, error.code, error.message); failed = True
+                    self._fail(ctx, name, error.code, error.message, error.fix); failed = True
                     return
                 except Exception:
                     self._fail(ctx, name, 'owner_run_step_failed'); failed = True

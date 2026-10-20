@@ -49,8 +49,17 @@
     $('run-model-note').textContent = picker.locked ? `Fixed by MYCELIUM_A13_RUN_MODEL (${picker.selected}).`
       : `Pinned: ${picker.model_id} @ ${picker.resolved_commit.slice(0, 12)} · ${picker.source === 'saved' ? 'your choice' : 'demo default'}. Joined Macs fetch only their slice of it.`;
   }
+  // Start without a prepared model: show where to prepare it (the Inference download step), once per failure.
+  let pointedAt = null;
+  function pointToModelStep(fix) {
+    const target = $(fix.target || 'acquisition');
+    if (!target || pointedAt === latestRunId) return;
+    pointedAt = latestRunId; target.scrollIntoView({block: 'center'}); target.classList.add('needs-attention');
+  }
+  let latestRunId = null;
   function renderRun(status) {
     const run = status.owner_run; if (!run) return;
+    latestRunId = run.run_id;
     const active = ['running','serving','stopping'].includes(run.state);
     $('demo-start').disabled = busy || active;
     $('demo-stop').disabled = busy || !active;
@@ -59,6 +68,7 @@
     $('demo-state').textContent = run.state === 'failed' ? `Stopped at “${(run.steps.find((s) => s.name === run.failed_step) || {}).label}”: ${run.error_message ? `${run.error_message} (${run.error_code})` : explain(run.error_code)}`
       : run.state === 'serving' ? 'Serving — open the chat below.' : run.state === 'running' ? `Running: ${step ? step.label : ''}…`
       : run.state === 'stopping' ? 'Stopping…' : run.state === 'stopped' ? 'Stopped.' : 'Idle.';
+    if (run.state === 'failed' && run.error_fix && run.error_fix.action === 'prepare_model') pointToModelStep(run.error_fix);
     $('demo-steps').replaceChildren(...(run.steps || []).map((s) => {
       const li = document.createElement('li'); li.className = s.state;
       li.textContent = s.label + (s.detail ? ` — ${s.detail}` : '') + (s.state === 'done' ? ' ✓' : s.state === 'failed' ? ' ✗' : '');

@@ -123,6 +123,13 @@ def _owner_compiled_bundle(app):
     return Path(app.root) / 'chain-runs' / run_id / 'compiled' / 'transfer-bundle'
 
 
+#: Acquisition states in which a download/verify/compile is genuinely running (acquisition.py ``status()['state']``).
+ACQUISITION_ACTIVE_STATES = frozenset({'starting', 'resolving_metadata', 'checking_capacity', 'downloading',
+                                       'verifying', 'compiling'})
+MODEL_NOT_PREPARED_MESSAGE = ('Download the selected model on this Mac first: under Inference, tick the authorization '
+                              'box, press “Download / resume source” and wait for “prepared”, then press Start again.')
+MODEL_NOT_PREPARED_FIX = {'action': 'prepare_model', 'target': 'acquisition'}
+
 class ChainOps:
     """Seam over chain_compile (N-host compile, rebuild, stop)."""
 
@@ -414,9 +421,17 @@ class AppDemoChain:
             raise OwnerRunError('owner_swarm_required')
         def prepared():
             return app.acquisition.status().get('state') == 'prepared'
+        def downloading():
+            return app.acquisition.status().get('state') in ACQUISITION_ACTIVE_STATES
         ctx.progress('checking the pinned model on this Mac')
-        ctx.wait_until(prepared, budget=self.budgets['model'], code='owner_model_not_prepared',
-                       interval=min(self.interval, 1.0))
+        # Refuse at once without a prepared model; wait (bounded) only while a download is really running,
+        # so a harness that starts the run as the download finishes still passes.
+        if not prepared() and not downloading():
+            raise OwnerRunError('owner_model_not_prepared', MODEL_NOT_PREPARED_MESSAGE, MODEL_NOT_PREPARED_FIX)
+        ctx.wait_until(lambda: prepared() or not downloading(), budget=self.budgets['model'],
+                       code='owner_model_not_prepared', interval=min(self.interval, 1.0))
+        if not prepared():
+            raise OwnerRunError('owner_model_not_prepared', MODEL_NOT_PREPARED_MESSAGE, MODEL_NOT_PREPARED_FIX)
         source = app.acquisition.prepared_source()
         model = source.model
         slice_mode = slice_fetch_permitted(getattr(source, 'source_bytes', None), architecture=model.architecture,
