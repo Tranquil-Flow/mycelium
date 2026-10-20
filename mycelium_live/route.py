@@ -2695,9 +2695,14 @@ class PhysicalLiveRoute:
         if not any(health_results):
             self._handle_lost_peer_processes()
             return
-        if not all(health_results) and self._peer_exit_successor_authority is not None:
-            # A7: hand an exited non-entry participant to its request-scoped
-            # successor within this tick instead of the next status read.
+        if not all(health_results):
+            # A participant that stopped answering health may be an exited
+            # process (a lost pipeline stage while its peers still answer).
+            # Settle it within this tick, not at the next status read: A7
+            # hands an exited non-entry participant to its request-scoped
+            # successor; otherwise the request is interrupted inside the
+            # cancellation and cleanup budget instead of blocking on the
+            # entry's in-flight command until its node command timeout.
             self._handle_lost_peer_processes()
         with self._lock:
             failed_nodes: dict[str, str] = {}

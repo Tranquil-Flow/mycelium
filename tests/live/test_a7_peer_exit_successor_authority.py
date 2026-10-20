@@ -7,8 +7,9 @@ owner-approved A7 route change (``set_peer_exit_successor_authority``,
 
 * the authority's blocking RPC to the entry never runs under the route lock,
   from either detection caller (status read or the active liveness monitor);
-* with no authority installed, the lost-peer, monitor and participant paths
-  behave exactly as before;
+* with no authority installed, the lost-peer and participant paths behave
+  exactly as before, and the monitor settles a partial participant loss in the
+  same tick (A5: a lost remote pipeline stage), not at the next status read;
 * every refusal shape keeps today's interruption;
 * concurrent detection callers cannot cancel a request that one of them
   handed to its successor (the serialised peer-exit claim).
@@ -251,17 +252,28 @@ def test_no_authority_keeps_todays_cancel_and_participants() -> None:
     assert route._bound_participants("gone", fallback) is fallback
 
 
-def test_no_authority_monitor_keeps_todays_timing() -> None:
+def test_monitor_without_authority_reaches_the_handler_on_a_partial_failure() -> None:
     route, log = _route()
     handled: list[bool] = []
     route._handle_lost_peer_processes = lambda: handled.append(True)
 
     route._monitor_active_liveness_once()
 
-    # One of two health probes failed: only an all-failed tick (or a status
-    # read) reaches the lost-peer handler when no authority is installed.
-    assert handled == []
+    # One of two health probes failed: a lost pipeline stage must be settled in
+    # this tick (A5), whether or not an A7 authority is installed.
+    assert handled == [True]
     assert log["cancelled"] == []
+
+
+def test_monitor_without_authority_interrupts_a_lost_remote_stage_in_the_tick() -> None:
+    route, log = _route()
+
+    route._monitor_active_liveness_once()
+
+    assert log["cancelled"] == ["request-a7"]
+    assert route._active_route_requests["request-a7"]["lost_peer_node_ids"] == frozenset(
+        {"node-2"}
+    )
 
 
 def test_monitor_with_authority_reaches_the_handler_on_a_partial_failure() -> None:

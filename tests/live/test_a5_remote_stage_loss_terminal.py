@@ -30,11 +30,13 @@ from mycelium_deadlines import (
     CANCEL_AND_CLEANUP_BUDGET_SECONDS,
     LIVENESS_ACTIVE_FAILURE_DETECTION_MS,
 )
-from tests.live._a6_local_physical import PROMPT  # noqa: F401 - fixture parity
+from mycelium_live.supervisor import ColdRouteRestartOwner
+from tests.live._a6_local_physical import build_local_physical
 from tests.live.test_a6_local_physical_recovery import (
     _TERMINALS,
     SIDECAR_BINARY,
-    _compose,
+    _open_and_qualify,
+    _stack,
     _run_without_fault,
     _submit,
     _wait_ready,
@@ -53,6 +55,24 @@ TERMINAL_BOUND_SECONDS = (
     + CANCEL_AND_CLEANUP_BUDGET_SECONDS
     + 5.0
 )
+
+
+def _compose(tmp_path, step_delay_s=0.15):
+    local = build_local_physical(tmp_path, shape="single")
+    local.session_factory.step_delay_s = step_delay_s
+    owner = ColdRouteRestartOwner(
+        route_factory=local.new_route,
+        open_and_qualify=_open_and_qualify,
+        restart_budget=1,
+    )
+    try:
+        owner.open()
+        return (local, owner, *_stack(tmp_path, owner))
+    except BaseException:
+        owner.close()
+        owner.cleanup()
+        local.close()
+        raise
 
 
 def _collect(service, request_id, events, first_token, finished):
@@ -77,7 +97,7 @@ def _collect(service, request_id, events, first_token, finished):
 def test_lost_remote_stage_mid_decode_is_a_bounded_failed_terminal(
     tmp_path, watchdog
 ) -> None:
-    local, owner, router, service, _target = _compose(tmp_path, "single")
+    local, owner, router, service, _target = _compose(tmp_path)
     try:
         first_route = owner._current
         request_id = _submit(service, owner)
@@ -124,9 +144,82 @@ def test_lost_remote_stage_mid_decode_is_a_bounded_failed_terminal(
         _next_id, after = _run_without_fault(service, owner)
         assert after["kinds"] == ["completed"], after
     finally:
-        service.close()
-        try:
-            router.close()
-        finally:
-            owner.close()
-            local.close()
+        _teardown(local, owner, router, service)
+
+
+def _teardown(local, owner, router, service) -> None:
+    service.close()
+    try:
+        router.close()
+    finally:
+        owner.close()
+        local.close()
+
+
+def _start(service, owner):
+    request_id = _submit(service, owner)
+    events: list = []
+    first_token = threading.Event()
+    finished = threading.Event()
+    reader = threading.Thread(
+        target=_collect,
+        args=(service, request_id, events, first_token, finished),
+        daemon=True,
+    )
+    reader.start()
+    return events, first_token, finished, reader
+
+
+def _wait_for_event(events, kind, seconds):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if any(e.kind == kind for _t, e in events):
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def test_lost_remote_stage_during_prefill_is_a_bounded_failed_terminal(
+    tmp_path, watchdog
+) -> None:
+    # Each stage execution takes 2 s, so the remote stage is lost while the
+    # entry stage is still prefilling: no token has been produced yet.
+    local, owner, router, service, _target = _compose(tmp_path, step_delay_s=2.0)
+    local.session_factory.step_delay_s = 0.15  # only the replacement route
+    try:
+        first_route = owner._current
+        events, _first, finished, reader = _start(service, owner)
+        assert _wait_for_event(events, "accepted", 60)
+        time.sleep(0.5)
+        os.kill(first_route.process_id(REMOTE_STAGE), signal.SIGKILL)
+        assert finished.wait(TERMINAL_BOUND_SECONDS), (
+            f"no terminal within {TERMINAL_BOUND_SECONDS:.0f}s; "
+            f"events={[(e.kind, e.code) for _t, e in events]}"
+        )
+        reader.join(5)
+        kinds = [e.kind for _t, e in events]
+        assert kinds.count("failed") == 1 and "completed" not in kinds, kinds
+        assert "token" not in kinds, kinds
+    finally:
+        _teardown(local, owner, router, service)
+
+
+def test_lost_remote_stage_while_idle_is_reported_not_ready(
+    tmp_path, watchdog
+) -> None:
+    local, owner, router, service, _target = _compose(tmp_path)
+    try:
+        first_route = owner._current
+        _id, baseline = _run_without_fault(service, owner)
+        assert baseline["kinds"] == ["completed"], baseline
+        os.kill(first_route.process_id(REMOTE_STAGE), signal.SIGKILL)
+        # No request is running: the route must say within the bound that it
+        # is not serving (never keep advertising a qualification it cannot
+        # honour), and admission must be refused instead of hanging.
+        deadline = time.monotonic() + TERMINAL_BOUND_SECONDS
+        while time.monotonic() < deadline and owner.current() is not None:
+            time.sleep(0.1)
+        assert owner.current() is None
+        assert not owner.public_status().get("route_ready")
+    finally:
+        _teardown(local, owner, router, service)
