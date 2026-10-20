@@ -27,6 +27,11 @@ DIRECTORY_MAX_BODY_BYTES = 16 * 1024
 #: Open-mode guard rails enforced by the swarm's entry (per UTC day, whole swarm, all keys together).
 SWARM_DAILY_REQUESTS = 200
 SWARM_DAILY_TOKENS = 40_000
+#: Per-address share of the same day (open mode): one address, however many throwaway keys, cannot take the whole
+#: swarm-wide budget.  IPv6 clients count by their /64.  In memory only: a restart forgets it.
+IP_DAILY_REQUESTS = 40
+IP_DAILY_TOKENS = 8_000
+OPEN_GRANTS_PER_IP_PER_DAY = 12
 #: Access modes the swarm-wide budget applies to (owner-approved modes are bounded by their own grants).
 SWARM_CAP_ACCESS_MODES = ('open',)
 

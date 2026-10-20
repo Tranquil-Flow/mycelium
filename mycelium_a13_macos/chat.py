@@ -19,6 +19,7 @@ only through cloudflared on loopback), else ``local``.
 from __future__ import annotations
 
 import http.cookiejar
+import ipaddress
 import json
 import re
 import secrets
@@ -416,10 +417,22 @@ def chat_status(app: Any) -> dict[str, Any] | None:
 
 
 def client_key(headers: Mapping[str, str], *, via_relay: bool) -> str:
+    """The rate-limit key: the relay's ``Cf-Connecting-Ip`` normalised (IPv6 by its /64, v4-mapped as v4), else ``local``.
+
+    A household or a rotating-address client holds a whole /64, so one address must not be a fresh budget per request.
+    """
     if via_relay:
         value = headers.get('Cf-Connecting-Ip') or headers.get('cf-connecting-ip') or ''
         if re.fullmatch(r'[0-9A-Fa-f:.]{2,45}', value):
-            return 'relay:' + value
+            try:
+                address = ipaddress.ip_address(value)
+            except ValueError:
+                return 'relay:unknown'
+            if isinstance(address, ipaddress.IPv6Address):
+                address = address.ipv4_mapped or address
+            if isinstance(address, ipaddress.IPv6Address):
+                return 'relay:' + str(ipaddress.ip_network((address, 64), strict=False).network_address) + '/64'
+            return 'relay:' + str(address)
         return 'relay:unknown'
     return 'local'
 

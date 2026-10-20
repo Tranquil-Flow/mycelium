@@ -35,7 +35,7 @@ from typing import Any, Callable
 
 from . import docs, hosted_defaults
 from .directory import PRIVACY_NOTE
-from .ratelimit import WindowLimiter
+from .ratelimit import DailyBudget, WindowLimiter
 from .wire import Verifier, WireError, fingerprint, parse_json_object
 
 PREFIX = '/swarm-entry/v1/'
@@ -55,10 +55,14 @@ class EntryLimits:
     events_per_ip_per_minute: int = 240
     cancels_per_ip_per_minute: int = 60
     open_grants_per_ip_per_hour: int = 6
+    open_grants_per_ip_per_day: int = hosted_defaults.OPEN_GRANTS_PER_IP_PER_DAY
     max_nonces: int = 50000
     # Swarm-wide budget per UTC day over all keys and addresses (open swarms); None = unlimited.
     swarm_daily_requests: int | None = hosted_defaults.SWARM_DAILY_REQUESTS
     swarm_daily_tokens: int | None = hosted_defaults.SWARM_DAILY_TOKENS
+    # Per-address share of the same day (open swarms; the address is the relay's normalised client key).
+    ip_daily_requests: int = hosted_defaults.IP_DAILY_REQUESTS
+    ip_daily_tokens: int = hosted_defaults.IP_DAILY_TOKENS
 
 
 @dataclass(frozen=True)
@@ -226,6 +230,7 @@ class Admission:
     clamped: bool
     left: dict
     swarm: tuple[str, int] | None = None
+    daily: tuple[str, int, int] | None = None  # (address key, utc day, tokens reserved) of the per-address budget
 
 
 class EntryGuard:
@@ -241,6 +246,8 @@ class EntryGuard:
         self._key = WindowLimiter(limits.per_key_per_minute)
         self._events = WindowLimiter(limits.events_per_ip_per_minute)
         self._open_ip = WindowLimiter(limits.open_grants_per_ip_per_hour, 3600)
+        self._open_ip_day = WindowLimiter(limits.open_grants_per_ip_per_day, 86400)
+        self._ip_day = DailyBudget(limits.ip_daily_requests, limits.ip_daily_tokens)
         self._cancel_ip = WindowLimiter(limits.cancels_per_ip_per_minute)
         self._nonces: dict[str, int] = {}
         self._cut: OrderedDict[str, None] = OrderedDict()  # requests ended by the kill switch
@@ -261,6 +268,8 @@ class EntryGuard:
         self._ip.limit, self._key.limit = value.per_ip_per_minute, value.per_key_per_minute
         self._events.limit, self._open_ip.limit = value.events_per_ip_per_minute, value.open_grants_per_ip_per_hour
         self._cancel_ip.limit = value.cancels_per_ip_per_minute
+        self._open_ip_day.limit = value.open_grants_per_ip_per_day
+        self._ip_day.requests, self._ip_day.tokens = value.ip_daily_requests, value.ip_daily_tokens
 
     def current(self) -> EntryPolicy:
         policy = self.policy()
@@ -403,14 +412,50 @@ class EntryGuard:
         grant = self.check_grant(document['grant'], document['key'], policy, now)
         wanted = min(document['max_new_tokens'], self.limits.max_new_tokens)
         cap = self._cap(policy, now)
-        taken, left = self.ledger.charge(grant, wanted, cap)
+        daily = self._reserve_address(cap, client, now, wanted)
+        try:
+            taken, left = self.ledger.charge(grant, daily[2] if daily else wanted, cap)
+        except BaseException:
+            self._release_address(daily, 0)
+            raise
+        self._release_address(daily, taken)
         return Admission(grant_id=grant['grant_id'], key=document['key'],
                          client_key='swarm:' + fingerprint(document['key']), max_new_tokens=taken,
                          clamped=taken != document['max_new_tokens'], left=left,
-                         swarm=None if cap is None else (cap[0], cap[1])), document['prompt']
+                         swarm=None if cap is None else (cap[0], cap[1]),
+                         daily=None if daily is None else (daily[0], daily[1], taken)), document['prompt']
+
+    # -- per-address daily budget (open swarms) -------------------------------------------
+    def _reserve_address(self, cap: Any, client: str, now: int, wanted: int) -> tuple[str, int, int] | None:
+        if cap is None:  # not an open swarm: its grants bound the use
+            return None
+        day = now // 86400
+        taken = self._ip_day.reserve(client, day, wanted)
+        if taken is None:
+            raise WireError('entry_ip_daily_cap', 429)
+        return client, day, taken
+
+    def _release_address(self, daily: tuple[str, int, int] | None, used_tokens: int) -> None:
+        """Give back what the swarm-wide charge did not use (all of it when ``used_tokens`` is 0 after a refusal)."""
+        if daily is None:
+            return
+        client, day, reserved = daily
+        if used_tokens == 0:
+            self._ip_day.release(client, day, requests=1, tokens=reserved)
+        elif used_tokens < reserved:
+            self._ip_day.release(client, day, requests=0, tokens=reserved - used_tokens)
+
+    def ip_budget(self, policy: EntryPolicy, client: str) -> dict[str, Any] | None:
+        now = int(self.clock())
+        if self._cap(policy, now) is None:
+            return None
+        requests_left, tokens_left = self._ip_day.left(client, now // 86400)
+        return {'requests_left': requests_left, 'tokens_left': tokens_left, 'resets_at': (now // 86400 + 1) * 86400}
 
     def refund(self, admission: Admission) -> None:
         self.ledger.refund(admission.grant_id, admission.max_new_tokens, admission.swarm)
+        if admission.daily is not None:
+            self._ip_day.release(admission.daily[0], admission.daily[1], requests=1, tokens=admission.daily[2])
 
     def admit_relay_chat(self, client: str, wanted_tokens: int) -> Admission | None:
         """Gate the owner relay's shared ``/chat/api/send`` with the entry's own checks (None = nothing published).
@@ -429,9 +474,16 @@ class EntryGuard:
             raise WireError('entry_chat_requires_entry', 403)
         wanted = min(wanted_tokens, self.limits.max_new_tokens)
         cap = self._cap(policy, now)
-        taken, left = self.ledger.charge(None, wanted, cap)
+        daily = self._reserve_address(cap, client, now, wanted)
+        try:
+            taken, left = self.ledger.charge(None, daily[2] if daily else wanted, cap)
+        except BaseException:
+            self._release_address(daily, 0)
+            raise
+        self._release_address(daily, taken)
         return Admission(grant_id=None, key=client, client_key=client, max_new_tokens=taken,
-                         clamped=taken != wanted_tokens, left=left, swarm=None if cap is None else (cap[0], cap[1]))
+                         clamped=taken != wanted_tokens, left=left, swarm=None if cap is None else (cap[0], cap[1]),
+                         daily=None if daily is None else (daily[0], daily[1], taken))
 
     def open_grant(self, raw: bytes, client: str) -> dict[str, Any]:
         policy = self.current()
@@ -445,6 +497,9 @@ class EntryGuard:
         if existing is not None:
             return existing
         if not self._open_ip.allow(client, now):
+            raise WireError('entry_open_grants_rate_limited', 429)
+        if not self._open_ip_day.allow(client, now):
+            self._open_ip.refund(client)
             raise WireError('entry_open_grants_rate_limited', 429)
         quota = policy.open_quota
         grant = docs.grant(self.signer, swarm_id=policy.swarm_id, grantee_key=document['key'], issued_at=now,
@@ -496,6 +551,7 @@ class EntryGateway:
                                'per_key_per_minute': limits.per_key_per_minute,
                                'per_ip_per_minute': limits.per_ip_per_minute},
                     'killed': self.guard.killed(policy), 'swarm_budget': self.guard.budget(policy),
+                    **({'ip_budget': ip_budget} if (ip_budget := self.guard.ip_budget(policy, client)) else {}),
                     'live': self._live(), 'privacy': PRIVACY_NOTE}
         if route == 'kill':
             return self.guard.apply_kill(body, client)
