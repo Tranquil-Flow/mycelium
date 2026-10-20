@@ -21,7 +21,8 @@ def peer(**kw):
 
 def diag(**kw):
     base = {"role": "owner", "peers": [], "chats": {"recent": [], "error_codes": {}},
-            "relay": {"state": "stopped", "provider": None}, "host": {}, "member_view": None,
+            "relay": {"state": "relay_process_running", "provider": "cloudflare", "expires_in_seconds": 1500.0},
+            "host": {}, "member_view": None,
             "run": {"state": "serving"}}
     base.update(kw)
     return base
@@ -147,12 +148,17 @@ def test_relay_problems():
 
 
 def test_no_relay_finding_when_nobody_has_joined():
-    assert derive_findings(diag(peers=[])) == []
+    assert derive_findings(diag(peers=[], relay={"state": "stopped", "provider": None})) == []
+
+
+def test_this_macs_own_node_does_not_need_a_relay():
+    own = peer(is_this_mac=True, name="This Mac")
+    assert derive_findings(diag(peers=[own], relay={"state": "private", "provider": None})) == []
 
 
 def test_host_pressure():
     host = {"memory_pressure": "critical", "spotlight_mds_cpu_percent": 85.0, "disk_free_bytes": 2_000_000_000,
-            "load_average": [14.0, 10.0, 8.0], "cpu_count": 8}
+            "load_average": [20.0, 10.0, 8.0], "cpu_count": 8}
     found = derive_findings(diag(host=host))
     assert {"host_memory_pressure", "host_spotlight_busy", "host_disk_low", "host_load_high"} <= set(ids(found))
     assert "mds" in by_id(found, "host_spotlight_busy")["title"]

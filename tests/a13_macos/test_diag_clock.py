@@ -121,7 +121,6 @@ def test_a_refused_request_leaves_no_clock_sample(tmp_path):
 @pytest.fixture
 def client_probe():
     state = DiagState()
-    install_client_probe(state)
     yield state
     uninstall_client_probe()
 
@@ -130,7 +129,8 @@ def test_member_estimates_the_owner_clock_and_records_claim_loop_latency(tmp_pat
     state = client_probe
     with _world(tmp_path, mailbox_options={"long_poll_hold": 0.0}) as world:
         client = _skewed_client(world, SKEW)  # this Mac is 9.19 s AHEAD, so the owner is 9.19 s behind
-        _enqueue(world, "hello-diag-1")
+        _enqueue(world, "hello-diag-1")  # the owner's own client runs before the member probe goes in
+        install_client_probe(state)
         delivery = _poll(world, client, 1)
         assert delivery["delivery_kind"] == "command"
         owner = world["authority"].coordinator.seed_node_id
@@ -149,6 +149,7 @@ def test_member_records_the_bounded_error_code_of_a_failed_poll(tmp_path, client
     state = client_probe
     with _world(tmp_path, mailbox_options={"long_poll_hold": 0.0}) as world:
         client = _skewed_client(world, SKEW)
+        install_client_probe(state)
         _poll(world, client, 1)
         with pytest.raises(Exception):
             _poll(world, client, 1, "-again")

@@ -70,7 +70,7 @@ def app(tmp_path, monkeypatch):
     chat = ChatService(SimpleNamespace(), clock=time.monotonic)
     chat._requests["rid"] = {"id": "rid", "tokens": [REPLY, " more"], "done": True, "error": "backend_failed",
                              "terminal": "failed", "client": None, "cancel_reason": None, "max_new_tokens": 8,
-                             "clamped": False, "served_by": [{"label": f"{HOSTNAME} (owner)", "node": "nodeaaaa1111",
+                             "clamped": False, "served_by": [{"label": HOSTNAME, "node": "nodeaaaa1111",
                                                               "layers": [0, 4]}],
                              "run_id": "run-1", "started": time.monotonic() - 3, "finished": time.monotonic() - 2,
                              "prompt": PROMPT}
@@ -83,7 +83,7 @@ def app(tmp_path, monkeypatch):
              "liveness_age_seconds": 1.0, "endpoint_addrs": [f"{IPV4}:4001"], "verification_key_digest": KEY_HEX},)),
             control_mailbox=None),
         owner_run=SimpleNamespace(status=lambda: {"state": "serving", "run_id": "run-1", "participants": [
-            {"label": f"{HOSTNAME} (owner)", "node_id": "nodeaaaa1111", "layers": [0, 4]}], "step": None}),
+            {"label": HOSTNAME, "node_id": "nodeaaaa1111", "layers": [0, 4]}], "step": None}),
         public_relay=SimpleNamespace(status=lambda: {"state": "relay_process_running", "provider": "cloudflare",
                                                      "public_origin": RELAY_URL, "error_code": None,
                                                      "privacy": f"relay at {RELAY_URL}"}),

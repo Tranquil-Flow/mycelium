@@ -15,6 +15,7 @@ import pytest
 
 from mycelium_a13_macos.app import DemoApp
 from mycelium_a13_macos.diagnostics import ensure_installed
+from mycelium_a13_macos.diagnostics.clock import uninstall_client_probe
 from mycelium_a13_macos.diagnostics.state import state_for
 
 SNTP = "sudo sntp -sS time.apple.com"
@@ -36,6 +37,12 @@ class Authority:
 
     def renew(self):
         return self.status()
+
+
+@pytest.fixture(autouse=True)
+def _release_the_member_probe():
+    yield
+    uninstall_client_probe()
 
 
 @pytest.fixture
@@ -127,14 +134,15 @@ def test_bundle_download(app):
 
 
 def test_diagnostics_are_read_only_over_http(app):
-    headers = {**login(app), "Origin": app.origin, "X-Mycelium-Action": "1", "Content-Type": "application/json"}
+    session = login(app)
+    headers = {**session, "Origin": app.origin, "X-Mycelium-Action": "1", "Content-Type": "application/json"}
     c = http.client.HTTPConnection("127.0.0.1", app.port, timeout=3)
     c.request("POST", "/api/diagnostics", body="{}", headers=headers)
     r = c.getresponse()
     r.read()
     c.close()
     assert r.status != 200
-    assert get(app, "/api/diagnostics?x=1", login(app))[0] == 400  # the server's own path guard
+    assert get(app, "/api/diagnostics?x=1", session)[0] == 400  # the server's own path guard
 
 
 def test_diagnostics_are_not_reachable_through_the_chat_or_public_routes(app):
@@ -151,7 +159,7 @@ def test_install_probes_once_on_the_owner_mailbox(app):
             return 200, {}
 
         def _clock(self):
-            return 1.0
+            return time.time()
 
     mailbox = Mailbox()
     app.authority.control_mailbox = mailbox
@@ -160,7 +168,7 @@ def test_install_probes_once_on_the_owner_mailbox(app):
     ensure_installed(app)
     assert mailbox.handle_http is first  # not wrapped twice
     mailbox.handle_http("POST", "/managed-control/poll",
-                        {"statement": {"target_node_id": "n1", "issued_at": 10.0}})
+                        {"statement": {"target_node_id": "n1", "issued_at": time.time() + 3.0}})
     assert calls == ["/managed-control/poll"]
     assert state_for(app).clock.estimate("n1")["samples"] == 1
 
