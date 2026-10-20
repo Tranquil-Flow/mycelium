@@ -30,6 +30,8 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from mycelium_swarm_directory.wire import WireError
+
 MAX_PROMPT_CHARS = 2000
 MAX_NEW_TOKENS_CAP = 256
 DEFAULT_NEW_TOKENS = 128
@@ -448,10 +450,37 @@ def handle(app: Any, method: str, path: str, headers: Mapping[str, str], body: b
         if path == '/chat/api/state':
             return _json(200, chat.state())
         if path == '/chat/api/send':
-            return _json(200, chat.send(client_key(headers, via_relay=via_relay), document))
+            return _json(200, _send(app, chat, client_key(headers, via_relay=via_relay), document, via_relay))
         return _json(200, chat.events(document))
     except ChatError as error:
         return _json(error.status, {'error': error.code})
+    except WireError as error:  # the swarm entry's checks (kill switch, access mode, daily cap)
+        return _json(error.status, {'error': error.code})
+
+
+def _entry_guard(app: Any) -> Any:
+    gateway = getattr(getattr(app, 'swarm_publisher', None), 'gateway', None)
+    return getattr(gateway, 'guard', None)
+
+
+def _send(app: Any, chat: ChatService, client: str, document: Any, via_relay: bool) -> dict[str, Any]:
+    """A prompt from the relay's shared chat page goes through the published swarm's entry checks first.
+
+    Only the public relay is gated (the loopback page is the owner's own).  Bodies the chat service would refuse
+    anyway are handed straight to it, so nothing is charged for a request that does no work.
+    """
+    guard = _entry_guard(app) if via_relay else None
+    wanted = document.get('max_new_tokens', DEFAULT_NEW_TOKENS) if isinstance(document, dict) else None
+    if guard is None or type(wanted) is not int or wanted < 1:
+        return chat.send(client, document)
+    admission = guard.admit_relay_chat(client, min(wanted, MAX_NEW_TOKENS_CAP))
+    if admission is None:
+        return chat.send(client, document)
+    try:
+        return chat.send(client, {**document, 'max_new_tokens': min(wanted, admission.max_new_tokens)})
+    except BaseException:
+        guard.refund(admission)
+        raise
 
 
 def _json(status: int, value: Any) -> tuple[int, str, bytes]:

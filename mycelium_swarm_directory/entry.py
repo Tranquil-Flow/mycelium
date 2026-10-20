@@ -104,21 +104,22 @@ class UsageLedger:
             'CREATE TABLE IF NOT EXISTS kill_switch (swarm_id TEXT PRIMARY KEY, engaged INTEGER NOT NULL, '
             'seq INTEGER NOT NULL, at INTEGER NOT NULL);')
 
-    def charge(self, grant: dict[str, Any], wanted_tokens: int,
+    def charge(self, grant: dict[str, Any] | None, wanted_tokens: int,
                swarm: tuple[str, int, int | None, int | None] | None = None) -> tuple[int, dict[str, int]]:
         """Atomically take one request and up to ``wanted_tokens``; returns (tokens, left).
 
         ``swarm`` = (swarm_id, utc_day, max_requests, max_tokens) also charges the swarm-wide daily
         budget in the same transaction (None = unlimited); nothing is charged when either side refuses.
+        ``grant=None`` (the relay's shared chat page, which has no grant) charges only the swarm-wide budget.
         """
         with self._lock:
             self._db.execute('BEGIN IMMEDIATE')
             try:
-                row = self._db.execute('SELECT requests, tokens FROM usage WHERE grant_id=?',
-                                       (grant['grant_id'],)).fetchone()
+                row = None if grant is None else self._db.execute(
+                    'SELECT requests, tokens FROM usage WHERE grant_id=?', (grant['grant_id'],)).fetchone()
                 requests, tokens = row if row else (0, 0)
-                tokens_left = grant['max_tokens'] - tokens
-                if requests >= grant['max_requests'] or tokens_left < 1:
+                tokens_left = wanted_tokens if grant is None else grant['max_tokens'] - tokens
+                if grant is not None and (requests >= grant['max_requests'] or tokens_left < 1):
                     raise WireError('entry_quota_exhausted', 429)
                 taken = min(wanted_tokens, tokens_left)
                 swarm_left: dict[str, int] = {}
@@ -138,19 +139,23 @@ class UsageLedger:
                     self._db.execute('INSERT OR REPLACE INTO swarm_usage (swarm_id, day, requests, tokens) '
                                      'VALUES (?, ?, ?, ?)', (swarm_id, day, used_r + 1, used_t + taken))
                     self._db.execute('DELETE FROM swarm_usage WHERE swarm_id=? AND day<?', (swarm_id, day - 7))
-                self._db.execute('INSERT OR REPLACE INTO usage (grant_id, requests, tokens) VALUES (?, ?, ?)',
-                                 (grant['grant_id'], requests + 1, tokens + taken))
+                if grant is not None:
+                    self._db.execute('INSERT OR REPLACE INTO usage (grant_id, requests, tokens) VALUES (?, ?, ?)',
+                                     (grant['grant_id'], requests + 1, tokens + taken))
                 self._db.execute('COMMIT')
             except BaseException:
                 self._db.execute('ROLLBACK')
                 raise
+        if grant is None:
+            return taken, swarm_left
         return taken, {'requests_left': grant['max_requests'] - requests - 1, 'tokens_left': tokens_left - taken,
                        **swarm_left}
 
-    def refund(self, grant_id: str, tokens: int, swarm: tuple[str, int] | None = None) -> None:
+    def refund(self, grant_id: str | None, tokens: int, swarm: tuple[str, int] | None = None) -> None:
         with self._lock:
-            self._db.execute('UPDATE usage SET requests=MAX(requests-1, 0), tokens=MAX(tokens-?, 0) '
-                             'WHERE grant_id=?', (tokens, grant_id))
+            if grant_id is not None:
+                self._db.execute('UPDATE usage SET requests=MAX(requests-1, 0), tokens=MAX(tokens-?, 0) '
+                                 'WHERE grant_id=?', (tokens, grant_id))
             if swarm is not None:
                 self._db.execute('UPDATE swarm_usage SET requests=MAX(requests-1, 0), tokens=MAX(tokens-?, 0) '
                                  'WHERE swarm_id=? AND day=?', (tokens, swarm[0], swarm[1]))
@@ -214,7 +219,7 @@ class UsageLedger:
 
 @dataclass(frozen=True)
 class Admission:
-    grant_id: str
+    grant_id: str | None
     key: str
     client_key: str
     max_new_tokens: int
@@ -406,6 +411,27 @@ class EntryGuard:
 
     def refund(self, admission: Admission) -> None:
         self.ledger.refund(admission.grant_id, admission.max_new_tokens, admission.swarm)
+
+    def admit_relay_chat(self, client: str, wanted_tokens: int) -> Admission | None:
+        """Gate the owner relay's shared ``/chat/api/send`` with the entry's own checks (None = nothing published).
+
+        While a swarm is published its entry is the only public door: ``/chat`` honours the same owner kill
+        switch and the same swarm-wide daily budget, and is refused outright unless the swarm is open (an
+        invite-only or request-only swarm admits grant holders through ``/swarm-entry/v1/send`` alone).
+        """
+        policy = self.policy()
+        if policy is None:
+            return None
+        now = int(self.clock())
+        if self.killed(policy):
+            raise WireError('entry_killed_by_owner', 403)
+        if policy.access_mode != 'open':
+            raise WireError('entry_chat_requires_entry', 403)
+        wanted = min(wanted_tokens, self.limits.max_new_tokens)
+        cap = self._cap(policy, now)
+        taken, left = self.ledger.charge(None, wanted, cap)
+        return Admission(grant_id=None, key=client, client_key=client, max_new_tokens=taken,
+                         clamped=taken != wanted_tokens, left=left, swarm=None if cap is None else (cap[0], cap[1]))
 
     def open_grant(self, raw: bytes, client: str) -> dict[str, Any]:
         policy = self.current()
