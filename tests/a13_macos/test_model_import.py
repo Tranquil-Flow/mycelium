@@ -236,3 +236,47 @@ def test_cli_rejects_a_malformed_manifest_file(stick, tmp_path, capsys):
     code = cli.main(_argv(stick, tmp_path, "--manifest", str(bad)), environ={})
     assert code == 1 and "manifest" in capsys.readouterr().err.lower()
     assert os.path.exists(bad)
+
+
+# ------------------------------------------- fetching the manifest file once
+
+
+def _fetch_argv(tmp_path, *extra):
+    return ["models", "fetch-manifest", "--model", MODEL.model_id, "--commit",
+            MODEL.resolved_commit, "--out", str(tmp_path / "pinned.manifest.json"), *extra]
+
+
+def test_cli_fetch_manifest_writes_the_pinned_manifest_that_import_accepts(stick, tmp_path, capsys):
+    manifest = stick[3]
+    code = cli.main(_fetch_argv(tmp_path), environ={},
+                    model_manifest_resolver=lambda model: manifest)
+    assert code == 0 and "pinned.manifest.json" in capsys.readouterr().out
+    written = json.loads((tmp_path / "pinned.manifest.json").read_text())
+    assert written == manifest
+    code = cli.main(_argv(stick, tmp_path, "--manifest", str(tmp_path / "pinned.manifest.json")),
+                    environ={})
+    assert code == 0
+
+
+def test_cli_fetch_manifest_is_refused_offline_without_contacting_hugging_face(tmp_path, capsys):
+    code = cli.main(_fetch_argv(tmp_path, "--offline"), environ={},
+                    model_manifest_resolver=lambda model: pytest.fail("no Hugging Face"))
+    captured = capsys.readouterr()
+    assert code == 1 and "offline" in captured.err.lower() and "--no-offline" in captured.err
+    assert not (tmp_path / "pinned.manifest.json").exists()
+
+
+def test_cli_fetch_manifest_does_not_overwrite_a_file(stick, tmp_path, capsys):
+    (tmp_path / "pinned.manifest.json").write_text("keep")
+    code = cli.main(_fetch_argv(tmp_path), environ={},
+                    model_manifest_resolver=lambda model: stick[3])
+    assert code == 1 and "already exists" in capsys.readouterr().err
+    assert (tmp_path / "pinned.manifest.json").read_text() == "keep"
+
+
+def test_cli_fetch_manifest_refuses_a_manifest_for_another_commit(stick, tmp_path, capsys):
+    other = {**stick[3], "resolved_commit": "b" * 40}
+    code = cli.main(_fetch_argv(tmp_path), environ={},
+                    model_manifest_resolver=lambda model: other)
+    assert code == 1 and "commit" in capsys.readouterr().err
+    assert not (tmp_path / "pinned.manifest.json").exists()
