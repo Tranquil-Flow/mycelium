@@ -45,7 +45,7 @@ Legend: **works** = branch exists for the OS; **degraded** = runs but a signal o
 | Component | macOS | Linux | Windows | Evidence |
 |---|---|---|---|---|
 | `mycelium_node` process supervision | works | works (procfs inventory) | degraded: the control-frame write has a win32 branch (`:410`), but process and group inventory raises `ProcessLookupError` off Linux/Darwin; Windows supervision goes through `mycelium_service_runner` and `mycelium_host_platform` job objects instead | `process.py:1342-1349`, `:1747-1752` (Linux/Darwin dispatch), `:1407,1706` (`/bin/ps`, Darwin helpers), `:2683` (`killpg`) |
-| `mycelium_node` interpreter identity | works: framework `Python.app` image derived from `MYCELIUM_PHYSICAL_SERVICE_PYTHON` (macOS only), then `sys.executable`; Apple Silicon Homebrew `/opt/homebrew/bin/python3` is only the last fallback (`_MACOS_LEGACY_PYTHON`) | works (`sys.executable`) | works (`sys.executable`, host platform) | `process.py:1186-1225`; tests `tests/node_agent/test_physical_interpreter_identity.py` |
+| `mycelium_node` interpreter identity | works: framework `Python.app` image derived from `MYCELIUM_PHYSICAL_SERVICE_PYTHON` if set (macOS only), then Apple Silicon Homebrew `/opt/homebrew/bin/python3` (`_MACOS_LEGACY_PYTHON`, unchanged macOS behaviour), then plain `sys.executable` as the last fallback | works (`sys.executable`) | works (`sys.executable`, host platform) | `process.py:1186-1225`; tests `tests/node_agent/test_physical_interpreter_identity.py` |
 | Node identity key and durable membership files | works | works | missing: needs `os.getuid`, `os.fchmod`, `O_NOFOLLOW`; Windows ACL path is `mycelium_a13_windows/acl.py` | `identity.py:154,160,176,188,249,313,324`; `durable_membership.py:162,168,216,221` |
 | `mycelium_seed` (coordinator, state, authority, operator) | works | works | degraded: seed files use the same POSIX owner/mode checks; a Windows seed is not a stated goal | `authority.py:51,57,95`; `operator.py:59,66,260`; `invite_batch.py:61,72`; `__main__.py:305` |
 | `mycelium_membership` | works | works | works (no OS calls) | no platform references |
@@ -100,7 +100,7 @@ part in the A16 policy loop or a shipped install.
    `process.py:879` does. Only matters if a Windows member runs the `mycelium_node` agent directly.
 4. **Remove the remaining owner-machine hard-codes** (R2 T15): watchdog and testbed paths. The cutover root
    and `process.py`'s `/opt/homebrew/bin/python3` assumption are fixed (home-derived root, `sys.executable`
-   or `MYCELIUM_PHYSICAL_SERVICE_PYTHON`, Homebrew kept as the last macOS fallback).
+   or `MYCELIUM_PHYSICAL_SERVICE_PYTHON`; macOS order unchanged: configured, Homebrew, then `sys.executable`).
 5. **Wire the Linux import guard into CI** as an `ubuntu-latest` job (R2 T12): run
    `python -B scripts/linux_import_guard.py` and `--all`. Add `cargo check --target x86_64-unknown-linux-gnu`
    (needs the target installed; not run here).

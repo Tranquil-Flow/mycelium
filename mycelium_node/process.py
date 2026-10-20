@@ -1181,8 +1181,8 @@ def revalidate_executable_identity(identity: _ExecutableIdentity) -> bool:
     return current == identity
 
 
-# Last-resort macOS fallback only: Apple Silicon Homebrew's python3.  It is consulted after the
-# configured and the running interpreter, so Intel Homebrew, python.org and venv layouts never need it.
+# macOS order is unchanged from before the cross-platform work: the owner-configured interpreter
+# (opt-in), then Apple Silicon Homebrew's python3, then plain ``sys.executable`` as the last fallback.
 _MACOS_LEGACY_PYTHON = "/opt/homebrew/bin/python3"
 PHYSICAL_SERVICE_PYTHON_ENV = "MYCELIUM_PHYSICAL_SERVICE_PYTHON"
 
@@ -1210,8 +1210,7 @@ def physical_service_interpreter_identity(
     environment = os.environ if environ is None else environ
     running = sys.executable if executable is None else executable
     if (sys.platform if platform is None else platform) == "darwin":
-        candidates = [environment.get(PHYSICAL_SERVICE_PYTHON_ENV), running, _MACOS_LEGACY_PYTHON]
-        for candidate in candidates:
+        for candidate in (environment.get(PHYSICAL_SERVICE_PYTHON_ENV), _MACOS_LEGACY_PYTHON):
             if not candidate:
                 continue
             try:
