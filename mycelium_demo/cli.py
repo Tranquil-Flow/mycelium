@@ -15,7 +15,12 @@ from mycelium_platform_neutral.lan_doctor import (
     render_report as render_lan_report,
     run_lan_doctor,
 )
-from mycelium_platform_neutral.offline import add_offline_argument
+from mycelium_platform_neutral.offline import (
+    OfflineSettingError,
+    add_offline_argument,
+    apply_offline,
+    offline_message,
+)
 
 from .doctor import (
     DEFAULT_COMMANDS,
@@ -75,6 +80,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="intended local TCP listener port to probe; repeat for multiple ports",
     )
+
+    models = commands.add_parser("models", help="manage the local model cache")
+    model_commands = models.add_subparsers(dest="models_action", required=True)
+    importer = model_commands.add_parser(
+        "import",
+        help="verify a model folder against the pinned manifest and install it read-only",
+    )
+    importer.add_argument("folder", type=Path, help="folder holding the model files")
+    importer.add_argument("--model", required=True, help="pinned model id, e.g. Qwen/Qwen2.5-7B")
+    importer.add_argument("--commit", required=True, help="pinned 40-character model commit")
+    importer.add_argument(
+        "--cache-root",
+        required=True,
+        type=Path,
+        help="model cache folder (the 'model-source' folder inside the app's state folder)",
+    )
+    importer.add_argument(
+        "--manifest",
+        type=Path,
+        help="the pinned manifest file (file list, sizes, digests); required when offline",
+    )
+    network_mode_module.add_network_mode_argument(importer)
+    add_offline_argument(importer)
 
     device_lab = commands.add_parser(
         "device-lab",
@@ -431,6 +459,71 @@ def _fixture_has_live_only_arguments(args: argparse.Namespace) -> bool:
     )
 
 
+def _models_import(args, environ, resolver) -> int:
+    """``models import``: plain-English failures, exit status 1, nothing partial installed."""
+    import json
+    import sys
+
+    from mycelium_a13_macos.model_import import ModelImportError, import_model_folder
+    from mycelium_a13_macos.serving import ServingPreparationError, registered_model_contract
+
+    def fail(message: str) -> int:
+        print(f"error: {message}", file=sys.stderr)
+        return 1
+
+    env = os.environ if environ is None else dict(environ)
+    try:
+        offline = apply_offline(args.offline, args.network_mode, env)
+    except (OfflineSettingError, ValueError) as exc:
+        return fail(str(exc))
+    try:
+        model = registered_model_contract(args.model, args.commit)
+    except ServingPreparationError:
+        return fail(
+            f"{args.model} at {args.commit[:12]} is not a supported pinned model in this "
+            "version, so it cannot be imported."
+        )
+    if args.manifest is not None:
+        try:
+            raw = args.manifest.read_bytes()
+            if len(raw) > 4 * 1024 * 1024:
+                raise ValueError("too large")
+            manifest = json.loads(raw)
+        except (OSError, ValueError):
+            return fail(f"the manifest file {args.manifest} could not be read as JSON.")
+    elif offline:
+        return fail(
+            "no pinned manifest was given. "
+            + offline_message("the pinned file list")
+            + " Pass --manifest FILE with the pinned manifest the owner gave you."
+        )
+    else:
+        try:
+            if resolver is None:
+                from mycelium_a13_macos.acquisition import _HTTPRepositoryTransport
+
+                resolver = _HTTPRepositoryTransport().resolve
+            manifest = resolver(model)
+        except Exception as exc:
+            return fail(
+                "the pinned file list could not be fetched "
+                f"({getattr(exc, 'code', type(exc).__name__)}). Pass --manifest FILE instead."
+            )
+    try:
+        result = import_model_folder(
+            args.folder, manifest=manifest, model=model, cache_root=args.cache_root
+        )
+    except ModelImportError as exc:
+        return fail(str(exc))
+    except Exception as exc:
+        return fail(
+            "the model cache could not be written "
+            f"({getattr(exc, 'code', type(exc).__name__)}). Check the --cache-root folder."
+        )
+    print(canonical_json(result))
+    return 0
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -444,6 +537,7 @@ def main(
     device_lab_prepare=prepare_device_lab,
     demo_stack_bringup=None,
     demo_stack_inputs_factory=None,
+    model_manifest_resolver=None,
 ) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -540,6 +634,9 @@ def main(
             ]
         )
         return int(live_server_main(live_arguments))
+
+    if args.action == "models":
+        return _models_import(args, environ, model_manifest_resolver)
 
     if args.action == "demo-stack":
         if demo_stack_inputs_factory is None:
