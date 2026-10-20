@@ -6,13 +6,16 @@ background cold restart replaced the degraded route while a recovery (whose
 successor has the *same* request id as the released source) still needed it,
 and a restart still opening nodes at SIGINT left node processes for the
 post-teardown census.  A5's property -- a failed terminal does not wait for a
-slow replacement route -- holds only without a recovery runtime attached
-(tests/live/test_a5_remote_stage_loss_terminal.py).
+slow replacement route (tests/live/test_a5_remote_stage_loss_terminal.py) --
+holds because the background restart stays unless the A6 fault control is
+mounted; the outstanding-recovery gate applies either way.
 """
 from __future__ import annotations
 
 import threading
 import time
+
+import pytest
 
 from mycelium_live import supervisor as supervisor_module
 from mycelium_live.supervisor import ColdRouteRestartOwner
@@ -81,9 +84,14 @@ def _owner(routes):
     )
 
 
-def test_recovering_request_id_gates_the_restart_until_the_recovery_settles() -> None:
+@pytest.mark.parametrize("a6_fault_control", [True, False])
+def test_recovering_request_id_gates_the_restart_until_the_recovery_settles(
+    a6_fault_control,
+) -> None:
     route, spare = _RecoveringRoute("first"), _Degraded("spare")
     owner = _owner([route, spare])
+    if a6_fault_control:
+        owner.attach_recovery_guard()
     runtime = _Runtime()
     owner.set_m16_runtime_source(runtime)
     owner.open()
@@ -100,7 +108,7 @@ def test_recovering_request_id_gates_the_restart_until_the_recovery_settles() ->
         owner.release_request(RID)
         time.sleep(0.2)
         assert _restart_threads() == []
-        assert owner._current is route and owner.peek_current() is route
+        assert owner._current is route
         assert owner._state == "ready" and route.close_count == 0
         # The successor reuses the request id on the surviving route.
         result = owner.infer((1, 2, 3), max_new_tokens=4, request_id=RID, sink=_Sink())
@@ -109,12 +117,16 @@ def test_recovering_request_id_gates_the_restart_until_the_recovery_settles() ->
         # Recovery still unsettled: its release must not restart either.
         owner.release_request(RID)
         assert owner._current is route and spare.open_count == 0
-        # Settled: the next release restarts, inline, never on a thread.
+        # Settled: the next release restarts. With the A6 fault control that
+        # is inline on the releasing thread; otherwise in the background.
         runtime.settle()
         owner.release_request(RID)
-        assert owner.public_status()["cold_route_restart"]["generation"] == 2
+        if a6_fault_control:
+            assert owner.public_status()["cold_route_restart"]["generation"] == 2
+            assert _restart_threads() == []
+        else:
+            _wait_generation(owner, 2)
         assert route.close_count == 1 and spare.open_count == 1
-        assert _restart_threads() == []
     finally:
         owner.close()
 
@@ -131,13 +143,12 @@ def test_a_terminal_released_request_does_not_block_the_restart() -> None:
         owner._request_routes[RID] = route
         owner.release_request(RID)
         _wait_generation(owner, 2)
-        assert _restart_threads() == []
     finally:
         owner.close()
 
 
-def test_without_a_recovery_runtime_the_restart_stays_in_the_background() -> None:
-    """The A5 property: no recovery runtime, so the release returns at once."""
+def test_without_the_a6_fault_control_the_restart_stays_in_the_background() -> None:
+    """The A5 property: no A6 fault control, so the release returns at once."""
 
     gate = threading.Event()
     route, spare = _Degraded("first"), _Degraded("spare")
@@ -213,7 +224,7 @@ def test_close_during_a_spawning_restart_leaves_nothing_alive() -> None:
     owner.open()
     first.lost = True
     owner._request_routes[RID] = first
-    owner.release_request(RID)  # no recovery runtime: background restart
+    owner.release_request(RID)  # no A6 fault control: background restart
     assert replacement.mid_open.wait(timeout=5.0)
     assert supervisor_module.COLD_ROUTE_RESTART_CLOSE_JOIN_SECONDS <= 8.0
     started = time.monotonic()

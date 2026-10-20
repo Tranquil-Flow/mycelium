@@ -656,8 +656,22 @@ class ColdRouteRestartOwner:
         self._settled_request_authority: dict[str, Any] = {}
         self._stop_token_ids: tuple[int, ...] | None = None
         self._m16_runtime_source: Callable[[], Mapping[str, Any] | None] | None = None
+        self._recovery_guard = False
         self._m17_model_operation_set = False
         self._m17_model_operation: Mapping[str, Any] | None = None
+
+    def attach_recovery_guard(self) -> None:
+        """Mark this owner as serving under the A6 product fault control.
+
+        Then the idle cold restart never runs on a background thread: a
+        detached restart may still be opening nodes when the serve shuts down,
+        which the A6 post-teardown census cannot verify. Without it (A5) the
+        restart stays in the background so a failed terminal is not delayed.
+        The outstanding-recovery gate applies in both modes.
+        """
+
+        with self._lock:
+            self._recovery_guard = True
 
     def open(self) -> RouteIdentity:
         with self._lock:
@@ -1115,11 +1129,13 @@ class ColdRouteRestartOwner:
         )
 
     def _recovery_outstanding(self, released_request_id: str | None) -> bool:
-        """True while the M16 runtime still runs a request other than the released one.
+        """True while the M16 runtime still runs a request that may need this route.
 
         A request in recovery is not mapped to its route between the source
-        attempt's release and its successor's start; the runtime's active set
-        is the authority for it. An unreadable runtime never blocks a restart.
+        attempt's release and its successor's start; the runtime is the
+        authority for it. The successor reuses the source's request id, so the
+        released id counts as outstanding until the runtime lists it terminal
+        (or no longer lists it). An unreadable runtime never blocks a restart.
         """
 
         with self._lock:
@@ -1129,9 +1145,17 @@ class ColdRouteRestartOwner:
         try:
             document = source()
             active = document["queue"]["active_request_ids"]  # type: ignore[index]
-            return any(
-                item != released_request_id for item in active
-            )
+            if any(item != released_request_id for item in active):
+                return True
+            if released_request_id is None:
+                return False
+            if released_request_id in active:
+                records = document.get("requests") or ()  # type: ignore[union-attr]
+                for record in records:
+                    if record.get("request_id") == released_request_id:
+                        return record.get("terminal_state") is None
+                return True
+            return False
         except BaseException:
             return False
 
@@ -1159,7 +1183,24 @@ class ColdRouteRestartOwner:
                 return
         if self._route_alive(route):
             return
-        if self._recovery_outstanding(released_request_id):
+        outstanding = self._recovery_outstanding(released_request_id)
+        with self._lock:
+            inline = self._recovery_guard
+        _LOGGER.info(
+            "cold restart decision released_request_id=%s recovery_outstanding=%s "
+            "inline=%s generation=%s thread=%s",
+            released_request_id, outstanding, inline, generation,
+            threading.current_thread().name,
+        )
+        if outstanding:
+            return
+        if inline:
+            # A6 fault control mounted: restart on the releasing thread, only
+            # now that no recovery needs the degraded route.
+            try:
+                self._restart_from(route, generation, reason="route_not_alive")
+            except ColdRouteRestartError:
+                pass
             return
 
         def restart() -> None:
@@ -1284,10 +1325,22 @@ class ColdRouteRestartOwner:
             with self._lock:
                 leftover = self._replacing
             if leftover is not None:
+                abort = getattr(leftover, "abort_open", None)
+                if callable(abort):
+                    try:
+                        abort()  # re-snapshot sessions started since the first abort
+                    except BaseException:  # pragma: no cover
+                        pass
                 try:
                     self._retire_route(leftover, cleanup=False)
                 except BaseException:  # pragma: no cover - never mask shutdown
                     pass
+            # Return only once the restart thread unwound (its replacement is
+            # then retired and its node processes reaped), bounded.
+            reap_deadline = time.monotonic() + COLD_ROUTE_RESTART_CLOSE_JOIN_SECONDS
+            for thread in restart_threads:
+                if thread is not threading.current_thread():
+                    thread.join(timeout=max(0.0, reap_deadline - time.monotonic()))
 
     def cleanup(self) -> None:
         with self._lock:
@@ -1342,6 +1395,10 @@ class ColdRouteRestartOwner:
         generation: int,
     ) -> tuple[RouteIdentity, Any]:
         identity, qualification = self._open_and_qualify(route, generation)
+        with self._lock:
+            closed = self._closed
+        if closed:
+            raise RouteUnavailableError("route_closed")
         self._apply_cached_configuration(route)
         return identity, qualification
 
@@ -5283,6 +5340,9 @@ def _mount_a6_product_fault_control(
         grant_from_environment,
     )
 
+    attach_guard = getattr(route, "attach_recovery_guard", None)
+    if callable(attach_guard):
+        attach_guard()
     grant = grant_from_environment()
     targets: list[Any] = []
     authority = None

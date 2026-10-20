@@ -152,10 +152,13 @@ def test_release_waits_for_the_recovery_runtime_to_finish_the_request() -> None:
         owner.close()
 
 
-def test_the_runtime_listing_the_released_request_itself_does_not_block_the_restart() -> None:
+def test_the_runtime_listing_the_released_request_terminal_does_not_block_the_restart() -> None:
     owner, route, _spare = _degraded_owner()
     owner.set_m16_runtime_source(
-        lambda: {"queue": {"active_request_ids": ["source"]}})
+        lambda: {
+            "queue": {"active_request_ids": ["source"]},
+            "requests": [{"request_id": "source", "terminal_state": "failed"}],
+        })
     try:
         owner._request_routes["source"] = route
         owner.release_request("source")

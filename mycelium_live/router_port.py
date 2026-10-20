@@ -1697,6 +1697,7 @@ class LiveRouterPort:
         successor_registered = False
         successor_placements: tuple[str, ...] = ()
         command_terminal_error: str | None = None
+        _LOGGER.info("a6 recovery stage=reserve request_id=%s", request_id)
         try:
             manifest = authority.reserve_candidate(
                 checkpoint=checkpoint,
@@ -1706,6 +1707,7 @@ class LiveRouterPort:
                 now_unix_ms=self._recovery_clock_ms(),
             )
             successor_identity = coordinator.recovery_successor_identity(request_id)
+            _LOGGER.info("a6 recovery stage=qualify request_id=%s", request_id)
             source_compatibility, qualification = qualification_source(
                 request_id,
                 checkpoint,
@@ -1731,6 +1733,7 @@ class LiveRouterPort:
             )
             if source_command is None:
                 raise M16AdmissionError("recovery_command_identity_missing")
+            _LOGGER.info("a6 recovery stage=register request_id=%s", request_id)
             self._register_recovery_command(
                 pending,
                 route_identity=successor_identity,
@@ -1747,6 +1750,7 @@ class LiveRouterPort:
                 if (pending.cancellation_requested.is_set()
                         or pending.cancellation_linearized):
                     raise InferenceCancelled("recovery_cancelled_before_fence")
+            _LOGGER.info("a6 recovery stage=fence request_id=%s", request_id)
             coordinator.fence_recovery_source(
                 request_id,
                 expected_source_identity=source_identity,
