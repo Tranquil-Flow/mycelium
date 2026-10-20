@@ -40,7 +40,8 @@ ASSETS = {'/swarms': ('index.html', 'text/html; charset=utf-8'),
           '/swarms/swarms.js': ('swarms.js', 'text/javascript; charset=utf-8'),
           '/swarms/swarms.css': ('swarms.css', 'text/css; charset=utf-8')}
 DEMO_LABEL = ('Demo. Hosted on one volunteer Mac through a tunnel: it may sleep. No accounts, no email, '
-              'no tracking. Keys live only in this browser.')
+              'no tracking by this site. Keys live only in this browser. Traffic passes through Cloudflare, which can '
+              'see your IP address, timing and prompts.')
 _IP = re.compile(r'[0-9A-Fa-f:.]{2,45}\Z')
 _CHUNK = re.compile(rb'[0-9A-Fa-f]{1,8}\r\n')
 

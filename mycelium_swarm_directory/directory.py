@@ -23,7 +23,9 @@ from .ratelimit import WindowLimiter
 from .wire import Verifier, WireError, fingerprint, parse_json_object
 
 PRIVACY_NOTE = ('Your prompt is seen by this swarm\'s nodes (the Macs that run it). It is not end-to-end '
-                'encrypted from them. The directory never sees prompts and keeps no logs or analytics.')
+                'encrypted from them. The directory never sees prompts and keeps no logs or analytics. '
+                'Cloudflare terminates TLS for this site and for swarm entries on trycloudflare.com and can see '
+                'your IP address, timing and plaintext prompts.')
 #: Signed read-only queries: own budgets, not the write budgets.
 QUERY_ROUTES = frozenset({'/owner-inbox', '/my-grants'})
 API_ROUTES = frozenset({'/records', '/delete', '/heartbeat', '/access-requests', '/owner-inbox', '/grants', '/deny',

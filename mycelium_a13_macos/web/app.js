@@ -401,7 +401,7 @@ function currentConsent(){
     network:$('network').value,background:false,diagnostics:false,thermal:'stop_on_serious'};
 }
 $('relay-start').addEventListener('click',()=>{
-  if(!window.confirm('Start a temporary Cloudflare quick tunnel? The relay terminates HTTPS and can observe control traffic; inference stays on Iroh.'))return;
+  if(!window.confirm('Start a temporary Cloudflare quick tunnel? The relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh.'))return;
   void perform('/api/network/start',{relay_acknowledged:true,max_seconds:1800},'Public relay started. Now create the swarm, then invite Macs.');
 });
 $('window-open').addEventListener('click',()=>void perform('/api/pair/window/open',{ttl_seconds:Number($('window-ttl').value)},'Join code opened. Show it to one person; approve their Mac when it appears.'));

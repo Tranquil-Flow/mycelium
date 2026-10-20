@@ -305,7 +305,7 @@ class TemporaryHttpsRelay:
         return {'state':'relay_process_running' if running else 'stopped',
             'provider':self.provider,'public_origin':self.public_origin,'error_code':self.error_code,
             'seed_bound':self.proxy is not None and self.proxy.server.backend is not None,
-            'privacy':'The selected relay terminates HTTPS and can observe control traffic; inference uses Iroh. If system DNS fails, relay names use Cloudflare HTTPS DNS with unchanged certificate verification.',
+            'privacy':'The selected relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross this relay); only inference between the Macs uses Iroh. If system DNS fails, relay names use Cloudflare HTTPS DNS with unchanged certificate verification.',
             'relay_host_trust':'public_webpki'}
 
     def close(self):
