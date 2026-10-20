@@ -364,6 +364,9 @@ class RequestGatewayService:
         if self._replay_checkpoint_root is not None:
             from mycelium_a6_recovery import CheckpointStore
 
+            # Crash leftovers hold the encoded prompt in the clear: sweep the temporaries, then reconcile and
+            # discard the orphaned records (journaled by digest only).
+            CheckpointStore.sweep_temporaries(self._replay_checkpoint_root)
             self._startup_recovery_reconciliations = (
                 CheckpointStore.reconcile_orphans(self._replay_checkpoint_root)
             )

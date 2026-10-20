@@ -729,6 +729,30 @@ class CheckpointStore:
         except (KeyError, TypeError, UnicodeDecodeError) as exc:
             raise ValueError("checkpoint_store_corrupt") from exc
 
+    @staticmethod
+    def sweep_temporaries(root: str | os.PathLike[str]) -> int:
+        """Remove ``.checkpoint-*.tmp`` files a crash left between ``mkstemp`` and ``os.replace``.
+
+        They hold the serialized checkpoint, encoded prompt token ids included, and no reconciliation ever sees
+        them.  Only names this store creates are touched, links are unlinked and never followed.  Call it before
+        any writer exists (gateway start-up); returns how many were removed.
+        """
+        directory = Path(root)
+        removed = 0
+        try:
+            candidates = sorted(directory.glob(".checkpoint-*.tmp"))
+        except OSError:
+            return 0
+        for candidate in candidates:
+            try:
+                candidate.unlink()
+                removed += 1
+            except FileNotFoundError:
+                continue
+            except OSError:
+                continue  # unremovable: start-up still proceeds; the reconciliation below fails closed on real records
+        return removed
+
     @classmethod
     def reconcile_orphans(
         cls,
