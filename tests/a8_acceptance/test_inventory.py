@@ -1,0 +1,453 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[2]
+INVENTORY = Path(__file__).with_name("inventory.v1.json")
+SPECIFICATION = (
+    ROOT
+    / "docs/superpowers/specs/2026-08-18-mycelium-a8-internet-native-control.md"
+)
+PROTOCOL = "mycelium.a8_acceptance_inventory.v1"
+CLAIM_BOUNDARY = (
+    "frozen A8 acceptance decisions plus privacy-reduced retained proof of 14 "
+    "source/spec-bound executed physical and ordinary-browser cases; final completion "
+    "additionally requires post-document regressions, audits, handover closure, and "
+    "the atomic feature commit"
+)
+REQUIRED_DECISIONS = {
+    "public_https_bootstrap_authentication",
+    "seed_key_pinning",
+    "invitation_and_revocation",
+    "iroh_direct_relay_activation",
+    "unknown_not_zero_measurements",
+    "privacy_safe_relay_projection",
+    "ssh_tailscale_independence",
+}
+REQUIRED_NEGATIVE_CASES = {
+    "cleartext_or_redirect_bootstrap",
+    "certificate_without_seed_authority",
+    "invalid_or_replayed_invitation",
+    "revoked_active_member",
+    "endpoint_identity_mismatch",
+    "missing_or_stale_path_measurements",
+    "raw_relay_identity_injection",
+    "unqualified_external_member",
+    "tailscale_unavailable",
+    "ssh_unavailable",
+}
+REQUIRED_POSITIVE_CASES = {
+    "unrelated_https_invite_without_tailscale",
+    "direct_path_qualified_browser_inference",
+    "forced_relay_privacy_reduced_browser_inference",
+    "observed_path_transition_and_reconnect",
+}
+WORKSPACES = {
+    "inference",
+    "device_lab",
+    "network",
+    "nodes",
+    "plans",
+    "readiness",
+    "incidents",
+    "settings",
+}
+DETERMINISTIC_GATE_KINDS = {
+    "deterministic_positive",
+    "deterministic_negative",
+}
+DETERMINISTIC_GATE_FIELDS = {
+    "gate_id",
+    "gate_kind",
+    "spec_section",
+    "covered_by",
+    "test_ids",
+    "decision_ids",
+}
+_REQUIRED_DETERMINISTIC_GATES = {
+    # §3 public HTTPS bootstrap boundary
+    "bootstrap_canonical_origin",
+    "bootstrap_downgrade_redirect_refusal",
+    "bootstrap_content_type_method_path_allowlist",
+    "bootstrap_frame_concurrency_rate_bounds",
+    "bootstrap_timeout_and_no_store",
+    # §10.1 seed key pinning
+    "pin_success",
+    "wrong_pin_rejected",
+    "rotated_overlap_accepted",
+    "expired_rotation_rejected",
+    "certificate_valid_unsigned_seed_rejected",
+    "tls_valid_no_invitation_authority_rejected",
+    # §4 invitation and join
+    "invite_expiry_rejected",
+    "invite_exact_idempotent_retry",
+    "invite_changed_retry_rejected",
+    "wrong_swarm_or_seed_rejected",
+    "duplicate_key_or_endpoint_rejected",
+    "unsupported_class_rejected",
+    "atomic_no_partial_member",
+    # §5 post-join control and revocation
+    "resume_through_public_adapter",
+    "heartbeat_lease_renewal",
+    "lease_expiry_rejected",
+    "stale_generation_rejected",
+    "revoked_generation_rejected",
+    "changed_incarnation_rejected",
+    "bounded_reconnect_same_origin",
+    # §6 activation and observations
+    "direct_observation",
+    "relay_observation",
+    "unknown_path_observation",
+    "path_transition_history",
+    "persistent_connection_reuse",
+    "nullable_measurements_unknown",
+    "explicit_measured_zero_loss",
+    "relay_redaction",
+    # §8 closed contracts + §11 privacy scans
+    "closed_contracts_fixtures_validate",
+    "projection_privacy_scans",
+}
+DECISION_FIELDS = {
+    "decision_id",
+    "decision",
+    "authorities",
+    "required_acceptance",
+    "forbidden_fallbacks",
+}
+NEGATIVE_FIELDS = {
+    "case_id",
+    "gate_kind",
+    "setup",
+    "stimulus",
+    "required_outcomes",
+    "forbidden_side_effects",
+}
+REQUIRED_OUTCOMES = {
+    "no_cleartext_fallback",
+    "seed_pin_mismatch_before_invite_transmission",
+    "no_partial_member",
+    "revoked_connection_removed_from_activation_admission",
+    "endpoint_mismatch_rejected",
+    "missing_metrics_remain_unknown",
+    "raw_relay_identity_rejected",
+    "all_serve_authorities_rejected",
+    "supported_path_works_without_tailscale",
+    "supported_path_works_without_ssh",
+}
+FORBIDDEN_PUBLIC_VALUES = re.compile(
+    r"(?:https?://|iroh://|tailscale\.com|100\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"(?:token|secret|password|credential)\s*[:=])",
+    re.IGNORECASE,
+)
+
+
+def _inventory() -> dict:
+    value = json.loads(INVENTORY.read_text("utf-8"))
+    assert isinstance(value, dict)
+    return value
+
+
+def _bounded_unique_names(values: object, *, maximum: int = 16) -> set[str]:
+    assert isinstance(values, list) and 1 <= len(values) <= maximum
+    assert len(values) == len(set(values))
+    assert all(
+        isinstance(value, str)
+        and re.fullmatch(r"[a-z][a-z0-9_]{0,95}", value) is not None
+        for value in values
+    )
+    return set(values)
+
+
+def test_a8_inventory_is_closed_bounded_physically_qualified_and_specification_bound() -> None:
+    inventory = _inventory()
+    assert set(inventory) == {
+        "protocol",
+        "gate",
+        "state",
+        "claim_boundary",
+        "source_specification",
+        "decisions",
+        "workspace_projections",
+        "deterministic_gates",
+        "physical_positive_cases",
+        "physical_negative_cases",
+        "physical_execution",
+    }
+    assert inventory["protocol"] == PROTOCOL
+    assert inventory["gate"] == "A8"
+    assert inventory["state"] == "physically_qualified"
+    assert inventory["claim_boundary"] == CLAIM_BOUNDARY
+    assert inventory["source_specification"] == str(
+        SPECIFICATION.relative_to(ROOT)
+    )
+
+    specification = SPECIFICATION.read_text("utf-8")
+    assert "**Status:** `design_only`;" in specification
+    assert f"`{INVENTORY.relative_to(ROOT)}`" in specification
+    assert f"`{PROTOCOL}`" in specification
+    for decision_id in REQUIRED_DECISIONS:
+        assert f"`{decision_id}`" in specification
+
+    encoded = INVENTORY.read_text("utf-8")
+    assert FORBIDDEN_PUBLIC_VALUES.search(encoded) is None
+
+
+def test_a8_workspace_projection_matrix_is_exact_and_nonempty() -> None:
+    projections = _inventory()["workspace_projections"]
+    assert set(projections) == WORKSPACES
+    for requirements in projections.values():
+        _bounded_unique_names(requirements)
+
+
+def test_a8_decision_inventory_has_exact_coverage_and_fail_closed_choices() -> None:
+    decisions = _inventory()["decisions"]
+    assert isinstance(decisions, list) and len(decisions) == len(REQUIRED_DECISIONS)
+    assert {decision["decision_id"] for decision in decisions} == REQUIRED_DECISIONS
+
+    acceptance: set[str] = set()
+    forbidden: set[str] = set()
+    for decision in decisions:
+        assert isinstance(decision, dict) and set(decision) == DECISION_FIELDS
+        assert isinstance(decision["decision"], str)
+        assert 40 <= len(decision["decision"]) <= 512
+        _bounded_unique_names(decision["authorities"])
+        acceptance.update(_bounded_unique_names(decision["required_acceptance"]))
+        forbidden.update(_bounded_unique_names(decision["forbidden_fallbacks"]))
+
+    assert {
+        "seed_signature_required_after_tls",
+        "pin_checked_before_secret_transmission",
+        "revoked_open_activation_removed",
+        "forced_relay_observed_not_configured",
+        "missing_metrics_remain_unknown",
+        "raw_relay_identity_rejected",
+        "tailscale_disabled_before_join",
+        "ssh_absent_on_external_peer",
+    } <= acceptance
+    assert {
+        "cleartext_http",
+        "trust_on_first_use",
+        "revoked_connection_survival",
+        "address_only_trust",
+        "default_zero_coercion",
+        "raw_relay_url",
+        "tailnet_fallback",
+        "ssh_serving",
+    } <= forbidden
+
+
+def test_a8_deterministic_gate_matrix_is_exact_and_machine_checked() -> None:
+    import re as _re
+
+    gates = _inventory()["deterministic_gates"]
+    assert isinstance(gates, list) and 1 <= len(gates) <= 64
+    assert {gate["gate_id"] for gate in gates} == _REQUIRED_DETERMINISTIC_GATES
+    for gate in gates:
+        assert isinstance(gate, dict) and set(gate) == DETERMINISTIC_GATE_FIELDS
+        assert gate["gate_kind"] in DETERMINISTIC_GATE_KINDS
+        assert isinstance(gate["spec_section"], str)
+        assert _re.fullmatch(r"\d{1,2}(\.\d+)?", gate["spec_section"])
+        covered_by = gate["covered_by"]
+        assert isinstance(covered_by, str) and covered_by.endswith(".py")
+        path = ROOT / covered_by
+        assert path.is_file(), f"deterministic gate coverage file missing: {covered_by}"
+        test_ids = _bounded_unique_names(gate["test_ids"], maximum=64)
+        source = path.read_text("utf-8")
+        for test_id in test_ids:
+            assert f"def {test_id}(" in source, (
+                f"deterministic gate {gate['gate_id']} names missing test "
+                f"{test_id} in {covered_by}"
+            )
+        decision_ids = _bounded_unique_names(gate["decision_ids"])
+        assert decision_ids <= REQUIRED_DECISIONS
+
+
+def test_a8_physical_negative_inventory_is_exact_and_side_effect_bounded() -> None:
+    cases = _inventory()["physical_negative_cases"]
+    assert isinstance(cases, list) and 1 <= len(cases) <= 32
+    assert {case["case_id"] for case in cases} == REQUIRED_NEGATIVE_CASES
+
+    outcomes: set[str] = set()
+    side_effects: set[str] = set()
+    for case in cases:
+        assert isinstance(case, dict) and set(case) == NEGATIVE_FIELDS
+        assert case["gate_kind"] == "physical_negative"
+        assert isinstance(case["setup"], str) and 20 <= len(case["setup"]) <= 256
+        assert isinstance(case["stimulus"], str) and 10 <= len(case["stimulus"]) <= 256
+        outcomes.update(_bounded_unique_names(case["required_outcomes"]))
+        side_effects.update(_bounded_unique_names(case["forbidden_side_effects"]))
+
+    assert REQUIRED_OUTCOMES <= outcomes
+    assert {
+        "invite_secret_transmitted",
+        "member_created",
+        "route_mutated",
+        "silent_repin",
+        "lease_extended",
+        "new_request_admitted",
+        "zero_metrics_fabricated",
+        "raw_value_logged",
+        "artifact_disclosed",
+        "tailnet_fallback",
+        "ssh_fallback",
+    } <= side_effects
+
+
+def test_a8_physical_positive_inventory_is_exact_and_ordinary_path_bound() -> None:
+    cases = _inventory()["physical_positive_cases"]
+    assert isinstance(cases, list) and len(cases) == len(REQUIRED_POSITIVE_CASES)
+    assert {case["case_id"] for case in cases} == REQUIRED_POSITIVE_CASES
+
+    outcomes: set[str] = set()
+    side_effects: set[str] = set()
+    for case in cases:
+        assert isinstance(case, dict) and set(case) == NEGATIVE_FIELDS
+        assert case["gate_kind"] == "physical_positive"
+        assert isinstance(case["setup"], str) and 20 <= len(case["setup"]) <= 256
+        assert isinstance(case["stimulus"], str) and 10 <= len(case["stimulus"]) <= 256
+        outcomes.update(_bounded_unique_names(case["required_outcomes"]))
+        side_effects.update(_bounded_unique_names(case["forbidden_side_effects"]))
+
+    assert {
+        "https_bootstrap_succeeds",
+        "browser_inference_completes",
+        "positive_physical_counters",
+        "privacy_safe_relay_reference_only",
+        "transition_generations_retained",
+        "subsequent_request_completes",
+    } <= outcomes
+    assert {
+        "tailnet_fallback",
+        "unqualified_member_serves",
+        "raw_relay_identity_emitted",
+        "prior_observation_rewritten",
+    } <= side_effects
+
+
+def test_a8_physical_execution_is_exact_candidate_bound_and_repo_local() -> None:
+    """Retained execution claims bind the frozen candidate and summary while
+    raw owner evidence remains outside the repository."""
+
+    import hashlib
+
+    section = _inventory()["physical_execution"]
+    assert isinstance(section, dict) and set(section) == {
+        "runner",
+        "preverified_by",
+        "executed_summary",
+        "source_manifest",
+        "source_digest",
+        "spec_digest",
+        "passing_case_count",
+    }
+    runner = ROOT / section["runner"]
+    assert runner.is_file() and runner.suffix == ".py"
+    assert "scripts/" in str(runner)
+    summary_path = ROOT / section["executed_summary"]
+    manifest_path = ROOT / section["source_manifest"]
+    assert summary_path.is_file() and manifest_path.is_file()
+    assert section["source_digest"] == (
+        "sha256:" + hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    )
+    assert section["spec_digest"] == (
+        "sha256:" + hashlib.sha256(SPECIFICATION.read_bytes()).hexdigest()
+    )
+    assert section["passing_case_count"] == (
+        len(REQUIRED_POSITIVE_CASES) + len(REQUIRED_NEGATIVE_CASES)
+    )
+    summary = json.loads(summary_path.read_text("utf-8"))
+    assert summary["protocol"] == "mycelium.a8_completion_evidence.v1"
+    assert summary["state"] == "physically_qualified"
+    assert summary["source_manifest"]["digest"] == section["source_digest"]
+    assert summary["specification"]["digest"] == section["spec_digest"]
+    assert summary["qualification"]["case_count"] == section["passing_case_count"]
+    assert summary["qualification"]["all_passed"] is True
+    assert summary["qualification"]["referenced_evidence_resolved"] is True
+    declared = {
+        case["case_id"]: set(case["required_outcomes"])
+        for key in ("physical_positive_cases", "physical_negative_cases")
+        for case in _inventory()[key]
+    }
+    summarized = {
+        case["case_id"]: set(case["outcomes"])
+        for case in summary["qualification"]["cases"]
+    }
+    assert set(summarized) == set(declared)
+    for case_id, required_outcomes in declared.items():
+        assert required_outcomes <= summarized[case_id], (
+            case_id,
+            sorted(required_outcomes - summarized[case_id]),
+        )
+    preverified = section["preverified_by"]
+    assert isinstance(preverified, dict)
+    physical_ids = {
+        case["case_id"]
+        for key in ("physical_positive_cases", "physical_negative_cases")
+        for case in _inventory()[key]
+    }
+    assert set(preverified) == physical_ids
+    for case_id, module_path in preverified.items():
+        assert case_id in physical_ids
+        module = ROOT / module_path
+        assert module.is_file() and module.suffix == ".py"
+        assert "tests/" in str(module)
+
+
+def test_source_manifest_pins_recorded_immutable_a8_commit_without_digest_cycle() -> None:
+    import hashlib
+
+    from mycelium_internet.physical import (
+        _HISTORICAL_A8_SOURCE_COMMIT,
+        _HISTORICAL_A8_SOURCE_DIGEST,
+        _read_git_source_paths,
+    )
+
+    manifest_relative = "docs/handover/a8-source-manifest.v1.json"
+    manifest_raw = _read_git_source_paths(
+        ROOT,
+        _HISTORICAL_A8_SOURCE_COMMIT,
+        [manifest_relative],
+    )[manifest_relative]
+    manifest = json.loads(manifest_raw)
+    pins = manifest["files"]
+    paths = [pin["path"] for pin in pins]
+    assert paths == sorted(set(paths))
+    assert "tests/a8_acceptance/inventory.v1.json" not in paths
+    assert "ui/web/e2e/product-shell.smoke.spec.ts" in paths
+    assert "scripts/interactive_browser_e2e.mjs" in paths
+    assert "mycelium_qualification/signing.py" in paths
+    assert "tests/a5_acceptance/test_replica_dispatch.py" not in paths
+    contents = _read_git_source_paths(
+        ROOT,
+        _HISTORICAL_A8_SOURCE_COMMIT,
+        paths,
+    )
+    for pin in pins:
+        content = contents[pin["path"]]
+        assert pin["size_bytes"] == len(content), pin["path"]
+        assert pin["sha256"] == "sha256:" + hashlib.sha256(content).hexdigest(), (
+            pin["path"]
+        )
+    manifest_digest = "sha256:" + hashlib.sha256(manifest_raw).hexdigest()
+    assert manifest_digest == _HISTORICAL_A8_SOURCE_DIGEST
+    assert _inventory()["physical_execution"]["source_digest"] == manifest_digest
+
+
+def test_source_manifest_rejects_matching_symlink(tmp_path: Path) -> None:
+    from scripts.a8_source_manifest import build_manifest, source_paths
+
+    package = tmp_path / "mycelium_bad"
+    package.mkdir()
+    target = tmp_path / "outside.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    (package / "runtime.py").symlink_to(target)
+
+    assert "mycelium_bad/runtime.py" in source_paths(tmp_path)
+    with pytest.raises(ValueError, match="missing or unsafe A8 source path"):
+        build_manifest(tmp_path)

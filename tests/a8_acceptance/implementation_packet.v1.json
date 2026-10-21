@@ -1,0 +1,350 @@
+{
+  "protocol": "mycelium.a8_implementation_packet.v1",
+  "gate_state": "design_only",
+  "packet_base_commit": "181dc07e06978dd45281434acf64460b61ea54a9",
+  "claim_boundary": "machine-checked A8 leaf implementation handover only; no production implementation, shared wiring, external listener, network contact, physical evidence, qualification, readiness, or completion claim",
+  "source_inputs": [
+    "docs/superpowers/specs/2026-08-18-mycelium-a8-internet-native-control.md",
+    "tests/a8_acceptance/inventory.v1.json",
+    "docs/handover/2026-08-18-mycelium-a4-implementation-packet.md",
+    "docs/superpowers/plans/2026-08-11-mycelium-completion-plan.md"
+  ],
+  "dependency_gate": {
+    "leaf_work_before_a4": "only_the_frozen_default_deny_leaf_allowlist_may_be_implemented",
+    "allowed_execution_before_a4": "deterministic_loopback_tests_only",
+    "shared_wiring_prerequisite": "A4_closed_with_one_atomic_commit",
+    "physical_qualification_prerequisite": "A4_closed_and_A8_rebased_onto_the_exact_atomic_A4_commit",
+    "rebase_rule": "rebase_the_complete_A8_leaf_lane_onto_the_exact_atomic_A4_commit_before_the_first_shared_wiring_or_physical_preflight_change",
+    "unknown_a4_commit_policy": "stop_until_the_primary_integrator_supplies_and_verifies_the_exact_atomic_A4_commit",
+    "guessed_interface_policy": "forbidden"
+  },
+  "leaf_ownership": {
+    "existing_source_patterns": [
+      "mycelium_seed/http.py",
+      "mycelium_bootstrap_preflight/**"
+    ],
+    "existing_test_patterns": [
+      "tests/seed_coordinator/test_http.py",
+      "tests/bootstrap_preflight/**"
+    ],
+    "planned_new_package": {
+      "root": "mycelium_internet_control",
+      "exact_paths": [
+        "mycelium_internet_control/__init__.py",
+        "mycelium_internet_control/observation.py",
+        "mycelium_internet_control/relay.py"
+      ],
+      "responsibilities": [
+        "closed_nullable_activation_observation_values",
+        "bound_direct_relay_unknown_normalization",
+        "privacy_reduced_relay_projection",
+        "provider_neutral_validation_only"
+      ],
+      "forbidden_dependencies": [
+        "membership_state_mutation",
+        "iroh_transport_control",
+        "request_gateway_dispatch",
+        "supervisor_composition",
+        "generated_contracts",
+        "ui_projection",
+        "provider_sdk",
+        "network_io"
+      ]
+    },
+    "planned_template_directory": {
+      "root": "config/internet-bootstrap",
+      "exact_paths": [
+        "config/internet-bootstrap/README.md",
+        "config/internet-bootstrap/bootstrap.env.template",
+        "config/internet-bootstrap/reverse-proxy.conf.template"
+      ],
+      "template_only": true,
+      "provider_neutral": true,
+      "may_contain_real_endpoint": false,
+      "may_contain_credential": false,
+      "may_activate_listener": false
+    },
+    "default_rule": "default_deny_every_source_test_configuration_or_resource_not_explicitly_allowlisted_is_out_of_scope"
+  },
+  "prohibited_leaf_ownership": {
+    "path_patterns": [
+      "mycelium_request_gateway/**",
+      "mycelium_membership/contracts.py",
+      "mycelium_seed/state.py",
+      "mycelium_router/transports/iroh.py",
+      "mycelium_live/supervisor.py",
+      "mycelium_product_spine/**",
+      "contracts/**",
+      "ui/contracts/**",
+      "mycelium_ui_gateway/**",
+      "ui/**",
+      "mycelium_physical_runner/**",
+      "tests/evidence/**",
+      "docs/qualification/**"
+    ],
+    "surface_categories": [
+      "supervisor_or_shared_composition",
+      "generated_contract_or_compatibility_fixture",
+      "shared_ui_or_ui_gateway",
+      "external_listener",
+      "credential_or_certificate_private_key",
+      "physical_device",
+      "shared_fleet_state",
+      "provider_account_or_sdk",
+      "physical_or_browser_qualification_evidence"
+    ],
+    "discovery_rule": "stop_for_primary_integrator_review_instead_of_widening_the_leaf_lane"
+  },
+  "https_bootstrap_boundary": {
+    "public_origin": "one_canonical_https_origin_without_userinfo_path_query_or_fragment",
+    "leaf_listener": "loopback_http_only_behind_an_unactivated_reviewed_tls_proxy_template",
+    "tls_authority": "publicly_trusted_tls_authenticates_only_the_canonical_hostname",
+    "seed_authority": "signed_seed_identity_verified_against_the_invitation_bound_seed_key_pin_before_invite_secret_transmission",
+    "membership_authority": "single_use_invitation_for_join_and_signed_member_envelopes_for_resume_and_control",
+    "route_allowlist": [
+      {"method": "GET", "path": "/seed/identity", "authority": "signed_seed_identity"},
+      {"method": "GET", "path": "/seed/rotation", "authority": "dual_signed_seed_key_transition"},
+      {"method": "POST", "path": "/seed/join", "authority": "single_use_invitation_and_signed_generation_zero_join"},
+      {"method": "POST", "path": "/seed/resume", "authority": "signed_current_member_resume"},
+      {"method": "POST", "path": "/seed/message", "authority": "signed_current_member_message"}
+    ],
+    "limits": {
+      "maximum_canonical_json_body_bytes": 1048576,
+      "connection_read_timeout_ms": 2000,
+      "maximum_concurrent_requests_default": 32,
+      "maximum_concurrent_requests_minimum": 1,
+      "maximum_concurrent_requests_maximum": 256,
+      "per_invite_attempt_limit_default": 8,
+      "per_invite_attempt_limit_minimum": 1,
+      "per_invite_attempt_limit_maximum": 32,
+      "per_invite_attempt_window_ms": 300000,
+      "maximum_error_body_bytes": 4096
+    },
+    "response_requirements": [
+      "canonical_json_only",
+      "exact_application_json_content_type",
+      "cache_control_no_store",
+      "bounded_reason_code_only",
+      "no_sensitive_access_log_fields"
+    ],
+    "rejected_inputs": [
+      "cleartext_public_origin",
+      "redirect_or_downgrade",
+      "non_allowlisted_method_or_path",
+      "query_or_fragment",
+      "userinfo",
+      "cookie_or_bearer_membership",
+      "form_encoding",
+      "transfer_encoding",
+      "websocket_upgrade",
+      "directory_or_static_file_serving",
+      "public_operator_administration"
+    ]
+  },
+  "membership_authority_boundaries": {
+    "invitation": {
+      "owner": "owner_private_seed_administration",
+      "leaf_role": "validate_canonical_transport_envelope_and_delegate_exactly_once",
+      "secret_location": "canonical_POST_seed_join_JSON_body_only",
+      "required_precondition": "valid_TLS_hostname_plus_valid_signed_seed_identity_plus_exact_invitation_seed_key_pin",
+      "atomicity_owner": "mycelium_seed_state_and_coordinator_outside_A8_leaf_ownership"
+    },
+    "resume": {
+      "owner": "signed_current_membership_generation",
+      "leaf_role": "closed_transport_adapter_only",
+      "ambient_authority_forbidden": ["ip_address", "tls_session", "cookie", "connection_reuse"]
+    },
+    "revocation": {
+      "owner": "membership_state_and_activation_admission_integrators",
+      "leaf_role": "reject_a_revoked_or_stale_control_generation_returned_by_existing_authority",
+      "deferred_effect": "closing_or_quarantining_an_open_Iroh_connection_is_shared_integration_work",
+      "forbidden_leaf_effect": "mutate_membership_state_or_Iroh_admission"
+    }
+  },
+  "nullable_observation_boundary": {
+    "path_class_values": ["direct", "relay", "unknown"],
+    "nullable_fields": [
+      "rtt_ms",
+      "warm_rtt_ms",
+      "jitter_ms",
+      "goodput_bytes_per_second",
+      "loss_ratio",
+      "sample_count",
+      "connection_generation",
+      "observed_at",
+      "fresh_until"
+    ],
+    "unknown_rule": "missing_stale_rejected_or_unmeasured_values_are_null_and_path_class_is_unknown",
+    "zero_rule": "numeric_zero_is_valid_only_for_a_current_explicit_measurement_with_a_positive_sample_count_and_a_zero_capable_measured_quantity",
+    "planning_rule": "unknown_or_stale_values_cannot_satisfy_a_required_readiness_or_planning_objective",
+    "nonfinite_numbers_allowed": false,
+    "negative_measurements_allowed": false,
+    "raw_endpoint_or_address_allowed": false
+  },
+  "relay_projection_boundary": {
+    "algorithm": "HMAC-SHA256",
+    "domain_separator": "mycelium.relay_projection.v1\u0000",
+    "key_authority": "owner_private_persistent_projection_key_injected_by_shared_composition",
+    "leaf_key_storage": "none",
+    "public_fields": ["relay_reference", "coarse_region"],
+    "coarse_region_authority": "reviewed_relay_metadata_or_operator_declaration_else_unknown",
+    "forbidden_public_inputs": [
+      "relay_url",
+      "dns_name",
+      "ip_address",
+      "port",
+      "credential",
+      "provider_account",
+      "exact_location",
+      "canonical_relay_identity"
+    ],
+    "continuity_rule": "same_key_domain_and_canonical_relay_identity_produce_the_same_reference_and_distinct_identities_are_separated",
+    "inference_rule": "region_or_relay_reference_never_grants_location_placement_route_or_membership_authority"
+  },
+  "direct_relay_boundary": {
+    "accepted_source": "current_bound_live_Iroh_connection_observation_for_the_exact_membership_authorized_EndpointID_and_connection_generation",
+    "leaf_input": "detached_provider_neutral_transport_observation_supplied_by_the_later_integrator",
+    "forbidden_sources": [
+      "same_lan_or_different_network",
+      "operating_system_or_peer_class",
+      "configured_force_relay_setting",
+      "address_or_hostname",
+      "participation",
+      "operator_typed_EndpointID"
+    ],
+    "forced_relay_rule": "forcing_relay_is_a_later_physical_test_control_and_is_not_itself_an_observation",
+    "transport_wiring_owner": "primary_integrator_after_A4_atomic_close"
+  },
+  "deterministic_negative_cases": [
+    "non_https_or_noncanonical_origin",
+    "redirect_downgrade_or_route_method_mismatch",
+    "tls_success_with_wrong_seed_pin_or_signature",
+    "invite_in_query_fragment_cookie_header_or_redirect_body_replay",
+    "expired_reused_forged_wrong_swarm_wrong_seed_or_changed_retry_invitation",
+    "stale_changed_or_revoked_resume_and_member_generation",
+    "missing_stale_nonfinite_negative_or_default_zero_measurement",
+    "path_class_inferred_without_bound_live_observation",
+    "forced_relay_configuration_claimed_as_observation",
+    "raw_relay_network_identity_or_credential_projection",
+    "template_contains_provider_account_endpoint_or_secret",
+    "leaf_attempts_network_contact_external_bind_shared_state_or_qualification_write"
+  ],
+  "focused_tests": [
+    {
+      "case_id": "closed_https_origin_and_public_routes",
+      "nodeid": "tests/seed_coordinator/test_http.py::test_a8_https_origin_and_public_route_allowlist_fail_closed",
+      "kind": "deterministic_loopback",
+      "owned_paths": ["mycelium_seed/http.py"]
+    },
+    {
+      "case_id": "seed_pin_before_invite_secret",
+      "nodeid": "tests/seed_coordinator/test_http.py::test_a8_seed_pin_and_signature_precede_invite_secret_transmission",
+      "kind": "deterministic_loopback",
+      "owned_paths": ["mycelium_seed/http.py"]
+    },
+    {
+      "case_id": "join_resume_revocation_adapter_authority",
+      "nodeid": "tests/seed_coordinator/test_http.py::test_a8_join_resume_and_revocation_boundaries_delegate_without_partial_mutation",
+      "kind": "deterministic_loopback",
+      "owned_paths": ["mycelium_seed/http.py"]
+    },
+    {
+      "case_id": "request_and_invite_attempt_bounds",
+      "nodeid": "tests/seed_coordinator/test_http.py::test_a8_request_and_invite_attempt_bounds_fail_closed",
+      "kind": "deterministic_loopback",
+      "owned_paths": ["mycelium_seed/http.py"]
+    },
+    {
+      "case_id": "offline_external_input_preflight",
+      "nodeid": "tests/bootstrap_preflight/test_preflight.py::test_a8_external_inputs_are_nullable_offline_and_never_claim_physical_readiness",
+      "kind": "deterministic_offline",
+      "owned_paths": ["mycelium_bootstrap_preflight/**"]
+    },
+    {
+      "case_id": "provider_neutral_templates",
+      "nodeid": "tests/bootstrap_preflight/test_preflight.py::test_a8_template_inventory_is_exact_provider_neutral_and_secret_free",
+      "kind": "deterministic_offline",
+      "owned_paths": ["mycelium_bootstrap_preflight/**", "config/internet-bootstrap/**"]
+    },
+    {
+      "case_id": "unknown_not_zero",
+      "nodeid": "tests/bootstrap_preflight/test_internet_control.py::test_missing_stale_and_rejected_measurements_remain_unknown_not_zero",
+      "kind": "deterministic_offline",
+      "owned_paths": ["mycelium_internet_control/**"]
+    },
+    {
+      "case_id": "explicit_measured_zero",
+      "nodeid": "tests/bootstrap_preflight/test_internet_control.py::test_zero_requires_current_explicit_positive_sample_observation",
+      "kind": "deterministic_offline",
+      "owned_paths": ["mycelium_internet_control/**"]
+    },
+    {
+      "case_id": "bound_path_class",
+      "nodeid": "tests/bootstrap_preflight/test_internet_control.py::test_direct_relay_unknown_requires_bound_live_transport_observation",
+      "kind": "deterministic_offline",
+      "owned_paths": ["mycelium_internet_control/**"]
+    },
+    {
+      "case_id": "privacy_safe_relay_projection",
+      "nodeid": "tests/bootstrap_preflight/test_internet_control.py::test_relay_projection_is_stable_separated_and_rejects_raw_public_identity",
+      "kind": "deterministic_offline",
+      "owned_paths": ["mycelium_internet_control/**"]
+    }
+  ],
+  "focused_regression_commands": [
+    "python3.14 -m pytest -q tests/a8_acceptance",
+    "python3.14 -m pytest -q tests/seed_coordinator/test_http.py tests/bootstrap_preflight",
+    "ruff check tests/a8_acceptance mycelium_seed/http.py mycelium_bootstrap_preflight tests/seed_coordinator/test_http.py tests/bootstrap_preflight"
+  ],
+  "unresolved_shared_surfaces": [
+    {
+      "surface": "membership_state_invite_consumption_resume_lease_and_revocation",
+      "paths": ["mycelium_seed/state.py", "mycelium_membership/contracts.py"],
+      "owner": "membership_and_primary_integrator",
+      "handoff": "consume_existing_authority_only_until_A4_atomic_rebase_and_explicit_reservation"
+    },
+    {
+      "surface": "activation_admission_open_connection_revocation_and_live_path_observation",
+      "paths": ["mycelium_router/transports/iroh.py"],
+      "owner": "transport_and_primary_integrator",
+      "handoff": "wire_detached_observations_and_revocation_after_A4_atomic_rebase"
+    },
+    {
+      "surface": "browser_gateway_and_public_projection",
+      "paths": ["mycelium_request_gateway/**", "mycelium_ui_gateway/**", "ui/**"],
+      "owner": "gateway_UI_and_primary_integrator",
+      "handoff": "add_privacy_reduced_projection_only_after_contract_and_generation_ownership_is_reserved"
+    },
+    {
+      "surface": "supervisor_shared_composition_projection_key_and_configuration_injection",
+      "paths": ["mycelium_live/supervisor.py", "mycelium_product_spine/**"],
+      "owner": "primary_integrator",
+      "handoff": "inject_interfaces_and_owner_private_keys_after_A4_atomic_rebase"
+    },
+    {
+      "surface": "versioned_contract_generation_and_compatibility",
+      "paths": ["contracts/**", "ui/contracts/**"],
+      "owner": "contract_integrator",
+      "handoff": "generate_and_migrate_only_after_leaf_shapes_and_A4_interfaces_are_stable"
+    },
+    {
+      "surface": "external_listener_devices_fleet_and_physical_browser_evidence",
+      "paths": ["mycelium_physical_runner/**", "tests/evidence/**", "docs/qualification/**"],
+      "owner": "physical_gate_owner",
+      "handoff": "reserve_real_infrastructure_only_after_A4_atomic_rebase_and_shared_wiring_review"
+    }
+  ],
+  "later_integration_handoff": [
+    "primary_integrator_publishes_and_verifies_one_exact_atomic_A4_commit",
+    "A8_leaf_lane_rebases_its_complete_reviewed_history_onto_that_exact_A4_commit",
+    "rerun_A8_packet_checks_and_all_deterministic_loopback_leaf_tests_on_the_rebased_tree",
+    "primary_integrator_reserves_membership_transport_gateway_supervisor_contract_and_UI_surfaces",
+    "integrator_wires_existing_membership_authority_and_detached_Iroh_observations_without_moving_authority_into_the_leaf_package",
+    "contract_integrator_generates_closed_contracts_and_compatibility_fixtures_after_leaf_shapes_stabilize",
+    "integrator_injects_owner_private_projection_key_and_provider_neutral_configuration_without_committing_credentials",
+    "physical_gate_owner_runs_external_preflight_then_unrelated_network_direct_forced_relay_transition_reconnect_revocation_browser_and_privacy_gates",
+    "owner_reviews_bound_evidence_before_any_A8_qualification_or_promotion_claim"
+  ],
+  "qualification_claim": false,
+  "promotion_authorized": false
+}
