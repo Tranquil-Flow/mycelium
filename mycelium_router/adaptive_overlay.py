@@ -52,6 +52,7 @@ OVERLAY_KEYS: Final = frozenset({
 })
 _REASONS: Final = frozenset({
     "none", "owner_game_mode", "owner_stop", "host_memory_pressure", "host_cpu_saturation",
+    "host_on_battery",
 })
 _MAX_BYTES: Final = 1 << 50
 _FUTURE_TOLERANCE_S: Final = 2.0

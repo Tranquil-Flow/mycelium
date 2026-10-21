@@ -35,7 +35,7 @@ _RANK: Final = {mode: index for index, mode in enumerate(MODES)}
 
 REASON_CATEGORIES: Final = frozenset({
     "none", "owner_game_mode", "owner_stop", "host_memory_pressure",
-    "host_cpu_saturation",
+    "host_cpu_saturation", "host_on_battery",
 })
 PUBLICATION_KEYS: Final = frozenset({
     "adaptive_enabled", "mode", "reason", "generation", "issued_at",
@@ -74,7 +74,15 @@ _POLICY_KEYS: Final = frozenset(DEFAULT_POLICY)
 # value of ``enabled`` (every file written before this key existed), so DEFAULT_POLICY and the
 # file schema are unchanged.  ``enabled`` stays "the controller exists" (automatic or a manual
 # Pause sharing is on).
-_OPTIONAL_POLICY_KEYS: Final = frozenset({"automatic"})
+# PV25 'Plugged in only' (``plugged_in_only``): pause sharing while the Mac is on battery.  It rides the
+# same controller (reason ``host_on_battery``), so it needs ``enabled`` (a controller exists) but not
+# ``automatic``; absent = off, so every earlier file is unchanged.
+_OPTIONAL_POLICY_KEYS: Final = frozenset({"automatic", "plugged_in_only"})
+
+
+def policy_plugged_in_only(policy: Mapping[str, Any]) -> bool:
+    """Whether the owner asked to share only while plugged in."""
+    return bool(policy.get("plugged_in_only", False))
 
 
 def policy_automatic(policy: Mapping[str, Any]) -> bool:
@@ -108,6 +116,10 @@ def validate_policy(policy: object) -> dict[str, Any]:
         raise bad
     if "automatic" in policy and (
         type(policy["automatic"]) is not bool or (policy["automatic"] and policy["enabled"] is not True)
+    ):
+        raise bad
+    if "plugged_in_only" in policy and (
+        type(policy["plugged_in_only"]) is not bool or (policy["plugged_in_only"] and policy["enabled"] is not True)
     ):
         raise bad
     if policy["schema"] != 1 or type(policy["schema"]) is not int:
@@ -589,7 +601,7 @@ def publication_admissible(
 
 # -------------------------------------------------------------- controller
 _MARKER_REASONS = frozenset(
-    {"none", "owner_game_mode", "owner_stop", "host_memory_pressure", "host_cpu_saturation"})
+    {"none", "owner_game_mode", "owner_stop", "host_memory_pressure", "host_cpu_saturation", "host_on_battery"})
 
 
 class AdaptiveHostController:
@@ -624,6 +636,7 @@ class AdaptiveHostController:
         # Set when this Mac pauses (drain/withdraw); cleared once the route is seen ready again, so
         # the page can say "Rejoining" between a released fence and a ready route (derived, no wire).
         self.rejoin_pending = False
+        self._on_battery = False
         self._policy = validate_policy(policy)
         self._timings = resolve_timings(self._policy)
 
@@ -646,6 +659,14 @@ class AdaptiveHostController:
             elif self._policy["game_mode"]:
                 self._escalate("drain", "owner_game_mode")
 
+    def set_on_battery(self, on_battery: bool) -> None:
+        """PV25: the latest power reading (only acted on while ``plugged_in_only`` is set)."""
+        with self._lock:
+            self._on_battery = bool(on_battery)
+
+    def _battery_hold(self) -> bool:
+        return bool(self._on_battery and policy_plugged_in_only(self._policy))
+
     @property
     def critical(self) -> bool:
         """Whether the latest sample classified as critical memory pressure."""
@@ -658,7 +679,8 @@ class AdaptiveHostController:
     def recovery_ready(self) -> bool:
         """True once only authority evidence is missing for leaving a non-normal mode."""
         with self._lock:
-            if not self.enabled or self.mode == "normal" or self.stopped or self._policy["game_mode"]:
+            if (not self.enabled or self.mode == "normal" or self.stopped or self._policy["game_mode"]
+                    or self._battery_hold()):
                 return False
             now = self._clock()
             return (
@@ -780,6 +802,8 @@ class AdaptiveHostController:
                 self._escalate("drain", "owner_stop")
             if self._policy["game_mode"]:
                 self._escalate("drain", "owner_game_mode")
+            if self._battery_hold() and self.mode in ("normal", "reduced"):
+                self._escalate("drain", "host_on_battery")  # never re-labels an owner Stop / Pause
             if cls == "critical":
                 self._escalate("drain", "host_memory_pressure")
             elif memory_moderate:
@@ -803,7 +827,8 @@ class AdaptiveHostController:
         return now - self._cpu_since >= self._timings["cpu_sustain_s"]
 
     def _pressure_persists(self) -> bool:
-        return self.stopped or self._policy["game_mode"] or self._classification in ("critical", "moderate")
+        return (self.stopped or self._policy["game_mode"] or self._battery_hold()
+                or self._classification in ("critical", "moderate"))
 
     def _progress(self, now: float) -> None:
         if self.mode == "drain" and self._pressure_persists():
@@ -812,7 +837,7 @@ class AdaptiveHostController:
             return
         if self.mode == "normal" or self._pressure_persists() or self._classification != "healthy":
             return
-        if self._healthy_since is None or self.stopped or self._policy["game_mode"]:
+        if self._healthy_since is None or self.stopped or self._policy["game_mode"] or self._battery_hold():
             return
         if now - self._healthy_since < self._timings["recovery_s"]:
             return
@@ -937,7 +962,9 @@ class AdaptiveHostRuntime:
         clock: Callable[[], float] = time.monotonic,
         footprint_bytes: Callable[[], int] = lambda: 0,
         inflight: Callable[[], int] = lambda: 0,
+        power_state: Callable[[], str | None] = lambda: None,
     ) -> None:
+        self._power = power_state  # 'external' | 'battery' | 'unknown' | None (PV25 Plugged in only)
         self._load = policy_loader
         self._sampler = sampler
         self._clock = clock
@@ -1046,6 +1073,13 @@ class AdaptiveHostRuntime:
         if self._last_sample_at is None or now - self._last_sample_at >= interval:
             self._last_sample_at = now
             raw: object = None
+            on_battery = False
+            if policy_plugged_in_only(policy):
+                try:
+                    on_battery = self._power() == "battery"  # unknown never pauses: no battery to guess
+                except Exception:
+                    on_battery = False
+            self._controller.set_on_battery(on_battery)
             if policy_automatic(policy):  # Adaptive sharing off: the sampler is never invoked
                 try:
                     raw = self._sampler()
@@ -1073,6 +1107,7 @@ def adaptive_resource_check(app: Any) -> str | None:
             clock=lambda: getattr(app, "_adaptive_clock", time.monotonic)(),
             footprint_bytes=lambda: _drain().footprint_bytes(_drain().target_runtime(app)),
             inflight=lambda: _drain().inflight_count(_drain().target_runtime(app)),
+            power_state=lambda: _app_power(app),
         )
         try:
             app._adaptive_runtime = runtime
@@ -1081,6 +1116,24 @@ def adaptive_resource_check(app: Any) -> str | None:
     for capacity_root in capacity_roots(app):  # a restart after a withdraw must already be fenced here
         runtime.sync_capacity_root(capacity_root)
     return runtime.check()
+
+
+def _app_power(app: Any) -> str | None:
+    """The app's own power observation (``resource_observation['power']``), refreshed through its observer."""
+    observer = getattr(app, "_policy_observer", None)
+    if not callable(observer):
+        return None
+    try:
+        observation = observer()
+    except Exception:
+        return None
+    if not isinstance(observation, dict) or not isinstance(observation.get("power"), str):
+        return None
+    try:
+        app.resource_observation = dict(observation)
+    except AttributeError:
+        pass
+    return observation["power"]
 
 
 def capacity_roots(app: Any) -> list[Path]:
