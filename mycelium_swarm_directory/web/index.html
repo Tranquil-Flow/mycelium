@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>Mycelium · Swarms (demo)</title>
+<link rel="stylesheet" href="/swarms/swarms.css"><script defer src="/swarms/swarms.js"></script></head>
+<body>
+<header><div class="brand">✳ Mycelium <span>public swarms</span></div>
+<p class="badge" id="demo">Demo. Hosted on one volunteer Mac: it may sleep. No accounts, no tracking.</p></header>
+<main>
+<section class="card" id="flow-card"><h2>How it works</h2>
+<ol id="flow"><li data-step="create"><strong>Create a swarm</strong> with a name and a model. You own it with this browser's key.</li>
+<li data-step="helper"><strong>Add a helper Mac.</strong> The Mac that runs the Mycelium app serves the swarm; more Macs join it with an invite.</li>
+<li data-step="access"><strong>Choose who may use it:</strong> open to anyone (with a quota), by request (you approve), or invite only.</li>
+<li data-step="run"><strong>Run inference</strong> here in the browser. Tokens appear as the route makes them, and the end of every prompt is named.</li></ol></section>
+
+<section class="card" id="helper-card" data-download-state="unavailable"><h2>Add a Mac that helps run a swarm</h2>
+<div id="download-body"><p>Checking for the helper app…</p></div>
+<p class="meta">The invite itself comes from the app, not from this page: on the swarm owner's Mac choose <strong>Invite a Mac</strong>, then send the join link or QR to the person who helps. The owner approves each Mac.</p></section>
+
+<section class="card" id="identity-card"><h2>Your browser key</h2>
+<p>This browser made an Ed25519 key that never leaves it (non-extractable, stored in this browser only). No email, no password, no account. Owners grant access to this key's fingerprint.</p>
+<p class="mono" id="identity">Creating your key…</p>
+<button type="button" class="secondary" id="forget">Forget this key (and its grants and swarms)</button></section>
+
+<section class="card"><div class="heading"><h2>All swarms</h2><button type="button" class="secondary" id="refresh">Refresh</button></div>
+<p class="privacy" id="privacy">Your prompt is seen by the swarm's nodes (the Macs that run it).</p>
+<p id="list-state" role="status" aria-live="polite"></p><div id="swarms"></div></section>
+
+<section class="card" id="chat-card" hidden><h2 id="chat-title">Chat</h2>
+<p class="privacy" id="chat-privacy"></p><p id="chat-state" role="status" aria-live="polite"></p>
+<div id="log" class="log" aria-live="polite"></div>
+<form id="chat-form"><label>Prompt<textarea id="prompt" rows="3" maxlength="2000" required></textarea></label>
+<div class="row"><label>Max new tokens<input id="tokens" type="number" min="1" max="256" value="128"></label>
+<button type="submit" id="send">Send</button><button type="button" class="secondary" id="stop" hidden>Stop</button><button type="button" class="secondary" id="chat-close">Close</button></div></form></section>
+
+<section class="card"><h2>Create a swarm</h2>
+<p>You become its owner: this browser key signs the swarm record and every grant. Compute comes from Macs running the Mycelium app, which join with the link below. A swarm shows <strong>serving</strong> only when its route is qualified.</p>
+<form id="create-form"><div class="fields">
+<label>Name<input id="c-name" maxlength="48" required></label>
+<label>Model (as the Macs will run it)<input id="c-model" maxlength="96" value="Qwen/Qwen3-0.6B" required></label>
+<label>Access<select id="c-mode"><option value="request">Request access (you approve)</option><option value="open">Open (automatic, with a quota)</option><option value="invite">Invite only</option></select></label>
+<label>Description<input id="c-desc" maxlength="280"></label>
+<label>Open quota: requests per key<input id="c-req" type="number" min="1" max="1000" value="20"></label>
+<label>Open quota: tokens per key<input id="c-tok" type="number" min="1" max="200000" value="4000"></label>
+</div><button type="submit">Create swarm</button></form>
+<p id="create-state" role="status" aria-live="polite"></p></section>
+
+<section class="card" id="owned-card" hidden><h2>Swarms you own</h2><div id="owned"></div></section>
+</main>
+<footer>AGPL-3.0 · Mycelium · This directory sets no cookies, runs no analytics and keeps no logs. Cloudflare terminates TLS for this site and for every swarm entry on trycloudflare.com, so Cloudflare can see your IP address, request timing and, when you chat, your prompt and the reply in plaintext. A prompt goes from your browser directly to the swarm's entry Mac, never through this directory; that Mac sees your prompt and IP address too, and a swarm is run by whoever runs its entry Mac, not by Mycelium.</footer>
+</body></html>

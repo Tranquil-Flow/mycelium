@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  TEMPLATE. Not installed, not loaded by anything in this repo.
+
+  now.mycelium.swarm-directory: the always-on swarm directory (phonebook) for
+  mycelium.now/swarms. It is deliberately NOT part of the demo stack that the
+  gate runs take down: KeepAlive restarts it, the start script binds it to
+  127.0.0.1 only, and the apex proxy mounts it with the proxy directory-upstream flag.
+
+  Render every double-underscore placeholder with mycelium_swarm_directory.unit.render_unit,
+  then (owner only, deployment step):
+    cp the rendered file to ~/Library/LaunchAgents/now.mycelium.swarm-directory.plist
+    launchctl bootstrap gui/$(id -u) that file
+-->
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>__MYCELIUM_HOME__</string>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>MYCELIUM_PYTHON</key>
+		<string>__MYCELIUM_PYTHON__</string>
+		<key>MYCELIUM_SWARM_DIR_STATE_DIR</key>
+		<string>__SWARM_DIR_STATE_DIR__</string>
+	</dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>now.mycelium.swarm-directory</string>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>__MYCELIUM_REPO_ROOT__/deploy/swarm-directory-start.sh</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>__MYCELIUM_LOG_DIR__/swarm-directory.err.log</string>
+	<key>StandardOutPath</key>
+	<string>__MYCELIUM_LOG_DIR__/swarm-directory.log</string>
+	<key>ThrottleInterval</key>
+	<integer>15</integer>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>WorkingDirectory</key>
+	<string>__MYCELIUM_REPO_ROOT__</string>
+</dict>
+</plist>
