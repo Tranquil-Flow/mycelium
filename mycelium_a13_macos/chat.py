@@ -31,7 +31,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from mycelium_swarm_directory.wire import WireError
+from mycelium_swarm_directory.wire import WireError, fingerprint
 
 MAX_PROMPT_CHARS = 2000
 MAX_NEW_TOKENS_CAP = 256
@@ -433,7 +433,34 @@ class ChatService:
                     for p in (serving.get('participants') or [])],
                 'limits': {'max_prompt_chars': MAX_PROMPT_CHARS, 'max_new_tokens': MAX_NEW_TOKENS_CAP,
                            'per_client_per_minute': PER_CLIENT_PER_MINUTE,
-                           'swarm_per_minute': GLOBAL_PER_MINUTE}}
+                           'swarm_per_minute': GLOBAL_PER_MINUTE},
+                'notice': self.notice()}
+
+    def notice(self) -> dict[str, Any]:
+        """Public facts for the page's first-prompt notice: who runs this swarm, from its verified listing.
+
+        Only the entry's verified, owner-signed record counts (``EntryPolicy`` is rebuilt from it and
+        signature-checked); a swarm that is not published and attached to a directory claims no owner.
+        """
+        notice: dict[str, Any] = {'published': False, 'swarm_name': None, 'owner_fingerprint': None,
+                                  'access_mode': None, 'open_quota': None, 'kept_answers': MAX_KEPT_REQUESTS,
+                                  'directory': None}
+        try:
+            publisher = getattr(self.app, 'swarm_publisher', None)
+            guard = _entry_guard(self.app)
+            policy = None if guard is None else guard.policy()
+            if policy is None:
+                return notice
+            directory = (getattr(publisher, 'state', None) or {}).get('directory')
+            notice.update({'published': True, 'swarm_name': policy.name,
+                           'owner_fingerprint': fingerprint(policy.owner_key), 'access_mode': policy.access_mode,
+                           'open_quota': dict(policy.open_quota) if policy.open_quota else None,
+                           'directory': directory if isinstance(directory, str) and directory.startswith('https://')
+                           else None})
+        except Exception:  # noqa: BLE001 - the notice must never break the page's state poll
+            return {**notice, 'published': False, 'owner_fingerprint': None, 'swarm_name': None,
+                    'access_mode': None, 'open_quota': None, 'directory': None}
+        return notice
 
 
 def _model_id(app):
