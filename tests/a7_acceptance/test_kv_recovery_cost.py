@@ -86,6 +86,19 @@ def test_sliding_window_and_mla_shrink_the_bytes() -> None:
     assert mla.kv_bytes(2048) == 24 * 576 * 2 * 2048
 
 
+def test_shape_from_the_model_config_matches_the_published_qwen_shapes() -> None:
+    qwen_05b = {"hidden_size": 896, "num_attention_heads": 14, "num_key_value_heads": 2, "num_hidden_layers": 24, "use_sliding_window": False, "sliding_window": 32768}
+    qwen_7b = {"hidden_size": 3584, "num_attention_heads": 28, "num_key_value_heads": 4, "num_hidden_layers": 28, "use_sliding_window": False}
+    assert cost.shape_from_model_config(qwen_05b) == SHAPE_05B
+    assert cost.shape_from_model_config(qwen_7b) == SHAPE_7B
+    # A stage holding 12 of the 28 layers moves 12/28 of the bytes.
+    stage = cost.shape_from_model_config(qwen_7b, layers=12)
+    assert stage.kv_bytes(2048) == SHAPE_7B.kv_bytes(2048) * 12 // 28
+    # MHA (no num_key_value_heads) means kv_heads == attention heads.
+    mha = cost.shape_from_model_config({"hidden_size": 128, "num_attention_heads": 4, "num_hidden_layers": 2})
+    assert mha.kv_heads == 4 and mha.head_dim == 32
+
+
 # -- predictions ---------------------------------------------------------------------
 
 
