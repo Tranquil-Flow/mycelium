@@ -5893,12 +5893,13 @@ class PhysicalNodeService:
         ``None`` when nothing was applied.
         """
 
-        if getattr(self, "_a10_batch_policy_applied", False):
-            return None
+        capacity_root = getattr(self, "capacity_root", None)
+        if capacity_root is None or getattr(self, "_a10_batch_policy_applied", False):
+            return None  # no private root, so no owner-published mode to read
         with self._control_lock:
             if self.state != "RUNNING" or self.router is None:
                 return None
-            mode = read_service_mode(self.capacity_root)
+            mode = read_service_mode(capacity_root)
             config = router_config_for_mode(self._router_config, mode)
             relay = self.router.relay
             if relay.batch_controller.config != config:
