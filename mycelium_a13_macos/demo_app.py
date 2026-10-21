@@ -176,9 +176,11 @@ def target_agent(app: Any):
         from .demo_target import DemoTargetAgent, StandingConsentGate
         from .run_exchange import RunExchangeClient
         from .peer_model_source import joiner_model_source
+        from .placement import app_calibrator
         client = RunExchangeClient(app.authority.peer)
         agent = DemoTargetAgent(app, consent=StandingConsentGate(), source=client.read, sink=client.report,
-                                model_source=lambda announcement: joiner_model_source(app, announcement))
+                                model_source=lambda announcement: joiner_model_source(app, announcement),
+                                calibrator=app_calibrator(app))
         app.demo_target = agent
     return agent
 

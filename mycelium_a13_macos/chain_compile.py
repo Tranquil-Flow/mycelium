@@ -47,11 +47,14 @@ def _capability_rows(reports:Mapping[str,Any],node_ids:Sequence[str],*,members=N
                 raise ValueError('member_capability_report_stale')
         row={'node_id':node,'memory_bytes':report.get('memory_bytes')}
         if 'decode_tokens_per_second' in report:row['decode_tokens_per_second']=report['decode_tokens_per_second']
+        # Placement inputs (placement.py); all optional, never required for a memory-only split.
+        for key in ('chip','link_rtt_ms','max_memory_bytes','step_calibration'):
+            if report.get(key) is not None:row[key]=report[key]
         rows.append(row)
     return rows
 
 
-def plan_member_split(capability_reports,*,model_root,model_contract=None,members=None,now=None):
+def plan_member_split(capability_reports,*,model_root,model_contract=None,members=None,now=None,force_split=False):
     """Stable API: capability reports + model -> deterministic split document.
 
     ``capability_reports`` is a mapping node_id -> record or a sequence of
@@ -65,7 +68,19 @@ def plan_member_split(capability_reports,*,model_root,model_contract=None,member
     if not MIN_HOSTS<=len(node_ids)<=MAX_HOSTS:raise SplitRefused('host_count_invalid')
     rows=_capability_rows(capability_reports,node_ids,members=members,now=now)
     policy=policy_for_runtime(getattr(model_contract,'runtime_quantization',None))
-    return memory_proportional_split(rows,model_layer_profile(model_root),policy)
+    profile=model_layer_profile(model_root)
+    # Speed-aware placement when every member has a (measured or chip-estimated) step calibration;
+    # otherwise the unchanged memory-proportional split.
+    if model_contract is not None:
+        from .placement import calibrated_rows,choose_placement
+        speed_rows=calibrated_rows(rows,profile,model_id=model_contract.model_id,
+                                   resolved_commit=model_contract.resolved_commit)
+        if speed_rows is not None:
+            try:
+                return choose_placement(speed_rows,profile,policy,force_split=force_split)
+            except SplitRefused:raise
+            except Exception:pass  # a placement defect must never block the run: fall back to memory
+    return memory_proportional_split(rows,profile,policy)
 
 
 def member_resource_plan(model,split,*,reports=None,owner_node_id=None,slice_mode=True):
@@ -156,8 +171,10 @@ def start_compile(app,*,acknowledged):
     if reports is not None:
         if not isinstance(reports,Mapping):raise ValueError('member_capability_report_required')
         try:
+            from .placement import load_setting
             split=plan_member_split({n:reports.get(n) for n in node_ids},
-                model_root=prepared.source_root,model_contract=prepared.model,members=current)
+                model_root=prepared.source_root,model_contract=prepared.model,members=current,
+                force_split=load_setting(app.root)=='always_split')
         except SplitRefused as error:
             raise _with_message(error,prepared.model)
         if [s['node_id'] for s in split['stages']]!=node_ids:raise ValueError('member_capability_report_required')
@@ -247,6 +264,8 @@ def start_compile(app,*,acknowledged):
                     from .model_resources import public_member_resources
                     state['resource_plan']={'members':[public_member_resources(r) for r in resource_plan['members']]}
                 if split is not None:
+                    from .placement import public_decision
+                    state['placement']=public_decision(split)
                     state['layer_split']={'split_digest':split['split_digest'],'weighting':split['weighting'],
                         'stages':[{k:s[k] for k in ('node_id','start','end','stage_bytes','cost_bytes','budget_bytes')}
                                   for s in split['stages']]}

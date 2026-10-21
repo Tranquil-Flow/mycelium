@@ -177,6 +177,11 @@ def member_capability_records(app, node_ids, *, now=None, local_device=None) -> 
         reports = {}
     coordinator = app.authority.coordinator
     local = app.local_contributor.member.node_id if app.local_contributor is not None else None
+    exchange = getattr(app, 'run_exchange', None)
+    try:
+        calibrations = {n: r.get('step_calibration') for n, r in (exchange.reports() if exchange else {}).items()}
+    except Exception:
+        calibrations = {}
     records = {}
     for node in node_ids:
         if node == local:
@@ -186,16 +191,27 @@ def member_capability_records(app, node_ids, *, now=None, local_device=None) -> 
             records[node] = {'memory_bytes': int(local_device['memory_bytes']),
                              'generation': coordinator.member(node)['generation'],
                              'expires_at': now + 900}
+            if isinstance(local_device.get('chip'), str):  # the owner is the route's entry: no link RTT of its own
+                records[node]['chip'] = local_device['chip']
             if type(local_device.get('available_storage_bytes')) is int:
                 records[node]['available_storage_bytes'] = local_device['available_storage_bytes']
+            if calibrations.get(node):
+                records[node]['step_calibration'] = calibrations[node]
             continue
         report = reports.get(node)
         if not isinstance(report, Mapping) or not isinstance(report.get('device'), Mapping):
             continue
         records[node] = {'memory_bytes': report['device'].get('memory_bytes'),
                          'generation': report.get('generation'), 'expires_at': report.get('expires_at')}
+        if isinstance(report['device'].get('chip'), str):
+            records[node]['chip'] = report['device']['chip']
+        rtt = (report.get('link') or {}).get('rtt_ms_median') if isinstance(report.get('link'), Mapping) else None
+        if type(rtt) in (int, float):
+            records[node]['link_rtt_ms'] = float(rtt)
         if type(report['device'].get('available_storage_bytes')) is int:
             records[node]['available_storage_bytes'] = report['device']['available_storage_bytes']
+        if calibrations.get(node):
+            records[node]['step_calibration'] = calibrations[node]
     return records
 
 
@@ -473,6 +489,7 @@ class AppDemoChain:
     def _step_contributor(self, ctx):
         app = self.app
         from .demo_target import DemoTargetAgent, OwnerRunConsent, SnapshotRangeTransport
+        from .placement import app_calibrator
         with app.guard:
             if app.local_contributor is None:
                 app._start_local_contributor()
@@ -488,6 +505,7 @@ class AppDemoChain:
             consent=OwnerRunConsent(lambda: run is not None and run.active()),
             source=lambda: exchange.announcement(local),
             sink=lambda report: exchange.submit_local(local, report),
+            calibrator=app_calibrator(app),
             slice_transport=lambda: SnapshotRangeTransport(source.source_root,
                 model_id=source.model.model_id, resolved_commit=source.model.resolved_commit,
                 clone_root=_owner_compiled_bundle(app)))
@@ -770,6 +788,8 @@ class AppDemoChain:
             if not proposal_within_ceiling(proposal, ceiling):
                 raise OwnerRunError('execution_proposal_outside_ceiling')
         ctx.state['proposal'] = proposal
+        ctx.result['placement'] = state.get('placement')
+        app._last_placement = state.get('placement')
         ctx.state['compile_state'] = {'resource_plan': state.get('resource_plan'),
                                       'epoch': state.get('epoch')}
         ctx.state['layers'] = {s['node_id']: [s['start'], s['end']]

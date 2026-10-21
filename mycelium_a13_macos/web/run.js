@@ -81,6 +81,13 @@
     pointedAt = latestRunId; target.scrollIntoView({block: 'center'}); target.classList.add('needs-attention');
   }
   let latestRunId = null;
+  function renderPlacement(status, run) {
+    const placement = status.placement || {}; const decision = run.placement || placement.decision;
+    $('demo-placement').textContent = decision && decision.explanation ? decision.explanation : '';
+    const box = $('placement-always-split'); if (!box) return;
+    box.checked = placement.setting === 'always_split';
+    box.disabled = busy || !(placement.modes || []).length || ['running','serving','stopping'].includes(run.state);
+  }
   function renderRun(status) {
     const run = status.owner_run; if (!run) return;
     latestRunId = run.run_id;
@@ -92,6 +99,7 @@
     $('demo-state').textContent = run.state === 'failed' ? `Stopped at “${(run.steps.find((s) => s.name === run.failed_step) || {}).label}”: ${run.error_message ? `${run.error_message} (${run.error_code})` : explain(run.error_code)}`
       : run.state === 'serving' ? 'Serving — open the chat below.' : run.state === 'running' ? `Running: ${step ? step.label : ''}…`
       : run.state === 'stopping' ? 'Stopping…' : run.state === 'stopped' ? 'Stopped.' : 'Idle.';
+    renderPlacement(status, run);
     if (run.state === 'failed' && run.error_fix && run.error_fix.action === 'prepare_model') pointToModelStep(run.error_fix);
     $('demo-steps').replaceChildren(...(run.steps || []).map((s) => {
       const li = document.createElement('li'); li.className = s.state;
@@ -177,6 +185,7 @@
   $('demo-start').addEventListener('click', () => act('/api/demo/start', {}));
   $('demo-stop').addEventListener('click', () => act('/api/demo/stop', {}));
   $('demo-rebuild').addEventListener('click', () => act('/api/demo/rebuild', {}));
+  $('placement-always-split').addEventListener('change', () => act('/api/placement', {mode: $('placement-always-split').checked ? 'always_split' : 'auto'}));
   $('run-model').addEventListener('change', () => act('/api/run-model', {choice:$('run-model').value}));
   refresh(); setInterval(refresh, 2000);
 })();

@@ -515,6 +515,18 @@ def _demo_status(app, part):
         return {'state':'unavailable'}
 
 
+def _placement_status(app):
+    """Owner placement setting plus the last decision's one-sentence explanation; never breaks /api/status."""
+    try:
+        from .placement import MODES, SINGLE_HOST_ROUTE_SUPPORTED, load_setting
+        state = getattr(app, '_chain_compile_state', None) or {}
+        return {'setting': load_setting(app.root), 'modes': list(MODES),
+                'single_host_route_supported': SINGLE_HOST_ROUTE_SUPPORTED,
+                'decision': state.get('placement') or getattr(app, '_last_placement', None)}
+    except Exception:
+        return {'setting': 'auto', 'modes': ['auto', 'always_split'], 'decision': None}
+
+
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
     block_on_close = False
@@ -933,6 +945,17 @@ class DemoApp:
         self.acquisition_policy_error = None
         self._open_acquisition()
         return document(self.root, swarm_rows=self.swarm_memory_rows())
+
+    def _choose_placement(self, body):
+        """Owner setting: ``auto`` (fast path when a Mac holds the model and is faster) or ``always_split``."""
+        from .placement import MODES, SETTING_ENVIRONMENT, load_setting, save_setting
+        if self.installation_role != 'owner': raise DemoError('owner_role_required')
+        if not isinstance(body, dict) or set(body) != {'mode'} or body['mode'] not in MODES:
+            raise DemoError('placement_mode_invalid')
+        import os
+        if os.environ.get(SETTING_ENVIRONMENT) in MODES: raise DemoError('placement_locked_by_environment')
+        save_setting(self.root, body['mode'])
+        return {'setting': load_setting(self.root), 'modes': list(MODES)}
 
     def make_launch_file(self):
         self.launch_code = secrets.token_urlsafe(32)
@@ -1371,6 +1394,7 @@ class DemoApp:
                 'sharing':_sharing_status(self),'relay_wait':self._relay_wait_status(),
                 'owner_run':_demo_status(self,'owner'),'demo_target':_demo_status(self,'target'),
                 'chat':_demo_status(self,'chat'),'swarm':_swarm_status(self),
+                'placement':_placement_status(self),
                 'serving':self._serving_block(),'peer_liveness':_peer_liveness(),
                 'test_seams_active':_test_seam_offset(self) is not None,
                 'test_seams':_test_seams.status(_test_seam_offset(self))}
@@ -1420,6 +1444,8 @@ class DemoApp:
                 return self._idle_policy_action(body)
             if path == '/api/run-model':
                 return self._choose_run_model(body)
+            if path == '/api/placement':
+                return self._choose_placement(body)
             from .demo_app import OWNER_ROUTES as _DEMO_ROUTES
             if path in _DEMO_ROUTES:
                 from .demo_app import action as _demo_action

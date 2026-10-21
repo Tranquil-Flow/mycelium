@@ -58,7 +58,9 @@ _RESP_FIELDS = frozenset(_RESPONSE_COMMON_FIELDS | _BINDING_FIELDS | {'announcem
 _REPORT_KEYS = frozenset({'protocol', 'run_id', 'deployment_id', 'state', 'detail', 'model',
                           'progress', 'descriptor', 'issued_at'})
 #: Optional: the member's own measured round trip of its last exchange (corrects the owner's clock-offset estimate).
-_OPTIONAL_REPORT_KEYS = frozenset({'clock_rtt_seconds'})
+#: Optional ``step_calibration``: the member's measured (or chip-estimated) per-layer decode step and prefill throughput
+#: for the announced model (placement.py); it rides inside the member-signed envelope and is validated closed.
+_OPTIONAL_REPORT_KEYS = frozenset({'clock_rtt_seconds', 'step_calibration'})
 MAX_CLOCK_RTT_SECONDS = 60.0
 _CODE = re.compile(r'[a-z][a-z0-9_]{0,95}\Z')
 MAX_REPORT_BYTES = 32 * 1024
@@ -85,6 +87,12 @@ def validate_report(report: Any) -> dict[str, Any]:
     rtt = report.get('clock_rtt_seconds')
     _require('clock_rtt_seconds' not in report or (type(rtt) in (int, float) and math.isfinite(rtt)
                                                    and 0 <= rtt <= MAX_CLOCK_RTT_SECONDS), 'demo_report_invalid')
+    if 'step_calibration' in report:
+        from .placement import validate_step_calibration
+        try:
+            validate_step_calibration(report['step_calibration'])
+        except ValueError:
+            raise DemoExchangeError('demo_report_invalid') from None
     model = report['model']
     _require(model is None or (isinstance(model, dict) and set(model) == {'model_id', 'resolved_commit'}
              and all(isinstance(model[k], str) and len(model[k]) <= 128 for k in model)), 'demo_report_invalid')
