@@ -1,0 +1,89 @@
+{
+  "protocol": "mycelium.lane_audit_manifest.v1",
+  "target_branch": "integration/mycelium-manual-driver",
+  "lanes": [
+    {
+      "name": "independent-numerical-oracle",
+      "branch": "feature/independent-numerical-oracle",
+      "expected_base": "b3e2062e72a9e905698c5d538b4ea569d66bfe8a",
+      "allowed_paths": [
+        "mycelium_reference_oracle/**",
+        "tests/reference_oracle/**",
+        "docs/qualification/independent-reference-oracle.md"
+      ]
+    },
+    {
+      "name": "release-doctor-hardening",
+      "branch": "review/release-doctor-hardening",
+      "expected_base": "7341629c90f01b3e9e3deb45303fadbfd98b7ff0",
+      "allowed_paths": [
+        "mycelium_demo/**",
+        "tests/demo/**",
+        "docs/demo/release-doctor-preflight.md"
+      ]
+    },
+    {
+      "name": "request-token-stream",
+      "branch": "feature/request-token-stream",
+      "expected_base": "b3e2062e72a9e905698c5d538b4ea569d66bfe8a",
+      "allowed_paths": [
+        "mycelium_request_gateway/**",
+        "tests/request_gateway/**",
+        "docs/request-gateway/**"
+      ]
+    },
+    {
+      "name": "route-qualification-authority",
+      "branch": "feature/route-qualification-authority",
+      "expected_base": "1d458f5474294f11ae3ff12cf333fe28a799931f",
+      "allowed_paths": [
+        "mycelium_qualification/**",
+        "tests/qualification/**",
+        "contracts/compatibility-fixtures/route-qualification-v1.json",
+        "contracts/contract-manifest.v1.json",
+        "scripts/contract_registry.py",
+        "scripts/generate_contract_fixtures.py",
+        "tests/contracts/test_contract_fixtures.py"
+      ]
+    },
+    {
+      "name": "router-iroh-adapter",
+      "branch": "feature/router-iroh-adapter",
+      "expected_base": "1d458f5474294f11ae3ff12cf333fe28a799931f",
+      "allowed_paths": [
+        "mycelium_router/transports/**",
+        "mycelium_iroh_sidecar/client.py",
+        "native/iroh_transport/src/local.rs",
+        "native/iroh_transport/src/sidecar.rs",
+        "test_iroh_sidecar_cross_language.py",
+        "test_router_iroh_integration.py",
+        "test_router_iroh_transport.py"
+      ]
+    },
+    {
+      "name": "router-lifecycle-conformance",
+      "branch": "test/router-lifecycle-conformance",
+      "expected_base": "b3e2062e72a9e905698c5d538b4ea569d66bfe8a",
+      "allowed_paths": [
+        "mycelium_conformance/**",
+        "tests/conformance/**",
+        "docs/qualification/router-lifecycle-conformance.md"
+      ]
+    },
+    {
+      "name": "stage-local-kv",
+      "branch": "feature/stage-local-kv",
+      "expected_base": "1d458f5474294f11ae3ff12cf333fe28a799931f",
+      "allowed_paths": [
+        "mycelium_router/contracts.py",
+        "mycelium_router/entry.py",
+        "mycelium_router/mlx_runtime.py",
+        "mycelium_router/relay.py",
+        "test_router_mlx_runtime.py",
+        "test_two_process_inference_qualification.py",
+        "two_process_inference_qualification.py",
+        "two_process_runtime_qualification.py"
+      ]
+    }
+  ]
+}

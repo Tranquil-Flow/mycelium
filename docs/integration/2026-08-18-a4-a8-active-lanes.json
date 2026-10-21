@@ -1,0 +1,68 @@
+{
+  "protocol": "mycelium.lane_audit_manifest.v1",
+  "target_branch": "codex/flexible-swarm-catalog",
+  "lanes": [
+    {
+      "name": "a4-primary-integrator",
+      "branch": "codex/flexible-swarm-catalog",
+      "expected_base": "181dc07e06978dd45281434acf64460b61ea54a9",
+      "allowed_paths": [
+        "contracts/compatibility-fixtures/**",
+        "contracts/contract-manifest.v1.json",
+        "docs/handover/2026-08-18-mycelium-a4-implementation-packet.md",
+        "docs/integration/2026-08-18-a4-a8-active-lanes.json",
+        "docs/integration/lane-topology-audit.md",
+        "docs/superpowers/specs/2026-08-17-mycelium-a4-product-concurrency-liveness.md",
+        "mycelium_lane_audit/**",
+        "mycelium_live/**",
+        "mycelium_m16_runtime.py",
+        "mycelium_membership/contracts.py",
+        "mycelium_mobile/pixel_runtime.py",
+        "mycelium_node/process.py",
+        "mycelium_physical_runner/**",
+        "mycelium_product_spine/**",
+        "mycelium_request_gateway/**",
+        "mycelium_router/contracts.py",
+        "mycelium_router/entry.py",
+        "mycelium_router/fakes.py",
+        "mycelium_router/live_ports.py",
+        "mycelium_router/mlx_runtime.py",
+        "mycelium_router/numpy_runtime.py",
+        "mycelium_router/relay.py",
+        "mycelium_router/router.py",
+        "mycelium_router/routing.py",
+        "mycelium_router/transports/iroh.py",
+        "mycelium_seed/state.py",
+        "mycelium_ui_gateway/**",
+        "physical_inference_node.py",
+        "scripts/contract_registry.py",
+        "scripts/generate_contract_fixtures.py",
+        "scripts/run_a4_*.py",
+        "tests/a4_acceptance/**",
+        "tests/contracts/test_contract_fixtures.py",
+        "tests/evidence/a4/**",
+        "tests/lane_audit/**",
+        "tests/node_agent/test_process.py",
+        "tests/live/test_a4_*.py",
+        "tests/live/test_m16_runtime.py",
+        "tests/path_cancellation_adversarial/test_contract_entry_relay.py",
+        "tests/path_cancellation_adversarial/test_iroh_transport.py",
+        "tests/physical_qualification/test_node_service.py",
+        "tests/request_gateway/**",
+        "tests/ui_gateway/**",
+        "ui/contracts/**",
+        "ui/web/**"
+      ]
+    },
+    {
+      "name": "a8-implementation-packet",
+      "branch": "codex/a8-implementation-packet",
+      "expected_base": "181dc07e06978dd45281434acf64460b61ea54a9",
+      "allowed_paths": [
+        "docs/handover/2026-08-18-mycelium-a8-implementation-packet.md",
+        "tests/a8_acceptance/implementation_packet.v1.json",
+        "tests/a8_acceptance/test_implementation_packet.py"
+      ]
+    }
+  ]
+}

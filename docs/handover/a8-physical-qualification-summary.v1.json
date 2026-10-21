@@ -1,0 +1,345 @@
+{
+  "claim_boundary": "privacy-reduced retained summary of all 14 exact-final A8 source/spec-bound physical and ordinary-browser qualifications; source manifest freezes implementation and test candidate before post-freeze completion-metadata and handover edits; no owner-private invite, node, endpoint, relay, host, key, or raw transport value is disclosed",
+  "deployed_native_binaries": {
+    "linux_x86_64": "sha256:a73bca6c6748ee27c9f31c20811f0c1680b299c17a81adeffef00038ebf8f38c",
+    "macos_arm64": "sha256:de03e3da16faa20ec6331e9aa0d32a3728c7c9f127595b1bb60ce3956d5cca50"
+  },
+  "gate_id": "A8",
+  "ordinary_browser": {
+    "browser_failures": 0,
+    "collector_prewrite_requirements": [
+      "all_eight_workspace_projections_rendered",
+      "back_forward_reload_reconstruction",
+      "clean_second_browser_session",
+      "forbidden_identity_needles_absent",
+      "ordinary_prompt_submission_reached_server_terminal_state",
+      "browser_projection_synchronized_to_signed_transport_reports"
+    ],
+    "completed_requests": 2,
+    "connection_generations": [
+      2,
+      3
+    ],
+    "observed_path_sequence": [
+      "direct",
+      "relay"
+    ],
+    "passed": true,
+    "report_digest": "sha256:bb32948e2caa20cb52d2e4f2dd4c35363f62dbe4e60ce1490294f3f486eaa4e6",
+    "report_protocol": "mycelium.a8_product_browser_observation.v2",
+    "terminal_states": [
+      "completed",
+      "completed"
+    ],
+    "workspaces": [
+      "inference",
+      "lab",
+      "network",
+      "nodes",
+      "plans",
+      "readiness",
+      "incidents",
+      "settings"
+    ]
+  },
+  "private_evidence": "retained owner-private outside repository; all 21 evidence-digest references resolved during seal verification (20 unique digests), and all 14 selected qualification seals are owner-only read-only mode-0400 files",
+  "protocol": "mycelium.a8_completion_evidence.v1",
+  "qualification": {
+    "all_passed": true,
+    "case_count": 14,
+    "cases": [
+      {
+        "case_id": "certificate_without_seed_authority",
+        "evidence_artifacts": [],
+        "evidence_digests": [],
+        "fresh_until": "2026-09-02T09:30:00.558Z",
+        "gate_kind": "physical_negative",
+        "observed_at": "2026-08-26T09:30:00.558Z",
+        "outcomes": [
+          "bounded_incident_only",
+          "invite_secret_never_transmitted",
+          "join_not_attempted",
+          "seed_pin_mismatch_before_invite_transmission"
+        ],
+        "projection_digest": "sha256:8a4e247fccd95f37d1e821615299055131bac673cfa23a60bcc8a5b3e1edbd99",
+        "qualification_id": "a8-certificate_without_seed_authority-1787736600558",
+        "relay_reference": null
+      },
+      {
+        "case_id": "cleartext_or_redirect_bootstrap",
+        "evidence_artifacts": [],
+        "evidence_digests": [],
+        "fresh_until": "2026-09-02T09:29:59.992Z",
+        "gate_kind": "physical_negative",
+        "observed_at": "2026-08-26T09:29:59.992Z",
+        "outcomes": [
+          "bounded_public_error",
+          "cleartext_redirect_observed",
+          "invite_secret_never_transmitted",
+          "no_cleartext_fallback",
+          "request_rejected"
+        ],
+        "projection_digest": "sha256:c1179dadbd127e9161bda0fc5b33bd151a46ee9d01ed0a94db615c9eb52703b0",
+        "qualification_id": "a8-cleartext_or_redirect_bootstrap-1787736599992",
+        "relay_reference": null
+      },
+      {
+        "case_id": "direct_path_qualified_browser_inference",
+        "evidence_artifacts": [],
+        "evidence_digests": [
+          "sha256:009bdee404f46641127b383633348211d6543781511bf778cff56b418e11c37b",
+          "sha256:a3e39823d3541ffcd9913b5d3cb6fa7a2581cd6909745a920337d864108414d7",
+          "sha256:1d6854166a006b7ad492f6c0e2e4adb8aee06619650426a6e371325188ba9397",
+          "sha256:cf5c42274ae2323de429c271de4bd2c3c6cf59967a854a6dadb397b1a803c8e6"
+        ],
+        "fresh_until": "2026-08-26T11:22:11.907Z",
+        "gate_kind": "physical_positive",
+        "observed_at": "2026-08-26T09:22:28.725Z",
+        "outcomes": [
+          "browser_inference_completes",
+          "direct_path_observed",
+          "positive_physical_counters"
+        ],
+        "projection_digest": "sha256:297435f4467b297faa802a763debc6208e5d4bbb907fe9d950b61e17f6e8bf3e",
+        "qualification_id": "a8-direct_path_qualified_browser_inference-d03648526aab2c27f360ec64fe12d4729721d4b4f2f46f2923870cbfad58eafe",
+        "relay_reference": null
+      },
+      {
+        "case_id": "endpoint_identity_mismatch",
+        "evidence_artifacts": [],
+        "evidence_digests": [
+          "sha256:0f5189db5ac483eabd38edb3bba180745510739cf083cc80c49ee5d6d73417ed"
+        ],
+        "fresh_until": "2026-09-02T09:30:44.595Z",
+        "gate_kind": "physical_negative",
+        "observed_at": "2026-08-26T09:30:44.595Z",
+        "outcomes": [
+          "endpoint_mismatch_rejected",
+          "member_record_unchanged",
+          "mismatched_identity_refused",
+          "no_activation_frame_accepted",
+          "path_class_remains_unknown"
+        ],
+        "projection_digest": "sha256:4c0428b8ee7a077f6d8db68784427ee51f9ca604811d037a07b3d86ae0e53316",
+        "qualification_id": "a8-endpoint_identity_mismatch-1787736644595",
+        "relay_reference": null
+      },
+      {
+        "case_id": "forced_relay_privacy_reduced_browser_inference",
+        "evidence_artifacts": [],
+        "evidence_digests": [
+          "sha256:a9faa92e6a65c0f1ca867e869530d145a2535dc5d39033deeac3eec8dd9e44c7",
+          "sha256:d1c78ad73395e50d6f90a728b099c8819418f614cf9a2eba7b898bab583ecde4",
+          "sha256:1d6854166a006b7ad492f6c0e2e4adb8aee06619650426a6e371325188ba9397",
+          "sha256:14c81ba6afb3a884312a767b51ae37182f76d133d6cfd3e5268a7ec0679848be"
+        ],
+        "fresh_until": "2026-08-26T17:15:30.437Z",
+        "gate_kind": "physical_positive",
+        "observed_at": "2026-08-26T15:18:18.078Z",
+        "outcomes": [
+          "browser_inference_completes",
+          "no_http_inference_fallback",
+          "privacy_safe_relay_reference_only",
+          "relay_identity_privacy_reduced",
+          "relay_path_observed"
+        ],
+        "projection_digest": "sha256:910419b256e59cb4a0b881ec0da665fb1faa07e048106bc7999259e92ef551cf",
+        "qualification_id": "a8-forced_relay_privacy_reduced_browser_inference-4528251b5272e4d13c0a3e77d1bcfae921803263a8a266905b2a2c0cab097221",
+        "relay_reference": "hmac-sha256:debcd965fa761f7e6ff3aac1f036a7705260ce39dce9e5560fea343877c85ca4"
+      },
+      {
+        "case_id": "invalid_or_replayed_invitation",
+        "evidence_artifacts": [],
+        "evidence_digests": [
+          "sha256:bb2e16353cf27ea143af64f33d33414d9e2e5800d9de0cb90e9517f49bf9654c"
+        ],
+        "fresh_until": "2026-09-02T09:31:32.375Z",
+        "gate_kind": "physical_negative",
+        "observed_at": "2026-08-26T09:31:32.375Z",
+        "outcomes": [
+          "changed_retry_rejected",
+          "exact_retry_idempotent",
+          "join_rejected",
+          "no_partial_member",
+          "single_use_state_not_corrupted"
+        ],
+        "projection_digest": "sha256:56be841afbe065db53279a05a7ca0070a091fa1cb28cfeb8a353a611e24af3f1",
+        "qualification_id": "a8-invalid_or_replayed_invitation-1787736692375",
+        "relay_reference": null
+      },
+      {
+        "case_id": "missing_or_stale_path_measurements",
+        "evidence_artifacts": [],
+        "evidence_digests": [],
+        "fresh_until": "2026-09-02T09:27:15.741Z",
+        "gate_kind": "physical_negative",
+        "observed_at": "2026-08-26T09:27:15.741Z",
+        "outcomes": [
+          "missing_metrics_remain_unknown",
+          "path_class_remains_unknown",
+          "required_objective_blocked"
+        ],
+        "projection_digest": "sha256:56e7759735212d28bbed6f138e34b5d7add14ec2a7aefc0774684cfc64f228fe",
+        "qualification_id": "a8-missing_or_stale_path_measurements-1787736435741",
+        "relay_reference": null
+      },
+      {
+        "case_id": "observed_path_transition_and_reconnect",
+        "evidence_artifacts": [],
+        "evidence_digests": [
+          "sha256:534928c36e47da4f14e507379cea95b1c8668b62cc837bd56926def4c477db79",
+          "sha256:d3204a24d22b91ec044da0974c87e0f45743f3621857c1e2ff7b2162105e9f5c",
+          "sha256:e8f96006e692270620542becfaff39cb839f58a908f4ffd6a6ffdcac81cba0e1",
+          "sha256:0e5d0158fa7fe6e448ccc967e8c5d6ad1e1c4c8aa5b3df01d9989169cc630b26",
+          "sha256:ed2aad88d66c0ed501f860513b4ff258e47466cf6a6c1183730f2ad8801ccd9b"
+        ],
+        "fresh_until": "2026-08-26T17:51:53.504Z",
+        "gate_kind": "physical_positive",
+        "observed_at": "2026-08-26T15:54:39.328Z",
+        "outcomes": [
+          "browser_inference_completes_after_transition",
+          "connection_reuse_observed",
+          "stale_connection_not_reused",
+          "subsequent_request_completes",
+          "transition_generations_retained"
+        ],
+        "projection_digest": "sha256:e6d4894344d21d547b2bc765e71a96f67a3640c63247de06f89669a4d998d288",
+        "qualification_id": "a8-observed_path_transition_and_reconnect-6fb8d6c6c1a05e4c72c83d8b65d171bce9f3d8792da4f76e9a0f0b5ba20d499e",
+        "relay_reference": "hmac-sha256:a7d7de3c1dad1dfdbadf32c97b652cfdc63af3b478d59ebbce58c72c9ae92db4"
+      },
+      {
+        "case_id": "raw_relay_identity_injection",
+        "evidence_artifacts": [],
+        "evidence_digests": [],
+        "fresh_until": "2026-09-02T09:27:16.015Z",
+        "gate_kind": "physical_negative",
+        "observed_at": "2026-08-26T09:27:16.015Z",
+        "outcomes": [
+          "no_public_projection_emitted",
+          "privacy_incident_bounded",
+          "raw_relay_identity_rejected"
+        ],
+        "projection_digest": "sha256:879eadfd083df5beefb83ed37041bda38d928be62ee82cebcc634aa7eb230d0d",
+        "qualification_id": "a8-raw_relay_identity_injection-1787736436015",
+        "relay_reference": null
+      },
+      {
+        "case_id": "revoked_active_member",
+        "evidence_artifacts": [],
+        "evidence_digests": [
+          "sha256:acc226a08dd226402cbc6e23d325ca026d76d65dc0ea5ee3276b9a5c5d45fee0",
+          "sha256:f0c5ba840c6e45b4e0be1320bd8ab5dbafbdc9faca5393e702212e32fbef7fa6"
+        ],
+        "fresh_until": "2026-09-02T15:57:49.584Z",
+        "gate_kind": "physical_negative",
+        "observed_at": "2026-08-26T15:57:49.584Z",
+        "outcomes": [
+          "control_refused_after_revocation",
+          "member_enrolled_before_revocation",
+          "refusal_durable_across_retries",
+          "revocation_incident_bounded",
+          "revoked_connection_removed_from_activation_admission",
+          "revoked_control_rejected"
+        ],
+        "projection_digest": "sha256:4f13797f09b96dfd4e7327affc3e2806d70fa69ce3ad3235f4d0b9a4bb8dd059",
+        "qualification_id": "a8-revoked_active_member-1787759869584",
+        "relay_reference": null
+      },
+      {
+        "case_id": "ssh_unavailable",
+        "evidence_artifacts": [],
+        "evidence_digests": [
+          "sha256:06ace0cc2f0e0c4f9b63c366e0c6fb1e5b6e2264efcf6c79356daf9f38679c5a"
+        ],
+        "fresh_until": "2026-09-02T09:40:26.180Z",
+        "gate_kind": "physical_negative",
+        "observed_at": "2026-08-26T09:40:26.180Z",
+        "outcomes": [
+          "bootstrap_completed_over_public_origin",
+          "no_remote_shell_attempted",
+          "no_ssh_invocation_in_window",
+          "signed_artifact_path_only",
+          "ssh_present_but_unused",
+          "supported_path_works_without_ssh"
+        ],
+        "projection_digest": "sha256:63ffc1a374fd696991e449ef2f84f95b0da2e0e360e2884444d59679889e34f1",
+        "qualification_id": "a8-ssh_unavailable-1787737226180",
+        "relay_reference": null
+      },
+      {
+        "case_id": "tailscale_unavailable",
+        "evidence_artifacts": [],
+        "evidence_digests": [
+          "sha256:25e3ecc5ce1b20a9ab9af506143b6a6b4db933acf8f77a47d39187d21d224dfb"
+        ],
+        "fresh_until": "2026-09-02T09:40:07.301Z",
+        "gate_kind": "physical_negative",
+        "observed_at": "2026-08-26T09:40:07.301Z",
+        "outcomes": [
+          "bootstrap_completed_over_public_origin",
+          "no_tailnet_address_or_evidence",
+          "no_tailnet_path_observed",
+          "ordinary_internet_path_observed",
+          "supported_path_works_without_tailscale"
+        ],
+        "projection_digest": "sha256:af57351de25a6ec69a060bc01e978a1e6c1f7c282dd5dd04dabdcdec043165aa",
+        "qualification_id": "a8-tailscale_unavailable-1787737207301",
+        "relay_reference": null
+      },
+      {
+        "case_id": "unqualified_external_member",
+        "evidence_artifacts": [],
+        "evidence_digests": [
+          "sha256:2814287af433261451e6b50ec04665ac9b7eaa61c36df6ee8bce71a1c75fadbc"
+        ],
+        "fresh_until": "2026-09-02T09:31:49.501Z",
+        "gate_kind": "physical_negative",
+        "observed_at": "2026-08-26T09:31:49.501Z",
+        "outcomes": [
+          "all_serve_authorities_rejected",
+          "member_visible_but_ineligible",
+          "no_prompt_delivery"
+        ],
+        "projection_digest": "sha256:e9bd6c6bed3bc0b5994c4851cae944eb05fde185d47cd5f7ffa2417aef5e77e0",
+        "qualification_id": "a8-unqualified_external_member-1787736709501",
+        "relay_reference": null
+      },
+      {
+        "case_id": "unrelated_https_invite_without_tailscale",
+        "evidence_artifacts": [],
+        "evidence_digests": [
+          "sha256:4a21c04b2c406483a19e157d76fec93038afe4c9ed36ad672ca202280d5cbdb3"
+        ],
+        "fresh_until": "2026-09-02T09:33:07.084Z",
+        "gate_kind": "physical_positive",
+        "observed_at": "2026-08-26T09:33:07.084Z",
+        "outcomes": [
+          "https_bootstrap_succeeds",
+          "invite_redeemed",
+          "membership_renewed",
+          "no_tailnet_path_observed",
+          "seed_pin_verified",
+          "signed_member_visible_but_ineligible"
+        ],
+        "projection_digest": "sha256:1dc2b61c8e2977a48725f277a995190e7fc94a0c5d8713bf547e78fffdb770e1",
+        "qualification_id": "a8-unrelated_https_invite_without_tailscale-1787736787084",
+        "relay_reference": null
+      }
+    ],
+    "failed_records_in_final_passing_root": 0,
+    "referenced_evidence_resolved": true,
+    "source_bound": true,
+    "spec_bound": true
+  },
+  "source_manifest": {
+    "artifact": "docs/handover/a8-source-manifest.v1.json",
+    "base_commit": "1aa70c64b14754b08abe55e8095c597d91b6d13c",
+    "digest": "sha256:29a5a0dc9e2faf4e1dc53738ed283b2a0f6cd7a1644185d3393b03ca40adff97",
+    "file_count": 1083
+  },
+  "specification": {
+    "artifact": "docs/superpowers/specs/2026-08-18-mycelium-a8-internet-native-control.md",
+    "digest": "sha256:694e653c37eed8c31b21e73eb4a423aea9f66b6b00a6c4e9c2031470b13396d9"
+  },
+  "state": "physically_qualified"
+}

@@ -1,0 +1,395 @@
+{
+  "audits": {
+    "claim_boundary": {
+      "exit_code": 0,
+      "output_tail": "claim boundary audit OK: 456 source files"
+    },
+    "contract": {
+      "exit_code": 0,
+      "output_tail": "contract audit OK: 71 contracts"
+    },
+    "governance": {
+      "exit_code": 0,
+      "output_tail": "governance audit OK: 15 capabilities, 7 milestones, 8 product-action clients"
+    },
+    "release_security": {
+      "exit_code": 0,
+      "output_tail": "release security audit OK: 1209 tracked files"
+    }
+  },
+  "browser": {
+    "browser_failures": 0,
+    "engines": [
+      {
+        "engine": "chromium",
+        "workspaces": [
+          "lab",
+          "network",
+          "plans",
+          "incidents",
+          "readiness",
+          "nodes",
+          "settings",
+          "inference"
+        ]
+      },
+      {
+        "engine": "firefox",
+        "workspaces": [
+          "lab",
+          "network",
+          "plans",
+          "incidents",
+          "readiness",
+          "nodes",
+          "settings",
+          "inference"
+        ]
+      },
+      {
+        "engine": "webkit",
+        "workspaces": [
+          "lab",
+          "network",
+          "plans",
+          "incidents",
+          "readiness",
+          "nodes",
+          "settings",
+          "inference"
+        ]
+      }
+    ],
+    "reconnect_scenarios": [
+      {
+        "phase": "waiting",
+        "publisher_reconnect_observed": true,
+        "terminal": "cancellation_unconfirmed"
+      },
+      {
+        "phase": "prefill",
+        "publisher_reconnect_observed": true,
+        "terminal": "cancellation_unconfirmed"
+      },
+      {
+        "phase": "decode",
+        "publisher_reconnect_observed": true,
+        "terminal": "cancellation_unconfirmed"
+      }
+    ],
+    "second_session_privacy": "clean",
+    "workspaces": [
+      "lab",
+      "network",
+      "plans",
+      "incidents",
+      "readiness",
+      "nodes",
+      "settings",
+      "inference"
+    ]
+  },
+  "claim_boundary": "executed A4 concurrency-liveness qualification; owner promotion is the in-session install act itself",
+  "detector_budgets": {
+    "active_failure_detection_ms": 2000,
+    "idle_keepalive_ms": 5000,
+    "maximum_incidents": 256,
+    "maximum_subjects": 4096,
+    "quarantine_misses": 3,
+    "quarantine_stale_ms": 15000,
+    "recovery_fresh_observations": 2,
+    "suspect_misses": 2
+  },
+  "deterministic": {
+    "command": "env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.14 -m pytest -q",
+    "duration_s": 304.49,
+    "observed_at_unix_ms": 1787316750000,
+    "passed": true,
+    "passed_count": 4325,
+    "protocol": "mycelium.a4_deterministic_suite_summary.v1",
+    "skipped": 13,
+    "subtests_passed": 121,
+    "suite": "pytest"
+  },
+  "dispatcher_and_locks": {
+    "batch_state": {
+      "continuous_batching": false,
+      "maximum_runtime_batch_size": 20,
+      "mode": "concurrent_request_sequential_stage_dispatch",
+      "observed_batches": [],
+      "pipeline_overlap": false
+    },
+    "cancellation_and_cleanup_bound_ms": 2000,
+    "maximum_concurrent_requests": 4,
+    "queue": {
+      "active_request_ids": [],
+      "batch_depth": 0,
+      "depth": 0,
+      "interactive_depth": 0,
+      "maximum_active_requests": 4,
+      "maximum_bytes": 268435456,
+      "maximum_items": 1024,
+      "queued_bytes": 0
+    }
+  },
+  "environment_digest": "sha256:40426e7d59c4c9a6ad3ee9071b5c48e87f4a412c889a844242eae9a7d369b5f5",
+  "evidence_digest": "sha256:b2a324831929eae1f6c41d3d8b053e47b63748b78c3892d26f158de7ec123be8",
+  "installed_a4_qualification": {
+    "cancellation_and_cleanup_bound_ms": 2000,
+    "cooperative_interruption_proven": true,
+    "deployment_id": "e1d1a2fa-f68d-5b38-a507-34b367c8d855",
+    "eligible": true,
+    "evidence_digest": "sha256:146d86ad103e9d9a8baae53ae7e4149b9d793bc77fa1a001ba56dc8941b527f6",
+    "maximum_concurrent_requests": 4,
+    "protocol": "mycelium.product_concurrency_liveness_qualification.v1",
+    "publisher_generation_fencing_proven": true,
+    "qualification_digest": "sha256:72595cfa16ae2c97f9a7cabb71527442d12d5f9252ac75215ada0863546977fb",
+    "request_scoped_cleanup_proven": true,
+    "scoped_liveness_proven": true,
+    "shared_process_termination_used": false
+  },
+  "passed": true,
+  "physical": {
+    "active_disconnect": [
+      {
+        "affected_terminal": null,
+        "healthy_peer_resources_released": true,
+        "visibility_to_runtime_clean_ms": 0.5287081003189087
+      },
+      {
+        "affected_terminal": null,
+        "healthy_peer_resources_released": true,
+        "visibility_to_runtime_clean_ms": 0.5715829320251942
+      }
+    ],
+    "idle_staleness": {
+      "admission_after_quarantine": {
+        "outcome": "accepted_terminal:failed",
+        "rejected": false,
+        "terminal": "failed"
+      },
+      "progression": {
+        "quarantine_snapshot": {
+          "consecutive_misses": 3,
+          "kind": "peer",
+          "last_fresh_ms": 596199480,
+          "last_source": "idle_keepalive",
+          "liveness_generated_at_monotonic_ms": 596216265,
+          "membership_generation": 61,
+          "state": "quarantined",
+          "subject_id": "node-2"
+        },
+        "stale_at_quarantine_ms": 16785,
+        "stall_to_suspect_ms": 5031.4801670610905,
+        "suspect_snapshot": {
+          "consecutive_misses": 1,
+          "kind": "peer",
+          "last_fresh_ms": 596199480,
+          "last_source": "idle_keepalive",
+          "membership_generation": 61,
+          "state": "suspect",
+          "subject_id": "node-2"
+        },
+        "suspect_to_quarantine_ms": 11055.946415988728
+      }
+    },
+    "nonparticipant_exit": {
+      "counters_advanced": true,
+      "node3_processes_killed": [
+        94906
+      ],
+      "request_a": {
+        "event_counts": {
+          "accepted": 1,
+          "completed": 1,
+          "lifecycle": 6,
+          "token": 9
+        },
+        "publisher_generation": 1,
+        "request_id": "c46a8adb-862a-4cb4-92f8-7ef64d0ff2eb",
+        "terminal": "completed"
+      },
+      "request_b": {
+        "event_counts": {
+          "accepted": 1,
+          "completed": 1,
+          "lifecycle": 6,
+          "token": 9
+        },
+        "publisher_generation": 1,
+        "request_id": "7a1e0798-9464-461d-8d5d-4ff4930ca605",
+        "terminal": "completed"
+      }
+    },
+    "one_missed_receipt": {
+      "suspect_observed_ms_after_kill": 5031.4801670610905,
+      "suspect_snapshot": {
+        "consecutive_misses": 1,
+        "kind": "peer",
+        "last_fresh_ms": 596199480,
+        "last_source": "idle_keepalive",
+        "membership_generation": 61,
+        "state": "suspect",
+        "subject_id": "node-2"
+      }
+    },
+    "positive_overlap": [
+      {
+        "after_counters": {
+          "applied_operation_count": 28,
+          "fatal": null,
+          "frames_received": 35,
+          "frames_sent": 35
+        },
+        "before_counters": {
+          "applied_operation_count": 12,
+          "fatal": null,
+          "frames_received": 16,
+          "frames_sent": 16
+        },
+        "cancellation_total_observation_to_terminal_ms": 108.49604208488017,
+        "final_queue": {
+          "active_request_ids": [],
+          "batch_depth": 0,
+          "depth": 0,
+          "interactive_depth": 0,
+          "maximum_active_requests": 4,
+          "maximum_bytes": 268435456,
+          "maximum_items": 1024,
+          "queued_bytes": 0
+        },
+        "request_ids": [
+          "51bf3d61-d8d6-48eb-b57f-70279c76b8bb",
+          "7a0062f9-053a-4302-94a1-1b260b4ed07b"
+        ],
+        "runtime_batch_mode": {
+          "continuous_batching": false,
+          "maximum_runtime_batch_size": 20,
+          "mode": "concurrent_request_sequential_stage_dispatch",
+          "observed_batches": [],
+          "pipeline_overlap": false
+        }
+      },
+      {
+        "after_counters": {
+          "applied_operation_count": 40,
+          "fatal": null,
+          "frames_received": 47,
+          "frames_sent": 47
+        },
+        "before_counters": {
+          "applied_operation_count": 24,
+          "fatal": null,
+          "frames_received": 28,
+          "frames_sent": 28
+        },
+        "cancellation_total_observation_to_terminal_ms": 97.71262493450195,
+        "final_queue": {
+          "active_request_ids": [],
+          "batch_depth": 0,
+          "depth": 0,
+          "interactive_depth": 0,
+          "maximum_active_requests": 4,
+          "maximum_bytes": 268435456,
+          "maximum_items": 1024,
+          "queued_bytes": 0
+        },
+        "request_ids": [
+          "73e12f3b-a174-42c8-bcdd-1e17700b5220",
+          "76c2b2c1-7ac3-4399-b1c5-b6c4cc884066"
+        ],
+        "runtime_batch_mode": {
+          "continuous_batching": false,
+          "maximum_runtime_batch_size": 20,
+          "mode": "concurrent_request_sequential_stage_dispatch",
+          "observed_batches": [],
+          "pipeline_overlap": false
+        }
+      }
+    ],
+    "qualification_rejection": {
+      "rejection": {
+        "message": "http_post_409",
+        "status": 409
+      },
+      "request_count_delta": 0,
+      "zero_runtime_resources_after": true
+    },
+    "queue_saturation": {
+      "counters_advanced": true,
+      "drain": {
+        "drain_wall_seconds": 27.41655741701834,
+        "zero_resources_after_drain": true
+      },
+      "storm": {
+        "accepted": 60,
+        "attempted": 425,
+        "maximum_active_observed": 4,
+        "maximum_pending_observed": 60,
+        "rejected": 365,
+        "rejection_codes": {
+          "http_post_400": 365
+        }
+      },
+      "terminal_census": {
+        "completed": 18,
+        "failed": 4
+      }
+    },
+    "shutdown": {
+      "remote_nodes_retired": null,
+      "serve_exit_observed": true,
+      "shutdown_bound_ms": 4000.0,
+      "shutdown_ms": 770.758958067745
+    }
+  },
+  "promotion_authorized": false,
+  "protocol": "mycelium.a4_product_qualification.v1",
+  "qualification_claim": true,
+  "regressions": {
+    "bundle_asset": "index-DYrvYz2M.js",
+    "command": "cd ui/web && npm run check",
+    "exit_code": 0,
+    "observed_at_unix_ms": 1787316750000,
+    "passed": true,
+    "protocol": "mycelium.a4_regression_suite_summary.v1",
+    "steps": [
+      "vitest",
+      "test:contracts",
+      "test:interactive-contract",
+      "test:interactive-bundle",
+      "typecheck",
+      "build"
+    ],
+    "suite": "frontend"
+  },
+  "request_identities": {
+    "graph_digest": "sha256:0f970000f5fe1f9220ca83722ba884e12915783e1f9896e985e5e4c403c38084",
+    "path_manifest_digest": "sha256:b384ccc599f92dae0b509b7cb70acbb5502ad8832a562f93436e9bc897f41baa",
+    "request_ids": [
+      "51bf3d61-d8d6-48eb-b57f-70279c76b8bb",
+      "73e12f3b-a174-42c8-bcdd-1e17700b5220",
+      "76c2b2c1-7ac3-4399-b1c5-b6c4cc884066",
+      "7a0062f9-053a-4302-94a1-1b260b4ed07b"
+    ]
+  },
+  "selected_deployment_qualification": {
+    "deployment_epoch": 1,
+    "deployment_id": "e1d1a2fa-f68d-5b38-a507-34b367c8d855",
+    "evidence_class": "physical_qualification",
+    "issued_at_unix_ms": 1787317421072,
+    "manifest_digest": "sha256:2729a427933ffaf01af4739ef70206023f2e7aa1061c2791283d3356f686d305",
+    "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+    "path_manifest_digest": "sha256:b384ccc599f92dae0b509b7cb70acbb5502ad8832a562f93436e9bc897f41baa",
+    "qualification_digest": "sha256:72595cfa16ae2c97f9a7cabb71527442d12d5f9252ac75215ada0863546977fb",
+    "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+  },
+  "source": {
+    "repository_commit": "487a1b43039d61510100afeba2ed48a6253eae61",
+    "sealer_script": "scripts/run_a4_qualification_gate.py"
+  },
+  "specification": {
+    "digest": "sha256:e4a0037d01b810e53e84df488a0b94a7577e8ca58e18e6c8be6b4863ab8d32df",
+    "path": "docs/superpowers/specs/2026-08-17-mycelium-a4-product-concurrency-liveness.md"
+  }
+}

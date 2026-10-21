@@ -1,0 +1,75 @@
+{
+  "atomic_commit": {
+    "embedded_sha": false,
+    "mode": "containing_git_commit",
+    "required_verification": "HEAD contains this record, the A8 checklist transition, and every staged A8 feature path in one commit"
+  },
+  "bindings": {
+    "authority_generation": 3,
+    "contract_digest": "sha256:0f7727d3efbaa48d84d110c500df5a867a7ed9a61c09dcdfbba17cf8d3acc268",
+    "environment_digest": "sha256:cad1b104450b99f83bc7d78c801580319ed5d484806c531fdfdce66a2e65fe09",
+    "runtime_digest": "sha256:0a368bb74f4005cbae1c53c17959b8e937b2ca8eb0634cd2f8701be4c72665c5"
+  },
+  "claim_boundary": "Privacy-reduced retained A8 closure record. Physical and browser claims bind the exact immutable source/spec candidate and owner-private sealed evidence. Atomicity means the containing Git commit includes this record, the updated checklist, and the full A8 feature diff; the containing SHA is verified after commit and intentionally not embedded to avoid self-reference.",
+  "gate_id": "A8",
+  "handover": "docs/handover/A8_INFRA_REQUIREMENTS.md",
+  "protocol": "mycelium.gate_completion_record.v1",
+  "regressions": {
+    "browser_e2e": {
+      "browsers": [
+        "chromium",
+        "firefox",
+        "webkit"
+      ],
+      "passed": true
+    },
+    "changed_file_ruff": true,
+    "claim_boundary_audit": true,
+    "completion_audit": true,
+    "contract_audit": {
+      "contracts": 75,
+      "passed": true
+    },
+    "governance_audit": {
+      "capabilities": 15,
+      "milestones": 7,
+      "passed": true,
+      "product_action_clients": 8
+    },
+    "python": {
+      "passed": 4661,
+      "skipped": 13,
+      "subtests_passed": 121
+    },
+    "release_security_audit": true,
+    "rust": {
+      "clippy_deny_warnings": true,
+      "format": true,
+      "release_build": true,
+      "tests_passed": 35
+    },
+    "ui_unit": {
+      "passed": 581
+    }
+  },
+  "sealed_evidence": {
+    "all_passed": true,
+    "artifact": "docs/handover/a8-physical-qualification-summary.v1.json",
+    "case_count": 14,
+    "digest": "sha256:02bb0baf04c72efc5b6726cdb59e6fde7ed61fa4eba0087f6acaaee35202a57e",
+    "fresh_until": "2026-08-26T17:15:30.437Z",
+    "observed_at": "2026-08-26T15:57:49.584Z",
+    "source_bound": true,
+    "spec_bound": true
+  },
+  "source_manifest": {
+    "artifact": "docs/handover/a8-source-manifest.v1.json",
+    "digest": "sha256:29a5a0dc9e2faf4e1dc53738ed283b2a0f6cd7a1644185d3393b03ca40adff97",
+    "file_count": 1083
+  },
+  "specification": {
+    "artifact": "docs/superpowers/specs/2026-08-18-mycelium-a8-internet-native-control.md",
+    "digest": "sha256:694e653c37eed8c31b21e73eb4a423aea9f66b6b00a6c4e9c2031470b13396d9"
+  },
+  "state": "complete"
+}

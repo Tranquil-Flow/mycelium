@@ -1,0 +1,33 @@
+{
+  "protocol": "mycelium.gate_completion_record.v1",
+  "gate_id": "A3",
+  "state": "complete",
+  "claim_boundary": "retained proof of the executed A3 milestone only; does not assert current route qualification, authority freshness, or release readiness",
+  "atomic_commit": "905786df41ffdad5718d3464733e2f5cb8727532",
+  "sealed_evidence": {
+    "artifact": "a3-7b-gate-20260815/executed-v46/a3-useful-model-qualification.json",
+    "digest": "sha256:11ea9ea9d5d5cb8e057ab02add62715965d22dcf04a7b0c1a62b7ed4a4419ff0",
+    "protocol": "mycelium.a3_useful_model_qualification.v1",
+    "passed": true,
+    "observed_at": "2026-08-18T15:49:35.779Z",
+    "fresh_until": "2026-08-18T16:49:35.567Z"
+  },
+  "bindings": {
+    "contract_digest": "sha256:7dfd4b3b48beefa49fd5c3a4c8b6a44ad8b0f8fd0ce032963261a69d8d494707",
+    "model_digest": "sha256:e9595b0aca297e2a522f6a6b7816370204bb0b3ccd915f21a20e73968ee4c2f0",
+    "representation_digest": "sha256:c3029635eddc32a7e2f7e8c004a5ab4e96dd4366425a9e10e9e98f5bf2e63d04",
+    "runtime_digest": "sha256:b63e673ad0c55d80af7fcb35cfdc68c099ad0445f93f5afa040918ecc812ce7f",
+    "environment_digest": "sha256:a72fb5d3047eebc88592b536e26b259990ccaf29e1990a47d59e7dd5639ce0e0",
+    "authority_generation": 1787068175779
+  },
+  "route": {
+    "deployment_id": "1328217f-a042-51aa-895f-55a2546f78bd",
+    "stage_count": 2,
+    "incumbent_restored": "e1d1a2fa-f68d-5b38-a507-34b367c8d855"
+  },
+  "browser": {
+    "candidate_request_id": "ae347607-373e-4680-a144-f8fb19f463f2",
+    "incumbent_request_id": "4e716b0c-9949-492b-baf8-39ff1a360a0e",
+    "candidate_output_token_count": 7
+  }
+}
