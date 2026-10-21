@@ -219,6 +219,14 @@ def _time(value: Any) -> int:
     return integer(value, low=0, high=TIME_MAX, code='time_invalid')
 
 
+def registered_model(model: str) -> str:
+    # Import metadata only, never an inference runtime. Keep reads of old signed records valid.
+    from mycelium_a13_macos.run_model import CHOICES
+    if model not in {choice.model.model_id for choice in CHOICES}:
+        raise WireError('model_not_registered')
+    return model
+
+
 def check_record(document: Any, verifier: Verifier, *, allow_loopback: bool = False,
                  allow_private: bool = False) -> dict[str, Any]:
     exact_keys(document, RECORD, _KEYS[RECORD])

@@ -37,6 +37,23 @@ p{margin:0 0 .6em;text-wrap:pretty}
 .proto a{color:inherit}
 @media (prefers-color-scheme:light){.proto{background:#fbf1d8;color:#6b4500}}
 
+/* Static apex: asynchronous counts never determine geometry. */
+.apex-hero{padding:64px 0 32px;max-width:820px}
+.apex-hero h1{font-size:clamp(2.3rem,5vw,3.8rem);max-width:18ch;margin-bottom:24px}
+.apex-lead{font-size:1.15rem;max-width:65ch;margin:20px 0}
+.apex-demo{font-size:14px;max-width:65ch;margin-top:20px}
+.apex-now{max-width:820px}
+.apex-now h2{font-size:1.15rem}
+.apex-counts{display:grid;grid-template-columns:1fr 1fr;margin:16px 0;gap:20px}
+.apex-counts strong{display:block;height:54px;font-size:2.2rem;line-height:54px}
+.apex-counts span{display:block}
+#apex-fresh{height:48px;margin:0;font-size:14px}
+.apex-source{font-size:13px;margin:0}
+.apex-steps{margin:24px 0}.apex-steps h3{font-size:1.1rem;margin-bottom:12px}
+.apex .sect{padding:36px 0}.apex-privacy{border-block:1px solid var(--line)}
+.apex footer.foot{padding:24px 20px}
+@media(max-width:640px){.apex .g2,.apex .g3{grid-template-columns:1fr}.apex-hero{padding-top:36px}.apex .top .wrap{gap:8px}.apex .top .btn{font-size:14px;padding:0 10px}.apex .row{gap:10px}#apex-fresh{height:66px}}
+
 /* header */
 .top{background:var(--bg-2);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
 .top .wrap{display:flex;align-items:center;gap:20px;height:60px}

@@ -15,7 +15,7 @@ let swarms = [];
 let mine = {grants: [], denied: [], pending: [], open: {}};
 let pastGrants = {}, localRequests = {};
 const cards = new Map(), liveStates = new Map(), measurements = new Map(), ownerNodes = new Map();
-const consented = new Set(), accessErrors = new Map();
+const consented = new Set(), accessErrors = new Map(), heldDecisions = new Set();
 let filter = 'all', refreshing = false, refreshDelay = 15000, routeName = '', routeId = '';
 let noticeTimer;
 function notify(text) { $('list-state').textContent = text; clearTimeout(noticeTimer); noticeTimer = setTimeout(() => { $('list-state').textContent = ''; }, 7000); }
@@ -28,7 +28,7 @@ function stat(s, key) {
   if (key === 'status') return s.status;
   if (key === 'seen') return s.last_seen_seconds === null ? '—' : ago(s.last_seen_seconds);
   if (s.status === 'offline') return '—';
-  if (key === 'macs') return `${s.members} Macs`;
+  if (key === 'macs') return `${s.members} ${s.members === 1 ? 'Mac' : 'Macs'}`;
   if (key === 'queue') return state ? (state.killed ? 'Stopped' : state.busy ? '1 running' : state.available ? 'Free' : 'Not ready') : '—';
   if (key === 'uptime') return duration(state?.live?.route?.started_at ? now() - state.live.route.started_at : null);
   if (key === 'latency') return Number.isFinite(measured.latency) ? `${Math.round(measured.latency)} ms` : '—';
@@ -163,6 +163,8 @@ const MESSAGES = {
   entry_cancel_not_requester: 'Only the browser key that sent a prompt can stop it.',
   entry_request_unknown: 'The swarm no longer knows this prompt (it may have finished).',
   entry_cancel_unsupported: 'This swarm cannot stop a running prompt.',
+  request_cooldown: 'The owner declined this request. Wait until the retry time shown here.',
+  model_not_registered: 'This model is not in the supported registry. Ask the owner to update the listing.',
   rate_limited_ip: 'Too many requests from your network. Wait a minute.',
   rate_limited_key: 'Too many requests from your key. Wait a minute.',
 };
@@ -223,7 +225,7 @@ function renderLists() {
     const parent = s.status === 'offline' ? $('offline-swarms') : $('swarms');
     if (card.parentNode !== parent) parent.append(card);
     updateCard(s);
-    card.hidden = !(s.name + ' ' + s.model).toLowerCase().includes(query) ||
+    card.hidden = ['hidden','delisted'].includes(s.listing_state) || !(s.name + ' ' + s.model).toLowerCase().includes(query) ||
       (filter === 'serving' && s.status !== 'serving') || (['open','request'].includes(filter) && s.access_mode !== filter);
     if (!card.hidden) { if (s.status === 'offline') offline++; else visible++; }
   }
@@ -258,6 +260,7 @@ function route() {
   const id = parts[1] || '';
   if (sending && (name !== 'chat' || id !== routeId)) { notify('Stop the current answer before changing swarms.'); location.hash = 'chat/' + routeId; return; }
   const changed = name !== routeName || id !== routeId;
+  if(changed) for(const cancel of heldDecisions) cancel();
   routeName = name; routeId = id;
   document.body.dataset.route = name;
   for (const panel of document.querySelectorAll('main > .panel')) panel.hidden = panel.id !== 'panel-' + name;
@@ -310,6 +313,13 @@ async function refresh() {
     try { sessionStorage.setItem('swarm-list', JSON.stringify(swarms)); } catch (_) {}
     try { mine = {...mine, ...await directory('/my-grants', await sign({protocol: 'mycelium.swarm.grantee_query.v1', grantee_key: me.key, at: now(), nonce: randomText(18)}))}; }
     catch (_) { notify('Access could not be refreshed. Keeping your last known access; the entry checks every prompt.'); }
+    for(const own of mine.owned_swarms || []) {
+      const existing=swarms.find(s=>s.swarm_id===own.swarm_id);
+      if(existing) Object.assign(existing,own); else swarms.push(Object.assign(previous.get(own.swarm_id)||{},own));
+    }
+    if(routeId && !swarms.some(s=>s.swarm_id===routeId) && /^sw-[a-z0-9]{20}$/.test(routeId)){
+      try{swarms.push((await directory('/swarms/'+routeId)).swarm);}catch(_){}
+    }
     mine.open = await openGrants();
     pastGrants = await kv('readonly', s => s.get('past-grants')) || {};
     localRequests = await kv('readonly', s => s.get('pending-requests')) || {};
@@ -423,7 +433,7 @@ function updateGate() {
     approved: ['You have access', `Your prompt goes directly to ${s.entry_origin}, never through this directory. The relay and swarm’s Macs can read it; the swarm sees your key and can link your prompts. Do not type secrets.`],
     'needs-request': ['Ask for access', `Owner ${s.owner_fingerprint} decides. They see your browser key and your optional note. This is not an automatic approval.`],
     pending: ['Request sent', 'Waiting for the owner. You can close this tab; your pending request survives reload. The owner must open their inbox to answer.'],
-    declined: ['The owner declined your request', 'Ask the owner before trying again. A 24-hour server-enforced cooldown is planned, not available in this release.'],
+    declined: ['The owner declined your request', (mine.cooldowns?.[s.swarm_id] > now()) ? 'You can ask again after ' + new Date(mine.cooldowns[s.swarm_id]*1000).toLocaleString() + '. The directory enforces this cooldown.' : 'You can ask again now. Consider checking with the owner first.'],
     expired: ['Your access expired', 'Ask for a new allowance. Your draft stays here.'],
     quota: ['Your allowance is used up', 'Ask the owner for new access, or wait until tomorrow for a swarm-wide daily limit.'],
     revoked: ['Your access was withdrawn', 'The owner revoked your allowance. Ask them for access again.'],
@@ -439,6 +449,7 @@ function updateGate() {
   $('gate').dataset.state = kind;
   $('gate').hidden = kind === 'ready';
   $('request-fields').hidden = !(kind === 'needs-request' || kind === 'declined' || kind === 'offline' && s.access_mode === 'request' && !chatTarget.grant && !mine.pending.includes(s.swarm_id));
+  $('ask').disabled = (mine.cooldowns?.[s.swarm_id] || 0) > now();
   $('consent').hidden = !['first','approved'].includes(kind);
   $('self-access').hidden = kind !== 'owner';
   $('retry-access').hidden = !['expired','quota','revoked'].includes(kind);
@@ -628,6 +639,27 @@ function ownerUsage(state) {
     el('p', {class: 'meta'}, 'Per-key usage is not shown here: it is counted on the entry Mac and each visitor sees their own remaining quota.'));
 }
 
+function grantDefaults() {
+  try { const d=JSON.parse(localStorage.getItem('grant-defaults')); if(d && [d.hours,d.requests,d.tokens].every(Number.isSafeInteger) && d.hours>=1 && d.hours<=720 && d.requests>=1 && d.requests<=10000 && d.tokens>=1 && d.tokens<=1000000) return d; } catch(_) {}
+  return {hours:24,requests:20,tokens:4000};
+}
+function holdDecision(row, label, action) {
+  if(row.dataset.holding==='1') return;
+  row.dataset.holding='1';
+  const result=row.querySelector('[data-decision]'), undo=row.querySelector('[data-undo]');
+  const controls=[...row.querySelectorAll('.row input,.row button:not([data-undo])')];
+  controls.forEach(n=>n.disabled=true); undo.style.visibility='visible';
+  setText(result,label+' in 5 seconds. Leaving this page cancels it.');
+  const timer=setTimeout(async()=>{
+    heldDecisions.delete(cancel);
+    undo.style.visibility='hidden'; setText(result,'Saving…');
+    try {await action();setText(result,'Saved: '+label.toLowerCase()+'.');await refresh();}
+    catch(e){setText(result,'Not saved: '+say(e.message));}
+    finally{row.dataset.holding='0';controls.forEach(n=>n.disabled=false);}
+  },5000);
+  const cancel=()=>{clearTimeout(timer);heldDecisions.delete(cancel);row.dataset.holding='0';controls.forEach(n=>n.disabled=false);undo.style.visibility='hidden';setText(result,'Cancelled. Nothing was sent.');};
+  undo.onclick=cancel;heldDecisions.add(cancel);
+}
 function createOwner(s) {
   const link = swarmLink(s.swarm_id);
   const box = el('article', {class:'owner-card', 'data-owned':s.swarm_id}, el('h3', {}, s.name),
@@ -640,7 +672,8 @@ function createOwner(s) {
   const saved = el('span',{class:'access-state meta',role:'status'});
   box.append(el('div',{class:'row'},el('label',{},'Access',mode),el('button',{type:'button',class:'save-access',on:()=>saveAccess(s,mode.value,saved)},'Save access'),saved),
     el('button',{type:'button',on:async()=>{try {await approve(s,me.key,24,50,10000); await refresh();}catch(e){notify(say(e.message));}}},'Grant myself access (24 h)'),
-    el('button',{type:'button',class:'secondary',on:()=>remove(s).catch(e=>notify(say(e.message)))},'Delete swarm'));
+    el('button',{type:'button',class:'secondary',on:()=>remove(s).catch(e=>notify(say(e.message)))},'Delete swarm'),
+    el('button',{type:'button',class:'secondary',on:async()=>{try{await resign(s,{});await refresh();notify('Listing republished.');}catch(e){notify(say(e.message));}}},'Republish listing'));
   const helpers = el('div',{'data-owner-helpers':''}), grants = el('div',{'data-owner-grants':''}), usage = el('div',{'data-owner-usage':''});
   const killState = el('p',{'data-kill-state':''});
   const kill = el('button',{type:'button',class:'danger','data-kill':'',disabled:'',on:async()=>{
@@ -696,18 +729,23 @@ async function renderOwned() {
       for(const r of value.requests){
         let row=n.requests.get(r.requester_key);
         if(!row){
-          const hours=el('input',{type:'number',min:'1',max:'720',value:'24','aria-label':'Hours'});
-          const reqs=el('input',{type:'number',min:'1',max:'10000',value:'20','aria-label':'Requests'});
-          const toks=el('input',{type:'number',min:'1',max:'1000000',value:'4000','aria-label':'Tokens'});
+          const hours=el('input',{type:'number',min:'1',max:'720',value:String(grantDefaults().hours),'aria-label':'Hours'});
+          const reqs=el('input',{type:'number',min:'1',max:'10000',value:String(grantDefaults().requests),'aria-label':'Requests'});
+          const toks=el('input',{type:'number',min:'1',max:'1000000',value:String(grantDefaults().tokens),'aria-label':'Tokens'});
           const actions=el('div',{class:'row'},el('label',{},'Hours',hours),el('label',{},'Requests',reqs),el('label',{},'Tokens',toks));
-          const act=async(action)=>{try{await action();await refresh();}catch(e){notify('Not saved: '+say(e.message));}};
-          actions.append(el('button',{type:'button','data-approve':r.requester_fingerprint,on:()=>act(()=>approve(s,r.requester_key,Number(hours.value),Number(reqs.value),Number(toks.value)))},'Approve'),
-            el('button',{type:'button',class:'secondary',on:()=>act(()=>deny(s,r.requester_key))},'Decline'));
-          row=el('div',{class:'request','data-request':r.requester_fingerprint},el('p',{}),actions);
+          actions.append(el('div',{class:'row decision-buttons'},el('button',{type:'button','data-approve':r.requester_fingerprint,on:()=>{
+            if(![hours,reqs,toks].every(n=>n.reportValidity()))return;
+            const d={hours:Number(hours.value),requests:Number(reqs.value),tokens:Number(toks.value)};
+            holdDecision(row,'Approve',async()=>{await approve(s,r.requester_key,d.hours,d.requests,d.tokens);try{localStorage.setItem('grant-defaults',JSON.stringify(d));}catch(_){}});
+          }},'Approve'),
+            el('button',{type:'button',class:'secondary',on:()=>holdDecision(row,'Decline',()=>deny(s,r.requester_key))},'Decline'),
+            el('button',{type:'button','data-undo':''},'Undo')));
+          row=el('div',{class:'request','data-request':r.requester_fingerprint},el('p',{}),actions,
+            el('div',{class:'decision-slot'},el('span',{'data-decision':'',role:'status'})));
           n.requests.set(r.requester_key,row);n.grants.append(row);
         }
         setText(row.querySelector('p'),`Key ${r.requester_fingerprint} · ${r.state}${r.note?' · “'+r.note+'”':''}`);
-        row.querySelector('.row').hidden=r.state!=='pending';
+        row.querySelector('.row').style.visibility=['pending','denied'].includes(r.state)?'visible':'hidden';
       }
     }catch(e){notify('Inbox unavailable: '+say(e.message));}
   }));
@@ -732,6 +770,7 @@ function formState() {
 async function main() {
   route();
   window.addEventListener('hashchange', route);
+  window.addEventListener('pagehide',()=>{for(const cancel of heldDecisions)cancel();});
   $('key-open').onclick=()=>$('identity-card').showModal(); $('key-close').onclick=()=>$('identity-card').close();
   $('search').addEventListener('input',renderLists);
   for(const button of document.querySelectorAll('[data-filter]')) button.onclick=()=>{

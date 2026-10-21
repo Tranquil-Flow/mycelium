@@ -405,6 +405,7 @@ class EntryGuard:
 
     def admit(self, raw: bytes, client: str) -> tuple[Admission, str]:
         policy = self.current()
+        docs.registered_model(policy.model)
         now = int(self.clock())
         if self.killed(policy):
             raise WireError('entry_killed_by_owner', 403)
@@ -467,6 +468,7 @@ class EntryGuard:
         policy = self.policy()
         if policy is None:
             return None
+        docs.registered_model(policy.model)
         now = int(self.clock())
         if self.killed(policy):
             raise WireError('entry_killed_by_owner', 403)

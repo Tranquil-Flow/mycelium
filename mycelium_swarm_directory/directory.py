@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The swarm directory: a phonebook of signed swarm records (pure core).
 
-It lists every swarm (visible to all, for the demo), keeps owner-signed
+It lists recent public swarms and retains stale listings for recovery, keeps owner-signed
 records, entry/owner heartbeats, access requests, owner-signed grants for the
 grantee to fetch, and entry offers (a Mac asking a web-created swarm's owner to
 attach it as the entry).  It grants nothing itself: every right is a signature
@@ -43,6 +43,9 @@ class Limits:
     max_grants_per_grantee: int = 64
     max_live_nonces: int = 20000
     heartbeat_ttl: int = 90
+    offline_hide_seconds: int = 24 * 3600
+    offline_delist_seconds: int = 14 * 24 * 3600
+    decline_cooldown_seconds: int = 24 * 3600
     skew: int = 300
     offer_ttl: int = 3600
     writes_per_ip_per_minute: int = 30
@@ -61,6 +64,10 @@ class Directory:
     def __init__(self, store: Any, verifier: Verifier, *, clock: Callable[[], float] = time.time,
                  limits: Limits = Limits(), allow_loopback_entries: bool = False,
                  allow_private_entries: bool = False) -> None:
+        if not 0 < limits.offline_hide_seconds < limits.offline_delist_seconds:
+            raise ValueError('listing_retention_invalid')
+        if limits.decline_cooldown_seconds < 0:
+            raise ValueError('decline_cooldown_invalid')
         self.store = store
         self.verifier = verifier
         self.clock = clock
@@ -158,6 +165,7 @@ class Directory:
     def _put_record(self, document, now):
         record = docs.check_record(document, self.verifier, allow_loopback=self.allow_loopback,
                                     allow_private=self.allow_private)
+        docs.registered_model(record['model'])
         self._key_rate(record['owner_key'], now)
         self._charge_write(now)
         swarm_id = record['swarm_id']
@@ -185,6 +193,9 @@ class Directory:
             row = dict(row, record=record, updated=now)
             if record['entry'] is not None:
                 self.store.delete('offer', swarm_id + '/' + record['entry']['key'])
+        # An authenticated newer record explicitly republishes a retained listing.
+        since = now if self._status(row, now) == 'offline' else row['heartbeat_received'] + self.limits.heartbeat_ttl
+        row = dict(row, offline_since=since)
         self.store.put('swarm', swarm_id, row)
         return {'swarm': self._public(row, now)}
 
@@ -222,7 +233,12 @@ class Directory:
         previous = row.get('heartbeat')
         if previous is not None and document['at'] <= previous['at']:
             raise WireError('heartbeat_stale', 409)
-        row = dict(row, heartbeat=document, heartbeat_received=now)
+        offline_since = self._offline_since(row)
+        if document['status'] != 'offline':
+            offline_since = now + self.limits.heartbeat_ttl
+        elif self._status(row, now) != 'offline':
+            offline_since = now
+        row = dict(row, heartbeat=document, heartbeat_received=now, offline_since=offline_since)
         self.store.put('swarm', document['swarm_id'], row)
         return {'status': self._status(row, now)}
 
@@ -234,6 +250,7 @@ class Directory:
         row = self.store.get('swarm', document['swarm_id'])
         if row is None:
             raise WireError('swarm_unknown', 404)
+        docs.registered_model(row['record']['model'])
         mode = row['record']['access_mode']
         if mode == 'invite':
             raise WireError('swarm_invite_only', 403)
@@ -241,7 +258,10 @@ class Directory:
             raise WireError('swarm_is_open', 409)
         swarm_id, requester = document['swarm_id'], document['requester_key']
         key = swarm_id + '/' + requester
-        if self.store.get('request', key) is None and \
+        previous = self.store.get('request', key)
+        if previous and previous.get('state') == 'denied' and now < previous.get('denied_at', 0) + self.limits.decline_cooldown_seconds:
+            raise WireError('request_cooldown', 429)
+        if previous is None and \
                 len(self.store.scan('request', swarm_id + '/')) >= self.limits.max_requests_per_swarm:
             raise WireError('swarm_request_queue_full', 429)
         self.store.put('request', key, {'request': document, 'state': 'pending', 'received': now})
@@ -285,8 +305,8 @@ class Directory:
         request = self.store.get('request', swarm_id + '/' + requester)
         if request is None:
             raise WireError('request_unknown', 404)
-        self.store.put('request', swarm_id + '/' + requester, dict(request, state='denied'))
-        self._grantee_state(requester, swarm_id, {'state': 'denied', 'swarm_id': swarm_id})
+        self.store.put('request', swarm_id + '/' + requester, dict(request, state='denied', denied_at=now))
+        self._grantee_state(requester, swarm_id, {'state': 'denied', 'swarm_id': swarm_id, 'denied_at': now})
         return {'state': 'denied'}
 
     def _entry_offer(self, document, now):
@@ -326,7 +346,9 @@ class Directory:
                   for _k, v in self.store.scan('offer', swarm_id + '/')
                   if now - v['received'] <= self.limits.offer_ttl]
         requests.sort(key=lambda r: (r['state'] != 'pending', -r['at']))
-        return {'requests': requests, 'entry_offers': offers}
+        grants = [v['grant'] for _k, v in self.store.scan('grant')
+                  if v.get('swarm_id') == swarm_id and v.get('state') == 'granted']
+        return {'requests': requests, 'entry_offers': offers, 'grants': grants}
 
     def _my_grants(self, document, now):
         document = docs.check(document, docs.GRANTEE_QUERY, self.verifier)
@@ -334,14 +356,18 @@ class Directory:
         self._query_rate(document['grantee_key'], now)
         self._consume_nonce(document['nonce'], now)
         grants, denied, pending = [], [], []
+        cooldowns = {}
         for _key, value in self.store.scan('grant', document['grantee_key'] + '/'):
             if value['state'] == 'granted' and value['grant']['expires_at'] > now:
                 grants.append(value['grant'])
             elif value['state'] == 'denied':
                 denied.append(value['swarm_id'])
+                cooldowns[value['swarm_id']] = value.get('denied_at', 0) + self.limits.decline_cooldown_seconds
             elif value['state'] == 'pending':
                 pending.append(value['swarm_id'])
-        return {'grants': grants, 'denied': denied, 'pending': pending}
+        owned = [self._public(v, now) for _k, v in self.store.scan('swarm')
+                 if v['record']['owner_key'] == document['grantee_key']]
+        return {'grants': grants, 'denied': denied, 'pending': pending, 'cooldowns': cooldowns, 'owned_swarms': owned}
 
     # -- public view -------------------------------------------------------------
     def _status(self, row, now):
@@ -351,11 +377,22 @@ class Directory:
             return 'offline'
         return heartbeat['status']
 
+    def _offline_since(self, row):
+        if 'offline_since' in row:
+            return row['offline_since']
+        received = row.get('heartbeat_received')
+        if received is not None:
+            return received + (self.limits.heartbeat_ttl if row['heartbeat']['status'] != 'offline' else 0)
+        return row['updated']
+
     def _public(self, row, now):
         record = row['record']
         status = self._status(row, now)
         heartbeat = row.get('heartbeat') if status != 'offline' else None
         entry = record['entry']
+        offline_seconds = max(0, now - self._offline_since(row)) if status == 'offline' else 0
+        listing_state = ('delisted' if offline_seconds >= self.limits.offline_delist_seconds else
+                         'hidden' if offline_seconds >= self.limits.offline_hide_seconds else 'listed')
         return {'swarm_id': record['swarm_id'], 'name': record['name'], 'model': record['model'],
                 'description': record['description'], 'access_mode': record['access_mode'],
                 'open_quota': record['open_quota'], 'owner_key': record['owner_key'],
@@ -366,10 +403,12 @@ class Directory:
                 'entry_fingerprint': None if entry is None else fingerprint(entry['key']),
                 'last_seen_seconds': None if row.get('heartbeat_received') is None
                 else max(0, now - row['heartbeat_received']),
+                'offline_seconds': offline_seconds, 'listing_state': listing_state,
                 'privacy': PRIVACY_NOTE, 'record': record}
 
     def list_swarms(self) -> list[dict[str, Any]]:
         now = self.now()
         rows = [self._public(value, now) for _key, value in self.store.scan('swarm')]
+        rows = [row for row in rows if row['listing_state'] != 'delisted']
         rows.sort(key=lambda r: (_STATUS_ORDER[r['status']], r['name'].lower(), r['swarm_id']))
         return rows

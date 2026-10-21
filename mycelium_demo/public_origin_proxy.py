@@ -53,6 +53,8 @@ _PUBLIC_GET_API_PATHS = frozenset(
 )
 _DIRECTORY_ASSET_PATHS = frozenset(
     {
+        '/',
+        '/apex.js',
         _hosted.DIRECTORY_MOUNT_PREFIX,
         _hosted.DIRECTORY_MOUNT_PREFIX + "/",
         _hosted.DIRECTORY_MOUNT_PREFIX + "/swarms.js",
@@ -138,8 +140,8 @@ class ProxyConfig:
     # Helper app zip served at /swarms/download/<name> (needs the mount); None = nothing to serve.
     helper_zip_path: str | None = None
     helper_version: str = _hosted.HELPER_DOWNLOAD["version"]
-    # '/' redirects to the swarms page while the mount is on.  Owner decision 5 is still open: default ON.
-    redirect_root_to_swarms: bool = True
+    # The apex explainer is static Profile A; the old redirect remains an explicit rollback option.
+    redirect_root_to_swarms: bool = False
     # With the directory mounted the legacy product-gateway surface is closed (404, no upstream connection): it
     # has no per-IP limit, no daily cap and no kill switch, and the proxy stamps its callers as the owner.
     # Only an explicit opt-in serves it next to the directory.
@@ -350,7 +352,10 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
         ):
             self._send_redirect(_hosted.DIRECTORY_MOUNT_PREFIX + "/")
             return
-        if self._config.directory_host is not None and _is_directory_mount(path):
+        if self._config.directory_host is not None and (
+            _is_directory_mount(path) or path == '/apex.js' or
+            (path == '/' and not self._config.enable_product_routes)
+        ):
             self._handle_directory_request()
             return
         if self._config.directory_host is not None and not self._config.enable_product_routes:
@@ -834,8 +839,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--redirect-root-to-swarms",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="redirect GET / to /swarms/ while the directory is mounted (default on; owner decision 5)",
+        default=False,
+        help="use the legacy root redirect instead of the static apex explainer (default off)",
     )
     parser.add_argument("--connection-slots", type=int, default=_hosted.PROXY_CONNECTION_SLOTS)
     parser.add_argument("--socket-timeout-seconds", type=float, default=_hosted.PROXY_SOCKET_TIMEOUT_SECONDS)

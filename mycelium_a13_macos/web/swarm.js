@@ -21,12 +21,24 @@
     swarm_link_invalid: 'That is not a swarm link (it starts with mycelium-swarm:).',
   };
   const explain = (code) => (ERRORS[code] ? `${ERRORS[code]} (${code})` : `Action not completed: ${String(code).replaceAll('_', ' ')} (${code}).`);
+  let inboxEnabled=false, inboxAt=0, inboxLoading=false;
+  async function pollInbox(){
+    if(document.hidden||!inboxEnabled||inboxLoading||Date.now()-inboxAt<30000)return;
+    inboxLoading=true;inboxAt=Date.now();
+    try{const value=await api('/api/swarm/inbox',{});$('swarm-inbox-count').textContent=String(value.requests.filter(r=>r.state==='pending').length);}
+    catch(_){$('swarm-inbox-count').textContent='—';}
+    finally{inboxLoading=false;}
+  }
   let lastError = null;  // the last refused action stays visible until the next one succeeds
   function render(status) {
     const card = $('swarm-publish'); if (!card) return;
     card.hidden = status.installation_role !== 'owner';
     const swarm = status.swarm || {};
     const published = swarm.enabled === true;
+    inboxEnabled=status.installation_role==='owner' && published && swarm.mode==='app';
+    $('swarm-inbox-header').style.visibility=inboxEnabled?'visible':'hidden';
+    if(!inboxEnabled){inboxAt=0;$('swarm-inbox-count').textContent='—';}
+    void pollInbox();
     $('swarm-key').textContent = swarm.entry_fingerprint ? `This Mac's swarm key: ${swarm.entry_fingerprint}` : '';
     let text = 'Not published. The run stays private to your Macs.';
     if (published && swarm.mode === 'link' && !swarm.attached) {
@@ -69,6 +81,7 @@
   async function loadInbox() {
     try {
       const value = await api('/api/swarm/inbox', {});
+      $('swarm-inbox-count').textContent=String(value.requests.filter(r=>r.state==='pending').length);
       const rows = value.requests.map(requestRow);
       if (!rows.length) { const p = document.createElement('p'); p.className = 'detail'; p.textContent = 'No access requests yet.'; rows.push(p); }
       $('swarm-requests').replaceChildren(...rows);
@@ -86,6 +99,8 @@
     $('swarm-attach').addEventListener('click', () => act('/api/swarm/publish', {link: $('swarm-link').value.trim()}));
     $('swarm-unpublish').addEventListener('click', () => act('/api/swarm/unpublish', $('swarm-delete').checked ? {delete: true} : {}));
     $('swarm-inbox').addEventListener('click', loadInbox);
+    $('swarm-inbox-header').addEventListener('click',loadInbox);
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)void pollInbox();});
     refresh(); setInterval(refresh, 5000);
   });
 })();

@@ -64,6 +64,9 @@ label{display:block;color:var(--muted);font-size:14px}
 .request{padding:14px 0;border-bottom:1px solid var(--line)}
 .request .row label{width:105px}
 .request .row{align-items:end}
+.decision-buttons{position:relative}
+[data-undo]{visibility:hidden;position:absolute;left:0;top:0;z-index:1}
+.decision-slot{min-height:90px;display:flex;align-items:center;gap:8px}.decision-slot span{flex:1;font-size:13px}.decision-slot button{flex:none}
 .sec{font-size:14px;margin:12px 0}
 .sec[data-available=false]{color:var(--muted)}
 .error{color:var(--bad)}

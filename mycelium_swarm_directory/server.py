@@ -35,7 +35,9 @@ from .store import SqliteStore
 
 API = '/swarms/api/v1'
 WEB = Path(__file__).resolve().parent / 'web'
-ASSETS = {'/swarms': ('index.html', 'text/html; charset=utf-8'),
+ASSETS = {'/': ('apex.html', 'text/html; charset=utf-8'),
+          '/apex.js': ('apex.js', 'text/javascript; charset=utf-8'),
+          '/swarms': ('index.html', 'text/html; charset=utf-8'),
           '/swarms/': ('index.html', 'text/html; charset=utf-8'),
           '/swarms/swarms.js': ('swarms.js', 'text/javascript; charset=utf-8'),
           '/swarms/swarms.css': ('swarms.css', 'text/css; charset=utf-8'),
@@ -236,6 +238,9 @@ def build_parser() -> argparse.ArgumentParser:
                              'explicit flags still win' % hosted_defaults.DIRECTORY_PUBLIC_ORIGIN)
     parser.add_argument('--trusted-proxy', action='store_true', help='rate-key on Cf-Connecting-Ip (cloudflared)')
     parser.add_argument('--allow-loopback-entries', action='store_true', help='local testing only')
+    parser.add_argument('--offline-hide-seconds', type=int, default=Limits().offline_hide_seconds)
+    parser.add_argument('--offline-delist-seconds', type=int, default=Limits().offline_delist_seconds)
+    parser.add_argument('--decline-cooldown-seconds', type=int, default=Limits().decline_cooldown_seconds)
     network_mode.add_network_mode_argument(parser)
     return parser
 
@@ -246,7 +251,9 @@ def build_directory(args: argparse.Namespace, environ: Any = None) -> Directory:
     private = mode.allows_private_origins
     if args.public_origin is not None:
         docs.origin(args.public_origin, allow_loopback=True, allow_private=private, code='public_origin_invalid')
-    return Directory(SqliteStore(args.db), verify, limits=Limits(),
+    return Directory(SqliteStore(args.db), verify, limits=Limits(
+        offline_hide_seconds=args.offline_hide_seconds, offline_delist_seconds=args.offline_delist_seconds,
+        decline_cooldown_seconds=args.decline_cooldown_seconds),
                      allow_loopback_entries=args.allow_loopback_entries, allow_private_entries=private)
 
 
