@@ -1,0 +1,67 @@
+# A8 public HTTPS bootstrap boundary (spec §3, §10)
+#
+# Placeholders to substitute at deployment time:
+#   __A8_PUBLIC_HOSTNAME__     canonical public hostname (no userinfo/path)
+#   __A8_SEED_LOOPBACK_PORT__  loopback port of the seed HTTP listener
+#
+# This template forwards ONLY the five closed routes to the loopback seed.
+# Cleartext HTTP is rejected (444) — never redirected. Operator
+# administration, invite minting, revocation, backups, and raw audit routes
+# are not forwarded by design (frozen plane separation, spec §2).
+
+limit_req_zone $binary_remote_addr zone=a8_bootstrap:1m rate=8r/s;
+
+server {
+    listen 80;
+    # Cleartext bootstrap is refused; clients never follow redirects and
+    # this boundary never offers one.
+    return 444;
+}
+
+server {
+    listen 443 ssl;
+    server_name __A8_PUBLIC_HOSTNAME__;
+
+    ssl_certificate     /etc/letsencrypt/live/__A8_PUBLIC_HOSTNAME__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__A8_PUBLIC_HOSTNAME__/privkey.pem;
+    ssl_protocols TLSv1.3;
+
+    client_max_body_size 1m;
+    limit_req zone=a8_bootstrap burst=16 nodelay;
+
+    add_header Cache-Control "no-store" always;
+    add_header X-Content-Type-Options nosniff always;
+
+    # The five closed routes only.
+    location = /seed/identity {
+        proxy_pass http://127.0.0.1:__A8_SEED_LOOPBACK_PORT__;
+        proxy_set_header Host $host;
+        proxy_read_timeout 5s;
+    }
+    location = /seed/rotation {
+        proxy_pass http://127.0.0.1:__A8_SEED_LOOPBACK_PORT__;
+        proxy_set_header Host $host;
+        proxy_read_timeout 5s;
+    }
+    location = /seed/join {
+        proxy_pass http://127.0.0.1:__A8_SEED_LOOPBACK_PORT__;
+        proxy_set_header Host $host;
+        proxy_read_timeout 5s;
+    }
+    location = /seed/resume {
+        proxy_pass http://127.0.0.1:__A8_SEED_LOOPBACK_PORT__;
+        proxy_set_header Host $host;
+        proxy_read_timeout 5s;
+    }
+    location = /seed/message {
+        proxy_pass http://127.0.0.1:__A8_SEED_LOOPBACK_PORT__;
+        proxy_set_header Host $host;
+        proxy_read_timeout 5s;
+    }
+
+    # Everything else is a bounded rejection; no directory listing, no
+    # static files, no websocket upgrade.
+    location / {
+        return 404;
+    }
+}

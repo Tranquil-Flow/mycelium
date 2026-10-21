@@ -1,0 +1,22 @@
+# A8 public HTTPS bootstrap via Cloudflare Tunnel (spec §3, §10)
+#
+# Placeholders (substituted at provision time, never committed):
+#   __A8_PUBLIC_HOSTNAME__     canonical public hostname
+#   __A8_TUNNEL_ID__           cloudflared tunnel UUID
+#   __A8_CREDENTIALS_FILE__    owner-private credentials file path
+#   __A8_SEED_LOOPBACK_PORT__  loopback port of the seed HTTP listener
+#
+# The tunnel forwards the single canonical hostname to the loopback seed
+# listener only. Path-level enforcement (the closed five-route allowlist)
+# is performed by the seed's own PublicBootstrapPolicy - the tunnel is
+# transport, never authorization. Any other hostname resolves to 404.
+# The runtime config with the real credentials path lives in the
+# owner-private state dir (~/.mycelium/a8-tls), never in this repository.
+
+tunnel: __A8_TUNNEL_ID__
+credentials-file: __A8_CREDENTIALS_FILE__
+
+ingress:
+  - hostname: __A8_PUBLIC_HOSTNAME__
+    service: http://127.0.0.1:__A8_SEED_LOOPBACK_PORT__
+  - service: http_status:404
