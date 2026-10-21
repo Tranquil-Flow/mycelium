@@ -123,3 +123,37 @@ def test_stop_serving_with_a_stuck_thread_still_refuses_and_keeps_the_state(tmp_
         chain_compile.start_compile(app, acknowledged=True)
     workflow.release.set()
     app._chain_serving_thread.join(5)
+
+
+# -- a new Start while the previous route is still closing (V1.2 D1/D2) -------------------------------------------
+
+def test_start_waits_for_the_previous_route_to_finish_closing_instead_of_failing(tmp_path):
+    import threading as _t
+    from test_demo_chain import make, wait
+    app, ops, members, run = make(tmp_path)
+    release = _t.Event()
+    closing = _t.Thread(target=lambda: release.wait(10), daemon=True)
+    closing.start()
+    app._chain_serving_thread = closing          # the last route's close is still running (unproven cleanup)
+    run.chain.budgets['previous_close'] = 5.0
+    run.start()
+    time.sleep(0.2)
+    assert run.status()['state'] == 'running' and run.status()['step'] == 'model'
+    assert 'previous route' in (run.status()['steps'][0]['detail'] or '')
+    release.set()
+    assert wait(run, lambda s: s['state'] in {'serving', 'failed'})['state'] == 'serving'
+
+
+def test_start_names_a_route_that_never_finishes_closing(tmp_path):
+    import threading as _t
+    from test_demo_chain import make, wait
+    app, ops, members, run = make(tmp_path)
+    release = _t.Event()
+    closing = _t.Thread(target=lambda: release.wait(10), daemon=True)
+    closing.start()
+    app._chain_serving_thread = closing
+    run.chain.budgets['previous_close'] = 0.1
+    run.start()
+    status = wait(run, lambda s: s['state'] == 'failed')
+    assert (status['failed_step'], status['error_code']) == ('model', 'previous_run_still_closing')
+    release.set()
