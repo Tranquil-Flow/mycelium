@@ -1,0 +1,244 @@
+{
+  "browser_report": {
+    "browser_certificate_errors_ignored": true,
+    "browser_failures": 0,
+    "engines": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "evidence": {
+      "completed_at": 1784571225.5516832,
+      "created_at": 1784571225.522954,
+      "generated_labels": [
+        "<pad>",
+        "<pad>"
+      ],
+      "generated_tokens": [
+        0,
+        0
+      ],
+      "initial_tokens": [
+        4,
+        1,
+        4,
+        2,
+        2,
+        3,
+        6,
+        3,
+        2,
+        4,
+        3,
+        6,
+        3,
+        2
+      ],
+      "local_evidence_only": true,
+      "max_intermediate_error": 2.220446049250313e-16,
+      "max_logit_error": 1.0170042514801025e-06,
+      "observed_distinct_peers": 2,
+      "peer_ids": [
+        "peer-baWptsg9lXzm5XhA839LcmT9",
+        "peer-n1cDLM_A9rCMcV89Ax0Xy65T"
+      ],
+      "prompt_bytes": 23,
+      "prompt_digest": "sha256:86b1117cbcc13c1bd7a0189ea4e96e22a9738694d66c03d28ab27a93f17b773e",
+      "protocol": "mycelium.interactive_inference_record.v1",
+      "request_id": "request-48fb122a-5f47-4972-8097-0a7d8ed65e39",
+      "required_distinct_peers": 2,
+      "route_ready": false,
+      "stage_pack_digest": "sha256:2a99a75b61ea759c37e6838be492b7cb571a6dcb39293513b3acb5d6042a8355",
+      "token_records": [
+        {
+          "browser_job_id": "job-TrQerGwPRvILoQzrvP_7e-nz",
+          "browser_output_digest": "sha256:f028cc7ba95fab522d8ab6ab3fba04567d413418ec35d2b9b7832f6e2c81f498",
+          "browser_peer_id": "peer-baWptsg9lXzm5XhA839LcmT9",
+          "context_length": 15,
+          "intermediate_error": 2.220446049250313e-16,
+          "logit_error": 1.0170042514801025e-06,
+          "route_ready": false,
+          "selected_label": "<pad>",
+          "selected_token": 0,
+          "stage_request_id": "request-48fb122a-5f47-4972-8097-0a7d8ed65e39:token-0",
+          "token_index": 0
+        },
+        {
+          "browser_job_id": "job-rAi-ISXh_57tbJaU4v3A8MHG",
+          "browser_output_digest": "sha256:3c859f12fe79e698d5f045135269d82fd641d687385ee161fc83d29f6011ab5a",
+          "browser_peer_id": "peer-n1cDLM_A9rCMcV89Ax0Xy65T",
+          "context_length": 16,
+          "intermediate_error": 2.220446049250313e-16,
+          "logit_error": 1.0170042514801025e-06,
+          "route_ready": false,
+          "selected_label": "<pad>",
+          "selected_token": 0,
+          "stage_request_id": "request-48fb122a-5f47-4972-8097-0a7d8ed65e39:token-1",
+          "token_index": 1
+        }
+      ]
+    },
+    "evidence_json_downloaded_and_parsed": true,
+    "exact_launch_entrypoint": "python3.14 -m mycelium_demo device-lab --advertise-host <LAN_IP>",
+    "generated_labels": [
+      "<pad>",
+      "<pad>"
+    ],
+    "independent_browser_contexts": 3,
+    "local_evidence_only": true,
+    "max_intermediate_error": 2.220446049250313e-16,
+    "max_logit_error": 1.0170042514801025e-06,
+    "network_origin": "lan_address_https",
+    "node_https_api_verified": true,
+    "physical_devices": 0,
+    "protocol": "mycelium.interactive_multibrowser_e2e.v1",
+    "real_browser_stage_jobs": [
+      1,
+      1
+    ],
+    "request_id": "request-48fb122a-5f47-4972-8097-0a7d8ed65e39",
+    "responsive_viewport_checks": {
+      "firefoxPeer": {
+        "innerWidth": 390,
+        "routeBoundary": true,
+        "scrollWidth": 390
+      },
+      "operator": {
+        "innerWidth": 390,
+        "routeBoundary": true,
+        "scrollWidth": 390
+      },
+      "webkitPeer": {
+        "innerWidth": 390,
+        "routeBoundary": true,
+        "scrollWidth": 390
+      }
+    },
+    "roles": {
+      "operator": "chromium",
+      "peer_1": "firefox",
+      "peer_2": "webkit"
+    },
+    "route_ready": false,
+    "user_agent_families": {
+      "chromium": "Mozilla/5.0 (Macintosh; Intel",
+      "firefox": "Mozilla/5.0 (Macintosh; Intel",
+      "webkit": "Mozilla/5.0 (Macintosh; Intel"
+    }
+  },
+  "candidate_base_commit": "907a94f2d1e877bbd2c55bc11e867c8a38b659a9",
+  "candidate_branch": "integration/mycelium-real-demo",
+  "captured_at": "2026-07-20T18:14:12Z",
+  "certificate": {
+    "ca_key_mode": "0600",
+    "ca_sha256": "7e4a7dce63d5be17bd01c807ae29b639841d7b4fe1a7af7859468841afb55bd5",
+    "ca_stable_across_launches": true,
+    "chain_verified": true,
+    "chromium_firefox_webkit_ca_trust_derivation": "unverified: automated LAN browser contexts used ignoreHTTPSErrors=true; only Node HTTPS requests verified the generated CA",
+    "chromium_firefox_webkit_ca_trust_verified": false,
+    "exact_ipv4_san_verified": true,
+    "final_leaf_sha256": "343f2b237fc862cf1e9d954abbf60636c11ffb63b081eb0c587c8790e758d095",
+    "generated_ca_node_api_verified": true,
+    "leaf_rotated_on_final_launch": true,
+    "minimum_twelve_hour_expiry_verified": true,
+    "previous_leaf_sha256": "b1945341c8828ebc06328f33a410ad19304d9ed1b610eeac39aefd544e4de732",
+    "server_key_mode": "0600",
+    "state_root_mode": "0700"
+  },
+  "claim_boundary": {
+    "automated_test_only": true,
+    "browser_trust_store_verified": false,
+    "lan_host": "10.100.155.32",
+    "physical_device_identity_verified": false,
+    "physical_devices_verified": 0,
+    "production_network_path_verified": false,
+    "separate_physical_hosts": 0
+  },
+  "exact_launch_entrypoint": "MYCELIUM_DEVICE_LAB_HOST=10.100.155.32 MYCELIUM_DEVICE_LAB_STATE_ROOT=/tmp/mycelium-device-lab-final-47492 node scripts/interactive-multibrowser-e2e.mjs",
+  "explicit_remaining_gaps": [
+    "operator-host and worker-device CA installation not executed",
+    "stock-browser trust-store verification not executed",
+    "two independent physical devices not exercised",
+    "production network path not exercised"
+  ],
+  "local_evidence_only": true,
+  "protocol": "mycelium.device_lab_https_rehearsal.v3",
+  "route_ready": false,
+  "source_manifest": {
+    "aggregate_sha256": "0475f858ffa9b3db474b28f4e9efd5ba579cb31a3b4405f27234b17a653c7231",
+    "algorithm": "sha256",
+    "base_commit": "907a94f2d1e877bbd2c55bc11e867c8a38b659a9",
+    "branch": "integration/mycelium-real-demo",
+    "excluded_self_referential_artifacts": [
+      "docs/automation/2026-07-20-device-lab-https-rehearsal.json",
+      "docs/automation/2026-07-20-real-frontend-browser-evidence.json"
+    ],
+    "files": [
+      {
+        "path": "docs/automation/2026-07-19-two-device-ui-test-handover.md",
+        "sha256": "9bb57f31d5a47954639660993990858bce2e9bbf8d63b6e3eeccc82fd4fd04c6"
+      },
+      {
+        "path": "docs/interactive-browser-swarm.md",
+        "sha256": "cdaef436236c0be031dae42377bcc3570769fd47e99aa87894331bc11a14c466"
+      },
+      {
+        "path": "mycelium_demo/cli.py",
+        "sha256": "d4f73d037ba8f53202af18373e971fdcfcf1c9dd91cb17be0866408dbdbcad08"
+      },
+      {
+        "path": "mycelium_demo/device_lab.py",
+        "sha256": "779ade66462b4c6d4245f5a4c7ac2fe0984e297e57b5bedac73f4764fa4cf219"
+      },
+      {
+        "path": "mycelium_interactive/runtime.py",
+        "sha256": "ea7e1dbe02cdb1518e38c23ea7253df0f99c11cdc04488495859249e01798773"
+      },
+      {
+        "path": "mycelium_interactive/server.py",
+        "sha256": "0c6c418edda722c8c5ac697914410e8236280ea830fe921b8897708ca6433241"
+      },
+      {
+        "path": "mycelium_interactive/static/index.html",
+        "sha256": "d95dc9b17c6b92df921456ce11266d2b3c441921360f40ba62c7aa9d661707fe"
+      },
+      {
+        "path": "mycelium_interactive/static/interactive.js",
+        "sha256": "e180b350fe34aca86da86d696ba854750565c85a2e03aa09cfc3ca72d8f9b2ab"
+      },
+      {
+        "path": "mycelium_interactive/swarm.py",
+        "sha256": "29417c1cc857e70f24d4e04d25e397ece35c96b4c31d6b5ad661c09da41a2138"
+      },
+      {
+        "path": "scripts/interactive_browser_e2e.mjs",
+        "sha256": "1b3a6660f2b5c9f305800f2be78638b809cb37adaef690448c7e4e3801d99256"
+      },
+      {
+        "path": "tests/demo/test_device_lab.py",
+        "sha256": "80a84189c88176a82fa97b9bc43e7246dc2947368fc3bb41ce41bf77776e9d4b"
+      },
+      {
+        "path": "tests/demo/test_serve_cli.py",
+        "sha256": "169d45e7315abdb3457297b8b15cb7a6fcfa3dcf0cc677a04c93cf138fbbf846"
+      },
+      {
+        "path": "tests/interactive/test_runtime.py",
+        "sha256": "17846514af716b2037e999214e68e9cdbeec91540df39f4bf63e3e38476a5279"
+      },
+      {
+        "path": "tests/interactive/test_swarm.py",
+        "sha256": "4bf539c16fe39a0c5e10591c5ff38da089b814579a677ff684293b344895a6c0"
+      },
+      {
+        "path": "ui/web/package.json",
+        "sha256": "9710190fba778206b24001db8bf9f0f9a1e6c5916ab9199c86b7941a4c4f83eb"
+      },
+      {
+        "path": "ui/web/scripts/interactive-multibrowser-e2e.mjs",
+        "sha256": "97f0aea8ba6b08c862a893213dd74c7a339a19827f35ab6a01e019811640db83"
+      }
+    ]
+  },
+  "tailscale_required": false
+}
