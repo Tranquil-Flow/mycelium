@@ -744,8 +744,13 @@ class DemoApp:
         existing ``relocate_authority``), then the same route binding as a fresh start runs.  Any failure
         closes the relay and leaves the swarm exactly as it was.
         """
-        if self.installation_role!='owner' or self.public_relay is not None:
+        if self.installation_role!='owner':
             raise DemoError('network_requires_fresh_owner')
+        if self.public_relay is not None:
+            # A relay whose window ran out closed itself but is still attached: the same Start reopens it (V1.2 D4).
+            # One that is still running is not started a second time.
+            if self.public_relay.status().get('state')!='stopped':raise DemoError('network_requires_fresh_owner')
+            self.public_relay.close();self.public_relay=None
         external=body.get('provider')=='external'
         _base={'relay_acknowledged','max_seconds'}
         shape_ok=(_base|{'provider','public_origin','proxy_port'}<=set(body)<=_base|_EXTERNAL_OPTIONAL
@@ -755,7 +760,8 @@ class DemoApp:
             or type(body['max_seconds']) is not int or not 30<=body['max_seconds']<=1800):
             raise DemoError('network_consent_required')
         existing=bool(self.authority.status().get('swarm_created'))
-        if existing and getattr(self,'local_contributor',None) is not None:
+        if (existing and getattr(self,'local_contributor',None) is not None
+                and not self._external_origin_unchanged(body)):
             raise DemoError('network_stop_local_contributor_required')
         from . import endpoint_recovery
         relay=self._new_relay(self.root/'public-relay',body)
@@ -788,6 +794,19 @@ class DemoApp:
             self.public_relay=None
             relay.close();raise
 
+    def _external_origin_unchanged(self,spec):
+        """True when an external relay comes back on the address the retained authority already answers on.
+
+        Nothing is relocated then, so the owner's own contributor need not be stopped (V1.2 D4).  Any other
+        address keeps ``network_stop_local_contributor_required``.
+        """
+        if spec.get('provider')!='external':return False
+        try:
+            from .public_relay import validate_external_origin
+            configured=self.authority._network_configuration()
+            return configured is not None and configured['public_origin']==validate_external_origin(spec.get('public_origin'))
+        except Exception:return False
+
     def _new_relay(self,root,spec):
         """A not-yet-started relay for a validated request body; bad owner-chosen values are bounded codes."""
         from .public_relay import TemporaryHttpsRelay
@@ -802,9 +821,13 @@ class DemoApp:
         return relay
 
     def _relay_is_serving(self):
-        """True while an owner run is active: the external relay may extend itself only then (V1.1 e)."""
+        """True while an owner run is active or a swarm is published: the external relay may extend itself only then (V1.1 e, V1.2 D4)."""
         run=getattr(self,'owner_run',None)
-        return run is not None and run.active() is True
+        if run is not None and run.active() is True:return True
+        # A published swarm's listing points at this relay: keep it up (bounded by the same renewal cap) while idle.
+        publisher=getattr(self,'swarm_publisher',None)
+        state=getattr(publisher,'state',None)
+        return isinstance(state,dict) and state.get('enabled') is True
 
     @staticmethod
     def _free_seed_port(avoid=None):
@@ -1374,6 +1397,7 @@ class DemoApp:
                 for m in coordinator.members()]}
         from .run_model import document as run_model_document
         from .adaptive_owner import adaptive_status, adaptive_publication
+        owner_run=_demo_status(self,'owner')
         return {'label':'macOS A13 hackathon demo','role':'not_yet_serving',
                 'model_contract':asdict(self.run_model_contract()),
                 'run_model':run_model_document(self.root, swarm_rows=self.swarm_memory_rows()),
@@ -1392,18 +1416,31 @@ class DemoApp:
                 'priority_apps':_priority_apps_status(self),
                 'idle_energy':self._idle_link().status(),
                 'sharing':_sharing_status(self),'relay_wait':self._relay_wait_status(),
-                'owner_run':_demo_status(self,'owner'),'demo_target':_demo_status(self,'target'),
+                'owner_run':owner_run,'demo_target':_demo_status(self,'target'),
                 'chat':_demo_status(self,'chat'),'swarm':_swarm_status(self),
                 'placement':_placement_status(self),
-                'serving':self._serving_block(),'peer_liveness':_peer_liveness(),
+                'serving':self._serving_block(owner_run),'peer_liveness':_peer_liveness(),
                 'test_seams_active':_test_seam_offset(self) is not None,
                 'test_seams':_test_seams.status(_test_seam_offset(self))}
 
-    def _serving_block(self):
+    def _serving_block(self,owner_run=None):
         wait=self._relay_wait_status()
         if wait is not None:
             return {'state':'waiting_for_relay','route_ready':False,'members_joined':wait['members_joined'],
                     'next_action':'Start the public relay so the joined Macs can serve.'}
+        # PV30: follow the owner run and its route readiness (was a constant).
+        run=owner_run if isinstance(owner_run,dict) else {}
+        state=run.get('state')
+        if state=='serving' and run.get('route_ready') is True and run.get('registry_origin'):
+            # route_ready is the qualifier's own claim carried by the owner run, never a literal here (claim boundary).
+            return {'state':'serving','route_ready':run.get('route_ready') is True,'next_action':'Open the chat.'}
+        if state in {'running','serving'}:
+            return {'state':'starting','route_ready':False,'next_action':'The route is being prepared.'}
+        if state in {'stopping','failing'}:
+            return {'state':'stopping','route_ready':False,'next_action':'The run is stopping.'}
+        if state=='failed':
+            return {'state':'failed','route_ready':False,'error_code':run.get('error_code'),
+                    'next_action':'Press Start to run again.'}
         return {'state':'not_yet_serving','route_ready':False,
                 'next_action':'Native route preparation and exact model execution approval required.'}
 
@@ -1422,6 +1459,21 @@ class DemoApp:
             apply_first_consent_choice(self, choice)
         return result
 
+    def test_seams_enabled(self):
+        """True only on a joined Mac launched with ``MYCELIUM_A13_TEST_SEAMS=1`` (V1.2 runtime clock seam)."""
+        return (self.installation_role == 'target'
+                and getattr(self.authority, 'test_seams_enabled', False) is True)
+
+    def _set_test_clock_offset(self, body):
+        if not self.test_seams_enabled():
+            raise DemoError('test_seams_unavailable')
+        if not isinstance(body, dict) or set(body) != {'offset_seconds'}:
+            raise DemoError('test_seam_offset_invalid')
+        try:
+            return self.authority.set_test_clock_offset(body['offset_seconds'])
+        except ValueError as error:
+            raise DemoError(str(error)) from None
+
     def _action(self, path, body):
         with self.guard:
             if self.closed.is_set(): raise DemoError('application_closed')
@@ -1431,6 +1483,8 @@ class DemoApp:
             if path == '/api/leave':
                 from .member_leave import leave_action
                 return leave_action(self, body)
+            if path == '/api/test-seams/clock-offset':
+                return self._set_test_clock_offset(body)
             from .adaptive_owner import ADAPTIVE_ROUTES, adaptive_action
             if path in ADAPTIVE_ROUTES:
                 return adaptive_action(self, path, body)
@@ -1537,10 +1591,10 @@ class DemoApp:
                     or body['relay_acknowledged'] is not True
                     or type(body['max_seconds']) is not int or not 30<=body['max_seconds']<=1800):
                     raise DemoError('network_consent_required')
-                if getattr(self,'local_contributor',None) is not None:
+                spec={**self._saved_external_address(),**body} if external else body
+                if getattr(self,'local_contributor',None) is not None and not self._external_origin_unchanged(spec):
                     raise DemoError('network_stop_local_contributor_required')
                 from .endpoint_recovery import relocate_authority
-                spec={**self._saved_external_address(),**body} if external else body
                 if external and not {'public_origin','proxy_port'}<=set(spec):raise DemoError('relay_origin_invalid')
                 fresh=self._new_relay(self.root,spec) if external else None  # validated before the old relay is touched
                 if self.public_relay is not None:
@@ -2027,6 +2081,10 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_value(status,raw,content_type=kind,extra={'Content-Security-Policy':CSP})
     def do_POST(self):
         if not self.base_guard(): return
+        if self.path == '/api/test-seams/clock-offset':
+            # V1.2 runtime clock seam: the route exists only on a joined Mac launched with the gate open, loopback only.
+            if not self.app.test_seams_enabled(): self.fail(404,'not_found'); return
+            if self.client_address[0] not in {'127.0.0.1','::1'}: self.fail(403,'loopback_only'); return
         if self.path.startswith('/chat/'):
             if self.headers.get('Transfer-Encoding') or len(self.headers.get_all('Content-Length',[])) != 1:
                 self.fail(400,'framing_rejected'); return

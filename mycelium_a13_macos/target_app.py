@@ -21,6 +21,8 @@ class TargetApplication:
     def __init__(self, root, *, _test_peer_factory=None):
         # A13 gate test seam (inert unless MYCELIUM_A13_TEST_SEAMS=1 and an offset is set; see a13_test_seams).
         self.test_clock_offset_seconds = _seams.clock_offset_seconds() if self.HONOURS_TEST_CLOCK_SEAM else None
+        #: Whether the gate was open at LAUNCH: only then may the offset be changed at runtime (V1.2).
+        self.test_seams_enabled = bool(self.HONOURS_TEST_CLOCK_SEAM and _seams.gate_open())
         factory = _test_peer_factory or RemoteMacMember
         if self.test_clock_offset_seconds is None:
             self.peer = factory(root)
@@ -29,6 +31,19 @@ class TargetApplication:
             self.peer = factory(root, clock=_seams.member_clock())
         self.capability = None
         self._runtime = None
+
+    def set_test_clock_offset(self, offset):
+        """Runtime form of the clock-skew seam (``None`` clears); only if the gate was open at launch."""
+        if not self.test_seams_enabled:
+            raise ValueError('test_seams_unavailable')
+        value = _seams.checked_offset(offset)
+        if value is None:
+            self.peer._clock_source = time.time
+        else:
+            self.peer._clock_source = lambda: time.time() + value
+            _seams.announce(value)
+        self.test_clock_offset_seconds = value
+        return _seams.status(value)
 
     @property
     def member(self):

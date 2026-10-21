@@ -171,7 +171,7 @@ From gentlest to most final:
 | Stop this Mac serving, keep everything | **Stop serving now** (Adaptive sharing card) | This Mac takes no new work and frees model memory. **Allow serving again** resumes. |
 | Pause, keep identity | **Stop & retain private state** | Membership renewal pauses. **Start / reconnect** resumes with the same identity. |
 | Close the app | **Quit launcher** | The app exits and removes its temporary launch page. Reopening makes a new browser authorization. |
-| Leave a swarm | **Withdraw standing consent** (joined Mac) or **Revoke this Mac** (needs its checkbox) | Revoke ends membership. It is different from deleting local files. |
+| Leave a swarm | **Leave smoothly** or **Leave now** (joined Mac), or **Revoke this Mac** (owner, needs its checkbox) | A joined Mac that leaves stops serving and withdraws its consent; the owner is told (smooth leave) or sees it drop out. A Mac that left can join the same swarm again with a **new join code**. Revoke ends membership. It is different from deleting local files. |
 | Uninstall | Quit, then run the app's installer with `--uninstall` | Removes the app link and installed version. Identity and state **stay** unless you add `--delete-identity-and-state`. |
 
 Uninstall example (the executable inside the app link):

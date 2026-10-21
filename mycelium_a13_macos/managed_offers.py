@@ -121,6 +121,7 @@ class ManagedProvisioningMailbox(ManagedControlMailbox):
             with self._offer_connection() as db:
                 db.execute('BEGIN IMMEDIATE')
                 db.execute('DELETE FROM managed_stage_offers WHERE expires<=?',(now,))
+                self._supersede_older_identity(db,binding)
                 _require(db.execute('SELECT 1 FROM managed_stage_offers WHERE node_id=?',
                     (target['node_id'],)).fetchone() is None,'offer_already_pending')
                 count,total=db.execute('SELECT count(*),coalesce(sum(length(archive)),0) FROM managed_stage_offers').fetchone()
@@ -128,6 +129,30 @@ class ManagedProvisioningMailbox(ManagedControlMailbox):
                 db.execute('INSERT INTO managed_stage_offers (node_id,offer_id,expires,metadata,archive) VALUES (?,?,?,?,?)',
                     (target['node_id'],offer['offer_id'],offer['expires_at'],json.dumps(offer,sort_keys=True),archive))
             return dict(offer)
+
+    @staticmethod
+    def _supersede_older_identity(db,binding):
+        """Replace a live offer that an OLDER identity of the same node published (V1.2 D1).
+
+        A member app restart is a re-admission (newer generation and incarnation).  The offer bound to the old identity
+        can no longer be read, cleaned or retired by anyone, so it would block the node until its TTL.  It is recorded
+        in the bounded history as ``superseded`` -- never as a cleanup acknowledgement -- and a full history still
+        fails closed.  The same identity, or a newer one than the publisher's, keeps ``offer_already_pending``.
+        """
+        row=db.execute('SELECT metadata,ack FROM managed_stage_offers WHERE node_id=?',(binding['target_node_id'],)).fetchone()
+        if row is None:return
+        stale=json.loads(row[0])
+        if not (type(stale.get('membership_generation')) is int
+                and stale['membership_generation']<binding['membership_generation']
+                and stale.get('member_incarnation')!=binding['member_incarnation']):return
+        _require(db.execute('SELECT count(*) FROM managed_stage_history').fetchone()[0]<256,
+            'offer_history_capacity_exhausted')
+        receipt={'offer':stale,'stage_ack':None if row[1] is None else json.loads(row[1]),'cleanup_ack':None,
+            'superseded':True,'superseded_by':{'membership_generation':binding['membership_generation'],
+            'member_incarnation':binding['member_incarnation']}}
+        db.execute('INSERT INTO managed_stage_history (offer_id,receipt) VALUES (?,?)',
+            (stale['offer_id'],json.dumps(receipt,sort_keys=True)))
+        db.execute('DELETE FROM managed_stage_offers WHERE node_id=?',(binding['target_node_id'],))
 
     def retire_offer(self,offer):
         """Owner-local retirement after exact target-confirmed cleanup only.

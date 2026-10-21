@@ -153,6 +153,7 @@ def start_compile(app,*,acknowledged):
     doc=None if context is None else context.observations
     if context is None or doc is None:raise ValueError('two_distinct_hosts_required')
     node_ids=_compile_hosts(context,doc)
+    with app.guard:_reap_retired_route_locked(app)
     if getattr(app,'_chain_compile_state',None) is not None:raise ValueError('compiler_already_started')
     # Current local source, consent and current members must still bind.
     if app._resource_check() is not None:raise ValueError('compiler_resource_policy_denied')
@@ -315,14 +316,24 @@ def start_serving(app,*,proposal,acknowledged):
         listener.bind(('127.0.0.1',0));port=listener.getsockname()[1]
     # The canonical runner independently enforces the dynamic/protected-port guard.
     app._chain_activation_event=threading.Event()
+    # Bind the run now: by the time the route's close fails the owner teardown may already have given up waiting
+    # (rebuild_stop_timeout) and forgotten the observation context.
+    workflow=app._chain_workflow
+    epoch=getattr(app,'_chain_epoch',0)
+    run_id=getattr(getattr(app,'_observation_context',None),'run_id',None)
     def serve():
-        try:app._chain_workflow.run(approval=app._chain_approval,port=port,
+        try:workflow.run(approval=app._chain_approval,port=port,
             activation_event=app._chain_activation_event)
         except Exception as error:
-            # Keep the original cause private; public workflow codes stay bounded.
-            root=_private_directory(app.root/'chain-runs'/app._observation_context.run_id,create=True)
-            _atomic_private_json(root/'serve-error.private.json',{
-                'exception_type':type(error).__name__,'traceback':traceback.format_exc()})
+            # Keep the original cause private; public workflow codes stay bounded. Never raise from here.
+            try:
+                if isinstance(run_id,str) and run_id:
+                    root=_private_directory(app.root/'chain-runs'/run_id,create=True)
+                    _atomic_private_json(root/'serve-error.private.json',{
+                        'exception_type':type(error).__name__,'traceback':traceback.format_exc()})
+            except Exception:pass
+        finally:
+            _mark_retired_route(app,workflow,epoch,run_id)
     app._chain_serving_thread=threading.Thread(target=serve,name='a13-chain-serving',daemon=True)
     app._chain_serving_thread.start()
     return {'state':'starting','registry_origin':f'http://127.0.0.1:{port}','route_ready':False}
@@ -349,6 +360,37 @@ def activate_serving(app,*,proposal,acknowledged):
 
 _CHAIN_FIELDS=('_chain_compile_state','_chain_compile_thread','_chain_workflow','_chain_approval',
                '_chain_serving_thread','_chain_activation_event')
+
+
+def _mark_retired_route(app,workflow,epoch,run_id):
+    """Terminal path of a serving thread whose run was already retired by ``stop_serving``.
+
+    ``stop_serving`` refuses with ``rebuild_stop_timeout`` and leaves the state while a thread still runs (a live route
+    is never forgotten); when that thread ends later (e.g. the route close finishing ``cleanup_unproven``) nothing else
+    would clear it, and every next start answered ``compiler_already_started``. The serving worker never takes
+    ``app.guard`` (a status read must never wait on it), so it only leaves a marker; ``start_compile`` reaps the retired
+    run under the guard. A run that is still current is left to its owner teardown, so its status stays reportable.
+    """
+    try:
+        if getattr(app,'_chain_epoch',0)==epoch or getattr(app,'_chain_workflow',None) is not workflow:return
+        app._chain_retired_route=(workflow,epoch,run_id)     # one attribute store: atomic, no lock needed
+    except Exception:pass
+
+
+def _reap_retired_route_locked(app):
+    """Caller holds ``app.guard``. Forget a retired run whose serving thread has ended (see ``_mark_retired_route``)."""
+    marker=getattr(app,'_chain_retired_route',None)
+    if marker is None:return
+    workflow,epoch,run_id=marker
+    thread=getattr(app,'_chain_serving_thread',None)
+    if getattr(app,'_chain_workflow',None) is not workflow or getattr(app,'_chain_epoch',0)==epoch:
+        app._chain_retired_route=None; return
+    if thread is not None and thread.is_alive():return
+    if isinstance(run_id,str) and run_id:
+        try:(app.root/'chain-runs'/run_id/'compile-complete.private.json').unlink(missing_ok=True)
+        except OSError:pass
+    for name in _CHAIN_FIELDS:setattr(app,name,None)
+    app._chain_retired_route=None
 
 
 def stop_serving(app,*,timeout=30.0):
