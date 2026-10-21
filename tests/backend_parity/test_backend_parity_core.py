@@ -326,3 +326,92 @@ def test_verdict_is_fail_partial_pass_or_pass() -> None:
     assert bp.route_verdict({"H": passed, "Q0": passed, "N": passed, "G": passed, "P": passed}) == "pass"
     # a required gate that was not evaluated can never yield a pass
     assert bp.route_verdict({"H": skipped, "Q0": passed, "N": passed, "G": passed, "P": passed}) == "partial_pass"
+
+
+# --------------------------------------------------------------------------- calibration
+
+
+def _h_row(name: str, **over) -> dict:
+    metrics = {
+        "top1_agreement": 1.0,
+        "logits_cosine_min": 1 - 1e-12,
+        "logits_max_abs_delta_top": 2e-5,
+        "kl_mean": 1e-12,
+        "kl_max": 1e-11,
+        "hop_cosine_min": 1 - 1e-12,
+        "hop_rel_l2_max": 1.5e-6,
+        "activation_abs_max": 300.0,
+    }
+    metrics.update(over)
+    return {"name": name, "metrics": metrics}
+
+
+def _q_row(name: str, **over) -> dict:
+    metrics = {"top1_agreement": 0.995, "topk_overlap_mean": 0.97, "logits_cosine_min": 0.9995, "kl_mean": 1e-3, "kl_max": 4e-3}
+    metrics.update(over)
+    return {"name": name, "metrics": metrics}
+
+
+def _calibrate(h, q, **kw):
+    return bp.calibrate_policy(
+        bp.default_policy_v2(),
+        h_samples=h,
+        q_samples=q,
+        context={"calibrated_on": "mac-node", "date": "2026-10-21"},
+        policy_id="calibrated-test",
+        **kw,
+    )
+
+
+def test_calibration_tightens_h_to_measured_noise_times_margin_and_stays_provisional() -> None:
+    policy = _calibrate([_h_row("a"), _h_row("b", logits_max_abs_delta_top=4e-5)], [_q_row("a"), _q_row("b", kl_mean=2e-3)])
+    h = policy["gates"]["H"]["thresholds"]
+    assert h["logits_max_abs_delta_top"]["value"] == pytest.approx(4e-4)
+    assert h["top1_agreement"]["value"] == 1.0
+    assert 1 - 1e-6 < h["logits_cosine_min"]["value"] < 1 - 1e-9
+    assert h["hop_rel_l2_max"]["value"] == pytest.approx(1.5e-5)
+    q = policy["gates"]["Q0"]["thresholds"]
+    assert q["kl_mean"]["value"] == pytest.approx(5e-3)  # 3 x 2e-3 = 6e-3 is looser than the prior, so the prior holds
+    assert policy["status"] == "provisional" and policy["frozen_at"] is None
+    assert policy["calibration"]["calibrated_on"] == "mac-node"
+    assert policy["calibration"]["samples"]["H"] == ["a", "b"]
+    assert policy["policy_digest"] == bp.policy_digest(policy)
+
+
+def test_calibrated_thresholds_are_never_looser_than_the_prior_when_legit_samples_pass() -> None:
+    prior = bp.validate_policy(bp.default_policy_v2())
+    policy = _calibrate([_h_row("a", kl_mean=3e-6)], [_q_row("a")])
+    for gate in ("H", "Q0"):
+        for metric, spec in policy["gates"][gate]["thresholds"].items():
+            base = prior["gates"][gate]["thresholds"][metric]
+            if spec["op"] == "<=":
+                assert spec["value"] <= base["value"] + 1e-18
+            else:
+                assert spec["value"] >= base["value"] - 1e-18
+
+
+def test_every_legit_sample_passes_its_own_calibrated_gate() -> None:
+    h = [_h_row("a"), _h_row("b", logits_max_abs_delta_top=3e-5, hop_rel_l2_max=2e-6)]
+    q = [_q_row("a"), _q_row("b", top1_agreement=0.99, kl_mean=2e-3)]
+    policy = _calibrate(h, q)
+    for row in h:
+        assert all(c["pass"] for c in bp.evaluate_thresholds(row["metrics"], policy["gates"]["H"]["thresholds"]))
+    for row in q:
+        assert all(c["pass"] for c in bp.evaluate_thresholds(row["metrics"], policy["gates"]["Q0"]["thresholds"]))
+
+
+def test_a_legit_sample_that_violates_the_prior_relaxes_and_is_flagged() -> None:
+    q = [_q_row("a", top1_agreement=0.97)]
+    policy = _calibrate([_h_row("a")], q)
+    note = policy["calibration"]["per_metric"]["Q0"]["top1_agreement"]
+    assert note["prior_exceeded"] is True
+    assert policy["gates"]["Q0"]["thresholds"]["top1_agreement"]["value"] <= 0.97
+
+
+def test_calibration_requires_samples_and_complete_metrics() -> None:
+    with pytest.raises(bp.BackendParityError, match="parity_calibration_empty"):
+        _calibrate([], [_q_row("a")])
+    incomplete = _h_row("a")
+    del incomplete["metrics"]["kl_mean"]
+    with pytest.raises(bp.BackendParityError, match="parity_calibration_metric_missing"):
+        _calibrate([incomplete], [_q_row("a")])

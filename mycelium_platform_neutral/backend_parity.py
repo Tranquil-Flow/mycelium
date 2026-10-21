@@ -489,6 +489,100 @@ def route_quantization_class(policy: Mapping[str, Any], representations: Sequenc
     return worst
 
 
+# --------------------------------------------------------------------------- calibration
+
+#: Smallest gap/magnitude a calibrated threshold may be built on (below float noise anyway).
+CALIBRATION_FLOORS = {
+    "logits_cosine_min": 1e-9,  # as 1 - cosine
+    "hop_cosine_min": 1e-9,
+    "kl_mean": 1e-10,
+    "kl_max": 1e-10,
+    "logits_max_abs_delta_top": 1e-5,
+    "hop_rel_l2_max": 1e-7,
+}
+
+
+def _tighten(prior: Mapping[str, Any], samples: Sequence[float], metric: str, margin: float) -> tuple[dict[str, Any], dict[str, Any]]:
+    """One calibrated threshold: the legit worst case times ``margin``, never looser than the
+    prior unless a legitimate sample itself violates the prior (then flagged)."""
+
+    op = prior["op"]
+    prior_value = float(prior["value"])
+    note: dict[str, Any] = {"prior": prior_value, "n": len(samples)}
+    if op == ">=":
+        worst = min(samples)
+        gap = max(1.0 - worst, CALIBRATION_FLOORS.get(metric, 0.0))
+        measured_bound = 1.0 - margin * gap
+        flagged = worst < prior_value
+        value = measured_bound if flagged else max(prior_value, measured_bound)
+        note.update(worst=worst, measured_bound=measured_bound, prior_exceeded=flagged)
+    else:
+        worst = max(samples)
+        measured_bound = margin * max(worst, CALIBRATION_FLOORS.get(metric, 0.0))
+        value = min(prior_value, measured_bound)
+        flagged = worst > prior_value
+        if flagged:
+            value = measured_bound
+        note.update(worst=worst, measured_bound=measured_bound, prior_exceeded=flagged)
+    note["threshold"] = float(value)
+    return {"op": op, "value": float(value)}, note
+
+
+def calibrate_policy(
+    prior: Mapping[str, Any],
+    *,
+    h_samples: Sequence[Mapping[str, Any]],
+    q_samples: Sequence[Mapping[str, Any]],
+    quantization_class: str = "Q0",
+    h_margin: float = 10.0,
+    q_margin: float = 3.0,
+    n_margin: float = 10.0,
+    context: Mapping[str, Any],
+    policy_id: str,
+) -> dict[str, Any]:
+    """Tighten the provisional priors from MEASURED legitimate spread (still provisional).
+
+    ``h_samples``/``q_samples`` are ``{"name", "metrics"}`` rows of routes that must pass.
+    The gate for ``quantization_class`` is calibrated; the other class keeps its prior.
+    The result stays ``provisional`` and is stamped with ``context`` (host, date, load...).
+    """
+
+    checked = validate_policy(prior)
+    if not h_samples or not q_samples:
+        _reject("parity_calibration_empty")
+    out = copy.deepcopy(checked)
+    notes: dict[str, dict[str, Any]] = {"H": {}, quantization_class: {}, "N": {}}
+    for gate, samples, margin in (("H", h_samples, h_margin), (quantization_class, q_samples, q_margin)):
+        for metric, spec in checked["gates"][gate]["thresholds"].items():
+            values = [float(row["metrics"][metric]) for row in samples if _finite_number(row["metrics"].get(metric))]
+            if len(values) != len(samples):
+                _reject("parity_calibration_metric_missing", f"{gate}.{metric}")
+            new_spec, note = _tighten(spec, values, metric, margin)
+            out["gates"][gate]["thresholds"][metric] = new_spec
+            notes[gate][metric] = note
+    magnitude = [float(row["metrics"]["activation_abs_max"]) for row in h_samples if "activation_abs_max" in row["metrics"]]
+    if magnitude:
+        cap = min(float(checked["gates"]["N"]["thresholds"]["activation_abs_max"]["value"]), n_margin * max(magnitude))
+        out["gates"]["N"]["thresholds"]["activation_abs_max"]["value"] = float(cap)
+        notes["N"]["activation_abs_max"] = {"worst": max(magnitude), "threshold": float(cap), "n": len(magnitude)}
+    out["policy_id"] = policy_id
+    out["status"] = "provisional"
+    out["frozen_at"] = None
+    out["calibration"] = {
+        "basis": "measured legitimate spread, thresholds = worst legit sample x margin, never looser than the plan prior unless a legit sample violates it",
+        "margins": {"H": h_margin, quantization_class: q_margin, "N": n_margin},
+        "calibrated_gates": ["H", quantization_class, "N"],
+        "samples": {
+            "H": [row["name"] for row in h_samples],
+            quantization_class: [row["name"] for row in q_samples],
+        },
+        "per_metric": notes,
+        **dict(context),
+    }
+    out["policy_digest"] = policy_digest(out)
+    return validate_policy(out)
+
+
 # --------------------------------------------------------------------------- corpus
 
 
@@ -640,10 +734,35 @@ def logits_metrics(ref: np.ndarray, test: np.ndarray, params: Mapping[str, Any])
 # --------------------------------------------------------------------------- gates
 
 
+def _nonfinite_count(capture: RouteCapture) -> int:
+    total = 0
+    for case in capture.cases.values():
+        total += int(np.count_nonzero(~np.isfinite(case.logits)))
+        for hop in case.hops.values():
+            total += int(np.count_nonzero(~np.isfinite(hop)))
+    return total
+
+
+def _nonfinite_result(gate: str, spec: Mapping[str, Any], count: int) -> dict[str, Any]:
+    """A route that produced NaN/inf fails its gate (it must not crash the gate)."""
+
+    metrics = {"nonfinite_input_count": count}
+    return _result(
+        gate,
+        "fail",
+        reason="parity_nonfinite_input: route or reference produced non-finite values",
+        metrics=metrics,
+        checks=evaluate_thresholds(metrics, spec),
+    )
+
+
 def gate_h(route: RouteCapture, monolith: RouteCapture, policy: Mapping[str, Any]) -> dict[str, Any]:
     """Hop/split parity: the actual route against a same-numerics monolith."""
 
     cases = _common_cases(route, monolith)
+    bad = _nonfinite_count(route) + _nonfinite_count(monolith)
+    if bad:
+        return _nonfinite_result("H", policy["gates"]["H"]["thresholds"], bad)
     boundaries = {tuple(sorted(route.cases[c].hops)) for c in cases} | {
         tuple(sorted(monolith.cases[c].hops)) for c in cases
     }
@@ -676,8 +795,11 @@ def gate_q(
     if quantization_class not in QUANTIZATION_CLASSES:
         _reject("parity_gate_class_invalid", str(quantization_class))
     cases = _common_cases(route, oracle)
-    metrics = logits_metrics(_stack_logits(oracle, cases), _stack_logits(route, cases), policy["metric_params"])
     gate = f"Q{quantization_class[1:]}"
+    bad = _nonfinite_count(route) + _nonfinite_count(oracle)
+    if bad:
+        return _nonfinite_result(gate, policy["gates"][gate]["thresholds"], bad)
+    metrics = logits_metrics(_stack_logits(oracle, cases), _stack_logits(route, cases), policy["metric_params"])
     checks = evaluate_thresholds(metrics, policy["gates"][gate]["thresholds"])
     status = "pass" if all(check["pass"] for check in checks) else "fail"
     return _result(gate, status, metrics=metrics, checks=checks)
@@ -1008,6 +1130,8 @@ def summarize_battery(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     problems = []
     for row in rows:
         kind = row.get("kind")
+        if kind == "observation":
+            continue
         if kind not in ("defect", "control"):
             _reject("parity_battery_invalid", str(row.get("name")))
         failed = row["verdict"] == "fail"
@@ -1017,6 +1141,7 @@ def summarize_battery(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             problems.append({"name": row["name"], "problem": "legitimate_noise_rejected"})
     defects = [r for r in rows if r["kind"] == "defect"]
     controls = [r for r in rows if r["kind"] == "control"]
+    observations = [r for r in rows if r["kind"] == "observation"]
     return {
         "protocol": BATTERY_PROTOCOL,
         "defects_total": len(defects),
@@ -1025,6 +1150,8 @@ def summarize_battery(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "controls_passed": sum(1 for r in controls if r["verdict"] != "fail"),
         "all_defects_fail": all(r["verdict"] == "fail" for r in defects),
         "all_controls_pass": all(r["verdict"] != "fail" for r in controls),
+        "observations_total": len(observations),
+        "observations_detected": sum(1 for r in observations if r["verdict"] == "fail"),
         "problems": problems,
         "rows": [dict(r) for r in rows],
     }
