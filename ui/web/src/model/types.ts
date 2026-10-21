@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 export const EVIDENCE_SNAPSHOT_PROTOCOL = 'mycelium.ui_evidence_snapshot.v1' as const;
 
 export type EvidenceProvenance =

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 import canonicalManualProvisioningRoute from '../../../../contracts/compatibility-fixtures/manual-provisioning-route-v1.json';
 import canonicalProvisioningAudit from '../../../../contracts/compatibility-fixtures/provisioning-audit-v1.json';

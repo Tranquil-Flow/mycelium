@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
 import re
@@ -36,27 +37,67 @@ def production_source_files() -> list[Path]:
         if not path.name.startswith("test_")
         and not path.name.endswith(".test.ts")
         and not path.name.endswith(".test.tsx")
+        and "e2e" not in path.parts
+        and not ("src" in path.parts and "test" in path.parts[path.parts.index("src") + 1 :])
     ]
 
 
-def test_ui_contains_no_mutating_http_calls() -> None:
+def test_mutating_http_calls_are_confined_to_typed_product_action_clients() -> None:
+    allowed_clients = {
+        (UI_ROOT / "web" / "src" / "features" / "deviceLab" / "deviceLabClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "inference" / "deploymentClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "inference" / "requestClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "liveRoute" / "deploymentActivation.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "membership" / "membershipClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "models" / "modelCapacityRefresh.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "models" / "modelPreparation.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "swarm" / "SwarmClient.ts").resolve(),
+    }
     forbidden = re.compile(
         r"method\s*:\s*['\"](?:POST|PUT|PATCH|DELETE)['\"]|"
         r"['\"](?:POST|PUT|PATCH|DELETE)['\"]",
         re.I,
     )
-    for path in production_source_files():
-        assert not forbidden.search(path.read_text(encoding="utf-8")), path
+    write_surfaces = {
+        path.resolve()
+        for path in production_source_files()
+        if forbidden.search(path.read_text(encoding="utf-8"))
+    }
+    assert write_surfaces == allowed_clients
 
 
-def test_browser_network_is_confined_to_read_only_source_transport() -> None:
-    allowed_transport = UI_ROOT / "web" / "src" / "data" / "observatorySource.ts"
+def test_browser_network_is_confined_to_read_only_source_and_typed_action_clients() -> None:
+    allowed_transports = {
+        (UI_ROOT / "web" / "src" / "data" / "observatorySource.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "deviceLab" / "deviceLabClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "governance" / "governanceReadiness.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "inference" / "deploymentClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "inference" / "requestClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "liveRoute" / "m17ModelOperation.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "liveRoute" / "m21Heterogeneous.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "liveRoute" / "m22Release.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "liveRoute" / "m23Kv.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "liveRoute" / "deploymentActivation.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "membership" / "membershipClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "models" / "artifactAcquisition.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "models" / "modelCapacityRefresh.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "models" / "modelPreparation.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "observatory" / "live" / "productGatewaySession.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "productEvidence" / "source.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "swarm" / "SwarmClient.ts").resolve(),
+        # Page-lifecycle gate over globalThis.fetch for background reads; it owns no endpoint (asserted below).
+        (UI_ROOT / "web" / "src" / "app" / "backgroundFetch.ts").resolve(),
+    }
     forbidden_browser_writes = ("WebSocket", "XMLHttpRequest", "sendBeacon", "WebTransport")
     for path in production_source_files():
         text = path.read_text(encoding="utf-8")
         assert all(surface not in text for surface in forbidden_browser_writes), path
-        if re.search(r"\bfetch\s*\(|\bEventSource\s*\(", text):
-            assert path.resolve() == allowed_transport.resolve(), path
+        # Direct calls of the background-read gate count as transport use too.
+        if re.search(r"\bfetch\s*\(|\bbackgroundFetch\s*\(|\bEventSource\s*\(", text):
+            assert path.resolve() in allowed_transports, path
+    gate = (UI_ROOT / "web" / "src" / "app" / "backgroundFetch.ts").read_text(encoding="utf-8")
+    assert not re.search(r"['\"`]/(?:api|__mycelium|v1)\b", gate), "the background-read gate must not own an endpoint"
+    assert "globalThis.fetch(" in gate and "XMLHttpRequest" not in gate
 
 
 def test_elk_remains_lazy_and_confined_to_graph_layout() -> None:

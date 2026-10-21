@@ -1,54 +1,105 @@
-import { useEffect, useState } from 'react';
-import { AppShell, type ObservatoryView } from './components/AppShell';
+// SPDX-License-Identifier: AGPL-3.0-only
+import { useEffect, useMemo, useState } from 'react';
+import { applicationSurface, canonicalizeApplicationPath } from './app/consumerRoute';
+import { ConsumerLiveRoute } from './features/consumer/ConsumerLiveRoute';
+import { ProductFeatureSlot } from './app/ProductFeatureSlot';
+import { createInitialProductState, type ProductState } from './app/ProductState';
+import {
+  createProductFeatureRegistry,
+  parseProductRoute,
+  productRouteHref,
+  type ProductFeatureRegistry,
+  type ProductRouteId,
+} from './app/navigation';
+import { FixtureInferenceClient } from './app/fixtureInferenceClient';
+import { ProductNodesWorkspace } from './app/ProductNodesWorkspace';
+import { AppShell } from './components/AppShell';
 import {
   createObservatorySource,
+  type LiveObservatorySourceState,
   type ObservatoryDataSource,
   type ObservatorySourceState,
 } from './data/observatorySource';
+import type {
+  LiveObservatoryEventSource,
+  LiveObservatoryEventState,
+} from './data/observatoryEventSource';
 import { EvidenceView } from './views/EvidenceView';
+import { DeviceLabWorkspace } from './features/deviceLab/DeviceLabWorkspace';
+import { RouteExplorerWorkspace } from './features/routeExplorer/RouteExplorer';
+import { ProductInternetNativeProjection } from './features/internetNative/ProductInternetNativeProjection';
+import { InferenceWorkspace } from './features/inference/InferenceWorkspace';
+import { HttpDeploymentRegistryClient } from './features/inference/deploymentClient';
+import { LiveKvStatusPanel } from './features/liveRoute/LiveKvStatusPanel';
+import { LiveRouteWorkspace } from './features/liveRoute/LiveRouteWorkspace';
+import { ConcurrencyLivenessSource } from './features/liveRoute/ConcurrencyLivenessPanel';
+import { M17ModelOperationSourcePanel } from './features/liveRoute/M17ModelOperationSourcePanel';
+import { ModelCatalogControlSource } from './features/models/ModelCatalogControlSource';
+import { ArtifactAcquisitionSource } from './features/models/ArtifactAcquisitionSource';
+import { PreparedDeploymentsSourcePanel } from './features/liveRoute/PreparedDeploymentsSourcePanel';
+import { HttpM15ComparisonClient } from './features/liveRoute/m15Comparison';
+import { EvidenceProvenanceSource } from './features/evidence/EvidenceProvenanceSource';
+import { useProductEvidence } from './features/productEvidence/ProductEvidenceContext';
+import {
+  ProductEvidenceSettings,
+  ProductEvidenceSummary,
+  ProductEvidenceWorkspace,
+  productEvidenceRouteReady,
+} from './features/productEvidence/ProductEvidenceWorkspace';
+import { LifecycleCoveragePanel } from './features/lifecycle/LifecycleBadge';
+import {
+  LIFECYCLE_STATE_ORDER,
+  projectLifecycle,
+} from './features/lifecycle/lifecycleProjection';
+import { SettingsProvider } from './features/settings/SettingsContext';
+import { SettingsWorkspace } from './features/settings/SettingsWorkspace';
+import { GovernanceReadinessSource } from './features/governance/GovernanceReadinessSource';
+import { RecoveryStatusBar } from './features/recovery/RecoveryStatusBar';
+import { A7RecoveryStatusBar, type A7WorkspaceKey } from './features/a7Recovery/A7RecoveryStatusBar';
+import { A7_RECOVERY_ENTITY_ID } from './features/productEvidence/contracts';
 import { IncidentsView } from './views/IncidentsView';
 import { NetworkView } from './views/NetworkView';
 import { PlansView } from './views/PlansView';
+import { preparingFixture } from './test/lifecycleFixtures/recordedSnapshots';
 import './styles.css';
 
+type AppSource = ObservatoryDataSource | LiveObservatoryEventSource;
+type AppSourceState = ObservatorySourceState | LiveObservatoryEventState;
+
 type SourceResult =
-  | { readonly source: ObservatoryDataSource; readonly state: 'loading' }
+  | { readonly source: AppSource; readonly state: 'loading' }
   | {
-      readonly source: ObservatoryDataSource;
+      readonly source: AppSource;
       readonly state: 'ready';
-      readonly sourceState: ObservatorySourceState;
+      readonly sourceState: AppSourceState;
     }
-  | { readonly source: ObservatoryDataSource; readonly state: 'error'; readonly message: string };
+  | { readonly source: AppSource; readonly state: 'error'; readonly message: string };
 
 export interface AppProps {
-  readonly source?: ObservatoryDataSource;
+  readonly source?: AppSource;
+  readonly featureRegistry?: ProductFeatureRegistry;
+  readonly productState?: ProductState;
+  /** Memory-only capability consumed from the Device Lab URL fragment. */
+  readonly deviceLabOperatorToken?: string | null;
 }
 
-const defaultSource = createObservatorySource();
+const defaultSource = createObservatorySource({ source_mode: 'fixture' });
+const emptyFeatureRegistry = createProductFeatureRegistry([]);
 
-const OBSERVATORY_VIEWS: readonly ObservatoryView[] = [
-  'network',
-  'plans',
-  'incidents',
-  'evidence',
-];
-
-function viewFromHash(hash: string): ObservatoryView | null {
-  const candidate = hash.replace(/^#/, '');
-  return OBSERVATORY_VIEWS.includes(candidate as ObservatoryView)
-    ? (candidate as ObservatoryView)
-    : null;
-}
+const liveM15ComparisonClient = new HttpM15ComparisonClient();
+const liveDeploymentRegistryClient = new HttpDeploymentRegistryClient();
+const recordedLifecycleProjections = Object.freeze(
+  LIFECYCLE_STATE_ORDER.map((state) => projectLifecycle(preparingFixture({ state }))),
+);
 
 function sourceErrorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : 'Unknown Observatory source error';
 }
 
-function initialSourceResult(source: ObservatoryDataSource): SourceResult {
+function initialSourceResult(source: AppSource): SourceResult {
   const current = source.getState();
   if (current !== null) return { source, state: 'ready', sourceState: current };
-  if (source.kind !== 'static') return { source, state: 'loading' };
-
+  if (source.source_mode !== 'fixture') return { source, state: 'loading' };
   try {
     const initial = source.loadInitial();
     return initial instanceof Promise
@@ -61,19 +112,19 @@ function initialSourceResult(source: ObservatoryDataSource): SourceResult {
 
 function BundleError({
   message,
-  sourceKind,
+  sourceMode,
 }: {
   readonly message: string;
-  readonly sourceKind: ObservatoryDataSource['kind'];
+  readonly sourceMode: ObservatoryDataSource['source_mode'];
 }) {
   return (
     <section className="bundle-error panel" role="alert">
       <span aria-hidden="true">!</span>
       <div>
         <p className="eyebrow caution">
-          {sourceKind === 'static' ? 'Offline fixture error' : 'Live source error'}
+          {sourceMode === 'fixture' ? 'Offline fixture error' : 'Semantic source error'}
         </p>
-        <h2>Evidence bundle unavailable</h2>
+        <h1>Evidence projection unavailable</h1>
         <p>{message}</p>
         <small>No fallback values were inferred or presented.</small>
       </div>
@@ -81,22 +132,100 @@ function BundleError({
   );
 }
 
-function BundleLoading() {
+function BundleLoading({ sourceMode }: { readonly sourceMode: ObservatoryDataSource['source_mode'] }) {
   return (
     <section className="bundle-error panel" role="status" aria-live="polite">
       <span className="layout-loader" aria-hidden="true" />
       <div>
         <p className="eyebrow">Read-only source</p>
-        <h2>Loading coherent evidence snapshot</h2>
+        <h1>
+          {sourceMode === 'fixture'
+            ? 'Loading coherent evidence snapshot'
+            : 'Loading semantic Observatory snapshot'}
+        </h1>
         <small>No partial generation is rendered.</small>
       </div>
     </section>
   );
 }
 
-export default function App({ source = defaultSource }: AppProps) {
-  const [activeView, setActiveView] = useState<ObservatoryView>(
-    () => viewFromHash(window.location.hash) ?? 'network',
+function isProductEventState(state: AppSourceState): state is LiveObservatoryEventState {
+  return state.source_mode === 'live' && 'projection' in state;
+}
+
+function ProductGatewayProjectionView({ state }: { readonly state: LiveObservatoryEventState }) {
+  const qualification = state.projection.snapshot.qualification;
+  return (
+    <section className="panel semantic-observatory" aria-label="Product gateway Observatory projection">
+      <p className="eyebrow">Privacy-preserving product gateway projection</p>
+      <h1>Live deployment observation</h1>
+      <dl>
+        <div><dt>Generation</dt><dd>{state.generation}</dd></div>
+        <div><dt>Source cursor</dt><dd>{state.source_cursor}</dd></div>
+        <div><dt>Connection</dt><dd>{state.status} · {state.freshness}</dd></div>
+        <div><dt>Request sessions</dt><dd>{state.projection.snapshot.sessions.length}</dd></div>
+        <div><dt>Incidents</dt><dd>{state.projection.incidents.length}</dd></div>
+        <div><dt>Route readiness</dt><dd>{state.route_ready ? 'Accepted physical qualification' : 'Not accepted'}</dd></div>
+      </dl>
+      {qualification === null ? <p role="status">No qualifier-owned evidence is present.</p> : null}
+    </section>
+  );
+}
+
+function SemanticProjectionView({ state }: { readonly state: LiveObservatorySourceState }) {
+  const { snapshot } = state;
+  return (
+    <section className="panel semantic-observatory" aria-label="Semantic Observatory projection">
+      <p className="eyebrow">Privacy-preserving semantic projection</p>
+      <h1>Semantic deployment observation</h1>
+      <dl>
+        <div><dt>Deployment</dt><dd>{snapshot.binding.deployment.id}</dd></div>
+        <div><dt>Model</dt><dd>{snapshot.binding.model.id} · {snapshot.binding.model.revision}</dd></div>
+        <div><dt>Route</dt><dd>{snapshot.binding.route.id} · g{snapshot.binding.route.generation}</dd></div>
+        <div><dt>Challenge</dt><dd>{snapshot.route_challenge.status}</dd></div>
+        <div><dt>Request lifecycle</dt><dd>{snapshot.request_lifecycle.state}</dd></div>
+        <div><dt>Conflicts</dt><dd>{snapshot.conflicts.length}</dd></div>
+      </dl>
+      {!state.live_qualified && (
+        <p role="status">Not live: {state.qualification_reasons.join(', ')}</p>
+      )}
+    </section>
+  );
+}
+
+export default function App(props: AppProps) {
+  const [surface, setSurface] = useState(canonicalizeApplicationPath);
+  useEffect(() => {
+    const synchronize = () => setSurface(canonicalizeApplicationPath());
+    window.addEventListener('hashchange', synchronize);
+    window.addEventListener('popstate', synchronize);
+    return () => {
+      window.removeEventListener('hashchange', synchronize);
+      window.removeEventListener('popstate', synchronize);
+    };
+  }, []);
+  if (surface === 'consumer') return <ConsumerLiveRoute />;
+  if (surface === 'not-found') return <main><h1>Page not found</h1><a href="/">Return to Mycelium</a></main>;
+  return <OperatorApp {...props} />;
+}
+
+function OperatorApp({
+  source = defaultSource,
+  featureRegistry = emptyFeatureRegistry,
+  productState,
+  deviceLabOperatorToken = null,
+}: AppProps) {
+  const fixtureInferenceClient = useMemo(() => source.source_mode === 'live' ? undefined : new FixtureInferenceClient(), [source]);
+  const productEvidence = useProductEvidence();
+  const effectiveProductState =
+    productState !== undefined && productState.source_mode === source.source_mode
+      ? productState
+      : createInitialProductState({
+          source_mode: source.source_mode,
+          now_unix_ms: Date.now(),
+        });
+  const [activeView, setActiveView] = useState<ProductRouteId>(
+    () => parseProductRoute(window.location.hash) ?? 'inference',
   );
   const [sourceResult, setSourceResult] = useState<SourceResult>(() =>
     initialSourceResult(source),
@@ -104,35 +233,51 @@ export default function App({ source = defaultSource }: AppProps) {
 
   useEffect(() => {
     const synchronizeHash = () => {
-      const nextView = viewFromHash(window.location.hash);
+      // A departing operator listener must not rewrite a consumer anchor before
+      // the outer route boundary handles the same history event.
+      if (applicationSurface(window.location.pathname, window.location.hash) !== 'operator') return;
+      const nextView = parseProductRoute(window.location.hash);
       if (nextView === null) {
-        window.history.replaceState(null, '', '#network');
-        setActiveView('network');
+        window.history.replaceState(null, '', productRouteHref('inference'));
+        setActiveView('inference');
         return;
+      }
+      const canonicalHash = productRouteHref(nextView);
+      if (window.location.hash !== canonicalHash) {
+        window.history.replaceState(null, '', canonicalHash);
       }
       setActiveView(nextView);
     };
-
     synchronizeHash();
     window.addEventListener('hashchange', synchronizeHash);
-    return () => window.removeEventListener('hashchange', synchronizeHash);
+    window.addEventListener('popstate', synchronizeHash);
+    return () => {
+      window.removeEventListener('hashchange', synchronizeHash);
+      window.removeEventListener('popstate', synchronizeHash);
+    };
   }, []);
 
   useEffect(() => {
     let active = true;
     let unsubscribe: (() => void) | undefined;
 
-    const acceptState = (nextState: ObservatorySourceState) => {
-      if (active) setSourceResult({ source, state: 'ready', sourceState: nextState });
+    const acceptState = (nextState: AppSourceState) => {
+      if (!active) return;
+      if (nextState.source_mode !== source.source_mode) {
+        setSourceResult({
+          source,
+          state: 'error',
+          message: 'Observatory source_mode/state mismatch',
+        });
+        return;
+      }
+      setSourceResult({ source, state: 'ready', sourceState: nextState });
     };
     const acceptError = (reason: unknown) => {
       if (!active) return;
       const current = source.getState();
-      if (current !== null) {
-        acceptState(current);
-      } else {
-        setSourceResult({ source, state: 'error', message: sourceErrorMessage(reason) });
-      }
+      if (current !== null) acceptState(current);
+      else setSourceResult({ source, state: 'error', message: sourceErrorMessage(reason) });
     };
 
     const current = source.getState();
@@ -162,27 +307,104 @@ export default function App({ source = defaultSource }: AppProps) {
     };
   }, [source]);
 
-  const navigate = (view: ObservatoryView) => {
+  const navigate = (view: ProductRouteId) => {
     setActiveView(view);
-    const nextHash = `#${view}`;
-    if (window.location.hash !== nextHash) {
-      window.history.pushState(null, '', nextHash);
-    }
+    const nextHash = productRouteHref(view);
+    if (window.location.hash !== nextHash) window.history.pushState(null, '', nextHash);
   };
 
-  const renderedSourceResult: SourceResult =
+  const rendered: SourceResult =
     sourceResult.source === source ? sourceResult : { source, state: 'loading' };
+  const unifiedEvidenceReady = productEvidenceRouteReady(productEvidence.visible);
 
   let content;
-  if (renderedSourceResult.state === 'loading') {
-    content = <BundleLoading />;
-  } else if (renderedSourceResult.state === 'error') {
-    content = <BundleError message={renderedSourceResult.message} sourceKind={source.kind} />;
+  if (activeView === 'lab') {
+    content = <>
+      <ProductEvidenceSummary compact />
+      {source.source_mode === 'live' ? <ConcurrencyLivenessSource view="lab" /> : null}
+      <DeviceLabWorkspace operatorToken={deviceLabOperatorToken} />
+      {source.source_mode === 'live' ? <M17ModelOperationSourcePanel view="lab" /> : null}
+    </>;
+  } else if (activeView === 'settings') {
+    content = <>
+      <ProductEvidenceSummary compact />
+      <ProductEvidenceSettings />
+      {source.source_mode === 'live' ? <ConcurrencyLivenessSource view="settings" /> : null}
+      {source.source_mode === 'live' ? <GovernanceReadinessSource /> : null}
+      <SettingsWorkspace workloadClient={source.source_mode === 'live' ? liveM15ComparisonClient : null} deploymentClient={source.source_mode === 'live' ? liveDeploymentRegistryClient : null} />
+      {source.source_mode === 'live' ? <ModelCatalogControlSource /> : null}
+      {source.source_mode === 'live' ? <ArtifactAcquisitionSource view="settings" /> : null}
+    </>;
+  } else if (rendered.state === 'loading') {
+    content = <BundleLoading sourceMode={source.source_mode} />;
+  } else if (rendered.state === 'error') {
+    content = <BundleError message={rendered.message} sourceMode={source.source_mode} />;
+  } else if (activeView === 'inference') {
+    content = (
+      <>
+        <ProductEvidenceSummary compact />
+        {source.source_mode === 'live' ? <ConcurrencyLivenessSource view="inference" /> : null}
+        {source.source_mode === 'live' ? <LiveKvStatusPanel view="inference" freshness={rendered.sourceState.freshness} /> : null}
+        <InferenceWorkspace
+          client={source.source_mode !== 'live' ? fixtureInferenceClient : undefined}
+          externalBlockReason={
+            source.source_mode === 'live' && productEvidence.configured && !unifiedEvidenceReady
+              ? `Inference disabled: ${productEvidence.visible?.reason_code ?? 'unified product evidence is not current and qualified'}`
+              : (source.source_mode !== 'live' || productState !== undefined) &&
+                !effectiveProductState.route_readiness.value
+                ? `Inference disabled: ${effectiveProductState.route_readiness.reasons.join(', ')}`
+                : null
+          }
+        />
+        {source.source_mode === 'live' ? <M17ModelOperationSourcePanel view="inference" /> : null}
+      </>
+    );
+  } else if (rendered.sourceState.source_mode === 'live') {
+    content = productEvidence.configured
+      ? (
+          <>
+            {activeView === 'nodes' ? (
+              <><ProductEvidenceWorkspace view="nodes" /><ConcurrencyLivenessSource view="nodes" /><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /><ArtifactAcquisitionSource view="nodes" /><PreparedDeploymentsSourcePanel view="nodes" hideUnavailable /><M17ModelOperationSourcePanel view="nodes" /></>
+            ) : activeView === 'network' || activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents' ? (
+              <>
+                <ProductEvidenceWorkspace view={activeView} />
+                <LiveRouteWorkspace
+                  view={activeView}
+                  qualification={
+                    isProductEventState(rendered.sourceState)
+                      ? rendered.sourceState.projection.snapshot.qualification
+                      : null
+                  }
+                  freshness={rendered.sourceState.freshness}
+                />
+                {activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents' ? <ArtifactAcquisitionSource view={activeView} /> : null}
+              </>
+            ) : (
+              <ProductEvidenceWorkspace view={activeView} />
+            )}
+          </>
+        )
+      : activeView === 'nodes'
+        ? <><ConcurrencyLivenessSource view="nodes" /><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /><ArtifactAcquisitionSource view="nodes" /></>
+        : isProductEventState(rendered.sourceState)
+          ? activeView === 'network' || activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents'
+            ? (
+              <><LiveRouteWorkspace
+                view={activeView}
+                qualification={rendered.sourceState.projection.snapshot.qualification}
+                freshness={rendered.sourceState.freshness}
+              />{activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents' ? <ArtifactAcquisitionSource view={activeView} /> : null}</>
+              )
+            : <ProductGatewayProjectionView state={rendered.sourceState} />
+          : <SemanticProjectionView state={rendered.sourceState} />;
   } else {
-    const { snapshot, incidents, provisioning } = renderedSourceResult.sourceState.bundle;
+    const { snapshot, incidents, provisioning } = rendered.sourceState.bundle;
     switch (activeView) {
       case 'network':
         content = <NetworkView snapshot={snapshot} />;
+        break;
+      case 'nodes':
+        content = <ProductNodesWorkspace sourceMode="fixture" snapshot={snapshot} provisioning={provisioning} />;
         break;
       case 'plans':
         content = <PlansView snapshot={snapshot} />;
@@ -190,36 +412,105 @@ export default function App({ source = defaultSource }: AppProps) {
       case 'incidents':
         content = <IncidentsView incidents={incidents} />;
         break;
-      case 'evidence':
+      case 'readiness':
         content = (
-          <EvidenceView
-            snapshot={snapshot}
-            incidents={incidents}
-            provisioning={provisioning}
-          />
+          <>
+            <EvidenceView
+              snapshot={snapshot}
+              incidents={incidents}
+              provisioning={provisioning}
+            />
+            <LifecycleCoveragePanel projections={recordedLifecycleProjections} />
+          </>
         );
         break;
     }
   }
 
-  const sourceState =
-    renderedSourceResult.state === 'ready' ? renderedSourceResult.sourceState : null;
-  const scopeLabel =
-    sourceState === null
-      ? source.kind === 'static'
-        ? 'offline fixture'
-        : 'live gateway'
-      : sourceState.bundle.snapshot.source.scenarioName;
+  const sourceState = rendered.state === 'ready' ? rendered.sourceState : null;
+  const acceptedPhysicalLiveReadiness =
+    productState === undefined &&
+    sourceState !== null &&
+    isProductEventState(sourceState) &&
+    sourceState.status === 'connected' &&
+    sourceState.freshness === 'current' &&
+    sourceState.route_ready &&
+    sourceState.projection.snapshot.qualification?.evidence_class === 'physical_qualification' &&
+    (!productEvidence.configured || unifiedEvidenceReady);
+  const renderedProductState: ProductState = acceptedPhysicalLiveReadiness
+    ? {
+        ...effectiveProductState,
+        route_readiness: {
+          value: true,
+          status: 'accepted',
+          authority: 'mycelium_qualification.qualifier:RouteQualificationV1',
+          reasons: [],
+        },
+      }
+    : effectiveProductState;
+  const scopeLabel = (() => {
+    if (activeView === 'lab' && !productEvidence.configured) return 'local browser-stage swarm';
+    if (productEvidence.visible !== null) {
+      const route = productEvidence.visible.snapshot.entities.find(
+        (entity) => entity.kind === 'route',
+      );
+      if (route !== undefined) {
+        const deployment = route.attributes.deployment_id;
+        const model = route.attributes.model_id;
+        if (typeof deployment === 'string' && typeof model === 'string') {
+          return `${deployment} · ${model}`;
+        }
+      }
+    }
+    if (sourceState === null) {
+      if (source.source_mode === 'fixture') return 'offline fixture';
+      if (source.source_mode === 'replay') return 'replay evidence';
+      return 'product gateway';
+    }
+    if ('bundle' in sourceState) return sourceState.bundle.snapshot.source.scenarioName;
+    if (isProductEventState(sourceState)) {
+      return sourceState.projection.snapshot.qualification?.binding.deployment_id ?? 'product gateway';
+    }
+    return sourceState.snapshot.binding.deployment.id;
+  })();
 
   return (
-    <AppShell
-      activeView={activeView}
-      onViewChange={navigate}
-      scopeLabel={scopeLabel}
-      sourceKind={source.kind}
-      sourceState={sourceState}
-    >
-      {content}
-    </AppShell>
+    <SettingsProvider>
+      <AppShell
+        activeView={activeView}
+        onViewChange={navigate}
+        scopeLabel={scopeLabel}
+        sourceMode={source.source_mode}
+        sourceState={sourceState}
+        routeReadiness={renderedProductState.route_readiness}
+        productEvidenceConfigured={productEvidence.configured}
+        productEvidenceState={productEvidence.visible}
+      >
+        <RecoveryStatusBar route={activeView} enabled={source.source_mode === 'live'} />
+        {productEvidence.visible?.snapshot.entities.some(
+          ({ kind, entity_id }) => kind === 'recovery' && entity_id === A7_RECOVERY_ENTITY_ID,
+        ) ? (
+          <A7RecoveryStatusBar
+            workspace={(activeView === 'lab' ? 'device_lab' : activeView) as A7WorkspaceKey}
+            enabled={source.source_mode === 'live'}
+          />
+        ) : null}
+        <ProductFeatureSlot
+          route={activeView}
+          registry={featureRegistry}
+          productState={renderedProductState}
+        >
+          {source.source_mode === 'live' ? <EvidenceProvenanceSource /> : null}
+          {productEvidence.visible !== null ? (
+            <ProductInternetNativeProjection
+              view={activeView}
+              snapshot={productEvidence.visible.snapshot}
+            />
+          ) : null}
+          {activeView === 'network' ? <RouteExplorerWorkspace /> : null}
+          {content}
+        </ProductFeatureSlot>
+      </AppShell>
+    </SettingsProvider>
   );
 }

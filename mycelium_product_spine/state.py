@@ -1,0 +1,481 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+"""Owner-only atomic persistence for the bounded product event replay window."""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import stat
+import tempfile
+from typing import Any, Mapping, Sequence
+
+from .contracts import validate_product_event
+
+
+STATE_PROTOCOL = "mycelium.product_evidence_state.v1"
+STATE_FILE = "product-evidence-state.v1.json"
+MAX_STATE_BYTES = 32 * 1024 * 1024
+TRANSPORT_HISTORY_PROTOCOL = "mycelium.product_transport_history.v1"
+TRANSPORT_HISTORY_FILE = "product-transport-history.v1.json"
+MAX_TRANSPORT_HISTORY_BYTES = 1024 * 1024
+_LEGACY_DEVICE_ATTRIBUTE_FIELDS = frozenset(
+    {
+        "peer_class",
+        "membership_generation",
+        "incarnation",
+        "lifecycle",
+        "lease_freshness",
+        "runtime_backend",
+        "transport",
+        "activation_protocol",
+        "activation_eligible",
+        "placement_id",
+    }
+)
+_PRE_A8_SNAPSHOT_FIELDS = frozenset(
+    {
+        "protocol",
+        "publication",
+        "supported_entity_kinds",
+        "source_states",
+        "entities",
+        "relations",
+        "readiness",
+        "notices",
+        "provenance",
+    }
+)
+
+
+class ProductEvidenceStateError(RuntimeError):
+    """Stable state error that never embeds filesystem or evidence contents."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+def _encoded(value: Mapping[str, Any]) -> bytes:
+    try:
+        return json.dumps(
+            dict(value),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise ProductEvidenceStateError("product_evidence_state_invalid") from exc
+
+
+def _upgrade_generation_one_event(value: object) -> object:
+    """Upgrade only the exact pre-authority-generation device shape."""
+
+    try:
+        detached = json.loads(
+            json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        )
+    except (TypeError, ValueError, RecursionError):
+        return value
+    if not isinstance(detached, dict):
+        return detached
+    snapshot = detached.get("snapshot")
+    entities = snapshot.get("entities") if isinstance(snapshot, dict) else None
+    if not isinstance(entities, list):
+        return detached
+    for entity in entities:
+        if not isinstance(entity, dict) or entity.get("kind") != "device":
+            continue
+        attributes = entity.get("attributes")
+        if (
+            isinstance(attributes, dict)
+            and set(attributes) == _LEGACY_DEVICE_ATTRIBUTE_FIELDS
+        ):
+            attributes["authority_generation"] = 1
+    return detached
+
+
+def _upgrade_pre_a8_internet_native_event(value: object) -> Any:
+    """Add only a claim-free projection to the exact pre-A8 snapshot shape."""
+
+    if not isinstance(value, dict):
+        return value
+    snapshot = value.get("snapshot")
+    if not isinstance(snapshot, dict) or set(snapshot) != _PRE_A8_SNAPSHOT_FIELDS:
+        return value
+    publication = snapshot.get("publication")
+    observed_at = (
+        publication.get("published_at_unix_ms")
+        if isinstance(publication, dict)
+        else None
+    )
+    if (
+        not isinstance(observed_at, int)
+        or isinstance(observed_at, bool)
+        or observed_at < 0
+    ):
+        return value
+    activation = {
+        "protocol": "mycelium.internet_activation_observation.v1",
+        "observation_id": f"internet-unknown-{observed_at}",
+        "connection_generation": 0,
+        "connection_reuse": 0,
+        "path_class": "unknown",
+        "path_source": "unknown",
+        "endpoint_pseudonym": None,
+        "observed_at_unix_ms": observed_at,
+        "freshness": "unknown",
+        "evidence_lifetime_until_unix_ms": observed_at,
+        "metrics": {
+            "rtt_ms": None,
+            "warm_rtt_ms": None,
+            "jitter_ms": None,
+            "goodput_bytes_per_second": None,
+            "loss_ratio": None,
+            "sample_count": None,
+            "measured_zero": False,
+        },
+    }
+    snapshot["internet_native"] = {
+        "bootstrap_status": {
+            "protocol": "mycelium.internet_bootstrap_status.v1",
+            "generation": 1,
+            "observed_at_unix_ms": observed_at,
+            "freshness": "unknown",
+            "tls_state": "unknown",
+            "canonical_origin_verified": False,
+            "seed_pin_state": "unknown",
+            "route_state": "unknown",
+            "invitation_state": "unknown",
+            "counters": {
+                "requests": 0,
+                "joins_accepted": 0,
+                "joins_rejected": 0,
+            },
+        },
+        "activation_observation": activation,
+        "activation_history": [activation],
+        "relay_projection": None,
+        "qualification": None,
+    }
+    return value
+
+
+def _validated_root(root: Path, code: str) -> tuple[int, int]:
+    try:
+        metadata = root.lstat()
+    except OSError as exc:
+        raise ProductEvidenceStateError(code) from exc
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        raise ProductEvidenceStateError(code)
+    return metadata.st_dev, metadata.st_ino
+
+
+def _read_private(path: Path, *, limit: int, prefix: str) -> bytes | None:
+    """Read one owner-only regular file; ``None`` when it does not exist."""
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ProductEvidenceStateError(f"{prefix}_unavailable") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or metadata.st_nlink != 1
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise ProductEvidenceStateError(f"{prefix}_unavailable")
+        raw = b""
+        while len(raw) <= limit:
+            chunk = os.read(descriptor, min(1024 * 1024, limit + 1 - len(raw)))
+            if not chunk:
+                break
+            raw += chunk
+    finally:
+        os.close(descriptor)
+    if len(raw) > limit:
+        raise ProductEvidenceStateError(f"{prefix}_too_large")
+    return raw
+
+
+def _write_private(
+    root: Path,
+    path: Path,
+    payload: bytes,
+    *,
+    revalidate: Any,
+    prefix: str,
+) -> None:
+    """Atomically replace one owner-only file under a revalidated private root."""
+
+    revalidate()
+    temporary: Path | None = None
+    try:
+        descriptor, raw_path = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=root,
+        )
+        temporary = Path(raw_path)
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb", closefd=True) as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        revalidate()
+        os.replace(temporary, path)
+        temporary = None
+        os.chmod(path, 0o600, follow_symlinks=False)
+        directory = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        revalidate()
+    except ProductEvidenceStateError:
+        raise
+    except OSError as exc:
+        raise ProductEvidenceStateError(f"{prefix}_write_failed") from exc
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _upgrade_pre_transition_history_route_explorer(value: object) -> Any:
+    """Re-project a route explorer written under the pre-transition-history rule.
+
+    Before per-endpoint transition history, only the last activation observation
+    was current. A stored explorer is replaced only when it is exactly what that
+    rule projects from the same stored snapshot; anything else is left for the
+    ordinary validator to refuse.
+    """
+
+    if not isinstance(value, dict):
+        return value
+    snapshot = value.get("snapshot")
+    if not isinstance(snapshot, dict) or "route_explorer" not in snapshot:
+        return value
+    try:
+        from .contracts import validate_internet_native_snapshot
+        from .route_explorer import project_route_explorer, validate_route_explorer
+
+        detached = {k: v for k, v in snapshot.items() if k != "route_explorer"}
+        detached["internet_native"] = validate_internet_native_snapshot(
+            snapshot["internet_native"]
+        )
+        if "coarse_region_evidence" in snapshot:
+            from .coarse_region import validate_coarse_region_evidence
+
+            detached["coarse_region_evidence"] = [
+                validate_coarse_region_evidence(item)
+                for item in snapshot["coarse_region_evidence"]
+            ]
+        stored = validate_route_explorer(snapshot["route_explorer"])
+        current = project_route_explorer(detached)
+        if stored == current or stored != project_route_explorer(
+            detached, legacy_history=True
+        ):
+            return value
+    except (TypeError, ValueError, KeyError):
+        return value
+    upgraded = dict(value)
+    upgraded["snapshot"] = dict(snapshot, route_explorer=current)
+    return upgraded
+
+
+class ProductEvidenceStateStore:
+    """Persist privacy-reduced events under an already-created private root."""
+
+    def __init__(self, root: str | Path, *, replay_limit: int) -> None:
+        path = Path(root).expanduser()
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        self._root = Path(os.path.abspath(path))
+        self._path = self._root / STATE_FILE
+        self._replay_limit = replay_limit
+        self._root_identity = self._validate_root()
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    def _validate_root(self) -> tuple[int, int]:
+        return _validated_root(self._root, "product_evidence_state_root_invalid")
+
+    def _revalidate_root(self) -> None:
+        if self._validate_root() != self._root_identity:
+            raise ProductEvidenceStateError("product_evidence_state_root_changed")
+
+    def load(self) -> list[dict[str, Any]]:
+        self._revalidate_root()
+        raw = _read_private(
+            self._path, limit=MAX_STATE_BYTES, prefix="product_evidence_state"
+        )
+        if raw is None:
+            return []
+        try:
+            document = json.loads(raw.decode("utf-8"))
+        except (UnicodeError, ValueError, RecursionError) as exc:
+            raise ProductEvidenceStateError("product_evidence_state_corrupt") from exc
+        if (
+            not isinstance(document, dict)
+            or set(document) != {"protocol", "replay_limit", "events"}
+            or document.get("protocol") != STATE_PROTOCOL
+            or document.get("replay_limit") != self._replay_limit
+            or not isinstance(document.get("events"), list)
+            or len(document["events"]) > self._replay_limit
+        ):
+            raise ProductEvidenceStateError("product_evidence_state_corrupt")
+        try:
+            events = [
+                validate_product_event(
+                    _upgrade_pre_transition_history_route_explorer(
+                        _upgrade_pre_a8_internet_native_event(
+                            _upgrade_generation_one_event(event)
+                        )
+                    )
+                )
+                for event in document["events"]
+            ]
+        except (TypeError, ValueError) as exc:
+            raise ProductEvidenceStateError("product_evidence_state_corrupt") from exc
+        if any(
+            current["cursor"] != previous["cursor"] + 1
+            for previous, current in zip(events, events[1:])
+        ):
+            raise ProductEvidenceStateError("product_evidence_state_corrupt")
+        self._revalidate_root()
+        return events
+
+    def write(self, events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        retained = [validate_product_event(event) for event in events][-self._replay_limit :]
+        while True:
+            document = {
+                "protocol": STATE_PROTOCOL,
+                "replay_limit": self._replay_limit,
+                "events": retained,
+            }
+            payload = _encoded(document)
+            if len(payload) <= MAX_STATE_BYTES:
+                break
+            if len(retained) <= 1:
+                raise ProductEvidenceStateError("product_evidence_state_too_large")
+            retained = retained[1:]
+        _write_private(
+            self._root,
+            self._path,
+            payload,
+            revalidate=self._revalidate_root,
+            prefix="product_evidence_state",
+        )
+        return retained
+
+
+class TransportHistoryStateStore:
+    """Persist the direct/relay ledger of one deployment under the private root.
+
+    The file is bound to the deployment it was observed for: a ledger written
+    for another deployment is refused, never merged, so a transition can only be
+    assembled from observations of the same deployment across planned serve
+    restarts. Content validation (shape, order, monotonic generations) belongs
+    to the ledger, which re-admits every restored observation through its own
+    refusal rules.
+    """
+
+    def __init__(self, root: str | Path, *, binding: str) -> None:
+        if (
+            type(binding) is not str
+            or not 1 <= len(binding) <= 128
+            or not all(ch.isalnum() or ch in "-_.:" for ch in binding)
+        ):
+            raise ValueError("product_transport_history_binding_invalid")
+        path = Path(root).expanduser()
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        self._root = Path(os.path.abspath(path))
+        self._path = self._root / TRANSPORT_HISTORY_FILE
+        self._binding = binding
+        self._root_identity = self._validate_root()
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    def _validate_root(self) -> tuple[int, int]:
+        return _validated_root(self._root, "product_transport_history_root_invalid")
+
+    def _revalidate_root(self) -> None:
+        if self._validate_root() != self._root_identity:
+            raise ProductEvidenceStateError("product_transport_history_root_changed")
+
+    def load(self) -> list[dict[str, Any]]:
+        self._revalidate_root()
+        raw = _read_private(
+            self._path,
+            limit=MAX_TRANSPORT_HISTORY_BYTES,
+            prefix="product_transport_history",
+        )
+        if raw is None:
+            return []
+        try:
+            document = json.loads(raw.decode("utf-8"))
+        except (UnicodeError, ValueError, RecursionError) as exc:
+            raise ProductEvidenceStateError("product_transport_history_corrupt") from exc
+        if (
+            not isinstance(document, dict)
+            or set(document) != {"protocol", "binding", "observations"}
+            or document.get("protocol") != TRANSPORT_HISTORY_PROTOCOL
+            or not isinstance(document.get("binding"), str)
+            or not isinstance(document.get("observations"), list)
+        ):
+            raise ProductEvidenceStateError("product_transport_history_corrupt")
+        if document["binding"] != self._binding:
+            raise ProductEvidenceStateError(
+                "product_transport_history_foreign_deployment"
+            )
+        self._revalidate_root()
+        return document["observations"]
+
+    def write(self, observations: Sequence[Mapping[str, Any]]) -> None:
+        payload = _encoded(
+            {
+                "protocol": TRANSPORT_HISTORY_PROTOCOL,
+                "binding": self._binding,
+                "observations": [dict(item) for item in observations],
+            }
+        )
+        if len(payload) > MAX_TRANSPORT_HISTORY_BYTES:
+            raise ProductEvidenceStateError("product_transport_history_too_large")
+        _write_private(
+            self._root,
+            self._path,
+            payload,
+            revalidate=self._revalidate_root,
+            prefix="product_transport_history",
+        )
+
+
+__all__ = [
+    "MAX_STATE_BYTES",
+    "MAX_TRANSPORT_HISTORY_BYTES",
+    "ProductEvidenceStateError",
+    "ProductEvidenceStateStore",
+    "STATE_FILE",
+    "STATE_PROTOCOL",
+    "TRANSPORT_HISTORY_FILE",
+    "TRANSPORT_HISTORY_PROTOCOL",
+    "TransportHistoryStateStore",
+]

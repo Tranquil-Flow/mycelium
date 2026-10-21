@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
 import asyncio
@@ -6,7 +7,7 @@ import math
 import multiprocessing
 from pathlib import Path
 import tempfile
-from typing import Any, Callable
+from typing import Any
 import unittest
 from unittest import mock
 

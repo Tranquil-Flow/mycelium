@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mycelium.local/schemas/product-ui-observatory-v1.schema.json",
+  "title": "Mycelium Product UI Observatory Status v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "generation", "status", "source", "metrics"],
+  "properties": {
+    "protocol": { "const": "mycelium.product_ui.observatory.v1" },
+    "generation": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "status": { "enum": ["connecting", "connected", "disconnected"] },
+    "source": { "$ref": "#/$defs/source" },
+    "metrics": { "$ref": "#/$defs/metrics" }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "freshness", "observed_at_unix_ms", "replay_of_generation"],
+      "properties": {
+        "mode": { "enum": ["fixture", "live", "replay"] },
+        "freshness": { "enum": ["fixture", "current", "stale", "replay", "unknown"] },
+        "observed_at_unix_ms": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+            { "type": "null" }
+          ]
+        },
+        "replay_of_generation": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "fixture" } }, "required": ["mode"] },
+          "then": {
+            "properties": {
+              "freshness": { "const": "fixture" },
+              "replay_of_generation": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "live" } }, "required": ["mode"] },
+          "then": {
+            "properties": {
+              "freshness": { "enum": ["current", "stale", "unknown"] },
+              "replay_of_generation": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "replay" } }, "required": ["mode"] },
+          "then": {
+            "properties": {
+              "freshness": { "const": "replay" },
+              "replay_of_generation": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+            }
+          }
+        }
+      ]
+    },
+    "nullable_count": {
+      "oneOf": [
+        { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        { "type": "null" }
+      ]
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["native_node_count", "browser_worker_count", "incident_count"],
+      "properties": {
+        "native_node_count": { "$ref": "#/$defs/nullable_count" },
+        "browser_worker_count": { "$ref": "#/$defs/nullable_count" },
+        "incident_count": { "$ref": "#/$defs/nullable_count" }
+      }
+    }
+  }
+}

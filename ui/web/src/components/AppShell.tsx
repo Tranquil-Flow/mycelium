@@ -1,34 +1,28 @@
-import type { ReactNode } from 'react';
+// SPDX-License-Identifier: AGPL-3.0-only
+import { useEffect, useRef, type ReactNode } from 'react';
+import { PRODUCT_ROUTES, productRouteHref, type ProductRouteId } from '../app/navigation';
+import type { RouteReadinessState } from '../app/ProductState';
+import type { ProductSourceMode } from '../app/contracts';
 import type {
-  ObservatorySourceKind,
   ObservatorySourceState,
 } from '../data/observatorySource';
-
-export type ObservatoryView = 'network' | 'plans' | 'incidents' | 'evidence';
+import type { LiveObservatoryEventState } from '../data/observatoryEventSource';
+import type { ProductEvidenceState } from '../features/productEvidence/source';
 
 interface AppShellProps {
-  readonly activeView: ObservatoryView;
-  readonly onViewChange: (view: ObservatoryView) => void;
+  readonly activeView: ProductRouteId;
+  readonly onViewChange: (view: ProductRouteId) => void;
   readonly scopeLabel: string;
-  readonly sourceKind: ObservatorySourceKind;
-  readonly sourceState: ObservatorySourceState | null;
+  readonly sourceMode: ProductSourceMode;
+  readonly sourceState: ObservatorySourceState | LiveObservatoryEventState | null;
+  readonly routeReadiness: RouteReadinessState;
+  readonly productEvidenceConfigured?: boolean;
+  readonly productEvidenceState?: ProductEvidenceState | null;
   readonly children: ReactNode;
 }
 
-const navItems: ReadonlyArray<{
-  id: ObservatoryView;
-  label: string;
-  detail: string;
-  icon: 'network' | 'plans' | 'incidents' | 'evidence';
-}> = [
-  { id: 'network', label: 'Network', detail: 'Route topology', icon: 'network' },
-  { id: 'plans', label: 'Plans', detail: 'Modeled strategies', icon: 'plans' },
-  { id: 'incidents', label: 'Incidents', detail: 'Fixture replays', icon: 'incidents' },
-  { id: 'evidence', label: 'Evidence', detail: 'Proof boundaries', icon: 'evidence' },
-];
-
-function NavIcon({ name }: { readonly name: 'network' | 'plans' | 'incidents' | 'evidence' }) {
-  if (name === 'network') {
+function NavIcon({ name }: { readonly name: ProductRouteId }) {
+  if (name === 'network' || name === 'nodes') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="5" cy="12" r="2.25" />
@@ -52,6 +46,29 @@ function NavIcon({ name }: { readonly name: 'network' | 'plans' | 'incidents' | 
       </svg>
     );
   }
+  if (name === 'lab') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3.5" y="5" width="12" height="9" rx="1.5" />
+        <path d="M7 18h5M9.5 14v4M17 8h3.5v9H17zM18.5 14.5h.01" />
+      </svg>
+    );
+  }
+  if (name === 'inference') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 6h16v12H4zM8 10l3 2-3 2M13 14h3" />
+      </svg>
+    );
+  }
+  if (name === 'settings') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
+      </svg>
+    );
+  }
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M6 3.5h9l3 3v14H6zM15 3.5v4h3M9 12l2 2 4-4M9 17h6" />
@@ -63,21 +80,57 @@ export function AppShell({
   activeView,
   onViewChange,
   scopeLabel,
-  sourceKind,
+  sourceMode,
   sourceState,
+  routeReadiness,
+  productEvidenceConfigured = false,
+  productEvidenceState = null,
   children,
 }: AppShellProps) {
-  const isStatic = sourceKind === 'static';
-  const currentLabel = isStatic
-    ? 'Current unavailable'
+  const mainRef = useRef<HTMLElement>(null);
+  const previousView = useRef(activeView);
+  useEffect(() => {
+    if (previousView.current !== activeView) {
+      mainRef.current?.focus();
+      previousView.current = activeView;
+    }
+  }, [activeView]);
+  const activeLabel = PRODUCT_ROUTES.find((route) => route.id === activeView)?.label ?? activeView;
+  const isDeviceLab = activeView === 'lab' && sourceMode === 'fixture';
+  const isFixture = sourceMode === 'fixture';
+  const isReplay = sourceMode === 'replay';
+  const observatoryLiveCurrent =
+    sourceState?.source_mode === 'live' &&
+    sourceState.status === 'connected' &&
+    sourceState.freshness === 'current';
+  const productLiveCurrent =
+    productEvidenceState?.status === 'connected'
+    && productEvidenceState.source_mode === 'live'
+    && productEvidenceState.freshness === 'current';
+  const isLiveCurrent = observatoryLiveCurrent
+    && (!productEvidenceConfigured || productLiveCurrent);
+  const displayedGeneration = productEvidenceConfigured
+    ? productEvidenceState?.generation ?? null
+    : sourceState?.generation ?? null;
+  const currentLabel = isDeviceLab
+    ? 'Live local device status'
+    : isFixture
+      ? 'Fixture data · not current'
+    : isReplay
+      ? sourceState === null
+        ? 'Replay evidence · loading'
+        : `Replay evidence · g${displayedGeneration}`
     : sourceState === null
       ? 'Connecting'
       : sourceState.status === 'disconnected'
-        ? `Disconnected · g${sourceState.generation}`
-        : `Current · g${sourceState.generation}`;
+        ? `Disconnected · g${displayedGeneration}`
+        : isLiveCurrent
+          ? `Current evidence · g${displayedGeneration}`
+          : `Stale or degraded evidence · g${displayedGeneration}`;
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <aside className="sidebar">
         <div className="brand-block">
           <div className="brand-mark" aria-hidden="true">
@@ -87,32 +140,49 @@ export function AppShell({
           </div>
           <div>
             <div className="brand-eyebrow-row">
-              <p className="eyebrow">Mycelium systems</p>
+              <p className="eyebrow">Private distributed inference</p>
               <span className="maturity-badge" aria-label="Product lifecycle: MVP">MVP</span>
             </div>
-            <h1>Network Observatory</h1>
+            <strong className="brand-title">Mycelium</strong>
           </div>
         </div>
 
         <div
           className="fixture-badge"
-          aria-label={isStatic ? 'Offline evidence mode' : 'Live read-only evidence mode'}
+          aria-label={
+            isDeviceLab
+              ? 'Live local Device Lab evidence'
+              : isFixture
+                ? 'Fixture data, not live'
+                : isReplay
+                  ? 'Replay evidence, not live'
+                  : 'Live semantic evidence state'
+          }
         >
           <span className="fixture-dot" aria-hidden="true" />
-          {isStatic ? 'SIMULATION · FIXTURE' : 'LIVE · READ ONLY'}
+          {isDeviceLab
+            ? 'LIVE DEVICE LAB · LOCAL EVIDENCE'
+            : isFixture
+              ? 'FIXTURE DATA · NOT LIVE'
+              : isReplay
+                ? 'REPLAY EVIDENCE · NOT LIVE'
+                : isLiveCurrent
+                  ? 'LIVE EVIDENCE · CURRENT'
+                  : 'LIVE EVIDENCE · NOT CURRENT'}
         </div>
 
-        <nav className="primary-nav" aria-label="Observatory sections">
+        <nav className="primary-nav" aria-label="Product sections">
           <p className="nav-caption">Workspace</p>
-          {navItems.map((item) => (
+          {PRODUCT_ROUTES.map((item) => (
             <a
               key={item.id}
-              href={`#${item.id}`}
+              href={productRouteHref(item.id)}
               className="nav-button"
+              aria-label={item.label}
               aria-current={activeView === item.id ? 'page' : undefined}
               onClick={() => onViewChange(item.id)}
             >
-              <span className="nav-icon"><NavIcon name={item.icon} /></span>
+              <span className="nav-icon"><NavIcon name={item.id} /></span>
               <span className="nav-copy">
                 <span>{item.label}</span>
                 <small>{item.detail}</small>
@@ -126,11 +196,27 @@ export function AppShell({
           <div className="source-state">
             <span className="source-glyph" aria-hidden="true">◇</span>
             <div>
-              <strong>{isStatic ? 'Local evidence bundle' : 'Gateway evidence source'}</strong>
-              <span>{isStatic ? 'No network dependency' : 'GET + inbound event stream only'}</span>
+              <strong>
+                {isDeviceLab
+                  ? 'Bounded Device Lab'
+                  : isFixture
+                    ? 'Local evidence bundle'
+                    : isReplay
+                      ? 'Local evidence replay'
+                      : 'Unified product evidence gateway'}
+              </strong>
+              <span>
+                {isDeviceLab
+                  ? 'Same-origin operator API'
+                  : isFixture || isReplay
+                    ? 'No network dependency'
+                    : 'Browser credentials stay same-origin'}
+              </span>
             </div>
           </div>
-          <p>Read-only qualification surface</p>
+          <p>
+            Route readiness {routeReadiness.status} · {routeReadiness.authority}
+          </p>
         </div>
       </aside>
 
@@ -140,14 +226,22 @@ export function AppShell({
             <span className="topbar-label">Scope</span>
             <strong>{scopeLabel}</strong>
             <span className="separator" aria-hidden="true">/</span>
-            <span>{isStatic ? 'offline replay' : 'gateway projection'}</span>
+            <span>
+              {isDeviceLab
+                ? 'live local synthetic evidence'
+                : isFixture
+                  ? 'fixture evidence'
+                  : isReplay
+                    ? 'replay evidence'
+                    : 'unified product snapshot'}
+            </span>
           </div>
           <button type="button" className="current-control" disabled>
             <span className="status-ring" aria-hidden="true" />
             {currentLabel}
           </button>
         </header>
-        <main className="main-content" id="main-content" tabIndex={-1}>
+        <main ref={mainRef} className="main-content" id="main-content" tabIndex={-1} aria-label={`${activeLabel} workspace`}>
           {children}
         </main>
       </div>

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Durable coherent snapshot publication for the read-only Observatory gateway."""
 from __future__ import annotations
 
@@ -628,6 +629,62 @@ class CoherentSnapshotPublisher:
                 ]
                 for identifier in slow_subscribers:
                     self._subscribers.pop(identifier, None)
+                return publication
+            finally:
+                if lock_descriptor is not None:
+                    try:
+                        fcntl.flock(lock_descriptor, fcntl.LOCK_UN)
+                    finally:
+                        os.close(lock_descriptor)
+                os.close(parent_fd)
+
+    def seed_generation_floor(self, bundle: Any, *, floor: int) -> Optional[Publication]:
+        """Install one complete bundle at ``floor`` while durable state is behind.
+
+        A deployment whose consumers persist a fail-closed high-water mark (the
+        product UI refuses a generation below the newest one it accepted) needs
+        the durable generation never to restart below that mark.  The floor is
+        only ever raised: an already-current durable generation is left alone.
+
+        Returns the installed publication, or ``None`` when the durable
+        generation already meets or exceeds the requested floor.
+        """
+
+        if (
+            isinstance(floor, bool)
+            or not isinstance(floor, int)
+            or floor < 0
+            or floor > MAX_SAFE_GENERATION
+        ):
+            raise ValueError("floor must be a JavaScript-safe non-negative integer")
+        copied_bundle, frozen_bundle = _canonical_bundle(
+            bundle, max_nesting=self._max_nesting
+        )
+        with self._mutex:
+            parent_fd = _open_parent_directory(self._state_path)
+            lock_descriptor: Optional[int] = None
+            try:
+                lock_descriptor = _open_process_lock(parent_fd, self._lock_name)
+                fcntl.flock(lock_descriptor, fcntl.LOCK_EX)
+                persisted = self._read_persisted(parent_fd)
+                previous_generation = persisted.generation if persisted is not None else 0
+                if persisted is not None:
+                    self._append_replay_locked(persisted)
+                if previous_generation >= floor:
+                    return None
+                envelope_json = _canonical_envelope_bytes(floor, copied_bundle)
+                if len(envelope_json) > self._max_payload_bytes:
+                    raise BundleValidationError(
+                        "Observatory envelope exceeds maximum payload size"
+                    )
+                publication = Publication(
+                    generation=floor,
+                    bundle=frozen_bundle,
+                    envelope_json=envelope_json,
+                )
+                self._atomic_replace(parent_fd, envelope_json)
+                self._current = publication
+                self._append_replay_locked(publication)
                 return publication
             finally:
                 if lock_descriptor is not None:

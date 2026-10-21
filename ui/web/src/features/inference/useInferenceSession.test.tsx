@@ -1,0 +1,679 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  PRODUCT_INFERENCE_EVENT_PROTOCOL,
+  PRODUCT_INFERENCE_PROTOCOL,
+  type InferenceAcceptedResponse,
+  type InferenceCancelResponse,
+  type InferenceEvent,
+  type InferenceSubmission,
+  type ProductQualification,
+} from '../../app/contracts';
+import { InferenceClientError, type InferenceClient } from './requestClient';
+import { isTerminalInferencePhase, type InferenceSessionState } from './types';
+import {
+  RESTORED_STREAM_RETRY_DELAYS_MS,
+  inferenceSessionReducer,
+  useInferenceSession,
+} from './useInferenceSession';
+
+const NOW = 1_800_000_000_000;
+const DIGEST_A = `sha256:${'a'.repeat(64)}`;
+const DIGEST_B = `sha256:${'b'.repeat(64)}`;
+
+function qualification(
+  overrides: Partial<ProductQualification> = {},
+): ProductQualification {
+  return {
+    protocol: PRODUCT_INFERENCE_PROTOCOL,
+    issued_at_unix_ms: NOW,
+    evidence_class: 'physical_qualification',
+    route_ready: true,
+    reason_codes: [],
+    binding: {
+      qualification_id: 'qualification-a',
+      qualification_digest: DIGEST_A,
+      deployment_id: 'deployment-a',
+      deployment_epoch: 1,
+      topology_version: 1,
+      model_id: 'model-a',
+      resolved_commit: 'commit-a',
+      manifest_digest: DIGEST_A,
+      path_manifest_digest: DIGEST_A,
+      stage_load_proof_digests: [DIGEST_A],
+    },
+    ...overrides,
+  };
+}
+
+const accepted: InferenceAcceptedResponse = {
+  protocol: PRODUCT_INFERENCE_PROTOCOL,
+  request_id: 'request-a',
+  accepted: true,
+  event_path: '/api/v1/inference/request-a/events',
+  cancel_path: '/api/v1/inference/request-a/cancel',
+};
+
+function stateFor(phase: InferenceSessionState['phase']): InferenceSessionState {
+  return {
+    qualification_status: 'ready',
+    qualification: qualification(),
+    qualification_changed: false,
+    phase,
+    accepted_request: accepted,
+    captured_binding: qualification().binding,
+    requested_max_new_tokens: 8,
+    submitted_prompt: 'synthetic prompt',
+    output: '',
+    token_count: 0,
+    last_applied_sequence: 0,
+    publisher_generation: 1,
+    error_code: null,
+    form_error: null,
+    cancellation_requested: false,
+    started_at_unix_ms: NOW,
+    history: [],
+  };
+}
+
+function event(
+  sequence: number,
+  value:
+    | { type: 'accepted' | 'completed' | 'cancelled' }
+    | { type: 'failed'; code: string }
+    | { type: 'token'; token_index: number; text: string },
+): InferenceEvent {
+  return {
+    protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL,
+    request_id: accepted.request_id,
+    sequence,
+    publisher_generation: 1,
+    ...value,
+  } as InferenceEvent;
+}
+
+class FakeClient implements InferenceClient {
+  qualifications: ProductQualification[] = [qualification()];
+  readonly submissions: InferenceSubmission[] = [];
+  readonly streamCursors: Array<number | null> = [];
+  readonly streamBatches: InferenceEvent[][] = [];
+  readonly streamFailures: unknown[] = [];
+  readonly cancelFailures: unknown[] = [];
+  cancelCalls = 0;
+
+  async loadQualification(): Promise<ProductQualification> {
+    return this.qualifications.shift() ?? qualification();
+  }
+
+  async submit(value: InferenceSubmission): Promise<InferenceAcceptedResponse> {
+    this.submissions.push(value);
+    return accepted;
+  }
+
+  async stream(
+    _request: InferenceAcceptedResponse,
+    lastEventId: number | null,
+    onEvent: (value: InferenceEvent) => void,
+  ): Promise<void> {
+    this.streamCursors.push(lastEventId);
+    for (const item of this.streamBatches.shift() ?? []) onEvent(item);
+    const failure = this.streamFailures.shift();
+    if (failure !== undefined) throw failure;
+  }
+
+  async cancel(): Promise<InferenceCancelResponse> {
+    this.cancelCalls += 1;
+    const failure = this.cancelFailures.shift();
+    if (failure !== undefined) throw failure;
+    return {
+      protocol: PRODUCT_INFERENCE_PROTOCOL,
+      request_id: accepted.request_id,
+      cancelled: true,
+    };
+  }
+}
+
+async function loaded(client: FakeClient) {
+  const hook = renderHook(() =>
+    useInferenceSession({ client, now: () => NOW + 1 }),
+  );
+  await waitFor(() => expect(hook.result.current.qualification_status).toBe('ready'));
+  return hook;
+}
+
+describe('useInferenceSession', () => {
+  it('refreshes a stale local snapshot before submitting and accepts genuine same-route renewal once', async () => {
+    const client = new FakeClient();
+    const clock = { value: NOW };
+    const renewed = qualification({
+      issued_at_unix_ms: NOW + 61 * 60_000,
+      binding: {
+        ...qualification().binding,
+        qualification_id: 'renewal-b',
+        qualification_digest: DIGEST_B,
+        path_manifest_digest: DIGEST_B,
+      },
+    });
+    client.qualifications = [qualification(), renewed, renewed];
+    const hook = renderHook(() => useInferenceSession({ client, now: () => clock.value }));
+    await waitFor(() => expect(hook.result.current.can_submit).toBe(true));
+    clock.value += 61 * 60_000;
+    client.streamBatches.push([event(0, { type: 'accepted' }), event(1, { type: 'completed' })]);
+    await act(async () => {
+      await Promise.all([
+        hook.result.current.start('private synthetic input', 8),
+        hook.result.current.start('private synthetic input', 8),
+      ]);
+    });
+    expect(client.submissions).toHaveLength(1);
+    expect(client.submissions[0].qualification).toEqual(renewed.binding);
+    expect(hook.result.current.qualification_changed).toBe(false);
+  });
+
+  it('keeps a foreign model change behind explicit acknowledgement', async () => {
+    const client = new FakeClient();
+    const clock = { value: NOW };
+    const foreign = qualification({
+      issued_at_unix_ms: NOW + 61 * 60_000,
+      binding: { ...qualification().binding, model_id: 'other-model' },
+    });
+    client.qualifications = [qualification(), foreign, foreign];
+    const hook = renderHook(() => useInferenceSession({ client, now: () => clock.value }));
+    await waitFor(() => expect(hook.result.current.can_submit).toBe(true));
+    clock.value += 61 * 60_000;
+    await act(() => hook.result.current.start('private synthetic input', 8));
+    expect(client.submissions).toHaveLength(0);
+    expect(hook.result.current.qualification_changed).toBe(true);
+    await act(() => hook.result.current.reload_qualification());
+    expect(hook.result.current.qualification_changed).toBe(true);
+  });
+
+  it('polls only after root bootstrap and replaces the stale local snapshot without clicks', async () => {
+    const client = new FakeClient();
+    const load = vi.spyOn(client, 'loadQualification');
+    const interval = vi.spyOn(window, 'setInterval');
+    const clock = { value: NOW };
+    const refreshed = qualification({
+      issued_at_unix_ms: NOW + 61 * 60_000,
+      binding: { ...qualification().binding, qualification_id: 'renewal-b',
+        qualification_digest: DIGEST_B, path_manifest_digest: DIGEST_B },
+    });
+    client.qualifications = [qualification(), refreshed];
+    const hook = renderHook(({ ready }) => useInferenceSession({ client, now: () => clock.value, bootstrapReady: ready }),
+      { initialProps: { ready: false } });
+    expect(load).not.toHaveBeenCalled();
+    expect(interval.mock.calls.some(([, delay]) => delay === 30_000)).toBe(false);
+    hook.rerender({ ready: true });
+    await waitFor(() => expect(hook.result.current.can_submit).toBe(true));
+    const poll = interval.mock.calls.find(([, delay]) => delay === 30_000)?.[0];
+    expect(poll).toBeTypeOf('function');
+    clock.value += 61 * 60_000;
+    await act(async () => { (poll as () => void)(); });
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(hook.result.current.can_submit).toBe(true);
+    expect(hook.result.current.qualification?.binding).toEqual(refreshed.binding);
+    expect(hook.result.current.qualification_changed).toBe(false);
+    hook.unmount();
+    interval.mockRestore();
+  });
+
+  it('does not treat a failed server renewal as a fresh qualification after 60 minutes', async () => {
+    const client = new FakeClient();
+    client.qualifications = [qualification(), qualification({ issued_at_unix_ms: NOW })];
+    const clock = { value: NOW };
+    const hook = renderHook(() => useInferenceSession({ client, now: () => clock.value }));
+    await waitFor(() => expect(hook.result.current.can_submit).toBe(true));
+    clock.value += 61 * 60_000;
+    await act(() => hook.result.current.reload_qualification());
+    expect(hook.result.current.submit_block_reason).toBe('Qualification is stale');
+    expect(hook.result.current.can_submit).toBe(false);
+    expect(client.submissions).toHaveLength(0);
+  });
+
+  it('loads qualification first and reports the exact route_ready=false reason', async () => {
+    const client = new FakeClient();
+    client.qualifications = [
+      qualification({
+        evidence_class: 'synthetic_test_fixture',
+        route_ready: false,
+        reason_codes: ['physical_qualification_missing', 'route_probe_missing'],
+      }),
+    ];
+    const hook = renderHook(() =>
+      useInferenceSession({ client, now: () => NOW + 1 }),
+    );
+
+    await waitFor(() =>
+      expect(hook.result.current.submit_block_reason).toBe(
+        'Route is not ready: physical_qualification_missing, route_probe_missing',
+      ),
+    );
+    expect(hook.result.current.can_submit).toBe(false);
+    expect(client.submissions).toHaveLength(0);
+  });
+
+  it('revalidates before submit, blocks a changed binding, and captures only an acknowledged exact binding', async () => {
+    const client = new FakeClient();
+    const changed = qualification({
+      binding: {
+        ...qualification().binding,
+        qualification_id: 'qualification-b',
+        qualification_digest: DIGEST_B,
+        deployment_epoch: 2,
+      },
+    });
+    client.qualifications = [qualification(), changed, changed];
+    const hook = await loaded(client);
+
+    await act(() => hook.result.current.start('private synthetic input', 8));
+    expect(client.submissions).toHaveLength(0);
+    expect(hook.result.current.submit_block_reason).toBe(
+      'Qualification changed; review and accept the current binding',
+    );
+
+    act(() => hook.result.current.accept_current_qualification());
+    client.streamBatches.push([event(0, { type: 'accepted' })]);
+    await act(() => hook.result.current.start('private synthetic input', 8));
+
+    expect(client.submissions).toHaveLength(1);
+    expect(client.submissions[0].qualification).toEqual(changed.binding);
+    expect(hook.result.current.captured_binding).toEqual(changed.binding);
+    expect(hook.result.current.phase).toBe('interrupted');
+  });
+
+  it('surfaces a newly false route reason ahead of binding acknowledgement', async () => {
+    const client = new FakeClient();
+    const dropped = qualification({
+      route_ready: false,
+      reason_codes: ['route_probe_missing'],
+    });
+    client.qualifications = [qualification(), dropped];
+    const hook = await loaded(client);
+
+    await act(() => hook.result.current.start('private synthetic input', 8));
+
+    expect(client.submissions).toHaveLength(0);
+    expect(hook.result.current.can_submit).toBe(false);
+    expect(hook.result.current.submit_block_reason).toBe(
+      'Route is not ready: route_probe_missing',
+    );
+  });
+
+  it('applies only contiguous events, ignores duplicates, and fails closed on gaps', async () => {
+    const client = new FakeClient();
+    client.qualifications = [qualification(), qualification()];
+    client.streamBatches.push([
+      event(0, { type: 'accepted' }),
+      event(1, { type: 'token', token_index: 0, text: 'A' }),
+      event(1, { type: 'token', token_index: 0, text: 'A' }),
+      event(3, { type: 'completed' }),
+      event(2, { type: 'token', token_index: 1, text: 'must not apply' }),
+    ]);
+    const hook = await loaded(client);
+
+    await act(() => hook.result.current.start('private synthetic input', 8));
+
+    expect(hook.result.current.output).toBe('A');
+    expect(hook.result.current.last_applied_sequence).toBe(1);
+    expect(hook.result.current.phase).toBe('failed');
+    expect(hook.result.current.error_code).toBe('stream_sequence_invalid');
+  });
+
+  it('resumes from the last fully applied sequence without duplicating output', async () => {
+    const client = new FakeClient();
+    client.qualifications = [qualification(), qualification()];
+    client.streamBatches.push([
+      event(0, { type: 'accepted' }),
+      event(1, { type: 'token', token_index: 0, text: 'A' }),
+    ]);
+    client.streamBatches.push([
+      event(1, { type: 'token', token_index: 0, text: 'A' }),
+      event(2, { type: 'token', token_index: 1, text: 'B' }),
+      event(3, { type: 'completed' }),
+    ]);
+    const hook = await loaded(client);
+
+    await act(() => hook.result.current.start('private synthetic input', 8));
+    expect(hook.result.current.phase).toBe('interrupted');
+    await act(() => hook.result.current.resume());
+
+    expect(client.streamCursors).toEqual([null, 1]);
+    expect(hook.result.current.output).toBe('AB');
+    expect(hook.result.current.last_applied_sequence).toBe(3);
+    expect(hook.result.current.phase).toBe('completed');
+  });
+
+  it('automatically resumes an active request restored after a page refresh', async () => {
+    const client = new FakeClient();
+    client.streamBatches.push([
+      event(2, { type: 'token', token_index: 1, text: 'B' }),
+      event(3, { type: 'completed' }),
+    ]);
+    const restored: InferenceSessionState = {
+      qualification_status: 'ready',
+      qualification: qualification(),
+      qualification_changed: false,
+      phase: 'streaming',
+      accepted_request: accepted,
+      captured_binding: qualification().binding,
+      requested_max_new_tokens: 8,
+      submitted_prompt: 'restored prompt',
+      output: 'A',
+      token_count: 1,
+      last_applied_sequence: 1,
+      publisher_generation: 1,
+      error_code: null,
+      form_error: null,
+      cancellation_requested: false,
+      started_at_unix_ms: NOW,
+      history: [],
+    };
+
+    const hook = renderHook(() =>
+      useInferenceSession({ client, now: () => NOW + 1, restored_state: restored }),
+    );
+
+    await waitFor(() => expect(hook.result.current.phase).toBe('completed'));
+    expect(client.streamCursors).toEqual([1]);
+    expect(hook.result.current.output).toBe('AB');
+    expect(hook.result.current.history).toHaveLength(1);
+  });
+
+  it('does not resurrect a request already recorded terminal in history', async () => {
+    const client = new FakeClient();
+    const restored: InferenceSessionState = {
+      qualification_status: 'ready',
+      qualification: qualification(),
+      qualification_changed: false,
+      phase: 'interrupted',
+      accepted_request: accepted,
+      captured_binding: qualification().binding,
+      requested_max_new_tokens: 8,
+      submitted_prompt: 'cancelled prompt',
+      output: '',
+      token_count: 0,
+      last_applied_sequence: 0,
+      publisher_generation: 1,
+      error_code: 'stream_disconnected',
+      form_error: null,
+      cancellation_requested: false,
+      started_at_unix_ms: NOW,
+      history: [{
+        request_id: accepted.request_id,
+        prompt: 'cancelled prompt',
+        response: '',
+        terminal_state: 'cancelled',
+        token_count: 0,
+        started_at_unix_ms: NOW,
+        finished_at_unix_ms: NOW + 1,
+        deployment_id: qualification().binding.deployment_id,
+        model_id: qualification().binding.model_id,
+        error_code: null,
+      }],
+    };
+
+    const hook = renderHook(() =>
+      useInferenceSession({ client, now: () => NOW + 2, restored_state: restored }),
+    );
+
+    await waitFor(() => expect(hook.result.current.qualification_status).toBe('ready'));
+    expect(hook.result.current.phase).toBe('cancelled');
+    expect(hook.result.current.can_submit).toBe(true);
+    expect(client.streamCursors).toEqual([]);
+    expect(hook.result.current.history).toHaveLength(1);
+  });
+
+  it('retries the transient old-subscriber race while restoring an active request', async () => {
+    const client = new FakeClient();
+    client.streamBatches.push(
+      [],
+      [],
+      [
+        event(2, { type: 'token', token_index: 1, text: 'B' }),
+        event(3, { type: 'completed' }),
+      ],
+    );
+    client.streamFailures.push(
+      new InferenceClientError('stream_already_attached', false),
+      new InferenceClientError('stream_already_attached', false),
+    );
+    const restored: InferenceSessionState = {
+      qualification_status: 'ready',
+      qualification: qualification(),
+      qualification_changed: false,
+      phase: 'streaming',
+      accepted_request: accepted,
+      captured_binding: qualification().binding,
+      requested_max_new_tokens: 8,
+      submitted_prompt: 'restored prompt',
+      output: 'A',
+      token_count: 1,
+      last_applied_sequence: 1,
+      publisher_generation: 1,
+      error_code: null,
+      form_error: null,
+      cancellation_requested: false,
+      started_at_unix_ms: NOW,
+      history: [],
+    };
+
+    const hook = renderHook(() =>
+      useInferenceSession({ client, now: () => NOW + 1, restored_state: restored }),
+    );
+
+    await waitFor(() => expect(hook.result.current.phase).toBe('completed'), { timeout: 10_000 });
+    expect(client.streamCursors).toEqual([1, 1, 1]);
+    expect(hook.result.current.output).toBe('AB');
+  }, 15_000);
+
+  it('fails with the stable client code when the stream fails before its accepted event', async () => {
+    const client = new FakeClient();
+    client.qualifications = [qualification(), qualification()];
+    client.streamFailures.push(new InferenceClientError('invalid_event_stream', false));
+    const hook = await loaded(client);
+
+    await act(() => hook.result.current.start('private synthetic input', 8));
+
+    expect(hook.result.current.phase).toBe('failed');
+    expect(hook.result.current.error_code).toBe('invalid_event_stream');
+    expect(hook.result.current.history).toHaveLength(1);
+  });
+
+  it('enforces the captured generation bound against an overlong stream', async () => {
+    const client = new FakeClient();
+    client.qualifications = [qualification(), qualification()];
+    client.streamBatches.push([
+      event(0, { type: 'accepted' }),
+      event(1, { type: 'token', token_index: 0, text: 'A' }),
+      event(2, { type: 'token', token_index: 1, text: 'must not apply' }),
+    ]);
+    const hook = await loaded(client);
+
+    await act(() => hook.result.current.start('private synthetic input', 1));
+
+    expect(hook.result.current.output).toBe('A');
+    expect(hook.result.current.phase).toBe('failed');
+    expect(hook.result.current.error_code).toBe('stream_token_limit_exceeded');
+  });
+
+  it('does not admit a second request while an accepted request is active', async () => {
+    const client = new FakeClient();
+    client.qualifications = [qualification(), qualification(), qualification()];
+    client.streamBatches.push([event(0, { type: 'accepted' })]);
+    const hook = await loaded(client);
+    await act(() => hook.result.current.start('private synthetic input', 8));
+
+    await act(() => hook.result.current.start('second private input', 8));
+
+    expect(client.submissions).toHaveLength(1);
+    expect(hook.result.current.form_error).toBe('A request is already active');
+  });
+
+  it('coalesces cancellation and keeps terminal state immutable', async () => {
+    const client = new FakeClient();
+    client.qualifications = [qualification(), qualification()];
+    client.streamBatches.push([event(0, { type: 'accepted' })]);
+    const hook = await loaded(client);
+    await act(() => hook.result.current.start('private synthetic input', 8));
+
+    await act(async () => {
+      await Promise.all([
+        hook.result.current.cancel(),
+        hook.result.current.cancel(),
+        hook.result.current.cancel(),
+      ]);
+    });
+    expect(client.cancelCalls).toBe(1);
+    // Ack path: non-terminal, no server frame authored.
+    expect(hook.result.current.phase).toBe('cancel_unconfirmed');
+    expect(hook.result.current.output).toBe('');
+
+    // A server terminal frame delivered before the acknowledgement wins and
+    // is never overridden by the unconfirmed transition.
+    const serverCancelled = inferenceSessionReducer(
+      stateFor('cancelling'),
+      { type: 'event', event: event(1, { type: 'cancelled' }), now: NOW },
+    );
+    expect(serverCancelled.phase).toBe('cancelled');
+    expect(
+      inferenceSessionReducer(serverCancelled, { type: 'cancel_unconfirmed' }),
+    ).toBe(serverCancelled);
+  });
+
+  it('allows cancellation retry after a public cancellation failure', async () => {
+    const client = new FakeClient();
+    client.qualifications = [qualification(), qualification()];
+    client.streamBatches.push([event(0, { type: 'accepted' })]);
+    client.cancelFailures.push(new InferenceClientError('network_unavailable', true));
+    const hook = await loaded(client);
+    await act(() => hook.result.current.start('private synthetic input', 8));
+
+    await act(() => hook.result.current.cancel());
+    expect(hook.result.current.phase).toBe('interrupted');
+    expect(hook.result.current.cancellation_requested).toBe(false);
+    expect(hook.result.current.error_code).toBe('network_unavailable');
+
+    await act(() => hook.result.current.cancel());
+    expect(client.cancelCalls).toBe(2);
+    expect(hook.result.current.phase).toBe('cancel_unconfirmed');
+  });
+
+  it('fails prompt/token bounds before network submission', async () => {
+    const client = new FakeClient();
+    const hook = await loaded(client);
+
+    await act(() => hook.result.current.start('', 0));
+
+    expect(client.submissions).toHaveLength(0);
+    expect(hook.result.current.form_error).toBe('Prompt is required');
+  });
+
+  it('surfaces cancel_unconfirmed without authoring a terminal state and clears the submit gate', async () => {
+    const client = new FakeClient();
+    client.qualifications = [qualification(), qualification()];
+    client.streamBatches.push([event(0, { type: 'accepted' })]);
+    const hook = renderHook(() =>
+      useInferenceSession({ client, now: () => NOW + 1 }),
+    );
+    await waitFor(() => expect(hook.result.current.qualification_status).toBe('ready'));
+    await act(() => hook.result.current.start('private synthetic input', 8));
+    expect(hook.result.current.phase).toBe('interrupted');
+
+    await act(() => hook.result.current.cancel());
+    expect(client.cancelCalls).toBe(1);
+    // The ack is not terminal evidence: a distinct NON-terminal phase.
+    expect(hook.result.current.phase).toBe('cancel_unconfirmed');
+    expect(isTerminalInferencePhase(hook.result.current.phase)).toBe(false);
+    expect(hook.result.current.error_code).toBeNull();
+    // No history entry is authored without a server terminal frame.
+    expect(hook.result.current.history).toHaveLength(0);
+    // The per-tab submit gate is cleared — the actual UX defect.
+    expect(hook.result.current.can_submit).toBe(true);
+    expect(hook.result.current.submit_block_reason).toBeNull();
+
+    client.qualifications.push(qualification());
+    client.streamBatches.push([event(0, { type: 'accepted' })]);
+    await act(() => hook.result.current.start('second private input', 8));
+    expect(client.submissions).toHaveLength(2);
+  });
+
+  it('cancel_unconfirmed is only reachable from cancelling and never beats a server terminal frame', () => {
+    const cancelled = stateFor('cancelling');
+    const next = inferenceSessionReducer(cancelled, { type: 'cancel_unconfirmed' });
+    expect(next.phase).toBe('cancel_unconfirmed');
+    expect(isTerminalInferencePhase(next.phase)).toBe(false);
+    expect(next.history).toHaveLength(0);
+
+    // Server delivered the terminal frame first: the action must not override it.
+    const serverCancelled = inferenceSessionReducer(
+      stateFor('cancelling'),
+      { type: 'event', event: event(1, { type: 'cancelled' }), now: NOW },
+    );
+    expect(serverCancelled.phase).toBe('cancelled');
+    const after = inferenceSessionReducer(serverCancelled, { type: 'cancel_unconfirmed' });
+    expect(after).toBe(serverCancelled);
+
+    // Unreachable from non-cancelling non-terminal phases: no-op.
+    const interrupted = stateFor('interrupted');
+    expect(
+      inferenceSessionReducer(interrupted, { type: 'cancel_unconfirmed' }),
+    ).toBe(interrupted);
+  });
+
+  it('treats a retryable resume_cursor_expired as a defined non-looping restore outcome', async () => {
+    const client = new FakeClient();
+    client.streamFailures.push(new InferenceClientError('resume_cursor_expired', true));
+    const restored = stateFor('streaming');
+    const hook = renderHook(() =>
+      useInferenceSession({ client, now: () => NOW + 1, restored_state: restored }),
+    );
+    await waitFor(
+      () => expect(hook.result.current.error_code).toBe('resume_cursor_expired'),
+      { timeout: 4_000 },
+    );
+    expect(hook.result.current.phase).toBe('interrupted');
+    // The auto-restore loop must stop after the first attempt for any code
+    // other than stream_already_attached — no retry storm against a server
+    // that has discarded the cursor.
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(client.streamCursors.length).toBe(1);
+  });
+
+  it('carries the provisional extended restore retry schedule (A4 coordination pending)', () => {
+    expect(RESTORED_STREAM_RETRY_DELAYS_MS).toEqual([
+      500, 1_500, 3_000, 6_000, 12_000, 30_000, 60_000,
+    ]);
+  });
+});
+
+
+describe('consumer bootstrap ordering', () => {
+  it('does not race the root cookie bootstrap before that session is ready', async () => {
+    const client = new FakeClient();
+    const load = vi.spyOn(client, 'loadQualification');
+    const { result, rerender } = renderHook(({ ready }) => {
+      const options = { client, now: () => NOW, bootstrapReady: ready };
+      return useInferenceSession(options);
+    }, { initialProps: { ready: false } });
+    expect(load).not.toHaveBeenCalled();
+    expect(result.current.can_submit).toBe(false);
+    rerender({ ready: true });
+    await waitFor(() => expect(result.current.can_submit).toBe(true));
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('stream_opened publisher generation', () => {
+  it('records the generation the gateway advanced to for an accepted resume only', () => {
+    const interrupted = { ...stateFor('interrupted'), publisher_generation: 1 };
+    const opened = inferenceSessionReducer(interrupted, { type: 'stream_opened', publisher_generation: 2 });
+    expect(opened.publisher_generation).toBe(2);
+    expect(opened.phase).toBe('interrupted');
+    // Never skips a generation and never rewinds.
+    expect(inferenceSessionReducer(interrupted, { type: 'stream_opened', publisher_generation: 3 })).toBe(interrupted);
+    expect(inferenceSessionReducer(opened, { type: 'stream_opened', publisher_generation: 2 })).toBe(opened);
+    const completed = { ...stateFor('completed'), publisher_generation: 1 };
+    expect(inferenceSessionReducer(completed, { type: 'stream_opened', publisher_generation: 2 })).toBe(completed);
+  });
+});

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import {
   EVIDENCE_SNAPSHOT_PROTOCOL,
   type EvidenceLink,

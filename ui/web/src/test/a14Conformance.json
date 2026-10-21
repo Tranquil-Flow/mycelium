@@ -1,0 +1,855 @@
+{
+  "entities": [
+    {
+      "attributes": {
+        "activation_eligible": false,
+        "activation_protocol": "mycelium.router_wire.v1",
+        "authority_generation": 1,
+        "incarnation": "conformance",
+        "lease_freshness": "fresh",
+        "lifecycle": "running",
+        "membership_generation": 1,
+        "peer_class": "mac_mlx_iroh",
+        "placement_id": "stage-000-primary",
+        "runtime_backend": "mlx",
+        "transport": "iroh"
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": null,
+        "route_generation": null,
+        "route_id": null,
+        "topology_version": null
+      },
+      "entity_id": "device-f6e475e01da038776130",
+      "freshness": {
+        "observed_at_unix_ms": 1000000,
+        "status": "current",
+        "valid_until_unix_ms": 1600000
+      },
+      "kind": "device",
+      "label": "Native inference device",
+      "source_id": "membership-source"
+    },
+    {
+      "attributes": {
+        "activation_eligible": false,
+        "activation_protocol": "mycelium.router_wire.v1",
+        "authority_generation": 1,
+        "incarnation": "conformance",
+        "lease_freshness": "fresh",
+        "lifecycle": "running",
+        "membership_generation": 1,
+        "peer_class": "mac_mlx_iroh",
+        "placement_id": "stage-001-primary",
+        "runtime_backend": "mlx",
+        "transport": "iroh"
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": null,
+        "route_generation": null,
+        "route_id": null,
+        "topology_version": null
+      },
+      "entity_id": "device-7760229f8ebfda86dcee",
+      "freshness": {
+        "observed_at_unix_ms": 1000000,
+        "status": "current",
+        "valid_until_unix_ms": 1600000
+      },
+      "kind": "device",
+      "label": "Native inference device",
+      "source_id": "membership-source"
+    },
+    {
+      "attributes": {
+        "cancellation_cleanup_bound_ms": 8000,
+        "concurrency_eligible": false,
+        "decode_mode": "stage_local_kv",
+        "deployment_id": "12345678-1234-5678-1234-567812345678",
+        "model_id": "org/model",
+        "placement_provenance": "operator_selected",
+        "publisher_generation_fenced": false,
+        "route_alive": false,
+        "scoped_liveness_proven": false,
+        "topology_version": 1
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": "12345678-1234-5678-1234-567812345678",
+        "route_generation": 1,
+        "route_id": "route-53acff4e81fe35642ff9",
+        "topology_version": 1
+      },
+      "entity_id": "route-53acff4e81fe35642ff9",
+      "freshness": {
+        "observed_at_unix_ms": 1000000,
+        "status": "current",
+        "valid_until_unix_ms": 1000000
+      },
+      "kind": "route",
+      "label": "Distributed inference route",
+      "source_id": "route-source"
+    },
+    {
+      "attributes": {
+        "component_roles": [
+          "input_embedding",
+          "decoder"
+        ],
+        "decode_mode": "stage_local_kv",
+        "end_layer_exclusive": 2,
+        "stage_index": 0,
+        "start_layer": 0
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": "12345678-1234-5678-1234-567812345678",
+        "route_generation": 1,
+        "route_id": "route-53acff4e81fe35642ff9",
+        "topology_version": 1
+      },
+      "entity_id": "stage-000-primary",
+      "freshness": {
+        "observed_at_unix_ms": 1000000,
+        "status": "current",
+        "valid_until_unix_ms": 1000000
+      },
+      "kind": "stage",
+      "label": "Inference stage 1",
+      "source_id": "route-source"
+    },
+    {
+      "attributes": {
+        "component_roles": [
+          "decoder",
+          "final_norm",
+          "lm_head"
+        ],
+        "decode_mode": "stage_local_kv",
+        "end_layer_exclusive": 4,
+        "stage_index": 1,
+        "start_layer": 2
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": "12345678-1234-5678-1234-567812345678",
+        "route_generation": 1,
+        "route_id": "route-53acff4e81fe35642ff9",
+        "topology_version": 1
+      },
+      "entity_id": "stage-001-primary",
+      "freshness": {
+        "observed_at_unix_ms": 1000000,
+        "status": "current",
+        "valid_until_unix_ms": 1000000
+      },
+      "kind": "stage",
+      "label": "Inference stage 2",
+      "source_id": "route-source"
+    },
+    {
+      "attributes": {
+        "connectivity": "unknown",
+        "dst_device_id": "device-7760229f8ebfda86dcee",
+        "measurement_digest": null,
+        "src_device_id": "device-f6e475e01da038776130"
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": "12345678-1234-5678-1234-567812345678",
+        "route_generation": 1,
+        "route_id": "route-53acff4e81fe35642ff9",
+        "topology_version": 1
+      },
+      "entity_id": "directed-link-0",
+      "freshness": {
+        "observed_at_unix_ms": 1000000,
+        "status": "current",
+        "valid_until_unix_ms": 1000000
+      },
+      "kind": "directed_link",
+      "label": "Activation-plane directed link",
+      "source_id": "route-source"
+    },
+    {
+      "attributes": {
+        "authority": "seed_coordinator",
+        "evidence_digest": null,
+        "source_generation": null,
+        "source_protocol": "mycelium.membership.signed_message.v1"
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": null,
+        "route_generation": null,
+        "route_id": null,
+        "topology_version": null
+      },
+      "entity_id": "provenance-membership-source",
+      "freshness": {
+        "observed_at_unix_ms": 1000000,
+        "status": "current",
+        "valid_until_unix_ms": 1000000
+      },
+      "kind": "source_provenance",
+      "label": "Evidence source",
+      "source_id": "membership-source"
+    },
+    {
+      "attributes": {
+        "authority": "physical_assignment_authority",
+        "evidence_digest": null,
+        "source_generation": null,
+        "source_protocol": "mycelium.membership.assignment_offer.v1"
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": null,
+        "route_generation": null,
+        "route_id": null,
+        "topology_version": null
+      },
+      "entity_id": "provenance-assignment-source",
+      "freshness": {
+        "observed_at_unix_ms": null,
+        "status": "unsupported",
+        "valid_until_unix_ms": null
+      },
+      "kind": "source_provenance",
+      "label": "Evidence source",
+      "source_id": "assignment-source"
+    },
+    {
+      "attributes": {
+        "authority": "live_router_status",
+        "evidence_digest": null,
+        "source_generation": null,
+        "source_protocol": "mycelium.live_route_status.v1"
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": null,
+        "route_generation": null,
+        "route_id": null,
+        "topology_version": null
+      },
+      "entity_id": "provenance-route-source",
+      "freshness": {
+        "observed_at_unix_ms": 1000000,
+        "status": "current",
+        "valid_until_unix_ms": 1000000
+      },
+      "kind": "source_provenance",
+      "label": "Evidence source",
+      "source_id": "route-source"
+    },
+    {
+      "attributes": {
+        "authority": "route_qualification_authority",
+        "evidence_digest": null,
+        "source_generation": null,
+        "source_protocol": "mycelium.route_qualification.v1"
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": null,
+        "route_generation": null,
+        "route_id": null,
+        "topology_version": null
+      },
+      "entity_id": "provenance-qualification-source",
+      "freshness": {
+        "observed_at_unix_ms": null,
+        "status": "missing",
+        "valid_until_unix_ms": null
+      },
+      "kind": "source_provenance",
+      "label": "Evidence source",
+      "source_id": "qualification-source"
+    },
+    {
+      "attributes": {
+        "authority": "request_gateway_recovery",
+        "evidence_digest": null,
+        "source_generation": null,
+        "source_protocol": "mycelium.full_context_recovery_runtime.v1"
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": null,
+        "route_generation": null,
+        "route_id": null,
+        "topology_version": null
+      },
+      "entity_id": "provenance-recovery-source",
+      "freshness": {
+        "observed_at_unix_ms": null,
+        "status": "missing",
+        "valid_until_unix_ms": null
+      },
+      "kind": "source_provenance",
+      "label": "Evidence source",
+      "source_id": "recovery-source"
+    },
+    {
+      "attributes": {
+        "authority": "unsupported_until_m13",
+        "evidence_digest": null,
+        "source_generation": null,
+        "source_protocol": "mycelium.layer_planner_snapshot.v1"
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": null,
+        "route_generation": null,
+        "route_id": null,
+        "topology_version": null
+      },
+      "entity_id": "provenance-planner-source",
+      "freshness": {
+        "observed_at_unix_ms": null,
+        "status": "unsupported",
+        "valid_until_unix_ms": null
+      },
+      "kind": "source_provenance",
+      "label": "Evidence source",
+      "source_id": "planner-source"
+    },
+    {
+      "attributes": {
+        "authority": "unsupported_until_m14",
+        "evidence_digest": null,
+        "source_generation": null,
+        "source_protocol": "mycelium.transport_path_observation.v1"
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": null,
+        "route_generation": null,
+        "route_id": null,
+        "topology_version": null
+      },
+      "entity_id": "provenance-transport-path-source",
+      "freshness": {
+        "observed_at_unix_ms": null,
+        "status": "unsupported",
+        "valid_until_unix_ms": null
+      },
+      "kind": "source_provenance",
+      "label": "Evidence source",
+      "source_id": "transport-path-source"
+    },
+    {
+      "attributes": {
+        "authority": "artifact_inventory_adapter_pending",
+        "evidence_digest": null,
+        "source_generation": null,
+        "source_protocol": "mycelium.physical_deployment.v1"
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": null,
+        "route_generation": null,
+        "route_id": null,
+        "topology_version": null
+      },
+      "entity_id": "provenance-artifact-source",
+      "freshness": {
+        "observed_at_unix_ms": null,
+        "status": "unsupported",
+        "valid_until_unix_ms": null
+      },
+      "kind": "source_provenance",
+      "label": "Evidence source",
+      "source_id": "artifact-source"
+    },
+    {
+      "attributes": {
+        "authority": "runtime_kv_adapter_pending",
+        "evidence_digest": null,
+        "source_generation": null,
+        "source_protocol": "mycelium.live_route_status.v1"
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": null,
+        "route_generation": null,
+        "route_id": null,
+        "topology_version": null
+      },
+      "entity_id": "provenance-runtime-source",
+      "freshness": {
+        "observed_at_unix_ms": null,
+        "status": "unsupported",
+        "valid_until_unix_ms": null
+      },
+      "kind": "source_provenance",
+      "label": "Evidence source",
+      "source_id": "runtime-source"
+    },
+    {
+      "attributes": {
+        "authority": "request_lifecycle_adapter_pending",
+        "evidence_digest": null,
+        "source_generation": null,
+        "source_protocol": "mycelium.observatory.request_projection.v1"
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": null,
+        "route_generation": null,
+        "route_id": null,
+        "topology_version": null
+      },
+      "entity_id": "provenance-request-source",
+      "freshness": {
+        "observed_at_unix_ms": null,
+        "status": "unsupported",
+        "valid_until_unix_ms": null
+      },
+      "kind": "source_provenance",
+      "label": "Evidence source",
+      "source_id": "request-source"
+    }
+  ],
+  "internet_native": {
+    "activation_history": [
+      {
+        "connection_generation": 1,
+        "connection_reuse": 0,
+        "endpoint_pseudonym": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "evidence_lifetime_until_unix_ms": 1600000,
+        "freshness": "current",
+        "metrics": {
+          "goodput_bytes_per_second": 1000,
+          "jitter_ms": 1,
+          "loss_ratio": 0,
+          "measured_zero": true,
+          "rtt_ms": 4,
+          "sample_count": 2,
+          "warm_rtt_ms": 2
+        },
+        "observation_id": "conformance-1",
+        "observed_at_unix_ms": 998001,
+        "path_class": "direct",
+        "path_source": "bound_live_connection",
+        "protocol": "mycelium.internet_activation_observation.v1"
+      },
+      {
+        "connection_generation": 2,
+        "connection_reuse": 0,
+        "endpoint_pseudonym": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "evidence_lifetime_until_unix_ms": 1600000,
+        "freshness": "current",
+        "metrics": {
+          "goodput_bytes_per_second": 1000,
+          "jitter_ms": 1,
+          "loss_ratio": 0,
+          "measured_zero": true,
+          "rtt_ms": 4,
+          "sample_count": 2,
+          "warm_rtt_ms": 2
+        },
+        "observation_id": "conformance-2",
+        "observed_at_unix_ms": 998002,
+        "path_class": "relay",
+        "path_source": "bound_live_connection",
+        "protocol": "mycelium.internet_activation_observation.v1"
+      }
+    ],
+    "activation_observation": {
+      "connection_generation": 2,
+      "connection_reuse": 0,
+      "endpoint_pseudonym": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "evidence_lifetime_until_unix_ms": 1600000,
+      "freshness": "current",
+      "metrics": {
+        "goodput_bytes_per_second": 1000,
+        "jitter_ms": 1,
+        "loss_ratio": 0,
+        "measured_zero": true,
+        "rtt_ms": 4,
+        "sample_count": 2,
+        "warm_rtt_ms": 2
+      },
+      "observation_id": "conformance-2",
+      "observed_at_unix_ms": 998002,
+      "path_class": "relay",
+      "path_source": "bound_live_connection",
+      "protocol": "mycelium.internet_activation_observation.v1"
+    },
+    "bootstrap_status": {
+      "canonical_origin_verified": false,
+      "counters": {
+        "joins_accepted": 0,
+        "joins_rejected": 0,
+        "requests": 0
+      },
+      "freshness": "unknown",
+      "generation": 1,
+      "invitation_state": "unknown",
+      "observed_at_unix_ms": 1000000,
+      "protocol": "mycelium.internet_bootstrap_status.v1",
+      "route_state": "unknown",
+      "seed_pin_state": "unknown",
+      "tls_state": "unknown"
+    },
+    "qualification": null,
+    "relay_projection": null
+  },
+  "notices": [
+    {
+      "code": "qualification_source_missing",
+      "notice_id": "source-qualification-source-missing",
+      "scope_id": "product-root",
+      "severity": "warning",
+      "source_id": "qualification-source"
+    },
+    {
+      "code": "recovery_source_missing",
+      "notice_id": "source-recovery-source-missing",
+      "scope_id": "product-root",
+      "severity": "warning",
+      "source_id": "recovery-source"
+    }
+  ],
+  "protocol": "mycelium.product_snapshot.v1",
+  "provenance": {
+    "projector": "mycelium_product_spine",
+    "projector_version": "m12-v1",
+    "source_mode": "fixture"
+  },
+  "publication": {
+    "cursor": 1,
+    "generation": 1,
+    "published_at_unix_ms": 1000000,
+    "snapshot_id": "snapshot-1-050cbd7e786bed91",
+    "source_mode": "fixture"
+  },
+  "readiness": [
+    {
+      "dimension": "membership",
+      "reason_code": null,
+      "scope_id": "device-f6e475e01da038776130",
+      "source_id": "membership-source",
+      "state": "ready"
+    },
+    {
+      "dimension": "membership",
+      "reason_code": null,
+      "scope_id": "device-7760229f8ebfda86dcee",
+      "source_id": "membership-source",
+      "state": "ready"
+    },
+    {
+      "dimension": "artifacts",
+      "reason_code": "assignment_projection_unsupported",
+      "scope_id": "route-53acff4e81fe35642ff9",
+      "source_id": "assignment-source",
+      "state": "unsupported"
+    },
+    {
+      "dimension": "membership",
+      "reason_code": "placement_member_ineligible",
+      "scope_id": "route-53acff4e81fe35642ff9",
+      "source_id": "membership-source",
+      "state": "not_ready"
+    },
+    {
+      "dimension": "transport",
+      "reason_code": "scoped_liveness_unqualified",
+      "scope_id": "route-53acff4e81fe35642ff9",
+      "source_id": "transport-path-source",
+      "state": "not_ready"
+    },
+    {
+      "dimension": "runtime",
+      "reason_code": "concurrency_liveness_unqualified",
+      "scope_id": "route-53acff4e81fe35642ff9",
+      "source_id": "runtime-source",
+      "state": "not_ready"
+    },
+    {
+      "dimension": "qualification",
+      "reason_code": "coherent_qualification_unavailable",
+      "scope_id": "route-53acff4e81fe35642ff9",
+      "source_id": "qualification-source",
+      "state": "not_ready"
+    },
+    {
+      "dimension": "product_source",
+      "reason_code": null,
+      "scope_id": "product-root",
+      "source_id": "route-source",
+      "state": "ready"
+    }
+  ],
+  "relations": [
+    {
+      "from_entity_id": "stage-000-primary",
+      "kind": "assigned_to",
+      "relation_id": "stage-route-0",
+      "source_id": "route-source",
+      "to_entity_id": "route-53acff4e81fe35642ff9"
+    },
+    {
+      "from_entity_id": "stage-000-primary",
+      "kind": "placed_on",
+      "relation_id": "stage-device-0",
+      "source_id": "route-source",
+      "to_entity_id": "device-f6e475e01da038776130"
+    },
+    {
+      "from_entity_id": "stage-001-primary",
+      "kind": "assigned_to",
+      "relation_id": "stage-route-1",
+      "source_id": "route-source",
+      "to_entity_id": "route-53acff4e81fe35642ff9"
+    },
+    {
+      "from_entity_id": "stage-001-primary",
+      "kind": "placed_on",
+      "relation_id": "stage-device-1",
+      "source_id": "route-source",
+      "to_entity_id": "device-7760229f8ebfda86dcee"
+    }
+  ],
+  "route_explorer": {
+    "digest": "sha256:84cca19319fec27252d6bcc34e633acdf1a99eef3cd2c7a85c26b132ecb4bff7",
+    "generation": 1,
+    "nodes": [
+      {
+        "id": "sha256:a429100e82031a3f98985741f2b590e7e41f5822fe8d4e276ac8f43895c77a27",
+        "kind": "endpoint",
+        "region": "unknown",
+        "region_source": "unavailable"
+      },
+      {
+        "id": "sha256:aba791d0e6bd72e0ca43af04e0f47a990d1015f9e2ea7aeaea8ada975a7635ce",
+        "kind": "member",
+        "region": "unknown",
+        "region_source": "unavailable"
+      },
+      {
+        "id": "sha256:fbc2ea382330a9a5effc2719a9587680828b444487c376ec323f7bfff228570a",
+        "kind": "member",
+        "region": "unknown",
+        "region_source": "unavailable"
+      }
+    ],
+    "overlays": "unavailable",
+    "protocol": "mycelium.route_explorer.v1",
+    "segments": [
+      {
+        "authority_digest": "sha256:bbf94f60cf26e61dc9011ce75fab7c3782591fb2f91ed6d964422ea3724d0764",
+        "binding": {
+          "attempt": null,
+          "deployment": "sha256:be6bf1ea57078ff17fa690d9c62d24fb803c8aac2368bb9088431187034a2cfe",
+          "path_generation": 1,
+          "request": null,
+          "track": null
+        },
+        "connection_generation": null,
+        "destination": "sha256:aba791d0e6bd72e0ca43af04e0f47a990d1015f9e2ea7aeaea8ada975a7635ce",
+        "edge_kind": "logical_execution",
+        "expires_at": null,
+        "freshness": "unknown",
+        "history": false,
+        "id": "sha256:eaaf80b67fc52a119c8754ef05083d072dae09c49d69ad74ed77b95a773d75d7",
+        "issued_at": null,
+        "metrics": {
+          "goodput_bytes_per_second": null,
+          "jitter_ms": null,
+          "loss_ratio": null,
+          "measured_zero": false,
+          "rtt_ms": null,
+          "sample_count": null,
+          "warm_rtt_ms": null
+        },
+        "path_status": "selected",
+        "phase": "unknown",
+        "provenance": "fixture",
+        "role": "unknown",
+        "source": "sha256:fbc2ea382330a9a5effc2719a9587680828b444487c376ec323f7bfff228570a",
+        "transport": "unknown"
+      },
+      {
+        "authority_digest": "sha256:1ab5e695303f8d8281bc0471ff15252d1533b004d5a03f410cffa5d82768d2fd",
+        "binding": {
+          "attempt": null,
+          "deployment": null,
+          "path_generation": null,
+          "request": null,
+          "track": null
+        },
+        "connection_generation": 1,
+        "destination": "sha256:a429100e82031a3f98985741f2b590e7e41f5822fe8d4e276ac8f43895c77a27",
+        "edge_kind": "transport_observation",
+        "expires_at": 1600000,
+        "freshness": "current",
+        "history": true,
+        "id": "sha256:97ecb5b9441ed573411f4a0b5dbdee8e82ec0aef893ee5b8113d76d8edce89af",
+        "issued_at": 998001,
+        "metrics": {
+          "goodput_bytes_per_second": 1000,
+          "jitter_ms": 1,
+          "loss_ratio": 0,
+          "measured_zero": true,
+          "rtt_ms": 4,
+          "sample_count": 2,
+          "warm_rtt_ms": 2
+        },
+        "path_status": "observed",
+        "phase": "unknown",
+        "provenance": "fixture",
+        "role": "unknown",
+        "source": null,
+        "transport": "direct"
+      },
+      {
+        "authority_digest": "sha256:33f18b8115651df26424900ed98bdc0715d1221ca8e00266ddab1c28c561002c",
+        "binding": {
+          "attempt": null,
+          "deployment": null,
+          "path_generation": null,
+          "request": null,
+          "track": null
+        },
+        "connection_generation": 2,
+        "destination": "sha256:a429100e82031a3f98985741f2b590e7e41f5822fe8d4e276ac8f43895c77a27",
+        "edge_kind": "transport_observation",
+        "expires_at": 1600000,
+        "freshness": "current",
+        "history": false,
+        "id": "sha256:404dba6450ca398237c77dc459cc1c6deddb2765801e3bd4bc087eaaf5478b2f",
+        "issued_at": 998002,
+        "metrics": {
+          "goodput_bytes_per_second": 1000,
+          "jitter_ms": 1,
+          "loss_ratio": 0,
+          "measured_zero": true,
+          "rtt_ms": 4,
+          "sample_count": 2,
+          "warm_rtt_ms": 2
+        },
+        "path_status": "observed",
+        "phase": "unknown",
+        "provenance": "fixture",
+        "role": "unknown",
+        "source": null,
+        "transport": "relay"
+      }
+    ],
+    "source_digest": "sha256:e84688b5c146e40db513ccf9a9eba0a1a16376dbfcae6798b0c9ee0b1d5d6d6e",
+    "source_mode": "fixture"
+  },
+  "source_states": [
+    {
+      "authority": "seed_coordinator",
+      "generation": null,
+      "observed_at_unix_ms": 1000000,
+      "reason_code": null,
+      "source_id": "membership-source",
+      "status": "current",
+      "valid_until_unix_ms": 1000000
+    },
+    {
+      "authority": "physical_assignment_authority",
+      "generation": null,
+      "observed_at_unix_ms": null,
+      "reason_code": "assignment_projection_unsupported",
+      "source_id": "assignment-source",
+      "status": "unsupported",
+      "valid_until_unix_ms": null
+    },
+    {
+      "authority": "live_router_status",
+      "generation": null,
+      "observed_at_unix_ms": 1000000,
+      "reason_code": null,
+      "source_id": "route-source",
+      "status": "current",
+      "valid_until_unix_ms": 1000000
+    },
+    {
+      "authority": "route_qualification_authority",
+      "generation": null,
+      "observed_at_unix_ms": null,
+      "reason_code": "qualification_source_missing",
+      "source_id": "qualification-source",
+      "status": "missing",
+      "valid_until_unix_ms": null
+    },
+    {
+      "authority": "request_gateway_recovery",
+      "generation": null,
+      "observed_at_unix_ms": null,
+      "reason_code": "recovery_source_missing",
+      "source_id": "recovery-source",
+      "status": "missing",
+      "valid_until_unix_ms": null
+    },
+    {
+      "authority": "unsupported_until_m13",
+      "generation": null,
+      "observed_at_unix_ms": null,
+      "reason_code": "planner_projection_unsupported",
+      "source_id": "planner-source",
+      "status": "unsupported",
+      "valid_until_unix_ms": null
+    },
+    {
+      "authority": "unsupported_until_m14",
+      "generation": null,
+      "observed_at_unix_ms": null,
+      "reason_code": "transport_path_unsupported",
+      "source_id": "transport-path-source",
+      "status": "unsupported",
+      "valid_until_unix_ms": null
+    },
+    {
+      "authority": "artifact_inventory_adapter_pending",
+      "generation": null,
+      "observed_at_unix_ms": null,
+      "reason_code": "artifact_inventory_unavailable",
+      "source_id": "artifact-source",
+      "status": "unsupported",
+      "valid_until_unix_ms": null
+    },
+    {
+      "authority": "runtime_kv_adapter_pending",
+      "generation": null,
+      "observed_at_unix_ms": null,
+      "reason_code": "runtime_kv_projection_unavailable",
+      "source_id": "runtime-source",
+      "status": "unsupported",
+      "valid_until_unix_ms": null
+    },
+    {
+      "authority": "request_lifecycle_adapter_pending",
+      "generation": null,
+      "observed_at_unix_ms": null,
+      "reason_code": "request_projection_unavailable",
+      "source_id": "request-source",
+      "status": "unsupported",
+      "valid_until_unix_ms": null
+    }
+  ],
+  "supported_entity_kinds": [
+    "artifact",
+    "assignment",
+    "device",
+    "directed_link",
+    "incident",
+    "load_proof",
+    "qualification",
+    "recovery",
+    "request",
+    "route",
+    "runtime_kv_ownership",
+    "source_provenance",
+    "stage"
+  ]
+}

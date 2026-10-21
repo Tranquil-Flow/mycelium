@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 import fixture from '../../../tests/fixtures/failover/failover-scenarios.json';
 import scenario from '../../../tests/fixtures/source/hypothetical-six-node.json';

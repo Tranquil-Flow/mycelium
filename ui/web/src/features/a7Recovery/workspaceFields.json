@@ -1,0 +1,50 @@
+{
+  "inference": [
+    "Committed token count",
+    "Sync-ack wait median (ms)",
+    "Recovery prefill operations",
+    "Duplicate token count"
+  ],
+  "device_lab": [
+    "Standby placement fingerprint",
+    "Runtime backend",
+    "KV reservation bytes",
+    "Measured free bytes"
+  ],
+  "network": [
+    "Last checkpoint bytes/sec",
+    "Last ack RTT (ms)",
+    "Fence advance sequence",
+    "Transport RTT to standby (ms)"
+  ],
+  "nodes": [
+    "Entry node binding",
+    "Source node binding",
+    "Standby node binding",
+    "Process-exited incident count"
+  ],
+  "plans": [
+    "Standby plan digest",
+    "Deployment ID + epoch",
+    "Qualification age (s)",
+    "Parity challenge digest"
+  ],
+  "readiness": [
+    "Fence ledger state",
+    "Durable fence generation",
+    "Parity challenge status",
+    "Qualification TTL remaining (s)"
+  ],
+  "incidents": [
+    "Scoped incident count (1h)",
+    "Incident reason code",
+    "Recovery path chosen",
+    "Terminal blocked count"
+  ],
+  "settings": [
+    "Collection window (ms)",
+    "Command timeout (ms)",
+    "Ack timeout (s)",
+    "Receipt timeout (s)"
+  ]
+}

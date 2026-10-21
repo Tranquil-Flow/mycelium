@@ -1,25 +1,33 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import {
   StaticObservatorySource,
+  type LiveObservatorySourceState,
   type ObservatoryDataSource,
   type ObservatorySourceListener,
   type ObservatorySourceState,
 } from './data/observatorySource';
+import { decodeObservatorySnapshot } from './model/semanticProjection';
+import { validSemanticSnapshot } from './test/semanticFixture';
 
 class InjectedLiveSource implements ObservatoryDataSource {
+  readonly source_mode = 'live' as const;
   readonly kind = 'live' as const;
   readonly calls: string[] = [];
   private readonly listeners = new Set<ObservatorySourceListener>();
-  private state: ObservatorySourceState;
+  private state: LiveObservatorySourceState;
 
   constructor() {
-    const staticState = new StaticObservatorySource().loadInitial();
     this.state = {
+      source_mode: 'live',
       status: 'disconnected',
       generation: 7,
-      bundle: staticState.bundle,
+      snapshot: decodeObservatorySnapshot(validSemanticSnapshot()),
+      live_qualified: false,
+      qualification_reasons: ['transport_not_current'],
+      freshness: 'current',
       reason: 'test disconnect',
     };
   }
@@ -30,20 +38,23 @@ class InjectedLiveSource implements ObservatoryDataSource {
     return () => this.listeners.delete(listener);
   };
 
-  loadInitial(): ObservatorySourceState {
+  loadInitial(): LiveObservatorySourceState {
     this.calls.push('loadInitial');
     return this.state;
   }
 
-  getState(): ObservatorySourceState {
+  getState(): LiveObservatorySourceState {
     return this.state;
   }
 
   reconnect(): void {
     this.state = {
+      ...this.state,
       status: 'connected',
       generation: 8,
-      bundle: this.state.bundle,
+      live_qualified: true,
+      qualification_reasons: [],
+      reason: undefined,
     };
     for (const listener of this.listeners) listener(this.state);
   }
@@ -56,11 +67,27 @@ describe('Network Observatory', () => {
   it('makes fixture mode and disabled live integration unmistakable', () => {
     render(<App />);
 
-    expect(screen.getByRole('heading', { name: /network observatory/i })).toBeInTheDocument();
+    expect(screen.getByText('Mycelium')).toBeInTheDocument();
     expect(screen.getByText(/^MVP$/)).toBeInTheDocument();
-    expect(screen.getByText(/simulation · fixture/i)).toBeInTheDocument();
-    expect(screen.getByText(/current unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/fixture data · not live/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /fixture data · not current/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /pipeline/i })).toBeInTheDocument();
+  });
+
+  it('wires inference, node/swarm, membership, and settings workspaces without fixture network calls', async () => {
+    window.history.replaceState(null, '', '#inference');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('fixture network forbidden'));
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: /^inference$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /start inference/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('link', { name: /nodes/i }));
+    expect(await screen.findByRole('heading', { name: /nodes and swarm/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /invite or join/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('link', { name: /settings/i }));
+    expect(screen.getByRole('heading', { name: /^settings$/i })).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   it('shows truthful failover states and route generations', () => {
@@ -79,18 +106,17 @@ describe('Network Observatory', () => {
     fireEvent.click(screen.getByRole('link', { name: /plans/i }));
 
     expect(screen.getByRole('heading', { name: /strategy comparison/i })).toBeInTheDocument();
-    expect(screen.getByText('global_best_shortest_subset')).toBeInTheDocument();
     expect(screen.getAllByText(/synthetic/i).length).toBeGreaterThan(0);
   });
 
   it('keeps artifact readiness separate from route readiness and from simulator scope', () => {
     render(<App />);
-    fireEvent.click(screen.getByRole('link', { name: /evidence/i }));
+    fireEvent.click(screen.getByRole('link', { name: /^readiness$/i }));
 
     expect(screen.getByRole('heading', { name: /proof matrix/i })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /independent provisioning capture/i })).toBeInTheDocument();
-    expect(screen.getByText(/ready for runtime load/i)).toBeInTheDocument();
-    expect(screen.getByText(/route ready/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/ready for runtime load/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/route ready/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/artifact provisioning only/i)).toBeInTheDocument();
     expect(screen.getByText(/separate scope.*not.*active simulation/i)).toBeInTheDocument();
     expect(screen.getAllByText(/tiny-random-GPT2Model-sharded/i).length).toBeGreaterThan(0);
@@ -113,8 +139,9 @@ describe('Network Observatory', () => {
     render(<App />);
 
     expect(screen.getByRole('heading', { name: /proof matrix/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /evidence/i })).toHaveAttribute('href', '#evidence');
-    expect(screen.getByRole('link', { name: /evidence/i })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: /readiness/i })).toHaveAttribute('href', '#readiness');
+    expect(screen.getByRole('link', { name: /readiness/i })).toHaveAttribute('aria-current', 'page');
+    expect(window.location.hash).toBe('#readiness');
 
     fireEvent.click(screen.getByRole('link', { name: /plans/i }));
     expect(window.location.hash).toBe('#plans');
@@ -128,7 +155,7 @@ describe('Network Observatory', () => {
     act(() => window.dispatchEvent(new HashChangeEvent('hashchange')));
 
     expect(screen.getByRole('heading', { name: /proof matrix/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /evidence/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /readiness/i })).toHaveAttribute(
       'aria-current',
       'page',
     );
@@ -138,8 +165,8 @@ describe('Network Observatory', () => {
     window.history.replaceState(null, '', '#future-contract');
     render(<App />);
 
-    expect(window.location.hash).toBe('#network');
-    expect(screen.getByRole('heading', { name: /network topology/i })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#inference');
+    expect(screen.getByRole('heading', { name: /^inference$/i })).toBeInTheDocument();
   });
 
   it('renders the existing fail-closed fixture error instead of crashing source construction', () => {
@@ -154,27 +181,40 @@ describe('Network Observatory', () => {
     expect(screen.getByText(/no fallback values/i)).toBeInTheDocument();
   });
 
-  it('accepts an injected read-only live source and reflects disconnect then reconnect state', () => {
+  it('does not label disconnected semantic evidence live, then gates live on qualification', () => {
     const source = new InjectedLiveSource();
     render(<App source={source} />);
 
-    expect(screen.getByText(/live · read only/i)).toBeInTheDocument();
+    expect(screen.getByText(/live evidence · not current/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^live evidence · current$/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /disconnected · g7/i })).toBeDisabled();
+    expect(screen.getAllByText(/deployment-alpha/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/route-primary/i)).toBeInTheDocument();
     expect(source.calls).toEqual(['subscribe', 'loadInitial']);
 
     act(() => source.reconnect());
 
-    expect(screen.getByRole('button', { name: /current · g8/i })).toBeDisabled();
+    expect(screen.getByText(/^live evidence · current$/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /current evidence · g8/i })).toBeDisabled();
   });
 
-  it('never renders a previous source bundle under a replacement source identity', async () => {
+  it('never renders a previous fixture bundle under a replacement live source identity', async () => {
     const staticSource = new StaticObservatorySource();
-    const bundle = staticSource.loadInitial().bundle;
+    const semanticState: LiveObservatorySourceState = {
+      source_mode: 'live',
+      status: 'connected',
+      generation: 12,
+      snapshot: decodeObservatorySnapshot(validSemanticSnapshot()),
+      live_qualified: true,
+      qualification_reasons: [],
+      freshness: 'current',
+    };
     let resolveInitial: ((state: ObservatorySourceState) => void) | undefined;
     const loading = new Promise<ObservatorySourceState>((resolve) => {
       resolveInitial = resolve;
     });
     const replacement: ObservatoryDataSource = {
+      source_mode: 'live',
       kind: 'live',
       getState: () => null,
       loadInitial: () => loading,
@@ -185,17 +225,37 @@ describe('Network Observatory', () => {
     rerender(<App source={replacement} />);
 
     expect(
-      screen.getByRole('heading', { name: /loading coherent evidence snapshot/i }),
+      screen.getByRole('heading', { name: /loading semantic observatory snapshot/i }),
     ).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /network topology/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/live · read only/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^live evidence · current$/i)).not.toBeInTheDocument();
 
     await act(async () => {
-      resolveInitial?.({ status: 'connected', generation: 12, bundle });
+      resolveInitial?.(semanticState);
       await loading;
     });
 
-    expect(screen.getByRole('heading', { name: /network topology/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /current · g12/i })).toBeDisabled();
+    expect(screen.getAllByText(/deployment-alpha/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /current evidence · g12/i })).toBeDisabled();
+    expect(screen.getByText(/^live evidence · current$/i)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /network topology/i })).not.toBeInTheDocument();
+  });
+
+  it('shows live source loading before exposing inference controls', () => {
+    window.history.replaceState(null, '', '#inference');
+    const pending = new Promise<ObservatorySourceState>(() => undefined);
+    const source: ObservatoryDataSource = {
+      source_mode: 'live',
+      kind: 'live',
+      getState: () => null,
+      loadInitial: () => pending,
+    };
+
+    render(<App source={source} />);
+
+    expect(
+      screen.getByRole('heading', { name: /loading semantic observatory snapshot/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^inference$/i })).not.toBeInTheDocument();
   });
 });

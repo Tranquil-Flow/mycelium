@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mycelium.local/schemas/product-ui-swarm-v1.schema.json",
+  "title": "Mycelium Product UI Swarm Status v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "native_nodes", "browser_workers"],
+  "properties": {
+    "protocol": { "const": "mycelium.product_ui.swarm.v1" },
+    "native_nodes": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": { "$ref": "#/$defs/native_node" }
+    },
+    "browser_workers": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": { "$ref": "#/$defs/browser_worker" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "safe_nonnegative_integer": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "native_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["member_id", "capability", "membership_state", "connectivity", "endpoint_id"],
+      "properties": {
+        "member_id": { "$ref": "#/$defs/identifier" },
+        "capability": { "const": "native_inference_node" },
+        "membership_state": { "enum": ["invited", "trusted", "reachable", "assigned", "qualified", "revoked"] },
+        "connectivity": { "enum": ["direct", "relayed", "local", "disconnected", "stale", "unknown"] },
+        "endpoint_id": {
+          "oneOf": [
+            { "$ref": "#/$defs/identifier" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "browser_worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["peer_id", "capability", "state", "expires_at_unix_ms"],
+      "properties": {
+        "peer_id": { "$ref": "#/$defs/identifier" },
+        "capability": { "const": "synthetic_browser_probe" },
+        "state": { "enum": ["invited", "connecting", "ready", "busy", "disconnected", "stale", "revoked"] },
+        "expires_at_unix_ms": { "$ref": "#/$defs/safe_nonnegative_integer" }
+      }
+    },
+    "create_invite_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "action", "capability", "expires_in_seconds"],
+      "properties": {
+        "protocol": { "const": "mycelium.product_ui.swarm.v1" },
+        "action": { "const": "create_invite" },
+        "capability": { "enum": ["native_inference_node", "synthetic_browser_probe"] },
+        "expires_in_seconds": { "type": "integer", "minimum": 30, "maximum": 86400 }
+      }
+    },
+    "invite_response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "invite_id", "invite_code", "capability", "expires_at_unix_ms"],
+      "properties": {
+        "protocol": { "const": "mycelium.product_ui.swarm.v1" },
+        "invite_id": { "$ref": "#/$defs/identifier" },
+        "invite_code": { "type": "string", "minLength": 16, "maxLength": 2048 },
+        "capability": { "enum": ["native_inference_node", "synthetic_browser_probe"] },
+        "expires_at_unix_ms": { "$ref": "#/$defs/safe_nonnegative_integer" }
+      }
+    },
+    "join_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "action", "invite_code", "display_name"],
+      "properties": {
+        "protocol": { "const": "mycelium.product_ui.swarm.v1" },
+        "action": { "const": "join" },
+        "invite_code": { "type": "string", "minLength": 16, "maxLength": 2048 },
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "join_response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "joined", "member_id", "capability"],
+      "properties": {
+        "protocol": { "const": "mycelium.product_ui.swarm.v1" },
+        "joined": { "const": true },
+        "member_id": { "$ref": "#/$defs/identifier" },
+        "capability": { "enum": ["native_inference_node", "synthetic_browser_probe"] }
+      }
+    },
+    "leave_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "action", "member_id"],
+      "properties": {
+        "protocol": { "const": "mycelium.product_ui.swarm.v1" },
+        "action": { "const": "leave" },
+        "member_id": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "leave_response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "member_id", "left"],
+      "properties": {
+        "protocol": { "const": "mycelium.product_ui.swarm.v1" },
+        "member_id": { "$ref": "#/$defs/identifier" },
+        "left": { "type": "boolean" }
+      }
+    }
+  }
+}
