@@ -6,6 +6,11 @@ frames.  No adapter envelope or simulator fallback exists on the remote path.
 A confirmed receipt means the authenticated remote adapter dispatched and
 ACKed the Router frame.  Dedupe and confirmation history are process-local;
 simultaneous loss of both sidecars is not durable exactly-once delivery.
+
+PV5 (``hop_ack_on_receipt``, default OFF): for plain hop frames only, the ACK
+may instead mean RECEIVED (held in the bounded dispatch queue, ownership
+transferred) while EXECUTED still gates cleanup, drain and dispatch counters.
+See docs/design/HOP-ACK-ON-RECEIPT.md.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from dataclasses import asdict, dataclass, is_dataclass
 import hashlib
 import re
 import json
+import os
 from pathlib import Path
 from queue import Empty, Full, Queue
 import threading
@@ -46,6 +52,12 @@ from mycelium_router.contracts import (
     ProgressivePrefillMessage,
     TokenEvent,
     VerifyEvent,
+)
+from mycelium_router.hop_overlap_trace import (
+    ACK_MODE_AFTER_EXECUTE,
+    ACK_MODE_ON_RECEIPT,
+    ENV_ENABLE as _HOP_TRACE_ENV,
+    HopOverlapTrace,
 )
 from mycelium_router.wire import (
     ROUTER_WIRE_PROTOCOL,
@@ -92,6 +104,12 @@ _DELIVERY_CANCEL_ATTEMPT_TIMEOUT_SECONDS = 0.2
 # races it.
 _DELIVERY_CANCEL_SHUTDOWN_GRANT_SECONDS = _DELIVERY_CANCEL_ATTEMPT_TIMEOUT_SECONDS
 _DELIVERY_CANCEL_SHUTDOWN_HANDOFF_SECONDS = 0.05
+#: PV5: acknowledge a hop frame when it is RECEIVED (held in the dispatch queue,
+#: ownership transferred) instead of after it is EXECUTED.  Off unless switched
+#: on here or per transport; the device A10 trace has to prove the gain first.
+_HOP_ACK_ENV = "MYCELIUM_HOP_ACK_ON_RECEIPT"
+_DEFAULT_HOP_ACK_WINDOW = 2
+_TRUE_TEXT = frozenset({"1", "true", "yes", "on"})
 _NON_DELIVERED_SCOPED_ERRORS = frozenset(
     {
         "manifest_delta_queue_full",
@@ -743,6 +761,10 @@ class TransportEvidence:
     route_ready: bool = False
     delivery_semantics: str = DELIVERY_SEMANTICS
     process_lifetime_limitation: str = PROCESS_LIFETIME_LIMITATION
+    # PV5 measurement: which acknowledgement mode ran, and the per-hop instants
+    # (empty unless the overlap trace is switched on).
+    hop_ack_on_receipt: bool = False
+    hop_overlap_trace: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass
@@ -781,6 +803,9 @@ class _InboundFrame:
     # Diagnostics only (evidence bundle).
     kind: str = ""
     received_at: float = 0.0
+    # PV5: the frame was acknowledged on receipt, so the dispatcher must not
+    # acknowledge it again.  It stays in ``_inflight_received`` until EXECUTED.
+    early_acked: bool = False
 
 
 @dataclass(frozen=True)
@@ -855,6 +880,9 @@ class IrohTransport:
         poll_interval_seconds: float = 0.05,
         client_factory: ClientFactory = SidecarClient,
         stall_policy: PrefillStallPolicy | None = None,
+        hop_ack_on_receipt: bool | None = None,
+        hop_ack_window: int | None = None,
+        hop_overlap_trace: bool | None = None,
     ):
         if not node_id or not expected_endpoint_id:
             raise ValueError("node and expected endpoint ids must not be empty")
@@ -864,6 +892,13 @@ class IrohTransport:
             raise ValueError("queue_capacity must be positive")
         if delivery_timeout_seconds <= 0 or poll_interval_seconds <= 0:
             raise ValueError("timeouts must be positive")
+        if hop_ack_window is None:
+            hop_ack_window = min(_DEFAULT_HOP_ACK_WINDOW, queue_capacity)
+        if (
+            type(hop_ack_window) is not int
+            or not 1 <= hop_ack_window <= queue_capacity
+        ):
+            raise ValueError("hop_ack_window must be within 1..queue_capacity")
         selected_local_generation = (
             peer.generation if local_generation is None else local_generation
         )
@@ -959,6 +994,20 @@ class IrohTransport:
         self._pending: dict[bytes, _PendingSend] = {}
         self._seen: OrderedDict[bytes, bytes] = OrderedDict()
         self._inflight_received: dict[bytes, _InboundFrame] = {}
+        self._hop_ack_on_receipt = (
+            os.environ.get(_HOP_ACK_ENV, "").strip().lower() in _TRUE_TEXT
+            if hop_ack_on_receipt is None
+            else bool(hop_ack_on_receipt)
+        )
+        self._hop_ack_window = hop_ack_window
+        self._hop_trace = HopOverlapTrace(
+            node_id=node_id,
+            enabled=(
+                os.environ.get(_HOP_TRACE_ENV, "").strip().lower() in _TRUE_TEXT
+                if hop_overlap_trace is None
+                else bool(hop_overlap_trace)
+            ),
+        )
         self._forward_scopes: dict[tuple[str, str, int], int] = {}
         self._active_forward_scope: tuple[str, str, int] | None = None
         self._cancelled_forward_scopes: OrderedDict[tuple[str, str, int], None] = (
@@ -1017,6 +1066,67 @@ class IrohTransport:
     @property
     def stall_policy(self) -> PrefillStallPolicy:
         return self._stall_policy
+
+    #: Frame kinds acknowledged on receipt when ``hop_ack_on_receipt`` is on.
+    #: Progressive prefill keeps its synchronous lock handshake and manifests,
+    #: failures, tokens and A7 control keep acknowledge-after-dispatch.
+    _early_ack_kinds = ("HopHeader",)
+
+    @property
+    def hop_ack_on_receipt(self) -> bool:
+        return self._hop_ack_on_receipt
+
+    @property
+    def hop_ack_window(self) -> int:
+        """Most RECEIVED-but-not-EXECUTED hop frames this node holds at once."""
+
+        return self._hop_ack_window
+
+    @property
+    def hop_overlap_trace_enabled(self) -> bool:
+        return self._hop_trace.enabled
+
+    def hop_overlap_records(self) -> tuple[Mapping[str, Any], ...]:
+        """Per-hop send/receive/execute/ack instants (empty when the trace is off)."""
+
+        return self._hop_trace.records()
+
+    def _trace_hop(
+        self,
+        role: str,
+        message: object,
+        event: str,
+        *,
+        at: float | None = None,
+        **extra: Any,
+    ) -> None:
+        """Record one hop instant; the instrument must never touch the data plane."""
+
+        if not self._hop_trace.enabled:
+            return
+        try:
+            self._hop_trace.mark(role, message, event, at=at, **extra)
+        except Exception:
+            pass
+
+    def _receiver_must_wait_locked(self) -> bool:
+        """Whether the receive loop must not take another frame yet.
+
+        Default: any frame still in flight (not yet acknowledged, i.e. executed).
+        With acknowledge-on-receipt only frames that still await their dispatch
+        acknowledgement block it, plus a full window of RECEIVED hops.
+        """
+
+        if not self._inflight_received:
+            return False
+        if not self._hop_ack_on_receipt:
+            return True
+        received = 0
+        for item in self._inflight_received.values():
+            if not item.early_acked:
+                return True
+            received += 1
+        return received >= self._hop_ack_window
 
     @property
     def _dispatcher_phase(self) -> str:
@@ -1621,6 +1731,7 @@ class IrohTransport:
                 error.code,
             ) from error
         request_id, path_id, path_attempt = self._fence_scope(decoded)
+        self._trace_hop("send", decoded.message, "send_requested")
         # Deadline ordering (A14 class D): a frame of a request whose prefill
         # wait is registered must expire before that wait does, so a stuck hop
         # reports its own code while the wait can still observe it.
@@ -1760,6 +1871,7 @@ class IrohTransport:
                 # sidecar. If it wins after, exact-message sidecar cancellation is
                 # required and retried across the admission crossing.
                 pending.admission_started = True
+            self._trace_hop("send", decoded.message, "send_started")
             self._send_confirmed_recovering(
                 client,
                 frame,
@@ -1773,6 +1885,7 @@ class IrohTransport:
                 request_id=request_id,
                 stalled_windows=stalled_windows,
             )
+            self._trace_hop("send", decoded.message, "send_confirmed")
             with self._state_lock:
                 current = self._lookup_destination_peer(destination_node_id)
                 if pending.cancelled or current.generation != pending.generation:
@@ -3164,7 +3277,7 @@ class IrohTransport:
             if not self._drain_ack_requests(client):
                 return
             with self._state_lock:
-                awaiting_dispatch_ack = bool(self._inflight_received)
+                awaiting_dispatch_ack = self._receiver_must_wait_locked()
             if awaiting_dispatch_ack:
                 # Bounded as before; an acknowledgement queued after the drain
                 # above wakes the receiver at once.
@@ -3220,6 +3333,7 @@ class IrohTransport:
             if delivery is None:
                 continue
             message_id, source_endpoint_id, delivery_generation, frame = delivery
+            received_at = time.monotonic()
             digest = hashlib.sha256(frame).digest()
             with self._state_lock:
                 source_peer = (
@@ -3255,6 +3369,11 @@ class IrohTransport:
                         IrohTransportError("malformed_router_frame", error.code)
                     )
                     return
+            early_ack = (
+                self._hop_ack_on_receipt
+                and decoded is not None
+                and type(decoded.message).__name__ in self._early_ack_kinds
+            )
             with self._state_lock:
                 self._inflight_received[message_id] = _InboundFrame(
                     digest,
@@ -3262,7 +3381,18 @@ class IrohTransport:
                     inbound_scope[1],
                     inbound_scope[2],
                     kind="duplicate" if decoded is None else _frame_kind(decoded.message),
-                    received_at=time.monotonic(),
+                    received_at=received_at,
+                    early_acked=early_ack,
+                )
+            if decoded is not None:
+                self._trace_hop(
+                    "recv",
+                    decoded.message,
+                    "received",
+                    at=received_at,
+                    ack_mode=(
+                        ACK_MODE_ON_RECEIPT if early_ack else ACK_MODE_AFTER_EXECUTE
+                    ),
                 )
             try:
                 self._dispatch_queue.put_nowait(
@@ -3280,6 +3410,16 @@ class IrohTransport:
                     self._inflight_received.pop(message_id, None)
                 self._set_fatal(IrohTransportError("dispatch_queue_full"))
                 return
+            if early_ack:
+                # RECEIVED: the frame is held in the bounded dispatch queue, so the
+                # sender may release it and send the next one.  EXECUTED is still
+                # what ``_inflight_received`` (cleanup, drain, withdrawal) waits for.
+                try:
+                    client.ack(message_id)
+                except BaseException as error:
+                    self._set_fatal(self._map_sidecar_error("ack_failed", error))
+                    return
+                self._trace_hop("recv", decoded.message, "ack_sent")
 
     def _dispatch_loop(self) -> None:
         while not self._stop.is_set():
@@ -3330,12 +3470,14 @@ class IrohTransport:
                     self._note_failure_report(
                         "received", source_node_id, decoded.message, "received"
                     )
+                self._trace_hop("recv", decoded.message, "exec_start")
                 self._dispatch(decoded, source_node_id=source_node_id)
+                self._trace_hop("recv", decoded.message, "exec_end")
                 with self._state_lock:
                     self._dispatcher_phase = "awaiting_local_ack"
                 if delivery_generation != self._peers.lookup(source_node_id).generation:
                     raise IrohTransportError("peer_rotated_during_dispatch")
-                self._ack_after_dispatch(message_id)
+                self._ack_unless_received(message_id, decoded.message)
                 with self._state_lock:
                     self._dispatcher_phase = "idle"
                     dispatched = self._inflight_received.pop(message_id, None)
@@ -3450,7 +3592,10 @@ class IrohTransport:
                     # subject even though that request-local operation failed. ACK it
                     # so the sidecar can retire this delivery; the scoped incident is
                     # the durable failure signal and unrelated traffic remains live.
-                    self._ack_after_dispatch(message_id)
+                    self._ack_unless_received(
+                        message_id,
+                        decoded.message if isinstance(decoded, DecodedFrame) else None,
+                    )
                     with self._state_lock:
                         self._dispatcher_phase = "idle"
                         self._inflight_received.pop(message_id, None)
@@ -3595,6 +3740,17 @@ class IrohTransport:
         with self._state_lock:
             if self._forward_thread is current:
                 self._forward_thread = None
+
+    def _ack_unless_received(self, message_id: bytes, message: object) -> None:
+        """Acknowledge after dispatch, unless the frame was acknowledged on receipt."""
+
+        with self._state_lock:
+            inbound = self._inflight_received.get(message_id)
+            already = inbound is not None and inbound.early_acked
+        if already:
+            return
+        self._ack_after_dispatch(message_id)
+        self._trace_hop("recv", message, "ack_sent")
 
     def _ack_after_dispatch(self, message_id: bytes) -> None:
         request = _AckRequest(message_id=message_id, completed=threading.Event())
@@ -4759,6 +4915,7 @@ class IrohTransport:
                 self._router_frames_dispatched,
                 self._duplicate_frames,
             )
+            hop_ack_on_receipt = self._hop_ack_on_receipt
             scoped_events = tuple(
                 {
                     "protocol": "mycelium.iroh_scoped_transport_event.v1",
@@ -4851,6 +5008,8 @@ class IrohTransport:
             duplicate_frames=counters[3],
             scoped_events=scoped_events,
             transport_path_observations=observations,
+            hop_ack_on_receipt=hop_ack_on_receipt,
+            hop_overlap_trace=self._hop_trace.records(),
         )
 
     def counter_snapshot(self) -> dict[str, int]:
