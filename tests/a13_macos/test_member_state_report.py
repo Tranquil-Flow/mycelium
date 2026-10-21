@@ -339,9 +339,6 @@ def test_announcement_carries_the_owner_service_mode_and_report_carries_the_appl
     assert exchange.member_states.view(node, generation)['service_mode'] == 'batch'
 
 
-@pytest.mark.xfail(strict=True, reason='TODO(rel2 merge): lane/rel2-modes owns service-mode.json; once '
-                   'mycelium_router.service_modes is on this branch the member must apply the owner mode from the '
-                   'announcement (MemberStateReporter owner_service_mode hook) - then remove this marker')
 def test_member_applies_the_owner_service_mode_to_its_own_service_mode_file(tmp_path):
     from mycelium_router import service_modes as sm
     from mycelium_a13_macos.member_state import apply_owner_service_mode
