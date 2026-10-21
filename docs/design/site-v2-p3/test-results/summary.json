@@ -1398,177 +1398,353 @@
     "tests/swarm_directory/test_web_ui_browser.py": "ddda1c0bf328a4846eaab749b412dc4e24f2fb15c6dfd914a9eb9770308f4202"
   },
   "artifacts": {
+    "access-approved-1440-dark.aria.txt": {
+      "sha256": "c814cbe8b8d60bbb2bde513c4f52e776a3411ccd6c82614ef937f76a0e818fbe",
+      "bytes": 847
+    },
     "access-approved-1440-dark.png": {
       "sha256": "428a9769168eae1d6b5b818582c4e55cab4805749b7f722915d88929f2d8505a",
       "bytes": 134321
+    },
+    "access-approved-1440-light.aria.txt": {
+      "sha256": "eef0ae28ad738244777f000f5b2be44143981c806f90772180e1ab9136a23607",
+      "bytes": 847
     },
     "access-approved-1440-light.png": {
       "sha256": "4569fb662cdfcb46b19aadf156d1eca5a48d1bbc83a03673c4f831ad3d3ead24",
       "bytes": 133714
     },
+    "access-approved-390-dark.aria.txt": {
+      "sha256": "17177df75021468d668d4b0cac6966b91df8af12c39be265ed1287f21d235521",
+      "bytes": 818
+    },
     "access-approved-390-dark.png": {
       "sha256": "f60a37e92f98c33d3e10c9542d7358d056313d34782e92a848937276408bf4f5",
       "bytes": 108579
+    },
+    "access-approved-390-light.aria.txt": {
+      "sha256": "f0c91d03cc48c1dc65ff11e4b9e4f30f76814bc5eb15c9db057f200ce031b80c",
+      "bytes": 818
     },
     "access-approved-390-light.png": {
       "sha256": "637e7f71e2a4fe64eab3cb14a1b280a66c80c48a9167f39fb168f8990d3228ad",
       "bytes": 108805
     },
+    "access-declined-1440-dark.aria.txt": {
+      "sha256": "81d3ea0ba1474ffb02af0d5b01a3a743c96f4e31ced1063b9e8dc0ad02ce6970",
+      "bytes": 960
+    },
     "access-declined-1440-dark.png": {
       "sha256": "b7c36d3a7f9bd550368ff7823a53956054a860f42610bf383a5351ebdec2b2c0",
       "bytes": 133378
+    },
+    "access-declined-1440-light.aria.txt": {
+      "sha256": "076f928ce65c4bf016d8ec188c8d011573777bd12c323812bd323dbc3ddad9b0",
+      "bytes": 960
     },
     "access-declined-1440-light.png": {
       "sha256": "f5cae7035edac6c1d4220624c0f0428642787297bbc6bc538d14425cdfe93b8b",
       "bytes": 134115
     },
+    "access-declined-390-dark.aria.txt": {
+      "sha256": "1e8657066103f67674990516926880586d306900885e7998fc8f2e0fb808ede4",
+      "bytes": 931
+    },
     "access-declined-390-dark.png": {
       "sha256": "23a70df60e86b0f4d95fe5911b14facb6f5cd623a77b69e3df67691dfef1da62",
       "bytes": 108767
+    },
+    "access-declined-390-light.aria.txt": {
+      "sha256": "30c91301dcbcb7ed6ab31257ece5b2806ed6b4291542aa85f3d756e68b6cc5a4",
+      "bytes": 931
     },
     "access-declined-390-light.png": {
       "sha256": "d967d6ba35112712989a19753276d1260b1d99d9073d22c6cea93f0b594c54cc",
       "bytes": 108865
     },
+    "access-expired-1440-dark.aria.txt": {
+      "sha256": "a555f22fcd3b589ddcc876498240184d55e3be240df9a87c3c6f8bd06420d534",
+      "bytes": 772
+    },
     "access-expired-1440-dark.png": {
       "sha256": "423255c4a0e2f711fc1c751f3711c20a5a6bd06ef6d90a5aeba02c7c97215ec6",
       "bytes": 127281
+    },
+    "access-expired-1440-light.aria.txt": {
+      "sha256": "a555f22fcd3b589ddcc876498240184d55e3be240df9a87c3c6f8bd06420d534",
+      "bytes": 772
     },
     "access-expired-1440-light.png": {
       "sha256": "95dcc78e87b5c23853f8419ec520724c81ff3d62f38c61ef704406f3a4cf1405",
       "bytes": 127448
     },
+    "access-expired-390-dark.aria.txt": {
+      "sha256": "e23ff003b2da79c56d13d4c63e316cbf5d8e73810778d7274fecd7fdc8edda8f",
+      "bytes": 743
+    },
     "access-expired-390-dark.png": {
       "sha256": "0ba3e249675e06214cd25c30c4982ac49f8fc6b74ae5716359d70bc820faadb8",
       "bytes": 103264
+    },
+    "access-expired-390-light.aria.txt": {
+      "sha256": "e23ff003b2da79c56d13d4c63e316cbf5d8e73810778d7274fecd7fdc8edda8f",
+      "bytes": 743
     },
     "access-expired-390-light.png": {
       "sha256": "0bc3426b572f9be28f02f7fa755af8a88b8c7c69956e188ab2c08e84ea443b48",
       "bytes": 103683
     },
+    "access-first-1440-dark.aria.txt": {
+      "sha256": "b5722ad4c04eb5ca30274308d59e260fec4f0f5b098676017c85252c3c3081ce",
+      "bytes": 938
+    },
     "access-first-1440-dark.png": {
       "sha256": "594fa53964ab1d897170b14cd93d12e7be003938ebf30efd283fb84cabcda948",
       "bytes": 139851
+    },
+    "access-first-1440-light.aria.txt": {
+      "sha256": "75e7fbbc1a49fc80f8622ac146481ef1c79409478349a6d44d9d6525a4954c15",
+      "bytes": 938
     },
     "access-first-1440-light.png": {
       "sha256": "5a9010aa66a2739bc839fb1777fc88a2e0c0134d842befb8a33fd0054a863418",
       "bytes": 139633
     },
+    "access-first-390-dark.aria.txt": {
+      "sha256": "f0a53be94aab634f7a204e3206911532c9fb9c2a893b1015430234d69a10cbf2",
+      "bytes": 909
+    },
     "access-first-390-dark.png": {
       "sha256": "753e369f4da0438dbc01e8f08d9bb5880f931ca98264622f51ba7f3382eb64d7",
       "bytes": 111738
+    },
+    "access-first-390-light.aria.txt": {
+      "sha256": "bb11df350d651e18a2404952a8f14e311de41a3f31d518c57105c37cd5b5fd90",
+      "bytes": 909
     },
     "access-first-390-light.png": {
       "sha256": "aa4080e26f5686cc61bc8c410f6bae8a8729798e835b28c31f1d76c8240741b1",
       "bytes": 111748
     },
+    "access-invite-1440-dark.aria.txt": {
+      "sha256": "7a8ace6bcab79eef5fc598695508b62bc25afdf940635ecec49ed694943c723c",
+      "bytes": 769
+    },
     "access-invite-1440-dark.png": {
       "sha256": "b0351234e420b310f0fea54c64828ecb7de1452a30b2f9421d417db3c06ef8bc",
       "bytes": 126884
+    },
+    "access-invite-1440-light.aria.txt": {
+      "sha256": "01976bb811ddc737281c0747af09c75f3a90ee80d62905bf58ad38304954d880",
+      "bytes": 769
     },
     "access-invite-1440-light.png": {
       "sha256": "a45a5805b550731c22b23039ffa34fcd43b0f9229186c214946598a86448eca8",
       "bytes": 126513
     },
+    "access-invite-390-dark.aria.txt": {
+      "sha256": "2230da2a771c7507167a8eca0da5188bd9d1c849c38e39b68a04628d5d219b62",
+      "bytes": 740
+    },
     "access-invite-390-dark.png": {
       "sha256": "69b8e689f4d7f6c76ace6e9005fb97870d9b229233f072bb9be9dfec9a6425a8",
       "bytes": 103071
+    },
+    "access-invite-390-light.aria.txt": {
+      "sha256": "2ce3cf611e59cc39cafeab45d05d53d5b8119f19d3e59b553a6d8dc415b2323a",
+      "bytes": 740
     },
     "access-invite-390-light.png": {
       "sha256": "b373b95e29d94cd5040da50ce8d45353c1cff6807d6b4ca28e18357af396ab2b",
       "bytes": 103922
     },
+    "access-killed-1440-dark.aria.txt": {
+      "sha256": "aa42a743caf346234344551af99aaa74d4b692fbbc4c26c6db187d8f7ba36260",
+      "bytes": 762
+    },
     "access-killed-1440-dark.png": {
       "sha256": "0b9d31fd6297b0973053609e612f202479f35b161a2b6cfbfccdacbe20fd3fc0",
       "bytes": 123989
+    },
+    "access-killed-1440-light.aria.txt": {
+      "sha256": "aa42a743caf346234344551af99aaa74d4b692fbbc4c26c6db187d8f7ba36260",
+      "bytes": 762
     },
     "access-killed-1440-light.png": {
       "sha256": "b2bcbc8948a704c6197b69eda5ae9954b0c8d10fc3d3e40bc092962fb8a00933",
       "bytes": 123970
     },
+    "access-killed-390-dark.aria.txt": {
+      "sha256": "fd167c47e1c43fbcaf92ee8836ae75c262408ab6bec1cd798e3d85bfaafe535e",
+      "bytes": 733
+    },
     "access-killed-390-dark.png": {
       "sha256": "f9b46539be00c7e011a5c551fab6dd1dad10c9c507b4e554b2594b19be924d71",
       "bytes": 101937
+    },
+    "access-killed-390-light.aria.txt": {
+      "sha256": "fd167c47e1c43fbcaf92ee8836ae75c262408ab6bec1cd798e3d85bfaafe535e",
+      "bytes": 733
     },
     "access-killed-390-light.png": {
       "sha256": "ad98048d293ab3869753ed2f5ff25f3217affc0fe73d186fae5451c21efdf040",
       "bytes": 101843
     },
+    "access-needs-request-1440-dark.aria.txt": {
+      "sha256": "708990c8d3dde267589f57132c44ade9eb9bc027e767f892a706f1e44b92d40a",
+      "bytes": 874
+    },
     "access-needs-request-1440-dark.png": {
       "sha256": "50df77f7971520175f1fe87376e9fe048fb360688fb30f4361d25a666903123e",
       "bytes": 131441
+    },
+    "access-needs-request-1440-light.aria.txt": {
+      "sha256": "7f782bf8c6931c5b4c7972281933cd0c008c0e59755dfe740545bf876b64f095",
+      "bytes": 874
     },
     "access-needs-request-1440-light.png": {
       "sha256": "311cff87e24e9369fbc710cc1ad319257028ffda53d2389a104d1c829933a525",
       "bytes": 132450
     },
+    "access-needs-request-390-dark.aria.txt": {
+      "sha256": "5b7752ad23667d36e8a7423ac590adcf674ef682fee943112615717bfc68d155",
+      "bytes": 845
+    },
     "access-needs-request-390-dark.png": {
       "sha256": "9da966a063e08c35f119282379550ef13792f1c0f960c0e466a9fd78129c58dc",
       "bytes": 107066
+    },
+    "access-needs-request-390-light.aria.txt": {
+      "sha256": "41c4497d2f88db42ceaba7dd49b25fffbc9b8d39b78fdc8d808e4296fde7b1a2",
+      "bytes": 845
     },
     "access-needs-request-390-light.png": {
       "sha256": "3ba47ce8ecd8ddc34abbc024104eab68523d80e800015d2a3252c66d3f11b377",
       "bytes": 107815
     },
+    "access-offline-1440-dark.aria.txt": {
+      "sha256": "f22118ec874cb771731bf27f0a1a6fa93870f2e36ab73d2c2aa3d2e842a85bb9",
+      "bytes": 831
+    },
     "access-offline-1440-dark.png": {
       "sha256": "359bed64279ec41b05eb63e068fc4e4e2fb62114a37cb8fa33b08d71ff048855",
       "bytes": 126235
+    },
+    "access-offline-1440-light.aria.txt": {
+      "sha256": "f22118ec874cb771731bf27f0a1a6fa93870f2e36ab73d2c2aa3d2e842a85bb9",
+      "bytes": 831
     },
     "access-offline-1440-light.png": {
       "sha256": "78f17d708cd25ccd0a319d195b75260b421b578a5815b67692243e6a50493034",
       "bytes": 126209
     },
+    "access-offline-390-dark.aria.txt": {
+      "sha256": "068a503c2edff95b58c01b25e8ccc4e90228371fab3817ff2a3446933b431ec1",
+      "bytes": 802
+    },
     "access-offline-390-dark.png": {
       "sha256": "033f37c5dc4cea2f793c48fc1d23ead03608dc9adb56b5bd65bf5cf01825741d",
       "bytes": 102730
+    },
+    "access-offline-390-light.aria.txt": {
+      "sha256": "068a503c2edff95b58c01b25e8ccc4e90228371fab3817ff2a3446933b431ec1",
+      "bytes": 802
     },
     "access-offline-390-light.png": {
       "sha256": "0feb032d0d604100957236569161e70660025813047d32fd2343ad3f935ba2f9",
       "bytes": 102538
     },
+    "access-pending-1440-dark.aria.txt": {
+      "sha256": "f68bf4734c4aa077017047e887bf2864a754749bdf719859ccb8aa03e02a8338",
+      "bytes": 766
+    },
     "access-pending-1440-dark.png": {
       "sha256": "af9f3dac1f25589df01f2c960f2ba3e0d66d9c29e209732a5e89d755df9d94d2",
       "bytes": 126495
+    },
+    "access-pending-1440-light.aria.txt": {
+      "sha256": "f68bf4734c4aa077017047e887bf2864a754749bdf719859ccb8aa03e02a8338",
+      "bytes": 766
     },
     "access-pending-1440-light.png": {
       "sha256": "64caf96c3a33c21a7f784f4ded36ee886515c3263e191d8dd51e096f5bec62a3",
       "bytes": 126486
     },
+    "access-pending-390-dark.aria.txt": {
+      "sha256": "46fae95b818e49ac151344da50f2722902cbca5ebf9a79e2d70f83581188f549",
+      "bytes": 737
+    },
     "access-pending-390-dark.png": {
       "sha256": "dab4c07d8fde333e61681dc570ea776c30f2d1b08d3035b3c4efb01e4af4f914",
       "bytes": 103335
+    },
+    "access-pending-390-light.aria.txt": {
+      "sha256": "c2989395a6211505d0b4f5f3515472b099ec36ac0b6384a2292975ab01734588",
+      "bytes": 737
     },
     "access-pending-390-light.png": {
       "sha256": "984d791d5a1dd313e1292c635cdc017aec1478422b8a6fcd877f6ce0fec9384f",
       "bytes": 103469
     },
+    "access-quota-1440-dark.aria.txt": {
+      "sha256": "802905baa29356cbc70a17b7ed0758628a19ed7a542cc68d35bf80d6b6035839",
+      "bytes": 1221
+    },
     "access-quota-1440-dark.png": {
       "sha256": "91eae015a007e3320ebfe782db344c7960ae5b14bb626296fe9be4f348dd972e",
       "bytes": 125560
+    },
+    "access-quota-1440-light.aria.txt": {
+      "sha256": "802905baa29356cbc70a17b7ed0758628a19ed7a542cc68d35bf80d6b6035839",
+      "bytes": 1221
     },
     "access-quota-1440-light.png": {
       "sha256": "462ffba28db9e0e08f79ca73041d54a448637e7687183d1cc3b0200138788f26",
       "bytes": 125276
     },
+    "access-quota-390-dark.aria.txt": {
+      "sha256": "962d9f6fe148168a56280deddb355abc3bde4982809997c148067c13def2ec84",
+      "bytes": 1192
+    },
     "access-quota-390-dark.png": {
       "sha256": "939072a1a6a885592947b5a3c3a0900a19ed5eed311fab0d20b31f24f7cd7db2",
       "bytes": 102057
+    },
+    "access-quota-390-light.aria.txt": {
+      "sha256": "93d30abda36386d4375ecfee01d5e5dc3fa9f8a35e1388de53cf82104c6d4134",
+      "bytes": 1192
     },
     "access-quota-390-light.png": {
       "sha256": "a9ebe6bd6c5fbb5a333ea08bacda3fc80fb62f502b6911e68bcb0a4a47f6af2e",
       "bytes": 102051
     },
+    "access-ready-1440-dark.aria.txt": {
+      "sha256": "08ca5246ecf064fb148fdc060af1dee80d4242f0fd534669455baadca7e31a7c",
+      "bytes": 557
+    },
     "access-ready-1440-dark.png": {
       "sha256": "e94692d4c1279ba0d65f1b7760972950c74f60e82872fc50c3ffc45d224fb0a1",
       "bytes": 113286
+    },
+    "access-ready-1440-light.aria.txt": {
+      "sha256": "08ca5246ecf064fb148fdc060af1dee80d4242f0fd534669455baadca7e31a7c",
+      "bytes": 557
     },
     "access-ready-1440-light.png": {
       "sha256": "d5b5c029b1d7e112db04ebf123658d1dfc4012100c2a3aa2de00bd5b96112245",
       "bytes": 112974
     },
+    "access-ready-390-dark.aria.txt": {
+      "sha256": "038cb3305bd413a695743a78a270df3815dfd682652930024f717d35946859e2",
+      "bytes": 528
+    },
     "access-ready-390-dark.png": {
       "sha256": "219d226b2738ba9439319a3bad73f03705f5ae03a8fe7360a2932226e8bd50e6",
       "bytes": 91160
+    },
+    "access-ready-390-light.aria.txt": {
+      "sha256": "038cb3305bd413a695743a78a270df3815dfd682652930024f717d35946859e2",
+      "bytes": 528
     },
     "access-ready-390-light.png": {
       "sha256": "ce2fa6ee7da8690a643172a14f8373d57724f6bc3775d2bb1fe2a6404db37f34",
