@@ -1223,6 +1223,7 @@ class DemoApp:
                 for m in coordinator.members()]}
         from .run_model import document as run_model_document
         from .adaptive_owner import adaptive_status, adaptive_publication
+        owner_run=_demo_status(self,'owner')
         return {'label':'macOS A13 hackathon demo','role':'not_yet_serving',
                 'model_contract':asdict(self.run_model_contract()),
                 'run_model':run_model_document(self.root),
@@ -1238,17 +1239,29 @@ class DemoApp:
                 'join_flow':self._join_flow_status(),
                 'adaptive_host':adaptive_status(self),'adaptive_host_publication':adaptive_publication(self),
                 'sharing':_sharing_status(self),'relay_wait':self._relay_wait_status(),
-                'owner_run':_demo_status(self,'owner'),'demo_target':_demo_status(self,'target'),
+                'owner_run':owner_run,'demo_target':_demo_status(self,'target'),
                 'chat':_demo_status(self,'chat'),'swarm':_swarm_status(self),
-                'serving':self._serving_block(),'peer_liveness':_peer_liveness(),
+                'serving':self._serving_block(owner_run),'peer_liveness':_peer_liveness(),
                 'test_seams_active':_test_seam_offset(self) is not None,
                 'test_seams':_test_seams.status(_test_seam_offset(self))}
 
-    def _serving_block(self):
+    def _serving_block(self,owner_run=None):
         wait=self._relay_wait_status()
         if wait is not None:
             return {'state':'waiting_for_relay','route_ready':False,'members_joined':wait['members_joined'],
                     'next_action':'Start the public relay so the joined Macs can serve.'}
+        # PV30: follow the owner run and its route readiness (was a constant).
+        run=owner_run if isinstance(owner_run,dict) else {}
+        state=run.get('state')
+        if state=='serving' and run.get('route_ready') is True and run.get('registry_origin'):
+            return {'state':'serving','route_ready':True,'next_action':'Open the chat.'}
+        if state in {'running','serving'}:
+            return {'state':'starting','route_ready':False,'next_action':'The route is being prepared.'}
+        if state in {'stopping','failing'}:
+            return {'state':'stopping','route_ready':False,'next_action':'The run is stopping.'}
+        if state=='failed':
+            return {'state':'failed','route_ready':False,'error_code':run.get('error_code'),
+                    'next_action':'Press Start to run again.'}
         return {'state':'not_yet_serving','route_ready':False,
                 'next_action':'Native route preparation and exact model execution approval required.'}
 
