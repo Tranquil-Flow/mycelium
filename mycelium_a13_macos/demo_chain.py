@@ -253,7 +253,10 @@ class AppDemoChain:
                         'targets': 280.0, 'serving': 900.0,
                         # V1.2 D1: how long a joined Mac with a newer identity may stay not-serving before the run
                         # ends as member_restarted (its fresh agent reports every 10 s).
-                        'member_restart_grace': 15.0, **(budgets or {})}
+                        'member_restart_grace': 15.0,
+                        # V1.2 D1/D2: a Start waits this long for the previous route's close (an unproven cleanup
+                        # keeps its serving thread alive until the member's commands expire).
+                        'previous_close': 120.0, **(budgets or {})}
         self._local_device = local_device
         self.exchange = None
         self.agent = None
@@ -424,6 +427,11 @@ class AppDemoChain:
             raise OwnerRunError('owner_role_required')
         if not app.authority.status().get('swarm_created'):
             raise OwnerRunError('owner_swarm_required')
+        closing = getattr(app, '_chain_serving_thread', None)
+        if closing is not None and closing.is_alive():
+            ctx.progress('waiting for the previous route to finish closing')
+            ctx.wait_until(lambda: not closing.is_alive(), budget=self.budgets['previous_close'],
+                           code='previous_run_still_closing', interval=self.interval)
         def prepared():
             return app.acquisition.status().get('state') == 'prepared'
         def downloading():

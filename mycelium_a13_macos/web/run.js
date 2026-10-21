@@ -32,6 +32,7 @@
     member_storage_cap_below_share:'A joined Mac agreed to less storage than its share of this model needs.',
     member_cannot_hold_share:'A Mac cannot hold even the smallest share of this model. Add a Mac with more memory, or choose a smaller model.',
     owner_storage_consent_below_model:'This Mac\'s storage limit is below what the selected model needs here.',
+    previous_run_still_closing:'The previous route is still closing (a Mac that left it has not confirmed cleanup yet). Wait a minute and press Start again.',
     member_restarted:'A joined Mac was restarted while the demo was serving, so it left the route and the run ended. Press Start to run it again.',
     route_qualification_failed:'The route failed its startup qualification, so nothing is served. The owner log names the Mac and reason.',
   };
