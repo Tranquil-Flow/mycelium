@@ -100,9 +100,15 @@ def write_policy(root: str | os.PathLike[str], setting: Any) -> IdlePolicy:
     return policy
 
 
-def unload_after_s_or_never(root: str | os.PathLike[str]) -> float | None:
-    """Node-side reader: seconds, or ``None`` (never) when the file is unreadable (fail safe: keep serving)."""
+def unload_after_s_or_never(root: str | os.PathLike[str], *, missing_means_never: bool = False) -> float | None:
+    """Node-side reader: seconds, or ``None`` (never) when the file is unreadable (fail safe: keep serving).
+
+    A node launched without an app that publishes the policy (gate harnesses, tools) has no file;
+    with ``missing_means_never`` that is *never unload*, so only apps that publish a policy opt in.
+    """
     try:
+        if missing_means_never and not os.path.lexists(Path(root) / POLICY_FILENAME):
+            return None
         return read_policy(root).unload_after_s
     except IdlePolicyError:
         return None

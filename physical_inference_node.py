@@ -1987,6 +1987,13 @@ class NativeSidecarProcess:
 
 
 class PhysicalNodeService:
+    # PV25 idle unload: ``None`` until configure attaches a link (or when the runtime cannot release
+    # weights); the gate waits at most this long for a lazy reload before answering member_warming.
+    idle: Any = None
+    _idle_stop: Any = None
+    _idle_thread: Any = None
+    _idle_gate_timeout_s = 30.0
+
     def __init__(
         self,
         *,
@@ -2101,6 +2108,7 @@ class PhysicalNodeService:
         self._cancellation_worker_errors: dict[str, str] = {}
         self._request_cleanup_receipts: dict[str, dict[str, Any]] = {}
         self._request_cleanup_receipt_counters: dict[str, dict[str, int]] = {}
+        self._idle_stop = threading.Event()
 
     def _safe_document(self, relative_path: Any, code: str) -> dict[str, Any]:
         _require(
@@ -3262,6 +3270,12 @@ class PhysicalNodeService:
                 endpoint_id=endpoint_id,
             )
         )
+        if pixel_stage is None and report is not None:
+            _assignment, _report, _generation = assignment, report, data["load_generation"]
+            self._attach_idle(
+                runtime,
+                load=lambda: load_assignment_stage(_assignment, _report, load_generation=_generation),
+            )
         self.state = "CONFIGURED"
         configured_details = {
             "assignment_id": assignment["assignment_id"],
@@ -3285,6 +3299,70 @@ class PhysicalNodeService:
             # signed observation instead of reading a peer's disk.
             configured_details["a7_node_config"] = json.loads(json.dumps(a7_wiring.config))
         return self._signed_result("configured", configured_details)
+
+    # -- PV25 idle unload ---------------------------------------------------------------------
+    def _attach_idle(self, runtime: Any, *, load: Callable[[], Any], start_thread: bool = True) -> None:
+        """Wire the idle link when the runtime port can release and restore its weights."""
+        if not callable(getattr(runtime, "release_weights", None)):
+            return
+        from mycelium_idle import node_link
+
+        self.idle = node_link.NodeIdleLink(
+            capacity_root=self.capacity_root,
+            port=node_link.RuntimePortAdapter(runtime, load),
+            on_reload_failed=self._idle_failed,
+        )
+        if start_thread:
+            self._idle_thread = threading.Thread(
+                target=self._idle_loop, args=(self.idle,), name="mycelium-node-idle", daemon=True
+            )
+            self._idle_thread.start()
+
+    def _idle_loop(self, link: Any) -> None:
+        stop = self._idle_stop
+        while not stop.wait(1.0):
+            if self.state not in {"CONFIGURED", "RUNNING"}:
+                continue
+            try:
+                link.tick()
+            except BaseException:
+                pass  # the idle policy never interferes with serving
+
+    def _idle_failed(self, code: str) -> None:
+        """A reload that errors or never finishes fails closed: the route then sees a lost member."""
+        _emit_stderr_line(f"MYCELIUM-IDLE-RELOAD-FAILED {code}")
+        try:
+            self.close()
+        except BaseException:
+            pass
+        from mycelium_idle import node_link
+
+        node_link.terminate_self()
+
+    def _idle_gate(self) -> None:
+        """Before model work: lazily reload unloaded weights, or answer ``member_warming``."""
+        link = self.idle
+        if link is None:
+            return
+        from mycelium_idle.residency import MemberWarming, ResidencyError
+
+        try:
+            link.work_gate(min(self._idle_gate_timeout_s, self.command_timeout * 0.8))
+        except MemberWarming:
+            raise NodeCommandError("member_warming") from None
+        except ResidencyError as exc:
+            raise NodeCommandError(exc.code) from None
+
+    def _idle_command(self, name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        link = self.idle
+        _require(link is not None, "idle_unload_unsupported")
+        from mycelium_idle import node_link
+
+        try:
+            details = link.command(name, payload)
+        except node_link.IdleCommandError as exc:
+            raise NodeCommandError(exc.code) from None
+        return self._signed_result("idle_status", details)
 
     def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
         _require(self.state == "CONFIGURED", "invalid_state_for_start")
@@ -3637,6 +3715,8 @@ class PhysicalNodeService:
         operation_counters = getattr(runtime, "operation_counter_snapshot", None)
         if callable(operation_counters):
             details["runtime_counters"] = _plain_json(operation_counters())
+        if self.idle is not None:
+            details["idle_residency"] = _plain_json(self.idle.health_detail())
         return self._signed_result(
             "health",
             details,
@@ -4324,6 +4404,7 @@ class PhysicalNodeService:
         )
 
     def _infer_start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._idle_gate()
         # A11: an optional explicit future-request speculation preference rides
         # beside any of the existing field sets; it never changes those sets.
         speculation = payload.get("speculation")
@@ -4701,6 +4782,7 @@ class PhysicalNodeService:
         raise NodeCommandError("inference_start_failed")
 
     def _infer_decode(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._idle_gate()
         fields = set(payload)
         _require(
             fields
@@ -5568,6 +5650,8 @@ class PhysicalNodeService:
         return self._signed_result("peer_rotated", {"peer": _plain_json(peer)})
 
     def close(self) -> None:
+        if self._idle_stop is not None:
+            self._idle_stop.set()
         if self.state == "STOPPED":
             return
         if self.transport is not None:
@@ -5635,6 +5719,9 @@ class PhysicalNodeService:
             "a11_snapshot": self._a11_snapshot,
             "a11_draft_loss": self._a11_draft_loss,
             "diagnostic_evidence": self._diagnostic_evidence,
+            "idle_status": lambda p: self._idle_command("idle_status", p),
+            "idle_reload": lambda p: self._idle_command("idle_reload", p),
+            "idle_unload": lambda p: self._idle_command("idle_unload", p),
         }
         handler = handlers.get(document["command"])
         _require(handler is not None, "unsupported_command")

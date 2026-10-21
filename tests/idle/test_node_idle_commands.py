@@ -147,12 +147,13 @@ def test_ops_applied_by_hops_count_as_activity(tmp_path):
     runtime = FakeRuntime()
     ip.write_policy(tmp_path, 1)
     svc = service(tmp_path, runtime, [])
-    svc.idle.residency._last_activity -= 50
+    svc.idle.tick()  # baseline of the operation counter
+    svc.idle.residency._last_activity -= 59
     runtime.ops = 7  # a downstream stage served hops, no command ever reached this node
+    svc.idle.tick()  # counter moved: the idle clock restarts
+    svc.idle.residency._last_activity -= 59
     svc.idle.tick()
-    svc.idle.residency._last_activity -= 50
-    svc.idle.tick()
-    assert runtime.calls == []  # activity refreshed the clock at the first tick
+    assert runtime.calls == []  # 59 s since the refresh, not 118 s
 
 
 def test_a_reload_that_fails_closes_the_node_and_terminates_the_process(tmp_path, monkeypatch):

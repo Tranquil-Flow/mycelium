@@ -40,6 +40,36 @@ def process_rss_bytes() -> int | None:
         return None
 
 
+class RuntimePortAdapter:
+    """Presents a runtime port plus a loader closure as the no-argument release/restore interface."""
+
+    def __init__(self, runtime: Any, load: Callable[[], Any]) -> None:
+        self._runtime, self._load = runtime, load
+
+    def release_weights(self) -> None:
+        self._runtime.release_weights()
+
+    def restore_weights(self) -> None:
+        self._runtime.restore_weights(lambda _placement_id: self._load())
+
+    def active_request_count(self) -> int:
+        return int(self._runtime.active_request_count())
+
+    def activity_counter(self) -> int:
+        return int(self._runtime.operation_counter_snapshot()["applied_operation_count"])
+
+
+def terminate_self() -> None:
+    """Ask this process to stop through its normal SIGTERM path (route sees a lost member)."""
+    import signal
+    import sys
+    if sys.platform == "win32":
+        import _thread
+        _thread.interrupt_main(signal.SIGTERM)
+    else:
+        os.kill(os.getpid(), signal.SIGTERM)
+
+
 class NodeIdleLink:
     def __init__(self, *, capacity_root: str | os.PathLike[str], port: Any,
                  clock: Callable[[], float] | None = None,
@@ -54,14 +84,25 @@ class NodeIdleLink:
             kwargs["clock"] = clock
         self.residency = WeightResidency(
             release=port.release_weights, restore=port.restore_weights,
-            unload_after_s=lambda: _policy.unload_after_s_or_never(self._root),
+            unload_after_s=lambda: _policy.unload_after_s_or_never(self._root, missing_means_never=True),
             inflight=port.active_request_count, rss_bytes=rss_bytes,
             reload_deadline_s=reload_deadline_s, on_reload_failed=on_reload_failed, spawn=spawn, **kwargs)
         self._written: str | None = None
         self._write_lock = threading.Lock()
+        self._counter: int | None = None
 
     # ------------------------------------------------------------- driving
     def tick(self) -> str:
+        counter = getattr(self._port, "activity_counter", None)
+        if callable(counter):  # hops served by a downstream stage never pass through a command
+            try:
+                value = int(counter())
+            except Exception:
+                value = None
+            if value is not None and value != self._counter:
+                if self._counter is not None:
+                    self.residency.note_activity()
+                self._counter = value
         state = self.residency.tick()
         self._publish()
         return state
