@@ -250,7 +250,10 @@ class AppDemoChain:
                         'verify_stall': 600.0, 'verify_rate': 25e6,
                         'descriptor_margin': 60.0, 'bootstrap': 180.0, 'collect': 180.0,
                         'cleanup': 120.0, 'compile': 3600.0, 'slices': 7200.0, 'publish': 600.0,
-                        'targets': 280.0, 'serving': 900.0, **(budgets or {})}
+                        'targets': 280.0, 'serving': 900.0,
+                        # V1.2 D1: how long a joined Mac with a newer identity may stay not-serving before the run
+                        # ends as member_restarted (its fresh agent reports every 10 s).
+                        'member_restart_grace': 15.0, **(budgets or {})}
         self._local_device = local_device
         self.exchange = None
         self.agent = None
@@ -1032,7 +1035,45 @@ class AppDemoChain:
             return 'managed_workflow_missing'
         if state['state'] in {'failed', 'stopped'}:
             return state.get('error_code') or 'managed_workflow_stopped'
-        return None
+        return self._restarted_member(ctx)
+
+    _IDENTITY = ('generation', 'incarnation', 'verification_key_digest', 'endpoint_id')
+
+    def _restarted_member(self, ctx):
+        """``'member_restarted'`` once a joined Mac came back as a newer identity and no longer serves this run.
+
+        A member app restarted while the route serves is re-admitted (newer generation and incarnation) without its
+        native worker; its fresh agent never re-stages, so every command to it expires unclaimed (V1.2 D1).  A
+        re-admission whose worker survived (relay rotation) keeps reporting ``serving``, and a Mac that stopped
+        serving under its old identity is not a restart; neither ends the run here.
+        """
+        context = getattr(self.app, '_observation_context', None)
+        bound = {m['node_id']: m for m in (getattr(context, 'members', None) or ())
+                 if isinstance(m, Mapping) and isinstance(m.get('node_id'), str)}
+        if not bound:
+            return None
+        local = ctx.state.get('local_node')
+        reports = self._reports(ctx)
+        first_seen = ctx.state.setdefault('member_restart_seen', {})
+        now = time.monotonic()
+        grace = self.budgets['member_restart_grace']
+        found = None
+        for node, was in bound.items():
+            report = reports.get(node)
+            if node == local or report is None or report.get('state') == 'serving':
+                first_seen.pop(node, None)
+                continue
+            try:
+                current = self.app.authority.coordinator.member(node)
+            except Exception:
+                first_seen.pop(node, None)   # revoked or left: the membership paths own that
+                continue
+            if all(current.get(k) == was.get(k) for k in self._IDENTITY):
+                first_seen.pop(node, None)
+                continue
+            if now - first_seen.setdefault(node, now) >= grace:
+                found = found or node
+        return 'member_restarted' if found else None
 
     def teardown(self, ctx, *, failed):
         app = self.app
