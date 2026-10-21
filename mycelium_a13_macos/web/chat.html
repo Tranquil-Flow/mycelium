@@ -1,0 +1,10 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Mycelium · swarm chat</title><link rel="stylesheet" href="/chat/chat.css"><script defer src="/chat/chat.js"></script></head>
+<body><header><div class="brand">✳ Mycelium <span>a model running across the Macs in this room</span></div></header>
+<main><p id="state" role="status" aria-live="polite">Connecting…</p>
+<p id="served" class="detail"></p>
+<div id="log" aria-live="polite"></div>
+<form id="form"><label for="prompt">Your prompt</label><textarea id="prompt" rows="3" maxlength="2000" placeholder="Ask the swarm something" required></textarea>
+<div class="row"><label>Max new tokens<select id="tokens"><option value="64">64</option><option value="128" selected>128</option><option value="256">256</option></select></label><button id="send" type="submit" disabled>Send</button></div></form>
+<p class="detail">No account. One prompt at a time for the whole room; a few prompts per minute each. Answers come from a shared, cooperative demo: the Macs computing it can observe prompts and activations. Do not type secrets.</p></main></body></html>
