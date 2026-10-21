@@ -74,7 +74,7 @@ def test_deltas_accumulate_across_pids_and_a_vanished_pid_keeps_its_contribution
     del source.values[2]  # worker 2 exited (idle unload / restart)
     source.values[1] = (25.0, 0.0)
     m.update([1])
-    assert m.snapshot()["cpu_seconds"] == pytest.approx(25.0 + 9.0)
+    assert m.snapshot()["cpu_seconds"] == pytest.approx((25.0 - 10.0) + (9.0 - 5.0))
 
 
 def test_a_restarted_pid_with_lower_counters_is_not_a_negative_delta():
@@ -84,7 +84,8 @@ def test_a_restarted_pid_with_lower_counters_is_not_a_negative_delta():
     source.values[1] = (2.0, 0.5)  # pid reused / new worker
     m.update([1])
     snap = m.snapshot()
-    assert snap["cpu_seconds"] >= 100.0 and snap["gpu_seconds"] >= 4.0
+    # the first sample was only a baseline; the restarted process's counters are all session work
+    assert snap["cpu_seconds"] == pytest.approx(2.0) and snap["gpu_seconds"] == pytest.approx(0.5)
 
 
 def test_the_first_sample_is_a_baseline_not_a_charge():
