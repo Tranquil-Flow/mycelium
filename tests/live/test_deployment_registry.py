@@ -1,0 +1,510 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+from __future__ import annotations
+
+import json
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from mycelium_live.health import LIVE_QUALIFICATION_REFRESH_AFTER_MS
+from mycelium_live.registry import (
+    DeploymentSelectionError,
+    LiveDeploymentRegistry,
+    QualifiedDeploymentRuntime,
+    UnavailableDeployment,
+)
+from mycelium_live.route import FakeLiveRoute
+
+
+def test_registry_advertises_delegated_a4_router_capabilities() -> None:
+    assert LiveDeploymentRegistry.requires_qualification_binding is True
+    assert LiveDeploymentRegistry.supports_workload_profiles is True
+    assert LiveDeploymentRegistry.supports_publisher_generation is True
+
+
+def test_registry_preserves_owner_cancellation_deadline() -> None:
+    registry = LiveDeploymentRegistry([_runtime(0)])
+    observed: list[tuple[str, float]] = []
+
+    class Router:
+        def cancel_with_deadline(
+            self,
+            request_id: str,
+            *,
+            deadline_monotonic_s: float,
+        ) -> bool:
+            observed.append((request_id, deadline_monotonic_s))
+            return True
+
+    registry._requests["request-a"] = "deployment-0"
+    registry._routers["deployment-0"] = Router()  # type: ignore[assignment]
+
+    assert registry.cancel_with_deadline(
+        "request-a",
+        deadline_monotonic_s=123.25,
+    )
+    assert observed == [("request-a", 123.25)]
+
+
+class _Codec:
+    def __init__(self, prefix: str) -> None:
+        self.prefix = prefix
+
+    def encode(self, _prompt: str) -> tuple[int, ...]:
+        return (1,)
+
+    def decode_token(self, token_id: int) -> str:
+        return f"{self.prefix}{token_id}"
+
+
+def _runtime(index: int) -> QualifiedDeploymentRuntime:
+    route = FakeLiveRoute(scripted_tokens=(index + 1,))
+    route.open()
+    return QualifiedDeploymentRuntime(
+        deployment_id=f"deployment-{index}",
+        model_id=f"Qwen/model-{index}",
+        model_revision=f"{index}" * 40,
+        quantization="int8-weight-only",
+        qualified_at_unix_ms=1_000 + index,
+        route=route,
+        graph=SimpleNamespace(deployment_id=f"deployment-{index}", stages=(1, 2)),
+        codec=_Codec(f"model-{index}:"),
+        qualification=SimpleNamespace(
+            route_ready=True,
+            qualification_id=f"qualification-{index}",
+            issued_at_unix_ms=1_000 + index,
+            deployment_id=f"deployment-{index}",
+            model_id=f"Qwen/model-{index}",
+        ),
+    )
+
+
+def _unavailable(index: int) -> UnavailableDeployment:
+    return UnavailableDeployment(
+        deployment_id=f"deployment-{index}",
+        model_id=f"Qwen/model-{index}",
+        model_revision=f"{index}" * 40,
+        quantization="int8-weight-only",
+        topology_size=2,
+        reason_code="node_command_rejected",
+        observed_at_unix_ms=2_000 + index,
+    )
+
+
+def test_registry_serves_fail_closed_control_plane_without_live_route() -> None:
+    registry = LiveDeploymentRegistry(
+        [],
+        unavailable_deployments=(_unavailable(0),),
+    )
+
+    assert registry.current() is None
+    assert registry.is_alive() is False
+    assert registry.registry_status() == {
+        "protocol": "mycelium.live_deployment_registry.v1",
+        "selected_deployment_id": "deployment-0",
+        "switching_allowed": True,
+        "deployments": [
+            {
+                "deployment_id": "deployment-0",
+                "model_id": "Qwen/model-0",
+                "model_revision": "0" * 40,
+                "quantization": "int8-weight-only",
+                "topology_size": 2,
+                "health": "unavailable",
+                "qualified_at_unix_ms": 0,
+                "qualification_id": "unavailable",
+            }
+        ],
+    }
+    public = registry.public_status()
+    assert public["route_alive"] is False
+    assert public["simulated"] is False
+    assert public["counters"]["fatal"] == "node_command_rejected"
+    assert public["incidents"][-1]["state"] == "configured_deployment_unavailable"
+    assert registry.membership_status(qualification=None)["native_nodes"] == []
+    with pytest.raises(RuntimeError, match="deployment_unavailable"):
+        registry.current_deployment()
+
+
+def test_first_qualified_runtime_restores_service_from_degraded_registry() -> None:
+    registry = LiveDeploymentRegistry(
+        [],
+        unavailable_deployments=(_unavailable(0),),
+        clock_unix_ms=lambda: 9_000,
+    )
+
+    status = registry.add_qualified_runtime(_runtime(1))
+
+    assert status["selected_deployment_id"] == "deployment-1"
+    assert registry.current_deployment().deployment_id == "deployment-1"
+    assert registry.current() is not None
+    assert registry.public_status()["incidents"][-1]["state"] == (
+        "qualified_service_restored"
+    )
+
+
+def test_registry_lists_and_atomically_selects_qualified_deployments() -> None:
+    registry = LiveDeploymentRegistry([_runtime(0), _runtime(1)])
+
+    assert registry.current_deployment().deployment_id == "deployment-0"
+    selected = registry.select("deployment-1")
+
+    assert registry.current_deployment().deployment_id == "deployment-1"
+    assert selected["selected_deployment_id"] == "deployment-1"
+    assert [item["health"] for item in selected["deployments"]] == [
+        "qualified",
+        "qualified",
+    ]
+
+
+def test_registry_starts_with_one_runtime_and_adds_qualified_standby() -> None:
+    incumbent = _runtime(0)
+    candidate = _runtime(1)
+    registry = LiveDeploymentRegistry([incumbent])
+
+    status = registry.add_qualified_runtime(candidate)
+
+    assert status["selected_deployment_id"] == "deployment-0"
+    assert [item["deployment_id"] for item in status["deployments"]] == [
+        "deployment-0",
+        "deployment-1",
+    ]
+    assert registry.current_deployment().deployment_id == "deployment-0"
+    registry.select("deployment-1")
+    assert registry.current_deployment().deployment_id == "deployment-1"
+
+
+def test_registry_unloads_only_an_idle_non_selected_runtime() -> None:
+    selected = _runtime(0)
+    standby = _runtime(1)
+    registry = LiveDeploymentRegistry([selected, standby])
+
+    status = registry.unload_qualified_runtime("deployment-1")
+
+    assert standby.route.is_alive() is False
+    assert [item["deployment_id"] for item in status["deployments"]] == ["deployment-0"]
+    assert status["selected_deployment_id"] == "deployment-0"
+    with pytest.raises(DeploymentSelectionError, match="deployment_unload_selected"):
+        registry.unload_qualified_runtime("deployment-0")
+
+
+def test_registry_capacity_evidence_uses_richest_live_planned_route() -> None:
+    small = replace(
+        _runtime(0),
+        placement_projection={"nodes": [{"node_id": "node-a"}]},
+        topology_projection={"decision": {"opened_order": ["node-a"]}},
+    )
+    rich = replace(
+        _runtime(1),
+        placement_projection={"nodes": [{"node_id": "node-a"}, {"node_id": "node-b"}]},
+        topology_projection={"decision": {"opened_order": ["node-a", "node-b"]}},
+    )
+    small.route.m17_swarm_evidence = lambda: {"deployment_id": "small"}  # type: ignore[attr-defined,method-assign]
+    rich.route.m17_swarm_evidence = lambda: {"deployment_id": "rich"}  # type: ignore[attr-defined,method-assign]
+    registry = LiveDeploymentRegistry([small, rich])
+
+    evidence = registry.m17_swarm_evidence()
+
+    assert evidence["deployment_id"] == "rich"
+    assert evidence["placement"] == rich.placement_projection
+    assert evidence["topology"] == rich.topology_projection
+
+
+def test_registry_capacity_evidence_allows_placement_derived_route_order() -> None:
+    runtime = replace(
+        _runtime(0),
+        placement_projection={
+            "nodes": [
+                {"node_id": "node-a", "start_layer": 0, "end_layer_exclusive": 8},
+                {"node_id": "node-b", "start_layer": 8, "end_layer_exclusive": 16},
+            ]
+        },
+        topology_projection=None,
+    )
+    runtime.route.m17_swarm_evidence = lambda: {  # type: ignore[attr-defined,method-assign]
+        "deployment_id": "placement-only",
+        "topology": None,
+    }
+    registry = LiveDeploymentRegistry([runtime])
+
+    evidence = registry.m17_swarm_evidence()
+
+    assert evidence["deployment_id"] == "placement-only"
+    assert evidence["placement"] == runtime.placement_projection
+    assert evidence["topology"] is None
+
+
+def test_registry_publishes_refreshed_operation_to_all_runtimes() -> None:
+    registry = LiveDeploymentRegistry([_runtime(0), _runtime(1)])
+    operation = {"protocol": "mycelium.model_operation.v1", "generation": 7}
+
+    registry.set_m17_model_operation(operation)
+    operation["generation"] = 8
+
+    assert {
+        runtime.model_operation["generation"]
+        for runtime in registry._runtimes.values()  # noqa: SLF001
+        if runtime.model_operation is not None
+    } == {7}
+
+
+def test_registry_rejects_duplicate_or_unqualified_runtime_insertion() -> None:
+    incumbent = _runtime(0)
+    registry = LiveDeploymentRegistry([incumbent])
+
+    with pytest.raises(DeploymentSelectionError, match="deployment_duplicate"):
+        registry.add_qualified_runtime(incumbent)
+
+    unavailable = _runtime(1)
+    unavailable.route.close()
+    with pytest.raises(DeploymentSelectionError, match="deployment_not_qualified"):
+        registry.add_qualified_runtime(unavailable)
+
+
+def test_candidate_canary_executes_without_changing_selection() -> None:
+    runtimes = [_runtime(0), _runtime(1)]
+    runtimes[1].graph.stages = (
+        SimpleNamespace(
+            stage_id="stage-candidate",
+            placements=(SimpleNamespace(node_id="fake-node"),),
+        ),
+    )
+    registry = LiveDeploymentRegistry(runtimes)
+
+    result = registry.canary_candidate(
+        "deployment-1",
+        case_id="arbitrary-capital",
+        prompt="What is the capital of France?",
+        max_new_tokens=1,
+    )
+
+    assert result["candidate_deployment_id"] == "deployment-1"
+    assert result["output_text"] == "model-1:2"
+    assert result["frames_per_request_by_stage"] == {"stage-candidate": 2}
+    assert registry.registry_status()["selected_deployment_id"] == "deployment-0"
+
+
+def test_candidate_canary_rejects_selected_or_invalid_input() -> None:
+    registry = LiveDeploymentRegistry([_runtime(0), _runtime(1)])
+
+    with pytest.raises(DeploymentSelectionError, match="candidate_already_selected"):
+        registry.canary_candidate(
+            "deployment-0",
+            case_id="selected",
+            prompt="test",
+            max_new_tokens=1,
+        )
+    with pytest.raises(DeploymentSelectionError, match="candidate_canary_invalid"):
+        registry.canary_candidate(
+            "deployment-1",
+            case_id="invalid",
+            prompt="",
+            max_new_tokens=1,
+        )
+
+
+def test_registry_persists_atomic_public_selection_state(tmp_path: Path) -> None:
+    state_path = tmp_path / "state" / "deployments.json"
+    registry = LiveDeploymentRegistry(
+        [_runtime(0), _runtime(1)],
+        state_path=state_path,
+    )
+
+    registry.select("deployment-1")
+
+    persisted = json.loads(state_path.read_text())
+    assert persisted == registry.registry_status()
+    assert persisted["deployments"][1]["qualification_id"] == "qualification-1"
+    assert not list(state_path.parent.glob("*.tmp"))
+
+
+def test_registry_restores_last_qualified_selection_after_restart(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "state" / "deployments.json"
+    first = LiveDeploymentRegistry([_runtime(0), _runtime(1)], state_path=state_path)
+    first.select("deployment-1")
+
+    restarted = LiveDeploymentRegistry(
+        [_runtime(0), _runtime(1)],
+        state_path=state_path,
+    )
+
+    assert restarted.current_deployment().deployment_id == "deployment-1"
+    assert restarted.registry_status()["selected_deployment_id"] == "deployment-1"
+
+
+def test_registry_rejects_switch_until_request_is_fully_released() -> None:
+    registry = LiveDeploymentRegistry([_runtime(0), _runtime(1)])
+    assert registry.encode("test") == (1,)
+    request = SimpleNamespace(
+        request_id="request-a",
+        prompt_token_ids=(1,),
+        max_new_tokens=1,
+    )
+    sink = SimpleNamespace(emit=lambda _index, _token: None)
+    graph = registry.current_deployment()
+    registry.admit(request, sink, pinned_deployment=graph)
+
+    with pytest.raises(DeploymentSelectionError, match="deployment_switch_busy"):
+        registry.select("deployment-1")
+
+    registry.release_request("request-a")
+    assert registry.request_status("request-a") == "UNKNOWN"
+    registry.select("deployment-1")
+    assert registry.decode_token(7) == "model-0:7"
+
+
+def test_registry_rejects_unknown_or_unavailable_deployment() -> None:
+    runtimes = [_runtime(0), _runtime(1)]
+    registry = LiveDeploymentRegistry(runtimes)
+    runtimes[1].route.close()
+
+    with pytest.raises(DeploymentSelectionError, match="deployment_unknown"):
+        registry.select("deployment-missing")
+    with pytest.raises(DeploymentSelectionError, match="deployment_not_qualified"):
+        registry.select("deployment-1")
+
+
+def test_registry_projects_real_failover_incident_after_selected_route_loss() -> None:
+    runtimes = [_runtime(0), _runtime(1)]
+    registry = LiveDeploymentRegistry(runtimes)
+    runtimes[0].route.close()
+
+    registry.select("deployment-1")
+
+    incident = registry.public_status()["incidents"][-1]
+    assert incident == {
+        "protocol": "mycelium.live_route_incident.v1",
+        "incident_id": "registry-incident-1",
+        "deployment_id": "deployment-0",
+        "request_id": None,
+        "state": "qualified_failover_selected",
+        "reason": "route_unavailable",
+        "observed_at_unix_ms": incident["observed_at_unix_ms"],
+    }
+
+
+def test_registry_renews_selected_qualification_before_browser_expiry() -> None:
+    runtimes = [_runtime(0), _runtime(1)]
+    renewed = SimpleNamespace(
+        route_ready=True,
+        qualification_id="qualification-renewed",
+        issued_at_unix_ms=1_000 + LIVE_QUALIFICATION_REFRESH_AFTER_MS,
+        deployment_id="deployment-0",
+        model_id="Qwen/model-0",
+    )
+    registry = LiveDeploymentRegistry(
+        runtimes,
+        qualification_refresher=lambda _runtime: renewed,
+        clock_unix_ms=lambda: renewed.issued_at_unix_ms,
+    )
+
+    assert registry.current() is renewed
+    status = registry.registry_status()["deployments"][0]
+    assert status["qualification_id"] == "qualification-renewed"
+    assert status["qualified_at_unix_ms"] == renewed.issued_at_unix_ms
+
+
+def test_registry_defers_renewal_until_active_request_is_released() -> None:
+    runtimes = [_runtime(0), _runtime(1)]
+    renewed = SimpleNamespace(
+        route_ready=True,
+        qualification_id="qualification-renewed",
+        issued_at_unix_ms=1_000 + LIVE_QUALIFICATION_REFRESH_AFTER_MS,
+        deployment_id="deployment-0",
+        model_id="Qwen/model-0",
+    )
+    refreshes = []
+    registry = LiveDeploymentRegistry(
+        runtimes,
+        qualification_refresher=lambda _runtime: refreshes.append("refresh") or renewed,
+        clock_unix_ms=lambda: renewed.issued_at_unix_ms,
+    )
+    assert registry.encode("test") == (1,)
+    request = SimpleNamespace(
+        request_id="request-renewal-blocker",
+        prompt_token_ids=(1,),
+        max_new_tokens=1,
+    )
+    sink = SimpleNamespace(emit=lambda _index, _token: None)
+    registry.admit(request, sink, pinned_deployment=registry.current_deployment())
+
+    assert registry.current() is runtimes[0].qualification
+    assert refreshes == []
+
+    registry.release_request(request.request_id)
+    assert registry.current() is renewed
+    assert refreshes == ["refresh"]
+
+
+class _SpyRouter:
+    def __init__(self, events: list, name: str) -> None:
+        self._events = events
+        self._name = name
+
+    def close(self) -> None:
+        self._events.append(("router", self._name))
+
+
+def _spy_registry(monkeypatch, runtimes, events):
+    for runtime in runtimes:
+        route = runtime.route
+        original_close = route.close
+
+        def close(original_close=original_close, name=runtime.deployment_id):
+            events.append(("route", name))
+            original_close()
+
+        route.close = close
+    monkeypatch.setattr(
+        LiveDeploymentRegistry,
+        "_router_for",
+        staticmethod(lambda runtime: _SpyRouter(events, runtime.deployment_id)),
+    )
+    return LiveDeploymentRegistry(runtimes)
+
+
+def test_registry_unload_closes_the_router_before_its_route(monkeypatch) -> None:
+    events: list = []
+    registry = _spy_registry(monkeypatch, [_runtime(0), _runtime(1)], events)
+
+    registry.unload_qualified_runtime("deployment-1")
+
+    assert events == [("router", "deployment-1"), ("route", "deployment-1")]
+
+
+def test_registry_close_closes_every_router_before_its_route(monkeypatch) -> None:
+    events: list = []
+    registry = _spy_registry(monkeypatch, [_runtime(0), _runtime(1)], events)
+
+    registry.close()
+
+    assert events == [
+        ("router", "deployment-0"),
+        ("route", "deployment-0"),
+        ("router", "deployment-1"),
+        ("route", "deployment-1"),
+    ]
+
+
+def test_registry_close_still_closes_routes_when_a_router_close_fails(
+    monkeypatch,
+) -> None:
+    events: list = []
+    registry = _spy_registry(monkeypatch, [_runtime(0), _runtime(1)], events)
+
+    def failing_close() -> None:
+        events.append(("router", "deployment-0"))
+        raise RuntimeError("router_port_shutdown_cancellation_timeout")
+
+    registry._routers["deployment-0"].close = failing_close
+
+    with pytest.raises(RuntimeError, match="router_port_shutdown_cancellation_timeout"):
+        registry.close()
+
+    assert ("route", "deployment-0") in events
+    assert ("router", "deployment-1") in events
+    assert ("route", "deployment-1") in events

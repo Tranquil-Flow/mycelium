@@ -1,0 +1,1006 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+"""Atomic selection across independently qualified live deployments."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+import copy
+import hashlib
+import json
+import os
+from pathlib import Path
+import threading
+import time
+from typing import Any, Callable, Mapping
+import uuid
+
+from mycelium_router.contracts import ExecutionGraph, RequestContext
+from mycelium_m16_runtime import build_live_m16_runtime
+from mycelium_model_catalog import enrich_model_operation_lifecycle
+from mycelium_m18_replication import validate_replica_plan, validate_replica_runtime
+
+from .health import LIVE_QUALIFICATION_REFRESH_AFTER_MS
+from .route import LiveRoute, RouteCounters
+from .router_port import LiveRouterPort
+
+
+class DeploymentSelectionError(RuntimeError):
+    """A requested deployment switch cannot be performed safely."""
+
+
+@dataclass(frozen=True, slots=True)
+class QualifiedDeploymentRuntime:
+    deployment_id: str
+    model_id: str
+    model_revision: str
+    quantization: str
+    qualified_at_unix_ms: int
+    route: LiveRoute
+    graph: ExecutionGraph
+    codec: Any
+    qualification: Any
+    placement_projection: Mapping[str, Any] | None = None
+    topology_projection: Mapping[str, Any] | None = None
+    workload_comparison: Mapping[str, Any] | None = None
+    m16_performance_budget: Mapping[str, Any] | None = None
+    model_operation: Mapping[str, Any] | None = None
+    replica_plan: Mapping[str, Any] | None = None
+    replica_runtime_source: Callable[[], Mapping[str, Any] | None] | None = None
+    historical_evidence: tuple[Mapping[str, Any], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class UnavailableDeployment:
+    """Public identity of a configured deployment that failed live startup."""
+
+    deployment_id: str
+    model_id: str
+    model_revision: str
+    quantization: str
+    topology_size: int
+    reason_code: str
+    observed_at_unix_ms: int
+
+
+class LiveDeploymentRegistry:
+    """QualificationSource, RouterPort, and codec for one selected deployment."""
+
+    is_simulated = False
+    # The registry is the product-facing RouterPort and delegates these exact
+    # capabilities to the selected LiveRouterPort.  Advertising them here is
+    # required so the gateway supplies qualifier-owned command authority and
+    # reconnect generations instead of silently dropping either at the
+    # registry boundary.
+    requires_qualification_binding = True
+    supports_workload_profiles = True
+    supports_publisher_generation = True
+    supports_speculation_preference = True
+
+    def __init__(
+        self,
+        runtimes: list[QualifiedDeploymentRuntime],
+        *,
+        unavailable_deployments: tuple[UnavailableDeployment, ...] = (),
+        state_path: Path | None = None,
+        qualification_refresher: (
+            Callable[[QualifiedDeploymentRuntime], Any] | None
+        ) = None,
+        clock_unix_ms: Callable[[], int] | None = None,
+    ) -> None:
+        if not runtimes and not unavailable_deployments:
+            raise ValueError("deployment_registry_requires_one_or_more")
+        if len({runtime.deployment_id for runtime in runtimes}) != len(runtimes):
+            raise ValueError("deployment_registry_duplicate")
+        unavailable_ids = {
+            deployment.deployment_id for deployment in unavailable_deployments
+        }
+        if (
+            len(unavailable_ids) != len(unavailable_deployments)
+            or unavailable_ids & {runtime.deployment_id for runtime in runtimes}
+        ):
+            raise ValueError("deployment_registry_duplicate")
+        self._runtimes = {runtime.deployment_id: runtime for runtime in runtimes}
+        self._unavailable = {
+            deployment.deployment_id: deployment
+            for deployment in unavailable_deployments
+        }
+        self._routers = {
+            runtime.deployment_id: self._router_for(runtime) for runtime in runtimes
+        }
+        self._selected = (
+            runtimes[0].deployment_id
+            if runtimes
+            else unavailable_deployments[0].deployment_id
+        )
+        self._requests: dict[str, str] = {}
+        self._incidents: list[dict[str, Any]] = []
+        self._incident_sequence = 0
+        self._promotion_previous: dict[str, str] = {}
+        self._promotion_reports: dict[str, Mapping[str, Any]] = {}
+        self._candidate_canaries: set[str] = set()
+        self._draining: set[str] = set()
+        self._thread_binding = threading.local()
+        self._lock = threading.RLock()
+        self._qualification_refresher = qualification_refresher
+        self._clock_unix_ms = clock_unix_ms or (lambda: int(time.time() * 1_000))
+        self._state_path = None if state_path is None else Path(state_path)
+        self._model_operation = next(
+            (
+                copy.deepcopy(runtime.model_operation)
+                for runtime in runtimes
+                if runtime.model_operation is not None
+            ),
+            None,
+        )
+        for deployment in unavailable_deployments:
+            self._incident_sequence += 1
+            self._incidents.append(
+                {
+                    "protocol": "mycelium.live_route_incident.v1",
+                    "incident_id": f"registry-incident-{self._incident_sequence}",
+                    "deployment_id": deployment.deployment_id,
+                    "request_id": None,
+                    "state": "configured_deployment_unavailable",
+                    "reason": deployment.reason_code,
+                    "observed_at_unix_ms": deployment.observed_at_unix_ms,
+                }
+            )
+        restored = self._restored_selection()
+        if restored is not None:
+            self._selected = restored
+        self._persist()
+
+    @staticmethod
+    def _router_for(runtime: QualifiedDeploymentRuntime) -> LiveRouterPort:
+        coordinator = None
+        if isinstance(runtime.graph, ExecutionGraph):
+            coordinator = build_live_m16_runtime(
+                runtime.graph,
+                placement_projection=runtime.placement_projection,
+                workload_comparison=runtime.workload_comparison,
+            )
+            if runtime.m16_performance_budget is not None:
+                coordinator.attach_performance_budget(runtime.m16_performance_budget)
+        return LiveRouterPort(
+            route=runtime.route,
+            execution_graph=runtime.graph,
+            runtime_coordinator=coordinator,
+        )
+
+    def add_qualified_runtime(
+        self,
+        runtime: QualifiedDeploymentRuntime,
+    ) -> Mapping[str, Any]:
+        """Insert one independently opened and qualified runtime without selecting it."""
+
+        if not isinstance(runtime, QualifiedDeploymentRuntime):
+            raise DeploymentSelectionError("deployment_runtime_invalid")
+        qualification = runtime.qualification
+        if (
+            not runtime.route.is_alive()
+            or getattr(qualification, "route_ready", None) is not True
+            or getattr(qualification, "deployment_id", None) != runtime.deployment_id
+            or getattr(qualification, "model_id", None) != runtime.model_id
+            or getattr(runtime.graph, "deployment_id", None) != runtime.deployment_id
+        ):
+            raise DeploymentSelectionError("deployment_not_qualified")
+        router = self._router_for(runtime)
+        with self._lock:
+            if runtime.deployment_id in self._runtimes:
+                raise DeploymentSelectionError("deployment_duplicate")
+            no_live_selection = self._selected not in self._runtimes
+            if self._model_operation is not None:
+                runtime = replace(
+                    runtime,
+                    model_operation=copy.deepcopy(self._model_operation),
+                )
+            self._runtimes[runtime.deployment_id] = runtime
+            self._routers[runtime.deployment_id] = router
+            self._unavailable.pop(runtime.deployment_id, None)
+            if no_live_selection:
+                previous = self._selected
+                self._selected = runtime.deployment_id
+                self._incident_sequence += 1
+                self._incidents.append(
+                    {
+                        "protocol": "mycelium.live_route_incident.v1",
+                        "incident_id": f"registry-incident-{self._incident_sequence}",
+                        "deployment_id": runtime.deployment_id,
+                        "request_id": None,
+                        "state": "qualified_service_restored",
+                        "reason": f"replaced_unavailable:{previous}",
+                        "observed_at_unix_ms": self._clock_unix_ms(),
+                    }
+                )
+                self._incidents = self._incidents[-64:]
+            status = self.registry_status()
+            self._persist(status)
+            return status
+
+    def unload_qualified_runtime(self, deployment_id: str) -> Mapping[str, Any]:
+        """Close and forget one non-selected, idle qualified runtime."""
+
+        if not isinstance(deployment_id, str) or not deployment_id:
+            raise DeploymentSelectionError("deployment_unknown")
+        with self._lock:
+            runtime = self._runtimes.get(deployment_id)
+            if runtime is None:
+                raise DeploymentSelectionError("deployment_unknown")
+            if deployment_id == self._selected:
+                raise DeploymentSelectionError("deployment_unload_selected")
+            if deployment_id in self._draining:
+                raise DeploymentSelectionError("deployment_unload_busy")
+            if (
+                deployment_id in self._candidate_canaries
+                or deployment_id in self._requests.values()
+            ):
+                raise DeploymentSelectionError("deployment_unload_busy")
+            self._draining.add(deployment_id)
+        error: BaseException | None = None
+        try:
+            # The router owns a dispatch thread and a worker pool; stop them
+            # before the route they cancel through is closed.
+            try:
+                self._routers[deployment_id].close()
+            finally:
+                runtime.route.close()
+        except BaseException as exc:
+            error = exc
+        with self._lock:
+            self._draining.discard(deployment_id)
+            if error is None:
+                self._runtimes.pop(deployment_id, None)
+                self._routers.pop(deployment_id, None)
+                self._promotion_previous.pop(deployment_id, None)
+                self._promotion_reports.pop(deployment_id, None)
+            status = self.registry_status()
+            self._persist(status)
+        if error is not None:
+            raise DeploymentSelectionError("deployment_unload_failed") from error
+        return status
+
+    def _restored_selection(self) -> str | None:
+        path = self._state_path
+        if path is None or not path.is_file() or path.is_symlink():
+            return None
+        try:
+            if path.stat().st_size > 1_048_576:
+                return None
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError, RecursionError):
+            return None
+        if not isinstance(document, dict):
+            return None
+        deployment_id = document.get("selected_deployment_id")
+        runtime = self._runtimes.get(deployment_id)
+        known = runtime is not None or deployment_id in self._unavailable
+        if (
+            document.get("protocol") != "mycelium.live_deployment_registry.v1"
+            or not known
+        ):
+            return None
+        if runtime is not None and (
+            not runtime.route.is_alive()
+            or runtime.qualification.route_ready is not True
+        ):
+            return None
+        if runtime is None and self._runtimes:
+            return None
+        return deployment_id
+
+    def _current(self) -> QualifiedDeploymentRuntime:
+        runtime = self._runtimes.get(self._selected)
+        if runtime is None:
+            raise RuntimeError("deployment_unavailable")
+        return runtime
+
+    def _refresh_current_if_needed(self) -> QualifiedDeploymentRuntime:
+        runtime = self._current()
+        issued_at = getattr(runtime.qualification, "issued_at_unix_ms", None)
+        if (
+            self._qualification_refresher is None
+            or self._requests
+            or type(issued_at) is not int
+            or self._clock_unix_ms() - issued_at < LIVE_QUALIFICATION_REFRESH_AFTER_MS
+        ):
+            return runtime
+        try:
+            qualification = self._qualification_refresher(runtime)
+        except Exception:
+            # Preserve the previous binding so later reads can retry. Browser
+            # freshness admission remains fail closed once its hour elapses.
+            return runtime
+        if (
+            qualification.route_ready is not True
+            or qualification.deployment_id != runtime.deployment_id
+            or qualification.model_id != runtime.model_id
+        ):
+            return runtime
+        refreshed = replace(
+            runtime,
+            qualified_at_unix_ms=qualification.issued_at_unix_ms,
+            qualification=qualification,
+        )
+        self._runtimes[runtime.deployment_id] = refreshed
+        self._persist()
+        return refreshed
+
+    def current(self) -> Any | None:
+        with self._lock:
+            if self._selected not in self._runtimes:
+                return None
+            runtime = self._refresh_current_if_needed()
+            return runtime.qualification if runtime.route.is_alive() else None
+
+    def current_deployment(self) -> ExecutionGraph:
+        with self._lock:
+            return self._current().graph
+
+    def encode(self, prompt: str) -> tuple[int, ...]:
+        with self._lock:
+            runtime = self._current()
+            self._thread_binding.deployment_id = runtime.deployment_id
+            return runtime.codec.encode(prompt)
+
+    def policy_response(self, prompt: str) -> str | None:
+        with self._lock:
+            runtime = self._current()
+            self._thread_binding.deployment_id = runtime.deployment_id
+            policy = getattr(runtime.codec, "policy_response", None)
+            return None if not callable(policy) else policy(prompt)
+
+    def decode_token(self, token_id: int) -> str:
+        deployment_id = getattr(self._thread_binding, "deployment_id", None)
+        with self._lock:
+            runtime = self._runtimes.get(deployment_id)
+            if runtime is None:
+                raise RuntimeError("request_deployment_binding_missing")
+            return runtime.codec.decode_token(token_id)
+
+    def admit(
+        self,
+        request: RequestContext,
+        client_sink: object,
+        *,
+        pinned_deployment: ExecutionGraph | None = None,
+        **kwargs: object,
+    ) -> str:
+        with self._lock:
+            runtime = self._current()
+            bound = getattr(self._thread_binding, "deployment_id", None)
+            if (
+                bound != runtime.deployment_id
+                or pinned_deployment is None
+                or pinned_deployment.deployment_id != runtime.deployment_id
+            ):
+                raise RuntimeError("deployment_changed_during_admission")
+            if request.request_id in self._requests:
+                raise RuntimeError("duplicate_request_id")
+            self._requests[request.request_id] = runtime.deployment_id
+            router = self._routers[runtime.deployment_id]
+        try:
+            return router.admit(
+                request,
+                client_sink,
+                pinned_deployment=pinned_deployment,
+                **kwargs,
+            )
+        except BaseException:
+            self.release_request(request.request_id)
+            raise
+
+    def _request_router(self, request_id: str) -> LiveRouterPort | None:
+        with self._lock:
+            deployment_id = self._requests.get(request_id)
+            return None if deployment_id is None else self._routers[deployment_id]
+
+    def decode_one(self, request_id: str) -> bool:
+        router = self._request_router(request_id)
+        return False if router is None else router.decode_one(request_id)
+
+    def request_status(self, request_id: str) -> str:
+        router = self._request_router(request_id)
+        return "UNKNOWN" if router is None else router.request_status(request_id)
+
+    def cancel(self, request_id: str) -> bool:
+        router = self._request_router(request_id)
+        return False if router is None else router.cancel(request_id)
+
+    def cancel_with_deadline(
+        self,
+        request_id: str,
+        *,
+        deadline_monotonic_s: float,
+    ) -> bool:
+        """Preserve the gateway owner's cancellation deadline across selection."""
+
+        router = self._request_router(request_id)
+        if router is None:
+            return False
+        return router.cancel_with_deadline(
+            request_id,
+            deadline_monotonic_s=deadline_monotonic_s,
+        )
+
+    def release_request(self, request_id: str) -> None:
+        with self._lock:
+            deployment_id = self._requests.pop(request_id, None)
+            router = None if deployment_id is None else self._routers.get(deployment_id)
+        if router is not None:
+            router.release_request(request_id)
+
+    def select(self, deployment_id: str) -> Mapping[str, Any]:
+        with self._lock:
+            if deployment_id not in self._runtimes:
+                raise DeploymentSelectionError("deployment_unknown")
+            if deployment_id in self._draining:
+                raise DeploymentSelectionError("deployment_unload_busy")
+            if self._requests:
+                raise DeploymentSelectionError("deployment_switch_busy")
+            target = self._runtimes[deployment_id]
+            if (
+                not target.route.is_alive()
+                or target.qualification.route_ready is not True
+            ):
+                raise DeploymentSelectionError("deployment_not_qualified")
+            previous = self._runtimes.get(self._selected)
+            self._selected = deployment_id
+            if previous is None or previous.deployment_id != deployment_id:
+                if previous is None:
+                    self._incident_sequence += 1
+                    self._incidents.append(
+                        {
+                            "protocol": "mycelium.live_route_incident.v1",
+                            "incident_id": (
+                                f"registry-incident-{self._incident_sequence}"
+                            ),
+                            "deployment_id": deployment_id,
+                            "request_id": None,
+                            "state": "qualified_service_restored",
+                            "reason": "operator_selection",
+                            "observed_at_unix_ms": self._clock_unix_ms(),
+                        }
+                    )
+                    self._incidents = self._incidents[-64:]
+                    status = self.registry_status()
+                    self._persist(status)
+                    return status
+                previous_status = previous.route.public_status()
+                failed = (
+                    not previous.route.is_alive()
+                    or previous_status.get("counters", {}).get("fatal") is not None
+                )
+                self._incident_sequence += 1
+                self._incidents.append(
+                    {
+                        "protocol": "mycelium.live_route_incident.v1",
+                        "incident_id": f"registry-incident-{self._incident_sequence}",
+                        "deployment_id": previous.deployment_id,
+                        "request_id": None,
+                        "state": (
+                            "qualified_failover_selected"
+                            if failed
+                            else "qualified_deployment_selected"
+                        ),
+                        "reason": (
+                            str(
+                                previous_status.get("counters", {}).get("fatal")
+                                or "route_unavailable"
+                            )
+                            if failed
+                            else "operator_selection"
+                        ),
+                        "observed_at_unix_ms": int(time.time() * 1_000),
+                    }
+                )
+                self._incidents = self._incidents[-64:]
+            status = self.registry_status()
+            self._persist(status)
+            return status
+
+    def promote_candidate(self, report: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Atomically promote a qualified planner-v2 candidate without rebinding requests."""
+
+        from mycelium_candidate_promotion import validate_candidate_promotion_report
+
+        validated = validate_candidate_promotion_report(report)
+        with self._lock:
+            candidate_id = validated["candidate_deployment_id"]
+            incumbent_id = validated["incumbent_deployment_id"]
+            if validated["decision"] != "promote":
+                raise DeploymentSelectionError("candidate_evidence_rejected")
+            if incumbent_id != self._selected:
+                raise DeploymentSelectionError("candidate_incumbent_changed")
+            target = self._runtimes.get(candidate_id)
+            if target is None:
+                raise DeploymentSelectionError("deployment_unknown")
+            if candidate_id in self._candidate_canaries:
+                raise DeploymentSelectionError("candidate_canary_active")
+            if (
+                not target.route.is_alive()
+                or target.qualification.route_ready is not True
+            ):
+                raise DeploymentSelectionError("deployment_not_qualified")
+            self._promotion_previous[candidate_id] = incumbent_id
+            self._promotion_reports[candidate_id] = copy.deepcopy(validated)
+            self._selected = candidate_id
+            self._incident_sequence += 1
+            self._incidents.append(
+                {
+                    "protocol": "mycelium.live_route_incident.v1",
+                    "incident_id": f"registry-incident-{self._incident_sequence}",
+                    "deployment_id": candidate_id,
+                    "request_id": None,
+                    "state": "qualified_candidate_promoted",
+                    "reason": validated["planner_snapshot_digest"],
+                    "observed_at_unix_ms": int(time.time() * 1_000),
+                }
+            )
+            self._incidents = self._incidents[-64:]
+            status = self.registry_status()
+            self._persist(status)
+            return status
+
+    def canary_candidate(
+        self,
+        candidate_id: str,
+        *,
+        case_id: str,
+        prompt: str,
+        max_new_tokens: int,
+    ) -> Mapping[str, Any]:
+        """Exercise one qualified candidate without changing public selection."""
+
+        if (
+            not isinstance(candidate_id, str)
+            or not candidate_id
+            or not isinstance(case_id, str)
+            or not case_id
+            or len(case_id) > 128
+            or not isinstance(prompt, str)
+            or not prompt.strip()
+            or len(prompt) > 4_096
+            or type(max_new_tokens) is not int
+            or not 1 <= max_new_tokens <= 64
+        ):
+            raise DeploymentSelectionError("candidate_canary_invalid")
+        with self._lock:
+            if candidate_id == self._selected:
+                raise DeploymentSelectionError("candidate_already_selected")
+            runtime = self._runtimes.get(candidate_id)
+            if runtime is None:
+                raise DeploymentSelectionError("deployment_unknown")
+            if (
+                not runtime.route.is_alive()
+                or runtime.qualification.route_ready is not True
+            ):
+                raise DeploymentSelectionError("deployment_not_qualified")
+            if candidate_id in self._candidate_canaries:
+                raise DeploymentSelectionError("candidate_canary_active")
+            self._candidate_canaries.add(candidate_id)
+
+        request_id = f"candidate-canary-{uuid.uuid4().hex}"
+        emitted_at: list[float] = []
+
+        class _CanarySink:
+            def emit(self, _token_index: int, _token_id: int) -> None:
+                emitted_at.append(time.monotonic())
+
+        started_at = time.monotonic()
+        try:
+            prompt_token_ids = runtime.codec.encode(prompt)
+            result = runtime.route.infer(
+                prompt_token_ids,
+                max_new_tokens=max_new_tokens,
+                request_id=request_id,
+                sink=_CanarySink(),
+            )
+            completed_at = time.monotonic()
+            status = runtime.route.public_status()
+            recent = status.get("recent_inferences", [])
+            inference = recent[-1] if isinstance(recent, list) and recent else {}
+            peer_deltas = inference.get("peer_counter_deltas", [])
+            frames_by_node = {
+                item["node_id"]: int(item.get("frames_sent", 0))
+                + int(item.get("frames_received", 0))
+                for item in peer_deltas
+                if isinstance(item, Mapping) and isinstance(item.get("node_id"), str)
+            }
+            elapsed_ms = max((completed_at - started_at) * 1_000.0, 0.001)
+            ttft_ms = (
+                max((emitted_at[0] - started_at) * 1_000.0, 0.001)
+                if emitted_at
+                else elapsed_ms
+            )
+            tpot_ms = inference.get("tpot_ms")
+            if not isinstance(tpot_ms, (int, float)) or isinstance(tpot_ms, bool):
+                tpot_ms = elapsed_ms / max(len(result.token_ids), 1)
+            return {
+                "protocol": "mycelium.candidate_canary_result.v1",
+                "case_id": case_id,
+                "candidate_deployment_id": candidate_id,
+                "model_id": runtime.model_id,
+                "completed": True,
+                "output_text": "".join(
+                    runtime.codec.decode_token(token_id)
+                    for token_id in result.token_ids
+                ),
+                "output_token_count": len(result.token_ids),
+                "ttft_ms": ttft_ms,
+                "tpot_ms": max(float(tpot_ms), 0.001),
+                "total_ms": elapsed_ms,
+                "output_tokens_per_second": max(
+                    len(result.token_ids) * 1_000.0 / elapsed_ms,
+                    0.001,
+                ),
+                "frames_per_request_by_stage": {
+                    stage.stage_id: sum(
+                        frames_by_node.get(placement.node_id, 0)
+                        for placement in stage.placements
+                    )
+                    for stage in runtime.graph.stages
+                },
+            }
+        finally:
+            runtime.route.release_request(request_id)
+            with self._lock:
+                self._candidate_canaries.discard(candidate_id)
+
+    def rollback_candidate(
+        self, candidate_id: str, *, reason: str
+    ) -> Mapping[str, Any]:
+        """Restore the captured incumbent while admitted requests keep their original router."""
+
+        with self._lock:
+            incumbent_id = self._promotion_previous.get(candidate_id)
+            if self._selected != candidate_id or incumbent_id is None:
+                raise DeploymentSelectionError("candidate_rollback_unavailable")
+            incumbent = self._runtimes.get(incumbent_id)
+            if (
+                incumbent is None
+                or not incumbent.route.is_alive()
+                or incumbent.qualification.route_ready is not True
+            ):
+                raise DeploymentSelectionError("candidate_incumbent_unavailable")
+            if not isinstance(reason, str) or not reason or len(reason) > 128:
+                raise DeploymentSelectionError("candidate_rollback_reason_invalid")
+            self._selected = incumbent_id
+            self._promotion_previous.pop(candidate_id, None)
+            self._incident_sequence += 1
+            self._incidents.append(
+                {
+                    "protocol": "mycelium.live_route_incident.v1",
+                    "incident_id": f"registry-incident-{self._incident_sequence}",
+                    "deployment_id": candidate_id,
+                    "request_id": None,
+                    "state": "qualified_candidate_rolled_back",
+                    "reason": reason,
+                    "observed_at_unix_ms": int(time.time() * 1_000),
+                }
+            )
+            self._incidents = self._incidents[-64:]
+            status = self.registry_status()
+            self._persist(status)
+            return status
+
+    def registry_status(self) -> Mapping[str, Any]:
+        with self._lock:
+            unavailable = [
+                {
+                    "deployment_id": deployment.deployment_id,
+                    "model_id": deployment.model_id,
+                    "model_revision": deployment.model_revision,
+                    "quantization": deployment.quantization,
+                    "topology_size": deployment.topology_size,
+                    "health": "unavailable",
+                    "qualified_at_unix_ms": 0,
+                    "qualification_id": "unavailable",
+                }
+                for deployment in self._unavailable.values()
+            ]
+            return {
+                "protocol": "mycelium.live_deployment_registry.v1",
+                "selected_deployment_id": self._selected,
+                "switching_allowed": not self._requests,
+                "deployments": [
+                    {
+                        "deployment_id": runtime.deployment_id,
+                        "model_id": runtime.model_id,
+                        "model_revision": runtime.model_revision,
+                        "quantization": runtime.quantization,
+                        "topology_size": len(runtime.graph.stages),
+                        "health": (
+                            "qualified" if runtime.route.is_alive() else "unavailable"
+                        ),
+                        "qualified_at_unix_ms": runtime.qualified_at_unix_ms,
+                        "qualification_id": runtime.qualification.qualification_id,
+                    }
+                    for runtime in self._runtimes.values()
+                ]
+                + unavailable,
+            }
+
+    def m17_model_operation(self) -> Mapping[str, Any] | None:
+        """Return the selected deployment's bounded M17 planning projection."""
+
+        with self._lock:
+            document = self._model_operation
+            if document is None:
+                return None
+            return enrich_model_operation_lifecycle(
+                document,
+                self.registry_status(),
+            )
+
+    def set_m17_model_operation(self, document: Mapping[str, Any]) -> None:
+        """Atomically publish one refreshed catalog generation to every runtime."""
+
+        detached = copy.deepcopy(dict(document))
+        if detached.get("protocol") != "mycelium.model_operation.v1":
+            raise ValueError("model_operation_invalid")
+        with self._lock:
+            self._model_operation = copy.deepcopy(detached)
+            self._runtimes = {
+                deployment_id: replace(runtime, model_operation=copy.deepcopy(detached))
+                for deployment_id, runtime in self._runtimes.items()
+            }
+
+    def m17_swarm_evidence(self) -> Mapping[str, Any]:
+        """Capture the richest current signed route without changing selection."""
+
+        with self._lock:
+            candidates = [
+                runtime
+                for runtime in self._runtimes.values()
+                if runtime.route.is_alive()
+                and runtime.deployment_id not in self._draining
+                and runtime.placement_projection is not None
+            ]
+            if not candidates:
+                raise RuntimeError("swarm_evidence_unavailable")
+            runtime = max(
+                candidates,
+                key=lambda item: (
+                    len(item.placement_projection.get("nodes", [])),
+                    item.deployment_id,
+                ),
+            )
+            document = dict(runtime.route.m17_swarm_evidence())
+            document["placement"] = copy.deepcopy(runtime.placement_projection)
+            document["topology"] = copy.deepcopy(runtime.topology_projection)
+            return document
+
+    def m18_replica_plan(self) -> Mapping[str, Any] | None:
+        """Return selected deployment's bounded Planner-owned replica intent."""
+
+        with self._lock:
+            if self._selected not in self._runtimes:
+                return None
+            document = self._current().replica_plan
+            return None if document is None else validate_replica_plan(document)
+
+    def m18_replica_runtime(self) -> Mapping[str, Any] | None:
+        """Return selected deployment's Router-owned request-track ledger."""
+
+        with self._lock:
+            if self._selected not in self._runtimes:
+                return None
+            source = self._current().replica_runtime_source
+        document = None if source is None else source()
+        return None if document is None else validate_replica_runtime(document)
+
+    def _persist(self, status: Mapping[str, Any] | None = None) -> None:
+        path = self._state_path
+        if path is None:
+            return
+        if not path.is_absolute() or path.name in {"", ".", ".."}:
+            raise ValueError("deployment_registry_state_path_invalid")
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        encoded = (
+            json.dumps(
+                dict(status or self.registry_status()),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+        descriptor = os.open(temporary, flags, 0o600)
+        try:
+            with os.fdopen(descriptor, "wb") as output:
+                descriptor = -1
+                output.write(encoded)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, path)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            temporary.unlink(missing_ok=True)
+
+    def public_status(self) -> Mapping[str, Any]:
+        with self._lock:
+            if self._selected not in self._runtimes:
+                deployment = self._unavailable[self._selected]
+                identity = hashlib.sha256(
+                    (
+                        deployment.deployment_id
+                        + deployment.model_id
+                        + deployment.model_revision
+                    ).encode("utf-8")
+                ).hexdigest()
+                return {
+                    "protocol": "mycelium.live_route_status.v1",
+                    "route_alive": False,
+                    "simulated": False,
+                    "route_identity_digest": f"sha256:{identity}",
+                    "deployment_id": deployment.deployment_id,
+                    "model_id": deployment.model_id,
+                    "topology_version": 0,
+                    "decode_mode": "unavailable",
+                    "counters": {
+                        "frames_sent": 0,
+                        "frames_received": 0,
+                        "applied_operation_count": 0,
+                        "fatal": deployment.reason_code,
+                    },
+                    "stages": [],
+                    "peers": [],
+                    "recent_inferences": [],
+                    "incidents": copy.deepcopy(self._incidents)[-64:],
+                    "placement": None,
+                    "topology": None,
+                }
+            runtime = self._current()
+            placement = copy.deepcopy(runtime.placement_projection)
+            topology = copy.deepcopy(runtime.topology_projection)
+            report = self._promotion_reports.get(self._selected)
+            incidents = copy.deepcopy(self._incidents)
+        status = dict(runtime.route.public_status())
+        with self._lock:
+            if placement is not None and report is not None:
+                placement["promotion"] = {
+                    "candidate_deployment_id": report["candidate_deployment_id"],
+                    "incumbent_deployment_id": report["incumbent_deployment_id"],
+                    "decision": report["decision"],
+                    "reasons": copy.deepcopy(report["reasons"]),
+                    "sample_size": report["metrics"]["sample_size"],
+                }
+            status["placement"] = placement
+            status["topology"] = topology
+            route_incidents = status.get("incidents", [])
+            status["incidents"] = [
+                *(list(route_incidents) if isinstance(route_incidents, list) else []),
+                *incidents,
+            ][-64:]
+            return status
+
+    def m15_plan_comparison(self) -> Mapping[str, Any] | None:
+        """Return the selected deployment's privacy-reduced M15 planner intent."""
+
+        with self._lock:
+            if self._selected not in self._runtimes:
+                return None
+            return copy.deepcopy(self._current().workload_comparison)
+
+    def m16_runtime_status(self) -> Mapping[str, Any] | None:
+        """Return admission and scheduling state for the selected deployment."""
+
+        with self._lock:
+            if self._selected not in self._runtimes:
+                return None
+            return self._routers[self._selected].runtime_status()
+
+    def membership_status(self, *, qualification: Any | None) -> Mapping[str, Any]:
+        with self._lock:
+            if self._selected not in self._runtimes:
+                return {
+                    "protocol": "mycelium.product_ui.swarm.v1",
+                    "native_nodes": [],
+                    "browser_workers": [],
+                }
+            return self._current().route.membership_status(qualification=qualification)
+
+    def mint_native_invite(
+        self,
+        *,
+        seed_url: str,
+        ttl_seconds: int,
+        nonce: str,
+    ) -> Mapping[str, Any]:
+        """Delegate enrollment to the selected route's shared seed authority."""
+
+        with self._lock:
+            source = getattr(self._current().route, "mint_native_invite", None)
+            if not callable(source):
+                raise RuntimeError("live_seed_authority_unavailable")
+            return source(
+                seed_url=seed_url,
+                ttl_seconds=ttl_seconds,
+                nonce=nonce,
+            )
+
+    def revoke_native_member(self, member_id: str) -> Mapping[str, Any]:
+        """Delegate standby-member fencing to the selected route authority."""
+
+        with self._lock:
+            source = getattr(self._current().route, "revoke_native_member", None)
+            if not callable(source):
+                raise RuntimeError("live_seed_authority_unavailable")
+            return source(member_id)
+
+    def product_membership_records(self) -> tuple[dict[str, Any], ...]:
+        with self._lock:
+            if self._selected not in self._runtimes:
+                return ()
+            source = getattr(self._current().route, "product_membership_records", None)
+            if not callable(source):
+                raise RuntimeError("product_membership_source_unavailable")
+            return tuple(dict(item) for item in source())
+
+    def product_assignment_records(self) -> tuple[dict[str, Any], ...]:
+        with self._lock:
+            if self._selected not in self._runtimes:
+                return ()
+            source = getattr(self._current().route, "product_assignment_records", None)
+            if not callable(source):
+                raise RuntimeError("product_assignment_source_unavailable")
+            return tuple(dict(item) for item in source())
+
+    def product_pseudonym_salt(self) -> bytes:
+        with self._lock:
+            if self._selected not in self._runtimes:
+                return hashlib.sha256(
+                    f"mycelium-degraded:{self._selected}".encode("utf-8")
+                ).digest()
+            source = getattr(self._current().route, "product_pseudonym_salt", None)
+            if not callable(source):
+                raise RuntimeError("product_pseudonym_salt_unavailable")
+            return bytes(source())
+
+    def counters(self) -> RouteCounters:
+        with self._lock:
+            if self._selected not in self._runtimes:
+                return RouteCounters(0, 0, 0, "deployment_unavailable")
+            return self._current().route.counters()
+
+    def is_alive(self) -> bool:
+        with self._lock:
+            if self._selected not in self._runtimes:
+                return False
+            return self._current().route.is_alive()
+
+    def close(self) -> None:
+        with self._lock:
+            owned = tuple(
+                (self._routers.get(deployment_id), runtime)
+                for deployment_id, runtime in self._runtimes.items()
+            )
+        first_error: BaseException | None = None
+        for router, runtime in owned:
+            try:
+                if router is not None:
+                    router.close()
+            except BaseException as exc:
+                first_error = first_error or exc
+            finally:
+                runtime.route.close()
+        if first_error is not None:
+            raise first_error
+
+    def cleanup(self) -> None:
+        with self._lock:
+            runtimes = tuple(self._runtimes.values())
+        for runtime in runtimes:
+            runtime.route.cleanup()
+
+
+__all__ = [
+    "DeploymentSelectionError",
+    "LiveDeploymentRegistry",
+    "QualifiedDeploymentRuntime",
+    "UnavailableDeployment",
+]

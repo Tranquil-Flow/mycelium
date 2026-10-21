@@ -1,0 +1,581 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+from collections import deque
+import json
+import threading
+from types import SimpleNamespace
+
+import pytest
+
+import mycelium_live.route as live_route_module
+from mycelium_live.route import FakeLiveRoute, PhysicalLiveRoute
+
+
+class RecordingSink:
+    def __init__(self):
+        self.tokens = []
+
+    def emit(self, token_index: int, token_id: int) -> None:
+        self.tokens.append((token_index, token_id))
+
+
+def test_route_is_not_alive_before_open():
+    route = FakeLiveRoute(scripted_tokens=(1, 2, 3))
+    assert route.is_alive() is False
+
+
+def test_physical_cancelled_status_wins_before_local_callback_is_visible() -> None:
+    assert live_route_module._request_is_cancelled("CANCELLED", lambda: False) is True
+    assert live_route_module._request_is_cancelled("DECODING", lambda: False) is False
+
+
+def test_public_transport_health_exposes_only_bounded_fatal_code() -> None:
+    healthy = live_route_module._public_transport_health(
+        {
+            "details": {
+                "sidecar_process": {"alive": True, "pid": 1234},
+                "transport_running": True,
+                "transport_fatal_error": None,
+            }
+        }
+    )
+    assert healthy == {
+        "data_plane_health_observed": True,
+        "sidecar_process_alive": True,
+        "transport_running": True,
+        "transport_fatal": False,
+        "transport_fatal_code": None,
+    }
+
+    fatal = live_route_module._public_transport_health(
+        {
+            "details": {
+                "sidecar_process": {"alive": True},
+                "transport_running": False,
+                "transport_fatal_error": {
+                    "code": "sidecar_receive_reconnect_failed" + "x" * 256,
+                    "detail": "private transport detail",
+                },
+            }
+        }
+    )
+    assert fatal["transport_fatal"] is True
+    assert fatal["transport_fatal_code"].startswith(
+        "sidecar_receive_reconnect_failed"
+    )
+    assert len(fatal["transport_fatal_code"]) == 128
+    assert "private transport detail" not in repr(fatal)
+
+
+def test_infer_emits_each_token_and_route_stays_alive():
+    route = FakeLiveRoute(scripted_tokens=(1, 2, 3))
+    route.open()
+    sink = RecordingSink()
+    result = route.infer(
+        (15496, 11), max_new_tokens=3, request_id="request-a", sink=sink
+    )
+    assert sink.tokens == [(0, 1), (1, 2), (2, 3)]
+    assert result.token_ids == (1, 2, 3)
+    assert route.is_alive() is True
+
+
+def test_second_request_reuses_open_route_and_advances_counters():
+    route = FakeLiveRoute(scripted_tokens=(1, 2, 3))
+    route.open()
+    sink = RecordingSink()
+    route.infer((1,), max_new_tokens=3, request_id="request-a", sink=sink)
+    first = route.counters().frames_sent
+    route.infer((2,), max_new_tokens=3, request_id="request-b", sink=sink)
+    assert route.counters().frames_sent > first
+
+
+def test_public_status_is_prompt_free_and_reports_counter_delta() -> None:
+    route = FakeLiveRoute(scripted_tokens=(1, 2, 3))
+    route.open()
+    private_prompt_tokens = (999_001, 999_002)
+    route.infer(
+        private_prompt_tokens,
+        max_new_tokens=3,
+        request_id="private-request-id",
+        sink=RecordingSink(),
+    )
+
+    status = route.public_status()
+    assert status["protocol"] == "mycelium.live_route_status.v1"
+    assert status["counters"]["frames_sent"] == 3
+    assert status["recent_inferences"][-1]["context_tokens"] == 2
+    assert status["recent_inferences"][-1]["peer_counter_deltas"] == [
+        {
+            "node_id": "fake-node",
+            "frames_sent": 3,
+            "frames_received": 3,
+            "applied_operation_count": 3,
+        }
+    ]
+    serialized = repr(status)
+    assert "private-request-id" not in serialized
+    assert "999001" not in serialized
+
+
+def test_infer_before_open_is_rejected():
+    route = FakeLiveRoute(scripted_tokens=(1,))
+    with pytest.raises(RuntimeError, match="route_not_open"):
+        route.infer((1,), max_new_tokens=1, request_id="r", sink=RecordingSink())
+
+
+def test_close_makes_route_permanently_not_alive():
+    route = FakeLiveRoute(scripted_tokens=(1,))
+    route.open()
+    route.close()
+
+
+def test_physical_route_initializes_optional_public_projections(monkeypatch) -> None:
+    graph = SimpleNamespace(topology_version=1)
+    monkeypatch.setattr(
+        live_route_module,
+        "execution_graph_from_document",
+        lambda _document: graph,
+    )
+    route = PhysicalLiveRoute(
+        controller=SimpleNamespace(peers=()),
+        endpoints={},
+        run_plan={
+            "nodes": [
+                {"node_id": "node-0", "configure": {"graph": {}}},
+            ],
+        },
+    )
+
+    assert route._placement_projection is None
+    assert route._topology_projection is None
+    assert route._workload_comparison is None
+    assert route._model_operation is None
+    assert route.is_alive() is False
+    route.close()
+
+
+def test_physical_route_preserves_prepositioned_artifacts_for_cleanup(
+    monkeypatch, tmp_path
+) -> None:
+    captured: dict[str, object] = {}
+    prepositioned = {
+        "protocol": "mycelium.controller_prepositioned_artifacts.v1",
+        "members": {
+            "node-0": [
+                {
+                    "destination_path": "deployment/model.safetensors",
+                    "source_path": "/private/model.safetensors",
+                    "size_bytes": 1,
+                    "content_digest": "sha256:" + "a" * 64,
+                }
+            ]
+        },
+    }
+    run_plan = {
+        "nodes": [{"node_id": "node-0", "configure": {"graph": {}}}],
+    }
+
+    class RecordingController:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+            self.peers = kwargs["peers"]
+
+        def _validate_physical_distinctness(self) -> None:
+            return None
+
+        def _validate_membership(self):
+            return {"node-0": {"endpoint_id": "endpoint-0"}}
+
+        def _validate_run_plan(self):
+            return run_plan
+
+    authority = SimpleNamespace(
+        signer=object(),
+        seed_node_id="seed-0",
+        members={},
+        close=lambda: None,
+    )
+    monkeypatch.setattr(
+        live_route_module,
+        "_load_live_seed_authority",
+        lambda **_kwargs: authority,
+    )
+    monkeypatch.setattr(
+        live_route_module,
+        "_refresh_membership_snapshot",
+        lambda snapshot, **_kwargs: snapshot,
+    )
+    monkeypatch.setattr(
+        live_route_module,
+        "PeerIdentity",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    monkeypatch.setattr(
+        live_route_module,
+        "QualificationController",
+        RecordingController,
+    )
+    monkeypatch.setattr(
+        live_route_module,
+        "execution_graph_from_document",
+        lambda _document: SimpleNamespace(topology_version=1),
+    )
+    plan = {
+        "controller": {
+            "mode": "physical",
+            "peers": [{"node_id": "node-0"}],
+            "source_root": "/private/source",
+            "transfer_manifest": {"protocol": "transfer"},
+            "node_transfer_manifests": {"protocol": "node-transfers"},
+            "prepositioned_artifacts": prepositioned,
+            "membership_snapshot": {"protocol": "membership"},
+            "run_plan": run_plan,
+        }
+    }
+    plan_path = tmp_path / "operator-plan.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+
+    route = PhysicalLiveRoute.from_operator_plan(
+        plan_path,
+        seed_state_root=tmp_path / "seed",
+    )
+
+    assert captured["prepositioned_artifacts"] == prepositioned
+    route.close()
+
+
+def test_single_physical_route_publishes_one_honest_qualified_model(monkeypatch) -> None:
+    graph = SimpleNamespace(
+        topology_version=1,
+        deployment_id="deployment-1",
+        model_id="Qwen/Qwen2.5-3B-Instruct",
+        resolved_commit="a" * 40,
+        stages=(SimpleNamespace(), SimpleNamespace(), SimpleNamespace()),
+    )
+    monkeypatch.setattr(
+        live_route_module,
+        "execution_graph_from_document",
+        lambda _document: graph,
+    )
+    route = PhysicalLiveRoute(
+        controller=SimpleNamespace(peers=()),
+        endpoints={},
+        run_plan={
+            "nodes": [
+                {"node_id": "node-0", "configure": {"graph": {}}},
+            ],
+        },
+    )
+    route._open = True
+    route._sessions = {"node-0": SimpleNamespace(returncode=None)}
+    route.set_deployment_qualification(
+        SimpleNamespace(
+            deployment_id="deployment-1",
+            model_id="Qwen/Qwen2.5-3B-Instruct",
+            route_ready=True,
+            issued_at_unix_ms=1234,
+            qualification_id="sha256:" + "b" * 64,
+        ),
+        quantization="int8-weight-only",
+    )
+
+    status = route.registry_status()
+
+    assert status["switching_allowed"] is False
+    assert status["selected_deployment_id"] == "deployment-1"
+    assert status["deployments"] == [
+        {
+            "deployment_id": "deployment-1",
+            "model_id": "Qwen/Qwen2.5-3B-Instruct",
+            "model_revision": "a" * 40,
+            "quantization": "int8-weight-only",
+            "topology_size": 3,
+            "health": "qualified",
+            "qualified_at_unix_ms": 1234,
+            "qualification_id": "sha256:" + "b" * 64,
+        }
+    ]
+    route.close()
+
+
+def test_physical_route_propagates_route_wide_decode_mode_to_node_command() -> None:
+    route = object.__new__(PhysicalLiveRoute)
+    route._peers = {
+        "node-0": SimpleNamespace(
+            staging_root="/opt/mycelium/stage",
+            process_transport="local",
+        )
+    }
+    route._plans_by_node = {
+        "node-0": {
+            "python_executable": "/usr/bin/python3",
+            "socket_root": "/tmp/mycelium/socket",
+            "sidecar_binary": "/opt/mycelium/sidecar",
+            "endpoint_secret_file": "/opt/mycelium/identities/node-0.key",
+        }
+    }
+    route._plan = {
+        "run_id": "run-m23",
+        "deployment_id": "deployment-m23",
+        "decode_mode": "stage_local_kv",
+    }
+
+    command = route._node_command("node-0")
+
+    assert command[0] == "/usr/bin/python3"
+    mode_flag = command.index("--decode-mode")
+    assert command[mode_flag + 1] == "stage_local_kv"
+
+
+def test_physical_route_reserves_native_threads_on_remote_nodes(monkeypatch) -> None:
+    route = object.__new__(PhysicalLiveRoute)
+    route._peers = {
+        "node-2": SimpleNamespace(
+            staging_root="/opt/mycelium/stage",
+            process_transport="ssh",
+        )
+    }
+    route._plans_by_node = {
+        "node-2": {
+            "python_executable": "/usr/bin/python3",
+            "socket_root": "/tmp/mycelium/socket",
+            "sidecar_binary": "/opt/mycelium/sidecar",
+            "endpoint_secret_file": "/opt/mycelium/identities/node-2.key",
+        }
+    }
+    route._plan = {
+        "run_id": "run-a5-control-capacity",
+        "deployment_id": "deployment-a5-control-capacity",
+        "decode_mode": "stage_local_kv",
+    }
+    monkeypatch.setattr(
+        "mycelium_live.route._peer_process_argv",
+        lambda _peer, command: command,
+    )
+
+    command = route._node_command("node-2")
+
+    assert command[:4] == (
+        "env",
+        "OPENBLAS_NUM_THREADS=1",
+        "OMP_NUM_THREADS=1",
+        "MKL_NUM_THREADS=1",
+    )
+
+
+def test_physical_route_emits_force_relay_only_under_explicit_runtime_control() -> None:
+    route = object.__new__(PhysicalLiveRoute)
+    route._peers = {
+        "node-0": SimpleNamespace(
+            staging_root="/opt/mycelium/stage",
+            process_transport="local",
+        )
+    }
+    route._plans_by_node = {
+        "node-0": {
+            "python_executable": "/usr/bin/python3",
+            "socket_root": "/tmp/mycelium/socket",
+            "sidecar_binary": "/opt/mycelium/sidecar",
+            "endpoint_secret_file": "/opt/mycelium/identities/node-0.key",
+        }
+    }
+    route._plan = {
+        "run_id": "run-a8",
+        "deployment_id": "deployment-a8",
+        "decode_mode": "stage_local_kv",
+    }
+    route._force_relay = False
+    assert "--sidecar-force-relay" not in route._node_command("node-0")
+
+    route._force_relay = True
+    assert route._node_command("node-0").count("--sidecar-force-relay") == 1
+
+
+def test_physical_cancellation_cleanup_requires_every_peer_release() -> None:
+    route = object.__new__(PhysicalLiveRoute)
+    route._lock = threading.RLock()
+    route._sessions = {"node-0": object(), "node-1": object()}
+    released = {
+        "details": {
+            "runtime": {"active_state_count": 0},
+            "transport_pending_delivery_count": 0,
+            "transport_cancellation_cleanup_complete": True,
+        }
+    }
+    still_active = {
+        "details": {
+            "runtime": {"active_state_count": 1},
+            "transport_pending_delivery_count": 0,
+            "transport_cancellation_cleanup_complete": False,
+        }
+    }
+    route._last_snapshots = {"node-0": released, "node-1": still_active}
+    assert route._cancellation_cleanup_complete() is False
+    assert route._cancellation_cleanup_complete(frozenset({"node-0"})) is True
+
+    route._last_snapshots["node-1"] = released
+    assert route._cancellation_cleanup_complete() is True
+
+
+def test_physical_route_accepts_eos_completion_without_visible_token() -> None:
+    class Session:
+        def send(self, *, command_id, command, payload):
+            del command_id, payload
+            if command == "infer_start":
+                return {
+                    "details": {
+                        "status": "DECODING",
+                        "output": {"token_indexes": [0], "token_ids": [101]},
+                    }
+                }
+            assert command == "infer_decode"
+            return {
+                "details": {
+                    "status": "COMPLETED",
+                    "output": {"token_indexes": [0], "token_ids": [101]},
+                }
+            }
+
+    route = object.__new__(PhysicalLiveRoute)
+    route._lock = threading.Lock()
+    route._fatal = None
+    route._plan = {
+        "entry_node_id": "node-0",
+        "request": {
+            "qos_class": "interactive",
+            "admitted_at": 0.0,
+            "target_ttft_ms": 1_000.0,
+            "target_tpot_ms": 1_000.0,
+            "target_tokens_per_second": 1.0,
+            "sampling_seed": 17,
+            "generation_config_digest": "sha256:" + "a" * 64,
+        },
+    }
+    route._sessions = {"node-0": Session()}
+    route._stop_token_ids = frozenset()
+    route._request_outputs = {}
+    route._request_inputs = {}
+    route._request_limits = {}
+    route._request_entry_nodes = {}
+    route._recent_inferences = deque(maxlen=16)
+    route.is_alive = lambda: True
+    route._command_id = lambda node_id, action: f"{node_id}-{action}"
+    route._verify_observation = lambda node_id, response, **kwargs: response
+    route._peer_counters = lambda: {
+        "node-0": {
+            "frames_sent": 0,
+            "frames_received": 0,
+            "applied_operation_count": 0,
+        }
+    }
+    route._snapshot_all = lambda: None
+    sink = RecordingSink()
+
+    result = route.infer((7, 8), max_new_tokens=4, request_id="request-eos", sink=sink)
+
+    assert result.token_ids == (101,)
+    assert sink.tokens == [(0, 101)]
+    assert route._fatal is None
+
+
+def test_physical_replica_qualification_proves_distinct_overlapping_tracks() -> None:
+    class Session:
+        def __init__(self, *, placement_id: str, excluded_placement_id: str) -> None:
+            self.started = 0
+            self.placement_id = placement_id
+            self.excluded_placement_id = excluded_placement_id
+
+        def send(self, *, command_id, command, payload):
+            del command_id
+            if command == "infer_start":
+                assert payload["excluded_placement_ids"] == [
+                    self.excluded_placement_id
+                ]
+                index = self.started
+                self.started += 1
+                return {
+                    "details": {
+                        "status": "DECODING",
+                        "output": {"token_indexes": [0], "token_ids": [10 + index]},
+                        "path": {
+                            "path_id": f"path-{self.placement_id}-{index}",
+                            "path_attempt": 0,
+                            "placement_ids": [self.placement_id],
+                        },
+                    }
+                }
+            assert command == "infer_decode"
+            index = int(payload["request_id"].rsplit("-", 1)[1])
+            return {
+                "details": {
+                    "status": "COMPLETED",
+                    "output": {
+                        "token_indexes": [0, 1],
+                        "token_ids": [10 + index, 20 + index],
+                    },
+                }
+            }
+
+    route = object.__new__(PhysicalLiveRoute)
+    route._lock = threading.Lock()
+    route._plan = {
+        "entry_node_id": "node-0",
+        "request": {
+            "qos_class": "interactive",
+            "admitted_at": 0.0,
+            "target_ttft_ms": 1_000.0,
+            "target_tpot_ms": 1_000.0,
+            "target_tokens_per_second": 1.0,
+            "sampling_seed": 17,
+            "generation_config_digest": "sha256:" + "a" * 64,
+        },
+    }
+    route._graph = SimpleNamespace(
+        deployment_id="deployment-m18",
+        stages=(
+            SimpleNamespace(
+                placements=(
+                    SimpleNamespace(node_id="node-0", placement_id="p0"),
+                    SimpleNamespace(node_id="node-1", placement_id="p1"),
+                )
+            ),
+        ),
+    )
+    route._sessions = {
+        "node-0": Session(placement_id="p0", excluded_placement_id="p1"),
+        "node-1": Session(placement_id="p1", excluded_placement_id="p0"),
+    }
+    route._request_outputs = {}
+    route._request_inputs = {}
+    route._request_limits = {}
+    route._request_entry_nodes = {}
+    route.is_alive = lambda: True
+    route._command_id = lambda node_id, action: f"{node_id}-{action}"
+    route._verify_observation = lambda node_id, response, **kwargs: response
+    route._peer_counters = lambda: {
+        "node-0": {
+            "frames_sent": 0,
+            "frames_received": 0,
+            "applied_operation_count": 0,
+        },
+        "node-1": {
+            "frames_sent": 0,
+            "frames_received": 0,
+            "applied_operation_count": 0,
+        },
+    }
+    route._snapshot_all = lambda: None
+
+    evidence = route.qualify_replica_concurrency(
+        ((7, 8), (9, 10)),
+        max_new_tokens=2,
+        request_id_prefix="m18-physical",
+    )
+
+    assert evidence["protocol"] == "mycelium.physical_replica_concurrency.v1"
+    assert evidence["overlapping_at_admission"] is True
+    assert evidence["distinct_tracks"] is True
+    assert [item["placement_ids"] for item in evidence["requests"]] == [
+        ["p0"],
+        ["p1"],
+    ]
+    assert all("output_digest" in item for item in evidence["requests"])
