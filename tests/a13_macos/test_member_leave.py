@@ -167,8 +167,10 @@ def test_modes_are_closed_and_runs_are_idempotent(tmp_path):
 
 
 def test_leave_does_not_widen_closed_reason_enum():
+    # Leave adds nothing; the one deliberate widening is PV25 'Plugged in only' (host_on_battery).
     assert adaptive_host.REASON_CATEGORIES == frozenset({
-        "none", "owner_game_mode", "owner_stop", "host_memory_pressure", "host_cpu_saturation"})
+        "none", "owner_game_mode", "owner_stop", "host_memory_pressure", "host_cpu_saturation",
+        "host_on_battery"})
 
 
 # -- the application route -------------------------------------------------------
