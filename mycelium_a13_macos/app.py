@@ -1267,6 +1267,21 @@ class DemoApp:
             apply_first_consent_choice(self, choice)
         return result
 
+    def test_seams_enabled(self):
+        """True only on a joined Mac launched with ``MYCELIUM_A13_TEST_SEAMS=1`` (V1.2 runtime clock seam)."""
+        return (self.installation_role == 'target'
+                and getattr(self.authority, 'test_seams_enabled', False) is True)
+
+    def _set_test_clock_offset(self, body):
+        if not self.test_seams_enabled():
+            raise DemoError('test_seams_unavailable')
+        if not isinstance(body, dict) or set(body) != {'offset_seconds'}:
+            raise DemoError('test_seam_offset_invalid')
+        try:
+            return self.authority.set_test_clock_offset(body['offset_seconds'])
+        except ValueError as error:
+            raise DemoError(str(error)) from None
+
     def _action(self, path, body):
         with self.guard:
             if self.closed.is_set(): raise DemoError('application_closed')
@@ -1276,6 +1291,8 @@ class DemoApp:
             if path == '/api/leave':
                 from .member_leave import leave_action
                 return leave_action(self, body)
+            if path == '/api/test-seams/clock-offset':
+                return self._set_test_clock_offset(body)
             from .adaptive_owner import ADAPTIVE_ROUTES, adaptive_action
             if path in ADAPTIVE_ROUTES:
                 return adaptive_action(self, path, body)
@@ -1845,6 +1862,10 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_value(status,raw,content_type=kind,extra={'Content-Security-Policy':CSP})
     def do_POST(self):
         if not self.base_guard(): return
+        if self.path == '/api/test-seams/clock-offset':
+            # V1.2 runtime clock seam: the route exists only on a joined Mac launched with the gate open, loopback only.
+            if not self.app.test_seams_enabled(): self.fail(404,'not_found'); return
+            if self.client_address[0] not in {'127.0.0.1','::1'}: self.fail(403,'loopback_only'); return
         if self.path.startswith('/chat/'):
             if self.headers.get('Transfer-Encoding') or len(self.headers.get_all('Content-Length',[])) != 1:
                 self.fail(400,'framing_rejected'); return
