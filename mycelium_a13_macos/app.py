@@ -1254,7 +1254,8 @@ class DemoApp:
         run=owner_run if isinstance(owner_run,dict) else {}
         state=run.get('state')
         if state=='serving' and run.get('route_ready') is True and run.get('registry_origin'):
-            return {'state':'serving','route_ready':True,'next_action':'Open the chat.'}
+            # route_ready is the qualifier's own claim carried by the owner run, never a literal here (claim boundary).
+            return {'state':'serving','route_ready':run.get('route_ready') is True,'next_action':'Open the chat.'}
         if state in {'running','serving'}:
             return {'state':'starting','route_ready':False,'next_action':'The route is being prepared.'}
         if state in {'stopping','failing'}:

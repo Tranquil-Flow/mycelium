@@ -79,8 +79,8 @@ def test_serving_thread_error_handler_does_not_raise_after_the_context_was_forgo
 
 def test_a_start_after_a_cleanup_unproven_close_is_not_refused_as_compiler_already_started(tmp_path, thread_errors):
     app = _drive_close_with_unproven_cleanup(tmp_path)
-    assert app._chain_compile_state is None
-    assert app._chain_serving_thread is None and app._chain_workflow is None
+    # The serving worker never takes app.guard, so it only marks the retired run; the next start reaps it.
+    assert app._chain_retired_route is not None
     # A fresh observation context for the next run; the compiler guard must not see the old run's state.
     app._observation_context = SimpleNamespace(
         run_id='run-2', deployment_id='dep-2', facts={'a': {}, 'b': {}},
@@ -88,6 +88,9 @@ def test_a_start_after_a_cleanup_unproven_close_is_not_refused_as_compiler_alrea
     with pytest.raises(ValueError) as refused:
         chain_compile.start_compile(app, acknowledged=True)
     assert str(refused.value) == 'compiler_resource_policy_denied'   # got past the compiler_already_started guard
+    assert app._chain_compile_state is None
+    assert app._chain_serving_thread is None and app._chain_workflow is None
+    assert app._chain_retired_route is None
 
 
 def test_the_private_serve_error_record_still_names_the_run(tmp_path, thread_errors):
