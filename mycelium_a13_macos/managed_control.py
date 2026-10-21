@@ -97,7 +97,7 @@ MAX_CLOCK_SKEW_SECONDS = 30.0
 _ALLOWED_OPERATIONS = frozenset(
     {"hello", "configure", "start", "health", "snapshot", "cancel", "stop",
      "bind_request_control", "update_request_control", "infer_start", "infer_decode",
-     "infer_cancel", "infer_cancel_wait", "rotate"}
+     "infer_cancel", "infer_cancel_wait", "rotate", "idle_reload"}
 )
 _WORK_OPERATIONS = frozenset({"configure", "start", "infer_start", "infer_decode", "rotate"})
 _MAX_ACTIVE_WORK = 1
@@ -154,6 +154,8 @@ _OPERATION_PAYLOAD_FIELD_SETS.update({
     "infer_cancel": (frozenset({"request_id"}), _CANCEL_CONTROL_FIELDS),
     "infer_cancel_wait": (_CANCEL_CONTROL_FIELDS,),
     "rotate": (frozenset({"peer"}),),
+    # PV25: ask a member to bring its unloaded weights back (idempotent, answers at once).
+    "idle_reload": (frozenset(),),
 })
 
 _ENVELOPE_FIELDS = frozenset(

@@ -35,6 +35,7 @@ from .command_controller import (
 from .a4_contracts import validate_interruptible_stage_command
 from .lock_order import LockOrderDetector, LockOrderViolation
 
+from mycelium_idle.residency import MemberWarming
 from .route import AffectedPeerQuarantined, InferenceCancelled, LiveRoute, TokenSink
 
 # The owner's cancellation-and-cleanup window, bound from the one registry record
@@ -1082,7 +1083,7 @@ class LiveRouterPort:
         except InferenceCancelled:
             terminal = "CANCELLED"
             admission_refused = False
-        except AffectedPeerQuarantined as error:
+        except (AffectedPeerQuarantined, MemberWarming) as error:
             terminal = "FAILED"
             admission_refused = True
             terminal_error_code = self._bounded_error_code(error)

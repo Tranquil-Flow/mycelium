@@ -2893,6 +2893,52 @@ class PhysicalLiveRoute:
         except BaseException:
             return False
 
+    # PV25 idle unload: how long admission waits for an unloaded member to bring its weights back.
+    _idle_warm_deadline_s = 25.0
+    _idle_warm_poll_s = 0.25
+
+    def _warm_idle_peers(self, participating_node_ids: frozenset[str]) -> None:
+        """Wake participating members that unloaded their weights while idle.
+
+        Reads only the last verified health observation (no extra command for a loaded cluster).
+        A reloading member is *warming*: the wait is bounded and ends in ``MemberWarming``
+        (``member_warming``), which is neither a keepalive miss nor a loss.  A member that stops
+        answering gets no immunity: the keepalive monitor keeps accruing its misses.
+        """
+
+        from mycelium_idle.route_warming import WarmingCoordinator
+
+        def reload_peer(node_id: str) -> None:
+            self._send_before(
+                node_id,
+                command_id=self._command_id(node_id, "idle_reload"),
+                command="idle_reload",
+                payload={},
+                deadline_monotonic_s=time.monotonic() + 5.0,
+            )
+
+        def probe(node_id: str) -> dict[str, Any]:
+            response = self._send_before(
+                node_id,
+                command_id=self._command_id(node_id, "health"),
+                command="health",
+                payload={},
+                deadline_monotonic_s=time.monotonic() + 5.0,
+            )
+            observation = self._verify_observation(node_id, response, event="health")
+            with self._lock:
+                self._last_health[node_id] = observation
+            return observation
+
+        WarmingCoordinator(
+            send_reload=reload_peer,
+            health=probe,
+            cached=lambda node_id: self._last_health.get(node_id),
+            deadline_s=self._idle_warm_deadline_s,
+            poll_s=self._idle_warm_poll_s,
+            recent_activity_s=0.0,
+        ).ensure_warm(sorted(participating_node_ids))
+
     def _peer_subject_is_quarantined(self, node_id: str) -> bool:
         subjects = getattr(self, "_liveness_subjects", None)
         subject = subjects.get(node_id) if isinstance(subjects, dict) else None
@@ -4516,6 +4562,7 @@ class PhysicalLiveRoute:
                 for node_id in participating_node_ids
             ):
                 raise RuntimeError("selected_route_not_open")
+            self._warm_idle_peers(participating_node_ids)
             self._reject_if_affected_peer_quarantined(participating_node_ids)
             # Metrics collection is not part of request identity or cleanup
             # proof.  Defer it until after the request is registered so an

@@ -38,8 +38,10 @@ class WarmingCoordinator:
         self, *, send_reload: Callable[[str], Any], health: Callable[[str], Any],
         clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], Any] = time.sleep,
         deadline_s: float = 30.0, poll_s: float = 0.25, recent_activity_s: float = 30.0,
+        cached: Callable[[str], Any] | None = None,
     ) -> None:
         self._send_reload, self._health = send_reload, health
+        self._cached = cached  # last known observation; with it, loaded members cost no command at all
         self._clock, self._sleep = clock, sleep
         self._deadline_s, self._poll_s = deadline_s, poll_s
         self._recent_s = recent_activity_s
@@ -64,7 +66,7 @@ class WarmingCoordinator:
             if self._recently_used(node_id, started):
                 continue
             probed.append(node_id)
-            state = idle_state_of(self._health(node_id))
+            state = idle_state_of((self._cached or self._health)(node_id))
             if state in (None, LOADED):
                 continue
             if state == FAILED:
