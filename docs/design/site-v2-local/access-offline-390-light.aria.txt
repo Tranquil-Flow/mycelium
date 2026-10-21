@@ -1,0 +1,22 @@
+- heading "Chat with Reading room" [level=2]
+- button "All chats"
+- status: You have access; the swarm is asleep
+- text: "Your browser: 3 ms · —"
+- heading "You have access; the swarm is asleep" [level=3]
+- paragraph: The entry Mac is offline or not ready. Your access and draft are kept. Try Refresh, or choose another swarm.
+- log
+- text: Prompt
+- textbox "Prompt" [disabled]:
+  - /placeholder: You have access; the swarm is asleep
+  - text: kept while asleep
+- button "Send" [disabled]
+- text: Answer limit
+- combobox "Answer limit":
+  - option "64"
+  - option "128" [selected]
+  - option "256"
+- text: You have access; the swarm is asleep
+- paragraph:
+  - text: The swarm’s Macs can read your prompt. It is not end-to-end encrypted from them.
+  - link "Who can see what":
+    - /url: "#notice"

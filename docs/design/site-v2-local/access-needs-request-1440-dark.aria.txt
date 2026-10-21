@@ -1,0 +1,27 @@
+- heading "Chat with Reading room" [level=2]
+- paragraph: Qwen/Qwen3-0.6B
+- button "All chats"
+- status: Ask for access
+- text: "Your browser: 4 ms · —"
+- heading "Ask for access" [level=3]
+- paragraph: Owner CA7E-822D-6089-9876 decides. They see your browser key and your optional note. This is not an automatic approval.
+- text: Optional note to the owner
+- textbox "Optional note to the owner":
+  - /placeholder: Say hello
+- paragraph: 0 / 140
+- button "Send request"
+- log
+- text: Prompt
+- textbox "Prompt" [disabled]:
+  - /placeholder: Ask for access
+- button "Send" [disabled]
+- text: Answer limit
+- combobox "Answer limit":
+  - option "64"
+  - option "128" [selected]
+  - option "256"
+- text: Ask for access
+- paragraph:
+  - text: The swarm’s Macs can read your prompt. It is not end-to-end encrypted from them.
+  - link "Who can see what":
+    - /url: "#notice"

@@ -1,0 +1,56 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.8, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/evinova-self/Projects/mycelium-rel2-siteux-build
+configfile: pytest.ini
+plugins: xdist-3.8.0, anyio-4.12.1, asyncio-1.3.0, langsmith-0.7.16
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+created: 1/1 worker
+1 worker [2 items]
+
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_______________________ test_twenty_real_app_behaviours ________________________
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+local = {'app': <_swarm_fixtures.FakeApp object at 0x10dbe3380>, 'directory': <mycelium_swarm_directory.server.DirectoryServer...elayProxy object at 0x10dbe3770>, 'publisher': <mycelium_a13_macos.swarm_publish.SwarmPublisher object at 0x10dbe3a10>}
+
+    def test_twenty_real_app_behaviours(local):
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            owner = page_for(browser, local, '#new')
+            # 1–5: native registry picker, form validity, quota visibility, actual creation.
+>           assert owner.locator('#c-model').evaluate('(e)=>e.tagName') == 'SELECT'
+E           AssertionError: assert 'INPUT' == 'SELECT'
+E             
+E             - SELECT
+E             + INPUT
+
+tests/swarm_directory/test_site_v2_browser.py:33: AssertionError
+____________________ test_registry_dropdown_matches_source _____________________
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+    def test_registry_dropdown_matches_source():
+        from html.parser import HTMLParser
+        from mycelium_a13_macos.run_model import CHOICES
+        class Options(HTMLParser):
+            values = []
+            inside = False
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if tag == 'select': self.inside = attrs.get('id') == 'c-model'
+                if tag == 'option' and self.inside and attrs.get('value'): self.values.append(attrs['value'])
+            def handle_endtag(self, tag):
+                if tag == 'select': self.inside = False
+        parser = Options()
+        parser.feed((Path(__file__).parents[2] / 'mycelium_swarm_directory/web/index.html').read_text())
+>       assert parser.values == [c.model.model_id for c in CHOICES]
+E       AssertionError: assert [] == ['Qwen/Qwen2....en/Qwen3-14B']
+E         
+E         Right contains 5 more items, first extra item: 'Qwen/Qwen2.5-0.5B-Instruct'
+E         Use -v to get more diff
+
+tests/swarm_directory/test_site_v2_browser.py:112: AssertionError
+=========================== short test summary info ============================
+FAILED tests/swarm_directory/test_site_v2_browser.py::test_twenty_real_app_behaviours
+FAILED tests/swarm_directory/test_site_v2_browser.py::test_registry_dropdown_matches_source
+============================== 2 failed in 5.63s ===============================

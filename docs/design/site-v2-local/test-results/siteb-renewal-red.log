@@ -1,0 +1,152 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.8, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/evinova-self/Projects/mycelium-rel2-siteux-build
+configfile: pytest.ini
+plugins: xdist-3.8.0, anyio-4.12.1, asyncio-1.3.0, langsmith-0.7.16
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+created: 1/1 worker
+1 worker [1 item]
+
+F                                                                        [100%]
+=================================== FAILURES ===================================
+______ test_access_states_real_entry_and_composer_geometry[dark-1440-900] ______
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+local = {'app': <_swarm_fixtures.FakeApp object at 0x109aa30e0>, 'directory': <mycelium_swarm_directory.server.DirectoryServer...elayProxy object at 0x109aa34d0>, 'publisher': <mycelium_a13_macos.swarm_publish.SwarmPublisher object at 0x109aa3770>}
+width = 1440, height = 900, theme = 'dark'
+
+    @pytest.mark.parametrize('width,height', [(1440,900),(390,844)])
+    @pytest.mark.parametrize('theme', ['dark','light'])
+    def test_access_states_real_entry_and_composer_geometry(local, width, height, theme):
+        from test_hosted_ui_browser import RUN_DOC
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            owner = page_for(browser, local, '#new', viewport={'width':width,'height':height}, color_scheme=theme)
+            create_swarm(owner, local, 'Reading room', 'request')
+            sid = owner.locator('[data-owned]').first.get_attribute('data-owned')
+            visitor = page_for(browser, local, '#chat/'+sid, viewport={'width':width,'height':height}, color_scheme=theme)
+            public_key = visitor.evaluate('me.key')
+            results = []
+            def capture(state):
+                expect(visitor.locator('#gate')).to_have_attribute('data-state',state)
+                if state != 'ready': expect(visitor.locator('#prompt')).to_be_disabled()
+                else: expect(visitor.locator('#prompt')).to_be_enabled()
+                # Measure before screenshots/locator clicks can auto-scroll the page.
+                rect = visitor.locator('#prompt').bounding_box()
+                assert rect and rect['y'] >= 0 and rect['y'] + rect['height'] < height - (58 if width < 640 else 0)
+                assert visitor.evaluate('window.scrollY') == 0
+                visitor.wait_for_timeout(550)
+                cls = sum(visitor.evaluate('window.__cls'))
+                assert cls < .01, (state,width,theme,cls)
+                results.append({'state':state,'cls':cls})
+                if os.environ.get('SITEB_SHOTS'):
+                    out = Path(os.environ['SITEB_SHOTS']); out.mkdir(parents=True,exist_ok=True)
+                    name = f'access-{state}-{width}-{theme}'
+                    visitor.screenshot(path=str(out/(name+'.png')),full_page=True)
+                    (out/(name+'.aria.txt')).write_text(visitor.locator('#chat-card').aria_snapshot())
+            capture('needs-request')
+            visitor.fill('#note','Hello, can I join?')
+            visitor.click('#ask'); capture('pending')
+            visitor.reload(); capture('pending')
+            owner.click('#refresh')
+            expect(owner.locator('#owned-count')).to_have_text('1')
+            if os.environ.get('SITEB_SHOTS'):
+                owner.screenshot(path=str(Path(os.environ['SITEB_SHOTS'])/f'owner-inbox-{width}-{theme}.png'),full_page=True)
+            owner.locator('.request button',has_text='Decline').click()
+            visitor.click('#refresh'); capture('declined')
+            visitor.click('#ask')
+            owner.click('#refresh')
+            row = owner.locator('.request')
+            row.locator('[aria-label=Hours]').fill('6')
+            owner.click('#refresh')
+            expect(row.locator('[aria-label=Hours]')).to_have_value('6')
+            owner.locator('[data-approve]').click()
+            visitor.click('#refresh'); capture('approved')
+            visitor.click('#consent'); capture('ready')
+            visitor.fill('#prompt','kept while asleep')
+            local['app'].owner_run.status = lambda: {'state':'idle'}
+            local['publisher'].tick()
+            visitor.click('#refresh'); capture('offline')
+            expect(visitor.locator('#prompt')).to_have_value('kept while asleep')
+            local['app'].owner_run.status = lambda: dict(RUN_DOC)
+            local['publisher'].tick()
+            owner.click('#refresh')
+            owner.locator('[data-kill]').click()
+            visitor.click('#refresh'); capture('killed')
+            owner.locator('[data-kill]').click()
+            visitor.click('#refresh')
+            # Real short-lived signed allowance: no fake page state or time override.
+            owner.evaluate('async key => { await approve(swarms[0], key, 2/3600, 1, 2000); }', public_key)
+            visitor.click('#refresh')
+            visitor.wait_for_timeout(2100)
+            visitor.click('#refresh'); capture('expired')
+            owner.evaluate('async key => { await approve(swarms[0], key, 1, 1, 2000); }', public_key)
+            visitor.click('#refresh')
+            visitor.fill('#prompt','capital of Germany?'); visitor.click('#send')
+            expect(terminal(visitor,'completed')).to_be_visible()
+            visitor.fill('#prompt','second prompt'); visitor.click('#send')
+            expect(terminal(visitor,'quota')).to_be_visible(); capture('quota')
+            visitor.click('#retry-access')
+>           expect(visitor.locator('#gate-title')).to_have_text('Request sent')
+E           AssertionError: Locator expected to have text 'Request sent'
+E           Actual value: Ready to chat 
+E           Call log:
+E             - Expect "to_have_text" with timeout 5000ms
+E             - waiting for locator("#gate-title")
+E               - locator resolved to <h3 id="gate-title">Your allowance is used up</h3>
+E               - unexpected value "Your allowance is used up"
+E               13 × locator resolved to <h3 id="gate-title">Ready to chat</h3>
+E                  - unexpected value "Ready to chat"
+E           
+E           Aria snapshot:
+E           - link "Skip to content":
+E             - /url: "#main"
+E           - banner:
+E             - link "✳ Mycelium":
+E               - /url: "#browse"
+E             - text: Preview · Apple silicon Macs
+E             - button "Your key 2648-77A8-7370-6252"
+E           - main:
+E             - heading "Chat" [level=1]
+E             - paragraph: A few Macs. One model. People you trust.
+E             - button "Refresh"
+E             - link "Start a swarm":
+E               - /url: "#new"
+E             - tablist "Swarms":
+E               - tab "Browse"
+E               - tab "Chat" [selected]
+E               - tab "Contributing"
+E               - tab "Owned 0"
+E             - tabpanel "Chat":
+E               - link "Reading room serving · Needs approval":
+E                 - /url: "#chat/sw-g7nw6hnisdzbjc8y6fa0"
+E               - heading "Chat with Reading room" [level=2]
+E               - paragraph: Qwen/Qwen3-0.6B
+E               - button "All chats"
+E               - status: Ready to chat
+E               - text: "Your browser: 2 ms · 7.3 tok/s"
+E               - log: "capital of Germany? Berlin. left on your grant: 0 requests, 1872 tokens · 7.3 tok/s · 3 tokens · first word 0.0 s · measured in your browser (includes network and wait) Served by: This Mac (owner) (layers 0-14), MacBook helper (layers 14-28) Completed in 0.16 s. second prompt (no answer) Quota used up. Your grant for this swarm is used up. Ask the owner for a new one."
+E               - text: Prompt
+E               - textbox "Prompt":
+E                 - /placeholder: Ask the swarm…
+E                 - text: second prompt
+E               - button "Send"
+E               - text: Answer limit
+E               - combobox "Answer limit":
+E                 - option "64"
+E                 - option "128" [selected]
+E                 - option "256"
+E               - text: Ready · entry checks your allowance
+E               - paragraph:
+E                 - text: The swarm’s Macs can read your prompt. It is not end-to-end encrypted from them.
+E                 - link "Who can see what":
+E                   - /url: "#notice"
+E           - status
+E           - contentinfo:
+E             - paragraph: "Demo. Hosted on one volunteer Mac through a tunnel: it may sleep. No accounts, no email, no tracking by this site. Keys live only in this browser. Traffic passes through Cloudflare, which can see your IP address, timing and prompts."
+E             - paragraph: AGPL-3.0 · This directory sets no cookies, runs no analytics and keeps no logs. Cloudflare terminates TLS and can see your IP address and timing; for entries behind Cloudflare (including trycloudflare.com) it can also read prompts and replies. Cloudflare may add a bot-check script; our content security policy blocks scripts from other origins and inline scripts. Prompts go directly to the swarm's entry Mac, never through this directory. The entry Mac sees your prompt and IP address too. A swarm is run by whoever runs its entry Mac, not by Mycelium.
+
+tests/swarm_directory/test_site_v2_browser.py:190: AssertionError
+=========================== short test summary info ============================
+FAILED tests/swarm_directory/test_site_v2_browser.py::test_access_states_real_entry_and_composer_geometry[dark-1440-900]
+============================== 1 failed in 19.09s ==============================

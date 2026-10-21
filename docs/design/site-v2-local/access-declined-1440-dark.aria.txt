@@ -1,0 +1,28 @@
+- heading "Chat with Reading room" [level=2]
+- paragraph: Qwen/Qwen3-0.6B
+- button "All chats"
+- status: The owner declined your request
+- text: "Your browser: 6 ms · —"
+- heading "The owner declined your request" [level=3]
+- paragraph: Ask the owner before trying again. A 24-hour server-enforced cooldown is planned, not available in this release.
+- text: Optional note to the owner
+- textbox "Optional note to the owner":
+  - /placeholder: Say hello
+- paragraph: 0 / 140
+- button "Send request"
+- button "Copy a message for the owner"
+- log
+- text: Prompt
+- textbox "Prompt" [disabled]:
+  - /placeholder: The owner declined your request
+- button "Send" [disabled]
+- text: Answer limit
+- combobox "Answer limit":
+  - option "64"
+  - option "128" [selected]
+  - option "256"
+- text: The owner declined your request
+- paragraph:
+  - text: The swarm’s Macs can read your prompt. It is not end-to-end encrypted from them.
+  - link "Who can see what":
+    - /url: "#notice"

@@ -1,0 +1,22 @@
+- heading "Chat with Reading room" [level=2]
+- button "All chats"
+- status: Stopped by the owner
+- text: "Your browser: 3 ms · —"
+- heading "Stopped by the owner" [level=3]
+- paragraph: The owner paused new prompts with the kill switch. Access is kept; only the owner can reopen the swarm.
+- log
+- text: Prompt
+- textbox "Prompt" [disabled]:
+  - /placeholder: Stopped by the owner
+  - text: kept while asleep
+- button "Send" [disabled]
+- text: Answer limit
+- combobox "Answer limit":
+  - option "64"
+  - option "128" [selected]
+  - option "256"
+- text: Stopped by the owner
+- paragraph:
+  - text: The swarm’s Macs can read your prompt. It is not end-to-end encrypted from them.
+  - link "Who can see what":
+    - /url: "#notice"

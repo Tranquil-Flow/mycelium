@@ -1,0 +1,24 @@
+- heading "Chat with Reading room" [level=2]
+- button "All chats"
+- status: Answer ended. See the result below.
+- text: "Your browser: 6 ms · 7.2 tok/s"
+- heading "Your allowance is used up" [level=3]
+- paragraph: Ask the owner for new access, or wait until tomorrow for a swarm-wide daily limit.
+- button "Ask for new access"
+- button "Copy a message for the owner"
+- log: "capital of Germany? Berlin. left on your grant: 0 requests, 1872 tokens · 7.2 tok/s · 3 tokens · first word 0.0 s · measured in your browser (includes network and wait) Served by: This Mac (owner) (layers 0-14), MacBook helper (layers 14-28) Completed in 0.16 s. second prompt (no answer) Quota used up. Your grant for this swarm is used up. Ask the owner for a new one."
+- text: Prompt
+- textbox "Prompt" [disabled]:
+  - /placeholder: Your allowance is used up
+  - text: second prompt
+- button "Send" [disabled]
+- text: Answer limit
+- combobox "Answer limit":
+  - option "64"
+  - option "128" [selected]
+  - option "256"
+- text: Your allowance is used up
+- paragraph:
+  - text: The swarm’s Macs can read your prompt. It is not end-to-end encrypted from them.
+  - link "Who can see what":
+    - /url: "#notice"

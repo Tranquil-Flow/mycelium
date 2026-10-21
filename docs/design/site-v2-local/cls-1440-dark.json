@@ -1,0 +1,148 @@
+[
+  {
+    "page": "browse-1440-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "chat-1440-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "contributing-1440-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "owned-1440-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "new-1440-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "notice-1440-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "swarm-detail-1440-dark",
+    "cls": 0.0006766068572370114,
+    "shifts": [
+      {
+        "value": 0.0006766068572370114,
+        "time": 1501.1000000238419,
+        "sources": [
+          {
+            "selector": "P.",
+            "previous": {
+              "x": 201,
+              "y": 876.734375,
+              "width": 1038,
+              "height": 23.25,
+              "top": 876.734375,
+              "right": 1239,
+              "bottom": 899.984375,
+              "left": 201
+            },
+            "current": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "page": "chat-detail-1440-dark",
+    "cls": 0.0002041877987289952,
+    "shifts": [
+      {
+        "value": 0.0002041877987289952,
+        "time": 1496.4000000059605,
+        "sources": [
+          {
+            "selector": "DIV.",
+            "previous": {
+              "x": 199,
+              "y": 348.046875,
+              "width": 39.09375,
+              "height": 28.90625,
+              "top": 348.046875,
+              "right": 238.09375,
+              "bottom": 376.953125,
+              "left": 199
+            },
+            "current": {
+              "x": 199,
+              "y": 337.984375,
+              "width": 196.34375,
+              "height": 49.046875,
+              "top": 337.984375,
+              "right": 395.34375,
+              "bottom": 387.03125,
+              "left": 199
+            }
+          },
+          {
+            "selector": "#chat-metrics",
+            "previous": {
+              "x": 308.3125,
+              "y": 417.203125,
+              "width": 163.78125,
+              "height": 18.59375,
+              "top": 417.203125,
+              "right": 472.09375,
+              "bottom": 435.796875,
+              "left": 308.3125
+            },
+            "current": {
+              "x": 297.609375,
+              "y": 417.203125,
+              "width": 112.578125,
+              "height": 18.59375,
+              "top": 417.203125,
+              "right": 410.1875,
+              "bottom": 435.796875,
+              "left": 297.609375
+            }
+          },
+          {
+            "selector": "#composer-reason",
+            "previous": {
+              "x": 1134.921875,
+              "y": 791.90625,
+              "width": 108.078125,
+              "height": 18.59375,
+              "top": 791.90625,
+              "right": 1243,
+              "bottom": 810.5,
+              "left": 1134.921875
+            },
+            "current": {
+              "x": 1160.390625,
+              "y": 791.90625,
+              "width": 82.609375,
+              "height": 18.59375,
+              "top": 791.90625,
+              "right": 1243,
+              "bottom": 810.5,
+              "left": 1160.390625
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

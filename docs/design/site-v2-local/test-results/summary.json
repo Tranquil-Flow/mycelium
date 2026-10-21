@@ -1,0 +1,169 @@
+{
+  "source_commit": "ae821c08fa5e75767f2b4954585eb0a12bcfb8a2",
+  "base_commit": "9c6c7260",
+  "runs": {
+    "siteb-baseline": {
+      "total": 537,
+      "passed": 536,
+      "failed": 0,
+      "skipped": 1,
+      "time_s": 205.813,
+      "failures": [],
+      "skips": [
+        {
+          "classname": "tests.governance.test_a0_literal_verification_record",
+          "name": "test_prepared_record_claims_no_execution_and_no_completion",
+          "time": "0.000",
+          "reason": {
+            "type": "pytest.skip",
+            "message": "the committed record is executed; see the executed-state tests"
+          }
+        }
+      ]
+    },
+    "siteb-candidate": {
+      "total": 548,
+      "passed": 546,
+      "failed": 1,
+      "skipped": 1,
+      "time_s": 419.457,
+      "failures": [
+        "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[dark-1440-900]"
+      ],
+      "skips": [
+        {
+          "classname": "tests.governance.test_a0_literal_verification_record",
+          "name": "test_prepared_record_claims_no_execution_and_no_completion",
+          "time": "0.001",
+          "reason": {
+            "type": "pytest.skip",
+            "message": "the committed record is executed; see the executed-state tests"
+          }
+        }
+      ]
+    },
+    "siteb-final": {
+      "total": 548,
+      "passed": 546,
+      "failed": 1,
+      "skipped": 1,
+      "time_s": 619.46,
+      "failures": [
+        "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[dark-390-844]"
+      ],
+      "skips": [
+        {
+          "classname": "tests.governance.test_a0_literal_verification_record",
+          "name": "test_prepared_record_claims_no_execution_and_no_completion",
+          "time": "0.000",
+          "reason": {
+            "type": "pytest.skip",
+            "message": "the committed record is executed; see the executed-state tests"
+          }
+        }
+      ]
+    },
+    "siteb-stable-1": {
+      "total": 11,
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0,
+      "time_s": 172.673,
+      "failures": [],
+      "skips": []
+    },
+    "siteb-stable-2": {
+      "total": 11,
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0,
+      "time_s": 180.297,
+      "failures": [],
+      "skips": []
+    },
+    "siteb-stable-3": {
+      "total": 11,
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0,
+      "time_s": 178.155,
+      "failures": [],
+      "skips": []
+    },
+    "siteb-verified": {
+      "total": 548,
+      "passed": 547,
+      "failed": 0,
+      "skipped": 1,
+      "time_s": 435.006,
+      "failures": [],
+      "skips": [
+        {
+          "classname": "tests.governance.test_a0_literal_verification_record",
+          "name": "test_prepared_record_claims_no_execution_and_no_completion",
+          "time": "0.000",
+          "reason": {
+            "type": "pytest.skip",
+            "message": "the committed record is executed; see the executed-state tests"
+          }
+        }
+      ]
+    }
+  },
+  "baseline_case_renames": {
+    "tests.demo.test_profile_a_site_closed::test_the_proxy_serves_exactly_the_four_directory_assets_so_the_new_pages_added_no_route": "tests.demo.test_profile_a_site_closed::test_the_proxy_serves_exactly_the_five_directory_assets_and_no_inference_route"
+  },
+  "rename_reason": "The exact closed static allowlist adds site.css (four assets become five); inference routes remain forbidden.",
+  "baseline_cases_retained_after_explicit_rename": 537,
+  "added_cases": [
+    "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[dark-1440-900]",
+    "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[dark-390-844]",
+    "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[light-1440-900]",
+    "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[light-390-844]",
+    "tests.swarm_directory.test_site_v2_browser::test_busy_wait_is_cancellable_and_prompts_never_go_to_directory",
+    "tests.swarm_directory.test_site_v2_browser::test_registry_dropdown_matches_source",
+    "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[dark-1440-900]",
+    "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[dark-390-844]",
+    "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[light-1440-900]",
+    "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[light-390-844]",
+    "tests.swarm_directory.test_site_v2_browser::test_twenty_real_app_behaviours"
+  ],
+  "new_failures": [],
+  "cls": {
+    "samples": 80,
+    "maximum": 0.0008564557383140713,
+    "budget_exclusive": 0.01,
+    "by_matrix": {
+      "cls-1440-dark.json": 0.0006766068572370114,
+      "cls-1440-light.json": 0.0006766068572370114,
+      "cls-390-dark.json": 0.00039769275367890347,
+      "cls-390-light.json": 0.00039769275367890347,
+      "cls-access-1440-dark.json": 0.0004175922158323688,
+      "cls-access-1440-light.json": 0.0004175922158323688,
+      "cls-access-390-dark.json": 0.0008564557383140713,
+      "cls-access-390-light.json": 0.0008564557383140713
+    }
+  },
+  "candidate_screenshots": 80,
+  "scope": "Local directory and entry; scripted generation and telemetry. No public deploy or live service action.",
+  "receipt_sha256": {
+    "siteb-anchor-red.log": "9354f9d2f3fafab7239449c2c301843c81b53835b1e7bfd47b2db620ccd568ce",
+    "siteb-baseline.log": "93ee4d39dc8ab731005d030d5c9468e0be2473599b15a40cb27cea6cf44957bc",
+    "siteb-baseline.xml": "c7ab55171a75de02721da24f4e5a3fde024532f13857629e68c371900f70c046",
+    "siteb-candidate.log": "5dd2d745ba4c14f4f2649c2cdae6e2df313eaceeb50855f26009c0660efb825d",
+    "siteb-candidate.xml": "8d405b32d8cf215fcfde41a8a486ace2960143e2335fde7a604756a4fc588144",
+    "siteb-cls-negative-controls.log": "fa164ff78894ff495b8ac397b0d7e4d7557275d928aa0f3c74e3a3c521388daa",
+    "siteb-final.log": "e2bdbfb663818620c272b4c9892c18e4cc7700ec3735055a5825fa1ee496878b",
+    "siteb-final.xml": "92773442e31a72f43f84389b8556e77e74761012a641f6f4c268c7a34ee9dd88",
+    "siteb-red.log": "d7a258ac82c22ab3887da9aabea4d01229d737613d8719041a876016f5172d17",
+    "siteb-renewal-red.log": "722228c4cc3a11c1293eaeac7bc433e670744e28b56376b83b42e3d673b618fd",
+    "siteb-stable-1.log": "9c4dd83890c464707cae1453cb8f57be27dda274c3c66e5352f631a8f19df841",
+    "siteb-stable-1.xml": "b12d091fc6da390e0e9ceb688b8a146b99663748afac23bd356ada0f12e95f97",
+    "siteb-stable-2.log": "ba99550c68b8b1b99e0783355f233401ce2bfabaa028343fd62fa6c4129732eb",
+    "siteb-stable-2.xml": "4c3577a503f07c84f6bf665f9e4379a0cb05189309ce7f6f9f92db792f464929",
+    "siteb-stable-3.log": "38b0597084852e41734dbbdf4de25075cf3d68fc429dbbc31e9db3bf8b16af38",
+    "siteb-stable-3.xml": "cfe847954c90c3236260d7411d16b28614af50f6f8692e87ef43090499255a09",
+    "siteb-verified.log": "9803794b50e3f517d3d43ee4ee1383cef3894cee21750c2557df0321ead1b5c5",
+    "siteb-verified.xml": "7a2532c079cb461e1fed52211e15788d12c54271efd11208d4a23fab15d93ef5"
+  }
+}

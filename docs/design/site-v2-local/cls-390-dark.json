@@ -1,0 +1,95 @@
+[
+  {
+    "page": "browse-390-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "chat-390-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "contributing-390-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "owned-390-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "new-390-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "notice-390-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "swarm-detail-390-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "chat-detail-390-dark",
+    "cls": 0.00039769275367890347,
+    "shifts": [
+      {
+        "value": 0.00039769275367890347,
+        "time": 1573,
+        "sources": [
+          {
+            "selector": "#chat-metrics",
+            "previous": {
+              "x": 138.3125,
+              "y": 331.703125,
+              "width": 163.78125,
+              "height": 15.59375,
+              "top": 331.703125,
+              "right": 302.09375,
+              "bottom": 347.296875,
+              "left": 138.3125
+            },
+            "current": {
+              "x": 127.609375,
+              "y": 331.703125,
+              "width": 112.578125,
+              "height": 15.59375,
+              "top": 331.703125,
+              "right": 240.1875,
+              "bottom": 347.296875,
+              "left": 127.609375
+            }
+          },
+          {
+            "selector": "#composer-reason",
+            "previous": {
+              "x": 252.921875,
+              "y": 669.21875,
+              "width": 108.078125,
+              "height": 16.1875,
+              "top": 669.21875,
+              "right": 361,
+              "bottom": 685.40625,
+              "left": 252.921875
+            },
+            "current": {
+              "x": 278.390625,
+              "y": 669.21875,
+              "width": 82.609375,
+              "height": 16.1875,
+              "top": 669.21875,
+              "right": 361,
+              "bottom": 685.40625,
+              "left": 278.390625
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

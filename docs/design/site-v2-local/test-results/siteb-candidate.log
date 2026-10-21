@@ -1,0 +1,56 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.8, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/evinova-self/Projects/mycelium-rel2-siteux-build
+configfile: pytest.ini
+plugins: xdist-3.8.0, anyio-4.12.1, asyncio-1.3.0, langsmith-0.7.16
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+created: 1/1 worker
+1 worker [548 items]
+
+........................................................................ [ 13%]
+........................................................................ [ 26%]
+.........F.............................................................. [ 39%]
+........................................................................ [ 52%]
+........................................................................ [ 65%]
+.................s...................................................... [ 78%]
+........................................................................ [ 91%]
+............................................                             [100%]
+=================================== FAILURES ===================================
+_________ test_routes_slow_loading_cls_and_screenshots[dark-1440-900] __________
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+local = {'app': <_swarm_fixtures.FakeApp object at 0x10ba787d0>, 'directory': <mycelium_swarm_directory.server.DirectoryServer...elayProxy object at 0x109f10210>, 'publisher': <mycelium_a13_macos.swarm_publish.SwarmPublisher object at 0x10b9baf50>}
+width = 1440, height = 900, theme = 'dark'
+
+            expect(second.locator('#prompt')).to_have_value('cancel this waiting draft')
+            first.click('#stop')
+            assert any(url.startswith(local['proxy'].origin) and 'capital of Germany?' in (body or '') for url,body in posts)
+            assert not any(url.startswith(local['directory'].origin) and 'capital of Germany?' in (body or '') for url,body in posts)
+            # Even a malicious listing cannot make the page POST a prompt back to its own apex.
+            result=second.evaluate("async()=>{try{await entry(location.origin,'send',{prompt:'must-not-leave'});return 'sent';}catch(e){return e.message;}}")
+            assert result=='entry_is_directory'
+            assert not any('must-not-leave' in (body or '') for _,body in posts)
+            browser.close()
+    
+    
+    @pytest.mark.parametrize('width,height', [(1440,900),(390,844)])
+    @pytest.mark.parametrize('theme', ['dark','light'])
+    def test_routes_slow_loading_cls_and_screenshots(local, width, height, theme):
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            owner = page_for(browser, local, '#new')
+            owner.select_option('#c-model', 'Qwen/Qwen3-0.6B')
+            create_swarm(owner, local, 'Reading room', 'request')
+            sid = owner.locator('[data-owned]').first.get_attribute('data-owned')
+            results = []
+            for route in ['browse', 'chat', 'contributing', 'owned', 'new', 'notice', 'swarm/'+sid, 'chat/'+sid]:
+                page = browser.new_context(viewport={'width':width,'height':height}, color_scheme=theme).new_page()
+>               page.add_init_script(CLS)
+E               AssertionError: ('notice', 1440, 'dark', 0.016977921850887347)
+E               assert 0.016977921850887347 < 0.01
+
+tests/swarm_directory/test_site_v2_browser.py:263: AssertionError
+- generated xml file: /Users/evinova-self/.hermes/cache/scratch/siteb-candidate.xml -
+=========================== short test summary info ============================
+FAILED tests/swarm_directory/test_site_v2_browser.py::test_routes_slow_loading_cls_and_screenshots[dark-1440-900]
+============= 1 failed, 546 passed, 1 skipped in 419.46s (0:06:59) =============

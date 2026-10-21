@@ -1,0 +1,23 @@
+- heading "Chat with Reading room" [level=2]
+- paragraph: Qwen/Qwen3-0.6B
+- button "All chats"
+- status: Invite only
+- text: "Your browser: 6 ms · —"
+- heading "Invite only" [level=3]
+- paragraph: Ask owner CA7E-822D-6089-9876 to grant your full public key from the Mac app. Copy a message below; a fingerprint alone is not enough.
+- button "Copy a message for the owner"
+- log
+- text: Prompt
+- textbox "Prompt" [disabled]:
+  - /placeholder: Invite only
+- button "Send" [disabled]
+- text: Answer limit
+- combobox "Answer limit":
+  - option "64"
+  - option "128" [selected]
+  - option "256"
+- text: Invite only
+- paragraph:
+  - text: The swarm’s Macs can read your prompt. It is not end-to-end encrypted from them.
+  - link "Who can see what":
+    - /url: "#notice"
