@@ -1,0 +1,55 @@
+{
+  "base_qualification_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "deployment_epoch": 1,
+  "deployment_id": "deployment-fixture",
+  "directed_edges": [],
+  "failure_domain_facts": [],
+  "issued_at_unix_ms": 10000,
+  "legal_tracks": [
+    {
+      "placement_sequence": [
+        "p0",
+        "p1"
+      ],
+      "track_id": "track-fixture"
+    }
+  ],
+  "model_id": "model-fixture",
+  "model_revision": "revision-fixture",
+  "plan_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "plan_id": "plan-fixture",
+  "predicted_marginal_gain_fraction": 0.12,
+  "protocol": "mycelium.replica_plan.v1",
+  "rejections": [],
+  "replica_groups": [
+    {
+      "group_id": "group-fixture-0",
+      "layer_range": [
+        0,
+        22
+      ]
+    },
+    {
+      "group_id": "group-fixture-1",
+      "layer_range": [
+        23,
+        24
+      ]
+    }
+  ],
+  "representation_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "route_generation": 7,
+  "route_ready": false,
+  "traffic_fractions": [
+    {
+      "fraction": 1.0,
+      "track_id": "track-fixture"
+    }
+  ],
+  "uncertainty": {
+    "lower": 0.0,
+    "upper": 0.3
+  },
+  "workload_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "zero_flow_removals": []
+}

@@ -1,0 +1,17 @@
+{
+  "authority": "mycelium_live.route:public_status",
+  "capability": "route_execution",
+  "captured_at_unix_ms": 2,
+  "freshness": "current",
+  "generation": 1,
+  "observed_at_unix_ms": 1,
+  "payload": {
+    "protocol": "mycelium.live_route_status.v1",
+    "route_alive": true
+  },
+  "payload_protocol": "mycelium.live_route_status.v1",
+  "protocol": "mycelium.evidence_projection.v1",
+  "record_id": "runtime-contract-fixture",
+  "source_kind": "live_runtime",
+  "valid_until_unix_ms": 3002
+}

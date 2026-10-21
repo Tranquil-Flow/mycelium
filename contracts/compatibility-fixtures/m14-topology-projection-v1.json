@@ -1,0 +1,203 @@
+{
+  "allocation": [
+    {
+      "end": 8,
+      "node_id": "node-a",
+      "start": 0
+    },
+    {
+      "end": 16,
+      "node_id": "node-b",
+      "start": 8
+    },
+    {
+      "end": 24,
+      "node_id": "node-c",
+      "start": 16
+    }
+  ],
+  "decision": {
+    "candidates": [
+      {
+        "cost_ms": 6.75,
+        "order": [
+          "node-a",
+          "node-b",
+          "node-c"
+        ],
+        "rejection_reason": null,
+        "selected": true
+      },
+      {
+        "cost_ms": 12.75,
+        "order": [
+          "node-a",
+          "node-c",
+          "node-b"
+        ],
+        "rejection_reason": null,
+        "selected": false
+      }
+    ],
+    "canonical_node_id_order": [
+      "node-a",
+      "node-b",
+      "node-c"
+    ],
+    "differs_from_canonical_order": false,
+    "explored_candidates": 2,
+    "globally_exact": true,
+    "loopback": {
+      "dst": "node-a",
+      "src": "node-c"
+    },
+    "mode": "exact_enumeration",
+    "opened_order": [
+      "node-a",
+      "node-b",
+      "node-c"
+    ],
+    "selected_cost_ms": 6.75,
+    "selected_cycle": [
+      "node-a",
+      "node-b",
+      "node-c"
+    ],
+    "winning_rationale": "minimum measured directed RTT/2 plus jitter; stable lexicographic tie-break"
+  },
+  "edges": [
+    {
+      "connection_generation": 1,
+      "connections_opened": 1,
+      "dst": "node-b",
+      "dst_endpoint_digest": "sha256:8cd9068180c89f54a963c162ec37d617e1e492009ebe1b0e7ec6457137de03ba",
+      "formula": "one_way_rtt_plus_jitter_v1",
+      "frames_sent": 8,
+      "fresh_until_unix_ms": 7201000,
+      "goodput_Bps": 10000000.0,
+      "jitter_ms": 0.25,
+      "logical_role": "forward",
+      "loss_ratio": 0.0,
+      "observation_digest": "sha256:f4b21c812b38a8ae0528c317a75d12b19c7f85098ccbf6d0e1d6bcd498877722",
+      "path_class": "direct",
+      "relay_identity": null,
+      "relay_region": null,
+      "rtt_ms": 4.0,
+      "sample_count": 8,
+      "src": "node-a",
+      "src_endpoint_digest": "sha256:2a56d8bf858f2c1b3c9a2d423647819f6183d9719725415c712fb34f107e52e2"
+    },
+    {
+      "connection_generation": 1,
+      "connections_opened": 1,
+      "dst": "node-c",
+      "dst_endpoint_digest": "sha256:b0885000f8fbef249548c4db1d3955c1a7d079eeb7b222ce3b048bc316e2212f",
+      "formula": "one_way_rtt_plus_jitter_v1",
+      "frames_sent": 8,
+      "fresh_until_unix_ms": 7201000,
+      "goodput_Bps": 10000000.0,
+      "jitter_ms": 0.25,
+      "logical_role": "physical_only",
+      "loss_ratio": 0.0,
+      "observation_digest": "sha256:e697acb8aa9033b70dfd352545366c28ab593927abf79345168c33a38b8e4f6c",
+      "path_class": "direct",
+      "relay_identity": null,
+      "relay_region": null,
+      "rtt_ms": 8.0,
+      "sample_count": 8,
+      "src": "node-a",
+      "src_endpoint_digest": "sha256:2a56d8bf858f2c1b3c9a2d423647819f6183d9719725415c712fb34f107e52e2"
+    },
+    {
+      "connection_generation": 1,
+      "connections_opened": 1,
+      "dst": "node-a",
+      "dst_endpoint_digest": "sha256:2a56d8bf858f2c1b3c9a2d423647819f6183d9719725415c712fb34f107e52e2",
+      "formula": "one_way_rtt_plus_jitter_v1",
+      "frames_sent": 8,
+      "fresh_until_unix_ms": 7201000,
+      "goodput_Bps": 10000000.0,
+      "jitter_ms": 0.25,
+      "logical_role": "physical_only",
+      "loss_ratio": 0.0,
+      "observation_digest": "sha256:b79503cdaa562680bf34c9bba666cfd0d9a413ba361ff83759d0c0e083f0b718",
+      "path_class": "direct",
+      "relay_identity": null,
+      "relay_region": null,
+      "rtt_ms": 8.0,
+      "sample_count": 8,
+      "src": "node-b",
+      "src_endpoint_digest": "sha256:8cd9068180c89f54a963c162ec37d617e1e492009ebe1b0e7ec6457137de03ba"
+    },
+    {
+      "connection_generation": 1,
+      "connections_opened": 1,
+      "dst": "node-c",
+      "dst_endpoint_digest": "sha256:b0885000f8fbef249548c4db1d3955c1a7d079eeb7b222ce3b048bc316e2212f",
+      "formula": "one_way_rtt_plus_jitter_v1",
+      "frames_sent": 8,
+      "fresh_until_unix_ms": 7201000,
+      "goodput_Bps": 10000000.0,
+      "jitter_ms": 0.25,
+      "logical_role": "forward",
+      "loss_ratio": 0.0,
+      "observation_digest": "sha256:6c79ae21a4c3095f14ce753a25e613c7d9eb5eabd200e123bbbb8b6df6cd68a0",
+      "path_class": "direct",
+      "relay_identity": null,
+      "relay_region": null,
+      "rtt_ms": 4.0,
+      "sample_count": 8,
+      "src": "node-b",
+      "src_endpoint_digest": "sha256:8cd9068180c89f54a963c162ec37d617e1e492009ebe1b0e7ec6457137de03ba"
+    },
+    {
+      "connection_generation": 1,
+      "connections_opened": 1,
+      "dst": "node-a",
+      "dst_endpoint_digest": "sha256:2a56d8bf858f2c1b3c9a2d423647819f6183d9719725415c712fb34f107e52e2",
+      "formula": "one_way_rtt_plus_jitter_v1",
+      "frames_sent": 8,
+      "fresh_until_unix_ms": 7201000,
+      "goodput_Bps": 10000000.0,
+      "jitter_ms": 0.25,
+      "logical_role": "decode_loopback",
+      "loss_ratio": 0.0,
+      "observation_digest": "sha256:a3716bdb278652e534fef07cf67b1c3e038f1582a2f274ed95a844b69a883317",
+      "path_class": "direct",
+      "relay_identity": null,
+      "relay_region": null,
+      "rtt_ms": 4.0,
+      "sample_count": 8,
+      "src": "node-c",
+      "src_endpoint_digest": "sha256:b0885000f8fbef249548c4db1d3955c1a7d079eeb7b222ce3b048bc316e2212f"
+    },
+    {
+      "connection_generation": 1,
+      "connections_opened": 1,
+      "dst": "node-b",
+      "dst_endpoint_digest": "sha256:8cd9068180c89f54a963c162ec37d617e1e492009ebe1b0e7ec6457137de03ba",
+      "formula": "one_way_rtt_plus_jitter_v1",
+      "frames_sent": 8,
+      "fresh_until_unix_ms": 7201000,
+      "goodput_Bps": 10000000.0,
+      "jitter_ms": 0.25,
+      "logical_role": "physical_only",
+      "loss_ratio": 0.0,
+      "observation_digest": "sha256:8e4d0b258a3099046d30b0e4dd2c858176b1da91d0f572de39c644423d255612",
+      "path_class": "direct",
+      "relay_identity": null,
+      "relay_region": null,
+      "rtt_ms": 8.0,
+      "sample_count": 8,
+      "src": "node-c",
+      "src_endpoint_digest": "sha256:b0885000f8fbef249548c4db1d3955c1a7d079eeb7b222ce3b048bc316e2212f"
+    }
+  ],
+  "exclusions": [
+    "path_transition_not_observed_within_budget"
+  ],
+  "measurement_source": "iroh_activation_plane",
+  "promotion": null,
+  "protocol": "mycelium.m14_topology_projection.v1",
+  "route_ready": false
+}

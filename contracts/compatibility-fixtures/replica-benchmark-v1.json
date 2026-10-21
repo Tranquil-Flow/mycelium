@@ -1,0 +1,35 @@
+{
+  "benchmark_protocol_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "benchmark_run_id": "run-fixture",
+  "decision": "material",
+  "deployment_epoch": 1,
+  "deployment_id": "deployment-fixture",
+  "finished_at_unix_ms": 1000000,
+  "paired_95_percent_bootstrap_lower_bound_fraction": 0.105,
+  "paired_improvements": [
+    0.12,
+    0.14,
+    0.11,
+    0.15,
+    0.13,
+    0.16
+  ],
+  "point_estimate_fraction": 0.135,
+  "prediction_error_fraction": -0.015,
+  "primary_only_samples": [],
+  "promotion_authorized": false,
+  "protocol": "mycelium.replica_benchmark.v1",
+  "provenance": {
+    "configuration_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "instrumentation_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "software_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "qualification_claim": false,
+  "reasons": [
+    "throughput_window_within_tolerance"
+  ],
+  "replicated_samples": [],
+  "route_generation": 7,
+  "started_at_unix_ms": 10000,
+  "workload_manifest_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}

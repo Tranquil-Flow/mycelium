@@ -1,0 +1,20 @@
+{
+  "protocol": "mycelium.governance_boundary_protocol_registration.v1",
+  "registrations": [
+    {"name": "mycelium.interactive_inference_record.v1", "kind": "action", "owner_source": "mycelium_interactive/runtime.py"},
+    {"name": "mycelium.interactive_runtime.v1", "kind": "action", "owner_source": "mycelium_interactive/runtime.py"},
+    {"name": "mycelium.interactive_status.v1", "kind": "action", "owner_source": "mycelium_interactive/swarm.py"},
+    {"name": "mycelium.live_deployment_registry.v1", "kind": "action", "owner_source": "mycelium_live/registry.py"},
+    {"name": "mycelium.model_capacity_refresh.v1", "kind": "action", "owner_source": "mycelium_live/model_capacity.py"},
+    {"name": "mycelium.model_preparation.v1", "kind": "action", "owner_source": "mycelium_live/preparation.py"},
+    {"name": "mycelium.model_preparation_authorization.v1", "kind": "action", "owner_source": "mycelium_live/preparation.py"},
+    {"name": "mycelium.model_representation_decision.v1", "kind": "action", "owner_source": "mycelium_live/preparation.py"},
+    {"name": "mycelium.model_representation_decision.v2", "kind": "action", "owner_source": "mycelium_live/preparation.py"},
+    {"name": "mycelium.product_membership.v1", "kind": "action", "owner_source": "ui/web/src/features/membership/membershipClient.ts"},
+    {"name": "mycelium.swarm_feasibility_evidence.v1", "kind": "action", "owner_source": "scripts/assemble_m17_swarm_evidence.py"},
+    {"name": "mycelium.claim_boundary_audit.v1", "kind": "read_only", "owner_source": "scripts/claim_boundary_audit.py"},
+    {"name": "mycelium.contract_audit.v1", "kind": "read_only", "owner_source": "scripts/governance_gate.py"},
+    {"name": "mycelium.governance_audit.v1", "kind": "read_only", "owner_source": "scripts/governance_audit.py"},
+    {"name": "mycelium.governance_gate.v1", "kind": "read_only", "owner_source": "scripts/governance_gate.py"}
+  ]
+}

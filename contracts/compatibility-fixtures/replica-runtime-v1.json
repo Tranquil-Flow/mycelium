@@ -1,0 +1,29 @@
+{
+  "admitted_requests": [
+    {
+      "edge_set": [
+        "e0",
+        "e1"
+      ],
+      "placement_sequence": [
+        "p0",
+        "p1"
+      ],
+      "request_id": "request-fixture",
+      "track_id": "track-fixture"
+    }
+  ],
+  "batch_mode": "tracked",
+  "deployment_epoch": 1,
+  "deployment_id": "deployment-fixture",
+  "observed_at_unix_ms": 10000,
+  "placements": [],
+  "protocol": "mycelium.replica_runtime.v1",
+  "qualification_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "rejected_admissions": [],
+  "replica_loss_actions": [],
+  "route_generation": 7,
+  "runtime_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "snapshot_generation": 1,
+  "tracks": []
+}

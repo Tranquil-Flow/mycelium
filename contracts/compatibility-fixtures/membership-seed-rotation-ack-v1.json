@@ -1,0 +1,14 @@
+{
+  "authority_generation": 2,
+  "expires_at": 1300.0,
+  "generation": 1,
+  "incarnation": "incarnation-fixture",
+  "issued_at": 1000.0,
+  "message_id": "seed_rotation_ack-fixture",
+  "protocol": "mycelium.membership.seed_rotation_ack.v1",
+  "recipient_node_id": "seed-node",
+  "sender_endpoint_id": "endpoint-node-a",
+  "sender_node_id": "node-a",
+  "swarm_id": "swarm-fixture",
+  "transition_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+}

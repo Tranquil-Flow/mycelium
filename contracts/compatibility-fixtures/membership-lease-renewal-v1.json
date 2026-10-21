@@ -1,0 +1,16 @@
+{
+  "expires_at": 1300.0,
+  "generation": 1,
+  "heartbeat_message_id": "heartbeat-fixture",
+  "incarnation": "incarnation-fixture",
+  "issued_at": 1000.0,
+  "lease_expires_at": 1300.0,
+  "member_incarnation": "incarnation-fixture",
+  "membership_generation": 1,
+  "message_id": "lease_renewal-fixture",
+  "protocol": "mycelium.membership.lease_renewal.v1",
+  "recipient_node_id": "node-a",
+  "sender_endpoint_id": "endpoint-seed",
+  "sender_node_id": "seed-node",
+  "swarm_id": "swarm-fixture"
+}

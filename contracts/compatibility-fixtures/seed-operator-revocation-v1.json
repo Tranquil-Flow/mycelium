@@ -1,0 +1,12 @@
+{
+  "generation": 3,
+  "lifecycle_state": "STOPPED",
+  "node_id": "node-fixture",
+  "previous_generation": 2,
+  "protocol": "mycelium.seed_operator_revocation.v1",
+  "reason": "operator_revoked",
+  "revoked_at_unix_ms": 1700000000000,
+  "route_ready": false,
+  "seed_key_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "swarm_id": "swarm-fixture"
+}

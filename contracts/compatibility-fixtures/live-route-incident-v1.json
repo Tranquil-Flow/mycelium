@@ -1,0 +1,9 @@
+{
+  "deployment_id": "deployment-fixture",
+  "incident_id": "route-incident-fixture",
+  "observed_at_unix_ms": 1900000000000,
+  "protocol": "mycelium.live_route_incident.v1",
+  "reason": "fixture_route_unavailable",
+  "request_id": null,
+  "state": "route_unavailable"
+}

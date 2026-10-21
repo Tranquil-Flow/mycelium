@@ -1,0 +1,19 @@
+{
+  "accepted": true,
+  "assignment_id": "assignment-fixture",
+  "deployment_epoch": 1,
+  "deployment_id": "deployment-fixture",
+  "expires_at": 1300.0,
+  "generation": 1,
+  "incarnation": "incarnation-fixture",
+  "issued_at": 1000.0,
+  "load_proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "message_id": "assignment_result-fixture",
+  "protocol": "mycelium.membership.assignment_result.v1",
+  "recipient_node_id": "seed-node",
+  "result_code": "loaded",
+  "runtime_endpoint": "iroh://endpoint-node-a/assignment-fixture",
+  "sender_endpoint_id": "endpoint-node-a",
+  "sender_node_id": "node-a",
+  "swarm_id": "swarm-fixture"
+}

@@ -1,0 +1,8 @@
+{
+  "deployment_fatal_reason": null,
+  "deployment_id": "deployment-fixture",
+  "generated_at_monotonic_ms": 10000,
+  "incidents": [],
+  "protocol": "mycelium.traffic_liveness.v1",
+  "subjects": []
+}

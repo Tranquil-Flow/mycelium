@@ -1,0 +1,93 @@
+{
+  "activation_bytes": 2,
+  "deployment_epoch": 1,
+  "deployment_id": "12345678-1234-5678-1234-567812345678",
+  "edges": [
+    {
+      "edge_id": "forward:stage-000-primary->stage-001-primary",
+      "from_placement_id": "stage-000-primary",
+      "link_id": "link:node-a/http-overlay->node-b/http-overlay@sha256:81d7549041bc2d5aa9d9380f7c614d0b7a3759871ba4794482c3c97baa1c32ae",
+      "to_placement_id": "stage-001-primary"
+    }
+  ],
+  "entry_stage_id": "stage-000",
+  "final_stage_id": "stage-001",
+  "hidden_size": 128,
+  "loopback_edges": [
+    {
+      "edge_id": "loopback:stage-001-primary->stage-000-primary",
+      "from_placement_id": "stage-001-primary",
+      "link_id": "link:node-b/http-overlay->node-a/http-overlay@sha256:a8bd4171ee574542b3b967adaa965a35f3b3d3d402b34adb30aacf1a861d1a99",
+      "to_placement_id": "stage-000-primary"
+    }
+  ],
+  "manifest_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e",
+  "model_id": "org/model",
+  "protocol": "mycelium.execution_graph.v1",
+  "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "stages": [
+    {
+      "component_roles": [
+        "input_embedding",
+        "decoder"
+      ],
+      "placements": [
+        {
+          "assignment_id": "b5914413-fe42-5450-99e8-21572c831d43",
+          "lifecycle_state": "ACTIVE",
+          "load_proof_digest": "sha256:dc5fc54a1defceeb60b2862b91a16fc1119051501c2260892b7425069d441d1a",
+          "node_id": "node-a",
+          "placement_id": "stage-000-primary",
+          "replica_group_id": "stage-000",
+          "runtime_backend": "mlx",
+          "runtime_endpoint": "tcp://127.0.0.1:9100",
+          "stage_signature": "sha256:abe199b362878e294758af557741098b1e7cd46cfd58b986b66c03ca9c1effd1"
+        }
+      ],
+      "range": {
+        "end_layer_exclusive": 2,
+        "layer_count": 2,
+        "start_layer": 0
+      },
+      "stage_cost": {
+        "decode_work_units_per_token": 2.0,
+        "kv_bytes_per_context_token": 512,
+        "prefill_work_units_per_prompt_token": 2.0
+      },
+      "stage_id": "stage-000"
+    },
+    {
+      "component_roles": [
+        "decoder",
+        "final_norm",
+        "lm_head"
+      ],
+      "placements": [
+        {
+          "assignment_id": "4e937bdb-100f-58fc-9944-f4afbc8dbd56",
+          "lifecycle_state": "ACTIVE",
+          "load_proof_digest": "sha256:39d9df62c1ef31485a70a58ed793241c644cdac88bab40e90b44f918463a4c16",
+          "node_id": "node-b",
+          "placement_id": "stage-001-primary",
+          "replica_group_id": "stage-001",
+          "runtime_backend": "mlx",
+          "runtime_endpoint": "tcp://127.0.0.1:9101",
+          "stage_signature": "sha256:78d14f547bcd03b17483e387f13170c71e8c56f587724b07167af3c486bdc374"
+        }
+      ],
+      "range": {
+        "end_layer_exclusive": 4,
+        "layer_count": 2,
+        "start_layer": 2
+      },
+      "stage_cost": {
+        "decode_work_units_per_token": 2.0,
+        "kv_bytes_per_context_token": 512,
+        "prefill_work_units_per_prompt_token": 2.0
+      },
+      "stage_id": "stage-001"
+    }
+  ],
+  "token_envelope_bytes": 1024,
+  "topology_version": 1
+}

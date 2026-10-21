@@ -1,0 +1,12 @@
+{
+  "authority_generation": 2,
+  "effective_at_unix_ms": 1700000000000,
+  "event": "rotation_pending",
+  "new_seed_key_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "old_seed_key_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "overlap_expires_at_unix_ms": 1700003600000,
+  "previous_generation": 1,
+  "protocol": "mycelium.seed_operator_rotation.v1",
+  "route_ready": false,
+  "swarm_id": "swarm-fixture"
+}

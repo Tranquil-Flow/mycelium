@@ -1,0 +1,235 @@
+{
+  "binding": {
+    "deployment": {
+      "epoch": 1,
+      "id": "deployment-fixture"
+    },
+    "model": {
+      "id": "model-fixture",
+      "manifest_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "num_layers": 4,
+      "revision": "immutable-revision"
+    },
+    "route": {
+      "assignments": [
+        {
+          "end_layer_exclusive": 2,
+          "id": "assignment-a",
+          "peer_id": "peer-a",
+          "start_layer": 0
+        },
+        {
+          "end_layer_exclusive": 4,
+          "id": "assignment-b",
+          "peer_id": "peer-b",
+          "start_layer": 2
+        }
+      ],
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "generation": 1,
+      "id": "route-fixture"
+    }
+  },
+  "claims": [
+    {
+      "freshness": {
+        "observed_at": "2026-07-17T00:00:00Z",
+        "valid_until": "2026-07-17T00:05:00Z"
+      },
+      "id": "claim-1",
+      "provenance": {
+        "kind": "gateway_projection",
+        "producer": "mycelium_gateway"
+      },
+      "scope": {
+        "id": "deployment-fixture",
+        "kind": "deployment"
+      },
+      "statement": "deployment_bound",
+      "value": "confirmed"
+    },
+    {
+      "freshness": {
+        "observed_at": "2026-07-17T00:00:00Z",
+        "valid_until": "2026-07-17T00:05:00Z"
+      },
+      "id": "claim-2",
+      "provenance": {
+        "kind": "provisioning_audit",
+        "producer": "mycelium_provisioning"
+      },
+      "scope": {
+        "id": "model-fixture",
+        "kind": "model"
+      },
+      "statement": "model_bound",
+      "value": "confirmed"
+    },
+    {
+      "freshness": {
+        "observed_at": "2026-07-17T00:00:00Z",
+        "valid_until": "2026-07-17T00:05:00Z"
+      },
+      "id": "claim-3",
+      "provenance": {
+        "kind": "route_challenge",
+        "producer": "mycelium_router"
+      },
+      "scope": {
+        "id": "route-fixture",
+        "kind": "route"
+      },
+      "statement": "route_challenge_succeeded",
+      "value": "confirmed"
+    },
+    {
+      "freshness": {
+        "observed_at": "2026-07-17T00:00:00Z",
+        "valid_until": "2026-07-17T00:05:00Z"
+      },
+      "id": "claim-4",
+      "provenance": {
+        "kind": "provisioning_audit",
+        "producer": "mycelium_provisioning"
+      },
+      "scope": {
+        "id": "assignment-a",
+        "kind": "assignment"
+      },
+      "statement": "assignment_ready",
+      "value": "confirmed"
+    },
+    {
+      "freshness": {
+        "observed_at": "2026-07-17T00:00:00Z",
+        "valid_until": "2026-07-17T00:05:00Z"
+      },
+      "id": "claim-5",
+      "provenance": {
+        "kind": "provisioning_audit",
+        "producer": "mycelium_provisioning"
+      },
+      "scope": {
+        "id": "assignment-b",
+        "kind": "assignment"
+      },
+      "statement": "assignment_ready",
+      "value": "confirmed"
+    },
+    {
+      "freshness": {
+        "observed_at": "2026-07-17T00:00:00Z",
+        "valid_until": "2026-07-17T00:05:00Z"
+      },
+      "id": "claim-6",
+      "provenance": {
+        "kind": "router_runtime",
+        "producer": "mycelium_router"
+      },
+      "scope": {
+        "id": "request-fixture",
+        "kind": "request"
+      },
+      "statement": "request_lifecycle_observed",
+      "value": "confirmed"
+    }
+  ],
+  "conflicts": [],
+  "freshness": {
+    "observed_at": "2026-07-17T00:00:00Z",
+    "valid_until": "2026-07-17T00:05:00Z"
+  },
+  "protocol": "mycelium.observatory.snapshot.v1",
+  "provenance": {
+    "kind": "gateway_projection",
+    "producer": "mycelium_gateway"
+  },
+  "request_lifecycle": {
+    "binding": {
+      "deployment": {
+        "epoch": 1,
+        "id": "deployment-fixture"
+      },
+      "model": {
+        "id": "model-fixture",
+        "manifest_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "num_layers": 4,
+        "revision": "immutable-revision"
+      },
+      "route": {
+        "assignments": [
+          {
+            "end_layer_exclusive": 2,
+            "id": "assignment-a",
+            "peer_id": "peer-a",
+            "start_layer": 0
+          },
+          {
+            "end_layer_exclusive": 4,
+            "id": "assignment-b",
+            "peer_id": "peer-b",
+            "start_layer": 2
+          }
+        ],
+        "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "generation": 1,
+        "id": "route-fixture"
+      }
+    },
+    "freshness": {
+      "observed_at": "2026-07-17T00:00:00Z",
+      "valid_until": "2026-07-17T00:05:00Z"
+    },
+    "path_attempt": 1,
+    "provenance": {
+      "kind": "router_runtime",
+      "producer": "mycelium_router"
+    },
+    "request_id": "request-fixture",
+    "state": "completed"
+  },
+  "route_challenge": {
+    "binding": {
+      "deployment": {
+        "epoch": 1,
+        "id": "deployment-fixture"
+      },
+      "model": {
+        "id": "model-fixture",
+        "manifest_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "num_layers": 4,
+        "revision": "immutable-revision"
+      },
+      "route": {
+        "assignments": [
+          {
+            "end_layer_exclusive": 2,
+            "id": "assignment-a",
+            "peer_id": "peer-a",
+            "start_layer": 0
+          },
+          {
+            "end_layer_exclusive": 4,
+            "id": "assignment-b",
+            "peer_id": "peer-b",
+            "start_layer": 2
+          }
+        ],
+        "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "generation": 1,
+        "id": "route-fixture"
+      }
+    },
+    "freshness": {
+      "observed_at": "2026-07-17T00:00:00Z",
+      "valid_until": "2026-07-17T00:05:00Z"
+    },
+    "id": "challenge-fixture",
+    "provenance": {
+      "kind": "route_challenge",
+      "producer": "mycelium_router"
+    },
+    "status": "succeeded"
+  },
+  "snapshot_id": "snapshot-fixture"
+}

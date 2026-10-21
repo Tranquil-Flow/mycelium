@@ -1,23 +1,43 @@
 {
   "diagnostics": {
     "accepted_replica_nodes": [],
+    "admitted_node_ids": [
+      "node-a",
+      "node-b"
+    ],
     "candidate_node_ids": [
       "node-a",
       "node-b"
     ],
+    "decode_mode": "unknown",
     "excluded_nodes": {},
     "frozen_primary_order": [
       "node-a",
       "node-b"
     ],
+    "node_runtime": {},
     "path_cost": "phase_sensitive_latency_plus_payload_over_bandwidth",
+    "placement_provenance": "planner_v2",
     "primary_order": [
       "node-a",
       "node-b"
     ],
     "primary_search": [
-      "allocation: no feasible contiguous allocation: 2 candidate order(s) rejected"
+      "primary order frozen from directed latency and jitter only",
+      "admitted_node_count=2",
+      "topology_cycle_cost_ms=1.2"
     ],
+    "replication": {
+      "authority": "capability_aware_replica_flow_planner",
+      "candidate_decisions": [],
+      "kv_locality": "request_track_pinned_no_migration",
+      "minimum_gain_fraction": 0.05,
+      "parallelism_label": "data_parallel_request_routing",
+      "request_routing_semantics": "one_complete_track_per_request",
+      "route_ready": false,
+      "uncertainty_fraction": 0.1,
+      "zero_flow_removed_placement_ids": []
+    },
     "speculative": {
       "enabled": false,
       "target_fallback": true
@@ -63,25 +83,39 @@
     }
   ],
   "metrics": {
+    "primary_request_capacity_rps": 0.2248886580751643,
+    "replica_capacity_gain_rps": 0.0,
     "replicated_output_capacity_tps": 48.351061486160326,
     "replicated_request_capacity_rps": 0.2248886580751643,
     "scenarios": [
       {
         "confidence": 1.0,
+        "decode_compute_ms": 40.29584,
         "decode_payload_bytes": 256,
+        "decode_transfer_ms": 1.4027200000000002,
+        "expected_response_ms": 9006.641439999998,
         "name": "interactive-c1",
         "output_goodput_tps": 23.981643490806402,
+        "prefill_compute_ms": 40.57184,
         "prefill_payload_bytes": 17920,
+        "prefill_transfer_ms": 0.8792,
+        "required_memory_bytes": 240291840.0,
         "single_request_tps": 23.981643490806402,
         "tpot_ms": 41.69855999999999,
         "ttft_ms": 41.45104
       },
       {
         "confidence": 1.0,
+        "decode_compute_ms": 41.17136,
         "decode_payload_bytes": 256,
+        "decode_transfer_ms": 1.4027200000000002,
+        "expected_response_ms": 9195.753759999998,
         "name": "interactive-c4",
         "output_goodput_tps": 48.57745772789629,
+        "prefill_compute_ms": 41.44736,
         "prefill_payload_bytes": 17920,
+        "prefill_transfer_ms": 0.8792,
+        "required_memory_bytes": 241167360.0,
         "single_request_tps": 23.48846997985629,
         "tpot_ms": 42.574079999999995,
         "ttft_ms": 42.32656
@@ -130,9 +164,9 @@
     "budget_exhausted": false,
     "candidate_budget": 100000,
     "candidate_node_count": 2,
-    "explored_candidates": 4,
+    "explored_candidates": 1,
     "globally_exact": true,
-    "mode": "exact_joint_enumeration"
+    "mode": "exact_topology_enumeration"
   },
   "snapshot_digest": "sha256:3d0fd58d7d5d7f0bbd43974a9af026a3c3853d1c1828da8bfcbda7353543bfb0",
   "workload_name": "interactive_chat_v1"

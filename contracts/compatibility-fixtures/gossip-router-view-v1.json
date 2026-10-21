@@ -43,7 +43,7 @@
       }
     }
   ],
-  "eligibility_generation": "0e1e26785a180056b7b31f013bfe6ce27af4e1c9109ad76de5ff9c98f9e428b8",
+  "eligibility_generation": "45534cdeede8b8c292e8a00a0a18e2b879f0e4b20438fc29b155347a6e1fe80c",
   "nodes": [
     {
       "boot_id": "boot-node-a-1",
@@ -93,7 +93,7 @@
       "queue_depth": 0,
       "status_version": {
         "incarnation": 1,
-        "payload_hash": "sha256:0e3869dc687a4cf82df7ae89609e304f75807fc1ff1ecd143d1955585b3f9b78",
+        "payload_hash": "sha256:0b9e0d738d714c183d79711100dd3e967a074e2d9f5d41ca131f320aa32997ff",
         "sequence": 1
       }
     },
@@ -145,11 +145,11 @@
       "queue_depth": 0,
       "status_version": {
         "incarnation": 1,
-        "payload_hash": "sha256:6e74198056d3cdd1376f863d001a89b34ec9d70831acf5b4a1601fadf28a5bda",
+        "payload_hash": "sha256:88870e0038cb2a0ee394c315edd74be64042dfced3fab041ab8fca876b27d8f2",
         "sequence": 1
       }
     }
   ],
   "protocol": "mycelium.gossip.router_view.v1",
-  "snapshot_generation": 8
+  "snapshot_generation": 10
 }

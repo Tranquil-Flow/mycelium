@@ -1,0 +1,13 @@
+{
+  "browser_workers": [],
+  "native_nodes": [
+    {
+      "capability": "native_inference_node",
+      "connectivity": "unknown",
+      "endpoint_id": null,
+      "member_id": "mobile-conformance-001",
+      "membership_state": "reachable"
+    }
+  ],
+  "protocol": "mycelium.product_ui.swarm.v1"
+}

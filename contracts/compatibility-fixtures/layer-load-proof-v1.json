@@ -1,13 +1,13 @@
 {
-  "assignment_id": "06dcdeb6-ffc8-5e8c-b210-44f4fc80e407",
+  "assignment_id": "b5914413-fe42-5450-99e8-21572c831d43",
   "claim_boundary": "assignment-bound local MLX stage loaded and deterministically probed; no route challenge or distributed inference claim",
   "control_plane_binding": {
     "deployment_epoch": 1,
     "deployment_id": "12345678-1234-5678-1234-567812345678",
-    "evidence_bundle_digest": "sha256:07c57801ddc10d4955cda04cdc547d768791dddd51e60cbb1f1ebc2de1e1b805",
-    "planner_snapshot_digest": "sha256:6fb892bf7d4e0bbf4560a98c7d29ad9743590b2f4e721ddaa4c529c6f8711394",
+    "evidence_bundle_digest": "sha256:3eb094fdd637e59cb6aafee58dccca8796a4dab719e6550f7ec2887a289ab7a8",
+    "planner_snapshot_digest": "sha256:547b7dad65c2b40d907761a11e2bdb241893ad19de0077cd4b99cc4ff754992d",
     "protocol": "mycelium.control_plane_binding.v1",
-    "snapshot_generation": 8,
+    "snapshot_generation": 10,
     "swarm_id": "swarm-a"
   },
   "deployment_epoch": 1,
@@ -22,7 +22,7 @@
     "layer_count": 2,
     "start_layer": 0
   },
-  "loaded_tensor_digest": "sha256:5fd96d14df60f8489556cd81a2c36f7229e6012473956761976ade3898ca14e8",
+  "loaded_tensor_digest": "sha256:15fadf7f529e054ef69350b47eb3374314dc28ddf9d2ca0d06fcdf484983bf9e",
   "loaded_tensor_keys": [
     "transformer.h.0.attn.c_attn.bias",
     "transformer.h.0.attn.c_attn.weight",
@@ -54,7 +54,7 @@
   "manifest_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e",
   "model_id": "org/model",
   "node_id": "node-a",
-  "probe_digest": "sha256:bf4f21428c8a6fdb8736ec6f477e89327c47371673ae38d867a9645e85cbf12a",
+  "probe_digest": "sha256:c7a63d84d188a5dda542c6b2b6e928376ca298696d1a8366564281dcaed75332",
   "probe_shape": [
     1,
     3,

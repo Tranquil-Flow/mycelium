@@ -1,6 +1,8 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import stat
 import subprocess
@@ -10,9 +12,43 @@ from pathlib import Path
 import pytest
 
 from layer_assignment import validate_assignment_identity
+from mycelium_assignment_cache import (
+    validate_cache_status,
+    validate_materialization_report,
+)
+from mycelium_candidate_promotion import validate_candidate_promotion_report
+from mycelium_gateway.semantic import (
+    decode_observatory_event,
+    decode_observatory_snapshot,
+)
 from mycelium_gossip.evidence_bundle import evidence_bundle_from_dict
+from mycelium_gossip.signed_bundle import validate_signed_evidence_bundle
+from mycelium_membership import JOIN_REQUEST_PROTOCOL, verify_join_request
+from mycelium_layer_planner.replan_simulator import simulate_bundle
 from mycelium_layer_planner.gossip_adapter import validate_planner_snapshot_binding
 from mycelium_layer_planner.serialization import route_plan_from_dict
+from mycelium_layer_planner.public_projection import validate_m13_placement_projection
+from mycelium_layer_planner.workload_intelligence import validate_m15_plan_comparison
+from mycelium_m16_runtime import validate_m16_runtime_status
+from mycelium_a6_recovery import (
+    validate_checkpoint_projection,
+    validate_recovery_gate,
+    validate_recovery_intent,
+    validate_recovery_qualification,
+    validate_recovery_runtime,
+)
+from mycelium_request_gateway.contracts import InferenceSubmission, StreamEvent
+from mycelium_topology_evidence import (
+    validate_m14_topology_projection,
+    validate_transport_path_observation,
+)
+from mycelium_router.serialization import (
+    execution_graph_from_dict,
+    path_manifest_from_dict,
+    path_manifest_to_dict,
+)
+from mycelium_router.validation import validate_manifest
+from mycelium_router.wire import decode_frame
 from planner_assignment import validate_control_plane_tranche
 from route_contract import validate_manual_provisioning_route_v1
 from runtime_contracts import GPT2_DECODER_TENSOR_SUFFIXES
@@ -32,6 +68,8 @@ from weight_provisioning import artifact_report_errors, provisioning_audit_error
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "contracts" / "compatibility-fixtures"
 EXPECTED_PROTOCOLS = {
+    "coarse-region-evidence-v1.json": "mycelium.coarse_region_evidence.v1",
+    "route-explorer-v1.json": "mycelium.route_explorer.v1",
     "route-plan-v2.json": "mycelium.route_plan.v2",
     "manual-provisioning-route-v1.json": "mycelium.manual_provisioning_route.v1",
     "layer-assignment-v2.json": "mycelium.layer_assignment.v2",
@@ -40,9 +78,107 @@ EXPECTED_PROTOCOLS = {
     "gossip-router-view-v1.json": "mycelium.gossip.router_view.v1",
     "gossip-allocator-view-v1.json": "mycelium.gossip.allocator_view.v1",
     "gossip-evidence-bundle-v1.json": "mycelium.gossip.evidence_bundle.v1",
+    "signed-gossip-evidence-bundle-v1.json": "mycelium.gossip.signed_evidence_bundle.v1",
     "layer-planner-snapshot-v1.json": "mycelium.layer_planner_snapshot.v1",
     "control-plane-tranche-v1.json": "mycelium.control_plane_tranche.v1",
     "layer-load-proof-v1.json": "mycelium.layer_load_proof.v1",
+    "route-qualification-v1.json": "mycelium.route_qualification.v1",
+    "request-gateway-v1.json": "mycelium.request_gateway.v1",
+    "request-gateway-v2.json": "mycelium.request_gateway.v2",
+    "request-event-v1.json": "mycelium.request_event.v1",
+    "request-event-v2.json": "mycelium.request_event.v2",
+    "membership-signed-message-v1.json": "mycelium.membership.signed_message.v1",
+    "membership-join-request-v1.json": "mycelium.membership.join_request.v1",
+    "membership-join-acceptance-v1.json": "mycelium.membership.join_acceptance.v1",
+    "membership-resume-request-v1.json": "mycelium.membership.resume_request.v1",
+    "membership-resume-acceptance-v1.json": (
+        "mycelium.membership.resume_acceptance.v1"
+    ),
+    "membership-capability-report-v1.json": "mycelium.membership.capability_report.v1",
+    "membership-link-probe-report-v1.json": "mycelium.membership.link_probe_report.v1",
+    "membership-heartbeat-v1.json": "mycelium.membership.heartbeat.v1",
+    "membership-lease-renewal-v1.json": "mycelium.membership.lease_renewal.v1",
+    "membership-assignment-offer-v1.json": "mycelium.membership.assignment_offer.v1",
+    "membership-assignment-result-v1.json": "mycelium.membership.assignment_result.v1",
+    "membership-drain-ack-v1.json": "mycelium.membership.drain_ack.v1",
+    "membership-seed-rotation-ack-v1.json": (
+        "mycelium.membership.seed_rotation_ack.v1"
+    ),
+    "seed-operator-inventory-v1.json": "mycelium.seed_operator_inventory.v1",
+    "seed-operator-revocation-v1.json": "mycelium.seed_operator_revocation.v1",
+    "seed-key-transition-v1.json": "mycelium.seed_key_transition.v1",
+    "seed-operator-rotation-v1.json": "mycelium.seed_operator_rotation.v1",
+    "seed-backup-v1.json": "mycelium.seed_backup.v1",
+    "capacity-profile-v1.json": "mycelium.capacity_profile.v1",
+    "link-state-v1.json": "mycelium.link_state.v1",
+    "product-ui-swarm-v1.json": "mycelium.product_ui.swarm.v1",
+    "live-route-incident-v1.json": "mycelium.live_route_incident.v1",
+    "performance-budget-v1.json": "mycelium.performance_budget.v1",
+    "performance-budget-v2.json": "mycelium.performance_budget.v2",
+    "performance-budget-v3.json": "mycelium.performance_budget.v3",
+    "assignment-artifact-cache-v1.json": "mycelium.assignment_artifact_cache.v1",
+    "assignment-materialization-v1.json": "mycelium.assignment_materialization.v1",
+    "candidate-promotion-report-v1.json": "mycelium.candidate_promotion_report.v1",
+    "m13-placement-projection-v1.json": "mycelium.m13_placement_projection.v1",
+    "transport-path-observation-v1.json": "mycelium.transport_path_observation.v1",
+    "m14-topology-projection-v1.json": "mycelium.m14_topology_projection.v1",
+    "m15-plan-comparison-v1.json": "mycelium.m15_plan_comparison.v1",
+    "concurrent-request-runtime-v1.json": "mycelium.concurrent_request_runtime.v1",
+    "private-request-replay-checkpoint-v1.json": (
+        "mycelium.private_request_replay_checkpoint.v1"
+    ),
+    "full-context-recovery-intent-v1.json": (
+        "mycelium.full_context_recovery_intent.v1"
+    ),
+    "full-context-recovery-runtime-v1.json": (
+        "mycelium.full_context_recovery_runtime.v1"
+    ),
+    "full-context-recovery-qualification-v1.json": (
+        "mycelium.full_context_recovery_qualification.v1"
+    ),
+    "full-context-recovery-gate-v1.json": (
+        "mycelium.full_context_recovery_gate.v1"
+    ),
+    "interruptible-stage-command-v1.json": "mycelium.interruptible_stage_command.v1",
+    "traffic-liveness-v1.json": "mycelium.traffic_liveness.v1",
+    "scoped-runtime-incident-v1.json": "mycelium.scoped_runtime_incident.v1",
+    "product-concurrency-liveness-qualification-v1.json": (
+        "mycelium.product_concurrency_liveness_qualification.v1"
+    ),
+    "internet-bootstrap-status-v1.json": "mycelium.internet_bootstrap_status.v1",
+    "internet-activation-observation-v1.json": (
+        "mycelium.internet_activation_observation.v1"
+    ),
+    "relay-projection-v1.json": "mycelium.relay_projection.v1",
+    "internet-native-qualification-v1.json": (
+        "mycelium.internet_native_qualification.v1"
+    ),
+    "m23-kv-gate-v1.json": "mycelium.m23_heterogeneous_kv_gate.v1",
+    "product-snapshot-v1.json": "mycelium.product_snapshot.v1",
+    "product-event-v1.json": "mycelium.product_event.v1",
+    "execution-graph-v1.json": "mycelium.execution_graph.v1",
+    "path-manifest-v1.json": "mycelium.path_manifest.v1",
+    "live-route-status-v1.json": "mycelium.live_route_status.v1",
+    "deployment-activation-v1.json": "mycelium.deployment_activation.v1",
+    "model-preparation-authorization-v2.json": (
+        "mycelium.model_preparation_authorization.v2"
+    ),
+    "deployment-residency-physical-v1.json": (
+        "mycelium.deployment_residency_physical_gate.v1"
+    ),
+    "governance-readiness-v1.json": "mycelium.governance_readiness.v1",
+    "evidence-projection-v1.json": "mycelium.evidence_projection.v1",
+    "evidence-history-v1.json": "mycelium.evidence_history.v1",
+    "router-wire-v1.json": "mycelium.router_wire.v1",
+    "layer-replan-simulation-report-v1.json": "mycelium.layer_replan_simulation_report.v1",
+    "product-ui-bootstrap-v1.json": "mycelium.product_ui.bootstrap.v1",
+    "observatory-snapshot-v1.json": "mycelium.observatory.snapshot.v1",
+    "observatory-event-v1.json": "mycelium.observatory.event.v1",
+    "replica-plan-v1.json": "mycelium.replica_plan.v1",
+    "replica-qualification-v1.json": "mycelium.replica_qualification.v1",
+    "replica-runtime-v1.json": "mycelium.replica_runtime.v1",
+    "replica-benchmark-v1.json": "mycelium.replica_benchmark.v1",
+    "replica-benchmark-v2.json": "mycelium.replica_benchmark.v2",
 }
 
 
@@ -69,7 +205,10 @@ def load_fixture(name: str) -> dict:
 
 
 def test_generated_contract_fixtures_have_no_drift() -> None:
-    for script in ("scripts/generate_contract_fixtures.py", "scripts/generate_contract_manifest.py"):
+    for script in (
+        "scripts/generate_contract_fixtures.py",
+        "scripts/generate_contract_manifest.py",
+    ):
         completed = subprocess.run(
             [sys.executable, script, "--check"],
             cwd=ROOT,
@@ -78,6 +217,19 @@ def test_generated_contract_fixtures_have_no_drift() -> None:
             check=False,
         )
         assert completed.returncode == 0, completed.stderr or completed.stdout
+
+
+def test_model_preparation_browser_contract_is_manifest_pinned() -> None:
+    manifest = json.loads(encoded_manifest())
+    contract = next(
+        item
+        for item in manifest["contracts"]
+        if item["protocol"] == "mycelium.model_preparation_authorization.v2"
+    )
+
+    assert "ui/web/src/features/models/modelPreparation.ts" in {
+        source["path"] for source in contract["owner_sources"]
+    }
 
 
 def test_contract_audit_checks_manifest_hashes_and_protocol_ownership() -> None:
@@ -93,8 +245,12 @@ def test_contract_audit_checks_manifest_hashes_and_protocol_ownership() -> None:
     assert payload == {"checked": len(EXPECTED_PROTOCOLS), "drift": [], "ok": True}
 
 
-def test_contract_audit_fails_closed_on_hash_namespace_and_path_drift(tmp_path: Path) -> None:
-    canonical = json.loads((ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8"))
+def test_contract_audit_fails_closed_on_hash_namespace_and_path_drift(
+    tmp_path: Path,
+) -> None:
+    canonical = json.loads(
+        (ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8")
+    )
 
     canonical["contracts"][0]["fixture"]["size_bytes"] += 1
     hash_manifest = tmp_path / "hash-drift.json"
@@ -103,14 +259,20 @@ def test_contract_audit_fails_closed_on_hash_namespace_and_path_drift(tmp_path: 
     assert hash_result["ok"] is False
     assert any("size drift" in error for error in hash_result["drift"])
 
-    canonical = json.loads((ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8"))
+    canonical = json.loads(
+        (ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8")
+    )
     canonical["contracts"][1]["protocol"] = canonical["contracts"][0]["protocol"]
-    canonical["contracts"][1]["owner_sources"][0]["path"] = "../mycelium-mobile-lab/pyproject.toml"
+    canonical["contracts"][1]["owner_sources"][0]["path"] = (
+        "../mycelium-mobile-lab/pyproject.toml"
+    )
     ownership_manifest = tmp_path / "ownership-drift.json"
     ownership_manifest.write_text(json.dumps(canonical), encoding="utf-8")
     ownership_result = audit(ownership_manifest)
     assert ownership_result["ok"] is False
-    assert any("duplicate protocol owner" in error for error in ownership_result["drift"])
+    assert any(
+        "duplicate protocol owner" in error for error in ownership_result["drift"]
+    )
     assert any("escapes canonical root" in error for error in ownership_result["drift"])
 
 
@@ -152,7 +314,9 @@ def test_contract_audit_rejects_manifest_listed_symlink_source(
     result = audit(manifest_path)
 
     assert result["ok"] is False
-    assert any("owner_sources" in error and "symlink" in error for error in result["drift"])
+    assert any(
+        "owner_sources" in error and "symlink" in error for error in result["drift"]
+    )
 
 
 def test_contract_audit_rejects_manifest_listed_symlink_fixture(
@@ -198,10 +362,14 @@ def test_contract_audit_rejects_manifest_listed_symlink_parent(
     result = audit(manifest_path)
 
     assert result["ok"] is False
-    assert any(expected_label in error and "symlink" in error for error in result["drift"])
+    assert any(
+        expected_label in error and "symlink" in error for error in result["drift"]
+    )
 
 
-def test_contract_audit_rejects_incomplete_alias_and_duplicate_key_manifests(tmp_path: Path) -> None:
+def test_contract_audit_rejects_incomplete_alias_and_duplicate_key_manifests(
+    tmp_path: Path,
+) -> None:
     manifest_path = ROOT / "contracts" / "contract-manifest.v1.json"
     canonical_text = manifest_path.read_text(encoding="utf-8")
     canonical = json.loads(canonical_text)
@@ -236,8 +404,12 @@ def test_contract_audit_rejects_incomplete_alias_and_duplicate_key_manifests(tmp
     assert any("duplicate JSON key" in error for error in duplicate["drift"])
 
 
-def test_contract_audit_reports_unhashable_manifest_fields_without_crashing(tmp_path: Path) -> None:
-    canonical = json.loads((ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8"))
+def test_contract_audit_reports_unhashable_manifest_fields_without_crashing(
+    tmp_path: Path,
+) -> None:
+    canonical = json.loads(
+        (ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8")
+    )
     canonical["contracts"][0]["protocol"] = ["mycelium.invalid"]
     protocol_path = tmp_path / "array-protocol.json"
     protocol_path.write_text(json.dumps(canonical), encoding="utf-8")
@@ -245,10 +417,14 @@ def test_contract_audit_reports_unhashable_manifest_fields_without_crashing(tmp_
     protocol_result = audit(protocol_path)
 
     assert protocol_result["ok"] is False
-    assert any("contract registry mismatch" in error for error in protocol_result["drift"])
+    assert any(
+        "contract registry mismatch" in error for error in protocol_result["drift"]
+    )
     assert any("invalid protocol" in error for error in protocol_result["drift"])
 
-    canonical = json.loads((ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8"))
+    canonical = json.loads(
+        (ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8")
+    )
     canonical["contracts"][0]["fixture"]["path"] = {"not": "a path"}
     fixture_path = tmp_path / "object-fixture-path.json"
     fixture_path.write_text(json.dumps(canonical), encoding="utf-8")
@@ -256,7 +432,9 @@ def test_contract_audit_reports_unhashable_manifest_fields_without_crashing(tmp_
     fixture_result = audit(fixture_path)
 
     assert fixture_result["ok"] is False
-    assert any("contract registry mismatch" in error for error in fixture_result["drift"])
+    assert any(
+        "contract registry mismatch" in error for error in fixture_result["drift"]
+    )
     assert any("pinned path" in error for error in fixture_result["drift"])
 
 
@@ -386,21 +564,32 @@ def test_atomic_write_keeps_replacement_inside_opened_parent_descriptor(
     assert (displaced_parent / target.name).read_bytes() == b"replacement"
 
 
-def test_fixture_check_rejects_unexpected_files() -> None:
-    unexpected = FIXTURES / "unexpected-contract.json"
-    unexpected.write_text("{}\n", encoding="utf-8")
-    try:
-        completed = subprocess.run(
-            [sys.executable, "scripts/generate_contract_fixtures.py", "--check"],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        assert completed.returncode != 0
-        assert "unexpected fixture" in (completed.stderr + completed.stdout)
-    finally:
-        unexpected.unlink(missing_ok=True)
+def test_fixture_check_rejects_unexpected_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Check a private copy of the fixture directory: writing the stray file into the
+    # checked-in directory made concurrent drift/audit tests (pytest-xdist) see it.
+    import importlib.util
+
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    spec = importlib.util.spec_from_file_location(
+        "generate_contract_fixtures_under_test", ROOT / "scripts" / "generate_contract_fixtures.py"
+    )
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    private = tmp_path / "compatibility-fixtures"
+    private.mkdir()
+    for source in FIXTURES.iterdir():
+        if source.name.endswith(".json"):
+            (private / source.name).write_bytes(source.read_bytes())
+    (private / "unexpected-contract.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(generator, "FIXTURE_DIR", private)
+    monkeypatch.setattr(sys, "argv", ["generate_contract_fixtures.py", "--check"])
+    before = sorted(path.name for path in FIXTURES.iterdir())
+
+    assert generator.main() != 0
+    assert "unexpected fixture: unexpected-contract.json" in capsys.readouterr().err
+    assert sorted(path.name for path in FIXTURES.iterdir()) == before
 
 
 def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
@@ -412,6 +601,20 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
     manual_route = load_fixture("manual-provisioning-route-v1.json")
     validate_manual_provisioning_route_v1(manual_route)
 
+    validate_checkpoint_projection(
+        load_fixture("private-request-replay-checkpoint-v1.json")
+    )
+    validate_recovery_intent(
+        load_fixture("full-context-recovery-intent-v1.json")
+    )
+    validate_recovery_runtime(
+        load_fixture("full-context-recovery-runtime-v1.json")
+    )
+    validate_recovery_qualification(
+        load_fixture("full-context-recovery-qualification-v1.json")
+    )
+    validate_recovery_gate(load_fixture("full-context-recovery-gate-v1.json"))
+
     assignment = load_fixture("layer-assignment-v2.json")
     validate_assignment_identity(assignment)
     report = load_fixture("artifact-verification-report-v1.json")
@@ -419,7 +622,12 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
 
     assignments, reports = assignments_and_reports()
     audit_payload = load_fixture("provisioning-audit-v1.json")
-    assert provisioning_audit_errors(generated_manual_route(), assignments, reports, audit_payload) == []
+    assert (
+        provisioning_audit_errors(
+            generated_manual_route(), assignments, reports, audit_payload
+        )
+        == []
+    )
     tampered_audit = dict(audit_payload)
     tampered_audit["deployment_id"] = "87654321-4321-8765-4321-876543218765"
     assert any(
@@ -448,6 +656,18 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
 
     evidence_bundle = load_fixture("gossip-evidence-bundle-v1.json")
     evidence_bundle_from_dict(evidence_bundle)
+    signed_bundle = load_fixture("signed-gossip-evidence-bundle-v1.json")
+    validated_signed_bundle = validate_signed_evidence_bundle(
+        signed_bundle,
+        expected_verification_key_digest=signed_bundle["verification_key"][
+            "verification_key_digest"
+        ],
+        now_unix_ms=2_000,
+    )
+    assert (
+        validated_signed_bundle.bundle.evidence_bundle_digest
+        == evidence_bundle["evidence_bundle_digest"]
+    )
     planner_snapshot = load_fixture("layer-planner-snapshot-v1.json")
     validate_planner_snapshot_binding(planner_snapshot, evidence_bundle)
     tranche = load_fixture("control-plane-tranche-v1.json")
@@ -461,10 +681,175 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
             for prefix in tranche_assignment["expected_tensor_prefixes"]
             for suffix in GPT2_DECODER_TENSOR_SUFFIXES
         )
-        assert tranche_assignment["component_tensor_keys"]["decoder"] == expected_decoder_keys
+        assert (
+            tranche_assignment["component_tensor_keys"]["decoder"]
+            == expected_decoder_keys
+        )
 
     load_proof = load_fixture("layer-load-proof-v1.json")
     assert load_proof["assignment_id"] == tranche["assignments"][0]["assignment_id"]
     assert load_proof["loaded_tensor_keys"] == sorted(
         tranche["assignments"][0]["expected_tensor_keys"]
     )
+
+    submission_document = load_fixture("request-gateway-v1.json")
+    assert (
+        InferenceSubmission.from_dict(submission_document).to_dict()
+        == submission_document
+    )
+    submission_v2 = load_fixture("request-gateway-v2.json")
+    assert InferenceSubmission.from_dict(submission_v2).to_dict() == submission_v2
+    event_document = load_fixture("request-event-v1.json")
+    assert StreamEvent.from_dict(event_document).to_dict() == event_document
+
+    membership = load_fixture("membership-signed-message-v1.json")
+    assert (
+        verify_join_request(membership, now=1_100.0)["protocol"]
+        == JOIN_REQUEST_PROTOCOL
+    )
+
+    graph_document = load_fixture("execution-graph-v1.json")
+    graph = execution_graph_from_dict(graph_document)
+    path_document = load_fixture("path-manifest-v1.json")
+    path = path_manifest_from_dict(path_document)
+    assert path_manifest_to_dict(validate_manifest(path, graph)) == path_document
+
+    runtime_status = load_fixture("live-route-status-v1.json")
+    assert runtime_status["simulated"] is False
+    assert runtime_status["decode_mode"] == "stage_local_kv"
+    assert all(peer["active_kv_state_count"] == 0 for peer in runtime_status["peers"])
+
+    validate_cache_status(load_fixture("assignment-artifact-cache-v1.json"))
+    validate_materialization_report(load_fixture("assignment-materialization-v1.json"))
+    promotion = validate_candidate_promotion_report(
+        load_fixture("candidate-promotion-report-v1.json")
+    )
+    assert promotion["decision"] == "promote"
+    placement = validate_m13_placement_projection(
+        load_fixture("m13-placement-projection-v1.json")
+    )
+    assert placement["placement_provenance"] == "planner_v2"
+    transport_observation = validate_transport_path_observation(
+        load_fixture("transport-path-observation-v1.json"),
+        now_unix_ms=2_000,
+        require_resolved=True,
+    )
+    assert transport_observation["measurement_source"] == "iroh_activation_plane"
+    topology = validate_m14_topology_projection(
+        load_fixture("m14-topology-projection-v1.json")
+    )
+    assert len(topology["edges"]) == 6
+    workload_comparison = validate_m15_plan_comparison(
+        load_fixture("m15-plan-comparison-v1.json")
+    )
+    assert len(workload_comparison["comparisons"]) == 2
+    assert all(
+        comparison["selected_candidate_id"] in comparison["pareto_candidate_ids"]
+        for comparison in workload_comparison["comparisons"]
+    )
+    runtime_status = validate_m16_runtime_status(
+        load_fixture("concurrent-request-runtime-v1.json")
+    )
+    assert (
+        runtime_status["batch_state"]["mode"]
+        == "concurrent_request_sequential_stage_dispatch"
+    )
+    assert runtime_status["queue"]["depth"] == 0
+
+    transport = load_fixture("router-wire-v1.json")
+    golden_root = ROOT / "contracts" / "router-wire-golden"
+    assert transport == json.loads(
+        (golden_root / "index.json").read_text(encoding="utf-8")
+    )
+    for frame in transport["frames"]:
+        payload = (golden_root / frame["file"]).read_bytes()
+        assert hashlib.sha256(payload).hexdigest() == frame["frame_sha256"]
+        assert type(decode_frame(payload).message).__name__ == frame["message_type"]
+
+    recovery = load_fixture("layer-replan-simulation-report-v1.json")
+    simulated_recovery = json.loads(
+        json.dumps(simulate_bundle(ROOT / "scenarios" / "product-v1-replanning.json"))
+    )
+    assert recovery == simulated_recovery
+
+    semantic_snapshot = load_fixture("observatory-snapshot-v1.json")
+    assert decode_observatory_snapshot(semantic_snapshot) == semantic_snapshot
+    semantic_event = load_fixture("observatory-event-v1.json")
+    assert decode_observatory_event(semantic_event) == semantic_event
+
+
+def test_a6_runtime_contract_pins_live_projection_owners() -> None:
+    from scripts.contract_registry import CONTRACT_SPECS
+
+    spec = next(
+        item
+        for item in CONTRACT_SPECS
+        if item.protocol == "mycelium.full_context_recovery_runtime.v1"
+    )
+    assert {
+        "mycelium_live/router_port.py",
+        "mycelium_request_gateway/service.py",
+        "mycelium_ui_gateway/app.py",
+    }.issubset(spec.owner_sources)
+
+
+def test_a6_gate_contract_pins_physical_and_browser_harnesses() -> None:
+    from scripts.contract_registry import CONTRACT_SPECS
+
+    spec = next(
+        item
+        for item in CONTRACT_SPECS
+        if item.protocol == "mycelium.full_context_recovery_gate.v1"
+    )
+    assert {
+        "scripts/run_a6_recovery_case.py",
+        "scripts/run_a6_recovery_gate.py",
+        "ui/web/scripts/a6-product-browser-e2e.mjs",
+    }.issubset(spec.owner_sources)
+
+
+_A6_OWNER_REQUIREMENTS = {
+    "mycelium.private_request_replay_checkpoint.v1": {
+        "mycelium_a6_gateway.py",
+        "mycelium_a6_recovery.py",
+        "mycelium_request_gateway/service.py",
+    },
+    "mycelium.full_context_recovery_intent.v1": {
+        "mycelium_a6_recovery.py",
+        "mycelium_layer_planner/recovery_intent.py",
+    },
+    "mycelium.full_context_recovery_runtime.v1": {
+        "mycelium_a6_recovery.py",
+        "mycelium_m16_runtime.py",
+        "mycelium_live/router_port.py",
+        "mycelium_live/supervisor.py",
+        "mycelium_request_gateway/backend.py",
+        "mycelium_request_gateway/service.py",
+        "mycelium_product_spine/app.py",
+        "mycelium_product_spine/contracts.py",
+        "mycelium_product_spine/projector.py",
+        "mycelium_demo/product_stack.py",
+        "mycelium_ui_gateway/app.py",
+        "ui/web/src/features/productEvidence/contracts.ts",
+        "ui/web/src/features/recovery/RecoveryStatusBar.tsx",
+    },
+    "mycelium.full_context_recovery_qualification.v1": {
+        "mycelium_a6_m16.py",
+        "mycelium_a6_recovery.py",
+        "mycelium_live/a6_recovery.py",
+    },
+    "mycelium.full_context_recovery_gate.v1": {
+        "mycelium_a6_recovery.py",
+        "scripts/run_a6_recovery_case.py",
+        "scripts/run_a6_recovery_gate.py",
+        "ui/web/scripts/a6-product-browser-e2e.mjs",
+    },
+}
+
+
+def test_all_a6_contracts_pin_every_production_owner() -> None:
+    from scripts.contract_registry import CONTRACT_SPECS
+
+    by_protocol = {item.protocol: set(item.owner_sources) for item in CONTRACT_SPECS}
+    for protocol, required in _A6_OWNER_REQUIREMENTS.items():
+        assert required <= by_protocol[protocol], protocol

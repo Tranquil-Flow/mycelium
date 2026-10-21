@@ -1,0 +1,20 @@
+{
+  "authorized_product_action_count": 8,
+  "capability_count": 15,
+  "contract_manifest_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "contract_manifest_protocol": "mycelium.contract_manifest.v1",
+  "governance_gate_ok": true,
+  "governance_gate_protocol": "mycelium.governance_gate.v1",
+  "ledger_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "ledger_protocol": "mycelium.governance_ledger.v1",
+  "milestone_count": 7,
+  "observed_at_unix_ms": 1,
+  "protocol": "mycelium.governance_readiness.v1",
+  "release_exclusions": [
+    "runtime and physical gates remain open"
+  ],
+  "release_ready": false,
+  "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "source_kind": "source_control",
+  "source_worktree_clean": true
+}

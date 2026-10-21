@@ -1,0 +1,43 @@
+{
+  "ab_deltas": [],
+  "authority_generation": 2,
+  "decode_mode": "stage_local_kv",
+  "evidence_bundle_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+  "exclusions": [],
+  "links": [],
+  "nodes": [
+    {
+      "assigned_object_count": 2,
+      "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "assignment_id": "assignment-node-a",
+      "backend": "mlx",
+      "decode_mode": "stage_local_kv",
+      "decode_ms_per_layer_token": 0.2,
+      "end_layer_exclusive": 2,
+      "fast_allocatable_bytes": 2000000000,
+      "load_proof_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "node_id": "node-a",
+      "prefill_ms_per_layer_token": 0.1,
+      "profile_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+      "ready": true,
+      "source_evidence_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+      "start_layer": 0,
+      "total_allocatable_bytes": 4000000000
+    }
+  ],
+  "placement_provenance": "planner_v2",
+  "promotion": {
+    "candidate_deployment_id": "candidate-fixture",
+    "decision": "promote",
+    "incumbent_deployment_id": "incumbent-fixture",
+    "reasons": [],
+    "sample_size": 5
+  },
+  "protocol": "mycelium.m13_placement_projection.v1",
+  "quantization": "int8-weight-only",
+  "route_ready": false,
+  "snapshot_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+  "snapshot_generation": 9,
+  "valid_until_unix_ms": 6000,
+  "verification_key_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+}

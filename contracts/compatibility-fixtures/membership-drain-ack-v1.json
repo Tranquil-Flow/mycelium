@@ -1,0 +1,16 @@
+{
+  "active_requests": 0,
+  "completed_at": 1050.0,
+  "drain_id": "drain-fixture",
+  "expires_at": 1300.0,
+  "generation": 1,
+  "incarnation": "incarnation-fixture",
+  "issued_at": 1000.0,
+  "last_request_id": null,
+  "message_id": "drain_ack-fixture",
+  "protocol": "mycelium.membership.drain_ack.v1",
+  "recipient_node_id": "seed-node",
+  "sender_endpoint_id": "endpoint-node-a",
+  "sender_node_id": "node-a",
+  "swarm_id": "swarm-fixture"
+}

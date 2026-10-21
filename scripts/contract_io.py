@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Fail-closed descriptor-relative I/O for generated contract artifacts."""
 from __future__ import annotations
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 """Fail closed on cross-component contract hash or namespace drift."""
 from __future__ import annotations
 

@@ -1,0 +1,26 @@
+{
+  "endpoint_addr": {
+    "addrs": [
+      "iroh-relay://relay.example/node-a"
+    ],
+    "id": "endpoint-node-a"
+  },
+  "expires_at": 1300.0,
+  "generation": 0,
+  "incarnation": "incarnation-fixture",
+  "invite_nonce": "invite-fixture",
+  "issued_at": 1000.0,
+  "message_id": "join_request-fixture",
+  "peer_class": "mac_mlx_iroh",
+  "protocol": "mycelium.membership.join_request.v1",
+  "recipient_node_id": "seed-node",
+  "runtime_capability": {
+    "activation_protocol": "mycelium.router_wire.v1",
+    "runtime_backend": "mlx",
+    "transport": "iroh"
+  },
+  "sender_endpoint_id": "endpoint-node-a",
+  "sender_node_id": "node-a",
+  "software_version": "0.1.0",
+  "swarm_id": "swarm-fixture"
+}
