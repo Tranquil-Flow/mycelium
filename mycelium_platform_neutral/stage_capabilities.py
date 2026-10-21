@@ -20,6 +20,7 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 import importlib.util
 import re
+from types import MappingProxyType
 from typing import Any
 
 from .primitives import (
@@ -341,6 +342,52 @@ class StageCapabilities:
         return tuple(result)
 
 
+#: Static wire dtype ceiling per declared backend, for callers that only know the
+#: backend id (the route compiler); a full record's ``wire_dtypes_*`` may only
+#: narrow this.  Matches the per-backend rule enforced in ``from_mapping``.
+DECLARED_BACKEND_WIRE_DTYPES = MappingProxyType(
+    {
+        backend: (
+            frozenset({"float32"})
+            if backend in _FLOAT32_ONLY_BACKENDS
+            else frozenset(WIRE_DTYPES)
+        )
+        for backend in STAGE_BACKENDS
+    }
+)
+
+
+def _negotiate(
+    entries: Sequence[tuple[str, frozenset[str]]],
+    *,
+    requested: str | None,
+    enabled: Iterable[str],
+    runtime_present: Collection[str] | None,
+) -> str:
+    for backend, _common in entries:
+        if not stage_backend_selectable(backend, runtime_present=runtime_present):
+            raise PlatformNeutralContractError("fenced_stage_backend_unavailable")
+    try:
+        enabled_set = frozenset(enabled)
+    except TypeError:
+        raise PlatformNeutralContractError("wire_dtype_not_enabled") from None
+    dtype = ROUTE_WIRE_FALLBACK_DTYPE if requested is None else requested
+    require(
+        isinstance(dtype, str) and dtype in WIRE_DTYPES and dtype in enabled_set,
+        "wire_dtype_not_enabled",
+    )
+    mixed = len({backend for backend, _common in entries}) > 1
+    require(
+        dtype == ROUTE_WIRE_FALLBACK_DTYPE or not mixed,
+        "mixed_backend_route_requires_float32",
+    )
+    require(
+        all(dtype in common for _backend, common in entries),
+        "wire_dtype_negotiation_failed",
+    )
+    return dtype
+
+
 def negotiate_route_wire_dtype(
     capabilities: Sequence[StageCapabilities],
     *,
@@ -365,35 +412,47 @@ def negotiate_route_wire_dtype(
         and all(isinstance(item, StageCapabilities) for item in capabilities),
         "route_stage_capabilities_invalid",
     )
-    for item in capabilities:
-        if not stage_backend_selectable(item.backend, runtime_present=runtime_present):
-            raise PlatformNeutralContractError("fenced_stage_backend_unavailable")
-    try:
-        enabled_set = frozenset(enabled)
-    except TypeError:
-        raise PlatformNeutralContractError("wire_dtype_not_enabled") from None
-    dtype = ROUTE_WIRE_FALLBACK_DTYPE if requested is None else requested
-    require(
-        isinstance(dtype, str) and dtype in WIRE_DTYPES and dtype in enabled_set,
-        "wire_dtype_not_enabled",
-    )
-    mixed = len({item.backend for item in capabilities}) > 1
-    require(
-        dtype == ROUTE_WIRE_FALLBACK_DTYPE or not mixed,
-        "mixed_backend_route_requires_float32",
-    )
-    require(
-        all(
-            dtype in item.wire_dtypes_in and dtype in item.wire_dtypes_out
+    return _negotiate(
+        [
+            (item.backend, frozenset(item.wire_dtypes_in) & frozenset(item.wire_dtypes_out))
             for item in capabilities
-        ),
-        "wire_dtype_negotiation_failed",
+        ],
+        requested=requested,
+        enabled=enabled,
+        runtime_present=runtime_present,
     )
-    return dtype
+
+
+def negotiate_route_wire_dtype_for_backends(
+    backends: Sequence[str],
+    *,
+    requested: str | None = None,
+    enabled: Iterable[str] = DEFAULT_ENABLED_WIRE_DTYPES,
+    runtime_present: Collection[str] | None = None,
+) -> str:
+    """:func:`negotiate_route_wire_dtype` over declared backend ids only.
+
+    Uses each backend's static ceiling (:data:`DECLARED_BACKEND_WIRE_DTYPES`);
+    the route compiler calls this where it fixes the route's hop dtype.
+    """
+
+    require(
+        isinstance(backends, (list, tuple)) and bool(backends),
+        "route_stage_capabilities_invalid",
+    )
+    for backend in backends:
+        require_stage_backend(backend)
+    return _negotiate(
+        [(backend, DECLARED_BACKEND_WIRE_DTYPES[backend]) for backend in backends],
+        requested=requested,
+        enabled=enabled,
+        runtime_present=runtime_present,
+    )
 
 
 __all__ = [
     "ARCHITECTURES",
+    "DECLARED_BACKEND_WIRE_DTYPES",
     "DECODE_MODES",
     "DEFAULT_ENABLED_WIRE_DTYPES",
     "FENCED_STAGE_BACKENDS",
@@ -410,6 +469,7 @@ __all__ = [
     "WIRE_DTYPES",
     "admit_stage_quantization",
     "negotiate_route_wire_dtype",
+    "negotiate_route_wire_dtype_for_backends",
     "require_stage_backend",
     "stage_backend_selectable",
 ]

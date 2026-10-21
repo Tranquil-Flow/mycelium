@@ -227,7 +227,7 @@ def test_activation_valid_vectors_decode_to_the_recorded_elements():
 def test_activation_valid_vectors_include_format_extremes():
    by_file = {entry["file"]: entry for entry in _act_index()["vectors"]}
    f16 = bytes.fromhex(by_file["02-f16-1x2x4.bin"]["data_hex"])
-   assert f16[8:10] == (0x3C00).to_bytes(2, "little")  # 1.0
+   assert f16[4:6] == (0x3C00).to_bytes(2, "little")  # element 2 is 1.0
    assert (0x7BFF).to_bytes(2, "little") in {f16[i : i + 2] for i in range(0, len(f16), 2)}
    bf16 = bytes.fromhex(by_file["03-bf16-1x2x4.bin"]["data_hex"])
    assert (0x7F7F).to_bytes(2, "little") in {bf16[i : i + 2] for i in range(0, len(bf16), 2)}
@@ -308,3 +308,28 @@ def test_a_c99_decoder_consumes_every_activation_vector(tmp_path):
    valid = sum(1 for entry in index if entry["kind"] == "valid")
    reject = len(index) - valid
    assert completed.stdout == f"ok valid={valid} reject={reject}\n"
+
+
+@pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler on this host")
+def test_the_c_checker_is_not_vacuous(tmp_path):
+   binary = tmp_path / "myac_decode_check"
+   subprocess.run(
+      ["cc", "-std=c99", "-Wall", "-Wextra", "-Werror", "-o", str(binary),
+       str(ACT_DIR / "myac_decode_check.c")],
+      check=True,
+      capture_output=True,
+   )
+   original = (ACT_DIR / "vectors.tsv").read_text(encoding="utf-8")
+   mutations = {
+      "element byte": original.replace("\t803f\n", "\t813f\n", 1),
+      "dimension": original.replace("\t1,2,4\t", "\t1,2,5\t", 1),
+      "reject code": original.replace("invalid_activation_payload_magic", "unknown_activation_dtype_code", 1),
+   }
+   for label, mutated in mutations.items():
+      assert mutated != original, label
+      work = tmp_path / label.replace(" ", "_")
+      shutil.copytree(ACT_DIR, work)
+      (work / "vectors.tsv").write_text(mutated, encoding="utf-8")
+      completed = subprocess.run([str(binary), str(work)], capture_output=True, text=True)
+      assert completed.returncode == 1, label
+      assert completed.stderr.startswith("FAIL "), label

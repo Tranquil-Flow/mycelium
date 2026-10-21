@@ -1,0 +1,21 @@
+# mycelium.router_activation.golden.v1
+valid	01-f32-1x2x4.bin	3	3	1,2,4	00000000000000800000803f0000c0bfffff7f7f0000800001000000cdcccc3d
+valid	02-f16-1x2x4.bin	1	3	1,2,4	00000080003c00beff7b00040100662e
+valid	03-bf16-1x2x4.bin	2	3	1,2,4	00000080803fc0bf7f7f80000100cd3d
+valid	04-f32-rank1-3.bin	3	1	3	0000803f0000004000004040
+valid	05-f16-rank2-3x2.bin	1	2	3,2	003c00400042004400450046
+valid	06-bf16-rank3-1x1x1.bin	2	3	1,1,1	803f
+valid	07-f32-rank8-1x1x1x1x1x1x1x2.bin	3	8	1,1,1,1,1,1,1,2	000020c00000003e
+reject	r01-truncated-header.bin	truncated_activation_payload
+reject	r02-bad-magic.bin	invalid_activation_payload_magic
+reject	r03-unknown-version.bin	unknown_activation_payload_version
+reject	r04-unknown-dtype-code.bin	unknown_activation_dtype_code
+reject	r05-big-endian-flag.bin	unsupported_activation_byte_order
+reject	r06-rank-zero.bin	invalid_activation_rank
+reject	r07-rank-nine.bin	invalid_activation_rank
+reject	r08-truncated-shape.bin	truncated_activation_shape
+reject	r09-oversize-claim.bin	activation_payload_too_large
+reject	r10-data-shorter-than-header-claims.bin	activation_payload_length_mismatch
+reject	r11-trailing-byte.bin	activation_payload_length_mismatch
+reject	r12-zero-dimension.bin	invalid_activation_dimension
+reject	r13-shape-data-mismatch.bin	activation_data_length_mismatch

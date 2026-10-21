@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import struct
 import sys
 from typing import Any
 
@@ -35,6 +36,11 @@ from mycelium_router.contracts import (  # noqa: E402
    StageCost,
    TokenEvent,
 )
+from mycelium_router.payloads import (  # noqa: E402
+   PayloadError,
+   decode_activation,
+   encode_activation,
+)
 from mycelium_router.wire import (  # noqa: E402
    ROUTER_WIRE_PROTOCOL,
    decode_frame,
@@ -44,6 +50,8 @@ from mycelium_router.wire import (  # noqa: E402
 
 OUTPUT_DIR = ROOT / "contracts" / "router-wire-golden"
 INDEX_SCHEMA = "mycelium.router_wire.golden.v1"
+ACTIVATION_OUTPUT_DIR = ROOT / "contracts" / "router-activation-golden"
+ACTIVATION_SCHEMA = "mycelium.router_activation.golden.v1"
 
 
 def _graph() -> ExecutionGraph:
@@ -315,6 +323,165 @@ def generate() -> dict[str, Any]:
    return index
 
 
+_DTYPE_CODES = {"float16": 1, "bfloat16": 2, "float32": 3}
+_ACTIVATION_HEADER = struct.Struct(">4sBBBBQ")
+
+
+def _u16(*values: int) -> bytes:
+   return b"".join(struct.pack("<H", value) for value in values)
+
+
+def _f32(*values: float) -> bytes:
+   return b"".join(struct.pack("<f", value) for value in values)
+
+
+def _raw_frame(
+   *,
+   magic: bytes = b"MYAC",
+   version: int = 1,
+   dtype_code: int = 3,
+   rank: int | None = None,
+   byte_order: int = 1,
+   data_length: int | None = None,
+   dims: tuple[int, ...] = (1, 1, 1),
+   data: bytes = b"\x00\x00\x00\x00",
+) -> bytes:
+   """A hand-built frame, so reject vectors can break one field at a time."""
+
+   header = _ACTIVATION_HEADER.pack(
+      magic,
+      version,
+      dtype_code,
+      len(dims) if rank is None else rank,
+      byte_order,
+      len(data) if data_length is None else data_length,
+   )
+   return header + b"".join(struct.pack(">I", dim) for dim in dims) + data
+
+
+def _activation_fixtures() -> tuple[tuple[str, dict[str, Any], bytes], ...]:
+   """(file, metadata, frame): valid frames first, then reject frames.
+
+   Element values are chosen at the format edges: signed zero, one, a negative
+   value that needs a mantissa bit, the largest finite value, the smallest
+   normal and the smallest subnormal.
+   """
+
+   f32 = _f32(0.0, -0.0, 1.0, -1.5, 3.4028234663852886e38, 1.1754943508222875e-38, 1e-45, 0.1)
+   f16 = _u16(0x0000, 0x8000, 0x3C00, 0xBE00, 0x7BFF, 0x0400, 0x0001, 0x2E66)
+   bf16 = _u16(0x0000, 0x8000, 0x3F80, 0xBFC0, 0x7F7F, 0x0080, 0x0001, 0x3DCD)
+   valid = (
+      ("01-f32-1x2x4.bin", "float32", (1, 2, 4), f32),
+      ("02-f16-1x2x4.bin", "float16", (1, 2, 4), f16),
+      ("03-bf16-1x2x4.bin", "bfloat16", (1, 2, 4), bf16),
+      ("04-f32-rank1-3.bin", "float32", (3,), _f32(1.0, 2.0, 3.0)),
+      ("05-f16-rank2-3x2.bin", "float16", (3, 2), _u16(0x3C00, 0x4000, 0x4200, 0x4400, 0x4500, 0x4600)),
+      ("06-bf16-rank3-1x1x1.bin", "bfloat16", (1, 1, 1), _u16(0x3F80)),
+      ("07-f32-rank8-1x1x1x1x1x1x1x2.bin", "float32", (1, 1, 1, 1, 1, 1, 1, 2), _f32(-2.5, 0.125)),
+   )
+   fixtures: list[tuple[str, dict[str, Any], bytes]] = []
+   for name, dtype, shape, data in valid:
+      frame = encode_activation(dtype=dtype, shape=shape, data=data)
+      fixtures.append(
+         (
+            name,
+            {
+               "kind": "valid",
+               "dtype": dtype,
+               "dtype_code": _DTYPE_CODES[dtype],
+               "shape": list(shape),
+               "data_hex": data.hex(),
+            },
+            frame,
+         )
+      )
+   good = _raw_frame()
+   rejects = (
+      ("r01-truncated-header.bin", good[:15]),
+      ("r02-bad-magic.bin", _raw_frame(magic=b"MYAD")),
+      ("r03-unknown-version.bin", _raw_frame(version=2)),
+      ("r04-unknown-dtype-code.bin", _raw_frame(dtype_code=9)),
+      ("r05-big-endian-flag.bin", _raw_frame(byte_order=0)),
+      ("r06-rank-zero.bin", _raw_frame(rank=0, dims=())),
+      ("r07-rank-nine.bin", _raw_frame(dims=(1,) * 9)),
+      ("r08-truncated-shape.bin", _raw_frame(dims=(1, 1, 1))[: 16 + 8]),
+      ("r09-oversize-claim.bin", _raw_frame(data_length=268_435_457, data=b"")),
+      ("r10-data-shorter-than-header-claims.bin", _raw_frame(data_length=8, data=b"\x00\x00\x00\x00")),
+      ("r11-trailing-byte.bin", _raw_frame(data_length=4, data=b"\x00\x00\x00\x00\x00")),
+      ("r12-zero-dimension.bin", _raw_frame(dims=(1, 0, 1), data=b"")),
+      ("r13-shape-data-mismatch.bin", _raw_frame(dims=(1, 2, 1), data=b"\x00\x00\x00\x00")),
+   )
+   for name, frame in rejects:
+      try:
+         decode_activation(frame)
+      except PayloadError as error:
+         code = error.code
+      else:
+         raise RuntimeError(f"reject vector {name} decoded")
+      fixtures.append((name, {"kind": "reject", "expected_error": code}, frame))
+   return tuple(sorted(fixtures, key=lambda item: item[0]))
+
+
+def generate_activation() -> dict[str, Any]:
+   """Write the C-consumable ``MYAC`` activation vectors (own directory)."""
+
+   directory = ACTIVATION_OUTPUT_DIR
+   directory.mkdir(parents=True, exist_ok=True)
+   fixtures = _activation_fixtures()
+   expected_files = {name for name, _, _ in fixtures}
+   for old_frame in directory.glob("*.bin"):
+      if old_frame.name not in expected_files:
+         old_frame.unlink()
+
+   entries: list[dict[str, Any]] = []
+   rows = [f"# {ACTIVATION_SCHEMA}"]
+   for name, meta, frame in fixtures:
+      if meta["kind"] == "valid":
+         decoded = decode_activation(frame)
+         if (
+            decoded.dtype != meta["dtype"]
+            or list(decoded.shape) != meta["shape"]
+            or decoded.data.hex() != meta["data_hex"]
+         ):
+            raise RuntimeError(f"canonical round trip failed for {name}")
+         rows.append(
+            "\t".join(
+               (
+                  "valid",
+                  name,
+                  str(meta["dtype_code"]),
+                  str(len(meta["shape"])),
+                  ",".join(str(dim) for dim in meta["shape"]),
+                  meta["data_hex"],
+               )
+            )
+         )
+      else:
+         rows.append("\t".join(("reject", name, meta["expected_error"])))
+      (directory / name).write_bytes(frame)
+      entries.append(
+         {
+            "byte_length": len(frame),
+            "file": name,
+            "frame_sha256": hashlib.sha256(frame).hexdigest(),
+            **meta,
+         }
+      )
+
+   index = {"protocol": "MYAC/1", "schema": ACTIVATION_SCHEMA, "vectors": entries}
+   (directory / "index.json").write_text(
+      json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+   )
+   (directory / "vectors.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+   return index
+
+
 if __name__ == "__main__":
    generated = generate()
    print(f"generated {len(generated['frames'])} Router wire golden frames")
+   # stdout above is a pinned contract; the activation vectors report on stderr.
+   activation = generate_activation()
+   print(
+      f"generated {len(activation['vectors'])} MYAC activation golden vectors",
+      file=sys.stderr,
+   )

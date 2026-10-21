@@ -1,0 +1,197 @@
+{
+  "protocol": "MYAC/1",
+  "schema": "mycelium.router_activation.golden.v1",
+  "vectors": [
+    {
+      "byte_length": 60,
+      "data_hex": "00000000000000800000803f0000c0bfffff7f7f0000800001000000cdcccc3d",
+      "dtype": "float32",
+      "dtype_code": 3,
+      "file": "01-f32-1x2x4.bin",
+      "frame_sha256": "4ea490ee03a5270562721458a44ebc3e43dabf214ede5558aeb0ab2437cfb911",
+      "kind": "valid",
+      "shape": [
+        1,
+        2,
+        4
+      ]
+    },
+    {
+      "byte_length": 44,
+      "data_hex": "00000080003c00beff7b00040100662e",
+      "dtype": "float16",
+      "dtype_code": 1,
+      "file": "02-f16-1x2x4.bin",
+      "frame_sha256": "5f1edddc08cd1859286ee8af9fd008f123cc9e3ebcf4935a6fd7469e51b8910b",
+      "kind": "valid",
+      "shape": [
+        1,
+        2,
+        4
+      ]
+    },
+    {
+      "byte_length": 44,
+      "data_hex": "00000080803fc0bf7f7f80000100cd3d",
+      "dtype": "bfloat16",
+      "dtype_code": 2,
+      "file": "03-bf16-1x2x4.bin",
+      "frame_sha256": "39b55b0b76bcd2a80a3cbed258e8c7181fbac5e32b2193d00418c35789bc0893",
+      "kind": "valid",
+      "shape": [
+        1,
+        2,
+        4
+      ]
+    },
+    {
+      "byte_length": 32,
+      "data_hex": "0000803f0000004000004040",
+      "dtype": "float32",
+      "dtype_code": 3,
+      "file": "04-f32-rank1-3.bin",
+      "frame_sha256": "7a3206bb64ce93f49af38bae32d9b5100e3dd7e78bfe4a024276344ea7b1d966",
+      "kind": "valid",
+      "shape": [
+        3
+      ]
+    },
+    {
+      "byte_length": 36,
+      "data_hex": "003c00400042004400450046",
+      "dtype": "float16",
+      "dtype_code": 1,
+      "file": "05-f16-rank2-3x2.bin",
+      "frame_sha256": "7440ec351a14796aeb41b12a371714af5d89aa70250c2aa5fa6d7b74f0203da1",
+      "kind": "valid",
+      "shape": [
+        3,
+        2
+      ]
+    },
+    {
+      "byte_length": 30,
+      "data_hex": "803f",
+      "dtype": "bfloat16",
+      "dtype_code": 2,
+      "file": "06-bf16-rank3-1x1x1.bin",
+      "frame_sha256": "7db1b682394df567c741df436d2f7054e93ef0f01d4ae370c2bc5604936eba66",
+      "kind": "valid",
+      "shape": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "byte_length": 56,
+      "data_hex": "000020c00000003e",
+      "dtype": "float32",
+      "dtype_code": 3,
+      "file": "07-f32-rank8-1x1x1x1x1x1x1x2.bin",
+      "frame_sha256": "66f04b26fd2b14e7d7d8d570bc547d05e02fb7ec4810564a19728b2808bc56fd",
+      "kind": "valid",
+      "shape": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2
+      ]
+    },
+    {
+      "byte_length": 15,
+      "expected_error": "truncated_activation_payload",
+      "file": "r01-truncated-header.bin",
+      "frame_sha256": "d8771aaa90bf1d50e3bddb23ca2ef6fc573590b176cc6a22d80cb114c504e0fd",
+      "kind": "reject"
+    },
+    {
+      "byte_length": 32,
+      "expected_error": "invalid_activation_payload_magic",
+      "file": "r02-bad-magic.bin",
+      "frame_sha256": "4336b019f684859ae0f4886c72c5a2ec8e0658a37c2610e9536a717c990be148",
+      "kind": "reject"
+    },
+    {
+      "byte_length": 32,
+      "expected_error": "unknown_activation_payload_version",
+      "file": "r03-unknown-version.bin",
+      "frame_sha256": "e0bcdc2efefcc1dec5dda7c531d5abbe8adfb456506d3d331f102567eed96e6f",
+      "kind": "reject"
+    },
+    {
+      "byte_length": 32,
+      "expected_error": "unknown_activation_dtype_code",
+      "file": "r04-unknown-dtype-code.bin",
+      "frame_sha256": "ccf91682c39adf9e5888a74eb79113cc6ac2febc186985c6d753ed05c249c520",
+      "kind": "reject"
+    },
+    {
+      "byte_length": 32,
+      "expected_error": "unsupported_activation_byte_order",
+      "file": "r05-big-endian-flag.bin",
+      "frame_sha256": "6000517e15a7d0c70fc96135dc0f5ffae8d48ae9c00ef3be2a5c7a084b1eb83c",
+      "kind": "reject"
+    },
+    {
+      "byte_length": 20,
+      "expected_error": "invalid_activation_rank",
+      "file": "r06-rank-zero.bin",
+      "frame_sha256": "a229be1fdcc1571ba5fcc519aab665659482613661128f09c110896703cf063c",
+      "kind": "reject"
+    },
+    {
+      "byte_length": 56,
+      "expected_error": "invalid_activation_rank",
+      "file": "r07-rank-nine.bin",
+      "frame_sha256": "d4ceda82a117bf9fb2cbb24b6ff4869409724d2abe3e5455c86f674c785abaf8",
+      "kind": "reject"
+    },
+    {
+      "byte_length": 24,
+      "expected_error": "truncated_activation_shape",
+      "file": "r08-truncated-shape.bin",
+      "frame_sha256": "4a04e6b0b028f65fceddc7402eb9dc67e5139ac99cb5ce104df18acec3866e76",
+      "kind": "reject"
+    },
+    {
+      "byte_length": 28,
+      "expected_error": "activation_payload_too_large",
+      "file": "r09-oversize-claim.bin",
+      "frame_sha256": "67d1f52edfd142b6d17e5dca204fce1814aebf35a8e18c4f6f73cd87523f0ada",
+      "kind": "reject"
+    },
+    {
+      "byte_length": 32,
+      "expected_error": "activation_payload_length_mismatch",
+      "file": "r10-data-shorter-than-header-claims.bin",
+      "frame_sha256": "f7b00b6fb69e40949bc92146ffc8e57641dd61bfdb1590646a16bae4e4f6fd11",
+      "kind": "reject"
+    },
+    {
+      "byte_length": 33,
+      "expected_error": "activation_payload_length_mismatch",
+      "file": "r11-trailing-byte.bin",
+      "frame_sha256": "4f84a5672df3690e9d0757ddfd77a1ac190fbb9db13b63b4c8a90a62f6fdae0e",
+      "kind": "reject"
+    },
+    {
+      "byte_length": 28,
+      "expected_error": "invalid_activation_dimension",
+      "file": "r12-zero-dimension.bin",
+      "frame_sha256": "bfd07b2c9217e38ce7d0558a797ebf9e28b6371b890b66ef554563db3ff62f3e",
+      "kind": "reject"
+    },
+    {
+      "byte_length": 32,
+      "expected_error": "activation_data_length_mismatch",
+      "file": "r13-shape-data-mismatch.bin",
+      "frame_sha256": "6c431ec3d872d4797bf4cfdefa1e137ed16994b9ba62e3619ce91d7733cb9f3f",
+      "kind": "reject"
+    }
+  ]
+}

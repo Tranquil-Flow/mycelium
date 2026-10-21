@@ -620,6 +620,34 @@ def _resolve_bundle_file(bundle: Path, relative: object) -> Path:
     return path
 
 
+def _require_negotiated_wire_dtype(
+    model: ModelContract,
+    node_runtime_backends: Mapping[str, str] | None,
+    node_ids: set[str],
+) -> None:
+    """The route's one hop dtype must be the negotiated one, never assumed.
+
+    PV29 R-W1: float32 unless a separately gated decision widens it, and float32
+    only for mixed-backend routes.  Reaching here means every node's backend is
+    already a registered, unfenced stage backend (``node_runtime``).
+    """
+
+    from mycelium_platform_neutral.primitives import PlatformNeutralContractError
+    from mycelium_platform_neutral.stage_capabilities import (
+        negotiate_route_wire_dtype_for_backends,
+    )
+
+    backends = (
+        [model.runtime_backend] * len(node_ids)
+        if node_runtime_backends is None
+        else [node_runtime_backends[node_id] for node_id in sorted(node_ids)]
+    )
+    try:
+        negotiate_route_wire_dtype_for_backends(backends, requested=model.runtime_dtype)
+    except PlatformNeutralContractError:
+        raise ServingPreparationError("operator_plan_wire_dtype_mismatch") from None
+
+
 def _validate_operator_plan(
     plan_path: Path,
     prepared: PreparedSource,
@@ -691,6 +719,7 @@ def _validate_operator_plan(
         raise ServingPreparationError("operator_plan_duplicate_node")
     if node_runtime_backends is not None and set(node_runtime_backends) != node_ids:
         raise ServingPreparationError("operator_plan_representation_mismatch")
+    _require_negotiated_wire_dtype(prepared.model, node_runtime_backends, node_ids)
     expected = (
         prepared.model.model_id,
         prepared.model.resolved_commit,
