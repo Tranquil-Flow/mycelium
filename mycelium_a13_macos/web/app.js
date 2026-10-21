@@ -51,6 +51,7 @@ const HUMAN_ERRORS={
   pairing_window_relay_required:'Start the public relay to make join codes redeemable; codes can be asked for before that.',
   pairing_window_swarm_required:'Create the swarm first, then invite a Mac.',
   network_requires_fresh_owner:'A public relay is already running, or this Mac is not the owner.',
+  network_stop_local_contributor_required:'The public relay would move to a new address, which needs this Mac’s own contributor stopped first (local-contributor/stop). Reopen it on the same address of your own instead (no stop needed), or stop the contributor and press “Start public relay” again.',
   relay_required:'Members joined, but the public relay is not running. Press “Start public relay”, then try again.',
   join_acceptance_mismatch:'The invitation that came back is not the one this Mac asked for. Nothing was joined; ask the owner to approve this Mac again.',
   join_code_invalid:'That join code is not right. Check it against the owner’s screen and try again.',

@@ -676,8 +676,13 @@ class DemoApp:
         existing ``relocate_authority``), then the same route binding as a fresh start runs.  Any failure
         closes the relay and leaves the swarm exactly as it was.
         """
-        if self.installation_role!='owner' or self.public_relay is not None:
+        if self.installation_role!='owner':
             raise DemoError('network_requires_fresh_owner')
+        if self.public_relay is not None:
+            # A relay whose window ran out closed itself but is still attached: the same Start reopens it (V1.2 D4).
+            # One that is still running is not started a second time.
+            if self.public_relay.status().get('state')!='stopped':raise DemoError('network_requires_fresh_owner')
+            self.public_relay.close();self.public_relay=None
         external=body.get('provider')=='external'
         _base={'relay_acknowledged','max_seconds'}
         shape_ok=(_base|{'provider','public_origin','proxy_port'}<=set(body)<=_base|_EXTERNAL_OPTIONAL
@@ -687,7 +692,8 @@ class DemoApp:
             or type(body['max_seconds']) is not int or not 30<=body['max_seconds']<=1800):
             raise DemoError('network_consent_required')
         existing=bool(self.authority.status().get('swarm_created'))
-        if existing and getattr(self,'local_contributor',None) is not None:
+        if (existing and getattr(self,'local_contributor',None) is not None
+                and not self._external_origin_unchanged(body)):
             raise DemoError('network_stop_local_contributor_required')
         from . import endpoint_recovery
         relay=self._new_relay(self.root/'public-relay',body)
@@ -720,6 +726,19 @@ class DemoApp:
             self.public_relay=None
             relay.close();raise
 
+    def _external_origin_unchanged(self,spec):
+        """True when an external relay comes back on the address the retained authority already answers on.
+
+        Nothing is relocated then, so the owner's own contributor need not be stopped (V1.2 D4).  Any other
+        address keeps ``network_stop_local_contributor_required``.
+        """
+        if spec.get('provider')!='external':return False
+        try:
+            from .public_relay import validate_external_origin
+            configured=self.authority._network_configuration()
+            return configured is not None and configured['public_origin']==validate_external_origin(spec.get('public_origin'))
+        except Exception:return False
+
     def _new_relay(self,root,spec):
         """A not-yet-started relay for a validated request body; bad owner-chosen values are bounded codes."""
         from .public_relay import TemporaryHttpsRelay
@@ -734,9 +753,13 @@ class DemoApp:
         return relay
 
     def _relay_is_serving(self):
-        """True while an owner run is active: the external relay may extend itself only then (V1.1 e)."""
+        """True while an owner run is active or a swarm is published: the external relay may extend itself only then (V1.1 e, V1.2 D4)."""
         run=getattr(self,'owner_run',None)
-        return run is not None and run.active() is True
+        if run is not None and run.active() is True:return True
+        # A published swarm's listing points at this relay: keep it up (bounded by the same renewal cap) while idle.
+        publisher=getattr(self,'swarm_publisher',None)
+        state=getattr(publisher,'state',None)
+        return isinstance(state,dict) and state.get('enabled') is True
 
     @staticmethod
     def _free_seed_port(avoid=None):
@@ -1346,10 +1369,10 @@ class DemoApp:
                     or body['relay_acknowledged'] is not True
                     or type(body['max_seconds']) is not int or not 30<=body['max_seconds']<=1800):
                     raise DemoError('network_consent_required')
-                if getattr(self,'local_contributor',None) is not None:
+                spec={**self._saved_external_address(),**body} if external else body
+                if getattr(self,'local_contributor',None) is not None and not self._external_origin_unchanged(spec):
                     raise DemoError('network_stop_local_contributor_required')
                 from .endpoint_recovery import relocate_authority
-                spec={**self._saved_external_address(),**body} if external else body
                 if external and not {'public_origin','proxy_port'}<=set(spec):raise DemoError('relay_origin_invalid')
                 fresh=self._new_relay(self.root,spec) if external else None  # validated before the old relay is touched
                 if self.public_relay is not None:
