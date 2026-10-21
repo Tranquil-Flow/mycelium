@@ -1,0 +1,78 @@
+=== SUITE: iroh_conformance+request_conformance
+=== CMD: env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3 -B -m pytest -q -p no:cacheprovider tests/iroh_conformance tests/request_conformance
+=== START 2026-09-21T00:27:08Z
+........................................................................ [ 56%]
+.......................................................                  [100%]
+127 passed in 25.61s
+=== EXIT 0  END 2026-09-21T00:27:34Z
+
+=== SUITE: node_agent
+=== CMD: env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3 -B -m pytest -q -p no:cacheprovider tests/node_agent
+=== START 2026-09-21T00:27:34Z
+................................s....................................... [ 47%]
+........................................................................ [ 95%]
+.......                                                                  [100%]
+150 passed, 1 skipped in 77.78s (0:01:17)
+=== EXIT 0  END 2026-09-21T00:28:53Z
+
+=== SUITE: contracts
+=== CMD: env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3 -B -m pytest -q -p no:cacheprovider tests/contracts
+=== START 2026-09-21T00:28:53Z
+.............................                                            [100%]
+29 passed in 2.40s
+=== EXIT 0  END 2026-09-21T00:28:56Z
+
+=== SUITE: product_spine
+=== CMD: env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3 -B -m pytest -q -p no:cacheprovider tests/product_spine
+=== START 2026-09-21T00:28:56Z
+...........................                                              [100%]
+27 passed in 0.19s
+=== EXIT 0  END 2026-09-21T00:28:57Z
+
+=== SUITE: governance
+=== CMD: env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3 -B -m pytest -q -p no:cacheprovider tests/governance
+=== START 2026-09-21T00:28:57Z
+....................                                                     [100%]
+20 passed in 3.01s
+=== EXIT 0  END 2026-09-21T00:29:00Z
+
+=== SUITE: security
+=== CMD: env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3 -B -m pytest -q -p no:cacheprovider tests/security
+=== START 2026-09-21T00:29:00Z
+.........F                                                               [100%]
+=================================== FAILURES ===================================
+__________ test_current_checkout_and_runbook_preserve_claim_boundary ___________
+
+    def test_current_checkout_and_runbook_preserve_claim_boundary() -> None:
+        result = audit_repository(ROOT)
+        runbook = RUNBOOK.read_text(encoding="utf-8")
+    
+>       assert result["ok"] is True, result["findings"]
+E       AssertionError: [{'code': 'secret_cli_argument', 'line': 4020, 'path': 'mycelium_testbed/emulation.py', 'subject': '--token-steps'}]
+E       assert False is True
+
+tests/security/test_release_security_audit.py:332: AssertionError
+=========================== short test summary info ============================
+FAILED tests/security/test_release_security_audit.py::test_current_checkout_and_runbook_preserve_claim_boundary
+1 failed, 9 passed in 3.05s
+=== EXIT 1  END 2026-09-21T00:29:04Z
+
+=== SUITE: seed_coordinator_deselected
+=== CMD: env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3 -B -m pytest -q -p no:cacheprovider tests/seed_coordinator --deselect tests/seed_coordinator/test_local_two_node_native_process_e2e.py::test_local_two_node_native_process_e2e
+=== START 2026-09-21T00:29:04Z
+........................................................................ [ 18%]
+........................................................................ [ 36%]
+........................................................................ [ 54%]
+........................................................................ [ 72%]
+........................................................................ [ 90%]
+......................................                                   [100%]
+398 passed in 13.03s
+=== EXIT 0  END 2026-09-21T00:29:18Z
+
+=== SUITE: lane_audit
+=== CMD: env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3 -B -m pytest -q -p no:cacheprovider tests/lane_audit
+=== START 2026-09-21T00:29:18Z
+.........                                                                [100%]
+9 passed in 2.02s
+=== EXIT 0  END 2026-09-21T00:29:20Z
+

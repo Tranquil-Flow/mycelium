@@ -1,0 +1,10 @@
+#!/bin/sh
+# Counted by scripts/a13_operator/ssh_audit.py: log the call, then behave as ssh.
+log="${A13_SSH_LOG:-/tmp/asm/ssh-calls.log}"
+mkdir -p "$(dirname "$log")" 2>/dev/null
+# ONE line per invocation: a command argument containing newlines must not pose as several
+# calls. Measured 2026-09-16: the pre-launch sweep's 2 ssh calls logged as 10 lines, which
+# would have read as 10 calls. Command whitespace is normalised to single spaces for the log.
+cmd=$(printf '%s' "$*" | tr '\n' ' ')
+printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$cmd" >> "$log" 2>/dev/null
+exec "${A13_SSH_REAL:-/usr/bin/ssh}" "$@"

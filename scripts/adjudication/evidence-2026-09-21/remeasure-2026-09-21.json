@@ -1,0 +1,212 @@
+{
+ "core_head": "349845ba646c75aefbcee2309a123c454de016ba",
+ "core_head_short": "349845b",
+ "tree_dirty_entries": 0,
+ "a9_tip": "ba6abbe3a953a755c493f5c56025adeb1f91a35e",
+ "a9_base_claimed": "abe291c",
+ "a9_base_actual_merge_base": "abe291c3ae856bef60394f528f1f86bddf78b2ad",
+ "a9_base_short": "abe291c",
+ "unreachable_all_refs_count": 122,
+ "refs_total": 86,
+ "refs_not_ancestor_of_core": 54,
+ "doc_hex_tokens_distinct": 172,
+ "doc_tokens_resolving_as_commits_not_ancestor": 5,
+ "doc_token_examples": [
+  {
+   "token": "1aa70c64b14754b08abe55e8095c597d91b6d13c",
+   "full": "1aa70c64b14754b08abe55e8095c597d91b6d13c",
+   "in_unreachable": true
+  },
+  {
+   "token": "4bde254f3f53bd77ce9a642397e8cfc297425334",
+   "full": "4bde254f3f53bd77ce9a642397e8cfc297425334",
+   "in_unreachable": true
+  },
+  {
+   "token": "641eba4a78185fb23982bed1cdbe43b66b96983a",
+   "full": "641eba4a78185fb23982bed1cdbe43b66b96983a",
+   "in_unreachable": true
+  },
+  {
+   "token": "7ddd74d",
+   "full": "7ddd74dad61ddc0aa6cd06f67ddc1e13aed3e638",
+   "in_unreachable": true
+  },
+  {
+   "token": "95fe9b77d9fb6f43e96cdd35e7d5ee02e8dc136d",
+   "full": "95fe9b77d9fb6f43e96cdd35e7d5ee02e8dc136d",
+   "in_unreachable": true
+  }
+ ],
+ "review_cited": [
+  {
+   "short": "7ddd74d",
+   "full": "7ddd74dad61ddc0aa6cd06f67ddc1e13aed3e638",
+   "is_ancestor_of_core": false,
+   "in_unreachable_all_refs": true
+  },
+  {
+   "short": "a65fd54",
+   "full": "a65fd54df9495863c636b34ec49d09476e4eba08",
+   "is_ancestor_of_core": true,
+   "in_unreachable_all_refs": false
+  },
+  {
+   "short": "ba6abbe",
+   "full": "ba6abbe3a953a755c493f5c56025adeb1f91a35e",
+   "is_ancestor_of_core": false,
+   "in_unreachable_all_refs": true
+  },
+  {
+   "short": "22796ad",
+   "full": "22796ad005aaeeab41708ddb8ef526702d0db135",
+   "is_ancestor_of_core": false,
+   "in_unreachable_all_refs": true
+  },
+  {
+   "short": "8141289",
+   "full": "8141289ce3cce11a5291f8c04a6f9ba9e63f475d",
+   "is_ancestor_of_core": true,
+   "in_unreachable_all_refs": false
+  },
+  {
+   "short": "824ffc6",
+   "full": "824ffc6e2020cbc75bd00fdfb4232316745ea679",
+   "is_ancestor_of_core": false,
+   "in_unreachable_all_refs": true
+  }
+ ],
+ "candidates_found": 124,
+ "candidates_from_named_lanes_only": 32,
+ "candidates_in_unreachable_only": 122,
+ "demotion_arithmetic": {
+  "unreachable": 122,
+  "dangling_doc_named": 0,
+  "already_integrated_review_cited": 2,
+  "sum": 124,
+  "dangling_hashes": [],
+  "integrated_review_hashes": [
+   "a65fd54df9495863c636b34ec49d09476e4eba08",
+   "8141289ce3cce11a5291f8c04a6f9ba9e63f475d"
+  ]
+ },
+ "a9_lane_commit_count": 27,
+ "a9_lane_commits_ancestor_of_core": 0,
+ "a9_changed_paths_total": 209,
+ "a9_paths_added": 157,
+ "a9_paths_modified": 52,
+ "a9_paths_deleted": 0,
+ "a9_paths_other_status": 0,
+ "a9_paths_absent_at_core_head": 157,
+ "a9_paths_identical_at_core_head": 0,
+ "a9_paths_present_but_divergent": 52,
+ "a9_absent_sample": [
+  "contracts/compatibility-fixtures/a9-admission-authority-snapshot-v1.json",
+  "contracts/compatibility-fixtures/a9-admission-bootstrap-v1.json",
+  "contracts/compatibility-fixtures/a9-path-admission-v1.json",
+  "contracts/compatibility-fixtures/membership-assignment-offer-v2.json",
+  "contracts/compatibility-fixtures/membership-assignment-result-v2.json",
+  "contracts/compatibility-fixtures/membership-capability-publication-v2.json",
+  "contracts/compatibility-fixtures/membership-drain-ack-v2.json",
+  "contracts/compatibility-fixtures/membership-heartbeat-v2.json",
+  "contracts/compatibility-fixtures/membership-join-acceptance-v2.json",
+  "contracts/compatibility-fixtures/membership-join-request-v2.json"
+ ],
+ "a9_divergent_sample": [
+  "contracts/compatibility-fixtures/product-event-v1.json",
+  "contracts/compatibility-fixtures/product-snapshot-v1.json",
+  "contracts/contract-manifest.v1.json",
+  "docs/handover/mycelium-completion-checklist.v1.json",
+  "docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-peer-capability.md",
+  "layer_assignment.py",
+  "model_adapters.py",
+  "mycelium_live/route.py",
+  "mycelium_live/supervisor.py",
+  "mycelium_membership/contracts.py"
+ ],
+ "a9_added_paths_existing_at_head": 0,
+ "a9_added_paths_existing_sample": [],
+ "named_sample_paths": [
+  {
+   "path": "mycelium_membership/v2.py",
+   "exists_at_core_head": false,
+   "exists_in_a9_tip": true,
+   "identical_to_a9_tip": false,
+   "in_lane_changed_set": true
+  },
+  {
+   "path": "mycelium_membership/capability_v2.py",
+   "exists_at_core_head": false,
+   "exists_in_a9_tip": true,
+   "identical_to_a9_tip": false,
+   "in_lane_changed_set": true
+  },
+  {
+   "path": "mycelium_membership/migration.py",
+   "exists_at_core_head": false,
+   "exists_in_a9_tip": true,
+   "identical_to_a9_tip": false,
+   "in_lane_changed_set": true
+  },
+  {
+   "path": "mycelium_router/native_cpu_provider.py",
+   "exists_at_core_head": false,
+   "exists_in_a9_tip": true,
+   "identical_to_a9_tip": false,
+   "in_lane_changed_set": true
+  },
+  {
+   "path": "docs/superpowers/specs/mycelium-membership-control-v2.md",
+   "exists_at_core_head": false,
+   "exists_in_a9_tip": true,
+   "identical_to_a9_tip": false,
+   "in_lane_changed_set": true
+  },
+  {
+   "path": "docs/a9-native-cpu-provider.md",
+   "exists_at_core_head": false,
+   "exists_in_a9_tip": true,
+   "identical_to_a9_tip": false,
+   "in_lane_changed_set": true
+  },
+  {
+   "path": "contracts/contract-manifest.v1.json",
+   "exists_at_core_head": true,
+   "exists_in_a9_tip": true,
+   "identical_to_a9_tip": false,
+   "in_lane_changed_set": true
+  },
+  {
+   "path": "mycelium_a13_macos/peer.py",
+   "exists_at_core_head": true,
+   "exists_in_a9_tip": false,
+   "identical_to_a9_tip": false,
+   "in_lane_changed_set": false
+  }
+ ],
+ "core_paths_changed_since_a9_base": 455,
+ "core_commits_since_a9_base": 148,
+ "lane_paths_also_changed_in_core": 18,
+ "lane_paths_also_changed_in_core_sample": [
+  "contracts/contract-manifest.v1.json",
+  "docs/handover/mycelium-completion-checklist.v1.json",
+  "mycelium_live/route.py",
+  "mycelium_live/supervisor.py",
+  "mycelium_product_spine/contracts.py",
+  "mycelium_product_spine/projector.py",
+  "mycelium_router/mlx_runtime.py",
+  "mycelium_router/numpy_runtime.py",
+  "mycelium_router/transports/iroh.py",
+  "mycelium_seed/http.py",
+  "physical_inference_node.py",
+  "physical_inference_qualification.py",
+  "scripts/contract_registry.py",
+  "scripts/generate_contract_fixtures.py",
+  "tests/contracts/test_contract_fixtures.py",
+  "tests/product_spine/test_application.py",
+  "ui/web/src/App.tsx",
+  "ui/web/src/features/productEvidence/contracts.ts"
+ ],
+ "a9_lane_commits_with_patch_id_in_core": 0,
+ "a9_lane_commits_patch_id_matched_hashes": []
+}
