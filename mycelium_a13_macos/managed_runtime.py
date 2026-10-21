@@ -99,12 +99,13 @@ class ManagedTargetRuntime:
     # A16 defaults (also for partially-constructed runtimes): never withdrawn, no drain tick.
     _withdrawn=False
     _adaptive_drain=None
+    _idle_tick=None  # PV25: app-side idle link tick (policy out, node status in, energy); None = off
 
     def __init__(self, state_root, *, client, current_member, run_id, deployment_id,
                  staging:TargetStaging, archive:bytes, archive_digest,
                  resource_policy, limits, sidecar_binary, authorize_load,
                  preposition=None, endpoint_secret_file=None, sequence_root=None, _test_observer=None,
-                 adaptive_overlay=None, adaptive_drain=None):
+                 adaptive_overlay=None, adaptive_drain=None, idle_tick=None):
         if not callable(current_member) or not isinstance(staging,TargetStaging):
             raise RuntimeErrorCode('runtime_configuration_invalid')
         self._current_member=current_member
@@ -126,6 +127,7 @@ class ManagedTargetRuntime:
         self._adaptive=None
         # A16 drain-to-withdraw tick (callable taking this runtime); None = never unloads.
         self._adaptive_drain=adaptive_drain
+        self._idle_tick=idle_tick
         self._withdrawn=False
         if adaptive_overlay is not None:
             from .adaptive_host import OverlayPublisher
@@ -386,6 +388,9 @@ class ManagedTargetRuntime:
                 if self._adaptive_drain is not None:
                     try: self._adaptive_drain(self)
                     except Exception: pass  # a drain fault leaves the model loaded; it never kills control
+                if self._idle_tick is not None:
+                    try: self._idle_tick(self)
+                    except Exception: pass  # an idle/energy fault never stops control
                 self._replace_worker_if_dead()
                 step=self.pump.step()
                 # A retrying outbound is a bounded recovery, not a death: back off a

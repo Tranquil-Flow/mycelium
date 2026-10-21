@@ -235,7 +235,8 @@ class TargetApplication:
             resource_policy=resource_policy,limits=limits,sidecar_binary=sidecar_binary,
             authorize_load=authorize_load,endpoint_secret_file=endpoint_secret_file,
             sequence_root=self.peer.state_root,_test_observer=_test_observer,
-            adaptive_overlay=self.adaptive_overlay, adaptive_drain=self.adaptive_drain)
+            adaptive_overlay=self.adaptive_overlay, adaptive_drain=self.adaptive_drain,
+            idle_tick=getattr(self, 'idle_tick', None))
 
     def activate_runtime(self, runtime):
         """Attach an already admitted target-local runtime, never a web payload."""
