@@ -1,0 +1,129 @@
+{
+  "protocol": "mycelium.gate_requirements_spec.v1",
+  "gate_id": "A10",
+  "spec_version": 1,
+  "feature": "Concurrent and late requests are batched with exact output and material throughput gain within the tail budget; one real multi-position verification call matches sequential target authority.",
+  "claim_boundary": "requirements only: any member set that binds these roles from the seed membership and verified signed capability reports may run this gate; binding is not a gate result",
+  "model": {
+    "model_id": "qwen2.5-7b-instruct",
+    "weight_bytes": 15231233024,
+    "layer_count": 28,
+    "weight_bytes_source": "safetensors index total_size of the pinned Qwen2.5-7B-Instruct revision (about 15.2 GB)"
+  },
+  "resource_policy": {
+    "usable_memory_fraction": 0.75,
+    "memory_reserve_bytes": 2147483648,
+    "kv_headroom_fraction": 0.15,
+    "disk_reserve_bytes": 2147483648
+  },
+  "freshness": {
+    "max_report_age_seconds": 600
+  },
+  "roles": [
+    {
+      "role": "entry",
+      "count": {
+        "min": 1,
+        "max": 1
+      },
+      "fit": {
+        "fraction_of_model": 0.5
+      },
+      "requirements": {
+        "backends": [
+          "mlx"
+        ],
+        "max_link_rtt_ms": 250,
+        "min_link_bytes_per_second": 1000000,
+        "os_families": [
+          "macos"
+        ],
+        "power_sources": [
+          "external"
+        ],
+        "thermal_states": [
+          "fair",
+          "nominal"
+        ]
+      },
+      "may_share_member_with": [],
+      "same_backend_as": null
+    },
+    {
+      "role": "final",
+      "count": {
+        "min": 1,
+        "max": 1
+      },
+      "fit": {
+        "fraction_of_model": 0.5
+      },
+      "requirements": {
+        "backends": [
+          "mlx"
+        ],
+        "max_link_rtt_ms": 250,
+        "min_link_bytes_per_second": 1000000,
+        "os_families": [
+          "macos"
+        ],
+        "power_sources": [
+          "external"
+        ],
+        "thermal_states": [
+          "fair",
+          "nominal"
+        ]
+      },
+      "may_share_member_with": [],
+      "same_backend_as": null
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "verifier_matrix",
+      "requires_roles": {
+        "entry": 1,
+        "final": 1
+      }
+    },
+    {
+      "case_id": "verifier_product",
+      "requires_roles": {
+        "entry": 1,
+        "final": 1
+      }
+    },
+    {
+      "case_id": "benchmark",
+      "requires_roles": {
+        "entry": 1,
+        "final": 1
+      }
+    },
+    {
+      "case_id": "negatives",
+      "requires_roles": {
+        "entry": 1,
+        "final": 1
+      }
+    }
+  ],
+  "evidence": {
+    "per_case_fields": [
+      "case_id",
+      "candidate_commit",
+      "spec_digest",
+      "binding_digest",
+      "device_classes",
+      "outcome",
+      "evidence_digest"
+    ],
+    "binding_fields": [
+      "role",
+      "device_class",
+      "capability_digest",
+      "member_digest"
+    ]
+  }
+}

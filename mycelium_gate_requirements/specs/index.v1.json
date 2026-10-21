@@ -1,0 +1,37 @@
+{
+  "protocol": "mycelium.gate_requirements_spec_index.v1",
+  "specs": {
+    "A1": {
+      "file": "a1.v1.json",
+      "spec_digest": "sha256:0b535fd5f32d440eb8da935b1f10fd7dcb842f8d93db6fa2cf1b31a434a2d550"
+    },
+    "A10": {
+      "file": "a10.v1.json",
+      "spec_digest": "sha256:c915d3aed58b3a45e38ec8c165fc7d4e5b3689f748ee0d6c8b1a369db64a0004"
+    },
+    "A11": {
+      "file": "a11.v1.json",
+      "spec_digest": "sha256:0b55e322f3574d274987f78b00d71ad87853e01bd2f6d9ccaa47864feb105f80"
+    },
+    "A12": {
+      "file": "a12.v1.json",
+      "spec_digest": "sha256:d9fc5c337935b597d1d87fe3c6c42792fb776d0307ae1a1062dd7252dec55c14"
+    },
+    "A14": {
+      "file": "a14.v1.json",
+      "spec_digest": "sha256:60043f8ea848c762721797991036da17ce82b07daa48ba998652fbe9cda52642"
+    },
+    "A5": {
+      "file": "a5.v1.json",
+      "spec_digest": "sha256:a8cef89cb2acd5bd43ab3bfae0775fc3025200f0f9b649d338c4380e1c4e89cb"
+    },
+    "A6": {
+      "file": "a6.v1.json",
+      "spec_digest": "sha256:b35a63853e801a51f9f7745090bc5ea2f29a6533d11a1047c724c143982d58d4"
+    },
+    "A7": {
+      "file": "a7.v1.json",
+      "spec_digest": "sha256:06875bb0c2cd14d4099c8c9a297ed1b4494fe49ce65df77a509b84bfb4865358"
+    }
+  }
+}

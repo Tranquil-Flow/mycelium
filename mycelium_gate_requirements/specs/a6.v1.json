@@ -1,0 +1,206 @@
+{
+  "protocol": "mycelium.gate_requirements_spec.v1",
+  "gate_id": "A6",
+  "spec_version": 1,
+  "feature": "Kill a peer mid-request: a qualified successor continues with parity, zero duplicate delivery and exact cleanup; with no successor the request aborts explicitly.",
+  "claim_boundary": "requirements only: any member set that binds these roles from the seed membership and verified signed capability reports may run this gate; binding is not a gate result; every placement holds the complete model",
+  "model": {
+    "model_id": "qwen2.5-0.5b-instruct",
+    "weight_bytes": 999604126,
+    "layer_count": 24,
+    "weight_bytes_source": "pinned Qwen2.5-0.5B-Instruct snapshot bytes fetched and verified in A13 C3 (docs/handover/A13-MACOS-DEMO.md)"
+  },
+  "resource_policy": {
+    "usable_memory_fraction": 0.75,
+    "memory_reserve_bytes": 2147483648,
+    "kv_headroom_fraction": 0.15,
+    "disk_reserve_bytes": 2147483648
+  },
+  "freshness": {
+    "max_report_age_seconds": 600
+  },
+  "roles": [
+    {
+      "role": "entry",
+      "count": {
+        "min": 1,
+        "max": 1
+      },
+      "fit": "full_model",
+      "requirements": {
+        "backends": [
+          "mlx"
+        ],
+        "max_link_rtt_ms": 250,
+        "min_link_bytes_per_second": 1000000,
+        "os_families": [
+          "macos"
+        ],
+        "thermal_states": [
+          "fair",
+          "nominal"
+        ]
+      },
+      "may_share_member_with": [],
+      "same_backend_as": null
+    },
+    {
+      "role": "successor",
+      "count": {
+        "min": 1,
+        "max": 2
+      },
+      "fit": "full_model",
+      "requirements": {
+        "backends": [
+          "mlx",
+          "numpy"
+        ],
+        "max_link_rtt_ms": 250,
+        "min_link_bytes_per_second": 1000000,
+        "os_families": [
+          "linux",
+          "macos",
+          "windows"
+        ],
+        "thermal_states": [
+          "fair",
+          "nominal"
+        ]
+      },
+      "may_share_member_with": [],
+      "same_backend_as": null
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "ordinary_browser_source_failure_recovery",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 1
+      }
+    },
+    {
+      "case_id": "incompatible_successor",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 1
+      }
+    },
+    {
+      "case_id": "stale_qualification",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 1
+      }
+    },
+    {
+      "case_id": "foreign_qualification",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 1
+      }
+    },
+    {
+      "case_id": "unexecuted_qualification",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 1
+      }
+    },
+    {
+      "case_id": "mismatched_path_attempt",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 1
+      }
+    },
+    {
+      "case_id": "no_successor",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 1
+      }
+    },
+    {
+      "case_id": "successor_prefill_failure",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 1
+      }
+    },
+    {
+      "case_id": "cancellation_before_recovery",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 1
+      }
+    },
+    {
+      "case_id": "cancellation_during_prefill",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 1
+      }
+    },
+    {
+      "case_id": "timeout_during_recovery",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 1
+      }
+    },
+    {
+      "case_id": "exhausted_recovery_attempts",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 2
+      }
+    },
+    {
+      "case_id": "stale_source_output_after_fencing",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 1
+      }
+    },
+    {
+      "case_id": "cleanup_reservation_release",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 1
+      }
+    },
+    {
+      "case_id": "cleanup_authority_failure",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 1
+      }
+    },
+    {
+      "case_id": "shutdown_during_recovery",
+      "requires_roles": {
+        "entry": 1,
+        "successor": 1
+      }
+    }
+  ],
+  "evidence": {
+    "per_case_fields": [
+      "case_id",
+      "candidate_commit",
+      "spec_digest",
+      "binding_digest",
+      "device_classes",
+      "outcome",
+      "evidence_digest"
+    ],
+    "binding_fields": [
+      "role",
+      "device_class",
+      "capability_digest",
+      "member_digest"
+    ]
+  }
+}
