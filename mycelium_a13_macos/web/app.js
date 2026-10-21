@@ -243,7 +243,15 @@ function render(value) {
       if (!window.confirm('Revoke this membership? It cannot accept future work. Local identity and evidence are retained.')) return;
       void perform('/api/revoke',{node_id:member.node_id ?? member.member_id,generation:member.generation ?? member.membership_generation},'Membership revoked.');
     });
-    row.append(label,button);$('members').append(row);
+    // PV11: the member's reported Adaptive-sharing state with its freshness (allow-listed fields, text only).
+    const reported=document.createElement('span'); reported.className='member-state';
+    if (member.member_state) {
+      const extra=[member.member_state.reason_text,member.member_state.worker?`worker ${member.member_state.worker.state}`:null,
+        member.member_state.model?`model ${member.member_state.model.verification}`:null].filter(Boolean);
+      reported.textContent=member.member_state.line+(extra.length?` · ${extra.join(' · ')}`:'');
+      reported.dataset.state=member.member_state.state;
+    }
+    row.append(label,reported,button);$('members').append(row);
   }
 }
 async function refresh(announce=true) {

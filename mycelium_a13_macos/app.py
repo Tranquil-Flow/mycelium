@@ -439,6 +439,18 @@ def _sharing_status(app):
         return {'state':'idle','line':'Not sharing yet'}
 
 
+def _member_state_view(app, member):
+    """PV11: the member's reported A16 state with its freshness (never lets it break /api/status)."""
+    from .member_state import owner_member_view
+    return owner_member_view(app, member)
+
+
+def _member_state_report_status(app):
+    from .member_state import reporter_status
+    try: return reporter_status(app)
+    except Exception: return None
+
+
 def _peer_liveness():
     """Per-peer liveness (fresh/stale/quarantined, last seen) of the route open in this process, else None."""
     try:
@@ -1158,6 +1170,9 @@ class DemoApp:
                     self._standing_tick(); self.standing_error = None
                 except Exception as error:
                     self.standing_error = public_failure_code(error)
+                # PV1: the signed member state report goes out whether or not standing consent holds; it never raises.
+                from . import member_state
+                member_state.app_tick(self)
 
     def _join_flow_status(self):
         from .standing_consent import DISCLOSURE_TEXT, DISCLOSURE_DIGEST, load_standing_consent
@@ -1179,7 +1194,8 @@ class DemoApp:
             standing_error=self.standing_error,
             join_window=None if join is None else {'state':'waiting_for_owner',
                 'fingerprint':join['fingerprint'],'pinned':join['seed_key_digest'] is not None},
-            last_report=None if self.last_report is None else dict(self.last_report))
+            last_report=None if self.last_report is None else dict(self.last_report),
+            member_state_report=_member_state_report_status(self))
         return value
 
     def status(self):
@@ -1190,7 +1206,8 @@ class DemoApp:
             offsets = getattr(getattr(self, 'run_exchange', None), 'clock_offsets', None)
             value = {**value, 'members': [
                 {'node_id':m['node_id'],'generation':m['generation'],'lifecycle_state':m['lifecycle_state'],
-                 'clock':None if offsets is None else offsets.view(m['node_id'])}
+                 'clock':None if offsets is None else offsets.view(m['node_id']),
+                 'member_state':_member_state_view(self,m)}
                 for m in coordinator.members()]}
         from .run_model import document as run_model_document
         from .adaptive_owner import adaptive_status, adaptive_publication

@@ -61,8 +61,9 @@ def test_status_view_is_for_the_current_generation_only(world):
     assert members(app)[node]['member_state']['state'] == 'unknown'
 
 
-def test_owners_own_contributor_is_shown_from_its_local_facts(world):
+def test_owners_own_contributor_is_shown_from_its_local_facts(world, monkeypatch):
     app, actor, exchange = world
+    monkeypatch.setattr(app, 'local_contributor', actor)
     row = members(app)[actor.member.node_id]
     assert row['member_state']['state'] == 'reported' and row['member_state']['source'] == 'local'
     assert row['member_state']['age_seconds'] == 0 and row['member_state']['sharing']['state'] == 'normal'

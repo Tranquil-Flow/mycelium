@@ -136,6 +136,26 @@ def _label(report: Mapping[str, Any]) -> str:
     return 'Sharing'
 
 
+def reported_view(report: Mapping[str, Any], generation: int, age: float, received_at: float | None, *,
+                  source: str = 'report') -> dict[str, Any]:
+    """The owner-visible view of one held report; ``age`` is on the owner's clock."""
+    fresh = age <= FRESH_SECONDS
+    line = (f'{_label(report)} - reported {_age_text(age)}' if fresh
+            else f'Stale - last report {_age_text(age)} ({_label(report)})')
+    return {'state': 'reported' if fresh else 'stale', 'age_seconds': round(age, 1),
+            'since': None if fresh else received_at, 'generation': generation, 'source': source,
+            'sharing': report['sharing'], 'worker': report['worker'], 'model': report['model'],
+            'caps': report['caps'], 'service_mode': report['service_mode'], 'purpose': report['purpose'],
+            'reason_text': REASON_TEXT.get(report['sharing']['reason']) if report['sharing']['state'] != 'normal' else None,
+            'line': line}
+
+
+def unknown_view(generation: int | None, since: float | None, line: str) -> dict[str, Any]:
+    return {'state': 'unknown', 'age_seconds': None, 'since': since, 'generation': generation, 'source': 'none',
+            'sharing': None, 'worker': None, 'model': None, 'caps': None, 'service_mode': None, 'purpose': None,
+            'reason_text': None, 'line': line}
+
+
 class MemberStateChannel:
     """Owner side: the signed route, the latest report per member, and the view built from them."""
 
@@ -188,22 +208,9 @@ class MemberStateChannel:
         with self._lock:
             held = copy.deepcopy(self._latest.get(node_id))
         if held is None or (generation is not None and held['generation'] != generation):
-            return {'state': 'unknown', 'age_seconds': None, 'since': self.started_at, 'generation': generation,
-                    'sharing': None, 'worker': None, 'model': None, 'caps': None, 'service_mode': None,
-                    'purpose': None, 'reason_text': None,
-                    'line': f'Unknown - no report received yet (this view started {_age_text(now - self.started_at)})'}
-        report = held['report']
-        age = max(0.0, now - held['received_at'])
-        fresh = age <= FRESH_SECONDS
-        reason = report['sharing']['reason']
-        line = (f'{_label(report)} - reported {_age_text(age)}' if fresh
-                else f'Stale - last report {_age_text(age)} ({_label(report)})')
-        return {'state': 'reported' if fresh else 'stale', 'age_seconds': round(age, 1),
-                'since': None if fresh else held['received_at'], 'generation': held['generation'],
-                'sharing': report['sharing'], 'worker': report['worker'], 'model': report['model'],
-                'caps': report['caps'], 'service_mode': report['service_mode'], 'purpose': report['purpose'],
-                'reason_text': REASON_TEXT.get(reason) if report['sharing']['state'] != 'normal' else None,
-                'line': line}
+            return unknown_view(generation, self.started_at,
+                                f'Unknown - no report received yet (this view started {_age_text(now - self.started_at)})')
+        return reported_view(held['report'], held['generation'], max(0.0, now - held['received_at']), held['received_at'])
 
     def set_service_mode_provider(self, provider: Callable[[], Any] | None) -> None:
         self._service_mode = provider
@@ -507,3 +514,29 @@ def app_tick(app: Any) -> str | None:
 def reporter_status(app: Any) -> dict[str, Any] | None:
     reporter = getattr(app, 'member_state_reporter', None)
     return None if reporter is None else reporter.status()
+
+
+def owner_member_view(app: Any, member: Mapping[str, Any]) -> dict[str, Any]:
+    """``/api/status`` ``authority.members[].member_state``: what the owner knows of one member's A16 state.
+
+    The owner's own contributor is read from this process; every other member only from its signed reports (or
+    ``unknown``) - never assumed.  Never raises.
+    """
+    node, generation = member.get('node_id'), member.get('generation')
+    try:
+        local = getattr(app, 'local_contributor', None)
+        local_member = getattr(local, 'member', None)
+        if local_member is not None and getattr(local_member, 'node_id', None) == node:
+            facts = collect_facts(app)
+            report = validate_state_report({'protocol': STATE_REPORT, 'purpose': 'periodic', 'issued_at': time.time(),
+                                            **{**facts, 'generation': generation}})
+            return reported_view(report, generation, 0, None, source='local')
+    except Exception:
+        pass
+    channel = getattr(getattr(app, 'run_exchange', None), 'member_states', None)
+    try:
+        if channel is not None:
+            return channel.view(node, generation)
+    except Exception:
+        pass
+    return unknown_view(generation, None, 'Unknown - no report received yet')
