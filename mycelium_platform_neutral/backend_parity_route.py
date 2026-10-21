@@ -669,43 +669,6 @@ def load_oracle(path: Path, corpus: Mapping[str, Any], *, expected_digest: str |
     return bp.RouteCapture(cases=cases, meta={"kind": "oracle"})
 
 
-def generate_hf_oracle(snapshot: Path, corpus: Mapping[str, Any], out_path: Path, boundaries: Sequence[int]) -> dict[str, Any]:
-    """HF float32 CPU teacher-forced oracle (offline).  Needs torch + transformers (lazy)."""
-
-    import os
-
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    os.environ["TRANSFORMERS_OFFLINE"] = "1"
-    import torch
-    import transformers
-    from transformers import AutoModelForCausalLM
-
-    model = AutoModelForCausalLM.from_pretrained(str(snapshot), local_files_only=True, trust_remote_code=False, dtype=torch.float32)
-    model.eval()
-    cases: dict[str, bp.CaseCapture] = {}
-    with torch.inference_mode():
-        for case in corpus["cases"]:
-            ids = torch.tensor([case["token_ids"]], dtype=torch.long)
-            out = model(input_ids=ids, use_cache=False, output_hidden_states=True, return_dict=True)
-            positions = bp.scored_positions(case)
-            logits = out.logits[0, positions, :].float().numpy().astype(np.float32)
-            hops = {b: out.hidden_states[b][0, :-1, :].float().numpy().astype(np.float32) for b in boundaries}
-            cases[case["case_id"]] = bp.CaseCapture(case["case_id"], logits, hops, {}, 0)
-    identity = {
-        "implementation": "hf-transformers-float32-cpu-teacher-forced",
-        "runtime_digest": bp.digest_of(
-            {
-                "torch": torch.__version__,
-                "transformers": transformers.__version__,
-                "numpy": importlib.metadata.version("numpy"),
-                "dtype": "float32",
-                "device": "cpu",
-            }
-        ),
-    }
-    return save_oracle(out_path, bp.RouteCapture(cases=cases), identity)
-
-
 # --------------------------------------------------------------------------- route identity
 
 
@@ -720,10 +683,36 @@ def _backend_identity(backend: str) -> tuple[str, str, str]:
     raise bp.BackendParityError("parity_backend_unknown", backend)
 
 
-def route_document(ctx: Context, plan: RoutePlan, *, model_id: str, revision: str, source_digest: str) -> dict[str, Any]:
+def stage_identity(backend: str) -> dict[str, str]:
+    """Identity of the code that runs ``backend`` on THIS machine (travels in stage metadata)."""
+
+    version, build, device = _backend_identity(backend)
+    return {"backend": backend, "backend_version": version, "build_digest": build, "device_class": device}
+
+
+def route_document(
+    ctx: Context,
+    plan: RoutePlan,
+    *,
+    model_id: str,
+    revision: str,
+    source_digest: str,
+    identities: Sequence[Mapping[str, str]] | None = None,
+) -> dict[str, Any]:
+    """The declared route tuple.  ``identities`` (one per stage, from :func:`stage_identity` run on the
+    machine that executed the stage) overrides this machine's identity; its backend must match the plan."""
+
+    if identities is not None and len(identities) != len(plan.stages):
+        raise bp.BackendParityError("parity_route_invalid", "identity count")
     stages = []
     for index, stage in enumerate(plan.stages):
-        version, build, device = _backend_identity(stage.backend)
+        if identities is not None:
+            ident = identities[index]
+            if ident.get("backend") != stage.backend:
+                raise bp.BackendParityError("parity_route_invalid", f"stage {index} ran backend {ident.get('backend')}, plan says {stage.backend}")
+            version, build, device = ident["backend_version"], ident["build_digest"], ident["device_class"]
+        else:
+            version, build, device = _backend_identity(stage.backend)
         stages.append(
             {
                 "stage_index": index,
@@ -992,3 +981,176 @@ def legit_samples(rows: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, Any
         if q_name == "Q0":
             q_rows.append({"name": row["name"], "metrics": dict(row["metrics"]["Q0"])})
     return h_rows, q_rows
+
+
+# --------------------------------------------------------------------------- file-based stage replay
+#
+# Teacher-forced inputs are fixed, so stage k's hop frames do not depend on stage k+1: each
+# stage can run on its own machine, writing/reading real MYAC frames, and the combined result is
+# the same numerics as a live route.  This is how one parity run spans the two Macs and SB2
+# without a live network (see docs/design/PV29-SB2-FIRST-SLICE.md).
+
+FRAMES_PROTOCOL = "mycelium.backend_parity_frames.v1"
+
+
+def _case_steps(case: Mapping[str, Any]) -> list[tuple[slice, int]]:
+    """(token slice, position) of the prefill step followed by one decode step per forced token."""
+
+    prefill, total = case["prefill_len"], len(case["token_ids"])
+    return [(slice(0, prefill), 0), *[(slice(t, t + 1), t) for t in range(prefill, total - 1)]]
+
+
+def _encode_frame(hidden: np.ndarray, wire_mode: str) -> bytes:
+    from mycelium_router.payloads import encode_activation
+
+    array = np.ascontiguousarray(hidden, dtype=np.float32)
+    if wire_mode != "float32":
+        raise bp.BackendParityError("parity_wire_mode_invalid", "file replay carries honest float32 frames only")
+    return encode_activation(dtype="float32", shape=tuple(int(d) for d in array.shape), data=array.astype("<f4").tobytes())
+
+
+def _decode_frame(frame: bytes) -> tuple[np.ndarray, dict[str, Any]]:
+    from mycelium_router.payloads import decode_activation
+
+    envelope = decode_activation(bytes(frame))
+    if envelope.dtype == "float32":
+        array = np.frombuffer(envelope.data, dtype="<f4").astype(np.float32)
+    elif envelope.dtype == "float16":
+        array = np.frombuffer(envelope.data, dtype="<f2").astype(np.float32)
+    else:
+        array = (np.frombuffer(envelope.data, dtype="<u2").astype(np.uint32) << 16).view(np.float32)
+    return array.reshape(envelope.shape), {"dtype": envelope.dtype, "shape": tuple(envelope.shape)}
+
+
+def run_stage_frames(
+    ctx: Context,
+    plan: RoutePlan,
+    index: int,
+    frames_in: Mapping[str, list[bytes]] | None,
+    *,
+    timings: list[dict[str, Any]] | None = None,
+) -> tuple[dict[str, list[bytes]] | None, dict[str, np.ndarray] | None]:
+    """Run stage ``index`` of ``plan`` over every case.
+
+    ``timings`` (optional) receives one row per step: ``kind`` (prefill|decode), ``rows`` (tokens
+    processed), ``compute_s`` (frame decode + stage forward) and ``frame_s`` (frame encode).
+
+    Returns ``(frames_out, None)`` for a non-final stage and ``(None, logits_by_case)`` for the
+    final one.  ``frames_in`` is ``None`` only for stage 0 (which reads the corpus tokens).
+    """
+
+    n_stages = len(plan.stages)
+    if (index == 0) != (frames_in is None):
+        raise bp.BackendParityError("parity_stage_input_invalid", "only stage 0 reads tokens")
+    stage = _Stage(ctx, plan.stages[index], has_embed=index == 0, has_head=index == n_stages - 1)
+    frames_out: dict[str, list[bytes]] = {}
+    logits_out: dict[str, np.ndarray] = {}
+    for case in ctx.corpus["cases"]:
+        stage.reset()
+        ids = np.asarray(case["token_ids"], dtype=np.int64)[None, :]
+        steps = _case_steps(case)
+        if frames_in is not None and len(frames_in[case["case_id"]]) != len(steps):
+            raise bp.BackendParityError("parity_frames_case_mismatch", case["case_id"])
+        out_frames: list[bytes] = []
+        out_logits: list[np.ndarray] = []
+        for number, (token_slice, position) in enumerate(steps):
+            decode = number > 0
+            started = time.perf_counter()
+            if frames_in is None:
+                x = ids[:, token_slice]
+            else:
+                x, _ = _decode_frame(frames_in[case["case_id"]][number])
+            pos = position + stage.plan.position_offset + (stage.plan.decode_position_offset if decode else 0)
+            out = stage.forward(x, pos)
+            computed = time.perf_counter()
+            frame_s = 0.0
+            if index == n_stages - 1:
+                out_logits.append(out)
+            else:
+                out_frames.append(_encode_frame(out, plan.wire_mode))
+                frame_s = time.perf_counter() - computed
+            if timings is not None:
+                timings.append(
+                    {
+                        "case_id": case["case_id"],
+                        "kind": "decode" if decode else "prefill",
+                        "rows": int(token_slice.stop - token_slice.start),
+                        "compute_s": computed - started,
+                        "frame_s": frame_s,
+                    }
+                )
+        if index == n_stages - 1:
+            logits_out[case["case_id"]] = np.stack(out_logits).astype(np.float32)
+        else:
+            frames_out[case["case_id"]] = out_frames
+    return (frames_out, None) if index < n_stages - 1 else (None, logits_out)
+
+
+def save_frames(path: Path, frames: Mapping[str, list[bytes]], meta: Mapping[str, Any]) -> str:
+    arrays: dict[str, np.ndarray] = {}
+    for case_id, items in frames.items():
+        for number, frame in enumerate(items):
+            arrays[f"frame__{case_id}__{number:05d}"] = np.frombuffer(frame, dtype=np.uint8)
+    arrays["meta"] = np.frombuffer(json.dumps({"protocol": FRAMES_PROTOCOL, **dict(meta)}, sort_keys=True).encode(), dtype=np.uint8)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as handle:
+        np.savez(handle, **arrays)
+    return bp.file_digest(path)
+
+
+def load_frames(path: Path, corpus: Mapping[str, Any]) -> tuple[dict[str, list[bytes]], dict[str, Any]]:
+    with np.load(Path(path), allow_pickle=False) as archive:
+        meta = json.loads(bytes(archive["meta"].tobytes()).decode())
+        if meta.get("protocol") != FRAMES_PROTOCOL:
+            raise bp.BackendParityError("parity_frames_protocol_invalid")
+        frames: dict[str, list[bytes]] = {}
+        for case in corpus["cases"]:
+            count = len(_case_steps(case))
+            items = []
+            for number in range(count):
+                key = f"frame__{case['case_id']}__{number:05d}"
+                if key not in archive.files:
+                    raise bp.BackendParityError("parity_frames_case_mismatch", case["case_id"])
+                items.append(archive[key].tobytes())
+            frames[case["case_id"]] = items
+    return frames, meta
+
+
+def capture_from_frames(
+    ctx: Context,
+    plan: RoutePlan,
+    frames_by_boundary: Mapping[int, Mapping[str, list[bytes]]],
+    logits_by_case: Mapping[str, np.ndarray],
+) -> bp.RouteCapture:
+    """Assemble a RouteCapture from per-stage frame files and the final stage's logits."""
+
+    cases: dict[str, bp.CaseCapture] = {}
+    for case in ctx.corpus["cases"]:
+        case_id = case["case_id"]
+        hops, wire = {}, {}
+        for boundary, per_case in frames_by_boundary.items():
+            decoded = [_decode_frame(frame) for frame in per_case[case_id]]
+            hops[boundary] = np.concatenate([array[0] for array, _ in decoded], axis=0)
+            wire[boundary] = decoded[0][1]
+        cases[case_id] = bp.CaseCapture(case_id, np.asarray(logits_by_case[case_id], dtype=np.float32), hops, wire, 0)
+    return bp.RouteCapture(cases=cases, meta={"assembled_from": "stage frames"})
+
+
+def summarize_timings(timings: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Per-stage speed numbers from :func:`run_stage_frames` timing rows (compute only, no network)."""
+
+    prefill = [t for t in timings if t["kind"] == "prefill"]
+    decode = [t for t in timings if t["kind"] == "decode"]
+    out: dict[str, Any] = {"steps": len(timings), "prefill_steps": len(prefill), "decode_steps": len(decode)}
+    if prefill:
+        rows = sum(t["rows"] for t in prefill)
+        out["prefill_ms_per_token"] = round(1000 * sum(t["compute_s"] for t in prefill) / rows, 4)
+    if decode:
+        ordered = sorted(t["compute_s"] for t in decode)
+        median = ordered[len(ordered) // 2]
+        out["decode_ms_per_token_median"] = round(1000 * median, 4)
+        out["decode_ms_per_token_mean"] = round(1000 * sum(ordered) / len(ordered), 4)
+        out["decode_tokens_per_second_stage_local"] = round(1.0 / median, 3) if median > 0 else None
+        out["frame_encode_ms_per_decode_step_median"] = round(1000 * sorted(t["frame_s"] for t in decode)[len(decode) // 2], 4)
+    return out

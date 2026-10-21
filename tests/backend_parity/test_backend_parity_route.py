@@ -198,3 +198,68 @@ def test_route_document_is_a_valid_digest_bound_route(ctx) -> None:
     assert document["stages"][1]["device_class"] == "cpu"
     swapped = rt.route_document(ctx, _plan(ctx, "numpy", "mlx"), model_id="Qwen/Qwen2.5-0.5B-Instruct", revision=REVISION, source_digest="sha256:" + "a" * 64)
     assert bp.route_digest(swapped) != bp.route_digest(document)
+
+
+def test_stage_frame_replay_equals_the_in_process_route_bit_for_bit(tmp_path, ctx, policy, oracle) -> None:
+    plan = _plan(ctx)
+    frames0, _ = rt.run_stage_frames(ctx, plan, 0, None)
+    digest = rt.save_frames(tmp_path / "hops.npz", frames0, {"stage": 0})
+    assert digest.startswith("sha256:")
+    loaded, meta = rt.load_frames(tmp_path / "hops.npz", ctx.corpus)
+    assert meta["stage"] == 0 and loaded == frames0
+    _, logits = rt.run_stage_frames(ctx, plan, 1, loaded)
+    replayed = rt.capture_from_frames(ctx, plan, {2: loaded}, logits)
+    direct = rt.run_route(ctx, plan)
+    for case_id in direct.cases:
+        assert np.array_equal(replayed.cases[case_id].logits, direct.cases[case_id].logits)
+        assert np.array_equal(replayed.cases[case_id].hops[2], direct.cases[case_id].hops[2])
+        assert replayed.cases[case_id].hop_wire[2]["dtype"] == "float32"
+    gates = bp.evaluate_route(replayed, rt.Evaluator(ctx, policy, oracle).monolith(plan), oracle, policy, ["none", "none"])
+    assert gates["N"]["status"] == "pass"
+
+
+def test_stage_frame_replay_rejects_missing_or_mismatched_frames(tmp_path, ctx) -> None:
+    plan = _plan(ctx)
+    frames0, _ = rt.run_stage_frames(ctx, plan, 0, None)
+    short = {k: v[:-1] for k, v in frames0.items()}
+    with pytest.raises(bp.BackendParityError, match="parity_frames_case_mismatch"):
+        rt.run_stage_frames(ctx, plan, 1, short)
+    with pytest.raises(bp.BackendParityError, match="parity_stage_input_invalid"):
+        rt.run_stage_frames(ctx, plan, 1, None)
+    with pytest.raises(bp.BackendParityError, match="parity_stage_input_invalid"):
+        rt.run_stage_frames(ctx, plan, 0, frames0)
+    corrupted = {k: [bytes([v[0][0] ^ 0xFF]) + v[0][1:], *v[1:]] for k, v in frames0.items()}
+    from mycelium_router.payloads import PayloadError
+
+    with pytest.raises(PayloadError):
+        rt.run_stage_frames(ctx, plan, 1, corrupted)
+
+
+def test_stage_timings_split_prefill_and_decode(ctx) -> None:
+    plan = _plan(ctx)
+    timings: list[dict] = []
+    rt.run_stage_frames(ctx, plan, 0, None, timings=timings)
+    expected_steps = sum(len(rt._case_steps(c)) for c in ctx.corpus["cases"])
+    summary = rt.summarize_timings(timings)
+    assert summary["steps"] == expected_steps == len(timings)
+    assert summary["prefill_steps"] == len(ctx.corpus["cases"])
+    assert summary["decode_steps"] == expected_steps - len(ctx.corpus["cases"])
+    assert summary["decode_ms_per_token_median"] > 0 and summary["decode_tokens_per_second_stage_local"] > 0
+    assert summary["prefill_ms_per_token"] > 0
+    assert all(t["kind"] in ("prefill", "decode") for t in timings)
+
+
+def test_route_document_takes_stage_identity_from_the_machine_that_ran_the_stage(ctx) -> None:
+    plan = _plan(ctx)
+    identities = [rt.stage_identity("mlx"), {**rt.stage_identity("numpy"), "backend_version": "9.9.9"}]
+    document = rt.route_document(
+        ctx, plan, model_id="Qwen/Qwen2.5-0.5B-Instruct", revision=REVISION, source_digest="sha256:" + "a" * 64, identities=identities
+    )
+    assert document["stages"][1]["backend_version"] == "9.9.9"
+    local = rt.route_document(ctx, plan, model_id="Qwen/Qwen2.5-0.5B-Instruct", revision=REVISION, source_digest="sha256:" + "a" * 64)
+    assert bp.route_digest(document) != bp.route_digest(local)
+    with pytest.raises(bp.BackendParityError, match="parity_route_invalid"):
+        rt.route_document(
+            ctx, plan, model_id="Qwen/Qwen2.5-0.5B-Instruct", revision=REVISION, source_digest="sha256:" + "a" * 64,
+            identities=[rt.stage_identity("numpy"), rt.stage_identity("numpy")],
+        )
