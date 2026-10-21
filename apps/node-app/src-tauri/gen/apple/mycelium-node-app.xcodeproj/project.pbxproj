@@ -1,0 +1,480 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0D49E6475156044A93E4E2EF /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CFC509C648A60156EC65F362 /* Security.framework */; };
+		127E194C6FA4B1CA2F2FA73E /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1D1AF37475837983A66E71F /* Metal.framework */; };
+		1779ABA8E041641C8FCB5C4E /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4C11A069E62B2223ECAF3213 /* CoreGraphics.framework */; };
+		21A76EA44C1863FB11032669 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 465BF0018E5ACBD797F4516C /* QuartzCore.framework */; };
+		26E0EE889B3ED1DEC883D62C /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 79EEC799B93806A08D20D8A2 /* LaunchScreen.storyboard */; };
+		5348203D58D1D52B76C28530 /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 31FEF96B3BE78516915286FA /* SystemConfiguration.framework */; };
+		6D3A9C89DFD2F0C5243BB34E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 11DA6F7DCABA2A8A42A72E09 /* Assets.xcassets */; };
+		894834A4D264C222DFC1937A /* assets in Resources */ = {isa = PBXBuildFile; fileRef = DA393D3EFA12B6AC499F0E24 /* assets */; };
+		AD9E3684F982D69519E0CEBF /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = C82FE61BC99B182A057FE52F /* main.mm */; };
+		E38B358D42ABF55CC399A6A8 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 57D0625969EA98D7C3164F40 /* UIKit.framework */; };
+		E427181968077939E0CEDC64 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 10CBBEE66C444071A436CEC4 /* MetalKit.framework */; };
+		F265E07C4515AA1B99DC65E1 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 38AD11C238CB77EE9003A52D /* libapp.a */; };
+		F55C956A6B0AF8E1F3108460 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8C56058B12A9FCC63AAE821D /* WebKit.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		10CBBEE66C444071A436CEC4 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
+		11DA6F7DCABA2A8A42A72E09 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		31FEF96B3BE78516915286FA /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
+		38AD11C238CB77EE9003A52D /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
+		3BC4AE42533F9DD75A211A7A /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
+		465BF0018E5ACBD797F4516C /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		4C11A069E62B2223ECAF3213 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
+		503635C23811B7C519F757D9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		57D0625969EA98D7C3164F40 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		6B88685A42D72CB2D3F4E8AE /* mycelium-node-app_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "mycelium-node-app_iOS.entitlements"; sourceTree = "<group>"; };
+		79EEC799B93806A08D20D8A2 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		8C56058B12A9FCC63AAE821D /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
+		A1D1AF37475837983A66E71F /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		B599F4F9F8A3712B4BAA844F /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
+		C82FE61BC99B182A057FE52F /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
+		CA74E869CC4D697CC73029FB /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
+		CD3C923FCA0BA6FC805095AD /* node_service.rs */ = {isa = PBXFileReference; path = node_service.rs; sourceTree = "<group>"; };
+		CFC509C648A60156EC65F362 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		DA393D3EFA12B6AC499F0E24 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
+		E83E723767144C154F75FD22 /* mycelium-node-app_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "mycelium-node-app_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		687D4EB47ECF93F5876ED922 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F265E07C4515AA1B99DC65E1 /* libapp.a in Frameworks */,
+				1779ABA8E041641C8FCB5C4E /* CoreGraphics.framework in Frameworks */,
+				127E194C6FA4B1CA2F2FA73E /* Metal.framework in Frameworks */,
+				E427181968077939E0CEDC64 /* MetalKit.framework in Frameworks */,
+				21A76EA44C1863FB11032669 /* QuartzCore.framework in Frameworks */,
+				0D49E6475156044A93E4E2EF /* Security.framework in Frameworks */,
+				5348203D58D1D52B76C28530 /* SystemConfiguration.framework in Frameworks */,
+				E38B358D42ABF55CC399A6A8 /* UIKit.framework in Frameworks */,
+				F55C956A6B0AF8E1F3108460 /* WebKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0AFA26C043B34AD7BC9E0F33 /* mycelium-node-app */ = {
+			isa = PBXGroup;
+			children = (
+				C82FE61BC99B182A057FE52F /* main.mm */,
+				E1124D192641D1B3408073BE /* bindings */,
+			);
+			path = "mycelium-node-app";
+			sourceTree = "<group>";
+		};
+		0C46A8679241BAA2BC355823 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				0AFA26C043B34AD7BC9E0F33 /* mycelium-node-app */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		4226C908CF383C07A480C35F /* Externals */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Externals;
+			sourceTree = "<group>";
+		};
+		58645E58941901B472CE04A4 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				4C11A069E62B2223ECAF3213 /* CoreGraphics.framework */,
+				38AD11C238CB77EE9003A52D /* libapp.a */,
+				A1D1AF37475837983A66E71F /* Metal.framework */,
+				10CBBEE66C444071A436CEC4 /* MetalKit.framework */,
+				465BF0018E5ACBD797F4516C /* QuartzCore.framework */,
+				CFC509C648A60156EC65F362 /* Security.framework */,
+				31FEF96B3BE78516915286FA /* SystemConfiguration.framework */,
+				57D0625969EA98D7C3164F40 /* UIKit.framework */,
+				8C56058B12A9FCC63AAE821D /* WebKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		8BF61447B3463D4A523E5BB0 = {
+			isa = PBXGroup;
+			children = (
+				DA393D3EFA12B6AC499F0E24 /* assets */,
+				11DA6F7DCABA2A8A42A72E09 /* Assets.xcassets */,
+				79EEC799B93806A08D20D8A2 /* LaunchScreen.storyboard */,
+				4226C908CF383C07A480C35F /* Externals */,
+				D977EF1BB7FD807463A58D62 /* mycelium-node-app_iOS */,
+				0C46A8679241BAA2BC355823 /* Sources */,
+				F9DE384E8D96A8E3CBC487DE /* src */,
+				58645E58941901B472CE04A4 /* Frameworks */,
+				C3AD53AF0B765AD40D955F16 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C3AD53AF0B765AD40D955F16 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				E83E723767144C154F75FD22 /* mycelium-node-app_iOS.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D977EF1BB7FD807463A58D62 /* mycelium-node-app_iOS */ = {
+			isa = PBXGroup;
+			children = (
+				503635C23811B7C519F757D9 /* Info.plist */,
+				6B88685A42D72CB2D3F4E8AE /* mycelium-node-app_iOS.entitlements */,
+			);
+			path = "mycelium-node-app_iOS";
+			sourceTree = "<group>";
+		};
+		E1124D192641D1B3408073BE /* bindings */ = {
+			isa = PBXGroup;
+			children = (
+				CA74E869CC4D697CC73029FB /* bindings.h */,
+			);
+			path = bindings;
+			sourceTree = "<group>";
+		};
+		F9DE384E8D96A8E3CBC487DE /* src */ = {
+			isa = PBXGroup;
+			children = (
+				B599F4F9F8A3712B4BAA844F /* lib.rs */,
+				3BC4AE42533F9DD75A211A7A /* main.rs */,
+				CD3C923FCA0BA6FC805095AD /* node_service.rs */,
+			);
+			name = src;
+			path = ../../src;
+			sourceTree = "<group>";
+		};
+		"TEMP_B5E8E45E-D4B5-45F1-94A5-BC5934F4A856" /* arm64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = arm64;
+			sourceTree = "<group>";
+		};
+		"TEMP_FE426A56-1424-44CF-8DAF-42937C4F2437" /* x86_64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = x86_64;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B5106AC9F3795F939E5C2A21 /* mycelium-node-app_iOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BCFAEAA6D3EB658203BE1104 /* Build configuration list for PBXNativeTarget "mycelium-node-app_iOS" */;
+			buildPhases = (
+				A8976B8B3DC2671F6D1E1ADE /* Build Rust Code */,
+				D459C0FC64DB7B9891797EED /* Sources */,
+				FC5DA6D394813FBEE1C0D1CC /* Resources */,
+				687D4EB47ECF93F5876ED922 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "mycelium-node-app_iOS";
+			packageProductDependencies = (
+			);
+			productName = "mycelium-node-app_iOS";
+			productReference = E83E723767144C154F75FD22 /* mycelium-node-app_iOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		4DD821007BEB794BC7D7C3A1 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = C77923571A245973DE59E60A /* Build configuration list for PBXProject "mycelium-node-app" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 8BF61447B3463D4A523E5BB0;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = C3AD53AF0B765AD40D955F16 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B5106AC9F3795F939E5C2A21 /* mycelium-node-app_iOS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		FC5DA6D394813FBEE1C0D1CC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6D3A9C89DFD2F0C5243BB34E /* Assets.xcassets in Resources */,
+				26E0EE889B3ED1DEC883D62C /* LaunchScreen.storyboard in Resources */,
+				894834A4D264C222DFC1937A /* assets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A8976B8B3DC2671F6D1E1ADE /* Build Rust Code */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Rust Code";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a",
+				"$(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "npm run -- tauri ios xcode-script -v --platform \"${PLATFORM_DISPLAY_NAME:?}\" --sdk-root \"${SDKROOT:?}\" --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration \"${CONFIGURATION:?}\" ${FORCE_COLOR} ${ARCHS:?}\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		D459C0FC64DB7B9891797EED /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AD9E3684F982D69519E0CEBF /* main.mm in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		7E1133B437D022C15DE309FE /* release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				ARCHS = (
+					arm64,
+				);
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "mycelium-node-app_iOS/mycelium-node-app_iOS.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_BITCODE = NO;
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".\"",
+				);
+				INFOPLIST_FILE = "mycelium-node-app_iOS/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = now.mycelium.node;
+				PRODUCT_NAME = "Mycelium Node";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALID_ARCHS = arm64;
+			};
+			name = release;
+		};
+		9ECE815BA4EE26CC90C89096 /* release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = release;
+		};
+		E21C50610B9AFF2E9C30360C /* debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				ARCHS = (
+					arm64,
+				);
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "mycelium-node-app_iOS/mycelium-node-app_iOS.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_BITCODE = NO;
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".\"",
+				);
+				INFOPLIST_FILE = "mycelium-node-app_iOS/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = now.mycelium.node;
+				PRODUCT_NAME = "Mycelium Node";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALID_ARCHS = arm64;
+			};
+			name = debug;
+		};
+		E6CCCB10080F89403083D103 /* debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		BCFAEAA6D3EB658203BE1104 /* Build configuration list for PBXNativeTarget "mycelium-node-app_iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E21C50610B9AFF2E9C30360C /* debug */,
+				7E1133B437D022C15DE309FE /* release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = debug;
+		};
+		C77923571A245973DE59E60A /* Build configuration list for PBXProject "mycelium-node-app" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E6CCCB10080F89403083D103 /* debug */,
+				9ECE815BA4EE26CC90C89096 /* release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 4DD821007BEB794BC7D7C3A1 /* Project object */;
+}
