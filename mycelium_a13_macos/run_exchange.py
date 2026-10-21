@@ -25,6 +25,7 @@ import uuid
 from typing import Any, Mapping
 
 from .clock_offset import PeerClockOffsets
+from .member_state import MemberStateChannel
 from .managed_control import (_BINDING_FIELDS, _REQUEST_COMMON_FIELDS, _RESPONSE_COMMON_FIELDS,
                               ManagedControlError, _binding_from_member)
 
@@ -126,6 +127,8 @@ class RunExchange:
         self._issued: dict[str, float] = {}
         #: Each peer's clock offset from the timestamps it signs (V1.1 a); survives ``forget_reports``.
         self.clock_offsets = PeerClockOffsets(clock=clock)
+        #: Signed member state reports (PV1): in memory only, so a restarted owner rebuilds from the members' next reports.
+        self.member_states = MemberStateChannel(mailbox, clock=clock)
         self._model_source = None
         self.announce(phase='idle')
 
@@ -134,7 +137,14 @@ class RunExchange:
         routes[PATH_READ] = self._read
         routes[PATH_REPORT] = self._report
         self.mailbox.route_extensions = routes
+        self.member_states.install()
         return self
+
+    def set_service_mode_provider(self, provider) -> None:
+        """``provider() -> 'interactive' | 'batch' | None``: the owner's service mode, carried in every announcement."""
+        if provider is not None and not callable(provider):
+            raise ValueError('demo_announcement_invalid')
+        self.member_states.set_service_mode_provider(provider)
 
     # -- owner API ------------------------------------------------------------
     def announce(self, *, phase: str, run_id: str | None = None, deployment_id: str | None = None,
@@ -224,6 +234,9 @@ class RunExchange:
             value['work_limits'] = extra['work_limits']
         value['member_resources'] = extra.get('resources')
         value['model_source'] = self._model_source_hint(value['phase'])
+        # PV1: ask a member that has no fresh report (e.g. after this owner restarted) for one now.
+        value['member_state_requested'] = node_id is not None and not self.member_states.is_fresh(node_id)
+        value['service_mode'] = self.member_states.owner_service_mode()
         return value
 
     def reports(self) -> dict[str, dict[str, Any]]:

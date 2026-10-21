@@ -306,8 +306,9 @@ def test_collect_facts_projects_adaptive_state_without_app_names(tmp_path):
     value = collect_facts(app)
     assert value['sharing'] == {'state': 'paused', 'reason': 'owner_game_mode', 'adaptive_enabled': True}
     assert value['worker']['state'] in {'running', 'idle', 'warming'}
+    assert value['generation'] is None                                   # not a member: nothing to report for
     validate_state_report({'protocol': 'mycelium.v2_member_state_report.v1', 'purpose': 'periodic',
-                           'issued_at': time.time(), **value})
+                           'issued_at': time.time(), **{**value, 'generation': 1}})
     text = json.dumps(value)
     assert 'Zoom' not in text and 'app_name' not in text
 
