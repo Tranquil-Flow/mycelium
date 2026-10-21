@@ -47,6 +47,11 @@ RUNTIME_BACKEND_STAGES = MappingProxyType(
         "mlx": "implemented",
         "numpy": "implemented",
         "llama_http": "implemented",
+        # PV29 patched-llama.cpp layer-range stage backend.  ``fenced`` is a
+        # declared identity only: it is never ``implemented`` (so it cannot be
+        # qualified) and is selectable only when its runtime module is present
+        # (see ``stage_capabilities.stage_backend_selectable``).
+        "llama_stage": "fenced",
         "openrouter_http": "implemented",
         # The A9 native accelerated Windows x86_64 provider (source tranche in
         # ``mycelium_platform_neutral/windows_provider.py``).  Registration is a
