@@ -2968,7 +2968,7 @@ class PhysicalLiveRoute:
         WarmingCoordinator(
             send_reload=reload_peer,
             health=probe,
-            cached=lambda node_id: self._last_health.get(node_id),
+            cached=lambda node_id: getattr(self, "_last_health", {}).get(node_id),
             deadline_s=self._idle_warm_deadline_s,
             poll_s=self._idle_warm_poll_s,
             recent_activity_s=0.0,
