@@ -1,0 +1,46 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.8, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/evinova-self/Projects/mycelium-rel2-siteux-p3
+configfile: pytest.ini
+plugins: xdist-3.8.0, anyio-4.12.1, asyncio-1.3.0, langsmith-0.7.16
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+created: 1/1 worker
+1 worker [2 items]
+
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_____________ test_apex_explains_without_identity_or_chat_surface ______________
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+    def test_apex_explains_without_identity_or_chat_surface():
+        running = DirectoryServer(Directory(MemoryStore(), verify)).start()
+        try:
+            c = http.client.HTTPConnection('127.0.0.1', running.server_port)
+            c.request('GET', '/')
+            r = c.getresponse(); body = r.read().decode()
+>           assert r.status == 200
+E           assert 404 == 200
+E            +  where 404 = <http.client.HTTPResponse object at 0x10cb82b60>.status
+
+tests/swarm_directory/test_site_p3_http.py:20: AssertionError
+________ test_entry_rejects_unregistered_model_before_quota_or_backend _________
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+world = {'chat': <test_entry_guard.FakeChat object at 0x10d753cb0>, 'clock': <test_entry_guard.Clock object at 0x10d752e40>, '...5519Signer object at 0x10dca8e10>, 'gateway': <mycelium_swarm_directory.entry.EntryGateway object at 0x10d753e00>, ...}
+
+    def test_entry_rejects_unregistered_model_before_quota_or_backend(world):
+        visitor = Ed25519Signer.generate()
+        grant = grant_for(world, visitor)
+        world['policy']['value'] = replace(world['policy']['value'], model='Unknown/typo')
+>       assert send(world, visitor, grant) == (400, {'error': 'model_not_registered'})
+E       AssertionError: assert (200, {'clamp...rrrrrr', ...}) == (400, {'error..._registered'})
+E         
+E         At index 0 diff: 200 != 400
+E         Use -v to get more diff
+
+tests/swarm_directory/test_site_p3_http.py:34: AssertionError
+- generated xml file: /Users/evinova-self/Projects/mycelium-rel2-siteux-p3/docs/design/site-v2-p3/test-results/http-red.xml -
+=========================== short test summary info ============================
+FAILED tests/swarm_directory/test_site_p3_http.py::test_apex_explains_without_identity_or_chat_surface
+FAILED tests/swarm_directory/test_site_p3_http.py::test_entry_rejects_unregistered_model_before_quota_or_backend
+============================== 2 failed in 1.43s ===============================

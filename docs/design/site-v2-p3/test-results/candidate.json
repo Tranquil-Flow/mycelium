@@ -1,0 +1,26 @@
+{
+  "exit_code": 0,
+  "git_head": "aa4d387d2ffa934b9d87c29f3730efb3ac2f57eb",
+  "elapsed_seconds": 542.5824720859528,
+  "command": [
+    "nice",
+    "-n",
+    "19",
+    "/Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "no:cacheprovider",
+    "-n",
+    "1",
+    "tests/swarm_directory",
+    "tests/demo",
+    "tests/governance",
+    "tests/contracts",
+    "tests/claims",
+    "--basetemp=/Users/evinova-self/.hermes/cache/scratch/sitep3-candidate",
+    "--junitxml=/Users/evinova-self/Projects/mycelium-rel2-siteux-p3/docs/design/site-v2-p3/test-results/candidate.xml"
+  ],
+  "cases": 571,
+  "failures": []
+}

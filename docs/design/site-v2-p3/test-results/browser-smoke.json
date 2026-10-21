@@ -1,0 +1,24 @@
+{
+  "exit_code": 0,
+  "git_head": "7c5b21742f5f2b309254bca416f0987625ea4523",
+  "elapsed_seconds": 46.60272407531738,
+  "command": [
+    "nice",
+    "-n",
+    "19",
+    "/Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "no:cacheprovider",
+    "-n",
+    "1",
+    "tests/swarm_directory/test_site_v2_browser.py",
+    "-k",
+    "apex or undo or mac_app_header or stale_browse",
+    "--basetemp=/Users/evinova-self/.hermes/cache/scratch/sitep3-browser-smoke",
+    "--junitxml=/Users/evinova-self/Projects/mycelium-rel2-siteux-p3/docs/design/site-v2-p3/test-results/browser-smoke.xml"
+  ],
+  "cases": 8,
+  "failures": []
+}

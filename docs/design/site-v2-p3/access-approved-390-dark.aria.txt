@@ -1,0 +1,22 @@
+- heading "Chat with Reading room" [level=2]
+- button "All chats"
+- status: You have access
+- text: "Your browser: 2 ms · —"
+- heading "You have access" [level=3]
+- paragraph: Your prompt goes directly to http://127.0.0.1:55010, never through this directory. The relay and swarm’s Macs can read it; the swarm sees your key and can link your prompts. Do not type secrets.
+- button "I understand, start chatting"
+- log
+- text: Prompt
+- textbox "Prompt" [disabled]:
+  - /placeholder: You have access
+- button "Send" [disabled]
+- text: Answer limit
+- combobox "Answer limit":
+  - option "64"
+  - option "128" [selected]
+  - option "256"
+- text: You have access
+- paragraph:
+  - text: The swarm’s Macs can read your prompt. It is not end-to-end encrypted from them.
+  - link "Who can see what":
+    - /url: "#notice"

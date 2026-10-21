@@ -1,0 +1,50 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.8, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/evinova-self/Projects/mycelium-rel2-siteux-p3
+configfile: pytest.ini
+plugins: xdist-3.8.0, anyio-4.12.1, asyncio-1.3.0, langsmith-0.7.16
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+created: 1/1 worker
+1 worker [1 item]
+
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_____ test_owner_undo_cancels_write_and_reload_cancels_hold[dark-390-844] ______
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+local = {'app': <_swarm_fixtures.FakeApp object at 0x10ddf3b60>, 'directory': <mycelium_swarm_directory.server.DirectoryServer...elayProxy object at 0x10e444050>, 'publisher': <mycelium_a13_macos.swarm_publish.SwarmPublisher object at 0x10e4442f0>}
+width = 390, height = 844, theme = 'dark'
+
+    @pytest.mark.parametrize('width,height', [(1440,900),(390,844)])
+    @pytest.mark.parametrize('theme',['dark','light'])
+    def test_owner_undo_cancels_write_and_reload_cancels_hold(local, width, height, theme):
+        with sync_playwright() as p:
+            browser=p.chromium.launch()
+            owner=page_for(browser,local,'#new',viewport={'width':width,'height':height},color_scheme=theme)
+            create_swarm(owner,local,'Undo room','request')
+            sid=owner.locator('[data-owned]').first.get_attribute('data-owned')
+            visitor=page_for(browser,local,'#chat/'+sid)
+            visitor.click('#ask')
+            expect(visitor.locator('#gate')).to_have_attribute('data-state','pending')
+            owner.click('#refresh');expect(owner.locator('#owned-count')).to_have_text('1')
+            writes=[]
+            owner.on('request',lambda r:writes.append(r.url) if r.method=='POST' and r.url.endswith(('/grants','/deny')) else None)
+            row=owner.locator('.request')
+            for label in ('Approve','Decline'):
+                row.get_by_role('button',name=label,exact=True).click()
+                expect(row.locator('[data-undo]')).to_be_visible()
+                expect(row.locator('[data-approve]')).to_be_hidden(timeout=1000)  # no partial Approve label behind Undo
+                expect(row.locator('[data-decision]')).to_contain_text('in 5 seconds')
+>               assert row.locator('[data-decision]').evaluate("e=>{const r=e.getBoundingClientRect(),p=e.closest('.owner-grid > div').getBoundingClientRect();return r.top>=p.top&&r.bottom<=p.bottom}"), 'held-decision explanation is clipped by its panel'
+E               AssertionError: held-decision explanation is clipped by its panel
+E               assert False
+E                +  where False = evaluate("e=>{const r=e.getBoundingClientRect(),p=e.closest('.owner-grid > div').getBoundingClientRect();return r.top>=p.top&&r.bottom<=p.bottom}")
+E                +    where evaluate = <Locator frame=<Frame name= url='http://127.0.0.1:57225/swarms/#owned/sw-4snk9cq07137ceo4xopn'> selector='.request >> [data-decision]'>.evaluate
+E                +      where <Locator frame=<Frame name= url='http://127.0.0.1:57225/swarms/#owned/sw-4snk9cq07137ceo4xopn'> selector='.request >> [data-decision]'> = locator('[data-decision]')
+E                +        where locator = <Locator frame=<Frame name= url='http://127.0.0.1:57225/swarms/#owned/sw-4snk9cq07137ceo4xopn'> selector='.request'>.locator
+
+tests/swarm_directory/test_site_v2_browser.py:178: AssertionError
+- generated xml file: /Users/evinova-self/Projects/mycelium-rel2-siteux-p3/docs/design/site-v2-p3/test-results/mobile-hold-red.xml -
+=========================== short test summary info ============================
+FAILED tests/swarm_directory/test_site_v2_browser.py::test_owner_undo_cancels_write_and_reload_cancels_hold[dark-390-844]
+============================== 1 failed in 2.76s ===============================

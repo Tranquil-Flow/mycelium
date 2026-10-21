@@ -1,0 +1,24 @@
+{
+  "exit_code": 0,
+  "git_head": "4ff99d02493ef9edd25ba1ba894b956884d54e24",
+  "elapsed_seconds": 95.11476993560791,
+  "command": [
+    "nice",
+    "-n",
+    "19",
+    "/Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "no:cacheprovider",
+    "-n",
+    "1",
+    "tests/swarm_directory/test_site_v2_browser.py",
+    "-k",
+    "owner_undo",
+    "--basetemp=/Users/evinova-self/.hermes/cache/scratch/sitep3-owner-zero-green",
+    "--junitxml=/Users/evinova-self/Projects/mycelium-rel2-siteux-p3/docs/design/site-v2-p3/test-results/owner-zero-green.xml"
+  ],
+  "cases": 4,
+  "failures": []
+}

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="23.403" timestamp="2026-10-22T00:17:48.769184+02:00" hostname="m4pro"><testcase classname="tests.swarm_directory.test_site_v2_browser" name="test_routes_slow_loading_cls_and_screenshots[dark-1440-900]" time="21.822"><failure message="AssertionError: ('hydrated detail/chat slots must not move', 'swarm/sw-kfkrzsda85wsnh3unxei', 1440, 'dark', 0.0006766068572370114, [{'...25, 'left': 201, 'right': 1239, ...}, 'selector': 'P.'}], 'time': 1473.4000000059605, 'value': 0.0006766068572370114}])&#10;assert 0.0006766068572370114 == 0">local = {'app': &lt;_swarm_fixtures.FakeApp object at 0x109f0bb60&gt;, 'directory': &lt;mycelium_swarm_directory.server.DirectoryServer...elayProxy object at 0x10a55c050&gt;, 'publisher': &lt;mycelium_a13_macos.swarm_publish.SwarmPublisher object at 0x10a55c2f0&gt;}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x109fb3230&gt;
+width = 1440, height = 900, theme = 'dark'
+
+    @pytest.mark.parametrize('width,height', [(1440,900),(390,844)])
+    @pytest.mark.parametrize('theme', ['dark','light'])
+    def test_routes_slow_loading_cls_and_screenshots(local, monkeypatch, width, height, theme):
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            owner = page_for(browser, local, '#new')
+            owner.select_option('#c-model', 'Qwen/Qwen3-0.6B')
+            create_swarm(owner, local, 'Reading room', 'request')
+            sid = owner.locator('[data-owned]').first.get_attribute('data-owned')
+            results = []
+            from mycelium_swarm_directory import server as directory_server
+            original_get=directory_server._Handler.do_GET
+            def delayed_get(handler):
+                import time
+                if handler.path in ('/swarms/api/v1/swarms','/swarms/swarms.js'):
+                    time.sleep(.7)  # per-HTTP-request thread: CSS delivery and browser dispatch stay live
+                return original_get(handler)
+            monkeypatch.setattr(directory_server._Handler,'do_GET',delayed_get)
+            for route in ['browse', 'chat', 'contributing', 'owned', 'new', 'notice', 'swarm/'+sid, 'chat/'+sid]:
+                page = browser.new_context(viewport={'width':width,'height':height}, color_scheme=theme).new_page()
+                page.add_init_script(CLS)
+                # Real responses delayed by the server, without blocking CSS or Playwright's event loop.
+                page.goto(local['directory'].origin+'/swarms/#'+route)
+                page.wait_for_selector('body[data-loaded="1"]')
+                page.wait_for_timeout(1200)
+                cls = sum(page.evaluate('window.__cls'))
+                assert cls &lt; .01, (route,width,theme,cls,page.evaluate('window.__clsDetails'))
+                if '/' in route:
+&gt;                   assert cls == 0, ('hydrated detail/chat slots must not move',route,width,theme,cls,page.evaluate('window.__clsDetails'))
+E                   AssertionError: ('hydrated detail/chat slots must not move', 'swarm/sw-kfkrzsda85wsnh3unxei', 1440, 'dark', 0.0006766068572370114, [{'...25, 'left': 201, 'right': 1239, ...}, 'selector': 'P.'}], 'time': 1473.4000000059605, 'value': 0.0006766068572370114}])
+E                   assert 0.0006766068572370114 == 0
+
+tests/swarm_directory/test_site_v2_browser.py:470: AssertionError</failure></testcase></testsuite></testsuites>

@@ -1,0 +1,42 @@
+[
+  {
+    "page": "browse-1440-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "chat-1440-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "contributing-1440-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "owned-1440-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "new-1440-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "notice-1440-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "swarm-detail-1440-dark",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "page": "chat-detail-1440-dark",
+    "cls": 0,
+    "shifts": []
+  }
+]

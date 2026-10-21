@@ -1,0 +1,30 @@
+{
+  "exit_code": 1,
+  "git_head": "d1f0f8fa01bd239c378e99e09795c32531c40a89",
+  "elapsed_seconds": 3.2033541202545166,
+  "command": [
+    "nice",
+    "-n",
+    "19",
+    "/Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "no:cacheprovider",
+    "-n",
+    "1",
+    "tests/swarm_directory/test_site_v2_browser.py",
+    "-k",
+    "owner_undo and dark and 390",
+    "--basetemp=/Users/evinova-self/.hermes/cache/scratch/sitep3-mobile-hold-red",
+    "--junitxml=/Users/evinova-self/Projects/mycelium-rel2-siteux-p3/docs/design/site-v2-p3/test-results/mobile-hold-red.xml"
+  ],
+  "cases": 1,
+  "failures": [
+    {
+      "classname": "tests.swarm_directory.test_site_v2_browser",
+      "name": "test_owner_undo_cancels_write_and_reload_cancels_hold[dark-390-844]",
+      "time": "1.842"
+    }
+  ]
+}

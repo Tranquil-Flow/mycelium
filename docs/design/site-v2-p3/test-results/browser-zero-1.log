@@ -1,0 +1,120 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.8, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/evinova-self/Projects/mycelium-rel2-siteux-p3
+configfile: pytest.ini
+plugins: xdist-3.8.0, anyio-4.12.1, asyncio-1.3.0, langsmith-0.7.16
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+created: 1/1 worker
+1 worker [22 items]
+
+......F.F.............                                                   [100%]
+=================================== FAILURES ===================================
+_____ test_owner_undo_cancels_write_and_reload_cancels_hold[dark-390-844] ______
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+local = {'app': <_swarm_fixtures.FakeApp object at 0x10beb5590>, 'directory': <mycelium_swarm_directory.server.DirectoryServer...elayProxy object at 0x10beb67a0>, 'publisher': <mycelium_a13_macos.swarm_publish.SwarmPublisher object at 0x10beb5260>}
+width = 390, height = 844, theme = 'dark'
+
+    @pytest.mark.parametrize('width,height', [(1440,900),(390,844)])
+    @pytest.mark.parametrize('theme',['dark','light'])
+    def test_owner_undo_cancels_write_and_reload_cancels_hold(local, width, height, theme):
+        with sync_playwright() as p:
+            browser=p.chromium.launch()
+            owner=page_for(browser,local,'#new',viewport={'width':width,'height':height},color_scheme=theme)
+            create_swarm(owner,local,'Undo room','request')
+            sid=owner.locator('[data-owned]').first.get_attribute('data-owned')
+            visitor=page_for(browser,local,'#chat/'+sid)
+            visitor.click('#ask')
+            expect(visitor.locator('#gate')).to_have_attribute('data-state','pending')
+            owner.click('#refresh');expect(owner.locator('#owned-count')).to_have_text('1')
+            writes=[]
+            owner.on('request',lambda r:writes.append(r.url) if r.method=='POST' and r.url.endswith(('/grants','/deny')) else None)
+            row=owner.locator('.request')
+            for label in ('Approve','Decline'):
+                row.get_by_role('button',name=label,exact=True).click()
+                expect(row.locator('[data-undo]')).to_be_visible()
+                expect(row.locator('[data-approve]')).to_be_hidden(timeout=1000)  # no partial Approve label behind Undo
+                expect(row.locator('[data-decision]')).to_contain_text('in 5 seconds')
+                assert row.locator('[data-decision]').evaluate("e=>{const r=e.getBoundingClientRect(),p=e.closest('.owner-grid > div').getBoundingClientRect();return r.top>=p.top&&r.bottom<=p.bottom}"), 'held-decision explanation is clipped by its panel'
+                if os.environ.get('SITEB_SHOTS'):
+                    out=Path(os.environ['SITEB_SHOTS']);out.mkdir(parents=True,exist_ok=True)
+                    owner.screenshot(path=str(out/f'owner-held-{label.lower()}-{width}-{theme}.png'),full_page=True)
+                row.locator('[data-undo]').click()
+                expect(row.locator('[data-approve]')).to_be_visible()
+                owner.wait_for_timeout(5200)
+                assert writes == []
+                visitor.click('#refresh');expect(visitor.locator('#gate')).to_have_attribute('data-state','pending')
+            row.get_by_role('button',name='Approve',exact=True).click()
+            owner.reload();owner.wait_for_selector('body[data-ready="1"]');owner.wait_for_timeout(5200)
+            assert writes == []
+            expect(owner.locator('#owned-count')).to_have_text('1')
+            with owner.expect_response(lambda r:r.url.endswith('/grants') and r.request.method=='POST',timeout=10000) as saved:
+                owner.locator('[data-approve]').click()
+            assert saved.value.status == 200 and len(writes)==1
+            visitor.click('#refresh');expect(visitor.locator('#consent')).to_be_visible()
+            expect(owner.locator('#owned-count')).to_have_text('0')
+>           assert sum(owner.evaluate('window.__cls')) == 0, owner.evaluate('window.__clsDetails')
+E           AssertionError: [{'sources': [{'current': {'bottom': 690.53125, 'height': 20.140625, 'left': 52, 'right': 338, ...}, 'previous': {'bot...125, 'left': 52, 'right': 338, ...}, 'selector': 'SPAN.'}], 'time': 10324.59999999404, 'value': 0.0004247234919101847}]
+E           assert 0.0004247234919101847 == 0
+E            +  where 0.0004247234919101847 = sum([0.0004247234919101847])
+E            +    where [0.0004247234919101847] = evaluate('window.__cls')
+E            +      where evaluate = <Page url='http://127.0.0.1:64438/swarms/#owned/sw-jq0vtps3qvxnekxomjdi'>.evaluate
+
+tests/swarm_directory/test_site_v2_browser.py:196: AssertionError
+_____ test_owner_undo_cancels_write_and_reload_cancels_hold[light-390-844] _____
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+local = {'app': <_swarm_fixtures.FakeApp object at 0x10c21bc50>, 'directory': <mycelium_swarm_directory.server.DirectoryServer...elayProxy object at 0x10c21bb50>, 'publisher': <mycelium_a13_macos.swarm_publish.SwarmPublisher object at 0x10c219050>}
+width = 390, height = 844, theme = 'light'
+
+    @pytest.mark.parametrize('width,height', [(1440,900),(390,844)])
+    @pytest.mark.parametrize('theme',['dark','light'])
+    def test_owner_undo_cancels_write_and_reload_cancels_hold(local, width, height, theme):
+        with sync_playwright() as p:
+            browser=p.chromium.launch()
+            owner=page_for(browser,local,'#new',viewport={'width':width,'height':height},color_scheme=theme)
+            create_swarm(owner,local,'Undo room','request')
+            sid=owner.locator('[data-owned]').first.get_attribute('data-owned')
+            visitor=page_for(browser,local,'#chat/'+sid)
+            visitor.click('#ask')
+            expect(visitor.locator('#gate')).to_have_attribute('data-state','pending')
+            owner.click('#refresh');expect(owner.locator('#owned-count')).to_have_text('1')
+            writes=[]
+            owner.on('request',lambda r:writes.append(r.url) if r.method=='POST' and r.url.endswith(('/grants','/deny')) else None)
+            row=owner.locator('.request')
+            for label in ('Approve','Decline'):
+                row.get_by_role('button',name=label,exact=True).click()
+                expect(row.locator('[data-undo]')).to_be_visible()
+                expect(row.locator('[data-approve]')).to_be_hidden(timeout=1000)  # no partial Approve label behind Undo
+                expect(row.locator('[data-decision]')).to_contain_text('in 5 seconds')
+                assert row.locator('[data-decision]').evaluate("e=>{const r=e.getBoundingClientRect(),p=e.closest('.owner-grid > div').getBoundingClientRect();return r.top>=p.top&&r.bottom<=p.bottom}"), 'held-decision explanation is clipped by its panel'
+                if os.environ.get('SITEB_SHOTS'):
+                    out=Path(os.environ['SITEB_SHOTS']);out.mkdir(parents=True,exist_ok=True)
+                    owner.screenshot(path=str(out/f'owner-held-{label.lower()}-{width}-{theme}.png'),full_page=True)
+                row.locator('[data-undo]').click()
+                expect(row.locator('[data-approve]')).to_be_visible()
+                owner.wait_for_timeout(5200)
+                assert writes == []
+                visitor.click('#refresh');expect(visitor.locator('#gate')).to_have_attribute('data-state','pending')
+            row.get_by_role('button',name='Approve',exact=True).click()
+            owner.reload();owner.wait_for_selector('body[data-ready="1"]');owner.wait_for_timeout(5200)
+            assert writes == []
+            expect(owner.locator('#owned-count')).to_have_text('1')
+            with owner.expect_response(lambda r:r.url.endswith('/grants') and r.request.method=='POST',timeout=10000) as saved:
+                owner.locator('[data-approve]').click()
+            assert saved.value.status == 200 and len(writes)==1
+            visitor.click('#refresh');expect(visitor.locator('#consent')).to_be_visible()
+            expect(owner.locator('#owned-count')).to_have_text('0')
+>           assert sum(owner.evaluate('window.__cls')) == 0, owner.evaluate('window.__clsDetails')
+E           AssertionError: [{'sources': [{'current': {'bottom': 690.53125, 'height': 20.140625, 'left': 52, 'right': 338, ...}, 'previous': {'bot...25, 'left': 52, 'right': 338, ...}, 'selector': 'SPAN.'}], 'time': 10323.799999982119, 'value': 0.0004247234919101847}]
+E           assert 0.0004247234919101847 == 0
+E            +  where 0.0004247234919101847 = sum([0.0004247234919101847])
+E            +    where [0.0004247234919101847] = evaluate('window.__cls')
+E            +      where evaluate = <Page url='http://127.0.0.1:49943/swarms/#owned/sw-j0yaj100luwm4moxlpzh'>.evaluate
+
+tests/swarm_directory/test_site_v2_browser.py:196: AssertionError
+- generated xml file: /Users/evinova-self/Projects/mycelium-rel2-siteux-p3/docs/design/site-v2-p3/test-results/browser-zero-1.xml -
+=========================== short test summary info ============================
+FAILED tests/swarm_directory/test_site_v2_browser.py::test_owner_undo_cancels_write_and_reload_cancels_hold[dark-390-844]
+FAILED tests/swarm_directory/test_site_v2_browser.py::test_owner_undo_cancels_write_and_reload_cancels_hold[light-390-844]
+=================== 2 failed, 20 passed in 343.55s (0:05:43) ===================

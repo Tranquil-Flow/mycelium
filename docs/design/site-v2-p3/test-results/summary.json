@@ -1,0 +1,2207 @@
+{
+  "baseline_revision": "790d3caa9a3333284df02c6c9e4766d84026ae73",
+  "implementation_revision": "aa4d387d2ffa934b9d87c29f3730efb3ac2f57eb",
+  "baseline": {
+    "counts": {
+      "passed": 547,
+      "skipped": 1
+    },
+    "total": 548,
+    "elapsed_seconds": 376.361,
+    "cases": {
+      "tests.swarm_directory.test_chat_notice_browser::test_the_first_visit_shows_the_notice_and_holds_the_prompt_box_until_i_understand": "passed",
+      "tests.swarm_directory.test_chat_notice_browser::test_the_acknowledgement_is_per_origin_and_per_owner": "passed",
+      "tests.swarm_directory.test_chat_notice_browser::test_send_stays_refused_before_the_acknowledgement_even_if_the_form_is_forced": "passed",
+      "tests.swarm_directory.test_chat_notice_browser::test_forget_asks_first_says_what_it_resets_and_then_asks_for_the_notice_again": "passed",
+      "tests.swarm_directory.test_chat_notice_browser::test_a_swarm_that_is_not_open_says_chat_needs_a_grant_from_the_directory": "passed",
+      "tests.swarm_directory.test_chat_notice_browser::test_an_unlisted_swarm_claims_no_owner": "passed",
+      "tests.swarm_directory.test_chat_notice_browser::test_the_chat_assets_set_no_cookie_and_keep_the_csp": "passed",
+      "tests.swarm_directory.test_directory_card_browser::test_a_card_shows_model_members_status_and_how_fresh_that_status_is": "passed",
+      "tests.swarm_directory.test_directory_card_browser::test_every_card_links_the_same_short_notice": "passed",
+      "tests.swarm_directory.test_directory_card_browser::test_forget_this_key_asks_first_and_says_what_it_resets": "passed",
+      "tests.swarm_directory.test_directory_card_browser::test_the_page_sets_no_cookie_loads_nothing_third_party_and_keeps_its_csp": "passed",
+      "tests.swarm_directory.test_directory_core::test_create_and_list_shows_every_swarm_with_public_fields": "passed",
+      "tests.swarm_directory.test_directory_core::test_unsigned_forged_and_tampered_records_are_refused": "passed",
+      "tests.swarm_directory.test_directory_core::test_only_the_owner_updates_and_seq_must_grow": "passed",
+      "tests.swarm_directory.test_directory_core::test_delete_by_owner_and_old_record_cannot_be_replayed": "passed",
+      "tests.swarm_directory.test_directory_core::test_heartbeat_status_serving_warming_and_expiry_to_offline": "passed",
+      "tests.swarm_directory.test_directory_core::test_heartbeat_with_skewed_clock_is_refused": "passed",
+      "tests.swarm_directory.test_directory_core::test_access_request_owner_inbox_grant_and_deny": "passed",
+      "tests.swarm_directory.test_directory_core::test_grant_deposit_must_be_signed_by_the_swarm_owner": "passed",
+      "tests.swarm_directory.test_directory_core::test_query_replay_is_refused": "passed",
+      "tests.swarm_directory.test_directory_core::test_entry_offer_then_owner_attaches_entry": "passed",
+      "tests.swarm_directory.test_directory_core::test_entry_origin_must_be_https_unless_loopback_enabled": "passed",
+      "tests.swarm_directory.test_directory_core::test_size_caps_and_per_owner_and_total_caps": "passed",
+      "tests.swarm_directory.test_directory_core::test_per_ip_and_per_key_write_rate_limits": "passed",
+      "tests.swarm_directory.test_directory_core::test_sqlite_store_is_durable_across_restart": "passed",
+      "tests.swarm_directory.test_directory_core::test_canonical_bytes_match_the_js_rules": "passed",
+      "tests.swarm_directory.test_directory_core::test_unknown_routes_and_methods": "passed",
+      "tests.swarm_directory.test_directory_core::test_signed_read_queries_have_their_own_budget_and_never_spend_the_write_budget": "passed",
+      "tests.swarm_directory.test_directory_core::test_signed_read_queries_are_still_bounded": "passed",
+      "tests.swarm_directory.test_directory_write_budgets::test_700_junk_posts_from_30_addresses_do_not_starve_a_valid_heartbeat": "passed",
+      "tests.swarm_directory.test_directory_write_budgets::test_valid_signed_writes_are_what_spends_the_global_write_budget": "passed",
+      "tests.swarm_directory.test_directory_write_budgets::test_a_spent_write_budget_does_not_stop_heartbeats": "passed",
+      "tests.swarm_directory.test_directory_write_budgets::test_heartbeats_have_their_own_bounded_budget": "passed",
+      "tests.swarm_directory.test_directory_write_budgets::test_unsigned_or_unauthorised_heartbeats_do_not_spend_the_heartbeat_budget": "passed",
+      "tests.swarm_directory.test_directory_write_budgets::test_signed_queries_never_spend_the_write_budgets": "passed",
+      "tests.swarm_directory.test_entry_guard::test_valid_owner_grant_is_admitted_and_reaches_the_backend": "passed",
+      "tests.swarm_directory.test_entry_guard::test_no_grant_or_garbage_grant_is_refused_before_the_backend": "passed",
+      "tests.swarm_directory.test_entry_guard::test_forged_grant_signed_by_a_stranger_is_refused": "passed",
+      "tests.swarm_directory.test_entry_guard::test_grant_for_someone_else_or_another_swarm_is_refused": "passed",
+      "tests.swarm_directory.test_entry_guard::test_expired_and_not_yet_valid_grants_are_refused": "passed",
+      "tests.swarm_directory.test_entry_guard::test_quota_is_charged_durably_and_exhaustion_refuses": "passed",
+      "tests.swarm_directory.test_entry_guard::test_request_signature_and_replay_and_clock_are_checked": "passed",
+      "tests.swarm_directory.test_entry_guard::test_backend_refusal_refunds_the_quota": "passed",
+      "tests.swarm_directory.test_entry_guard::test_per_key_and_per_ip_rate_limits": "passed",
+      "tests.swarm_directory.test_entry_guard::test_revoked_grant_is_refused": "passed",
+      "tests.swarm_directory.test_entry_guard::test_open_swarm_auto_grant_is_issued_once_per_key_and_bounded": "passed",
+      "tests.swarm_directory.test_entry_guard::test_open_grant_refused_for_request_mode_swarm": "passed",
+      "tests.swarm_directory.test_entry_guard::test_policy_requires_a_valid_owner_record_naming_this_entry": "passed",
+      "tests.swarm_directory.test_entry_guard::test_unpublished_entry_refuses_everything": "passed",
+      "tests.swarm_directory.test_entry_guard::test_state_is_public_and_bounded": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_flow_and_helper_download_are_unavailable_until_published": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_published_download_shows_link_checksum_and_the_unnotarized_warning": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_owner_changes_access_mode_and_sees_helpers_grants_usage_and_the_kill_switch": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_visitor_card_shows_every_live_section_with_unavailable_ones_marked": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_inference_streams_tokens_and_every_terminal_state_is_named": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_tokens_arrive_progressively_and_the_owner_kill_switch_ends_it_and_cancels_the_generation": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_a_visitor_can_stop_their_own_prompt_and_is_told_it_was_cancelled_by_them": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_a_revoked_grant_is_reported_as_not_granted": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_a_request_mode_visitor_without_a_grant_is_told_it_is_not_granted": "passed",
+      "tests.swarm_directory.test_hosted_ui_proxy_browser::test_the_download_card_links_the_served_file_with_its_checksum_and_the_unnotarized_warning": "passed",
+      "tests.swarm_directory.test_hosted_ui_proxy_browser::test_a_missing_file_leaves_the_card_on_not_published_yet": "passed",
+      "tests.swarm_directory.test_hosted_ui_proxy_browser::test_the_root_lands_a_visitor_on_the_swarms_page": "passed",
+      "tests.swarm_directory.test_hosted_ui_proxy_browser::test_with_the_redirect_off_the_root_is_the_consumer_demo_only_when_product_routes_are_enabled": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_directory_plist_template_renders_to_a_valid_always_on_unit": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_watchdog_plist_template_runs_the_probe_on_an_interval_and_never_applies_by_default": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_render_refuses_missing_placeholders_and_unknown_templates": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_rendered_plists_pass_plutil_lint": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_raw_templates_are_marked_as_templates_and_never_install_anything": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_start_script_is_valid_bash_and_dry_run_has_no_side_effects": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_hosted_flag_applies_the_named_defaults_and_stays_overridable": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_probe_is_green_only_for_the_expected_config_document": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_probe_through_the_apex_proxy_sends_a_client_address": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_healthy_probe_resets_the_failure_count_and_never_restarts": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_restart_is_only_printed_in_dry_run_and_runs_with_apply": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_unknown_counts_as_unhealthy_and_a_restart_cooldown_stops_loops": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_failed_restart_command_is_reported_and_state_is_kept": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_a_down_proxy_is_reported_but_never_restarts_the_directory": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_corrupt_state_file_is_treated_as_empty": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_cli_dry_run_against_a_real_directory_server_is_green_and_writes_only_its_state_file": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_cli_apply_is_the_only_way_to_run_the_restart": "passed",
+      "tests.swarm_directory.test_kill_cancels_generation::test_engaging_the_kill_switch_cancels_the_running_generation": "passed",
+      "tests.swarm_directory.test_kill_cancels_generation::test_releasing_the_kill_switch_cancels_nothing": "passed",
+      "tests.swarm_directory.test_kill_cancels_generation::test_the_first_poll_after_a_kill_cancels_that_request_even_if_the_bulk_cancel_missed_it": "passed",
+      "tests.swarm_directory.test_kill_cancels_generation::test_a_chat_backend_without_cancel_still_gets_the_kill_applied": "passed",
+      "tests.swarm_directory.test_kill_cancels_generation::test_a_cancel_failure_never_blocks_the_kill": "passed",
+      "tests.swarm_directory.test_kill_cancels_generation::test_the_owner_app_kill_action_reaches_the_backend_cancel": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_defaults_come_from_the_one_named_module": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_many_distinct_keys_and_ips_cannot_exceed_the_swarm_request_budget": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_swarm_token_budget_clamps_then_refuses": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_budget_resets_on_the_next_utc_day_and_survives_a_restart": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_backend_refusal_gives_the_swarm_budget_back": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_budget_applies_to_open_swarms_only_and_none_disables_it": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_state_reports_the_remaining_swarm_budget_for_open_swarms": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_kill_switch_stops_new_admissions_and_new_open_grants": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_only_the_owner_key_can_flip_the_switch_and_replays_are_dead": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_release_reopens_admission_with_the_same_grants_and_the_state_is_durable": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_in_flight_request_ends_with_an_explicit_terminal_and_stays_terminal": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_request_that_finished_before_the_kill_is_left_alone": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_kill_route_is_rate_limited_by_ip_before_any_signature_work": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_kill_document_is_a_closed_set": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_owner_app_kill_action_signs_with_the_app_key_and_blocks_the_entry": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_owner_app_kill_action_validates_its_input_and_mode": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_defaults_are_named_in_the_one_module_and_wired_into_the_limits": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_one_address_rotating_ten_keys_cannot_take_more_than_its_daily_share": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_a_second_address_still_gets_service_when_the_first_is_spent": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_the_per_address_token_budget_clamps_then_refuses": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_a_request_the_backend_refuses_gives_the_address_its_budget_back": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_the_budget_resets_on_the_next_utc_day": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_open_grants_per_address_per_day_are_bounded": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_the_state_route_shows_the_callers_daily_budget_used": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_the_budget_applies_to_open_swarms_only": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_relay_chat_spends_the_same_per_address_budget": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_normalises_ipv6_to_its_64[2001:db8:1:2:aaaa:bbbb:cccc:dddd-2001:db8:1:2::1-True]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_normalises_ipv6_to_its_64[2001:db8:1:2::1-2001:db8:1:3::1-False]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_normalises_ipv6_to_its_64[2001:DB8:1:2::1-2001:db8:1:2:0:0:0:9-True]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_normalises_ipv6_to_its_64[::ffff:203.0.113.9-203.0.113.9-True]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_normalises_ipv6_to_its_64[203.0.113.9-203.0.113.10-False]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_for_a_bad_header_is_the_shared_unknown_bucket[]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_for_a_bad_header_is_the_shared_unknown_bucket[not-an-ip]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_for_a_bad_header_is_the_shared_unknown_bucket[1.2.3.4.5]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_for_a_bad_header_is_the_shared_unknown_bucket[2001:db8::zz]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_for_a_bad_header_is_the_shared_unknown_bucket[[::1]]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_for_a_bad_header_is_the_shared_unknown_bucket[203.0.113.9, 1.1.1.1]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_daily_budget_reserves_releases_and_stays_bounded": "passed",
+      "tests.swarm_directory.test_privacy_disclosure::test_the_page_footer_names_cloudflare_and_what_it_can_see": "passed",
+      "tests.swarm_directory.test_privacy_disclosure::test_the_page_footer_describes_the_direct_to_entry_flow_and_the_stranger_case": "passed",
+      "tests.swarm_directory.test_privacy_disclosure::test_the_page_footer_no_longer_claims_unqualified_no_logs": "passed",
+      "tests.swarm_directory.test_privacy_disclosure::test_the_directory_privacy_note_and_demo_label_name_cloudflare": "passed",
+      "tests.swarm_directory.test_privacy_disclosure::test_the_relay_status_says_web_chat_prompts_cross_the_relay": "passed",
+      "tests.swarm_directory.test_privacy_disclosure::test_the_owner_tunnel_prompt_does_not_say_inference_stays_on_iroh_alone": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_cancel_is_a_closed_route_and_a_closed_document": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_malformed_request_id_is_refused_in_the_document[short]": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_malformed_request_id_is_refused_in_the_document[a/bcccccccccccccccccccc]": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_malformed_request_id_is_refused_in_the_document[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_malformed_request_id_is_refused_in_the_document[]": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_malformed_request_id_is_refused_in_the_document[7]": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_malformed_request_id_is_refused_in_the_document[None]": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_the_requester_who_sent_the_prompt_cancels_it": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_another_key_cannot_cancel_it_not_even_the_swarm_owner": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_an_unknown_request_id_is_refused_before_the_backend": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_cancel_signed_for_one_request_cannot_be_pointed_at_another": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_replay_stale_and_foreign_swarm_are_refused": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_cancelling_something_that_already_ended_says_so": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_backend_without_cancel_is_a_closed_error_not_a_crash": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_stopping_your_own_prompt_needs_no_grant_and_no_send_budget": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_cancels_have_their_own_per_address_budget": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_twenty_real_app_behaviours": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_registry_dropdown_matches_source": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[dark-1440-900]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[dark-390-844]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[light-1440-900]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[light-390-844]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_busy_wait_is_cancellable_and_prompts_never_go_to_directory": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[dark-1440-900]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[dark-390-844]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[light-1440-900]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[light-390-844]": "passed",
+      "tests.swarm_directory.test_surface_probe_user_agent::test_probe_requests_carry_an_explicit_user_agent": "passed",
+      "tests.swarm_directory.test_two_swarms_integration::test_two_swarm_scenario_runs_its_steps_in_order": "passed",
+      "tests.swarm_directory.test_web_ui_browser::test_browser_create_attach_request_approve_and_chat": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_accepts_private_device_addresses[192.168.10.8-192.168.10.8]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_accepts_private_device_addresses[10.0.0.4-10.0.0.4]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_accepts_private_device_addresses[mycelium-lab.local-mycelium-lab.local]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[127.0.0.1]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[::1]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[fd00::1234]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[localhost]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[https://192.168.1.4]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[host/name]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[*.example.test]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[bad host.local]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[-bad.local]": "passed",
+      "tests.demo.test_device_lab::test_public_origin_uses_validated_ipv4_or_hostname": "passed",
+      "tests.demo.test_device_lab::test_prepare_device_lab_keeps_ca_stable_rotates_leaf_and_verifies_san": "passed",
+      "tests.demo.test_device_lab::test_prepare_device_lab_supports_stock_macos_libressl": "passed",
+      "tests.demo.test_device_lab::test_prepare_device_lab_rejects_symlink_state_root": "passed",
+      "tests.demo.test_device_lab::test_prepare_device_lab_rejects_group_accessible_state_root": "passed",
+      "tests.demo.test_device_lab::test_device_lab_cli_rejects_unsupported_ipv6_bind": "passed",
+      "tests.demo.test_device_lab::test_device_lab_cli_prepares_then_delegates_to_live_https_without_printing_key": "passed",
+      "tests.demo.test_device_lab::test_device_lab_cli_fails_closed_when_openssl_is_missing": "passed",
+      "tests.demo.test_doctor::test_preflight_reports_honest_non_release_boundary": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[empty]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[duplicate]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[non-string]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[traversal-shaped]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[absolute-shaped]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[path-shaped]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[windows-path-shaped]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[control-character]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[unicode-confusable]": "passed",
+      "tests.demo.test_doctor::test_malformed_which_results_fail_closed[empty-string]": "passed",
+      "tests.demo.test_doctor::test_malformed_which_results_fail_closed[nul-string]": "passed",
+      "tests.demo.test_doctor::test_malformed_which_results_fail_closed[bool]": "passed",
+      "tests.demo.test_doctor::test_malformed_which_results_fail_closed[int]": "passed",
+      "tests.demo.test_doctor::test_malformed_which_results_fail_closed[object]": "passed",
+      "tests.demo.test_doctor::test_which_exception_fails_closed_without_internal_text": "passed",
+      "tests.demo.test_doctor::test_invalid_port_inputs_fail_closed_without_probe[bool]": "passed",
+      "tests.demo.test_doctor::test_invalid_port_inputs_fail_closed_without_probe[string]": "passed",
+      "tests.demo.test_doctor::test_invalid_port_inputs_fail_closed_without_probe[float]": "passed",
+      "tests.demo.test_doctor::test_invalid_port_inputs_fail_closed_without_probe[zero]": "passed",
+      "tests.demo.test_doctor::test_invalid_port_inputs_fail_closed_without_probe[too-large]": "passed",
+      "tests.demo.test_doctor::test_invalid_port_inputs_fail_closed_without_probe[duplicate]": "passed",
+      "tests.demo.test_doctor::test_malformed_port_probe_results_fail_closed[none]": "passed",
+      "tests.demo.test_doctor::test_malformed_port_probe_results_fail_closed[int]": "passed",
+      "tests.demo.test_doctor::test_malformed_port_probe_results_fail_closed[string]": "passed",
+      "tests.demo.test_doctor::test_malformed_port_probe_results_fail_closed[object]": "passed",
+      "tests.demo.test_doctor::test_port_probe_exception_fails_closed_without_internal_text": "passed",
+      "tests.demo.test_doctor::test_local_port_probe_rejects_bool_and_non_int_values[True]": "passed",
+      "tests.demo.test_doctor::test_local_port_probe_rejects_bool_and_non_int_values[False]": "passed",
+      "tests.demo.test_doctor::test_local_port_probe_rejects_bool_and_non_int_values[41001]": "passed",
+      "tests.demo.test_doctor::test_local_port_probe_rejects_bool_and_non_int_values[41001.0]": "passed",
+      "tests.demo.test_doctor::test_local_port_probe_rejects_bool_and_non_int_values[None]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[empty]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[duplicate]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[non-string]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[absolute]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[traversal]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[repeated-separator]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[dot-segment]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[trailing-separator]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[backslash]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[control-character]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[unicode-confusable-letter]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[unicode-confusable-separator]": "passed",
+      "tests.demo.test_doctor::test_required_file_symlink_escape_fails_closed": "passed",
+      "tests.demo.test_doctor::test_required_file_symlink_swap_is_not_followed": "passed",
+      "tests.demo.test_doctor::test_required_file_descriptor_failure_fails_closed_without_internal_text": "passed",
+      "tests.demo.test_doctor::test_required_file_identity_mismatch_closes_open_descriptor": "passed",
+      "tests.demo.test_doctor::test_unsafe_repository_roots_fail_closed[missing]": "passed",
+      "tests.demo.test_doctor::test_unsafe_repository_roots_fail_closed[file]": "passed",
+      "tests.demo.test_doctor::test_unsafe_repository_roots_fail_closed[symlink]": "passed",
+      "tests.demo.test_doctor::test_unsafe_repository_roots_fail_closed[symlink-parent]": "passed",
+      "tests.demo.test_doctor::test_repository_root_identity_change_fails_closed": "passed",
+      "tests.demo.test_doctor::test_state_directory_inside_or_equal_to_source_fails_closed[inside]": "passed",
+      "tests.demo.test_doctor::test_state_directory_inside_or_equal_to_source_fails_closed[equal]": "passed",
+      "tests.demo.test_doctor::test_state_directory_inside_or_equal_to_source_fails_closed[symlink-into-source]": "passed",
+      "tests.demo.test_doctor::test_state_directory_symlink_swap_fails_closed": "passed",
+      "tests.demo.test_doctor::test_state_directory_missing_immediate_parent_fails_closed": "passed",
+      "tests.demo.test_doctor::test_state_directory_unwritable_existing_parent_fails_closed": "passed",
+      "tests.demo.test_doctor::test_iterable_exception_midway_fails_closed_without_partial_probes[commands]": "passed",
+      "tests.demo.test_doctor::test_iterable_exception_midway_fails_closed_without_partial_probes[required_files]": "passed",
+      "tests.demo.test_doctor::test_iterable_exception_midway_fails_closed_without_partial_probes[ports]": "passed",
+      "tests.demo.test_doctor::test_one_shot_iterables_are_consumed_once": "passed",
+      "tests.demo.test_doctor::test_report_is_deterministic_for_order_insensitive_iterables": "passed",
+      "tests.demo.test_doctor::test_duplicate_inputs_cannot_create_duplicate_check_names": "passed",
+      "tests.demo.test_doctor::test_report_omits_inputs_paths_environment_and_probe_values": "passed",
+      "tests.demo.test_doctor::test_preflight_is_read_only_and_uses_only_read_descriptors": "passed",
+      "tests.demo.test_doctor::test_local_port_probe_closes_its_point_in_time_socket": "passed",
+      "tests.demo.test_doctor::test_doctor_cli_emits_canonical_json_and_uses_only_local_preflight_exit": "passed",
+      "tests.demo.test_doctor::test_doctor_cli_invalid_port_is_private_json_failure[non-int]": "passed",
+      "tests.demo.test_doctor::test_doctor_cli_invalid_port_is_private_json_failure[oversized-numeric]": "passed",
+      "tests.demo.test_doctor::test_doctor_cli_probe_failure_is_json_exit_one_without_traceback": "passed",
+      "tests.demo.test_doctor::test_doctor_runbook_preserves_exact_claim_boundary": "passed",
+      "tests.demo.test_openai_api_surface_closed::test_v1_api_paths_answer_404_on_the_public_origin_and_reach_no_upstream": "passed",
+      "tests.demo.test_openai_api_surface_closed::test_the_surface_probe_still_passes_with_the_api_code_present": "passed",
+      "tests.demo.test_product_physical_composition::test_host_level_product_composition_reaches_browser_token_boundary_only": "passed",
+      "tests.demo.test_product_physical_composition::test_trusted_proxy_composition_requires_authenticated_proxy_capability": "passed",
+      "tests.demo.test_product_physical_composition::test_trusted_proxy_composition_requires_proxy_capability_configuration": "passed",
+      "tests.demo.test_product_physical_composition::test_product_stack_builds_projection_from_gateway_owned_recovery_source": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_serves_the_openai_shim_models_surface": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_shim_drives_the_route_inference_surface": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_serves_the_observatory_snapshot_through_the_product_gateway": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_observatory_slot_is_populated_by_the_real_gateway_application": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_fails_closed_when_the_observatory_module_is_unreachable": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_fails_closed_when_the_openai_shim_module_is_unreachable": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_cli_action_composes_both_servers": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_status_document_names_both_endpoints": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_bring_up_rejects_a_non_loopback_host": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_reuses_the_repository_qualification_fixture": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_close_stops_both_listeners": "passed",
+      "tests.demo.test_profile_a_site_closed::test_the_probe_still_passes_and_the_root_still_redirects_to_swarms": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[GET-/chat]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[GET-/chat/]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[GET-/chat/chat.js]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[GET-/chat/chat.css]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[POST-/chat/api/state]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[POST-/chat/api/send]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[POST-/chat/api/events]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[GET-/swarms/chat]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[GET-/swarms/chat.js]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[GET-/swarms/notice]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_the_proxy_serves_exactly_the_seven_directory_assets_and_no_inference_route": "passed",
+      "tests.demo.test_profile_a_site_closed::test_the_directory_server_itself_does_not_answer_chat_paths": "passed",
+      "tests.demo.test_profile_a_site_closed::test_the_directory_page_and_notice_name_no_public_inference_endpoint": "passed",
+      "tests.demo.test_public_origin_proxy::test_capability_loader_rejects_unsafe_files_and_accepts_owner_private": "passed",
+      "tests.demo.test_public_origin_proxy::test_proxy_overwrites_trusted_headers_and_strips_client_authority": "passed",
+      "tests.demo.test_public_origin_proxy::test_proxy_rejects_private_and_swarm_mutation_paths_without_upstream": "passed",
+      "tests.demo.test_public_origin_proxy::test_proxy_route_policy_matches_browser_gateway_contract": "passed",
+      "tests.demo.test_public_origin_proxy::test_proxy_allows_bootstrap_inference_events_and_streams_chunked_sse": "passed",
+      "tests.demo.test_public_origin_proxy::test_cli_refuses_non_loopback_listen_and_upstream_by_default": "passed",
+      "tests.demo.test_public_origin_proxy_bounds::test_defaults_match_the_directory": "passed",
+      "tests.demo.test_public_origin_proxy_bounds::test_stalled_connections_hold_the_slots_the_extra_one_is_refused_and_the_held_ones_time_out": "passed",
+      "tests.demo.test_public_origin_proxy_bounds::test_a_stalled_header_and_a_stalled_body_are_both_dropped_after_the_timeout": "passed",
+      "tests.demo.test_public_origin_proxy_bounds::test_a_normal_request_after_the_timeouts_is_unaffected": "passed",
+      "tests.demo.test_public_origin_proxy_bounds::test_concurrent_helper_downloads_are_capped": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_served_file_is_the_fixture_with_download_headers_and_never_reaches_an_upstream": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_config_advertises_the_download_with_the_startup_sha_when_the_file_hashes": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_unconfigured_proxy_leaves_the_directory_config_alone_and_serves_nothing": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_missing_file_stays_not_published": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_a_directory_that_claims_a_download_is_not_trusted_over_a_missing_file": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_unreadable_file_stays_not_published": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_empty_file_symlink_and_directory_stay_not_published": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_file_over_the_size_cap_stays_not_published": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_file_that_changes_after_startup_is_withdrawn_not_served_under_the_old_sha": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_file_deleted_after_startup_is_withdrawn": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_only_get_and_head_serve_it_and_nothing_else_is_forwarded": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_a_proxy_without_the_directory_mount_cannot_be_given_a_zip": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_bad_zip_paths_are_a_configuration_error[relative/path.zip]": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_bad_zip_paths_are_a_configuration_error[]": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_bad_zip_paths_are_a_configuration_error[/tmp/not-a-zip.txt]": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_bad_zip_paths_are_a_configuration_error[/tmp/we ird.zip]": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_bad_zip_paths_are_a_configuration_error[/tmp/abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.zip]": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_cli_flags": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_root_redirects_to_swarms_when_explicitly_enabled": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_everything_but_root_reaches_the_product_bundle_and_api_only_with_product_routes_enabled": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_the_flag_turns_the_redirect_off": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_without_the_directory_mount_root_is_the_product_even_with_the_default_flag": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[POST-/api/v1/inference]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/api/v1/bootstrap]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/api/v1/product/export]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/api/v1/observatory/events]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/api/v1/swarm/status]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/api/v1/inference/abc/events]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[DELETE-/api/v1/inference/abc/cancel]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/anything]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/assets/app.js]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[HEAD-/index.html]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/swarmsfoo]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_the_swarms_surface_and_the_apex_still_work_with_product_routes_closed": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_closed_even_when_the_root_redirect_is_off": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_blocked_prefixes_stay_unreachable_with_product_routes_closed": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_explicit_flag_restores_the_product_routes_unchanged": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_flag_off_is_the_default_and_the_cli_exposes_it": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_without_a_mounted_directory_the_product_proxy_is_unchanged": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_defaults_are_named_in_one_module": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_swarms_page_and_phonebook_reach_the_directory_not_the_product_gateway": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_directory_hop_gets_no_owner_authority_or_credentials": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_client_ip_header_is_validated_normalised_and_required": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_duplicate_client_ip_headers_are_refused": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_missing_client_ip_can_be_allowed_by_configuration_and_is_then_not_invented": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_traversal_and_unknown_swarms_paths_never_reach_either_upstream": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_swarms_methods_are_limited_to_get_head_post": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_existing_allowlist_and_blocklist_are_unchanged_with_the_mount_on_and_product_routes_enabled": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_mount_is_off_unless_configured_and_then_swarms_behaves_as_before": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_directory_down_is_a_502_not_a_product_fallback": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_directory_body_cap_and_chunked_reframing": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_refusal_survives_a_body_uploaded_after_the_response": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_config_rejects_non_loopback_directory_upstream_and_cli_wires_it": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_real_directory_behind_the_proxy_page_config_and_rate_key": "passed",
+      "tests.demo.test_serve_cli::test_fixture_serve_selects_bundled_data_and_never_starts_live_runtime": "passed",
+      "tests.demo.test_serve_cli::test_fixture_serve_bootstraps_locked_dependencies_before_start": "passed",
+      "tests.demo.test_serve_cli::test_fixture_serve_stops_when_dependency_bootstrap_fails": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_delegates_to_qualified_physical_runtime": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_forwards_isolated_product_state_root": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_forwards_force_relay_but_fixture_rejects_it": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_forwards_explicit_trusted_https_proxy_boundary": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_forwards_deployment_and_static_arguments": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_forwards_multiple_qualified_deployment_plans": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_forwards_prepared_candidate_directory": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_requires_operator_plan": "passed",
+      "tests.demo.test_serve_cli::test_fixture_serve_rejects_live_only_arguments": "passed",
+      "tests.demo.test_serve_cli::test_serve_rejects_unknown_mode": "passed",
+      "tests.demo.test_surface_probe::test_a_closed_proxy_passes_every_check_with_zero_upstream_connections_to_the_product": "passed",
+      "tests.demo.test_surface_probe::test_a_proxy_that_still_serves_the_product_routes_fails_and_names_them": "passed",
+      "tests.demo.test_surface_probe::test_a_set_cookie_on_the_page_fails_whatever_the_case_of_the_header": "passed",
+      "tests.demo.test_surface_probe::test_anything_but_404_on_a_product_route_fails_even_a_403_or_a_200": "passed",
+      "tests.demo.test_surface_probe::test_an_unreachable_host_is_unknown_and_unhealthy_never_a_pass": "passed",
+      "tests.demo.test_surface_probe::test_cli_prints_one_json_line_and_exits_by_verdict": "passed",
+      "tests.demo.test_surface_probe::test_cli_refuses_anything_but_an_https_origin_or_a_loopback_one[http://mycelium.now]": "passed",
+      "tests.demo.test_surface_probe::test_cli_refuses_anything_but_an_https_origin_or_a_loopback_one[ftp://x]": "passed",
+      "tests.demo.test_surface_probe::test_cli_refuses_anything_but_an_https_origin_or_a_loopback_one[https://u:p@mycelium.now]": "passed",
+      "tests.demo.test_surface_probe::test_cli_refuses_anything_but_an_https_origin_or_a_loopback_one[https://x/path]": "passed",
+      "tests.demo.test_surface_probe::test_cli_refuses_anything_but_an_https_origin_or_a_loopback_one[mycelium.now]": "passed",
+      "tests.demo.test_surface_probe::test_cli_refuses_anything_but_an_https_origin_or_a_loopback_one[http://10.0.0.5:4350]": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_record_is_closed_and_binds_the_exact_a0_specification": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_the_committed_record_is_prepared_or_fully_executed": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_prepared_record_claims_no_execution_and_no_completion": "skipped",
+      "tests.governance.test_a0_literal_verification_record::test_every_named_command_target_exists_in_the_tree": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_filling_binds_every_obligation_to_the_candidate": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_failed_obligation_is_recorded_as_failed_not_hidden": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_non_commit_candidate_is_refused[abc]": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_non_commit_candidate_is_refused[AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA]": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_non_commit_candidate_is_refused[gggggggggggggggggggggggggggggggggggggggg]": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_non_commit_candidate_is_refused[None]": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_partial_result_set_is_refused": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_an_unknown_result_or_missing_receipt_is_refused": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_half_executed_record_is_refused": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_the_cli_refuses_unless_head_is_the_candidate_on_a_clean_tree": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_the_prepared_form_of_the_committed_record_claims_nothing": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_an_executed_record_states_its_own_boundary": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_resolving_r4_completes_an_all_passed_executed_record": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_r4_cannot_complete_a_record_with_a_failed_obligation": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_r4_refuses_a_prepared_record_another_reading_or_another_commit": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_complete_record_that_drifts_is_refused": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_the_prepared_form_of_a_complete_record_clears_r4": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_the_cli_resolves_r4_on_an_executed_record": "passed",
+      "tests.governance.test_a6_source_manifest::test_build_and_verify_exact_a6_source_manifest": "passed",
+      "tests.governance.test_a6_source_manifest::test_verify_rejects_path_set_or_byte_drift": "passed",
+      "tests.governance.test_a6_source_manifest::test_manifest_digest_is_canonical": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_the_fixture_form_is_valid_without_a_claim_clause": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_the_pre_change_audit_accepts_a_blocker_its_artifact_refutes": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_the_pre_change_audit_was_not_vacuously_green_on_this_tree": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_the_fixed_audit_refutes_the_contradicted_blockers": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_truthful_blocker_claims_pass": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_malformed_and_undecidable_claims_are_findings": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_git_claims_are_decided_against_the_work_tree": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_git_claims_are_undecidable_without_a_readable_head": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_prose_without_a_clause_is_not_a_claim": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_the_live_checklist_carries_no_clauses_and_gains_no_findings": "passed",
+      "tests.governance.test_gate_source_sets::test_closure_includes_known_transitive_dependencies": "passed",
+      "tests.governance.test_gate_source_sets::test_unrelated_change_carries": "passed",
+      "tests.governance.test_gate_source_sets::test_every_pinned_file_change_forces_rerun": "passed",
+      "tests.governance.test_gate_source_sets::test_deleting_a_pinned_file_forces_rerun": "passed",
+      "tests.governance.test_gate_source_sets::test_new_module_shadowing_a_third_party_import_forces_rerun": "passed",
+      "tests.governance.test_gate_source_sets::test_manifest_is_stable_under_definition_and_entry_ordering": "passed",
+      "tests.governance.test_gate_source_sets::test_out_of_repo_driver_is_scanned_and_digested_but_flagged_unversioned": "passed",
+      "tests.governance.test_gate_source_sets::test_receipt_digest_binds_the_verdicts": "passed",
+      "tests.governance.test_gate_source_sets::test_path_join_pins_the_joined_file_not_its_parent_directories": "passed",
+      "tests.governance.test_gate_source_sets::test_change_only_in_generated_pin_files_carries_under_r1": "passed",
+      "tests.governance.test_gate_source_sets::test_generated_pin_change_with_a_code_change_still_reruns": "passed",
+      "tests.governance.test_gate_source_sets::test_external_window_npm_build_pins_the_web_bundle": "passed",
+      "tests.governance.test_gate_source_sets::test_real_gate_definitions_resolve_on_this_checkout": "passed",
+      "tests.governance.test_governance_audit::test_governance_ledger_matches_architecture_and_never_claims_release": "passed",
+      "tests.governance.test_governance_audit::test_model_preparation_authority_covers_cold_and_warm_product_actions": "passed",
+      "tests.governance.test_governance_audit::test_governance_rejects_implemented_endpoint_missing_from_ledger": "passed",
+      "tests.governance.test_governance_audit::test_governance_rejects_governed_endpoint_missing_from_client": "passed",
+      "tests.governance.test_governance_audit::test_governance_rejects_unsupported_milestone_promotion": "passed",
+      "tests.governance.test_governance_audit::test_governance_rejects_unpinned_action_protocol_and_absent_plan": "passed",
+      "tests.governance.test_governance_audit::test_governance_rejects_unknown_ledger_field_and_duplicate_milestone": "passed",
+      "tests.governance.test_governance_gate::test_aggregate_governance_gate_requires_every_child_authority": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_unmodified_git_backed_copy_passes_aggregate": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_single_ledger_rejection_has_healthy_copy_and_nonzero_gate[unknown_ledger_field-ledger_shape_invalid]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_single_ledger_rejection_has_healthy_copy_and_nonzero_gate[invalid_state-capability_entry_invalid]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_single_ledger_rejection_has_healthy_copy_and_nonzero_gate[duplicate_milestone-milestone_entry_invalid]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_single_ledger_rejection_has_healthy_copy_and_nonzero_gate[absent_governing_plan-governing_plan_unavailable]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_registration_owner_source_drift_fails_aggregate": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_fabricated_registration_cannot_claim_ledger_as_source": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_negative_copies_refuse_exactly_one_child[unlisted_post-claim_boundary-observatory_ui_write_surface]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_negative_copies_refuse_exactly_one_child[unregistered_protocol-contracts-manifest: contract registry mismatch]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_negative_copies_refuse_exactly_one_child[unknown_ledger_protocol-governance-boundary_protocol_unregistered:mycelium.unknown_boundary.v1]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_negative_copies_refuse_exactly_one_child[unknown_action_protocol-governance-boundary_protocol_unregistered:mycelium.unknown_action.v1]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_negative_copies_refuse_exactly_one_child[promoted_milestone-governance-milestone_promotion_unsupported:M18:4.8]": "passed",
+      "tests.governance.test_governance_projection::test_governance_projection_is_browser_safe_and_never_release_ready": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_current_mycelium_completion_checklist_is_closed_and_truthful": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_second_gate_in_progress": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_missing_and_extra_direct_dependencies": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_completed_requirement_without_evidence_is_rejected": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_complete_gate_state_without_executed_evidence_is_rejected": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_completed_evidence_validates_all_required_bindings": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_accepts_atomic_advance_to_the_next_primary_gate": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_completed_gate_retains_expired_live_evidence_as_historical_proof": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_concluded_design_only_gate_retains_expired_executed_evidence": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_accepts_dependency_ready_parallel_primary_gate": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_generic_a12_can_close_with_a4_while_a9_and_a11_are_incomplete": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a10_can_close_with_a4_while_a9_is_incomplete": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_ruled_dependencies_narrow_only_a10_and_a12_and_keep_a9_elsewhere": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_live_specifications_record_every_narrowed_a9_part": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_whole_gate_a9_dependency_on_a10_and_a12": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_narrowing_that_drops_a_named_a9_part": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_live_checklist_tracks_a14b_as_a_slice_of_the_a14_row": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_accepts_a_well_formed_slice": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a_slice_is_never_a_gate_id": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14:slices_invalid0]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14:slices_invalid1]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14:slice:0:shape_invalid0]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14:slice:0:shape_invalid1]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14:slice:0:id_invalid0]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14:slice:0:id_invalid1]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14:slice:0:id_invalid2]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14b:state_invalid]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14b:name_invalid]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14b:design_only_completion_invalid]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14b:requirement_partition_invalid]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14b:evidence_subject_invalid:specification]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14b:ui_workspace_set_invalid]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14b:specification_unavailable]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_duplicate_or_unordered_slices": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_slice_specification_must_name_the_slice_and_its_parent[replace_text0-gate:A14b:specification_gate_unbound]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_slice_specification_must_name_the_slice_and_its_parent[replace_text1-gate:A14b:specification_parent_unbound]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_slice_specification_must_name_the_slice_and_its_parent[replace_text2-gate:A14b:specification_design_boundary_missing]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_slice_specification_must_name_the_slice_and_its_parent[replace_text3-gate:A14b:specification_claim_boundary_missing]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a_slice_of_a_non_primary_gate_may_not_be_in_progress": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_live_checklist_records_the_slice_completion_policy": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a_gate_row_is_not_complete_while_a_slice_is_design_only": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a_gate_row_is_not_complete_while_a_slice_is_unfinished[implemented_unintegrated]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a_gate_row_is_not_complete_while_a_slice_is_unfinished[integrated_unqualified]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a_gate_row_is_not_complete_while_a_slice_is_unfinished[physically_qualified]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a_gate_row_is_complete_once_every_slice_is_complete": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_every_slice_must_be_complete_not_only_the_first": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_an_unfinished_slice_of_an_unfinished_row_is_not_a_slice_completion_finding": "passed",
+      "tests.contracts.test_a14b_registration::test_existing_evidence_is_registered_and_generated": "passed",
+      "tests.contracts.test_a14b_registration::test_registered_fixture_rejects_invalid_or_private_mutations[change0]": "passed",
+      "tests.contracts.test_a14b_registration::test_registered_fixture_rejects_invalid_or_private_mutations[change1]": "passed",
+      "tests.contracts.test_a14b_registration::test_registered_fixture_rejects_invalid_or_private_mutations[change2]": "passed",
+      "tests.contracts.test_a14b_registration::test_registered_fixture_rejects_invalid_or_private_mutations[change3]": "passed",
+      "tests.contracts.test_a14b_registration::test_registered_fixture_rejects_invalid_or_private_mutations[change4]": "passed",
+      "tests.contracts.test_a14b_registration::test_registered_fixture_rejects_invalid_or_private_mutations[change5]": "passed",
+      "tests.contracts.test_a6_intent_bounds::test_recovery_intent_rejects_duplicate_or_unbounded_lists[candidate_path_ids-value0]": "passed",
+      "tests.contracts.test_a6_intent_bounds::test_recovery_intent_rejects_duplicate_or_unbounded_lists[candidate_path_ids-value1]": "passed",
+      "tests.contracts.test_a6_intent_bounds::test_recovery_intent_rejects_duplicate_or_unbounded_lists[retained_path_ids-value2]": "passed",
+      "tests.contracts.test_a6_intent_bounds::test_recovery_intent_rejects_duplicate_or_unbounded_lists[rejection_reasons-value3]": "passed",
+      "tests.contracts.test_a6_qualification_claims::test_unexecuted_qualification_does_not_manufacture_positive_subclaims": "passed",
+      "tests.contracts.test_contract_fixtures::test_generated_contract_fixtures_have_no_drift": "passed",
+      "tests.contracts.test_contract_fixtures::test_model_preparation_browser_contract_is_manifest_pinned": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_checks_manifest_hashes_and_protocol_ownership": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_fails_closed_on_hash_namespace_and_path_drift": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_rejects_symlink_manifest": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_rejects_symlink_manifest_parent": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_rejects_manifest_listed_symlink_source": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_rejects_manifest_listed_symlink_fixture": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_rejects_manifest_listed_symlink_parent[owner_source]": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_rejects_manifest_listed_symlink_parent[fixture]": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_rejects_incomplete_alias_and_duplicate_key_manifests": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_reports_unhashable_manifest_fields_without_crashing": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_io_rejects_symlink_reads_and_writes": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_io_rejects_non_regular_inputs_and_outputs": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_io_always_attempts_parent_fd_cleanup": "passed",
+      "tests.contracts.test_contract_fixtures::test_atomic_write_keeps_replacement_inside_opened_parent_descriptor": "passed",
+      "tests.contracts.test_contract_fixtures::test_fixture_check_rejects_unexpected_files": "passed",
+      "tests.contracts.test_contract_fixtures::test_compatibility_fixtures_are_accepted_by_executable_consumers": "passed",
+      "tests.contracts.test_contract_fixtures::test_a6_runtime_contract_pins_live_projection_owners": "passed",
+      "tests.contracts.test_contract_fixtures::test_a6_gate_contract_pins_physical_and_browser_harnesses": "passed",
+      "tests.contracts.test_contract_fixtures::test_all_a6_contracts_pin_every_production_owner": "passed",
+      "tests.contracts.test_m11_baseline_sealer::test_baseline_projection_pins_sources_without_copying_private_fields": "passed",
+      "tests.contracts.test_m11_baseline_sealer::test_baseline_privacy_guard_rejects_inference_content": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_is_closed_and_detached": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_rejects_unfrozen_or_nonfinite_values[minimum_sample_size-True]": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_rejects_unfrozen_or_nonfinite_values[minimum_output_tokens_per_second-nan]": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_rejects_unfrozen_or_nonfinite_values[execution_scope-modeled_concurrent]": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_rejects_unfrozen_or_nonfinite_values[queueing_budget_state-met]": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_rejects_unknown_fields_and_inverted_percentiles": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_v2_is_closed_and_preserves_m16_boundary": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_v2_rejects_unknown_and_nonfinite_values": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_v3_closes_m16_dimensions_with_visible_batch_exclusion": "passed",
+      "tests.contracts.test_phone_node_control_golden::test_regenerating_reproduces_the_committed_golden": "passed",
+      "tests.contracts.test_phone_stage_node_golden::test_regenerating_reproduces_the_committed_scripts": "passed",
+      "tests.contracts.test_phone_stage_wire_golden::test_regenerating_reproduces_the_committed_vectors": "passed",
+      "tests.contracts.test_phone_stage_wire_golden::test_forwarded_frames_advance_exactly_one_hop_with_a_recomputed_key": "passed",
+      "tests.claims.test_claim_boundary_audit::test_honest_tree_preserves_fixed_false_readiness_claims": "passed",
+      "tests.claims.test_claim_boundary_audit::test_route_and_release_true_literals_fail_outside_authority": "passed",
+      "tests.claims.test_claim_boundary_audit::test_observatory_backend_and_ui_write_surfaces_fail": "passed",
+      "tests.claims.test_claim_boundary_audit::test_allowlisted_product_action_clients_do_not_weaken_observatory_boundary": "passed",
+      "tests.claims.test_claim_boundary_audit::test_unreadable_source_shapes_fail_closed": "passed",
+      "tests.claims.test_claim_boundary_audit::test_output_redacts_secret_shaped_tracked_paths": "passed",
+      "tests.claims.test_claim_boundary_audit::test_output_is_deterministic_and_repository_is_unchanged": "passed",
+      "tests.claims.test_claim_boundary_audit::test_cli_json_is_canonical_and_exit_matches_findings": "passed",
+      "tests.claims.test_claim_boundary_audit::test_current_checkout_and_runbook_preserve_claim_boundary": "passed"
+    }
+  },
+  "candidate": {
+    "counts": {
+      "passed": 570,
+      "skipped": 1
+    },
+    "total": 571,
+    "elapsed_seconds": 541.781,
+    "cases": {
+      "tests.swarm_directory.test_chat_notice_browser::test_the_first_visit_shows_the_notice_and_holds_the_prompt_box_until_i_understand": "passed",
+      "tests.swarm_directory.test_chat_notice_browser::test_the_acknowledgement_is_per_origin_and_per_owner": "passed",
+      "tests.swarm_directory.test_chat_notice_browser::test_send_stays_refused_before_the_acknowledgement_even_if_the_form_is_forced": "passed",
+      "tests.swarm_directory.test_chat_notice_browser::test_forget_asks_first_says_what_it_resets_and_then_asks_for_the_notice_again": "passed",
+      "tests.swarm_directory.test_chat_notice_browser::test_a_swarm_that_is_not_open_says_chat_needs_a_grant_from_the_directory": "passed",
+      "tests.swarm_directory.test_chat_notice_browser::test_an_unlisted_swarm_claims_no_owner": "passed",
+      "tests.swarm_directory.test_chat_notice_browser::test_the_chat_assets_set_no_cookie_and_keep_the_csp": "passed",
+      "tests.swarm_directory.test_directory_card_browser::test_a_card_shows_model_members_status_and_how_fresh_that_status_is": "passed",
+      "tests.swarm_directory.test_directory_card_browser::test_every_card_links_the_same_short_notice": "passed",
+      "tests.swarm_directory.test_directory_card_browser::test_forget_this_key_asks_first_and_says_what_it_resets": "passed",
+      "tests.swarm_directory.test_directory_card_browser::test_the_page_sets_no_cookie_loads_nothing_third_party_and_keeps_its_csp": "passed",
+      "tests.swarm_directory.test_directory_core::test_create_and_list_shows_every_swarm_with_public_fields": "passed",
+      "tests.swarm_directory.test_directory_core::test_unsigned_forged_and_tampered_records_are_refused": "passed",
+      "tests.swarm_directory.test_directory_core::test_only_the_owner_updates_and_seq_must_grow": "passed",
+      "tests.swarm_directory.test_directory_core::test_delete_by_owner_and_old_record_cannot_be_replayed": "passed",
+      "tests.swarm_directory.test_directory_core::test_heartbeat_status_serving_warming_and_expiry_to_offline": "passed",
+      "tests.swarm_directory.test_directory_core::test_heartbeat_with_skewed_clock_is_refused": "passed",
+      "tests.swarm_directory.test_directory_core::test_access_request_owner_inbox_grant_and_deny": "passed",
+      "tests.swarm_directory.test_directory_core::test_grant_deposit_must_be_signed_by_the_swarm_owner": "passed",
+      "tests.swarm_directory.test_directory_core::test_query_replay_is_refused": "passed",
+      "tests.swarm_directory.test_directory_core::test_entry_offer_then_owner_attaches_entry": "passed",
+      "tests.swarm_directory.test_directory_core::test_entry_origin_must_be_https_unless_loopback_enabled": "passed",
+      "tests.swarm_directory.test_directory_core::test_size_caps_and_per_owner_and_total_caps": "passed",
+      "tests.swarm_directory.test_directory_core::test_per_ip_and_per_key_write_rate_limits": "passed",
+      "tests.swarm_directory.test_directory_core::test_sqlite_store_is_durable_across_restart": "passed",
+      "tests.swarm_directory.test_directory_core::test_canonical_bytes_match_the_js_rules": "passed",
+      "tests.swarm_directory.test_directory_core::test_unknown_routes_and_methods": "passed",
+      "tests.swarm_directory.test_directory_core::test_signed_read_queries_have_their_own_budget_and_never_spend_the_write_budget": "passed",
+      "tests.swarm_directory.test_directory_core::test_signed_read_queries_are_still_bounded": "passed",
+      "tests.swarm_directory.test_directory_write_budgets::test_700_junk_posts_from_30_addresses_do_not_starve_a_valid_heartbeat": "passed",
+      "tests.swarm_directory.test_directory_write_budgets::test_valid_signed_writes_are_what_spends_the_global_write_budget": "passed",
+      "tests.swarm_directory.test_directory_write_budgets::test_a_spent_write_budget_does_not_stop_heartbeats": "passed",
+      "tests.swarm_directory.test_directory_write_budgets::test_heartbeats_have_their_own_bounded_budget": "passed",
+      "tests.swarm_directory.test_directory_write_budgets::test_unsigned_or_unauthorised_heartbeats_do_not_spend_the_heartbeat_budget": "passed",
+      "tests.swarm_directory.test_directory_write_budgets::test_signed_queries_never_spend_the_write_budgets": "passed",
+      "tests.swarm_directory.test_entry_guard::test_valid_owner_grant_is_admitted_and_reaches_the_backend": "passed",
+      "tests.swarm_directory.test_entry_guard::test_no_grant_or_garbage_grant_is_refused_before_the_backend": "passed",
+      "tests.swarm_directory.test_entry_guard::test_forged_grant_signed_by_a_stranger_is_refused": "passed",
+      "tests.swarm_directory.test_entry_guard::test_grant_for_someone_else_or_another_swarm_is_refused": "passed",
+      "tests.swarm_directory.test_entry_guard::test_expired_and_not_yet_valid_grants_are_refused": "passed",
+      "tests.swarm_directory.test_entry_guard::test_quota_is_charged_durably_and_exhaustion_refuses": "passed",
+      "tests.swarm_directory.test_entry_guard::test_request_signature_and_replay_and_clock_are_checked": "passed",
+      "tests.swarm_directory.test_entry_guard::test_backend_refusal_refunds_the_quota": "passed",
+      "tests.swarm_directory.test_entry_guard::test_per_key_and_per_ip_rate_limits": "passed",
+      "tests.swarm_directory.test_entry_guard::test_revoked_grant_is_refused": "passed",
+      "tests.swarm_directory.test_entry_guard::test_open_swarm_auto_grant_is_issued_once_per_key_and_bounded": "passed",
+      "tests.swarm_directory.test_entry_guard::test_open_grant_refused_for_request_mode_swarm": "passed",
+      "tests.swarm_directory.test_entry_guard::test_policy_requires_a_valid_owner_record_naming_this_entry": "passed",
+      "tests.swarm_directory.test_entry_guard::test_unpublished_entry_refuses_everything": "passed",
+      "tests.swarm_directory.test_entry_guard::test_state_is_public_and_bounded": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_flow_and_helper_download_are_unavailable_until_published": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_published_download_shows_link_checksum_and_the_unnotarized_warning": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_owner_changes_access_mode_and_sees_helpers_grants_usage_and_the_kill_switch": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_visitor_card_shows_every_live_section_with_unavailable_ones_marked": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_inference_streams_tokens_and_every_terminal_state_is_named": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_tokens_arrive_progressively_and_the_owner_kill_switch_ends_it_and_cancels_the_generation": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_a_visitor_can_stop_their_own_prompt_and_is_told_it_was_cancelled_by_them": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_a_revoked_grant_is_reported_as_not_granted": "passed",
+      "tests.swarm_directory.test_hosted_ui_browser::test_a_request_mode_visitor_without_a_grant_is_told_it_is_not_granted": "passed",
+      "tests.swarm_directory.test_hosted_ui_proxy_browser::test_the_download_card_links_the_served_file_with_its_checksum_and_the_unnotarized_warning": "passed",
+      "tests.swarm_directory.test_hosted_ui_proxy_browser::test_a_missing_file_leaves_the_card_on_not_published_yet": "passed",
+      "tests.swarm_directory.test_hosted_ui_proxy_browser::test_the_root_lands_a_visitor_on_the_swarms_page": "passed",
+      "tests.swarm_directory.test_hosted_ui_proxy_browser::test_with_the_redirect_off_the_root_is_the_consumer_demo_only_when_product_routes_are_enabled": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_directory_plist_template_renders_to_a_valid_always_on_unit": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_watchdog_plist_template_runs_the_probe_on_an_interval_and_never_applies_by_default": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_render_refuses_missing_placeholders_and_unknown_templates": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_rendered_plists_pass_plutil_lint": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_raw_templates_are_marked_as_templates_and_never_install_anything": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_start_script_is_valid_bash_and_dry_run_has_no_side_effects": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_hosted_flag_applies_the_named_defaults_and_stays_overridable": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_probe_is_green_only_for_the_expected_config_document": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_probe_through_the_apex_proxy_sends_a_client_address": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_healthy_probe_resets_the_failure_count_and_never_restarts": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_restart_is_only_printed_in_dry_run_and_runs_with_apply": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_unknown_counts_as_unhealthy_and_a_restart_cooldown_stops_loops": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_failed_restart_command_is_reported_and_state_is_kept": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_a_down_proxy_is_reported_but_never_restarts_the_directory": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_corrupt_state_file_is_treated_as_empty": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_cli_dry_run_against_a_real_directory_server_is_green_and_writes_only_its_state_file": "passed",
+      "tests.swarm_directory.test_hosted_unit::test_cli_apply_is_the_only_way_to_run_the_restart": "passed",
+      "tests.swarm_directory.test_kill_cancels_generation::test_engaging_the_kill_switch_cancels_the_running_generation": "passed",
+      "tests.swarm_directory.test_kill_cancels_generation::test_releasing_the_kill_switch_cancels_nothing": "passed",
+      "tests.swarm_directory.test_kill_cancels_generation::test_the_first_poll_after_a_kill_cancels_that_request_even_if_the_bulk_cancel_missed_it": "passed",
+      "tests.swarm_directory.test_kill_cancels_generation::test_a_chat_backend_without_cancel_still_gets_the_kill_applied": "passed",
+      "tests.swarm_directory.test_kill_cancels_generation::test_a_cancel_failure_never_blocks_the_kill": "passed",
+      "tests.swarm_directory.test_kill_cancels_generation::test_the_owner_app_kill_action_reaches_the_backend_cancel": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_defaults_come_from_the_one_named_module": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_many_distinct_keys_and_ips_cannot_exceed_the_swarm_request_budget": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_swarm_token_budget_clamps_then_refuses": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_budget_resets_on_the_next_utc_day_and_survives_a_restart": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_backend_refusal_gives_the_swarm_budget_back": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_budget_applies_to_open_swarms_only_and_none_disables_it": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_state_reports_the_remaining_swarm_budget_for_open_swarms": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_kill_switch_stops_new_admissions_and_new_open_grants": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_only_the_owner_key_can_flip_the_switch_and_replays_are_dead": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_release_reopens_admission_with_the_same_grants_and_the_state_is_durable": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_in_flight_request_ends_with_an_explicit_terminal_and_stays_terminal": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_request_that_finished_before_the_kill_is_left_alone": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_kill_route_is_rate_limited_by_ip_before_any_signature_work": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_kill_document_is_a_closed_set": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_owner_app_kill_action_signs_with_the_app_key_and_blocks_the_entry": "passed",
+      "tests.swarm_directory.test_open_guard_rails::test_owner_app_kill_action_validates_its_input_and_mode": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_defaults_are_named_in_the_one_module_and_wired_into_the_limits": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_one_address_rotating_ten_keys_cannot_take_more_than_its_daily_share": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_a_second_address_still_gets_service_when_the_first_is_spent": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_the_per_address_token_budget_clamps_then_refuses": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_a_request_the_backend_refuses_gives_the_address_its_budget_back": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_the_budget_resets_on_the_next_utc_day": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_open_grants_per_address_per_day_are_bounded": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_the_state_route_shows_the_callers_daily_budget_used": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_the_budget_applies_to_open_swarms_only": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_relay_chat_spends_the_same_per_address_budget": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_normalises_ipv6_to_its_64[2001:db8:1:2:aaaa:bbbb:cccc:dddd-2001:db8:1:2::1-True]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_normalises_ipv6_to_its_64[2001:db8:1:2::1-2001:db8:1:3::1-False]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_normalises_ipv6_to_its_64[2001:DB8:1:2::1-2001:db8:1:2:0:0:0:9-True]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_normalises_ipv6_to_its_64[::ffff:203.0.113.9-203.0.113.9-True]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_normalises_ipv6_to_its_64[203.0.113.9-203.0.113.10-False]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_for_a_bad_header_is_the_shared_unknown_bucket[]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_for_a_bad_header_is_the_shared_unknown_bucket[not-an-ip]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_for_a_bad_header_is_the_shared_unknown_bucket[1.2.3.4.5]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_for_a_bad_header_is_the_shared_unknown_bucket[2001:db8::zz]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_for_a_bad_header_is_the_shared_unknown_bucket[[::1]]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_client_key_for_a_bad_header_is_the_shared_unknown_bucket[203.0.113.9, 1.1.1.1]": "passed",
+      "tests.swarm_directory.test_open_ip_daily_budget::test_daily_budget_reserves_releases_and_stays_bounded": "passed",
+      "tests.swarm_directory.test_privacy_disclosure::test_the_page_footer_names_cloudflare_and_what_it_can_see": "passed",
+      "tests.swarm_directory.test_privacy_disclosure::test_the_page_footer_describes_the_direct_to_entry_flow_and_the_stranger_case": "passed",
+      "tests.swarm_directory.test_privacy_disclosure::test_the_page_footer_no_longer_claims_unqualified_no_logs": "passed",
+      "tests.swarm_directory.test_privacy_disclosure::test_the_directory_privacy_note_and_demo_label_name_cloudflare": "passed",
+      "tests.swarm_directory.test_privacy_disclosure::test_the_relay_status_says_web_chat_prompts_cross_the_relay": "passed",
+      "tests.swarm_directory.test_privacy_disclosure::test_the_owner_tunnel_prompt_does_not_say_inference_stays_on_iroh_alone": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_cancel_is_a_closed_route_and_a_closed_document": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_malformed_request_id_is_refused_in_the_document[short]": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_malformed_request_id_is_refused_in_the_document[a/bcccccccccccccccccccc]": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_malformed_request_id_is_refused_in_the_document[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_malformed_request_id_is_refused_in_the_document[]": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_malformed_request_id_is_refused_in_the_document[7]": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_malformed_request_id_is_refused_in_the_document[None]": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_the_requester_who_sent_the_prompt_cancels_it": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_another_key_cannot_cancel_it_not_even_the_swarm_owner": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_an_unknown_request_id_is_refused_before_the_backend": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_cancel_signed_for_one_request_cannot_be_pointed_at_another": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_replay_stale_and_foreign_swarm_are_refused": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_cancelling_something_that_already_ended_says_so": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_a_backend_without_cancel_is_a_closed_error_not_a_crash": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_stopping_your_own_prompt_needs_no_grant_and_no_send_budget": "passed",
+      "tests.swarm_directory.test_requester_cancel::test_cancels_have_their_own_per_address_budget": "passed",
+      "tests.swarm_directory.test_site_p3_core::test_decline_cooldown_survives_restart_and_expires_at_boundary": "passed",
+      "tests.swarm_directory.test_site_p3_core::test_model_whitelist_rejects_signed_listing_but_reads_old_record": "passed",
+      "tests.swarm_directory.test_site_p3_core::test_offline_hide_delist_and_owner_republish_are_reversible": "passed",
+      "tests.swarm_directory.test_site_p3_core::test_offline_heartbeats_do_not_reset_retention_but_live_ones_restore": "passed",
+      "tests.swarm_directory.test_site_p3_core::test_retention_thresholds_are_configurable": "passed",
+      "tests.swarm_directory.test_site_p3_core::test_cli_retention_config_and_invalid_order": "passed",
+      "tests.swarm_directory.test_site_p3_core::test_retained_listing_owner_is_recoverable_only_to_original_key": "passed",
+      "tests.swarm_directory.test_site_p3_core::test_record_edit_while_online_does_not_count_online_time_as_offline": "passed",
+      "tests.swarm_directory.test_site_p3_core::test_owner_inbox_includes_direct_grants_without_exposing_to_strangers": "passed",
+      "tests.swarm_directory.test_site_p3_http::test_apex_explains_without_identity_or_chat_surface": "passed",
+      "tests.swarm_directory.test_site_p3_http::test_apex_proxy_composes_exact_static_assets_and_keeps_prompt_routes_closed": "passed",
+      "tests.swarm_directory.test_site_p3_http::test_entry_rejects_unregistered_model_before_quota_or_backend": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_twenty_real_app_behaviours": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[dark-1440-900]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[dark-390-844]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[light-1440-900]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[light-390-844]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[dark-1440-900]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[dark-390-844]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[light-1440-900]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[light-390-844]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_mac_app_header_inbox_uses_real_owner_requests[1440-900]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_mac_app_header_inbox_uses_real_owner_requests[390-844]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_stale_browse_and_owner_republish_real_record": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_registry_dropdown_matches_source": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[dark-1440-900]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[dark-390-844]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[light-1440-900]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[light-390-844]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_busy_wait_is_cancellable_and_prompts_never_go_to_directory": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[dark-1440-900]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[dark-390-844]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[light-1440-900]": "passed",
+      "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[light-390-844]": "passed",
+      "tests.swarm_directory.test_surface_probe_user_agent::test_probe_requests_carry_an_explicit_user_agent": "passed",
+      "tests.swarm_directory.test_two_swarms_integration::test_two_swarm_scenario_runs_its_steps_in_order": "passed",
+      "tests.swarm_directory.test_web_ui_browser::test_browser_create_attach_request_approve_and_chat": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_accepts_private_device_addresses[192.168.10.8-192.168.10.8]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_accepts_private_device_addresses[10.0.0.4-10.0.0.4]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_accepts_private_device_addresses[mycelium-lab.local-mycelium-lab.local]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[127.0.0.1]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[::1]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[fd00::1234]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[localhost]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[https://192.168.1.4]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[host/name]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[*.example.test]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[bad host.local]": "passed",
+      "tests.demo.test_device_lab::test_validate_advertise_host_rejects_loopback_or_malformed_values[-bad.local]": "passed",
+      "tests.demo.test_device_lab::test_public_origin_uses_validated_ipv4_or_hostname": "passed",
+      "tests.demo.test_device_lab::test_prepare_device_lab_keeps_ca_stable_rotates_leaf_and_verifies_san": "passed",
+      "tests.demo.test_device_lab::test_prepare_device_lab_supports_stock_macos_libressl": "passed",
+      "tests.demo.test_device_lab::test_prepare_device_lab_rejects_symlink_state_root": "passed",
+      "tests.demo.test_device_lab::test_prepare_device_lab_rejects_group_accessible_state_root": "passed",
+      "tests.demo.test_device_lab::test_device_lab_cli_rejects_unsupported_ipv6_bind": "passed",
+      "tests.demo.test_device_lab::test_device_lab_cli_prepares_then_delegates_to_live_https_without_printing_key": "passed",
+      "tests.demo.test_device_lab::test_device_lab_cli_fails_closed_when_openssl_is_missing": "passed",
+      "tests.demo.test_doctor::test_preflight_reports_honest_non_release_boundary": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[empty]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[duplicate]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[non-string]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[traversal-shaped]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[absolute-shaped]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[path-shaped]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[windows-path-shaped]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[control-character]": "passed",
+      "tests.demo.test_doctor::test_invalid_command_inputs_fail_closed_without_probe[unicode-confusable]": "passed",
+      "tests.demo.test_doctor::test_malformed_which_results_fail_closed[empty-string]": "passed",
+      "tests.demo.test_doctor::test_malformed_which_results_fail_closed[nul-string]": "passed",
+      "tests.demo.test_doctor::test_malformed_which_results_fail_closed[bool]": "passed",
+      "tests.demo.test_doctor::test_malformed_which_results_fail_closed[int]": "passed",
+      "tests.demo.test_doctor::test_malformed_which_results_fail_closed[object]": "passed",
+      "tests.demo.test_doctor::test_which_exception_fails_closed_without_internal_text": "passed",
+      "tests.demo.test_doctor::test_invalid_port_inputs_fail_closed_without_probe[bool]": "passed",
+      "tests.demo.test_doctor::test_invalid_port_inputs_fail_closed_without_probe[string]": "passed",
+      "tests.demo.test_doctor::test_invalid_port_inputs_fail_closed_without_probe[float]": "passed",
+      "tests.demo.test_doctor::test_invalid_port_inputs_fail_closed_without_probe[zero]": "passed",
+      "tests.demo.test_doctor::test_invalid_port_inputs_fail_closed_without_probe[too-large]": "passed",
+      "tests.demo.test_doctor::test_invalid_port_inputs_fail_closed_without_probe[duplicate]": "passed",
+      "tests.demo.test_doctor::test_malformed_port_probe_results_fail_closed[none]": "passed",
+      "tests.demo.test_doctor::test_malformed_port_probe_results_fail_closed[int]": "passed",
+      "tests.demo.test_doctor::test_malformed_port_probe_results_fail_closed[string]": "passed",
+      "tests.demo.test_doctor::test_malformed_port_probe_results_fail_closed[object]": "passed",
+      "tests.demo.test_doctor::test_port_probe_exception_fails_closed_without_internal_text": "passed",
+      "tests.demo.test_doctor::test_local_port_probe_rejects_bool_and_non_int_values[True]": "passed",
+      "tests.demo.test_doctor::test_local_port_probe_rejects_bool_and_non_int_values[False]": "passed",
+      "tests.demo.test_doctor::test_local_port_probe_rejects_bool_and_non_int_values[41001]": "passed",
+      "tests.demo.test_doctor::test_local_port_probe_rejects_bool_and_non_int_values[41001.0]": "passed",
+      "tests.demo.test_doctor::test_local_port_probe_rejects_bool_and_non_int_values[None]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[empty]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[duplicate]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[non-string]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[absolute]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[traversal]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[repeated-separator]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[dot-segment]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[trailing-separator]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[backslash]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[control-character]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[unicode-confusable-letter]": "passed",
+      "tests.demo.test_doctor::test_invalid_required_file_inputs_fail_closed_without_leakage[unicode-confusable-separator]": "passed",
+      "tests.demo.test_doctor::test_required_file_symlink_escape_fails_closed": "passed",
+      "tests.demo.test_doctor::test_required_file_symlink_swap_is_not_followed": "passed",
+      "tests.demo.test_doctor::test_required_file_descriptor_failure_fails_closed_without_internal_text": "passed",
+      "tests.demo.test_doctor::test_required_file_identity_mismatch_closes_open_descriptor": "passed",
+      "tests.demo.test_doctor::test_unsafe_repository_roots_fail_closed[missing]": "passed",
+      "tests.demo.test_doctor::test_unsafe_repository_roots_fail_closed[file]": "passed",
+      "tests.demo.test_doctor::test_unsafe_repository_roots_fail_closed[symlink]": "passed",
+      "tests.demo.test_doctor::test_unsafe_repository_roots_fail_closed[symlink-parent]": "passed",
+      "tests.demo.test_doctor::test_repository_root_identity_change_fails_closed": "passed",
+      "tests.demo.test_doctor::test_state_directory_inside_or_equal_to_source_fails_closed[inside]": "passed",
+      "tests.demo.test_doctor::test_state_directory_inside_or_equal_to_source_fails_closed[equal]": "passed",
+      "tests.demo.test_doctor::test_state_directory_inside_or_equal_to_source_fails_closed[symlink-into-source]": "passed",
+      "tests.demo.test_doctor::test_state_directory_symlink_swap_fails_closed": "passed",
+      "tests.demo.test_doctor::test_state_directory_missing_immediate_parent_fails_closed": "passed",
+      "tests.demo.test_doctor::test_state_directory_unwritable_existing_parent_fails_closed": "passed",
+      "tests.demo.test_doctor::test_iterable_exception_midway_fails_closed_without_partial_probes[commands]": "passed",
+      "tests.demo.test_doctor::test_iterable_exception_midway_fails_closed_without_partial_probes[required_files]": "passed",
+      "tests.demo.test_doctor::test_iterable_exception_midway_fails_closed_without_partial_probes[ports]": "passed",
+      "tests.demo.test_doctor::test_one_shot_iterables_are_consumed_once": "passed",
+      "tests.demo.test_doctor::test_report_is_deterministic_for_order_insensitive_iterables": "passed",
+      "tests.demo.test_doctor::test_duplicate_inputs_cannot_create_duplicate_check_names": "passed",
+      "tests.demo.test_doctor::test_report_omits_inputs_paths_environment_and_probe_values": "passed",
+      "tests.demo.test_doctor::test_preflight_is_read_only_and_uses_only_read_descriptors": "passed",
+      "tests.demo.test_doctor::test_local_port_probe_closes_its_point_in_time_socket": "passed",
+      "tests.demo.test_doctor::test_doctor_cli_emits_canonical_json_and_uses_only_local_preflight_exit": "passed",
+      "tests.demo.test_doctor::test_doctor_cli_invalid_port_is_private_json_failure[non-int]": "passed",
+      "tests.demo.test_doctor::test_doctor_cli_invalid_port_is_private_json_failure[oversized-numeric]": "passed",
+      "tests.demo.test_doctor::test_doctor_cli_probe_failure_is_json_exit_one_without_traceback": "passed",
+      "tests.demo.test_doctor::test_doctor_runbook_preserves_exact_claim_boundary": "passed",
+      "tests.demo.test_openai_api_surface_closed::test_v1_api_paths_answer_404_on_the_public_origin_and_reach_no_upstream": "passed",
+      "tests.demo.test_openai_api_surface_closed::test_the_surface_probe_still_passes_with_the_api_code_present": "passed",
+      "tests.demo.test_product_physical_composition::test_host_level_product_composition_reaches_browser_token_boundary_only": "passed",
+      "tests.demo.test_product_physical_composition::test_trusted_proxy_composition_requires_authenticated_proxy_capability": "passed",
+      "tests.demo.test_product_physical_composition::test_trusted_proxy_composition_requires_proxy_capability_configuration": "passed",
+      "tests.demo.test_product_physical_composition::test_product_stack_builds_projection_from_gateway_owned_recovery_source": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_serves_the_openai_shim_models_surface": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_shim_drives_the_route_inference_surface": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_serves_the_observatory_snapshot_through_the_product_gateway": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_observatory_slot_is_populated_by_the_real_gateway_application": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_fails_closed_when_the_observatory_module_is_unreachable": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_fails_closed_when_the_openai_shim_module_is_unreachable": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_cli_action_composes_both_servers": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_status_document_names_both_endpoints": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_bring_up_rejects_a_non_loopback_host": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_reuses_the_repository_qualification_fixture": "passed",
+      "tests.demo.test_product_servers_reachability::test_demo_stack_close_stops_both_listeners": "passed",
+      "tests.demo.test_profile_a_site_closed::test_the_probe_still_passes_and_the_root_still_redirects_to_swarms": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[GET-/chat]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[GET-/chat/]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[GET-/chat/chat.js]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[GET-/chat/chat.css]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[POST-/chat/api/state]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[POST-/chat/api/send]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[POST-/chat/api/events]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[GET-/swarms/chat]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[GET-/swarms/chat.js]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin[GET-/swarms/notice]": "passed",
+      "tests.demo.test_profile_a_site_closed::test_the_proxy_serves_exactly_the_seven_directory_assets_and_no_inference_route": "passed",
+      "tests.demo.test_profile_a_site_closed::test_the_directory_server_itself_does_not_answer_chat_paths": "passed",
+      "tests.demo.test_profile_a_site_closed::test_the_directory_page_and_notice_name_no_public_inference_endpoint": "passed",
+      "tests.demo.test_public_origin_proxy::test_capability_loader_rejects_unsafe_files_and_accepts_owner_private": "passed",
+      "tests.demo.test_public_origin_proxy::test_proxy_overwrites_trusted_headers_and_strips_client_authority": "passed",
+      "tests.demo.test_public_origin_proxy::test_proxy_rejects_private_and_swarm_mutation_paths_without_upstream": "passed",
+      "tests.demo.test_public_origin_proxy::test_proxy_route_policy_matches_browser_gateway_contract": "passed",
+      "tests.demo.test_public_origin_proxy::test_proxy_allows_bootstrap_inference_events_and_streams_chunked_sse": "passed",
+      "tests.demo.test_public_origin_proxy::test_cli_refuses_non_loopback_listen_and_upstream_by_default": "passed",
+      "tests.demo.test_public_origin_proxy_bounds::test_defaults_match_the_directory": "passed",
+      "tests.demo.test_public_origin_proxy_bounds::test_stalled_connections_hold_the_slots_the_extra_one_is_refused_and_the_held_ones_time_out": "passed",
+      "tests.demo.test_public_origin_proxy_bounds::test_a_stalled_header_and_a_stalled_body_are_both_dropped_after_the_timeout": "passed",
+      "tests.demo.test_public_origin_proxy_bounds::test_a_normal_request_after_the_timeouts_is_unaffected": "passed",
+      "tests.demo.test_public_origin_proxy_bounds::test_concurrent_helper_downloads_are_capped": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_served_file_is_the_fixture_with_download_headers_and_never_reaches_an_upstream": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_config_advertises_the_download_with_the_startup_sha_when_the_file_hashes": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_unconfigured_proxy_leaves_the_directory_config_alone_and_serves_nothing": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_missing_file_stays_not_published": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_a_directory_that_claims_a_download_is_not_trusted_over_a_missing_file": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_unreadable_file_stays_not_published": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_empty_file_symlink_and_directory_stay_not_published": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_file_over_the_size_cap_stays_not_published": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_file_that_changes_after_startup_is_withdrawn_not_served_under_the_old_sha": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_file_deleted_after_startup_is_withdrawn": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_only_get_and_head_serve_it_and_nothing_else_is_forwarded": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_a_proxy_without_the_directory_mount_cannot_be_given_a_zip": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_bad_zip_paths_are_a_configuration_error[relative/path.zip]": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_bad_zip_paths_are_a_configuration_error[]": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_bad_zip_paths_are_a_configuration_error[/tmp/not-a-zip.txt]": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_bad_zip_paths_are_a_configuration_error[/tmp/we ird.zip]": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_bad_zip_paths_are_a_configuration_error[/tmp/abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.zip]": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_cli_flags": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_root_redirects_to_swarms_when_explicitly_enabled": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_everything_but_root_reaches_the_product_bundle_and_api_only_with_product_routes_enabled": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_the_flag_turns_the_redirect_off": "passed",
+      "tests.demo.test_public_origin_proxy_helper_download::test_without_the_directory_mount_root_is_the_product_even_with_the_default_flag": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[POST-/api/v1/inference]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/api/v1/bootstrap]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/api/v1/product/export]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/api/v1/observatory/events]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/api/v1/swarm/status]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/api/v1/inference/abc/events]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[DELETE-/api/v1/inference/abc/cancel]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/anything]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/assets/app.js]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[HEAD-/index.html]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_product_routes_are_404_with_zero_upstream_connections_when_the_directory_is_mounted[GET-/swarmsfoo]": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_the_swarms_surface_and_the_apex_still_work_with_product_routes_closed": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_closed_even_when_the_root_redirect_is_off": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_blocked_prefixes_stay_unreachable_with_product_routes_closed": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_explicit_flag_restores_the_product_routes_unchanged": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_flag_off_is_the_default_and_the_cli_exposes_it": "passed",
+      "tests.demo.test_public_origin_proxy_product_closed::test_without_a_mounted_directory_the_product_proxy_is_unchanged": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_defaults_are_named_in_one_module": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_swarms_page_and_phonebook_reach_the_directory_not_the_product_gateway": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_directory_hop_gets_no_owner_authority_or_credentials": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_client_ip_header_is_validated_normalised_and_required": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_duplicate_client_ip_headers_are_refused": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_missing_client_ip_can_be_allowed_by_configuration_and_is_then_not_invented": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_traversal_and_unknown_swarms_paths_never_reach_either_upstream": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_swarms_methods_are_limited_to_get_head_post": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_existing_allowlist_and_blocklist_are_unchanged_with_the_mount_on_and_product_routes_enabled": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_mount_is_off_unless_configured_and_then_swarms_behaves_as_before": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_directory_down_is_a_502_not_a_product_fallback": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_directory_body_cap_and_chunked_reframing": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_refusal_survives_a_body_uploaded_after_the_response": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_config_rejects_non_loopback_directory_upstream_and_cli_wires_it": "passed",
+      "tests.demo.test_public_origin_proxy_swarms::test_real_directory_behind_the_proxy_page_config_and_rate_key": "passed",
+      "tests.demo.test_serve_cli::test_fixture_serve_selects_bundled_data_and_never_starts_live_runtime": "passed",
+      "tests.demo.test_serve_cli::test_fixture_serve_bootstraps_locked_dependencies_before_start": "passed",
+      "tests.demo.test_serve_cli::test_fixture_serve_stops_when_dependency_bootstrap_fails": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_delegates_to_qualified_physical_runtime": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_forwards_isolated_product_state_root": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_forwards_force_relay_but_fixture_rejects_it": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_forwards_explicit_trusted_https_proxy_boundary": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_forwards_deployment_and_static_arguments": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_forwards_multiple_qualified_deployment_plans": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_forwards_prepared_candidate_directory": "passed",
+      "tests.demo.test_serve_cli::test_live_serve_requires_operator_plan": "passed",
+      "tests.demo.test_serve_cli::test_fixture_serve_rejects_live_only_arguments": "passed",
+      "tests.demo.test_serve_cli::test_serve_rejects_unknown_mode": "passed",
+      "tests.demo.test_surface_probe::test_a_closed_proxy_passes_every_check_with_zero_upstream_connections_to_the_product": "passed",
+      "tests.demo.test_surface_probe::test_a_proxy_that_still_serves_the_product_routes_fails_and_names_them": "passed",
+      "tests.demo.test_surface_probe::test_a_set_cookie_on_the_page_fails_whatever_the_case_of_the_header": "passed",
+      "tests.demo.test_surface_probe::test_anything_but_404_on_a_product_route_fails_even_a_403_or_a_200": "passed",
+      "tests.demo.test_surface_probe::test_an_unreachable_host_is_unknown_and_unhealthy_never_a_pass": "passed",
+      "tests.demo.test_surface_probe::test_cli_prints_one_json_line_and_exits_by_verdict": "passed",
+      "tests.demo.test_surface_probe::test_cli_refuses_anything_but_an_https_origin_or_a_loopback_one[http://mycelium.now]": "passed",
+      "tests.demo.test_surface_probe::test_cli_refuses_anything_but_an_https_origin_or_a_loopback_one[ftp://x]": "passed",
+      "tests.demo.test_surface_probe::test_cli_refuses_anything_but_an_https_origin_or_a_loopback_one[https://u:p@mycelium.now]": "passed",
+      "tests.demo.test_surface_probe::test_cli_refuses_anything_but_an_https_origin_or_a_loopback_one[https://x/path]": "passed",
+      "tests.demo.test_surface_probe::test_cli_refuses_anything_but_an_https_origin_or_a_loopback_one[mycelium.now]": "passed",
+      "tests.demo.test_surface_probe::test_cli_refuses_anything_but_an_https_origin_or_a_loopback_one[http://10.0.0.5:4350]": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_record_is_closed_and_binds_the_exact_a0_specification": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_the_committed_record_is_prepared_or_fully_executed": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_prepared_record_claims_no_execution_and_no_completion": "skipped",
+      "tests.governance.test_a0_literal_verification_record::test_every_named_command_target_exists_in_the_tree": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_filling_binds_every_obligation_to_the_candidate": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_failed_obligation_is_recorded_as_failed_not_hidden": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_non_commit_candidate_is_refused[abc]": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_non_commit_candidate_is_refused[AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA]": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_non_commit_candidate_is_refused[gggggggggggggggggggggggggggggggggggggggg]": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_non_commit_candidate_is_refused[None]": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_partial_result_set_is_refused": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_an_unknown_result_or_missing_receipt_is_refused": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_half_executed_record_is_refused": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_the_cli_refuses_unless_head_is_the_candidate_on_a_clean_tree": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_the_prepared_form_of_the_committed_record_claims_nothing": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_an_executed_record_states_its_own_boundary": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_resolving_r4_completes_an_all_passed_executed_record": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_r4_cannot_complete_a_record_with_a_failed_obligation": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_r4_refuses_a_prepared_record_another_reading_or_another_commit": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_a_complete_record_that_drifts_is_refused": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_the_prepared_form_of_a_complete_record_clears_r4": "passed",
+      "tests.governance.test_a0_literal_verification_record::test_the_cli_resolves_r4_on_an_executed_record": "passed",
+      "tests.governance.test_a6_source_manifest::test_build_and_verify_exact_a6_source_manifest": "passed",
+      "tests.governance.test_a6_source_manifest::test_verify_rejects_path_set_or_byte_drift": "passed",
+      "tests.governance.test_a6_source_manifest::test_manifest_digest_is_canonical": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_the_fixture_form_is_valid_without_a_claim_clause": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_the_pre_change_audit_accepts_a_blocker_its_artifact_refutes": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_the_pre_change_audit_was_not_vacuously_green_on_this_tree": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_the_fixed_audit_refutes_the_contradicted_blockers": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_truthful_blocker_claims_pass": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_malformed_and_undecidable_claims_are_findings": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_git_claims_are_decided_against_the_work_tree": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_git_claims_are_undecidable_without_a_readable_head": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_prose_without_a_clause_is_not_a_claim": "passed",
+      "tests.governance.test_completion_audit_blocker_claims::test_the_live_checklist_carries_no_clauses_and_gains_no_findings": "passed",
+      "tests.governance.test_gate_source_sets::test_closure_includes_known_transitive_dependencies": "passed",
+      "tests.governance.test_gate_source_sets::test_unrelated_change_carries": "passed",
+      "tests.governance.test_gate_source_sets::test_every_pinned_file_change_forces_rerun": "passed",
+      "tests.governance.test_gate_source_sets::test_deleting_a_pinned_file_forces_rerun": "passed",
+      "tests.governance.test_gate_source_sets::test_new_module_shadowing_a_third_party_import_forces_rerun": "passed",
+      "tests.governance.test_gate_source_sets::test_manifest_is_stable_under_definition_and_entry_ordering": "passed",
+      "tests.governance.test_gate_source_sets::test_out_of_repo_driver_is_scanned_and_digested_but_flagged_unversioned": "passed",
+      "tests.governance.test_gate_source_sets::test_receipt_digest_binds_the_verdicts": "passed",
+      "tests.governance.test_gate_source_sets::test_path_join_pins_the_joined_file_not_its_parent_directories": "passed",
+      "tests.governance.test_gate_source_sets::test_change_only_in_generated_pin_files_carries_under_r1": "passed",
+      "tests.governance.test_gate_source_sets::test_generated_pin_change_with_a_code_change_still_reruns": "passed",
+      "tests.governance.test_gate_source_sets::test_external_window_npm_build_pins_the_web_bundle": "passed",
+      "tests.governance.test_gate_source_sets::test_real_gate_definitions_resolve_on_this_checkout": "passed",
+      "tests.governance.test_governance_audit::test_governance_ledger_matches_architecture_and_never_claims_release": "passed",
+      "tests.governance.test_governance_audit::test_model_preparation_authority_covers_cold_and_warm_product_actions": "passed",
+      "tests.governance.test_governance_audit::test_governance_rejects_implemented_endpoint_missing_from_ledger": "passed",
+      "tests.governance.test_governance_audit::test_governance_rejects_governed_endpoint_missing_from_client": "passed",
+      "tests.governance.test_governance_audit::test_governance_rejects_unsupported_milestone_promotion": "passed",
+      "tests.governance.test_governance_audit::test_governance_rejects_unpinned_action_protocol_and_absent_plan": "passed",
+      "tests.governance.test_governance_audit::test_governance_rejects_unknown_ledger_field_and_duplicate_milestone": "passed",
+      "tests.governance.test_governance_gate::test_aggregate_governance_gate_requires_every_child_authority": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_unmodified_git_backed_copy_passes_aggregate": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_single_ledger_rejection_has_healthy_copy_and_nonzero_gate[unknown_ledger_field-ledger_shape_invalid]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_single_ledger_rejection_has_healthy_copy_and_nonzero_gate[invalid_state-capability_entry_invalid]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_single_ledger_rejection_has_healthy_copy_and_nonzero_gate[duplicate_milestone-milestone_entry_invalid]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_single_ledger_rejection_has_healthy_copy_and_nonzero_gate[absent_governing_plan-governing_plan_unavailable]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_registration_owner_source_drift_fails_aggregate": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_fabricated_registration_cannot_claim_ledger_as_source": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_negative_copies_refuse_exactly_one_child[unlisted_post-claim_boundary-observatory_ui_write_surface]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_negative_copies_refuse_exactly_one_child[unregistered_protocol-contracts-manifest: contract registry mismatch]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_negative_copies_refuse_exactly_one_child[unknown_ledger_protocol-governance-boundary_protocol_unregistered:mycelium.unknown_boundary.v1]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_negative_copies_refuse_exactly_one_child[unknown_action_protocol-governance-boundary_protocol_unregistered:mycelium.unknown_action.v1]": "passed",
+      "tests.governance.test_governance_gate_negative_copies::test_negative_copies_refuse_exactly_one_child[promoted_milestone-governance-milestone_promotion_unsupported:M18:4.8]": "passed",
+      "tests.governance.test_governance_projection::test_governance_projection_is_browser_safe_and_never_release_ready": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_current_mycelium_completion_checklist_is_closed_and_truthful": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_second_gate_in_progress": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_missing_and_extra_direct_dependencies": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_completed_requirement_without_evidence_is_rejected": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_complete_gate_state_without_executed_evidence_is_rejected": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_completed_evidence_validates_all_required_bindings": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_accepts_atomic_advance_to_the_next_primary_gate": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_completed_gate_retains_expired_live_evidence_as_historical_proof": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_concluded_design_only_gate_retains_expired_executed_evidence": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_accepts_dependency_ready_parallel_primary_gate": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_generic_a12_can_close_with_a4_while_a9_and_a11_are_incomplete": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a10_can_close_with_a4_while_a9_is_incomplete": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_ruled_dependencies_narrow_only_a10_and_a12_and_keep_a9_elsewhere": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_live_specifications_record_every_narrowed_a9_part": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_whole_gate_a9_dependency_on_a10_and_a12": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_narrowing_that_drops_a_named_a9_part": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_live_checklist_tracks_a14b_as_a_slice_of_the_a14_row": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_accepts_a_well_formed_slice": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a_slice_is_never_a_gate_id": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14:slices_invalid0]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14:slices_invalid1]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14:slice:0:shape_invalid0]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14:slice:0:shape_invalid1]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14:slice:0:id_invalid0]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14:slice:0:id_invalid1]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14:slice:0:id_invalid2]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14b:state_invalid]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14b:name_invalid]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14b:design_only_completion_invalid]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14b:requirement_partition_invalid]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14b:evidence_subject_invalid:specification]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14b:ui_workspace_set_invalid]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_a_malformed_slice[<lambda>-gate:A14b:specification_unavailable]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_audit_rejects_duplicate_or_unordered_slices": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_slice_specification_must_name_the_slice_and_its_parent[replace_text0-gate:A14b:specification_gate_unbound]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_slice_specification_must_name_the_slice_and_its_parent[replace_text1-gate:A14b:specification_parent_unbound]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_slice_specification_must_name_the_slice_and_its_parent[replace_text2-gate:A14b:specification_design_boundary_missing]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_slice_specification_must_name_the_slice_and_its_parent[replace_text3-gate:A14b:specification_claim_boundary_missing]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a_slice_of_a_non_primary_gate_may_not_be_in_progress": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_live_checklist_records_the_slice_completion_policy": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a_gate_row_is_not_complete_while_a_slice_is_design_only": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a_gate_row_is_not_complete_while_a_slice_is_unfinished[implemented_unintegrated]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a_gate_row_is_not_complete_while_a_slice_is_unfinished[integrated_unqualified]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a_gate_row_is_not_complete_while_a_slice_is_unfinished[physically_qualified]": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_a_gate_row_is_complete_once_every_slice_is_complete": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_every_slice_must_be_complete_not_only_the_first": "passed",
+      "tests.governance.test_mycelium_completion_audit::test_an_unfinished_slice_of_an_unfinished_row_is_not_a_slice_completion_finding": "passed",
+      "tests.contracts.test_a14b_registration::test_existing_evidence_is_registered_and_generated": "passed",
+      "tests.contracts.test_a14b_registration::test_registered_fixture_rejects_invalid_or_private_mutations[change0]": "passed",
+      "tests.contracts.test_a14b_registration::test_registered_fixture_rejects_invalid_or_private_mutations[change1]": "passed",
+      "tests.contracts.test_a14b_registration::test_registered_fixture_rejects_invalid_or_private_mutations[change2]": "passed",
+      "tests.contracts.test_a14b_registration::test_registered_fixture_rejects_invalid_or_private_mutations[change3]": "passed",
+      "tests.contracts.test_a14b_registration::test_registered_fixture_rejects_invalid_or_private_mutations[change4]": "passed",
+      "tests.contracts.test_a14b_registration::test_registered_fixture_rejects_invalid_or_private_mutations[change5]": "passed",
+      "tests.contracts.test_a6_intent_bounds::test_recovery_intent_rejects_duplicate_or_unbounded_lists[candidate_path_ids-value0]": "passed",
+      "tests.contracts.test_a6_intent_bounds::test_recovery_intent_rejects_duplicate_or_unbounded_lists[candidate_path_ids-value1]": "passed",
+      "tests.contracts.test_a6_intent_bounds::test_recovery_intent_rejects_duplicate_or_unbounded_lists[retained_path_ids-value2]": "passed",
+      "tests.contracts.test_a6_intent_bounds::test_recovery_intent_rejects_duplicate_or_unbounded_lists[rejection_reasons-value3]": "passed",
+      "tests.contracts.test_a6_qualification_claims::test_unexecuted_qualification_does_not_manufacture_positive_subclaims": "passed",
+      "tests.contracts.test_contract_fixtures::test_generated_contract_fixtures_have_no_drift": "passed",
+      "tests.contracts.test_contract_fixtures::test_model_preparation_browser_contract_is_manifest_pinned": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_checks_manifest_hashes_and_protocol_ownership": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_fails_closed_on_hash_namespace_and_path_drift": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_rejects_symlink_manifest": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_rejects_symlink_manifest_parent": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_rejects_manifest_listed_symlink_source": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_rejects_manifest_listed_symlink_fixture": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_rejects_manifest_listed_symlink_parent[owner_source]": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_rejects_manifest_listed_symlink_parent[fixture]": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_rejects_incomplete_alias_and_duplicate_key_manifests": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_audit_reports_unhashable_manifest_fields_without_crashing": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_io_rejects_symlink_reads_and_writes": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_io_rejects_non_regular_inputs_and_outputs": "passed",
+      "tests.contracts.test_contract_fixtures::test_contract_io_always_attempts_parent_fd_cleanup": "passed",
+      "tests.contracts.test_contract_fixtures::test_atomic_write_keeps_replacement_inside_opened_parent_descriptor": "passed",
+      "tests.contracts.test_contract_fixtures::test_fixture_check_rejects_unexpected_files": "passed",
+      "tests.contracts.test_contract_fixtures::test_compatibility_fixtures_are_accepted_by_executable_consumers": "passed",
+      "tests.contracts.test_contract_fixtures::test_a6_runtime_contract_pins_live_projection_owners": "passed",
+      "tests.contracts.test_contract_fixtures::test_a6_gate_contract_pins_physical_and_browser_harnesses": "passed",
+      "tests.contracts.test_contract_fixtures::test_all_a6_contracts_pin_every_production_owner": "passed",
+      "tests.contracts.test_m11_baseline_sealer::test_baseline_projection_pins_sources_without_copying_private_fields": "passed",
+      "tests.contracts.test_m11_baseline_sealer::test_baseline_privacy_guard_rejects_inference_content": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_is_closed_and_detached": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_rejects_unfrozen_or_nonfinite_values[minimum_sample_size-True]": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_rejects_unfrozen_or_nonfinite_values[minimum_output_tokens_per_second-nan]": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_rejects_unfrozen_or_nonfinite_values[execution_scope-modeled_concurrent]": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_rejects_unfrozen_or_nonfinite_values[queueing_budget_state-met]": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_rejects_unknown_fields_and_inverted_percentiles": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_v2_is_closed_and_preserves_m16_boundary": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_v2_rejects_unknown_and_nonfinite_values": "passed",
+      "tests.contracts.test_performance_budget::test_performance_budget_v3_closes_m16_dimensions_with_visible_batch_exclusion": "passed",
+      "tests.contracts.test_phone_node_control_golden::test_regenerating_reproduces_the_committed_golden": "passed",
+      "tests.contracts.test_phone_stage_node_golden::test_regenerating_reproduces_the_committed_scripts": "passed",
+      "tests.contracts.test_phone_stage_wire_golden::test_regenerating_reproduces_the_committed_vectors": "passed",
+      "tests.contracts.test_phone_stage_wire_golden::test_forwarded_frames_advance_exactly_one_hop_with_a_recomputed_key": "passed",
+      "tests.claims.test_claim_boundary_audit::test_honest_tree_preserves_fixed_false_readiness_claims": "passed",
+      "tests.claims.test_claim_boundary_audit::test_route_and_release_true_literals_fail_outside_authority": "passed",
+      "tests.claims.test_claim_boundary_audit::test_observatory_backend_and_ui_write_surfaces_fail": "passed",
+      "tests.claims.test_claim_boundary_audit::test_allowlisted_product_action_clients_do_not_weaken_observatory_boundary": "passed",
+      "tests.claims.test_claim_boundary_audit::test_unreadable_source_shapes_fail_closed": "passed",
+      "tests.claims.test_claim_boundary_audit::test_output_redacts_secret_shaped_tracked_paths": "passed",
+      "tests.claims.test_claim_boundary_audit::test_output_is_deterministic_and_repository_is_unchanged": "passed",
+      "tests.claims.test_claim_boundary_audit::test_cli_json_is_canonical_and_exit_matches_findings": "passed",
+      "tests.claims.test_claim_boundary_audit::test_current_checkout_and_runbook_preserve_claim_boundary": "passed"
+    }
+  },
+  "test_renames": {
+    "test_the_proxy_serves_exactly_the_five_directory_assets_and_no_inference_route": "test_the_proxy_serves_exactly_the_seven_directory_assets_and_no_inference_route",
+    "test_root_redirects_to_swarms_by_default_when_the_mount_is_on": "test_root_redirects_to_swarms_when_explicitly_enabled",
+    "test_the_swarms_surface_and_the_root_redirect_still_work_with_product_routes_closed": "test_the_swarms_surface_and_the_apex_still_work_with_product_routes_closed"
+  },
+  "added_cases": [
+    "tests.swarm_directory.test_site_p3_core::test_cli_retention_config_and_invalid_order",
+    "tests.swarm_directory.test_site_p3_core::test_decline_cooldown_survives_restart_and_expires_at_boundary",
+    "tests.swarm_directory.test_site_p3_core::test_model_whitelist_rejects_signed_listing_but_reads_old_record",
+    "tests.swarm_directory.test_site_p3_core::test_offline_heartbeats_do_not_reset_retention_but_live_ones_restore",
+    "tests.swarm_directory.test_site_p3_core::test_offline_hide_delist_and_owner_republish_are_reversible",
+    "tests.swarm_directory.test_site_p3_core::test_owner_inbox_includes_direct_grants_without_exposing_to_strangers",
+    "tests.swarm_directory.test_site_p3_core::test_record_edit_while_online_does_not_count_online_time_as_offline",
+    "tests.swarm_directory.test_site_p3_core::test_retained_listing_owner_is_recoverable_only_to_original_key",
+    "tests.swarm_directory.test_site_p3_core::test_retention_thresholds_are_configurable",
+    "tests.swarm_directory.test_site_p3_http::test_apex_explains_without_identity_or_chat_surface",
+    "tests.swarm_directory.test_site_p3_http::test_apex_proxy_composes_exact_static_assets_and_keeps_prompt_routes_closed",
+    "tests.swarm_directory.test_site_p3_http::test_entry_rejects_unregistered_model_before_quota_or_backend",
+    "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[dark-1440-900]",
+    "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[dark-390-844]",
+    "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[light-1440-900]",
+    "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[light-390-844]",
+    "tests.swarm_directory.test_site_v2_browser::test_mac_app_header_inbox_uses_real_owner_requests[1440-900]",
+    "tests.swarm_directory.test_site_v2_browser::test_mac_app_header_inbox_uses_real_owner_requests[390-844]",
+    "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[dark-1440-900]",
+    "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[dark-390-844]",
+    "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[light-1440-900]",
+    "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[light-390-844]",
+    "tests.swarm_directory.test_site_v2_browser::test_stale_browse_and_owner_republish_real_record"
+  ],
+  "removed_cases": [],
+  "new_failing_ids": [],
+  "browser_runs": {
+    "browser-qualified-1": {
+      "counts": {
+        "passed": 22
+      },
+      "total": 22,
+      "elapsed_seconds": 339.048,
+      "cases": {
+        "tests.swarm_directory.test_site_v2_browser::test_twenty_real_app_behaviours": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[dark-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[dark-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[light-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[light-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[dark-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[dark-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[light-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[light-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_mac_app_header_inbox_uses_real_owner_requests[1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_mac_app_header_inbox_uses_real_owner_requests[390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_stale_browse_and_owner_republish_real_record": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_registry_dropdown_matches_source": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[dark-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[dark-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[light-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[light-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_busy_wait_is_cancellable_and_prompts_never_go_to_directory": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[dark-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[dark-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[light-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[light-390-844]": "passed"
+      }
+    },
+    "browser-qualified-2": {
+      "counts": {
+        "passed": 22
+      },
+      "total": 22,
+      "elapsed_seconds": 340.359,
+      "cases": {
+        "tests.swarm_directory.test_site_v2_browser::test_twenty_real_app_behaviours": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[dark-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[dark-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[light-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[light-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[dark-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[dark-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[light-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[light-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_mac_app_header_inbox_uses_real_owner_requests[1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_mac_app_header_inbox_uses_real_owner_requests[390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_stale_browse_and_owner_republish_real_record": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_registry_dropdown_matches_source": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[dark-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[dark-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[light-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[light-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_busy_wait_is_cancellable_and_prompts_never_go_to_directory": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[dark-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[dark-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[light-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[light-390-844]": "passed"
+      }
+    },
+    "browser-qualified-3": {
+      "counts": {
+        "passed": 22
+      },
+      "total": 22,
+      "elapsed_seconds": 340.031,
+      "cases": {
+        "tests.swarm_directory.test_site_v2_browser::test_twenty_real_app_behaviours": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[dark-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[dark-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[light-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_apex_real_counts_delayed_and_unavailable_without_identity[light-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[dark-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[dark-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[light-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_owner_undo_cancels_write_and_reload_cancels_hold[light-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_mac_app_header_inbox_uses_real_owner_requests[1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_mac_app_header_inbox_uses_real_owner_requests[390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_stale_browse_and_owner_republish_real_record": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_registry_dropdown_matches_source": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[dark-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[dark-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[light-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_access_states_real_entry_and_composer_geometry[light-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_busy_wait_is_cancellable_and_prompts_never_go_to_directory": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[dark-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[dark-390-844]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[light-1440-900]": "passed",
+        "tests.swarm_directory.test_site_v2_browser::test_routes_slow_loading_cls_and_screenshots[light-390-844]": "passed"
+      }
+    }
+  },
+  "cls_gate": {
+    "baseline": "< 0.01",
+    "candidate": "== 0",
+    "captured_samples": 88,
+    "maximum": 0
+  },
+  "screenshots": [
+    "access-approved-1440-dark.png",
+    "access-approved-1440-light.png",
+    "access-approved-390-dark.png",
+    "access-approved-390-light.png",
+    "access-declined-1440-dark.png",
+    "access-declined-1440-light.png",
+    "access-declined-390-dark.png",
+    "access-declined-390-light.png",
+    "access-expired-1440-dark.png",
+    "access-expired-1440-light.png",
+    "access-expired-390-dark.png",
+    "access-expired-390-light.png",
+    "access-first-1440-dark.png",
+    "access-first-1440-light.png",
+    "access-first-390-dark.png",
+    "access-first-390-light.png",
+    "access-invite-1440-dark.png",
+    "access-invite-1440-light.png",
+    "access-invite-390-dark.png",
+    "access-invite-390-light.png",
+    "access-killed-1440-dark.png",
+    "access-killed-1440-light.png",
+    "access-killed-390-dark.png",
+    "access-killed-390-light.png",
+    "access-needs-request-1440-dark.png",
+    "access-needs-request-1440-light.png",
+    "access-needs-request-390-dark.png",
+    "access-needs-request-390-light.png",
+    "access-offline-1440-dark.png",
+    "access-offline-1440-light.png",
+    "access-offline-390-dark.png",
+    "access-offline-390-light.png",
+    "access-pending-1440-dark.png",
+    "access-pending-1440-light.png",
+    "access-pending-390-dark.png",
+    "access-pending-390-light.png",
+    "access-quota-1440-dark.png",
+    "access-quota-1440-light.png",
+    "access-quota-390-dark.png",
+    "access-quota-390-light.png",
+    "access-ready-1440-dark.png",
+    "access-ready-1440-light.png",
+    "access-ready-390-dark.png",
+    "access-ready-390-light.png",
+    "apex-1440-dark-unavailable.png",
+    "apex-1440-dark.png",
+    "apex-1440-light-unavailable.png",
+    "apex-1440-light.png",
+    "apex-390-dark-unavailable.png",
+    "apex-390-dark.png",
+    "apex-390-light-unavailable.png",
+    "apex-390-light.png",
+    "browse-1440-dark.png",
+    "browse-1440-light.png",
+    "browse-390-dark.png",
+    "browse-390-light.png",
+    "chat-1440-dark.png",
+    "chat-1440-light.png",
+    "chat-390-dark.png",
+    "chat-390-light.png",
+    "chat-detail-1440-dark.png",
+    "chat-detail-1440-light.png",
+    "chat-detail-390-dark.png",
+    "chat-detail-390-light.png",
+    "contributing-1440-dark.png",
+    "contributing-1440-light.png",
+    "contributing-390-dark.png",
+    "contributing-390-light.png",
+    "mac-header-1440.png",
+    "mac-header-390.png",
+    "new-1440-dark.png",
+    "new-1440-light.png",
+    "new-390-dark.png",
+    "new-390-light.png",
+    "notice-1440-dark.png",
+    "notice-1440-light.png",
+    "notice-390-dark.png",
+    "notice-390-light.png",
+    "owned-1440-dark.png",
+    "owned-1440-light.png",
+    "owned-390-dark.png",
+    "owned-390-light.png",
+    "owner-held-approve-1440-dark.png",
+    "owner-held-approve-1440-light.png",
+    "owner-held-approve-390-dark.png",
+    "owner-held-approve-390-light.png",
+    "owner-held-decline-1440-dark.png",
+    "owner-held-decline-1440-light.png",
+    "owner-held-decline-390-dark.png",
+    "owner-held-decline-390-light.png",
+    "owner-inbox-1440-dark.png",
+    "owner-inbox-1440-light.png",
+    "owner-inbox-390-dark.png",
+    "owner-inbox-390-light.png",
+    "swarm-detail-1440-dark.png",
+    "swarm-detail-1440-light.png",
+    "swarm-detail-390-dark.png",
+    "swarm-detail-390-light.png"
+  ],
+  "source_hashes": {
+    "mycelium_a13_macos/web/index.html": "33650d7006d24476ee5fcdb126a705ea27bea12501f8ad21d3362d9c557b03e9",
+    "mycelium_a13_macos/web/style.css": "09c2ee49151f7de74de6bb8ae3eb976187ff7d27b26d098eb95e5be126dc60d7",
+    "mycelium_a13_macos/web/swarm.js": "c1f20724972986a01520ea881b95f966f50e44fb91a9e024225b049d11f65d41",
+    "mycelium_demo/public_origin_proxy.py": "9273baf2442ee7409aa6ed30a531f91d54756a2e19375840df717d23da296236",
+    "mycelium_swarm_directory/directory.py": "7196364c85b5650cbcea70892842e0e112d3b9390ba201383b1d2236b9bebcde",
+    "mycelium_swarm_directory/docs.py": "f3f062573e5ca9b61c45a1678c0c71b36e4d9d5dd075ef4ab282e0c654bb354e",
+    "mycelium_swarm_directory/entry.py": "34c47d29860467a587411eee91a9ec5e9b162a5406144aec27e1c5c0f59f3314",
+    "mycelium_swarm_directory/server.py": "d7e1cc4d104a1d45ad2564ec73823025cefb63b82a3ba7f04f3b32c930b8e5de",
+    "mycelium_swarm_directory/web/apex.html": "4b0493630134ee69e0635a1c5cb53f4ac4726e8460e11c64855959aabc3651aa",
+    "mycelium_swarm_directory/web/apex.js": "d99897a49cf17c4ad02c1fc456b14b4d2293345b2766468f5d3d879c1d011d98",
+    "mycelium_swarm_directory/web/index.html": "405a408869f76ecb40cfbd35b0e7fe62ade5416eac132ba5745c26b77a00e467",
+    "mycelium_swarm_directory/web/site.css": "e725a231ce4cd5f91121923f728107b21a62d9b2c2f5d62d96047b53a63a4d18",
+    "mycelium_swarm_directory/web/swarms.css": "9c4ee87a9306072bb5a43ec8b64e8c749f5551390c1e4277ad3f4c686cbf77ef",
+    "mycelium_swarm_directory/web/swarms.js": "eb17342e5ee8bd6bd999e17381ecb04f8164ec79f86a3b7b8e037317d72ebb50",
+    "tests/demo/test_profile_a_site_closed.py": "b145ed0423cad21eb3567709b230f12dbfe8baf54a3a0e313127d5a70cbd1d66",
+    "tests/demo/test_public_origin_proxy_helper_download.py": "a927b1b1702a5d05111aaa503ece8c6cced895bac019d2ed3b98b5083360db87",
+    "tests/demo/test_public_origin_proxy_product_closed.py": "4a2b02eb65f50b7e3991bf33a1040e4a6a708184f995a2c9c5457d248142df51",
+    "tests/swarm_directory/test_hosted_ui_browser.py": "0b3eabacdc23ae3060971c425b4ce060b611612364f81c23658728a4464599af",
+    "tests/swarm_directory/test_site_p3_core.py": "d635a5e0538c1f1c363bec508d9cc73c376bcb6bc609e19e98ab36226973a173",
+    "tests/swarm_directory/test_site_p3_http.py": "a05891829bced92c567c22ca03ebd2461059209d6b73813c033f4c55aaa3e845",
+    "tests/swarm_directory/test_site_v2_browser.py": "c5fe3ff384e9f994e9f08fcc5e4b10e14cd1a20e52d8a4e92718f67e6239a248",
+    "tests/swarm_directory/test_web_ui_browser.py": "ddda1c0bf328a4846eaab749b412dc4e24f2fb15c6dfd914a9eb9770308f4202"
+  },
+  "artifacts": {
+    "access-approved-1440-dark.png": {
+      "sha256": "428a9769168eae1d6b5b818582c4e55cab4805749b7f722915d88929f2d8505a",
+      "bytes": 134321
+    },
+    "access-approved-1440-light.png": {
+      "sha256": "4569fb662cdfcb46b19aadf156d1eca5a48d1bbc83a03673c4f831ad3d3ead24",
+      "bytes": 133714
+    },
+    "access-approved-390-dark.png": {
+      "sha256": "f60a37e92f98c33d3e10c9542d7358d056313d34782e92a848937276408bf4f5",
+      "bytes": 108579
+    },
+    "access-approved-390-light.png": {
+      "sha256": "637e7f71e2a4fe64eab3cb14a1b280a66c80c48a9167f39fb168f8990d3228ad",
+      "bytes": 108805
+    },
+    "access-declined-1440-dark.png": {
+      "sha256": "b7c36d3a7f9bd550368ff7823a53956054a860f42610bf383a5351ebdec2b2c0",
+      "bytes": 133378
+    },
+    "access-declined-1440-light.png": {
+      "sha256": "f5cae7035edac6c1d4220624c0f0428642787297bbc6bc538d14425cdfe93b8b",
+      "bytes": 134115
+    },
+    "access-declined-390-dark.png": {
+      "sha256": "23a70df60e86b0f4d95fe5911b14facb6f5cd623a77b69e3df67691dfef1da62",
+      "bytes": 108767
+    },
+    "access-declined-390-light.png": {
+      "sha256": "d967d6ba35112712989a19753276d1260b1d99d9073d22c6cea93f0b594c54cc",
+      "bytes": 108865
+    },
+    "access-expired-1440-dark.png": {
+      "sha256": "423255c4a0e2f711fc1c751f3711c20a5a6bd06ef6d90a5aeba02c7c97215ec6",
+      "bytes": 127281
+    },
+    "access-expired-1440-light.png": {
+      "sha256": "95dcc78e87b5c23853f8419ec520724c81ff3d62f38c61ef704406f3a4cf1405",
+      "bytes": 127448
+    },
+    "access-expired-390-dark.png": {
+      "sha256": "0ba3e249675e06214cd25c30c4982ac49f8fc6b74ae5716359d70bc820faadb8",
+      "bytes": 103264
+    },
+    "access-expired-390-light.png": {
+      "sha256": "0bc3426b572f9be28f02f7fa755af8a88b8c7c69956e188ab2c08e84ea443b48",
+      "bytes": 103683
+    },
+    "access-first-1440-dark.png": {
+      "sha256": "594fa53964ab1d897170b14cd93d12e7be003938ebf30efd283fb84cabcda948",
+      "bytes": 139851
+    },
+    "access-first-1440-light.png": {
+      "sha256": "5a9010aa66a2739bc839fb1777fc88a2e0c0134d842befb8a33fd0054a863418",
+      "bytes": 139633
+    },
+    "access-first-390-dark.png": {
+      "sha256": "753e369f4da0438dbc01e8f08d9bb5880f931ca98264622f51ba7f3382eb64d7",
+      "bytes": 111738
+    },
+    "access-first-390-light.png": {
+      "sha256": "aa4080e26f5686cc61bc8c410f6bae8a8729798e835b28c31f1d76c8240741b1",
+      "bytes": 111748
+    },
+    "access-invite-1440-dark.png": {
+      "sha256": "b0351234e420b310f0fea54c64828ecb7de1452a30b2f9421d417db3c06ef8bc",
+      "bytes": 126884
+    },
+    "access-invite-1440-light.png": {
+      "sha256": "a45a5805b550731c22b23039ffa34fcd43b0f9229186c214946598a86448eca8",
+      "bytes": 126513
+    },
+    "access-invite-390-dark.png": {
+      "sha256": "69b8e689f4d7f6c76ace6e9005fb97870d9b229233f072bb9be9dfec9a6425a8",
+      "bytes": 103071
+    },
+    "access-invite-390-light.png": {
+      "sha256": "b373b95e29d94cd5040da50ce8d45353c1cff6807d6b4ca28e18357af396ab2b",
+      "bytes": 103922
+    },
+    "access-killed-1440-dark.png": {
+      "sha256": "0b9d31fd6297b0973053609e612f202479f35b161a2b6cfbfccdacbe20fd3fc0",
+      "bytes": 123989
+    },
+    "access-killed-1440-light.png": {
+      "sha256": "b2bcbc8948a704c6197b69eda5ae9954b0c8d10fc3d3e40bc092962fb8a00933",
+      "bytes": 123970
+    },
+    "access-killed-390-dark.png": {
+      "sha256": "f9b46539be00c7e011a5c551fab6dd1dad10c9c507b4e554b2594b19be924d71",
+      "bytes": 101937
+    },
+    "access-killed-390-light.png": {
+      "sha256": "ad98048d293ab3869753ed2f5ff25f3217affc0fe73d186fae5451c21efdf040",
+      "bytes": 101843
+    },
+    "access-needs-request-1440-dark.png": {
+      "sha256": "50df77f7971520175f1fe87376e9fe048fb360688fb30f4361d25a666903123e",
+      "bytes": 131441
+    },
+    "access-needs-request-1440-light.png": {
+      "sha256": "311cff87e24e9369fbc710cc1ad319257028ffda53d2389a104d1c829933a525",
+      "bytes": 132450
+    },
+    "access-needs-request-390-dark.png": {
+      "sha256": "9da966a063e08c35f119282379550ef13792f1c0f960c0e466a9fd78129c58dc",
+      "bytes": 107066
+    },
+    "access-needs-request-390-light.png": {
+      "sha256": "3ba47ce8ecd8ddc34abbc024104eab68523d80e800015d2a3252c66d3f11b377",
+      "bytes": 107815
+    },
+    "access-offline-1440-dark.png": {
+      "sha256": "359bed64279ec41b05eb63e068fc4e4e2fb62114a37cb8fa33b08d71ff048855",
+      "bytes": 126235
+    },
+    "access-offline-1440-light.png": {
+      "sha256": "78f17d708cd25ccd0a319d195b75260b421b578a5815b67692243e6a50493034",
+      "bytes": 126209
+    },
+    "access-offline-390-dark.png": {
+      "sha256": "033f37c5dc4cea2f793c48fc1d23ead03608dc9adb56b5bd65bf5cf01825741d",
+      "bytes": 102730
+    },
+    "access-offline-390-light.png": {
+      "sha256": "0feb032d0d604100957236569161e70660025813047d32fd2343ad3f935ba2f9",
+      "bytes": 102538
+    },
+    "access-pending-1440-dark.png": {
+      "sha256": "af9f3dac1f25589df01f2c960f2ba3e0d66d9c29e209732a5e89d755df9d94d2",
+      "bytes": 126495
+    },
+    "access-pending-1440-light.png": {
+      "sha256": "64caf96c3a33c21a7f784f4ded36ee886515c3263e191d8dd51e096f5bec62a3",
+      "bytes": 126486
+    },
+    "access-pending-390-dark.png": {
+      "sha256": "dab4c07d8fde333e61681dc570ea776c30f2d1b08d3035b3c4efb01e4af4f914",
+      "bytes": 103335
+    },
+    "access-pending-390-light.png": {
+      "sha256": "984d791d5a1dd313e1292c635cdc017aec1478422b8a6fcd877f6ce0fec9384f",
+      "bytes": 103469
+    },
+    "access-quota-1440-dark.png": {
+      "sha256": "91eae015a007e3320ebfe782db344c7960ae5b14bb626296fe9be4f348dd972e",
+      "bytes": 125560
+    },
+    "access-quota-1440-light.png": {
+      "sha256": "462ffba28db9e0e08f79ca73041d54a448637e7687183d1cc3b0200138788f26",
+      "bytes": 125276
+    },
+    "access-quota-390-dark.png": {
+      "sha256": "939072a1a6a885592947b5a3c3a0900a19ed5eed311fab0d20b31f24f7cd7db2",
+      "bytes": 102057
+    },
+    "access-quota-390-light.png": {
+      "sha256": "a9ebe6bd6c5fbb5a333ea08bacda3fc80fb62f502b6911e68bcb0a4a47f6af2e",
+      "bytes": 102051
+    },
+    "access-ready-1440-dark.png": {
+      "sha256": "e94692d4c1279ba0d65f1b7760972950c74f60e82872fc50c3ffc45d224fb0a1",
+      "bytes": 113286
+    },
+    "access-ready-1440-light.png": {
+      "sha256": "d5b5c029b1d7e112db04ebf123658d1dfc4012100c2a3aa2de00bd5b96112245",
+      "bytes": 112974
+    },
+    "access-ready-390-dark.png": {
+      "sha256": "219d226b2738ba9439319a3bad73f03705f5ae03a8fe7360a2932226e8bd50e6",
+      "bytes": 91160
+    },
+    "access-ready-390-light.png": {
+      "sha256": "ce2fa6ee7da8690a643172a14f8373d57724f6bc3775d2bb1fe2a6404db37f34",
+      "bytes": 91199
+    },
+    "apex-1440-dark-unavailable.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "apex-1440-dark-unavailable.png": {
+      "sha256": "4d7b091e7d83eb07a9c64d71a1c79aa26d099792b62fa3017a29314378c93d7e",
+      "bytes": 244876
+    },
+    "apex-1440-dark.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "apex-1440-dark.png": {
+      "sha256": "c4d02784865298eb2405ae90f22876738e3d802db409698bf5eb82d6ca347a48",
+      "bytes": 245584
+    },
+    "apex-1440-light-unavailable.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "apex-1440-light-unavailable.png": {
+      "sha256": "8bdff59f2a965bfe7607d249aab4f6392c51a3cb9290374f9f6daee289d2ce8b",
+      "bytes": 243322
+    },
+    "apex-1440-light.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "apex-1440-light.png": {
+      "sha256": "89e5c83a66ed03bf3b55309df79c00cd81081997d34e8f98a155711defb812bd",
+      "bytes": 244015
+    },
+    "apex-390-dark-unavailable.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "apex-390-dark-unavailable.png": {
+      "sha256": "70ac156e412335b39fed88748dbf793f09716495665a52a6e8a36f086af814d0",
+      "bytes": 252514
+    },
+    "apex-390-dark.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "apex-390-dark.png": {
+      "sha256": "07c2d31937ea804d0cd03a90b8db41e6824503b13b087b775f0d71bc00c210ba",
+      "bytes": 252500
+    },
+    "apex-390-light-unavailable.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "apex-390-light-unavailable.png": {
+      "sha256": "6d191b59084db165e7b301ee4128f254e53d0b124bbcea1e0f04fab362e4e51c",
+      "bytes": 248899
+    },
+    "apex-390-light.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "apex-390-light.png": {
+      "sha256": "1f27a2dcc7b10e5e1e51dc942fc1ef027bb2d77abbf5710d1ed4155affee8ed4",
+      "bytes": 248951
+    },
+    "browse-1440-dark.png": {
+      "sha256": "f6ca70937dfa6f0616cbc7c0d3f2c87aae0832a6e23c6a6cafcdd9ed466c40e4",
+      "bytes": 136789
+    },
+    "browse-1440-light.png": {
+      "sha256": "68f5dec04b68dd004d918e449d4bf2b6f311dd5730e9f1017518dff5baeb8e79",
+      "bytes": 136553
+    },
+    "browse-390-dark.png": {
+      "sha256": "4bfdaaa6e8f53b871854bfab531c6603170456c087a51f265edcfb58a25c6cb9",
+      "bytes": 115077
+    },
+    "browse-390-light.png": {
+      "sha256": "7a7e7029f422919acf83c62a251d0475299d4d3f609c69669e5c4874e964761d",
+      "bytes": 114537
+    },
+    "chat-1440-dark.png": {
+      "sha256": "2ad18daba2612e6513f392ab7d3eae56adb4868a0ce4928ef98096493d849254",
+      "bytes": 87115
+    },
+    "chat-1440-light.png": {
+      "sha256": "9ff09ee444b97b7e0cc6aa79acff6a4fcbc8732fe974d426d3e15418a233a030",
+      "bytes": 86401
+    },
+    "chat-390-dark.png": {
+      "sha256": "9ef6d5f07511a4c64cca7eb6c2c285c1d455f59be11d7f7f12a00c799265b111",
+      "bytes": 70142
+    },
+    "chat-390-light.png": {
+      "sha256": "6bae04dd30fcac092a828213a5297565fcf255bcf9ee2b44bc0253a0451ce101",
+      "bytes": 70411
+    },
+    "chat-detail-1440-dark.png": {
+      "sha256": "9f369cca4f3f59486b08cb5835a127159151d06207cae189578279cbb56db074",
+      "bytes": 132319
+    },
+    "chat-detail-1440-light.png": {
+      "sha256": "68b61e50442ea8663b0f0959fc1cdb377f30c33a983a9c4939a28e2c11053df7",
+      "bytes": 132659
+    },
+    "chat-detail-390-dark.png": {
+      "sha256": "b620b70bf66991c36e4f974a266441262281ad7183274fbeaf85b34f19e256d1",
+      "bytes": 107342
+    },
+    "chat-detail-390-light.png": {
+      "sha256": "0ca66384526f4a7e4591b11db73138f693c057083c05bb2ca1b11af16c2c005f",
+      "bytes": 107419
+    },
+    "cls-1440-dark.json": {
+      "sha256": "c141ee12e29ceb0130ebcebacf8f805ae6f7c07b85c8b8664d67d85101c907bf",
+      "bytes": 590
+    },
+    "cls-1440-light.json": {
+      "sha256": "dd8e0c9f7d8f1c5e4bdb1ae7e96beb43c62e069acbf4a30ad16b944c7fdefc94",
+      "bytes": 598
+    },
+    "cls-390-dark.json": {
+      "sha256": "5aae2d94a0d51b0f307f2256425af14544b65d2288c4f10b8f4fbefebe3f78d8",
+      "bytes": 582
+    },
+    "cls-390-light.json": {
+      "sha256": "3acdf2f2105ca1f1e74c0f93f8c06c3147ca9c1f757268f13b82332628122b74",
+      "bytes": 590
+    },
+    "cls-access-1440-dark.json": {
+      "sha256": "37b2e80475f3984649cf86172cc9ede81cd32fff2ebe75ea7c73ce03ebd79dbe",
+      "bytes": 771
+    },
+    "cls-access-1440-light.json": {
+      "sha256": "37b2e80475f3984649cf86172cc9ede81cd32fff2ebe75ea7c73ce03ebd79dbe",
+      "bytes": 771
+    },
+    "cls-access-390-dark.json": {
+      "sha256": "37b2e80475f3984649cf86172cc9ede81cd32fff2ebe75ea7c73ce03ebd79dbe",
+      "bytes": 771
+    },
+    "cls-access-390-light.json": {
+      "sha256": "37b2e80475f3984649cf86172cc9ede81cd32fff2ebe75ea7c73ce03ebd79dbe",
+      "bytes": 771
+    },
+    "contributing-1440-dark.png": {
+      "sha256": "0bd553006c102503eaf00e55dbee8ccea65e2d71ac2e5133447fce37079ae9b6",
+      "bytes": 146232
+    },
+    "contributing-1440-light.png": {
+      "sha256": "bdea61d9b3868b1c58141d2ee07b9607a73801aa976edfedc2fdba409cfc9070",
+      "bytes": 144685
+    },
+    "contributing-390-dark.png": {
+      "sha256": "2413f6b09b3546996119a6ac2585e3cb42b42db38ba1f86e1d27bb4a0b9d5f0b",
+      "bytes": 124682
+    },
+    "contributing-390-light.png": {
+      "sha256": "475df5084318f6e9b5591a6c0ceefa62eac4c52e2d41fe1232980845c98c4c28",
+      "bytes": 124123
+    },
+    "layout-before/apex-1440-dark-unavailable.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "layout-before/apex-1440-dark.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "layout-before/apex-1440-light-unavailable.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "layout-before/apex-1440-light.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "layout-before/apex-390-dark-unavailable.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "layout-before/apex-390-dark.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "layout-before/apex-390-light-unavailable.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "layout-before/apex-390-light.cls.json": {
+      "sha256": "cd5da8697a55920ef9f4ed6b660ac0fb481e5a61c903903c414c4ea9396b6ae2",
+      "bytes": 30
+    },
+    "layout-before/cls-1440-dark.json": {
+      "sha256": "56b12fa8ab1335f355a0e7ad1bf7b9a02c0657f3dbef11bd4b53011efa94e2d8",
+      "bytes": 3432
+    },
+    "layout-before/cls-1440-light.json": {
+      "sha256": "5e7a45f84a9486a52eb5209b2fc2e3b3080394b1c0ac45524980c19ad7b8e308",
+      "bytes": 3426
+    },
+    "layout-before/cls-390-dark.json": {
+      "sha256": "397a12d58dffdf1da4239a091e82cc4cc06f160c7ad8dd3e6a07d54c99a21ee7",
+      "bytes": 2066
+    },
+    "layout-before/cls-390-light.json": {
+      "sha256": "56fe5be3592b1d3d4c9f7858540e55dc87c5861643b8aec6949b566a38940aa1",
+      "bytes": 2075
+    },
+    "layout-before/cls-access-1440-dark.json": {
+      "sha256": "eb286c8f7ce5084d612682c7ef53d96ec92eea293f082ab2f14cdb508c494684",
+      "bytes": 20961
+    },
+    "layout-before/cls-access-1440-light.json": {
+      "sha256": "643f33ee7568b3f418f0f6dbef6229c3844da5cd86c0a00b45dba59e4c1fb28c",
+      "bytes": 21081
+    },
+    "layout-before/cls-access-390-dark.json": {
+      "sha256": "169808ea09cb95dc25b1befe4ab7b30c83ff30a9db6ce7f92213d5640bfa48a6",
+      "bytes": 18557
+    },
+    "layout-before/cls-access-390-light.json": {
+      "sha256": "586c0b6347bf36b217cb16e8bf142acee5dfa0c93acd5c45c0f7bab5a2b6bca3",
+      "bytes": 18419
+    },
+    "mac-header-1440.png": {
+      "sha256": "f286bde05b7930dcd6e511397b7263c2128af3776e42db284b1d0f97f321de26",
+      "bytes": 128048
+    },
+    "mac-header-390.png": {
+      "sha256": "8df4684ae7886761feca4ba11f9b86de663f064a648602f12d3d824edd1dbece",
+      "bytes": 68738
+    },
+    "new-1440-dark.png": {
+      "sha256": "8d153197e38b47131c5b5a31b3ab69437d3a1bc2711580074af91b6b7de73a40",
+      "bytes": 117652
+    },
+    "new-1440-light.png": {
+      "sha256": "847588ae457a5a1be4addd65c5f3bfb31a740ed8278b5587b94b7b8b6a640f8a",
+      "bytes": 117196
+    },
+    "new-390-dark.png": {
+      "sha256": "475deefe8c0027df1ae2ecc397926fbea34ba55ce969e00b9483b285b2e9c52c",
+      "bytes": 98937
+    },
+    "new-390-light.png": {
+      "sha256": "170cad1b8ff0b231cf6888c09c71d477ae5cf9a43da4dc12d9565aa42013ce5e",
+      "bytes": 99041
+    },
+    "notice-1440-dark.png": {
+      "sha256": "7c5199db7cecd0f5fc9aaa664587a131b9113c4d1a4290f5f435e4218baab38f",
+      "bytes": 177599
+    },
+    "notice-1440-light.png": {
+      "sha256": "5b2f3236f396e2252f9e4f601ea26c2dea49c6d4dc8b5643f8221192a7d19d8b",
+      "bytes": 174605
+    },
+    "notice-390-dark.png": {
+      "sha256": "e01ff12a126daa0448e3d36e20868c032dea37ebf52e2fc6cdbe6fa4efb858b6",
+      "bytes": 170187
+    },
+    "notice-390-light.png": {
+      "sha256": "b3452471aa1a4e605d91462df77280275b422434ce363c0246a5d41778ce88c8",
+      "bytes": 167704
+    },
+    "owned-1440-dark.png": {
+      "sha256": "0639a3933f35ad636b473431de96fb9048ef09be41d7f56fa2f124ac07f03431",
+      "bytes": 98945
+    },
+    "owned-1440-light.png": {
+      "sha256": "bb8284bc2ee657ae8b8f9842c699d323d45418a65bda71846bcec511a7e2840d",
+      "bytes": 98844
+    },
+    "owned-390-dark.png": {
+      "sha256": "f6b3326bdb3ea40c808aedfc4c8150bbea15a8135820c4dd2ef023e3f96ad42f",
+      "bytes": 82842
+    },
+    "owned-390-light.png": {
+      "sha256": "bac4016220c912a9d970457f7a5ffa2955456bc3a299a083086047b4461dbdcf",
+      "bytes": 82684
+    },
+    "owner-held-approve-1440-dark.png": {
+      "sha256": "b4691e4ecb986cc1ed5693174b62b611ac54b452f8c5253571dea62926d91e2d",
+      "bytes": 164144
+    },
+    "owner-held-approve-1440-light.png": {
+      "sha256": "4dcdf4cb48a464fea3efdbdb281ffd33094e1952c6a0372f368c7e7c20f4eff7",
+      "bytes": 163708
+    },
+    "owner-held-approve-390-dark.png": {
+      "sha256": "03ab36ead445c105d7db2bbe22dbf6188d59bf71eb56346a7eeab67355d5503e",
+      "bytes": 108938
+    },
+    "owner-held-approve-390-light.png": {
+      "sha256": "ab40005e5ecb9066960a788e0d93d466d11ae22cd356c08bd54006c2d6c9563e",
+      "bytes": 108104
+    },
+    "owner-held-decline-1440-dark.png": {
+      "sha256": "de3de180b7019d1d9fb9387ac792ed94eb45a8ad232efa83efc3e8d458352c0d",
+      "bytes": 163730
+    },
+    "owner-held-decline-1440-light.png": {
+      "sha256": "ee5a5227aae72e09adee8bfd00cedf224a99205f8440044b6ce9f517d5b5641f",
+      "bytes": 163441
+    },
+    "owner-held-decline-390-dark.png": {
+      "sha256": "88630a3d89670c91166366cb2b90ea4dabc473ba603908d30b9b2005340b1d08",
+      "bytes": 108447
+    },
+    "owner-held-decline-390-light.png": {
+      "sha256": "65c5b21dd282c45e7f10812ffccb7edbc6b259ec8ea3612c631fe36a0028b128",
+      "bytes": 107720
+    },
+    "owner-inbox-1440-dark.png": {
+      "sha256": "4d3d0c009f34eb4b53a0a51c92cd509a5f407651f1c085f3c8cd86bbc348b798",
+      "bytes": 172900
+    },
+    "owner-inbox-1440-light.png": {
+      "sha256": "7f1c73268a7df2e0bb91afba385b0d1ee7b48e1a23980a88971eb79868cd51b1",
+      "bytes": 169946
+    },
+    "owner-inbox-390-dark.png": {
+      "sha256": "7a2347651934222ee05d8c70443334af2dc1939da6afc6a28aca0cb629a216a8",
+      "bytes": 105176
+    },
+    "owner-inbox-390-light.png": {
+      "sha256": "d61ee6ff6f4b7daddd5c38a91468a8ef9e91efde82d33b24c93bc1467180b4d9",
+      "bytes": 105165
+    },
+    "swarm-detail-1440-dark.png": {
+      "sha256": "9534e1818581401b185cba87564c3b180e23ff52b8333231b8ccdd58f8dd2561",
+      "bytes": 144124
+    },
+    "swarm-detail-1440-light.png": {
+      "sha256": "e5c0a8e066e46a4a43637c0410e79bf817ae3a7a72fd059ce92a5dbd11037afa",
+      "bytes": 142343
+    },
+    "swarm-detail-390-dark.png": {
+      "sha256": "cc629050a228e3a61fc3b19b14baa10d5f329f985842b529993bf42d8b7ebdd6",
+      "bytes": 120550
+    },
+    "swarm-detail-390-light.png": {
+      "sha256": "bc084862559af9ae035ae4f2eebf062fb020f1c922dd8f33b5696f06c63ae3cb",
+      "bytes": 119570
+    },
+    "test-results/baseline.json": {
+      "sha256": "a8be195c59774dff30ac38fdf561fdfd7d8cbfbf7911842dea6fa149b55ea3df",
+      "bytes": 54
+    },
+    "test-results/baseline.log": {
+      "sha256": "e3ad25e57f687a39734c2be2fcddb2696e3e5de688f40e7379148f9e43a20e86",
+      "bytes": 1309
+    },
+    "test-results/baseline.xml": {
+      "sha256": "f36e26f1d2eb4c90559f45b8aec4ac5d3170f77ad980a0d64b57086f391d3292",
+      "bytes": 82701
+    },
+    "test-results/browser-1.json": {
+      "sha256": "66fdc72b72ff30a3a5ac71e468dddf53890a67b0894b905290183b267b5ddf47",
+      "bytes": 623
+    },
+    "test-results/browser-1.log": {
+      "sha256": "1e0b7cfe47b243f64b27c81ca877f83c0cfe2fe5ff58c0b55a170521d46730d3",
+      "bytes": 746
+    },
+    "test-results/browser-1.xml": {
+      "sha256": "fa1947c9dcb5e344fd89963df430c20369c05117cddd580f714fe42bc14a3cf6",
+      "bytes": 3085
+    },
+    "test-results/browser-2.json": {
+      "sha256": "4fca860f100942c194c98f62abff81c8c8e5d127c11d3802dfc6e8a52c86f378",
+      "bytes": 621
+    },
+    "test-results/browser-2.log": {
+      "sha256": "e04dfffefa8f9a25f9e5a2cdf387de886a0aead7e93e782cffa7caf5d92e3b4f",
+      "bytes": 746
+    },
+    "test-results/browser-2.xml": {
+      "sha256": "3ccae9cdecbf857c780d3b3d496d87ea497e7d70b70db2b1a65034711dcda6fc",
+      "bytes": 3085
+    },
+    "test-results/browser-final-1.json": {
+      "sha256": "5536cd92240b7419b9c7742d2fe30efa7fbd9e32e3f7d3cb4a9205e8b4e0776f",
+      "bytes": 635
+    },
+    "test-results/browser-final-1.log": {
+      "sha256": "74467b9acfa36a4f267b0e28fe79b019e11775522bdc16aa8e64d8b41745a0fc",
+      "bytes": 752
+    },
+    "test-results/browser-final-1.xml": {
+      "sha256": "13e03943e969e68f85edd2e58c39722a3737007f3dfb18a99b143d1f1591b5ce",
+      "bytes": 3571
+    },
+    "test-results/browser-qualified-1.json": {
+      "sha256": "d63105fc5ad10b4c6eb39b65aa749fc2db04d1feae979c429df4d2e9a3e5154b",
+      "bytes": 642
+    },
+    "test-results/browser-qualified-1.log": {
+      "sha256": "3f8a47577fe19c05e12a76c17853ac260f3fe1a2e7f0dc7b7844580a22261ded",
+      "bytes": 756
+    },
+    "test-results/browser-qualified-1.xml": {
+      "sha256": "7d91666f0a6ad5c9e22da7ea19f46ec60b309cee898a10a2b41e812e7acb92f2",
+      "bytes": 3571
+    },
+    "test-results/browser-qualified-2.json": {
+      "sha256": "e2caf6a6c08d565b7255ab2d7cc3c08a13a418b29bac9727dede4c0014e1fc68",
+      "bytes": 642
+    },
+    "test-results/browser-qualified-2.log": {
+      "sha256": "3897f89f420fcf970534a43d25876f2319007a0101fd30220d8dec82812a5031",
+      "bytes": 756
+    },
+    "test-results/browser-qualified-2.xml": {
+      "sha256": "3dbae633332a7bb375043971156c9c1f6d14debc2aad462d2e5df44b9878dbeb",
+      "bytes": 3571
+    },
+    "test-results/browser-qualified-3.json": {
+      "sha256": "79e1b2b7a032ad7dce8402fc6e4a1d8af1d984a284d8dd91d22662d3d9310df1",
+      "bytes": 642
+    },
+    "test-results/browser-qualified-3.log": {
+      "sha256": "8f36e2a08bb414f5a760d417b45a36ea5a14293278787011d10939df09a8fbdf",
+      "bytes": 756
+    },
+    "test-results/browser-qualified-3.xml": {
+      "sha256": "3324992f7c8106e382cc807935b9729f259efd1321b1e8789a038c74777d2f4c",
+      "bytes": 3571
+    },
+    "test-results/browser-qualified-three.log": {
+      "sha256": "36fb5c6f9cfbb00720eeda1dd649662b516b3a0aa32589da314d36629b67534d",
+      "bytes": 1929
+    },
+    "test-results/browser-smoke.json": {
+      "sha256": "4daa35a7a4487057542dfa44b2ab7df53e494835e3db4b7de58f0ca1cc25f0ae",
+      "bytes": 693
+    },
+    "test-results/browser-smoke.log": {
+      "sha256": "cf8bb8d74e526db5b54b2f51d709f4456172777599bd7251fb830ee4c0dc87da",
+      "bytes": 749
+    },
+    "test-results/browser-smoke.xml": {
+      "sha256": "765ae14ffc856919f0bd59737b71b03ba09da4a4b43c81d4587ac3f288d4aa47",
+      "bytes": 1476
+    },
+    "test-results/browser-three.log": {
+      "sha256": "0a1a9228ab3253787552b14ba2cfe228007722ba0402465bdbd3e2495cc215f8",
+      "bytes": 624
+    },
+    "test-results/browser-zero-1.json": {
+      "sha256": "dd12bc70076612e286bcfa4f0acc59670005d830545e30eb77464bec639e1307",
+      "bytes": 1008
+    },
+    "test-results/browser-zero-1.log": {
+      "sha256": "1aa70288634f6dcbecc1cdcb1a0aeb1587cca3fa45e7186ff89c7cf61bc34829",
+      "bytes": 9479
+    },
+    "test-results/browser-zero-1.xml": {
+      "sha256": "98937418f0300c52f852867fc5ec09991494b27b2be417814d842ee3144776d7",
+      "bytes": 12760
+    },
+    "test-results/browser-zero-three.log": {
+      "sha256": "c44d3e566bc0a9b22ce7c579ea557ca9e8903c46cb544d25a0645366b7c1b16c",
+      "bytes": 1009
+    },
+    "test-results/candidate.json": {
+      "sha256": "e0b016b476d57dad776870aa4335b82cdd1ad8e42c2d9202ceca4a6b09bfbf87",
+      "bytes": 684
+    },
+    "test-results/candidate.log": {
+      "sha256": "29509d1da4a6aec382a003b0ecf7b88a8f28773adb499c0a34c4032f3c507226",
+      "bytes": 1307
+    },
+    "test-results/candidate.xml": {
+      "sha256": "80230be61e3ac98d424fc2970f3269508193639eb085e0626651d35a40ddd634",
+      "bytes": 86145
+    },
+    "test-results/core-final.log": {
+      "sha256": "260b3e1da300ad2a01c9a8393e66c3764dc7cda1c0cb58afcd1d81e2f7a5c02d",
+      "bytes": 747
+    },
+    "test-results/core-final.xml": {
+      "sha256": "12b4128b2a2082a2efd54fe23c29a95b0be85dbb3ace65caef25dd735b792a3e",
+      "bytes": 10054
+    },
+    "test-results/core.log": {
+      "sha256": "81da735548e95a4fd017f841aa21da4539b2e13b7508dca72e7cfca60f185a14",
+      "bytes": 741
+    },
+    "test-results/core.xml": {
+      "sha256": "a06b6a67eb0802012fc7ba445c7eb55fc6f1a22004bf0226cfe9e542d4490675",
+      "bytes": 3534
+    },
+    "test-results/focus.log": {
+      "sha256": "3316c9755f3d53611bc13dda3aac5a5fc476dead6bdd370ab3fdd28c3fdf8dc6",
+      "bytes": 7762
+    },
+    "test-results/focus.xml": {
+      "sha256": "0eb586c44d69babb7a105f024bb23345c8c1a25399ad5b7262686e0b0ef49174",
+      "bytes": 22746
+    },
+    "test-results/focus2.log": {
+      "sha256": "c948fd37be499b0a52cb9df1c4ec94c8ed67fd9e50acc01c86c348b3a91cc4e2",
+      "bytes": 743
+    },
+    "test-results/focus2.xml": {
+      "sha256": "ef561bbf99207b3f2df8116899f02442b678699c202abb86239677af9222cb27",
+      "bytes": 10521
+    },
+    "test-results/full-zero-pipeline.log": {
+      "sha256": "2093cf2276b98c22646dcf3311ee8d0d7b96aed988c730b98fffe6fdc12026c2",
+      "bytes": 31
+    },
+    "test-results/http-final.log": {
+      "sha256": "e5e4570116b8c7f54fa2f06f76d2a559cf01486bb3c3cc131a9a8699606c326d",
+      "bytes": 746
+    },
+    "test-results/http-final.xml": {
+      "sha256": "24cb6ee06dfeb2135ca962bdba11b6200e7cd95cec1235f702c10774b530846a",
+      "bytes": 683
+    },
+    "test-results/http-red.log": {
+      "sha256": "ea760cf888eb6fa4e4ad7955d29ad5745c6712167b0ba19bd7bdd65bbd285146",
+      "bytes": 2882
+    },
+    "test-results/http-red.xml": {
+      "sha256": "fd893adf233e9e8c44e047e4719df25c951906897d79499e9c3ed456ed60e417",
+      "bytes": 2251
+    },
+    "test-results/mobile-hold-green.json": {
+      "sha256": "f1ae354303c09f9a393433e06ce5d397b5647a81c3b618e5857da82dc3eafe6b",
+      "bytes": 665
+    },
+    "test-results/mobile-hold-green.log": {
+      "sha256": "e66a10c07f96bef9fa219095a2b668f2086dcfd5f4637ea527edc3e8b68a5428",
+      "bytes": 753
+    },
+    "test-results/mobile-hold-green.xml": {
+      "sha256": "cb97930f2465644eea717d99ad3a3f5e60e03ae61e4235256785c21456d3308b",
+      "bytes": 870
+    },
+    "test-results/mobile-hold-red.json": {
+      "sha256": "963c1e5cf6777a4d5588fcb6739f52c94fe824003a3c633eb455a731c60cab29",
+      "bytes": 866
+    },
+    "test-results/mobile-hold-red.log": {
+      "sha256": "f5b87895c22a37169432c410db83a0661a0fa5e65e8bd7325aa9d7a47e8adcce",
+      "bytes": 4087
+    },
+    "test-results/mobile-hold-red.xml": {
+      "sha256": "fe98701f76697f1207005ab38e4afa511b65a9bc4a8e57e0cc6bc03732145961",
+      "bytes": 4239
+    },
+    "test-results/owner-zero-green.json": {
+      "sha256": "75af98670f09d0948d23fd6e0e4ca1263f5364638589e230cef8b8565a4b19df",
+      "bytes": 663
+    },
+    "test-results/owner-zero-green.log": {
+      "sha256": "5ed5322aec059b0f1e9e5e2d9b7be714f5110c8004b2b92ef8fb1a4b9e4fad23",
+      "bytes": 752
+    },
+    "test-results/owner-zero-green.xml": {
+      "sha256": "a29df57c4e86ec0fc1e858c2026d6e988bc75e7731ed95c0ee93a3d27f02e45d",
+      "bytes": 870
+    },
+    "test-results/red.log": {
+      "sha256": "abb9e053dd75715ad675879417e8051895fa68772c14d4519581b056f288b59b",
+      "bytes": 7539
+    },
+    "test-results/red.xml": {
+      "sha256": "3fee1797fdd1bdc1248d8a1a479f704f54de27578681f7df273e3e4ec2e196ca",
+      "bytes": 6718
+    },
+    "test-results/visual-green.json": {
+      "sha256": "bedddeb59eff73de31b8a5f056c03bbfda61bb2e92afc82881d628c41bb3e06b",
+      "bytes": 655
+    },
+    "test-results/visual-green.log": {
+      "sha256": "94f55e938dc290b6a10084e04cd5247b2a99d60bae26a4dc2971e50f9f9212a3",
+      "bytes": 748
+    },
+    "test-results/visual-green.xml": {
+      "sha256": "6f88e6b6fe68cef9cc18ce78b3f3c086d317f2bc84ec70c254484f6ff901bd8f",
+      "bytes": 870
+    },
+    "test-results/visual-red.json": {
+      "sha256": "877cf166cdca0775059af70196c7122d92cc7fa4ab404ba513a4b9840cd5cf4d",
+      "bytes": 825
+    },
+    "test-results/visual-red.log": {
+      "sha256": "c5ed68d0f4ab6331620c7aa183daee77006243101245271ed5bcef1c3ebba812",
+      "bytes": 3262
+    },
+    "test-results/visual-red.xml": {
+      "sha256": "15e814b55d8ef2aa583df4ab59ac78543f11f0da68d76d17f9fbdf5765737714",
+      "bytes": 3002
+    },
+    "test-results/zero-cls-green.json": {
+      "sha256": "1ec38fb604097fde36ef4625ce57460659fadbbc15d6dc9ea01abc9e727de940",
+      "bytes": 660
+    },
+    "test-results/zero-cls-green.log": {
+      "sha256": "799436101ce84b333e148fb415fdea1bc31db93eb41c4e2bac95843d78f2ed66",
+      "bytes": 750
+    },
+    "test-results/zero-cls-green.xml": {
+      "sha256": "c21fbbaf616147061b480dac6b7404a7129efddfd2ad05e5d5db4accd4f778fe",
+      "bytes": 834
+    },
+    "test-results/zero-cls-red.json": {
+      "sha256": "110c7f049643832383b5f61ba3d42e7446330eec599bce1d7a1e1f7f634b6881",
+      "bytes": 855
+    },
+    "test-results/zero-cls-red.log": {
+      "sha256": "538aa6c5a95fa87a100c9a8c6fbfebd3e643ea067750ebf2e7c53b215d93080d",
+      "bytes": 3966
+    },
+    "test-results/zero-cls-red.xml": {
+      "sha256": "995175dc1fca63fe6c20b8725c008f381fb0d95e00295bb6ed46d45de38dbb41",
+      "bytes": 3498
+    },
+    "visual-red/decline-before.png": {
+      "sha256": "3e735d478a42e0e724af537e44e9f2e29531786e106b3412215ef841f9de5ab7",
+      "bytes": 160094
+    },
+    "visual-red/undo-overlap-before.png": {
+      "sha256": "cf74e177ec00780276966983490b8d548119dee1b991d23173bbf9e65359bfdd",
+      "bytes": 160339
+    }
+  },
+  "deployed": false
+}

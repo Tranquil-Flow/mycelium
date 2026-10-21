@@ -1,0 +1,62 @@
+[
+  {
+    "state": "needs-request",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "state": "pending",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "state": "pending",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "state": "declined",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "state": "approved",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "state": "ready",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "state": "offline",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "state": "killed",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "state": "expired",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "state": "quota",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "state": "invite",
+    "cls": 0,
+    "shifts": []
+  },
+  {
+    "state": "first",
+    "cls": 0,
+    "shifts": []
+  }
+]

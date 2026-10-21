@@ -1,0 +1,30 @@
+{
+  "exit_code": 1,
+  "git_head": "dc87ecf8a74f7e92a761f6301e31ffba880c916f",
+  "elapsed_seconds": 24.394758224487305,
+  "command": [
+    "nice",
+    "-n",
+    "19",
+    "/Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "no:cacheprovider",
+    "-n",
+    "1",
+    "tests/swarm_directory/test_site_v2_browser.py",
+    "-k",
+    "routes_slow and dark and 1440",
+    "--basetemp=/Users/evinova-self/.hermes/cache/scratch/sitep3-zero-cls-red",
+    "--junitxml=/Users/evinova-self/Projects/mycelium-rel2-siteux-p3/docs/design/site-v2-p3/test-results/zero-cls-red.xml"
+  ],
+  "cases": 1,
+  "failures": [
+    {
+      "classname": "tests.swarm_directory.test_site_v2_browser",
+      "name": "test_routes_slow_loading_cls_and_screenshots[dark-1440-900]",
+      "time": "21.822"
+    }
+  ]
+}

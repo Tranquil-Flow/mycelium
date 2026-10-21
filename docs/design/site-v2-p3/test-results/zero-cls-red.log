@@ -1,0 +1,55 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.8, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/evinova-self/Projects/mycelium-rel2-siteux-p3
+configfile: pytest.ini
+plugins: xdist-3.8.0, anyio-4.12.1, asyncio-1.3.0, langsmith-0.7.16
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+created: 1/1 worker
+1 worker [1 item]
+
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_________ test_routes_slow_loading_cls_and_screenshots[dark-1440-900] __________
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+local = {'app': <_swarm_fixtures.FakeApp object at 0x109f0bb60>, 'directory': <mycelium_swarm_directory.server.DirectoryServer...elayProxy object at 0x10a55c050>, 'publisher': <mycelium_a13_macos.swarm_publish.SwarmPublisher object at 0x10a55c2f0>}
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x109fb3230>
+width = 1440, height = 900, theme = 'dark'
+
+    @pytest.mark.parametrize('width,height', [(1440,900),(390,844)])
+    @pytest.mark.parametrize('theme', ['dark','light'])
+    def test_routes_slow_loading_cls_and_screenshots(local, monkeypatch, width, height, theme):
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            owner = page_for(browser, local, '#new')
+            owner.select_option('#c-model', 'Qwen/Qwen3-0.6B')
+            create_swarm(owner, local, 'Reading room', 'request')
+            sid = owner.locator('[data-owned]').first.get_attribute('data-owned')
+            results = []
+            from mycelium_swarm_directory import server as directory_server
+            original_get=directory_server._Handler.do_GET
+            def delayed_get(handler):
+                import time
+                if handler.path in ('/swarms/api/v1/swarms','/swarms/swarms.js'):
+                    time.sleep(.7)  # per-HTTP-request thread: CSS delivery and browser dispatch stay live
+                return original_get(handler)
+            monkeypatch.setattr(directory_server._Handler,'do_GET',delayed_get)
+            for route in ['browse', 'chat', 'contributing', 'owned', 'new', 'notice', 'swarm/'+sid, 'chat/'+sid]:
+                page = browser.new_context(viewport={'width':width,'height':height}, color_scheme=theme).new_page()
+                page.add_init_script(CLS)
+                # Real responses delayed by the server, without blocking CSS or Playwright's event loop.
+                page.goto(local['directory'].origin+'/swarms/#'+route)
+                page.wait_for_selector('body[data-loaded="1"]')
+                page.wait_for_timeout(1200)
+                cls = sum(page.evaluate('window.__cls'))
+                assert cls < .01, (route,width,theme,cls,page.evaluate('window.__clsDetails'))
+                if '/' in route:
+>                   assert cls == 0, ('hydrated detail/chat slots must not move',route,width,theme,cls,page.evaluate('window.__clsDetails'))
+E                   AssertionError: ('hydrated detail/chat slots must not move', 'swarm/sw-kfkrzsda85wsnh3unxei', 1440, 'dark', 0.0006766068572370114, [{'...25, 'left': 201, 'right': 1239, ...}, 'selector': 'P.'}], 'time': 1473.4000000059605, 'value': 0.0006766068572370114}])
+E                   assert 0.0006766068572370114 == 0
+
+tests/swarm_directory/test_site_v2_browser.py:470: AssertionError
+- generated xml file: /Users/evinova-self/Projects/mycelium-rel2-siteux-p3/docs/design/site-v2-p3/test-results/zero-cls-red.xml -
+=========================== short test summary info ============================
+FAILED tests/swarm_directory/test_site_v2_browser.py::test_routes_slow_loading_cls_and_screenshots[dark-1440-900]
+============================== 1 failed in 23.40s ==============================

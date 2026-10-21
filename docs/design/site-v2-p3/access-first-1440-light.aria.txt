@@ -1,0 +1,23 @@
+- heading "Chat with Reading room" [level=2]
+- paragraph: Qwen/Qwen3-0.6B
+- button "All chats"
+- status: Before your first prompt
+- text: "Your browser: 2 ms · —"
+- heading "Before your first prompt" [level=3]
+- paragraph: "Your prompt goes directly to http://127.0.0.1:55707. Its relay and the swarm’s Macs can read it. The swarm sees your browser key and can link your prompts. Do not type secrets. Open access: 20 requests per key; network and daily limits also apply."
+- button "I understand, start chatting"
+- log
+- text: Prompt
+- textbox "Prompt" [disabled]:
+  - /placeholder: Before your first prompt
+- button "Send" [disabled]
+- text: Answer limit
+- combobox "Answer limit":
+  - option "64"
+  - option "128" [selected]
+  - option "256"
+- text: Before your first prompt
+- paragraph:
+  - text: The swarm’s Macs can read your prompt. It is not end-to-end encrypted from them.
+  - link "Who can see what":
+    - /url: "#notice"

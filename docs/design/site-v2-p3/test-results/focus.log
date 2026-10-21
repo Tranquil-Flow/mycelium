@@ -1,0 +1,119 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.8, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/evinova-self/Projects/mycelium-rel2-siteux-p3
+configfile: pytest.ini
+plugins: xdist-3.8.0, anyio-4.12.1, asyncio-1.3.0, langsmith-0.7.16
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+created: 1/1 worker
+1 worker [109 items]
+
+....................................................FF.................. [ 66%]
+FF.F...........................FF....                                    [100%]
+=================================== FAILURES ===================================
+_ test_the_proxy_serves_exactly_the_five_directory_assets_and_no_inference_route _
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+    def test_the_proxy_serves_exactly_the_five_directory_assets_and_no_inference_route():
+        assets = proxy._DIRECTORY_ASSET_PATHS
+>       assert assets == {'/swarms', '/swarms/', '/swarms/swarms.js', '/swarms/swarms.css', '/swarms/site.css'}
+E       AssertionError: assert frozenset({'/...ms.css', ...}) == {'/swarms', '...ms/swarms.js'}
+E         
+E         Extra items in the left set:
+E         '/'
+E         '/apex.js'
+E         Use -v to get more diff
+
+tests/demo/test_profile_a_site_closed.py:50: AssertionError
+_________ test_the_directory_server_itself_does_not_answer_chat_paths __________
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+    def test_the_directory_server_itself_does_not_answer_chat_paths():
+        import http.client
+        from mycelium_swarm_directory.crypto import verify
+        from mycelium_swarm_directory.directory import Directory
+        from mycelium_swarm_directory.store import MemoryStore
+        running = server.DirectoryServer(Directory(MemoryStore(), verify)).start()
+        try:
+            for path in ('/chat', '/chat/chat.js', '/chat/api/state', '/', '/swarms/api/v1/chat', '/swarms/notice'):
+                connection = http.client.HTTPConnection('127.0.0.1', running.server_port, timeout=3)
+                connection.request('GET', path)
+                response = connection.getresponse()
+                response.read()
+>               assert response.status == 404, path
+E               AssertionError: /
+E               assert 200 == 404
+E                +  where 200 = <http.client.HTTPResponse object at 0x10a12b730>.status
+
+tests/demo/test_profile_a_site_closed.py:68: AssertionError
+________________________________ test_cli_flags ________________________________
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+tmp_path = PosixPath('/Users/evinova-self/.hermes/cache/scratch/sitep3-focus/popen-gw0/test_cli_flags0')
+zip_path = PosixPath('/Users/evinova-self/.hermes/cache/scratch/sitep3-focus/popen-gw0/test_cli_flags0/Mycelium-helper-mac.zip')
+
+    def test_cli_flags(tmp_path: Path, zip_path: Path) -> None:
+        capability = tmp_path / "cap"
+        capability.write_text(CAPABILITY + "\n")
+        capability.chmod(0o600)
+        base = ["--upstream", "http://127.0.0.1:4351", "--trusted-proxy-capability-file", str(capability),
+                "--directory-upstream", "http://127.0.0.1:4360"]
+        config = proxy.build_config_from_args(base + ["--helper-zip", str(zip_path), "--helper-version", "1.2.3"])
+        assert (config.helper_zip_path, config.helper_version) == (str(zip_path), "1.2.3")
+>       assert config.redirect_root_to_swarms is True
+E       AssertionError: assert False is True
+E        +  where False = ProxyConfig(listen_host='127.0.0.1', listen_port=4350, upstream_host='127.0.0.1', upstream_port=4351, public_host='myc..._swarms=False, enable_product_routes=False, connection_slots=32, socket_timeout_seconds=10, max_concurrent_downloads=2).redirect_root_to_swarms
+
+tests/demo/test_public_origin_proxy_helper_download.py:170: AssertionError
+________ test_root_redirects_to_swarms_by_default_when_the_mount_is_on _________
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+    def test_root_redirects_to_swarms_by_default_when_the_mount_is_on() -> None:
+        with world() as (public, product, directory):
+            for method in ("GET", "HEAD"):
+                status, headers, body = call(public.server_port, method, "/")
+>               assert (status, headers["location"], body) == (302, "/swarms/", b"")
+                                ^^^^^^^^^^^^^^^^^^^
+E               KeyError: 'location'
+
+tests/demo/test_public_origin_proxy_helper_download.py:181: KeyError
+_____________________ test_the_flag_turns_the_redirect_off _____________________
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+    def test_the_flag_turns_the_redirect_off() -> None:
+        with world(redirect_root_to_swarms=False, enable_product_routes=True) as (public, product, _):
+            assert call(public.server_port, "GET", "/")[0] == 200
+            assert [r["path"] for r in product.requests] == ["/"]
+        with world(redirect_root_to_swarms=False) as (public, product, _):  # product routes closed: nothing at the root
+>           assert call(public.server_port, "GET", "/")[0] == 404
+E           assert 400 == 404
+
+tests/demo/test_public_origin_proxy_helper_download.py:200: AssertionError
+_ test_the_swarms_surface_and_the_root_redirect_still_work_with_product_routes_closed _
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+    def test_the_swarms_surface_and_the_root_redirect_still_work_with_product_routes_closed() -> None:
+        with world() as (public, product, directory):
+            status, headers, _ = call(public.server_port, "GET", "/")
+>           assert status == 302 and headers["location"] == "/swarms/"
+E           assert (400 == 302)
+
+tests/demo/test_public_origin_proxy_product_closed.py:41: AssertionError
+________________ test_closed_even_when_the_root_redirect_is_off ________________
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+    def test_closed_even_when_the_root_redirect_is_off() -> None:
+        with world(redirect_root_to_swarms=False) as (public, product, _directory):
+>           assert call(public.server_port, "GET", "/")[0] == 404
+E           assert 400 == 404
+
+tests/demo/test_public_origin_proxy_product_closed.py:50: AssertionError
+- generated xml file: /Users/evinova-self/Projects/mycelium-rel2-siteux-p3/docs/design/site-v2-p3/test-results/focus.xml -
+=========================== short test summary info ============================
+FAILED tests/demo/test_profile_a_site_closed.py::test_the_proxy_serves_exactly_the_five_directory_assets_and_no_inference_route
+FAILED tests/demo/test_profile_a_site_closed.py::test_the_directory_server_itself_does_not_answer_chat_paths
+FAILED tests/demo/test_public_origin_proxy_helper_download.py::test_cli_flags
+FAILED tests/demo/test_public_origin_proxy_helper_download.py::test_root_redirects_to_swarms_by_default_when_the_mount_is_on
+FAILED tests/demo/test_public_origin_proxy_helper_download.py::test_the_flag_turns_the_redirect_off
+FAILED tests/demo/test_public_origin_proxy_product_closed.py::test_the_swarms_surface_and_the_root_redirect_still_work_with_product_routes_closed
+FAILED tests/demo/test_public_origin_proxy_product_closed.py::test_closed_even_when_the_root_redirect_is_off
+=================== 7 failed, 102 passed in 82.90s (0:01:22) ===================
