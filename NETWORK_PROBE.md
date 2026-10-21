@@ -41,7 +41,7 @@ CLI:
 
 ```bash
 python3 network_probe.py \
-  --nodes-url http://100.84.252.4:8788/nodes \
+  --nodes-url http://<owner-mac-ip>:8788/nodes \
   --self m4pro \
   --probe-attempts 10 \
   --probe-timeout 3.0 \
@@ -111,7 +111,7 @@ So when we have N≥2 eligible nodes with measured ping/jitter, the allocator's 
 
 ## Live run against current cluster
 
-- M4 Pro seeded at `100.84.252.4:8788`
+- M4 Pro seeded at `<owner-mac-ip>:8788`
 - Linux container reachable via SSH reverse tunnel at `127.0.0.1:18788` on M4
 - Pixel 8 Pro Tailscale offline at the moment of run
 

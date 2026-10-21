@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 import unittest
 from pathlib import Path
 import sys
@@ -40,14 +41,20 @@ class NetworkProbeTests(unittest.TestCase):
 
         def accept():
             for _ in range(3):
-                conn, _ = server.accept()
+                try:
+                    conn, _ = server.accept()
+                except OSError:
+                    break
                 conn.close()
 
         t = threading.Thread(target=accept, daemon=True)
         t.start()
 
         result = np.tcp_ping("127.0.0.1", port, timeout=1.0, attempts=3, settle=0.0)
+        t.join(timeout=1.0)
         server.close()
+        t.join(timeout=1.0)
+        self.assertFalse(t.is_alive())
         self.assertIsNotNone(result["avg_ms"])
         self.assertEqual(result["count"], 3)
         self.assertGreaterEqual(result["avg_ms"], 0.0)
@@ -120,14 +127,23 @@ class NetworkProbeTests(unittest.TestCase):
     def test_probe_uses_port_from_profile_url(self):
         # Two local listeners on different ports. profile_url points at port B,
         # --probe-port points at port A. We must probe B, not A.
-        import socket, threading
-        srv_a = socket.socket(); srv_a.bind(("127.0.0.1", 0)); srv_a.listen(8); pa = srv_a.getsockname()[1]
-        srv_b = socket.socket(); srv_b.bind(("127.0.0.1", 0)); srv_b.listen(8); pb = srv_b.getsockname()[1]
+        import socket
+        import threading
+        srv_a = socket.socket()
+        srv_a.bind(("127.0.0.1", 0))
+        srv_a.listen(8)
+        pa = srv_a.getsockname()[1]
+        srv_b = socket.socket()
+        srv_b.bind(("127.0.0.1", 0))
+        srv_b.listen(8)
+        pb = srv_b.getsockname()[1]
         accepted = {"a": 0, "b": 0}
         def accept_loop(s, key):
             for _ in range(8):
                 try:
-                    c, _ = s.accept(); accepted[key] += 1; c.close()
+                    c, _ = s.accept()
+                    accepted[key] += 1
+                    c.close()
                 except OSError:
                     break
         threading.Thread(target=accept_loop, args=(srv_a, "a"), daemon=True).start()
@@ -140,7 +156,8 @@ class NetworkProbeTests(unittest.TestCase):
         samples, errors = np.collect_pairwise_samples(
             nodes, self_id="self", probe_port=pa, timeout=1.0, attempts=3, max_pairs=0,
         )
-        srv_a.close(); srv_b.close()
+        srv_a.close()
+        srv_b.close()
         self.assertIn(("self", "peer"), samples)
         self.assertGreater(len(samples[("self", "peer")]), 0)
         # We should have hit B (the URL port), not A.

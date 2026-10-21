@@ -1,14 +1,49 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 [package]
 name = "mycelium-iroh-transport"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.91"
-license = "AGPL-3.0-or-later"
+license = "AGPL-3.0-only"
 description = "Clean-room native codec for Mycelium Router wire framing"
 publish = false
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
+getrandom = "0.3"
+hex = "0.4"
+hkdf = "0.12"
+hmac = "0.12"
+iroh = "=1.0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["arbitrary_precision"] }
 sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+zeroize = { version = "1", features = ["derive"] }
+
+# The A2-over-iroh artifact source (ALPN mycelium.artifact_chunk.v1) the
+# sidecar can serve beside the Router ALPN; no HTTP client is linked.
+mycelium-mobile-core = { path = "../mobile_core", default-features = false, features = ["artifact-source"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Threading",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
+] }
+
+[dev-dependencies]
+base64 = "0.22"
+
+[features]
+# Exposes the loopback channel CLI on non-Windows hosts so its authentication
+# path can be exercised end to end in tests. Never enabled in release builds.
+loopback-test = []

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Canonical `mycelium.router_wire.v1` framing.
 //!
 //! Message bodies remain JSON objects. This layer enforces known message types and
@@ -19,6 +19,7 @@ pub enum MessageType {
     HopHeader,
     ManifestDelta,
     ManifestLocked,
+    PathCancellation,
     ProgressivePrefillMessage,
     PrefillChunkCompleted,
     ReservationRequest,
@@ -26,6 +27,15 @@ pub enum MessageType {
     ReservationCommitResult,
     TokenEvent,
     FailureReport,
+    // A7 fenced KV-successor recovery control frames.
+    KVCheckpointShipment,
+    KVCheckpointAck,
+    KVSuccessorCutover,
+    KVSuccessorCutoverReceipt,
+    KVCheckpointCommit,
+    KVShadowRelease,
+    // A11 target verification result (entry-bound).
+    VerifyEvent,
 }
 
 impl MessageType {
@@ -34,6 +44,7 @@ impl MessageType {
             Self::HopHeader => "HopHeader",
             Self::ManifestDelta => "ManifestDelta",
             Self::ManifestLocked => "ManifestLocked",
+            Self::PathCancellation => "PathCancellation",
             Self::ProgressivePrefillMessage => "ProgressivePrefillMessage",
             Self::PrefillChunkCompleted => "PrefillChunkCompleted",
             Self::ReservationRequest => "ReservationRequest",
@@ -41,6 +52,13 @@ impl MessageType {
             Self::ReservationCommitResult => "ReservationCommitResult",
             Self::TokenEvent => "TokenEvent",
             Self::FailureReport => "FailureReport",
+            Self::KVCheckpointShipment => "KVCheckpointShipment",
+            Self::KVCheckpointAck => "KVCheckpointAck",
+            Self::KVSuccessorCutover => "KVSuccessorCutover",
+            Self::KVSuccessorCutoverReceipt => "KVSuccessorCutoverReceipt",
+            Self::KVCheckpointCommit => "KVCheckpointCommit",
+            Self::KVShadowRelease => "KVShadowRelease",
+            Self::VerifyEvent => "VerifyEvent",
         }
     }
 
@@ -49,6 +67,7 @@ impl MessageType {
             "HopHeader" => Ok(Self::HopHeader),
             "ManifestDelta" => Ok(Self::ManifestDelta),
             "ManifestLocked" => Ok(Self::ManifestLocked),
+            "PathCancellation" => Ok(Self::PathCancellation),
             "ProgressivePrefillMessage" => Ok(Self::ProgressivePrefillMessage),
             "PrefillChunkCompleted" => Ok(Self::PrefillChunkCompleted),
             "ReservationRequest" => Ok(Self::ReservationRequest),
@@ -56,6 +75,13 @@ impl MessageType {
             "ReservationCommitResult" => Ok(Self::ReservationCommitResult),
             "TokenEvent" => Ok(Self::TokenEvent),
             "FailureReport" => Ok(Self::FailureReport),
+            "KVCheckpointShipment" => Ok(Self::KVCheckpointShipment),
+            "KVCheckpointAck" => Ok(Self::KVCheckpointAck),
+            "KVSuccessorCutover" => Ok(Self::KVSuccessorCutover),
+            "KVSuccessorCutoverReceipt" => Ok(Self::KVSuccessorCutoverReceipt),
+            "KVCheckpointCommit" => Ok(Self::KVCheckpointCommit),
+            "KVShadowRelease" => Ok(Self::KVShadowRelease),
+            "VerifyEvent" => Ok(Self::VerifyEvent),
             _ => Err(WireError::UnknownMessageType),
         }
     }
@@ -76,6 +102,9 @@ impl MessageType {
             ],
             Self::ManifestDelta => &["request_id", "path_id", "path_attempt", "hop_index", "hop"],
             Self::ManifestLocked => &["request_id", "path_id", "path_attempt", "manifest", "build"],
+            Self::PathCancellation => {
+                &["request_id", "path_id", "path_attempt", "topology_version"]
+            }
             Self::ProgressivePrefillMessage => &[
                 "header",
                 "graph",
@@ -117,6 +146,65 @@ impl MessageType {
                 "token_index",
                 "scope",
                 "reason",
+            ],
+            Self::KVCheckpointShipment => &[
+                "request_id",
+                "path_id",
+                "path_attempt",
+                "standby_placement_id",
+                "checkpoint_sequence",
+                "byte_size",
+            ],
+            Self::KVCheckpointAck => &[
+                "request_id",
+                "path_id",
+                "path_attempt",
+                "hop",
+                "signed_ack",
+            ],
+            Self::KVSuccessorCutover => &[
+                "request_id",
+                "old_path_id",
+                "old_path_attempt",
+                "successor_path_id",
+                "successor_path_attempt",
+                "fencing_generation",
+                "placement_id",
+                "role",
+                "expected_next_position",
+                "lease_expires_at",
+            ],
+            Self::KVSuccessorCutoverReceipt => &[
+                "request_id",
+                "successor_path_id",
+                "successor_path_attempt",
+                "fencing_generation",
+                "placement_id",
+                "installed",
+                "reason",
+                "checkpoint_digest",
+            ],
+            Self::KVCheckpointCommit => &[
+                "request_id",
+                "path_id",
+                "path_attempt",
+                "request_attempt",
+                "source_placement_id",
+                "committed_token_count",
+                "committed_prefix_digest",
+            ],
+            Self::KVShadowRelease => &[
+                "request_id",
+                "path_id",
+                "path_attempt",
+                "reason",
+            ],
+            Self::VerifyEvent => &[
+                "request_id",
+                "path_id",
+                "path_attempt",
+                "token_index",
+                "decisions",
             ],
         }
     }

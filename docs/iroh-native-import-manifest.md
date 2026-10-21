@@ -8,13 +8,13 @@ Machine-readable source of truth: `docs/iroh-native-import-manifest.json` (`myce
 
 ## 1. Review scope and baseline
 
-- Canonical repository: `/Users/evinova-self/Projects/mycelium`
-- Isolated worktree: `/Users/evinova-self/Projects/mycelium-wt-p7-iroh-review`
+- Canonical repository: `~/Projects/mycelium`
+- Isolated worktree: `~/Projects/mycelium-wt-p7-iroh-review`
 - Branch: `phase7/native-iroh-review`
 - Frozen review baseline: `88af7fc0b4e2bf3ec480cd8e2916bcbc480c1e92`
-- Remote evidence host: `evinova@evis-macbook-pro-1`
-- Remote native source: `/Users/evinova/Projects/mycelium-iroh-native-spike`
-- Local evidence source: `/Users/evinova-self/Projects/mycelium-iroh-activation-spike`
+- Remote evidence host: `member@member-mac`
+- Remote native source: `~/Projects/mycelium-iroh-native-spike`
+- Local evidence source: `~/Projects/mycelium-iroh-activation-spike`
 
 Both evidence roots are unversioned directories, not Git repositories. The remote native root has no license file. Its reviewed provenance is therefore bound only by host, absolute path, byte size, and SHA-256. Import requires a separate source-ownership/reuse attestation and license decision.
 
@@ -319,14 +319,14 @@ Iroh/QUIC provides implicit flow control, but application policy is not exposed.
 
 ## 7. Files that must not be imported
 
-1. `/Users/evinova-self/Projects/mycelium-iroh-activation-spike/**`
+1. `~/Projects/mycelium-iroh-activation-spike/**`
    - Entire tree excluded.
    - Contains Python spike code, runtime/identity private keys, membership files, generated results, and machine-specific evidence.
-2. `/Users/evinova/Projects/mycelium-iroh-native-spike/src/main.rs`
+2. `~/Projects/mycelium-iroh-native-spike/src/main.rs`
    - Benchmark CLI/evidence writer, not production transport.
-3. `/Users/evinova/Projects/mycelium-iroh-native-spike/evidence/**`
+3. `~/Projects/mycelium-iroh-native-spike/evidence/**`
    - Generated evidence, including tensor-named outputs; not source and not proof that current reviewed hashes were executed.
-4. `/Users/evinova/Projects/mycelium-iroh-native-spike/target/**`
+4. `~/Projects/mycelium-iroh-native-spike/target/**`
    - Build output and dependency cache.
 5. Any `.key`, private-key, ready, stdout, result, membership, or machine-specific identity file from either source root.
 
@@ -441,7 +441,7 @@ git diff --name-only 88af7fc0b4e2bf3ec480cd8e2916bcbc480c1e92 -- \
 
 ```bash
 ssh -i ~/.ssh/id_ed25519_m4pro_to_laptop -o BatchMode=yes \
-  evinova@evis-macbook-pro-1 \
+  member@member-mac \
   'cd ~/Projects/mycelium-iroh-native-spike && \
    shasum -a 256 \
      Cargo.toml Cargo.lock \

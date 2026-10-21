@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 """
 Mycelium network probe: ping, jitter, geolocation.
 
@@ -16,8 +17,6 @@ import json
 import math
 import socket
 import statistics
-import sys
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -236,8 +235,6 @@ def _target_endpoint(record: dict[str, Any], probe_port: int) -> str | None:
     candidates = []
     if lan_ip:
         candidates.append(lan_ip)
-    location = profile.get("location") or {}
-    isp = (location.get("isp") or "").lower()
     # Heuristic: same ISP often means same private LAN. We still need IP for probing.
     for key in ("public_ip", "wan_ip"):
         if profile.get(key):

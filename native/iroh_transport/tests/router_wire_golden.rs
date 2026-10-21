@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -45,7 +45,7 @@ fn sha256(bytes: &[u8]) -> String {
 fn python_golden_frames_decode_and_reencode_byte_identically() {
     let index = index();
     assert_eq!(index.protocol, "mycelium.router_wire.v1");
-    assert_eq!(index.frames.len(), 10);
+    assert_eq!(index.frames.len(), 11);
 
     for entry in index.frames {
         let frame = fs::read(fixture_dir().join(&entry.file)).expect("read golden frame");
@@ -346,6 +346,9 @@ fn required_body_fields(message_type: MessageType) -> &'static [&'static str] {
         MessageType::ManifestLocked => {
             &["request_id", "path_id", "path_attempt", "manifest", "build"]
         }
+        MessageType::PathCancellation => {
+            &["request_id", "path_id", "path_attempt", "topology_version"]
+        }
         MessageType::ProgressivePrefillMessage => &[
             "header",
             "graph",
@@ -388,6 +391,91 @@ fn required_body_fields(message_type: MessageType) -> &'static [&'static str] {
             "scope",
             "reason",
         ],
+        MessageType::KVCheckpointShipment => &[
+            "request_id",
+            "path_id",
+            "path_attempt",
+            "standby_placement_id",
+            "checkpoint_sequence",
+            "byte_size",
+        ],
+        MessageType::KVCheckpointAck => &[
+            "request_id",
+            "path_id",
+            "path_attempt",
+            "hop",
+            "signed_ack",
+        ],
+        MessageType::KVSuccessorCutover => &[
+            "request_id",
+            "old_path_id",
+            "old_path_attempt",
+            "successor_path_id",
+            "successor_path_attempt",
+            "fencing_generation",
+            "placement_id",
+            "role",
+            "expected_next_position",
+            "lease_expires_at",
+        ],
+        MessageType::KVSuccessorCutoverReceipt => &[
+            "request_id",
+            "successor_path_id",
+            "successor_path_attempt",
+            "fencing_generation",
+            "placement_id",
+            "installed",
+            "reason",
+            "checkpoint_digest",
+        ],
+        MessageType::KVCheckpointCommit => &[
+            "request_id",
+            "path_id",
+            "path_attempt",
+            "request_attempt",
+            "source_placement_id",
+            "committed_token_count",
+            "committed_prefix_digest",
+        ],
+        MessageType::KVShadowRelease => &[
+            "request_id",
+            "path_id",
+            "path_attempt",
+            "reason",
+        ],
+        MessageType::VerifyEvent => &[
+            "request_id",
+            "path_id",
+            "path_attempt",
+            "token_index",
+            "decisions",
+        ],
+    }
+}
+
+#[test]
+fn verify_event_frames_round_trip_and_fail_closed_without_required_fields() {
+    let body = json!({
+        "request_id": "r",
+        "path_id": "p",
+        "path_attempt": 0,
+        "token_index": 3,
+        "decisions": [1, 2, 3],
+    });
+    let body = body.as_object().expect("object body").clone();
+    let frame = encode_frame(&MessageType::VerifyEvent, &body, b"").expect("encode verify event");
+    let decoded = decode_frame(&frame).expect("decode verify event");
+    assert_eq!(decoded.message_type, MessageType::VerifyEvent);
+    assert_eq!(decoded.message_type.as_str(), "VerifyEvent");
+    for field in required_body_fields(MessageType::VerifyEvent) {
+        let changed = mutate_header(&frame, |envelope| {
+            envelope
+                .get_mut("body")
+                .and_then(Value::as_object_mut)
+                .expect("object body")
+                .remove(*field);
+        });
+        assert!(decode_frame(&changed).is_err(), "{field}");
     }
 }
 

@@ -6,16 +6,16 @@
   "tests_modified": false,
   "review_outcome": "do_not_import_yet",
   "review_baseline": {
-    "repository": "/Users/evinova-self/Projects/mycelium",
-    "worktree": "/Users/evinova-self/Projects/mycelium-wt-p7-iroh-review",
+    "repository": "~/Projects/mycelium",
+    "worktree": "~/Projects/mycelium-wt-p7-iroh-review",
     "branch": "phase7/native-iroh-review",
     "commit": "88af7fc0b4e2bf3ec480cd8e2916bcbc480c1e92"
   },
   "provenance": {
     "remote_native_source": {
-      "host": "evis-macbook-pro-1",
-      "user": "evinova",
-      "path": "/Users/evinova/Projects/mycelium-iroh-native-spike",
+      "host": "member-mac",
+      "user": "member",
+      "path": "~/Projects/mycelium-iroh-native-spike",
       "access": "read_only_over_ssh",
       "git_repository": false,
       "source_commit": null,
@@ -28,7 +28,7 @@
       ]
     },
     "local_activation_spike": {
-      "path": "/Users/evinova-self/Projects/mycelium-iroh-activation-spike",
+      "path": "~/Projects/mycelium-iroh-activation-spike",
       "access": "read_only",
       "git_repository": false,
       "native_candidate_count": 0,
@@ -38,7 +38,7 @@
   },
   "candidate_files": [
     {
-      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/Cargo.toml",
+      "source_path": "~/Projects/mycelium-iroh-native-spike/Cargo.toml",
       "relative_source_path": "Cargo.toml",
       "byte_size": 573,
       "sha256": "397b5eb408c8d0b7041c2a146edfd52dfaed83ac0da03c28de5dfe1e2fb9586c",
@@ -71,7 +71,7 @@
       ]
     },
     {
-      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/Cargo.lock",
+      "source_path": "~/Projects/mycelium-iroh-native-spike/Cargo.lock",
       "relative_source_path": "Cargo.lock",
       "byte_size": 106203,
       "sha256": "a4e41a432926da35b236615bd471ca202f22721adc16ca2d793778de912da00f",
@@ -90,7 +90,7 @@
       ]
     },
     {
-      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/src/lib.rs",
+      "source_path": "~/Projects/mycelium-iroh-native-spike/src/lib.rs",
       "relative_source_path": "src/lib.rs",
       "byte_size": 71,
       "sha256": "fbb5747f0242830065cce32f306bc00dd8afe5cb75a7c2645429dfb41616bc5b",
@@ -112,7 +112,7 @@
       ]
     },
     {
-      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/src/main.rs",
+      "source_path": "~/Projects/mycelium-iroh-native-spike/src/main.rs",
       "relative_source_path": "src/main.rs",
       "byte_size": 4891,
       "sha256": "dfbcb16d96ea266de52e6dac5b64d0ef976e04927a4a86f365e725843351ee1d",
@@ -134,7 +134,7 @@
       "reason": "Production import must not add benchmark CLI, arbitrary evidence-path writes, or spike command surface. Recreate a separate example later only if still needed."
     },
     {
-      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/src/clock.rs",
+      "source_path": "~/Projects/mycelium-iroh-native-spike/src/clock.rs",
       "relative_source_path": "src/clock.rs",
       "byte_size": 1805,
       "sha256": "dcdf736ae8065843db6e2e296f06a18e55a05c07ec049e9ced0003861aeca045",
@@ -154,7 +154,7 @@
       ]
     },
     {
-      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/src/protocol.rs",
+      "source_path": "~/Projects/mycelium-iroh-native-spike/src/protocol.rs",
       "relative_source_path": "src/protocol.rs",
       "byte_size": 8030,
       "sha256": "ff4c2ffe878327573ce775b4170f94b6f0724fc91759ec87d6d44d219d061e39",
@@ -177,7 +177,7 @@
       ]
     },
     {
-      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/src/scheduler.rs",
+      "source_path": "~/Projects/mycelium-iroh-native-spike/src/scheduler.rs",
       "relative_source_path": "src/scheduler.rs",
       "byte_size": 3455,
       "sha256": "e315c14ec3a9fe38b72347b353eee6aee8025f57dcdcd940e6dc5a9ea53a849b",
@@ -199,7 +199,7 @@
       ]
     },
     {
-      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/src/transport.rs",
+      "source_path": "~/Projects/mycelium-iroh-native-spike/src/transport.rs",
       "relative_source_path": "src/transport.rs",
       "byte_size": 57336,
       "sha256": "64454f11a4ad597411b7271d6fc2e5ba521e897ce809c81c4fc3e9513c17709d",
@@ -238,7 +238,7 @@
       ]
     },
     {
-      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/tests/contract.rs",
+      "source_path": "~/Projects/mycelium-iroh-native-spike/tests/contract.rs",
       "relative_source_path": "tests/contract.rs",
       "byte_size": 5732,
       "sha256": "c05b1d18004f9f7a91d281482b54faad551c4687d61b3bca19d83547016eebb8",
@@ -260,7 +260,7 @@
       ]
     },
     {
-      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/tests/loopback.rs",
+      "source_path": "~/Projects/mycelium-iroh-native-spike/tests/loopback.rs",
       "relative_source_path": "tests/loopback.rs",
       "byte_size": 1656,
       "sha256": "756209b113efff1f312303c5d4f8185fa0972bd95da505d3473676401e964d25",
@@ -280,7 +280,7 @@
       ]
     },
     {
-      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/tests/persistent_chain.rs",
+      "source_path": "~/Projects/mycelium-iroh-native-spike/tests/persistent_chain.rs",
       "relative_source_path": "tests/persistent_chain.rs",
       "byte_size": 1918,
       "sha256": "df4aa0a1909b6f125ade26d046058a748dc186d2226a450b3698ed7fe1be0c7d",
@@ -470,19 +470,19 @@
   },
   "must_not_import": [
     {
-      "source_pattern": "/Users/evinova-self/Projects/mycelium-iroh-activation-spike/**",
+      "source_pattern": "~/Projects/mycelium-iroh-activation-spike/**",
       "reason": "Evidence-only Python spike; includes private identity key material, membership files, generated results, and a non-native transport implementation."
     },
     {
-      "source_pattern": "/Users/evinova/Projects/mycelium-iroh-native-spike/src/main.rs",
+      "source_pattern": "~/Projects/mycelium-iroh-native-spike/src/main.rs",
       "reason": "Benchmark CLI and evidence writer, not production transport."
     },
     {
-      "source_pattern": "/Users/evinova/Projects/mycelium-iroh-native-spike/evidence/**",
+      "source_pattern": "~/Projects/mycelium-iroh-native-spike/evidence/**",
       "reason": "Generated benchmark outputs, including tensor-named evidence; not source and not proof of current hashed source execution."
     },
     {
-      "source_pattern": "/Users/evinova/Projects/mycelium-iroh-native-spike/target/**",
+      "source_pattern": "~/Projects/mycelium-iroh-native-spike/target/**",
       "reason": "Build artifacts and dependency cache."
     },
     {
@@ -603,7 +603,7 @@
       "git diff --name-only 88af7fc0b4e2bf3ec480cd8e2916bcbc480c1e92 -- docs/iroh-native-import-manifest.md docs/iroh-native-import-manifest.json"
     ],
     "source_provenance_before_import": [
-      "ssh -i ~/.ssh/id_ed25519_m4pro_to_laptop -o BatchMode=yes evinova@evis-macbook-pro-1 'cd ~/Projects/mycelium-iroh-native-spike && shasum -a 256 Cargo.toml Cargo.lock src/lib.rs src/main.rs src/clock.rs src/protocol.rs src/scheduler.rs src/transport.rs tests/contract.rs tests/loopback.rs tests/persistent_chain.rs'",
+      "ssh -i ~/.ssh/id_ed25519_m4pro_to_laptop -o BatchMode=yes member@member-mac 'cd ~/Projects/mycelium-iroh-native-spike && shasum -a 256 Cargo.toml Cargo.lock src/lib.rs src/main.rs src/clock.rs src/protocol.rs src/scheduler.rs src/transport.rs tests/contract.rs tests/loopback.rs tests/persistent_chain.rs'",
       "git ls-tree -r --name-only 88af7fc0b4e2bf3ec480cd8e2916bcbc480c1e92 -- native/iroh_transport"
     ],
     "after_future_import": [
