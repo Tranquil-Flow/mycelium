@@ -156,6 +156,79 @@ def test_apex_real_counts_delayed_and_unavailable_without_identity(local, monkey
 
 
 @pytest.mark.parametrize('width,height', [(1440,900),(390,844)])
+@pytest.mark.parametrize('theme', ['dark','light'])
+def test_apex_demo_route_copy_tracks_only_the_serving_demo(local, monkeypatch, width, height, theme):
+    """Real signed directory records/heartbeats; no call to the public demo entry."""
+    import time
+    from mycelium_swarm_directory import docs
+    from mycelium_swarm_directory.crypto import Ed25519Signer
+    d = local['directory'].directory
+    signer = Ed25519Signer.generate()
+    demo = 'sw-bbbbbbbbbbbbbbbbbbbb'
+    duplicate = 'sw-cccccccccccccccccccc'
+    unrelated = 'sw-dddddddddddddddddddd'
+    for sid, origin in [(demo, 'https://demo.mycelium.now'),
+                        (duplicate, 'https://demo.mycelium.now'),
+                        (unrelated, 'https://not-the-demo.example')]:
+        record = docs.swarm_record(signer, swarm_id=sid, seq=1, name='Mycelium demo',
+                                   model='Qwen/Qwen3-0.6B', access_mode='request',
+                                   entry={'key': signer.public_key, 'origin': origin})
+        assert d.handle('POST', '/records', json.dumps(record).encode(), 'ip:fixture')[0] == 200
+    at = d.now()
+    def beat(sid, status, members):
+        nonlocal at
+        at += 1
+        body = docs.heartbeat(signer, sid, status=status, members=members,
+                              served_model='Qwen/Qwen3-0.6B' if status == 'serving' else None, at=at)
+        assert d.handle('POST', '/heartbeat', json.dumps(body).encode(), 'ip:fixture')[0] == 200
+    beat(unrelated, 'serving', 7)  # matching names and global totals are NOT demo-route counts
+    original = d.list_swarms
+    def delayed():
+        time.sleep(.7)  # real server thread; first paint/CSS is not held
+        return original()
+    monkeypatch.setattr(d, 'list_swarms', delayed)
+    neutral = 'The demo is volunteer-hosted and may be unavailable. Check its listing for current serving Macs.'
+    notes = {
+        'one-mac': 'The demo route runs on one Mac, not a distributed swarm.',
+        'two-mac': 'The demo route runs across 2 Macs.',
+        'max-macs': 'The demo route runs across 64 Macs.',
+    }
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        geometry = None
+        for state, status, members in [('two-mac','serving',2), ('one-mac','serving',1),
+                                       ('max-macs','serving',64), ('offline','offline',0),
+                                       ('warming','warming',2), ('unknown','serving',0),
+                                       ('ambiguous','serving',2), ('unavailable','serving',2)]:
+            beat(demo, status, members)
+            if state == 'ambiguous': beat(duplicate, 'serving',1)
+            page = browser.new_context(viewport={'width':width,'height':height}, color_scheme=theme).new_page()
+            page.add_init_script(CLS)
+            requests = []; page.on('request', lambda r: requests.append((r.method,r.url)))
+            if state == 'unavailable':
+                page.route('**/swarms/api/v1/swarms', lambda r:r.fulfill(status=503,json={}))
+            page.goto(local['directory'].origin + '/')
+            expect(page.locator('#apex-fresh')).to_contain_text('Status unavailable' if state == 'unavailable' else 'snapshot just loaded')
+            expect(page.locator('.apex-demo')).to_contain_text(notes.get(state, neutral))
+            page.wait_for_timeout(700)
+            cls = sum(page.evaluate('window.__cls'))
+            assert cls == 0, (state,width,theme,page.evaluate('window.__clsDetails'))
+            box = page.locator('.apex-demo').bounding_box()
+            assert box and page.locator('.apex-demo').evaluate('e=>e.scrollHeight <= e.clientHeight')
+            if geometry is None: geometry = box
+            assert box == geometry, (state,box,geometry)
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            assert all(method == 'GET' and url.startswith(local['directory'].origin) for method,url in requests)
+            if os.environ.get('SITEB_SHOTS') and state in ('one-mac','two-mac','unavailable'):
+                out = Path(os.environ['SITEB_SHOTS']) / 'demo-route'; out.mkdir(parents=True,exist_ok=True)
+                name = f'apex-{state}-{width}-{theme}'
+                page.screenshot(path=str(out/(name+'.png')),full_page=True)
+                (out/(name+'.json')).write_text(json.dumps({'state':state,'cls':cls,'box':box,'copy':page.locator('.apex-demo').inner_text(),'shifts':page.evaluate('window.__clsDetails')},indent=2)+'\n')
+            page.context.close()
+        browser.close()
+
+
+@pytest.mark.parametrize('width,height', [(1440,900),(390,844)])
 @pytest.mark.parametrize('theme',['dark','light'])
 def test_owner_undo_cancels_write_and_reload_cancels_hold(local, width, height, theme):
     with sync_playwright() as p:

@@ -41,7 +41,8 @@ p{margin:0 0 .6em;text-wrap:pretty}
 .apex-hero{padding:64px 0 32px;max-width:820px}
 .apex-hero h1{font-size:clamp(2.3rem,5vw,3.8rem);max-width:18ch;margin-bottom:24px}
 .apex-lead{font-size:1.15rem;max-width:65ch;margin:20px 0}
-.apex-demo{font-size:14px;max-width:65ch;margin-top:20px}
+/* Reserve the longest route note before the public snapshot arrives. */
+.apex-demo{font-size:14px;max-width:65ch;margin-top:20px;min-height:4.65em}
 .apex-now{max-width:820px}
 .apex-now h2{font-size:1.15rem}
 .apex-counts{display:grid;grid-template-columns:1fr 1fr;margin:16px 0;gap:20px}

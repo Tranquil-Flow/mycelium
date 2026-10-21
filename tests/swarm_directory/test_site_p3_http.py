@@ -19,7 +19,8 @@ def test_apex_explains_without_identity_or_chat_surface():
         r = c.getresponse(); body = r.read().decode()
         assert r.status == 200
         assert 'Run an AI model' in body and 'MVP' in body
-        assert 'https://demo.mycelium.now/chat' in body and 'one Mac' in body
+        assert 'https://demo.mycelium.now/chat' in body and 'Check its listing for current serving Macs.' in body
+        assert 'The fast demo route' not in body
         assert 'apex.js' in body and 'swarms.js' not in body
         assert not r.getheader('Set-Cookie')
         c.close()
