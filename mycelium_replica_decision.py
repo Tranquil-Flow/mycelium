@@ -186,13 +186,19 @@ def group_fits(
     return sum((_supply(host, policy) for host in group), Fraction(0)) >= _need(footprint, policy)
 
 
-def _checked_hosts(hosts: Iterable[HostMemory], policy: ReplicaPolicy) -> list[HostMemory]:
+def _checked_hosts(
+    hosts: Iterable[HostMemory], policy: ReplicaPolicy, *, single_route_baseline: bool,
+) -> list[HostMemory]:
     items = list(hosts)
     if not all(isinstance(host, HostMemory) for host in items):
         raise ReplicaDecisionError("invalid_host")
     if len({host.node_id for host in items}) != len(items):
         raise ReplicaDecisionError("duplicate_host")
-    if len(items) > min(policy.max_hosts_per_route, MAX_EXACT_HOSTS):
+    # The exact layout search is bounded for every caller. The per-route cap bounds the whole host set only when
+    # the caller compares against today's single route over ALL hosts (choose_replica_layout); the memory count
+    # alone lets hosts sit out, so it is bounded by the search limit only.
+    limit = min(policy.max_hosts_per_route, MAX_EXACT_HOSTS) if single_route_baseline else MAX_EXACT_HOSTS
+    if len(items) > limit:
         raise ReplicaDecisionError("hosts_out_of_bounds")
     return sorted(items, key=lambda host: host.node_id)
 
@@ -247,7 +253,7 @@ def max_memory_copies(
     policy: ReplicaPolicy = ReplicaPolicy(),
 ) -> int:
     """The most disjoint complete copies the hosts' memory allows (0 if none)."""
-    ordered = _checked_hosts(hosts, policy)
+    ordered = _checked_hosts(hosts, policy, single_route_baseline=False)
     return max((len(groups) for groups, _unused in _layouts(ordered, footprint, policy)),
                default=0)
 
@@ -268,7 +274,7 @@ def choose_replica_layout(
     group (or ``None`` when there is none). ``offered_demand_rps`` caps what
     any layout can be admitted at; ``None`` means demand is not the limit.
     """
-    ordered = _checked_hosts(hosts, policy)
+    ordered = _checked_hosts(hosts, policy, single_route_baseline=True)
     if offered_demand_rps is not None and (
         not _is_number(offered_demand_rps)
         or not math.isfinite(offered_demand_rps) or offered_demand_rps < 0
