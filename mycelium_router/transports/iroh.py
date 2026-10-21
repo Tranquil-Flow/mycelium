@@ -462,6 +462,12 @@ def _bounded_trace_identity(
     if request is not None and is_dataclass(request):
         request_input = asdict(request)
         request_input.pop("admitted_at", None)
+        if not getattr(request, "prefix_reuse_tokens", 0) and not getattr(
+            request, "prefix_chain", ()
+        ):
+            # PV20: the default (cold) request keeps its pre-PV20 identity hash.
+            request_input.pop("prefix_reuse_tokens", None)
+            request_input.pop("prefix_chain", None)
         encoded_request_input = json.dumps(
             request_input,
             sort_keys=True,

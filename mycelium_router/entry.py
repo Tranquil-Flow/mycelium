@@ -4,7 +4,7 @@ KV-successor classification of every replacement-path attempt."""
 import importlib
 import time
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from threading import RLock
 from typing import Any
 
@@ -231,6 +231,9 @@ class EntryCoordinator:
    #: (``mycelium_a11_route_speculation.RouteSpeculationController``); ``None``
    #: keeps every request target-only.
    a11_controller = None
+   #: PV20 prefix planner (``mycelium_router.prefix_cache.PrefixPlanner``); ``None``
+   #: keeps every request a cold full prefill (the default).
+   prefix_planner = None
 
    def __init__(
       self,
@@ -376,6 +379,8 @@ class EntryCoordinator:
          excluded_edges=excluded_edges,
          excluded_devices=excluded_devices,
       )
+      request = self._with_prefix_plan(request, manifest)
+      build = replace(build, request=request)
       state_machine = RequestStateMachine(path_attempt=manifest.path_attempt)
       state_machine.transition("PREFILL", path_attempt=manifest.path_attempt)
       record = RequestRecord(
@@ -405,7 +410,7 @@ class EntryCoordinator:
          request=request,
          phase="PREFILL",
          token_index=-1,
-         payload=request.prompt_token_ids,
+         payload=request.prompt_token_ids[request.prefix_reuse_tokens :],
          expected_generation=generation,
       )
       if outcome.failure_report is not None:
@@ -549,6 +554,7 @@ class EntryCoordinator:
       if placement_by_id[manifest.ordered_hops[0].placement_id].node_id != self.node_id:
          raise RoutingError("locked_path_entry_mismatch")
       self.transport.remember_entry(request.request_id, self.node_id)
+      request = self._with_prefix_plan(request, manifest)
       build = PathBuildState(
          request=request,
          graph=graph,
@@ -559,7 +565,7 @@ class EntryCoordinator:
       state_machine = RequestStateMachine(path_attempt=manifest.path_attempt)
       state_machine.transition("PREFILL", path_attempt=manifest.path_attempt)
       state_machine.transition("LOCKED", path_attempt=manifest.path_attempt)
-      chunks = self._prefill_chunks(request.prompt_token_ids)
+      chunks = self._prefill_chunks(request.prompt_token_ids[request.prefix_reuse_tokens :])
       record = RequestRecord(
          request=request,
          graph=graph,
@@ -801,6 +807,43 @@ class EntryCoordinator:
          prompt_token_ids[start : start + size]
          for start in range(0, len(prompt_token_ids), size)
       )
+
+   def _with_prefix_plan(
+      self, request: RequestContext, manifest: PathManifest
+   ) -> RequestContext:
+      """PV20: attach the all-stage-agreed prefix plan; the request is unchanged when off.
+
+      Only an exact, already-built path can be planned (every stage must be asked),
+      and only in ``stage_local_kv`` mode.  A request that already carries a plan
+      is left alone.
+      """
+
+      planner = self.prefix_planner
+      if (
+         planner is None
+         or self.relay.decode_mode != "stage_local_kv"
+         or request.prefix_reuse_tokens
+         or request.prefix_chain
+      ):
+         return request
+      plan = planner.plan(
+         request.request_id,
+         request.prompt_token_ids,
+         tuple(hop.placement_id for hop in manifest.ordered_hops),
+      )
+      if not plan.chain:
+         return request
+      return replace(
+         request,
+         prefix_reuse_tokens=plan.reuse_tokens,
+         prefix_chain=plan.chain,
+      )
+
+   def prefix_reused_tokens(self, request_id: str) -> int:
+      """PV20 receipt/status value: prompt tokens whose prefill was skipped (0 = cold)."""
+
+      record = self._requests.get(request_id)
+      return 0 if record is None else record.request.prefix_reuse_tokens
 
    def request_status(self, request_id: str) -> str:
       record = self._requests.get(request_id)
@@ -1758,6 +1801,13 @@ class EntryCoordinator:
       speculation = self.a11_controller
       if speculation is not None:
          speculation.release(record.request.request_id)
+      planner = self.prefix_planner
+      if planner is not None and record.request.prefix_chain:
+         # Idempotent: drops any pin a request that never started still holds.
+         planner.release(
+            record.request.request_id,
+            tuple(hop.placement_id for hop in manifest.ordered_hops),
+         )
       self.capacity.release(
          tuple(hop.reservation_id for hop in manifest.ordered_hops)
       )

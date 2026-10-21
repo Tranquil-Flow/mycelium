@@ -39,6 +39,17 @@ Mycelium's aim is that you run models on your own machines. This page says what 
 
 While a request runs, the request gateway can save a **plain, unencrypted copy of your prompt (as token numbers, which are easy to turn back into text) and the answer so far**, so it can recover after a failure. The folder is private to your user and the copy is deleted when the request ends. Start-up now **sweeps the temporary files a crash can leave behind** (`.checkpoint-*.tmp`, written just before a copy is saved, and they hold the prompt as token numbers); a test covers it. Orphaned finished copies were already discarded when the gateway starts. Both fixes are in the candidate-7 integration branch, not in an earlier build. Until you run a build with them, a crash can still leave such a file. Whatever the build, a state folder can still end up in Time Machine or other backups, so keep that in mind if you handle sensitive text.
 
+## Prompt prefix cache (in development, off by default)
+
+A cache that lets a swarm skip re-reading a shared system prompt or earlier turns is built but **not switched on** in any released build. When it is on, this is what it keeps and what it does not:
+
+- **What is kept:** on each Mac that runs part of the model, the intermediate attention state (K/V tensors) of the first part of a prompt, plus a salted fingerprint of those tokens. **No prompt text and no token numbers are stored.** The fingerprint is salted with the swarm's route identity, so it cannot be compared between swarms or owners.
+- **Where:** in memory only, on the Macs that already saw that prompt while serving you. It is never written to disk, never copied to another Mac, never part of a failure-recovery copy, and never put in a support bundle (only counts are reported).
+- **Who can use it:** only requests on the same swarm route. A different model, a different layer split or a different owner never hits it.
+- **How long:** it is capped (a fraction of the memory you share), gives way first when memory is needed, and is erased when the model is unloaded, the route is torn down or the app quits.
+- **What it does not change:** the Macs in your swarm already see the data for the layers they run, as described above. A Mac that served you a prompt can tell, from its own cache hit, that it has seen the same start of a prompt before. That is not new information for that Mac, but it is now a visible effect.
+- **Mixed versions:** when switched on, every Mac in the swarm must be on a build that understands it. A route with an older member runs without it.
+
 ## The public demo (`mycelium.now`)
 
 - It is **off** (it answers 502) by design. The origin is not running.

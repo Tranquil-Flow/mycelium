@@ -134,6 +134,12 @@ class RequestContext:
    target_tokens_per_second: float
    sampling_seed: int
    generation_config_digest: str
+   # PV20: prefix-cache plan, set by the entry only when a planner is attached
+   # (default 0 / () is a cold run and is not serialised on the wire).
+   # ``prefix_reuse_tokens`` leading prompt tokens are already in every stage's
+   # KV; ``prefix_chain`` is the chained block digest of every full prompt block.
+   prefix_reuse_tokens: int = 0
+   prefix_chain: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -316,6 +322,9 @@ class HopWorkItem:
    emits_token: bool = False
    terminal: bool = False
    lease_expires_at: float = float("inf")
+   # PV20 (internal; never on the wire): copied from the request by the relay.
+   prefix_reuse_tokens: int = 0
+   prefix_chain: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
