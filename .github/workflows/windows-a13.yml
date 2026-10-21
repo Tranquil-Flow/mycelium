@@ -1,0 +1,38 @@
+name: A13 Windows tranche
+
+# Separate from governance.yml on purpose (per the 2026-09-27 pm-w2 lane packet:
+# governance.yml is protected and is never edited from this lane). Its own
+# windows-portability job already runs the whole tests/a13_acceptance package
+# on windows-latest; this workflow narrows to exactly the two suites Gap A7
+# named -- the A13 Windows tranche and the A9 Windows native-provider adapter
+# -- so a Windows-only regression in either is visible without widening what
+# governance.yml's job covers. scripts/pilot_readiness_gate.py only discovers
+# commands from .github/workflows/governance.yml (see its WORKFLOW constant),
+# so this file is intentionally NOT part of that gate's canonical-suite
+# discovery; it is additional CI coverage, not a readiness-gate input.
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  a13-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Install test dependencies
+        run: python -m pip install --requirement tests/governance-requirements.txt
+      - name: Run the A13 Windows tranche and the A9 Windows provider suite
+        run: >-
+          python -m pytest -q
+          tests/a13_acceptance/test_a13_windows_install_source.py
+          tests/a13_acceptance/test_a13_windows_onboarding_invitation.py
+          tests/a13_acceptance/test_a13_windows_onboarding_progress.py
+          tests/a13_acceptance/test_a13_windows_package_manifest.py
+          tests/a13_acceptance/test_a13_windows_platform_admission.py
+          tests/a13_acceptance/test_a13_windows_service_lifecycle.py
+          tests/a13_acceptance/test_a13_windows_build.py
+          tests/a9_acceptance/test_windows_native_provider_adapter.py
