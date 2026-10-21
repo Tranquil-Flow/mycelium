@@ -196,6 +196,8 @@ const HUMAN_ERRORS={
   relay_join_failed:'The join request could not be passed through the relay. Check the relay is still running and try again.',
   relay_local_invalid:'The relay’s local connection is not valid. Stop and start the relay again.',
   relay_not_startable:'The relay cannot start right now. Check your internet connection and that no other relay is running.',
+  relay_openai_failed:'The relay could not pass that request to the OpenAI-compatible service. Try again in a moment.',
+  relay_openai_invalid:'The relay’s OpenAI-compatible handler is not valid. Stop and start the relay again.',
   relay_origin_changed:'The relay’s public address changed. Close open join codes and open new ones.',
   relay_origin_invalid:'That address is not valid. Use a plain https address with a real domain name (for example https://demo.mycelium.now): no port, path, login details or IP number.',
   relay_projection_invalid:'The relay status could not be read. Refresh the page.',
