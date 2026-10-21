@@ -68,6 +68,14 @@ Windows and Linux: none of this has been run on real Windows or Linux hardware. 
 | Research UI badge: "Stream interrupted", "Cancellation pending", "Cancellation unconfirmed", "Failed". | The connection broke, a stop is in progress, a stop could not be confirmed, or the request failed. | Wait; if it stays, retry. "Cancellation unconfirmed" means the app could not prove the stop; do not assume work ended. |
 | "membership alone does not make inference available" | The Mac joined, but the route has not passed its check. Joining is not serving. | Wait for qualification, or start the run. |
 
+## A Mac that left the swarm, or was restarted while serving
+
+| What you see | What it means | What to do |
+|---|---|---|
+| "already joined" when a Mac that left tries to join again. | Leaving stops serving and withdraws consent, but the Mac is still a member until the owner revokes it. There is no in-place re-join in V1. | The owner revokes the Mac (owner screen), then opens a join window and the Mac pairs again with a **new join code**. |
+| The run ends with "A joined Mac was restarted while the demo was serving" (`member_restarted`). | A joined Mac's app was restarted during a run. It comes back as a new membership generation without its model loaded, so it cannot rejoin that route. The owner ends the run instead of letting chats hang. | Press **Start** again; the restarted Mac takes part in the new run. |
+| "The previous route is still closing" (`previous_run_still_closing`). | The last route is still waiting for a Mac to confirm cleanup. | Wait a minute and press **Start** again. |
+
 ## When a Mac leaves or fails mid-answer
 
 These are designed behaviours, tested on two Macs. See [WHAT-MYCELIUM-DOES](WHAT-MYCELIUM-DOES.md).

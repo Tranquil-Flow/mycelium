@@ -222,7 +222,7 @@ function render(value) {
     : !canDownload ? 'Create or join a swarm first; the download unlocks once this Mac is enrolled.'
     : !$('download-consent').checked ? 'Tick the authorization box above to enable the download.' : '';
   $('leave-hint').textContent=target && a.membership_state==='current'
-    ? 'This Mac joined as a member. To leave the swarm, use “Leave swarm” below: “Leave smoothly” lets work in progress finish first; “Instant leave” stops at once. Only the owner can revoke a membership.' : '';
+    ? 'This Mac joined as a member. To leave the swarm, use “Leave swarm” below: “Leave smoothly” lets work in progress finish first; “Instant leave” stops at once. Only the owner can revoke a membership; after leaving, this Mac pairs again with a new join code once the owner has revoked it.' : '';
   $('download-consent').disabled=busy || downloading;
   $('download-limit').disabled=busy || downloading;
   if(acquisition){
@@ -351,6 +351,7 @@ Object.assign(HUMAN_ERRORS,{
   leave_confirmation_required:'Tick “I want this Mac to leave the swarm” first.',
   leave_mode_invalid:'Choose “Leave smoothly” or “Instant leave”.',
   target_role_required:'Only a Mac that joined a swarm can leave it. The owner revokes members from the owner screen.',
+  already_joined:'This Mac is still a member of a swarm. Leaving stops it serving, but the owner must revoke it before it can pair again with a new join code.',
   leave_unload_failed:'The model could not be unloaded cleanly; this Mac left anyway.'});
 function renderLeaveSwarm(value){
   const card=$('leave-swarm'); if(!card)return;
@@ -360,7 +361,7 @@ function renderLeaveSwarm(value){
   const text=!leave ? ''
     : left ? (leave.fallback==='stall' || leave.fallback==='cap'
         ? 'The swarm did not finish in time, so this Mac left immediately. It no longer accepts work and its consent is withdrawn.'
-        : 'This Mac has left the swarm: it no longer accepts work and its standing consent is withdrawn. The owner sees it drop out.')
+        : 'This Mac has left the swarm: it no longer accepts work and its standing consent is withdrawn. The owner sees it drop out. To take part again, the owner revokes this Mac and it pairs again with a new join code.')
     : leave.state==='draining' ? 'Leaving smoothly: no new work is accepted; waiting for the work already running to finish (up to 30 seconds).'
     : 'Leaving…';
   $('leave-state').textContent=text;
