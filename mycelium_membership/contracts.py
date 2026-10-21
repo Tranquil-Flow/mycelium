@@ -1,0 +1,937 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+"""Strict signed control-plane contracts for swarm membership."""
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping
+import json
+import math
+import re
+from typing import Any
+
+from mycelium_qualification.evidence import canonical_json_bytes
+from mycelium_qualification.signing import (
+    Ed25519EvidenceSigner,
+    build_ed25519_verifier,
+)
+
+JOIN_REQUEST_PROTOCOL = "mycelium.membership.join_request.v1"
+JOIN_ACCEPTANCE_PROTOCOL = "mycelium.membership.join_acceptance.v1"
+RESUME_REQUEST_PROTOCOL = "mycelium.membership.resume_request.v1"
+RESUME_ACCEPTANCE_PROTOCOL = "mycelium.membership.resume_acceptance.v1"
+CAPABILITY_REPORT_PROTOCOL = "mycelium.membership.capability_report.v1"
+LINK_PROBE_REPORT_PROTOCOL = "mycelium.membership.link_probe_report.v1"
+HEARTBEAT_PROTOCOL = "mycelium.membership.heartbeat.v1"
+LEASE_RENEWAL_PROTOCOL = "mycelium.membership.lease_renewal.v1"
+ASSIGNMENT_OFFER_PROTOCOL = "mycelium.membership.assignment_offer.v1"
+ASSIGNMENT_RESULT_PROTOCOL = "mycelium.membership.assignment_result.v1"
+DRAIN_ACK_PROTOCOL = "mycelium.membership.drain_ack.v1"
+SEED_ROTATION_ACK_PROTOCOL = "mycelium.membership.seed_rotation_ack.v1"
+SIGNED_MESSAGE_PROTOCOL = "mycelium.membership.signed_message.v1"
+
+MAX_MESSAGE_TTL_SECONDS = 3_600.0
+MAX_CLOCK_SKEW_SECONDS = 30.0
+ROUTER_ACTIVATION_PROTOCOL = "mycelium.router_wire.v1"
+PLACEMENT_PROVENANCES = frozenset(
+    {"frozen_fixture", "planner_v2", "target_local_physical_preload"}
+)
+_RUNTIME_CAPABILITY_FIELDS = frozenset(
+    {"runtime_backend", "transport", "activation_protocol"}
+)
+_PEER_RUNTIME_CAPABILITIES = {
+    "mac_mlx_iroh": {
+        "runtime_backend": "mlx",
+        "transport": "iroh",
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
+    },
+    "browser_http": {
+        "runtime_backend": "browser",
+        "transport": "http",
+        "activation_protocol": None,
+    },
+    "pixel_http": {
+        "runtime_backend": "android",
+        "transport": "http",
+        "activation_protocol": None,
+    },
+    "android_termux_iroh": {
+        "runtime_backend": "pixel-stdlib",
+        "transport": "iroh",
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
+    },
+    "linux_numpy_iroh": {
+        "runtime_backend": "numpy",
+        "transport": "iroh",
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
+    },
+    "linux_tbd": {
+        "runtime_backend": "tbd",
+        "transport": "none",
+        "activation_protocol": None,
+    },
+    "artifact_source_https": {
+        "runtime_backend": "artifact-source",
+        "transport": "https",
+        "activation_protocol": None,
+    },
+    # [2026-09-27 OWNER RULING] the native Android app is an activation-eligible
+    # peer class; its runtime is the mobile Rust reference over iroh.
+    "android_native_iroh": {
+        "runtime_backend": "mobile-rust-reference",
+        "transport": "iroh",
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
+    },
+    # Q2 phone ruling: a new class preserves existing reference-phone leases.
+    "android_native_qwen2_iroh": {
+        "runtime_backend": "mobile-rust-qwen2",
+        "transport": "iroh",
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
+    },
+    # [OWNER RULING 2026-10-07, superseding 2026-09-27] Windows has full
+    # parity with macOS and Linux: the native Windows node (host-platform
+    # seam, Job Object service runner, loopback iroh sidecar) runs the NumPy
+    # stage runtime and is activation-eligible for every stage position.
+    "windows_native_iroh": {
+        "runtime_backend": "numpy",
+        "transport": "iroh",
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
+    },
+    # The A13 Linux product class.  [OWNER PARITY RULING 2026-10-07, applied
+    # to Linux] Windows, macOS and Linux devices can all do everything (full
+    # nodes, every stage position, managed hosts) and A13 covers all three
+    # platforms.  The packaged Linux app now binds the NumPy stage runtime
+    # (``mycelium_a13_linux.managed_host``), so the class declares it and is
+    # activation-eligible exactly like ``windows_native_iroh``.
+    "linux_native_iroh": {
+        "runtime_backend": "numpy",
+        "transport": "iroh",
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
+    },
+}
+PEER_CLASSES = frozenset(_PEER_RUNTIME_CAPABILITIES)
+#: Closed allow-set of peer classes that may receive activation work.
+_ACTIVATION_ELIGIBLE_PEER_CLASSES = frozenset(
+    {"mac_mlx_iroh", "linux_numpy_iroh", "android_native_iroh", "windows_native_iroh",
+     "linux_native_iroh", "android_native_qwen2_iroh"}
+)
+#: Named, stable refusal reasons for known peer classes that are admitted to
+#: membership but may not receive activation work yet.
+PEER_CLASS_ACTIVATION_REFUSALS: dict[str, str] = {}
+
+_COMMON_FIELDS = frozenset(
+    {
+        "protocol",
+        "message_id",
+        "swarm_id",
+        "sender_node_id",
+        "sender_endpoint_id",
+        "recipient_node_id",
+        "incarnation",
+        "generation",
+        "issued_at",
+        "expires_at",
+    }
+)
+_SPECIFIC_FIELDS = {
+    JOIN_REQUEST_PROTOCOL: frozenset(
+        {
+            "invite_nonce",
+            "endpoint_addr",
+            "software_version",
+            "peer_class",
+            "runtime_capability",
+        }
+    ),
+    JOIN_ACCEPTANCE_PROTOCOL: frozenset(
+        {
+            "request_message_id",
+            "accepted_node_id",
+            "accepted_incarnation",
+            "membership_generation",
+            "lease_expires_at",
+        }
+    ),
+    RESUME_REQUEST_PROTOCOL: frozenset(
+        {
+            "previous_incarnation",
+            "endpoint_addr",
+            "software_version",
+            "peer_class",
+            "runtime_capability",
+        }
+    ),
+    RESUME_ACCEPTANCE_PROTOCOL: frozenset(
+        {
+            "request_message_id",
+            "accepted_node_id",
+            "accepted_incarnation",
+            "previous_membership_generation",
+            "membership_generation",
+            "lease_expires_at",
+        }
+    ),
+    CAPABILITY_REPORT_PROTOCOL: frozenset(
+        {
+            "platform",
+            "architecture",
+            "memory_bytes",
+            "available_storage_bytes",
+            "backends",
+            "precisions",
+        }
+    ),
+    LINK_PROBE_REPORT_PROTOCOL: frozenset(
+        {
+            "target_node_id",
+            "target_endpoint_id",
+            "reachable",
+            "rtt_ms",
+            "goodput_bytes_per_second",
+            "probe_sequence",
+        }
+    ),
+    HEARTBEAT_PROTOCOL: frozenset(
+        {
+            "heartbeat_sequence",
+            "lifecycle_state",
+            "route_ready",
+            "active_requests",
+            "liveness_source",
+            "activity_receipt_digest",
+            "activity_peer_node_id",
+        }
+    ),
+    LEASE_RENEWAL_PROTOCOL: frozenset(
+        {
+            "heartbeat_message_id",
+            "member_incarnation",
+            "membership_generation",
+            "lease_expires_at",
+        }
+    ),
+    ASSIGNMENT_OFFER_PROTOCOL: frozenset(
+        {
+            "deployment_id",
+            "deployment_epoch",
+            "assignment_id",
+            "assignment_digest",
+            "stage_pack_digest",
+            "graph_digest",
+            "load_generation",
+            "placement_provenance",
+            "peer_endpoint_records",
+        }
+    ),
+    ASSIGNMENT_RESULT_PROTOCOL: frozenset(
+        {
+            "deployment_id",
+            "deployment_epoch",
+            "assignment_id",
+            "accepted",
+            "result_code",
+            "load_proof_digest",
+            "runtime_endpoint",
+        }
+    ),
+    DRAIN_ACK_PROTOCOL: frozenset(
+        {"drain_id", "active_requests", "last_request_id", "completed_at"}
+    ),
+    SEED_ROTATION_ACK_PROTOCOL: frozenset(
+        {"authority_generation", "transition_digest"}
+    ),
+}
+_ENVELOPE_FIELDS = frozenset(
+    {"protocol", "message", "signature", "verification_key"}
+)
+_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_LIFECYCLE_STATES = frozenset(
+    {"NEW", "CONFIGURED", "RUNNING", "DRAINING", "STOPPING", "STOPPED"}
+)
+
+
+class MembershipContractError(ValueError):
+    """Fail-closed schema or signature error carrying one stable code."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+def _require(condition: bool, code: str) -> None:
+    if not condition:
+        raise MembershipContractError(code)
+
+
+def _safe_check(condition: bool, code: str) -> None:
+    try:
+        if not condition:
+            raise MembershipContractError(code)
+    except MembershipContractError:
+        raise
+    except Exception:
+        raise MembershipContractError("membership_field_unusable")
+
+
+def _safe_in(
+    needle: Any,
+    haystack: Iterable[Any],
+    code: str,
+) -> None:
+    try:
+        if needle not in haystack:
+            raise MembershipContractError(code)
+    except MembershipContractError:
+        raise
+    except Exception:
+        raise MembershipContractError("membership_field_unusable")
+
+
+def _segment(value: Any) -> bool:
+    return isinstance(value, str) and _SEGMENT_RE.fullmatch(value) is not None
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        result = float(value)
+    except (OverflowError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _integer(value: Any, *, minimum: int = 0) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, int)
+        and value >= minimum
+    )
+
+
+def _text(value: Any, *, maximum: int = 512) -> bool:
+    if not isinstance(value, str) or not value or value != value.strip():
+        return False
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return len(encoded) <= maximum
+
+
+def _digest(value: Any) -> bool:
+    return isinstance(value, str) and _DIGEST_RE.fullmatch(value) is not None
+
+
+def _string_array(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and len(value) <= 64
+        and all(_segment(item) for item in value)
+        and len(set(value)) == len(value)
+    )
+
+
+def validate_peer_runtime_capability(
+    peer_class: Any,
+    runtime_capability: Any,
+) -> dict[str, Any]:
+    """Validate one exact peer-class runtime declaration and return a detached copy."""
+
+    _safe_in(peer_class, PEER_CLASSES, "membership_peer_class_invalid")
+    _require(
+        isinstance(runtime_capability, Mapping)
+        and set(runtime_capability) == _RUNTIME_CAPABILITY_FIELDS,
+        "membership_runtime_capability_invalid",
+    )
+    expected = _PEER_RUNTIME_CAPABILITIES[peer_class]
+    _require(
+        dict(runtime_capability) == expected,
+        "membership_runtime_capability_mismatch",
+    )
+    return json.loads(canonical_json_bytes(dict(runtime_capability)))
+
+
+def peer_runtime_is_activation_eligible(
+    peer_class: Any,
+    runtime_capability: Any,
+) -> bool:
+    """Return current production eligibility after exact capability validation."""
+
+    validated = validate_peer_runtime_capability(peer_class, runtime_capability)
+    return (
+        peer_class in _ACTIVATION_ELIGIBLE_PEER_CLASSES
+        and validated["transport"] == "iroh"
+        and validated["activation_protocol"] == ROUTER_ACTIVATION_PROTOCOL
+    )
+
+
+def peer_runtime_activation_refusal(peer_class: Any) -> str | None:
+    """Return the named activation refusal for a known peer class, if any."""
+
+    if not isinstance(peer_class, str):
+        return None
+    return PEER_CLASS_ACTIVATION_REFUSALS.get(peer_class)
+
+
+#: A9 one-time migration (spec §6.4): join and resume keep their envelope
+#: protocol, but after the recorded cutover the compound ``peer_class`` and
+#: ``runtime_capability`` declaration is replaced by one signed
+#: ``mycelium.membership.peer_profile.v2`` envelope.  Exactly one of the two
+#: declaration forms is accepted per message; which one a seed admits is the
+#: seed's recorded membership contract, never the sender's choice.
+V1_DECLARATION_FIELDS = frozenset({"peer_class", "runtime_capability"})
+V2_DECLARATION_FIELDS = frozenset({"peer_profile"})
+PEER_PROFILE_V2_PROTOCOL = "mycelium.membership.peer_profile.v2"
+_DECLARATION_PROTOCOLS = frozenset({JOIN_REQUEST_PROTOCOL, RESUME_REQUEST_PROTOCOL})
+
+
+def declaration_form(message: Mapping[str, Any]) -> str:
+    """``"v1"`` (compound class) or ``"v2"`` (signed peer profile) for join/resume."""
+
+    return "v2" if "peer_profile" in message else "v1"
+
+
+def _expected_fields(message: Mapping[str, Any], protocol: str) -> frozenset[str]:
+    expected = _COMMON_FIELDS | _SPECIFIC_FIELDS[protocol]
+    if protocol in _DECLARATION_PROTOCOLS and declaration_form(message) == "v2":
+        expected = (expected - V1_DECLARATION_FIELDS) | V2_DECLARATION_FIELDS
+    return expected
+
+
+def _validate_peer_profile_shape(message: Mapping[str, Any]) -> None:
+    """Shape and binding only; the seed verifies the signature against the member key."""
+
+    envelope = message["peer_profile"]
+    _require(
+        isinstance(envelope, Mapping)
+        and set(envelope) == {"protocol", "profile", "signature", "verification_key"}
+        and envelope["protocol"] == PEER_PROFILE_V2_PROTOCOL
+        and isinstance(envelope["profile"], Mapping),
+        "membership_peer_profile_invalid",
+    )
+    profile = envelope["profile"]
+    _require(
+        profile.get("node_id") == message["sender_node_id"]
+        and profile.get("swarm_id") == message["swarm_id"]
+        and profile.get("incarnation") == message["incarnation"],
+        "membership_peer_profile_binding_mismatch",
+    )
+
+
+def _validate_declaration(message: Mapping[str, Any]) -> None:
+    if declaration_form(message) == "v2":
+        _validate_peer_profile_shape(message)
+    else:
+        validate_peer_runtime_capability(
+            message["peer_class"],
+            message["runtime_capability"],
+        )
+
+
+def _validate_common(message: Mapping[str, Any], protocol: str) -> None:
+    expected = _expected_fields(message, protocol)
+    _require(set(message) == expected, "membership_fields_invalid")
+    for field in (
+        "message_id",
+        "swarm_id",
+        "sender_node_id",
+        "sender_endpoint_id",
+        "recipient_node_id",
+        "incarnation",
+    ):
+        _require(_segment(message[field]), "membership_identifier_invalid")
+    _require(_integer(message["generation"]), "membership_generation_invalid")
+    issued_at = _number(message["issued_at"])
+    expires_at = _number(message["expires_at"])
+    _require(issued_at is not None and expires_at is not None, "membership_time_invalid")
+    _require(expires_at > issued_at, "membership_time_invalid")
+    _require(
+        expires_at - issued_at <= MAX_MESSAGE_TTL_SECONDS,
+        "membership_ttl_invalid",
+    )
+    if protocol == JOIN_REQUEST_PROTOCOL:
+        _require(message["generation"] == 0, "membership_join_generation_invalid")
+    else:
+        _require(message["generation"] >= 1, "membership_generation_invalid")
+
+
+def _validate_join_request(message: Mapping[str, Any]) -> None:
+    _require(_segment(message["invite_nonce"]), "membership_identifier_invalid")
+    _require(_text(message["software_version"], maximum=128), "membership_text_invalid")
+    _validate_declaration(message)
+    _validate_membership_endpoint(message)
+
+
+def _validate_membership_endpoint(message: Mapping[str, Any]) -> None:
+    endpoint = message["endpoint_addr"]
+    _require(
+        isinstance(endpoint, Mapping) and set(endpoint) == {"id", "addrs"},
+        "membership_endpoint_addr_invalid",
+    )
+    _require(
+        endpoint["id"] == message["sender_endpoint_id"],
+        "membership_endpoint_id_mismatch",
+    )
+    addrs = endpoint["addrs"]
+    _require(
+        isinstance(addrs, list)
+        and bool(addrs)
+        and len(addrs) <= 16
+        and all(_text(item, maximum=1_024) for item in addrs),
+        "membership_endpoint_addr_invalid",
+    )
+
+
+def _validate_resume_request(message: Mapping[str, Any]) -> None:
+    _require(
+        _segment(message["previous_incarnation"]),
+        "membership_identifier_invalid",
+    )
+    _require(
+        message["previous_incarnation"] != message["incarnation"],
+        "membership_resume_incarnation_invalid",
+    )
+    _require(_text(message["software_version"], maximum=128), "membership_text_invalid")
+    _validate_declaration(message)
+    _validate_membership_endpoint(message)
+
+
+def _validate_join_acceptance(message: Mapping[str, Any]) -> None:
+    for field in (
+        "request_message_id",
+        "accepted_node_id",
+        "accepted_incarnation",
+    ):
+        _require(_segment(message[field]), "membership_identifier_invalid")
+    _require(
+        message["accepted_node_id"] == message["recipient_node_id"],
+        "membership_recipient_mismatch",
+    )
+    _require(
+        isinstance(message["membership_generation"], int)
+        and not isinstance(message["membership_generation"], bool)
+        and message["membership_generation"] >= 1
+        and message["membership_generation"] == message["generation"],
+        "membership_generation_invalid",
+    )
+    lease = _number(message["lease_expires_at"])
+    issued = _number(message["issued_at"])
+    _require(
+        lease is not None and issued is not None and lease > issued,
+        "membership_time_invalid",
+    )
+    _require(
+        lease - issued <= MAX_MESSAGE_TTL_SECONDS,
+        "membership_lease_ttl_invalid",
+    )
+
+
+def _validate_resume_acceptance(message: Mapping[str, Any]) -> None:
+    for field in (
+        "request_message_id",
+        "accepted_node_id",
+        "accepted_incarnation",
+    ):
+        _require(_segment(message[field]), "membership_identifier_invalid")
+    _require(
+        message["accepted_node_id"] == message["recipient_node_id"],
+        "membership_recipient_mismatch",
+    )
+    previous = message["previous_membership_generation"]
+    current = message["membership_generation"]
+    _require(
+        _integer(previous, minimum=1)
+        and _integer(current, minimum=2)
+        and current == previous + 1
+        and current == message["generation"],
+        "membership_generation_invalid",
+    )
+    lease = _number(message["lease_expires_at"])
+    issued = _number(message["issued_at"])
+    _require(
+        lease is not None
+        and issued is not None
+        and lease > issued
+        and lease - issued <= MAX_MESSAGE_TTL_SECONDS,
+        "membership_lease_ttl_invalid",
+    )
+
+
+def _validate_capability(message: Mapping[str, Any]) -> None:
+    _require(_text(message["platform"], maximum=128), "membership_text_invalid")
+    _require(_segment(message["architecture"]), "membership_identifier_invalid")
+    for field in ("memory_bytes", "available_storage_bytes"):
+        _require(_integer(message[field]), "membership_integer_invalid")
+    for field in ("backends", "precisions"):
+        _require(_string_array(message[field]), "membership_array_invalid")
+
+
+def _validate_link_probe(message: Mapping[str, Any]) -> None:
+    for field in ("target_node_id", "target_endpoint_id"):
+        _require(_segment(message[field]), "membership_identifier_invalid")
+    _require(
+        message["target_node_id"] == message["recipient_node_id"],
+        "membership_recipient_mismatch",
+    )
+    _safe_check(isinstance(message["reachable"], bool), "membership_boolean_invalid")
+    for field in ("rtt_ms", "goodput_bytes_per_second"):
+        value = _number(message[field])
+        _require(value is not None and value >= 0.0, "membership_number_invalid")
+    _require(_integer(message["probe_sequence"]), "membership_integer_invalid")
+
+
+def _validate_heartbeat(message: Mapping[str, Any]) -> None:
+    _require(_integer(message["heartbeat_sequence"]), "membership_integer_invalid")
+    _safe_in(message["lifecycle_state"], _LIFECYCLE_STATES, "membership_lifecycle_invalid")
+    _safe_check(isinstance(message["route_ready"], bool), "membership_route_ready_invalid")
+    _require(_integer(message["active_requests"]), "membership_integer_invalid")
+    if message["route_ready"] is True:
+        raise MembershipContractError("membership_route_ready_invalid")
+    source = message["liveness_source"]
+    receipt_digest = message["activity_receipt_digest"]
+    peer_node_id = message["activity_peer_node_id"]
+    _safe_in(
+        source,
+        {"scheduled_heartbeat", "activation_receipt"},
+        "membership_liveness_source_invalid",
+    )
+    if source == "scheduled_heartbeat":
+        _require(
+            receipt_digest is None and peer_node_id is None,
+            "membership_liveness_shape_invalid",
+        )
+    else:
+        _require(
+            _digest(receipt_digest) and _segment(peer_node_id),
+            "membership_liveness_shape_invalid",
+        )
+
+
+def _validate_lease_renewal(message: Mapping[str, Any]) -> None:
+    _require(_segment(message["heartbeat_message_id"]), "membership_identifier_invalid")
+    _require(_segment(message["member_incarnation"]), "membership_identifier_invalid")
+    _require(
+        _integer(message["membership_generation"], minimum=1)
+        and message["membership_generation"] == message["generation"],
+        "membership_generation_invalid",
+    )
+    lease = _number(message["lease_expires_at"])
+    issued = _number(message["issued_at"])
+    _require(
+        lease is not None
+        and issued is not None
+        and lease > issued
+        and lease - issued <= MAX_MESSAGE_TTL_SECONDS,
+        "membership_lease_ttl_invalid",
+    )
+
+
+def _validate_assignment_identity(message: Mapping[str, Any]) -> None:
+    for field in ("deployment_id", "assignment_id"):
+        _require(_segment(message[field]), "membership_identifier_invalid")
+    _require(_integer(message["deployment_epoch"]), "membership_integer_invalid")
+
+
+def _validate_assignment_offer(message: Mapping[str, Any]) -> None:
+    _validate_assignment_identity(message)
+    for field in ("assignment_digest", "stage_pack_digest", "graph_digest"):
+        _require(_digest(message[field]), "membership_digest_invalid")
+    _require(_integer(message["load_generation"], minimum=1), "membership_integer_invalid")
+    _safe_in(
+        message["placement_provenance"],
+        PLACEMENT_PROVENANCES,
+        "membership_placement_provenance_invalid",
+    )
+    records = message["peer_endpoint_records"]
+    _require(
+        isinstance(records, list) and len(records) <= 256,
+        "membership_peer_endpoint_records_invalid",
+    )
+    seen_nodes: set[str] = set()
+    expected_fields = {
+        "node_id",
+        "endpoint_id",
+        "deployment_epoch",
+        "membership_generation",
+        "valid_from",
+        "valid_until",
+    }
+    issued_at = _number(message["issued_at"])
+    expires_at = _number(message["expires_at"])
+    assert issued_at is not None and expires_at is not None
+    for record in records:
+        _require(
+            isinstance(record, Mapping) and set(record) == expected_fields,
+            "membership_peer_endpoint_record_invalid",
+        )
+        _require(
+            _segment(record["node_id"])
+            and _segment(record["endpoint_id"])
+            and record["node_id"] != message["recipient_node_id"],
+            "membership_peer_endpoint_identity_invalid",
+        )
+        _require(
+            record["node_id"] not in seen_nodes,
+            "membership_peer_endpoint_duplicate",
+        )
+        seen_nodes.add(record["node_id"])
+        _require(
+            _integer(record["deployment_epoch"], minimum=1)
+            and record["deployment_epoch"] == message["deployment_epoch"]
+            and _integer(record["membership_generation"], minimum=1),
+            "membership_peer_endpoint_generation_invalid",
+        )
+        valid_from = _number(record["valid_from"])
+        valid_until = _number(record["valid_until"])
+        _require(
+            valid_from is not None
+            and valid_until is not None
+            and issued_at <= valid_from < valid_until <= expires_at,
+            "membership_peer_endpoint_validity_invalid",
+        )
+    _require(
+        [record["node_id"] for record in records]
+        == sorted(record["node_id"] for record in records),
+        "membership_peer_endpoint_order_invalid",
+    )
+
+
+def _validate_assignment_result(message: Mapping[str, Any]) -> None:
+    _validate_assignment_identity(message)
+    _safe_check(isinstance(message["accepted"], bool), "membership_boolean_invalid")
+    _require(_segment(message["result_code"]), "membership_identifier_invalid")
+    proof = message["load_proof_digest"]
+    endpoint = message["runtime_endpoint"]
+    if message["accepted"]:
+        _require(_digest(proof), "membership_digest_invalid")
+        _require(_text(endpoint, maximum=1_024), "membership_text_invalid")
+    else:
+        _require(proof is None and endpoint is None, "membership_result_shape_invalid")
+
+
+def _validate_drain_ack(message: Mapping[str, Any]) -> None:
+    _require(_segment(message["drain_id"]), "membership_identifier_invalid")
+    _require(
+        isinstance(message["active_requests"], int)
+        and not isinstance(message["active_requests"], bool)
+        and message["active_requests"] == 0,
+        "membership_active_requests_invalid",
+    )
+    last = message["last_request_id"]
+    _require(last is None or _segment(last), "membership_identifier_invalid")
+    completed = _number(message["completed_at"])
+    issued = _number(message["issued_at"])
+    expires = _number(message["expires_at"])
+    _require(
+        completed is not None
+        and issued is not None
+        and expires is not None
+        and issued <= completed <= expires,
+        "membership_time_invalid",
+    )
+
+
+def _validate_seed_rotation_ack(message: Mapping[str, Any]) -> None:
+    _require(
+        _integer(message["authority_generation"], minimum=2),
+        "membership_authority_generation_invalid",
+    )
+    _require(_digest(message["transition_digest"]), "membership_digest_invalid")
+
+
+_VALIDATORS = {
+    JOIN_REQUEST_PROTOCOL: _validate_join_request,
+    JOIN_ACCEPTANCE_PROTOCOL: _validate_join_acceptance,
+    RESUME_REQUEST_PROTOCOL: _validate_resume_request,
+    RESUME_ACCEPTANCE_PROTOCOL: _validate_resume_acceptance,
+    CAPABILITY_REPORT_PROTOCOL: _validate_capability,
+    LINK_PROBE_REPORT_PROTOCOL: _validate_link_probe,
+    HEARTBEAT_PROTOCOL: _validate_heartbeat,
+    LEASE_RENEWAL_PROTOCOL: _validate_lease_renewal,
+    ASSIGNMENT_OFFER_PROTOCOL: _validate_assignment_offer,
+    ASSIGNMENT_RESULT_PROTOCOL: _validate_assignment_result,
+    DRAIN_ACK_PROTOCOL: _validate_drain_ack,
+    SEED_ROTATION_ACK_PROTOCOL: _validate_seed_rotation_ack,
+}
+
+
+def validate_membership_message(message: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate exact schema and return a detached JSON-compatible copy."""
+
+    try:
+        _require(isinstance(message, Mapping), "membership_message_invalid")
+        protocol = message.get("protocol")
+        if not isinstance(protocol, str):
+            raise MembershipContractError("membership_protocol_invalid")
+        _safe_check(protocol in _SPECIFIC_FIELDS, "membership_protocol_invalid")
+        _validate_common(message, protocol)
+        _VALIDATORS[protocol](message)
+        return json.loads(canonical_json_bytes(dict(message)))
+    except MembershipContractError:
+        raise
+    except Exception as exc:
+        raise MembershipContractError("membership_message_invalid") from exc
+
+
+def sign_membership_message(
+    *,
+    signer: Ed25519EvidenceSigner,
+    message: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Sign one validated message and include only the public verification key."""
+
+    validated = validate_membership_message(message)
+    _require(
+        signer.endpoint_id == validated["sender_endpoint_id"],
+        "membership_signer_endpoint_mismatch",
+    )
+    return {
+        "protocol": SIGNED_MESSAGE_PROTOCOL,
+        "message": validated,
+        "signature": signer.sign(validated),
+        "verification_key": signer.public_key_record(),
+    }
+
+
+def _verify_envelope(
+    envelope: Mapping[str, Any],
+    *,
+    now: float,
+    expected_key_digest: str | None,
+    expected_protocol: str,
+    expected_swarm_id: str | None,
+    expected_sender_node_id: str | None,
+    expected_sender_endpoint_id: str | None,
+    expected_recipient_node_id: str | None,
+) -> dict[str, Any]:
+    _require(isinstance(envelope, Mapping), "membership_envelope_invalid")
+    envelope_keys = set(envelope)
+    _require(
+        envelope_keys
+        == {
+            "protocol",
+            "message",
+            "signature",
+            "verification_key",
+        },
+        "membership_envelope_invalid",
+    )
+    _require(
+        envelope["protocol"] == SIGNED_MESSAGE_PROTOCOL,
+        "membership_envelope_invalid",
+    )
+    message = envelope["message"]
+    signature = envelope["signature"]
+    record = envelope["verification_key"]
+    _require(
+        isinstance(message, Mapping)
+        and isinstance(signature, Mapping)
+        and isinstance(record, Mapping),
+        "membership_envelope_invalid",
+    )
+    validated = validate_membership_message(message)
+    _require(
+        validated["protocol"] == expected_protocol,
+        "membership_protocol_invalid",
+    )
+    if expected_key_digest is None:
+        _require(
+            isinstance(record.get("verification_key_digest"), str)
+            and bool(record.get("verification_key_digest")),
+            "membership_key_pin_invalid",
+        )
+    else:
+        _require(
+            record.get("verification_key_digest") == expected_key_digest,
+            "membership_key_pin_mismatch",
+        )
+    if expected_swarm_id is not None:
+        _require(
+            validated["swarm_id"] == expected_swarm_id,
+            "membership_swarm_mismatch",
+        )
+    if expected_sender_node_id is not None:
+        _require(
+            validated["sender_node_id"] == expected_sender_node_id,
+            "membership_sender_node_mismatch",
+        )
+    if expected_sender_endpoint_id is not None:
+        _require(
+            validated["sender_endpoint_id"] == expected_sender_endpoint_id,
+            "membership_sender_endpoint_mismatch",
+        )
+    if expected_recipient_node_id is not None:
+        _require(
+            validated["recipient_node_id"] == expected_recipient_node_id,
+            "membership_recipient_mismatch",
+        )
+    try:
+        verify = build_ed25519_verifier([dict(record)])
+    except Exception as exc:
+        raise MembershipContractError("membership_verifier_invalid") from exc
+    issued_at = _number(validated["issued_at"])
+    expires_at = _number(validated["expires_at"])
+    current = _number(now)
+    _require(current is not None, "membership_time_invalid")
+    if current > expires_at:
+        raise MembershipContractError("membership_message_expired")
+    if current + MAX_CLOCK_SKEW_SECONDS < issued_at:
+        raise MembershipContractError("membership_message_from_future")
+    _safe_check(
+        verify(canonical_json_bytes(validated), dict(signature)),
+        "membership_signature_invalid",
+    )
+    return validated
+
+
+def verify_join_request(
+    envelope: Mapping[str, Any],
+    *,
+    now: float,
+) -> dict[str, Any]:
+    """Verify an untrusted join request using the envelope's own public key."""
+
+    if (
+        not isinstance(envelope, Mapping)
+        or not isinstance(envelope.get("message"), Mapping)
+        or envelope["message"].get("protocol") != JOIN_REQUEST_PROTOCOL
+    ):
+        raise MembershipContractError("join_request_protocol_required")
+    return _verify_envelope(
+        envelope,
+        now=now,
+        expected_key_digest=None,
+        expected_protocol=JOIN_REQUEST_PROTOCOL,
+        expected_swarm_id=None,
+        expected_sender_node_id=None,
+        expected_sender_endpoint_id=None,
+        expected_recipient_node_id=None,
+    )
+
+
+def verify_membership_message(
+    envelope: Mapping[str, Any],
+    *,
+    now: float,
+    expected_key_digest: str,
+    expected_protocol: str,
+    expected_swarm_id: str | None = None,
+    expected_sender_node_id: str | None = None,
+    expected_sender_endpoint_id: str | None = None,
+    expected_recipient_node_id: str | None = None,
+) -> dict[str, Any]:
+    """Verify a pinned-key membership envelope with optional identity binding."""
+
+    if not isinstance(expected_key_digest, str) or not _digest(expected_key_digest):
+        raise MembershipContractError("membership_key_pin_invalid")
+    return _verify_envelope(
+        envelope,
+        now=now,
+        expected_key_digest=expected_key_digest,
+        expected_protocol=expected_protocol,
+        expected_swarm_id=expected_swarm_id,
+        expected_sender_node_id=expected_sender_node_id,
+        expected_sender_endpoint_id=expected_sender_endpoint_id,
+        expected_recipient_node_id=expected_recipient_node_id,
+    )
