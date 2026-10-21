@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="1.435" timestamp="2026-10-21T22:51:18.330951+02:00" hostname="m4pro"><testcase classname="tests.swarm_directory.test_site_p3_http" name="test_apex_explains_without_identity_or_chat_surface" time="0.505"><failure message="assert 404 == 200&#10; +  where 404 = &lt;http.client.HTTPResponse object at 0x10cb82b60&gt;.status">def test_apex_explains_without_identity_or_chat_surface():
+        running = DirectoryServer(Directory(MemoryStore(), verify)).start()
+        try:
+            c = http.client.HTTPConnection('127.0.0.1', running.server_port)
+            c.request('GET', '/')
+            r = c.getresponse(); body = r.read().decode()
+&gt;           assert r.status == 200
+E           assert 404 == 200
+E            +  where 404 = &lt;http.client.HTTPResponse object at 0x10cb82b60&gt;.status
+
+tests/swarm_directory/test_site_p3_http.py:20: AssertionError</failure></testcase><testcase classname="tests.swarm_directory.test_site_p3_http" name="test_entry_rejects_unregistered_model_before_quota_or_backend" time="0.008"><failure message="AssertionError: assert (200, {'clamp...rrrrrr', ...}) == (400, {'error..._registered'})&#10;  &#10;  At index 0 diff: 200 != 400&#10;  Use -v to get more diff">world = {'chat': &lt;test_entry_guard.FakeChat object at 0x10d753cb0&gt;, 'clock': &lt;test_entry_guard.Clock object at 0x10d752e40&gt;, '...5519Signer object at 0x10dca8e10&gt;, 'gateway': &lt;mycelium_swarm_directory.entry.EntryGateway object at 0x10d753e00&gt;, ...}
+
+    def test_entry_rejects_unregistered_model_before_quota_or_backend(world):
+        visitor = Ed25519Signer.generate()
+        grant = grant_for(world, visitor)
+        world['policy']['value'] = replace(world['policy']['value'], model='Unknown/typo')
+&gt;       assert send(world, visitor, grant) == (400, {'error': 'model_not_registered'})
+E       AssertionError: assert (200, {'clamp...rrrrrr', ...}) == (400, {'error..._registered'})
+E         
+E         At index 0 diff: 200 != 400
+E         Use -v to get more diff
+
+tests/swarm_directory/test_site_p3_http.py:34: AssertionError</failure></testcase></testsuite></testsuites>

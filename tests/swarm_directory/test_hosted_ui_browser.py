@@ -248,7 +248,9 @@ def test_owner_changes_access_mode_and_sees_helpers_grants_usage_and_the_kill_sw
             visitor.click('#ask')
             visitor_fp = visitor.text_content('#identity').split()[-1]
             owner.click('#refresh')
-            owner.click('[data-approve="%s"]' % visitor_fp)
+            with owner.expect_response(lambda r: r.url.endswith('/grants') and r.request.method == 'POST', timeout=10000) as saved:
+                owner.click('[data-approve="%s"]' % visitor_fp)
+            assert saved.value.status == 200
             owner.click('#refresh')
             expect(owner.locator('[data-owned] [data-owner-grants]')).to_contain_text('granted')
 

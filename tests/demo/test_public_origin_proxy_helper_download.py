@@ -167,15 +167,16 @@ def test_cli_flags(tmp_path: Path, zip_path: Path) -> None:
             "--directory-upstream", "http://127.0.0.1:4360"]
     config = proxy.build_config_from_args(base + ["--helper-zip", str(zip_path), "--helper-version", "1.2.3"])
     assert (config.helper_zip_path, config.helper_version) == (str(zip_path), "1.2.3")
-    assert config.redirect_root_to_swarms is True
+    assert config.redirect_root_to_swarms is False
+    assert proxy.build_config_from_args(base + ['--redirect-root-to-swarms']).redirect_root_to_swarms is True
     assert proxy.build_config_from_args(base).helper_zip_path is None
     assert proxy.build_config_from_args(base + ["--no-redirect-root-to-swarms"]).redirect_root_to_swarms is False
 
 
 # -- (2) the '/' redirect ------------------------------------------------------------------------------
 
-def test_root_redirects_to_swarms_by_default_when_the_mount_is_on() -> None:
-    with world() as (public, product, directory):
+def test_root_redirects_to_swarms_when_explicitly_enabled() -> None:
+    with world(redirect_root_to_swarms=True) as (public, product, directory):
         for method in ("GET", "HEAD"):
             status, headers, body = call(public.server_port, method, "/")
             assert (status, headers["location"], body) == (302, "/swarms/", b"")
@@ -196,8 +197,9 @@ def test_the_flag_turns_the_redirect_off() -> None:
     with world(redirect_root_to_swarms=False, enable_product_routes=True) as (public, product, _):
         assert call(public.server_port, "GET", "/")[0] == 200
         assert [r["path"] for r in product.requests] == ["/"]
-    with world(redirect_root_to_swarms=False) as (public, product, _):  # product routes closed: nothing at the root
-        assert call(public.server_port, "GET", "/")[0] == 404
+    with world(redirect_root_to_swarms=False) as (public, product, directory):  # only the static directory root
+        assert call(public.server_port, "GET", "/", headers=IP)[0] == 200
+        assert [r['path'] for r in directory.requests] == ['/']
         assert product.requests == []
 
 

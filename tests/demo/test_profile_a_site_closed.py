@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """PV14: Profile A stays closed after the public-site extras (notice, forget control, richer card).
 
-Profile A: ``mycelium.now/`` redirects to ``/swarms/``; the directory is a phonebook; there is NO hosted chat at the
+Profile A: ``mycelium.now/`` serves a static explainer; the directory is a phonebook; there is NO hosted chat at the
 apex and no new public API.  The per-swarm chat page (``/chat``) lives on each swarm's own relay origin only.
 Run here against loopback stand-ins only (the shipped proxy in front of recording stubs).
 """
@@ -45,12 +45,12 @@ def test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin(method, pat
         assert not [r for r in directory.requests if r['path'].startswith('/chat')]
 
 
-def test_the_proxy_serves_exactly_the_five_directory_assets_and_no_inference_route():
+def test_the_proxy_serves_exactly_the_seven_directory_assets_and_no_inference_route():
     assets = proxy._DIRECTORY_ASSET_PATHS
-    assert assets == {'/swarms', '/swarms/', '/swarms/swarms.js', '/swarms/swarms.css', '/swarms/site.css'}
+    assert assets == {'/', '/apex.js', '/swarms', '/swarms/', '/swarms/swarms.js', '/swarms/swarms.css', '/swarms/site.css'}
     # every file the directory server serves is one of them, and the web folder holds only those files
     assert set(server.ASSETS) == assets
-    assert sorted(path.name for path in WEB.iterdir()) == ['index.html', 'site.css', 'swarms.css', 'swarms.js']
+    assert sorted(path.name for path in WEB.iterdir()) == ['apex.html', 'apex.js', 'index.html', 'site.css', 'swarms.css', 'swarms.js']
 
 
 def test_the_directory_server_itself_does_not_answer_chat_paths():
@@ -60,7 +60,7 @@ def test_the_directory_server_itself_does_not_answer_chat_paths():
     from mycelium_swarm_directory.store import MemoryStore
     running = server.DirectoryServer(Directory(MemoryStore(), verify)).start()
     try:
-        for path in ('/chat', '/chat/chat.js', '/chat/api/state', '/', '/swarms/api/v1/chat', '/swarms/notice'):
+        for path in ('/chat', '/chat/chat.js', '/chat/api/state', '/swarms/api/v1/chat', '/swarms/notice'):
             connection = http.client.HTTPConnection('127.0.0.1', running.server_port, timeout=3)
             connection.request('GET', path)
             response = connection.getresponse()

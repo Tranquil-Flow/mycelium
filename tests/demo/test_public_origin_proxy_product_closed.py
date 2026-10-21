@@ -35,19 +35,19 @@ def test_product_routes_are_404_with_zero_upstream_connections_when_the_director
         assert product.requests == [] and directory.requests == []
 
 
-def test_the_swarms_surface_and_the_root_redirect_still_work_with_product_routes_closed() -> None:
+def test_the_swarms_surface_and_the_apex_still_work_with_product_routes_closed() -> None:
     with world() as (public, product, directory):
-        status, headers, _ = call(public.server_port, "GET", "/")
-        assert status == 302 and headers["location"] == "/swarms/"
+        status, headers, _ = call(public.server_port, "GET", "/", headers=IP)
+        assert status == 200 and 'location' not in headers
         assert call(public.server_port, "GET", "/swarms", headers=IP)[0] == 200
         assert call(public.server_port, "GET", "/swarms/api/v1/config", headers=IP)[0] == 200
-        assert [r["path"] for r in directory.requests] == ["/swarms", "/swarms/api/v1/config"]
+        assert [r["path"] for r in directory.requests] == ["/", "/swarms", "/swarms/api/v1/config"]
         assert product.requests == []
 
 
 def test_closed_even_when_the_root_redirect_is_off() -> None:
     with world(redirect_root_to_swarms=False) as (public, product, _directory):
-        assert call(public.server_port, "GET", "/")[0] == 404
+        assert call(public.server_port, "GET", "/", headers=IP)[0] == 200
         assert call(public.server_port, "GET", "/api/v1/bootstrap")[0] == 404
         assert product.requests == []
 

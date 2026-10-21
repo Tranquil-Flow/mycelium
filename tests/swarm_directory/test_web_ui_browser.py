@@ -85,7 +85,9 @@ def test_browser_create_attach_request_approve_and_chat(stack):
             expect(visitor.locator('#gate-copy')).to_contain_text('Waiting for the owner')
 
             owner.click('#refresh')
-            owner.click('[data-approve="%s"]' % visitor_fp)
+            with owner.expect_response(lambda r: r.url.endswith('/grants') and r.request.method == 'POST', timeout=10000) as saved:
+                owner.click('[data-approve="%s"]' % visitor_fp)
+            assert saved.value.status == 200
             owner.wait_for_selector('text=granted')
 
             visitor.click('#refresh')

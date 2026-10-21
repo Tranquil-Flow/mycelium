@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="6" skipped="0" tests="6" time="0.683" timestamp="2026-10-21T22:48:41.709355+02:00" hostname="m4pro"><testcase classname="tests.swarm_directory.test_site_p3_core" name="test_decline_cooldown_survives_restart_and_expires_at_boundary" time="0.010"><failure message="AssertionError: assert (200, {'state': 'pending'}) == (429, {'error...st_cooldown'})&#10;  &#10;  At index 0 diff: 200 != 429&#10;  Use -v to get more diff">world = (&lt;mycelium_swarm_directory.directory.Directory object at 0x10d234830&gt;, &lt;test_directory_core.Clock object at 0x10d23459...ory.crypto.Ed25519Signer object at 0x10d235160&gt;, &lt;mycelium_swarm_directory.crypto.Ed25519Signer object at 0x10d1e4050&gt;)
+
+    def test_decline_cooldown_survives_restart_and_expires_at_boundary(world):
+        d, clock, owner, visitor = world
+        ask = lambda: docs.access_request(visitor, SID, note='hello', at=clock.t)
+        assert call(d, 'POST', '/access-requests', ask())[0] == 200
+        assert call(d, 'POST', '/deny', docs.deny(owner, SID, visitor.public_key, at=clock.t))[0] == 200
+        d = Directory(d.store, verify, clock=clock)
+&gt;       assert call(d, 'POST', '/access-requests', ask()) == (429, {'error': 'request_cooldown'})
+E       AssertionError: assert (200, {'state': 'pending'}) == (429, {'error...st_cooldown'})
+E         
+E         At index 0 diff: 200 != 429
+E         Use -v to get more diff
+
+tests/swarm_directory/test_site_p3_core.py:29: AssertionError</failure></testcase><testcase classname="tests.swarm_directory.test_site_p3_core" name="test_model_whitelist_rejects_signed_listing_but_reads_old_record" time="0.003"><failure message="AssertionError: assert (200, {'swarm...: None, ...}}) == (400, {'error..._registered'})&#10;  &#10;  At index 0 diff: 200 != 400&#10;  Use -v to get more diff">world = (&lt;mycelium_swarm_directory.directory.Directory object at 0x10d1e4a50&gt;, &lt;test_directory_core.Clock object at 0x10d1e47d...ory.crypto.Ed25519Signer object at 0x10d1e4b90&gt;, &lt;mycelium_swarm_directory.crypto.Ed25519Signer object at 0x10d0be8b0&gt;)
+
+    def test_model_whitelist_rejects_signed_listing_but_reads_old_record(world):
+        d, clock, owner, visitor = world
+        old = record(owner, seq=2, model='Unknown/typo')
+&gt;       assert call(d, 'POST', '/records', old) == (400, {'error': 'model_not_registered'})
+E       AssertionError: assert (200, {'swarm...: None, ...}}) == (400, {'error..._registered'})
+E         
+E         At index 0 diff: 200 != 400
+E         Use -v to get more diff
+
+tests/swarm_directory/test_site_p3_core.py:41: AssertionError</failure></testcase><testcase classname="tests.swarm_directory.test_site_p3_core" name="test_offline_hide_delist_and_owner_republish_are_reversible" time="0.003"><failure message="KeyError: 'listing_state'">world = (&lt;mycelium_swarm_directory.directory.Directory object at 0x10d0beea0&gt;, &lt;test_directory_core.Clock object at 0x10d1e4f5...ory.crypto.Ed25519Signer object at 0x10d0befd0&gt;, &lt;mycelium_swarm_directory.crypto.Ed25519Signer object at 0x10d09b410&gt;)
+
+    def test_offline_hide_delist_and_owner_republish_are_reversible(world):
+        d, clock, owner, _ = world
+&gt;       assert d.list_swarms()[0]['listing_state'] == 'listed'
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'listing_state'
+
+tests/swarm_directory/test_site_p3_core.py:52: KeyError</failure></testcase><testcase classname="tests.swarm_directory.test_site_p3_core" name="test_offline_heartbeats_do_not_reset_retention_but_live_ones_restore" time="0.003"><failure message="KeyError: 'offline_seconds'">world = (&lt;mycelium_swarm_directory.directory.Directory object at 0x10d0bf490&gt;, &lt;test_directory_core.Clock object at 0x10d0bf23...ory.crypto.Ed25519Signer object at 0x10d04b680&gt;, &lt;mycelium_swarm_directory.crypto.Ed25519Signer object at 0x10d04b790&gt;)
+
+    def test_offline_heartbeats_do_not_reset_retention_but_live_ones_restore(world):
+        d, clock, owner, _ = world
+        def beat(status):
+            return call(d, 'POST', '/heartbeat', docs.heartbeat(owner, SID, status=status, members=1,
+                        served_model='Qwen/Qwen3-0.6B', at=clock.t))
+        assert beat('serving')[0] == 200
+        clock.t += 91
+&gt;       assert d.list_swarms()[0]['offline_seconds'] == 1
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'offline_seconds'
+
+tests/swarm_directory/test_site_p3_core.py:72: KeyError</failure></testcase><testcase classname="tests.swarm_directory.test_site_p3_core" name="test_retention_thresholds_are_configurable" time="0.003"><failure message="TypeError: Limits.__init__() got an unexpected keyword argument 'offline_hide_seconds'">world = (&lt;mycelium_swarm_directory.directory.Directory object at 0x10d1a0170&gt;, &lt;test_directory_core.Clock object at 0x10d0bfce...ory.crypto.Ed25519Signer object at 0x10d160b50&gt;, &lt;mycelium_swarm_directory.crypto.Ed25519Signer object at 0x10d160c50&gt;)
+
+    def test_retention_thresholds_are_configurable(world):
+        d, clock, owner, _ = world
+&gt;       d = Directory(d.store, verify, clock=clock, limits=Limits(offline_hide_seconds=5, offline_delist_seconds=10))
+                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: Limits.__init__() got an unexpected keyword argument 'offline_hide_seconds'
+
+tests/swarm_directory/test_site_p3_core.py:86: TypeError</failure></testcase><testcase classname="tests.swarm_directory.test_site_p3_core" name="test_owner_inbox_includes_direct_grants_without_exposing_to_strangers" time="0.004"><failure message="KeyError: 'grants'">world = (&lt;mycelium_swarm_directory.directory.Directory object at 0x10d04b680&gt;, &lt;test_directory_core.Clock object at 0x10d09a9f...ory.crypto.Ed25519Signer object at 0x10d1efa70&gt;, &lt;mycelium_swarm_directory.crypto.Ed25519Signer object at 0x10d1efe30&gt;)
+
+    def test_owner_inbox_includes_direct_grants_without_exposing_to_strangers(world):
+        d, clock, owner, visitor = world
+        grant = docs.grant(owner, swarm_id=SID, grantee_key=visitor.public_key, issued_at=clock.t,
+                           expires_at=clock.t+3600, max_requests=20, max_tokens=4000)
+        assert call(d, 'POST', '/grants', grant)[0] == 200
+        inbox = call(d, 'POST', '/owner-inbox', docs.owner_query(owner, SID, at=clock.t))[1]
+&gt;       assert inbox['grants'] == [grant]
+               ^^^^^^^^^^^^^^^
+E       KeyError: 'grants'
+
+tests/swarm_directory/test_site_p3_core.py:99: KeyError</failure></testcase></testsuite></testsuites>

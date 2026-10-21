@@ -67,7 +67,9 @@ def test_twenty_real_app_behaviours(local):
         # 11–14: owner badge, approval, consent, actual streamed answer and browser measurement.
         owner.click('#refresh')
         expect(owner.locator('#owned-count')).to_have_text('1')
-        owner.locator('[data-approve]').click()
+        with owner.expect_response(lambda r: r.url.endswith('/grants') and r.request.method == 'POST', timeout=10000) as saved:
+            owner.locator('[data-approve]').click()
+        assert saved.value.status == 200
         visitor.click('#refresh')
         expect(visitor.locator('#consent')).to_be_visible()
         visitor.click('#consent')
@@ -101,6 +103,165 @@ def test_twenty_real_app_behaviours(local):
         expect(visitor.locator('#prompt')).to_be_disabled()
         assert 'Unavailable (' not in visitor.locator('body').inner_text()
         assert not errors
+        browser.close()
+
+
+@pytest.mark.parametrize('width,height', [(1440,900),(390,844)])
+@pytest.mark.parametrize('theme', ['dark','light'])
+def test_apex_real_counts_delayed_and_unavailable_without_identity(local, monkeypatch, width, height, theme):
+    import time
+    from mycelium_swarm_directory import docs
+    from mycelium_swarm_directory.crypto import Ed25519Signer
+    d = local['directory'].directory
+    signer = Ed25519Signer.generate()
+    sid = 'sw-aaaaaaaaaaaaaaaaaaaa'
+    document = docs.swarm_record(signer, swarm_id=sid, seq=1, name='One Mac test route', model='Qwen/Qwen3-0.6B', access_mode='request')
+    assert d.handle('POST','/records',json.dumps(document).encode(),'ip:fixture')[0] == 200
+    beat = docs.heartbeat(signer,sid,status='serving',members=1,served_model='Qwen/Qwen3-0.6B',at=d.now())
+    assert d.handle('POST','/heartbeat',json.dumps(beat).encode(),'ip:fixture')[0] == 200
+    original = d.list_swarms
+    def delayed():
+        time.sleep(.7)  # server thread only; CSS and script are NOT blocked
+        return original()
+    monkeypatch.setattr(d,'list_swarms',delayed)
+    with sync_playwright() as p:
+        browser=p.chromium.launch()
+        for failed in (False,True):
+            page=browser.new_context(viewport={'width':width,'height':height},color_scheme=theme).new_page()
+            page.add_init_script(CLS)
+            requests=[]; page.on('request',lambda r: requests.append((r.method,r.url)))
+            if failed: page.route('**/swarms/api/v1/swarms',lambda r:r.fulfill(status=503,body='{}',content_type='application/json'))
+            page.goto(local['directory'].origin+'/')
+            if failed:
+                expect(page.locator('#apex-fresh')).to_contain_text('Status unavailable')
+                expect(page.locator('#serving-count')).to_have_text('—')
+            else:
+                expect(page.locator('#serving-count')).to_have_text('1')
+                expect(page.locator('#mac-count')).to_have_text('1')
+            page.wait_for_timeout(700)
+            cls=sum(page.evaluate('window.__cls'))
+            assert cls < .01, (width,theme,failed,cls,page.evaluate('window.__clsDetails'))
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            assert page.evaluate('async()=> (await indexedDB.databases()).length') == 0
+            assert page.evaluate('localStorage.length + sessionStorage.length') == 0
+            assert all(method=='GET' and url.startswith(local['directory'].origin) for method,url in requests)
+            expect(page.get_by_role('link',name='Try the demo chat')).to_have_attribute('href','https://demo.mycelium.now/chat')
+            if os.environ.get('SITEB_SHOTS'):
+                out=Path(os.environ['SITEB_SHOTS']);out.mkdir(parents=True,exist_ok=True)
+                name=f'apex-{width}-{theme}'+('-unavailable' if failed else '')
+                page.screenshot(path=str(out/(name+'.png')),full_page=True)
+                (out/(name+'.cls.json')).write_text(json.dumps({'cls':cls,'shifts':page.evaluate('window.__clsDetails')},indent=2))
+            page.context.close()
+        browser.close()
+
+
+def test_owner_undo_cancels_write_and_reload_cancels_hold(local):
+    with sync_playwright() as p:
+        browser=p.chromium.launch()
+        owner=page_for(browser,local,'#new')
+        create_swarm(owner,local,'Undo room','request')
+        sid=owner.locator('[data-owned]').first.get_attribute('data-owned')
+        visitor=page_for(browser,local,'#chat/'+sid)
+        visitor.click('#ask')
+        expect(visitor.locator('#gate')).to_have_attribute('data-state','pending')
+        owner.click('#refresh');expect(owner.locator('#owned-count')).to_have_text('1')
+        writes=[]
+        owner.on('request',lambda r:writes.append(r.url) if r.method=='POST' and r.url.endswith(('/grants','/deny')) else None)
+        row=owner.locator('.request')
+        for label in ('Approve','Decline'):
+            row.get_by_role('button',name=label,exact=True).click()
+            expect(row.locator('[data-undo]')).to_be_visible()
+            expect(row.locator('[data-decision]')).to_contain_text('in 5 seconds')
+            row.locator('[data-undo]').click()
+            owner.wait_for_timeout(5200)
+            assert writes == []
+            visitor.click('#refresh');expect(visitor.locator('#gate')).to_have_attribute('data-state','pending')
+        row.get_by_role('button',name='Approve',exact=True).click()
+        owner.reload();owner.wait_for_selector('body[data-ready="1"]');owner.wait_for_timeout(5200)
+        assert writes == []
+        expect(owner.locator('#owned-count')).to_have_text('1')
+        with owner.expect_response(lambda r:r.url.endswith('/grants') and r.request.method=='POST',timeout=10000) as saved:
+            owner.locator('[data-approve]').click()
+        assert saved.value.status == 200 and len(writes)==1
+        visitor.click('#refresh');expect(visitor.locator('#consent')).to_be_visible()
+        expect(owner.locator('#owned-count')).to_have_text('0')
+        assert sum(owner.evaluate('window.__cls')) < .01, owner.evaluate('window.__clsDetails')
+        browser.close()
+
+
+@pytest.mark.parametrize('width,height', [(1440,900),(390,844)])
+def test_mac_app_header_inbox_uses_real_owner_requests(local, width, height):
+    """Shipped app HTML/CSS/swarm.js; loopback HTTP facade over the real publisher.
+
+    Other app panels are inert here: no device action, model launch or live app traffic.
+    """
+    import re
+    from mycelium_swarm_directory import docs
+    from mycelium_swarm_directory.crypto import Ed25519Signer
+    web=Path(__file__).parents[2]/'mycelium_a13_macos/web'
+    pub=local['publisher']
+    pub.publish({'directory':local['directory'].origin,'name':'Mac owner inbox','access_mode':'request'})
+    sid=pub.state['swarm_id']
+    visitor=Ed25519Signer.generate()
+    d=local['directory'].directory
+    body=docs.access_request(visitor,sid,note='Please approve',at=d.now())
+    assert d.handle('POST','/access-requests',json.dumps(body).encode(),'ip:fixture')[0]==200
+    with sync_playwright() as p:
+        browser=p.chromium.launch()
+        page=browser.new_context(viewport={'width':width,'height':height}).new_page()
+        page.add_init_script(CLS)
+        def facade(route):
+            path=route.request.url.split(local['directory'].origin,1)[-1]
+            if path=='/mac-owner':
+                html=re.sub(r'<script defer src="(?!/swarm.js)[^"]+"></script>','', (web/'index.html').read_text()).replace('id="private" hidden','id="private"')
+                return route.fulfill(body=html,content_type='text/html')
+            if path in ('/style.css','/swarm.js'):
+                return route.fulfill(body=(web/path[1:]).read_text(),content_type='text/css' if path.endswith('css') else 'text/javascript')
+            if path=='/api/status':
+                return route.fulfill(json={'installation_role':'owner','swarm':pub.status()})
+            if path=='/api/swarm/inbox':
+                return route.fulfill(json=pub.inbox({}))
+            route.abort()  # no unmatched requests leave the local facade
+        page.route('**/*',facade)
+        page.goto(local['directory'].origin+'/mac-owner')
+        expect(page.locator('#swarm-inbox-count')).to_have_text('1')
+        expect(page.locator('#swarm-inbox-header')).to_be_visible()
+        # Native anchor targets the real inbox; fetching is authenticated by the publisher.
+        page.click('#swarm-inbox-header')
+        expect(page.locator('#swarm-requests')).to_contain_text('Please approve')
+        pub.deny({'requester_key':visitor.public_key})
+        page.click('#swarm-inbox-header')
+        expect(page.locator('#swarm-inbox-count')).to_have_text('0')
+        page.wait_for_timeout(700)
+        assert sum(page.evaluate('window.__cls')) < .01, page.evaluate('window.__clsDetails')
+        browser.close()
+
+
+def test_stale_browse_and_owner_republish_real_record(local):
+    with sync_playwright() as p:
+        browser=p.chromium.launch()
+        owner=page_for(browser,local,'#new')
+        owner.fill('#c-name','Sleeping room');owner.select_option('#c-model','Qwen/Qwen3-0.6B');owner.click('#c-go')
+        expect(owner.locator('[data-owned]')).to_be_visible()
+        sid=owner.locator('[data-owned]').get_attribute('data-owned')
+        d=local['directory'].directory
+        visitor=page_for(browser,local,'#browse')
+        visitor.locator('#offline-summary').click()
+        expect(visitor.locator('.swarm',has_text='Sleeping room')).to_be_visible()
+        row=d.store.get('swarm',sid);row['offline_since']=d.now()-d.limits.offline_hide_seconds;d.store.put('swarm',sid,row)
+        visitor.click('#refresh')
+        expect(visitor.locator('#offline-summary')).to_have_text('Show offline (0)')
+        expect(visitor.locator('.swarm',has_text='Sleeping room')).to_be_hidden()
+        row['offline_since']=d.now()-d.limits.offline_delist_seconds;d.store.put('swarm',sid,row)
+        owner.click('#refresh')
+        expect(owner.locator('[data-owned]')).to_be_visible()
+        with owner.expect_response(lambda r:r.url.endswith('/records') and r.request.method=='POST') as saved:
+            owner.get_by_role('button',name='Republish listing').click()
+        assert saved.value.status==200
+        visitor.click('#refresh')
+        expect(visitor.locator('#offline-summary')).to_have_text('Show offline (1)')
+        expect(visitor.locator('.swarm',has_text='Sleeping room')).to_be_visible()
+        assert d.store.get('swarm',sid)['record']['seq']==2
         browser.close()
 
 
@@ -162,15 +323,20 @@ def test_access_states_real_entry_and_composer_geometry(local, width, height, th
         if os.environ.get('SITEB_SHOTS'):
             owner.locator('[data-owner-grants]').scroll_into_view_if_needed()
             owner.screenshot(path=str(Path(os.environ['SITEB_SHOTS'])/f'owner-inbox-{width}-{theme}.png'),full_page=True)
-        owner.locator('.request button',has_text='Decline').click()
+        with owner.expect_response(lambda r: r.url.endswith('/deny') and r.request.method == 'POST', timeout=10000) as saved:
+            owner.locator('.request button',has_text='Decline').click()
+        assert saved.value.status == 200
         visitor.click('#refresh'); capture('declined')
-        visitor.click('#ask')
+        expect(visitor.locator('#ask')).to_be_disabled()
+        expect(visitor.locator('#gate-copy')).to_contain_text('ask again after')
         owner.click('#refresh')
         row = owner.locator('.request')
         row.locator('[aria-label=Hours]').fill('6')
         owner.click('#refresh')
         expect(row.locator('[aria-label=Hours]')).to_have_value('6')
-        owner.locator('[data-approve]').click()
+        with owner.expect_response(lambda r: r.url.endswith('/grants') and r.request.method == 'POST', timeout=10000) as saved:
+            owner.locator('[data-approve]').click()
+        assert saved.value.status == 200
         visitor.click('#refresh'); capture('approved')
         visitor.click('#consent'); capture('ready')
         visitor.fill('#prompt','kept while asleep')
@@ -201,7 +367,9 @@ def test_access_states_real_entry_and_composer_geometry(local, width, height, th
         visitor.reload()
         expect(visitor.locator('#gate-title')).to_have_text('Request sent')
         owner.click('#refresh')
-        owner.locator('[data-approve]').click()
+        with owner.expect_response(lambda r: r.url.endswith('/grants') and r.request.method == 'POST', timeout=10000) as saved:
+            owner.locator('[data-approve]').click()
+        assert saved.value.status == 200
         visitor.click('#refresh')
         visitor.click('#consent')
         expect(visitor.locator('#prompt')).to_be_enabled()
@@ -260,7 +428,7 @@ def test_busy_wait_is_cancellable_and_prompts_never_go_to_directory(local):
 
 @pytest.mark.parametrize('width,height', [(1440,900),(390,844)])
 @pytest.mark.parametrize('theme', ['dark','light'])
-def test_routes_slow_loading_cls_and_screenshots(local, width, height, theme):
+def test_routes_slow_loading_cls_and_screenshots(local, monkeypatch, width, height, theme):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         owner = page_for(browser, local, '#new')
@@ -268,16 +436,18 @@ def test_routes_slow_loading_cls_and_screenshots(local, width, height, theme):
         create_swarm(owner, local, 'Reading room', 'request')
         sid = owner.locator('[data-owned]').first.get_attribute('data-owned')
         results = []
+        from mycelium_swarm_directory import server as directory_server
+        original_get=directory_server._Handler.do_GET
+        def delayed_get(handler):
+            import time
+            if handler.path in ('/swarms/api/v1/swarms','/swarms/swarms.js'):
+                time.sleep(.7)  # per-HTTP-request thread: CSS delivery and browser dispatch stay live
+            return original_get(handler)
+        monkeypatch.setattr(directory_server._Handler,'do_GET',delayed_get)
         for route in ['browse', 'chat', 'contributing', 'owned', 'new', 'notice', 'swarm/'+sid, 'chat/'+sid]:
             page = browser.new_context(viewport={'width':width,'height':height}, color_scheme=theme).new_page()
             page.add_init_script(CLS)
-            # Delayed actual response, not invented JSON: exercise first-visit skeletons.
-            def delayed(r):
-                import time
-                time.sleep(.7)
-                r.continue_()
-            page.route('**/swarms/api/v1/swarms', delayed)
-            page.route('**/swarms/swarms.js', delayed)
+            # Real responses delayed by the server, without blocking CSS or Playwright's event loop.
             page.goto(local['directory'].origin+'/swarms/#'+route)
             page.wait_for_selector('body[data-loaded="1"]')
             page.wait_for_timeout(1200)
