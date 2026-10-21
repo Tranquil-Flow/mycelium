@@ -172,7 +172,8 @@ class DemoTargetAgent:
                  sink: Callable[[Mapping[str, Any]], Any], local: bool = False,
                  slice_transport: Callable[[], Any] | None = None,
                  model_source: Callable[[Mapping[str, Any]], Any] | None = None,
-                 clock: Callable[[], float] = time.time, report_interval: float = 10.0) -> None:
+                 clock: Callable[[], float] = time.time, report_interval: float = 10.0,
+                 calibrator: Callable[[Mapping[str, Any]], Mapping[str, Any] | None] | None = None) -> None:
         self.app = app
         self.consent = consent
         self.source = source
@@ -200,6 +201,11 @@ class DemoTargetAgent:
         self._download_for: tuple | None = None
         self._retry_delay = 0.0
         self._retry_at: float | None = None
+        # Join-time speed calibration (placement.py): one bounded run per announced model, off the tick thread.
+        self._calibrator = calibrator
+        self._calibration: dict[str, Any] | None = None
+        self._calibration_for: tuple | None = None
+        self._calibration_thread: threading.Thread | None = None
 
     # -- helpers ------------------------------------------------------------
     def _actor(self):
@@ -234,6 +240,26 @@ class DemoTargetAgent:
             raise ValueError('slice_destination_invalid')
         return root
 
+    def _ensure_calibration(self, a: Mapping[str, Any]) -> None:
+        """Start (once per announced model) the bounded step calibration of this Mac."""
+        model = a.get('model') or {}
+        key = (model.get('model_id'), model.get('resolved_commit'))
+        if self._calibrator is None or None in key or self._calibration_for == key:
+            return
+        self._calibration_for = key
+        self._calibration = None
+
+        def work():
+            try:
+                value = self._calibrator(a)
+            except Exception:
+                value = None
+            with self._lock:
+                if self._calibration_for == key:
+                    self._calibration = None if value is None else dict(value)
+        self._calibration_thread = threading.Thread(target=work, daemon=True, name='step-calibration')
+        self._calibration_thread.start()
+
     def _set(self, state: str, detail: str | None = None, progress: dict | None = None) -> None:
         self.state, self.detail, self.progress = state, detail, progress
 
@@ -249,8 +275,14 @@ class DemoTargetAgent:
                   'descriptor': self._descriptor if self._descriptor_for and announcement
                   and self._descriptor_for == (announcement.get('run_id'), announcement.get('deployment_id')) else None,
                   'issued_at': self._clock()}
+        with self._lock:
+            calibration = self._calibration
+            announced = (announcement or {}).get('model') or {}
+            wanted = (announced.get('model_id'), announced.get('resolved_commit'))
+            if calibration is not None and wanted == self._calibration_for:
+                report['step_calibration'] = calibration
         key = (report['run_id'], report['state'], report['detail'], json.dumps(report['progress']),
-               report['descriptor'] is not None)
+               report['descriptor'] is not None, 'step_calibration' in report)
         now = self._clock()
         if not force and key == self._last_report and now - self._last_report_at < self._report_interval:
             return
@@ -359,6 +391,7 @@ class DemoTargetAgent:
             self._slice_result = {}
             self._slice_stop = threading.Event()
             self._set('reported')
+            self._ensure_calibration(a)
             self._report(a, force=True)
         elif phase == 'collect' and self._descriptor_aging():
             # 1b. While the owner still collects, re-sign before half the
