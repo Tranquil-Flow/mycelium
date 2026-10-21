@@ -26,6 +26,7 @@ from typing import Any, Mapping
 
 from .clock_offset import PeerClockOffsets
 from .member_state import MemberStateChannel
+from .member_withdrawal import MemberWithdrawalChannel
 from .managed_control import (_BINDING_FIELDS, _REQUEST_COMMON_FIELDS, _RESPONSE_COMMON_FIELDS,
                               ManagedControlError, _binding_from_member)
 
@@ -117,7 +118,7 @@ def _check_node_extra(extra: Mapping[str, Any]) -> None:
 class RunExchange:
     """Owner side: mounted on the authority's ManagedProvisioningMailbox."""
 
-    def __init__(self, mailbox: Any, *, clock=time.time) -> None:
+    def __init__(self, mailbox: Any, *, clock=time.time, withdrawal_store=None) -> None:
         self.mailbox = mailbox
         self._clock = clock
         self._lock = threading.Lock()
@@ -129,6 +130,8 @@ class RunExchange:
         self.clock_offsets = PeerClockOffsets(clock=clock)
         #: Signed member state reports (PV1): in memory only, so a restarted owner rebuilds from the members' next reports.
         self.member_states = MemberStateChannel(mailbox, clock=clock)
+        #: Signed member withdrawals (PV10): who left smoothly, who left suddenly (final records persist when a store is given).
+        self.withdrawals = MemberWithdrawalChannel(mailbox, clock=clock, store_path=withdrawal_store)
         self._model_source = None
         self.announce(phase='idle')
 
@@ -138,6 +141,7 @@ class RunExchange:
         routes[PATH_REPORT] = self._report
         self.mailbox.route_extensions = routes
         self.member_states.install()
+        self.withdrawals.install()
         return self
 
     def set_service_mode_provider(self, provider) -> None:
@@ -268,6 +272,7 @@ class RunExchange:
 
     def _read(self, envelope: Any) -> dict[str, Any]:
         statement, _ = self._verify(envelope, protocol=READ, fields=_REQ_FIELDS)
+        self.withdrawals.observe_contact(statement['target_node_id'])
         self.clock_offsets.observe(statement['target_node_id'], signed_at=statement['issued_at'])
         return self._answer(statement)
 
@@ -275,6 +280,7 @@ class RunExchange:
         statement, _ = self._verify(envelope, protocol=REPORT, fields=_REPORT_FIELDS)
         report = validate_report(statement['report'])
         node = statement['target_node_id']
+        self.withdrawals.observe_contact(node)
         self.clock_offsets.observe(node, signed_at=statement['issued_at'],
                                    rtt_seconds=report.get('clock_rtt_seconds'))
         with self._lock:

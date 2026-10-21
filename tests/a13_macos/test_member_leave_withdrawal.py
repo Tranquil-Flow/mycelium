@@ -217,7 +217,7 @@ def test_the_final_is_signed_with_the_outcome_and_marks_the_peer_as_having_left(
 
 
 def leave_status_decisions(app):
-    return leave_status(app)['handoff_decisions']
+    return app._leave_handoff_decisions
 
 
 def test_status_carries_the_handoff_decisions(tmp_path, ledger):

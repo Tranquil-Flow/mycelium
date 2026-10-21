@@ -221,7 +221,7 @@ function render(value) {
     : !canDownload ? 'Create or join a swarm first; the download unlocks once this Mac is enrolled.'
     : !$('download-consent').checked ? 'Tick the authorization box above to enable the download.' : '';
   $('leave-hint').textContent=target && a.membership_state==='current'
-    ? 'This Mac joined as a member. To leave the swarm, use “Leave swarm” below: “Leave smoothly” lets work in progress finish first; “Instant leave” stops at once. Only the owner can revoke a membership.' : '';
+    ? 'This Mac joined as a member. To leave the swarm, use “Leave swarm” below: “Leave smoothly” tells the owner and lets work in progress finish first; “Leave now” stops at once. Only the owner can revoke a membership.' : '';
   $('download-consent').disabled=busy || downloading;
   $('download-limit').disabled=busy || downloading;
   if(acquisition){
@@ -251,9 +251,13 @@ function render(value) {
       reported.textContent=member.member_state.line+(extra.length?` · ${extra.join(' · ')}`:'');
       reported.dataset.state=member.member_state.state;
     }
-    row.append(label,reported,button);$('members').append(row);
+    // PV10: how this member left - from its signed withdrawal ("left smoothly") or from observed silence ("left suddenly").
+    const left=document.createElement('span'); left.className='member-leave';
+    if (member.leave) { left.textContent=member.leave.line; left.dataset.kind=member.leave.kind; left.title=MEMBER_LEAVE_KIND[member.leave.kind]||''; }
+    row.append(label,reported,left,button);$('members').append(row);
   }
 }
+const MEMBER_LEAVE_KIND={left_smoothly:'Left smoothly: the Mac sent a signed withdrawal',left_suddenly:'Left suddenly: no withdrawal, the Mac went silent',leaving:'Leaving smoothly: the Mac is winding down'};
 async function refresh(announce=true) {
   try {
     render(await api('/api/status'));
@@ -356,35 +360,53 @@ $('quit').addEventListener('click',()=>void perform('/api/quit',{},'Launcher sto
 // ---- Leave swarm (joined member): self-contained block, keep separate from the rest of the file ----
 Object.assign(HUMAN_ERRORS,{
   leave_confirmation_required:'Tick “I want this Mac to leave the swarm” first.',
-  leave_mode_invalid:'Choose “Leave smoothly” or “Instant leave”.',
+  leave_mode_invalid:'Choose “Leave smoothly” or “Leave now”.',
   target_role_required:'Only a Mac that joined a swarm can leave it. The owner revokes members from the owner screen.',
-  leave_unload_failed:'The model could not be unloaded cleanly; this Mac left anyway.'});
+  leave_unload_failed:'The model could not be unloaded cleanly; this Mac left anyway.',
+  owner_ack_timeout:'The owner did not answer in time; this Mac left anyway and the owner will see it drop out.',
+  owner_notice_failed:'The owner could not be told; this Mac left anyway and the owner will see it drop out.',
+  peer_member_left:'This Mac left the swarm. Ask the owner for a new invite to join again.'});
+const LEAVE_DECISIONS={a7_kv_standby:'moved to a standby Mac with its progress',a6_replay:'restarted on another Mac',
+  not_in_flight:'already finished',loss_detection:'left to finish here'};
+function leaveHandoffText(leave){
+  const d=leave.handoff_decisions||{}, n=Object.keys(d).length; if(!n)return '';
+  const kinds=Object.values(d).reduce((m,x)=>{m[x]=(m[x]||0)+1;return m;},{});
+  return ' Work in progress: '+Object.entries(kinds).map(([k,c])=>`${c} ${LEAVE_DECISIONS[k]||k}`).join(', ')+'.';
+}
 function renderLeaveSwarm(value){
   const card=$('leave-swarm'); if(!card)return;
   const a=value.authority||{}, leave=value.leave||null;
   card.hidden=!(value.installation_role==='target' && (a.membership_state==='current' || leave));
   const inProgress=!!leave && leave.state!=='left', left=!!leave && leave.state==='left';
+  const forced=!!leave && (leave.fallback==='stall' || leave.fallback==='cap');
+  const told=!!leave && leave.mode==='smooth' && (leave.steps||[]).some(s=>s.name==='announce_withdrawal' && s.ok);
   const text=!leave ? ''
-    : left ? (leave.fallback==='stall' || leave.fallback==='cap'
+    : left ? (forced
         ? 'The swarm did not finish in time, so this Mac left immediately. It no longer accepts work and its consent is withdrawn.'
-        : 'This Mac has left the swarm: it no longer accepts work and its standing consent is withdrawn. The owner sees it drop out.')
-    : leave.state==='draining' ? 'Leaving smoothly: no new work is accepted; waiting for the work already running to finish (up to 30 seconds).'
+        : leave.mode==='smooth'
+          ? 'This Mac left the swarm smoothly'+(told ? ': the owner was told and recorded it.' : ' (the owner could not be told and will see it drop out).')
+            +' It no longer accepts work and its standing consent is withdrawn.'
+          : 'This Mac left the swarm: it no longer accepts work and its standing consent is withdrawn. The owner sees it drop out.')
+        +leaveHandoffText(leave)
+    : leave.state==='handing_off' ? 'Leaving smoothly: telling the owner so the swarm can plan around this Mac (up to 5 seconds).'
+    : leave.state==='draining' ? 'Leaving smoothly: no new work is accepted; waiting for the work already running to finish (up to 30 seconds).'+leaveHandoffText(leave)
+    : leave.state==='withdrawing' ? 'Leaving smoothly: unloading the model and withdrawing from the swarm.'
     : 'Leaving…';
   $('leave-state').textContent=text;
   const off=busy || inProgress || left;
   $('leave-confirm').disabled=off;
   $('leave-smooth').disabled=off || !$('leave-confirm').checked;
-  $('leave-instant').disabled=off || !$('leave-confirm').checked;
+  $('leave-now').disabled=off || !$('leave-confirm').checked;
 }
 function leaveSwarm(mode){
   const done=mode==='smooth' ? 'Leaving smoothly: no new work is accepted while running work finishes.'
     : 'This Mac left the swarm.';
-  return perform('/api/leave',{mode,confirm:true},done);  // buttons are enabled only while the box is ticked
+  return perform('/api/leave',{mode,confirm:true},done);  // API mode names: 'smooth' and 'instant' (the Leave now button)
 }
 {const baseRender=render; render=function(value){baseRender(value); renderLeaveSwarm(value);};}
 $('leave-confirm').addEventListener('change',()=>{if(latest)renderLeaveSwarm(latest);});
 $('leave-smooth').addEventListener('click',()=>void leaveSwarm('smooth'));
-$('leave-instant').addEventListener('click',()=>void leaveSwarm('instant'));
+$('leave-now').addEventListener('click',()=>void leaveSwarm('instant'));
 // ---- end Leave swarm ----
 $('revoke').addEventListener('click',()=>{
   if (!$('revoke-confirm').checked) { notice('Confirm that you want to revoke this Mac before continuing.'); return; }

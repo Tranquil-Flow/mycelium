@@ -498,6 +498,8 @@ def app_tick(app: Any) -> str | None:
     try:
         if getattr(app, 'installation_role', None) != 'target' or getattr(app.authority, 'peer', None) is None:
             return None
+        if getattr(app, '_left', False) or getattr(app, '_leave_fence', False):
+            return None   # leaving or left (PV10): the owner has the signed withdrawal, or sees silence; no more reports
         reporter = getattr(app, 'member_state_reporter', None)
         if reporter is None:
             client = MemberStateClient(app.authority.peer)

@@ -5,17 +5,19 @@
   admitting new work, withdraw the standing consent, disconnect (close the managed runtime, stop
   renewing the membership lease, turn contribution off) and cancel any download.  Every step runs
   even when an earlier one failed; the swarm adapts through its existing loss handling.
-* **Leave smoothly** = stop admitting new work, wait (bounded) for the requests already running on
-  this Mac to finish, hand them off only if a clean handoff seam exists (none does on a member
-  today, see ``app_steps``), unload the model with cleanup proof (A16 withdraw), publish the
-  withdrawal when the adaptive controller is on, then the same steps as an instant leave.  If the
-  in-flight count has not shrunk for ``LEAVE_SMOOTH_STALL_S`` (or the whole drain exceeds
-  ``LEAVE_SMOOTH_CAP_S``) it falls back to an instant leave and says so.
+* **Leave smoothly** = stop admitting new work, tell the owner (signed ``planning`` notice over the member channel,
+  see ``member_withdrawal``) which requests are still running here so the owner can use its existing A7 KV-standby /
+  A6 replay path instead of waiting for loss detection, wait for the owner's answer (bounded by
+  ``OWNER_ACK_TIMEOUT_S``), wait (bounded) for the requests to finish, unload the model with cleanup proof (A16
+  withdraw), publish the withdrawal when the adaptive controller is on, withdraw the consent, send one signed
+  ``final`` withdrawal (``drained``, or ``forced`` after a fallback) and only then disconnect.  If the in-flight count
+  has not shrunk for ``LEAVE_SMOOTH_STALL_S`` (or the whole drain exceeds ``LEAVE_SMOOTH_CAP_S``) it falls back to an
+  instant leave and says so (the final then says ``forced``).
 
-The state is persisted (``leave-state.json``) so a restart finishes a leave that was interrupted.
-A member cannot sign a seed-side revocation of itself (only the owner's coordinator advances a
-member's generation), so "left" means: this Mac stopped serving, withdrew its consent and stopped
-renewing; the owner sees the loss through lease expiry / control loss.
+The state is persisted (``leave-state.json``) so a restart finishes a leave that was interrupted (no final: the
+owner sees a Mac that vanished).  The signed final lets the owner record "left smoothly" and self-revoke that
+generation; ``Leave now`` sends nothing, so the owner sees what it sees when the internet drops.  Either way the
+peer records a voluntary leave so the Mac can ask for a new pairing later (same node, new generation).
 """
 from __future__ import annotations
 
@@ -32,6 +34,7 @@ PROTOCOL = "mycelium.a13_member_leave.v1"
 MODES = ("smooth", "instant")
 LEAVE_SMOOTH_STALL_S = 30
 LEAVE_SMOOTH_CAP_S = 120
+OWNER_ACK_TIMEOUT_S = 5.0     # how long a leave waits for the owner's answer to a signed notice
 POLL_S = 0.5
 _FILE = "leave-state.json"
 _CODE = re.compile(r"[a-z][a-z0-9_]{0,63}")
@@ -57,6 +60,32 @@ class LeaveSteps:
     withdraw_consent: Callable[[], Any]
     disconnect: Callable[[], Any]
     cancel_work: Callable[[], Any]
+    #: Signed final withdrawal (``outcome`` = ``drained`` | ``forced``); ``None`` where no owner channel exists.
+    announce_withdrawal: Callable[[str], Any] | None = None
+
+
+def bounded(call: Callable[[], Any], seconds: float) -> Any:
+    """Run ``call`` for at most ``seconds``; a timeout or failure is a ``LeaveError`` with a stable code."""
+    outcome: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            outcome["value"] = call()
+        except BaseException as error:  # noqa: BLE001 - carried to the caller
+            outcome["error"] = error
+
+    worker = threading.Thread(target=run, daemon=True, name="member-leave-owner-notice")
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive():
+        raise LeaveError("owner_ack_timeout")
+    error = outcome.get("error")
+    if error is not None:
+        code = getattr(error, "code", None)
+        if type(error).__module__.startswith("mycelium_") and isinstance(code, str) and _CODE.fullmatch(code):
+            raise LeaveError(code) from None
+        raise LeaveError("owner_notice_failed") from None
+    return outcome.get("value")
 
 
 def _write_private(path: Path, document: dict[str, Any]) -> None:
@@ -135,6 +164,10 @@ class MemberLeave:
             self._step(record, "publish_withdrawal", self._steps.publish_withdrawal)
         # Privacy order: these always run, whatever failed before.
         self._step(record, "withdraw_consent", self._steps.withdraw_consent)
+        if record["mode"] == "smooth" and self._steps.announce_withdrawal is not None:
+            outcome = "drained" if record["fallback"] is None else "forced"
+            announce = self._steps.announce_withdrawal
+            self._step(record, "announce_withdrawal", lambda: announce(outcome))
         self._step(record, "disconnect", self._steps.disconnect)
         self._step(record, "cancel_work", self._steps.cancel_work)
         record["state"] = "left"
@@ -192,17 +225,18 @@ class MemberLeave:
 def app_steps(app: Any) -> LeaveSteps:
     """Seams over a joined ``DemoApp`` (target role).
 
-    ``handoff`` is deliberately ``None``: the A7 successor hand-off and the A6 recovery need the
-    owner-side authority (grants, replay checkpoint, qualified successor binding); a member has
-    no seam to start or prove one (see ``adaptive_drain.product_hooks``).  Running requests
-    therefore finish within the bound instead of being handed over.
+    ``handoff`` is the member-side seam for the owner's A7 KV-standby / A6 replay recovery: the A7 successor
+    hand-off and the A6 recovery need the owner-side authority (grants, replay checkpoint, qualified successor
+    binding), which a member cannot start or prove itself (see ``adaptive_drain.product_hooks``).  What it can do
+    is tell the owner, signed, which requests are running here; the owner decides (``leave_handoff``) and the
+    answer is kept as ``handoff_decisions``.  Requests the owner did not take finish here within the bound.
     """
     from . import adaptive_drain
 
-    def guarded(function: Callable[[], Any]) -> Callable[[], Any]:
-        def call() -> Any:
+    def guarded(function: Callable[..., Any]) -> Callable[..., Any]:
+        def call(*args: Any) -> Any:
             with app.guard:
-                return function()
+                return function(*args)
         return call
 
     def controller() -> Any:
@@ -218,6 +252,49 @@ def app_steps(app: Any) -> LeaveSteps:
 
     def inflight() -> int:
         return adaptive_drain.inflight_count(adaptive_drain.target_runtime(app))
+
+    def client() -> Any:
+        injected = getattr(app, "_leave_client", None)
+        if injected is not None:
+            return injected
+        from .member_withdrawal import MemberWithdrawalClient
+        return MemberWithdrawalClient(app.authority.peer)
+
+    def notice(phase: str, in_flight: list[str], outcome: str | None) -> dict[str, Any]:
+        from .member_withdrawal import NOTICE
+        return {"protocol": NOTICE, "phase": phase, "issued_at": time.time(),
+                "generation": int(app.authority.member.generation), "in_flight": in_flight, "outcome": outcome}
+
+    def running_requests() -> tuple[list[str], bool]:
+        """(ids safe to name, whether the ledger could be read and every id fit the bound)."""
+        from .member_withdrawal import MAX_IN_FLIGHT, valid_request_id
+        runtime = adaptive_drain.target_runtime(app)
+        if runtime is None:
+            return [], True
+        try:
+            rows = adaptive_drain.live_reservations(runtime.root)
+        except Exception:  # noqa: BLE001 - cannot prove what is running
+            return [], False
+        ids: list[str] = []
+        complete = True
+        for row in rows:
+            request_id = row.get("request_id")
+            if not valid_request_id(request_id) or request_id in ids or len(ids) >= MAX_IN_FLIGHT:
+                complete = False
+                continue
+            ids.append(request_id)
+        return ids, complete
+
+    def handoff() -> bool:
+        from .member_withdrawal import HANDLED
+        ids, complete = running_requests()
+        ack = bounded(lambda: client().send(notice("planning", ids, None)), OWNER_ACK_TIMEOUT_S)
+        decisions = dict(ack.get("handoff", {}))
+        app._leave_handoff_decisions = decisions
+        return complete and all(decisions.get(request_id) in HANDLED for request_id in ids)
+
+    def announce_withdrawal(outcome: str) -> None:
+        bounded(lambda: client().send(notice("final", [], outcome)), OWNER_ACK_TIMEOUT_S)
 
     def unload() -> None:
         runtime = adaptive_drain.target_runtime(app)
@@ -248,6 +325,10 @@ def app_steps(app: Any) -> LeaveSteps:
                     enabled=False, expected_generation=member.generation)
         except Exception as error:  # noqa: BLE001
             failure = failure or error
+        try:
+            app.authority.peer.record_voluntary_leave()   # last: opens the re-join path (same node, new generation)
+        except Exception as error:  # noqa: BLE001
+            failure = failure or error
         if failure is not None:
             raise failure
 
@@ -255,9 +336,10 @@ def app_steps(app: Any) -> LeaveSteps:
         app._cancel_acquisition()
 
     return LeaveSteps(
-        fence=guarded(fence), inflight=guarded(inflight), handoff=None, unload=guarded(unload),
+        fence=guarded(fence), inflight=guarded(inflight), handoff=guarded(handoff), unload=guarded(unload),
         publish_withdrawal=guarded(publish_withdrawal), withdraw_consent=guarded(withdraw_consent),
-        disconnect=guarded(disconnect), cancel_work=guarded(cancel_work))
+        disconnect=guarded(disconnect), cancel_work=guarded(cancel_work),
+        announce_withdrawal=guarded(announce_withdrawal))
 
 
 def _leave_for(app: Any) -> MemberLeave:
@@ -271,8 +353,11 @@ def leave_status(app: Any) -> dict[str, Any] | None:
     record = _leave_for(app).status()
     if record is None:
         return None
-    return {key: record[key] for key in ("mode", "state", "fallback", "handoff", "steps")
-            if key in record}
+    view = {key: record[key] for key in ("mode", "state", "fallback", "handoff", "steps") if key in record}
+    decisions = getattr(app, "_leave_handoff_decisions", None)
+    if isinstance(decisions, dict):
+        view["handoff_decisions"] = dict(decisions)    # what the owner did with each running request
+    return view
 
 
 def leave_action(app: Any, body: Any) -> dict[str, Any]:
@@ -314,3 +399,16 @@ def resume_leave(app: Any) -> dict[str, Any] | None:
         return record
     app._leave_fence = True
     return leave.resume()
+
+
+def clear_leave(app: Any) -> None:
+    """A new membership (re-join after a leave) ends the finished leave: no fence, no stopped renewal."""
+    record = _leave_for(app).status()
+    if record is not None and record["state"] != "left":
+        return                            # a leave still running is not undone by a join
+    (Path(app.root) / _FILE).unlink(missing_ok=True)
+    app._leave_fence = False
+    app._left = False
+    app._leave = None
+    app._leave_thread = None
+    app._leave_handoff_decisions = None

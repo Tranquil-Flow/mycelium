@@ -445,6 +445,16 @@ def _member_state_view(app, member):
     return owner_member_view(app, member)
 
 
+def _member_leave_view(app, member):
+    """PV10: how this member left (smoothly / suddenly / leaving), from its signed withdrawal or observed silence."""
+    try:
+        withdrawals = getattr(getattr(app, 'run_exchange', None), 'withdrawals', None)
+        if withdrawals is None: return None
+        return withdrawals.view(member['node_id'], member['generation'], member.get('lifecycle_state'))
+    except Exception:
+        return None
+
+
 def _member_state_report_status(app):
     from .member_state import reporter_status
     try: return reporter_status(app)
@@ -864,6 +874,13 @@ class DemoApp:
         from .member_leave import leave_status
         return leave_status(self)
 
+    def _clear_leave(self):
+        try:
+            from .member_leave import clear_leave
+            clear_leave(self)
+        except Exception:
+            pass  # a leave record that cannot be cleared never blocks the join
+
     def _resume_leave(self):
         try:
             from .member_leave import resume_leave
@@ -1207,7 +1224,8 @@ class DemoApp:
             value = {**value, 'members': [
                 {'node_id':m['node_id'],'generation':m['generation'],'lifecycle_state':m['lifecycle_state'],
                  'clock':None if offsets is None else offsets.view(m['node_id']),
-                 'member_state':_member_state_view(self,m)}
+                 'member_state':_member_state_view(self,m),
+                 'leave':_member_leave_view(self,m)}
                 for m in coordinator.members()]}
         from .run_model import document as run_model_document
         from .adaptive_owner import adaptive_status, adaptive_publication
@@ -1702,6 +1720,7 @@ class DemoApp:
             try: bind_standing_consent(self.root, binding, now=time.time())
             except Exception as error: self.standing_error = public_failure_code(error)
         self._join_state_path().unlink(missing_ok=True)
+        self._clear_leave()  # PV10: a new membership ends the finished leave (same node, new generation)
         self.running = True
         report = self._auto_report('join')
         return {'state':'joined','membership_state':joined.get('membership_state', 'current')
