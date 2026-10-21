@@ -533,8 +533,8 @@
     },
     {
       "path": "docs/user/QUICKSTART-MACOS.md",
-      "sha256": "sha256:0a0df87db6564bec56192af85b0f2bc4b0f048b8890036ada639eb831d5249d3",
-      "size_bytes": 12325
+      "sha256": "sha256:fcb5c8387b0dc0e1464479b6f769a1e0d682b82c4939d0b733ab4d910514b378",
+      "size_bytes": 12561
     },
     {
       "path": "docs/user/README.md",
@@ -543,8 +543,8 @@
     },
     {
       "path": "docs/user/TROUBLESHOOTING.md",
-      "sha256": "sha256:734d193b2b7d62ab18875591db1f74fea61d2d826e97da7f7e3df3b316b03926",
-      "size_bytes": 14853
+      "sha256": "sha256:7bff7d555cef01ad95dff5b37f7781a9253e4c1012e6ecb9f67dd5ce39ad42e7",
+      "size_bytes": 15856
     },
     {
       "path": "docs/user/WHAT-MYCELIUM-DOES.md",
@@ -783,8 +783,8 @@
     },
     {
       "path": "mycelium_a13_macos/a13_test_seams.py",
-      "sha256": "sha256:cc569c1802fac0cc0b968965c22bbc262fd4f49c57e10af0c3eabe4007282584",
-      "size_bytes": 2511
+      "sha256": "sha256:7bcae69f3a4bc39e612383b4c66e327c8ca91ea55aa08cdf8dc1cd4c619dc041",
+      "size_bytes": 3627
     },
     {
       "path": "mycelium_a13_macos/acquisition.py",
@@ -813,8 +813,8 @@
     },
     {
       "path": "mycelium_a13_macos/app.py",
-      "sha256": "sha256:30cc52727f1472038940cbc7d99b6edc91800b2f36e95e526737f568c8365abc",
-      "size_bytes": 105835
+      "sha256": "sha256:22ef74c35545392de4e1e252ac505f67fe12ec1f369167add8b3968109ddbf4d",
+      "size_bytes": 109438
     },
     {
       "path": "mycelium_a13_macos/assignment_provisioning.py",
@@ -833,8 +833,8 @@
     },
     {
       "path": "mycelium_a13_macos/chain_compile.py",
-      "sha256": "sha256:6323c486068d667ea81d2c8733a70af1c03cfcbabfb5dc47f64f264c1216ae16",
-      "size_bytes": 25766
+      "sha256": "sha256:81b513fadbb3834835e60b797a10352816160e40fdaa4707ad8dcf408bfa75a3",
+      "size_bytes": 27259
     },
     {
       "path": "mycelium_a13_macos/chain_observation.py",
@@ -878,13 +878,13 @@
     },
     {
       "path": "mycelium_a13_macos/demo_chain.py",
-      "sha256": "sha256:534d557155c8c65a534d6c3856aa701322349be989f05fc992a11f0591a2d270",
-      "size_bytes": 57954
+      "sha256": "sha256:099c4421f0f95bb77d6d3e42f503a56f23d4bafcf3f4031dca126ae1a1ea4b6c",
+      "size_bytes": 60844
     },
     {
       "path": "mycelium_a13_macos/demo_target.py",
-      "sha256": "sha256:fe820651414e61d352720267c08634fb65382b317108186678c07b42c96b4c77",
-      "size_bytes": 31587
+      "sha256": "sha256:83f8dc395f0aa7c861e1b2b80c08f443067837c6fa6d8ea23c8e98b8ce1984d4",
+      "size_bytes": 32172
     },
     {
       "path": "mycelium_a13_macos/endpoint_recovery.py",
@@ -938,8 +938,8 @@
     },
     {
       "path": "mycelium_a13_macos/managed_offers.py",
-      "sha256": "sha256:a4e9c64b37ba5ac9adfe9b4a9dd63a83e0363c11ae7e087dcbb5fe975d46865a",
-      "size_bytes": 23875
+      "sha256": "sha256:d91b2103de4870d8a5c8b15104879ac3ad79aaa660352f3626efb5dbe6236bf3",
+      "size_bytes": 25679
     },
     {
       "path": "mycelium_a13_macos/managed_provisioning.py",
@@ -1063,8 +1063,8 @@
     },
     {
       "path": "mycelium_a13_macos/target_app.py",
-      "sha256": "sha256:8fa5eeaf574de3b50eeb15f3bdb2a00a96ab4441644d005b949d7d390f4c5b5f",
-      "size_bytes": 18010
+      "sha256": "sha256:d14d991d904b01a97dadb951c7d95b2d9ec04f62a08a7055e57ca7f7349bd022",
+      "size_bytes": 18770
     },
     {
       "path": "mycelium_a13_macos/tls.py",
@@ -1083,8 +1083,8 @@
     },
     {
       "path": "mycelium_a13_macos/web/app.js",
-      "sha256": "sha256:ebfbee18dae5bf9ff8d6cd90bc1aa7a1c7a39d848bab431d29c9ce5b1abc5d8e",
-      "size_bytes": 49666
+      "sha256": "sha256:18e974989c6d438cdc0ce016e25a1d93065bf2acecf45882d2cdf0504b8e6aeb",
+      "size_bytes": 50309
     },
     {
       "path": "mycelium_a13_macos/web/chat.css",
@@ -1108,8 +1108,8 @@
     },
     {
       "path": "mycelium_a13_macos/web/run.js",
-      "sha256": "sha256:577f5d34014c995d70e2ea534b403b83d4bb85a78eac330485a7c411976647d6",
-      "size_bytes": 11047
+      "sha256": "sha256:a9a74e61e6a232ad620c8963268eca0d1a96ece5db0d0498ad47f41caf43d2e8",
+      "size_bytes": 11354
     },
     {
       "path": "mycelium_a13_macos/web/style.css",
@@ -3042,6 +3042,11 @@
       "size_bytes": 8729
     },
     {
+      "path": "tests/a13_macos/test_a13_test_seams_runtime.py",
+      "sha256": "sha256:e3a7fa5c0d6b18f4c56b38a4ab07905b11eb009085f28aded0832d4fa56fc365",
+      "size_bytes": 6876
+    },
+    {
       "path": "tests/a13_macos/test_acquisition_reverify.py",
       "sha256": "sha256:46e53bb4cba7b3ec7c711d7a24bf303d2dfd011786abaea5fe8558551f099da6",
       "size_bytes": 6375
@@ -3170,6 +3175,11 @@
       "path": "tests/a13_macos/test_chat_registry_client.py",
       "sha256": "sha256:8a7d04b779c4135cb26fbe361b884e7ba0f095b764809876fc674f68951f71d1",
       "size_bytes": 6196
+    },
+    {
+      "path": "tests/a13_macos/test_compile_state_terminal_paths.py",
+      "sha256": "sha256:91ce88c840ec6fa3c4b5de8660fcc16f2b7a88188e4e2ef35dfbb78ca70e7881",
+      "size_bytes": 7353
     },
     {
       "path": "tests/a13_macos/test_control_delivery_wakeup.py",
@@ -3327,6 +3337,11 @@
       "size_bytes": 11497
     },
     {
+      "path": "tests/a13_macos/test_member_restart_while_serving.py",
+      "sha256": "sha256:c90e285e1f7f32da9b64c7ef3a96892bb50bc771abaa1a76c2fb7e489b0acc7b",
+      "size_bytes": 5434
+    },
+    {
       "path": "tests/a13_macos/test_model_contract.py",
       "sha256": "sha256:72ee8aaadeaaa9143c5eccce0868bd6eb1837cba289a87ee79e39e6a942a73a7",
       "size_bytes": 2067
@@ -3380,6 +3395,11 @@
       "path": "tests/a13_macos/test_nhost_slice_acquisition.py",
       "sha256": "sha256:6df39aa84ea6fa53b06c56687f0258772ec73b2ea15e82dc0abac8ff538406b9",
       "size_bytes": 15364
+    },
+    {
+      "path": "tests/a13_macos/test_offer_superseded_by_readmission.py",
+      "sha256": "sha256:1bc388f6b919b24b16612faf0cc2096ea0f02d7c5c2c9d597e68a8962f348765",
+      "size_bytes": 5023
     },
     {
       "path": "tests/a13_macos/test_os_floor.py",
@@ -3507,6 +3527,11 @@
       "size_bytes": 8491
     },
     {
+      "path": "tests/a13_macos/test_relay_reopen.py",
+      "sha256": "sha256:9e45a7c9b90716de04c5518ab73d13dbc44bdadad0d8c51351fe72540a86c71d",
+      "size_bytes": 6759
+    },
+    {
       "path": "tests/a13_macos/test_run_exchange.py",
       "sha256": "sha256:2234e854904a04554c52915a86180e29ffe66913944808e2bb205a4d5f7683e3",
       "size_bytes": 3613
@@ -3577,6 +3602,11 @@
       "size_bytes": 7840
     },
     {
+      "path": "tests/a13_macos/test_stale_stage_runtime.py",
+      "sha256": "sha256:82c7d13140cac3b574789251d9554e6ac054098d6884ec53d2213e53110daa35",
+      "size_bytes": 3408
+    },
+    {
       "path": "tests/a13_macos/test_standing_consent.py",
       "sha256": "sha256:9343244a228e8d1c2123743ee0a989933f0dc0d63530ffb8b12ca6414a8bf37a",
       "size_bytes": 14843
@@ -3600,6 +3630,11 @@
       "path": "tests/a13_macos/test_startup_verified_progress_proposal.py",
       "sha256": "sha256:50db3e3d47b73a5836efc55962490bf6c45141205c61d210ec7ce71b4f7a1034",
       "size_bytes": 11581
+    },
+    {
+      "path": "tests/a13_macos/test_status_serving_state.py",
+      "sha256": "sha256:16a6a6640f73980100e259c9823ec9390eed6bbbf42270fc3871878457c9370b",
+      "size_bytes": 3394
     },
     {
       "path": "tests/a13_macos/test_swarm_live.py",
@@ -5748,5 +5783,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:85cd61520116a3bc05a54140170beb85b604c2dccd0e2aa9d6cd2ae241f4c9e9"
+  "source_digest": "sha256:773302688ea03c0d1ddadd205b50fe7ee7f3757153987e8b78bc9afde5215584"
 }
