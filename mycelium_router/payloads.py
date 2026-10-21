@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Versioned data-plane payloads owned by the Router boundary.
 
 The activation format is deliberately tensor-library neutral.  It carries only

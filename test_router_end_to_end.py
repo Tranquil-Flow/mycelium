@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 import unittest
 from dataclasses import replace
 
@@ -129,6 +130,141 @@ class RouterEndToEndTests(unittest.TestCase):
       )
       self.assertFalse(accepted)
       self.assertEqual(self.sink.token_ids, [])
+
+   def test_stale_failure_from_completed_decode_step_is_ignored(self):
+      request_id = self.admit()
+      self.assertEqual(self.router.generate(request_id, token_count=1), (101,))
+      record = self.router.get_request(request_id)
+      original_manifest = record.manifest
+
+      recovered = self.router.receive_failure_report(
+         FailureReport(
+            request_id=request_id,
+            path_id=original_manifest.path_id,
+            path_attempt=original_manifest.path_attempt,
+            token_index=0,
+            scope="PLACEMENT",
+            reason="delayed_failure",
+            placement_id=original_manifest.ordered_hops[1].placement_id,
+         )
+      )
+
+      self.assertFalse(recovered)
+      self.assertEqual(self.router.get_request(request_id).manifest, original_manifest)
+      self.assertEqual(self.router.request_status(request_id), "DECODING")
+      self.assertEqual(self.router.generate(request_id, token_count=1), (102,))
+      self.assertEqual(self.sink.token_ids, [101, 102])
+
+   def test_future_failure_report_cannot_advance_recovery_state(self):
+      request_id = self.admit()
+      record = self.router.get_request(request_id)
+      original_manifest = record.manifest
+
+      recovered = self.router.receive_failure_report(
+         FailureReport(
+            request_id=request_id,
+            path_id=original_manifest.path_id,
+            path_attempt=original_manifest.path_attempt,
+            token_index=1,
+            scope="PLACEMENT",
+            reason="future_failure",
+            placement_id=original_manifest.ordered_hops[1].placement_id,
+         )
+      )
+
+      self.assertFalse(recovered)
+      self.assertEqual(self.router.get_request(request_id).manifest, original_manifest)
+      self.assertEqual(self.router.request_status(request_id), "DECODING")
+      self.assertEqual(self.runtime.cancel_calls, [])
+
+   def assert_failure_report_rejected_without_mutation(self, report):
+      record = self.router.get_request(report.request_id)
+      original_manifest = record.manifest
+      original_cancel_calls = tuple(self.runtime.cancel_calls)
+      original_release_calls = tuple(self.capacity.release_calls)
+      original_manifest_deltas = tuple(self.transport.manifest_deltas)
+
+      recovered = self.router.receive_failure_report(report)
+
+      self.assertFalse(recovered)
+      self.assertEqual(self.router.get_request(report.request_id).manifest, original_manifest)
+      self.assertEqual(self.router.request_status(report.request_id), "DECODING")
+      self.assertEqual(tuple(self.runtime.cancel_calls), original_cancel_calls)
+      self.assertEqual(tuple(self.capacity.release_calls), original_release_calls)
+      self.assertEqual(tuple(self.transport.manifest_deltas), original_manifest_deltas)
+
+   def test_off_path_placement_failure_report_is_ignored(self):
+      request_id = self.admit()
+      manifest = self.router.get_request(request_id).manifest
+      self.assertNotIn(
+         "node-b-stage-001",
+         {hop.placement_id for hop in manifest.ordered_hops},
+      )
+
+      self.assert_failure_report_rejected_without_mutation(
+         FailureReport(
+            request_id=request_id,
+            path_id=manifest.path_id,
+            path_attempt=manifest.path_attempt,
+            token_index=0,
+            scope="PLACEMENT",
+            reason="forged_off_path_placement",
+            placement_id="node-b-stage-001",
+         )
+      )
+
+   def test_off_path_edge_failure_report_is_ignored(self):
+      request_id = self.admit()
+      manifest = self.router.get_request(request_id).manifest
+      self.assertEqual(
+         tuple(hop.placement_id for hop in manifest.ordered_hops),
+         (
+            "node-a-stage-000",
+            "node-c-stage-001",
+            "node-a-stage-002",
+         ),
+      )
+
+      self.assert_failure_report_rejected_without_mutation(
+         FailureReport(
+            request_id=request_id,
+            path_id=manifest.path_id,
+            path_attempt=manifest.path_attempt,
+            token_index=0,
+            scope="EDGE",
+            reason="forged_off_path_edge",
+            edge_id="e-0a-1b",
+         )
+      )
+
+   def test_off_path_device_failure_report_is_ignored(self):
+      request_id = self.admit()
+      record = self.router.get_request(request_id)
+      manifest = record.manifest
+      placement_by_id = {
+         placement.placement_id: placement
+         for stage in self.graph.stages
+         for placement in stage.placements
+      }
+      self.assertNotIn(
+         "node-b",
+         {
+            placement_by_id[hop.placement_id].node_id
+            for hop in manifest.ordered_hops
+         },
+      )
+
+      self.assert_failure_report_rejected_without_mutation(
+         FailureReport(
+            request_id=request_id,
+            path_id=manifest.path_id,
+            path_attempt=manifest.path_attempt,
+            token_index=0,
+            scope="DEVICE",
+            reason="forged_off_path_device",
+            node_id="node-b",
+         )
+      )
 
    def test_entry_device_failure_is_explicitly_unrecoverable(self):
       request_id = self.admit()

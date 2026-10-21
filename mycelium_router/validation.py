@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Fail-closed structural validation for Router contracts."""
 
 from mycelium_router.contracts import (
@@ -105,10 +106,17 @@ def validate_execution_graph(graph: ExecutionGraph) -> ExecutionGraph:
             placement.placement_id,
          )
          _require(
-            placement.lifecycle_state in {"ACTIVE", "RETIRING"},
+            placement.lifecycle_state in {"ACTIVE", "RETIRING", "STANDBY"},
             "invalid_placement_lifecycle",
             placement.placement_id,
          )
+      # A7: a STANDBY placement is recovery capacity, never ordinary serving
+      # capacity, so it cannot be the only placement of its stage.
+      _require(
+         any(placement.lifecycle_state != "STANDBY" for placement in stage.placements),
+         "stage_without_serving_placement",
+         stage.stage_id,
+      )
 
    _require(
       graph.entry_stage_id == graph.stages[0].stage_id,

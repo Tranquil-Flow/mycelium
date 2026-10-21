@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Pure route-cost model for prefill and decode traffic."""
 
 import math
@@ -9,11 +10,33 @@ from mycelium_router.contracts import (
    RouterConfig,
    ScoreBreakdown,
 )
+from mycelium_router.rtt_measurement import MeasuredRttTable
+
+
+#: Provenance labels reported by ``RouteScorer.transfer_provenance``.  Only
+#: ``measured`` means the number came from a real round trip; the others name
+#: exactly which stated or defaulted value was substituted for it.
+TRANSFER_PROVENANCE_MEASURED = "measured"
+TRANSFER_PROVENANCE_STATE = "state_neighbor_rtt_ms"
+TRANSFER_PROVENANCE_DEFAULT = "fallback_default_rtt_ms"
+TRANSFER_PROVENANCE_UNKNOWN = "unknown_source_node"
 
 
 class RouteScorer:
-   def __init__(self, config: RouterConfig):
+   def __init__(self, config: RouterConfig, *, rtt_table: MeasuredRttTable | None = None):
+      """Score routes, preferring measured link latency when one is available.
+
+      ``rtt_table`` is optional.  Without it the cost model behaves exactly as
+      before; with it, a link this host has actually measured wins over the
+      value stated in ``DeviceState.neighbor_rtt_ms``, and the choice is
+      inspectable through :meth:`transfer_provenance` so a caller can tell a
+      measurement from a placeholder.
+      """
+
+      if rtt_table is not None and not isinstance(rtt_table, MeasuredRttTable):
+         raise ValueError("rtt_table must be a MeasuredRttTable")
       self.config = config
+      self.rtt_table = rtt_table
 
    def score_route(
       self,
@@ -149,6 +172,75 @@ class RouteScorer:
       half_life = max(0.001, self.config.confidence_half_life_seconds)
       return math.exp(-math.log(2.0) * projected_age_seconds / half_life)
 
+   def _resolve_rtt_ms(
+      self,
+      source_node: str,
+      destination_node: str,
+      source_state: DeviceState,
+   ) -> tuple[float, str, int]:
+      """Return (rtt_ms, provenance, sample_count) for one directed link.
+
+      A link this host measured wins; otherwise the stated neighbour value is
+      used, and only when that is absent does the configured default apply —
+      reported as a default, never as a measurement.
+      """
+
+      if self.rtt_table is not None:
+         sample = self.rtt_table.rtt_ms(source_node, destination_node)
+         if sample.is_measured:
+            return sample.rtt_ms, TRANSFER_PROVENANCE_MEASURED, sample.sample_count
+      stated = source_state.neighbor_rtt_ms.get(destination_node)
+      if stated is not None:
+         return float(stated), TRANSFER_PROVENANCE_STATE, 0
+      return (
+         self.config.default_rtt_ms,
+         TRANSFER_PROVENANCE_DEFAULT,
+         0,
+      )
+
+   def transfer_provenance(
+      self,
+      source_node: str,
+      destination_node: str,
+      states: dict[str, DeviceState],
+   ) -> dict[str, object]:
+      """Report where the transfer cost for a link actually came from.
+
+      Exists so a caller — or a test — can prove that route selection used a
+      measurement rather than a default that merely looked like one.
+      """
+
+      if source_node == destination_node:
+         return {
+            "source_node_id": source_node,
+            "destination_node_id": destination_node,
+            "rtt_ms": 0.0,
+            "provenance": "same_node",
+            "sample_count": 0,
+            "is_measured": False,
+         }
+      source_state = states.get(source_node)
+      if source_state is None:
+         return {
+            "source_node_id": source_node,
+            "destination_node_id": destination_node,
+            "rtt_ms": None,
+            "provenance": TRANSFER_PROVENANCE_UNKNOWN,
+            "sample_count": 0,
+            "is_measured": False,
+         }
+      rtt_ms, provenance, sample_count = self._resolve_rtt_ms(
+         source_node, destination_node, source_state
+      )
+      return {
+         "source_node_id": source_node,
+         "destination_node_id": destination_node,
+         "rtt_ms": rtt_ms,
+         "provenance": provenance,
+         "sample_count": sample_count,
+         "is_measured": provenance == TRANSFER_PROVENANCE_MEASURED,
+      }
+
    def _transfer_ms(
       self,
       source_node: str,
@@ -161,8 +253,8 @@ class RouteScorer:
       source = states.get(source_node)
       if source is None:
          return math.inf
-      rtt_ms = source.neighbor_rtt_ms.get(
-         destination_node, self.config.default_rtt_ms
+      rtt_ms, _provenance, _count = self._resolve_rtt_ms(
+         source_node, destination_node, source
       )
       bandwidth = source.neighbor_bandwidth_bytes_per_second.get(
          destination_node, self.config.default_bandwidth_bytes_per_second

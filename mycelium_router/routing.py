@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Progressive route construction over the acyclic model-stage graph."""
 
 import math
@@ -124,10 +125,30 @@ class RoutePolicy:
 
 
 class ProgressivePathBuilder:
-   def __init__(self, *, policy, capacity, id_source):
+   def __init__(self, *, policy, capacity, id_source, lease_seconds=None):
       self.policy = policy
       self.capacity = capacity
       self.id_source = id_source
+      # Optional ``() -> seconds`` that scales the issued reservation lease
+      # with the measured link (a physical node passes its transport's KV
+      # lease window); ``None`` keeps ``reservation_lease_seconds``.
+      self.lease_seconds = lease_seconds
+
+   def reservation_lease_seconds(self) -> float:
+      """TTL of a lease issued now: the base lease, or the composer's
+      link-scaled window when that is longer (never shorter than the base)."""
+
+      base = float(self.policy.scorer.config.reservation_lease_seconds)
+      provider = self.lease_seconds
+      if provider is None:
+         return base
+      try:
+         scaled = float(provider())
+      except Exception:
+         return base
+      if not math.isfinite(scaled):
+         return base
+      return max(base, scaled)
 
    def start(
       self,
@@ -160,10 +181,12 @@ class ProgressivePathBuilder:
       states: dict[str, DeviceState],
       *,
       now: float,
+      lease_now: float | None = None,
    ) -> PathBuildState:
       if self.is_complete(build):
          raise RoutingError("path_already_complete")
       current = build
+      lease_base = now if lease_now is None else lease_now
       while True:
          try:
             decision = self.policy.choose_next(current, states, now=now)
@@ -183,15 +206,13 @@ class ProgressivePathBuilder:
                placement_id=decision.placement_id,
                kv_bytes=kv_bytes,
                deployment_epoch=current.graph.deployment_epoch,
-               lease_expires_at=(
-                  now + self.policy.scorer.config.reservation_lease_seconds
-               ),
+               lease_expires_at=lease_base + self.reservation_lease_seconds(),
             )
          )
          reservation_is_live = (
             reservation.accepted
             and reservation.deployment_epoch == current.graph.deployment_epoch
-            and reservation.expires_at > now
+            and reservation.expires_at > lease_base
          )
          if reservation_is_live:
             hop = PathHop(
@@ -222,10 +243,17 @@ class ProgressivePathBuilder:
       build: PathBuildState,
       *,
       now: float | None = None,
+      lease_now: float | None = None,
    ) -> PathManifest:
       if not self.is_complete(build):
          raise RoutingError("path_incomplete")
-      lock_time = build.request.admitted_at if now is None else now
+      lock_time = (
+         build.request.admitted_at
+         if now is None and lease_now is None
+         else now
+         if lease_now is None
+         else lease_now
+      )
       try:
          validate_hop_leases(
             build.ordered_hops,
@@ -261,6 +289,15 @@ class ProgressivePathBuilder:
          loopback_edge_id=loopback.edge_id,
       )
       validate_manifest(manifest, build.graph)
+      synchronize = getattr(self.capacity, "synchronize_build", None)
+      if synchronize is not None:
+         synchronized = synchronize(build)
+         if not synchronized.accepted:
+            self.abort(build)
+            raise RoutingError(
+               "path_reservation_sync_rejected",
+               synchronized.reason,
+            )
       commit = self.capacity.commit(
          tuple(hop.reservation_id for hop in build.ordered_hops),
          deployment_epoch=build.graph.deployment_epoch,

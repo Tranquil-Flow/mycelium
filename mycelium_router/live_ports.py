@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Thread-safe local Router state and lease-capacity ports.
 
 These implementations support deterministic local and multi-process qualification.

@@ -79,6 +79,14 @@
       "message_type": "FailureReport",
       "payload_length": 0,
       "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "byte_length": 298,
+      "file": "11-path-cancellation.bin",
+      "frame_sha256": "32f980210b77bfada8c402cd33efc5c67c2f044685307d31cc4d90c9510a15a8",
+      "message_type": "PathCancellation",
+      "payload_length": 0,
+      "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     }
   ],
   "protocol": "mycelium.router_wire.v1",

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Standalone request and inter-layer Router reference for Mycelium."""
 
 from mycelium_router.entry import EntryCoordinator

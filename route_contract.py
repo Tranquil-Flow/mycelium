@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 """Compatibility contract for ordered manual provisioning routes.
 
 The product Planner owns ``mycelium.route_plan.v2``. This module accepts only the

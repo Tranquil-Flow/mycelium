@@ -1,5 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 import unittest
-from dataclasses import replace
 
 from mycelium_router.contracts import RouterConfig
 from mycelium_router.fakes import (

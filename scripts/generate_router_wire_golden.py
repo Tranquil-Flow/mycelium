@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
 """Generate deterministic cross-language Router wire golden frames."""
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from mycelium_router.contracts import (  # noqa: E402
    ManifestDelta,
    ManifestLocked,
    PathBuildState,
+   PathCancellation,
    PathHop,
    PathManifest,
    Placement,
@@ -260,6 +261,16 @@ def _fixtures() -> tuple[tuple[str, object, bytes], ...]:
             scope="EDGE",
             reason="timeout",
             edge_id="edge-ab",
+         ),
+         b"",
+      ),
+      (
+         "11-path-cancellation.bin",
+         PathCancellation(
+            request.request_id,
+            build.path_id,
+            build.path_attempt,
+            graph.topology_version,
          ),
          b"",
       ),

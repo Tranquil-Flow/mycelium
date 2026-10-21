@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Fail-closed request, path, and hop lifecycle state machines."""
 
 

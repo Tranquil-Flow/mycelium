@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Versioned immutable contracts for the standalone Mycelium Router."""
 
 from dataclasses import dataclass, replace
@@ -150,6 +151,7 @@ class RouterConfig:
    interactive_base_priority: float = 100.0
    batch_base_priority: float = 10.0
    aging_priority_per_second: float = 1.0
+   batch_aging_multiplier: float = 4.0
    maximum_deficit_boost: float = 50.0
    maximum_recovery_attempts: int = 3
    reservation_lease_seconds: float = 30.0
@@ -164,6 +166,13 @@ class RouterConfig:
    prefill_runtime_batch_size: int = 20
    maximum_runtime_batch_bytes: int = 2_400_000
    prefill_collection_window_seconds: float = 0.002
+   # Bounded time a live transport keeps collecting inbound hops before it
+   # drains them as runtime batches (only while the batch cap admits more than
+   # one member; a cap of one executes every hop as it arrives).
+   live_hop_collection_window_seconds: float = 0.002
+   # A request whose last hop here is older than this is no longer expected to
+   # join a collection window (bounds the arrival tracker; never a wait).
+   live_hop_join_horizon_seconds: float = 5.0
    batch_deadline_guard_seconds: float = 0.001
    batch_bdp_multiplier: float = 2.0
    batch_stats_stale_seconds: float = 10.0
@@ -304,6 +313,10 @@ class HopWorkItem:
    prefill_chunk_token_count: int = 0
    batch_key: RuntimeBatchKey | None = None
    deadline_at: float = float("inf")
+   position: int = 0
+   emits_token: bool = False
+   terminal: bool = False
+   lease_expires_at: float = float("inf")
 
 
 @dataclass(frozen=True)
@@ -346,6 +359,14 @@ class ManifestDelta:
 
 
 @dataclass(frozen=True)
+class PathCancellation:
+   request_id: str
+   path_id: str
+   path_attempt: int
+   topology_version: int
+
+
+@dataclass(frozen=True)
 class TokenEvent:
    request_id: str
    path_id: str
@@ -353,6 +374,22 @@ class TokenEvent:
    token_index: int
    token_id: int
    sampling_counter: int
+
+
+@dataclass(frozen=True)
+class VerifyEvent:
+   """A11: the target final stage's greedy decision after every position of one VERIFY.
+
+   Private-path material like ``TokenEvent.token_id``: it travels only to the
+   request's entry, which arbitrates the target-authoritative commit.  It is never
+   output by itself.
+   """
+
+   request_id: str
+   path_id: str
+   path_attempt: int
+   token_index: int
+   decisions: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -375,6 +412,85 @@ class FailureReport:
    placement_id: str = ""
    edge_id: str = ""
    node_id: str = ""
+
+
+@dataclass(frozen=True)
+class KVCheckpointShipment:
+   """A7: one sealed shadow checkpoint, source stage -> its standby (payload = sealed bytes)."""
+
+   request_id: str
+   path_id: str
+   path_attempt: int
+   standby_placement_id: str
+   checkpoint_sequence: int
+   byte_size: int
+
+
+@dataclass(frozen=True)
+class KVCheckpointAck:
+   """A7: a standby's signed checkpoint acknowledgement (canonical JSON)."""
+
+   request_id: str
+   path_id: str
+   path_attempt: int
+   hop: str
+   signed_ack: str
+
+
+@dataclass(frozen=True)
+class KVSuccessorCutover:
+   """A7: install the fence for a successor path on one participant stage."""
+
+   request_id: str
+   old_path_id: str
+   old_path_attempt: int
+   successor_path_id: str
+   successor_path_attempt: int
+   fencing_generation: int
+   placement_id: str
+   role: str
+   expected_next_position: int
+   lease_expires_at: float
+
+
+@dataclass(frozen=True)
+class KVSuccessorCutoverReceipt:
+   """A7: a participant's fence-install result for one successor path."""
+
+   request_id: str
+   successor_path_id: str
+   successor_path_attempt: int
+   fencing_generation: int
+   placement_id: str
+   installed: bool
+   reason: str
+   checkpoint_digest: str
+
+
+@dataclass(frozen=True)
+class KVCheckpointCommit:
+   """A7: entry -> source: output through this count is committed to the gateway.
+
+   The source ships the stage KV for exactly that committed count and digest.
+   """
+
+   request_id: str
+   path_id: str
+   path_attempt: int
+   request_attempt: int
+   source_placement_id: str
+   committed_token_count: int
+   committed_prefix_digest: str
+
+
+@dataclass(frozen=True)
+class KVShadowRelease:
+   """A7: entry -> source/standby: the request is terminal or fenced; release its shadow state."""
+
+   request_id: str
+   path_id: str
+   path_attempt: int
+   reason: str
 
 
 @dataclass(frozen=True)
@@ -401,6 +517,7 @@ class HopReceiveResult:
    token_event: TokenEvent | None = None
    failure_report: FailureReport | None = None
    prefill_chunk_completed: PrefillChunkCompleted | None = None
+   verify_event: VerifyEvent | None = None
 
 
 @dataclass(frozen=True)

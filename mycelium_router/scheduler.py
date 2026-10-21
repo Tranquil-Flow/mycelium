@@ -1,7 +1,11 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Device-wide fair scheduler for local inter-layer work."""
 
 from collections import Counter
+from functools import wraps
+from threading import RLock
 
+from mycelium_router.idempotency import hop_identity
 from mycelium_router.contracts import (
    BatchDecision,
    HopWorkItem,
@@ -21,16 +25,30 @@ class BackpressureError(RuntimeError):
       super().__init__(f"backpressure:{reason}")
 
 
+def _locked(method):
+   """Serialize one scheduler operation: ingress, drains and releases may run on
+   different threads (the transport dispatcher, local senders, cancellation)."""
+
+   @wraps(method)
+   def wrapper(self, *args, **kwargs):
+      with self._lock:
+         return method(self, *args, **kwargs)
+
+   return wrapper
+
+
 class HopScheduler:
    def __init__(self, config: RouterConfig):
       self.config = config
+      self._lock = RLock()
       self._queue: list[HopWorkItem] = []
       self._queued_payload_bytes = 0
-      self._seen_keys: dict[str, tuple[float, str]] = {}
+      self._seen_keys: dict[tuple[str, str, int, str, int, int], tuple[float, str]] = {}
 
+   @_locked
    def enqueue(self, item: HopWorkItem) -> None:
       self._evict_seen(now=item.enqueued_at)
-      if item.idempotency_key in self._seen_keys:
+      if hop_identity(item) in self._seen_keys:
          raise DuplicateHopError(item.idempotency_key)
       retry_after = max(0.001, self.config.backpressure_retry_after_seconds)
       if len(self._queue) >= max(0, self.config.maximum_pending_hops):
@@ -41,7 +59,7 @@ class HopScheduler:
          > max(0, self.config.maximum_pending_bytes)
       ):
          raise BackpressureError("byte_limit", retry_after)
-      self._seen_keys[item.idempotency_key] = (
+      self._seen_keys[hop_identity(item)] = (
          item.enqueued_at,
          item.path_id,
       )
@@ -56,7 +74,12 @@ class HopScheduler:
          else self.config.interactive_base_priority
       )
       age = max(0.0, now - item.enqueued_at)
-      aging = age * self.config.aging_priority_per_second
+      aging_multiplier = (
+         self.config.batch_aging_multiplier
+         if item.qos_class == "batch"
+         else 1.0
+      )
+      aging = age * self.config.aging_priority_per_second * aging_multiplier
       deficit = max(0.0, min(1.0, item.deficit_ratio))
       deficit_boost = deficit * self.config.maximum_deficit_boost
       return base + aging + deficit_boost
@@ -64,6 +87,43 @@ class HopScheduler:
    def pop_next(self, *, now: float) -> HopWorkItem:
       return self.pop_batch(now=now, maximum_items=1).items[0]
 
+   @_locked
+   def take(self, item: HopWorkItem) -> HopWorkItem | None:
+      """Pop exactly the item one dispatch enqueued, if it is still queued.
+
+      A synchronous dispatch may only execute the work it enqueued.  Popping the
+      queue's global priority anchor can hand a caller *another* command
+      identity's item to execute (and leave the caller's own item queued for a
+      later pop), which is how one command identity came to execute twice.
+      """
+
+      for offset, queued in enumerate(self._queue):
+         if queued is item or hop_identity(queued) == hop_identity(item):
+            self._queue.pop(offset)
+            self._queued_payload_bytes -= self._payload_size(queued.payload)
+            return queued
+      return None
+
+   @_locked
+   def withdraw(self, item: HopWorkItem) -> bool:
+      """Remove a rejected dispatch's item so no later pop can execute it.
+
+      A dispatch rejected *after* its enqueue used to leave its item in the
+      shared queue.  The item outlives the cancelled path, and the next pop -
+      another hop, another request - executed it: a second native execution of a
+      command identity that is already gone.  Withdrawing is exact bookkeeping,
+      not a timed window: the item exists only while its own dispatch owns it.
+      """
+
+      for offset, queued in enumerate(self._queue):
+         if queued is item or hop_identity(queued) == hop_identity(item):
+            self._queue.pop(offset)
+            self._queued_payload_bytes -= self._payload_size(queued.payload)
+            self._seen_keys.pop(hop_identity(item), None)
+            return True
+      return False
+
+   @_locked
    def batch_candidates(self, *, now: float) -> tuple[HopWorkItem, ...]:
       """Return priority-ordered work compatible with the next anchor."""
       if not self._queue:
@@ -75,16 +135,19 @@ class HopScheduler:
       anchor = self._queue[anchor_index]
       if anchor.batch_key is None:
          return (anchor,)
-      compatible_indices = sorted(
-         (
-            offset
-            for offset, item in enumerate(self._queue)
-            if item.batch_key == anchor.batch_key
-         ),
-         key=lambda offset: self._priority_key(offset, now=now),
+      compatible_indices = self._one_member_per_request(
+         sorted(
+            (
+               offset
+               for offset, item in enumerate(self._queue)
+               if item.batch_key == anchor.batch_key
+            ),
+            key=lambda offset: self._priority_key(offset, now=now),
+         )
       )
       return tuple(self._queue[offset] for offset in compatible_indices)
 
+   @_locked
    def pop_batch(
       self,
       *,
@@ -116,9 +179,11 @@ class HopScheduler:
             for offset, item in enumerate(self._queue)
             if item.batch_key == anchor.batch_key
          ]
-         selected_indices = sorted(
-            compatible_indices,
-            key=lambda offset: self._priority_key(offset, now=now),
+         selected_indices = self._one_member_per_request(
+            sorted(
+               compatible_indices,
+               key=lambda offset: self._priority_key(offset, now=now),
+            )
          )[:maximum]
       byte_limit = None if maximum_bytes is None else max(1, maximum_bytes)
       if byte_limit is not None:
@@ -141,6 +206,24 @@ class HopScheduler:
          decision=decision,
       )
 
+   def _one_member_per_request(self, offsets: list[int]) -> list[int]:
+      """Keep only each request's first item, in the given priority order.
+
+      One request's queued items depend on each other (a later chunk extends the
+      KV an earlier one writes), so they never share one runtime batch; the later
+      item waits for a following batch.
+      """
+
+      seen: set[str] = set()
+      kept: list[int] = []
+      for offset in offsets:
+         request_id = self._queue[offset].request_id
+         if request_id in seen:
+            continue
+         seen.add(request_id)
+         kept.append(offset)
+      return kept
+
    def _priority_key(self, offset: int, *, now: float) -> tuple:
       item = self._queue[offset]
       return (
@@ -152,6 +235,7 @@ class HopScheduler:
          offset,
       )
 
+   @_locked
    def release_path(self, path_id: str) -> None:
       self._queue = [item for item in self._queue if item.path_id != path_id]
       self._queued_payload_bytes = sum(
@@ -163,12 +247,19 @@ class HopScheduler:
          if value[1] != path_id
       }
 
+   @_locked
    def queue_depth(self) -> int:
       return len(self._queue)
 
+   @_locked
+   def queued_path_ids(self) -> frozenset[str]:
+      return frozenset(item.path_id for item in self._queue)
+
+   @_locked
    def placement_depths(self) -> dict[str, int]:
       return dict(Counter(item.placement_id for item in self._queue))
 
+   @_locked
    def queued_payload_bytes(self) -> int:
       return self._queued_payload_bytes
 
@@ -184,11 +275,12 @@ class HopScheduler:
          return len(payload) * 4
       raise TypeError("unsupported_hop_payload_for_byte_accounting")
 
+   @_locked
    def seen_key_count(self) -> int:
       return len(self._seen_keys)
 
    def _evict_seen(self, *, now: float) -> None:
-      active_keys = {item.idempotency_key for item in self._queue}
+      active_keys = {hop_identity(item) for item in self._queue}
       retention = max(0.0, self.config.idempotency_retention_seconds)
       expired = [
          key

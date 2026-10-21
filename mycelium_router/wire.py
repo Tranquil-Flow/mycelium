@@ -1,16 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Versioned, fail-closed Router control framing with raw binary payloads."""
 
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import math
 import struct
 from typing import Any
 
 from mycelium_router.contracts import (
    FailureReport,
    HopHeader,
+   KVCheckpointAck,
+   KVCheckpointCommit,
+   KVCheckpointShipment,
+   KVShadowRelease,
+   KVSuccessorCutover,
+   KVSuccessorCutoverReceipt,
    ManifestDelta,
    ManifestLocked,
+   PathCancellation,
    PathBuildState,
    PathHop,
    PathManifest,
@@ -22,6 +31,7 @@ from mycelium_router.contracts import (
    ReservationRequest,
    ReservationResult,
    TokenEvent,
+   VerifyEvent,
 )
 from mycelium_router.serialization import (
    execution_graph_from_dict,
@@ -54,6 +64,7 @@ _MESSAGE_TYPES = {
       HopHeader,
       ManifestDelta,
       ManifestLocked,
+      PathCancellation,
       ProgressivePrefillMessage,
       PrefillChunkCompleted,
       ReservationRequest,
@@ -61,8 +72,25 @@ _MESSAGE_TYPES = {
       ReservationCommitResult,
       TokenEvent,
       FailureReport,
+      KVCheckpointShipment,
+      KVCheckpointAck,
+      KVSuccessorCutover,
+      KVSuccessorCutoverReceipt,
+      KVCheckpointCommit,
+      KVShadowRelease,
+      VerifyEvent,
    )
 }
+
+#: A11 bound on one VERIFY: the pending token plus at most 16 candidates.
+MAX_VERIFY_DECISIONS = 17
+
+#: A7 bounds: a sealed checkpoint and a signed acknowledgement stay small and exact.
+A7_MAX_SEALED_CHECKPOINT_BYTES = 64 * 1024 * 1024
+A7_MAX_SIGNED_ACK_BYTES = 16 * 1024
+A7_CUTOVER_ROLES = frozenset({"standby_import", "surviving_rekey"})
+A7_ACK_HOPS = frozenset({"standby_to_source", "source_to_entry"})
+A7_RELEASE_REASONS = frozenset({"completed", "cancelled", "failed", "fenced", "fallback", "aborted"})
 
 
 def encode_progressive_prefill(
@@ -135,6 +163,7 @@ def encode_frame(message: object, payload: bytes = b"") -> bytes:
    message_type = type(message).__name__
    if message_type not in _MESSAGE_TYPES:
       raise WireError("unknown_message_type", message_type)
+   _validate_message(message)
    if not isinstance(payload, bytes):
       raise WireError("payload_must_be_bytes")
    if len(payload) > _MAX_PAYLOAD_BYTES:
@@ -242,6 +271,11 @@ def _decode_message(cls, body: dict[str, Any]) -> object:
          )
       if cls is ManifestDelta:
          values["hop"] = _path_hop_from_dict(_required(values, "hop"))
+      if cls is VerifyEvent:
+         decisions = _required(values, "decisions")
+         if not isinstance(decisions, list):
+            raise WireError("invalid_verify_event")
+         values["decisions"] = tuple(decisions)
       return cls(**values)
    except WireError:
       raise
@@ -323,7 +357,94 @@ def _build_from_dict(body: dict[str, Any]) -> PathBuildState:
    )
 
 
+def _a7_text(value: object) -> bool:
+   return isinstance(value, str) and bool(value) and len(value) <= 512 and value == value.strip()
+
+
+def _a7_count(value: object, minimum: int = 0) -> bool:
+   return type(value) is int and value >= minimum
+
+
+def _validate_a7_message(message: object) -> None:
+   valid = True
+   if isinstance(message, KVCheckpointShipment):
+      valid = (
+         _a7_text(message.request_id)
+         and _a7_text(message.path_id)
+         and _a7_count(message.path_attempt)
+         and _a7_text(message.standby_placement_id)
+         and _a7_count(message.checkpoint_sequence)
+         and _a7_count(message.byte_size, 1)
+         and message.byte_size <= A7_MAX_SEALED_CHECKPOINT_BYTES
+      )
+   elif isinstance(message, KVCheckpointAck):
+      valid = (
+         _a7_text(message.request_id)
+         and _a7_text(message.path_id)
+         and _a7_count(message.path_attempt)
+         and message.hop in A7_ACK_HOPS
+         and isinstance(message.signed_ack, str)
+         and 2 <= len(message.signed_ack.encode("utf-8")) <= A7_MAX_SIGNED_ACK_BYTES
+      )
+   elif isinstance(message, KVSuccessorCutover):
+      valid = (
+         _a7_text(message.request_id)
+         and _a7_text(message.old_path_id)
+         and _a7_text(message.successor_path_id)
+         and message.old_path_id != message.successor_path_id
+         and _a7_count(message.old_path_attempt)
+         and _a7_count(message.successor_path_attempt, 1)
+         and message.successor_path_attempt > message.old_path_attempt
+         and _a7_count(message.fencing_generation, 1)
+         and _a7_text(message.placement_id)
+         and message.role in A7_CUTOVER_ROLES
+         and _a7_count(message.expected_next_position, 1)
+         and isinstance(message.lease_expires_at, (int, float))
+         and not isinstance(message.lease_expires_at, bool)
+         and math.isfinite(float(message.lease_expires_at))
+      )
+   elif isinstance(message, KVSuccessorCutoverReceipt):
+      valid = (
+         _a7_text(message.request_id)
+         and _a7_text(message.successor_path_id)
+         and _a7_count(message.successor_path_attempt, 1)
+         and _a7_count(message.fencing_generation, 1)
+         and _a7_text(message.placement_id)
+         and type(message.installed) is bool
+         and _a7_text(message.reason)
+         and isinstance(message.checkpoint_digest, str)
+         and len(message.checkpoint_digest) <= 71
+      )
+   elif isinstance(message, KVCheckpointCommit):
+      valid = (
+         _a7_text(message.request_id)
+         and _a7_text(message.path_id)
+         and _a7_count(message.path_attempt)
+         and _a7_count(message.request_attempt, 1)
+         and _a7_text(message.source_placement_id)
+         and _a7_count(message.committed_token_count, 1)
+         and isinstance(message.committed_prefix_digest, str)
+         and len(message.committed_prefix_digest) == 71
+         and message.committed_prefix_digest.startswith("sha256:")
+      )
+   elif isinstance(message, KVShadowRelease):
+      valid = (
+         _a7_text(message.request_id)
+         and _a7_text(message.path_id)
+         and _a7_count(message.path_attempt)
+         and message.reason in A7_RELEASE_REASONS
+      )
+   if not valid:
+      raise WireError("invalid_wire_field", type(message).__name__)
+
+
 def _validate_message(message: object) -> None:
+   _validate_a7_message(message)
+   if isinstance(message, PathCancellation) and (
+      type(message.path_attempt) is not int
+      or type(message.topology_version) is not int
+   ):
+      raise WireError("invalid_wire_field", "path_cancellation_identity")
    if isinstance(message, ProgressivePrefillMessage):
       header = message.header
       _validate_message(header)
@@ -354,7 +475,16 @@ def _validate_message(message: object) -> None:
          raise WireError("invalid_manifest_locked", error.code) from error
    if isinstance(
       message,
-      (HopHeader, ManifestDelta, ReservationRequest, TokenEvent, PrefillChunkCompleted, FailureReport),
+      (
+         HopHeader,
+         ManifestDelta,
+         PathCancellation,
+         ReservationRequest,
+         TokenEvent,
+         PrefillChunkCompleted,
+         FailureReport,
+         VerifyEvent,
+      ),
    ):
       if not message.request_id or not message.path_id:
          raise WireError("invalid_wire_identity")
@@ -371,6 +501,9 @@ def _validate_message(message: object) -> None:
    elif isinstance(message, ManifestDelta):
       if message.hop_index < 0 or not message.hop.reservation_id:
          raise WireError("invalid_manifest_delta")
+   elif isinstance(message, PathCancellation):
+      if message.topology_version < 0:
+         raise WireError("invalid_path_cancellation")
    elif isinstance(message, ReservationRequest):
       if (
          not message.placement_id
@@ -382,8 +515,22 @@ def _validate_message(message: object) -> None:
    elif isinstance(message, TokenEvent):
       if message.token_index < 0 or message.sampling_counter < 1:
          raise WireError("invalid_token_event")
+   elif isinstance(message, VerifyEvent):
+      decisions = message.decisions
+      if (
+         type(message.token_index) is not int
+         or message.token_index < 1
+         or not isinstance(decisions, tuple)
+         or not 2 <= len(decisions) <= MAX_VERIFY_DECISIONS
+         or any(type(item) is not int or item < 0 for item in decisions)
+      ):
+         raise WireError("invalid_verify_event")
    elif isinstance(message, PrefillChunkCompleted):
-      if message.chunk_index < 1 or message.token_count < 1:
+      # Locked-path stage-local KV starts with chunk zero. Progressive route
+      # discovery starts completion reporting at chunk one because its first
+      # chunk constructs the path, so both protocols require a non-negative
+      # chunk index rather than a one-based index.
+      if message.chunk_index < 0 or message.token_count < 1:
          raise WireError("invalid_prefill_chunk_completed")
    elif isinstance(message, FailureReport):
       if not message.scope or not message.reason:

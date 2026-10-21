@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Phase-aware, latency-first runtime microbatch policy.
 
 The controller is transport-neutral.  It consumes recent directed-link and runtime

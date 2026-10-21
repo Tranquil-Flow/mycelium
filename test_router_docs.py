@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 import json
 import unittest
 from pathlib import Path
@@ -20,8 +21,7 @@ class RouterDocumentationTests(unittest.TestCase):
       text = (
          ROOT
          / "docs"
-         / "plans"
-         / "2026-07-16-request-streaming-session-lifecycle-mvp.md"
+         / "request-streaming-session-lifecycle.md"
       ).read_text()
       for required in (
          "SessionLifecycleManager",

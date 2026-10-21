@@ -1,4 +1,7 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Public composition facade for the standalone Mycelium Router."""
+
+from contextlib import contextmanager
 
 from mycelium_router.entry import EntryCoordinator
 from mycelium_router.relay import RelayEngine
@@ -20,6 +23,7 @@ class Router:
       clock,
       id_source,
       config,
+      kv_lease_seconds=None,
    ):
       scorer = RouteScorer(config)
       policy = RoutePolicy(scorer)
@@ -27,6 +31,7 @@ class Router:
          policy=policy,
          capacity=capacity,
          id_source=id_source,
+         lease_seconds=kv_lease_seconds,
       )
       scheduler = HopScheduler(config)
       relay = RelayEngine(
@@ -52,21 +57,64 @@ class Router:
       )
       self.relay = relay
 
-   def admit(self, request, client_sink, **kwargs):
-      return self.entry.admit(request, client_sink, **kwargs)
+   @contextmanager
+   def _admission(self, request):
+      """Announce an accepted request to the relay until its path is in place.
+
+      A prefill hop queued meanwhile may wait (inside its collection window)
+      for it instead of racing past it; registration or its own hop ends the
+      announcement, and so does a failed or finished start.
+      """
+
+      self.relay.begin_admission(request.request_id)
+      try:
+         yield
+      finally:
+         self.relay.end_admission(request.request_id)
+
+   def current_deployment(self):
+      return self.entry.topology.snapshot()
+
+   def admit(
+      self,
+      request,
+      client_sink,
+      *,
+      pinned_deployment=None,
+      **kwargs,
+   ):
+      with self._admission(request):
+         return self.entry.admit(
+            request,
+            client_sink,
+            pinned_deployment=pinned_deployment,
+            **kwargs,
+         )
 
    def start_distributed_prefill(self, request, client_sink, **kwargs):
-      return self.entry.start_distributed_prefill(
-         request,
-         client_sink,
-         **kwargs,
-      )
+      with self._admission(request):
+         return self.entry.start_distributed_prefill(
+            request,
+            client_sink,
+            **kwargs,
+         )
+
+   def start_locked_distributed_prefill(self, request, client_sink, **kwargs):
+      with self._admission(request):
+         return self.entry.start_locked_distributed_prefill(
+            request,
+            client_sink,
+            **kwargs,
+         )
 
    def request_status(self, request_id):
       return self.entry.request_status(request_id)
 
-   def receive_manifest_locked(self, locked):
-      return self.entry.receive_manifest_locked(locked)
+   def receive_manifest_locked(self, locked, *, source_node_id=None):
+      return self.entry.receive_manifest_locked(
+         locked,
+         source_node_id=source_node_id,
+      )
 
    def get_request(self, request_id):
       return self.entry.get_request(request_id)
@@ -80,20 +128,60 @@ class Router:
    def decode_one_distributed(self, request_id):
       return self.entry.decode_one_distributed(request_id)
 
+   def speculate_one_distributed(self, request_id):
+      return self.entry.speculate_one_distributed(request_id)
+
    def cancel(self, request_id):
       return self.entry.cancel(request_id)
 
-   def register_path(self, request, manifest, graph):
-      return self.relay.register_path(request, manifest, graph)
+   def cancel_local(self, request_id):
+      return self.entry.cancel_local(request_id)
 
-   def receive_hop(self, header, payload):
-      return self.relay.receive_hop(header, payload)
+   def receive_path_cancellation(self, cancellation, *, source_node_id=None):
+      return self.relay.receive_path_cancellation(
+         cancellation,
+         source_node_id=source_node_id,
+      )
 
-   def enqueue_hop(self, header, payload):
-      return self.relay.enqueue_hop(header, payload)
+   def apply_controlled_path_cancellation(self, cancellation):
+      return self.relay.apply_controlled_path_cancellation(cancellation)
+
+   def register_path(
+      self,
+      request,
+      manifest,
+      graph,
+      *,
+      source_node_id=None,
+      entry_node_id=None,
+   ):
+      return self.relay.register_path(
+         request,
+         manifest,
+         graph,
+         source_node_id=source_node_id,
+         entry_node_id=entry_node_id,
+      )
+
+   def receive_hop(self, header, payload, *, source_node_id=None):
+      return self.relay.receive_hop(
+         header,
+         payload,
+         source_node_id=source_node_id,
+      )
+
+   def enqueue_hop(self, header, payload, *, source_node_id=None):
+      return self.relay.enqueue_hop(
+         header,
+         payload,
+         source_node_id=source_node_id,
+      )
 
    def drain_ready_batches(self, **kwargs):
       return self.relay.drain_ready_batches(**kwargs)
+
+   def pump_ready_batches(self, **kwargs):
+      return self.relay.pump_ready_batches(**kwargs)
 
    def update_batch_network_stats(self, placement_id, stats):
       return self.relay.update_batch_network_stats(placement_id, stats)
@@ -113,14 +201,95 @@ class Router:
    def next_batch_deadline(self):
       return self.relay.next_batch_deadline()
 
-   def receive_progressive_prefill(self, header, context):
-      return self.relay.receive_progressive_prefill(header, context)
+   def batch_clock_now(self):
+      return self.relay.clock.now()
 
-   def receive_token_event(self, event):
-      return self.entry.receive_token_event(event)
+   def runtime_batch_cap(self):
+      return self.relay.batch_controller.config.maximum_runtime_batch_size
 
-   def receive_prefill_chunk_completed(self, event):
-      return self.entry.receive_prefill_chunk_completed(event)
+   def hop_collection_window_seconds(self):
+      return self.relay.batch_controller.config.live_hop_collection_window_seconds
 
-   def receive_failure_report(self, report):
-      return self.entry.receive_failure_report(report)
+   def hop_join_partners_due(self):
+      return self.relay.hop_join_partners_due()
+
+   def receive_progressive_prefill(
+      self,
+      header,
+      context,
+      *,
+      source_node_id=None,
+      entry_node_id=None,
+   ):
+      return self.relay.receive_progressive_prefill(
+         header,
+         context,
+         source_node_id=source_node_id,
+         entry_node_id=entry_node_id,
+      )
+
+   def receive_token_event(self, event, *, source_node_id=None):
+      return self.entry.receive_token_event(
+         event,
+         source_node_id=source_node_id,
+      )
+
+   def receive_verify_event(self, event, *, source_node_id=None):
+      return self.entry.receive_verify_event(
+         event,
+         source_node_id=source_node_id,
+      )
+
+   def receive_prefill_chunk_completed(self, event, *, source_node_id=None):
+      return self.entry.receive_prefill_chunk_completed(
+         event,
+         source_node_id=source_node_id,
+      )
+
+   #: The node's A7 successor-recovery agent; ``None`` refuses every A7 message.
+   a7_agent = None
+
+   def receive_kv_checkpoint_shipment(self, shipment, sealed, *, source_node_id=None):
+      agent = self.a7_agent
+      if agent is None:
+         return False
+      return agent.receive_shipment(shipment, sealed, source_node_id=source_node_id)
+
+   def receive_kv_checkpoint_ack(self, ack, *, source_node_id=None):
+      agent = self.a7_agent
+      if agent is None:
+         return False
+      return agent.receive_ack(ack, source_node_id=source_node_id)
+
+   def receive_kv_successor_cutover(self, cutover, *, source_node_id=None):
+      agent = self.a7_agent
+      if agent is None:
+         return False
+      lookup = getattr(self.relay, "entry_node_for_path", None)
+      old_path_id = getattr(cutover, "old_path_id", None)
+      path_entry = lookup(old_path_id) if callable(lookup) and isinstance(old_path_id, str) else None
+      return agent.receive_cutover(cutover, source_node_id=source_node_id, path_entry_node_id=path_entry)
+
+   def receive_kv_successor_cutover_receipt(self, receipt, *, source_node_id=None):
+      agent = self.a7_agent
+      if agent is None:
+         return False
+      return agent.receive_cutover_receipt(receipt, source_node_id=source_node_id)
+
+   def receive_kv_checkpoint_commit(self, commit, *, source_node_id=None):
+      agent = self.a7_agent
+      if agent is None:
+         return False
+      return agent.receive_commit(commit, source_node_id=source_node_id)
+
+   def receive_kv_shadow_release(self, release, *, source_node_id=None):
+      agent = self.a7_agent
+      if agent is None:
+         return False
+      return agent.receive_release(release, source_node_id=source_node_id)
+
+   def receive_failure_report(self, report, *, source_node_id=None):
+      return self.entry.receive_failure_report(
+         report,
+         source_node_id=source_node_id,
+      )

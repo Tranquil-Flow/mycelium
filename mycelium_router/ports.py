@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """External seams for topology, state, capacity, transport, and execution."""
 
 from typing import Protocol
@@ -10,6 +11,7 @@ from mycelium_router.contracts import (
    HopWorkItem,
    ManifestDelta,
    ManifestLocked,
+   PathCancellation,
    PrefillChunkCompleted,
    ReservationCommitResult,
    ReservationRequest,
@@ -40,9 +42,11 @@ class CapacityPort(Protocol):
 
 
 class TransportPort(Protocol):
+   def remember_entry(self, request_id: str, node_id: str) -> None: ...
    def send_hop(self, header: HopHeader, payload: object) -> None: ...
    def send_manifest_delta(self, delta: ManifestDelta) -> None: ...
    def send_manifest_locked(self, locked: ManifestLocked) -> None: ...
+   def send_path_cancellation(self, cancellation: PathCancellation) -> None: ...
    def send_failure_report(self, report: FailureReport) -> None: ...
    def send_token_event(self, event: TokenEvent) -> None: ...
    def send_prefill_chunk_completed(
@@ -52,6 +56,8 @@ class TransportPort(Protocol):
 
 
 class RuntimePort(Protocol):
+   decode_mode: str
+
    def execute(self, item: HopWorkItem) -> RuntimeResult: ...
    def execute_batch(self, batch: RuntimeBatch) -> tuple[RuntimeResult, ...]: ...
    def cancel(self, path_id: str) -> None: ...

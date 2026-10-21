@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Deterministic in-memory collaborators used by Router tests and demos."""
 
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ from mycelium_router.contracts import (
    HopWorkItem,
    ManifestDelta,
    ManifestLocked,
+   PathCancellation,
    PrefillChunkCompleted,
    ProgressivePrefillContext,
    ReservationCommitResult,
@@ -17,6 +19,7 @@ from mycelium_router.contracts import (
    RuntimeBatch,
    RuntimeResult,
    TokenEvent,
+   VerifyEvent,
 )
 
 
@@ -144,12 +147,20 @@ class FakeDeviceStateProvider:
 
 class FakeTransportPort:
    def __init__(self):
+      self.entry_nodes: dict[str, str] = {}
       self.hops: list[tuple[HopHeader, object]] = []
       self.manifest_deltas: list[ManifestDelta] = []
       self.manifest_locks: list[ManifestLocked] = []
+      self.path_cancellations: list[PathCancellation] = []
       self.failure_reports: list[FailureReport] = []
       self.token_events: list[TokenEvent] = []
       self.prefill_chunk_completions: list[PrefillChunkCompleted] = []
+      self.verify_events: list[VerifyEvent] = []
+
+   def remember_entry(self, request_id: str, node_id: str) -> None:
+      existing = self.entry_nodes.setdefault(request_id, node_id)
+      if existing != node_id:
+         raise ValueError("request_entry_conflict")
 
    def send_hop(self, header: HopHeader, payload: object) -> None:
       self.hops.append((header, payload))
@@ -160,11 +171,17 @@ class FakeTransportPort:
    def send_manifest_locked(self, locked: ManifestLocked) -> None:
       self.manifest_locks.append(locked)
 
+   def send_path_cancellation(self, cancellation: PathCancellation) -> None:
+      self.path_cancellations.append(cancellation)
+
    def send_failure_report(self, report: FailureReport) -> None:
       self.failure_reports.append(report)
 
    def send_token_event(self, event: TokenEvent) -> None:
       self.token_events.append(event)
+
+   def send_verify_event(self, event: VerifyEvent) -> None:
+      self.verify_events.append(event)
 
    def send_prefill_chunk_completed(
       self,
@@ -185,6 +202,11 @@ class InProcessMeshTransport:
       self.mesh = mesh
       self.node_id = node_id
 
+   def remember_entry(self, request_id: str, node_id: str) -> None:
+      if node_id != self.node_id:
+         raise ValueError("request_entry_transport_mismatch")
+      self.mesh.remember_entry(request_id, node_id)
+
    def send_hop(self, header: HopHeader, payload: object) -> None:
       self.mesh.send_hop(self.node_id, header, payload)
 
@@ -194,11 +216,17 @@ class InProcessMeshTransport:
    def send_manifest_locked(self, locked: ManifestLocked) -> None:
       self.mesh.send_manifest_locked(self.node_id, locked)
 
+   def send_path_cancellation(self, cancellation: PathCancellation) -> None:
+      self.mesh.send_path_cancellation(self.node_id, cancellation)
+
    def send_failure_report(self, report: FailureReport) -> None:
       self.mesh.send_failure_report(self.node_id, report)
 
    def send_token_event(self, event: TokenEvent) -> None:
       self.mesh.send_token_event(self.node_id, event)
+
+   def send_verify_event(self, event: VerifyEvent) -> None:
+      self.mesh.send_verify_event(self.node_id, event)
 
    def send_prefill_chunk_completed(
       self,
@@ -215,12 +243,15 @@ class InProcessMesh:
       self._transports: dict[str, InProcessMeshTransport] = {}
       self._entry_by_request: dict[str, str] = {}
       self._graph_by_path: dict[str, ExecutionGraph] = {}
+      self._participant_nodes_by_path: dict[str, frozenset[str]] = {}
       self.hop_deliveries: list[InProcessHopDelivery] = []
       self.hop_results: list[object] = []
       self.manifest_deltas: list[tuple[str, ManifestDelta]] = []
       self.manifest_locks: list[tuple[str, ManifestLocked]] = []
+      self.path_cancellations: list[tuple[str, PathCancellation]] = []
       self.failure_reports: list[tuple[str, FailureReport]] = []
       self.token_events: list[tuple[str, TokenEvent]] = []
+      self.verify_events: list[tuple[str, VerifyEvent]] = []
       self.prefill_chunk_completions: list[
          tuple[str, PrefillChunkCompleted]
       ] = []
@@ -241,12 +272,21 @@ class InProcessMesh:
          raise ValueError("duplicate_mesh_node")
       self.routers[node_id] = router
 
+   def remember_entry(self, request_id: str, node_id: str) -> None:
+      if node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_entry:{node_id}")
+      existing = self._entry_by_request.setdefault(request_id, node_id)
+      if existing != node_id:
+         raise ValueError("request_entry_conflict")
+
    def send_hop(
       self,
       source_node_id: str,
       header: HopHeader,
       payload: object,
    ) -> None:
+      if source_node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_source:{source_node_id}")
       if isinstance(payload, ProgressivePrefillContext):
          graph = payload.graph
          self._entry_by_request.setdefault(header.request_id, source_node_id)
@@ -268,9 +308,18 @@ class InProcessMesh:
          )
       )
       if isinstance(payload, ProgressivePrefillContext):
-         result = router.receive_progressive_prefill(header, payload)
+         result = router.receive_progressive_prefill(
+            header,
+            payload,
+            source_node_id=source_node_id,
+            entry_node_id=self._entry_by_request.get(header.request_id),
+         )
       else:
-         result = router.receive_hop(header, payload)
+         result = router.receive_hop(
+            header,
+            payload,
+            source_node_id=source_node_id,
+         )
       self.hop_results.append(result)
 
    def send_manifest_delta(
@@ -285,9 +334,10 @@ class InProcessMesh:
       source_node_id: str,
       locked: ManifestLocked,
    ) -> None:
+      if source_node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_source:{source_node_id}")
       self.manifest_locks.append((source_node_id, locked))
       graph = locked.build.graph
-      self._graph_by_path[locked.path_id] = graph
       placement_map = {
          placement.placement_id: placement
          for stage in graph.stages
@@ -297,59 +347,114 @@ class InProcessMesh:
          placement_map[hop.placement_id].node_id
          for hop in locked.manifest.ordered_hops
       }
-      for node_id in participant_nodes:
-         router = self.routers.get(node_id)
-         if router is None:
-            raise ValueError(f"unknown_mesh_node:{node_id}")
-         router.register_path(
-            locked.build.request,
-            locked.manifest,
-            graph,
-         )
+      self._participant_nodes_by_path[locked.path_id] = frozenset(participant_nodes)
       entry_node_id = self._entry_by_request.get(locked.request_id)
       entry = self.routers.get(entry_node_id) if entry_node_id else None
       if entry is None:
          raise ValueError("unknown_mesh_entry")
-      if not entry.receive_manifest_locked(locked):
+      for node_id in participant_nodes:
+         router = self.routers.get(node_id)
+         if router is None:
+            raise ValueError(f"unknown_mesh_node:{node_id}")
+         accepted = router.register_path(
+            locked.build.request,
+            locked.manifest,
+            graph,
+            source_node_id=(
+               None if source_node_id == entry_node_id else source_node_id
+            ),
+            entry_node_id=entry_node_id,
+         )
+         if not accepted:
+            raise ValueError("manifest_lock_rejected")
+      self._graph_by_path[locked.path_id] = graph
+      if not entry.receive_manifest_locked(
+         locked,
+         source_node_id=source_node_id,
+      ):
          raise ValueError("manifest_lock_rejected")
+
+   def send_path_cancellation(
+      self,
+      source_node_id: str,
+      cancellation: PathCancellation,
+   ) -> None:
+      if source_node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_source:{source_node_id}")
+      entry_node_id = self._entry_by_request.get(cancellation.request_id)
+      if entry_node_id != source_node_id:
+         raise ValueError("path_cancellation_source_not_entry")
+      participant_nodes = self._participant_nodes_by_path.get(cancellation.path_id)
+      if participant_nodes is None:
+         raise ValueError("unknown_mesh_path")
+      self.path_cancellations.append((source_node_id, cancellation))
+      for node_id in sorted(participant_nodes - {source_node_id}):
+         router = self.routers.get(node_id)
+         if router is None:
+            raise ValueError(f"unknown_mesh_node:{node_id}")
+         if not router.receive_path_cancellation(
+            cancellation,
+            source_node_id=source_node_id,
+         ):
+            raise ValueError("path_cancellation_rejected")
 
    def send_failure_report(
       self,
       source_node_id: str,
       report: FailureReport,
    ) -> None:
+      if source_node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_source:{source_node_id}")
       self.failure_reports.append((source_node_id, report))
       entry = self._entry_router(report.request_id)
-      entry.receive_failure_report(report)
+      entry.receive_failure_report(report, source_node_id=source_node_id)
 
    def send_token_event(
       self,
       source_node_id: str,
       event: TokenEvent,
    ) -> None:
+      if source_node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_source:{source_node_id}")
       self.token_events.append((source_node_id, event))
       entry = self._entry_router(event.request_id)
-      entry.receive_token_event(event)
+      entry.receive_token_event(event, source_node_id=source_node_id)
+
+   def send_verify_event(
+      self,
+      source_node_id: str,
+      event: VerifyEvent,
+   ) -> None:
+      if source_node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_source:{source_node_id}")
+      self.verify_events.append((source_node_id, event))
+      entry = self._entry_router(event.request_id)
+      entry.receive_verify_event(event, source_node_id=source_node_id)
 
    def send_prefill_chunk_completed(
       self,
       source_node_id: str,
       event: PrefillChunkCompleted,
    ) -> None:
+      if source_node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_source:{source_node_id}")
       delivery = (source_node_id, event)
       self.prefill_chunk_completions.append(delivery)
       if self.defer_prefill_chunk_completions:
          self.deferred_prefill_chunk_completions.append(delivery)
          return
       entry = self._entry_router(event.request_id)
-      entry.receive_prefill_chunk_completed(event)
+      entry.receive_prefill_chunk_completed(event, source_node_id=source_node_id)
 
    def deliver_next_prefill_chunk_completion(self) -> bool:
       if not self.deferred_prefill_chunk_completions:
          return False
-      _, event = self.deferred_prefill_chunk_completions.pop(0)
+      source_node_id, event = self.deferred_prefill_chunk_completions.pop(0)
       entry = self._entry_router(event.request_id)
-      return entry.receive_prefill_chunk_completed(event)
+      return entry.receive_prefill_chunk_completed(
+         event,
+         source_node_id=source_node_id,
+      )
 
    def _entry_router(self, request_id: str):
       node_id = self._entry_by_request.get(request_id)
