@@ -76,7 +76,7 @@ def test_the_download_card_links_the_served_file_with_its_checksum_and_the_unnot
         browser = p.chromium.launch()
         try:
             page = browser.new_context(accept_downloads=True).new_page()
-            page.goto(origin + '/swarms')
+            page.goto(origin + '/swarms#contributing')
             page.wait_for_selector('body[data-ready="1"]')
             expect(page.locator('#helper-card')).to_have_attribute('data-download-state', 'available')
             expect(page.locator('#download-sha')).to_have_text(SHA)
@@ -97,7 +97,7 @@ def test_a_missing_file_leaves_the_card_on_not_published_yet(tmp_path):
         browser = p.chromium.launch()
         try:
             page = browser.new_context().new_page()
-            page.goto(origin + '/swarms')
+            page.goto(origin + '/swarms#contributing')
             page.wait_for_selector('body[data-ready="1"]')
             expect(page.locator('#helper-card')).to_have_attribute('data-download-state', 'unavailable')
             expect(page.locator('#helper-card')).to_contain_text('not published yet')
@@ -115,6 +115,8 @@ def test_the_root_lands_a_visitor_on_the_swarms_page(tmp_path):
             page.goto(origin + '/')
             page.wait_for_selector('body[data-ready="1"]')
             assert page.url == origin + '/swarms/'
+            expect(page.locator('#panel-browse')).to_be_visible()
+            page.click('#tab-contributing')
             expect(page.locator('#helper-card')).to_be_visible()
             expect(page.locator('#consumer')).to_have_count(0)
             shot(page, '18-root-redirects-to-swarms')

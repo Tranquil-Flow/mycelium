@@ -45,12 +45,12 @@ def test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin(method, pat
         assert not [r for r in directory.requests if r['path'].startswith('/chat')]
 
 
-def test_the_proxy_serves_exactly_the_four_directory_assets_so_the_new_pages_added_no_route():
+def test_the_proxy_serves_exactly_the_five_directory_assets_and_no_inference_route():
     assets = proxy._DIRECTORY_ASSET_PATHS
-    assert assets == {'/swarms', '/swarms/', '/swarms/swarms.js', '/swarms/swarms.css'}
+    assert assets == {'/swarms', '/swarms/', '/swarms/swarms.js', '/swarms/swarms.css', '/swarms/site.css'}
     # every file the directory server serves is one of them, and the web folder holds only those files
     assert set(server.ASSETS) == assets
-    assert sorted(path.name for path in WEB.iterdir()) == ['index.html', 'swarms.css', 'swarms.js']
+    assert sorted(path.name for path in WEB.iterdir()) == ['index.html', 'site.css', 'swarms.css', 'swarms.js']
 
 
 def test_the_directory_server_itself_does_not_answer_chat_paths():

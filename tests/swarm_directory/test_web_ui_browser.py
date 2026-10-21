@@ -56,6 +56,8 @@ def test_browser_create_attach_request_approve_and_chat(stack):
               try { await crypto.subtle.exportKey('pkcs8', id.privateKey); return 'exported'; }
               catch (e) { return id.privateKey.extractable; } }""")
             assert extractable is False
+            owner.goto(url + '#new')
+            owner.select_option('#c-model', 'Qwen/Qwen3-0.6B')
             owner.fill('#c-name', 'Browser swarm')
             owner.click('#create-form button[type=submit]')
             link = owner.wait_for_selector('[data-link]').text_content()
@@ -75,18 +77,19 @@ def test_browser_create_attach_request_approve_and_chat(stack):
             visitor.wait_for_selector('body[data-ready="1"]')
             card = visitor.locator('.swarm', has_text='Browser swarm')
             expect(card.locator('.status')).to_have_text('serving')
-            expect(card).to_contain_text('seen by this swarm')
+            expect(card.locator('.notice-link')).to_have_text('What happens to your prompt')
             visitor_fp = visitor.text_content('#identity').split()[-1]
-            card.locator('input').fill('hello from the test')
             card.locator('button', has_text='Request access').click()
-            expect(card).to_contain_text('Waiting for the owner')
+            visitor.fill('#note', 'hello from the test')
+            visitor.click('#ask')
+            expect(visitor.locator('#gate-copy')).to_contain_text('Waiting for the owner')
 
             owner.click('#refresh')
             owner.click('[data-approve="%s"]' % visitor_fp)
             owner.wait_for_selector('text=granted')
 
             visitor.click('#refresh')
-            card.locator('button', has_text='Chat').click()
+            visitor.click('#consent')
             visitor.fill('#prompt', 'Capital of Germany?')
             visitor.click('#send')
             expect(visitor.locator('.msg.swarm').last).to_have_text('Berlin.', timeout=10000)

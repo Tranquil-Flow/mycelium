@@ -57,6 +57,7 @@ _DIRECTORY_ASSET_PATHS = frozenset(
         _hosted.DIRECTORY_MOUNT_PREFIX + "/",
         _hosted.DIRECTORY_MOUNT_PREFIX + "/swarms.js",
         _hosted.DIRECTORY_MOUNT_PREFIX + "/swarms.css",
+        _hosted.DIRECTORY_MOUNT_PREFIX + "/site.css",
     }
 )
 _DIRECTORY_API_PREFIX = _hosted.DIRECTORY_MOUNT_PREFIX + "/api/v1/"

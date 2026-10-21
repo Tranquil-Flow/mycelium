@@ -12,7 +12,40 @@ const enc = new TextEncoder();
 let me = null;          // {privateKey, publicKey, key: 'ed25519:..', fp}
 let config = null;
 let swarms = [];
-let mine = {grants: [], denied: [], pending: []};
+let mine = {grants: [], denied: [], pending: [], open: {}};
+let pastGrants = {}, localRequests = {};
+const cards = new Map(), liveStates = new Map(), measurements = new Map(), ownerNodes = new Map();
+const consented = new Set(), accessErrors = new Map();
+let filter = 'all', refreshing = false, refreshDelay = 15000, routeName = '', routeId = '';
+let noticeTimer;
+function notify(text) { $('list-state').textContent = text; clearTimeout(noticeTimer); noticeTimer = setTimeout(() => { $('list-state').textContent = ''; }, 7000); }
+function currentSwarm(id) { return swarms.find(s => s.swarm_id === id); }
+function setText(node, text) { if (node && node.textContent !== String(text)) node.textContent = text; }
+function accessLabel(mode) { return {open: 'Open to anyone', request: 'Needs approval', invite: 'Invite only'}[mode] || 'Access unavailable'; }
+function duration(seconds) { if (!Number.isFinite(seconds) || seconds < 0) return '—'; return seconds < 60 ? `${Math.floor(seconds)} s` : seconds < 3600 ? `${Math.floor(seconds / 60)} min` : `${Math.floor(seconds / 3600)} h`; }
+function stat(s, key) {
+  const state = liveStates.get(s.swarm_id), measured = measurements.get(s.swarm_id) || {};
+  if (key === 'status') return s.status;
+  if (key === 'seen') return s.last_seen_seconds === null ? '—' : ago(s.last_seen_seconds);
+  if (s.status === 'offline') return '—';
+  if (key === 'macs') return `${s.members} Macs`;
+  if (key === 'queue') return state ? (state.killed ? 'Stopped' : state.busy ? '1 running' : state.available ? 'Free' : 'Not ready') : '—';
+  if (key === 'uptime') return duration(state?.live?.route?.started_at ? now() - state.live.route.started_at : null);
+  if (key === 'latency') return Number.isFinite(measured.latency) ? `${Math.round(measured.latency)} ms` : '—';
+  if (key === 'speed') return Number.isFinite(measured.speed) ? `${measured.speed.toFixed(1)} tok/s` : '—';
+  return '—';
+}
+async function pollLive(s) {
+  if (!s.entry_origin || s.status === 'offline') { liveStates.delete(s.swarm_id); return; }
+  const start = performance.now();
+  try {
+    const state = await entry(s.entry_origin, 'state', {});
+    liveStates.set(s.swarm_id, state);
+    if (!state.killed && accessErrors.get(s.swarm_id) === 'entry_killed_by_owner') accessErrors.delete(s.swarm_id);
+    measurements.set(s.swarm_id, {...measurements.get(s.swarm_id), latency: performance.now() - start});
+  } catch (_) { liveStates.set(s.swarm_id, null); }
+  updateCard(s); renderDetail(); updateGate();
+}
 let chatTarget = null;  // {swarm, grant}
 let sending = false;
 
@@ -53,7 +86,9 @@ async function kv(mode, fn) {
   const handle = await db();
   return new Promise((resolve, reject) => {
     const tx = handle.transaction('kv', mode); const req = fn(tx.objectStore('kv'));
-    tx.oncomplete = () => resolve(req && req.result); tx.onerror = () => reject(tx.error);
+    tx.oncomplete = () => { handle.close(); resolve(req && req.result); };
+    tx.onerror = () => { handle.close(); reject(tx.error); };
+    tx.onabort = () => { handle.close(); reject(tx.error || new Error('storage_aborted')); };
   });
 }
 async function loadIdentity() {
@@ -87,7 +122,9 @@ async function directory(path, doc) {
   return value;
 }
 async function entry(origin, route, doc) {
+  if (!origin || new URL(origin).origin === location.origin) throw new Error('entry_is_directory');
   const response = await fetch(origin + '/swarm-entry/v1/' + route, {method: 'POST', mode: 'cors', cache: 'no-store',
+    signal: AbortSignal.timeout(12000),
     credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer',
     headers: {'Content-Type': 'application/json'}, body: JSON.stringify(doc)});
   const value = await response.json();
@@ -111,6 +148,7 @@ const MESSAGES = {
   entry_grant_signature_invalid: 'The grant signature is invalid.',
   entry_not_published: 'This Mac is not serving this swarm right now.',
   entry_clock_skew: 'Your computer clock is off by more than two minutes.',
+  entry_is_directory: 'This listing points back to the directory, not a swarm entry. Ask the owner to fix its address.',
   entry_prompt_too_long: 'That prompt is too long (2,000 characters at most).',
   swarm_invite_only: 'This swarm is invite only.',
   entry_killed_by_owner: 'Stopped by the swarm owner (kill switch).',
@@ -140,43 +178,110 @@ function el(tag, attrs, ...children) {
   for (const child of children) if (child !== null && child !== undefined) node.append(child);
   return node;
 }
-function grantFor(swarmId) { return mine.grants.find((g) => g.swarm_id === swarmId) || mine.open[swarmId] || null; }
+function grantFor(swarmId) {
+  if (mine.denied.includes(swarmId) || mine.pending.includes(swarmId)) return null;
+  return mine.grants.find(g => g.swarm_id === swarmId) || mine.open[swarmId] ||
+    (pastGrants[swarmId]?.expires_at <= now() ? pastGrants[swarmId] : null);
+}
 
 function renderSwarm(s) {
-  const grant = grantFor(s.swarm_id);
-  const actions = el('div', {class: 'actions'});
-  const note = el('p', {class: 'meta', 'data-access-note': ''});
-  const usable = s.entry_origin && s.status === 'serving';
-  if (grant && grant.expires_at > now()) {
-    actions.append(el('button', {type: 'button', on: () => openChat(s, grant), ...(usable ? {} : {disabled: ''})}, 'Chat'));
-    note.textContent = `You have access until ${new Date(grant.expires_at * 1000).toLocaleString()} ` +
-      `(${grant.max_requests} requests, ${grant.max_tokens} tokens).`;
-  } else if (s.owner_key === me.key) {
-    note.textContent = 'You own this swarm. Grant yourself access below to chat with it.';
-  } else if (s.access_mode === 'open') {
-    actions.append(el('button', {type: 'button', on: () => getOpenAccess(s), ...(s.entry_origin ? {} : {disabled: ''})}, 'Get open access'));
-    if (s.open_quota) note.textContent = `Automatic access: ${s.open_quota.max_requests} requests, ${s.open_quota.max_tokens} tokens per key.`;
-  } else if (s.access_mode === 'request') {
-    if (mine.denied.includes(s.swarm_id)) note.textContent = 'Not granted: the owner declined your request.';
-    else if (mine.pending.includes(s.swarm_id)) note.textContent = 'Not granted yet. Request sent. Waiting for the owner.';
-    else note.textContent = 'Not granted: ask for access and the owner decides.';
-    const input = el('input', {maxlength: '140', placeholder: 'Optional note to the owner (140 characters)', 'aria-label': 'Note to the owner'});
-    actions.append(input, el('button', {type: 'button', on: () => requestAccess(s, input.value.trim())}, 'Request access'));
-  } else {
-    note.textContent = `Invite only. Not granted: ask the owner (key ${s.owner_fingerprint}) to grant your key ${me.fp}.`;
+  const card = el('article', {class: 'card swarm swarm-card', 'data-swarm': s.swarm_id},
+    el('div', {class: 'row between'}, el('h3', {}, el('a', {href: '#swarm/' + s.swarm_id, 'data-name': ''}, s.name)), el('span', {class: 'status'})),
+    el('p', {class: 'meta'}, el('span', {'data-card-model': ''}), el('span', {class: 'tag', 'data-mode': ''})),
+    el('p', {class: 'desc'}, s.description || 'A model running on Macs people choose to share.'),
+    el('div', {class: 'stats'}, ...[['macs','Macs','Reported by the swarm'], ['queue','Availability','Reported by the swarm'], ['uptime','Run uptime','Start reported by the swarm'], ['latency','Your latency','Measured in your browser']].map(([key,label,source]) =>
+      el('div', {class: 'stat', title: source}, el('div', {class: 'k'}, label), el('div', {class: 'v', 'data-stat': key}, '—')))),
+    el('p', {class: 'card-fresh muted'}, el('span', {'data-card-fresh': ''}), el('span', {'data-card-quota': ''})),
+    el('div', {class: 'foot'}, el('span', {class: 'who'}, 'Owner ', el('span', {class: 'owner-chip', 'data-card-owner': ''})),
+      el('button', {type: 'button', 'data-open-chat': '', on: () => openChat(currentSwarm(s.swarm_id))}, 'Chat')),
+    el('a', {class: 'notice-link', href: '#notice'}, 'What happens to your prompt'));
+  cards.set(s.swarm_id, card);
+  return card;
+}
+function updateCard(s) {
+  const card = cards.get(s.swarm_id); if (!card) return;
+  setText(card.querySelector('[data-name]'), s.name);
+  const status = card.querySelector('.status'); setText(status, s.status); status.className = 'status ' + s.status;
+  setText(card.querySelector('[data-card-model]'), s.served_model || s.model);
+  setText(card.querySelector('[data-mode]'), accessLabel(s.access_mode));
+  setText(card.querySelector('[data-card-owner]'), s.owner_fingerprint);
+  const fresh = freshness(s), node = card.querySelector('[data-card-fresh]');
+  setText(node, fresh.text); node.dataset.seconds = fresh.seconds; node.dataset.stale = fresh.stale;
+  setText(card.querySelector('[data-card-quota]'), s.open_quota ? ` · ${s.open_quota.max_requests} requests/key` : '');
+  for (const node of card.querySelectorAll('[data-stat]')) setText(node, stat(s, node.dataset.stat));
+  card.querySelector('[data-stat=macs]').setAttribute('data-card-members', '');
+  const g = grantFor(s.swarm_id);
+  setText(card.querySelector('[data-open-chat]'), g && g.expires_at > now() ? 'Chat' : s.access_mode === 'open' ? 'Get open access' : 'Request access');
+}
+function renderLists() {
+  for (const node of document.querySelectorAll('.skeleton')) node.remove();
+  const ids = new Set(swarms.map(s => s.swarm_id));
+  for (const [id, card] of cards) if (!ids.has(id)) { card.remove(); cards.delete(id); }
+  const query = $('search').value.trim().toLowerCase(); let visible = 0, offline = 0;
+  for (const s of swarms) {
+    const card = cards.get(s.swarm_id) || renderSwarm(s);
+    const parent = s.status === 'offline' ? $('offline-swarms') : $('swarms');
+    if (card.parentNode !== parent) parent.append(card);
+    updateCard(s);
+    card.hidden = !(s.name + ' ' + s.model).toLowerCase().includes(query) ||
+      (filter === 'serving' && s.status !== 'serving') || (['open','request'].includes(filter) && s.access_mode !== filter);
+    if (!card.hidden) { if (s.status === 'offline') offline++; else visible++; }
   }
-  const live = el('div', {class: 'live'}, el('h4', {}, 'Live status'), el('div', {class: 'live-holder'}, 'Loading…'));
-  loadLive(s, live.querySelector('.live-holder'));
-  const fresh = freshness(s);
-  return el('div', {class: 'swarm', 'data-swarm': s.swarm_id},
-    el('h3', {}, s.name, el('span', {class: 'status ' + s.status}, s.status)),
-    el('p', {class: 'meta'}, 'Model ', el('span', {'data-card-model': ''}, s.served_model || s.model), ' · ',
-      el('span', {'data-card-members': ''}, `${s.members} Mac${s.members === 1 ? '' : 's'}`), ` · access ${s.access_mode} · owner `,
-      el('span', {'data-card-owner': ''}, s.owner_fingerprint), s.entry_fingerprint ? ` · entry ${s.entry_fingerprint}` : ' · no entry Mac yet'),
-    el('p', {class: 'meta'}, el('span', {'data-card-fresh': '', 'data-seconds': String(fresh.seconds), 'data-stale': String(fresh.stale)}, fresh.text),
-      s.open_quota ? el('span', {'data-card-quota': ''}, ` · open quota ${s.open_quota.max_requests} requests, ${s.open_quota.max_tokens} tokens per key`) : null),
-    s.description ? el('p', {}, s.description) : null,
-    el('p', {class: 'privacy'}, s.privacy, ' ', el('a', {class: 'notice-link', href: '#notice'}, 'What happens to your prompt')), note, actions, live);
+  setText($('browse-count'), `${visible} online swarm${visible === 1 ? '' : 's'}`);
+  $('browse-empty').hidden = visible !== 0;
+  setText($('offline-summary'), `Show offline (${offline})`);
+  // Chat rail is keyed, including pending and offline grants so access never disappears without a reason.
+  const chatIds = new Set();
+  for (const s of swarms.filter(s => s.access_mode === 'open' || grantFor(s.swarm_id) || mine.pending.includes(s.swarm_id) || s.owner_key === me?.key || s.swarm_id === routeId)) {
+    chatIds.add(s.swarm_id);
+    let item = $('chat-list').querySelector(`[data-chat-id="${s.swarm_id}"]`);
+    if (!item) { item = el('a', {class: 'chat-item', 'data-chat-id': s.swarm_id, href: '#chat/' + s.swarm_id}, el('div', {class: 'n'}), el('div', {class: 's'})); $('chat-list').append(item); }
+    setText(item.querySelector('.n'), s.name); setText(item.querySelector('.s'), s.status + ' · ' + accessLabel(s.access_mode));
+    item.setAttribute('aria-current', String(routeId === s.swarm_id));
+  }
+  for (const item of $('chat-list').children) if (!chatIds.has(item.dataset.chatId)) item.remove();
+}
+function renderDetail() {
+  if (routeName !== 'swarm') return;
+  const s = currentSwarm(routeId); if (!s) { setText($('detail-name'), 'Swarm not found'); return; }
+  setText($('detail-name'), s.name); setText($('detail-description'), s.description);
+  setText($('detail-owner'), 'Owner key ' + s.owner_fingerprint);
+  setText($('detail-model'), s.model + ' · ' + accessLabel(s.access_mode));
+  $('detail-chat').href = '#chat/' + s.swarm_id;
+  for (const node of $('detail-stats').querySelectorAll('[data-stat]')) setText(node, stat(s, node.dataset.stat));
+  const live = liveStates.get(s.swarm_id);
+  $('detail-live').replaceChildren(live ? renderLive(live) : el('p', {}, 'The entry Mac has not reported live details.'));
+}
+function route() {
+  const parts = location.hash.slice(1).split('/');
+  const name = ['browse','chat','contributing','owned','swarm','new','notice'].includes(parts[0]) ? parts[0] : 'browse';
+  const id = parts[1] || '';
+  if (sending && (name !== 'chat' || id !== routeId)) { notify('Stop the current answer before changing swarms.'); location.hash = 'chat/' + routeId; return; }
+  const changed = name !== routeName || id !== routeId;
+  routeName = name; routeId = id;
+  document.body.dataset.route = name;
+  for (const panel of document.querySelectorAll('main > .panel')) panel.hidden = panel.id !== 'panel-' + name;
+  for (const tab of document.querySelectorAll('[role=tab]')) { const on = tab.id === 'tab-' + name; tab.setAttribute('aria-selected', String(on)); tab.tabIndex = on ? 0 : -1; }
+  for (const tab of document.querySelectorAll('[data-tab]')) { if (tab.dataset.tab === name) tab.setAttribute('aria-current','page'); else tab.removeAttribute('aria-current'); }
+  setText($('page-title'), {browse:'Swarms',chat:'Chat',contributing:'Contributing',owned:'Owned',swarm:'Swarm',new:'Start a swarm',notice:'Privacy'}[name]);
+  $('chat-card').hidden = name !== 'chat' || !id;
+  $('chat-empty').hidden = !!id;
+  if (name === 'chat' && id) {
+    const s = currentSwarm(id);
+    if (s) {
+      if (chatTarget?.swarm.swarm_id !== id) { $('log').replaceChildren(); $('prompt').value = ''; $('note').value = ''; $('cnt').textContent = '0 / 140'; }
+      chatTarget = {swarm:s, grant:grantFor(id)}; updateGate();
+    } else {
+      $('gate').hidden = false;
+      setText($('gate-title'), document.body.dataset.loaded ? 'Swarm not found' : 'Loading swarm…');
+      setText($('gate-copy'), 'Choose a listed swarm from Browse.');
+      for (const id of ['request-fields','consent','self-access','retry-access','copy-request']) $(id).hidden = true;
+      $('prompt').disabled = true; $('send').disabled = true;
+      setText($('composer-reason'), 'No swarm selected');
+    }
+  }
+  renderDetail();
+  if (changed && me) renderLists();
 }
 
 // How old the status is: the directory's own clock at the last signed heartbeat (never the browser's).
@@ -194,17 +299,39 @@ function freshness(s) {
 }
 
 async function refresh() {
+  if (refreshing || !me) return;
+  refreshing = true;
   try {
     const listing = await directory('/swarms');
-    swarms = listing.swarms;
-    try { mine = await directory('/my-grants', await sign({protocol: 'mycelium.swarm.grantee_query.v1', grantee_key: me.key, at: now(), nonce: randomText(18)})); }
-    catch (error) { mine = {grants: [], denied: [], pending: []}; }
-    mine.open = {};
-    for (const [id, g] of Object.entries(await openGrants())) if (g.expires_at > now()) mine.open[id] = g;
-    $('swarms').replaceChildren(...swarms.map(renderSwarm));
-    $('list-state').textContent = swarms.length ? `${swarms.length} swarm${swarms.length === 1 ? '' : 's'} (all visible for this demo).` : 'No swarms yet. Create one below.';
-    renderOwned();
-  } catch (error) { $('list-state').textContent = 'Cannot reach the directory right now (the demo host may be asleep).'; }
+    // Reuse data objects as well as DOM nodes: owner action closures always see the current record revision.
+    const previous = new Map(swarms.map(s => [s.swarm_id,s]));
+    swarms = listing.swarms.map(s => Object.assign(previous.get(s.swarm_id) || {}, s));
+    swarms.sort((a,b) => ({serving:0,warming:1,offline:2}[a.status] - {serving:0,warming:1,offline:2}[b.status]) || a.name.localeCompare(b.name));
+    try { sessionStorage.setItem('swarm-list', JSON.stringify(swarms)); } catch (_) {}
+    try { mine = {...mine, ...await directory('/my-grants', await sign({protocol: 'mycelium.swarm.grantee_query.v1', grantee_key: me.key, at: now(), nonce: randomText(18)}))}; }
+    catch (_) { notify('Access could not be refreshed. Keeping your last known access; the entry checks every prompt.'); }
+    mine.open = await openGrants();
+    pastGrants = await kv('readonly', s => s.get('past-grants')) || {};
+    localRequests = await kv('readonly', s => s.get('pending-requests')) || {};
+    for (const g of mine.grants) {
+      if (pastGrants[g.swarm_id]?.grant_id !== g.grant_id) accessErrors.delete(g.swarm_id);
+      if (g.swarm_id in localRequests && localRequests[g.swarm_id] !== g.grant_id) delete localRequests[g.swarm_id];
+      pastGrants[g.swarm_id] = g;
+    }
+    for (const id of mine.denied) delete localRequests[id];
+    mine.pending = [...new Set([...mine.pending, ...Object.keys(localRequests)])];
+    await kv('readwrite', s => s.put(pastGrants, 'past-grants'));
+    await kv('readwrite', s => s.put(localRequests, 'pending-requests'));
+    renderLists(); route(); updateGate();
+    await Promise.all(swarms.filter(s => s.status !== 'offline').map(pollLive));
+    await renderOwned();
+    document.body.dataset.loaded = '1'; refreshDelay = 15000;
+  } catch (_) { notify('Cannot reach the directory right now. Try Refresh; the host may be asleep.'); refreshDelay = 60000; document.body.dataset.loaded = '1'; }
+  finally { refreshing = false; }
+}
+async function poll() {
+  if (!document.hidden && !document.activeElement?.matches('input, textarea, select')) await refresh();
+  setTimeout(poll, refreshDelay);
 }
 
 // -- helper app download (the Mac that serves or helps a swarm) -------------------------------------
@@ -225,25 +352,33 @@ function renderDownload(download) {
 
 // -- visitor actions -------------------------------------------------------------------
 async function requestAccess(s, note) {
+  $('ask').disabled = true;
   try {
     await directory('/access-requests', await sign({protocol: 'mycelium.swarm.access_request.v1', swarm_id: s.swarm_id,
       requester_key: me.key, note, at: now()}));
-    $('list-state').textContent = `Request sent to ${s.name}. The owner sees your key ${me.fp}.`;
-  } catch (error) { $('list-state').textContent = 'Not sent: ' + say(error.message); }
-  refresh();
+    localRequests[s.swarm_id] = grantFor(s.swarm_id)?.grant_id || null;
+    await kv('readwrite', store => store.put(localRequests, 'pending-requests'));
+    accessErrors.delete(s.swarm_id);
+    mine.denied = mine.denied.filter(id => id !== s.swarm_id);
+    mine.pending = [...new Set([...mine.pending, s.swarm_id])];
+    updateGate();
+  } catch (error) { notify('Not sent: ' + say(error.message)); }
+  finally { $('ask').disabled = false; }
+  await refresh();
 }
 async function getOpenAccess(s) {
   try {
     const value = await entry(s.entry_origin, 'open-grant', await sign({protocol: 'mycelium.swarm.open_grant_request.v1',
       swarm_id: s.swarm_id, key: me.key, at: now(), nonce: randomText(18)}));
-    await saveOpenGrant(value.grant);
-  } catch (error) { $('list-state').textContent = 'No access: ' + say(error.message); }
-  refresh();
+    await saveOpenGrant(value.grant); mine.open[s.swarm_id] = value.grant; accessErrors.delete(s.swarm_id);
+  } catch (error) { accessErrors.set(s.swarm_id, error.message); notify('No access: ' + say(error.message)); }
+  updateGate(); await refresh();
 }
 
 // -- chat (same polling contract and failure codes as the A13 chat page) ------------
 const POLL_MS = 400;  // 150 polls a minute: inside the entry's 240/min per-address limit
-function line(kind, text) { const div = el('div', {class: 'msg ' + kind}, text); $('log').append(div); div.scrollIntoView({block: 'end'}); return div; }
+function followLog(fn) { const log = document.querySelector('.conversation'); const follow = log.scrollHeight - log.clientHeight - log.scrollTop < 70; fn(); if (follow) log.scrollTop = log.scrollHeight; }
+function line(kind, text) { const div = el('div', {class: 'msg ' + kind}, text); followLog(() => $('log').append(div)); return div; }
 // Every end of a prompt is one of these seven; each is named on the page (data-terminal) and never guessed.
 function classify(code, page) {
   if (code === 'entry_killed_by_owner' || (page && page.killed)) return 'killed';
@@ -259,20 +394,66 @@ function terminalLine(kind, code, seconds) {
     cancelled_by_you: 'Cancelled by you. ' + say('cancelled_by_requester'), killed: say('entry_killed_by_owner'), quota: 'Quota used up. ' + say(code), not_granted: 'Not granted. ' + say(code)}[kind];
   return el('div', {class: 'msg terminal', 'data-terminal': kind}, text);
 }
-async function openChat(s, grant) {
-  chatTarget = {swarm: s, grant};
-  $('chat-card').hidden = false; $('log').replaceChildren();
-  $('chat-title').textContent = 'Chat with ' + s.name;
-  $('chat-privacy').textContent = s.privacy;
-  try {
-    const state = await entry(s.entry_origin, 'state', {});
-    $('chat-state').textContent = state.killed ? say('entry_killed_by_owner') :
-      state.available ? `Serving ${state.model_id || ''}${state.busy ? ' · busy' : ' · ready'}` : say(state.warming_up ? 'chat_warming_up' : 'chat_not_ready');
-  } catch (error) { $('chat-state').textContent = say(error.message); }
-  $('chat-card').scrollIntoView();
+async function openChat(s) {
+  if (!s) return;
+  location.hash = 'chat/' + s.swarm_id; route();
+  await pollLive(s); updateGate();
+}
+function accessState(s) {
+  const grant = grantFor(s.swarm_id), state = liveStates.get(s.swarm_id), error = accessErrors.get(s.swarm_id);
+  if (state?.killed || error === 'entry_killed_by_owner') return 'killed';
+  if (s.status === 'offline' || !s.entry_origin || liveStates.has(s.swarm_id) && !state) return 'offline';
+  if (state && !state.available) return state.warming_up ? 'warming' : 'offline';
+  if (error === 'entry_quota_exhausted' || error === 'entry_swarm_daily_cap') return 'quota';
+  if (error === 'entry_grant_expired' || grant && grant.expires_at <= now()) return 'expired';
+  if (error === 'entry_grant_revoked') return 'revoked';
+  if (grant && grant.expires_at > now()) return consented.has(s.swarm_id) ? 'ready' : 'approved';
+  if (mine.pending.includes(s.swarm_id)) return 'pending';
+  if (mine.denied.includes(s.swarm_id)) return 'declined';
+  if (s.owner_key === me.key) return 'owner';
+  return s.access_mode === 'open' ? 'first' : s.access_mode === 'invite' ? 'invite' : 'needs-request';
+}
+function updateGate() {
+  if (routeName !== 'chat' || !routeId) return;
+  const s = currentSwarm(routeId); if (!s) return;
+  const kind = accessState(s), state = liveStates.get(s.swarm_id);
+  chatTarget = {swarm:s, grant:grantFor(s.swarm_id)};
+  const copy = {
+    first: ['Before your first prompt', `Your prompt goes directly to ${s.entry_origin}. Its relay and the swarm’s Macs can read it. The swarm sees your browser key and can link your prompts. Do not type secrets. Open access: ${s.open_quota?.max_requests || 'limited'} requests per key; network and daily limits also apply.`],
+    approved: ['You have access', `Your prompt goes directly to ${s.entry_origin}, never through this directory. The relay and swarm’s Macs can read it; the swarm sees your key and can link your prompts. Do not type secrets.`],
+    'needs-request': ['Ask for access', `Owner ${s.owner_fingerprint} decides. They see your browser key and your optional note. This is not an automatic approval.`],
+    pending: ['Request sent', 'Waiting for the owner. You can close this tab; your pending request survives reload. The owner must open their inbox to answer.'],
+    declined: ['The owner declined your request', 'Ask the owner before trying again. A 24-hour server-enforced cooldown is planned, not available in this release.'],
+    expired: ['Your access expired', 'Ask for a new allowance. Your draft stays here.'],
+    quota: ['Your allowance is used up', 'Ask the owner for new access, or wait until tomorrow for a swarm-wide daily limit.'],
+    revoked: ['Your access was withdrawn', 'The owner revoked your allowance. Ask them for access again.'],
+    invite: ['Invite only', `Ask owner ${s.owner_fingerprint} to grant your full public key from the Mac app. Copy a message below; a fingerprint alone is not enough.`],
+    owner: ['You own this swarm', 'Grant this browser key access before chatting.'],
+    offline: [chatTarget.grant ? 'You have access; the swarm is asleep' : 'This swarm is asleep', !s.entry_origin ? 'The owner has not attached an entry Mac yet. You can still request access below.' : 'The entry Mac is offline or not ready. Your access and draft are kept. Try Refresh, or choose another swarm.'],
+    warming: ['The swarm is warming up', 'Its Macs are preparing the model. Access is kept; try again when the swarm is serving.'],
+    killed: ['Stopped by the owner', 'The owner paused new prompts with the kill switch. Access is kept; only the owner can reopen the swarm.'],
+    ready: ['Ready to chat', 'Your prompt travels directly to this swarm, not through the directory.']
+  }[kind];
+  setText($('chat-title'), 'Chat with ' + s.name); setText($('chat-model'), s.model);
+  setText($('gate-title'), copy[0]); setText($('gate-copy'), copy[1]);
+  $('gate').dataset.state = kind;
+  $('gate').hidden = kind === 'ready';
+  $('request-fields').hidden = !(kind === 'needs-request' || kind === 'declined' || kind === 'offline' && s.access_mode === 'request' && !chatTarget.grant && !mine.pending.includes(s.swarm_id));
+  $('consent').hidden = !['first','approved'].includes(kind);
+  $('self-access').hidden = kind !== 'owner';
+  $('retry-access').hidden = !['expired','quota','revoked'].includes(kind);
+  $('copy-request').hidden = !['pending','invite','declined','quota','expired'].includes(kind);
+  $('prompt').disabled = kind !== 'ready' || sending;
+  $('send').disabled = kind !== 'ready' || sending;
+  $('prompt').placeholder = kind === 'ready' ? 'Ask the swarm…' : copy[0];
+  setText($('composer-reason'), kind === 'ready' ? 'Ready · entry checks your allowance' : copy[0]);
+  if (!sending) setText($('chat-state'), state?.busy ? 'One prompt is running. Yours will wait up to 30 seconds.' : copy[0]);
+  setText($('chat-metrics'), 'Your browser: ' + stat(s,'latency') + ' · ' + stat(s,'speed'));
 }
 let running = null;  // the prompt in flight: {swarm, requestId}, so Stop can name it
+let waitingCancelled = false;
 async function stop() {
+  waitingCancelled = true;
   if (!running) return;
   const {swarm, requestId} = running; $('stop').disabled = true;
   try {
@@ -283,38 +464,59 @@ async function stop() {
 }
 async function send(event) {
   event.preventDefault();
-  const prompt = $('prompt').value.trim(); if (!prompt || sending || !chatTarget) return;
-  sending = true; $('send').disabled = true;
+  const prompt = $('prompt').value.trim(); if (!prompt || sending || !chatTarget || $('prompt').disabled) return;
+  sending = true; $('send').disabled = true; $('prompt').disabled = true;
   line('you', prompt); const answer = line('swarm', '…'); const meta = line('meta', '');
   const {swarm, grant} = chatTarget;
-  let text = ''; let outcome = null;
+  const started = performance.now(); let firstToken = null, tokenCount = 0;
+  let text = '', outcome = null;
+  waitingCancelled = false; $('stop').hidden = false; $('stop').disabled = false; $('send').hidden = true;
   try {
-    const accepted = await entry(swarm.entry_origin, 'send', await sign({protocol: 'mycelium.swarm.entry_send.v1',
-      swarm_id: swarm.swarm_id, key: me.key, grant, prompt, max_new_tokens: Number($('tokens').value) || 128,
-      at: now(), nonce: randomText(18)}));
-    const served = (accepted.served_by || []).map((row) => `${row.label}${row.layers ? ' (layers ' + row.layers.join('-') + ')' : ''}`);
+    let accepted;
+    const deadline = performance.now() + 30000;
+    for (;;) {
+      if (waitingCancelled) throw new Error('cancelled_by_requester');
+      try {
+        accepted = await entry(swarm.entry_origin, 'send', await sign({protocol: 'mycelium.swarm.entry_send.v1',
+          swarm_id: swarm.swarm_id, key: me.key, grant, prompt, max_new_tokens: Number($('tokens').value) || 128,
+          at: now(), nonce: randomText(18)})); break;
+      } catch (error) {
+        if (error.message !== 'chat_busy' || performance.now() >= deadline) throw error;
+        setText($('chat-state'), 'Waiting for your turn (up to 30 seconds)…');
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+    }
+    const served = (accepted.served_by || []).map(row => `${row.label}${row.layers ? ' (layers ' + row.layers.join('-') + ')' : ''}`);
     if (served.length) line('meta', 'Served by: ' + served.join(', '));
     meta.textContent = (accepted.clamped ? `capped at ${accepted.max_new_tokens} tokens · ` : '') +
       `left on your grant: ${accepted.quota.requests_left} requests, ${accepted.quota.tokens_left} tokens`;
-    running = {swarm, requestId: accepted.request_id}; $('stop').disabled = false; $('stop').hidden = false;
-    $('chat-state').textContent = 'Generating… tokens appear as the route makes them.';
-    $('prompt').value = '';
+    running = {swarm, requestId: accepted.request_id};
+    if (waitingCancelled) await stop();
+    $('chat-state').textContent = 'Generating…'; $('prompt').value = '';
     let next = 0;
     for (;;) {
       const page = await entry(swarm.entry_origin, 'events', {request_id: accepted.request_id, after: next});
-      next = page.next; text += page.tokens.join(''); answer.textContent = text || '…';
+      if (page.tokens.length && firstToken === null) firstToken = performance.now();
+      tokenCount += page.tokens.length;
+      next = page.next; text += page.tokens.join(''); followLog(() => { answer.textContent = text || '…'; });
       if (page.done) {
-        if (page.seconds !== null && page.seconds !== undefined) meta.textContent += ` · ${page.seconds} s`;
-        outcome = {kind: classify(page.error, page), code: page.error, seconds: page.seconds};
-        break;
+        const elapsed = (performance.now() - started) / 1000;
+        const speed = tokenCount / elapsed;
+        measurements.set(swarm.swarm_id, {...measurements.get(swarm.swarm_id), speed});
+        meta.textContent += ` · ${speed.toFixed(1)} tok/s · ${tokenCount} tokens · first word ${firstToken === null ? '—' : ((firstToken-started)/1000).toFixed(1) + ' s'} · measured in your browser (includes network and wait)`;
+        outcome = {kind: classify(page.error, page), code: page.error, seconds: page.seconds}; break;
       }
-      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+      await new Promise(resolve => setTimeout(resolve, POLL_MS));
     }
   } catch (error) { outcome = {kind: classify(error.message), code: error.message, seconds: null}; }
   finally {
-    if (!text) answer.textContent = outcome && outcome.kind === 'completed' ? '(empty answer)' : '(no answer)';
-    if (outcome) { $('log').append(terminalLine(outcome.kind, outcome.code, outcome.seconds)); $('chat-state').textContent = 'Done.'; }
-    running = null; $('stop').hidden = true; sending = false; $('send').disabled = false;
+    if (!text) answer.textContent = outcome?.kind === 'completed' ? '(empty answer)' : '(no answer)';
+    if (outcome) {
+      followLog(() => $('log').append(terminalLine(outcome.kind, outcome.code, outcome.seconds)));
+      if (['quota','killed','not_granted'].includes(outcome.kind)) accessErrors.set(swarm.swarm_id, outcome.code);
+    }
+    running = null; $('stop').hidden = true; $('send').hidden = false; sending = false;
+    updateGate(); setText($('chat-state'), outcome?.kind === 'completed' ? 'Answer complete' : 'Answer ended. See the result below.');
   }
 }
 
@@ -322,7 +524,7 @@ async function send(event) {
 function sec(name, available, ...children) {
   return el('div', {class: 'sec', 'data-live': name, 'data-available': String(!!available)}, ...children);
 }
-function unavailable(name, label, reason) { return sec(name, false, el('b', {}, label + ': '), 'Unavailable (' + reason + ')'); }
+function unavailable(name, label, reason) { return sec(name, false, el('b', {}, label + ': '), 'Not reported by the swarm.'); }
 function renderLive(state) {
   const live = state && state.live;
   const box = el('div', {class: 'live-body'});
@@ -352,12 +554,6 @@ function renderLive(state) {
   box.append(sec('sessions', s.available, el('b', {}, 'Concurrent prompts: '), `${s.max_concurrent} (${s.policy})${s.busy ? ' · busy right now' : ''}`));
   return box;
 }
-async function loadLive(s, holder) {
-  if (!s.entry_origin || s.status === 'offline') { holder.replaceChildren(sec('route', false, 'Live status unavailable: no entry Mac is serving this swarm.')); return null; }
-  try { const state = await entry(s.entry_origin, 'state', {}); holder.replaceChildren(renderLive(state)); return state; }
-  catch (error) { holder.replaceChildren(sec('route', false, 'Live status unavailable: ' + say(error.message))); return null; }
-}
-
 // -- owner actions -------------------------------------------------------------------------
 function newSwarmId() {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -376,8 +572,8 @@ async function create(event) {
     open_quota: mode === 'open' ? {max_requests: Number($('c-req').value), max_tokens: Number($('c-tok').value), ttl_seconds: 86400} : null};
   try {
     await directory('/records', await sign(record));
-    $('create-state').textContent = 'Created. Now attach a Mac: see "Swarms you own".';
-    $('create-form').reset(); $('c-model').value = 'Qwen/Qwen3-0.6B';
+    $('create-state').textContent = 'Created. Now attach a Mac in Owned.';
+    $('create-form').reset(); formState(); location.hash = 'owned/' + record.swarm_id;
   } catch (error) { $('create-state').textContent = 'Not created: ' + say(error.message); }
   refresh();
 }
@@ -432,80 +628,92 @@ function ownerUsage(state) {
     el('p', {class: 'meta'}, 'Per-key usage is not shown here: it is counted on the entry Mac and each visitor sees their own remaining quota.'));
 }
 
+function createOwner(s) {
+  const link = swarmLink(s.swarm_id);
+  const box = el('article', {class:'owner-card', 'data-owned':s.swarm_id}, el('h3', {}, s.name),
+    el('p', {'data-step-help':'helper'}, 'Add a helper Mac: install the Mycelium app, choose “Publish this run as a swarm” and paste this link. Then use “Invite a Mac” in the app. Attach the serving Mac below after checking its fingerprint.'),
+    el('img', {class:'qr', width:'180', height:'180', src:`${API}/swarms/${s.swarm_id}/link.svg`, alt:'QR code of the swarm link'}),
+    el('p', {class:'mono link', 'data-link':''}, link));
+  const mode = el('select', {class:'access-mode','aria-label':'Access mode'}, ...[['request','By request'],['open','Open to anyone'],['invite','Invite only']].map(([value,label]) => el('option',{value},label)));
+  mode.value = s.access_mode;
+  mode.addEventListener('change', () => { pendingMode[s.swarm_id] = mode.value; });
+  const saved = el('span',{class:'access-state meta',role:'status'});
+  box.append(el('div',{class:'row'},el('label',{},'Access',mode),el('button',{type:'button',class:'save-access',on:()=>saveAccess(s,mode.value,saved)},'Save access'),saved),
+    el('button',{type:'button',on:async()=>{try {await approve(s,me.key,24,50,10000); await refresh();}catch(e){notify(say(e.message));}}},'Grant myself access (24 h)'),
+    el('button',{type:'button',class:'secondary',on:()=>remove(s).catch(e=>notify(say(e.message)))},'Delete swarm'));
+  const helpers = el('div',{'data-owner-helpers':''}), grants = el('div',{'data-owner-grants':''}), usage = el('div',{'data-owner-usage':''});
+  const killState = el('p',{'data-kill-state':''});
+  const kill = el('button',{type:'button',class:'danger','data-kill':'',disabled:'',on:async()=>{
+    kill.disabled=true;
+    try {await killSwitch(s,!liveStates.get(s.swarm_id)?.killed); await pollLive(s); await renderOwned();}
+    catch(e){notify('Kill switch not changed: '+say(e.message));kill.disabled=false;}
+  }},'Kill switch');
+  const offers = el('div',{'data-offers':''});
+  box.append(el('div',{class:'owner-grid'},
+    el('div',{},el('h4',{},'Helper Macs'),helpers),el('div',{},el('h4',{},'Requests & access'),grants),
+    el('div',{},el('h4',{},'Usage'),usage),el('div',{},el('h4',{},'Emergency stop'),killState,el('p',{class:'meta'},'Engaged: new prompts are refused and running generation stops. Revoke individual grants in the Mac app.'),kill)),offers);
+  ownerNodes.set(s.swarm_id,{box,mode,saved,helpers,grants,usage,killState,kill,offers,requests:new Map(),offersByKey:new Map()});
+  $('owned-list').append(box);
+  return ownerNodes.get(s.swarm_id);
+}
 async function renderOwned() {
-  const owned = swarms.filter((s) => s.owner_key === me.key);
-  $('owned-card').hidden = !owned.length;
-  const blocks = [];
-  for (const s of owned) {
-    const link = swarmLink(s.swarm_id);
-    const box = el('div', {class: 'swarm', 'data-owned': s.swarm_id}, el('h3', {}, s.name, el('span', {class: 'status ' + s.status}, s.status)),
-      el('p', {'data-step-help': 'helper'}, 'Step 2, add a helper Mac: install the Mycelium app (see the download above), choose "Publish this run as a swarm" and paste this link (or scan the QR). ' +
-        'Then use "Invite a Mac" in the app to send the join link to each person who helps, and approve them there. Attach the serving Mac here when its fingerprint appears.'),
-      el('img', {class: 'qr', src: `${API}/swarms/${s.swarm_id}/link.svg`, alt: 'QR code of the swarm link'}),
-      el('p', {class: 'mono link', 'data-link': ''}, link));
-    // step 3: who may use it
-    const mode = el('select', {class: 'access-mode', 'aria-label': 'Access mode'},
-      ...[['request', 'Request access (you approve)'], ['open', 'Open (automatic, with a quota)'], ['invite', 'Invite only']].map(
-        ([value, label]) => el('option', {value, ...(value === (pendingMode[s.swarm_id] || s.access_mode) ? {selected: ''} : {})}, label)));
-    mode.addEventListener('change', () => { pendingMode[s.swarm_id] = mode.value; });
-    const saved = el('span', {class: 'access-state meta', role: 'status'}, accessNotice[s.swarm_id] || '');
-    box.append(el('div', {class: 'row'}, el('label', {}, 'Access', mode),
-      el('button', {type: 'button', class: 'save-access', on: () => saveAccess(s, mode.value, saved)}, 'Save access'), saved));
-    const self = el('button', {type: 'button', on: async () => { await approve(s, me.key, 24, 50, 10000); refresh(); }}, 'Grant myself access (24 h)');
-    box.append(self, el('button', {type: 'button', class: 'secondary', on: () => remove(s)}, 'Delete swarm'));
-    // what the owner can see and do while it runs
-    const helpers = el('div', {'data-owner-helpers': ''}, el('p', {class: 'meta'}, 'Loading helpers…'));
-    const grants = el('div', {'data-owner-grants': ''}, el('p', {class: 'meta'}, 'Loading grants…'));
-    const usage = el('div', {'data-owner-usage': ''}, el('p', {class: 'meta'}, 'Loading usage…'));
-    const killState = el('p', {'data-kill-state': ''}, '…');
-    const kill = el('button', {type: 'button', class: 'danger', 'data-kill': '', disabled: ''}, 'Kill switch');
-    const offers = el('div', {});
-    box.append(el('div', {class: 'owner-grid'},
-      el('div', {}, el('h4', {}, 'Helper Macs'), helpers),
-      el('div', {}, el('h4', {}, 'Grants'), grants),
-      el('div', {}, el('h4', {}, 'Usage'), usage),
-      el('div', {}, el('h4', {}, 'Kill switch'), killState,
-        el('p', {class: 'meta'}, 'Engaged: new prompts and new open grants are refused and any running generation is stopped on the route. Release to reopen. Revoking one grant is done in the Mycelium app on the entry Mac.'), kill)),
-      offers);
-    blocks.push(box);
-    entry(s.entry_origin || 'http://invalid.invalid', 'state', {}).then((state) => {
-      helpers.replaceChildren(ownerHelpers(state)); usage.replaceChildren(ownerUsage(state));
-      killState.textContent = state.killed ? 'Kill switch ENGAGED' : 'Kill switch off'; killState.className = state.killed ? 'on' : '';
-      kill.textContent = state.killed ? 'Release kill switch' : 'Engage kill switch';
-      kill.disabled = false;
-      kill.addEventListener('click', async () => {
-        kill.disabled = true;
-        try { await killSwitch(s, !state.killed); } catch (error) { killState.textContent = 'Kill switch not changed: ' + say(error.message); kill.disabled = false; return; }
-        renderOwned();
-      });
-    }).catch((error) => {
-      const why = s.entry_origin ? say(error.message) : 'no entry Mac is attached yet';
-      for (const node of [helpers, usage]) node.replaceChildren(el('p', {class: 'meta'}, 'Unavailable: ' + why + '.'));
-      killState.textContent = 'Kill switch unavailable: ' + why + '.';
-    });
-    inbox(s).then((value) => {
-      if (s.entry_fingerprint) offers.append(el('p', {class: 'meta', 'data-attached': s.entry_fingerprint},
-        `Attached Mac: fingerprint ${s.entry_fingerprint} at ${s.entry_origin}.`));
-      for (const offer of value.entry_offers) {
-        const attached = s.record.entry && s.record.entry.key === offer.entry_key;
-        offers.append(el('div', {class: 'offer'}, el('p', {}, `Mac offering to serve: fingerprint ${offer.entry_fingerprint} at ${offer.origin}. Check the app shows the same fingerprint.`),
-          attached ? el('p', {class: 'meta'}, 'Attached.') : el('button', {type: 'button', 'data-attach': offer.entry_fingerprint, on: async () => {
-            await resign(s, {entry: {key: offer.entry_key, origin: offer.origin}}); refresh(); }}, 'Attach this Mac')));
+  const owned = swarms.filter(s=>s.owner_key===me.key);
+  $('owned-empty').hidden = !!owned.length;
+  for (const [id,node] of ownerNodes) if (!owned.some(s=>s.swarm_id===id)) {node.box.remove();ownerNodes.delete(id);}
+  let count = 0;
+  await Promise.all(owned.map(async s=>{
+    const n = ownerNodes.get(s.swarm_id) || createOwner(s);
+    const state = liveStates.get(s.swarm_id);
+    if (!(s.swarm_id in pendingMode)) n.mode.value=s.access_mode;
+    setText(n.saved,accessNotice[s.swarm_id]||'');
+    n.helpers.replaceChildren(ownerHelpers(state)); n.usage.replaceChildren(ownerUsage(state));
+    setText(n.killState,state ? state.killed ? 'Kill switch ENGAGED' : 'Kill switch off' : 'Kill switch unavailable: no serving entry Mac.');
+    setText(n.kill,state?.killed?'Release kill switch':'Engage kill switch'); n.kill.disabled=!state;
+    try {
+      const value = await inbox(s);
+      count += value.requests.filter(r=>r.state==='pending').length;
+      if(s.entry_fingerprint) {
+        let attached=n.offers.querySelector('[data-attached]');
+        if(!attached){attached=el('p',{class:'meta','data-attached':s.entry_fingerprint});n.offers.prepend(attached);}
+        attached.dataset.attached=s.entry_fingerprint;setText(attached,'Attached Mac: fingerprint '+s.entry_fingerprint+' at '+s.entry_origin+'.');
       }
-      const rows = [];
-      for (const r of value.requests) {
-        const hours = el('input', {type: 'number', min: '1', max: '720', value: '24', 'aria-label': 'Hours'});
-        const reqs = el('input', {type: 'number', min: '1', max: '10000', value: '20', 'aria-label': 'Requests'});
-        const toks = el('input', {type: 'number', min: '1', max: '1000000', value: '4000', 'aria-label': 'Tokens'});
-        rows.push(el('div', {class: 'request'}, el('p', {}, `Key ${r.requester_fingerprint} · ${r.state}${r.note ? ' · “' + r.note + '”' : ''}`),
-          r.state === 'pending' ? el('div', {class: 'row'}, el('label', {}, 'Hours', hours), el('label', {}, 'Requests', reqs), el('label', {}, 'Tokens', toks),
-            el('button', {type: 'button', 'data-approve': r.requester_fingerprint, on: async () => { await approve(s, r.requester_key, Number(hours.value), Number(reqs.value), Number(toks.value)); refresh(); }}, 'Approve'),
-            el('button', {type: 'button', class: 'secondary', on: async () => { await deny(s, r.requester_key); refresh(); }}, 'Decline')) : null));
+      for(const offer of value.entry_offers){
+        const attached=s.record.entry?.key===offer.entry_key;
+        let row=n.offersByKey.get(offer.entry_key);
+        if(!row){
+          row=el('div',{class:'offer'},el('p',{},`Mac offering to serve: fingerprint ${offer.entry_fingerprint} at ${offer.origin}. Check the app shows the same fingerprint.`),
+            el('button',{type:'button','data-attach':offer.entry_fingerprint,on:async()=>{
+              try{await resign(s,{entry:{key:offer.entry_key,origin:offer.origin}});await refresh();}catch(e){notify(say(e.message));}
+            }},'Attach this Mac'));
+          n.offersByKey.set(offer.entry_key,row);n.offers.append(row);
+        }
+        row.querySelector('button').hidden=attached;
       }
-      grants.replaceChildren(...(rows.length ? rows : [el('p', {class: 'meta'}, 'No grants yet. Open-mode keys get an automatic grant at the entry Mac and are not listed here.')]));
-    }).catch((error) => { grants.replaceChildren(el('p', {class: 'error'}, 'Inbox unavailable: ' + say(error.message))); });
-  }
-  $('owned').replaceChildren(...blocks);
+      if(!value.requests.length && !n.grants.querySelector('.empty')) n.grants.append(el('p',{class:'empty meta'},'No grants yet. Open-mode allowances are issued by the entry Mac and not listed here.'));
+      if(value.requests.length) n.grants.querySelector('.empty')?.remove();
+      const keys=new Set(value.requests.map(r=>r.requester_key));
+      for(const [key,row] of n.requests) if(!keys.has(key)){row.remove();n.requests.delete(key);}
+      for(const r of value.requests){
+        let row=n.requests.get(r.requester_key);
+        if(!row){
+          const hours=el('input',{type:'number',min:'1',max:'720',value:'24','aria-label':'Hours'});
+          const reqs=el('input',{type:'number',min:'1',max:'10000',value:'20','aria-label':'Requests'});
+          const toks=el('input',{type:'number',min:'1',max:'1000000',value:'4000','aria-label':'Tokens'});
+          const actions=el('div',{class:'row'},el('label',{},'Hours',hours),el('label',{},'Requests',reqs),el('label',{},'Tokens',toks));
+          const act=async(action)=>{try{await action();await refresh();}catch(e){notify('Not saved: '+say(e.message));}};
+          actions.append(el('button',{type:'button','data-approve':r.requester_fingerprint,on:()=>act(()=>approve(s,r.requester_key,Number(hours.value),Number(reqs.value),Number(toks.value)))},'Approve'),
+            el('button',{type:'button',class:'secondary',on:()=>act(()=>deny(s,r.requester_key))},'Decline'));
+          row=el('div',{class:'request','data-request':r.requester_fingerprint},el('p',{}),actions);
+          n.requests.set(r.requester_key,row);n.grants.append(row);
+        }
+        setText(row.querySelector('p'),`Key ${r.requester_fingerprint} · ${r.state}${r.note?' · “'+r.note+'”':''}`);
+        row.querySelector('.row').hidden=r.state!=='pending';
+      }
+    }catch(e){notify('Inbox unavailable: '+say(e.message));}
+  }));
+  setText($('owned-count'),count);setText($('mobile-owned-count'),count);
+  $('owned-count').classList.toggle('alert',count>0);$('mobile-owned-count').classList.toggle('alert',count>0);
+  document.title=(count?'('+count+') ':'')+'Mycelium · Swarms';
 }
 
 async function forget() {
@@ -517,23 +725,45 @@ async function forgetNow() {
   location.reload();
 }
 
+function formState() {
+  $('c-quota').hidden = $('c-mode').value !== 'open';
+  $('c-go').disabled = !$('c-name').value.trim() || !$('c-model').value;
+}
 async function main() {
-  if (!window.crypto || !crypto.subtle || !window.indexedDB) { $('identity').textContent = 'This browser lacks WebCrypto/IndexedDB.'; return; }
-  try { await loadIdentity(); } catch (error) {
-    $('identity').textContent = 'This browser cannot create an Ed25519 key (needs a current Chrome, Safari or Firefox).'; return;
-  }
-  $('identity').textContent = 'Fingerprint ' + me.fp;
-  try { config = await directory('/config'); $('demo').textContent = config.demo; $('privacy').textContent = config.privacy; renderDownload(config.download); } catch (error) { config = {directory: location.origin}; renderDownload(null); }
-  $('refresh').addEventListener('click', refresh);
-  $('forget').addEventListener('click', forget);
-  $('forget-no').addEventListener('click', keepKey);
-  $('forget-yes').addEventListener('click', forgetNow);
-  $('create-form').addEventListener('submit', create);
-  $('chat-form').addEventListener('submit', send);
-  $('stop').addEventListener('click', stop);
-  $('chat-close').addEventListener('click', () => { $('chat-card').hidden = true; chatTarget = null; });
-  document.body.dataset.ready = '1';
-  await refresh();
-  setInterval(refresh, 15000);
+  route();
+  window.addEventListener('hashchange', route);
+  $('key-open').onclick=()=>$('identity-card').showModal(); $('key-close').onclick=()=>$('identity-card').close();
+  $('search').addEventListener('input',renderLists);
+  for(const button of document.querySelectorAll('[data-filter]')) button.onclick=()=>{
+    filter=button.dataset.filter; for(const b of document.querySelectorAll('[data-filter]')) b.setAttribute('aria-pressed',String(b===button)); renderLists();
+  };
+  const tabs=[...document.querySelectorAll('[role=tab]')];
+  for(const tab of tabs) tab.onkeydown=e=>{
+    if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;
+    e.preventDefault();let i=tabs.indexOf(tab);
+    i=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
+    location.hash=tabs[i].getAttribute('href');tabs[i].focus({preventScroll:true});
+  };
+  $('create-form').addEventListener('input',formState);$('create-form').addEventListener('change',formState);
+  $('note').oninput=()=>setText($('cnt'),$('note').value.length+' / 140');
+  $('ask').onclick=()=>requestAccess(currentSwarm(routeId),$('note').value.trim());
+  $('consent').onclick=async()=>{const s=currentSwarm(routeId);consented.add(s.swarm_id);if(s.access_mode==='open'&&!grantFor(s.swarm_id))await getOpenAccess(s);updateGate();};
+  $('self-access').onclick=async()=>{try{await approve(currentSwarm(routeId),me.key,24,50,10000);await refresh();}catch(e){notify(say(e.message));}};
+  $('retry-access').onclick=async()=>{const s=currentSwarm(routeId); if(s.access_mode==='open'){consented.add(s.swarm_id);await getOpenAccess(s);}else if(s.access_mode==='request')await requestAccess(s,$('note').value.trim());else notify('Ask the owner for a fresh grant from their Mac app.');};
+  $('copy-request').onclick=async()=>{const s=currentSwarm(routeId);try{await navigator.clipboard.writeText(`Please grant access to ${s.name}. My public key is ${me.key} (fingerprint ${me.fp}). Review your inbox: ${location.origin}/swarms/#owned/${s.swarm_id}`);notify('Message copied. Send it to the owner privately.');}catch(_){notify('Clipboard unavailable. Your public key: '+me.key);}};
+  $('prompt').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('chat-form').requestSubmit();}};
+  if (!window.crypto || !crypto.subtle || !window.indexedDB) { notify('This browser lacks WebCrypto/IndexedDB. Try a current browser.'); return; }
+  try { await loadIdentity(); } catch (_) { notify('This browser cannot create an Ed25519 key. Use a current Chrome, Safari or Firefox.'); return; }
+  $('identity').textContent='Fingerprint '+me.fp; $('key-chip').textContent=me.fp;
+  // Public listing cache only; never persist prompts, drafts, tokens or another person's access.
+  try{const cached=JSON.parse(sessionStorage.getItem('swarm-list')||'[]');if(Array.isArray(cached)){swarms=cached;renderLists();route();}}catch(_){}
+  try { config=await directory('/config'); setText($('demo'),config.demo);setText($('privacy'),config.privacy);renderDownload(config.download); }
+  catch (_) {config={directory:location.origin};renderDownload(null);}
+  $('refresh').addEventListener('click',refresh);
+  $('forget').addEventListener('click',forget);$('forget-no').addEventListener('click',keepKey);$('forget-yes').addEventListener('click',forgetNow);
+  $('create-form').addEventListener('submit',create);$('chat-form').addEventListener('submit',send);$('stop').addEventListener('click',stop);
+  $('chat-close').onclick=()=>{location.hash='chat';};
+  await refresh(); document.body.dataset.ready='1';
+  setTimeout(poll,refreshDelay);
 }
 main();

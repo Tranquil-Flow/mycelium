@@ -13,7 +13,7 @@ from mycelium_swarm_directory.directory import PRIVACY_NOTE
 
 ROOT = Path(__file__).resolve().parents[2]
 PAGE = (ROOT / 'mycelium_swarm_directory' / 'web' / 'index.html').read_text()
-FOOTER = PAGE[PAGE.index('<footer>'):PAGE.index('</footer>')]
+FOOTER = PAGE[PAGE.index('<footer'):PAGE.index('</footer>')]
 OWNER_JS = (ROOT / 'mycelium_a13_macos' / 'web' / 'app.js').read_text()
 
 

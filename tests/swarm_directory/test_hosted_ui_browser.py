@@ -125,10 +125,14 @@ def open_page(browser, stack):
 
 
 def create_swarm(owner, stack, name, mode='open', requests=20, tokens=4000):
+    owner.goto(stack['directory'].origin + '/swarms/#new')
+    owner.wait_for_selector('body[data-ready="1"]')
     owner.fill('#c-name', name)
-    owner.select_option('#c-mode', mode)
+    owner.select_option('#c-model', 'Qwen/Qwen3-0.6B')
+    owner.select_option('#c-mode', 'open')
     owner.fill('#c-req', str(requests))
     owner.fill('#c-tok', str(tokens))
+    owner.select_option('#c-mode', mode)
     owner.click('#create-form button[type=submit]')
     link = owner.wait_for_selector('[data-owned] [data-link]').text_content()
     state = stack['publisher'].publish({'link': link})
@@ -140,9 +144,17 @@ def create_swarm(owner, stack, name, mode='open', requests=20, tokens=4000):
     return state
 
 
+def stack_origin(page):
+    from urllib.parse import urlsplit
+    u = urlsplit(page.url)
+    return u.scheme + '://' + u.netloc
+
+
 def chat(visitor, name, prompt):
-    visitor.click('#refresh')
+    visitor.goto(stack_origin(visitor) + '/swarms/#browse')
+    visitor.wait_for_selector('body[data-ready="1"]')
     visitor.locator('.swarm', has_text=name).locator('button', has_text='Chat').click()
+    if visitor.locator('#consent').is_visible(): visitor.click('#consent')
     visitor.fill('#prompt', prompt)
     visitor.click('#send')
 
@@ -166,7 +178,10 @@ def poll_text(locator, predicate, timeout=10.0):
 def get_open_access(visitor, name):
     card = visitor.locator('.swarm', has_text=name)
     card.locator('button', has_text='Get open access').click()
-    expect(card.locator('button', has_text='Chat')).to_be_visible()
+    visitor.click('#consent')
+    expect(visitor.locator('#prompt')).to_be_enabled()
+    visitor.goto(stack_origin(visitor) + '/swarms/#browse')
+    visitor.wait_for_selector('body[data-ready="1"]')
 
 
 # -- 1. the way in: flow, helper download, honest unavailability ----------------------------------
@@ -176,6 +191,7 @@ def test_flow_and_helper_download_are_unavailable_until_published(stack):
         browser = p.chromium.launch()
         try:
             page = open_page(browser, stack)
+            page.click('#tab-contributing')
             steps = page.locator('#flow li[data-step]')
             assert [steps.nth(i).get_attribute('data-step') for i in range(steps.count())] == ['create', 'helper', 'access', 'run']
             card = page.locator('#helper-card')
@@ -195,6 +211,7 @@ def test_published_download_shows_link_checksum_and_the_unnotarized_warning(tmp_
             browser = p.chromium.launch()
             try:
                 page = open_page(browser, stack)
+                page.click('#tab-contributing')
                 card = page.locator('#helper-card')
                 assert card.get_attribute('data-download-state') == 'available'
                 assert page.locator('#download-link').get_attribute('href') == DOWNLOAD['url']
@@ -226,8 +243,9 @@ def test_owner_changes_access_mode_and_sees_helpers_grants_usage_and_the_kill_sw
 
             visitor = open_page(browser, stack)
             card = visitor.locator('.swarm', has_text='Hosted demo')
-            card.locator('input').fill('please')
             card.locator('button', has_text='Request access').click()
+            visitor.fill('#note', 'please')
+            visitor.click('#ask')
             visitor_fp = visitor.text_content('#identity').split()[-1]
             owner.click('#refresh')
             owner.click('[data-approve="%s"]' % visitor_fp)
@@ -235,14 +253,14 @@ def test_owner_changes_access_mode_and_sees_helpers_grants_usage_and_the_kill_sw
             expect(owner.locator('[data-owned] [data-owner-grants]')).to_contain_text('granted')
 
             # request -> open -> invite, each saved as a new signed record and picked up by the entry
-            for mode, expected in (('open', 'Get open access'), ('invite', 'Invite only')):
+            for mode, expected in (('open', 'Open to anyone'), ('invite', 'Invite only')):
                 owner.select_option('[data-owned] select.access-mode', mode)
                 owner.click('[data-owned] button.save-access')
                 expect(owner.locator('[data-owned] .access-state')).to_contain_text('Saved')
                 stack['publisher'].tick()
                 newcomer = open_page(browser, stack)  # a visitor with no grant sees the new mode
                 expect(newcomer.locator('.swarm', has_text='Hosted demo')).to_contain_text(expected)
-                expect(newcomer.locator('.swarm', has_text='Hosted demo')).to_contain_text('access ' + mode)
+                expect(newcomer.locator('.swarm', has_text='Hosted demo').locator('[data-mode]')).to_have_text(expected)
             shot(newcomer, '04-visitor-invite-only')
         finally:
             browser.close()
@@ -255,7 +273,9 @@ def test_visitor_card_shows_every_live_section_with_unavailable_ones_marked(stac
             owner = open_page(browser, stack)
             create_swarm(owner, stack, 'Hosted demo', 'open')
             visitor = open_page(browser, stack)
-            live = visitor.locator('.swarm', has_text='Hosted demo').locator('.live')
+            visitor.locator('.swarm', has_text='Hosted demo').locator('h3 a').click()
+            visitor.locator('#panel-swarm summary').click()
+            live = visitor.locator('#detail-live')
             expect(live.locator('[data-live="route"]')).to_contain_text('serving')
             expect(live.locator('[data-live="helpers"]')).to_contain_text('MacBook helper')
             expect(live.locator('[data-live="helpers"]')).to_contain_text('withdrawn')
@@ -272,7 +292,7 @@ def test_visitor_card_shows_every_live_section_with_unavailable_ones_marked(stac
             stack['app'].owner_run.status = lambda: dict(RUN_DOC, participants=None)
             visitor.click('#refresh')
             helpers = live.locator('[data-live="helpers"]')
-            expect(helpers).to_contain_text('Unavailable')
+            expect(helpers).to_contain_text('Not reported')
             assert helpers.get_attribute('data-available') == 'false'
         finally:
             browser.close()
@@ -340,12 +360,12 @@ def test_tokens_arrive_progressively_and_the_owner_kill_switch_ends_it_and_cance
             assert Script.instances[-1].cancelled.is_set()  # the backend generation was stopped, not just hidden
             shot(owner, '11-owner-kill-engaged')
 
-            visitor.fill('#prompt', 'after kill')
-            visitor.click('#send')
-            expect(visitor.locator('.msg.terminal[data-terminal="killed"]')).to_have_count(2, timeout=10000)
+            expect(visitor.locator('#prompt')).to_be_disabled()
+            expect(visitor.locator('#gate-title')).to_have_text('Stopped by the owner')
 
             owner.click('[data-owned] button[data-kill]')
             expect(owner.locator('[data-owned] [data-kill-state]')).to_have_text('Kill switch off')
+            visitor.click('#refresh')
             visitor.fill('#prompt', 'back again')
             visitor.click('#send')
             expect(terminal(visitor, 'completed')).to_be_visible()
@@ -362,6 +382,7 @@ def test_a_visitor_can_stop_their_own_prompt_and_is_told_it_was_cancelled_by_the
             visitor = open_page(browser, stack)
             get_open_access(visitor, 'Hosted demo')
             visitor.locator('.swarm', has_text='Hosted demo').locator('button', has_text='Chat').click()
+            visitor.click('#consent')
             expect(visitor.locator('#stop')).to_be_hidden()  # nothing to stop yet
 
             visitor.fill('#prompt', 'slow story')
@@ -417,7 +438,9 @@ def test_a_request_mode_visitor_without_a_grant_is_told_it_is_not_granted(stack)
             visitor = open_page(browser, stack)
             card = visitor.locator('.swarm', has_text='Hosted demo')
             assert card.locator('button', has_text='Chat').count() == 0
-            expect(card.locator('[data-access-note]')).to_contain_text('Not granted')
+            card.locator('button', has_text='Request access').click()
+            expect(visitor.locator('#gate-title')).to_have_text('Ask for access')
+            expect(visitor.locator('#prompt')).to_be_disabled()
             shot(visitor, '13-visitor-not-granted')
         finally:
             browser.close()

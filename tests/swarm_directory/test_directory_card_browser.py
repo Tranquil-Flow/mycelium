@@ -93,6 +93,7 @@ def test_a_card_shows_model_members_status_and_how_fresh_that_status_is(world):
             expect(fresh.locator('[data-card-quota]')).to_contain_text('20 requests')
 
             stale = card(page, 'Sleepy swarm')
+            page.locator('#offline-fold summary').click()
             expect(stale.locator('.status')).to_have_text('offline')
             expect(stale.locator('[data-card-fresh]')).to_have_text('last seen 5 min ago')
             expect(stale.locator('[data-card-fresh]')).to_have_attribute('data-stale', 'true')
@@ -100,7 +101,7 @@ def test_a_card_shows_model_members_status_and_how_fresh_that_status_is(world):
 
             silent = card(page, 'Brand new')
             expect(silent.locator('[data-card-fresh]')).to_have_text('no status report yet')
-            expect(silent.locator('[data-card-members]')).to_have_text('0 Macs')
+            expect(silent.locator('[data-card-members]')).to_have_text('—')  # no stale numbers presented as live
             shot(page, '23-directory-cards')
         finally:
             browser.close()
@@ -117,13 +118,13 @@ def test_every_card_links_the_same_short_notice(world):
             links = page.locator('.swarm a.notice-link')
             assert links.count() == 3
             assert {links.nth(i).get_attribute('href') for i in range(3)} == {'#notice'}
-            expect(page.locator('#notice')).to_contain_text('volunteer Macs')
-            expect(page.locator('#notice')).to_contain_text('relay')
-            expect(page.locator('#notice')).to_contain_text('not stored')
-            expect(page.locator('#notice')).to_contain_text('quota')
+            expect(page.locator('#privacy-notice')).to_contain_text('volunteer Macs')
+            expect(page.locator('#privacy-notice')).to_contain_text('relay')
+            expect(page.locator('#privacy-notice')).to_contain_text('not stored')
+            expect(page.locator('#privacy-notice')).to_contain_text('quota')
             links.first.click()
             assert page.url.endswith('#notice')
-            expect(page.locator('#notice')).to_be_in_viewport()
+            expect(page.locator('#privacy-notice')).to_be_in_viewport()
             shot(page, '24-directory-notice')
         finally:
             browser.close()
@@ -139,6 +140,7 @@ def test_forget_this_key_asks_first_and_says_what_it_resets(world):
             page.wait_for_selector('body[data-ready="1"]')
             before = page.text_content('#identity')
             expect(page.locator('#forget-confirm')).to_be_hidden()
+            if not page.locator('#identity-card').is_visible(): page.click('#key-open')
             page.click('#forget')
             expect(page.locator('#forget-confirm')).to_be_visible()
             for fact in ('quota', 'network address', 'swarms you own', 'new key'):
@@ -147,6 +149,7 @@ def test_forget_this_key_asks_first_and_says_what_it_resets(world):
             page.click('#forget-no')
             expect(page.locator('#forget-confirm')).to_be_hidden()
             assert page.text_content('#identity') == before  # cancelled: same key
+            if not page.locator('#identity-card').is_visible(): page.click('#key-open')
             page.click('#forget')
             with page.expect_navigation():
                 page.click('#forget-yes')
@@ -174,6 +177,7 @@ def test_the_page_sets_no_cookie_loads_nothing_third_party_and_keeps_its_csp(wor
             page.goto(origin + '/swarms')
             page.wait_for_selector('body[data-ready="1"]')
             page.click('.swarm a.notice-link')
+            if not page.locator('#identity-card').is_visible(): page.click('#key-open')
             page.click('#forget')
             assert context.cookies() == []
             allowed = (origin + '/', world['entry'].origin + '/')  # the directory itself and the listed swarms' entries
