@@ -51,6 +51,12 @@ from mycelium_router.leases import (
    renew_kv_lease,
    validated_renewal_source,
 )
+from mycelium_router.prefix_cache import (
+   PrefixCacheConfig,
+   route_scope_digest,
+   stage_scope_digest,
+)
+from mycelium_router.prefix_runtime import PrefixRuntimeSupport, PrefixSeedError
 from mycelium_router.payloads import (
    PayloadError,
    decode_activation,
@@ -191,6 +197,23 @@ class _KVState:
    # Local progress renewal of the KV deadline (``mycelium_router.leases``);
    # ``lease_expires_at`` stays the manifest-bound value every item must carry.
    lease_renewed_until: float = float("-inf")
+   # PV20 prefix cache (empty / 0 unless a plan rode on the starting item).
+   prefix_chain: tuple[str, ...] = ()
+   prefix_stored_blocks: int = 0
+   prefix_reused_tokens: int = 0
+
+
+def _prefix_slice_block(array: mx.array, start: int, end: int) -> mx.array:
+   # Materialise a detached copy so a stored block owns exactly its bytes.
+   block = mx.contiguous(array[:, :, start:end, :])
+   mx.eval(block)
+   return block
+
+
+def _prefix_concat_blocks(blocks: Any) -> mx.array:
+   joined = mx.concatenate(list(blocks), axis=2)
+   mx.eval(joined)
+   return joined
 
 
 @dataclass(frozen=True)
@@ -1009,6 +1032,7 @@ class MLXRuntimePort:
       kv_lease_renewal_seconds: float | Callable[[], float] | None = (
          DEFAULT_KV_LEASE_RENEWAL_SECONDS
       ),
+      prefix_cache: PrefixCacheConfig | None = None,
    ):
       if not isinstance(node_id, str) or not node_id or node_id != node_id.strip():
          _reject("invalid_runtime_node_id")
@@ -1173,6 +1197,46 @@ class MLXRuntimePort:
       self._offered_members: dict[str, _OfferedMember] = {}
       self._offered_lock = RLock()
       self._observations: list[RuntimeBatchObservation] = []
+      # PV20: off unless enabled; only dense-attention KV is position-sliceable, and
+      # never on standby ports or in replay mode.
+      self._prefix: PrefixRuntimeSupport | None = None
+      if (
+         prefix_cache is not None
+         and prefix_cache.enabled
+         and decode_mode == "stage_local_kv"
+         and not standby_port
+         and self._architecture in {"qwen2", "qwen3"}
+      ):
+         self._prefix = PrefixRuntimeSupport(
+            prefix_cache,
+            clock=self._clock,
+            slice_block=_prefix_slice_block,
+            concat_blocks=_prefix_concat_blocks,
+            array_nbytes=lambda array: int(array.nbytes),
+         )
+         route_scope = route_scope_digest(graph)
+         for bound_id, (b_stage, b_placement, _b_loaded, b_runtime) in bound.items():
+            self._prefix.register_scope(
+               bound_id,
+               stage_scope_digest(
+                  route_scope,
+                  stage_signature=b_placement.stage_signature,
+                  assignment_id=b_placement.assignment_id,
+                  load_proof_digest=b_placement.load_proof_digest,
+                  runtime_backend=b_placement.runtime_backend,
+                  layer_range=(
+                     b_stage.layer_range.start_layer,
+                     b_stage.layer_range.end_layer_exclusive,
+                  ),
+                  runtime_identity={
+                     "backend": b_runtime["backend"],
+                     "dtype": b_runtime["dtype"],
+                     "quantization": b_runtime["quantization"],
+                     "architecture": b_runtime["architecture"],
+                     "int8_execution": self.int8_execution,
+                  },
+               ),
+            )
 
    @staticmethod
    def _validate_graph_stage_roles(graph: ExecutionGraph) -> None:
@@ -1602,6 +1666,48 @@ class MLXRuntimePort:
 
       self._discard_retained(self._retention().hold(path_id, state, now=float(self._clock())))
 
+   # -- PV20 prefix cache ------------------------------------------------------
+
+   @property
+   def prefix_cache_enabled(self) -> bool:
+      return self._prefix is not None
+
+   def prefix_pin(self, placement_id: str, chain: Any, owner: str) -> int:
+      """Planner probe: pin and report the leading blocks of ``chain`` this placement holds."""
+
+      return 0 if self._prefix is None else self._prefix.pin(placement_id, chain, owner)
+
+   def prefix_settle(self, placement_id: str, owner: str, keep_blocks: int) -> None:
+      if self._prefix is not None:
+         self._prefix.settle(placement_id, owner, keep_blocks)
+
+   def clear_prefix_cache(self, reason: str = "model_unload") -> int:
+      """Drop every cached block (weight unload, route teardown)."""
+
+      return 0 if self._prefix is None else self._prefix.clear(reason)
+
+   def set_prefix_cache_budget(self, max_bytes: int) -> None:
+      """Memory pressure / sharing-budget change: shrink the cap now, evicting first."""
+
+      if self._prefix is not None:
+         self._prefix.set_budget(max_bytes)
+
+   def _prefix_store(self, state: _KVState) -> None:
+      prefix = self._prefix
+      if (
+         prefix is None
+         or not state.prefix_chain
+         or state.prefix_stored_blocks >= len(state.prefix_chain)
+      ):
+         return
+      state.prefix_stored_blocks = prefix.store_new_blocks(
+         state.placement_id,
+         state.prefix_chain,
+         state.prefix_stored_blocks,
+         state.layers,
+         state.next_position,
+      )
+
    def _release_state(self, path_id: str, reason: str) -> bool:
       held = self._retention().drop(path_id)
       if held is not None:
@@ -1668,6 +1774,8 @@ class MLXRuntimePort:
             [(path_id, state, reason) for path_id, state in self._retention().clear()]
          )
          self._replays.clear()
+         if self._prefix is not None:
+            self._prefix.clear(reason)
          self._closed = True
 
    @staticmethod
@@ -1799,6 +1907,11 @@ class MLXRuntimePort:
                "cached_context_tokens": state.cached_context_tokens,
                "layer_count": len(state.layers),
                "kv_bytes": self._kv_bytes(state),
+               **(
+                  {"prefix_reused_tokens": state.prefix_reused_tokens}
+                  if self._prefix is not None
+                  else {}
+               ),
             }
             for path_id, state in sorted(self._kv_states.items())
          }
@@ -1850,6 +1963,11 @@ class MLXRuntimePort:
             **(
                {"terminal_kv_retention": self._retention().snapshot(self._kv_bytes)}
                if self._retention().enabled
+               else {}
+            ),
+            **(
+               {"prefix_cache": self._prefix.snapshot()}
+               if self._prefix is not None
                else {}
             ),
          }
@@ -2628,7 +2746,8 @@ class MLXRuntimePort:
             _reject("kv_recovery_sequence_mismatch")
          if item.phase == "PREFILL_CHUNK" and item.token_index != 0:
             _reject("kv_prefill_chunk_sequence_mismatch")
-         if item.position != 0:
+         reuse_tokens = item.prefix_reuse_tokens
+         if item.position != reuse_tokens:
             _reject("kv_position_mismatch")
          if item.path_id in self._kv_states:
             _reject("kv_state_already_exists")
@@ -2640,6 +2759,22 @@ class MLXRuntimePort:
          if float(self._clock()) >= float(item.lease_expires_at):
             self._released_paths.setdefault(item.path_id, "lease_expired")
             _reject("kv_lease_expired")
+         seeded_layers: dict[int, tuple[mx.array, mx.array]] = {}
+         if reuse_tokens:
+            if self._prefix is None:
+               _reject("prefix_cache_disabled")
+            if item.phase == "RECOVERY_PREFILL":
+               _reject("prefix_plan_invalid")
+            try:
+               seeded_layers = self._prefix.seed(
+                  item.placement_id,
+                  item.request_id,
+                  reuse_tokens,
+                  item.prefix_chain,
+                  item.position,
+               )
+            except PrefixSeedError as error:
+               _reject(error.code)
          output, layers = self._execute_stage_with_kv(
             stage=stage,
             loaded=loaded,
@@ -2647,7 +2782,7 @@ class MLXRuntimePort:
             token_ids=token_ids,
             hidden_states=hidden_states,
             position=item.position,
-            past_layers={},
+            past_layers=seeded_layers,
             path_id=item.path_id,
             produce_logits=produce_token,
          )
@@ -2666,14 +2801,25 @@ class MLXRuntimePort:
             manifest_digest=self.graph.manifest_digest,
             deployment_epoch=self.graph.deployment_epoch,
             lease_expires_at=float(item.lease_expires_at),
-            next_position=sequence,
+            next_position=item.position + sequence,
             next_sequence=(
                item.token_index + 1
                if item.phase == "RECOVERY_PREFILL"
                else 1
             ),
-            cached_context_tokens=sequence,
+            cached_context_tokens=item.position + sequence,
             layers=layers,
+            prefix_chain=(
+               tuple(item.prefix_chain)
+               if self._prefix is not None and item.phase != "RECOVERY_PREFILL"
+               else ()
+            ),
+            prefix_stored_blocks=(
+               reuse_tokens // self._prefix.config.block_tokens
+               if self._prefix is not None and reuse_tokens
+               else 0
+            ),
+            prefix_reused_tokens=reuse_tokens,
          )
          self._kv_states[item.path_id] = state
          with self._resource_index_lock:
@@ -2769,6 +2915,7 @@ class MLXRuntimePort:
          # its KV alive one more bounded window (abandoned work still expires).
          renew_kv_lease(state, now=float(self._clock()), source=self._kv_lease_renewal)
          self._update_kv_watermark()
+      self._prefix_store(state)
 
       self._applied_operation_count += 1
       phase_counter = (

@@ -106,6 +106,17 @@ class Router:
             **kwargs,
          )
 
+   def prefix_reused_tokens(self, request_id):
+      return self.entry.prefix_reused_tokens(request_id)
+
+   @property
+   def prefix_planner(self):
+      return self.entry.prefix_planner
+
+   @prefix_planner.setter
+   def prefix_planner(self, planner):
+      self.entry.prefix_planner = planner
+
    def request_status(self, request_id):
       return self.entry.request_status(request_id)
 

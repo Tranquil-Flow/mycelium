@@ -884,15 +884,35 @@ class RelayEngine:
          return tuple(self._runtime_unavailable() for _ in batch.items)
 
    def _kv_position(self, request: RequestContext, phase: str, token_index: int) -> int:
-      if phase in {"PREFILL", "RECOVERY_PREFILL"}:
+      # PV20: a planned prefix hit means the stages already hold the KV of the first
+      # ``prefix_reuse_tokens`` prompt tokens, so prefill starts at that position.
+      reuse = request.prefix_reuse_tokens
+      if phase == "PREFILL":
+         return reuse
+      if phase == "RECOVERY_PREFILL":
          return 0
       if phase == "PREFILL_CHUNK":
          size = self.scheduler.config.prefill_chunk_size_tokens
-         return 0 if size <= 0 else token_index * size
+         return reuse if size <= 0 else reuse + token_index * size
       if phase in {"DECODE", "VERIFY"}:
          # A11 VERIFY feeds the pending token first, at the DECODE position.
          return len(request.prompt_token_ids) + token_index - 1
       return 0
+
+   @staticmethod
+   def _prefix_plan_fields(
+      request: RequestContext, phase: str, token_index: int
+   ) -> dict[str, object]:
+      """PV20: the prefix plan rides only on the item that starts a stage's KV."""
+
+      if (phase == "PREFILL" and token_index == -1) or (
+         phase == "PREFILL_CHUNK" and token_index == 0
+      ):
+         return {
+            "prefix_reuse_tokens": request.prefix_reuse_tokens,
+            "prefix_chain": request.prefix_chain,
+         }
+      return {}
 
    def _verify_span_admissible(self, header: HopHeader) -> bool:
       """A VERIFY carries its span (pending + candidates) in the chunk-count field."""
@@ -1770,6 +1790,7 @@ class RelayEngine:
             header.prefill_chunk_token_count,
          ),
          lease_expires_at=hop.reservation_expires_at,
+         **self._prefix_plan_fields(request, header.phase, header.token_index),
          batch_key=self._runtime_batch_key(
             graph=graph,
             placement=placement,
@@ -2134,6 +2155,7 @@ class RelayEngine:
             header.prefill_chunk_token_count,
          ),
          lease_expires_at=hop.reservation_expires_at,
+         **self._prefix_plan_fields(request, header.phase, header.token_index),
          batch_key=self._runtime_batch_key(
             graph=graph,
             placement=placement,
@@ -2849,6 +2871,7 @@ class RelayEngine:
             position=self._kv_position(request, phase, token_index),
             terminal=self._is_terminal(request, phase, token_index),
             lease_expires_at=hop.reservation_expires_at,
+            **self._prefix_plan_fields(request, phase, token_index),
             batch_key=self._runtime_batch_key(
                graph=graph,
                placement=placement_map[hop.placement_id],

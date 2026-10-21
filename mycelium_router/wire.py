@@ -141,7 +141,7 @@ def _encode_message_body(message: object) -> dict[str, Any]:
       return {
          "header": asdict(message.header),
          "graph": execution_graph_to_dict(message.graph),
-         "request": asdict(message.request),
+         "request": _request_to_dict(message.request),
          "ordered_hops": [asdict(hop) for hop in message.ordered_hops],
          "excluded_placements": sorted(message.excluded_placements),
          "excluded_edges": sorted(message.excluded_edges),
@@ -299,11 +299,30 @@ def _hop_header_from_dict(body: dict[str, Any]) -> HopHeader:
    return HopHeader(**body)
 
 
+def _request_to_dict(request: RequestContext) -> dict[str, Any]:
+   """``asdict`` minus the PV20 prefix plan when it is the cold default (wire stays byte-identical)."""
+
+   body = asdict(request)
+   if not request.prefix_reuse_tokens and not request.prefix_chain:
+      body.pop("prefix_reuse_tokens", None)
+      body.pop("prefix_chain", None)
+   return body
+
+
 def _request_from_dict(body: dict[str, Any]) -> RequestContext:
    if not isinstance(body, dict):
       raise WireError("invalid_wire_field", "request")
    values = dict(body)
    values["prompt_token_ids"] = tuple(_required(values, "prompt_token_ids"))
+   if "prefix_chain" in values:
+      chain = values["prefix_chain"]
+      if not isinstance(chain, list) or not all(isinstance(d, str) for d in chain):
+         raise WireError("invalid_wire_field", "prefix_chain")
+      values["prefix_chain"] = tuple(chain)
+   if "prefix_reuse_tokens" in values and (
+      type(values["prefix_reuse_tokens"]) is not int or values["prefix_reuse_tokens"] < 0
+   ):
+      raise WireError("invalid_wire_field", "prefix_reuse_tokens")
    return RequestContext(**values)
 
 
@@ -325,7 +344,7 @@ def _manifest_from_dict(body: dict[str, Any]) -> PathManifest:
 
 def _build_to_dict(build: PathBuildState) -> dict[str, Any]:
    return {
-      "request": asdict(build.request),
+      "request": _request_to_dict(build.request),
       "graph": execution_graph_to_dict(build.graph),
       "path_id": build.path_id,
       "path_attempt": build.path_attempt,
