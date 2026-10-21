@@ -155,10 +155,12 @@ def test_apex_real_counts_delayed_and_unavailable_without_identity(local, monkey
         browser.close()
 
 
-def test_owner_undo_cancels_write_and_reload_cancels_hold(local):
+@pytest.mark.parametrize('width,height', [(1440,900),(390,844)])
+@pytest.mark.parametrize('theme',['dark','light'])
+def test_owner_undo_cancels_write_and_reload_cancels_hold(local, width, height, theme):
     with sync_playwright() as p:
         browser=p.chromium.launch()
-        owner=page_for(browser,local,'#new')
+        owner=page_for(browser,local,'#new',viewport={'width':width,'height':height},color_scheme=theme)
         create_swarm(owner,local,'Undo room','request')
         sid=owner.locator('[data-owned]').first.get_attribute('data-owned')
         visitor=page_for(browser,local,'#chat/'+sid)
@@ -171,11 +173,14 @@ def test_owner_undo_cancels_write_and_reload_cancels_hold(local):
         for label in ('Approve','Decline'):
             row.get_by_role('button',name=label,exact=True).click()
             expect(row.locator('[data-undo]')).to_be_visible()
+            expect(row.locator('[data-approve]')).to_be_hidden(timeout=1000)  # no partial Approve label behind Undo
             expect(row.locator('[data-decision]')).to_contain_text('in 5 seconds')
+            assert row.locator('[data-decision]').evaluate("e=>{const r=e.getBoundingClientRect(),p=e.closest('.owner-grid > div').getBoundingClientRect();return r.top>=p.top&&r.bottom<=p.bottom}"), 'held-decision explanation is clipped by its panel'
             if os.environ.get('SITEB_SHOTS'):
                 out=Path(os.environ['SITEB_SHOTS']);out.mkdir(parents=True,exist_ok=True)
-                owner.screenshot(path=str(out/f'owner-held-{label.lower()}.png'),full_page=True)
+                owner.screenshot(path=str(out/f'owner-held-{label.lower()}-{width}-{theme}.png'),full_page=True)
             row.locator('[data-undo]').click()
+            expect(row.locator('[data-approve]')).to_be_visible()
             owner.wait_for_timeout(5200)
             assert writes == []
             visitor.click('#refresh');expect(visitor.locator('#gate')).to_have_attribute('data-state','pending')

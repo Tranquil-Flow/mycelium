@@ -65,6 +65,7 @@ label{display:block;color:var(--muted);font-size:14px}
 .request .row label{width:105px}
 .request .row{align-items:end}
 .decision-buttons{position:relative}
+.request[data-holding="1"] [data-approve]{visibility:hidden}
 [data-undo]{visibility:hidden;position:absolute;left:0;top:0;z-index:1}
 .decision-slot{min-height:90px;display:flex;align-items:center;gap:8px}.decision-slot span{flex:1;font-size:13px}.decision-slot button{flex:none}
 .sec{font-size:14px;margin:12px 0}
@@ -112,7 +113,8 @@ dialog button{margin:4px}
 @media(max-width:900px){.owner-grid{grid-template-columns:1fr}
 }
 
-@media(max-width:640px){.preview,.keychip .lbl{display:none}
+@media(max-width:640px){.owner-grid>div:nth-child(2){height:410px}
+.preview,.keychip .lbl{display:none}
 .keychip{width:172px;padding:0 10px}
 .keychip .mono{font-size:11px}
 .page-head{height:100px;align-items:center;gap:8px}
