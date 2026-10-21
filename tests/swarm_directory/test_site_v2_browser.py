@@ -193,6 +193,7 @@ def test_owner_undo_cancels_write_and_reload_cancels_hold(local, width, height, 
         assert saved.value.status == 200 and len(writes)==1
         visitor.click('#refresh');expect(visitor.locator('#consent')).to_be_visible()
         expect(owner.locator('#owned-count')).to_have_text('0')
+        owner.wait_for_timeout(700)  # include the post-write layout observer delivery
         assert sum(owner.evaluate('window.__cls')) == 0, owner.evaluate('window.__clsDetails')
         browser.close()
 
