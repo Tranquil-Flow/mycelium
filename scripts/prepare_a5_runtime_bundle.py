@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
+"""Assemble local A5 runtime bytes; never stage, load or grant admission.
+
+The trusted controller stays in its attested Git checkout. Transfer archives
+are payloads, not alternate Git roots. Model preparation remains the existing
+build_qwen_live_route producer and requires separate exact-model authority.
+"""
+from __future__ import annotations
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import shutil
+import stat
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from physical_inference_qualification import build_transfer_archive, node_transfer_manifests
+
+
+def digest(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open('rb') as f:
+        while block := f.read(1024*1024):
+            h.update(block)
+    return 'sha256:' + h.hexdigest()
+
+
+def regular(path: Path) -> None:
+    if path.is_symlink() or not stat.S_ISREG(path.lstat().st_mode):
+        raise ValueError('unsafe_artifact')
+    if any(p.is_symlink() for p in path.parents):
+        raise ValueError('unsafe_artifact')
+
+
+def source_identity(root: Path) -> dict:
+    if root.is_symlink() or not (root/'.git').exists():
+        raise ValueError('source_git_root_invalid')
+    def git(*args):
+        return subprocess.check_output(['git', '-C', str(root), *args], text=True, stderr=subprocess.PIPE).strip()
+    if Path(git('rev-parse', '--show-toplevel')).resolve() != root.resolve():
+        raise ValueError('source_git_root_invalid')
+    if git('status', '--porcelain', '--untracked-files=normal'):
+        raise ValueError('source_not_clean')
+    return {'git_root': str(root.resolve()), 'commit': git('rev-parse','HEAD'), 'tree': git('rev-parse','HEAD^{tree}')}
+
+
+def native_identity(path: Path) -> dict:
+    regular(path)
+    description = subprocess.check_output(['/usr/bin/file', '-b', str(path)], text=True).strip()
+    expected = 'Mach-O 64-bit executable arm64'
+    if platform.system() != 'Darwin' or platform.machine() != 'arm64' or expected not in description:
+        raise ValueError('native_architecture_invalid')
+    if not os.access(path, os.X_OK):
+        raise ValueError('native_not_executable')
+    version = subprocess.check_output([str(path),'--version'], text=True, timeout=5).strip()
+    if not version.startswith('mycelium-iroh-sidecar '):
+        raise ValueError('native_identity_invalid')
+    return {'sha256': digest(path), 'size_bytes': path.stat().st_size,
+            'mode': oct(stat.S_IMODE(path.stat().st_mode)), 'architecture': description,
+            'version': version, 'platform_scope': 'aarch64-apple-darwin-only'}
+
+
+def transfer_manifest(root: Path) -> dict:
+    records = []
+    for p in sorted(root.rglob('*')):
+        if p.is_symlink():
+            raise ValueError('unsafe_artifact')
+        if p.is_dir():
+            continue
+        regular(p)
+        records.append({'path': p.relative_to(root).as_posix(), 'size_bytes': p.stat().st_size, 'content_digest': digest(p)})
+    result = {'protocol': 'mycelium.controller_transfer_manifest.v1', 'files': records}
+    # Same validation and archive path as physical controller, without its runner.
+    build_transfer_archive(root, result)
+    return result
+
+
+def load_model_metadata(path: Path, expected_digest: str | None = None) -> dict:
+    """Compile declared metadata only; never open or load model payloads."""
+    from model_manifest import compile_model_manifest
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        raise ValueError('unsafe_artifact') from exc
+    with os.fdopen(fd, 'rb') as stream:
+        metadata = os.fstat(stream.fileno())
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError('unsafe_artifact')
+        if metadata.st_size > 4 * 1024 * 1024:
+            raise ValueError('model_metadata_too_large')
+        raw = stream.read(4 * 1024 * 1024 + 1)
+    if len(raw) > 4 * 1024 * 1024:
+        raise ValueError('model_metadata_too_large')
+    if expected_digest is not None and 'sha256:' + hashlib.sha256(raw).hexdigest() != expected_digest:
+        raise ValueError('model_metadata_digest_mismatch')
+    def unique_fields(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError('model_metadata_duplicate_field')
+            value[key] = item
+        return value
+    value = json.loads(raw, object_pairs_hook=unique_fields)
+    required = {'model_id', 'requested_revision', 'resolved_commit', 'config',
+                'checkpoint_index', 'file_metadata'}
+    if not isinstance(value, dict) or not required <= set(value) or set(value) - required - {'index_file'}:
+        raise ValueError('model_metadata_fields_invalid')
+    if not all(isinstance(value[key], dict) for key in ('config', 'checkpoint_index', 'file_metadata')):
+        raise ValueError('model_metadata_fields_invalid')
+    return compile_model_manifest(**value)
+
+
+def write_json(path: Path, value: object) -> None:
+    raw = (json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False)+'\n').encode()
+    fd = os.open(path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'wb') as f:
+        f.write(raw); f.flush(); os.fsync(f.fileno())
+
+
+def prepare(repo: Path, sidecar: Path, ui: Path, output: Path, paths: list[str], node_paths: dict | None = None, model_metadata: Path | None = None, expected_model_metadata_digest: str | None = None) -> dict:
+    model = None
+    metadata_digest = None
+    if (model_metadata is None) != (expected_model_metadata_digest is None):
+        raise ValueError('model_metadata_binding_incomplete')
+    if model_metadata is not None:
+        model = load_model_metadata(model_metadata, expected_model_metadata_digest)
+        metadata_digest = expected_model_metadata_digest
+    source = source_identity(repo)
+    native = native_identity(sidecar)
+    if not (ui/'index.html').is_file() or ui.is_symlink():
+        raise ValueError('ui_distribution_missing')
+    if output.exists() or output.is_symlink():
+        raise ValueError('output_exists')
+    if len(set(paths)) != len(paths) or not paths:
+        raise ValueError('transfer_subset_invalid')
+    tracked = set(subprocess.check_output(['git','-C',str(repo),'ls-files'],text=True).splitlines())
+    for relative in paths:
+        if relative not in tracked or Path(relative).is_absolute() or '..' in Path(relative).parts:
+            raise ValueError('transfer_subset_invalid')
+        regular(repo/relative)
+    output.mkdir(mode=0o700)
+    payload = output/'payload'; payload.mkdir(mode=0o700)
+    for relative in sorted(paths):
+        target = payload/relative; target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(repo/relative, target)
+    (payload/'native').mkdir(exist_ok=True)
+    target = payload/'native/mycelium-iroh-sidecar'
+    shutil.copyfile(sidecar, target); target.chmod(0o700)
+    ui_files = []
+    for p in sorted(ui.rglob('*')):
+        if p.is_symlink():
+            raise ValueError('unsafe_artifact')
+        if p.is_dir():
+            continue
+        regular(p)
+        target = output/'ui'/p.relative_to(ui)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(p, target)
+        ui_files.append({'path': p.relative_to(ui).as_posix(), 'sha256': digest(target), 'size_bytes': target.stat().st_size})
+    manifest = transfer_manifest(payload)
+    write_json(output/'transfer-manifest.json', manifest)
+    node_manifest_path = output/'node-transfer-manifests.json'
+    if node_paths is not None:
+        write_json(node_manifest_path, node_transfer_manifests(manifest, node_paths))
+    archive = build_transfer_archive(payload, manifest)
+    fd = os.open(output/'runtime.tar', os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)
+    with os.fdopen(fd,'wb') as f:
+        f.write(archive); f.flush(); os.fsync(f.fileno())
+    if source != source_identity(repo):
+        raise ValueError('source_changed')
+    identity = {'protocol': 'mycelium.a5_local_runtime_preparation.v1',
+        'source': source, 'native': native, 'ui_files': ui_files,
+        'python': {'executable': sys.executable, 'version': sys.version,
+                   'dependency_lock_sha256': digest(repo/'release/python-requirements.lock')},
+        'transfer_manifest_sha256': digest(output/'transfer-manifest.json'),
+        'node_transfer_manifests_sha256': digest(node_manifest_path) if node_paths is not None else None,
+        'archive_sha256': digest(output/'runtime.tar'),
+        'transfer_scope': 'explicit runtime subset, not a model or complete placement',
+        'model_identity': None, 'target_native_identity': None,
+        'admission': False, 'qualification_claim': False, 'promotion_authorized': False,
+        'remaining_bindings': ['exact_model_revision_representation_stage_packs',
+            'target_native_binaries', 'fresh_host_membership_capacity_load_authority',
+            'per_host_model_transfer_subsets', 'exclusive_fleet_grant']}
+    if model is not None:
+        write_json(output/'model-manifest.json', model)
+        identity['model_metadata'] = {
+            'input_sha256': metadata_digest,
+            'manifest_sha256': digest(output/'model-manifest.json'),
+            'manifest_digest': model['manifest_digest'],
+            'model_id': model['model_id'],
+            'resolved_commit': model['resolved_commit'],
+            'model_payload_verified': False,
+            'representation_identity': None,
+            'load_proof': None,
+        }
+    write_json(output/'runtime-preparation.json', identity)
+    return identity
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    p.add_argument('--repo', type=Path, required=True)
+    p.add_argument('--sidecar', type=Path, required=True)
+    p.add_argument('--ui-root', type=Path, required=True)
+    p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--transfer-path', action='append', required=True)
+    p.add_argument('--node-transfer-paths', type=Path, help='JSON mapping of exact node IDs to payload paths; no host discovery')
+    p.add_argument('--model-metadata', type=Path, help='Local compile_model_manifest keyword inputs; metadata only, no payload verification')
+    p.add_argument('--expected-model-metadata-digest', help='Required sha256 pin when model metadata is supplied')
+    a = p.parse_args()
+    node_paths = None
+    if a.node_transfer_paths is not None:
+        regular(a.node_transfer_paths)
+        if a.node_transfer_paths.stat().st_size > 1_048_576:
+            raise ValueError('node_transfer_selection_too_large')
+        node_paths = json.loads(a.node_transfer_paths.read_text())
+        if not isinstance(node_paths, dict) or not node_paths:
+            raise ValueError('node_transfer_selection_invalid')
+    print(json.dumps(prepare(a.repo,a.sidecar,a.ui_root,a.output,a.transfer_path,node_paths,a.model_metadata,a.expected_model_metadata_digest), sort_keys=True))
+    return 0
+
+if __name__ == '__main__':
+    raise SystemExit(main())

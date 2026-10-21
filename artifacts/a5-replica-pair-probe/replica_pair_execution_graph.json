@@ -1,0 +1,148 @@
+{
+  "activation_bytes": 4,
+  "deployment_epoch": 1,
+  "deployment_id": "a5-lane-replica-pair",
+  "edges": [
+    {
+      "edge_id": "forward:stage-000-primary->stage-001-primary",
+      "from_placement_id": "stage-000-primary",
+      "link_id": "iroh:n0-fast->n1-fast",
+      "to_placement_id": "stage-001-primary"
+    },
+    {
+      "edge_id": "forward:stage-001-primary->stage-002-primary",
+      "from_placement_id": "stage-001-primary",
+      "link_id": "iroh:n1-fast->n2-bottleneck",
+      "to_placement_id": "stage-002-primary"
+    },
+    {
+      "edge_id": "forward:stage-001-primary->stage-002-replica-n3-spare",
+      "from_placement_id": "stage-001-primary",
+      "link_id": "iroh:n1-fast->n3-spare",
+      "to_placement_id": "stage-002-replica-n3-spare"
+    }
+  ],
+  "entry_stage_id": "replica-stage-000",
+  "final_stage_id": "replica-stage-002",
+  "hidden_size": 128,
+  "loopback_edges": [
+    {
+      "edge_id": "loopback:stage-002-primary->stage-000-primary",
+      "from_placement_id": "stage-002-primary",
+      "link_id": "iroh:n2-bottleneck->n0-fast",
+      "to_placement_id": "stage-000-primary"
+    },
+    {
+      "edge_id": "loopback:stage-002-replica-n3-spare->stage-000-primary",
+      "from_placement_id": "stage-002-replica-n3-spare",
+      "link_id": "iroh:n3-spare->n0-fast",
+      "to_placement_id": "stage-000-primary"
+    }
+  ],
+  "manifest_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "model_id": "org/a5-replica-pair-probe",
+  "protocol": "mycelium.execution_graph.v1",
+  "resolved_commit": "4fea2b6d513a714614ce6cf9004e2d1ff02d0533",
+  "stages": [
+    {
+      "component_roles": [
+        "decoder"
+      ],
+      "layer_range": {
+        "end_layer_exclusive": 1,
+        "layer_count": 1,
+        "start_layer": 0
+      },
+      "placements": [
+        {
+          "assignment_id": "assignment-stage-000-primary",
+          "lifecycle_state": "ACTIVE",
+          "load_proof_digest": "sha256:bbba119833f04d26335b0939bb2e605af574f3ad1d7ae30e4492644793c2e2c0",
+          "node_id": "n0-fast",
+          "placement_id": "stage-000-primary",
+          "replica_group_id": "stage-000",
+          "runtime_backend": "numpy-stdlib",
+          "runtime_endpoint": "iroh://n0-fast/assignment-stage-000-primary",
+          "stage_signature": "sha256:cac2044bb5bcf30ecdaed99f1d41f0f116401b161fd65165bd0223ec49d6010b"
+        }
+      ],
+      "stage_cost": {
+        "decode_work_units_per_token": 1.0,
+        "kv_bytes_per_context_token": 32,
+        "prefill_work_units_per_prompt_token": 1.0
+      },
+      "stage_id": "replica-stage-000"
+    },
+    {
+      "component_roles": [
+        "decoder"
+      ],
+      "layer_range": {
+        "end_layer_exclusive": 3,
+        "layer_count": 2,
+        "start_layer": 1
+      },
+      "placements": [
+        {
+          "assignment_id": "assignment-stage-001-primary",
+          "lifecycle_state": "ACTIVE",
+          "load_proof_digest": "sha256:5581985b8a403548fcc4c01e492261558d59134adedc44da020125d35b6965bf",
+          "node_id": "n1-fast",
+          "placement_id": "stage-001-primary",
+          "replica_group_id": "stage-001",
+          "runtime_backend": "numpy-stdlib",
+          "runtime_endpoint": "iroh://n1-fast/assignment-stage-001-primary",
+          "stage_signature": "sha256:f60e72c17dae77173b2d3e3a9481e752e1e139bf00ea8230ac5e2a9e2b5a45d1"
+        }
+      ],
+      "stage_cost": {
+        "decode_work_units_per_token": 1.0,
+        "kv_bytes_per_context_token": 32,
+        "prefill_work_units_per_prompt_token": 1.0
+      },
+      "stage_id": "replica-stage-001"
+    },
+    {
+      "component_roles": [
+        "decoder"
+      ],
+      "layer_range": {
+        "end_layer_exclusive": 4,
+        "layer_count": 1,
+        "start_layer": 3
+      },
+      "placements": [
+        {
+          "assignment_id": "assignment-stage-002-primary",
+          "lifecycle_state": "ACTIVE",
+          "load_proof_digest": "sha256:3a0286dd6b9fc7e820be017540107e4fc75684104007c27c0d4801fba1500f7e",
+          "node_id": "n2-bottleneck",
+          "placement_id": "stage-002-primary",
+          "replica_group_id": "stage-002",
+          "runtime_backend": "numpy-stdlib",
+          "runtime_endpoint": "iroh://n2-bottleneck/assignment-stage-002-primary",
+          "stage_signature": "sha256:e18fdc4a7983783ca23ba5ab3541bb9e9ddb232a844d8d650c2a70b8cda2267f"
+        },
+        {
+          "assignment_id": "assignment-stage-002-replica-n3-spare",
+          "lifecycle_state": "ACTIVE",
+          "load_proof_digest": "sha256:e9bc944f9306621d7fbb3bda038cb2fdb3d1b3e9d78f79d9d9d2da3278da88da",
+          "node_id": "n3-spare",
+          "placement_id": "stage-002-replica-n3-spare",
+          "replica_group_id": "stage-002",
+          "runtime_backend": "numpy-stdlib",
+          "runtime_endpoint": "iroh://n3-spare/assignment-stage-002-replica-n3-spare",
+          "stage_signature": "sha256:e18fdc4a7983783ca23ba5ab3541bb9e9ddb232a844d8d650c2a70b8cda2267f"
+        }
+      ],
+      "stage_cost": {
+        "decode_work_units_per_token": 1.0,
+        "kv_bytes_per_context_token": 32,
+        "prefill_work_units_per_prompt_token": 1.0
+      },
+      "stage_id": "replica-stage-002"
+    }
+  ],
+  "token_envelope_bytes": 9,
+  "topology_version": 1
+}

@@ -1,0 +1,102 @@
+{
+  "protocol": "mycelium.a5_workload_manifest.v1",
+  "gate_state": "design_only",
+  "claim_boundary": "test-only workload corpus; not runtime, qualification, or physical evidence",
+  "model": {
+    "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+    "model_revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+    "representation_digest": "sha256:2729a427933ffaf01af4739ef70206023f2e7aa1061c2791283d3356f686d305"
+  },
+  "base_deployment_id": "e1d1a2fa-f68d-5b38-a507-34b367c8d855",
+  "route_generation": 1,
+  "prompt_output_buckets": {
+    "protocol": "mycelium.a5_prompt_output_buckets.v1",
+    "buckets": [
+      {
+        "name": "short_chat",
+        "prompt_token_min": 8,
+        "prompt_token_max": 96,
+        "output_token_min": 16,
+        "output_token_max": 64,
+        "fraction": 0.5,
+        "description": "Interactive short Q&A and follow-ups"
+      },
+      {
+        "name": "medium_explanation",
+        "prompt_token_min": 64,
+        "prompt_token_max": 256,
+        "output_token_min": 64,
+        "output_token_max": 256,
+        "fraction": 0.3,
+        "description": "Single-topic explanations and rephrasings"
+      },
+      {
+        "name": "long_synthesis",
+        "prompt_token_min": 256,
+        "prompt_token_max": 768,
+        "output_token_min": 96,
+        "output_token_max": 512,
+        "fraction": 0.2,
+        "description": "Multi-paragraph synthesis from a longer prompt"
+      }
+    ],
+    "fraction_tolerance": 0.001,
+    "token_distribution": "uniform_within_bucket"
+  },
+  "arrival_schedule": {
+    "protocol": "mycelium.a5_arrival_schedule.v1",
+    "kind": "poisson",
+    "rate_per_second": 4.0,
+    "rng_seed": 165,
+    "warmup_seconds": 30,
+    "description": "Poisson arrivals at 4 req/s during measured windows; warmup ignores the first 30 s after window start"
+  },
+  "qos_mix": {
+    "protocol": "mycelium.a5_qos_mix.v1",
+    "classes": [
+      {"name": "interactive", "fraction": 0.6},
+      {"name": "background", "fraction": 0.3},
+      {"name": "bulk", "fraction": 0.1}
+    ],
+    "fraction_tolerance": 0.001
+  },
+  "offered_concurrency": {
+    "per_window": 8,
+    "minimum_terminal_requests_per_window": 60,
+    "rationale": "8 concurrent requests against a 0.5B Qwen pipeline; ≥60 terminals per window as required by benchmark protocol"
+  },
+  "token_limits": {
+    "protocol": "mycelium.a5_token_limits.v1",
+    "maximum_new_tokens_default": 512,
+    "per_bucket_max_overrides": {
+      "short_chat": 64,
+      "medium_explanation": 256,
+      "long_synthesis": 512
+    },
+    "stop_token_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "product_benchmark_session": {
+    "protocol": "mycelium.a5_product_benchmark_session.v1",
+    "session_digest_method": "sha256_canonical_json",
+    "fields": [
+      "model_id",
+      "model_revision",
+      "representation_digest",
+      "base_deployment_id",
+      "route_generation",
+      "workload_digest",
+      "arrival_schedule_digest",
+      "prompt_output_buckets_digest",
+      "qos_mix_digest",
+      "offered_concurrency",
+      "token_limits_digest",
+      "product_session_digest",
+      "software_digest",
+      "configuration_digest",
+      "instrumentation_digest"
+    ],
+    "instrumentation_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "configuration_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "software_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  }
+}
