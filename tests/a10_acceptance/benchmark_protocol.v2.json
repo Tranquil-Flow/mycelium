@@ -1,0 +1,324 @@
+{
+  "protocol": "mycelium.a10_benchmark_acceptance.v2",
+  "protocol_version": 2,
+  "gate_state": "design_only",
+  "claim_boundary": "frozen acceptance inputs and test-only throughput materiality math; no product implementation, runtime batching, overlap, verifier, benchmark result, or qualification claim",
+  "amendment": {
+    "ruling_date": "2026-09-27",
+    "ruling": "owner ruling: pre-registered amendment after r33 underpowered result",
+    "pre_registered": true,
+    "refinements": [
+      {
+        "ruling_date": "2026-09-27",
+        "ruling": "owner ruling: schedule 16 paired windows, require at least 12 valid pairs, score all valid pairs with no selection, trimming or choice of a subset; the +10% paired-bootstrap lower-bound threshold and every bootstrap parameter are unchanged",
+        "made_before_any_v2_benchmark_data": true,
+        "protocol_version_unchanged": 2,
+        "protocol_version_unchanged_reason": "no_v2_benchmark_result_exists"
+      }
+    ],
+    "applies_identically_to": [
+      "A5",
+      "A10"
+    ],
+    "shared_with": {
+      "protocol": "mycelium.a5_benchmark_acceptance.v2",
+      "path": "tests/a5_acceptance/benchmark_protocol.v2.json"
+    },
+    "supersedes": {
+      "inventory": "tests/a10_acceptance/scenarios.v1.json",
+      "inventory_digest": "sha256:3fccdc3c12183c2f4d3fee9142969de20508c7e71cf553835811b60ff1e20542",
+      "section": "benchmark_requirements",
+      "superseded_fields": {
+        "paired_window_order": [
+          "baseline_candidate",
+          "candidate_baseline",
+          "baseline_candidate"
+        ],
+        "measured_windows": 6
+      }
+    },
+    "changes": [
+      "calibrated_offered_load_selected_by_recorded_baseline_calibration_before_scored_windows",
+      "baseline_window_below_minimum_completion_fraction_is_invalid_and_excluded_with_reason",
+      "minimum_valid_pairs_raised_from_3_to_12",
+      "scheduled_pairs_16_exact_with_minimum_12_valid_pairs",
+      "every_valid_pair_scored_without_selection_trimming_or_subset_choice",
+      "fewer_valid_pairs_than_minimum_is_inconclusive_never_material"
+    ],
+    "unchanged": [
+      "throughput_improvement_percent",
+      "paired_bootstrap_confidence_percent",
+      "throughput_lower_bound_percent",
+      "maximum_interactive_p95_ttft_regression_percent",
+      "maximum_interactive_p95_tpot_regression_percent",
+      "per_window_request_mix_and_bucket_minima",
+      "same_route_bindings",
+      "denominator_retention_parity_and_zero_residual_resources"
+    ]
+  },
+  "metric": {
+    "name": "completed_generated_tokens_per_wall_clock_second",
+    "paired_fractional_improvement": "candidate_rate_divided_by_baseline_rate_minus_one",
+    "point_estimate": "arithmetic_mean_of_paired_fractional_improvements",
+    "material_threshold_fraction": 0.1
+  },
+  "confidence": {
+    "method": "paired_nonparametric_bootstrap",
+    "confidence_level": 0.95,
+    "lower_quantile": 0.025,
+    "resamples": 10000,
+    "scheduled_pairs": 16,
+    "minimum_valid_pairs": 12,
+    "sample": "valid_pairs_only",
+    "pair_selection": "all_valid_pairs_no_selection_or_trimming",
+    "seed": 165,
+    "statistic": "arithmetic_mean",
+    "quantile_method": "nearest_rank_ceiling"
+  },
+  "calibration": {
+    "mode": "baseline",
+    "scored": false,
+    "precedes_warmups_and_scored_windows": true,
+    "rate_ladder_per_second": [
+      4.0,
+      2.0,
+      1.0,
+      0.5,
+      0.25,
+      0.125,
+      0.0625
+    ],
+    "trial_order": "descending_stop_at_first_qualifying_rate",
+    "minimum_requests_per_trial": 60,
+    "selection_rule": "highest_ladder_rate_whose_baseline_trial_completes_at_least_minimum_completion_fraction_of_offered_requests",
+    "minimum_baseline_completion_fraction": 0.9,
+    "no_qualifying_rate_decision": "inconclusive"
+  },
+  "window_validity": {
+    "applies_to_mode": "baseline",
+    "minimum_baseline_completion_fraction": 0.9,
+    "completion_numerator": "completed_outcomes",
+    "offered_denominator": "measured_terminal_requests_plus_measured_arrivals_shed_at_the_offered_concurrency_cap",
+    "invalid_window_reason": "baseline_completion_below_minimum_fraction",
+    "invalid_window_excludes_its_pair": true,
+    "invalid_windows_recorded_in_decision": true,
+    "fewer_valid_pairs_than_minimum_decision": "inconclusive"
+  },
+  "retained_outcomes": [
+    "completed",
+    "failed",
+    "cancelled",
+    "overflowed",
+    "slow_consumer"
+  ],
+  "measured_windows": [
+    {
+      "index": 0,
+      "pair_id": 0,
+      "mode": "baseline"
+    },
+    {
+      "index": 1,
+      "pair_id": 0,
+      "mode": "candidate"
+    },
+    {
+      "index": 2,
+      "pair_id": 1,
+      "mode": "candidate"
+    },
+    {
+      "index": 3,
+      "pair_id": 1,
+      "mode": "baseline"
+    },
+    {
+      "index": 4,
+      "pair_id": 2,
+      "mode": "baseline"
+    },
+    {
+      "index": 5,
+      "pair_id": 2,
+      "mode": "candidate"
+    },
+    {
+      "index": 6,
+      "pair_id": 3,
+      "mode": "candidate"
+    },
+    {
+      "index": 7,
+      "pair_id": 3,
+      "mode": "baseline"
+    },
+    {
+      "index": 8,
+      "pair_id": 4,
+      "mode": "baseline"
+    },
+    {
+      "index": 9,
+      "pair_id": 4,
+      "mode": "candidate"
+    },
+    {
+      "index": 10,
+      "pair_id": 5,
+      "mode": "candidate"
+    },
+    {
+      "index": 11,
+      "pair_id": 5,
+      "mode": "baseline"
+    },
+    {
+      "index": 12,
+      "pair_id": 6,
+      "mode": "baseline"
+    },
+    {
+      "index": 13,
+      "pair_id": 6,
+      "mode": "candidate"
+    },
+    {
+      "index": 14,
+      "pair_id": 7,
+      "mode": "candidate"
+    },
+    {
+      "index": 15,
+      "pair_id": 7,
+      "mode": "baseline"
+    },
+    {
+      "index": 16,
+      "pair_id": 8,
+      "mode": "baseline"
+    },
+    {
+      "index": 17,
+      "pair_id": 8,
+      "mode": "candidate"
+    },
+    {
+      "index": 18,
+      "pair_id": 9,
+      "mode": "candidate"
+    },
+    {
+      "index": 19,
+      "pair_id": 9,
+      "mode": "baseline"
+    },
+    {
+      "index": 20,
+      "pair_id": 10,
+      "mode": "baseline"
+    },
+    {
+      "index": 21,
+      "pair_id": 10,
+      "mode": "candidate"
+    },
+    {
+      "index": 22,
+      "pair_id": 11,
+      "mode": "candidate"
+    },
+    {
+      "index": 23,
+      "pair_id": 11,
+      "mode": "baseline"
+    },
+    {
+      "index": 24,
+      "pair_id": 12,
+      "mode": "baseline"
+    },
+    {
+      "index": 25,
+      "pair_id": 12,
+      "mode": "candidate"
+    },
+    {
+      "index": 26,
+      "pair_id": 13,
+      "mode": "candidate"
+    },
+    {
+      "index": 27,
+      "pair_id": 13,
+      "mode": "baseline"
+    },
+    {
+      "index": 28,
+      "pair_id": 14,
+      "mode": "baseline"
+    },
+    {
+      "index": 29,
+      "pair_id": 14,
+      "mode": "candidate"
+    },
+    {
+      "index": 30,
+      "pair_id": 15,
+      "mode": "candidate"
+    },
+    {
+      "index": 31,
+      "pair_id": 15,
+      "mode": "baseline"
+    }
+  ],
+  "benchmark_requirements": {
+    "paired_window_order": [
+      "baseline_candidate",
+      "candidate_baseline",
+      "baseline_candidate",
+      "candidate_baseline",
+      "baseline_candidate",
+      "candidate_baseline",
+      "baseline_candidate",
+      "candidate_baseline",
+      "baseline_candidate",
+      "candidate_baseline",
+      "baseline_candidate",
+      "candidate_baseline",
+      "baseline_candidate",
+      "candidate_baseline",
+      "baseline_candidate",
+      "candidate_baseline"
+    ],
+    "measured_windows": 32,
+    "warmup_windows_per_mode": 1,
+    "minimum_completed_requests_per_window": 60,
+    "minimum_interactive_requests_per_window": 20,
+    "minimum_late_arrivals_per_window": 20,
+    "minimum_prompt_length_buckets": 2,
+    "minimum_output_length_buckets": 2,
+    "throughput_improvement_percent": 10,
+    "paired_bootstrap_confidence_percent": 95,
+    "throughput_lower_bound_percent": 10,
+    "maximum_interactive_p95_ttft_regression_percent": 10,
+    "maximum_interactive_p95_tpot_regression_percent": 10,
+    "same_route_bindings": [
+      "target",
+      "representation",
+      "route",
+      "product_sessions",
+      "workload",
+      "arrival_schedule",
+      "token_limits",
+      "measurement_window",
+      "instrumentation"
+    ],
+    "failed_cancelled_overflowed_and_slow_consumers_remain_in_denominator": true,
+    "exact_output_parity_required": true,
+    "zero_residual_resources_required": true
+  },
+  "qualification_claim": false,
+  "promotion_authorized": false
+}
