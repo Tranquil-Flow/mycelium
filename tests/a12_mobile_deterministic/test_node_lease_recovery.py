@@ -27,6 +27,8 @@ from typing import Any, Callable
 
 import pytest
 
+from tests.host_speed import scaled
+
 from mycelium_invite import SqliteInviteRegistry
 from mycelium_qualification.signing import generate_ed25519_signer
 from mycelium_seed import SeedCoordinator, SqliteSeedState
@@ -190,7 +192,8 @@ class Node:
                 self.lines.put((label, {"raw": body.strip()}))
 
     def wait(self, predicate: Callable[[dict[str, Any]], bool], timeout: float, what: str) -> dict[str, Any]:
-        deadline = time.monotonic() + timeout
+        # The node watches for 60 s, so a scaled guard stops short of it.
+        deadline = time.monotonic() + scaled(timeout, ceiling=55)
         if self.last and predicate(self.last):
             return self.last
         while time.monotonic() < deadline:
@@ -208,7 +211,7 @@ class Node:
 
     def stop(self) -> None:
         self.process.kill()
-        self.process.wait(timeout=10)
+        self.process.wait(timeout=scaled(10))
 
 
 def _held(generation: int) -> Callable[[dict[str, Any]], bool]:

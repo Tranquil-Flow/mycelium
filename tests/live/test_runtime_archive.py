@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import zipfile
+from tests.host_speed import scaled
 
 import pytest
 from scripts import build_qwen_live_route as builder
@@ -36,7 +37,7 @@ with scope.get('runtime_tree',lambda:nullcontext(Path(sys.argv[1]).with_name('my
  import physical_inference_node as node
  print(json.dumps({'digest':node._runtime_build_digest('numpy'),'root':str(root),'module':node.__file__,'version':sys.version}))
 '''
-    p=subprocess.run([sys.executable,'-I','-c',code,str(bundle/'physical_inference_node.py')],cwd=tmp_path,text=True,capture_output=True,timeout=30)
+    p=subprocess.run([sys.executable,'-I','-c',code,str(bundle/'physical_inference_node.py')],cwd=tmp_path,text=True,capture_output=True,timeout=scaled(30))
     assert p.returncode==0,p.stderr
     result=json.loads(p.stdout)
     h=hashlib.sha256(result['version'].encode())
@@ -62,7 +63,7 @@ with s['runtime_tree']() as root:
  import physical_inference_node as node
  print(node._runtime_build_digest('numpy'))
 '''
-    return subprocess.run([sys.executable,'-I','-c',code,str(bundle/'physical_inference_node.py')],cwd=tmp_path,capture_output=True,text=True,timeout=30)
+    return subprocess.run([sys.executable,'-I','-c',code,str(bundle/'physical_inference_node.py')],cwd=tmp_path,capture_output=True,text=True,timeout=scaled(30))
 
 
 def test_rebuilt_changed_source_changes_fingerprint_and_resources_resolve(tmp_path):
@@ -103,7 +104,7 @@ with s['runtime_tree']() as root:
  else:raise AssertionError('missing resource accepted')
  print(json.dumps({'sidecar':str(sidecar.relative_to(root)),'probe':str(candidates[0].relative_to(root)),'source':str(source.relative_to(root))}))
 '''
-    r=subprocess.run([sys.executable,'-I','-c',code,str(a/'physical_inference_node.py')],cwd=tmp_path,capture_output=True,text=True,timeout=30)
+    r=subprocess.run([sys.executable,'-I','-c',code,str(a/'physical_inference_node.py')],cwd=tmp_path,capture_output=True,text=True,timeout=scaled(30))
     assert r.returncode==0,r.stderr
     assert set(json.loads(r.stdout))=={'sidecar','probe','source'}
 

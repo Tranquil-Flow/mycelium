@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from tests.host_speed import scaled
 from contextlib import contextmanager
 from pathlib import Path
 import socket
@@ -854,6 +855,19 @@ def test_empty_concurrent_poll_holds_open_and_delivers_when_a_command_is_enqueue
         )
 
 
+class _FrozenHoldClock:
+    """``ManagedControlMailbox(monotonic=...)``: a clock that only moves when the test expires it."""
+
+    def __init__(self) -> None:
+        self._now = 0.0
+
+    def __call__(self) -> float:
+        return self._now
+
+    def expire(self) -> None:
+        self._now = float("inf")
+
+
 def test_a_held_poll_never_serialises_the_owners_own_enqueue(tmp_path: Path) -> None:
     """Trap A: the hold must sit between attempts, not inside the lock or transaction.
 
@@ -863,7 +877,11 @@ def test_a_held_poll_never_serialises_the_owners_own_enqueue(tmp_path: Path) -> 
     cancellation itself, so that would be strictly worse than the short poll.
     """
 
-    with _world(tmp_path, mailbox_options={"long_poll_hold": 2.0}) as world:
+    # The hold is measured on the mailbox's own clock; freezing it makes "the hold is still in progress" a fact
+    # instead of a wall-clock race.  A serialised enqueue would then wait for a hold that can never end, so the
+    # old "< 0.5 s" bound (which only separated the two on an idle host) becomes "it completes at all".
+    hold_clock = _FrozenHoldClock()
+    with _world(tmp_path, mailbox_options={"long_poll_hold": 2.0, "monotonic": hold_clock}) as world:
         outcome: dict[str, Any] = {}
 
         def held() -> None:
@@ -871,18 +889,25 @@ def test_a_held_poll_never_serialises_the_owners_own_enqueue(tmp_path: Path) -> 
 
         parked = threading.Thread(target=held, name="held-control-poll", daemon=True)
         parked.start()
-        parked.join(0.5)
+        parked.join(scaled(0.5))
         assert parked.is_alive(), "no hold was in progress, so this trap could not be exercised"
 
-        started = time.monotonic()
-        _enqueue(world, "enqueue-not-serialised", operation="cancel", payload=_allowed_payload("cancel"))
-        enqueue_seconds = time.monotonic() - started
-        assert enqueue_seconds < 0.5, (
-            f"the owner's enqueue waited {enqueue_seconds:.3f}s behind a held poll"
-        )
-
-        parked.join(10.0)
-        assert not parked.is_alive()
+        enqueued = threading.Thread(
+            target=lambda: _enqueue(
+                world, "enqueue-not-serialised", operation="cancel", payload=_allowed_payload("cancel")),
+            name="owner-enqueue", daemon=True)
+        enqueued.start()
+        try:
+            enqueued.join(scaled(10.0))
+            assert not enqueued.is_alive(), (
+                "the owner's enqueue is still waiting behind a held poll whose hold cannot end"
+            )
+            parked.join(scaled(10.0))
+            assert not parked.is_alive()
+        finally:
+            hold_clock.expire()  # never leave a parked poll behind a failed assertion
+            enqueued.join(scaled(10.0))
+            parked.join(scaled(10.0))
         assert outcome["delivery"]["command_id"] == "enqueue-not-serialised"
 
 

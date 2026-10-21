@@ -8,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .bounded import BoundedIdMap
 from .contracts import (
     AdmissionError,
     InferenceSubmission,
@@ -134,7 +135,14 @@ class HTTPGatewayClient:
     ``DELETE`` requests -- the same header ``mycelium_ui_gateway`` forwards.
     """
 
-    def __init__(self, *, base_url: str, bearer_token: str, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        bearer_token: str,
+        timeout: float = 30.0,
+        max_tracked_requests: int = 4_096,
+    ) -> None:
         parsed = urlparse(base_url)
         if (
             parsed.scheme not in {"http", "https"}
@@ -163,7 +171,8 @@ class HTTPGatewayClient:
         self._timeout = float(timeout)
         self._opener = build_opener(_NoRedirectHandler())
         # Owner token per accepted request, captured from the 202 document.
-        self._session_tokens: dict[str, str] = {}
+        # Bounded: a request the caller never finishes with must not pin its token for the process lifetime.
+        self._session_tokens: BoundedIdMap[str] = BoundedIdMap(max_tracked_requests)
 
     def current_qualification(self) -> QualificationBinding:
         document = self._json_request("GET", "/v1/qualification/current")

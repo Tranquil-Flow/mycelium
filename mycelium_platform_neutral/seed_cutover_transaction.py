@@ -236,6 +236,13 @@ def _committed_checks(before: Mapping[str, Any], after: Mapping[str, Any]) -> di
     }
 
 
+def _cutover_failure(exc: BaseException) -> str:
+    """``cutover_failed:<Type>:<code>``: the exception's stable ``code`` when it has one, else its bounded message."""
+    code = getattr(exc, "code", None)
+    detail = code if isinstance(code, str) and code else str(exc)
+    return f"cutover_failed:{type(exc).__name__}:{detail[:120] or 'no_message'}"
+
+
 def run_seed_cutover(
     fleet: OwnedFleet, *, cutover: Callable[[], Any], adopt: Mapping[str, Callable[[], Any]],
     epoch_parent: Path, owned_root: Path, expect_refusal: bool = False,
@@ -274,8 +281,8 @@ def run_seed_cutover(
                 adopt[node]()
                 receipt["phases"].append(f"adopted:{node}")
     except Exception as exc:  # noqa: BLE001 - recorded by type and bounded message, restart still proceeds
-        failure = f"cutover_failed:{type(exc).__name__}:{str(exc)[:120]}"
-        receipt["phases"].append("cutover_failed")
+        failure = _cutover_failure(exc)
+        receipt["phases"].append(failure)
     after = fleet.start(epoch)
     receipt["phases"].append("restarted")
     receipt["after"] = after
@@ -288,6 +295,9 @@ def run_seed_cutover(
             return receipt
         checks = _committed_checks(before, after)
         receipt["checks"] = checks
+        if failure is not None:  # an adoption failed after the commit: keep its code, never report verified
+            receipt.update(status="COMMITTED_ADOPTION_FAILED", reason=failure)
+            return receipt
         receipt["status"] = "COMMITTED_VERIFIED" if all(checks.values()) else "POST_RESTART_READBACK_FAILED"
         return receipt
     # A negative cutover that committed anyway: the transaction reports it, never hides it.

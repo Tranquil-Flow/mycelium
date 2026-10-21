@@ -40,6 +40,7 @@ from scripts.qwen_phone_builder import (
 )
 
 from layer_assignment import compile_layer_assignments
+from mycelium_live.socket_root import live_socket_root
 from mycelium_assignment_cache import ArtifactObjectKey, AssignmentArtifactCache
 from mycelium_live.codec import Qwen2PromptCodec, Qwen3PromptCodec, Qwen35PromptCodec
 from mycelium_layer_planner.gossip_adapter import (
@@ -2385,7 +2386,7 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
             {
                 "node_id": node_id,
                 "python_executable": topology_node["python_executable"],
-                "socket_root": f"{staging_roots[node_id]}/socket",
+                "socket_root": live_socket_root(staging_roots[node_id]),
                 "sidecar_binary": topology_node["sidecar_binary"],
                 "endpoint_secret_file": topology_node["endpoint_secret_file"],
                 "configure": {

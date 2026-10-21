@@ -15,6 +15,8 @@ import time
 
 import pytest
 
+from tests.host_speed import scaled
+
 from mycelium_seed import route_assignment as ra
 
 from .test_node_lease_recovery import Node, Seed, _held, node_cli  # noqa: F401 - shared fixture
@@ -36,7 +38,7 @@ def _database(seed: Seed) -> Path:
 
 
 def _wait_state(seed: Seed, node_id: str, state: str, timeout: float) -> dict:
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + scaled(timeout)
     record: dict = {}
     while time.monotonic() < deadline:
         record = ra.route_assignment_status(_database(seed), node_id=node_id)
@@ -240,7 +242,7 @@ def test_an_unverifiable_delivery_drops_the_applied_route(
             "tamper_pack": "stage_pack_digest_mismatch",
         }[mode]
         assert dropped["route_assignment_error"] == expected
-        time.sleep(1.5)  # several more polls: nothing is ever applied while tampered
+        time.sleep(scaled(1.5))  # several more polls (more of them on a slow host): nothing is applied while tampered
         assert node.last["route_assignment"] is None and node.last["stage_loaded"] is None
         assert ra.route_assignment_status(_database(seed), node_id=member["node_id"])["state"] != "applied"
     finally:
