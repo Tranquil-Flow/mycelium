@@ -167,12 +167,30 @@ function renderSwarm(s) {
   }
   const live = el('div', {class: 'live'}, el('h4', {}, 'Live status'), el('div', {class: 'live-holder'}, 'Loading…'));
   loadLive(s, live.querySelector('.live-holder'));
+  const fresh = freshness(s);
   return el('div', {class: 'swarm', 'data-swarm': s.swarm_id},
     el('h3', {}, s.name, el('span', {class: 'status ' + s.status}, s.status)),
-    el('p', {class: 'meta'}, `Model ${s.served_model || s.model} · ${s.members} Mac${s.members === 1 ? '' : 's'} · access ${s.access_mode} · owner ${s.owner_fingerprint}` +
-      (s.entry_fingerprint ? ` · entry ${s.entry_fingerprint}` : ' · no entry Mac yet')),
+    el('p', {class: 'meta'}, 'Model ', el('span', {'data-card-model': ''}, s.served_model || s.model), ' · ',
+      el('span', {'data-card-members': ''}, `${s.members} Mac${s.members === 1 ? '' : 's'}`), ` · access ${s.access_mode} · owner `,
+      el('span', {'data-card-owner': ''}, s.owner_fingerprint), s.entry_fingerprint ? ` · entry ${s.entry_fingerprint}` : ' · no entry Mac yet'),
+    el('p', {class: 'meta'}, el('span', {'data-card-fresh': '', 'data-seconds': String(fresh.seconds), 'data-stale': String(fresh.stale)}, fresh.text),
+      s.open_quota ? el('span', {'data-card-quota': ''}, ` · open quota ${s.open_quota.max_requests} requests, ${s.open_quota.max_tokens} tokens per key`) : null),
     s.description ? el('p', {}, s.description) : null,
-    el('p', {class: 'privacy'}, s.privacy), note, actions, live);
+    el('p', {class: 'privacy'}, s.privacy, ' ', el('a', {class: 'notice-link', href: '#notice'}, 'What happens to your prompt')), note, actions, live);
+}
+
+// How old the status is: the directory's own clock at the last signed heartbeat (never the browser's).
+function ago(seconds) {
+  if (seconds < 60) return `${seconds} s ago`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min ago`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)} h ago`;
+  return `${Math.floor(seconds / 86400)} d ago`;
+}
+function freshness(s) {
+  const seconds = Number.isSafeInteger(s.last_seen_seconds) && s.last_seen_seconds >= 0 ? s.last_seen_seconds : null;
+  const stale = s.status === 'offline';
+  if (seconds === null) return {text: 'no status report yet', seconds: '', stale: true};
+  return {text: (stale ? 'last seen ' : 'updated ') + ago(seconds), seconds, stale};
 }
 
 async function refresh() {
@@ -491,7 +509,10 @@ async function renderOwned() {
 }
 
 async function forget() {
-  if (!confirm('Forget this browser key? Swarms it owns can no longer be managed and its grants stop working here.')) return;
+  $('forget').hidden = true; $('forget-confirm').hidden = false; $('forget-no').focus();
+}
+function keepKey() { $('forget-confirm').hidden = true; $('forget').hidden = false; $('forget').focus(); }
+async function forgetNow() {
   await kv('readwrite', (s) => s.clear());
   location.reload();
 }
@@ -505,6 +526,8 @@ async function main() {
   try { config = await directory('/config'); $('demo').textContent = config.demo; $('privacy').textContent = config.privacy; renderDownload(config.download); } catch (error) { config = {directory: location.origin}; renderDownload(null); }
   $('refresh').addEventListener('click', refresh);
   $('forget').addEventListener('click', forget);
+  $('forget-no').addEventListener('click', keepKey);
+  $('forget-yes').addEventListener('click', forgetNow);
   $('create-form').addEventListener('submit', create);
   $('chat-form').addEventListener('submit', send);
   $('stop').addEventListener('click', stop);

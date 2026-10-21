@@ -3,7 +3,20 @@
 <body><header><div class="brand">✳ Mycelium <span>a model running across the Macs in this room</span></div></header>
 <main><p id="state" role="status" aria-live="polite">Connecting…</p>
 <p id="served" class="detail"></p>
+<section id="notice" aria-labelledby="notice-title"><h2 id="notice-title">Before your first prompt</h2>
+<ul>
+<li id="notice-owner" data-notice="owner">Checking who runs this swarm…</li>
+<li data-notice="travel">Your prompt goes from this browser through this swarm's relay (an HTTPS service that can read it in plain text) to the owner's Mac, and from there to the volunteer Macs that compute the answer. Those Macs can see your prompt and the activations. Do not type secrets.</li>
+<li data-notice="stored">What is stored: this page sets no cookies and keeps one note in this browser (that you read this). Your prompt and the answer are not stored by this page. The owner's Mac keeps the last <span id="notice-kept">64</span> answers in memory so your browser can fetch them, and forgets them when it restarts. The people who run the relay and the Macs could keep their own logs; Mycelium cannot see or control that.</li>
+<li id="notice-quota" data-notice="quota">Checking the quota…</li>
+</ul>
+<button id="notice-ack" type="button">I understand</button></section>
 <div id="log" aria-live="polite"></div>
-<form id="form"><label for="prompt">Your prompt</label><textarea id="prompt" rows="3" maxlength="2000" placeholder="Ask the swarm something" required></textarea>
+<form id="form" hidden><label for="prompt">Your prompt</label><textarea id="prompt" rows="3" maxlength="2000" placeholder="Ask the swarm something" required></textarea>
 <div class="row"><label>Max new tokens<select id="tokens"><option value="64">64</option><option value="128" selected>128</option><option value="256">256</option></select></label><button id="send" type="submit" disabled>Send</button></div></form>
-<p class="detail">No account. One prompt at a time for the whole room; a few prompts per minute each. Answers come from a shared, cooperative demo: the Macs computing it can observe prompts and activations. Do not type secrets.</p></main></body></html>
+<p class="detail">No account. One prompt at a time for the whole room; a few prompts per minute each. Answers come from a shared, cooperative demo: the Macs computing it can observe prompts and activations. Do not type secrets.</p>
+<p class="detail"><button id="forget" type="button" class="quiet">Forget this browser's data</button></p>
+<section id="forget-confirm" class="confirm" role="alertdialog" aria-labelledby="forget-title" hidden><h2 id="forget-title">Forget this browser's data?</h2>
+<p>This page keeps no key and no account: the only thing it saved here is the note that you read the notice, and forgetting deletes it, so the notice is shown again before your next prompt.</p>
+<p>It does not reset your quota. On this page your quota is counted on the owner's relay by your network address, not by anything stored in this browser. A per-key allowance (an open grant) belongs to the browser key kept by the directory page, which has its own forget button<span id="forget-directory-wrap" hidden> (<a id="forget-directory" rel="noopener noreferrer"></a>)</span>.</p>
+<button id="forget-yes" type="button">Forget</button> <button id="forget-no" type="button" class="quiet">Keep</button></section></main></body></html>
