@@ -53,7 +53,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:28f66e54dbc3a5549384e5e8cf07cb79c7dacc7cdd732b08365780c792577c29",
+      "sha256": "sha256:4f14a32e79b46de87265edea757d8f486015849c578b06b6629a3957fea22775",
       "size_bytes": 71574
     },
     {
@@ -1218,8 +1218,8 @@
     },
     {
       "path": "mycelium_a13_macos/web/app.js",
-      "sha256": "sha256:3f2e7d5e1d5bb9a375a070c7cee17a8e3142bd90d5b260cd45b3ed4af5d9ade7",
-      "size_bytes": 58062
+      "sha256": "sha256:d58784e47593eab284aef60a0888587a6e35efe92cd8af6bd83438ab2034d174",
+      "size_bytes": 58294
     },
     {
       "path": "mycelium_a13_macos/web/chat.css",
@@ -1743,8 +1743,8 @@
     },
     {
       "path": "mycelium_live/route.py",
-      "sha256": "sha256:5729ae6a96aa81c6c23ae40393e50663b1d48e90e3bc0c32dcd704f095d07439",
-      "size_bytes": 317343
+      "sha256": "sha256:f4ffe7df8b391db7eb3123d92a38866fd6e37fd559a6d27a0f241ce18b6e95c0",
+      "size_bytes": 317359
     },
     {
       "path": "mycelium_live/router_port.py",
@@ -2668,8 +2668,8 @@
     },
     {
       "path": "physical_inference_node.py",
-      "sha256": "sha256:5bf4ae53156fb4e4675a445b496b027ef86a8fcefa7365900e0d9c754515f680",
-      "size_bytes": 271057
+      "sha256": "sha256:b30fdb33c0d3ead66ee149f04b9d957cb49b27a7e2be1b4339bec88aef0e0e82",
+      "size_bytes": 271193
     },
     {
       "path": "physical_inference_qualification.py",
@@ -6293,5 +6293,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:d1c55211a28cc235ccf1e6f444d5482e4f8709f9173e16e35934d8a7cdf2c8b6"
+  "source_digest": "sha256:5536f34391f5a4e910094b10498dbd26edce147622b0fc88872310b3b9f4128d"
 }
