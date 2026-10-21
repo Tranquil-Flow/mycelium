@@ -54,6 +54,10 @@ from mycelium_router.contracts import (
 )
 
 CUTOVER_RECORD_PROTOCOL = "mycelium.a7_entry_cutover.v1"
+#: PV4: the cost policy's record protocol (``mycelium_kv_recovery_cost``).  Held as a
+#: literal so this controller imports nothing new; the policy is a plain callable.
+COST_DECISION_PROTOCOL = "mycelium.kv_recovery_cost_decision.v1"
+COST_REPLAY_REASON = "cost_prefers_replay"
 LAST_CUTOVER_SOURCE = "durable_last_cutover"
 ENTRY_INSTALLERS = ("request_gateway", "router", "transport_ingress")
 _MAX_TRACKED_REQUESTS = 4096
@@ -118,6 +122,9 @@ class _Coverage:
    standby_receipt_rtt_ms: float | None = None
    last_ack_rtt_ms: float | None = None
    last_ack_sequence: int | None = None
+   # PV4: the cost policy's recorded decision (or why it was ignored) for this request.
+   cost_decision: dict[str, Any] | None = None
+   cost_policy_error: str | None = None
 
 
 class A7EntryController:
@@ -126,6 +133,13 @@ class A7EntryController:
    #: send still blocked on the dead source cannot hold this entry's cleanup
    #: receipt open until the delivery deadline.  ``None`` changes nothing.
    fence_old_path: Callable[[str, str, int], Any] | None = None
+   #: PV4 -- optional ``policy(context) -> cost decision record | None``.  Consulted only
+   #: where BOTH recoveries are possible (the closed eligibility predicate says the
+   #: standby's acknowledged KV is the committed prefix AND A6 is available); it may
+   #: choose the A6 replay over the eligible KV continuation, never the reverse.  A
+   #: policy that raises or returns a malformed record changes nothing.  ``None``
+   #: (default) changes nothing and adds no key to any record.
+   recovery_cost_policy: Callable[[Mapping[str, Any]], Mapping[str, Any] | None] | None = None
 
    def __init__(
       self,
@@ -435,6 +449,10 @@ class A7EntryController:
       )
       if not pre["kv_successor_eligible"]:
          return self._finish_fallback(state, request_id, old_manifest, None, pre["reason"], gateway_committed_token_ids, started, watermark)
+      if self._cost_prefers_replay(state, coverage, watermark, gateway_count, expected_next_position):
+         # Both recoveries were possible and replay is clearly cheaper: nothing has been
+         # installed yet, so this is the same honest hand-off as any rejection.
+         return self._finish_fallback(state, request_id, old_manifest, None, COST_REPLAY_REASON, gateway_committed_token_ids, started, watermark)
 
       # Fence-install on every current participant of the successor path.
       replaced = {coverage.source_placement_id: coverage.standby_placement_id}
@@ -528,6 +546,43 @@ class A7EntryController:
       # Off the decode-resume path: the terminal release persists it again, synchronously.
       self._persist_last_cutover(request_id, background=True)
       return result
+
+   def _cost_prefers_replay(self, state: _Coverage, coverage: StandbyCoverage, watermark: Mapping[str, Any] | None, gateway_count: int, expected_next_position: int) -> bool:
+      """PV4: ask the cost policy (if any) whether replay is cheaper; record its decision.
+
+      Only consulted when the KV continuation is eligible and A6 is available; with
+      one recovery the existing behaviour stands.  The policy only ever chooses
+      between the two.  Any failure of the policy leaves the continuation untouched.
+      """
+
+      policy = self.recovery_cost_policy
+      if policy is None or not self._a6_available:
+         return False
+      acknowledged = int(watermark["committed_token_count"]) if watermark is not None else gateway_count
+      context = {
+         "stage_id": coverage.stage_id,
+         "source_placement_id": coverage.source_placement_id,
+         "standby_placement_id": coverage.standby_placement_id,
+         # KV the successor must hold, and the tokens a replay re-prefills (prompt + committed).
+         "kv_positions": expected_next_position,
+         "replay_tokens": expected_next_position + 1,
+         # Positions the standby has not acknowledged; 0 whenever the continuation is eligible.
+         "pending_positions": max(0, gateway_count - acknowledged),
+         "gateway_committed_token_count": gateway_count,
+         "acknowledged_token_count": acknowledged,
+      }
+      try:
+         record = policy(context)
+      except Exception as exc:
+         state.cost_policy_error = str(type(exc).__name__)[:64]
+         return False
+      if record is None:
+         return False
+      if not isinstance(record, Mapping) or record.get("protocol") != COST_DECISION_PROTOCOL or record.get("choice") not in {"kv", "replay"}:
+         state.cost_policy_error = "cost_policy_invalid"
+         return False
+      state.cost_decision = dict(record)
+      return record["choice"] == "replay"
 
    def decline(self, request_id: str, old_manifest: PathManifest, *, reason: str, gateway_committed_token_ids: Sequence[int]) -> dict[str, Any]:
       """A covered failure the entry cannot cut over (e.g. no successor path)."""
@@ -628,7 +683,7 @@ class A7EntryController:
    def _result(self, state, reason, gateway_tokens, started, *, outcome=None, watermark=None) -> dict[str, Any]:
       gateway_count = len(gateway_tokens)
       acked = None if watermark is None else int(watermark["committed_token_count"])
-      return {
+      result = {
          "protocol": CUTOVER_RECORD_PROTOCOL,
          "outcome": outcome or ("full_context_replay" if self._a6_available else "aborted"),
          "reason": reason,
@@ -644,6 +699,11 @@ class A7EntryController:
          "kv_continuity_claimed": outcome == "fenced_kv_successor",
          "recovery_prefill": False if outcome == "fenced_kv_successor" else None,
       }
+      if state is not None and state.cost_decision is not None:
+         result["cost_decision"] = dict(state.cost_decision)
+      if state is not None and state.cost_policy_error is not None:
+         result["cost_policy_error"] = state.cost_policy_error
+      return result
 
    # -- terminal --------------------------------------------------------------------
 
@@ -705,6 +765,8 @@ class A7EntryController:
             "outcome": None if state.result is None else state.result.get("outcome"),
             "request_key": "sha256:" + request_key(request_id),
          }
+         if state.cost_decision is not None:
+            document["cost_decision"] = dict(state.cost_decision)
       if state.last_ack_rtt_ms is None:
          self._note_ack(state, request_id)
       document["last_ack_rtt_ms"] = state.last_ack_rtt_ms
