@@ -19,11 +19,23 @@
 <section class="card" id="identity-card"><h2>Your browser key</h2>
 <p>This browser made an Ed25519 key that never leaves it (non-extractable, stored in this browser only). No email, no password, no account. Owners grant access to this key's fingerprint.</p>
 <p class="mono" id="identity">Creating your key…</p>
-<button type="button" class="secondary" id="forget">Forget this key (and its grants and swarms)</button></section>
+<button type="button" class="secondary" id="forget">Forget this key (and its grants and swarms)</button>
+<div id="forget-confirm" class="confirm" role="alertdialog" aria-labelledby="forget-title" hidden><h3 id="forget-title">Forget this browser key?</h3>
+<p>This deletes the key from this browser, with every grant and open-access allowance saved with it. You can no longer manage the swarms you own with it (their owner key is gone for good), and the access owners gave this key stops working here.</p>
+<p>The next visit makes a new key: a new identity with a fresh per-key quota. That does not reset the limits counted by network address, which the swarm's entry applies to everyone, nor a swarm's daily cap for open access.</p>
+<button type="button" id="forget-yes" class="danger">Forget this key</button><button type="button" class="secondary" id="forget-no">Keep it</button></div></section>
 
 <section class="card"><div class="heading"><h2>All swarms</h2><button type="button" class="secondary" id="refresh">Refresh</button></div>
 <p class="privacy" id="privacy">Your prompt is seen by the swarm's nodes (the Macs that run it).</p>
 <p id="list-state" role="status" aria-live="polite"></p><div id="swarms"></div></section>
+
+<section class="card" id="notice"><h2>What happens to your prompt</h2>
+<ul>
+<li><strong>Who runs a swarm.</strong> Each card shows the owner's key fingerprint: the key that signed its listing. A swarm is run by whoever runs its Mac, not by Mycelium.</li>
+<li><strong>Where it travels.</strong> Your prompt goes from this browser straight to the swarm's own relay (never through this directory), an HTTPS service that can read it in plain text, then to the owner's Mac and on to the volunteer Macs that compute the answer. Those Macs can see your prompt and the activations. Do not type secrets.</li>
+<li><strong>What is stored.</strong> This directory stores no prompts and sets no cookies; your key and grants stay in this browser. Prompts and answers are not stored by the directory or the chat page. The owner's Mac keeps the last 64 answers in memory so your browser can fetch them. The people who run the relay and the Macs could keep their own logs.</li>
+<li><strong>Your quota.</strong> An open swarm's card shows its quota (requests and tokens per key). Limits per network address and a daily cap for the whole swarm also apply.</li>
+</ul></section>
 
 <section class="card" id="chat-card" hidden><h2 id="chat-title">Chat</h2>
 <p class="privacy" id="chat-privacy"></p><p id="chat-state" role="status" aria-live="polite"></p>

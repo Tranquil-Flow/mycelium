@@ -34,3 +34,4 @@ button.danger{background:var(--bad);color:#190808}
 
 .row label:has(.access-mode){width:19rem}
 a{color:var(--accent)}a:hover{text-decoration:none}
+[hidden]{display:none!important}.confirm{border:1px solid var(--warn);border-radius:10px;padding:.2rem 1rem .6rem;margin:.6rem 0}.confirm h3{margin:.5rem 0 .2rem;font-size:1rem}#notice ul{padding-left:1.2rem;margin:.2rem 0}#notice li{margin:.35rem 0}.notice-link{font-size:.85rem;white-space:nowrap}
