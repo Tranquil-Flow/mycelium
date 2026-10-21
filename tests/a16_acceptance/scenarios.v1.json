@@ -1,0 +1,319 @@
+{
+  "protocol": "mycelium.a16_acceptance_scenarios.v1",
+  "claim_boundary": "design inputs and deterministic coverage references only; no physical, product-route, browser or qualification claim and no A16 DONE claim",
+  "gate_state": "design_only",
+  "qualification_claim": false,
+  "promotion_authorized": false,
+  "source_draft": "status/DRAFT-A16-ADAPTIVE-HOST-RESOURCES-20261018.md (programme repository, outside this tree)",
+  "owner_rulings": {
+    "trigger_and_consent": "A",
+    "action_on_pressure": "A",
+    "timings": "B_with_A_defaults",
+    "gpu_and_foreground_detection": "A",
+    "done_scope": "A_two_mac_only"
+  },
+  "dependency_requirements": {
+    "deterministic_tests_may_close_a16": false,
+    "a13_resource_guard_refusal_alone_may_close_a16": false,
+    "a6_handoff_requires_current_qualified_successor": true,
+    "a13_power_thermal_gates_may_be_softened": false,
+    "app_identity_may_be_collected": false,
+    "non_macos_ports_in_scope": false
+  },
+  "scenarios": [
+    {
+      "scenario_id": "a16_opt_in_and_consent_migration",
+      "gate_kind": "deterministic_negative",
+      "required_invariants": [
+        "existing_consent_migrates_to_off",
+        "malformed_policy_refuses",
+        "unauthorized_toggle_refuses",
+        "enable_requires_explicit_acknowledgement",
+        "no_monitoring_while_off"
+      ],
+      "required_workspaces": [
+        "settings"
+      ],
+      "execution_state": "deterministic_only",
+      "physical_evidence": null,
+      "deterministic_coverage": [
+        "tests/a13_macos/test_adaptive_host.py",
+        "tests/a13_macos/test_adaptive_owner.py"
+      ],
+      "known_gaps": []
+    },
+    {
+      "scenario_id": "a16_signal_unknown_privacy",
+      "gate_kind": "deterministic_negative",
+      "required_invariants": [
+        "probe_failure_is_unknown_not_healthy",
+        "stale_sample_is_unknown",
+        "contradictory_probes_are_unknown",
+        "unknown_blocks_new_admission_only",
+        "sample_schema_rejects_extra_keys",
+        "no_per_app_data_in_sample_overlay_status_or_dom"
+      ],
+      "required_workspaces": [
+        "nodes",
+        "readiness"
+      ],
+      "execution_state": "deterministic_only",
+      "physical_evidence": null,
+      "deterministic_coverage": [
+        "tests/a13_macos/test_adaptive_host.py",
+        "tests/a13_macos/test_adaptive_collectors.py",
+        "tests/a13_macos/test_adaptive_live_wiring.py"
+      ],
+      "known_gaps": [
+        "gpu_signal_not_collected_reads_as_unknown"
+      ]
+    },
+    {
+      "scenario_id": "a16_reduced_budget_kv_isolation",
+      "gate_kind": "deterministic_positive",
+      "required_invariants": [
+        "whole_context_larger_than_budget_is_refused",
+        "burst_cannot_overshoot_budget",
+        "committed_reservations_are_never_revoked",
+        "published_capacity_never_exceeds_qualified",
+        "idempotent_replay_is_unaffected",
+        "opt_out_is_byte_identical"
+      ],
+      "required_workspaces": [
+        "inference",
+        "nodes"
+      ],
+      "execution_state": "deterministic_only",
+      "physical_evidence": null,
+      "deterministic_coverage": [
+        "tests/physical_qualification/test_sqlite_capacity_adaptive.py",
+        "tests/a13_macos/test_adaptive_host.py",
+        "tests/a13_macos/test_adaptive_live_wiring.py"
+      ],
+      "known_gaps": [
+        "a10_batch_member_limits_not_capped_only_reservation_admission"
+      ]
+    },
+    {
+      "scenario_id": "a16_hysteresis_and_capacity_fence",
+      "gate_kind": "deterministic_negative",
+      "required_invariants": [
+        "flapping_cannot_restore_capacity",
+        "stale_generation_or_late_positive_publication_rejected",
+        "dwell_applies_but_escalation_and_stop_bypass_it",
+        "readmission_requires_recovery_window_authority_observations_and_requalification"
+      ],
+      "required_workspaces": [
+        "nodes",
+        "readiness"
+      ],
+      "execution_state": "deterministic_only",
+      "physical_evidence": null,
+      "deterministic_coverage": [
+        "tests/a13_macos/test_adaptive_host.py",
+        "tests/a13_macos/test_adaptive_live_wiring.py",
+        "tests/a13_macos/test_adaptive_reentry.py"
+      ],
+      "known_gaps": []
+    },
+    {
+      "scenario_id": "a16_memory_heavy_app_two_mac",
+      "gate_kind": "physical_positive",
+      "required_invariants": [
+        "no_new_reservation_after_pressure",
+        "drain_within_configured_bound",
+        "zero_published_capacity_within_configured_bound",
+        "no_wrong_or_duplicate_tokens",
+        "model_memory_released_after_withdraw",
+        "reentry_only_after_recovery_window_and_requalification"
+      ],
+      "required_workspaces": [
+        "inference",
+        "nodes",
+        "readiness"
+      ],
+      "execution_state": "unexecuted",
+      "physical_evidence": null,
+      "deterministic_coverage": [
+        "tests/a13_macos/test_adaptive_host.py",
+        "tests/a13_macos/test_adaptive_drain.py",
+        "tests/a13_macos/test_adaptive_reentry.py",
+        "tests/a13_macos/test_adaptive_collectors.py"
+      ],
+      "known_gaps": [
+        "two_mac_run_not_executed",
+        "measured_memory_release_unproven"
+      ]
+    },
+    {
+      "scenario_id": "a16_game_mode_two_mac",
+      "gate_kind": "physical_positive",
+      "required_invariants": [
+        "owner_toggle_without_app_identity_monitoring",
+        "zero_new_admission_within_configured_bound",
+        "bounded_drain_and_withdraw",
+        "measured_model_memory_release",
+        "unaffected_host_remains_usable_if_qualified"
+      ],
+      "required_workspaces": [
+        "nodes",
+        "settings"
+      ],
+      "execution_state": "unexecuted",
+      "physical_evidence": null,
+      "deterministic_coverage": [
+        "tests/a13_macos/test_adaptive_owner.py",
+        "tests/a13_macos/test_adaptive_drain.py",
+        "tests/a13_macos/test_adaptive_host.py"
+      ],
+      "known_gaps": [
+        "two_mac_run_not_executed"
+      ]
+    },
+    {
+      "scenario_id": "a16_cpu_saturation_without_app_identity",
+      "gate_kind": "physical_positive",
+      "required_invariants": [
+        "sustained_aggregate_cpu_reduces_admission",
+        "transient_spike_does_not_flap",
+        "no_process_name_inspection",
+        "gpu_only_if_a_safe_signal_exists"
+      ],
+      "required_workspaces": [
+        "nodes"
+      ],
+      "execution_state": "unexecuted",
+      "physical_evidence": null,
+      "deterministic_coverage": [
+        "tests/a13_macos/test_adaptive_collectors.py",
+        "tests/a13_macos/test_adaptive_host.py"
+      ],
+      "known_gaps": [
+        "two_mac_run_not_executed",
+        "gpu_signal_not_collected"
+      ]
+    },
+    {
+      "scenario_id": "a16_inflight_successor_or_abort",
+      "gate_kind": "physical_negative",
+      "required_invariants": [
+        "qualified_successor_continues_exact_committed_prefix",
+        "absent_or_unqualified_successor_yields_one_bounded_terminal",
+        "cancellation_keeps_precedence",
+        "no_false_success_or_data_loss",
+        "unload_blocked_until_nothing_in_flight"
+      ],
+      "required_workspaces": [
+        "inference",
+        "incidents"
+      ],
+      "execution_state": "unexecuted",
+      "physical_evidence": null,
+      "deterministic_coverage": [
+        "tests/a13_macos/test_adaptive_drain.py",
+        "tests/a13_macos/test_adaptive_drain_hooks.py",
+        "tests/a13_macos/test_adaptive_host.py"
+      ],
+      "known_gaps": [
+        "a4_abort_wired_to_existing_cancel_command_reaches_only_requests_this_node_is_entry_for",
+        "a6_handoff_and_successor_hooks_unwired_no_target_side_seam_owner_authority_only",
+        "two_mac_run_not_executed"
+      ]
+    },
+    {
+      "scenario_id": "a16_probe_loss_and_controller_partition",
+      "gate_kind": "physical_negative",
+      "required_invariants": [
+        "probe_failure_blocks_new_work",
+        "stale_overlay_expires_and_refuses_at_the_node",
+        "no_stale_positive_route",
+        "honest_in_flight_outcome_and_cleanup"
+      ],
+      "required_workspaces": [
+        "nodes",
+        "incidents"
+      ],
+      "execution_state": "unexecuted",
+      "physical_evidence": null,
+      "deterministic_coverage": [
+        "tests/a13_macos/test_adaptive_live_wiring.py",
+        "tests/a13_macos/test_adaptive_host.py",
+        "tests/a13_macos/test_adaptive_collectors.py"
+      ],
+      "known_gaps": [
+        "two_mac_run_not_executed"
+      ]
+    },
+    {
+      "scenario_id": "a16_thermal_battery_precedence",
+      "gate_kind": "physical_negative",
+      "required_invariants": [
+        "a13_thermal_and_ac_rules_override_healthy_a16",
+        "owner_stop_overrides_healthy_a16",
+        "unrelated_node_and_work_unaffected"
+      ],
+      "required_workspaces": [
+        "settings",
+        "nodes"
+      ],
+      "execution_state": "unexecuted",
+      "physical_evidence": null,
+      "deterministic_coverage": [
+        "tests/a13_macos/test_adaptive_host.py",
+        "tests/a13_macos/test_adaptive_owner.py"
+      ],
+      "known_gaps": [
+        "two_mac_run_not_executed"
+      ]
+    },
+    {
+      "scenario_id": "a16_restart_reentry_two_mac",
+      "gate_kind": "physical_positive",
+      "required_invariants": [
+        "stable_recovery_window_precedes_readmission",
+        "authority_observations_are_real_round_trips",
+        "eligibility_renewed_by_authority_after_withdraw",
+        "repeated_start_stop_leaves_zero_owned_residue"
+      ],
+      "required_workspaces": [
+        "nodes",
+        "readiness"
+      ],
+      "execution_state": "unexecuted",
+      "physical_evidence": null,
+      "deterministic_coverage": [
+        "tests/a13_macos/test_adaptive_reentry.py",
+        "tests/a13_macos/test_adaptive_drain.py",
+        "tests/a13_macos/test_adaptive_host.py",
+        "tests/a13_macos/test_adaptive_withdraw_marker.py"
+      ],
+      "known_gaps": [
+        "withdraw_marker_persistence_deterministic_only_no_real_process_restart",
+        "restart_while_withdrawn_unloads_the_fresh_run_and_needs_another_cold_run_on_reentry",
+        "two_mac_run_not_executed"
+      ]
+    },
+    {
+      "scenario_id": "a16_product_status_privacy",
+      "gate_kind": "browser_positive",
+      "required_invariants": [
+        "fresh_mode_and_capacity_in_ordinary_a1_workspaces",
+        "expired_state_shown_stale",
+        "no_app_identity_in_dom_or_network",
+        "reconnect_reconstructs_from_authority"
+      ],
+      "required_workspaces": [
+        "nodes",
+        "readiness"
+      ],
+      "execution_state": "unexecuted",
+      "physical_evidence": null,
+      "deterministic_coverage": [
+        "tests/a13_macos/test_adaptive_owner.py"
+      ],
+      "known_gaps": [
+        "a1_workspace_publication_not_implemented_target_to_owner_delivery_and_ui_web_rendering"
+      ]
+    }
+  ]
+}
