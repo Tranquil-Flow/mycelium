@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer"><meta name="color-scheme" content="dark light"><title>Mycelium · Swarms</title>
+<link rel="stylesheet" href="site.css"></head>
+<body data-page="swarms">
+<a class="skip" href="#main">Skip to content</a>
+<div class="proto" role="note"><span><b>Design prototype</b><span class="rest">: mock data, no backend, not the live site.</span></span></div>
+<header class="top"><div class="wrap"><a class="brand" href="index.html">✳ Mycelium</a><nav class="primary" aria-label="Site"><a href="index.html">How it works</a><a href="swarms.html" aria-current="page">Swarms</a><a href="index.html#privacy">Privacy</a></nav><span class="spacer"></span><button class="keychip" id="keychip" type="button" aria-haspopup="dialog"><span class="lbl">Your key</span><span class="mono full">2F00-F2E5-3E8E-2E5F</span><span class="short mono">2F00…2E5F</span></button></div></header>
+<main id="main" class="app wrap">
+<div class="page-head"><div><h1>Swarms</h1><p>Find a swarm, chat with it, or run one.</p></div><a class="btn" href="create.html">Start a swarm</a></div>
+<div class="tabs" role="tablist" aria-label="Swarms sections">
+<button role="tab" id="tab-browse" aria-controls="panel-browse" aria-selected="true">Browse <span class="count">7</span></button>
+<button role="tab" id="tab-chat" aria-controls="panel-chat" aria-selected="false" tabindex="-1">Chat <span class="count">3</span></button>
+<button role="tab" id="tab-contributing" aria-controls="panel-contributing" aria-selected="false" tabindex="-1">Contributing <span class="count">1</span></button>
+<button role="tab" id="tab-owned" aria-controls="panel-owned" aria-selected="false" tabindex="-1">Owned <span class="count alert">2</span></button>
+</div>
+
+<section id="panel-browse" role="tabpanel" aria-labelledby="tab-browse">
+<div class="toolbar"><label class="sr" for="search">Search swarms</label><input class="search" id="search" type="search" placeholder="Search by name or model">
+<button class="chip" data-filter="all" aria-pressed="true">All</button><button class="chip" data-filter="serving" aria-pressed="false">Serving</button><button class="chip" data-filter="open" aria-pressed="false">Open to anyone</button><button class="chip" data-filter="request" aria-pressed="false">Needs approval</button></div>
+<p class="muted" style="font-size:13.5px;margin:-4px 0 14px"><span id="browse-count" class="num">7 swarms</span> · numbers are reported by each swarm and refresh quietly; nothing moves while you read.</p>
+<div class="grid g2" id="browse-grid"><article class="card swarm-card" aria-hidden="true"><div class="row between"><span class="skel" style="width:46%;height:24px"></span><span class="skel" style="width:84px;height:24px"></span></div><div class="meta"><span class="skel" style="width:60%;height:18px"></span></div><p class="desc"><span class="skel" style="display:block;width:80%;height:18px"></span></p><div class="stats" style="height:66px;border-color:transparent"><span class="skel" style="grid-column:1/-1;height:66px;border-radius:10px"></span></div><div class="foot"><span class="skel" style="width:90px;height:18px"></span><span class="skel" style="width:76px;height:36px;border-radius:10px"></span></div></article><article class="card swarm-card" aria-hidden="true"><div class="row between"><span class="skel" style="width:46%;height:24px"></span><span class="skel" style="width:84px;height:24px"></span></div><div class="meta"><span class="skel" style="width:60%;height:18px"></span></div><p class="desc"><span class="skel" style="display:block;width:80%;height:18px"></span></p><div class="stats" style="height:66px;border-color:transparent"><span class="skel" style="grid-column:1/-1;height:66px;border-radius:10px"></span></div><div class="foot"><span class="skel" style="width:90px;height:18px"></span><span class="skel" style="width:76px;height:36px;border-radius:10px"></span></div></article><article class="card swarm-card" aria-hidden="true"><div class="row between"><span class="skel" style="width:46%;height:24px"></span><span class="skel" style="width:84px;height:24px"></span></div><div class="meta"><span class="skel" style="width:60%;height:18px"></span></div><p class="desc"><span class="skel" style="display:block;width:80%;height:18px"></span></p><div class="stats" style="height:66px;border-color:transparent"><span class="skel" style="grid-column:1/-1;height:66px;border-radius:10px"></span></div><div class="foot"><span class="skel" style="width:90px;height:18px"></span><span class="skel" style="width:76px;height:36px;border-radius:10px"></span></div></article><article class="card swarm-card" aria-hidden="true"><div class="row between"><span class="skel" style="width:46%;height:24px"></span><span class="skel" style="width:84px;height:24px"></span></div><div class="meta"><span class="skel" style="width:60%;height:18px"></span></div><p class="desc"><span class="skel" style="display:block;width:80%;height:18px"></span></p><div class="stats" style="height:66px;border-color:transparent"><span class="skel" style="grid-column:1/-1;height:66px;border-radius:10px"></span></div><div class="foot"><span class="skel" style="width:90px;height:18px"></span><span class="skel" style="width:76px;height:36px;border-radius:10px"></span></div></article><article class="card swarm-card" aria-hidden="true"><div class="row between"><span class="skel" style="width:46%;height:24px"></span><span class="skel" style="width:84px;height:24px"></span></div><div class="meta"><span class="skel" style="width:60%;height:18px"></span></div><p class="desc"><span class="skel" style="display:block;width:80%;height:18px"></span></p><div class="stats" style="height:66px;border-color:transparent"><span class="skel" style="grid-column:1/-1;height:66px;border-radius:10px"></span></div><div class="foot"><span class="skel" style="width:90px;height:18px"></span><span class="skel" style="width:76px;height:36px;border-radius:10px"></span></div></article><article class="card swarm-card" aria-hidden="true"><div class="row between"><span class="skel" style="width:46%;height:24px"></span><span class="skel" style="width:84px;height:24px"></span></div><div class="meta"><span class="skel" style="width:60%;height:18px"></span></div><p class="desc"><span class="skel" style="display:block;width:80%;height:18px"></span></p><div class="stats" style="height:66px;border-color:transparent"><span class="skel" style="grid-column:1/-1;height:66px;border-radius:10px"></span></div><div class="foot"><span class="skel" style="width:90px;height:18px"></span><span class="skel" style="width:76px;height:36px;border-radius:10px"></span></div></article></div>
+<div class="card" id="browse-empty" hidden><b>No swarm matches.</b> <span class="muted">Try another filter, or start one.</span></div>
+</section>
+
+<section id="panel-chat" role="tabpanel" aria-labelledby="tab-chat" hidden>
+<div class="chat-layout"><aside aria-label="Swarms you can chat with"><p class="muted" style="font-size:13.5px;margin:0 0 10px">Open swarms, swarms that approved you, and swarms you own.</p><div class="chat-list" id="chat-list"></div></aside><div id="chat-pane"></div></div>
+</section>
+
+<section id="panel-contributing" role="tabpanel" aria-labelledby="tab-contributing" hidden>
+<div class="grid g2"><div class="grid" id="contrib-list" style="align-content:start"></div>
+<div class="card"><h3 style="margin-bottom:8px">Lend another Mac</h3>
+<ol class="steps" style="margin:12px 0"><li class="now"><span><b>Install the Mycelium app</b><br><span class="muted">Apple silicon Macs only. The app is not published yet: ask a swarm owner for it.</span></span><span></span></li>
+<li><span><b>Join with the owner's invite</b><br><span class="muted">The owner sends a link or QR from "Invite a Mac". They approve your Mac.</span></span><span></span></li>
+<li><span><b>See it here</b><br><span class="muted">In the app press "Show on mycelium.now". This page remembers it in your browser only.</span></span><span></span></li></ol>
+<p class="hint">Your Mac is never listed by name for anyone else, only as a label the swarm shows. Pause or leave any time in the app.</p></div></div>
+</section>
+
+<section id="panel-owned" role="tabpanel" aria-labelledby="tab-owned" hidden>
+<div class="grid g2"><div class="grid" id="owned-list" style="align-content:start"></div>
+<div class="card"><h3 style="margin-bottom:8px">Start another swarm</h3><p class="muted">Pick a model from the registered list, choose who may use it, then attach a Mac from the app. You can own up to five swarms per browser key.</p><a class="btn sec" href="create.html">Start a swarm</a></div></div>
+</section>
+</main>
+<dialog id="keydlg" aria-labelledby="keydlg-t"><h2 id="keydlg-t" style="font-size:1.2rem;margin-bottom:10px">Your key</h2>
+<p>This browser made a key. It is how swarms recognise you: <b>no email, no password, no account.</b> The private half never leaves this browser.</p>
+<p class="mono" style="font-size:1.05rem">2F00-F2E5-3E8E-2E5F</p>
+<p class="muted">Swarm owners grant access to this fingerprint. Swarms you chat with can link your prompts to it.</p>
+<div class="row"><button class="btn sm" id="keydlg-close">Close</button><button class="btn sm sec" id="forget">Forget this key…</button></div>
+<div id="forget-confirm" class="note bad" hidden style="margin-top:12px"><b class="lead">Forget this key?</b> You lose every access you were given and you can no longer manage the swarms you own with it. A new key starts with a fresh allowance, but limits by network address still apply.
+<div class="row" style="margin-top:10px"><button class="btn sm danger" id="forget-yes">Forget key</button><button class="btn sm sec" id="forget-no">Keep it</button></div></div></dialog>
+<nav class="tabbar" aria-label="Swarms sections"><a id="bar-browse" href="swarms.html#browse" aria-current="page">Browse</a><a id="bar-chat" href="swarms.html#chat">Chat</a><a id="bar-contributing" href="swarms.html#contributing">Helping</a><a id="bar-owned" href="swarms.html#owned">Owned<span class="count alert" id="o-bar">2</span></a></nav>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="mock-data.js"></script><script src="app.js"></script>
+</body></html>

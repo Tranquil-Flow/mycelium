@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer"><meta name="color-scheme" content="dark light"><title>Mycelium · Chat</title>
+<link rel="stylesheet" href="site.css"></head>
+<body data-page="chat">
+<a class="skip" href="#main">Skip to content</a>
+<div class="proto" role="note"><span><b>Design prototype</b><span class="rest">: mock data, no backend, not the live site.</span></span><label>Swarm <select id="proto-swarm" style="min-height:24px;padding:0 6px;width:150px"></select></label><label>State <select id="proto-state" style="min-height:24px;padding:0 6px;width:150px"></select></label></div>
+<header class="top"><div class="wrap"><a class="brand" href="index.html">✳ Mycelium</a><nav class="primary" aria-label="Site"><a href="index.html">How it works</a><a href="swarms.html" aria-current="page">Swarms</a><a href="index.html#privacy">Privacy</a></nav><span class="spacer"></span><button class="keychip" id="keychip" type="button" aria-haspopup="dialog"><span class="lbl">Your key</span><span class="mono full">2F00-F2E5-3E8E-2E5F</span><span class="short mono">2F00…2E5F</span></button></div></header>
+<main id="main" class="app wrap"><nav class="tabs" aria-label="Swarms sections"><a class="tab" href="swarms.html#browse">Browse<span class="count">7</span></a><a class="tab" href="swarms.html#chat" aria-current="page">Chat<span class="count">3</span></a><a class="tab" href="swarms.html#contributing">Contributing<span class="count">1</span></a><a class="tab" href="swarms.html#owned">Owned<span class="count alert" id="o-tabcount">2</span></a></nav>
+<h1 class="sr">Chat</h1>
+<div class="chat-layout"><aside aria-label="Swarms you can chat with"><div class="chat-list" id="chat-list"></div></aside><div id="chat-pane"></div></div>
+</main>
+<dialog id="keydlg" aria-labelledby="keydlg-t"><h2 id="keydlg-t" style="font-size:1.2rem;margin-bottom:10px">Your key</h2>
+<p>This browser made a key. It is how swarms recognise you: <b>no email, no password, no account.</b> The private half never leaves this browser.</p>
+<p class="mono" style="font-size:1.05rem">2F00-F2E5-3E8E-2E5F</p>
+<p class="muted">Swarm owners grant access to this fingerprint. Swarms you chat with can link your prompts to it.</p>
+<div class="row"><button class="btn sm" id="keydlg-close">Close</button><button class="btn sm sec" id="forget">Forget this key…</button></div>
+<div id="forget-confirm" class="note bad" hidden style="margin-top:12px"><b class="lead">Forget this key?</b> You lose every access you were given and you can no longer manage the swarms you own with it. A new key starts with a fresh allowance, but limits by network address still apply.
+<div class="row" style="margin-top:10px"><button class="btn sm danger" id="forget-yes">Forget key</button><button class="btn sm sec" id="forget-no">Keep it</button></div></div></dialog>
+<nav class="tabbar" aria-label="Swarms sections"><a id="bar-browse" href="swarms.html#browse">Browse</a><a id="bar-chat" href="swarms.html#chat" aria-current="page">Chat</a><a id="bar-contributing" href="swarms.html#contributing">Helping</a><a id="bar-owned" href="swarms.html#owned">Owned<span class="count alert" id="o-bar">2</span></a></nav>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="mock-data.js"></script><script src="app.js"></script>
+</body></html>

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer"><meta name="color-scheme" content="dark light"><title>Mycelium · Owner view</title>
+<link rel="stylesheet" href="site.css"></head>
+<body data-page="owner">
+<a class="skip" href="#main">Skip to content</a>
+<div class="proto" role="note"><span><b>Design prototype</b><span class="rest">: mock data, no backend, not the live site.</span></span></div>
+<header class="top"><div class="wrap"><a class="brand" href="index.html">✳ Mycelium</a><nav class="primary" aria-label="Site"><a href="index.html">How it works</a><a href="swarms.html" aria-current="page">Swarms</a><a href="index.html#privacy">Privacy</a></nav><span class="spacer"></span><button class="keychip" id="keychip" type="button" aria-haspopup="dialog"><span class="lbl">Your key</span><span class="mono full">2F00-F2E5-3E8E-2E5F</span><span class="short mono">2F00…2E5F</span></button></div></header>
+<main id="main" class="app wrap"><nav class="tabs" aria-label="Swarms sections"><a class="tab" href="swarms.html#browse">Browse<span class="count">7</span></a><a class="tab" href="swarms.html#chat">Chat<span class="count">3</span></a><a class="tab" href="swarms.html#contributing">Contributing<span class="count">1</span></a><a class="tab" href="swarms.html#owned" aria-current="page">Owned<span class="count alert" id="o-tabcount">2</span></a></nav>
+<p class="crumbs"><a href="swarms.html#owned">← Owned swarms</a></p>
+<div class="page-head" style="align-items:flex-start"><div><div class="row" style="gap:12px"><h1>Family swarm</h1><span class="pill serving"><i aria-hidden="true"></i>Serving</span></div>
+<p>Qwen3-8B · By request · 2 Macs · you are the owner</p></div><a class="btn sec" href="swarm.html?id=family">Public page</a></div>
+<div class="grid" style="grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px;align-items:start" id="o-cols">
+<div class="grid">
+<section class="card" aria-labelledby="req-h"><div class="row between"><h2 id="req-h" style="font-size:1.15rem">Requests <span class="count alert" id="o-count" style="margin-left:6px">2</span></h2><button class="btn sm sec" id="approve-all">Approve all with the default</button></div>
+<p class="muted" id="o-lede" style="margin:6px 0 4px;min-height:24px"></p>
+<div id="o-reqs"></div>
+<details class="fold" style="margin-top:12px"><summary>Default for approvals: <span id="preset-now" style="margin-left:8px;font-weight:500" class="muted"></span></summary><div>
+<div class="grid g3"><div><label class="f" for="p-hours">Hours</label><input id="p-hours" type="number" min="1" max="720" value="24"></div><div><label class="f" for="p-req">Requests</label><input id="p-req" type="number" min="1" max="10000" value="20"></div><div><label class="f" for="p-tok">Tokens</label><input id="p-tok" type="number" min="1" max="1000000" value="4000"></div></div>
+<p class="hint">Kept in this browser. You can still change it per person when you approve.</p></div></details></section>
+<section class="card" aria-labelledby="ppl-h"><h2 id="ppl-h" style="font-size:1.15rem;margin-bottom:8px">People with access</h2>
+<table class="t stack"><thead><tr><th>Key</th><th>Access</th><th>Used</th><th></th></tr></thead><tbody id="o-people"></tbody></table></section>
+</div>
+<div class="grid">
+<section class="card" aria-labelledby="stat-h"><h2 id="stat-h" style="font-size:1.05rem;margin-bottom:10px">How it is running</h2><div id="o-stats"></div><p class="hint">Queue free · up 2 d 4 h · helper Macs and layers are on the <a href="swarm.html?id=family">public page</a>.</p></section>
+<section class="card" aria-labelledby="set-h"><h2 id="set-h" style="font-size:1.05rem;margin-bottom:10px">Setup <span class="tag you" style="margin-left:6px">complete</span></h2>
+<p class="muted" style="margin:0 0 10px">Swarm created · Kitchen Mac attached (2F00-…-91D0) · second Mac joined.</p>
+<details class="fold"><summary>Swarm link for another Mac</summary><div><p class="hint">Paste this in the Mycelium app ("Publish this run as a swarm") or scan the QR.</p><p class="mono" id="o-link" style="word-break:break-all;font-size:12px"></p></div></details></section>
+<section class="card" aria-labelledby="acm-h"><h2 id="acm-h" style="font-size:1.05rem;margin-bottom:10px">Who may use it</h2>
+<div class="radio-cards"><label><input type="radio" name="am" checked><span><b>By request</b><span class="muted">People ask; you approve each one.</span></span></label>
+<label><input type="radio" name="am"><span><b>Open to anyone</b><span class="muted">Automatic, with a daily allowance per key.</span></span></label>
+<label><input type="radio" name="am"><span><b>Invite only</b><span class="muted">Only keys you grant. Nobody can ask.</span></span></label></div>
+<div class="row" style="margin-top:12px"><button class="btn sm" disabled>Save</button><span class="hint" style="margin:0">Entry Macs pick up the change within a minute.</span></div></section>
+<details class="fold"><summary>Emergency stop</summary><div><p class="muted">Stops new prompts and open grants, and cancels what is running. Release it to reopen.</p><p id="o-kill-state" class="num" style="font-weight:650">Running normally.</p><button class="btn danger sm" id="o-kill" data-on="0">Stop new prompts</button></div></details>
+</div></div></main>
+<style>@media (max-width:900px){#o-cols{grid-template-columns:1fr!important}}</style>
+<dialog id="keydlg" aria-labelledby="keydlg-t"><h2 id="keydlg-t" style="font-size:1.2rem;margin-bottom:10px">Your key</h2>
+<p>This browser made a key. It is how swarms recognise you: <b>no email, no password, no account.</b> The private half never leaves this browser.</p>
+<p class="mono" style="font-size:1.05rem">2F00-F2E5-3E8E-2E5F</p>
+<p class="muted">Swarm owners grant access to this fingerprint. Swarms you chat with can link your prompts to it.</p>
+<div class="row"><button class="btn sm" id="keydlg-close">Close</button><button class="btn sm sec" id="forget">Forget this key…</button></div>
+<div id="forget-confirm" class="note bad" hidden style="margin-top:12px"><b class="lead">Forget this key?</b> You lose every access you were given and you can no longer manage the swarms you own with it. A new key starts with a fresh allowance, but limits by network address still apply.
+<div class="row" style="margin-top:10px"><button class="btn sm danger" id="forget-yes">Forget key</button><button class="btn sm sec" id="forget-no">Keep it</button></div></div></dialog>
+<nav class="tabbar" aria-label="Swarms sections"><a id="bar-browse" href="swarms.html#browse">Browse</a><a id="bar-chat" href="swarms.html#chat">Chat</a><a id="bar-contributing" href="swarms.html#contributing">Helping</a><a id="bar-owned" href="swarms.html#owned" aria-current="page">Owned<span class="count alert" id="o-bar">2</span></a></nav>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="mock-data.js"></script><script src="app.js"></script>
+</body></html>

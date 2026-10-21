@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer"><meta name="color-scheme" content="dark light"><title>Mycelium: run an AI model across a few Macs you trust</title>
+<link rel="stylesheet" href="site.css"></head>
+<body data-page="index">
+<a class="skip" href="#main">Skip to content</a>
+<div class="proto" role="note"><span><b>Design prototype</b><span class="rest">: mock data, no backend, not the live site.</span></span></div>
+<header class="top"><div class="wrap"><a class="brand" href="index.html">✳ Mycelium</a><nav class="primary" aria-label="Site"><a href="index.html" aria-current="page">How it works</a><a href="swarms.html">Swarms</a><a href="index.html#privacy">Privacy</a></nav><span class="spacer"></span><a class="btn sm" href="swarms.html">Open swarms</a></div></header>
+<main id="main">
+<section class="hero"><div class="wrap">
+<p class="eyebrow">Preview · Apple silicon Macs</p>
+<h1>Run an AI model across a few Macs you trust.</h1>
+<p class="lead">Mycelium splits a language model across Macs, so no single Mac has to hold the whole thing. Chat with a swarm someone runs, lend your Mac to one, or start your own.</p>
+<div class="row"><a class="btn" href="swarms.html">Browse swarms</a><a class="btn sec" href="create.html">Start a swarm</a></div>
+</div></section>
+
+<section class="wrap" aria-labelledby="status-h"><div class="card statusband" id="statusband">
+<div class="row between"><h2 id="status-h" style="font-size:1.05rem">Right now</h2><span class="muted" style="font-size:13px" id="sb-age">Updated just now</span></div>
+<div class="sb-nums" id="sb-nums" aria-live="off"></div>
+<div class="tiles" id="sb-tiles"></div>
+<div class="row between" style="margin-top:auto"><span class="muted" style="font-size:13px">Reported by each swarm's Macs. A swarm that goes quiet shows as offline after 90 seconds.</span><a href="swarms.html">See all swarms →</a></div>
+</div></section>
+
+<section class="sect" id="how"><div class="wrap">
+<p class="eyebrow">How it works</p><h2 style="font-size:1.9rem;max-width:26ch;margin-bottom:28px">A swarm is a model shared out across Macs.</h2>
+<div class="how">
+<div><h3>Someone starts a swarm</h3><p class="muted">They pick a registered model and a name, and decide who may use it: anyone, people they approve, or invited keys. Their browser key signs the listing. There are no accounts.</p></div>
+<div><h3>Macs join and share the work</h3><p class="muted">Each helper Mac holds a slice of the model's layers. The owner approves every Mac that joins, and a Mac can pause or leave whenever it needs its resources back.</p></div>
+<div><h3>You send a prompt</h3><p class="muted">Your browser sends it straight to the swarm's own entry Mac. It passes through the helper Macs, and the answer streams back token by token.</p></div>
+</div>
+<div class="diagram"><svg viewBox="0 0 900 250" role="img" aria-labelledby="dg-t dg-d"><title id="dg-t">How a prompt travels</title>
+<desc id="dg-d">Your browser sends a prompt directly to the swarm's entry Mac, which passes it through the helper Macs. The answer streams back the same way. The directory only lists swarms and never sees prompts.</desc>
+<rect class="box" x="10" y="10" width="300" height="42" rx="10" stroke-dasharray="4 4"/><text x="160" y="36" text-anchor="middle" class="mu">mycelium.now · the phone book</text>
+<path class="ln dim" d="M85 52 V100"/><text class="mu" x="98" y="82">lists swarms, never sees prompts</text>
+<rect class="box" x="10" y="100" width="150" height="70" rx="12"/><text x="85" y="132" text-anchor="middle" font-weight="650">Your browser</text><text class="mu" x="85" y="152" text-anchor="middle">holds your key</text>
+<rect class="box" x="260" y="100" width="170" height="70" rx="12"/><text x="345" y="132" text-anchor="middle" font-weight="650">Entry Mac</text><text class="mu" x="345" y="152" text-anchor="middle">layers 0–11</text>
+<rect class="box" x="520" y="100" width="170" height="70" rx="12"/><text x="605" y="132" text-anchor="middle" font-weight="650">Helper Mac</text><text class="mu" x="605" y="152" text-anchor="middle">layers 12–23</text>
+<rect class="box" x="770" y="100" width="120" height="70" rx="12" stroke-dasharray="4 4"/><text x="830" y="132" text-anchor="middle" font-weight="650">More Macs</text><text class="mu" x="830" y="152" text-anchor="middle">optional</text>
+<path class="ln" d="M160 124 H260"/><path class="ln" d="M430 124 H520"/><path class="ln" d="M690 124 H770"/>
+<path class="ln dim" d="M260 150 H160"/><text class="mu" x="210" y="116" text-anchor="middle">prompt</text><text class="mu" x="210" y="170" text-anchor="middle">answer</text>
+<text class="mu" x="450" y="222" text-anchor="middle">Prompts go straight to the entry Mac. Everyone on the path with a Mac can read them.</text>
+</svg></div>
+</div></section>
+
+<section class="sect" id="privacy" style="padding-top:8px"><div class="wrap">
+<p class="eyebrow">Privacy, plainly</p><h2 style="font-size:1.9rem;max-width:26ch;margin-bottom:24px">Who can see what.</h2>
+<div class="see">
+<div><b>This site (the directory)</b><span class="muted">A public list of swarms: names, models, owner key, status. It never sees your prompts, sets no cookies and runs no analytics.</span></div>
+<div><b>The swarm's Macs</b><span class="muted">The entry Mac and the helper Macs can read your prompt and the activations. It is <u>not</u> end-to-end encrypted from them. Use swarms you trust.</span></div>
+<div><b>Cloudflare</b><span class="muted">Swarm entries sit behind Cloudflare. It ends the HTTPS connection, so it can see your IP address, timing, and prompts and answers in plaintext.</span></div>
+<div><b>You</b><span class="muted">A key made in your browser identifies you to swarms. No email, no password. It never leaves the browser, and you can forget it any time.</span></div>
+</div></div></section>
+
+<section class="sect" style="padding-top:8px"><div class="wrap">
+<p class="eyebrow">Ways in</p>
+<div class="roles">
+<a href="swarms.html#browse"><b>Chat with a swarm →</b><span class="muted">See which swarms are up, how fast they are, and ask for access if they need it.</span></a>
+<a href="swarms.html#contributing"><b>Lend a Mac →</b><span class="muted">Join a swarm from the Mycelium Mac app and see how your Mac is helping.</span></a>
+<a href="create.html"><b>Start a swarm →</b><span class="muted">Pick a model from the list, choose who may use it, then attach your Mac.</span></a>
+</div></div></section>
+
+<section class="sect faq" style="padding-top:8px"><div class="wrap">
+<p class="eyebrow">Questions</p>
+<details><summary>Is this ready to rely on?</summary><p>No. It is a preview. It has been proven on two Apple silicon Macs the project owns. The public demo swarm runs on one volunteer Mac behind a tunnel and may sleep.</p></details>
+<details><summary>What does "serving" mean?</summary><p>The swarm's Macs have loaded the model and the route between them has passed its checks. "Warming up" means that is still happening. "Offline" means the swarm stopped reporting.</p></details>
+<details><summary>Why choose a model from a list instead of typing one?</summary><p>Each model needs a pinned set of files and a checked layer layout, so swarms can only run models Mycelium has registered. The list grows with releases.</p></details>
+</div></section>
+</main>
+<footer class="foot"><div class="wrap"><span>AGPL-3.0 · Mycelium · This site sets no cookies, runs no analytics and keeps no logs.</span><span>Prompts go from your browser directly to a swarm's entry Mac, never through this directory.</span></div></footer>
+
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="mock-data.js"></script><script src="app.js"></script>
+</body></html>

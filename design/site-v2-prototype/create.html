@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer"><meta name="color-scheme" content="dark light"><title>Mycelium · Start a swarm</title>
+<link rel="stylesheet" href="site.css"></head>
+<body data-page="create">
+<a class="skip" href="#main">Skip to content</a>
+<div class="proto" role="note"><span><b>Design prototype</b><span class="rest">: mock data, no backend, not the live site.</span></span></div>
+<header class="top"><div class="wrap"><a class="brand" href="index.html">✳ Mycelium</a><nav class="primary" aria-label="Site"><a href="index.html">How it works</a><a href="swarms.html" aria-current="page">Swarms</a><a href="index.html#privacy">Privacy</a></nav><span class="spacer"></span><button class="keychip" id="keychip" type="button" aria-haspopup="dialog"><span class="lbl">Your key</span><span class="mono full">2F00-F2E5-3E8E-2E5F</span><span class="short mono">2F00…2E5F</span></button></div></header>
+<main id="main" class="app wrap" style="max-width:760px"><nav class="tabs" aria-label="Swarms sections"><a class="tab" href="swarms.html#browse">Browse<span class="count">7</span></a><a class="tab" href="swarms.html#chat">Chat<span class="count">3</span></a><a class="tab" href="swarms.html#contributing">Contributing<span class="count">1</span></a><a class="tab" href="swarms.html#owned" aria-current="page">Owned<span class="count alert" id="o-tabcount">2</span></a></nav>
+<p class="crumbs"><a href="swarms.html#owned">← Swarms</a></p>
+<div id="c-step1"><div class="page-head"><div><h1>Start a swarm</h1><p>Three choices. You can change who may use it later.</p></div></div>
+<form id="c-form" class="grid" style="gap:22px" novalidate>
+<div class="card"><label class="f" for="c-name">1. Name it</label><input id="c-name" type="text" maxlength="48" autocomplete="off" placeholder="Reading group"><p class="hint">Shown in the public list. 48 characters at most.</p></div>
+<div class="card"><label class="f" for="c-model">2. Pick a model</label><select id="c-model"></select>
+<div class="note info" id="c-model-info" style="margin-top:12px;min-height:76px"><span class="muted">Models are registered by Mycelium so every Mac loads exactly the same pinned files. The app checks that your Macs have enough memory before anything is downloaded.</span></div></div>
+<fieldset class="card" style="margin:0;border:1px solid var(--line)"><legend class="f" style="padding:0 6px">3. Who may use it</legend>
+<div class="radio-cards"><label><input type="radio" name="mode" value="request" checked><span><b>By request</b><span class="muted">People ask and you approve each one. Good for friends and groups.</span></span></label>
+<label><input type="radio" name="mode" value="open"><span><b>Open to anyone</b><span class="muted">Automatic, with a daily allowance per key and per swarm. Anyone can read what you run, so keep the quota small.</span></span></label>
+<label><input type="radio" name="mode" value="invite"><span><b>Invite only</b><span class="muted">Only keys you grant. People cannot ask.</span></span></label></div>
+<div id="c-quota" hidden class="grid g2" style="margin-top:14px"><div><label class="f" for="q-req">Requests per key</label><input id="q-req" type="number" value="20" min="1" max="1000"></div><div><label class="f" for="q-tok">Tokens per key</label><input id="q-tok" type="number" value="4000" min="1" max="200000"></div></div></fieldset>
+<div class="card"><label class="f" for="c-desc">Description <span class="muted" style="font-weight:400">(optional)</span></label><input id="c-desc" type="text" maxlength="280" placeholder="What is this swarm for?"></div>
+<div class="row"><button class="btn" id="c-go" type="submit" disabled>Create swarm</button><span class="hint" style="margin:0">Signed with your browser key. No account needed.</span></div>
+</form></div>
+<div id="c-step2" hidden><div class="page-head"><div><h1>Swarm created</h1><p><b id="c-done-name"></b> · <span id="c-done-model"></span> · not serving yet</p></div></div>
+<div class="note good"><b class="lead">It is listed, but offline.</b> A swarm serves once a Mac running the Mycelium app is attached to it.</div>
+<ol class="steps" style="margin:20px 0"><li class="done"><span><b>Swarm created</b></span><span></span></li>
+<li class="now"><span><b>Attach your Mac</b><br><span class="muted">In the Mycelium app choose "Publish this run as a swarm" and paste the link below, or scan the QR.</span></span><span></span></li>
+<li><span><b>Add helper Macs</b><br><span class="muted">Use "Invite a Mac" in the app. You approve each Mac.</span></span><span></span></li>
+<li><span><b>Share it</b><br><span class="muted">Once it shows Serving, others can find it in the list.</span></span><span></span></li></ol>
+<div class="card"><p class="mono" style="word-break:break-all;font-size:12px;margin:0">mycelium-swarm:eyJwcm90b2NvbCI6Im15Y2VsaXVtLnN3YXJtLmxpbmsudjEi… (mock)</p></div>
+<div class="row" style="margin-top:16px"><a class="btn" href="owner.html">Go to your swarm</a><a class="btn sec" href="swarms.html#owned">Back to Owned</a></div></div>
+</main>
+<dialog id="keydlg" aria-labelledby="keydlg-t"><h2 id="keydlg-t" style="font-size:1.2rem;margin-bottom:10px">Your key</h2>
+<p>This browser made a key. It is how swarms recognise you: <b>no email, no password, no account.</b> The private half never leaves this browser.</p>
+<p class="mono" style="font-size:1.05rem">2F00-F2E5-3E8E-2E5F</p>
+<p class="muted">Swarm owners grant access to this fingerprint. Swarms you chat with can link your prompts to it.</p>
+<div class="row"><button class="btn sm" id="keydlg-close">Close</button><button class="btn sm sec" id="forget">Forget this key…</button></div>
+<div id="forget-confirm" class="note bad" hidden style="margin-top:12px"><b class="lead">Forget this key?</b> You lose every access you were given and you can no longer manage the swarms you own with it. A new key starts with a fresh allowance, but limits by network address still apply.
+<div class="row" style="margin-top:10px"><button class="btn sm danger" id="forget-yes">Forget key</button><button class="btn sm sec" id="forget-no">Keep it</button></div></div></dialog>
+<nav class="tabbar" aria-label="Swarms sections"><a id="bar-browse" href="swarms.html#browse">Browse</a><a id="bar-chat" href="swarms.html#chat">Chat</a><a id="bar-contributing" href="swarms.html#contributing">Helping</a><a id="bar-owned" href="swarms.html#owned" aria-current="page">Owned<span class="count alert" id="o-bar">2</span></a></nav>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="mock-data.js"></script><script src="app.js"></script>
+</body></html>
