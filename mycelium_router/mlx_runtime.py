@@ -993,6 +993,9 @@ def _qwen2_block_with_kv(
    return hidden, layer_kv
 
 
+_NO_TENSORS: Mapping[str, Any] = MappingProxyType({})
+
+
 class MLXRuntimePort:
    """Serial, item-isolated RuntimePort over assignment-bound LoadedStages."""
 
@@ -1124,6 +1127,8 @@ class MLXRuntimePort:
          for _stage, _placement, loaded, _runtime in bound.values():
             self._execution_tensors[id(loaded)] = _per_call_int8_tensors(loaded.tensors)
       self.standby_placement_ids = frozenset(bound) if standby_port else frozenset()
+      #: PV25: weights can be dropped while idle and restored from the same authenticated source.
+      self._weights_resident = True
       if clock is not None and not callable(clock):
          _reject("invalid_runtime_clock")
       self._clock = clock or time.monotonic
@@ -2405,8 +2410,89 @@ class MLXRuntimePort:
    def _tensors_for(self, loaded: LoadedStage) -> Mapping[str, Any]:
       """The execution tensors of a bound stage (packed int8 when available)."""
 
+      if not self._weights_resident:
+         _reject("weights_unloaded")
       execution = self._execution_tensors.get(id(loaded))
       return loaded.tensors if execution is None else execution
+
+   # -- PV25 idle unload: drop the weights, keep the port, graph, bindings and identity -----------
+   @property
+   def weights_resident(self) -> bool:
+      return self._weights_resident
+
+   def active_request_count(self) -> int:
+      """Requests that hold KV or are executing (expired leases are released first)."""
+
+      if self._closed:
+         return 0
+      try:
+         self.expire_leases()
+      except MLXRuntimeError:
+         pass
+      with self._resource_index_lock:
+         return len(self._kv_states) + len(self._executing_subjects)
+
+   def _execution_for(self, loaded: LoadedStage) -> Mapping[str, Any]:
+      if self._architecture in {"qwen2", "qwen3", "qwen3_5", "qwen3_5_moe"}:
+         execution, _mode = _persistent_int8_tensors(loaded.tensors)
+      else:
+         execution = loaded.tensors
+      if self.int8_execution == INT8_EXECUTION_PER_CALL_MATERIALIZATION:
+         execution = _per_call_int8_tensors(loaded.tensors)
+      return execution
+
+   def release_weights(self) -> None:
+      """Drop every stage's tensors (and packed copies).  Refused while any request holds state."""
+
+      if not self._state_lock.acquire(timeout=5.0):
+         _reject("weights_in_use")
+      try:
+         if not self._weights_resident or self._closed:
+            return
+         if self.active_request_count() != 0:
+            _reject("weights_in_use")
+         for _stage, _placement, loaded, _runtime in self._bound.values():
+            # LoadedStage is frozen and shared by identity (bindings, packed-weight index); only the
+            # tensor mapping is swapped, so every binding and proof stays exactly as authenticated.
+            object.__setattr__(loaded, "tensors", _NO_TENSORS)
+         self._execution_tensors.clear()
+         self._weights_resident = False
+      finally:
+         self._state_lock.release()
+      import gc
+      gc.collect()
+      mx.clear_cache()
+
+   def restore_weights(self, load: Callable[[str], LoadedStage]) -> None:
+      """Reload every stage through ``load(placement_id)``; refused unless it is the same weights.
+
+      The fresh stage must carry the originally authenticated assignment, tensor digest and proof;
+      anything else leaves the port unloaded and raises ``weights_restore_mismatch``.
+      """
+
+      if not self._state_lock.acquire(timeout=5.0):
+         _reject("weights_in_use")
+      try:
+         if self._weights_resident or self._closed:
+            return
+         fresh: dict[str, LoadedStage] = {}
+         for placement_id, (_stage, _placement, loaded, _runtime) in self._bound.items():
+            candidate = load(placement_id)
+            if (
+               not isinstance(candidate, LoadedStage)
+               or candidate.authenticated_assignment_id != loaded.authenticated_assignment_id
+               or candidate.authenticated_tensor_digest != loaded.authenticated_tensor_digest
+               or _plain_json(candidate.proof) != _plain_json(loaded.proof)
+            ):
+               _reject("weights_restore_mismatch", placement_id)
+            fresh[placement_id] = candidate
+         for placement_id, (_stage, _placement, loaded, _runtime) in self._bound.items():
+            object.__setattr__(loaded, "tensors", fresh[placement_id].tensors)
+         self._weights_resident = True
+         for _stage, _placement, loaded, _runtime in self._bound.values():
+            self._execution_tensors[id(loaded)] = self._execution_for(loaded)
+      finally:
+         self._state_lock.release()
 
    def _observe_cooperative_work_unit(self, started_at: float) -> None:
       elapsed_ms = max(0.0, (time.monotonic() - started_at) * 1_000.0)

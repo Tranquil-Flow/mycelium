@@ -22,7 +22,8 @@ ADAPTIVE_ROUTES = frozenset({"/api/adaptive/policy", "/api/adaptive/stop", "/api
 
 # Closed, allow-listed reason wording for the one-line status (never app identity).
 REASON_TEXT = {"owner_game_mode": "you paused sharing", "owner_stop": "you pressed Stop",
-               "host_memory_pressure": "memory is low", "host_cpu_saturation": "the CPU is busy"}
+               "host_memory_pressure": "memory is low", "host_cpu_saturation": "the CPU is busy",
+               "host_on_battery": "on battery"}
 
 
 def _error(code: str):
@@ -48,7 +49,9 @@ def status_line(*, automatic: bool, mode: str, reason: str, priority_app: tuple[
     if priority_app is not None and mode in ("drain", "withdraw"):
         name, running = priority_app
         return f"Adaptive sharing: paused - {name} {'is' if running else 'was'} running"[:120]
-    if not automatic:
+    if reason == "host_on_battery" and mode in ("drain", "withdraw"):
+        line = "Adaptive sharing: paused - on battery"  # Plugged in only: the same wording with Adaptive sharing on or off
+    elif not automatic:
         line = "Adaptive sharing: off" + (f" - {why}" if mode in ("drain", "withdraw") and why else "")
     elif mode == "reduced":
         line = "Adaptive sharing: reduced" + (f" - {why}" if why else "")
@@ -92,6 +95,7 @@ def adaptive_status(app: Any) -> dict[str, Any]:
         "new_admissions_allowed": publication["new_admissions_allowed"],
         "expires_in_s": round(max(0.0, publication["expires_at"] - now), 1),
         "withdraw_overdue": status["withdraw_overdue"], "reserve_bytes": policy["reserve_bytes"],
+        **({"plugged_in_only": True} if ah.policy_plugged_in_only(policy) else {}),
     }
 
 
@@ -112,7 +116,8 @@ def adaptive_action(app: Any, path: str, body: Any) -> dict[str, Any]:
         # alias of ``game_mode``), the third switches the automatic controller and the manual pause
         # independently.
         shapes = ({"enabled", "game_mode", "acknowledged"}, {"enabled", "pause_sharing", "acknowledged"},
-                  {"adaptive_sharing", "pause_sharing", "acknowledged"})
+                  {"adaptive_sharing", "pause_sharing", "acknowledged"},
+                  {"adaptive_sharing", "pause_sharing", "plugged_in_only", "acknowledged"})
         if (not isinstance(body, dict) or set(body) not in shapes
                 or any(type(value) is not bool for value in body.values())):
             raise _error("adaptive_request_invalid")
@@ -120,6 +125,11 @@ def adaptive_action(app: Any, path: str, body: Any) -> dict[str, Any]:
         independent = "adaptive_sharing" in body
         try:
             policy = copy.deepcopy(ah.read_adaptive_policy(app.root))
+            if "plugged_in_only" in body:
+                if body["plugged_in_only"]:
+                    policy["plugged_in_only"] = True
+                else:
+                    policy.pop("plugged_in_only", None)
             if independent:
                 automatic = body["adaptive_sharing"]
                 if automatic and not body["acknowledged"] and not (
@@ -131,6 +141,8 @@ def adaptive_action(app: Any, path: str, body: Any) -> dict[str, Any]:
                     raise _error("adaptive_acknowledgement_required")
                 policy["enabled"], policy["automatic"] = body["enabled"], body["enabled"]
                 policy["game_mode"] = body["enabled"] and pause
+            if ah.policy_plugged_in_only(policy) and not policy["enabled"]:
+                policy["enabled"], policy["automatic"] = True, False  # the controller exists to enforce it
             ah.write_adaptive_policy(app.root, policy, owner_authorized=True)
         except ah.AdaptiveHostError as error:
             raise _error(error.code) from None

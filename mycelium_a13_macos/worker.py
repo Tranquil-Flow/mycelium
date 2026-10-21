@@ -429,6 +429,7 @@ _OPERATION_PAYLOAD_FIELDS: dict[str, tuple[frozenset[str], ...]] = {
     "infer_cancel_wait": (_CANCEL_CONTROL_FIELDS,),
     "rotate": (frozenset({"peer"}),),
     "stop": (frozenset(),),
+    "idle_reload": (frozenset(),),  # PV25: wake unloaded weights; no payload
 }
 _ALLOWED = frozenset(_OPERATION_PAYLOAD_FIELDS)
 _EXACT_GRANT_COMMANDS = frozenset(

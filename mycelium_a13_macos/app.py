@@ -610,6 +610,7 @@ class DemoApp:
                 self.authority = TargetApplication(self.root / 'target', _test_peer_factory=self._test_peer_factory)
                 self.authority.adaptive_overlay = self._adaptive_overlay
                 self.authority.adaptive_drain = self._adaptive_drain
+                self.authority.idle_tick = self._idle_tick
             else:
                 if (self.root / 'target').exists():
                     raise DemoError('installation_role_missing')
@@ -980,6 +981,30 @@ class DemoApp:
         drain_step(adaptive.controller, runtime, hooks=cached[1])
         feed_for(self).tick(adaptive.controller, self.authority)
 
+    def _idle_link(self):
+        """PV25: the app's idle-unload setting, the node's idle status and the session energy estimate."""
+        link=getattr(self,'_idle_link_obj',None)
+        if link is None:
+            from mycelium_idle.app_link import AppIdleLink
+            link=self._idle_link_obj=AppIdleLink(app_root=self.root)
+        return link
+
+    def _idle_tick(self, runtime):
+        """Called from the managed runtime's control loop: publish the setting, read the node, meter energy."""
+        link=self._idle_link()
+        if getattr(self,'_idle_runtime_id',None)!=id(runtime):
+            self._idle_runtime_id=id(runtime)
+            link.new_session()
+        pid=getattr(getattr(runtime,'worker',None),'pid',None)
+        link.tick(runtime.root,[pid] if type(pid) is int else [])
+
+    def _idle_policy_action(self, body):
+        from mycelium_idle import policy as idle_policy
+        if not isinstance(body,dict) or set(body)!={'unload_after_minutes'}:
+            raise DemoError('idle_policy_invalid')
+        try: return self._idle_link().set_policy(body['unload_after_minutes'])
+        except idle_policy.IdlePolicyError as error: raise DemoError(error.code) from None
+
     def _adaptive_tick(self):
         """A16 tick from the policy loop while no managed runtime is attached (restart fence, re-entry)."""
         from .adaptive_host import adaptive_detached_tick
@@ -1108,6 +1133,7 @@ class DemoApp:
             self.authority = TargetApplication(self.root / 'target',_test_peer_factory=self._test_peer_factory)
             self.authority.adaptive_overlay = self._adaptive_overlay
             self.authority.adaptive_drain = self._adaptive_drain
+            self.authority.idle_tick = self._idle_tick
         if not self.running:
             self.authority.start()
             self.running = True
@@ -1247,6 +1273,7 @@ class DemoApp:
                 'adaptive_host':adaptive_status(self),'adaptive_host_publication':adaptive_publication(self),
                 'service_mode':_service_mode_status(self),
                 'priority_apps':_priority_apps_status(self),
+                'idle_energy':self._idle_link().status(),
                 'sharing':_sharing_status(self),'relay_wait':self._relay_wait_status(),
                 'owner_run':_demo_status(self,'owner'),'demo_target':_demo_status(self,'target'),
                 'chat':_demo_status(self,'chat'),'swarm':_swarm_status(self),
@@ -1293,6 +1320,8 @@ class DemoApp:
             from .service_mode_owner import MODE_ROUTES, service_mode_action
             if path in MODE_ROUTES:
                 return service_mode_action(self, path, body)
+            if path == '/api/idle/policy':
+                return self._idle_policy_action(body)
             if path == '/api/run-model':
                 return self._choose_run_model(body)
             from .demo_app import OWNER_ROUTES as _DEMO_ROUTES

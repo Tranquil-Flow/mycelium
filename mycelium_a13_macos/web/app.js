@@ -20,7 +20,7 @@ const ADAPTIVE_TEXT={off:'Off. Nothing is reduced or paused automatically; your 
   drain:'No new work: draining, finishing, handing off or ending running work.',withdraw:'Stopped. Model memory released; no work from this Mac.',
   error:'The sharing policy could not be read. New work is refused until you turn it off or on again.'};
 const ADAPTIVE_REASON={owner_game_mode:'you paused sharing',owner_stop:'you pressed Stop',host_memory_pressure:'memory is low',
-  host_cpu_saturation:'the CPU is busy',resource_thermal_policy_violation:'this Mac is hot',resource_power_policy_violation:'the battery rules apply',none:''};
+  host_cpu_saturation:'the CPU is busy',host_on_battery:'this Mac is on battery',resource_thermal_policy_violation:'this Mac is hot',resource_power_policy_violation:'the battery rules apply',none:''};
 // Derived Paused -> Rejoining (connecting route) -> Sharing; "Sharing" only once the route is ready.
 const SHARING_TEXT={paused:'Paused',rejoining:'Rejoining - connecting route',sharing:'Sharing',idle:'Not sharing yet'};
 function renderSharing(value){
@@ -28,9 +28,26 @@ function renderSharing(value){
   $('sharing-state').textContent=SHARING_TEXT[state]||SHARING_TEXT.idle;
   $('sharing-state').dataset.state=state;
 }
+// PV25: idle unload setting, the stage worker's weight state, and the per-session energy estimate.
+function renderIdle(value){
+  const ie=value.idle_energy||{};const pol=(ie.policy||{}).unload_after_minutes;
+  const select=$('idle-minutes');
+  if(pol!==undefined&&document.activeElement!==select){
+    const want=String(pol);
+    if(![...select.options].some(o=>o.value===want)){const o=document.createElement('option');o.value=want;o.textContent=`${want} minutes`;select.appendChild(o);}
+    select.value=want;
+  }
+  const m=ie.member;
+  $('idle-line').textContent=m?`Stage worker: ${m.line}`+(m.last_reload_ms!=null?` · last wake-up took ${(m.last_reload_ms/1000).toFixed(1)} s`:'')
+    +(m.rss_after_unload_bytes!=null&&m.state!=='loaded'?` · memory now ${(m.rss_after_unload_bytes/1048576).toFixed(0)} MB`:''):'Stage worker: not running on this Mac';
+  const e=ie.energy;
+  $('energy-line').textContent=e?e.text:'';
+  $('energy-note').textContent=e?`${e.label}.${e.gpu_time_available?'':' GPU time is not available here, so only CPU time is counted.'}`:'';
+}
 function renderAdaptive(value){
   const a=value.adaptive_host||{state:'off'};
-  $('adaptive-enable').checked=!!a.adaptive_sharing;$('adaptive-game').checked=!!a.pause_sharing;
+  $('adaptive-enable').checked=!!a.adaptive_sharing;$('adaptive-game').checked=!!a.pause_sharing;$('adaptive-plugged').checked=!!a.plugged_in_only;
+  $('adaptive-plugged').disabled=busy;
   const reason=ADAPTIVE_REASON[a.reason]||'';
   $('adaptive-line').textContent=a.line||'Adaptive sharing: off';
   $('adaptive-status').textContent=(ADAPTIVE_TEXT[a.state]||ADAPTIVE_TEXT.off)+(reason?` Reason: ${reason}.`:'')
@@ -236,7 +253,7 @@ function render(value) {
   $('join').hidden=target && a.membership_state==='current';
   $('revoke-consent').hidden=target;
   applyResources(value);
-  renderAdaptive(value);renderSharing(value);renderServiceMode(value);renderPriorityApps(value);
+  renderAdaptive(value);renderSharing(value);renderServiceMode(value);renderPriorityApps(value);renderIdle(value);
   if(value.resource_policy){
     for(const key of ['power','network','storage']){
       $(key).value=String(value.resource_policy[key==='storage'?'storage_bytes':key]);
@@ -635,8 +652,10 @@ window.addEventListener('pageshow',()=>void refresh(false));
 window.addEventListener('online',()=>void refresh());
 void refresh();
 setInterval(()=>{if(!busy&&connected)void refresh(false);},5000);
-function adaptiveBody(){return {adaptive_sharing:$('adaptive-enable').checked,pause_sharing:$('adaptive-game').checked,acknowledged:$('adaptive-ack').checked};}
+function adaptiveBody(){return {adaptive_sharing:$('adaptive-enable').checked,pause_sharing:$('adaptive-game').checked,plugged_in_only:$('adaptive-plugged').checked,acknowledged:$('adaptive-ack').checked};}
+$('adaptive-plugged').addEventListener('change',()=>void perform('/api/adaptive/policy',adaptiveBody(),$('adaptive-plugged').checked?'Plugged in only: sharing pauses while on battery.':'Plugged in only is off. Battery no longer pauses sharing.'));
 $('adaptive-enable').addEventListener('change',()=>void perform('/api/adaptive/policy',adaptiveBody(),$('adaptive-enable').checked?'Adaptive sharing on.':'Adaptive sharing off. Pause sharing and Stop still work.'));
 $('adaptive-game').addEventListener('change',()=>void perform('/api/adaptive/policy',adaptiveBody(),$('adaptive-game').checked?'Sharing paused: no new work.':'Pause sharing released. Sharing returns only after the calm period.'));
+$('idle-minutes').addEventListener('change',()=>{const v=$('idle-minutes').value;void perform('/api/idle/policy',{unload_after_minutes:v==='never'?'never':Number(v)},v==='never'?'Weights stay loaded (never unload).':`Weights unload after ${v} idle minutes.`);});
 $('adaptive-stop').addEventListener('click',()=>void perform('/api/adaptive/stop',{},'Stopped taking new work on this Mac.'));
 $('adaptive-resume').addEventListener('click',()=>void perform('/api/adaptive/resume',{},'Serving allowed again after the calm period.'));
