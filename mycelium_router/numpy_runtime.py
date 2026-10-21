@@ -53,6 +53,11 @@ from mycelium_router.payloads import (
    encode_activation,
 )
 from mycelium_router.stage_signatures import stage_signature_for_backend
+from mycelium_router.wire_dtype import (
+   WireDtypeError,
+   decode_wire_array,
+   encode_wire_array,
+)
 from mycelium_router.terminal_kv_retention import TerminalKVRetention
 from mycelium_router.validation import ContractError, validate_execution_graph
 from numpy_runtime import (
@@ -1361,8 +1366,10 @@ class NumpyRuntimePort:
       ):
          _reject("position_bounds_exceeded")
       self._validate_sequence_span(item.batch_key, item.phase, sequence)
-      hidden = np.frombuffer(envelope.data, dtype=_NUMPY_DTYPES[envelope.dtype])
-      hidden = hidden.reshape(envelope.shape)
+      try:
+         hidden = decode_wire_array(envelope.data, envelope.dtype, envelope.shape)
+      except WireDtypeError as exc:
+         _reject(exc.code, exc.detail)
       if not np.isfinite(hidden).all():
          _reject("nonfinite_activation")
       return None, hidden, sequence
@@ -1389,12 +1396,16 @@ class NumpyRuntimePort:
       if tuple(int(value) for value in output.shape) != expected:
          _reject("invalid_intermediate_stage_output")
       contiguous = np.ascontiguousarray(output)
+      try:
+         wire_data = encode_wire_array(contiguous, runtime["dtype"])
+      except WireDtypeError as exc:
+         _reject(exc.code, exc.detail)
       return RuntimeResult(
          success=True,
          payload=encode_activation(
             dtype=runtime["dtype"],
             shape=tuple(int(value) for value in contiguous.shape),
-            data=bytes(contiguous),
+            data=wire_data,
          ),
       )
 
@@ -1495,7 +1506,9 @@ class NumpyRuntimePort:
          )
          self._observe_cooperative_work_unit(work_unit_started)
          self._checkpoint_path(path_id)
-      output = np.ascontiguousarray(hidden, dtype=np.dtype(runtime["dtype"]))
+      # NumPy stages always compute in float32; the wire dtype conversion (and
+      # its range guard) happens once, at the edge, in ``_runtime_result``.
+      output = np.ascontiguousarray(hidden, dtype=np.float32)
       if not np.isfinite(output).all():
          _reject("nonfinite_stage_output")
       return output, next_layers
@@ -1898,13 +1911,6 @@ class NumpyRuntimePort:
       if not isinstance(batch, RuntimeBatch):
          raise NumpyRuntimeError("invalid_runtime_batch")
       return tuple(self.execute(item) for item in batch.items)
-
-
-_NUMPY_DTYPES = {
-   "float16": np.float16,
-   "bfloat16": np.float32,  # NumPy lacks native bfloat16; map to float32 bytes.
-   "float32": np.float32,
-}
 
 
 # Compatibility spelling for callers that prefer conventional CamelCase.
