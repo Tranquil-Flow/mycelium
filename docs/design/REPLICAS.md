@@ -180,8 +180,9 @@ serving; balancing requests".
   single-host routes. Today `MIN_HOSTS = 2`, so a 2-Mac setup cannot form two
   routes: **not applicable until PV31 (single-host route) lands**.
 - 2 Macs, two 2-Mac routes would need 4 Macs; not applicable.
-- 2 Macs, 7B int8: one copy already needs both (the 7B stage measured 7.4 GB
-  group RSS on one Mac); a second copy never fits. k = 1.
+- 2 Macs, 7B int8: the 7B route already splits across both (a 7B int8 stage
+  measured 7.4 GB group RSS, `model_resources.LOAD_PEAK_FACTOR`), so a second
+  copy does not fit. k = 1 (`single_copy_only_memory`).
 - 4+ Macs with a model that fits on a pair: two 2-Mac routes become possible
   with multi-route compile.
 - Gain is real only when demand exceeds one route's capacity; for one
