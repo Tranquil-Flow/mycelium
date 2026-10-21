@@ -1,0 +1,448 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+"""Frozen public contracts for the separately authenticated request gateway."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import hashlib
+import re
+from typing import Any, Mapping, Protocol
+
+from mycelium_qualification.contracts import (
+    RouteQualificationV1,
+    route_qualification_to_dict,
+)
+from mycelium_qualification.evidence import canonical_json_bytes, is_sha256_ref, sha256_bytes
+
+class TokenEmitter(Protocol):
+    def __call__(self, token_index: int, token_text: str, token_id: int | None = None) -> None: ...
+
+
+REQUEST_GATEWAY_PROTOCOL = "mycelium.request_gateway.v1"
+REQUEST_GATEWAY_PROTOCOL_V2 = "mycelium.request_gateway.v2"
+#: A11: the closed set of explicit speculation preferences (``None`` = not stated).
+SPECULATION_PREFERENCES = frozenset({None, "target_only", "speculative_requested"})
+REQUEST_EVENT_PROTOCOL = "mycelium.request_event.v1"
+REQUEST_EVENT_PROTOCOL_V2 = "mycelium.request_event.v2"
+MAX_PROMPT_UTF8_BYTES = 131_072
+MAX_NEW_TOKENS = 4_096
+_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,127}")
+_ERROR_CODE_RE = re.compile(r"[a-z][a-z0-9_]{0,63}")
+_PUBLIC_MODEL_ID_RE = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._:~-]{0,63}"
+    r"(?:/[A-Za-z0-9][A-Za-z0-9._:~-]{0,63})?"
+)
+
+
+def is_valid_request_id(value: object) -> bool:
+    return isinstance(value, str) and _REQUEST_ID_RE.fullmatch(value) is not None
+
+
+def is_safe_error_code(value: object) -> bool:
+    return isinstance(value, str) and _ERROR_CODE_RE.fullmatch(value) is not None
+
+
+def is_public_model_id(value: object) -> bool:
+    """Return whether a model id is safe for the browser-visible contract."""
+    return isinstance(value, str) and _PUBLIC_MODEL_ID_RE.fullmatch(value) is not None
+
+
+class AdmissionError(ValueError):
+    """Stable fail-closed admission error with no private request material."""
+
+    def __init__(self, code: str) -> None:
+        if not is_safe_error_code(code):
+            raise ValueError("invalid_admission_error_code")
+        self.code = code
+        super().__init__(code)
+
+
+def _require(condition: bool, code: str) -> None:
+    if not condition:
+        raise AdmissionError(code)
+
+
+def qualification_digest(qualification: RouteQualificationV1) -> str:
+    """Digest the entire canonical authority record for exact-match admission."""
+    return sha256_bytes(canonical_json_bytes(route_qualification_to_dict(qualification)))
+
+
+def _public_model_id(model_id: str) -> str:
+    if is_public_model_id(model_id):
+        return model_id
+    return "model-sha256-" + hashlib.sha256(model_id.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class QualificationBinding:
+    """Client-safe exact admission identity derived from RouteQualificationV1."""
+
+    qualification_id: str
+    qualification_digest: str
+    deployment_id: str
+    deployment_epoch: int
+    topology_version: int
+    model_id: str
+    resolved_commit: str
+    manifest_digest: str
+    path_manifest_digest: str
+    stage_load_proof_digests: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        for value in (
+            self.qualification_id,
+            self.deployment_id,
+            self.model_id,
+            self.resolved_commit,
+        ):
+            _require(isinstance(value, str) and bool(value), "invalid_qualification_binding")
+        for value in (
+            self.qualification_digest,
+            self.manifest_digest,
+            self.path_manifest_digest,
+            *self.stage_load_proof_digests,
+        ):
+            _require(isinstance(value, str) and is_sha256_ref(value), "invalid_qualification_binding")
+        _require(
+            isinstance(self.deployment_epoch, int)
+            and not isinstance(self.deployment_epoch, bool)
+            and self.deployment_epoch >= 0,
+            "invalid_qualification_binding",
+        )
+        _require(
+            isinstance(self.topology_version, int)
+            and not isinstance(self.topology_version, bool)
+            and self.topology_version >= 0,
+            "invalid_qualification_binding",
+        )
+        _require(
+            len(set(self.stage_load_proof_digests)) == len(self.stage_load_proof_digests),
+            "invalid_qualification_binding",
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "qualification_id": self.qualification_id,
+            "qualification_digest": self.qualification_digest,
+            "deployment_id": self.deployment_id,
+            "deployment_epoch": self.deployment_epoch,
+            "topology_version": self.topology_version,
+            "model_id": self.model_id,
+            "resolved_commit": self.resolved_commit,
+            "manifest_digest": self.manifest_digest,
+            "path_manifest_digest": self.path_manifest_digest,
+            "stage_load_proof_digests": list(self.stage_load_proof_digests),
+        }
+
+    @classmethod
+    def from_dict(cls, document: Mapping[str, Any]) -> "QualificationBinding":
+        expected = {
+            "qualification_id",
+            "qualification_digest",
+            "deployment_id",
+            "deployment_epoch",
+            "topology_version",
+            "model_id",
+            "resolved_commit",
+            "manifest_digest",
+            "path_manifest_digest",
+            "stage_load_proof_digests",
+        }
+        _require(isinstance(document, Mapping) and set(document) == expected, "invalid_qualification_binding")
+        stage_digests = document["stage_load_proof_digests"]
+        _require(isinstance(stage_digests, (list, tuple)), "invalid_qualification_binding")
+        return cls(
+            qualification_id=document["qualification_id"],
+            qualification_digest=document["qualification_digest"],
+            deployment_id=document["deployment_id"],
+            deployment_epoch=document["deployment_epoch"],
+            topology_version=document["topology_version"],
+            model_id=document["model_id"],
+            resolved_commit=document["resolved_commit"],
+            manifest_digest=document["manifest_digest"],
+            path_manifest_digest=document["path_manifest_digest"],
+            stage_load_proof_digests=tuple(stage_digests),
+        )
+
+
+def qualification_binding(qualification: RouteQualificationV1) -> QualificationBinding:
+    """Project an authority record into the exact client admission binding."""
+    model_id = _public_model_id(qualification.model_id)
+    return QualificationBinding(
+        qualification_id=qualification.qualification_id,
+        qualification_digest=qualification_digest(qualification),
+        deployment_id=qualification.deployment_id,
+        deployment_epoch=qualification.deployment_epoch,
+        topology_version=qualification.topology_version,
+        model_id=model_id,
+        resolved_commit=qualification.resolved_commit,
+        manifest_digest=qualification.manifest_digest,
+        path_manifest_digest=qualification.path_manifest_digest,
+        stage_load_proof_digests=tuple(
+            sorted(binding.load_proof_digest for binding in qualification.stage_bindings)
+        ),
+    )
+
+
+def safe_qualification_projection(qualification: RouteQualificationV1) -> dict[str, Any]:
+    """Allowlisted projection; never exposes endpoints, processes, or reservations."""
+    return {
+        "protocol": REQUEST_GATEWAY_PROTOCOL,
+        "issued_at_unix_ms": qualification.issued_at_unix_ms,
+        "evidence_class": qualification.evidence_class,
+        "route_ready": qualification.route_ready,
+        "reason_codes": list(qualification.reason_codes),
+        "binding": qualification_binding(qualification).to_dict(),
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class InferenceSubmission:
+    prompt: str
+    max_new_tokens: int
+    qualification: QualificationBinding
+    protocol: str = REQUEST_GATEWAY_PROTOCOL
+    workload_profile_id: str | None = None
+    qos_class: str | None = None
+    #: A11: an optional explicit future-request preference (v2 only).  It is a
+    #: request, never a grant: the entry node admits or refuses it, and any
+    #: refusal is an ordinary target-only request with the same output.
+    speculation_preference: str | None = None
+
+    def __post_init__(self) -> None:
+        _require(
+            self.protocol in {REQUEST_GATEWAY_PROTOCOL, REQUEST_GATEWAY_PROTOCOL_V2},
+            "unsupported_request_protocol",
+        )
+        _require(isinstance(self.prompt, str) and bool(self.prompt), "invalid_prompt")
+        _require(
+            len(self.prompt.encode("utf-8")) <= MAX_PROMPT_UTF8_BYTES,
+            "prompt_too_large",
+        )
+        _require(
+            isinstance(self.max_new_tokens, int)
+            and not isinstance(self.max_new_tokens, bool)
+            and 1 <= self.max_new_tokens <= MAX_NEW_TOKENS,
+            "invalid_max_new_tokens",
+        )
+        _require(isinstance(self.qualification, QualificationBinding), "invalid_qualification_binding")
+        _require(
+            (
+                self.speculation_preference is None
+                or (
+                    isinstance(self.speculation_preference, str)
+                    and self.speculation_preference in SPECULATION_PREFERENCES
+                )
+            )
+            and (
+                self.speculation_preference is None
+                or self.protocol == REQUEST_GATEWAY_PROTOCOL_V2
+            ),
+            "invalid_speculation_preference",
+        )
+        if self.protocol == REQUEST_GATEWAY_PROTOCOL:
+            _require(
+                self.workload_profile_id is None and self.qos_class is None,
+                "invalid_workload_binding",
+            )
+        else:
+            _require(
+                isinstance(self.workload_profile_id, str)
+                and _REQUEST_ID_RE.fullmatch(self.workload_profile_id) is not None
+                and self.qos_class in {"interactive", "batch"},
+                "invalid_workload_binding",
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        document = {
+            "protocol": self.protocol,
+            "prompt": self.prompt,
+            "max_new_tokens": self.max_new_tokens,
+            "qualification": self.qualification.to_dict(),
+        }
+        if self.protocol == REQUEST_GATEWAY_PROTOCOL_V2:
+            document["workload_profile_id"] = self.workload_profile_id
+            document["qos_class"] = self.qos_class
+            if self.speculation_preference is not None:
+                document["speculation_preference"] = self.speculation_preference
+        return document
+
+    @classmethod
+    def from_dict(cls, document: Mapping[str, Any]) -> "InferenceSubmission":
+        _require(isinstance(document, Mapping), "invalid_submission")
+        protocol = document.get("protocol")
+        expected = {"protocol", "prompt", "max_new_tokens", "qualification"}
+        if protocol == REQUEST_GATEWAY_PROTOCOL_V2:
+            expected.update({"workload_profile_id", "qos_class"})
+            if "speculation_preference" in document:
+                # Stated or absent: an explicit null is not a canonical form.
+                _require(
+                    document["speculation_preference"] is not None,
+                    "invalid_speculation_preference",
+                )
+                expected.add("speculation_preference")
+        _require(set(document) == expected, "invalid_submission")
+        _require(
+            protocol in {REQUEST_GATEWAY_PROTOCOL, REQUEST_GATEWAY_PROTOCOL_V2},
+            "unsupported_request_protocol",
+        )
+        qualification = document["qualification"]
+        _require(isinstance(qualification, Mapping), "invalid_qualification_binding")
+        return cls(
+            prompt=document["prompt"],
+            max_new_tokens=document["max_new_tokens"],
+            qualification=QualificationBinding.from_dict(qualification),
+            protocol=protocol,
+            workload_profile_id=document.get("workload_profile_id"),
+            qos_class=document.get("qos_class"),
+            speculation_preference=document.get("speculation_preference"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class StreamEvent:
+    """Deterministically ordered client event; token content exists only here."""
+
+    request_id: str
+    sequence: int
+    kind: str
+    token_index: int | None = None
+    text: str | None = None
+    code: str | None = None
+    phase: str | None = None
+    publisher_generation: int = 0
+    protocol: str = REQUEST_EVENT_PROTOCOL
+    token_id: int | None = None
+
+    def __post_init__(self) -> None:
+        _require(
+            isinstance(self.request_id, str) and bool(self.request_id),
+            "invalid_stream_event",
+        )
+        _require(
+            isinstance(self.publisher_generation, int)
+            and not isinstance(self.publisher_generation, bool)
+            and self.publisher_generation >= 0,
+            "invalid_stream_event",
+        )
+        _require(
+            isinstance(self.sequence, int)
+            and not isinstance(self.sequence, bool)
+            and self.sequence >= 0,
+            "invalid_stream_event",
+        )
+        _require(self.protocol in {REQUEST_EVENT_PROTOCOL, REQUEST_EVENT_PROTOCOL_V2}, "invalid_stream_event")
+        allowed_kinds = {"accepted", "token", "completed", "cancelled", "failed"}
+        if self.protocol == REQUEST_EVENT_PROTOCOL_V2:
+            allowed_kinds.add("lifecycle")
+        _require(self.kind in allowed_kinds, "invalid_stream_event")
+        if self.token_id is not None:
+            _require(
+                self.protocol == REQUEST_EVENT_PROTOCOL_V2 and self.kind == "token"
+                and type(self.token_id) is int and self.token_id >= 0,
+                "invalid_stream_event",
+            )
+        if self.kind == "token":
+            _require(
+                isinstance(self.token_index, int)
+                and not isinstance(self.token_index, bool)
+                and self.token_index >= 0
+                and isinstance(self.text, str)
+                and self.code is None
+                and self.phase is None,
+                "invalid_stream_event",
+            )
+        elif self.kind == "failed":
+            _require(
+                self.token_index is None
+                and self.text is None
+                and is_safe_error_code(self.code)
+                and self.phase is None,
+                "invalid_stream_event",
+            )
+        elif self.kind == "lifecycle":
+            _require(
+                self.protocol == REQUEST_EVENT_PROTOCOL_V2
+                and self.token_index is None
+                and self.text is None
+                and self.code is None
+                and self.phase in {
+                    "admission",
+                    "queue",
+                    "prefill",
+                    "first_token",
+                    "decode",
+                    "completion",
+                },
+                "invalid_stream_event",
+            )
+        else:
+            _require(
+                self.token_index is None
+                and self.text is None
+                and self.code is None
+                and self.phase is None,
+                "invalid_stream_event",
+            )
+
+    @property
+    def terminal(self) -> bool:
+        return self.kind in {"completed", "cancelled", "failed"}
+
+    def to_dict(self) -> dict[str, Any]:
+        document: dict[str, Any] = {
+            "protocol": self.protocol,
+            "request_id": self.request_id,
+            "sequence": self.sequence,
+            "type": self.kind,
+            "publisher_generation": self.publisher_generation,
+        }
+        if self.kind == "token":
+            document["token_index"] = self.token_index
+            document["text"] = self.text
+            if self.token_id is not None:
+                document["token_id"] = self.token_id
+        elif self.kind == "failed":
+            document["code"] = self.code
+        elif self.kind == "lifecycle":
+            document["phase"] = self.phase
+        return document
+
+    @classmethod
+    def from_dict(cls, document: Mapping[str, Any]) -> "StreamEvent":
+        _require(isinstance(document, Mapping), "invalid_stream_event")
+        allowed = {"protocol", "request_id", "sequence", "type", "token_index", "token_id", "text", "code", "phase", "publisher_generation"}
+        _require(set(document).issubset(allowed), "invalid_stream_event")
+        _require(
+            document.get("protocol") in {REQUEST_EVENT_PROTOCOL, REQUEST_EVENT_PROTOCOL_V2},
+            "invalid_stream_event",
+        )
+        kind_value = document.get("type")
+        _require(isinstance(kind_value, str), "invalid_stream_event")
+        kind = kind_value
+        required = {"protocol", "request_id", "sequence", "type", "publisher_generation"}
+        if kind == "token":
+            required.update({"token_index", "text"})
+            if "token_id" in document:
+                _require(
+                    document["protocol"] == REQUEST_EVENT_PROTOCOL_V2
+                    and type(document["token_id"]) is int and document["token_id"] >= 0,
+                    "invalid_stream_event",
+                )
+                required.add("token_id")
+        elif kind == "failed":
+            required.add("code")
+        elif kind == "lifecycle":
+            required.add("phase")
+        _require(set(document) == required, "invalid_stream_event")
+        return cls(
+            request_id=document["request_id"],
+            sequence=document["sequence"],
+            kind=kind,
+            token_index=document.get("token_index"),
+            token_id=document.get("token_id"),
+            text=document.get("text"),
+            code=document.get("code"),
+            phase=document.get("phase"),
+            publisher_generation=document["publisher_generation"],
+            protocol=document["protocol"],
+        )

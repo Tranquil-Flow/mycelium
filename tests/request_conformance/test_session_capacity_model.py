@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+from mycelium_request_conformance.capacity import CapacityModel, SessionRecord
+
+
+def test_capacity_rejects_when_every_session_is_live_without_side_effects():
+    model = CapacityModel(max_sessions=2)
+    state = model.initial_state()
+    state = model.admit(state, "request-a").state
+    state = model.admit(state, "request-b").state
+    state = model.start(state, "request-a").state
+    state = model.start(state, "request-b").state
+
+    rejected = model.admit(state, "request-c")
+
+    assert rejected.code == "gateway_capacity_exhausted"
+    assert rejected.state.sessions == state.sessions
+    assert rejected.state.admission_rejections == state.admission_rejections + 1
+    assert rejected.state.runtime_starts == state.runtime_starts
+
+
+def test_capacity_evicts_oldest_cleanup_complete_detached_session():
+    model = CapacityModel(max_sessions=2)
+    state = model.initial_state()
+    state = model.admit(state, "request-a").state
+    state = model.admit(state, "request-b").state
+    state = model.start(state, "request-a").state
+    state = model.start(state, "request-b").state
+    state = model.terminate(state, "request-a", "completed").state
+    state = model.finish_worker(state, "request-a").state
+
+    admitted = model.admit(state, "request-c")
+
+    assert admitted.code == "admitted"
+    assert [session.request_id for session in admitted.state.sessions] == [
+        "request-b",
+        "request-c",
+    ]
+    assert admitted.state.runtime_starts == 2
+
+
+def test_cancelled_session_is_not_evicted_until_worker_cleanup_finishes():
+    model = CapacityModel(max_sessions=1)
+    state = model.initial_state()
+    state = model.admit(state, "request-a").state
+    state = model.start(state, "request-a").state
+    state = model.terminate(state, "request-a", "cancelled").state
+
+    blocked = model.admit(state, "request-b")
+    assert blocked.code == "gateway_capacity_exhausted"
+
+    cleaned = model.finish_worker(blocked.state, "request-a")
+    admitted = model.admit(cleaned.state, "request-b")
+
+    assert admitted.code == "admitted"
+    assert admitted.state.sessions[0].request_id == "request-b"
+
+
+def test_capacity_lifecycle_reaches_cleanup_complete_eviction_state():
+    model = CapacityModel(max_sessions=1)
+    state = model.initial_state()
+    state = model.admit(state, "request-a").state
+    state = model.start(state, "request-a").state
+    state = model.attach(state, "request-a").state
+    state = model.terminate(state, "request-a", "cancelled").state
+
+    assert model.admit(state, "request-b").code == "gateway_capacity_exhausted"
+
+    state = model.detach(state, "request-a").state
+    state = model.finish_worker(state, "request-a").state
+    admitted = model.admit(state, "request-b")
+
+    assert admitted.code == "admitted"
+    assert admitted.state.sessions == (SessionRecord(request_id="request-b"),)
+    assert admitted.state.runtime_starts == 1
+
+
+def test_capacity_cancel_before_start_needs_no_resource_cleanup():
+    model = CapacityModel(max_sessions=1)
+    state = model.admit(model.initial_state(), "request-a").state
+    state = model.terminate(state, "request-a", "cancelled").state
+    state = model.finish_worker(state, "request-a").state
+
+    record = state.sessions[0]
+    assert record.worker_done is True
+    assert record.cleanup_count == 0
+    admitted = model.admit(state, "request-b")
+    assert admitted.code == "admitted"
+
+
+def test_capacity_precedes_duplicate_detection_for_live_full_session():
+    model = CapacityModel(max_sessions=1)
+    state = model.admit(model.initial_state(), "request-a").state
+    state = model.start(state, "request-a").state
+
+    duplicate = model.admit(state, "request-a")
+
+    assert duplicate.code == "gateway_capacity_exhausted"
+    assert duplicate.state.admission_rejections == 1
+    assert duplicate.state.sessions == state.sessions
+
+
+def test_room_is_made_before_duplicate_detection_like_production_submit():
+    model = CapacityModel(max_sessions=2)
+    state = model.admit(model.initial_state(), "request-live").state
+    state = model.start(state, "request-live").state
+    state = model.admit(state, "request-old").state
+    state = model.terminate(state, "request-old", "completed").state
+    state = model.finish_worker(state, "request-old").state
+
+    duplicate = model.admit(state, "request-live")
+
+    assert duplicate.code == "duplicate_request_id"
+    assert [item.request_id for item in duplicate.state.sessions] == ["request-live"]

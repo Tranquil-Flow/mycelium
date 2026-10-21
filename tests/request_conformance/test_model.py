@@ -1,0 +1,428 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+from dataclasses import replace
+import hashlib
+
+import pytest
+
+from mycelium_request_conformance.model import (
+    Action,
+    Authority,
+    GatewayModel,
+    Phase,
+)
+
+
+CURRENT = Authority(
+    deployment="deploy-a",
+    epoch=7,
+    path="path-a",
+    evidence="evidence-a",
+    qualification="qualification-a",
+    ready=True,
+)
+
+
+def _admitted(*, buffer_capacity: int = 4):
+    model = GatewayModel(current=CURRENT, buffer_capacity=buffer_capacity)
+    admitted = model.apply(Action.admit(CURRENT, payload="prompt-a"))
+    assert admitted.code == "admitted"
+    started = model.apply(Action.start(), state=admitted.state)
+    assert started.code == "started"
+    return model, started.state
+
+
+def test_admission_requires_exact_current_qualification():
+    model = GatewayModel(current=CURRENT)
+
+    accepted = model.apply(Action.admit(CURRENT, payload="prompt-a"))
+    assert accepted.code == "admitted"
+    assert accepted.state.phase is Phase.ADMITTED
+    assert accepted.state.counters.runtime_starts == 0
+    started = model.apply(Action.start(), state=accepted.state)
+    assert started.state.phase is Phase.STREAMING
+    assert started.state.counters.runtime_starts == 1
+    assert started.state.counters.capacity_acquires == 1
+    assert started.state.counters.kv_acquires == 1
+
+    variants = (
+        (replace(CURRENT, deployment="deploy-old"), "qualification_mismatch"),
+        (replace(CURRENT, epoch=6), "deployment_epoch_changed"),
+        (replace(CURRENT, path="path-old"), "path_changed"),
+        (replace(CURRENT, evidence="evidence-old"), "qualification_mismatch"),
+        (replace(CURRENT, qualification="qualification-old"), "stale_qualification"),
+        (replace(CURRENT, ready=False), "readiness_revoked"),
+    )
+    for stale, expected_code in variants:
+        rejected = GatewayModel(current=CURRENT).apply(
+            Action.admit(stale, payload="prompt-a")
+        )
+        assert rejected.code == expected_code
+        assert rejected.state.phase is Phase.NEW
+        assert rejected.state.counters.runtime_starts == 0
+        assert rejected.state.events == ()
+
+
+def test_continuous_revalidation_covers_all_authority_dimensions():
+    variants = (
+        ("deployment", "deploy-b", "qualification_mismatch"),
+        ("epoch", 8, "deployment_epoch_changed"),
+        ("path", "path-b", "path_changed"),
+        ("evidence", "evidence-b", "qualification_mismatch"),
+        ("qualification", "qualification-b", "stale_qualification"),
+        ("ready", False, "readiness_revoked"),
+    )
+    for field, value, expected_code in variants:
+        model, state = _admitted()
+        changed = model.apply(Action.change_authority(field, value), state=state)
+        terminal = model.apply(Action.complete(), state=changed.state)
+
+        assert terminal.code == expected_code
+        assert terminal.state.phase is Phase.FAILED
+        assert terminal.state.terminal_count == 1
+        assert terminal.state.counters.capacity_releases == 1
+        assert terminal.state.counters.kv_cleanups == 1
+
+
+def test_tokens_are_ordered_and_exact_token_replay_is_side_effect_free():
+    model, state = _admitted()
+    first = model.apply(Action.token(0, "alpha"), state=state)
+    before = first.state
+
+    replay = model.apply(Action.token(0, "alpha"), state=before)
+
+    assert replay.code == "exact_token_replay"
+    assert replay.state == before
+    assert replay.state.counters.token_events == 1
+    assert [
+        event.text_digest for event in replay.state.events if event.kind == "token"
+    ] == [
+        hashlib.sha256(b"alpha").hexdigest()
+    ]
+
+
+@pytest.mark.parametrize(
+    "action, code",
+    (
+        (Action.token(0, "different"), "token_order_violation"),
+        (Action.token(2, "future"), "token_order_violation"),
+    ),
+)
+def test_invalid_token_transition_fails_once_without_duplicate_token_event(action, code):
+    model, state = _admitted()
+    first = model.apply(Action.token(0, "alpha"), state=state)
+
+    failed = model.apply(action, state=first.state)
+    repeated = model.apply(Action.complete(), state=failed.state)
+
+    assert failed.code == code
+    assert failed.state.phase is Phase.FAILED
+    assert failed.state.terminal_count == 1
+    assert failed.state.counters.token_events == 1
+    assert failed.state.counters.failures == 1
+    assert failed.state.counters.capacity_releases == 1
+    assert failed.state.counters.kv_cleanups == 1
+    # The terminal's publication window settles on the next action; the
+    # settled state is semantically identical to the terminal state.
+    assert repeated.state == replace(
+        failed.state, publication_pending_kind=None
+    )
+    assert repeated.code == "already_terminal"
+
+
+def test_exact_request_replay_is_idempotent_and_conflict_precedes_side_effects():
+    model, state = _admitted()
+    before = state
+
+    exact = model.apply(Action.admit(CURRENT, payload="prompt-a"), state=state)
+    conflict = model.apply(Action.admit(CURRENT, payload="prompt-b"), state=state)
+
+    assert exact.code == "exact_request_replay"
+    assert exact.state == before
+    assert conflict.code == "conflicting_request_replay"
+    assert conflict.state == before
+
+
+def test_cancel_disconnect_reconnect_and_terminal_cleanup_are_idempotent():
+    model, state = _admitted()
+    connected = model.apply(Action.reconnect(-1), state=state)
+    disconnected = model.apply(Action.disconnect(), state=connected.state)
+    reconnected = model.apply(Action.reconnect(-1), state=disconnected.state)
+    cancelled = model.apply(Action.cancel(), state=reconnected.state)
+    again = model.apply(Action.cancel(), state=cancelled.state)
+
+    assert connected.state.attached is True
+    assert disconnected.state.attached is False
+    assert disconnected.state.phase is Phase.STREAMING
+    assert reconnected.state.attached is True
+    assert cancelled.state.phase is Phase.CANCELLED
+    assert cancelled.state.terminal_count == 1
+    assert cancelled.state.counters.backend_cancels == 1
+    assert cancelled.state.counters.capacity_releases == 1
+    assert cancelled.state.counters.kv_cleanups == 1
+    assert again.code == "already_terminal"
+    # A second cancel is absorbed by cancellation_started: no backend
+    # forward, no second counter bump; only the publication window settles.
+    assert again.state == replace(
+        cancelled.state, publication_pending_kind=None
+    )
+    assert again.state.counters.backend_cancels == 1
+
+
+def test_bounded_buffer_reserves_terminal_slot_and_ack_releases_backpressure():
+    model, state = _admitted(buffer_capacity=3)
+    first = model.apply(Action.token(0, "alpha"), state=state)
+    blocked = model.apply(Action.token(1, "beta"), state=first.state)
+
+    assert blocked.code == "backpressured"
+    assert blocked.state == first.state
+    assert blocked.state.counters.maximum_buffered == 2
+
+    connected = model.apply(Action.reconnect(-1), state=blocked.state)
+    delivered_accepted = model.apply(Action.next_event(), state=connected.state)
+    acked_accepted = model.apply(Action.ack(0), state=delivered_accepted.state)
+    delivered_token = model.apply(Action.next_event(), state=acked_accepted.state)
+    acknowledged = model.apply(Action.ack(1), state=delivered_token.state)
+    second = model.apply(Action.token(1, "beta"), state=acknowledged.state)
+    completed = model.apply(Action.complete(), state=second.state)
+
+    assert second.code == "token_accepted"
+    assert completed.state.phase is Phase.COMPLETED
+    assert completed.state.terminal_count == 1
+    assert len(completed.state.events) <= 3
+    assert completed.state.counters.maximum_buffered <= 3
+
+
+def test_expired_replay_cursor_fails_without_mutation():
+    model, state = _admitted(buffer_capacity=3)
+    first = model.apply(Action.token(0, "alpha"), state=state)
+    connected = model.apply(Action.reconnect(-1), state=first.state)
+    delivered_accepted = model.apply(Action.next_event(), state=connected.state)
+    acked_accepted = model.apply(Action.ack(0), state=delivered_accepted.state)
+    delivered_token = model.apply(Action.next_event(), state=acked_accepted.state)
+    acknowledged = model.apply(Action.ack(1), state=delivered_token.state)
+    pressure = model.apply(Action.token(1, "beta"), state=acknowledged.state)
+    disconnected = model.apply(Action.disconnect(), state=pressure.state)
+
+    expired = model.apply(Action.reconnect(-1), state=disconnected.state)
+
+    assert expired.code == "resume_cursor_expired"
+    assert expired.state == disconnected.state
+
+
+def test_cancel_before_start_has_no_runtime_capacity_or_cleanup_effects():
+    model = GatewayModel(current=CURRENT)
+    admitted = model.apply(Action.admit(CURRENT, payload="prompt-a"))
+    cancelled = model.apply(Action.cancel(), state=admitted.state)
+    late_start = model.apply(Action.start(), state=cancelled.state)
+
+    assert cancelled.state.phase is Phase.CANCELLED
+    assert cancelled.state.counters.runtime_starts == 0
+    assert cancelled.state.counters.backend_cancels == 0
+    assert cancelled.state.counters.capacity_acquires == 0
+    assert cancelled.state.counters.capacity_releases == 0
+    assert cancelled.state.counters.kv_acquires == 0
+    assert cancelled.state.counters.kv_cleanups == 0
+    assert late_start.state == replace(
+        cancelled.state, publication_pending_kind=None
+    )
+
+
+def test_cancel_inside_publication_window_bumps_backend_without_changing_terminal():
+    """The serial model must permit the backend-commit/publication race.
+
+    Pin the exact linearization that used to be under-permitted (the
+    load-dependent flake): accepted -> token -> completed with
+    backend_cancels == 1. A cancel landing after the backend committed
+    ``completed`` but before the service published the terminal is forwarded
+    to the backend (counter bump) and loses to the committed outcome. A
+    later cancel, after publication settled, does not bump again.
+    """
+
+    model = GatewayModel(current=CURRENT)
+    state = model.apply(Action.admit(CURRENT, payload="prompt-a")).state
+    state = model.apply(Action.start(), state=state).state
+    state = model.apply(Action.token(0, "token-0"), state=state).state
+    completed = model.apply(Action.complete(), state=state)
+    assert completed.state.phase is Phase.COMPLETED
+    assert completed.state.counters.backend_cancels == 0
+    assert completed.state.publication_pending_kind == "completed"
+
+    window_cancel = model.apply(Action.cancel(), state=completed.state)
+    assert window_cancel.code == "already_terminal"
+    assert window_cancel.state.phase is Phase.COMPLETED
+    assert window_cancel.state.counters.backend_cancels == 1
+    assert [event.kind for event in window_cancel.state.events] == [
+        "accepted",
+        "token",
+        "completed",
+    ]
+
+    settled_cancel = model.apply(Action.cancel(), state=window_cancel.state)
+    assert settled_cancel.state.counters.backend_cancels == 1
+    assert settled_cancel.state == window_cancel.state
+
+
+def test_cancel_inside_failed_publication_window_does_not_bump():
+    """The failed terminal publishes on the service's own synchronous path.
+
+    The backend-commit/publication window exists only for worker-delivered
+    completions. A failed terminal (token violation / revocation) is
+    published synchronously by the service, so a subsequent cancel is
+    absorbed with no second backend bump — the exact behavior the sequential
+    production harness shows.
+    """
+
+    model = GatewayModel(current=CURRENT)
+    state = model.apply(Action.admit(CURRENT, payload="prompt-a")).state
+    state = model.apply(Action.start(), state=state).state
+    revoked = model.apply(Action.change_authority("ready", False), state=state)
+    failed = model.apply(Action.complete(), state=revoked.state)
+    assert failed.state.phase is Phase.FAILED
+    assert failed.state.counters.backend_cancels == 1
+    assert failed.state.publication_pending_kind == "failed"
+
+    window_cancel = model.apply(Action.cancel(), state=failed.state)
+    assert window_cancel.state.phase is Phase.FAILED
+    assert window_cancel.state.counters.backend_cancels == 1
+    assert window_cancel.state.events[-1].kind == "failed"
+    assert window_cancel.state == replace(
+        failed.state, publication_pending_kind=None
+    )
+
+
+def test_non_utf8_token_text_fails_as_invalid_backend_token():
+    model, state = _admitted()
+
+    failed = model.apply(Action.token(0, "\ud800"), state=state)
+
+    assert failed.code == "invalid_backend_token"
+    assert failed.state.phase is Phase.FAILED
+    assert failed.state.events[-1].code == "invalid_backend_token"
+    assert failed.state.counters.token_events == 0
+    assert failed.state.counters.failures == 1
+    assert failed.state.counters.capacity_releases == 1
+    assert failed.state.counters.kv_cleanups == 1
+
+
+def test_oversized_utf8_token_text_fails_before_buffer_side_effects():
+    model, state = _admitted()
+
+    failed = model.apply(Action.token(0, "x" * 1_048_577), state=state)
+
+    assert failed.state.phase is Phase.FAILED
+    assert failed.state.events[-1].code == "invalid_backend_token"
+    assert failed.state.counters.token_events == 0
+    assert failed.state.counters.failures == 1
+    assert failed.state.counters.maximum_buffered == 2
+    assert failed.state.counters.capacity_releases == 1
+    assert failed.state.counters.kv_cleanups == 1
+
+
+def test_errors_and_events_never_echo_payload_or_token_text_in_codes():
+    model = GatewayModel(current=CURRENT)
+    rejected = model.apply(
+        Action.admit(replace(CURRENT, evidence="private-canary"), payload="secret-prompt")
+    )
+    _, state = _admitted()
+    conflict = model.apply(Action.token(0, "secret-token"), state=state)
+    conflict = model.apply(Action.token(0, "different-secret"), state=conflict.state)
+
+    assert "private-canary" not in rejected.code
+    assert "secret-prompt" not in rejected.code
+    assert "secret-token" not in conflict.code
+    assert "different-secret" not in conflict.code
+
+
+def test_acknowledged_replay_is_trimmed_before_next_token_capacity_check():
+    model = GatewayModel(current=CURRENT, buffer_capacity=2)
+    state = model.apply(Action.admit(CURRENT, payload="prompt")).state
+    state = model.apply(Action.start(), state=state).state
+    state = model.apply(Action.reconnect(-1), state=state).state
+    state = model.apply(Action.next_event(), state=state).state
+    state = model.apply(Action.ack(0), state=state).state
+
+    accepted = model.apply(Action.token(0, "alpha"), state=state)
+
+    assert accepted.code == "token_accepted"
+    assert [event.kind for event in accepted.state.events] == ["token"]
+    assert accepted.state.discarded_through == 0
+    assert len(accepted.state.events) == 1
+
+
+def test_admission_max_new_tokens_is_enforced_and_part_of_replay_identity():
+    model = GatewayModel(current=CURRENT)
+    admitted = model.apply(
+        Action.admit(CURRENT, payload="prompt", max_new_tokens=1)
+    ).state
+    replay = model.apply(
+        Action.admit(CURRENT, payload="prompt", max_new_tokens=1),
+        state=admitted,
+    )
+    conflict = model.apply(
+        Action.admit(CURRENT, payload="prompt", max_new_tokens=2),
+        state=admitted,
+    )
+    state = model.apply(Action.start(), state=admitted).state
+    state = model.apply(Action.token(0, "alpha"), state=state).state
+    overflow = model.apply(Action.token(1, "beta"), state=state)
+
+    assert replay.code == "exact_request_replay"
+    assert replay.state == admitted
+    assert conflict.code == "conflicting_request_replay"
+    assert conflict.state == admitted
+    assert overflow.state.phase is Phase.FAILED
+    assert overflow.code == "token_order_violation"
+
+
+def test_terminal_model_state_retains_only_digests_and_exact_replay_identity():
+    model = GatewayModel(current=CURRENT)
+    admission = Action.admit(CURRENT, payload="private-prompt", max_new_tokens=1)
+    state = model.apply(admission).state
+    state = model.apply(Action.start(), state=state).state
+    state = model.apply(Action.token(0, "private-token"), state=state).state
+    terminal = model.apply(Action.complete(), state=state).state
+
+    assert terminal.captured is None
+    assert terminal.payload_digest is None
+    assert terminal.max_new_tokens is None
+    assert terminal.token_digests == ()
+    assert "private-prompt" not in repr(terminal)
+    assert "private-token" not in repr(terminal)
+    replay = model.apply(admission, state=terminal)
+    assert replay.code == "exact_request_replay"
+    # The publication window settles on the next action; everything else
+    # (privacy-cleared identity fields) is retained exactly.
+    assert replay.state == replace(
+        terminal, publication_pending_kind=None
+    )
+
+
+def test_next_event_is_at_least_once_delivery_until_ack_like_production():
+    model, state = _admitted()
+    state = model.apply(Action.token(0, "alpha"), state=state).state
+    state = model.apply(Action.reconnect(-1), state=state).state
+
+    first = model.apply(Action.next_event(), state=state)
+    repeated = model.apply(Action.next_event(), state=first.state)
+
+    assert first.code == "delivered_accepted"
+    assert repeated.code == "delivered_accepted"
+    assert repeated.state == first.state
+
+
+def test_authority_changes_reject_values_outside_field_contract():
+    model, state = _admitted()
+
+    invalid_epoch = model.apply(
+        Action.change_authority("epoch", 1.5),
+        state=state,
+    )
+    invalid_ready = model.apply(
+        Action.change_authority("ready", 1),
+        state=state,
+    )
+
+    assert invalid_epoch.code == "invalid_authority_change"
+    assert invalid_epoch.state == state
+    assert invalid_ready.code == "invalid_authority_change"
+    assert invalid_ready.state == state
