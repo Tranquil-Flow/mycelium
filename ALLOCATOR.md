@@ -56,7 +56,7 @@ Can also read directly from router:
 
 ```bash
 python3 layer_planner.py \
-  --nodes-url http://100.84.252.4:8788/nodes \
+  --nodes-url http://<owner-mac-ip>:8788/nodes \
   --model-id llama-3.2-3b-ish \
   --num-layers 28 \
   --hidden-size 3072

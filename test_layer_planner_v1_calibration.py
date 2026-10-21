@@ -1,6 +1,7 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 import unittest
 
-from mycelium_layer_planner.calibration import CalibrationArtifact, ingest_calibration
+from mycelium_layer_planner.calibration import ingest_calibration
 
 
 class CalibrationTests(unittest.TestCase):

@@ -1,14 +1,35 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import hashlib
+import math
 from typing import Mapping, Sequence
 
 from .allocation import stage_cost
-from .contracts import NUMERIC_EPSILON, LayerRange, ModelIdentity, PlanningPolicy, StagePlacement, WorkloadScenario
+from .contracts import NUMERIC_EPSILON, ModelIdentity, PlanningPolicy, StagePlacement, WorkloadScenario
 from .flow import FlowEdge, FlowResult, assign_flow
+from .contracts import LegalTrack
 from .network_cost import transfer_time_ms
 from .physical_graph import PhysicalGraph
 from .primary_plan import PrimaryPlan
+
+
+@dataclass(frozen=True)
+class ReplicaCandidateDecision:
+    iteration: int
+    placement_id: str
+    node_id: str
+    replica_group_id: str
+    accepted: bool
+    reason: str
+    baseline_admitted_rps: float
+    proposed_admitted_rps: float
+    raw_gain_rps: float
+    robust_gain_rps: float
+    minimum_required_gain_rps: float
+    failure_domain: str
+    failure_domain_warning: str | None
 
 
 @dataclass(frozen=True)
@@ -20,6 +41,9 @@ class ReplicationResult:
     loopback_edges: tuple[FlowEdge, ...]
     flow: FlowResult
     accepted_replica_nodes: tuple[str, ...]
+    candidate_decisions: tuple[ReplicaCandidateDecision, ...]
+    zero_flow_removed_placement_ids: tuple[str, ...]
+    primary_capacity_rps: float
     iterations: int
 
 
@@ -132,15 +156,41 @@ def replicate_stages(
     unused = set(primary.unplaced_node_ids)
     accepted: list[str] = []
     forward, loops, current = _solve(groups, placements, graph, model, workload, policy)
+    primary_capacity_rps = current.admitted
+    decisions: list[ReplicaCandidateDecision] = []
     iterations = 0
     while unused and iterations < policy.replica_budget:
         best = None
+        evaluated: list[tuple[tuple[object, ...], ReplicaCandidateDecision]] = []
         for node_id in sorted(unused):
             node = graph.nodes[node_id]
             for group_index, group in enumerate(groups):
                 template = placements[group[0]]
                 cost = stage_cost(node, template.layer_range.count, model, workload, policy)
                 if not cost.feasible or cost.service_work_ms <= 0:
+                    decisions.append(
+                        ReplicaCandidateDecision(
+                            iteration=iterations,
+                            placement_id=f"stage-{group_index:03}-replica-{node_id}",
+                            node_id=node_id,
+                            replica_group_id=template.replica_group_id,
+                            accepted=False,
+                            reason=f"resource_{cost.diagnostic or 'infeasible'}",
+                            baseline_admitted_rps=current.admitted,
+                            proposed_admitted_rps=current.admitted,
+                            raw_gain_rps=0.0,
+                            robust_gain_rps=0.0,
+                            minimum_required_gain_rps=(
+                                current.admitted * policy.minimum_replica_gain_fraction
+                            ),
+                            failure_domain=node.region,
+                            failure_domain_warning=(
+                                "failure_domain_unknown"
+                                if node.region == "unknown"
+                                else None
+                            ),
+                        )
+                    )
                     continue
                 placement_id = f"stage-{group_index:03}-replica-{node_id}"
                 proposal = StagePlacement(
@@ -165,7 +215,20 @@ def replicate_stages(
                     policy,
                 )
                 gain = proposal_flow.admitted - current.admitted
+                uncertainty = max(
+                    policy.replica_uncertainty_fraction,
+                    1.0 - node.calibration_confidence,
+                )
+                robust_gain = max(0.0, gain * (1.0 - uncertainty))
+                minimum_gain = current.admitted * policy.minimum_replica_gain_fraction
+                primary_node = graph.nodes[template.node_id]
+                failure_domain_warning = None
+                if node.region == "unknown" or primary_node.region == "unknown":
+                    failure_domain_warning = "failure_domain_unknown"
+                elif node.region == primary_node.region:
+                    failure_domain_warning = "shared_failure_domain"
                 candidate = (
+                    robust_gain,
                     gain,
                     -proposal_flow.unmet_demand,
                     placement_id,
@@ -175,11 +238,47 @@ def replicate_stages(
                     proposal_loops,
                     proposal_flow,
                 )
-                if best is None or candidate[:3] > best[:3]:
+                decision = ReplicaCandidateDecision(
+                    iteration=iterations,
+                    placement_id=placement_id,
+                    node_id=node_id,
+                    replica_group_id=template.replica_group_id,
+                    accepted=False,
+                    reason=(
+                        "gain_below_threshold"
+                        if robust_gain <= max(NUMERIC_EPSILON, minimum_gain)
+                        else "lower_ranked_candidate"
+                    ),
+                    baseline_admitted_rps=current.admitted,
+                    proposed_admitted_rps=proposal_flow.admitted,
+                    raw_gain_rps=gain,
+                    robust_gain_rps=robust_gain,
+                    minimum_required_gain_rps=minimum_gain,
+                    failure_domain=node.region,
+                    failure_domain_warning=failure_domain_warning,
+                )
+                evaluated.append((candidate, decision))
+                if best is None or candidate[:4] > best[:4]:
                     best = candidate
-        if best is None or best[0] <= NUMERIC_EPSILON:
+        if best is None or best[0] <= max(
+            NUMERIC_EPSILON,
+            current.admitted * policy.minimum_replica_gain_fraction,
+        ):
+            decisions.extend(decision for _candidate, decision in evaluated)
             break
-        _, _, _, proposal, groups, forward, loops, current = best
+        _, _, _, selected_id, proposal, groups, forward, loops, current = best
+        decisions.extend(
+            replace(
+                decision,
+                accepted=decision.placement_id == selected_id,
+                reason=(
+                    "accepted_positive_robust_gain"
+                    if decision.placement_id == selected_id
+                    else decision.reason
+                ),
+            )
+            for _candidate, decision in evaluated
+        )
         placements[proposal.placement_id] = proposal
         unused.remove(proposal.node_id)
         accepted.append(proposal.node_id)
@@ -202,5 +301,132 @@ def replicate_stages(
         loopback_edges=loops,
         flow=current,
         accepted_replica_nodes=tuple(accepted),
+        candidate_decisions=tuple(decisions),
+        zero_flow_removed_placement_ids=tuple(sorted(removable)),
+        primary_capacity_rps=primary_capacity_rps,
         iterations=iterations,
+    )
+
+
+# --- A5 legal-track enumeration (extension; existing functions untouched) ---
+
+TRACK_FRACTION_TOLERANCE = 1e-6
+
+
+@dataclass(frozen=True)
+class LegalTrackEnumeration:
+    tracks: tuple[LegalTrack, ...]
+    missing_edges: tuple[tuple[str, str], ...]
+    reversed_edges: tuple[tuple[str, str], ...]
+    total_combinations: int
+
+
+def _track_id(placement_ids: Sequence[str]) -> str:
+    joined = "|".join(placement_ids)
+    return "track-" + hashlib.sha256(joined.encode("utf-8")).hexdigest()[:24]
+
+
+def enumerate_legal_tracks(
+    groups: Sequence[Sequence[str]],
+    placements: Mapping[str, StagePlacement],
+    forward_edges: Sequence[FlowEdge],
+    loopback_edges: Sequence[FlowEdge],
+    *,
+    traffic_fractions: Mapping[tuple[str, ...], float] | None = None,
+) -> LegalTrackEnumeration:
+    """Enumerate every complete legal track over ordered replica groups.
+
+    A complete legal track selects exactly one placement from every group in
+    group order, every consecutive pair is covered by a qualified forward
+    edge, and (with more than one group) the closure (last, first) is covered
+    by a qualified loopback edge. Enumeration is deterministic and sorted by
+    the placement-id tuple, so ties are stable across calls.
+
+    ``traffic_fractions`` optionally pins per-track fractions (keys are the
+    exact placement-id tuples). Fractions must be finite, non-negative, and
+    sum to one within ``TRACK_FRACTION_TOLERANCE``. When omitted, an equal
+    split is used. Fractions allocate whole requests across tracks; they
+    never split one request across tracks.
+    """
+    if not groups or any(not group for group in groups):
+        raise ValueError("stage groups must be non-empty")
+    ordered_groups = tuple(tuple(sorted(group)) for group in groups)
+    flattened = [pid for group in ordered_groups for pid in group]
+    if len(flattened) != len(set(flattened)) or any(
+        pid not in placements for pid in flattened
+    ):
+        raise ValueError("groups must reference each placement exactly once")
+    forward = {(edge.src, edge.dst): edge for edge in forward_edges}
+    loops = {(edge.src, edge.dst): edge for edge in loopback_edges}
+
+    # Enumerate every selection: one placement per group, in group order.
+    selections: list[tuple[str, ...]] = [()]
+    for group in ordered_groups:
+        selections = [prefix + (pid,) for prefix in selections for pid in group]
+
+    tracks: list[LegalTrack] = []
+    missing: list[tuple[str, str]] = []
+    reversed_edges: list[tuple[str, str]] = []
+    for path in selections:
+        complete = True
+        cost_ms = 0.0
+        for src, dst in zip(path, path[1:]):
+            edge = forward.get((src, dst))
+            if edge is None:
+                complete = False
+                missing.append((src, dst))
+                if forward.get((dst, src)) is not None:
+                    reversed_edges.append((src, dst))
+            else:
+                cost_ms += edge.cost_ms
+        if len(path) > 1:
+            closure = loops.get((path[-1], path[0]))
+            if closure is None:
+                complete = False
+                missing.append((path[-1], path[0]))
+            else:
+                cost_ms += closure.cost_ms
+        if not complete:
+            continue
+        tracks.append(
+            LegalTrack(
+                track_id=_track_id(path),
+                placement_ids=path,
+                traffic_fraction=0.0,
+                cost_ms=cost_ms,
+            )
+        )
+
+    if traffic_fractions is not None:
+        known = {track.placement_ids for track in tracks}
+        if set(traffic_fractions) - known:
+            raise ValueError("traffic fraction for non-legal track")
+        if set(traffic_fractions) != known:
+            raise ValueError("traffic fractions must cover every legal track")
+        for key, fraction in traffic_fractions.items():
+            if not math.isfinite(fraction) or fraction < 0:
+                raise ValueError("traffic fractions must be finite and non-negative")
+        total = math.fsum(traffic_fractions.values())
+        if abs(total - 1.0) > TRACK_FRACTION_TOLERANCE:
+            raise ValueError("traffic fractions must sum to one")
+        fraction_map = dict(traffic_fractions)
+    else:
+        fraction_map = {
+            track.placement_ids: 1.0 / len(tracks) for track in tracks
+        } if tracks else {}
+
+    tracks = tuple(
+        LegalTrack(
+            track_id=track.track_id,
+            placement_ids=track.placement_ids,
+            traffic_fraction=fraction_map[track.placement_ids],
+            cost_ms=track.cost_ms,
+        )
+        for track in tracks
+    )
+    return LegalTrackEnumeration(
+        tracks=tracks,
+        missing_edges=tuple(sorted(set(missing))),
+        reversed_edges=tuple(sorted(set(reversed_edges))),
+        total_combinations=len(selections),
     )

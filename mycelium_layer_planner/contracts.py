@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -154,6 +155,10 @@ class WorkloadScenario:
     arrival_rate_rps: Optional[float] = None
     system_prefix_tokens: int = 0
     history_tokens: int = 0
+    prompt_p95_tokens: Optional[int] = None
+    output_p95_tokens: Optional[int] = None
+    batch_size: int = 1
+    qos_class: str = "interactive"
 
     def __post_init__(self) -> None:
         if not self.name or self.prompt_tokens < 0 or self.output_tokens <= 0 or self.concurrency <= 0:
@@ -164,6 +169,12 @@ class WorkloadScenario:
             raise ValueError("invalid workload scaling")
         if self.arrival_rate_rps is not None and self.arrival_rate_rps < 0:
             raise ValueError("arrival rate must be non-negative")
+        if self.prompt_p95_tokens is not None and self.prompt_p95_tokens < self.prompt_tokens:
+            raise ValueError("prompt p95 must not be smaller than prompt p50")
+        if self.output_p95_tokens is not None and self.output_p95_tokens < self.output_tokens:
+            raise ValueError("output p95 must not be smaller than output p50")
+        if self.batch_size <= 0 or self.qos_class not in {"interactive", "batch"}:
+            raise ValueError("invalid workload batch or QoS class")
 
     @property
     def effective_prompt_tokens(self) -> int:
@@ -200,6 +211,8 @@ class PlanningPolicy:
     clustered_max_nodes: int = 128
     search_candidate_budget: int = 100_000
     replica_budget: int = 32
+    minimum_replica_gain_fraction: float = 0.05
+    replica_uncertainty_fraction: float = 0.1
     conservative_bandwidth_Bps: Optional[float] = 1_000_000.0
     exclude_missing_bandwidth: bool = False
     jitter_guard_sigma: float = 2.0
@@ -220,10 +233,16 @@ class PlanningPolicy:
             raise ValueError("search thresholds must be positive and nondecreasing")
         if self.search_candidate_budget <= 0 or self.replica_budget < 0:
             raise ValueError("invalid planning budget")
+        if not 0 <= self.minimum_replica_gain_fraction <= 1:
+            raise ValueError("minimum replica gain fraction must be in [0, 1]")
+        if not 0 <= self.replica_uncertainty_fraction < 1:
+            raise ValueError("replica uncertainty fraction must be in [0, 1)")
         if self.conservative_bandwidth_Bps is not None and self.conservative_bandwidth_Bps <= 0:
             raise ValueError("fallback bandwidth must be positive")
         if not 0 <= self.memory_reserve_fraction < 1:
             raise ValueError("memory reserve must be in [0, 1)")
+        if self.objective not in {"slo_goodput", "balanced", "prefill_ttft", "decode_tpot"}:
+            raise ValueError("unknown planning objective")
 
 
 @dataclass(frozen=True)

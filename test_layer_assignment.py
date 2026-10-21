@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 import unittest
 
 import layer_assignment as la
 import model_manifest as mm
+import runtime_loader
 
 
 class LayerAssignmentTests(unittest.TestCase):
@@ -186,6 +188,35 @@ class LayerAssignmentTests(unittest.TestCase):
                **manifest["runtime_model"],
             },
          )
+         la.validate_assignment_identity(assignment)
+
+   def test_numpy_assignment_compiles_to_loader_accepted_manifest_bound_runtime(self):
+      manifest = self.manifest()
+      assignments = la.compile_layer_assignments(
+         route_plan=self.route(),
+         manifest=manifest,
+         deployment_id="12345678-1234-5678-1234-567812345678",
+         deployment_epoch=1,
+         cache_roots={"node-a": "/tmp/a", "node-b": "/tmp/b"},
+         runtime_by_node={
+            node: {"backend": "numpy", "dtype": "float32", "quantization": "none"}
+            for node in ("node-a", "node-b")
+         },
+      )
+
+      for assignment in assignments:
+         self.assertEqual(
+            assignment["runtime"],
+            {
+               "backend": "numpy",
+               "dtype": "float32",
+               "quantization": "none",
+               **manifest["runtime_model"],
+            },
+         )
+         normalized, dtype = runtime_loader._validate_runtime(assignment["runtime"])
+         self.assertEqual(normalized, assignment["runtime"])
+         self.assertEqual(str(dtype), "float32")
          la.validate_assignment_identity(assignment)
 
    def test_node_runtime_cannot_override_manifest_model_identity(self):

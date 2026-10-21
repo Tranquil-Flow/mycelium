@@ -22,7 +22,7 @@ current MVP claim boundary. It absorbs the planner-relevant architecture from:
 - `ALLOCATOR.md`;
 - `PLANNER_SIMULATION_HANDOVER.md`;
 - the canonical simulator architecture at
-  `/Users/evinova/Projects/ddai/sim/design.md`.
+  `~/Projects/ddai/sim/design.md`.
 
 It does not absorb Router execution policy into the Planner. The Router may use
 `REQUEST_AND_INTER_LAYER_ROUTER_DESIGN.md` later, after the Planner, Layer

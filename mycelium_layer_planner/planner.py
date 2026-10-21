@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import fields
+from dataclasses import asdict, fields
 from typing import Any, Mapping
 
 from .contracts import (
@@ -18,7 +19,7 @@ from .contracts import (
     WorkloadScenario,
 )
 from .physical_graph import build_physical_graph
-from .primary_plan import plan_primary
+from .primary_plan import admit_primary_nodes, plan_primary
 from .replication import replicate_stages
 from .speculative import score_speculative
 from .workload import WorkloadProfile, empirical_interactive_chat, mlperf_qa_stress
@@ -85,7 +86,26 @@ def plan_snapshot(snapshot: Mapping[str, Any]) -> RoutePlanV2:
     except KeyError as exc:
         raise ValueError(f"snapshot missing required field: {exc.args[0]}") from exc
     graph = build_physical_graph(nodes, links, policy)
-    primary = plan_primary(graph, model, profile, policy)
+    explicit_admission = snapshot.get("admitted_node_ids")
+    if explicit_admission is None:
+        # Compatibility path for research fixtures that predate explicit admission.
+        admitted_node_ids = admit_primary_nodes(graph, model, profile, policy)
+    else:
+        if (
+            not isinstance(explicit_admission, (list, tuple))
+            or not explicit_admission
+            or any(not isinstance(node_id, str) for node_id in explicit_admission)
+            or len(set(explicit_admission)) != len(explicit_admission)
+        ):
+            raise ValueError("admitted_node_ids is invalid")
+        admitted_node_ids = tuple(explicit_admission)
+    primary = plan_primary(
+        graph,
+        model,
+        profile,
+        policy,
+        admitted_node_ids=admitted_node_ids,
+    )
     representative = max(
         profile.scenarios,
         key=lambda scenario: (scenario.total_context_tokens * scenario.concurrency, scenario.name),
@@ -115,15 +135,25 @@ def plan_snapshot(snapshot: Mapping[str, Any]) -> RoutePlanV2:
             "tpot_ms": score.tpot_ms,
             "single_request_tps": score.single_request_tps,
             "output_goodput_tps": score.output_goodput_tps,
+            "prefill_compute_ms": score.prefill_compute_ms,
+            "prefill_transfer_ms": score.prefill_network_ms,
+            "decode_compute_ms": score.decode_compute_ms,
+            "decode_transfer_ms": score.decode_network_ms + score.decode_loopback_ms,
             "prefill_payload_bytes": score.prefill_payload_bytes,
             "decode_payload_bytes": score.decode_payload_bytes,
+            "expected_response_ms": score.expected_response_ms,
+            "required_memory_bytes": score.required_memory_bytes,
             "confidence": score.confidence,
         }
         for score in primary.scenario_scores
     ]
     metrics: dict[str, Any] = {
         "scenarios": scenario_metrics,
+        "primary_request_capacity_rps": replicated.primary_capacity_rps,
         "replicated_request_capacity_rps": replicated.flow.admitted,
+        "replica_capacity_gain_rps": (
+            replicated.flow.admitted - replicated.primary_capacity_rps
+        ),
         "replicated_output_capacity_tps": replicated.flow.admitted * representative.output_tokens,
         "unmet_capacity_sweep_demand_rps": replicated.flow.unmet_demand,
     }
@@ -139,6 +169,9 @@ def plan_snapshot(snapshot: Mapping[str, Any]) -> RoutePlanV2:
             float(timing.get("proposal_transfer_ms", 0.0)),
             runtime_supported=bool(timing.get("runtime_supported", False)),
             proposal_payload_bytes=int(timing.get("proposal_payload_bytes", 16)),
+            material_gain_threshold=float(
+                timing.get("material_gain_threshold", 0.10)
+            ),
         )
         speculative_diagnostics = {
             "enabled": result.enabled,
@@ -146,16 +179,38 @@ def plan_snapshot(snapshot: Mapping[str, Any]) -> RoutePlanV2:
             "reason": result.reason,
             "target_fallback": result.target_fallback,
             "expected_accepted_tokens": result.expected_accepted_tokens,
+            "expected_committed_tokens": result.expected_committed_tokens,
+            "predicted_gain_fraction": result.predicted_gain_fraction,
+            "material_gain_threshold": result.material_gain_threshold,
             "draft_kv_owner": result.draft_kv_owner,
             "target_kv_owner": result.target_kv_owner,
         }
     diagnostics = {
+        "placement_provenance": snapshot.get("placement_provenance", "planner_v2"),
+        "decode_mode": snapshot.get("decode_mode", "unknown"),
+        "node_runtime": dict(snapshot.get("node_runtime", {})),
         "topology": "ordered_stage_groups_with_independent_loops_and_cross_edges",
         "primary_order": list(primary.order),
         "frozen_primary_order": list(primary.frozen_primary_order),
         "candidate_node_ids": list(primary.candidate_node_ids),
+        "admitted_node_ids": list(admitted_node_ids),
         "unplaced_node_ids": list(primary.unplaced_node_ids),
         "accepted_replica_nodes": list(replicated.accepted_replica_nodes),
+        "replication": {
+            "authority": "capability_aware_replica_flow_planner",
+            "minimum_gain_fraction": policy.minimum_replica_gain_fraction,
+            "uncertainty_fraction": policy.replica_uncertainty_fraction,
+            "candidate_decisions": [
+                asdict(decision) for decision in replicated.candidate_decisions
+            ],
+            "zero_flow_removed_placement_ids": list(
+                replicated.zero_flow_removed_placement_ids
+            ),
+            "request_routing_semantics": "one_complete_track_per_request",
+            "kv_locality": "request_track_pinned_no_migration",
+            "parallelism_label": "data_parallel_request_routing",
+            "route_ready": False,
+        },
         "excluded_nodes": dict(graph.exclusions),
         "workload": {
             "name": profile.name,

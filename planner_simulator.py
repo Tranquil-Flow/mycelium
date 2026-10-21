@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 """Deterministic simulation harness for Mycelium route-planner strategies.
 
 The simulator deliberately does not execute a real model. It estimates prefill,
