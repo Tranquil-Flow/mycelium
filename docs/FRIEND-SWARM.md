@@ -146,18 +146,21 @@ The join screen translates these codes; the wording may vary slightly.
 
 A Mac that joined can leave at any time from **Leave swarm** (tick the confirmation first):
 
-- **Leave smoothly** stops new work and lets the requests already running on this Mac
-  finish, then unloads the model, withdraws the standing consent and stops renewing the
-  membership. If the number of running requests has not gone down for 30 seconds (or the
-  wait passes 120 seconds) it leaves instantly instead and says so. Running requests are
-  not handed to a successor Mac: a member has no way to start or prove a handoff, so they
-  finish here or end with the swarm's normal failure handling.
-- **Instant leave** withdraws consent and disconnects now, like losing the internet. The
-  owner's swarm adapts on its next request.
+- **Leave smoothly** tells the owner you are leaving (a signed notice, with the requests still
+  running on this Mac), so the swarm can plan around you: the owner moves running requests to a
+  standby Mac with their progress when it has one, otherwise restarts them on another Mac, and
+  otherwise lets them finish here. This Mac then stops new work, waits for the owner's answer
+  (at most 5 seconds) and for the running requests (up to 30 seconds without progress, 120 in
+  total, then it leaves instantly and says so), unloads the model, withdraws the standing
+  consent and sends one signed withdrawal before it disconnects. The owner shows
+  **Left smoothly** for that member and removes its membership at once.
+- **Leave now** withdraws consent and disconnects at once, like losing the internet. Nothing is
+  sent; the owner notices that the Mac went silent (after about a minute) and shows
+  **Left suddenly**, and the swarm adapts on its next request.
 
-A member cannot sign its own removal at the owner: the owner sees a Mac that left the way it
-sees any lost Mac (its lease stops renewing and the control connection closes), and can
-revoke it from the owner screen.
+Either way this Mac keeps its identity and its downloaded model files. To come back, join again
+with a new invite from the owner: it is the same Mac (same node id) with a new membership
+generation, the owner approves it as usual, and the model does not have to be downloaded again.
 
 ## Limits
 
