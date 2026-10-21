@@ -97,7 +97,7 @@ Run M4 Pro as seed/router:
 python3 mycelium_broadcast.py \
   --host 0.0.0.0 \
   --port 8788 \
-  --advertise-host 100.84.252.4 \
+  --advertise-host <owner-mac-ip> \
   --probe-cmd python3 mycelium_probe.py
 ```
 
@@ -108,13 +108,13 @@ python3 mycelium_broadcast.py \
   --once --no-udp \
   --profile-file outputs/linux-container-profile.json \
   --advertise-host <node-ip> \
-  --seed-url http://100.84.252.4:8788
+  --seed-url http://<owner-mac-ip>:8788
 ```
 
 Router fetch:
 
 ```bash
-curl http://100.84.252.4:8788/nodes
+curl http://<owner-mac-ip>:8788/nodes
 ```
 
 ## Current claim boundary

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 """
 Mycelium profile broadcast / peer registry.
 
@@ -15,7 +16,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import socket
 import subprocess
 import sys

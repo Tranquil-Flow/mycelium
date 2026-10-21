@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Transport-neutral Mycelium gossip evidence contracts.
 
 This package deliberately contains no router, allocator, planner, or simulator imports.

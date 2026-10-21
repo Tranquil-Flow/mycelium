@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 import json
-import tempfile
 import time
 import unittest
 import urllib.request
-from pathlib import Path
 
 import mycelium_broadcast as mb
 
