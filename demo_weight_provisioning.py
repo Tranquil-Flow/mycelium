@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 """Two-peer V1 demo for pinned minimal-shard Hugging Face provisioning."""
 from __future__ import annotations
 

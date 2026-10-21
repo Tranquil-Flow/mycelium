@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 import json
 import tempfile
 import unittest
@@ -32,7 +33,7 @@ class DemoWeightProvisioningTests(unittest.TestCase):
    def test_node_specs_build_gap_free_v2_route_and_assignments(self):
       specs = demo.parse_node_specs([
          "m4pro,0,2,/tmp/mycelium-m4pro",
-         "evis-macbook-pro-1,2,3,/tmp/mycelium-laptop",
+         "member-mac,2,3,/tmp/member-mac",
       ])
       route, assignments = demo.build_demo_artifacts(
          self.manifest(),
@@ -41,10 +42,10 @@ class DemoWeightProvisioningTests(unittest.TestCase):
          deployment_epoch=1,
       )
       self.assertEqual(route["protocol"], "mycelium.manual_provisioning_route.v1")
-      self.assertEqual(route["node_order"], ["m4pro", "evis-macbook-pro-1"])
+      self.assertEqual(route["node_order"], ["m4pro", "member-mac"])
       self.assertEqual(route["route"][0]["range"]["end_layer_exclusive"], 2)
       self.assertEqual(len(assignments), 2)
-      self.assertEqual(assignments[1]["artifact_cache_root"], "/tmp/mycelium-laptop")
+      self.assertEqual(assignments[1]["artifact_cache_root"], "/tmp/member-mac")
 
    def test_node_specs_preserve_target_local_path_without_coordinator_resolution(self):
       specs = demo.parse_node_specs([

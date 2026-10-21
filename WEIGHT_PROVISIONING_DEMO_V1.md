@@ -76,20 +76,20 @@ Assignments:
 | Peer | Half-open range | Assigned files | Assigned bytes |
 |---|---:|---|---:|
 | `m4pro` | `[0, 3)` | `model-00002-of-00003.safetensors` | 150,404 |
-| `evis-macbook-pro-1` | `[3, 5)` | shards 2 and 3 | 206,660 |
+| `member-mac` | `[3, 5)` | shards 2 and 3 | 206,660 |
 
 Layer 3 crosses a physical shard boundary: its `ln_1` tensors remain in shard 2 while its other tensors are in shard 3. The laptop assignment therefore correctly includes both files. This is the behavior V1 must preserve: exact layer coverage using whole upstream files, with unavoidable shard-level overfetch.
 
 Generated artifacts:
 
-`/Users/evinova-self/Projects/mycelium/demo-runs/gpt2-two-peer-v1`
+`~/Projects/mycelium/demo-runs/gpt2-two-peer-v1`
 
 Important files:
 
 - `model-manifest.json`
 - `route-plan-v2.json` (historical filename; this sealed bundle predates the namespace split)
 - `assignment-m4pro.json`
-- `assignment-evis-macbook-pro-1.json`
+- `assignment-member-mac.json`
 - `report-m4pro-cold.json`
 - `report-m4pro-warm-post-review.json`
 
@@ -122,16 +122,16 @@ Verification gates:
 
 ## Reproduce orchestration
 
-From `/Users/evinova-self/Projects/mycelium` on the M4 Pro:
+From `~/Projects/mycelium` on the M4 Pro:
 
 ```sh
 python3 demo_weight_provisioning.py orchestrate \
   --repo bumblebee-testing/tiny-random-GPT2Model-sharded \
   --revision main \
-  --node 'm4pro,0,3,/Users/evinova-self/Projects/mycelium/.demo-cache/gpt2-m4pro' \
-  --node 'evis-macbook-pro-1,3,5,/Users/evinova/Projects/mycelium/.demo-cache/gpt2-laptop' \
-  --out-dir '/Users/evinova-self/Projects/mycelium/demo-runs/gpt2-two-peer-v1-next' \
-  --metadata-cache '/Users/evinova-self/Projects/mycelium/.demo-cache/coordinator-metadata'
+  --node 'm4pro,0,3,~/Projects/mycelium/.demo-cache/gpt2-m4pro' \
+  --node 'member-mac,3,5,~/Projects/mycelium/.demo-cache/gpt2-laptop' \
+  --out-dir '~/Projects/mycelium/demo-runs/gpt2-two-peer-v1-next' \
+  --metadata-cache '~/Projects/mycelium/.demo-cache/coordinator-metadata'
 ```
 
 The coordinator downloads only `config.json` and `model.safetensors.index.json` while compiling the manifest. It does not need the full model. New orchestration bundles write the compact route as `manual-provisioning-route-v1.json` with protocol `mycelium.manual_provisioning_route.v1`; `mycelium.route_plan.v2` is reserved for the product Planner contract.
@@ -161,9 +161,9 @@ Each assignment deliberately contains the peer's own absolute cache root. The co
 python3 demo_weight_provisioning.py audit \
   --route demo-runs/gpt2-two-peer-v1/route-plan-v2.json \
   --assignment demo-runs/gpt2-two-peer-v1/assignment-m4pro.json \
-  --assignment demo-runs/gpt2-two-peer-v1/assignment-evis-macbook-pro-1.json \
+  --assignment demo-runs/gpt2-two-peer-v1/assignment-member-mac.json \
   --report demo-runs/gpt2-two-peer-v1/report-m4pro-cold.json \
-  --report demo-runs/gpt2-two-peer-v1/report-evis-macbook-pro-1-cold.json \
+  --report demo-runs/gpt2-two-peer-v1/report-member-mac-cold.json \
   --out demo-runs/gpt2-two-peer-v1/provisioning-audit.json
 ```
 
@@ -173,7 +173,7 @@ A successful provisioning audit means all assigned artifacts are ready for a run
 
 The hardened live bundle is:
 
-`/Users/evinova-self/Projects/mycelium/demo-runs/gpt2-two-peer-http-v1-hardened`
+`~/Projects/mycelium/demo-runs/gpt2-two-peer-http-v1-hardened`
 
 Its historical `deployment.json` uses only relative references (`model-manifest.json`, the legacy-named `route-plan-v2.json`, and per-node assignment filenames). New bundles use `manual-provisioning-route-v1.json`. Copying the complete directory to another parent and loading it there succeeds. Peer cache roots remain absolute target-owned paths inside assignments and are never resolved by the coordinator.
 
@@ -250,8 +250,8 @@ Physical qualification completed on two Macs connected to the same phone hotspot
 
 - Evidence: `demo-runs/gpt2-two-physical-http-v1/physical-machine-qualification.json`.
 - Deployment: `5bf418bb-2735-42a8-b9d1-5c4f3546f02b`, epoch 1.
-- Coordinator: `m4pro` (`100.84.252.4:49874`).
-- Remote peer: `evis-macbook-pro-1` (`100.126.111.123`).
+- Coordinator: `m4pro` (`<owner-mac-ip>:49874`).
+- Remote peer: `member-mac` (`<member-mac-ip>`).
 - Observed Tailscale RTT before provisioning: 13 ms.
 - Commit: `4fca22a84867aacca5dcf7317144782ea1807e1a`.
 - Manifest: `sha256:75a58126d140ab3b945d80482314a92d6047fa163d37c2b37d0bfc4c420ddf46`.
@@ -259,7 +259,7 @@ Physical qualification completed on two Macs connected to the same phone hotspot
 | Physical peer | Range | Cold network bytes | Cold cache-hit bytes | Warm network bytes | Warm cache-hit bytes |
 |---|---:|---:|---:|---:|---:|
 | `m4pro` | `[0, 3)` | 150,404 | 0 | 0 | 150,404 |
-| `evis-macbook-pro-1` | `[3, 5)` | 206,660 | 0 | 0 | 206,660 |
+| `member-mac` | `[3, 5)` | 206,660 | 0 | 0 | 206,660 |
 
 Both cold caches were absent before provisioning. Each machine fetched its assignment over authenticated HTTP and downloaded only its minimal covering upstream shard set directly from Hugging Face. Both warm `--local-files-only` runs reused the same pinned-commit caches with zero network-download bytes.
 
@@ -271,7 +271,7 @@ SSH was used only to launch the remote test command, install the temporary token
 
 Final evidence directory:
 
-`/Users/evinova-self/Projects/mycelium/demo-runs/gpt2-two-peer-http-v1-final-cold`
+`~/Projects/mycelium/demo-runs/gpt2-two-peer-http-v1-final-cold`
 
 Deployment identity:
 

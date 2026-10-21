@@ -1,0 +1,130 @@
+{
+  "protocol": "mycelium.a3_acceptance_inventory.v1",
+  "gate": "A3",
+  "state": "acceptance_inventory_only",
+  "claim_boundary": "machine-checked acceptance requirements only; no physical execution, qualification, evidence, selector mutation, device contact, or completion claim",
+  "source_specification": "docs/superpowers/specs/2026-08-15-mycelium-a3-useful-local-model-qualification.md",
+  "required_gate_families": [
+    "physical_positive",
+    "physical_negative",
+    "selector",
+    "browser",
+    "warm_reuse",
+    "incumbent_switchback"
+  ],
+  "physical_negative_reasons": [
+    "stale_authority_or_evidence",
+    "incomplete_files_or_mixed_revisions",
+    "identity_or_manifest_drift",
+    "insufficient_resource_or_connectivity",
+    "unsupported_runtime_combination",
+    "unauthorized_conversion",
+    "parity_or_kv_cleanup_failure",
+    "dead_peer_fatal_route_or_stalled_counter",
+    "startup_challenge_failure",
+    "not_currently_qualifier_approved"
+  ],
+  "workspace_projection_matrix": {
+    "inference": ["qualified_selector", "exact_model_revision_representation", "streaming_output_history"],
+    "device_lab": ["eligible_device_classes", "contribution_evidence", "current_blockers"],
+    "network": ["ordered_topology", "directed_costs", "physical_frame_movement"],
+    "nodes": ["assigned_layers_backend", "resident_static_kv_bytes", "artifact_load_state"],
+    "plans": ["memory_tier_ab", "contiguous_allocation", "rejected_alternatives"],
+    "readiness": ["completeness_authorization_feasibility", "parity_load_qualification", "kv_cleanup_selector_eligibility"],
+    "incidents": ["bounded_failure_reason", "incumbent_preservation", "recovery_action"],
+    "settings": ["dynamic_local_catalogue", "qualified_future_request_default", "no_fixed_topology"]
+  },
+  "acceptance_cases": [
+    {
+      "case_id": "qualified_7b_physical_browser_request",
+      "gate_kind": "physical_positive",
+      "gate_families": ["physical_positive", "selector", "browser"],
+      "required_outcomes": [
+        "freshly_planned_assignment_local_route",
+        "same_run_qualifier_acceptance",
+        "candidate_registered_after_qualification",
+        "explicit_future_request_selection",
+        "ordinary_browser_prompt_streams_output",
+        "positive_per_peer_counters",
+        "terminal_stage_local_kv_cleanup"
+      ],
+      "forbidden_side_effects": ["hidden_origin_fetch", "unqualified_fallback", "incumbent_disruption"]
+    },
+    {
+      "case_id": "physical_rejection_preserves_incumbent",
+      "gate_kind": "physical_negative",
+      "gate_families": ["physical_negative", "selector"],
+      "required_outcomes": [
+        "rejected_before_selection",
+        "bounded_reason_matches_authority_and_ui",
+        "incumbent_remains_usable",
+        "candidate_not_published"
+      ],
+      "forbidden_side_effects": ["selector_mutated", "candidate_activated", "incumbent_failed"]
+    },
+    {
+      "case_id": "selector_requires_current_qualification",
+      "gate_kind": "selector_contract",
+      "gate_families": ["selector"],
+      "required_outcomes": [
+        "only_current_qualified_deployments_listed",
+        "selection_changes_future_requests_only",
+        "compatible_feasible_prepared_loaded_or_historical_is_insufficient"
+      ],
+      "forbidden_side_effects": ["active_request_rebound", "browser_authors_qualification"]
+    },
+    {
+      "case_id": "browser_lifecycle_reconstruction",
+      "gate_kind": "browser_positive",
+      "gate_families": ["browser"],
+      "required_outcomes": [
+        "all_workspaces_share_current_generation",
+        "refresh_navigation_back_forward_reconstruct",
+        "backend_reconnect_reconstructs",
+        "clean_second_session_reconstructs_public_truth",
+        "tab_private_prompt_output_isolated"
+      ],
+      "forbidden_side_effects": ["milestone_label_in_product_copy", "sealed_history_rendered_live"]
+    },
+    {
+      "case_id": "exact_warm_reacquisition",
+      "gate_kind": "warm_reuse_positive",
+      "gate_families": ["warm_reuse"],
+      "required_outcomes": [
+        "fresh_capacity_and_seed_binding",
+        "one_terminal_receipt_per_exact_stage",
+        "cached_verified_bytes_equal_total_bytes",
+        "zero_transferred_origin_and_peer_bytes",
+        "same_promotion_digest"
+      ],
+      "forbidden_side_effects": ["artifact_manifest_rewritten", "acquisition_binding_rewritten", "selection_changed"]
+    },
+    {
+      "case_id": "warm_reuse_mismatch_fails_closed",
+      "gate_kind": "warm_reuse_negative",
+      "gate_families": ["warm_reuse", "physical_negative"],
+      "required_outcomes": [
+        "exact_identity_or_placement_mismatch_rejected",
+        "replacement_candidate_not_published",
+        "activation_not_started",
+        "qualified_incumbent_remains_usable"
+      ],
+      "forbidden_side_effects": ["stale_receipt_reused", "cache_presence_treated_as_receipt", "selection_changed"]
+    },
+    {
+      "case_id": "incumbent_switchback_future_request",
+      "gate_kind": "physical_positive",
+      "gate_families": ["incumbent_switchback", "selector", "browser"],
+      "required_outcomes": [
+        "incumbent_selected_explicitly",
+        "already_admitted_request_unchanged",
+        "next_browser_request_uses_incumbent",
+        "incumbent_request_completes",
+        "candidate_identity_remains_immutable"
+      ],
+      "forbidden_side_effects": ["simultaneous_residency_claim", "active_request_migrated", "candidate_authority_rewritten"]
+    }
+  ],
+  "qualification_claim": false,
+  "completion_claim": false
+}

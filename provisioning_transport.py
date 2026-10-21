@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 """HTTP assignment pull and verification-report return for Mycelium provisioning."""
 from __future__ import annotations
 

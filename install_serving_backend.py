@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 """Explicit, platform-aware serving-backend bootstrap for Mycelium nodes.
 
 The core Mycelium modules remain stdlib-only. This optional helper prints an

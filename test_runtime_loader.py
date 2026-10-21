@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 """Focused contract and tamper tests for the assignment-bound MLX loader."""
 
 from __future__ import annotations
 
 import copy
+import io
 import json
+import os
 import struct
 from pathlib import Path
 from typing import Any
 
 import mlx.core as mx
+import numpy as np
 import pytest
 
+import runtime_loader
 from layer_assignment import assignment_id_for
 from runtime_loader import (
     RuntimeLoadError,
@@ -20,6 +25,7 @@ from runtime_loader import (
     load_assignment_stage,
 )
 from weight_provisioning import sha256_file
+from weight_quantization import Int8RowwiseWeight
 
 
 DEPLOYMENT_ID = "12345678-1234-5678-9234-abcdefabcdef"
@@ -39,6 +45,178 @@ LAYER_SUFFIXES = (
     "mlp.c_proj.weight",
     "mlp.c_proj.bias",
 )
+
+
+def test_rowwise_int8_loader_reads_only_one_bounded_row_chunk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Reader(io.BytesIO):
+        maximum_read = 0
+
+        def read(self, size: int = -1) -> bytes:
+            self.maximum_read = max(self.maximum_read, size)
+            return super().read(size)
+
+    monkeypatch.setattr(
+        runtime_loader,
+        "ROWWISE_INT8_CONVERSION_CHUNK_FLOAT_BYTES",
+        64,
+    )
+    source = np.arange(64, dtype=np.float32).reshape(8, 8) / 10.0
+    payload = source.astype("<f4").tobytes()
+    reader = Reader(payload)
+    loaded = runtime_loader._load_numpy_safetensors(
+        reader,
+        {
+            "model.layers.0.self_attn.q_proj.weight": {
+                "dtype": "F32",
+                "shape": [8, 8],
+                "data_offsets": [0, len(payload)],
+            }
+        },
+        0,
+        {"model.layers.0.self_attn.q_proj.weight"},
+        np.dtype("float32"),
+        quantize_qwen=True,
+    )
+
+    result = loaded["model.layers.0.self_attn.q_proj.weight"]
+    assert isinstance(result, Int8RowwiseWeight)
+    expected = runtime_loader.quantize_qwen2_numpy_tensor(
+        "model.layers.0.self_attn.q_proj.weight",
+        source,
+    )
+    assert isinstance(expected, Int8RowwiseWeight)
+    np.testing.assert_array_equal(result.values, expected.values)
+    np.testing.assert_array_equal(result.scales, expected.scales)
+    assert reader.maximum_read == 64
+    assert result.values.flags.writeable is False
+    assert result.scales.flags.writeable is False
+
+
+class _LoaderDeepcopyBomb:
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        self.calls.append("deepcopy")
+        raise RuntimeError("PRIVATE-direct-loader")
+
+
+class _LoaderArmedStr(str):
+    def __new__(cls, value: str, calls: list[str]) -> _LoaderArmedStr:
+        instance = super().__new__(cls, value)
+        instance.calls = calls
+        return instance
+
+    def _trip(self, operation: str) -> Any:
+        self.calls.append(operation)
+        raise RuntimeError("PRIVATE-direct-loader-scalar")
+
+    def __copy__(self) -> Any:
+        return self._trip("copy")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        return self._trip("deepcopy")
+
+    def __eq__(self, other: object) -> bool:
+        return self._trip("eq")
+
+    def __ne__(self, other: object) -> bool:
+        return self._trip("ne")
+
+    def __str__(self) -> str:
+        return self._trip("str")
+
+    def __bool__(self) -> bool:
+        return self._trip("bool")
+
+    __hash__ = str.__hash__
+
+
+class _LoaderArmedList(list[Any]):
+    def __init__(self, calls: list[str]) -> None:
+        super().__init__()
+        self.calls = calls
+
+    def _trip(self, operation: str) -> Any:
+        self.calls.append(operation)
+        raise RuntimeError("PRIVATE-direct-loader-root")
+
+    def __copy__(self) -> Any:
+        return self._trip("copy")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        return self._trip("deepcopy")
+
+    def __iter__(self) -> Any:
+        return self._trip("iter")
+
+
+class _LoaderArmedTuple(tuple[Any, ...]):
+    def __new__(
+        cls,
+        calls: list[str],
+    ) -> _LoaderArmedTuple:
+        instance = super().__new__(cls)
+        instance.calls = calls
+        return instance
+
+    def _trip(self, operation: str) -> Any:
+        self.calls.append(operation)
+        raise RuntimeError("PRIVATE-direct-loader-root")
+
+    def __copy__(self) -> Any:
+        return self._trip("copy")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        return self._trip("deepcopy")
+
+    def __iter__(self) -> Any:
+        return self._trip("iter")
+
+
+class _LoaderArmedInt(int):
+    def __new__(
+        cls,
+        calls: list[str],
+    ) -> _LoaderArmedInt:
+        instance = super().__new__(cls, 7)
+        instance.calls = calls
+        return instance
+
+    def _trip(self, operation: str) -> Any:
+        self.calls.append(operation)
+        raise RuntimeError("PRIVATE-direct-loader-root")
+
+    def __copy__(self) -> Any:
+        return self._trip("copy")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        return self._trip("deepcopy")
+
+    def __eq__(self, other: object) -> bool:
+        return self._trip("eq")
+
+    __hash__ = int.__hash__
+
+
+class _LoaderArmedDict(dict[Any, Any]):
+    def __init__(self, calls: list[str]) -> None:
+        super().__init__()
+        self.calls = calls
+
+    def __copy__(self) -> Any:
+        self.calls.append("copy")
+        raise RuntimeError("PRIVATE-direct-loader-root")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        self.calls.append("deepcopy")
+        raise RuntimeError("PRIVATE-direct-loader-root")
+
+    def __iter__(self) -> Any:
+        self.calls.append("iter")
+        raise RuntimeError("PRIVATE-direct-loader-root")
 
 
 def _values(
@@ -336,6 +514,15 @@ def test_loads_exact_assignment_owned_gpt2_stage_and_emits_canonical_proof(
     assert canonical_json(json.loads(serialized)) == serialized
 
 
+def test_loader_rejects_unauthenticated_stage_pack_digest_claims(tmp_path: Path) -> None:
+    assignment, report, _ = _case(tmp_path)
+    report["stage_pack_digest"] = "sha256:" + "1" * 64
+    report["stage_pack_verification_digest"] = "sha256:" + "2" * 64
+
+    with pytest.raises(RuntimeLoadError, match="stage-pack evidence must be complete"):
+        load_assignment_stage(assignment, report, load_generation=12)
+
+
 def test_emitted_proof_and_alias_evidence_are_deeply_immutable(tmp_path: Path) -> None:
     assignment, report, _ = _case(tmp_path)
     loaded = load_assignment_stage(assignment, report, load_generation=11)
@@ -405,6 +592,280 @@ def test_loads_explicit_unnamespaced_gpt2_tensor_layout(tmp_path: Path) -> None:
 def test_canonical_json_rejects_nonfinite_numbers() -> None:
     with pytest.raises(ValueError, match="JSON compliant"):
         canonical_json({"invalid": float("nan")})
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "components",
+        "runtime",
+        "component_aliases",
+        "control_plane_binding",
+        "claim_boundary",
+        "extra",
+    ),
+)
+def test_loader_rejects_assignment_deepcopy_callbacks_before_entry_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+) -> None:
+    assignment, report, _ = _case(tmp_path)
+    calls: list[str] = []
+    assignment[field] = _LoaderDeepcopyBomb(calls)
+    downstream = {
+        "identity": 0,
+        "report": 0,
+        "file": 0,
+        "tensor": 0,
+        "probe": 0,
+    }
+
+    def reject(name: str) -> Any:
+        def callback(*args: Any, **kwargs: Any) -> Any:
+            downstream[name] += 1
+            raise AssertionError(f"assignment snapshot reached {name}")
+
+        return callback
+
+    monkeypatch.setattr(runtime_loader, "validate_assignment_identity", reject("identity"))
+    monkeypatch.setattr(runtime_loader, "artifact_report_errors", reject("report"))
+    monkeypatch.setattr(runtime_loader, "_open_verified_artifact", reject("file"))
+    monkeypatch.setattr(runtime_loader, "_load_exact_tensors", reject("tensor"))
+    monkeypatch.setattr(runtime_loader, "_run_gpt2_probe", reject("probe"))
+
+    with pytest.raises(RuntimeLoadError) as raised:
+        load_assignment_stage(assignment, report, load_generation=1)
+
+    assert str(raised.value) == (
+        "stage-pack evidence rejected: "
+        "stage pack assignment files are invalid"
+    )
+    assert "PRIVATE-" not in str(raised.value)
+    assert calls == []
+    assert downstream == {
+        "identity": 0,
+        "report": 0,
+        "file": 0,
+        "tensor": 0,
+        "probe": 0,
+    }
+
+
+def test_loader_rejects_armed_assignment_protocol_before_comparison_or_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assignment, report, _ = _case(tmp_path)
+    calls: list[str] = []
+    assignment["protocol"] = _LoaderArmedStr(assignment["protocol"], calls)
+    downstream = {
+        "identity": 0,
+        "report": 0,
+        "file": 0,
+        "tensor": 0,
+        "probe": 0,
+    }
+
+    def reject(name: str) -> Any:
+        def callback(*args: Any, **kwargs: Any) -> Any:
+            downstream[name] += 1
+            raise AssertionError(f"assignment snapshot reached {name}")
+
+        return callback
+
+    monkeypatch.setattr(runtime_loader, "validate_assignment_identity", reject("identity"))
+    monkeypatch.setattr(runtime_loader, "artifact_report_errors", reject("report"))
+    monkeypatch.setattr(runtime_loader, "_open_verified_artifact", reject("file"))
+    monkeypatch.setattr(runtime_loader, "_load_exact_tensors", reject("tensor"))
+    monkeypatch.setattr(runtime_loader, "_run_gpt2_probe", reject("probe"))
+
+    with pytest.raises(RuntimeLoadError) as raised:
+        load_assignment_stage(assignment, report, load_generation=1)
+
+    assert str(raised.value) == (
+        "stage-pack evidence rejected: "
+        "stage pack assignment files are invalid"
+    )
+    assert calls == []
+    assert downstream == {
+        "identity": 0,
+        "report": 0,
+        "file": 0,
+        "tensor": 0,
+        "probe": 0,
+    }
+
+
+def _loader_nested_value(depth: int) -> Any:
+    value: Any = "leaf"
+    for _ in range(depth):
+        value = [value]
+    return value
+
+
+def _loader_shared_exact_json_dag(depth: int) -> Any:
+    value: Any = "leaf"
+    for _ in range(depth):
+        value = [value, value]
+    return value
+
+
+def test_loader_rejects_compact_shared_dag_before_downstream_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import stage_pack
+
+    assignment, report, _ = _case(tmp_path)
+    assignment["extra"] = _loader_shared_exact_json_dag(18)
+    effects = {
+        "identity": 0,
+        "report": 0,
+        "file": 0,
+        "tensor": 0,
+        "probe": 0,
+        "verifier": 0,
+    }
+
+    def reject(name: str) -> Any:
+        def callback(*args: Any, **kwargs: Any) -> Any:
+            effects[name] += 1
+            raise AssertionError(f"shared DAG reached {name}")
+
+        return callback
+
+    monkeypatch.setattr(runtime_loader, "validate_assignment_identity", reject("identity"))
+    monkeypatch.setattr(runtime_loader, "artifact_report_errors", reject("report"))
+    monkeypatch.setattr(runtime_loader, "_open_verified_artifact", reject("file"))
+    monkeypatch.setattr(runtime_loader, "_load_exact_tensors", reject("tensor"))
+    monkeypatch.setattr(runtime_loader, "_run_gpt2_probe", reject("probe"))
+    monkeypatch.setattr(stage_pack, "validate_stage_pack_evidence", reject("verifier"))
+
+    with pytest.raises(RuntimeLoadError) as raised:
+        load_assignment_stage(assignment, report, load_generation=1)
+
+    assert str(raised.value) == (
+        "stage-pack evidence rejected: "
+        "stage pack assignment files are invalid"
+    )
+    assert "RecursionError" not in str(raised.value)
+    assert "leaf" not in str(raised.value)
+    assert effects == {
+        "identity": 0,
+        "report": 0,
+        "file": 0,
+        "tensor": 0,
+        "probe": 0,
+        "verifier": 0,
+    }
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("over-limit", "python-recursion", "cycle"),
+)
+def test_loader_rejects_excess_or_cyclic_assignment_values_stably(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    assignment, report, _ = _case(tmp_path)
+    if mutation == "cycle":
+        cycle: list[Any] = []
+        cycle.append(cycle)
+        assignment["extra"] = cycle
+    else:
+        assignment["extra"] = _loader_nested_value(
+            64 if mutation == "over-limit" else 2000
+        )
+    effects = {"identity": 0, "report": 0, "file": 0, "tensor": 0, "probe": 0}
+
+    def reject(name: str) -> Any:
+        def callback(*args: Any, **kwargs: Any) -> Any:
+            effects[name] += 1
+            raise AssertionError(f"assignment snapshot reached {name}")
+
+        return callback
+
+    monkeypatch.setattr(runtime_loader, "validate_assignment_identity", reject("identity"))
+    monkeypatch.setattr(runtime_loader, "artifact_report_errors", reject("report"))
+    monkeypatch.setattr(runtime_loader, "_open_verified_artifact", reject("file"))
+    monkeypatch.setattr(runtime_loader, "_load_exact_tensors", reject("tensor"))
+    monkeypatch.setattr(runtime_loader, "_run_gpt2_probe", reject("probe"))
+
+    with pytest.raises(RuntimeLoadError) as raised:
+        load_assignment_stage(assignment, report, load_generation=1)
+
+    assert str(raised.value) == (
+        "stage-pack evidence rejected: "
+        "stage pack assignment files are invalid"
+    )
+    assert effects == {"identity": 0, "report": 0, "file": 0, "tensor": 0, "probe": 0}
+
+
+@pytest.mark.parametrize(
+    "root_kind",
+    (
+        "list",
+        "tuple",
+        "str",
+        "int",
+        "none",
+        "dict-subclass",
+        "list-subclass",
+        "tuple-subclass",
+        "str-subclass",
+        "int-subclass",
+    ),
+)
+def test_loader_rejects_non_dict_assignment_roots_before_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    root_kind: str,
+) -> None:
+    _, report, _ = _case(tmp_path)
+    calls: list[str] = []
+    roots: dict[str, Any] = {
+        "list": [],
+        "tuple": (),
+        "str": "assignment",
+        "int": 7,
+        "none": None,
+        "dict-subclass": _LoaderArmedDict(calls),
+        "list-subclass": _LoaderArmedList(calls),
+        "tuple-subclass": _LoaderArmedTuple(calls),
+        "str-subclass": _LoaderArmedStr("assignment", calls),
+        "int-subclass": _LoaderArmedInt(calls),
+    }
+    effects = {"identity": 0, "report": 0, "file": 0, "tensor": 0, "probe": 0}
+
+    def reject(name: str) -> Any:
+        def callback(*args: Any, **kwargs: Any) -> Any:
+            effects[name] += 1
+            raise AssertionError(f"assignment root reached {name}")
+
+        return callback
+
+    monkeypatch.setattr(runtime_loader, "validate_assignment_identity", reject("identity"))
+    monkeypatch.setattr(runtime_loader, "artifact_report_errors", reject("report"))
+    monkeypatch.setattr(runtime_loader, "_open_verified_artifact", reject("file"))
+    monkeypatch.setattr(runtime_loader, "_load_exact_tensors", reject("tensor"))
+    monkeypatch.setattr(runtime_loader, "_run_gpt2_probe", reject("probe"))
+
+    with pytest.raises(RuntimeLoadError) as raised:
+        load_assignment_stage(
+            roots[root_kind],
+            report,
+            load_generation=1,
+        )
+
+    assert str(raised.value) == (
+        "stage-pack evidence rejected: "
+        "stage pack assignment files are invalid"
+    )
+    assert calls == []
+    assert effects == {"identity": 0, "report": 0, "file": 0, "tensor": 0, "probe": 0}
 
 
 @pytest.mark.parametrize(
@@ -685,14 +1146,30 @@ def test_rejects_wrong_artifact_report_protocol(tmp_path: Path) -> None:
         load_assignment_stage(assignment, report, load_generation=1)
 
 
-def test_rejects_assigned_artifact_path_traversal(tmp_path: Path) -> None:
+def test_rejects_assigned_artifact_path_traversal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     assignment, report, _ = _case(tmp_path)
     assignment["files"][0]["path"] = "../model.safetensors"
     report["verified_files"][0]["path"] = "../model.safetensors"
     _rebind(assignment, report)
 
-    with pytest.raises(RuntimeLoadError, match=r"unsafe .*artifact path"):
+    artifact_opened = False
+
+    def forbidden_artifact_open(*args: Any, **kwargs: Any) -> Any:
+        nonlocal artifact_opened
+        artifact_opened = True
+        raise AssertionError("verified artifact must not be opened")
+
+    monkeypatch.setattr(
+        runtime_loader, "_open_verified_artifact", forbidden_artifact_open
+    )
+    with pytest.raises(RuntimeLoadError) as exc_info:
         load_assignment_stage(assignment, report, load_generation=1)
+    assert str(exc_info.value) == (
+        "stage-pack evidence rejected: stage pack assignment files are invalid"
+    )
+    assert artifact_opened is False
 
 
 def test_rejects_verified_local_path_outside_cache_root(tmp_path: Path) -> None:
@@ -704,6 +1181,23 @@ def test_rejects_verified_local_path_outside_cache_root(tmp_path: Path) -> None:
     report["verified_files"][0]["local_path"] = str(escaped.resolve())
 
     with pytest.raises(RuntimeLoadError, match="escapes artifact cache root"):
+        load_assignment_stage(assignment, report, load_generation=1)
+
+
+def test_rejects_nested_symlink_in_verified_artifact_path(tmp_path: Path) -> None:
+    assignment, report, artifact = _case(tmp_path)
+    real = tmp_path / "real"
+    real.mkdir()
+    moved = real / artifact.name
+    artifact.rename(moved)
+    (tmp_path / "nested").symlink_to(real.name, target_is_directory=True)
+    relative = f"nested/{artifact.name}"
+    assignment["files"][0]["path"] = relative
+    report["verified_files"][0]["path"] = relative
+    report["verified_files"][0]["local_path"] = str(tmp_path / relative)
+    _rebind(assignment, report)
+
+    with pytest.raises(RuntimeLoadError, match="unable to open verified artifact"):
         load_assignment_stage(assignment, report, load_generation=1)
 
 
@@ -733,6 +1227,30 @@ def test_rejects_file_tampering_after_artifact_report(tmp_path: Path) -> None:
     artifact.write_bytes(content)
 
     with pytest.raises(RuntimeLoadError, match="digest mismatch"):
+        load_assignment_stage(assignment, report, load_generation=1)
+
+
+def test_rejects_artifact_mutation_during_lazy_mlx_load(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assignment, report, artifact = _case(tmp_path)
+    original_eval = mx.eval
+    mutated = False
+
+    def eval_then_mutate(value: Any) -> None:
+        nonlocal mutated
+        original_eval(value)
+        if not mutated:
+            mutated = True
+            with artifact.open("r+b") as handle:
+                handle.seek(-1, os.SEEK_END)
+                byte = handle.read(1)
+                handle.seek(-1, os.SEEK_END)
+                handle.write(bytes([byte[0] ^ 1]))
+
+    monkeypatch.setattr(mx, "eval", eval_then_mutate)
+    with pytest.raises(RuntimeLoadError, match="changed during load"):
         load_assignment_stage(assignment, report, load_generation=1)
 
 

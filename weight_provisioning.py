@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 """Download and verify exact upstream shard allowlists for Mycelium assignments."""
 from __future__ import annotations
 
@@ -135,6 +136,12 @@ def _validate_assignment(assignment: dict[str, Any]) -> None:
       raise ValueError("assignment requires expected_tensor_prefixes")
 
 
+def validate_provisioning_assignment(assignment: dict[str, Any]) -> None:
+   """Public fail-closed validator shared by acquisition and verification."""
+
+   _validate_assignment(assignment)
+
+
 def fetch_huggingface_file(
    model_id: str,
    revision: str,
@@ -147,6 +154,14 @@ def fetch_huggingface_file(
    except ImportError as exc:
       raise RuntimeError("huggingface_hub is required for Hub downloads") from exc
 
+   # Deferred: importing mycelium_platform_neutral loads mycelium_qualification, which imports this module,
+   # so a top-level import is circular when this module is imported first.
+   from mycelium_platform_neutral.offline import OfflineModelSourceError, offline_enabled
+
+   # Offline mode (and the lan/local network modes) read the local cache only.
+   offline = offline_enabled()
+   if offline:
+      local_files_only = True
    cache_dir = str(Path(cache_root).expanduser().resolve())
    cached = try_to_load_from_cache(
       repo_id=model_id,
@@ -155,13 +170,21 @@ def fetch_huggingface_file(
       cache_dir=cache_dir,
    )
    cache_hit = isinstance(cached, str) and Path(cached).is_file()
-   resolved = hf_hub_download(
-      repo_id=model_id,
-      filename=filename,
-      revision=revision,
-      cache_dir=cache_dir,
-      local_files_only=local_files_only,
-   )
+   try:
+      resolved = hf_hub_download(
+         repo_id=model_id,
+         filename=filename,
+         revision=revision,
+         cache_dir=cache_dir,
+         local_files_only=local_files_only,
+      )
+   except Exception as exc:
+      if offline and (
+         isinstance(exc, FileNotFoundError)
+         or type(exc).__name__ == "LocalEntryNotFoundError"
+      ):
+         raise OfflineModelSourceError(f"the model file {filename}") from exc
+      raise
    return Path(resolved), cache_hit
 
 
@@ -173,6 +196,11 @@ def provision_assignment(
 ) -> dict[str, Any]:
    _validate_assignment(assignment)
    assigned_cache_root = assignment["artifact_cache_root"]
+   # The assignment admits POSIX and Windows spellings; this host owns only its own.
+   if not Path(assigned_cache_root).is_absolute():
+      raise ValueError(
+         f"artifact cache root for {assignment.get('node_id', 'peer')} is not absolute on this host"
+      )
    cache_root = Path(assigned_cache_root).resolve()
    cache_root.mkdir(parents=True, exist_ok=True)
    required_bytes = sum(record["size_bytes"] for record in assignment["files"])
@@ -289,6 +317,28 @@ def artifact_report_errors(
          errors.append(f"invalid report field type: {field}")
    if report.get("protocol") != "mycelium.artifact_verification_report.v1":
       errors.append("wrong report protocol")
+   stage_evidence_fields = (
+      "stage_pack",
+      "stage_pack_manifest",
+      "stage_pack_verification",
+      "stage_pack_digest",
+      "stage_pack_verification_digest",
+   )
+   present_stage_evidence_fields = [
+      field for field in stage_evidence_fields if field in report
+   ]
+   if present_stage_evidence_fields and len(present_stage_evidence_fields) != len(
+      stage_evidence_fields
+   ):
+      errors.append("stage-pack evidence must be complete")
+   for field in ("stage_pack", "stage_pack_manifest", "stage_pack_verification"):
+      if field in report and not isinstance(report.get(field), dict):
+         errors.append(f"invalid report field type: {field}")
+   for field in ("stage_pack_digest", "stage_pack_verification_digest"):
+      if field in report and not _SHA256_REF_RE.fullmatch(
+         str(report.get(field, ""))
+      ):
+         errors.append(f"invalid report field: {field}")
    for field in (
       "deployment_id",
       "deployment_epoch",

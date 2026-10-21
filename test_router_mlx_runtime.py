@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """End-to-end and fail-closed tests for the assignment-bound MLX RuntimePort."""
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from mycelium_router.contracts import (
    Stage,
    StageCost,
 )
+from mycelium_router.decoding import quantized_greedy_token_id
 from mycelium_router.layer_builder import layer_load_proof_digest
 from mycelium_router.mlx_runtime import MLXRuntimeError, MLXRuntimePort, _stage_signature
 from mycelium_router.payloads import decode_activation, encode_activation, encode_token_ids
@@ -129,7 +131,7 @@ def _build_graph(assignments, loaded_stages) -> ExecutionGraph:
 def runtime_case():
    temporary = tempfile.TemporaryDirectory(prefix="mycelium-mlx-runtime-test-")
    root = Path(temporary.name)
-   manifest, _ = _build_local_model(root)
+   manifest, _ = _build_local_model(root, n_positions=16)
    route = _route_for_manifest(manifest)
    assignments = compile_layer_assignments(
       route_plan=route,
@@ -209,22 +211,40 @@ def _work_item(
    request_id="request-1",
    path_id="path-1",
    batch_key=None,
+   token_index=None,
+   position=None,
+   emits_token=False,
+   terminal=False,
+   lease_expires_at=1_000_000_000_000.0,
+   idempotency_key=None,
 ):
    key = batch_key or _batch_key(case, stage_index, phase, token_span)
+   if token_index is None:
+      token_index = -1 if phase == "PREFILL" else 0
+   if position is None:
+      position = 0
    return HopWorkItem(
       request_id=request_id,
       path_id=path_id,
       path_attempt=0,
       phase=phase,
-      token_index=0,
+      token_index=token_index,
       hop_index=stage_index,
       placement_id=case.graph.stages[stage_index].placements[0].placement_id,
       qos_class="interactive",
       deficit_ratio=0.0,
       enqueued_at=0.0,
-      idempotency_key=f"{request_id}:{phase}:{stage_index}",
+      idempotency_key=(
+         idempotency_key
+         if idempotency_key is not None
+         else f"{request_id}:{phase}:{token_index}:{stage_index}"
+      ),
       payload=payload,
       batch_key=key,
+      position=position,
+      emits_token=emits_token,
+      terminal=terminal,
+      lease_expires_at=lease_expires_at,
    )
 
 
@@ -232,34 +252,77 @@ def _reference_token(case, token_ids):
    tokens = mx.array((token_ids,), dtype=mx.uint32)
    hidden = execute_loaded_stage(case.loaded[0], token_ids=tokens)
    logits = execute_loaded_stage(case.loaded[1], hidden_states=hidden)
-   return hidden, int(mx.argmax(logits[0, -1, :]).item())
+   return hidden, quantized_greedy_token_id(logits[0, -1, :].tolist())
 
 
-def _run_two_stage(case, token_ids, *, phase, path_id):
-   token_span = len(token_ids) if phase == "PREFILL" else 1
-   first = case.ports[0].execute(
+def _run_two_stage(
+   case,
+   token_ids,
+   *,
+   phase,
+   path_id,
+   request_id=None,
+   token_index=None,
+   position=None,
+   emits_token=False,
+   terminal=False,
+   ports=None,
+   lease_expires_at=1_000_000_000_000.0,
+):
+   token_span = (
+      len(token_ids)
+      if phase in {"PREFILL", "PREFILL_CHUNK", "RECOVERY_PREFILL"}
+      else 1
+   )
+   request_id = request_id or f"request:{path_id}"
+   ports = ports or case.ports
+   first = ports[0].execute(
       _work_item(
          case,
          0,
          encode_token_ids(token_ids),
          phase=phase,
          token_span=token_span,
+         request_id=request_id,
          path_id=path_id,
+         token_index=token_index,
+         position=position,
+         emits_token=emits_token,
+         terminal=terminal,
+         lease_expires_at=lease_expires_at,
       )
    )
    assert first.success, first.failure_reason
-   second = case.ports[1].execute(
+   second = ports[1].execute(
       _work_item(
          case,
          1,
          first.payload,
          phase=phase,
          token_span=token_span,
+         request_id=request_id,
          path_id=path_id,
+         token_index=token_index,
+         position=position,
+         emits_token=emits_token,
+         terminal=terminal,
+         lease_expires_at=lease_expires_at,
       )
    )
    assert second.success, second.failure_reason
    return first.payload, second.token_id
+
+
+def _fresh_ports(case, *, clock=None):
+   return tuple(
+      MLXRuntimePort(
+         assignment["node_id"],
+         case.graph,
+         {case.graph.stages[index].placements[0].placement_id: case.loaded[index]},
+         clock=clock,
+      )
+      for index, assignment in enumerate(case.assignments)
+   )
 
 
 def _assert_failure(result, reason):
@@ -270,15 +333,71 @@ def _assert_failure(result, reason):
    assert result.token_id is None
 
 
-def test_two_stage_prefill_and_decode_match_concatenated_reference_and_wire_bytes(runtime_case):
+KV_NUMERIC_TOLERANCE = 1e-5
+
+
+def test_final_prefill_chunk_emits_token_without_releasing_live_request_kv(
+   runtime_case,
+):
+   ports = _fresh_ports(runtime_case)
+   request_id = "request:chunk-kv-continuity"
+   path_id = "path:chunk-kv-continuity"
+
+   _run_two_stage(
+      runtime_case,
+      (1, 2),
+      phase="PREFILL_CHUNK",
+      path_id=path_id,
+      request_id=request_id,
+      token_index=0,
+      position=0,
+      ports=ports,
+   )
+   _, first_token = _run_two_stage(
+      runtime_case,
+      (3,),
+      phase="PREFILL_CHUNK",
+      path_id=path_id,
+      request_id=request_id,
+      token_index=1,
+      position=2,
+      emits_token=True,
+      terminal=False,
+      ports=ports,
+   )
+
+   assert first_token is not None
+   assert all(port.kv_snapshot()["active_state_count"] == 1 for port in ports)
+   _run_two_stage(
+      runtime_case,
+      (first_token,),
+      phase="DECODE",
+      path_id=path_id,
+      request_id=request_id,
+      token_index=1,
+      position=3,
+      terminal=True,
+      ports=ports,
+   )
+   assert all(port.kv_snapshot()["active_state_count"] == 0 for port in ports)
+
+
+def test_stage_local_kv_prefill_and_eight_single_token_decodes_match_reference(
+   runtime_case,
+):
    prompt = (1, 2, 3)
+   request_id = "request:stage-local-kv-parity"
+   path_id = "path:stage-local-kv-parity"
    reference_hidden, reference_prefill_token = _reference_token(runtime_case, prompt)
 
    activation_payload, prefill_token = _run_two_stage(
       runtime_case,
       prompt,
       phase="PREFILL",
-      path_id="path-prefill",
+      path_id=path_id,
+      request_id=request_id,
+      token_index=-1,
+      position=0,
    )
 
    assert prefill_token == reference_prefill_token
@@ -289,25 +408,113 @@ def test_two_stage_prefill_and_decode_match_concatenated_reference_and_wire_byte
    mx.eval(contiguous_reference)
    assert envelope.data == bytes(contiguous_reference)
 
-   # Exercise the host's concrete bytes -> MLX and MLX -> bytes paths, not a mock.
-   reconstructed = (
-      mx.array(memoryview(envelope.data), dtype=mx.uint8)
-      .view(mx.float32)
-      .reshape(envelope.shape)
-   )
-   mx.eval(reconstructed)
-   assert bool(mx.allclose(reconstructed, reference_hidden, rtol=0.0, atol=0.0).item())
-   assert decode_activation(encode_activation(contiguous_reference)).data == envelope.data
+   for stage_index, port in enumerate(runtime_case.ports):
+      snapshot = port.kv_snapshot()
+      assert snapshot["mode"] == "stage_local_kv"
+      assert snapshot["active_state_count"] == 1
+      state = snapshot["states"][path_id]
+      placement = runtime_case.graph.stages[stage_index].placements[0]
+      assert state["request_id"] == request_id
+      assert state["path_attempt"] == 0
+      assert state["placement_id"] == placement.placement_id
+      assert state["assignment_id"] == placement.assignment_id
+      assert state["manifest_digest"] == runtime_case.graph.manifest_digest
+      assert state["deployment_epoch"] == runtime_case.graph.deployment_epoch
+      assert state["next_position"] == len(prompt)
+      assert state["next_sequence"] == 1
+      assert state["cached_context_tokens"] == len(prompt)
+      assert state["kv_bytes"] > 0
 
-   decode_context = prompt + (prefill_token,)
-   _, reference_decode_token = _reference_token(runtime_case, decode_context)
-   _, decode_token = _run_two_stage(
+   context = list(prompt)
+   actual_tokens = [prefill_token]
+   reference_tokens = [reference_prefill_token]
+   max_hidden_abs_error = 0.0
+   for token_index in range(1, 9):
+      input_token = actual_tokens[-1]
+      context.append(input_token)
+      reference_hidden, reference_token = _reference_token(runtime_case, tuple(context))
+      activation_payload, actual_token = _run_two_stage(
+         runtime_case,
+         (input_token,),
+         phase="DECODE",
+         path_id=path_id,
+         request_id=request_id,
+         token_index=token_index,
+         position=len(prompt) + token_index - 1,
+         terminal=token_index == 8,
+      )
+      envelope = decode_activation(activation_payload)
+      assert envelope.shape == (1, 1, runtime_case.graph.hidden_size)
+      actual_hidden = (
+         mx.array(memoryview(envelope.data), dtype=mx.uint8)
+         .view(mx.float32)
+         .reshape(envelope.shape)
+      )
+      expected_hidden = reference_hidden[:, -1:, :]
+      mx.eval(actual_hidden, expected_hidden)
+      hidden_abs_error = float(mx.max(mx.abs(actual_hidden - expected_hidden)).item())
+      max_hidden_abs_error = max(max_hidden_abs_error, hidden_abs_error)
+      assert hidden_abs_error <= KV_NUMERIC_TOLERANCE
+      assert actual_token == reference_token
+      actual_tokens.append(actual_token)
+      reference_tokens.append(reference_token)
+
+   assert actual_tokens == reference_tokens
+   assert len(actual_tokens) == 9
+   assert max_hidden_abs_error <= KV_NUMERIC_TOLERANCE
+   for port in runtime_case.ports:
+      snapshot = port.kv_snapshot()
+      assert snapshot["active_state_count"] == 0
+      assert snapshot["release_counts"]["normal_completion"] >= 1
+
+
+def test_recovery_prefill_rebuilds_kv_without_replaying_last_token(runtime_case):
+   ports = _fresh_ports(runtime_case)
+   recovered_context = (1, 2, 3, 4, 5)
+   _, reference_recovery_token = _reference_token(runtime_case, recovered_context)
+   _, recovery_token = _run_two_stage(
       runtime_case,
-      decode_context,
-      phase="DECODE",
-      path_id="path-decode",
+      recovered_context,
+      phase="RECOVERY_PREFILL",
+      path_id="path:recovery-kv",
+      request_id="request:recovery-kv",
+      token_index=2,
+      position=0,
+      ports=ports,
    )
-   assert decode_token == reference_decode_token
+   assert recovery_token == reference_recovery_token
+   for port in ports:
+      state = port.kv_snapshot()["states"]["path:recovery-kv"]
+      assert state["next_position"] == len(recovered_context)
+      assert state["next_sequence"] == 3
+
+   expected_context = recovered_context + (recovery_token,)
+   _, expected_next_token = _reference_token(runtime_case, expected_context)
+   _, next_token = _run_two_stage(
+      runtime_case,
+      (recovery_token,),
+      phase="DECODE",
+      path_id="path:recovery-kv",
+      request_id="request:recovery-kv",
+      token_index=3,
+      position=len(recovered_context),
+      terminal=True,
+      ports=ports,
+   )
+   assert next_token == expected_next_token
+   for port in ports:
+      assert port.kv_snapshot()["active_state_count"] == 0
+
+
+def test_constructor_rejects_invalid_decode_mode(runtime_case):
+   placement = runtime_case.graph.stages[0].placements[0]
+   with pytest.raises(MLXRuntimeError, match="^invalid_runtime_decode_mode$"):
+      MLXRuntimePort(
+         placement.node_id,
+         runtime_case.graph,
+         {placement.placement_id: runtime_case.loaded[0]},
+         decode_mode="backend_specific_guess",
+      )
 
 
 def test_constructor_rejects_non_little_endian_host(runtime_case, monkeypatch):
@@ -484,7 +691,7 @@ def test_token_and_position_bounds_fail_closed_on_entry_and_activation(runtime_c
    entry_cases = (
       ("empty_token_sequence", (), 1),
       ("token_bounds_exceeded", (7,), 1),
-      ("position_bounds_exceeded", (0,) * 9, 9),
+      ("position_bounds_exceeded", (0,) * 17, 17),
    )
    for reason, token_ids, token_span in entry_cases:
       result = runtime_case.ports[0].execute(
@@ -501,33 +708,71 @@ def test_token_and_position_bounds_fail_closed_on_entry_and_activation(runtime_c
 
    over_position_activation = encode_activation(
       dtype="float32",
-      shape=(1, 9, 4),
-      data=b"\x00" * (1 * 9 * 4 * 4),
+      shape=(1, 17, 4),
+      data=b"\x00" * (1 * 17 * 4 * 4),
    )
    result = runtime_case.ports[1].execute(
       _work_item(
          runtime_case,
          1,
          over_position_activation,
-         token_span=9,
+         token_span=17,
          path_id="path-activation-position-bound",
       )
    )
    _assert_failure(result, "position_bounds_exceeded")
 
 
-def test_prefill_chunk_is_explicitly_unsupported_without_kv_continuity(runtime_case):
-   result = runtime_case.ports[0].execute(
+def test_prefill_chunks_extend_stage_local_kv_without_advancing_decode_sequence(
+   runtime_case,
+):
+   port = _fresh_ports(runtime_case)[0]
+   initial = port.execute(
       _work_item(
          runtime_case,
          0,
          encode_token_ids((1, 2)),
          phase="PREFILL_CHUNK",
          token_span=2,
+         request_id="request-prefill-chunk",
          path_id="path-prefill-chunk",
+         token_index=0,
+         position=0,
       )
    )
-   _assert_failure(result, "prefill_chunk_requires_kv_continuity")
+   continued = port.execute(
+      _work_item(
+         runtime_case,
+         0,
+         encode_token_ids((3,)),
+         phase="PREFILL_CHUNK",
+         token_span=1,
+         request_id="request-prefill-chunk",
+         path_id="path-prefill-chunk",
+         token_index=1,
+         position=2,
+      )
+   )
+   decoded = port.execute(
+      _work_item(
+         runtime_case,
+         0,
+         encode_token_ids((4,)),
+         phase="DECODE",
+         token_span=1,
+         request_id="request-prefill-chunk",
+         path_id="path-prefill-chunk",
+         token_index=1,
+         position=3,
+      )
+   )
+
+   assert initial.success
+   assert continued.success
+   assert decoded.success
+   state = port.kv_snapshot()["states"]["path-prefill-chunk"]
+   assert state["cached_context_tokens"] == 4
+   assert state["next_sequence"] == 2
 
 
 def test_cancellation_is_idempotent_and_isolated_by_path(runtime_case):
@@ -545,6 +790,284 @@ def test_cancellation_is_idempotent_and_isolated_by_path(runtime_case):
       replace(cancelled_item, path_id="path-not-cancelled", request_id="request-other")
    )
    assert other.success
+
+
+def test_stage_local_kv_replay_is_idempotent_and_conflicts_fail_closed(runtime_case):
+   port = _fresh_ports(runtime_case)[0]
+   path_id = "path:kv-replay"
+   request_id = "request:kv-replay"
+   prefill = _work_item(
+      runtime_case,
+      0,
+      encode_token_ids((1, 2, 3)),
+      request_id=request_id,
+      path_id=path_id,
+      token_index=-1,
+      position=0,
+   )
+
+   first = port.execute(prefill)
+   duplicate = port.execute(prefill)
+   assert first.success and duplicate == first
+   assert port.kv_snapshot()["applied_operation_count"] == 1
+   _assert_failure(
+      port.execute(replace(prefill, payload=encode_token_ids((3, 2, 1)))),
+      "kv_sequence_replay_conflict",
+   )
+
+   decode = _work_item(
+      runtime_case,
+      0,
+      encode_token_ids((4,)),
+      phase="DECODE",
+      token_span=1,
+      request_id=request_id,
+      path_id=path_id,
+      token_index=1,
+      position=3,
+   )
+   decoded = port.execute(decode)
+   assert decoded.success
+   assert port.execute(decode) == decoded
+   assert port.kv_snapshot()["applied_operation_count"] == 2
+   _assert_failure(
+      port.execute(replace(decode, payload=encode_token_ids((5,)))),
+      "kv_sequence_replay_conflict",
+   )
+   port.cancel(path_id)
+
+
+def test_stage_local_kv_identity_position_and_sequence_mismatches_fail_closed(
+   runtime_case,
+):
+   port = _fresh_ports(runtime_case)[0]
+   for invalid_lease in (float("inf"), float("-inf"), float("nan")):
+      invalid = _work_item(
+         runtime_case,
+         0,
+         encode_token_ids((1, 2, 3)),
+         path_id=f"path:invalid-lease:{invalid_lease!r}",
+         lease_expires_at=invalid_lease,
+      )
+      _assert_failure(port.execute(invalid), "invalid_kv_lease")
+   path_id = "path:kv-bindings"
+   request_id = "request:kv-bindings"
+   prefill = _work_item(
+      runtime_case,
+      0,
+      encode_token_ids((1, 2, 3)),
+      request_id=request_id,
+      path_id=path_id,
+      token_index=-1,
+      position=0,
+   )
+   assert port.execute(prefill).success
+   valid_decode = _work_item(
+      runtime_case,
+      0,
+      encode_token_ids((4,)),
+      phase="DECODE",
+      token_span=1,
+      request_id=request_id,
+      path_id=path_id,
+      token_index=1,
+      position=3,
+   )
+   valid_key = valid_decode.batch_key
+   assert valid_key is not None
+   cases = (
+      ("kv_request_id_mismatch", replace(valid_decode, request_id="wrong-request")),
+      ("kv_state_missing", replace(valid_decode, path_id="wrong-path")),
+      ("kv_path_attempt_mismatch", replace(valid_decode, path_attempt=1)),
+      ("kv_position_mismatch", replace(valid_decode, position=4)),
+      ("kv_sequence_mismatch", replace(valid_decode, token_index=2)),
+      (
+         "batch_key_assignment_id_mismatch",
+         replace(valid_decode, batch_key=replace(valid_key, assignment_id="wrong-assignment")),
+      ),
+      (
+         "batch_key_manifest_digest_mismatch",
+         replace(
+            valid_decode,
+            batch_key=replace(valid_key, manifest_digest="sha256:" + "0" * 64),
+         ),
+      ),
+      (
+         "batch_key_deployment_epoch_mismatch",
+         replace(
+            valid_decode,
+            batch_key=replace(
+               valid_key,
+               deployment_epoch=valid_key.deployment_epoch + 1,
+            ),
+         ),
+      ),
+   )
+   for reason, item in cases:
+      _assert_failure(port.execute(item), reason)
+      state = port.kv_snapshot()["states"][path_id]
+      assert state["next_position"] == 3
+      assert state["next_sequence"] == 1
+   assert port.execute(replace(valid_decode, terminal=True)).success
+   assert port.kv_snapshot()["active_state_count"] == 0
+
+
+def test_kv_state_mutates_only_after_output_validation(runtime_case, monkeypatch):
+   port = _fresh_ports(runtime_case)[0]
+   prefill = _work_item(
+      runtime_case,
+      0,
+      encode_token_ids((1, 2, 3)),
+      path_id="path:atomic",
+      request_id="request:atomic",
+   )
+   original_runtime_result = port._runtime_result
+
+   def reject_output(stage, runtime, output, **_kwargs):
+      raise MLXRuntimeError("forced_output_rejection")
+
+   monkeypatch.setattr(port, "_runtime_result", reject_output)
+   _assert_failure(port.execute(prefill), "forced_output_rejection")
+   assert port.kv_snapshot()["active_state_count"] == 0
+
+   monkeypatch.setattr(port, "_runtime_result", original_runtime_result)
+   assert port.execute(prefill).success
+   before = port.kv_snapshot()["states"][prefill.path_id]
+   decode = _work_item(
+      runtime_case,
+      0,
+      encode_token_ids((4,)),
+      phase="DECODE",
+      token_span=1,
+      path_id=prefill.path_id,
+      request_id=prefill.request_id,
+      token_index=1,
+      position=3,
+   )
+   monkeypatch.setattr(port, "_runtime_result", reject_output)
+   _assert_failure(port.execute(decode), "forced_output_rejection")
+   after = port.kv_snapshot()["states"][prefill.path_id]
+   assert after["next_position"] == before["next_position"] == 3
+   assert after["next_sequence"] == before["next_sequence"] == 1
+   assert after["cached_context_tokens"] == before["cached_context_tokens"] == 3
+   port.cancel(prefill.path_id)
+
+
+def test_kv_lifecycle_releases_cancel_expiry_completion_and_worker_crash(
+   runtime_case,
+):
+   class MutableClock:
+      now = 10.0
+
+      def __call__(self):
+         return self.now
+
+   clock = MutableClock()
+   port = _fresh_ports(runtime_case, clock=clock)[0]
+
+   def prefill(path_id, request_id, *, lease=100.0):
+      item = _work_item(
+         runtime_case,
+         0,
+         encode_token_ids((1, 2, 3)),
+         request_id=request_id,
+         path_id=path_id,
+         token_index=-1,
+         position=0,
+         lease_expires_at=lease,
+      )
+      result = port.execute(item)
+      assert result.success, result.failure_reason
+      return item
+
+   cancelled = prefill("path:cancel", "request:cancel")
+   assert port.kv_snapshot()["active_state_count"] == 1
+   port.cancel(cancelled.path_id)
+   port.cancel(cancelled.path_id)
+   snapshot = port.kv_snapshot()
+   assert snapshot["active_state_count"] == 0
+   assert snapshot["retained_result_count"] == 0
+   _assert_failure(port.execute(cancelled), "path_cancelled")
+
+   expired = prefill("path:expiry", "request:expiry", lease=12.0)
+   clock.now = 12.0
+   assert port.expire_leases() == (expired.path_id,)
+   snapshot = port.kv_snapshot()
+   assert snapshot["active_state_count"] == 0
+   assert snapshot["release_counts"]["lease_expired"] == 1
+   expired_decode = _work_item(
+      runtime_case,
+      0,
+      encode_token_ids((4,)),
+      phase="DECODE",
+      token_span=1,
+      request_id=expired.request_id,
+      path_id=expired.path_id,
+      token_index=1,
+      position=3,
+      lease_expires_at=12.0,
+   )
+   _assert_failure(port.execute(expired_decode), "kv_lease_expired")
+
+   completed = prefill("path:complete", "request:complete")
+   completed_decode = _work_item(
+      runtime_case,
+      0,
+      encode_token_ids((4,)),
+      phase="DECODE",
+      token_span=1,
+      request_id=completed.request_id,
+      path_id=completed.path_id,
+      token_index=1,
+      position=3,
+      terminal=True,
+      lease_expires_at=100.0,
+   )
+   assert port.execute(completed_decode).success
+   snapshot = port.kv_snapshot()
+   assert snapshot["active_state_count"] == 0
+   assert snapshot["retained_result_count"] == 0
+
+   crash_path = "path:worker-crash"
+   prefill(crash_path, "request:worker-crash")
+   port.close(reason="worker_crash")
+   snapshot = port.kv_snapshot()
+   assert snapshot["closed"] is True
+   assert snapshot["active_state_count"] == 0
+   assert snapshot["retained_result_count"] == 0
+   assert snapshot["release_counts"]["worker_crash"] == 1
+   _assert_failure(port.execute(completed), "runtime_closed")
+
+   replacement = _fresh_ports(runtime_case)[0]
+   missing = _work_item(
+      runtime_case,
+      0,
+      encode_token_ids((4,)),
+      phase="DECODE",
+      token_span=1,
+      request_id="request:fresh",
+      path_id=crash_path,
+      token_index=1,
+      position=3,
+   )
+   _assert_failure(replacement.execute(missing), "kv_state_missing")
+   fresh = replacement.execute(
+      _work_item(
+         runtime_case,
+         0,
+         encode_token_ids((2, 1)),
+         request_id="request:fresh",
+         path_id="path:fresh",
+         token_index=-1,
+         position=0,
+         token_span=2,
+      )
+   )
+   assert fresh.success
+   state = replacement.kv_snapshot()["states"]["path:fresh"]
+   assert state["request_id"] == "request:fresh"
+   assert state["cached_context_tokens"] == 2
+   replacement.cancel("path:fresh")
 
 
 def test_execute_batch_preserves_order_and_isolates_malformed_item(runtime_case):
@@ -581,3 +1104,81 @@ def test_execute_batch_preserves_order_and_isolates_malformed_item(runtime_case)
 def test_execute_batch_rejects_non_batch_input(runtime_case):
    with pytest.raises(MLXRuntimeError, match="^invalid_runtime_batch"):
       runtime_case.ports[0].execute_batch(object())
+
+
+def _replay_ports(case):
+   return tuple(
+      MLXRuntimePort(
+         assignment["node_id"],
+         case.graph,
+         {case.graph.stages[index].placements[0].placement_id: case.loaded[index]},
+         decode_mode="complete_context_replay",
+      )
+      for index, assignment in enumerate(case.assignments)
+   )
+
+
+def test_replay_accepts_only_a_full_context_prefill_chunk(runtime_case):
+   """Replay keeps no KV: only the whole prompt as one final chunk is accepted.
+
+   The accepted chunk is counted as prefill work (never as a decode), and the
+   first token then comes from a complete-context decode that must equal the
+   reference model's next token.
+   """
+
+   prompt = (1, 2, 3)
+   ports = _replay_ports(runtime_case)
+   rejected = (
+      dict(token_ids=(1, 2), token_index=0, position=0, emits_token=False),
+      dict(token_ids=(3,), token_index=1, position=2, emits_token=True),
+      dict(token_ids=(3,), token_index=0, position=2, emits_token=True),
+   )
+   for number, fields in enumerate(rejected):
+      token_ids = fields.pop("token_ids")
+      _assert_failure(
+         ports[0].execute(
+            _work_item(
+               runtime_case,
+               0,
+               encode_token_ids(token_ids),
+               phase="PREFILL_CHUNK",
+               token_span=len(token_ids),
+               request_id=f"request:replay-reject-{number}",
+               path_id=f"path:replay-reject-{number}",
+               **fields,
+            )
+         ),
+         "prefill_chunk_requires_kv_continuity",
+      )
+   assert ports[0].kv_snapshot()["applied_operation_count"] == 0
+
+   _, chunk_token = _run_two_stage(
+      runtime_case,
+      prompt,
+      phase="PREFILL_CHUNK",
+      path_id="path:replay-full-chunk",
+      token_index=0,
+      position=0,
+      emits_token=True,
+      ports=ports,
+   )
+   _, decoded = _run_two_stage(
+      runtime_case,
+      prompt,
+      phase="DECODE",
+      path_id="path:replay-full-chunk",
+      token_index=0,
+      position=len(prompt) - 1,
+      ports=ports,
+   )
+   _, reference = _reference_token(runtime_case, prompt)
+   assert decoded == reference
+   assert chunk_token == reference
+   for port in ports:
+      snapshot = port.kv_snapshot()
+      assert snapshot["active_state_count"] == 0
+      assert snapshot["prefill_operation_count"] == 1
+      assert snapshot["prefill_input_token_count"] == len(prompt)
+      assert snapshot["decode_operation_count"] == 1
+      assert snapshot["decode_input_token_count"] == len(prompt)
+      assert snapshot["applied_operation_count"] == 2

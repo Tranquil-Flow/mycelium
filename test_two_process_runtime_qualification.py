@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 """Executable qualification tests for two spawned assignment-bound MLX loads."""
 
 from __future__ import annotations

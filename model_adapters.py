@@ -1,9 +1,94 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
 """Architecture adapters shared by manifest compilation and future loaders."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+
+
+GPT2_DECODER_TENSOR_SUFFIXES = (
+   "ln_1.weight",
+   "ln_1.bias",
+   "attn.c_attn.weight",
+   "attn.c_attn.bias",
+   "attn.c_proj.weight",
+   "attn.c_proj.bias",
+   "ln_2.weight",
+   "ln_2.bias",
+   "mlp.c_fc.weight",
+   "mlp.c_fc.bias",
+   "mlp.c_proj.weight",
+   "mlp.c_proj.bias",
+)
+QWEN2_DECODER_TENSOR_SUFFIXES = (
+   "input_layernorm.weight",
+   "self_attn.q_proj.weight",
+   "self_attn.q_proj.bias",
+   "self_attn.k_proj.weight",
+   "self_attn.k_proj.bias",
+   "self_attn.v_proj.weight",
+   "self_attn.v_proj.bias",
+   "self_attn.o_proj.weight",
+   "post_attention_layernorm.weight",
+   "mlp.gate_proj.weight",
+   "mlp.up_proj.weight",
+   "mlp.down_proj.weight",
+)
+QWEN3_DECODER_TENSOR_SUFFIXES = (
+   "input_layernorm.weight",
+   "self_attn.q_proj.weight",
+   "self_attn.q_norm.weight",
+   "self_attn.k_proj.weight",
+   "self_attn.k_norm.weight",
+   "self_attn.v_proj.weight",
+   "self_attn.o_proj.weight",
+   "post_attention_layernorm.weight",
+   "mlp.gate_proj.weight",
+   "mlp.up_proj.weight",
+   "mlp.down_proj.weight",
+)
+# Qwen3.5 hybrid decoder: every layer shares norms + MLP; the token mixer is a
+# Gated DeltaNet ("linear_attention") or gated full attention, per layer_types.
+QWEN35_SHARED_TENSOR_SUFFIXES = (
+   "input_layernorm.weight",
+   "post_attention_layernorm.weight",
+   "mlp.gate_proj.weight",
+   "mlp.up_proj.weight",
+   "mlp.down_proj.weight",
+)
+QWEN35_LINEAR_ATTENTION_TENSOR_SUFFIXES = (
+   "linear_attn.in_proj_qkv.weight",
+   "linear_attn.in_proj_z.weight",
+   "linear_attn.in_proj_b.weight",
+   "linear_attn.in_proj_a.weight",
+   "linear_attn.conv1d.weight",
+   "linear_attn.dt_bias",
+   "linear_attn.A_log",
+   "linear_attn.norm.weight",
+   "linear_attn.out_proj.weight",
+)
+QWEN35_FULL_ATTENTION_TENSOR_SUFFIXES = (
+   "self_attn.q_proj.weight",
+   "self_attn.q_norm.weight",
+   "self_attn.k_proj.weight",
+   "self_attn.k_norm.weight",
+   "self_attn.v_proj.weight",
+   "self_attn.o_proj.weight",
+)
+# qwen3_5_moe replaces the dense MLP with a router, packed 3-D experts (no
+# ``.weight`` suffix) and a sigmoid-gated shared expert.
+QWEN35_MOE_SHARED_TENSOR_SUFFIXES = (
+   "input_layernorm.weight",
+   "post_attention_layernorm.weight",
+   "mlp.gate.weight",
+   "mlp.experts.gate_up_proj",
+   "mlp.experts.down_proj",
+   "mlp.shared_expert.gate_proj.weight",
+   "mlp.shared_expert.up_proj.weight",
+   "mlp.shared_expert.down_proj.weight",
+   "mlp.shared_expert_gate.weight",
+)
 
 
 @dataclass(frozen=True)
@@ -15,6 +100,27 @@ class ModelAdapter:
    tied_lm_head_source: tuple[str, ...] = ()
    alternate_block_prefix_templates: tuple[str, ...] = ()
    supported_architectures: tuple[str, ...] = ()
+   decoder_tensor_suffixes: tuple[str, ...] = ()
+   runtime_backends: tuple[str, ...] = ()
+   # Heterogeneous decoders (Qwen3.5 hybrid): suffixes added to
+   # ``decoder_tensor_suffixes`` for a layer of the given ``layer_types`` kind.
+   layer_type_tensor_suffixes: dict[str, tuple[str, ...]] = field(default_factory=dict)
+   # Checkpoint tensors that are recognised but never assigned or executed
+   # (vision encoder, multi-token-prediction head); recorded in the manifest.
+   excluded_tensor_prefixes: tuple[str, ...] = ()
+   # Non-"ForCausalLM" architecture names whose text decoder is a causal LM.
+   causal_lm_architectures: tuple[str, ...] = ()
+
+   def decoder_suffixes_for_layer(self, layer_type: str | None) -> tuple[str, ...]:
+      if not self.layer_type_tensor_suffixes:
+         return self.decoder_tensor_suffixes
+      if layer_type not in self.layer_type_tensor_suffixes:
+         raise ValueError(f"unsupported {self.architecture} layer type: {layer_type!r}")
+      return self.decoder_tensor_suffixes + self.layer_type_tensor_suffixes[layer_type]
+
+   @property
+   def runtime_supported(self) -> bool:
+      return bool(self.decoder_tensor_suffixes and self.runtime_backends)
 
    def layer_count(self, config: dict[str, Any]) -> int:
       for field in self.layer_count_fields:
@@ -51,6 +157,14 @@ _MODEL_LAYERS_COMPONENTS = {
    "lm_head": ("lm_head.",),
 }
 
+_QWEN35_COMPONENTS = {
+   "input_embedding": ("model.language_model.embed_tokens.",),
+   "decoder": ("model.language_model.layers.{layer}.",),
+   "final_norm": ("model.language_model.norm.",),
+   "lm_head": ("lm_head.",),
+}
+_QWEN35_EXCLUDED_PREFIXES = ("model.visual.", "mtp.")
+
 
 ADAPTERS = {
    "gpt2": ModelAdapter(
@@ -65,6 +179,8 @@ ADAPTERS = {
       },
       tied_lm_head_source=("transformer.wte.", "wte."),
       alternate_block_prefix_templates=("h.{layer}.",),
+      decoder_tensor_suffixes=GPT2_DECODER_TENSOR_SUFFIXES,
+      runtime_backends=("mlx", "numpy"),
    ),
    "bloom": ModelAdapter(
       architecture="bloom",
@@ -129,14 +245,64 @@ ADAPTERS = {
          "BertForMultipleChoice",
       ),
    ),
+   "qwen2": ModelAdapter(
+      architecture="qwen2",
+      layer_count_fields=("num_hidden_layers", "n_layer"),
+      block_prefix_template="model.layers.{layer}.",
+      components=_MODEL_LAYERS_COMPONENTS,
+      tied_lm_head_source=("model.embed_tokens.",),
+      supported_architectures=("Qwen2ForCausalLM",),
+      decoder_tensor_suffixes=QWEN2_DECODER_TENSOR_SUFFIXES,
+      runtime_backends=("mlx", "numpy", "mobile-rust-qwen2"),
+   ),
+   "qwen3": ModelAdapter(
+      architecture="qwen3",
+      layer_count_fields=("num_hidden_layers", "n_layer"),
+      block_prefix_template="model.layers.{layer}.",
+      components=_MODEL_LAYERS_COMPONENTS,
+      tied_lm_head_source=("model.embed_tokens.",),
+      supported_architectures=("Qwen3ForCausalLM",),
+      decoder_tensor_suffixes=QWEN3_DECODER_TENSOR_SUFFIXES,
+      runtime_backends=("mlx", "numpy"),
+   ),
+   "qwen3_5": ModelAdapter(
+      architecture="qwen3_5",
+      layer_count_fields=("text_config.num_hidden_layers", "num_hidden_layers"),
+      block_prefix_template="model.language_model.layers.{layer}.",
+      components=_QWEN35_COMPONENTS,
+      tied_lm_head_source=("model.language_model.embed_tokens.",),
+      supported_architectures=("Qwen3_5ForConditionalGeneration",),
+      decoder_tensor_suffixes=QWEN35_SHARED_TENSOR_SUFFIXES,
+      runtime_backends=("mlx",),
+      layer_type_tensor_suffixes={
+         "linear_attention": QWEN35_LINEAR_ATTENTION_TENSOR_SUFFIXES,
+         "full_attention": QWEN35_FULL_ATTENTION_TENSOR_SUFFIXES,
+      },
+      excluded_tensor_prefixes=_QWEN35_EXCLUDED_PREFIXES,
+      causal_lm_architectures=("Qwen3_5ForConditionalGeneration",),
+   ),
+   "qwen3_5_moe": ModelAdapter(
+      architecture="qwen3_5_moe",
+      layer_count_fields=("text_config.num_hidden_layers", "num_hidden_layers"),
+      block_prefix_template="model.language_model.layers.{layer}.",
+      components=_QWEN35_COMPONENTS,
+      tied_lm_head_source=("model.language_model.embed_tokens.",),
+      supported_architectures=("Qwen3_5MoeForConditionalGeneration",),
+      decoder_tensor_suffixes=QWEN35_MOE_SHARED_TENSOR_SUFFIXES,
+      runtime_backends=("mlx",),
+      layer_type_tensor_suffixes={
+         "linear_attention": QWEN35_LINEAR_ATTENTION_TENSOR_SUFFIXES,
+         "full_attention": QWEN35_FULL_ATTENTION_TENSOR_SUFFIXES,
+      },
+      excluded_tensor_prefixes=_QWEN35_EXCLUDED_PREFIXES,
+      causal_lm_architectures=("Qwen3_5MoeForConditionalGeneration",),
+   ),
 }
 
 for _model_type in (
    "llama",
    "mistral",
    "mixtral",
-   "qwen2",
-   "qwen3",
    "gemma",
    "gemma2",
    "gemma3_text",
@@ -147,6 +313,8 @@ for _model_type in (
       block_prefix_template="model.layers.{layer}.",
       components=_MODEL_LAYERS_COMPONENTS,
       tied_lm_head_source=("model.embed_tokens.",),
+      decoder_tensor_suffixes=(),
+      runtime_backends=(),
    )
 
 
@@ -155,3 +323,12 @@ def adapter_for_config(config: dict[str, Any]) -> ModelAdapter:
    if not isinstance(model_type, str) or model_type not in ADAPTERS:
       raise ValueError(f"unsupported model_type: {model_type!r}")
    return ADAPTERS[model_type]
+
+
+def adapter_for_runtime(architecture: str) -> ModelAdapter:
+   """Return the one adapter authorized to define runtime tensor ownership."""
+
+   adapter = ADAPTERS.get(architecture)
+   if adapter is None or not adapter.runtime_supported:
+      raise ValueError(f"runtime adapter unavailable: {architecture!r}")
+   return adapter
