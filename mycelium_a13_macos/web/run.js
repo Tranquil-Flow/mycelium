@@ -17,6 +17,8 @@
   const gb = (n) => (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + ' GB';
   const ERRORS = {
     owner_model_not_prepared:'Download the selected model on this Mac first: under Inference, tick the authorization box, press “Download / resume source” and wait for “prepared”, then press Start again.',
+    peer_clock_skew_exceeded:'A joined Mac\'s clock is too far from this Mac\'s. Turn on “Set time and date automatically” on both Macs (System Settings → General → Date & Time), then press Start again.',
+    router_port_shutdown_cleanup_unproven:'The route could not prove it had cleaned up the Macs after stopping. This is recorded; press Start again to build a new route.',
     two_macs_required:'At least two Macs must have joined and reported in. Invite a Mac with a code or QR, then press Start again.',
     two_distinct_hosts_required:'The run needs two different physical Macs; two copies of the app on one Mac do not count.',
     member_descriptors_timeout:'Some joined Macs did not report in.',

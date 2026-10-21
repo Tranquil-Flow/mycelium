@@ -206,6 +206,7 @@ const HUMAN_ERRORS={
   relay_proxy_closed:'The relay was closed. Start it again to let other Macs reach this one.',
   relay_route_unknown:'That address is not served through the relay.',
   relay_seed_invalid:'The relay could not reach this swarm’s membership service. Stop and start the relay again.',
+  relay_renewal_invalid:'The relay renewal settings are not valid. Use true or false for auto-renew and long-lived, and a total of up to 7 days.',
   relay_start_failed:'The public relay did not start. Check your internet connection, make sure cloudflared is installed, and try again.',
   relay_stop_failed:'The relay did not stop cleanly. Quit and reopen Mycelium if it keeps running.',
   relay_swarm_entry_failed:'The swarm’s public chat could not be reached through the relay. Try again in a moment.',
@@ -567,7 +568,9 @@ function renderJoinFlow(value,target,a){
   const waiting=!!flow.join_window;
   $('join-with-code').disabled=busy || joined || waiting || !$('standing-confirm').checked || !$('visibility').checked;
   $('join-cancel').hidden=!waiting;
+  const lapsed=target && ['expired','stale','unknown'].includes(a.membership_state);
   $('join-hint').textContent=joined || waiting || (owner && !!a.swarm_created) ? ''
+    : lapsed && $('visibility').checked && $('standing-confirm').checked ? 'Your membership lapsed. Ask the owner for a new join code: this Mac keeps its identity and the downloaded model.'
     : !$('visibility').checked ? 'Tick the cooperative-peer visibility box in step 01 to enable “Join with code”.'
     : !$('standing-confirm').checked ? 'Tick the standing-consent box above to enable “Join with code”.' : '';
   const origin=!!value.network?.public_origin;

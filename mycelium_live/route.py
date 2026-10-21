@@ -15,6 +15,7 @@ import sqlite3
 import stat
 import threading
 import time
+import weakref
 from types import MappingProxyType
 from typing import Any, Callable, Iterator, Mapping, Protocol, Sequence
 from urllib.parse import quote
@@ -1358,6 +1359,33 @@ class _TestOnlyTransportFaultSlot:
         self.disabled = False
 
 
+_OPEN_ROUTES: "weakref.WeakSet[Any]" = weakref.WeakSet()
+_OPEN_ROUTES_LOCK = threading.Lock()
+
+
+def _register_open_route(route: Any) -> None:
+    with _OPEN_ROUTES_LOCK:
+        _OPEN_ROUTES.add(route)
+
+
+def _unregister_open_route(route: Any) -> None:
+    with _OPEN_ROUTES_LOCK:
+        _OPEN_ROUTES.discard(route)
+
+
+def open_route_peer_liveness() -> "dict[str, dict[str, Any]] | None":
+    """Per-peer liveness of the route open in this process (``/api/status`` -> ``peer_liveness``), else ``None``."""
+
+    with _OPEN_ROUTES_LOCK:
+        routes = [route for route in _OPEN_ROUTES if getattr(route, "_open", False) and not getattr(route, "_closed", True)]
+    if not routes:
+        return None
+    try:
+        return routes[-1].peer_liveness_overview()
+    except Exception:
+        return None
+
+
 class PhysicalLiveRoute:
     """Persistent multi-host route composed from the physical node protocol."""
 
@@ -2570,6 +2598,7 @@ class PhysicalLiveRoute:
                         self._prove_external_cancellation(node_id)
                 self._refuse_aborted_open()
                 self._open = True
+                _register_open_route(self)
                 self._liveness_monitor_stop.clear()
                 self._liveness_monitor_thread = threading.Thread(
                     target=self._active_liveness_monitor_loop,
@@ -2867,14 +2896,20 @@ class PhysicalLiveRoute:
             # links are re-measured without waiting for user traffic.  Before
             # this, the duration was discarded and no RTT sample was ever filed.
             probe_started_at = time.monotonic()
+            # A peer reached through a polled mailbox (managed control) needs a claim hop, the execution and a
+            # result hop: 0.5 s is its whole wire life and expired on every relayed probe (live demo
+            # 2026-10-20/21), which kept a quarantined peer quarantined.  The session declares its floor; active
+            # request liveness keeps its own bounds.
+            probe_deadline = max(
+                _IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS,
+                float(getattr(self._sessions.get(node_id), "idle_probe_floor_seconds", 0.0) or 0.0),
+            )
             response = self._send_before(
                 node_id,
                 command_id=self._command_id(node_id, "keepalive"),
                 command="health",
                 payload={},
-                deadline_monotonic_s=(
-                    time.monotonic() + _IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS
-                ),
+                deadline_monotonic_s=time.monotonic() + probe_deadline,
             )
             self._record_measured_round_trip(
                 node_id,
@@ -5931,6 +5966,30 @@ class PhysicalLiveRoute:
             fatal=self._fatal,
         )
 
+    def peer_liveness_overview(self) -> dict[str, dict[str, Any]]:
+        """Per-peer liveness for diagnostics: label (fresh/stale/quarantined/failed), last seen, misses."""
+
+        labels = {
+            LivenessState.FRESH: "fresh",
+            LivenessState.RECOVERED: "fresh",
+            LivenessState.SUSPECT: "stale",
+            LivenessState.QUARANTINED: "quarantined",
+        }
+        now_ms = self._monotonic_ms()
+        overview: dict[str, dict[str, Any]] = {}
+        for item in self._liveness.snapshots():
+            if item.identity.kind is not SubjectKind.PEER:
+                continue
+            overview[item.identity.subject_id] = {
+                "state": item.state.value,
+                "label": labels.get(item.state, "failed"),
+                "last_seen_seconds_ago": round(max(0, now_ms - item.last_fresh_ms) / 1000.0, 3),
+                "consecutive_misses": item.consecutive_misses,
+                "recovery_observations": item.consecutive_signed_fresh,
+                "next_probe_in_seconds": round(max(0, item.next_keepalive_due_ms - now_ms) / 1000.0, 3),
+            }
+        return overview
+
     def a4_liveness_status(self) -> Mapping[str, Any]:
         """Return the detector-owned privacy-reduced liveness projection."""
 
@@ -6926,6 +6985,7 @@ class PhysicalLiveRoute:
             raise ControllerError("route_open_aborted")
 
     def close(self) -> None:
+        _unregister_open_route(self)
         self._liveness_monitor_stop.set()
         reconciliation_stop = getattr(self, "_cleanup_reconciliation_stop", None)
         if isinstance(reconciliation_stop, threading.Event):

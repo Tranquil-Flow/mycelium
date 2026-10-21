@@ -19,6 +19,7 @@ healthy -- an unknown is never a health claim.  No probe raises; no probe writes
 """
 from __future__ import annotations
 
+from mycelium_http_identity import with_user_agent
 import json
 import os
 import subprocess
@@ -312,7 +313,7 @@ class HTTPHealthProbe:
 
     def run(self) -> ProbeResult:
         try:
-            request = urllib.request.Request(self.url, headers=dict(self.headers))
+            request = urllib.request.Request(self.url, headers=with_user_agent(self.headers))
             with self.opener(request, timeout=self.timeout) as response:
                 status = getattr(response, "status", None)
                 body = response.read(_MAX_BODY_BYTES)

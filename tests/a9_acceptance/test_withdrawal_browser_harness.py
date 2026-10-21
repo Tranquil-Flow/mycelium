@@ -97,8 +97,11 @@ class FakePage:
             if not self.blind and self._reads > self.delay:
                 self._shown, self._seen, self._reads = current, current, 0
                 if self.stream_events:
-                    self.stream.append({"event": "message", "id": str(len(self.stream)), "bytes": 10, "digest": "sha256:x"})
+                    self._deliver()
         return self._shown
+
+    def _deliver(self):
+        self.stream.append({"event": "message", "id": str(len(self.stream)), "bytes": 10, "digest": "sha256:x"})
 
     def locator(self, selector):
         assert selector == "section.panel"
@@ -185,6 +188,113 @@ def test_no_events_stream_message_after_publish_fails_even_if_the_ui_changed():
     receipt = _run(world, sessions)
     assert receipt["passed"] is False
     assert "stage_withdrawal:session-b:no_events_stream_message_after_publish" in receipt["blockers"]
+
+
+# -- the Nodes workspace reads /events with fetch(Accept: text/event-stream) + a body reader ----------
+
+
+class FakeCdp:
+    """The slice of a Playwright CDPSession the harness uses: ``on`` plus a test-side ``emit``."""
+
+    def __init__(self):
+        self.handlers = {}
+
+    def on(self, name, handler):
+        self.handlers.setdefault(name, []).append(handler)
+
+    def emit(self, name, params):
+        for handler in self.handlers.get(name, []):
+            handler(params)
+
+
+EVENTS_URL = "http://127.0.0.1:9/api/v1/product/events"
+
+
+def _fetch_request(request_id="r1", url=EVENTS_URL, accept="text/event-stream"):
+    return {"requestId": request_id, "request": {"url": url, "method": "GET", "headers": {"Accept": accept}}}
+
+
+class FetchStreamPage(FakePage):
+    """Delivery arrives as a fetch body-reader chunk (CDP dataReceived), never an EventSource message."""
+
+    def __init__(self, world, *, data_length=120, announce=True, **kw):
+        super().__init__(world, **kw)
+        self.cdp, self.data_length, self.announce, self._requests = FakeCdp(), data_length, announce, 0
+        harness.record_event_streams(self.cdp, self.stream)
+
+    def _deliver(self):
+        self._requests += 1
+        request_id = f"fetch-{self._requests}"
+        if self.announce:
+            self.cdp.emit("Network.requestWillBeSent", _fetch_request(request_id))
+        self.cdp.emit("Network.dataReceived", {"requestId": request_id, "dataLength": self.data_length,
+                                               "encodedDataLength": self.data_length})
+        self.cdp.emit("Network.loadingFinished", {"requestId": request_id, "encodedDataLength": self.data_length})
+
+
+def _fetch_sessions(world, **kw):
+    pages = [FetchStreamPage(world, **kw), FetchStreamPage(world, **kw)]
+    return [harness.Session(n, p, p.stream, p.navigations) for n, p in zip(("session-a", "session-b"), pages)], pages
+
+
+def test_a_fetch_stream_delivery_on_events_counts_and_the_run_passes():
+    world = World()
+    sessions, pages = _fetch_sessions(world)
+    receipt = _run(world, sessions)
+    assert receipt["blockers"] == [] and receipt["passed"] is True
+    for step in receipt["steps"]:
+        for observed in step["sessions"].values():
+            assert observed["stream_messages_after_publish"] >= 1
+    assert {entry["event"] for page in pages for entry in page.stream} == {"fetch-stream"}
+
+
+def test_no_fetch_stream_delivery_after_publish_is_the_no_events_stream_message_blocker():
+    world = World()
+    sessions, _ = _fetch_sessions(world, data_length=0)  # request opened, nothing read
+    receipt = _run(world, sessions)
+    assert receipt["passed"] is False
+    assert "stage_withdrawal:session-a:no_events_stream_message_after_publish" in receipt["blockers"]
+    assert "stage_withdrawal:session-b:no_events_stream_message_after_publish" in receipt["blockers"]
+    unannounced = World()
+    sessions2, _ = _fetch_sessions(unannounced, announce=False)  # bytes on a request that was never an /events stream
+    receipt2 = _run(unannounced, sessions2)
+    assert "stage_withdrawal:session-a:no_events_stream_message_after_publish" in receipt2["blockers"]
+
+
+def test_only_event_stream_fetches_to_events_are_recorded():
+    cdp, stream = FakeCdp(), []
+    harness.record_event_streams(cdp, stream)
+    for request_id, url, accept in (("a", "http://h/api/v1/product/export", "text/event-stream"),  # not /events
+                                    ("b", EVENTS_URL, "application/json"),  # not an event stream
+                                    ("c", EVENTS_URL + "?after=3", "Text/Event-Stream, */*")):  # query, mixed case: yes
+        cdp.emit("Network.requestWillBeSent", _fetch_request(request_id, url, accept))
+        cdp.emit("Network.dataReceived", {"requestId": request_id, "dataLength": 50, "encodedDataLength": 50})
+    cdp.emit("Network.dataReceived", {"requestId": "never-seen", "dataLength": 50, "encodedDataLength": 50})
+    assert [(e["event"], e["id"], e["bytes"]) for e in stream] == [("fetch-stream", "c", 50)]
+
+
+def test_loading_finished_with_bytes_counts_once_and_empty_or_failed_requests_do_not():
+    cdp, stream = FakeCdp(), []
+    harness.record_event_streams(cdp, stream)
+    cdp.emit("Network.requestWillBeSent", _fetch_request("x"))
+    cdp.emit("Network.dataReceived", {"requestId": "x", "dataLength": 40, "encodedDataLength": 40})
+    cdp.emit("Network.loadingFinished", {"requestId": "x", "encodedDataLength": 40})  # already counted via dataReceived
+    cdp.emit("Network.requestWillBeSent", _fetch_request("y"))
+    cdp.emit("Network.loadingFinished", {"requestId": "y", "encodedDataLength": 90})  # no dataReceived seen: bytes finished
+    cdp.emit("Network.requestWillBeSent", _fetch_request("z"))
+    cdp.emit("Network.loadingFinished", {"requestId": "z", "encodedDataLength": 0})
+    cdp.emit("Network.requestWillBeSent", _fetch_request("w"))
+    cdp.emit("Network.loadingFailed", {"requestId": "w"})
+    cdp.emit("Network.dataReceived", {"requestId": "w", "dataLength": 10, "encodedDataLength": 10})
+    assert [e["id"] for e in stream] == ["x", "y"]
+
+
+def test_eventsource_messages_are_still_recorded_for_the_observatory_path():
+    cdp, stream = FakeCdp(), []
+    harness.record_event_streams(cdp, stream)
+    cdp.emit("Network.eventSourceMessageReceived", {"eventName": "message", "eventId": "7", "data": "hello"})
+    assert [(e["event"], e["id"], e["bytes"]) for e in stream] == [("message", "7", 5)]
+    assert stream[0]["digest"].startswith("sha256:")
 
 
 def test_a_reload_after_publish_fails(monkeypatch):
@@ -352,6 +462,29 @@ es.onmessage = (m) => { body.innerHTML = JSON.parse(m.data).map(r => '<tr><th sc
 </script></body></html>""" % "".join(f"<th>{h}</th>" for h in HEADERS)
 
 
+_FETCH_PAGE = """<!doctype html><html><body><section class="panel"><h2>Durable membership and capability</h2>
+<table><thead><tr>%s</tr></thead><tbody id="b"></tbody></table></section>
+<script>
+const body = document.getElementById('b');
+const render = (rows) => { body.innerHTML = rows.map(r => '<tr><th scope="row">' + r[0] + '</th>' +
+  r.slice(1).map(c => '<td>' + c + '</td>').join('') + '</tr>').join(''); };
+(async () => {
+  for (;;) {
+    const response = await fetch('/events', {headers: {Accept: 'text/event-stream'}});
+    const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
+    for (;;) {
+      const {value, done} = await reader.read(); if (done) break;
+      buffer += decoder.decode(value, {stream: true}); let at;
+      while ((at = buffer.indexOf('\\n\\n')) >= 0) {
+        const frame = buffer.slice(0, at); buffer = buffer.slice(at + 2);
+        if (frame.startsWith('data: ')) render(JSON.parse(frame.slice(6)));
+      }
+    }
+  }
+})();
+</script></body></html>""" % "".join(f"<th>{h}</th>" for h in HEADERS)
+
+
 class _Sse(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
@@ -375,7 +508,7 @@ class _Sse(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 pass
             return
-        raw = _PAGE.encode()
+        raw = (_FETCH_PAGE if self.server.page == "fetch" else _PAGE).encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.send_header("Content-Length", str(len(raw)))
@@ -383,11 +516,12 @@ class _Sse(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
 
-def test_real_chromium_reads_the_table_and_collects_cdp_event_stream_messages():
+@pytest.mark.parametrize("page", ["eventsource", "fetch"])
+def test_real_chromium_reads_the_table_and_collects_cdp_event_stream_messages(page):
     pytest.importorskip("playwright.sync_api")
     world = World()
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Sse)
-    server.world, server.stop = world, threading.Event()
+    server.world, server.stop, server.page = world, threading.Event(), page
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         try:

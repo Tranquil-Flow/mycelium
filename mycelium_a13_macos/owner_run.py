@@ -158,6 +158,7 @@ class OwnerRun:
                 'participants': None if ctx is None else ctx.result.get('participants'),
                 'started_at': self._started_at,
                 'route_ready': self._state == 'serving',
+                'cleanup_unproven': None if ctx is None else ctx.result.get('cleanup_unproven'),
             }
 
     def start(self, reason: str = 'start', *, execution_ceiling: dict | None = None) -> dict[str, Any]:

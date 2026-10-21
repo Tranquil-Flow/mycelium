@@ -6,6 +6,7 @@ try:  # instance lock; win32 goes through mycelium_host_platform
     import fcntl
 except ImportError:  # pragma: no cover - win32
     fcntl = None
+from mycelium_http_identity import with_user_agent
 import hashlib
 import html
 import http.client
@@ -24,6 +25,7 @@ import time
 import urllib.parse
 from dataclasses import asdict
 import mycelium_host_platform
+from . import a13_test_seams as _test_seams
 from .serving import RESOURCE_PROPOSAL
 
 MAX_BODY = 65536
@@ -51,6 +53,11 @@ def model_contract(root=None):
     if RUN_MODEL_ENVIRONMENT in os.environ:
         return asdict(selected_run_model())
     return asdict(choice(demo_default_choice()).model)
+
+
+def _test_seam_offset(app):
+    """The forced member clock offset actually in force (target role only); None = no seam (the normal case)."""
+    return getattr(app.authority, 'test_clock_offset_seconds', None) if app.installation_role == 'target' else None
 
 
 class DemoError(RuntimeError):
@@ -266,6 +273,11 @@ def host_memory_bytes():
     return value if type(value) is int and value > 0 else None
 
 
+#: Optional body keys of an external-provider relay request (public_origin and proxy_port are required).
+_EXTERNAL_OPTIONAL=frozenset({'provider','public_origin','proxy_port','cloudflare_front','auto_renew','long_lived',
+                              'max_renewed_seconds'})
+
+
 def read_resource_policy(root):
     path=root/'resource-policy.json'
     if mycelium_host_platform.is_win32():
@@ -307,8 +319,8 @@ def reopen_native(root):
         raise DemoError('native_control_unavailable')
     connection = http.client.HTTPConnection('127.0.0.1',control['port'],timeout=3)
     try:
-        connection.request('POST','/native-session','{}',headers={
-            'Content-Type':'application/json','X-Native-Authorization':control['credential']})
+        connection.request('POST','/native-session','{}',headers=with_user_agent({
+            'Content-Type':'application/json','X-Native-Authorization':control['credential']}))
         response=connection.getresponse(); response.read(4096)
         if response.status != 200: raise DemoError('native_control_unavailable')
     finally: connection.close()
@@ -458,6 +470,15 @@ def _diagnostics_probe(app):
         ensure_installed(app)
     except Exception:
         pass
+
+
+def _peer_liveness():
+    """Per-peer liveness (fresh/stale/quarantined, last seen) of the route open in this process, else None."""
+    try:
+        from mycelium_live.route import open_route_peer_liveness
+        return open_route_peer_liveness()
+    except Exception:
+        return None
 
 
 def _demo_status(app, part):
@@ -621,10 +642,12 @@ class DemoApp:
             except Exception as exc:
                 from .peer import RemoteMacMemberError
                 if (self.installation_role != 'target' or not isinstance(exc, RemoteMacMemberError)
-                    or exc.code not in {'peer_transport_unreachable', 'seed_http_remote_error'}):
+                    or exc.code not in {'peer_transport_unreachable', 'seed_http_remote_error',
+                                        'peer_member_expired', 'peer_generation_stale', 'peer_member_unknown'}):
                     raise
                 # A dead relay must not remove the local authenticated recovery
-                # surface. No member, native worker or contribution is enabled.
+                # surface. No member, native worker or contribution is enabled.  The same holds for a lapsed
+                # membership (V1.1 d): the app starts so the owner's new invite can replace it (``/api/join/window``).
                 self.recovery_error = exc.code
                 self.running = False
             self._open_acquisition()
@@ -691,7 +714,7 @@ class DemoApp:
             raise DemoError('network_requires_fresh_owner')
         external=body.get('provider')=='external'
         _base={'relay_acknowledged','max_seconds'}
-        shape_ok=(_base|{'provider','public_origin','proxy_port'}<=set(body)<=_base|{'provider','public_origin','proxy_port','cloudflare_front'}
+        shape_ok=(_base|{'provider','public_origin','proxy_port'}<=set(body)<=_base|_EXTERNAL_OPTIONAL
                   if external else
                   set(body) in (_base,_base|{'provider'}) and body.get('provider','cloudflare')=='cloudflare')
         if (not shape_ok or body['relay_acknowledged'] is not True
@@ -736,9 +759,18 @@ class DemoApp:
         from .public_relay import TemporaryHttpsRelay
         if spec.get('provider')!='external':return TemporaryHttpsRelay(root,provider=spec.get('provider','cloudflare'))
         try:
-            return TemporaryHttpsRelay(root,provider='external',public_origin=spec['public_origin'],
-                proxy_port=spec['proxy_port'],cloudflare_front=spec.get('cloudflare_front',False))
+            relay=TemporaryHttpsRelay(root,provider='external',public_origin=spec['public_origin'],
+                proxy_port=spec['proxy_port'],cloudflare_front=spec.get('cloudflare_front',False),
+                auto_renew=spec.get('auto_renew',True),long_lived=spec.get('long_lived',False),
+                **({'max_renewed_seconds':spec['max_renewed_seconds']} if 'max_renewed_seconds' in spec else {}))
         except ValueError as error:raise DemoError(str(error)) from None
+        relay.set_serving_probe(self._relay_is_serving)
+        return relay
+
+    def _relay_is_serving(self):
+        """True while an owner run is active: the external relay may extend itself only then (V1.1 e)."""
+        run=getattr(self,'owner_run',None)
+        return run is not None and run.active() is True
 
     @staticmethod
     def _free_seed_port(avoid=None):
@@ -1010,6 +1042,31 @@ class DemoApp:
         from .adaptive_host import adaptive_detached_tick
         adaptive_detached_tick(self)
 
+    def reverify_model_snapshot(self):
+        """Owner Start after a relaunch: re-hash a snapshot already on disk instead of asking for a new download.
+
+        Uses only the standing storage consent, fetches nothing (see ``reverify_closed_snapshot``), keeps every
+        power/thermal/network gate, and returns whether a verification is now running.
+        """
+        with self.guard:
+            policy = read_resource_policy(self.root)
+            if (self.closed.is_set() or policy is None or not self.running or self.acquisition is None
+                    or self._acquisition_active or self.authority.status().get('membership_state') != 'current'):
+                return False
+            if self.acquisition.status().get('state') not in {'closed', 'idle', 'failed', 'cancelled'}:
+                return False
+            reason = self._resource_check()
+            if reason:
+                self.acquisition_policy_error = reason
+                return False
+            try:
+                self.acquisition.reverify_closed_snapshot(storage_limit_bytes=policy['storage_bytes'])
+            except Exception:
+                return False
+            self.acquisition_policy_error = None
+            self._acquisition_active = True
+            return True
+
     def _cancel_acquisition(self):
         if self.acquisition is not None:
             self.acquisition.cancel()
@@ -1252,8 +1309,10 @@ class DemoApp:
         value = self.authority.status()
         coordinator = getattr(self.authority, 'coordinator', None)
         if self.installation_role == 'owner' and coordinator is not None:
+            offsets = getattr(getattr(self, 'run_exchange', None), 'clock_offsets', None)
             value = {**value, 'members': [
-                {'node_id':m['node_id'],'generation':m['generation'],'lifecycle_state':m['lifecycle_state']}
+                {'node_id':m['node_id'],'generation':m['generation'],'lifecycle_state':m['lifecycle_state'],
+                 'clock':None if offsets is None else offsets.view(m['node_id'])}
                 for m in coordinator.members()]}
         from .run_model import document as run_model_document
         from .adaptive_owner import adaptive_status, adaptive_publication
@@ -1277,7 +1336,9 @@ class DemoApp:
                 'sharing':_sharing_status(self),'relay_wait':self._relay_wait_status(),
                 'owner_run':_demo_status(self,'owner'),'demo_target':_demo_status(self,'target'),
                 'chat':_demo_status(self,'chat'),'swarm':_swarm_status(self),
-                'serving':self._serving_block()}
+                'serving':self._serving_block(),'peer_liveness':_peer_liveness(),
+                'test_seams_active':_test_seam_offset(self) is not None,
+                'test_seams':_test_seams.status(_test_seam_offset(self))}
 
     def _serving_block(self):
         wait=self._relay_wait_status()
@@ -1411,7 +1472,7 @@ class DemoApp:
                 _base={'relay_acknowledged','max_seconds'}
                 external=body.get('provider')=='external'
                 if (self.installation_role!='owner' or not self.authority.status().get('swarm_created')
-                    or not (set(body)==_base or (external and _base|{'provider'}<=set(body)<=_base|{'provider','public_origin','proxy_port','cloudflare_front'}))
+                    or not (set(body)==_base or (external and _base|{'provider'}<=set(body)<=_base|_EXTERNAL_OPTIONAL))
                     or body['relay_acknowledged'] is not True
                     or type(body['max_seconds']) is not int or not 30<=body['max_seconds']<=1800):
                     raise DemoError('network_consent_required')

@@ -35,6 +35,7 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 PROTOCOL = "mycelium.a9_withdrawal_browser.v1"
 GRANT_ENV = "MYCELIUM_A9_FLEET_GRANT"
@@ -133,6 +134,55 @@ class Session:
         self.name, self.page, self.stream, self.navigations = name, page, stream, navigations
 
 
+def record_event_streams(cdp: Any, stream: list[dict[str, Any]]) -> None:
+    """Record ``/events`` deliveries into ``stream``, whichever way the page reads them.
+
+    * ``Network.eventSourceMessageReceived`` - a real ``EventSource`` (the observatory path).
+    * ``fetch(url, {headers: {Accept: 'text/event-stream'}})`` read through ``response.body`` (the Nodes
+      workspace): CDP never reports those as EventSource messages, so remember the request on
+      ``requestWillBeSent`` (path ends ``/events``, ``Accept`` names ``text/event-stream``) and count
+      ``dataReceived`` with ``dataLength > 0`` - or, when no data event was seen, ``loadingFinished``
+      with ``encodedDataLength > 0`` - for that request id.  Only CDP network events; nothing runs in the page.
+    """
+    tracked: dict[str, bool] = {}  # request id -> a delivery was already counted
+
+    def record(params: dict[str, Any]) -> None:
+        data = str(params.get("data", ""))
+        stream.append({"event": params.get("eventName"), "id": params.get("eventId"), "bytes": len(data),
+                       "digest": "sha256:" + hashlib.sha256(data.encode()).hexdigest()})
+
+    def will_send(params: dict[str, Any]) -> None:
+        request = params.get("request") or {}
+        accept = next((str(v) for k, v in (request.get("headers") or {}).items() if str(k).lower() == "accept"), "")
+        path = urlsplit(str(request.get("url", ""))).path
+        if params.get("requestId") and path.endswith("/events") and "text/event-stream" in accept.lower():
+            tracked[str(params["requestId"])] = False
+
+    def count(request_id: str, size: Any) -> None:
+        if isinstance(size, (int, float)) and not isinstance(size, bool) and size > 0:
+            tracked[request_id] = True
+            stream.append({"event": "fetch-stream", "id": request_id, "bytes": int(size)})
+
+    def data_received(params: dict[str, Any]) -> None:
+        request_id = str(params.get("requestId"))
+        if request_id in tracked:
+            count(request_id, params.get("dataLength"))
+
+    def finished(params: dict[str, Any]) -> None:
+        request_id = str(params.get("requestId"))
+        if request_id in tracked and not tracked.pop(request_id):
+            count(request_id, params.get("encodedDataLength"))
+
+    def failed(params: dict[str, Any]) -> None:
+        tracked.pop(str(params.get("requestId")), None)
+
+    cdp.on("Network.eventSourceMessageReceived", record)
+    cdp.on("Network.requestWillBeSent", will_send)
+    cdp.on("Network.dataReceived", data_received)
+    cdp.on("Network.loadingFinished", finished)
+    cdp.on("Network.loadingFailed", failed)
+
+
 @contextmanager
 def playwright_sessions(*, engine: str = "chromium", headless: bool = True,
                         ignore_https_errors: bool = False) -> Iterator[list[Session]]:
@@ -153,12 +203,7 @@ def playwright_sessions(*, engine: str = "chromium", headless: bool = True,
                 cdp = context.new_cdp_session(page)
                 cdp.send("Network.enable")
 
-                def record(params: dict[str, Any], log: list[dict[str, Any]] = stream) -> None:
-                    data = str(params.get("data", ""))
-                    log.append({"event": params.get("eventName"), "id": params.get("eventId"), "bytes": len(data),
-                                "digest": "sha256:" + hashlib.sha256(data.encode()).hexdigest()})
-
-                cdp.on("Network.eventSourceMessageReceived", record)
+                record_event_streams(cdp, stream)
                 sessions.append(Session(name, page, stream, navigations))
             yield sessions
         finally:

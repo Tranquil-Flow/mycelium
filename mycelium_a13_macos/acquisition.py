@@ -8,6 +8,7 @@ seams; the production composition is Web-PKI HTTPS and the fixed public commit.
 """
 from __future__ import annotations
 
+from mycelium_http_identity import with_user_agent
 from collections.abc import Callable, Mapping
 import copy
 from dataclasses import asdict
@@ -461,11 +462,10 @@ class _HTTPRepositoryTransport:
         request = urllib.request.Request(
             self.api_origin + path,
             method="GET",
-            headers={
+            headers=with_user_agent({
                 "Accept": "application/json",
                 "Accept-Encoding": "identity",
-                "User-Agent": "MyceliumA13Acquisition/1",
-            },
+            }),
         )
         with self._open(request) as response:
             content_encoding = response.headers.get("Content-Encoding")
@@ -553,12 +553,11 @@ class _HTTPRepositoryTransport:
         headers = {
             "Accept": "application/octet-stream",
             "Accept-Encoding": "identity",
-            "User-Agent": "MyceliumA13Acquisition/1",
         }
         if offset:
             headers["Range"] = f"bytes={offset}-"
         request = urllib.request.Request(
-            self.download_origin + path, method="GET", headers=headers
+            self.download_origin + path, method="GET", headers=with_user_agent(headers)
         )
         return self._open(request)
 
@@ -603,12 +602,11 @@ class _HTTPRepositoryTransport:
         request = urllib.request.Request(
             url,
             method="GET",
-            headers={
+            headers=with_user_agent({
                 "Accept": "application/octet-stream",
                 "Accept-Encoding": "identity",
                 "Range": f"bytes={offset}-{end}",
-                "User-Agent": "MyceliumA13SliceAcquisition/1",
-            },
+            }),
         )
         with self._open(request) as response:
             content_range = response.headers.get("Content-Range") or ""
@@ -957,6 +955,44 @@ class SelectedModelAcquisition:
             ):
                 return None
             return Path(self._prepared.source_root), copy.deepcopy(self._verified_manifest)
+
+    def reverify_closed_snapshot(self, *, storage_limit_bytes: int) -> dict[str, Any]:
+        """Re-hash a complete snapshot left on disk by an earlier run of the app, then prepare it.
+
+        After a relaunch the recovered state is ``closed`` (or ``failed``/``prepared_source_revalidation_required``
+        after a crash) although the verified bytes are still on disk.  This runs the ordinary acquisition path, so
+        every file is hashed again exactly as a fresh download would; the grant allows **one** network byte, so
+        nothing can be downloaded (a missing or partial snapshot is refused instead).  Refuses with
+        ``source_not_on_disk`` unless a complete snapshot directory exists and no staged download does.
+        """
+
+        with self._guard:
+            if self._status["state"] not in {"closed", "idle", "failed", "cancelled"}:
+                _raise("acquisition_in_progress" if self._active else "source_already_prepared")
+            _stage, snapshot = self._paths_if_present()
+            if snapshot is None:
+                _raise("source_not_on_disk")
+        return self.start(
+            {
+                "download_acknowledged": True,
+                "max_download_bytes": 1,
+                "storage_limit_bytes": int(storage_limit_bytes),
+            }
+        )
+
+    def _paths_if_present(self) -> tuple[Path | None, Path | None]:
+        """The staged and final snapshot directories if they exist (nothing is created)."""
+
+        model_root = self.state_root / ("models--" + self.model.model_id.replace("/", "--"))
+        snapshots = model_root / "snapshots"
+        stage = snapshots / ("." + self.model.resolved_commit + ".acquiring")
+        snapshot = snapshots / self.model.resolved_commit
+        try:
+            staged = stage.exists() or stage.is_symlink()
+            final = snapshot.is_dir() and not snapshot.is_symlink()
+        except OSError:
+            return None, None
+        return (stage if staged else None), (snapshot if final and not staged else None)
 
     def _begin(self, consent: Mapping[str, Any]) -> dict[str, Any]:
         checked = _validate_consent(consent)

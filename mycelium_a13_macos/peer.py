@@ -59,6 +59,7 @@ _PENDING_PROTOCOL = "mycelium.remote_mac_pairing_pending.v1"
 _JOIN_PENDING_PROTOCOL = "mycelium.remote_mac_join_pending.v1"
 _RESUME_PENDING_PROTOCOL = "mycelium.remote_mac_resume_pending.v1"
 _ACCEPTED_PROTOCOL = "mycelium.remote_mac_accepted.v1"
+_REJOIN_PROTOCOL = "mycelium.remote_mac_rejoin_pending.v1"
 _DISPOSITION_PROTOCOL = "mycelium.remote_mac_membership_disposition.v1"
 _CAPABILITY_EVIDENCE_PROTOCOL = "mycelium.remote_mac_capability_evidence.v1"
 _CAPABILITY_RESULT_PROTOCOL = "mycelium.remote_mac_capability_result.v1"
@@ -77,6 +78,10 @@ _ACCEPTED_FIELDS = frozenset(
     {"protocol", "handoff_digest", "quota", "accepted_at"}
 )
 _TERMINAL_MEMBERSHIP_STATES = frozenset({"expired", "revoked", "stale", "unknown"})
+#: Lapsed memberships a new, owner-approved invite may replace (identity and model cache stay).  A membership the
+#: owner revoked is not among them: that is the owner's decision, not a lapse.
+_REJOINABLE_STATES = frozenset({"expired", "stale", "unknown"})
+_REJOIN_STATES_FOR_DISPOSITION = _REJOINABLE_STATES
 
 
 class RemoteMacMemberError(RuntimeError):
@@ -168,6 +173,10 @@ class RemoteMacMember:
         return self.state_root / "resume.pending.json"
 
     @property
+    def _rejoin_path(self) -> Path:
+        return self.state_root / "rejoin.pending.json"
+
+    @property
     def _accepted_path(self) -> Path:
         return self.state_root / "accepted.json"
 
@@ -214,6 +223,7 @@ class RemoteMacMember:
             self._accepted_path,
             self._disposition_path,
             self._capability_path,
+            self._rejoin_path,
             self.state_root / "membership.state.json",
         )
         return any(path.exists() or path.is_symlink() for path in paths)
@@ -339,17 +349,23 @@ class RemoteMacMember:
                 if membership is not None and accepted is not None:
                     # Durable acceptance makes pairing recovery unnecessary.
                     # Complete cleanup after a crash between accepted.json's
-                    # atomic replace and the ordinary unlink sequence.
-                    for path in (
-                        self._pending_path,
-                        self._handoff_path,
-                        self._join_pending_path,
-                    ):
-                        path.unlink(missing_ok=True)
+                    # atomic replace and the ordinary unlink sequence.  A re-join in flight keeps its files.
+                    if not self._rejoin_path.exists():
+                        for path in (
+                            self._pending_path,
+                            self._handoff_path,
+                            self._join_pending_path,
+                        ):
+                            path.unlink(missing_ok=True)
                     self._resume(membership)
                 return self.status()
-            except RemoteMacMemberError:
-                self._started = False
+            except RemoteMacMemberError as exc:
+                # A lapsed membership keeps the peer started (identity loaded, no member): the only thing it may do
+                # is ask for a new pairing, which the owner still has to approve (``pair_request``).
+                self._started = (
+                    exc.code in {"peer_member_expired", "peer_generation_stale", "peer_member_unknown"}
+                    and self._signer is not None
+                )
                 self._member = None
                 self._seed_client = None
                 raise
@@ -471,7 +487,8 @@ class RemoteMacMember:
 
         with self._lock:
             self._require_started()
-            if load_membership_state(self.state_root) is not None:
+            rejoining = load_membership_state(self.state_root) is not None
+            if rejoining and not self._rejoin_allowed():
                 raise RemoteMacMemberError("peer_already_enrolled")
             approved = self._validated_consent(consent)
             existing_consent = self._load_consent()
@@ -486,6 +503,8 @@ class RemoteMacMember:
                 self._pending_path.unlink()
             approved = self._save_consent(approved)
             assert self._signer is not None
+            if rejoining and not self._rejoin_path.exists():
+                _atomic_private_json(self._rejoin_path, {"protocol": _REJOIN_PROTOCOL, "requested_at": self._clock()})
             try:
                 request, private_key = new_pairing_request(
                     signer=self._signer,
@@ -507,6 +526,20 @@ class RemoteMacMember:
                 },
             )
             return request
+
+    def _rejoin_allowed(self) -> bool:
+        """A lapsed membership (lease ran out, or the owner no longer accepts this generation) may be replaced."""
+
+        if self._rejoin_path.exists():
+            return True  # a re-join already requested (a retry returns the same request)
+        disposition = self._load_disposition()
+        if disposition is not None:
+            return disposition in _REJOIN_STATES_FOR_DISPOSITION
+        member = self._member
+        if member is None:
+            return False
+        lease = member.lease_expires_at
+        return lease is not None and self._clock() >= lease
 
     def _make_client(
         self,
@@ -713,11 +746,15 @@ class RemoteMacMember:
             handoff_value = dict(handoff)
             handoff_digest = _digest(handoff_value)
             accepted = self._load_accepted()
+            rejoin = self._rejoin_path.exists()
+            if accepted is not None and rejoin and accepted["handoff_digest"] != handoff_digest:
+                accepted = None  # a new invite replaces the lapsed membership; the old one stays until this one commits
             if accepted is not None:
                 if accepted["handoff_digest"] != handoff_digest:
                     raise RemoteMacMemberError("pairing_handoff_changed")
                 if load_membership_state(self.state_root) is None:
                     raise RemoteMacMemberError("peer_membership_state_invalid")
+                self._rejoin_path.unlink(missing_ok=True)
                 return self._membership_result()
             checkpoint = _load_private_json(self._join_pending_path)
             if checkpoint is not None and checkpoint.get(
@@ -847,6 +884,7 @@ class RemoteMacMember:
                 self._pending_path,
                 self._handoff_path,
                 self._join_pending_path,
+                self._rejoin_path,
             ):
                 path.unlink(missing_ok=True)
             self._clear_disposition()

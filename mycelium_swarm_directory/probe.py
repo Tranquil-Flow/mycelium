@@ -12,6 +12,7 @@ beyond the word ``probe`` and never succeeds in running one.
 """
 from __future__ import annotations
 
+from mycelium_http_identity import with_user_agent
 import argparse
 import json
 import sys
@@ -25,7 +26,7 @@ from .crypto import Ed25519Signer
 
 def _post(origin: str, route: str, document: dict) -> tuple[int, str | None]:
     request = urllib.request.Request(origin + '/swarm-entry/v1/' + route, data=json.dumps(document).encode(),
-                                     headers={'Content-Type': 'application/json'}, method='POST')
+                                     headers=with_user_agent({'Content-Type': 'application/json'}), method='POST')
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         with opener.open(request, timeout=15) as response:

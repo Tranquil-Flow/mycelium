@@ -123,6 +123,8 @@ def _owner_compiled_bundle(app):
     return Path(app.root) / 'chain-runs' / run_id / 'compiled' / 'transfer-bundle'
 
 
+CLEANUP_UNPROVEN = 'router_port_shutdown_cleanup_unproven'
+
 #: Acquisition states in which a download/verify/compile is genuinely running (acquisition.py ``status()['state']``).
 ACQUISITION_ACTIVE_STATES = frozenset({'starting', 'resolving_metadata', 'checking_capacity', 'downloading',
                                        'verifying', 'compiling'})
@@ -427,6 +429,16 @@ class AppDemoChain:
         # Refuse at once without a prepared model; wait (bounded) only while a download is really running,
         # so a harness that starts the run as the download finishes still passes.
         if not prepared() and not downloading():
+            # After a relaunch the acquisition reads 'closed' although the verified snapshot is on disk: re-hash it
+            # (nothing is fetched) rather than make the owner repeat the download (live demo 2026-10-21).
+            reverify = getattr(app, 'reverify_model_snapshot', None)
+            if callable(reverify):
+                ctx.progress('checking the model files already on this Mac')
+                try:
+                    reverify()
+                except Exception:
+                    pass
+        if not prepared() and not downloading():
             raise OwnerRunError('owner_model_not_prepared', MODEL_NOT_PREPARED_MESSAGE, MODEL_NOT_PREPARED_FIX)
         ctx.wait_until(lambda: prepared() or not downloading(), budget=self.budgets['model'],
                        code='owner_model_not_prepared', interval=min(self.interval, 1.0))
@@ -497,6 +509,20 @@ class AppDemoChain:
             nodes.append(member['node_id'])
         return sorted(nodes)
 
+    def _refuse_skewed_peers(self, ctx, nodes) -> None:
+        """A peer whose clock is beyond the tolerance would drop the owner's short-TTL commands: refuse the route here."""
+        offsets = getattr(self._exchange(), 'clock_offsets', None)
+        skewed = {} if offsets is None else offsets.exceeded(nodes)
+        if not skewed:
+            return
+        node = max(skewed, key=lambda n: abs(skewed[n]))
+        seconds = skewed[node]
+        raise OwnerRunError('peer_clock_skew_exceeded', (
+            'The clock of the joined Mac …%s is %d s %s this Mac\'s, beyond the %d s the swarm tolerates. Turn on '
+            '“Set time and date automatically” on both Macs (System Settings → General → Date & Time), then press Start '
+            'again.' % (node[-8:], round(abs(seconds)), 'ahead of' if seconds > 0 else 'behind',
+                        round(offsets.tolerance))))
+
     def _step_descriptors(self, ctx):
         exchange = self._exchange()
         exchange.forget_reports()
@@ -551,6 +577,7 @@ class AppDemoChain:
             return left is None or left >= margin
 
         def have():
+            self._refuse_skewed_peers(ctx, expected)
             reports = self._reports(ctx)
             ready = [n for n in expected if usable(reports.get(n))]
             stale.clear()
@@ -1014,10 +1041,19 @@ class AppDemoChain:
                 self._announce(ctx, 'stopped')
         except Exception:
             pass
+        from .chain_observation import release_owner_channel
+        unproven = None
         try:
-            self.ops.stop(app)
+            state = self._workflow_state() or {}
+            if state.get('error_code') == CLEANUP_UNPROVEN:
+                unproven = CLEANUP_UNPROVEN
         except Exception:
             pass
+        try:
+            self.ops.stop(app)
+        except Exception as error:
+            if CLEANUP_UNPROVEN in (getattr(error, 'code', None), str(error)):
+                unproven = CLEANUP_UNPROVEN
         context = getattr(app, '_observation_context', None)
         if context is not None:
             for offer in getattr(context, 'offers', {}).values():
@@ -1033,6 +1069,17 @@ class AppDemoChain:
                 break
         if self.agent is not None:
             self.agent.close()
+        # An unproven route cleanup stays recorded and reported (run error, status); what is released is only this
+        # process's owner.lock, so a Stop/Start does not need the app to be quit (live demo 2026-10-20).
+        released = False
+        if context is not None:
+            try:
+                release_owner_channel(context)
+                released = True
+            except Exception:
+                pass
+        if unproven is not None:
+            ctx.result['cleanup_unproven'] = {'code': unproven, 'owner_lock_released': released}
         app._observation_context = None
         app._chain_target_keys = None
         app._chain_rebuild = None

@@ -32,6 +32,7 @@ from typing import Any, Callable
 
 from mycelium_platform_neutral.network_mode import NetworkMode
 from mycelium_swarm_directory import docs
+from mycelium_http_identity import with_user_agent
 from mycelium_swarm_directory.crypto import Ed25519Signer, verify
 from mycelium_swarm_directory.entry import EntryGateway, EntryGuard, EntryPolicy, UsageLedger
 from mycelium_swarm_directory.wire import WireError, fingerprint
@@ -69,7 +70,7 @@ class DirectoryClient:
         headers = {'Accept': 'application/json'}
         if data is not None:
             headers.update({'Content-Type': 'application/json', 'X-Mycelium-Swarms': '1'})
-        request = urllib.request.Request(self.origin + '/swarms/api/v1' + path, data=data, headers=headers,
+        request = urllib.request.Request(self.origin + '/swarms/api/v1' + path, data=data, headers=with_user_agent(headers),
                                          method='GET' if data is None else 'POST')
         try:
             with self._opener.open(request, timeout=self.timeout) as response:

@@ -30,6 +30,7 @@ membership projection.  No verifier-specific protocol is involved.
 
 from __future__ import annotations
 
+from mycelium_http_identity import with_user_agent
 from collections.abc import Mapping
 from contextlib import contextmanager
 import json
@@ -328,7 +329,10 @@ def _validate_time(statement: Mapping[str, Any], *, now: float) -> None:
     current = _number(now, "managed_control_clock_invalid")
     _require(issued < expires, "managed_control_time_invalid")
     _require(expires - issued <= MAX_TTL_SECONDS, "managed_control_ttl_invalid")
-    if current > expires:
+    # The documented skew tolerance holds on both sides: a member clock ahead of the owner's must not
+    # drop short-TTL commands (infer_cancel_wait 4.5 s).  The owner's mailbox still expires rows on its
+    # own clock and the nonce/sequence ledgers still block replay.
+    if current > expires + MAX_CLOCK_SKEW_SECONDS:
         raise ManagedControlError("managed_control_message_expired")
     if current + MAX_CLOCK_SKEW_SECONDS < issued:
         raise ManagedControlError("managed_control_message_from_future")
@@ -2051,7 +2055,7 @@ class ManagedControlClient:
             self.base_url + path,
             data=raw,
             method="POST",
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            headers=with_user_agent({"Content-Type": "application/json", "Accept": "application/json"}),
         )
         try:
             with self._opener.open(request, timeout=self._transport_timeout()) as response:

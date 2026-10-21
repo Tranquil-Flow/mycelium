@@ -1,6 +1,7 @@
 """Production clients for the shared request-gateway session contract."""
 from __future__ import annotations
 
+from mycelium_http_identity import with_user_agent
 import ipaddress
 import json
 from typing import Any, Iterator, Mapping, Protocol
@@ -220,7 +221,7 @@ class HTTPGatewayClient:
             headers["Last-Event-ID"] = str(last_event_id)
         request = Request(
             self._url(f"/v1/inference/{request_id}/events"),
-            headers=headers,
+            headers=with_user_agent(headers),
             method="GET",
         )
         try:
@@ -304,7 +305,7 @@ class HTTPGatewayClient:
         request = Request(
             self._url(path),
             data=payload,
-            headers=headers,
+            headers=with_user_agent(headers),
             method=method,
         )
         try:

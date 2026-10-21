@@ -8,6 +8,13 @@ from .workflow import owner_channel
 from .managed_control import _segment
 
 
+def release_owner_channel(context):
+    """Release a run's ``ManagedControlOwner`` (its ``owner.lock`` flock); safe to repeat, safe on a partial context."""
+    owner=getattr(getattr(context,'factory',None),'owner',None)
+    close=getattr(owner,'close',None)
+    if callable(close):close()
+
+
 @dataclass
 class ObservationContext:
     run_id:str
@@ -18,6 +25,10 @@ class ObservationContext:
     factory:ManagedSessionFactory
     mailbox:object
     observations:dict|None=None
+
+    def close(self):
+        """Local only: cancels this run's owner waits and drops its flock; remote cleanup proof is not touched."""
+        release_owner_channel(self)
 
     def retire_bootstrap(self):
         return {node:self.mailbox.retire_offer(offer) for node,offer in self.offers.items()}

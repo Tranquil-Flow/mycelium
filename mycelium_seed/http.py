@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from mycelium_http_identity import with_user_agent
 from collections.abc import Mapping
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -882,7 +883,7 @@ class SeedHTTPClient:
             self.seed_url + path,
             data=raw,
             method=method,
-            headers={} if raw is None else {"Content-Type": "application/json"},
+            headers=with_user_agent({} if raw is None else {"Content-Type": "application/json"}),
         )
         try:
             with self._opener.open(request, timeout=self.timeout) as response:

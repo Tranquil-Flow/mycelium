@@ -61,6 +61,7 @@ class LocalOwnerMember(RemoteMacMember):
 
 
 class LocalContributor(TargetApplication):
+    HONOURS_TEST_CLOCK_SEAM=False  # the owner's own node: the A13 clock test seam is member-only
     def __init__(self,owner_app):
         super().__init__(owner_app.root/'local-contributor')
         self.peer=LocalOwnerMember(owner_app.root/'local-contributor',owner=owner_app.authority)
