@@ -18,6 +18,7 @@ node_modules/
 dist/
 build/
 target/
+.build-native/
 
 # Editors and operating systems
 .DS_Store

@@ -1,0 +1,169 @@
+{
+  "entries": [
+    {
+      "category": "generic_secret",
+      "file": "mycelium_layer_planner/workload_intelligence.py",
+      "reason": "Reviewed: `*_p95_tokens` is a token-count statistic, not a credential."
+    },
+    {
+      "category": "generic_secret",
+      "file": "native/mobile_core/tests/fixtures/onboarding.json",
+      "reason": "Reviewed: synthetic signed-invitation fixture (fixed nonce, issued_at 1790000000, key `seed-endpoint-1`); no real key material."
+    },
+    {
+      "category": "generic_secret",
+      "file": "scripts/adjudication/evidence-2026-09-21/remeasure-2026-09-21.json",
+      "reason": "Reviewed: `token` values are 40-hex git commit ids found in documents, not credentials."
+    },
+    {
+      "category": "generic_secret",
+      "file": "scripts/a15_run_intake.py",
+      "reason": "Reviewed: `token` is a fixed test-clock sentinel string."
+    },
+    {
+      "category": "generic_secret",
+      "file": "test_provisioning_transport.py",
+      "reason": "Reviewed: fixed canary/sentinel constants that the tests plant to prove redaction; not credentials."
+    },
+    {
+      "category": "generic_secret",
+      "file": "tests/a8_acceptance/test_privacy.py",
+      "reason": "Reviewed: fixed canary/sentinel constants that the tests plant to prove redaction; not credentials."
+    },
+    {
+      "category": "generic_secret",
+      "file": "tests/live/test_m0_end_to_end.py",
+      "reason": "Reviewed: fixed canary/sentinel constants that the tests plant to prove redaction; not credentials."
+    },
+    {
+      "category": "generic_secret",
+      "file": "tests/node_agent/test_node_main.py",
+      "reason": "Reviewed: fixed canary/sentinel constants that the tests plant to prove redaction; not credentials."
+    },
+    {
+      "category": "generic_secret",
+      "file": "tests/ui_gateway/ui_gateway_support.py",
+      "reason": "Reviewed: fixed canary/sentinel constants that the tests plant to prove redaction; not credentials."
+    },
+    {
+      "category": "generic_secret",
+      "file": "tests/model/test_dialogpt_local_decode.py",
+      "reason": "Reviewed: false positive (`GPT2Tokenizer.from_files(` call)."
+    },
+    {
+      "category": "generic_secret",
+      "file": "tests/physical_qualification/test_plan_builder.py",
+      "reason": "Reviewed: placeholder cache path constant named PRIVATE_TOKENIZER_CACHE; not a credential."
+    },
+    {
+      "category": "generic_secret",
+      "file": "ui/web/scripts/a8-product-browser-gate.mjs",
+      "reason": "Reviewed: reads the password from the environment, no literal value."
+    },
+    {
+      "category": "private_key",
+      "file": "test_observatory_gateway.py",
+      "reason": "Reviewed: PEM header string without key body, planted to prove redaction."
+    },
+    {
+      "category": "private_key",
+      "file": "tests/a13_macos/test_compiler_inputs.py",
+      "reason": "Reviewed: PEM header string without key body, planted to prove redaction."
+    },
+    {
+      "category": "private_key",
+      "file": "tests/physical_runner/test_config.py",
+      "reason": "Reviewed: PEM header string without key body, planted to prove redaction."
+    },
+    {
+      "category": "private_key",
+      "file": "tests/release_bundle/test_bindings_and_secrets.py",
+      "reason": "Reviewed: PEM header string without key body, planted to prove redaction."
+    },
+    {
+      "category": "tailscale_ip",
+      "file": "contracts/compatibility-fixtures/control-plane-tranche-v1.json",
+      "reason": "Reviewed: synthetic 100.64.0.x/100.64.1.x address from the start of the CGNAT block; these fixtures (several are signed) test CGNAT/tailnet classification and redaction, they are not a real node."
+    },
+    {
+      "category": "tailscale_ip",
+      "file": "contracts/compatibility-fixtures/gossip-evidence-bundle-v1.json",
+      "reason": "Reviewed: synthetic 100.64.0.x/100.64.1.x address from the start of the CGNAT block; these fixtures (several are signed) test CGNAT/tailnet classification and redaction, they are not a real node."
+    },
+    {
+      "category": "tailscale_ip",
+      "file": "contracts/compatibility-fixtures/gossip-router-view-v1.json",
+      "reason": "Reviewed: synthetic 100.64.0.x/100.64.1.x address from the start of the CGNAT block; these fixtures (several are signed) test CGNAT/tailnet classification and redaction, they are not a real node."
+    },
+    {
+      "category": "tailscale_ip",
+      "file": "contracts/compatibility-fixtures/signed-gossip-evidence-bundle-v1.json",
+      "reason": "Reviewed: synthetic 100.64.0.x/100.64.1.x address from the start of the CGNAT block; these fixtures (several are signed) test CGNAT/tailnet classification and redaction, they are not a real node."
+    },
+    {
+      "category": "tailscale_ip",
+      "file": "tests/a13_macos/test_public_https.py",
+      "reason": "Reviewed: synthetic 100.64.0.x/100.64.1.x address from the start of the CGNAT block; these fixtures (several are signed) test CGNAT/tailnet classification and redaction, they are not a real node."
+    },
+    {
+      "category": "tailscale_ip",
+      "file": "tests/a14b_acceptance/test_coarse_region_contract.py",
+      "reason": "Reviewed: synthetic 100.64.0.x/100.64.1.x address from the start of the CGNAT block; these fixtures (several are signed) test CGNAT/tailnet classification and redaction, they are not a real node."
+    },
+    {
+      "category": "tailscale_ip",
+      "file": "tests/a8_acceptance/test_physical_peer_cases.py",
+      "reason": "Reviewed: synthetic 100.64.0.x/100.64.1.x address from the start of the CGNAT block; these fixtures (several are signed) test CGNAT/tailnet classification and redaction, they are not a real node."
+    },
+    {
+      "category": "tailscale_ip",
+      "file": "tests/a8_acceptance/test_privacy.py",
+      "reason": "Reviewed: synthetic 100.64.0.x/100.64.1.x address from the start of the CGNAT block; these fixtures (several are signed) test CGNAT/tailnet classification and redaction, they are not a real node."
+    },
+    {
+      "category": "tailscale_ip",
+      "file": "tests/gossip/helpers.py",
+      "reason": "Reviewed: synthetic 100.64.0.x/100.64.1.x address from the start of the CGNAT block; these fixtures (several are signed) test CGNAT/tailnet classification and redaction, they are not a real node."
+    },
+    {
+      "category": "tailscale_ip",
+      "file": "tests/gossip/test_schema_codec.py",
+      "reason": "Reviewed: synthetic 100.64.0.x/100.64.1.x address from the start of the CGNAT block; these fixtures (several are signed) test CGNAT/tailnet classification and redaction, they are not a real node."
+    },
+    {
+      "category": "tailscale_ip",
+      "file": "tests/live/test_swarm_artifacts.py",
+      "reason": "Reviewed: synthetic 100.64.0.x/100.64.1.x address from the start of the CGNAT block; these fixtures (several are signed) test CGNAT/tailnet classification and redaction, they are not a real node."
+    },
+    {
+      "category": "tailscale_ip",
+      "file": "tests/network_mode/test_network_mode.py",
+      "reason": "Reviewed: synthetic 100.64.0.x/100.64.1.x address from the start of the CGNAT block; these fixtures (several are signed) test CGNAT/tailnet classification and redaction, they are not a real node."
+    },
+    {
+      "category": "tailscale_ip",
+      "file": "ui/web/src/features/swarm/privacy.test.ts",
+      "reason": "Reviewed: synthetic 100.64.0.x/100.64.1.x address from the start of the CGNAT block; these fixtures (several are signed) test CGNAT/tailnet classification and redaction, they are not a real node."
+    },
+    {
+      "category": "tailscale_ip",
+      "file": "tests/gate_requirements/test_host_free_evidence.py",
+      "reason": "Reviewed: synthetic 100.84.0.x fleet address generated by the test fleet builder to prove CGNAT addresses are rejected from public evidence."
+    },
+    {
+      "category": "spdx_missing",
+      "file": "apps/node-app/src-tauri/gen/android/buildSrc/src/main/java/now/mycelium/node/kotlin/BuildTask.kt",
+      "reason": "Tauri-generated template/bindings file, not original project code; keeps its upstream licence."
+    },
+    {
+      "category": "spdx_missing",
+      "file": "apps/node-app/src-tauri/gen/android/buildSrc/src/main/java/now/mycelium/node/kotlin/RustPlugin.kt",
+      "reason": "Tauri-generated template/bindings file, not original project code; keeps its upstream licence."
+    },
+    {
+      "category": "spdx_missing",
+      "file": "apps/node-app/src-tauri/gen/apple/Sources/mycelium-node-app/bindings/bindings.h",
+      "reason": "Tauri-generated template/bindings file, not original project code; keeps its upstream licence."
+    }
+  ]
+}

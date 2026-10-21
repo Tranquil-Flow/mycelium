@@ -1,0 +1,34 @@
+# Development and test dependencies for the L0-L4 ladder (PLAN v2 §2.1).
+#
+# The lane venv inherits the interpreter's site packages and adds only what the
+# interpreter does not already carry:
+#
+#   /opt/homebrew/bin/python3 -m venv --system-site-packages .venv
+#   .venv/bin/pip install -r requirements-dev.txt
+#
+# `.venv/` is gitignored, so the venv never shows up as a dirty tree.
+#
+# From the interpreter, recorded and deliberately not pinned (inheriting it is
+# the point of --system-site-packages): Python 3.14.4, pytest 9.0.2,
+# pytest-asyncio 1.3.0, numpy 2.5.1, mlx 0.31.1, httpx 0.28.1, websockets
+# 15.0.1, requests 2.32.5.  A shell that inherits a foreign PYTHONPATH (the
+# agent venv, for instance) imports a *different* pytest, so every lane command
+# sets PYTHONPATH=. explicitly.
+#
+# Installed here because the interpreter does NOT carry them:
+#   pytest-xdist  the parallel runner L2 needs.
+#   playwright    tests/a13_macos/test_browser.py, test_browser_acquisition.py,
+#                 test_browser_target.py and test_package.py import
+#                 playwright.sync_api at module scope; without it a tree-wide
+#                 collection ends in four ImportErrors.
+#
+# Browser binaries are NOT downloaded by this file and no `playwright install`
+# is needed: playwright 1.62.0 expects chromium 1234 / chromium-headless-shell
+# 1234, and the existing shared cache ~/Library/Caches/ms-playwright already
+# holds chromium-1234 and chromium_headless_shell-1234 with validated
+# installations.  That is why 1.62.0 is the pinned version - it is the version
+# whose chromium the cache can serve.  Its firefox (1538) and webkit (2336)
+# revisions are absent from the cache and are not used by this suite.
+
+pytest-xdist==3.8.0
+playwright==1.62.0

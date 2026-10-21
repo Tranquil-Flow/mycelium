@@ -1,0 +1,761 @@
+{
+  "schema": "mycelium.public-features.v1",
+  "note": "One commit per feature on top of the published history. Order is dependency order. Every path that differs from the published history must match exactly one feature (paths minus except).",
+  "always_exclude_paths": [
+    "docs/handover/a0-completion-record.v1.json",
+    "docs/handover/a5-completion-record.v1.json",
+    "tests/a15_intake/test_run_intake.py",
+    "tests/governance/test_completion_audit_blocker_claims.py",
+    "tests/governance/test_mycelium_completion_audit.py"
+  ],
+  "always_exclude_globs": [],
+  "features": [
+    {
+      "id": "router-core",
+      "title": "feat(router): complete the request and inter-layer Router with wire codec, scheduling and relay",
+      "body": "The Router carries a request through the layer stages of a route. This adds the wire format and its golden vectors, leases, scheduling, backpressure, chunked and distributed prefill, decode redrive, relay and cache lifecycle. It also adds the lifecycle and path-cancellation conformance checks and the route contract the Router enforces.",
+      "paths": [
+        "mycelium_router/**",
+        "test_router_*.py",
+        "tests/router/**",
+        "ROUTER_HANDOVER.md",
+        "route_contract.py",
+        "test_route_contract.py",
+        "contracts/router-wire-golden/**",
+        "scripts/generate_router_wire_golden.py",
+        "tests/path_cancellation_adversarial/**",
+        "tests/conformance/**",
+        "mycelium_conformance/**",
+        "docs/qualification/router-lifecycle-conformance.md",
+        "docs/qualification/path-cancellation-adversarial.md"
+      ],
+      "except": [
+        "mycelium_router/transports/**",
+        "test_router_iroh_*.py",
+        "test_router_mlx_*.py",
+        "test_router_numpy_*.py",
+        "test_router_phase_batching.py",
+        "test_router_batching.py"
+      ]
+    },
+    {
+      "id": "layer-planner",
+      "title": "feat(planner): add the Product V1 layer planner, replanning and capacity profiles",
+      "body": "The layer planner splits a model across the available machines by memory, link cost and phase, and replans when a member leaves. This adds the allocation and replication logic, the replan simulator, the scenarios it is tested on, and the capacity profiles and catalogue checks it reads.",
+      "paths": [
+        "layer_planner.py",
+        "layer_assignment.py",
+        "planner_*.py",
+        "simulate_layer_replanner.py",
+        "test_layer_*.py",
+        "test_planner_*.py",
+        "mycelium_layer_planner/**",
+        "tests/layer_planner/**",
+        "ALLOCATOR.md",
+        "LAYER_PLANNER_PRODUCT_V1.md",
+        "QUESTIONS.md",
+        "mycelium_capacity_profiles/**",
+        "tests/capacity_profiles/**",
+        "tests/capacity_catalog_adversarial/**",
+        "docs/qualification/capacity-catalog-adversarial.md",
+        "docs/qualification/directed-cycle-search-offline.md",
+        "tests/integration/test_cycle_search_offline.py",
+        "scripts/build_m15_workload_comparison.py",
+        "scripts/calibrate_m15_workload_comparison.py",
+        "scripts/build_m13_physical_control_plane.py",
+        "scripts/build_m14_physical_control_plane.py",
+        "scripts/build_m18_physical_control_plane.py",
+        "mycelium_performance_budget.py",
+        "scripts/build_m16_performance_budget.py",
+        "tests/contracts/test_performance_budget.py"
+      ]
+    },
+    {
+      "id": "gossip-broadcast",
+      "title": "feat(gossip): add the broadcast protocol and signed gossip evidence bundles",
+      "body": "Members share signed capacity and link evidence through a transport-neutral gossip layer. This adds the broadcast protocol, the evidence bundles the planner and Router read, and their tests.",
+      "paths": [
+        "mycelium_gossip/**",
+        "tests/gossip/**",
+        "BROADCAST_PROTOCOL.md",
+        "mycelium_broadcast.py",
+        "test_broadcast.py"
+      ]
+    },
+    {
+      "id": "model-runtime",
+      "title": "feat(runtime): add model runtimes, stage packs, weight provisioning and the int8 kernel",
+      "body": "A stage runs a slice of a model from a verified stage pack. This adds the runtime loader, the NumPy and MLX paths for Qwen-family and GPT-2-family models, resumable weight provisioning with pinned hashes, the model catalogue and the optional native int8 kernel. It also adds the tokenizer and the two-process runtime qualification.",
+      "paths": [
+        "model_adapters.py",
+        "model_manifest.py",
+        "runtime_contracts.py",
+        "runtime_loader.py",
+        "numpy_runtime.py",
+        "qwen35_*.py",
+        "stage_pack.py",
+        "weight_*.py",
+        "provisioning_transport.py",
+        "install_serving_backend.py",
+        "demo_weight_provisioning.py",
+        "WEIGHT_PROVISIONING_*.md",
+        "test_model_*.py",
+        "test_numpy_*.py",
+        "test_runtime_loader.py",
+        "test_stage_pack.py",
+        "test_weight_provisioning.py",
+        "test_provisioning_transport.py",
+        "test_install_serving_backend.py",
+        "test_demo_weight_provisioning.py",
+        "test_cross_framework_greedy.py",
+        "test_router_mlx_*.py",
+        "test_router_numpy_*.py",
+        "mycelium_tokenizer/**",
+        "tests/tokenizer/**",
+        "tests/model/**",
+        "native/a9_int8_kernel/**",
+        "tolerances/**",
+        "docs/runtime-backend-selection.md",
+        "two_process_*.py",
+        "test_two_process_*.py",
+        "distributed_inference_qualification.py",
+        "mycelium_model_catalog.py",
+        "mycelium_artifact_acquisition.py",
+        "mycelium_member_models.py",
+        "mycelium_assignment_cache.py",
+        "test_m17_*.py",
+        "mycelium_swarm_artifacts.py",
+        "scripts/inventory_local_models.py",
+        "scripts/inventory_member_models.py",
+        "scripts/build_member_artifact_runtime.py",
+        "scripts/runtime_archive_bootstrap.py",
+        "scripts/build_m17_*.py",
+        "scripts/assemble_m17_swarm_evidence.py",
+        "tests/qualification/test_safetensors_sharding.py",
+        "tests/qualification/test_assignment_artifact_cache.py",
+        "tests/test_member_model_inventory.py",
+        "scripts/run_a2_product_gate.py",
+        "scripts/run_a3_model_qualification_gate.py",
+        "scripts/build_a3_*.py",
+        "tests/a3_acceptance/**",
+        "tests/live/test_a[23]_*.py",
+        "tests/live/test_swarm_artifacts.py",
+        "physical_sqlite_capacity.py"
+      ]
+    },
+    {
+      "id": "contracts",
+      "title": "feat(contracts): add the versioned contract registry, fixtures and golden vectors",
+      "body": "Cross-component messages are described by hash-pinned contract fixtures and a registry that regenerates and checks them. This adds the generator and audit scripts, the compatibility fixtures, the contract manifest and the documents that describe the control-plane and qualification contracts.",
+      "paths": [
+        "contracts/**",
+        "scripts/contract_*.py",
+        "scripts/generate_contract_*.py",
+        "tests/contracts/**",
+        "docs/contracts/**"
+      ],
+      "except": [
+        "contracts/router-wire-golden/**",
+        "contracts/phone-*/**",
+        "tests/contracts/test_performance_budget.py",
+        "tests/contracts/test_phone_*.py",
+        "tests/contracts/test_a6_*.py",
+        "tests/contracts/test_a14b_registration.py",
+        "tests/contracts/test_m11_baseline_sealer.py"
+      ]
+    },
+    {
+      "id": "membership-node-agent",
+      "title": "feat(node): add signed membership, the node agent and durable member identity",
+      "body": "A node agent runs on each machine, keeps a durable identity and joins a swarm through signed membership messages with leases, heartbeats and drain. This adds the membership contracts, the agent process lifecycle on POSIX and Windows, and reconnect and diagnostics handling.",
+      "paths": [
+        "mycelium_membership/**",
+        "mycelium_node/**",
+        "tests/membership/**",
+        "tests/node_agent/**",
+        "docs/membership-liveness.md",
+        "mycelium_member_runtime.py",
+        "mycelium_http_identity.py"
+      ]
+    },
+    {
+      "id": "seed-invites",
+      "title": "feat(seed): add the signed seed coordinator, single-use invitations and route assignment delivery",
+      "body": "A seed coordinator admits members with signed single-use invitations, places layers, and hands each member its route assignment over a bounded HTTP transport. This adds pairing, durable state, placement, plan binding and the invitation tooling.",
+      "paths": [
+        "mycelium_seed/**",
+        "mycelium_invite/**",
+        "tests/seed_coordinator/**",
+        "tests/invite/**",
+        "scripts/mint_swarm_invites.py",
+        "scripts/manage_seed_membership.py",
+        "scripts/bind_gate_roles.py",
+        "scripts/bind_operator_plan_to_seed.py",
+        "docs/swarm-multi-device-onboarding.md"
+      ],
+      "except": [
+        "tests/seed_coordinator/test_seed_android_pairing.py",
+        "tests/seed_coordinator/test_phone_*.py",
+        "mycelium_seed/phone_preparation.py",
+        "tests/seed_coordinator/test_seed_public_https.py"
+      ]
+    },
+    {
+      "id": "iroh-transport",
+      "title": "feat(transport): add the native iroh sidecar and its Python boundary",
+      "body": "Machines reach each other through an authenticated sidecar built on iroh. This adds the Rust transport, the Python boundary that supervises it, an independent conformance reference, the Router transport adapters and the two-host transport probe tools.",
+      "paths": [
+        "native/iroh_transport/**",
+        "mycelium_iroh_sidecar/**",
+        "mycelium_iroh_conformance/**",
+        "tests/iroh_conformance/**",
+        "tests/e2e_request_iroh/**",
+        "test_iroh_sidecar_cross_language.py",
+        "test_router_iroh_*.py",
+        "mycelium_router/transports/**",
+        "docs/iroh-native-import-manifest.*",
+        "docs/qualification/2026-07-19-two-host-iroh-transport-probe.md",
+        "docs/qualification/request-iroh-e2e.md",
+        "docs/design/lan-direct-transport.md",
+        "network_probe.py",
+        "probe.py",
+        "probe_android_adb.py",
+        "NETWORK_PROBE.md",
+        "test_network_probe.py",
+        "scripts/m14_transport_probe_host.py",
+        "scripts/run_transport_probe_sidecar.py",
+        "scripts/build_transport_probe_frame.py",
+        "scripts/assemble_m14_transport_matrix.py",
+        "tests/live/test_transport_probe_*.py"
+      ]
+    },
+    {
+      "id": "live-route",
+      "title": "feat(live): run a real route across machines with activation, artifact transfer and supervision",
+      "body": "A live route turns a plan into running stages on several machines. This adds deployment activation and registry, per-member artifact provisioning and transport, the stage codec for the supported model families, the supervisor with signal-safe shutdown, and cold-restart handling of the route.",
+      "paths": [
+        "mycelium_live/**",
+        "tests/live/**",
+        "mycelium_deadlines.py",
+        "scripts/stage_live_route.py",
+        "scripts/preposition_live_route.py",
+        "scripts/build_qwen_live_route.py",
+        "scripts/run_live_quality_gate.py",
+        "scripts/capture_member_capacity_snapshot.py",
+        "mycelium_candidate_promotion.py",
+        "scripts/experimental_candidate_isolation.py",
+        "docs/LOCAL-FIRST.md",
+        "docs/live-mvp-operator-runbook.md",
+        "tests/network_mode/**",
+        "tests/test_quiet_host_guard.py",
+        "scripts/quiet_host_guard.py",
+        "tests/test_test_ladder.py"
+      ],
+      "except": [
+        "mycelium_live/a4_*.py",
+        "mycelium_live/a6_recovery.py",
+        "mycelium_live/a7_authority.py",
+        "mycelium_live/phone_*.py",
+        "tests/live/test_a[0-9]*.py",
+        "tests/live/*phone*",
+        "tests/live/test_transport_probe_*.py",
+        "tests/live/test_swarm_artifacts.py",
+        "tests/live/test_member_model_*.py"
+      ]
+    },
+    {
+      "id": "internet-control",
+      "title": "feat(internet): add internet-native control, enrollment and activation",
+      "body": "Members that are not on one network enroll and activate through an internet-reachable control plane. This adds the bootstrap, enrollment and privacy rules, the activation records and the physical-gate runners that exercise them across hosts.",
+      "paths": [
+        "mycelium_internet/**",
+        "tests/a8_acceptance/**",
+        "scripts/a8_*"
+      ],
+      "except": [
+        "scripts/a8_provision_public_origin.sh"
+      ]
+    },
+    {
+      "id": "request-gateway",
+      "title": "feat(gateway): add the authenticated request gateway, OpenAI-compatible adapter and conformance model",
+      "body": "The request gateway accepts chat requests, authenticates them separately from the control plane and streams tokens back from the live route. This adds the gateway and its CLI and session lifecycle, an OpenAI Chat Completions adapter, and an independent conformance model with trace tools.",
+      "paths": [
+        "mycelium_request_gateway/**",
+        "tests/request_gateway/**",
+        "mycelium_request_conformance/**",
+        "tests/request_conformance/**",
+        "mycelium_openai_shim/**",
+        "tests/openai_shim/**",
+        "docs/request-gateway-*",
+        "docs/request-streaming-session-lifecycle.md",
+        "docs/qualification/request-gateway-model-conformance.md",
+        "tests/gateway/**",
+        "docs/operations/m1-gateway-control-runtime.md"
+      ]
+    },
+    {
+      "id": "observatory-ui",
+      "title": "feat(ui): add the read-only Observatory, route explorer, region globe and product gateway",
+      "body": "The browser UI shows a swarm and its routes without being able to change anything. This adds the web app, its product schemas, the browser-safe product gateway, the closed product snapshot and event contracts, the interactive local swarm, the route explorer and the coarse region globe.",
+      "paths": [
+        "ui/**",
+        "mycelium_ui_gateway/**",
+        "mycelium_product_spine/**",
+        "mycelium_interactive/**",
+        "mycelium_gateway/**",
+        "tests/ui_gateway/**",
+        "tests/product_spine/**",
+        "tests/interactive/**",
+        "tests/observatory_events/**",
+        "tests/a14_acceptance/**",
+        "tests/a14b_acceptance/**",
+        "tests/contracts/test_a14b_registration.py",
+        "test_observatory_*.py",
+        "docs/observatory-event-adapter.md",
+        "docs/semantic-observatory-contract.md",
+        "docs/interactive-browser-swarm.md",
+        "docs/a14a-local-implementation.md",
+        "docs/product-ui/**",
+        "scripts/interactive_*",
+        "scripts/serve_a14_conformance.py",
+        "scripts/generate_a14*.py",
+        "scripts/generate_browser_stage_vectors.py"
+      ],
+      "except": [
+        "tests/product_spine/test_a6_recovery_projection.py"
+      ]
+    },
+    {
+      "id": "qualification-evidence",
+      "title": "feat(qualification): add route qualification authority, evidence diffing and the physical test harness",
+      "body": "A route is only served after a signed qualification of what it actually ran. This adds the qualification authority and immutable evidence, the evidence-diff inspector, an independent reference oracle, the loopback testbed with soak and fault tests, and the physical preflight and runner.",
+      "paths": [
+        "mycelium_qualification/**",
+        "mycelium_qualification_diff/**",
+        "tests/qualification/**",
+        "tests/qualification_*/**",
+        "mycelium_reference_oracle/**",
+        "tests/reference_oracle/**",
+        "mycelium_evidence.py",
+        "tests/evidence/**",
+        "docs/qualification/**",
+        "mycelium_topology_evidence.py",
+        "tests/topology/**",
+        "mycelium_physical_preflight/**",
+        "tests/physical_preflight/**",
+        "mycelium_physical_runner/**",
+        "tests/physical_runner/**",
+        "tests/physical_qualification/**",
+        "mycelium_testbed/**",
+        "tests/testbed/**",
+        "tests/l3/**",
+        "research/**",
+        "evidence/**",
+        "physical_inference_*.py",
+        "test_physical_node_*.py",
+        "docs/automation/**",
+        "scripts/run_m16_physical_gate.py",
+        "mycelium_m16_runtime.py",
+        "scripts/seal_m11_successor_baseline.py",
+        "tests/contracts/test_m11_baseline_sealer.py"
+      ],
+      "except": [
+        "tests/qualification/test_safetensors_sharding.py",
+        "tests/qualification/test_assignment_artifact_cache.py",
+        "tests/qualification/test_phone_*.py",
+        "docs/qualification/router-lifecycle-conformance.md",
+        "docs/qualification/path-cancellation-adversarial.md",
+        "docs/qualification/capacity-catalog-adversarial.md",
+        "docs/qualification/directed-cycle-search-offline.md",
+        "docs/qualification/2026-07-19-two-host-iroh-transport-probe.md",
+        "docs/qualification/request-iroh-e2e.md",
+        "docs/qualification/request-gateway-model-conformance.md"
+      ]
+    },
+    {
+      "id": "replica-sharding",
+      "title": "feat(replicas): add replicated stage groups with loss handling and benchmark gates",
+      "body": "A stage can be served by more than one machine to raise throughput and survive a loss. This adds the replica contracts and dispatch, the replica-pair execution graph, loss and illegal-flow gates, and the benchmark protocol used to check that replication is worth its cost.",
+      "paths": [
+        "mycelium_replica_contracts.py",
+        "mycelium_m18_replication.py",
+        "test_m18_*.py",
+        "tests/a5_acceptance/**",
+        "scripts/build_a5_*.py",
+        "scripts/run_a5_*.py",
+        "scripts/prepare_a5_*.py",
+        "scripts/probe_a5_*.py",
+        "scripts/qualify_a5_*.py",
+        "scripts/qualify_m18_*.py",
+        "scripts/reconcile_a5_*.py",
+        "scripts/materialize_m18_*.py",
+        "artifacts/a5-replica-pair-probe/**",
+        "tests/live/test_a5_*.py"
+      ]
+    },
+    {
+      "id": "request-concurrency-liveness",
+      "title": "feat(live): add concurrent request admission, liveness checks and negative gates",
+      "body": "Several requests can run on one route at the same time, and a stalled stage is detected instead of hanging. This adds the command contracts, ownership and liveness checks, runtime interruption handling and the negative and idle-staleness gates.",
+      "paths": [
+        "mycelium_live/a4_*.py",
+        "tests/a4_acceptance/**",
+        "tests/live/test_a4_*.py",
+        "scripts/run_a4_*.py"
+      ]
+    },
+    {
+      "id": "live-recovery",
+      "title": "feat(recovery): recover a request after a stage is lost, by full-context replay or a fenced KV successor",
+      "body": "When a member disappears mid-request the route recovers instead of failing. This adds recovery by full-context replay with cleanup authority, a fenced KV-cache successor on a standby member, the physical fault controls used to prove both, and the pinned source manifest for the recovery gates.",
+      "paths": [
+        "mycelium_a6_*.py",
+        "mycelium_a7_*.py",
+        "mycelium_m19_recovery.py",
+        "test_m19_recovery.py",
+        "test_a6_recovery.py",
+        "tests/a6_acceptance/**",
+        "tests/a7_acceptance/**",
+        "tests/live/test_a6_*.py",
+        "tests/live/test_a7_*.py",
+        "mycelium_live/a6_recovery.py",
+        "mycelium_live/a7_authority.py",
+        "scripts/build_a6_*.py",
+        "scripts/build_a7_*.py",
+        "scripts/derive_a6_replica_plan.py",
+        "scripts/run_a6_*.py",
+        "scripts/run_a7_*.py",
+        "scripts/a7_physical_parity.py",
+        "scripts/qualify_m19_recovery.py",
+        "artifacts/a6/**",
+        "tests/contracts/test_a6_*.py",
+        "tests/governance/test_a6_source_manifest.py",
+        "tests/product_spine/test_a6_recovery_projection.py"
+      ]
+    },
+    {
+      "id": "batching-speculation",
+      "title": "feat(decode): add runtime batching and target-authoritative speculative decoding",
+      "body": "Decode steps from several requests can share one backend call, and a small draft model can propose tokens that the target model verifies. This adds the batch policy, the mixed-position batched decode, the verify phase on the wire and in the nodes, rollback of rejected tokens, and the benchmark runners.",
+      "paths": [
+        "mycelium_a10_*.py",
+        "mycelium_a11_*.py",
+        "mycelium_speculative_decode*.py",
+        "mycelium_m20_speculation.py",
+        "test_m20_speculation.py",
+        "tests/speculation/**",
+        "tests/a10_*/**",
+        "tests/a11_*/**",
+        "tests/live/test_a10_*.py",
+        "tests/live/test_a11_*.py",
+        "scripts/a10_batch_policy.py",
+        "scripts/build_a11_operator_plan.py",
+        "scripts/qualify_m20_speculation.py",
+        "scripts/run_a10_*.py",
+        "scripts/run_a11_*.py",
+        "scripts/inspect_local_speculation_compatibility.py",
+        "scripts/report_a11_request_bootstrap.py",
+        "test_router_phase_batching.py",
+        "test_router_batching.py"
+      ]
+    },
+    {
+      "id": "heterogeneous-kv",
+      "title": "feat(kv): add heterogeneous swarm placement and stage-local KV cache gates",
+      "body": "Machines with different memory and speed can serve different parts of one model. This adds the heterogeneous placement checks and the stage-local KV-cache accounting, with the gates that qualify them.",
+      "paths": [
+        "mycelium_m21_heterogeneous.py",
+        "mycelium_m23_kv.py",
+        "test_m21_*.py",
+        "test_m23_*.py",
+        "scripts/qualify_m21_*.py",
+        "scripts/run_m23_kv_gate.py"
+      ]
+    },
+    {
+      "id": "platform-neutral-peers",
+      "title": "feat(platform): add platform-neutral peer capabilities and a host platform seam for POSIX and Windows",
+      "body": "A peer is described by what it can do, not by its operating system. This adds the typed capability contracts, one host API over POSIX and native Windows primitives, identity-preserving migration of a running seed, and reduced-precision activation transport.",
+      "paths": [
+        "mycelium_platform_neutral/**",
+        "mycelium_host_platform/**",
+        "mycelium_a9_*.py",
+        "tests/a9_*/**",
+        "tests/host_platform/**",
+        "tests/service_runner/**",
+        "scripts/run_a9_*.py",
+        "scripts/linux_import_guard.py"
+      ]
+    },
+    {
+      "id": "mobile-core",
+      "title": "feat(mobile): add the Rust mobile node core and phone worker adapters",
+      "body": "A phone can serve a slice of a model. This adds the Rust core with identity, signed membership, artifact download with grants, the stage wire and a Qwen2 stage executor, the Android bridge and onboarding, and the golden vectors that keep it equal to the Python side.",
+      "paths": [
+        "mycelium_mobile/**",
+        "native/mobile_core/**",
+        "tests/mobile/**",
+        "tests/a12_*/**",
+        "mycelium_live/phone_*.py",
+        "tests/live/*phone*",
+        "scripts/a12_gate_membership.py",
+        "scripts/run_a12_*.py",
+        "scripts/qwen_phone_builder.py",
+        "physical_pixel_host_stage.py",
+        "contracts/phone-*/**",
+        "scripts/generate_phone_*.py",
+        "tests/contracts/test_phone_*.py",
+        "docs/phone-builder-preparation.md",
+        "tests/fixtures/native-phone-interruptibility.json",
+        "tests/seed_coordinator/test_seed_android_pairing.py",
+        "tests/seed_coordinator/test_phone_*.py",
+        "mycelium_seed/phone_preparation.py",
+        "tests/qualification/test_phone_*.py"
+      ]
+    },
+    {
+      "id": "node-app",
+      "title": "feat(node-app): add the Tauri node app for desktop and Android",
+      "body": "The node app wraps the node core in a small desktop and Android application with a foreground service. This adds the web front end, the Tauri shell, the Android project files and the release signing script.",
+      "paths": [
+        "apps/node-app/**"
+      ]
+    },
+    {
+      "id": "linux-windows-packages",
+      "title": "feat(packaging): add Linux and Windows host packages with onboarding and service lifecycle",
+      "body": "Linux and Windows machines join a swarm from an installable package. This adds the shared packaging core, the per-platform install source, platform admission, onboarding progress, service lifecycle and ACL checks, and a Windows CI job. These installers have not been run on real hardware yet.",
+      "paths": [
+        "mycelium_a13_linux/**",
+        "mycelium_a13_windows/**",
+        "mycelium_a13_packaging/**",
+        "tests/a13_linux/**",
+        "tests/a13_windows/**",
+        "tests/a13_acceptance/**",
+        "scripts/build_a13_linux.py",
+        "scripts/build_a13_windows.py",
+        "scripts/a13_windows_device_bringup.ps1",
+        ".github/workflows/windows-a13.yml",
+        "docs/design/cross-platform-matrix.md"
+      ]
+    },
+    {
+      "id": "macos-app",
+      "title": "feat(macos): add the macOS app to create, join, serve, chat and leave a swarm",
+      "body": "The macOS app is the main way to use Mycelium. It creates a swarm, shows a join link and QR code, lets a second Mac join with a single-use code, downloads only the model slice each Mac serves, checks the route, streams chat answers, and lets a Mac pause or leave while keeping its identity.",
+      "paths": [
+        "mycelium_a13_macos/**",
+        "tests/a13_macos/**",
+        "scripts/build_a13_macos.py",
+        "scripts/finalize_a13_macos.py",
+        "Mycelium A13 Demo.spec",
+        "requirements-a13-macos-runtime.txt",
+        "docs/handover/A13-MACOS-*",
+        "docs/design/swarm-ux-walkthrough.md"
+      ],
+      "except": [
+        "mycelium_a13_macos/adaptive_*.py",
+        "tests/a13_macos/test_adaptive_*.py",
+        "mycelium_a13_macos/public_relay.py",
+        "mycelium_a13_macos/public_https.py",
+        "mycelium_a13_macos/tls.py",
+        "mycelium_a13_macos/control_origin.py",
+        "tests/a13_macos/test_app_relay*.py",
+        "tests/a13_macos/test_external_origin_relay.py",
+        "tests/a13_macos/test_relay_*.py",
+        "tests/a13_macos/test_seed_relay.py",
+        "tests/a13_macos/test_public_https.py",
+        "tests/a13_macos/test_public_origin.py",
+        "tests/a13_macos/test_tls.py",
+        "mycelium_a13_macos/swarm_*.py",
+        "mycelium_a13_macos/web/swarm.js",
+        "tests/a13_macos/test_swarm_*.py",
+        "tests/a13_macos/test_browser_swarm_publish.py"
+      ]
+    },
+    {
+      "id": "public-relay-origin",
+      "title": "feat(relay): let a swarm publish its entry through a public relay and a Cloudflare origin",
+      "body": "A swarm owner can expose the swarm's public entry without opening ports. This adds the public relay and HTTPS entry, the TLS handling and control origin, the Cloudflare header checks, the bootstrap templates for an owner-run origin, and the relay renewal and reopen logic.",
+      "paths": [
+        "mycelium_a13_macos/public_relay.py",
+        "mycelium_a13_macos/public_https.py",
+        "mycelium_a13_macos/tls.py",
+        "mycelium_a13_macos/control_origin.py",
+        "tests/a13_macos/test_app_relay*.py",
+        "tests/a13_macos/test_external_origin_relay.py",
+        "tests/a13_macos/test_relay_*.py",
+        "tests/a13_macos/test_seed_relay.py",
+        "tests/a13_macos/test_public_https.py",
+        "tests/a13_macos/test_public_origin.py",
+        "tests/a13_macos/test_tls.py",
+        "tests/seed_coordinator/test_seed_public_https.py",
+        "tests/demo/test_public_origin_proxy*.py",
+        "release/a8-tls-bootstrap/**",
+        "scripts/a8_provision_public_origin.sh"
+      ]
+    },
+    {
+      "id": "swarm-directory",
+      "title": "feat(directory): add the swarm directory, owner-signed access grants and the mycelium.now site",
+      "body": "Swarm owners can list a swarm so that others can find it and chat through its public entry. This adds the directory service with signed access grants, rate limits and write budgets, the hosted web pages, the entry guard and privacy disclosure, and the service units used to run it.",
+      "paths": [
+        "mycelium_swarm_directory/**",
+        "tests/swarm_directory/**",
+        "deploy/swarm-directory*",
+        "mycelium_a13_macos/swarm_*.py",
+        "mycelium_a13_macos/web/swarm.js",
+        "tests/a13_macos/test_swarm_*.py",
+        "tests/a13_macos/test_browser_swarm_publish.py",
+        "docs/FRIEND-SWARM.md"
+      ]
+    },
+    {
+      "id": "adaptive-sharing",
+      "title": "feat(sharing): share a Mac's spare resources adaptively and withdraw cleanly",
+      "body": "A Mac shares only what it can spare and backs off when the owner needs the machine. This adds resource collectors, the adaptive host and owner policy, drain and pause hooks, a restart fence so a withdrawn Mac does not silently re-enter, and re-entry rules.",
+      "paths": [
+        "mycelium_a13_macos/adaptive_*.py",
+        "tests/a13_macos/test_adaptive_*.py",
+        "tests/a16_acceptance/**"
+      ]
+    },
+    {
+      "id": "governance-gates",
+      "title": "feat(governance): add the requirements-based gate harness, claim-boundary audit and completion audit",
+      "body": "Release claims are checked against what the evidence actually shows. This adds the requirements-based gate harness, the governance gate and audit, the claim-boundary and release-security audits, the lane audit, the completion audit, and the CI workflow that runs them.",
+      "paths": [
+        "mycelium_governance.py",
+        "mycelium_gate_requirements/**",
+        "mycelium_lane_audit/**",
+        "tests/gate_requirements/**",
+        "tests/lane_audit/**",
+        "tests/claims/**",
+        "tests/security/**",
+        "tests/governance/**",
+        "tests/governance-requirements.txt",
+        "tests/QUARANTINE.md",
+        ".github/workflows/governance.yml",
+        "scripts/governance_*.py",
+        "scripts/claim_boundary_audit.py",
+        "scripts/release_security_audit.py",
+        "scripts/mycelium_completion_audit.py",
+        "scripts/gate_evidence_carryover.py",
+        "scripts/gate_source_sets.py",
+        "scripts/pin_gate_requirement_specs.py",
+        "scripts/fill_a0_literal_record.py",
+        "scripts/pilot_readiness_gate.py",
+        "docs/security/**",
+        "docs/operations/blocker-claim-clauses.md",
+        "docs/operations/red-by-design-suites.md",
+        "docs/operations/requirements-based-gates.md"
+      ],
+      "except": [
+        "tests/governance/test_a6_source_manifest.py",
+        "tests/governance/test_prepublish_audit.py"
+      ]
+    },
+    {
+      "id": "release-evidence",
+      "title": "feat(release): add release evidence bundles, service packaging and executed-release intake",
+      "body": "A release is backed by an evidence bundle that can be checked without trusting the producer. This adds the bundle verifier, the SBOM and service package, the external reviewer bundle and preflight, the managed-restart seal, and the intake and decision tools for executed runs.",
+      "paths": [
+        "mycelium_m22_*.py",
+        "mycelium_service_*.py",
+        "mycelium_reviewer_*.py",
+        "mycelium_release_bundle/**",
+        "tests/release_bundle/**",
+        "test_m22_*.py",
+        "mycelium_a15_*.py",
+        "scripts/a15_*.py",
+        "tests/a15_*/**",
+        "scripts/seal_m22_*.py",
+        "scripts/package_m22_service.py",
+        "scripts/generate_m22_sbom.py",
+        "scripts/build_external_reviewer_bundle.py",
+        "scripts/external_reviewer_preflight.py",
+        "release/service-configs/**",
+        "release/python-requirements.lock",
+        "docs/release/**",
+        "docs/operations/a15-executed-artifact-intake.md",
+        "docs/operations/pilot-service-runbook.md",
+        "scripts/refresh_operator_runtime_sources.py"
+      ]
+    },
+    {
+      "id": "demo-ops",
+      "title": "feat(demo): add the local release doctor, the self-healing demo watchdog and bootstrap preflight",
+      "body": "Running a hosted demo needs a check that the machine is ready and a process that restarts what fails. This adds the read-only release preflight, the always-on demo watchdog with its service unit, and the fresh-checkout bootstrap preflight.",
+      "paths": [
+        "mycelium_demo/**",
+        "mycelium_demo_watchdog/**",
+        "mycelium_bootstrap_preflight/**",
+        "tests/demo/**",
+        "tests/demo_watchdog/**",
+        "tests/bootstrap_preflight/**",
+        "deploy/demo-watchdog.plist",
+        "docs/demo/**",
+        "docs/operations/hosted-demo-hardening.md"
+      ],
+      "except": [
+        "tests/demo/test_public_origin_proxy*.py"
+      ]
+    },
+    {
+      "id": "operator-tooling",
+      "title": "feat(tools): add the two-machine operator toolkit and adjudication scripts",
+      "body": "Real-hardware runs are driven from an operator toolkit that checks boot identity, collects receipts and records what each round observed. This adds those scripts with their tests, plus the adjudication scripts that re-measure disputed premises.",
+      "paths": [
+        "scripts/a13_operator/**",
+        "tests/a13_operator/**",
+        "scripts/adjudication/**"
+      ]
+    },
+    {
+      "id": "design-docs",
+      "title": "docs: add architecture handover, specs and implementation contracts",
+      "body": "These documents record how the system is structured and why. They hold the architecture handover, the design specs for each milestone and task, the implementation contracts, the completion records and the integration notes.",
+      "paths": [
+        "docs/superpowers/**",
+        "docs/handover/**",
+        "docs/design/**",
+        "docs/integration/**",
+        "REPORT.md"
+      ],
+      "except": [
+        "docs/design/cross-platform-matrix.md",
+        "docs/design/lan-direct-transport.md",
+        "docs/design/swarm-ux-walkthrough.md",
+        "docs/handover/A13-MACOS-*"
+      ]
+    },
+    {
+      "id": "user-docs",
+      "title": "docs: add user documentation for installing and using Mycelium on macOS",
+      "body": "These pages explain what Mycelium does, how to install and start it on a Mac, what privacy to expect and how to fix common problems.",
+      "paths": [
+        "docs/user/**"
+      ]
+    },
+    {
+      "id": "release-tooling-licence",
+      "title": "chore: add the AGPL-3.0-only licence, README, release notes and pre-publish audit",
+      "body": "Mycelium is licensed AGPL-3.0-only, and every source file carries that SPDX header. This adds the licence text, the README for the first public preview, the release notes, the pre-publish audit that refuses secrets, private paths and licence drift, and the scripts that rebuild this history. It also re-pins the provenance baseline manifest.",
+      "paths": [
+        "LICENSE",
+        "README.md",
+        ".gitignore",
+        "pytest.ini",
+        "conftest.py",
+        "requirements-dev.txt",
+        "scripts/prepublish_audit.py",
+        "scripts/prepublish_audit.allowlist.json",
+        "tests/governance/test_prepublish_audit.py",
+        "scripts/release/**",
+        "docs/RELEASE-NOTES-V1.md",
+        "docs/provenance/baseline-manifest.sha256"
+      ]
+    }
+  ]
+}

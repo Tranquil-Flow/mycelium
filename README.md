@@ -1,63 +1,73 @@
 # Mycelium
 
-Mycelium is a distributed-inference system for assigning model stages to heterogeneous peers, provisioning assignment-specific artifacts, routing activations, and qualifying physical execution with explicit evidence. It is the infer## Current status (updated 2026-10-09)
+Mycelium splits one language model across several computers, so machines that
+could not run the model alone can serve it together. It assigns model layers to
+devices by available memory, sends each device only the weights it needs, passes
+activations from device to device, and streams the answer back token by token.
 
-Mycelium is a research prototype. It currently assumes trusted, operator-controlled devices. It is not a public network, and it does not hide prompts or activations from the devices that run model stages.
+**Status: first public preview (V1).** It works on the project's own Macs and has
+not been tested on a wide range of machines. Read the
+[release notes](docs/RELEASE-NOTES-V1.md) for the exact list of what works and
+what does not.
 
-`main` contains the Planner, provisioning, Gossip, Router, batching, transport, and read-only Network Observatory surfaces. The physical multi-device results below were produced on integration branches that are not yet merged into `main`. The canonical status record is `docs/handover/CURRENT_AND_PLANNED_ARCHITECTURE.md` on branch `w6-27b-native-adapter`.
+## What works today
 
-Physical results (all models int8 weight-only, pipeline-split across the operator's own devices):
+- **A two-Mac swarm.** One Mac creates a swarm, a second Mac joins with a
+  short-lived, single-use code, and the model's layers are split between them.
+  Chat answers stream in the app.
+- **A public directory.** A swarm can be listed on <https://mycelium.now>, and
+  others can chat with it through the swarm's public entry.
+- **Your own relay origin.** The owner can serve the swarm's public entry from a
+  hostname they control instead of a temporary tunnel address.
+- **Verified downloads.** Each Mac fetches only its slice of the model; downloads
+  are checked against pinned hashes and can resume.
 
-- **Qwen2.5-0.5B-Instruct:** distributed requests served through the browser product across two physical hosts (Apple M4 Pro / MLX -> Microsoft Surface / NumPy), and across three hosts with stage replicas. An earlier three-device route measured about 0.75-0.82 tokens/s.
-- **Qwen2.5-3B-Instruct:** a three-host physical route completed browser inference.
-- **Qwen2.5-7B:** qualified over the M4 Pro / MLX -> Surface / NumPy route, streaming a real browser answer; retained as a qualified standby.
-- **Across networks:** internet-native control and activation transport completed ordinary inference over direct and forced-relay paths with an external peer on an unrelated network, without Tailscale (`docs/handover/A8_STATUS_2026-08-21.md` on branch `codex/a8-internet-native`).
+Limits worth knowing before you start: macOS on Apple silicon only; the app is
+ad-hoc signed and not notarized; the public demo model is small (Qwen2.5-0.5B);
+only two-Mac swarms have been run end to end; and the Macs that serve a prompt
+can see it (see [`docs/user/PRIVACY.md`](docs/user/PRIVACY.md)).
 
-Limitations:
+## Install (macOS app)
 
-- The runs above are retained, evidence-sealed observations, not current live health. Deployments must be freshly qualified before admitting new requests.
-- Pipeline (contiguous stage) parallelism only; no tensor parallelism.
-- Model adapters cover GPT-2, Qwen2, Qwen3, and Qwen3.5 architectures, and each model must be qualified before use. Qwen2.5-1.5B timed out during decode and must be requalified.
-- Request-level stage replicas worked end to end, but the speed-up benchmark was inconclusive (+16.7% point estimate, 95% lower bound -42%), so the feature was not promoted.
-- Throughput is early and has not been optimised.
+1. Download the macOS app zip and its `.sha256` file from the
+   [latest release](../../releases/latest).
+2. Follow [`docs/user/QUICKSTART-MACOS.md`](docs/user/QUICKSTART-MACOS.md): check
+   the checksum and signature, run the installer, then start or join a swarm with
+   two Macs.
+3. If something goes wrong, see
+   [`docs/user/TROUBLESHOOTING.md`](docs/user/TROUBLESHOOTING.md).
 
-Next: running a ~27B-class model, starting with Qwen3.8-27B. A native 4-bit route for the Qwen3.5 27B architecture is on branch `w6-27b-native-adapter`; it is unit-tested but not yet run on physical hardware.
+The other pages in [`docs/user/`](docs/user/README.md) explain what Mycelium does
+and how far each feature has been proven.
 
-nd route qualification remain under construction.
+## Developer setup
 
-## Architecture direction
-
-```text
-Gossip -> Planner -> assignments -> provisioning -> runtime load proofs
-       -> Layer Builder -> Router -> physical stage execution -> qualification
-```
-
-Control-plane records never carry model tensors or protected implementation edits. Peers download assignment-specific artifacts directly when possible. Runtime readiness and route readiness remain distinct.
-
-## Repository boundaries
-
-- Generated model caches, run directories, local evidence, internal handovers, and planning files remain untracked.
-- Curated evidence must be redacted, immutable, and manifest-addressed before entering version control.
-- Secrets and device tokens must never be committed.
-- The Network Observatory remains read-only; request submission is a separate control surface.
-
-## Verification
-
-Python baseline:
-
-```bash
-python3 -m pytest -q
-```
-
-Offline two-process MLX runtime-load qualification:
+You need Python 3.14 (the Homebrew build is what the project uses). In a fresh
+virtual environment:
 
 ```bash
-python3 two_process_runtime_qualification.py --json
+/opt/homebrew/bin/python3.14 -m venv --system-site-packages .venv
+.venv/bin/pip install cryptography numpy -r requirements-dev.txt
 ```
 
-The command generates all model artifacts locally, provisions through an injected local-only fetcher, uses `multiprocessing` with the `spawn` start method, and emits JSON-safe child load proofs. A Python audit guard rejects socket/DNS events from immediately before each assignment load until child exit; this is not an OS-level network sandbox. It does not claim distributed inference, route readiness, activation transfer, or simultaneous/post-exit device-memory residency.
+`requirements-dev.txt` adds `pytest-xdist` and `playwright`. `pytest` and
+`pytest-asyncio` come from the interpreter's own site-packages through
+`--system-site-packages`; on a bare interpreter also run
+`pip install pytest pytest-asyncio`. Sharded MLX inference needs `mlx` on Apple
+silicon (`pip install mlx`).
 
-Network Observatory:
+Run tests with the repository root on `PYTHONPATH`, one directory or file at a
+time:
+
+```bash
+PYTHONPATH=. .venv/bin/python -m pytest -q -p no:cacheprovider tests/invite
+```
+
+The test levels (unit, integration, emulation, physical) and their markers are
+described in [`pytest.ini`](pytest.ini). Tests under `physical_*` directories need
+real hardware.
+
+Web interface:
 
 ```bash
 cd ui/web
@@ -65,8 +75,62 @@ npm ci
 npm run check
 ```
 
-The MVP is not complete until a physical multi-peer qualification demonstrates real stage computation and deterministic token parity with a monolithic reference.
+Offline two-process MLX runtime-load qualification:
 
-## License
+```bash
+.venv/bin/python two_process_runtime_qualification.py --json
+```
 
-Mycelium is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See [LICENSE](LICENSE).
+It generates all model artifacts locally, provisions through an injected
+local-only fetcher, runs the stages in `multiprocessing` `spawn` children, and
+emits JSON-safe load proofs. A Python audit guard rejects socket and DNS events
+from just before each assignment load until the child exits; this is not an
+OS-level network sandbox. It does not claim distributed inference.
+
+Interactive browser swarm on one machine (a local qualification surface):
+
+```bash
+.venv/bin/python scripts/interactive_swarm_server.py
+```
+
+Open the printed `operator_url`, create a join link, and open it in the
+contributing browser. Use beyond loopback needs HTTPS and an explicit
+`--public-origin`; see [`docs/interactive-browser-swarm.md`](docs/interactive-browser-swarm.md).
+
+## How it fits together
+
+```text
+Gossip -> Planner -> assignments -> provisioning -> runtime load proofs
+       -> Layer Builder -> Router -> stage execution -> qualification
+```
+
+Control-plane records never carry model tensors. Runtime readiness and route
+readiness are separate states.
+
+| Area | Where |
+| --- | --- |
+| Layer planning and re-planning | `mycelium_layer_planner/`, `layer_planner.py` |
+| Request and inter-layer routing | `mycelium_router/` |
+| Peer discovery and evidence gossip | `mycelium_gossip/` |
+| Signed seed, invitations, memberships | `mycelium_seed/`, `mycelium_invite/`, `mycelium_membership/` |
+| Public swarm directory | `mycelium_swarm_directory/` |
+| macOS app | `mycelium_a13_macos/` |
+| Web interface | `ui/web/` |
+
+Component designs: [`ALLOCATOR.md`](ALLOCATOR.md),
+[`GOSSIP_PROTOCOL.md`](GOSSIP_PROTOCOL.md),
+[`BROADCAST_PROTOCOL.md`](BROADCAST_PROTOCOL.md),
+[`REQUEST_AND_INTER_LAYER_ROUTER_DESIGN.md`](REQUEST_AND_INTER_LAYER_ROUTER_DESIGN.md),
+[`FAULT_TOLERANT_LAYER_REPLANNER.md`](FAULT_TOLERANT_LAYER_REPLANNER.md), and
+[`LAYER_PLANNER_PRODUCT_V1.md`](LAYER_PLANNER_PRODUCT_V1.md).
+
+## Reporting problems
+
+Open a GitHub issue and include the app's short error code. Never paste secrets,
+tokens or private keys. Evidence committed to this repository must be redacted
+and addressed by a manifest; the Network Observatory stays read-only.
+
+## Licence
+
+Mycelium is licensed under the GNU Affero General Public License, version 3 only
+(`AGPL-3.0-only`). See [`LICENSE`](LICENSE).
