@@ -1,0 +1,162 @@
+{
+  "endpoint_addr": {
+    "addrs": [],
+    "id": "endpoint-phone"
+  },
+  "identity": {
+    "boot_id": "boot-1",
+    "endpoint_id": "endpoint-phone",
+    "host_id": "host-phone",
+    "node_id": "node-phone",
+    "process_id": "process-1"
+  },
+  "monotonic_ns": 7,
+  "schema": "mycelium.phone_node_control.golden.v1",
+  "seed_hex": "0909090909090909090909090909090909090909090909090909090909090909",
+  "stage": {
+    "assignment_id": "assignment-1",
+    "backend": "mobile-rust-qwen2",
+    "golden_output_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "load_generation": 1,
+    "pack_digest": "sha256:pack",
+    "runtime_build_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "stage_id": "stage-phone"
+  },
+  "steps": [
+    {
+      "command": {
+        "command": "hello",
+        "command_id": "c-hello",
+        "deployment_id": "dep-1",
+        "payload": {},
+        "protocol": "mycelium.physical_node_control.v1",
+        "run_id": "run-1"
+      },
+      "response_canonical": "{\"command_id\":\"c-hello\",\"node_id\":\"node-phone\",\"ok\":true,\"protocol\":\"mycelium.physical_node_control.v1\",\"result\":{\"boot_id\":\"boot-1\",\"deployment_id\":\"dep-1\",\"endpoint_id\":\"endpoint-phone\",\"host_id\":\"host-phone\",\"node_id\":\"node-phone\",\"peer_generation\":0,\"process_id\":\"process-1\",\"protocol\":\"mycelium.physical_node_control.v1\",\"route_ready\":false,\"run_id\":\"run-1\",\"state\":\"NEW\"},\"route_ready\":false}"
+    },
+    {
+      "command": {
+        "command": "configure",
+        "command_id": "c-configure",
+        "deployment_id": "dep-1",
+        "payload": {
+          "assignment_id": "assignment-1",
+          "load_generation": 1,
+          "manifest_digest": "sha256:graph",
+          "pack_digest": "sha256:pack",
+          "request_control_graph": {
+            "deployment_epoch": 1,
+            "deployment_id": "dep-1",
+            "topology_generation": 1
+          },
+          "stage_id": "stage-phone"
+        },
+        "protocol": "mycelium.physical_node_control.v1",
+        "run_id": "run-1"
+      },
+      "response_canonical": "{\"command_id\":\"c-configure\",\"node_id\":\"node-phone\",\"ok\":true,\"protocol\":\"mycelium.physical_node_control.v1\",\"result\":{\"observation\":{\"deployment_id\":\"dep-1\",\"details\":{\"assignment_id\":\"assignment-1\",\"endpoint_addr\":{\"addrs\":[],\"id\":\"endpoint-phone\"},\"golden_output_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"load_generation\":1,\"load_identity_provenance\":{\"applied_fields\":[\"assignment_id\",\"stage_id\",\"phone_stage_pack_digest\",\"runtime_backend\",\"runtime_build_digest\",\"golden_output_digest\",\"load_generation\"],\"controller_claim_fields\":[\"manifest_digest\"],\"limitation\":\"native_full_model_manifest_digest_not_independently_observed\",\"load_generation_basis\":\"native_stage_load_sequence_within_process_incarnation\"},\"manifest_digest\":\"sha256:graph\",\"phone_stage_pack_digest\":\"sha256:pack\",\"runtime_backend\":\"mobile-rust-qwen2\",\"runtime_build_digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"runtime_mode\":\"complete_context_replay\",\"stage_id\":\"stage-phone\"},\"endpoint_id\":\"endpoint-phone\",\"event\":\"configured\",\"host_id\":\"host-phone\",\"monotonic_ns\":7,\"node_id\":\"node-phone\",\"peer_generation\":0,\"process_id\":\"process-1\",\"protocol\":\"mycelium.physical_node_observation.v1\",\"route_ready\":false,\"run_id\":\"run-1\",\"state\":\"CONFIGURED\"},\"signature\":{\"algorithm\":\"ed25519\",\"signature\":\"L77OPY7GT/z6P/Z1M8CJOGg/WXtgidSs1yEECB9GDuswEYG8NgbiVlKesXARddeKc9vsibAMmk7s3DAnn2NnAg==\",\"signed_statement_digest\":\"sha256:4ac14e67a72e68ad8d924a35d9d61bd437231cc89a00a905f7e30776632d690b\",\"signer_endpoint_id\":\"endpoint-phone\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"},\"verification_key\":{\"algorithm\":\"ed25519\",\"encoding\":\"base64\",\"verification_key\":\"/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"}},\"route_ready\":false}"
+    },
+    {
+      "command": {
+        "command": "start",
+        "command_id": "c-start",
+        "deployment_id": "dep-1",
+        "payload": {
+          "local_generation": 5,
+          "peer": {
+            "endpoint_addr": {
+              "addrs": [],
+              "id": "endpoint-final"
+            },
+            "endpoint_id": "endpoint-final",
+            "generation": 3,
+            "node_id": "node-mac-final"
+          }
+        },
+        "protocol": "mycelium.physical_node_control.v1",
+        "run_id": "run-1"
+      },
+      "response_canonical": "{\"command_id\":\"c-start\",\"node_id\":\"node-phone\",\"ok\":true,\"protocol\":\"mycelium.physical_node_control.v1\",\"result\":{\"observation\":{\"deployment_id\":\"dep-1\",\"details\":{\"local_generation\":5,\"peer_node_id\":\"node-mac-final\",\"peer_node_ids\":[\"node-mac-final\"]},\"endpoint_id\":\"endpoint-phone\",\"event\":\"started\",\"host_id\":\"host-phone\",\"monotonic_ns\":7,\"node_id\":\"node-phone\",\"peer_generation\":5,\"process_id\":\"process-1\",\"protocol\":\"mycelium.physical_node_observation.v1\",\"route_ready\":false,\"run_id\":\"run-1\",\"state\":\"RUNNING\"},\"signature\":{\"algorithm\":\"ed25519\",\"signature\":\"RjOYQ7LM7t1WVvLriHYU/cK46zEB6zRuCjRGTAP/+JsTrm8FKXBr+sgTdKfFBD1+o2nFvhmGPmCavdxw1u7hCQ==\",\"signed_statement_digest\":\"sha256:a29a23e711c08c7bc06c049f7720c2c4f980cf3de2c771041e69f53e1d96bc40\",\"signer_endpoint_id\":\"endpoint-phone\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"},\"verification_key\":{\"algorithm\":\"ed25519\",\"encoding\":\"base64\",\"verification_key\":\"/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"}},\"route_ready\":false}"
+    },
+    {
+      "command": {
+        "command": "bind_request_control",
+        "command_id": "c-bind_request_control",
+        "deployment_id": "dep-1",
+        "payload": {
+          "control": {
+            "absolute_deadline_ms": 10,
+            "cancellation_generation": 0,
+            "command_id": "cmd",
+            "deployment_epoch": 1,
+            "deployment_id": "dep-1",
+            "path_attempt": 0,
+            "path_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "path_id": "p",
+            "publisher_generation": 1,
+            "qualification_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "request_attempt": 1,
+            "topology_generation": 1
+          },
+          "execution_budget_ms": 60000,
+          "request_id": "r"
+        },
+        "protocol": "mycelium.physical_node_control.v1",
+        "run_id": "run-1"
+      },
+      "response_canonical": "{\"command_id\":\"c-bind_request_control\",\"node_id\":\"node-phone\",\"ok\":true,\"protocol\":\"mycelium.physical_node_control.v1\",\"result\":{\"observation\":{\"deployment_id\":\"dep-1\",\"details\":{\"control_digest\":\"sha256:50dd32ab98ce9591177188d1d91d3458e90d9007b0772a0db533a31e10bdac1d\",\"request_id\":\"r\"},\"endpoint_id\":\"endpoint-phone\",\"event\":\"request_control_bound\",\"host_id\":\"host-phone\",\"monotonic_ns\":7,\"node_id\":\"node-phone\",\"peer_generation\":5,\"process_id\":\"process-1\",\"protocol\":\"mycelium.physical_node_observation.v1\",\"route_ready\":false,\"run_id\":\"run-1\",\"state\":\"RUNNING\"},\"signature\":{\"algorithm\":\"ed25519\",\"signature\":\"TKep5pmo18U7Jx5oxEZVTpt7Z7pJoFCjMtCPsN7A2rPxy79ZWNHxWf4lusDGqy0t4c58T+IPeWC9b46sX8VjAQ==\",\"signed_statement_digest\":\"sha256:e63783ac6c0fc88cfc1942a0905ce1f4e3fecfb0482d2672107e33ce6cd7056f\",\"signer_endpoint_id\":\"endpoint-phone\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"},\"verification_key\":{\"algorithm\":\"ed25519\",\"encoding\":\"base64\",\"verification_key\":\"/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"}},\"route_ready\":false}"
+    },
+    {
+      "command": {
+        "command": "infer_cancel_wait",
+        "command_id": "c-infer_cancel_wait",
+        "deployment_id": "dep-1",
+        "payload": {
+          "absolute_deadline_ms": 10,
+          "cancellation_generation": 1,
+          "command_id": "cmd",
+          "deadline_budget_ms": 4000,
+          "deployment_epoch": 1,
+          "deployment_id": "dep-1",
+          "path_attempt": 0,
+          "path_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "path_id": "p",
+          "publisher_generation": 1,
+          "qualification_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "request_attempt": 1,
+          "request_id": "r",
+          "topology_generation": 1
+        },
+        "protocol": "mycelium.physical_node_control.v1",
+        "run_id": "run-1"
+      },
+      "response_canonical": "{\"command_id\":\"c-infer_cancel_wait\",\"node_id\":\"node-phone\",\"ok\":true,\"protocol\":\"mycelium.physical_node_control.v1\",\"result\":{\"observation\":{\"deployment_id\":\"dep-1\",\"details\":{\"cancelled\":true,\"cleanup_pending\":false,\"request_cleanup\":{\"absolute_deadline_ms\":10,\"cancellation_generation\":1,\"cancellation_worker_complete\":true,\"command_id\":\"cmd\",\"complete\":true,\"deployment_epoch\":1,\"deployment_id\":\"dep-1\",\"path_attempt\":0,\"path_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"path_id\":\"p\",\"publisher_generation\":1,\"qualification_digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"request_attempt\":1,\"request_id\":\"r\",\"residue\":{\"inflight\":0,\"live_paths\":[],\"path_retained\":false,\"pending_cancellations\":0,\"replay_results\":0},\"runtime_clean\":true,\"topology_generation\":1,\"transport_clean\":true},\"request_id\":\"r\",\"status\":\"CANCELLED\"},\"endpoint_id\":\"endpoint-phone\",\"event\":\"inference_cancelled\",\"host_id\":\"host-phone\",\"monotonic_ns\":7,\"node_id\":\"node-phone\",\"peer_generation\":5,\"process_id\":\"process-1\",\"protocol\":\"mycelium.physical_node_observation.v1\",\"route_ready\":false,\"run_id\":\"run-1\",\"state\":\"RUNNING\"},\"signature\":{\"algorithm\":\"ed25519\",\"signature\":\"3v53UEtHS/C0J/ru+1ogr7sBKJjhUjg7dUvFTxwFUDsrQ80BAM4Kd4EcBGaqytmyTPBdGP5IK/dg1ymmV12QAg==\",\"signed_statement_digest\":\"sha256:be115a9eb636d7e5bae6423996ef398e82f0b32371a912afc594ae37df9a23d5\",\"signer_endpoint_id\":\"endpoint-phone\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"},\"verification_key\":{\"algorithm\":\"ed25519\",\"encoding\":\"base64\",\"verification_key\":\"/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"}},\"route_ready\":false}"
+    },
+    {
+      "command": {
+        "command": "infer_cancel_wait",
+        "command_id": "c-infer_cancel_wait",
+        "deployment_id": "dep-1",
+        "payload": {
+          "absolute_deadline_ms": 10,
+          "cancellation_generation": 1,
+          "command_id": "cmd",
+          "deadline_budget_ms": 4000,
+          "deployment_epoch": 1,
+          "deployment_id": "dep-1",
+          "path_attempt": 0,
+          "path_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "path_id": "p",
+          "publisher_generation": 1,
+          "qualification_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "request_attempt": 1,
+          "request_id": "r",
+          "topology_generation": 1
+        },
+        "protocol": "mycelium.physical_node_control.v1",
+        "run_id": "run-1"
+      },
+      "response_canonical": "{\"command_id\":\"c-infer_cancel_wait\",\"node_id\":\"node-phone\",\"ok\":true,\"protocol\":\"mycelium.physical_node_control.v1\",\"result\":{\"observation\":{\"deployment_id\":\"dep-1\",\"details\":{\"cancelled\":true,\"cleanup_pending\":false,\"request_cleanup\":{\"absolute_deadline_ms\":10,\"cancellation_generation\":1,\"cancellation_worker_complete\":true,\"command_id\":\"cmd\",\"complete\":true,\"deployment_epoch\":1,\"deployment_id\":\"dep-1\",\"path_attempt\":0,\"path_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"path_id\":\"p\",\"publisher_generation\":1,\"qualification_digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"request_attempt\":1,\"request_id\":\"r\",\"residue\":{\"inflight\":0,\"live_paths\":[],\"path_retained\":false,\"pending_cancellations\":0,\"replay_results\":0},\"runtime_clean\":true,\"topology_generation\":1,\"transport_clean\":true},\"request_id\":\"r\",\"status\":\"CANCELLED\"},\"endpoint_id\":\"endpoint-phone\",\"event\":\"inference_cancelled\",\"host_id\":\"host-phone\",\"monotonic_ns\":7,\"node_id\":\"node-phone\",\"peer_generation\":5,\"process_id\":\"process-1\",\"protocol\":\"mycelium.physical_node_observation.v1\",\"route_ready\":false,\"run_id\":\"run-1\",\"state\":\"RUNNING\"},\"signature\":{\"algorithm\":\"ed25519\",\"signature\":\"3v53UEtHS/C0J/ru+1ogr7sBKJjhUjg7dUvFTxwFUDsrQ80BAM4Kd4EcBGaqytmyTPBdGP5IK/dg1ymmV12QAg==\",\"signed_statement_digest\":\"sha256:be115a9eb636d7e5bae6423996ef398e82f0b32371a912afc594ae37df9a23d5\",\"signer_endpoint_id\":\"endpoint-phone\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"},\"verification_key\":{\"algorithm\":\"ed25519\",\"encoding\":\"base64\",\"verification_key\":\"/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=\",\"verification_key_digest\":\"sha256:dbc298251c51321b7266e78d1c151c2b62aff8cb95b293096d3463018544face\"}},\"route_ready\":false}"
+    }
+  ]
+}

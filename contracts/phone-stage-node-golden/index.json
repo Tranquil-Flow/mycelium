@@ -1,0 +1,907 @@
+{
+  "frames": {
+    "0de77771ee4ff672.bin": "0de77771ee4ff67222bff0e9cac072db112160681f5e0d2115e57d8167d0816f",
+    "14b6ca8768c33d03.bin": "14b6ca8768c33d03a2da8e91aa9d26fb61fe17798cdd80463280f8ef3504336a",
+    "14cac8a9525ae332.bin": "14cac8a9525ae33209b619443258b7f611552cc54ef998c03dde2ba6ec6f0ab8",
+    "1b416856dedf0ac5.bin": "1b416856dedf0ac5fb5f12f38b80fcdaca3796068c2ad7944be460a4cef12944",
+    "1fc47a89bff872b9.bin": "1fc47a89bff872b96b97d0569c5be707a17b7c8e78d986ef6960e2bec6b96cc2",
+    "38872711f5778153.bin": "38872711f57781537af24d084cac26bb2e4bc3c0acc12d3b4ccd2d57d985592b",
+    "3a7d200121ca3890.bin": "3a7d200121ca3890f541005d686d56f8a9fd210bf4e1d3f858723ee6ebe27628",
+    "3cbef73b38f209a1.bin": "3cbef73b38f209a1a3d90bb827c534f7dc6195d6c09fc737edf154e849dd96ff",
+    "47f82b32a3b774e5.bin": "47f82b32a3b774e5d53820cbd62208e9aae5118dfb3b5e41b03a4a51ab4f1d4e",
+    "4898ce05480d76a9.bin": "4898ce05480d76a9f6028e78298466dcd09a2e36538616cf3cf7c7c6911efdfe",
+    "53242b7129ced853.bin": "53242b7129ced853da3cd6b23385ea63ba4c2ad8980105030eadcbde6e1ed58d",
+    "54bf28d4bc2a2224.bin": "54bf28d4bc2a22244fb526eb4b0d7e71d53096e8218c344825975c9cbb8eb8f0",
+    "5616e0c675dd0020.bin": "5616e0c675dd00204ccc9c0c5cc8bdf9313c36461fb375da9baeb2f6e56c6868",
+    "5876960e89709a1a.bin": "5876960e89709a1ac8fc92977161f13ae7ca2cecc1d42b36918a344a80a1744b",
+    "58facc4edc1487f2.bin": "58facc4edc1487f265df6b8ee309244338c52d2f913ecbfaf61dc5405f907984",
+    "59800b1d4888168d.bin": "59800b1d4888168d24ea8398a4d4bda704c08b2b456c4d18e09e3d115956447c",
+    "5da2e6741e2a74aa.bin": "5da2e6741e2a74aa8a1434f324f9c0b001c7aa63ad4d7555840ebccfd9d2c929",
+    "5dcdd159255b465f.bin": "5dcdd159255b465ff24be5288b304f8e02f0bb5448c2fe7673fb6f0c35e90592",
+    "5de209a041af0cfe.bin": "5de209a041af0cfeb2676c80b19368ba4ddbd79003952a268b0fabf586073b98",
+    "5e5884c1e955e391.bin": "5e5884c1e955e391cc8c9976db59d5f06a5e881f3255c01553fba97841c6e484",
+    "5f60e8c928b905a9.bin": "5f60e8c928b905a9c30ba71a96dd388326a18b86d538f6b072fa8053b15db5c7",
+    "5f78a33f31c4d254.bin": "5f78a33f31c4d254db2e3ccd85bf5b52996e358aa260d8a3b6cd5e7802e6f8eb",
+    "6093026f2c981b1a.bin": "6093026f2c981b1a93a009e9e9dcb05c0862224ae6001f7a1d5363e2f83cc2dc",
+    "64a1cead93a8b987.bin": "64a1cead93a8b987d3281931632d8949c0c77edbbc8f2bc8873436941678c727",
+    "6822188aed72be26.bin": "6822188aed72be26b674df1448041508bf1f8097d1cc9f310b2d8d8186e075b2",
+    "6f79a9990b076a33.bin": "6f79a9990b076a335f5a119c33b957852691491815bd8b707112c26c7cb083ff",
+    "71ac8134a40f6fd3.bin": "71ac8134a40f6fd338b2ba38834ca2cbbe79cab0bd8acd9719fad5944c014991",
+    "738222523bd4e3bf.bin": "738222523bd4e3bf916560879863fa8af8678e08dd8cca0ba335aeec783b5f5d",
+    "79d34451614213f5.bin": "79d34451614213f5f586d6f8f8967e123d4be0d3970b6bff49056a994efc9c2c",
+    "8109bbbe7c940560.bin": "8109bbbe7c940560e0d33533e701270cb977cb160f95dc3281ebce5bb86d52c9",
+    "885f56f3d29ef873.bin": "885f56f3d29ef873b480359162589668d49b47fec41e1f7a80e00771138634ac",
+    "8b61fd6063e95105.bin": "8b61fd6063e95105bfd2698a97b35503c5676047b8848e91305c7661e482ce52",
+    "91f8a04f6a6bd294.bin": "91f8a04f6a6bd2942fec57ea45a20339ed7e0f161d9b5ec3c18923b514c5b7ea",
+    "9248b95940829ed7.bin": "9248b95940829ed7e9048cb720e408a954dea75af59e33ce3d449b8b63324a49",
+    "93f9fff63a7945b7.bin": "93f9fff63a7945b716d13a4b513336afb22e0479d87dacbf83d03122a17b2310",
+    "99df1e63d7b348e9.bin": "99df1e63d7b348e9f3f05dd611a0cbc5dec082648347097b37fc94faefba7bd8",
+    "9dcb73a83963b874.bin": "9dcb73a83963b874c131b76de2fbcb73de4592c96faf10d17039e9e69e38d91b",
+    "a84104b17190d9e0.bin": "a84104b17190d9e04df7e4d41743e1984232706a6c57abdde557486443eeaa8e",
+    "aa8be3d1fc6fd1b1.bin": "aa8be3d1fc6fd1b14b99c30529ad51924e96acec48db72c03e1bd111c5f0e68a",
+    "add78c7fc1d27333.bin": "add78c7fc1d27333a75fab76959dba1d6c6668c31b44f00ea89185243ad0f558",
+    "b1956537e43e0f9b.bin": "b1956537e43e0f9b1fa55356bde642a2c1ec2f2f1fe5b6de387658e64dddaf0d",
+    "c4d7e0f5a1a47322.bin": "c4d7e0f5a1a47322105804e9ac8b055fbdc460c9f9337303ab4760bd3802c7d9",
+    "c60efabbde59486e.bin": "c60efabbde59486ecbd8e9742edb6241e1d827fdc188f3359effe82cd884c324",
+    "e21b09638da35796.bin": "e21b09638da357965480c31d56b81ef5722e02b61f2dc8b645d23730662c0854",
+    "ed0eb4f48897bf15.bin": "ed0eb4f48897bf15274a69957e4bcc2bc46c8ed0b876cb810b379754221658d5"
+  },
+  "local_node_id": "node-phone",
+  "phone_bounds": {
+    "max_creators": 16,
+    "max_paths": 256,
+    "pending_per_source": 256,
+    "pending_total": 4096,
+    "quota_per_creator": 512
+  },
+  "protocol": "mycelium.router_wire.v1",
+  "scenarios": [
+    {
+      "bounds": {
+        "max_creators": 16,
+        "max_paths": 256,
+        "pending_per_source": 256,
+        "pending_total": 4096,
+        "quota_per_creator": 512
+      },
+      "name": "lifecycle",
+      "steps": [
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5dcdd159255b465f.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5dcdd159255b465f.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "FORWARDED",
+          "executed": 1,
+          "frame": "5876960e89709a1a.bin",
+          "from": "node-mac-entry",
+          "reason": "",
+          "sends": [
+            {
+              "frame": "c60efabbde59486e.bin",
+              "kind": "HopHeader",
+              "to": "node-mac-final"
+            }
+          ],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "FORWARDED",
+          "executed": 1,
+          "frame": "ed0eb4f48897bf15.bin",
+          "from": "node-mac-entry",
+          "reason": "",
+          "sends": [
+            {
+              "frame": "14cac8a9525ae332.bin",
+              "kind": "HopHeader",
+              "to": "node-mac-final"
+            }
+          ],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "FORWARDED",
+          "executed": 0,
+          "frame": "ed0eb4f48897bf15.bin",
+          "from": "node-mac-entry",
+          "reason": "",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "REJECTED",
+          "executed": 0,
+          "frame": "5f78a33f31c4d254.bin",
+          "from": "node-mac-entry",
+          "reason": "idempotency_payload_mismatch",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "REJECTED",
+          "executed": 0,
+          "frame": "93f9fff63a7945b7.bin",
+          "from": "node-mac-final",
+          "reason": "source_node_mismatch",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "REJECTED",
+          "executed": 0,
+          "frame": "47f82b32a3b774e5.bin",
+          "from": "node-mac-entry",
+          "reason": "stale_path_attempt",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": false,
+          "at": 0.0,
+          "frame": "5f60e8c928b905a9.bin",
+          "from": "node-mac-final",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": false,
+          "at": 0.0,
+          "frame": "6822188aed72be26.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": false,
+          "at": 0.0,
+          "frame": "9dcb73a83963b874.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5f60e8c928b905a9.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "REJECTED",
+          "executed": 0,
+          "frame": "59800b1d4888168d.bin",
+          "from": "node-mac-entry",
+          "reason": "unknown_path",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": false,
+          "at": 0.0,
+          "frame": "5dcdd159255b465f.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": false
+        }
+      ]
+    },
+    {
+      "bounds": {
+        "max_creators": 16,
+        "max_paths": 256,
+        "pending_per_source": 256,
+        "pending_total": 4096,
+        "quota_per_creator": 512
+      },
+      "name": "pending_cancellation",
+      "steps": [
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5f60e8c928b905a9.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": false,
+          "at": 0.0,
+          "frame": "5dcdd159255b465f.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": false
+        },
+        {
+          "at": 0.0,
+          "disposition": "REJECTED",
+          "executed": 0,
+          "frame": "ed0eb4f48897bf15.bin",
+          "from": "node-mac-entry",
+          "reason": "unknown_path",
+          "sends": [],
+          "transport_ack": true
+        }
+      ]
+    },
+    {
+      "bounds": {
+        "max_creators": 16,
+        "max_paths": 256,
+        "pending_per_source": 256,
+        "pending_total": 4096,
+        "quota_per_creator": 512
+      },
+      "name": "pending_cancellation_other_source",
+      "steps": [
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5f60e8c928b905a9.bin",
+          "from": "node-stranger",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5dcdd159255b465f.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "FORWARDED",
+          "executed": 1,
+          "frame": "ed0eb4f48897bf15.bin",
+          "from": "node-mac-entry",
+          "reason": "",
+          "sends": [
+            {
+              "frame": "14cac8a9525ae332.bin",
+              "kind": "HopHeader",
+              "to": "node-mac-final"
+            }
+          ],
+          "transport_ack": true
+        }
+      ]
+    },
+    {
+      "bounds": {
+        "max_creators": 16,
+        "max_paths": 256,
+        "pending_per_source": 256,
+        "pending_total": 4096,
+        "quota_per_creator": 512
+      },
+      "name": "manifest_sources",
+      "steps": [
+        {
+          "accepted": false,
+          "at": 0.0,
+          "frame": "5dcdd159255b465f.bin",
+          "from": "node-stranger",
+          "sends": [],
+          "transport_ack": false
+        },
+        {
+          "accepted": false,
+          "at": 0.0,
+          "frame": "5dcdd159255b465f.bin",
+          "from": "node-mac-final",
+          "sends": [],
+          "transport_ack": false
+        },
+        {
+          "at": 0.0,
+          "disposition": "REJECTED",
+          "executed": 0,
+          "frame": "ed0eb4f48897bf15.bin",
+          "from": "node-mac-entry",
+          "reason": "unknown_path",
+          "sends": [],
+          "transport_ack": true
+        }
+      ]
+    },
+    {
+      "bounds": {
+        "max_creators": 16,
+        "max_paths": 256,
+        "pending_per_source": 256,
+        "pending_total": 4096,
+        "quota_per_creator": 512
+      },
+      "name": "next_attempt",
+      "steps": [
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5dcdd159255b465f.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "FORWARDED",
+          "executed": 1,
+          "frame": "ed0eb4f48897bf15.bin",
+          "from": "node-mac-entry",
+          "reason": "",
+          "sends": [
+            {
+              "frame": "14cac8a9525ae332.bin",
+              "kind": "HopHeader",
+              "to": "node-mac-final"
+            }
+          ],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "3a7d200121ca3890.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "REJECTED",
+          "executed": 0,
+          "frame": "93f9fff63a7945b7.bin",
+          "from": "node-mac-entry",
+          "reason": "stale_path_attempt",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": false,
+          "at": 0.0,
+          "frame": "5dcdd159255b465f.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": false
+        }
+      ]
+    },
+    {
+      "bounds": {
+        "max_creators": 16,
+        "max_paths": 256,
+        "pending_per_source": 256,
+        "pending_total": 4096,
+        "quota_per_creator": 512
+      },
+      "name": "cross_owner_replacement",
+      "steps": [
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5dcdd159255b465f.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": false,
+          "at": 0.0,
+          "frame": "738222523bd4e3bf.bin",
+          "from": "node-mac-final",
+          "sends": [],
+          "transport_ack": false
+        },
+        {
+          "accepted": false,
+          "at": 0.0,
+          "frame": "58facc4edc1487f2.bin",
+          "from": "node-evil",
+          "sends": [],
+          "transport_ack": false
+        },
+        {
+          "at": 0.0,
+          "disposition": "FORWARDED",
+          "executed": 1,
+          "frame": "ed0eb4f48897bf15.bin",
+          "from": "node-mac-entry",
+          "reason": "",
+          "sends": [
+            {
+              "frame": "14cac8a9525ae332.bin",
+              "kind": "HopHeader",
+              "to": "node-mac-final"
+            }
+          ],
+          "transport_ack": true
+        }
+      ]
+    },
+    {
+      "bounds": {
+        "max_creators": 16,
+        "max_paths": 256,
+        "pending_per_source": 256,
+        "pending_total": 4096,
+        "quota_per_creator": 512
+      },
+      "name": "foreign_tombstone",
+      "steps": [
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5e5884c1e955e391.bin",
+          "from": "node-evil",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "6f79a9990b076a33.bin",
+          "from": "node-evil",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5dcdd159255b465f.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "FORWARDED",
+          "executed": 1,
+          "frame": "ed0eb4f48897bf15.bin",
+          "from": "node-mac-entry",
+          "reason": "",
+          "sends": [
+            {
+              "frame": "14cac8a9525ae332.bin",
+              "kind": "HopHeader",
+              "to": "node-mac-final"
+            }
+          ],
+          "transport_ack": true
+        }
+      ]
+    },
+    {
+      "bounds": {
+        "max_creators": 16,
+        "max_paths": 256,
+        "pending_per_source": 256,
+        "pending_total": 4096,
+        "quota_per_creator": 512
+      },
+      "name": "owner_high_water",
+      "steps": [
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5de209a041af0cfe.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "53242b7129ced853.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "71ac8134a40f6fd3.bin",
+          "from": "node-evil",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "4898ce05480d76a9.bin",
+          "from": "node-evil",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": false,
+          "at": 0.0,
+          "frame": "38872711f5778153.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": false
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5616e0c675dd0020.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        }
+      ]
+    },
+    {
+      "bounds": {
+        "max_creators": 16,
+        "max_paths": 256,
+        "pending_per_source": 256,
+        "pending_total": 4096,
+        "quota_per_creator": 512
+      },
+      "name": "separator_ids",
+      "steps": [
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "aa8be3d1fc6fd1b1.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5da2e6741e2a74aa.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "FORWARDED",
+          "executed": 1,
+          "frame": "64a1cead93a8b987.bin",
+          "from": "node-mac-entry",
+          "reason": "",
+          "sends": [
+            {
+              "frame": "6093026f2c981b1a.bin",
+              "kind": "HopHeader",
+              "to": "node-mac-final"
+            }
+          ],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "FORWARDED",
+          "executed": 1,
+          "frame": "885f56f3d29ef873.bin",
+          "from": "node-mac-entry",
+          "reason": "",
+          "sends": [
+            {
+              "frame": "9248b95940829ed7.bin",
+              "kind": "HopHeader",
+              "to": "node-mac-final"
+            }
+          ],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "54bf28d4bc2a2224.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        }
+      ]
+    },
+    {
+      "bounds": {
+        "max_creators": 16,
+        "max_paths": 256,
+        "pending_per_source": 256,
+        "pending_total": 4096,
+        "quota_per_creator": 2
+      },
+      "name": "stale_manifest_after_horizon",
+      "steps": [
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "8b61fd6063e95105.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "79d34451614213f5.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "a84104b17190d9e0.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "add78c7fc1d27333.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": false,
+          "at": 601.0,
+          "frame": "8b61fd6063e95105.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": false
+        },
+        {
+          "accepted": true,
+          "at": 601.0,
+          "frame": "8109bbbe7c940560.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 601.0,
+          "frame": "8b61fd6063e95105.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        }
+      ]
+    },
+    {
+      "bounds": {
+        "max_creators": 2,
+        "max_paths": 256,
+        "pending_per_source": 256,
+        "pending_total": 4096,
+        "quota_per_creator": 512
+      },
+      "name": "creator_slots",
+      "steps": [
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5dcdd159255b465f.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "c4d7e0f5a1a47322.bin",
+          "from": "node-b",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "e21b09638da35796.bin",
+          "from": "node-b",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": false,
+          "at": 0.0,
+          "frame": "b1956537e43e0f9b.bin",
+          "from": "node-c",
+          "sends": [],
+          "transport_ack": false
+        },
+        {
+          "at": 0.0,
+          "disposition": "FORWARDED",
+          "executed": 1,
+          "frame": "ed0eb4f48897bf15.bin",
+          "from": "node-mac-entry",
+          "reason": "",
+          "sends": [
+            {
+              "frame": "14cac8a9525ae332.bin",
+              "kind": "HopHeader",
+              "to": "node-mac-final"
+            }
+          ],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 601.0,
+          "frame": "b1956537e43e0f9b.bin",
+          "from": "node-c",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": false,
+          "at": 601.0,
+          "frame": "0de77771ee4ff672.bin",
+          "from": "node-b",
+          "sends": [],
+          "transport_ack": false
+        },
+        {
+          "at": 601.0,
+          "disposition": "FORWARDED",
+          "executed": 1,
+          "frame": "93f9fff63a7945b7.bin",
+          "from": "node-mac-entry",
+          "reason": "",
+          "sends": [
+            {
+              "frame": "1fc47a89bff872b9.bin",
+              "kind": "HopHeader",
+              "to": "node-mac-final"
+            }
+          ],
+          "transport_ack": true
+        }
+      ]
+    },
+    {
+      "bounds": {
+        "max_creators": 1,
+        "max_paths": 256,
+        "pending_per_source": 256,
+        "pending_total": 4096,
+        "quota_per_creator": 512
+      },
+      "name": "pending_without_slot",
+      "steps": [
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "1b416856dedf0ac5.bin",
+          "from": "node-late",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5dcdd159255b465f.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "accepted": false,
+          "at": 0.0,
+          "frame": "99df1e63d7b348e9.bin",
+          "from": "node-late",
+          "sends": [],
+          "transport_ack": false
+        },
+        {
+          "accepted": false,
+          "at": 0.0,
+          "frame": "99df1e63d7b348e9.bin",
+          "from": "node-late",
+          "sends": [],
+          "transport_ack": false
+        }
+      ]
+    },
+    {
+      "bounds": {
+        "max_creators": 16,
+        "max_paths": 256,
+        "pending_per_source": 256,
+        "pending_total": 4096,
+        "quota_per_creator": 512
+      },
+      "name": "failures",
+      "steps": [
+        {
+          "accepted": true,
+          "at": 0.0,
+          "frame": "5dcdd159255b465f.bin",
+          "from": "node-mac-entry",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "FAILED",
+          "executed": 1,
+          "frame": "ed0eb4f48897bf15.bin",
+          "from": "node-mac-entry",
+          "reason": "thermal_ceiling_reached",
+          "sends": [
+            {
+              "frame": "14b6ca8768c33d03.bin",
+              "kind": "FailureReport",
+              "to": "node-mac-entry"
+            }
+          ],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "FAILED",
+          "executed": 0,
+          "frame": "ed0eb4f48897bf15.bin",
+          "from": "node-mac-entry",
+          "reason": "thermal_ceiling_reached",
+          "sends": [],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "FAILED",
+          "executed": 1,
+          "frame": "93f9fff63a7945b7.bin",
+          "from": "node-mac-entry",
+          "reason": "stage_runtime_failed",
+          "sends": [
+            {
+              "frame": "91f8a04f6a6bd294.bin",
+              "kind": "FailureReport",
+              "to": "node-mac-entry"
+            }
+          ],
+          "transport_ack": true
+        },
+        {
+          "at": 0.0,
+          "disposition": "FORWARDED",
+          "executed": 1,
+          "frame": "59800b1d4888168d.bin",
+          "from": "node-mac-entry",
+          "reason": "",
+          "sends": [
+            {
+              "frame": "3cbef73b38f209a1.bin",
+              "kind": "HopHeader",
+              "to": "node-mac-final"
+            }
+          ],
+          "transport_ack": true
+        }
+      ]
+    }
+  ],
+  "schema": "mycelium.phone_stage_node.golden.v1"
+}

@@ -1,0 +1,209 @@
+{
+  "data_b64": "AAcOFRwjKjE4P0ZNVFtiaXB3foWMk5qhqK+2vcTL0tk=",
+  "grant": {
+    "message": {
+      "allowed_object_digests": [
+        "sha256:09a692d3fc00068f61195315fa90707e9f26aa9f6b1989c692a4945985c1b004",
+        "sha256:109ca067e7ffa87b5f404daddd2c21b597d37e79ee8a55963a3157cda4a1a6df",
+        "sha256:144420f05e8a4e67c47bd5bb278aaf54e159e593148b7fdcc0a103015a40cee6",
+        "sha256:1db158b964f0d37ec25a59bcb2cbfafa5dafc3f4f0c3603f397848a1fbe02cf0",
+        "sha256:1dff376d84154c5aab2d2799eadfd8fd0250a72ec6dbd54bbf68e5588d75a743",
+        "sha256:2202a71730b97cdb58dc6962957093b741b984afaca02ccfcc2ab3618f25afe2",
+        "sha256:2bdf691b027dc00c541056f9cd6d9807651a4d8dd60f2558bae9aab926702082",
+        "sha256:2f578df07897d99d735f75dfa298addb5e9a27e6daaf628a43a4607016d687f6",
+        "sha256:3212b49d15e097c144f14c91b007722afa74b7428feecb378ef70353a702450c",
+        "sha256:3f95c53f57d98ba1bda754f0265767a3252f3b9e8be41c86b8f8109f10e1c65d",
+        "sha256:47789271a41e65f168a4c4b581fae418052eaab2bda5c43feeee4eb1111032f0",
+        "sha256:5c3ae6e9ab3b17ced349b24ded40baeba1a06cf2386d36e6f3c0b20e883b73d4",
+        "sha256:73e835b7b5f60d3fa25f9b640550ed59964de54dc5a2add34f5ba255a34aea34",
+        "sha256:8a6f829df2e041fac235edfde21c8edf6e722fbb943e40f5cd3e1666b588e823",
+        "sha256:903a7c9c6d394cce88764ac9115e559be3b76fb073b4cfb4fa10b1d52a8dd21a",
+        "sha256:97f70e266dbbc469d330895ca10e8344a083b0da988dca2bcc4036cef8b70627",
+        "sha256:9fbdaa09e8947336ff898a6e07e939277afb7a2396c83989194c045b4e469f67",
+        "sha256:af968e6e9b9bac504f09ca67b76e341d22d50c0562dd67abe025d2d40d287541",
+        "sha256:b5056bec67aaed475606d2dfef3fa420bd18072abd84f30c813303b3286957dc",
+        "sha256:b9b40f4133b24298e424003ef2e377f4e8e0ff5b7bbb3d40097b95220e7d6038",
+        "sha256:e6ac2e558819b349bbcf4843c484977c077a8ce33f58fcdcb5466ea31e063661",
+        "sha256:e8e0a853a84895fcdb539108b06df365d9c4a609bce56104545934f9dae5eebc",
+        "sha256:ed5ab8e7750dfcf6598d67e94015f3654f52bef2883b532b5f2ee9740759041b",
+        "sha256:eef8c151edf2b048b5dc53fdff91f75cd2430204f195e9cc17a7f8ea4fee8b06"
+      ],
+      "assignment_id": "route-fixture-1",
+      "authorized_sources": [
+        {
+          "direct_addrs": [],
+          "endpoint_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "verification_key_digest": "sha256:6c8f8607dbe87077a62a2990ce07d94aaf749df76f87b98eb786a6d10f030765"
+        }
+      ],
+      "expires_at_unix_ms": 1790000900000,
+      "grant_id": "grant-fixture-1",
+      "issued_at_unix_ms": 1790000000000,
+      "manifest_pack_digest": "sha256:ea3883eede3112a7ed3d39f0c4fd62528a30be3f7712c7b841c668ef88ec7589",
+      "maximum_bytes_per_second": 33554432,
+      "maximum_chunk_bytes": 4194304,
+      "maximum_total_bytes": 148480,
+      "not_before_unix_ms": 1790000000000,
+      "protocol": "mycelium.mobile_artifact_grant.v1",
+      "recipient_endpoint_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "recipient_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "recipient_node_id": "node-phone-1",
+      "seed_node_id": "seed-node-1",
+      "swarm_id": "swarm-fixture"
+    },
+    "protocol": "mycelium.membership.signed_message.v1",
+    "signature": {
+      "algorithm": "ed25519",
+      "signature": "u4NKBxLdkOuKQsTr3fuThbZ4OTNfH2rEIERg5bDY5OYvYS7Wul6PSK1lWzx3244p9oQtdVV4AaqhJCkN9MEUDg==",
+      "signed_statement_digest": "sha256:be3ac5f53a1760d22d8c9bb79b89f67ea23bbe223e3553bfa05a08839164cfe4",
+      "signer_endpoint_id": "seed-endpoint-1",
+      "verification_key_digest": "sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6"
+    },
+    "verification_key": {
+      "algorithm": "ed25519",
+      "encoding": "base64",
+      "verification_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
+      "verification_key_digest": "sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6"
+    }
+  },
+  "member_key": {
+    "algorithm": "ed25519",
+    "encoding": "base64",
+    "verification_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+    "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+  },
+  "now_unix_ms": 1790000000000,
+  "receipt": {
+    "message": {
+      "grant_id": "grant-fixture-1",
+      "length_bytes": 32,
+      "object_digest": "sha256:5c3ae6e9ab3b17ced349b24ded40baeba1a06cf2386d36e6f3c0b20e883b73d4",
+      "offset_bytes": 16,
+      "protocol": "mycelium.mobile_artifact_chunk_receipt.v1",
+      "range_content_digest": "sha256:2dfd602a7a260b7a12905fd2ebd4b9acf49eed561758b9cb89cbccee389ae02d",
+      "recipient_node_id": "node-phone-1",
+      "request_id": "chunk-request-1",
+      "responded_at_unix_ms": 1790000002000,
+      "source_endpoint_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "protocol": "mycelium.membership.signed_message.v1",
+    "signature": {
+      "algorithm": "ed25519",
+      "signature": "1crXaGZTAThlv5xiELv6rH5kbz8gK250G65q8WJTK3mdLgMjMums5gyQ1JR3do1rLLgHkuRSaCZKP+PEUnAdCw==",
+      "signed_statement_digest": "sha256:08a8aa9fb7a4161cfe917d502d5289ebccab84d3b8801d501df9a53cdfab4f3b",
+      "signer_endpoint_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "verification_key_digest": "sha256:6c8f8607dbe87077a62a2990ce07d94aaf749df76f87b98eb786a6d10f030765"
+    },
+    "verification_key": {
+      "algorithm": "ed25519",
+      "encoding": "base64",
+      "verification_key": "F8t5+ytBIPKx7GXkGY1uCLKOgT/rAeSkAIObheGAgM4=",
+      "verification_key_digest": "sha256:6c8f8607dbe87077a62a2990ce07d94aaf749df76f87b98eb786a6d10f030765"
+    }
+  },
+  "request": {
+    "message": {
+      "expires_at_unix_ms": 1790000061000,
+      "grant": {
+        "message": {
+          "allowed_object_digests": [
+            "sha256:09a692d3fc00068f61195315fa90707e9f26aa9f6b1989c692a4945985c1b004",
+            "sha256:109ca067e7ffa87b5f404daddd2c21b597d37e79ee8a55963a3157cda4a1a6df",
+            "sha256:144420f05e8a4e67c47bd5bb278aaf54e159e593148b7fdcc0a103015a40cee6",
+            "sha256:1db158b964f0d37ec25a59bcb2cbfafa5dafc3f4f0c3603f397848a1fbe02cf0",
+            "sha256:1dff376d84154c5aab2d2799eadfd8fd0250a72ec6dbd54bbf68e5588d75a743",
+            "sha256:2202a71730b97cdb58dc6962957093b741b984afaca02ccfcc2ab3618f25afe2",
+            "sha256:2bdf691b027dc00c541056f9cd6d9807651a4d8dd60f2558bae9aab926702082",
+            "sha256:2f578df07897d99d735f75dfa298addb5e9a27e6daaf628a43a4607016d687f6",
+            "sha256:3212b49d15e097c144f14c91b007722afa74b7428feecb378ef70353a702450c",
+            "sha256:3f95c53f57d98ba1bda754f0265767a3252f3b9e8be41c86b8f8109f10e1c65d",
+            "sha256:47789271a41e65f168a4c4b581fae418052eaab2bda5c43feeee4eb1111032f0",
+            "sha256:5c3ae6e9ab3b17ced349b24ded40baeba1a06cf2386d36e6f3c0b20e883b73d4",
+            "sha256:73e835b7b5f60d3fa25f9b640550ed59964de54dc5a2add34f5ba255a34aea34",
+            "sha256:8a6f829df2e041fac235edfde21c8edf6e722fbb943e40f5cd3e1666b588e823",
+            "sha256:903a7c9c6d394cce88764ac9115e559be3b76fb073b4cfb4fa10b1d52a8dd21a",
+            "sha256:97f70e266dbbc469d330895ca10e8344a083b0da988dca2bcc4036cef8b70627",
+            "sha256:9fbdaa09e8947336ff898a6e07e939277afb7a2396c83989194c045b4e469f67",
+            "sha256:af968e6e9b9bac504f09ca67b76e341d22d50c0562dd67abe025d2d40d287541",
+            "sha256:b5056bec67aaed475606d2dfef3fa420bd18072abd84f30c813303b3286957dc",
+            "sha256:b9b40f4133b24298e424003ef2e377f4e8e0ff5b7bbb3d40097b95220e7d6038",
+            "sha256:e6ac2e558819b349bbcf4843c484977c077a8ce33f58fcdcb5466ea31e063661",
+            "sha256:e8e0a853a84895fcdb539108b06df365d9c4a609bce56104545934f9dae5eebc",
+            "sha256:ed5ab8e7750dfcf6598d67e94015f3654f52bef2883b532b5f2ee9740759041b",
+            "sha256:eef8c151edf2b048b5dc53fdff91f75cd2430204f195e9cc17a7f8ea4fee8b06"
+          ],
+          "assignment_id": "route-fixture-1",
+          "authorized_sources": [
+            {
+              "direct_addrs": [],
+              "endpoint_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "verification_key_digest": "sha256:6c8f8607dbe87077a62a2990ce07d94aaf749df76f87b98eb786a6d10f030765"
+            }
+          ],
+          "expires_at_unix_ms": 1790000900000,
+          "grant_id": "grant-fixture-1",
+          "issued_at_unix_ms": 1790000000000,
+          "manifest_pack_digest": "sha256:ea3883eede3112a7ed3d39f0c4fd62528a30be3f7712c7b841c668ef88ec7589",
+          "maximum_bytes_per_second": 33554432,
+          "maximum_chunk_bytes": 4194304,
+          "maximum_total_bytes": 148480,
+          "not_before_unix_ms": 1790000000000,
+          "protocol": "mycelium.mobile_artifact_grant.v1",
+          "recipient_endpoint_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "recipient_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+          "recipient_node_id": "node-phone-1",
+          "seed_node_id": "seed-node-1",
+          "swarm_id": "swarm-fixture"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "u4NKBxLdkOuKQsTr3fuThbZ4OTNfH2rEIERg5bDY5OYvYS7Wul6PSK1lWzx3244p9oQtdVV4AaqhJCkN9MEUDg==",
+          "signed_statement_digest": "sha256:be3ac5f53a1760d22d8c9bb79b89f67ea23bbe223e3553bfa05a08839164cfe4",
+          "signer_endpoint_id": "seed-endpoint-1",
+          "verification_key_digest": "sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
+          "verification_key_digest": "sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6"
+        }
+      },
+      "issued_at_unix_ms": 1790000001000,
+      "length_bytes": 32,
+      "object_digest": "sha256:5c3ae6e9ab3b17ced349b24ded40baeba1a06cf2386d36e6f3c0b20e883b73d4",
+      "offset_bytes": 16,
+      "protocol": "mycelium.mobile_artifact_chunk_request.v1",
+      "request_id": "chunk-request-1",
+      "request_nonce": "nonce-1",
+      "source_endpoint_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "protocol": "mycelium.membership.signed_message.v1",
+    "signature": {
+      "algorithm": "ed25519",
+      "signature": "VvqRLCkPFyk+XQOthpcyPBVAWD82XxPqm8Y5vC4tAao8dzmErSRaWJliVvIIColCP4Nxskohi0+2JqS5hnXQAw==",
+      "signed_statement_digest": "sha256:0939a15f693373221afe47053d405e61a07d44f18c660e065130e5d93a04773e",
+      "signer_endpoint_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+    },
+    "verification_key": {
+      "algorithm": "ed25519",
+      "encoding": "base64",
+      "verification_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+      "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+    }
+  },
+  "seed_key": {
+    "algorithm": "ed25519",
+    "encoding": "base64",
+    "verification_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
+    "verification_key_digest": "sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6"
+  },
+  "source_key": {
+    "algorithm": "ed25519",
+    "encoding": "base64",
+    "verification_key": "F8t5+ytBIPKx7GXkGY1uCLKOgT/rAeSkAIObheGAgM4=",
+    "verification_key_digest": "sha256:6c8f8607dbe87077a62a2990ce07d94aaf749df76f87b98eb786a6d10f030765"
+  }
+}
