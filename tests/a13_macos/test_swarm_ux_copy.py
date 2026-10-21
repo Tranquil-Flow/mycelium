@@ -230,7 +230,7 @@ def test_joined_mac_is_told_how_to_leave():
     out = run_ui({"status": status(role="target", member="current"), "read": ["leave-hint"]})
     text = out["text"]["leave-hint"]
     # Owner ruling R24/R25 (2026-10-20): a member leaves with the Leave swarm control (smoothly or instantly).
-    assert "Leave swarm" in text and "Leave smoothly" in text and "Instant leave" in text and "owner" in text
+    assert "Leave swarm" in text and "Leave smoothly" in text and "Leave now" in text and "Instant leave" not in text and "owner" in text
 
 
 @needs_node

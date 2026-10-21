@@ -18,6 +18,24 @@ from typing import Any
 OWNER_ROUTES = frozenset({'/api/demo/start', '/api/demo/stop', '/api/demo/rebuild'})
 
 
+def _wire_member_leave(app: Any, exchange: Any) -> None:
+    """PV10: a member's signed final withdrawal self-revokes that generation; a planning notice asks the app's
+    ``leave_handoff`` (the A7/A6 choice) when one is attached, else the member simply keeps draining."""
+    withdrawals = getattr(exchange, 'withdrawals', None)
+    if withdrawals is None:
+        return
+
+    def revoke(node_id: str, generation: int) -> Any:
+        return app.authority.revoke(node_id, generation)
+
+    def plan(node_id: str, generation: int, request_ids: list) -> Any:
+        handoff = getattr(app, 'leave_handoff', None)
+        return {} if handoff is None else handoff.plan(node_id, generation, request_ids)
+
+    withdrawals.set_on_final(revoke)
+    withdrawals.set_planner(plan)
+
+
 def ensure_exchange(app: Any):
     if app.installation_role != 'owner' or app.authority is None:
         return None
@@ -27,8 +45,9 @@ def ensure_exchange(app: Any):
     exchange = getattr(app, 'run_exchange', None)
     if exchange is None or exchange.mailbox is not mailbox:
         from .run_exchange import RunExchange
-        exchange = RunExchange(mailbox).install()
+        exchange = RunExchange(mailbox, withdrawal_store=app.root / 'member-withdrawals.json').install()
         app.run_exchange = exchange
+        _wire_member_leave(app, exchange)
     source = getattr(app, 'model_source_server', None)
     if source is None or source.mailbox is not mailbox:
         # Members may read the owner's verified pinned snapshot (relay route,

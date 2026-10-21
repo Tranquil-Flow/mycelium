@@ -77,10 +77,11 @@ _PENDING_FIELDS = frozenset(
 _ACCEPTED_FIELDS = frozenset(
     {"protocol", "handoff_digest", "quota", "accepted_at"}
 )
-_TERMINAL_MEMBERSHIP_STATES = frozenset({"expired", "revoked", "stale", "unknown"})
+_TERMINAL_MEMBERSHIP_STATES = frozenset({"expired", "revoked", "stale", "unknown", "left"})
 #: Lapsed memberships a new, owner-approved invite may replace (identity and model cache stay).  A membership the
-#: owner revoked is not among them: that is the owner's decision, not a lapse.
-_REJOINABLE_STATES = frozenset({"expired", "stale", "unknown"})
+#: owner revoked is not among them: that is the owner's decision, not a lapse.  ``left`` is this Mac's own voluntary
+#: leave (PV10): it may ask to join again, and the owner still approves.
+_REJOINABLE_STATES = frozenset({"expired", "stale", "unknown", "left"})
 _REJOIN_STATES_FOR_DISPOSITION = _REJOINABLE_STATES
 
 
@@ -285,6 +286,8 @@ class RemoteMacMember:
     def _record_disposition(self, state: str) -> None:
         if state not in _TERMINAL_MEMBERSHIP_STATES:
             return
+        if state != "left" and self._load_disposition() == "left":
+            return  # a voluntary leave stays the recorded truth even when the owner's self-revoke is seen later
         _atomic_private_json(
             self._disposition_path,
             {
@@ -296,6 +299,13 @@ class RemoteMacMember:
 
     def _clear_disposition(self) -> None:
         self._disposition_path.unlink(missing_ok=True)
+
+    def record_voluntary_leave(self) -> None:
+        """This Mac left on purpose (Leave smoothly / Leave now): no resume, no renewal, and a new pairing is allowed."""
+
+        with self._lock:
+            self._require_started()
+            self._record_disposition("left")
 
     def _translate(self, exc: BaseException) -> RemoteMacMemberError:
         code = getattr(exc, "code", "peer_operation_failed")
@@ -357,7 +367,8 @@ class RemoteMacMember:
                             self._join_pending_path,
                         ):
                             path.unlink(missing_ok=True)
-                    self._resume(membership)
+                    if self._load_disposition() != "left":   # a voluntary leave is not resumed
+                        self._resume(membership)
                 return self.status()
             except RemoteMacMemberError as exc:
                 # A lapsed membership keeps the peer started (identity loaded, no member): the only thing it may do
@@ -1020,6 +1031,8 @@ class RemoteMacMember:
 
     def _require_current(self) -> tuple[NodeMembershipSession, Any]:
         self._require_started()
+        if self._load_disposition() == "left":
+            raise RemoteMacMemberError("peer_member_left")   # a voluntary leave: nothing renews until a new pairing
         if self._member is None or self._seed_client is None:
             disposition = self._load_disposition()
             if disposition is not None:
@@ -1028,6 +1041,7 @@ class RemoteMacMember:
                     "revoked": "peer_member_revoked",
                     "stale": "peer_generation_stale",
                     "unknown": "peer_member_unknown",
+                    "left": "peer_member_left",
                 }[disposition]
                 raise RemoteMacMemberError(code)
             raise RemoteMacMemberError("peer_membership_missing")
@@ -1128,7 +1142,7 @@ class RemoteMacMember:
         with self._lock:
             self._require_started()
             generation = None
-            if purpose != "join" or self._member is not None:
+            if purpose != "join" or (self._member is not None and self._load_disposition() != "left"):
                 member, _client = self._require_current()
                 generation = member.generation
             assert self._signer is not None
