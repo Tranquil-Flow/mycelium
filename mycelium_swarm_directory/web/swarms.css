@@ -41,7 +41,9 @@ label{display:block;color:var(--muted);font-size:14px}
 .owner-chip{font-family:var(--mono);font-size:11px}
 .detail-head{height:148px;overflow:auto}
 .detail-head h2{margin-bottom:8px;height:30px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.detail-head p{max-height:46px;overflow:auto}
+.detail-head p{height:46px;max-height:46px;overflow:auto}
+#detail-owner{height:1.55em;overflow:auto}
+#detail-model{height:3.1em;overflow:auto}
 .bigstats{margin-bottom:20px}
 .bs{height:190px;min-height:190px;overflow:hidden}
 .bs .v{font-size:1.7rem;white-space:nowrap}
@@ -76,9 +78,11 @@ label{display:block;color:var(--muted);font-size:14px}
 .chat-item .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chat{height:calc(100dvh - 350px);min-height:480px}
 .chat-head{height:76px;flex:none;overflow:hidden;flex-wrap:nowrap}
-.chat-head>div{min-width:0}
+.chat-head>div{min-width:0;flex:1;height:50px}
 .chat-head h2{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .livebar{height:52px;min-height:52px;flex:none;overflow:auto;gap:4px 16px;font-size:12px}
+#chat-state{flex:0 0 110px;height:30px;line-height:30px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#chat-metrics{flex:1;min-width:0;height:30px;line-height:30px;white-space:nowrap;overflow:auto}
 .conversation{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;display:flex;flex-direction:column}
 .gate{margin:16px;flex:none;max-width:none}
 .gate p{font-size:14px}
@@ -95,7 +99,7 @@ label{display:block;color:var(--muted);font-size:14px}
 #tokens{width:78px;display:inline;padding:3px;min-height:30px}
 .fine{align-items:center}
 #chat-privacy{display:block;font-size:12px;margin:0}
-#composer-reason{font-size:12px;max-width:65%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#composer-reason{font-size:12px;flex:1;min-width:0;text-align:right;max-width:65%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .toast:not(:empty){opacity:1;transform:translate(-50%,0)}
 .toast{font-size:14px;top:64px;bottom:auto;max-height:120px;overflow:auto}
 #privacy{height:160px;overflow:auto}

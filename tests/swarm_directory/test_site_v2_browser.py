@@ -83,7 +83,7 @@ def test_twenty_real_app_behaviours(local):
         visitor.click('#send')
         expect(terminal(visitor, 'completed')).to_be_visible()
         expect(visitor.locator('#log')).to_contain_text('tok/s')
-        assert sum(visitor.evaluate('window.__cls')) < .01
+        assert sum(visitor.evaluate('window.__cls')) == 0
         # 15–17: keyboard tab routing, search empty state, offline entries folded.
         visitor.goto(local['directory'].origin + '/swarms/#browse')
         visitor.focus('#tab-browse')
@@ -140,7 +140,7 @@ def test_apex_real_counts_delayed_and_unavailable_without_identity(local, monkey
                 expect(page.locator('#mac-count')).to_have_text('1')
             page.wait_for_timeout(700)
             cls=sum(page.evaluate('window.__cls'))
-            assert cls < .01, (width,theme,failed,cls,page.evaluate('window.__clsDetails'))
+            assert cls == 0, (width,theme,failed,cls,page.evaluate('window.__clsDetails'))
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             assert page.evaluate('async()=> (await indexedDB.databases()).length') == 0
             assert page.evaluate('localStorage.length + sessionStorage.length') == 0
@@ -193,7 +193,7 @@ def test_owner_undo_cancels_write_and_reload_cancels_hold(local, width, height, 
         assert saved.value.status == 200 and len(writes)==1
         visitor.click('#refresh');expect(visitor.locator('#consent')).to_be_visible()
         expect(owner.locator('#owned-count')).to_have_text('0')
-        assert sum(owner.evaluate('window.__cls')) < .01, owner.evaluate('window.__clsDetails')
+        assert sum(owner.evaluate('window.__cls')) == 0, owner.evaluate('window.__clsDetails')
         browser.close()
 
 
@@ -246,7 +246,7 @@ def test_mac_app_header_inbox_uses_real_owner_requests(local, width, height):
         page.click('#swarm-inbox-header')
         expect(page.locator('#swarm-inbox-count')).to_have_text('0')
         page.wait_for_timeout(700)
-        assert sum(page.evaluate('window.__cls')) < .01, page.evaluate('window.__clsDetails')
+        assert sum(page.evaluate('window.__cls')) == 0, page.evaluate('window.__clsDetails')
         browser.close()
 
 
@@ -320,7 +320,7 @@ def test_access_states_real_entry_and_composer_geometry(local, width, height, th
             assert visitor.evaluate('window.scrollY') == 0
             visitor.wait_for_timeout(550)
             cls = sum(visitor.evaluate('window.__cls'))
-            assert cls < .01, (state,width,theme,cls,visitor.evaluate('window.__clsDetails'))
+            assert cls == 0, (state,width,theme,cls,visitor.evaluate('window.__clsDetails'))
             results.append({'state':state,'cls':cls,'shifts':visitor.evaluate('window.__clsDetails')})
             if os.environ.get('SITEB_SHOTS'):
                 out = Path(os.environ['SITEB_SHOTS']); out.mkdir(parents=True,exist_ok=True)
@@ -465,7 +465,7 @@ def test_routes_slow_loading_cls_and_screenshots(local, monkeypatch, width, heig
             page.wait_for_selector('body[data-loaded="1"]')
             page.wait_for_timeout(1200)
             cls = sum(page.evaluate('window.__cls'))
-            assert cls < .01, (route,width,theme,cls,page.evaluate('window.__clsDetails'))
+            assert cls == 0, (route,width,theme,cls,page.evaluate('window.__clsDetails'))
             assert page.evaluate('window.scrollY') == 0, ('hash route must not jump to a same-name DOM id', route)
             if route == 'owned':
                 empty = page.locator('#owned-empty').bounding_box()
