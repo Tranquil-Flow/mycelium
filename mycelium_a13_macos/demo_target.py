@@ -391,7 +391,16 @@ class DemoTargetAgent:
                 return
             intent = {'offer_id': offer['offer_id'], 'archive_digest': offer['archive_digest']}
             self._set('preparing')
-            app.action('/api/staging/accept', {**intent, 'stage_acknowledged': True})
+            try:
+                app.action('/api/staging/accept', {**intent, 'stage_acknowledged': True})
+            except Exception as error:
+                if _code(error, '') != 'stage_runtime_active':
+                    raise
+                # The previous run's runtime is still attached: its worker exited, but only a cleanup request
+                # detaches it and none can be made for an expired work offer (V1.2 D5).  Detach it once and retry;
+                # a runtime that stays attached is reported by name.
+                app.action('/api/control/stop', {})
+                app.action('/api/staging/accept', {**intent, 'stage_acknowledged': True})
             app.action('/api/control/start', {**intent, 'control_acknowledged': True})
             self._bootstrap_done.add(bootstrap)
             self._set('bootstrap_running'); return
