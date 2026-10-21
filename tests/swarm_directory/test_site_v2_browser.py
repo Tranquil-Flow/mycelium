@@ -172,6 +172,9 @@ def test_owner_undo_cancels_write_and_reload_cancels_hold(local):
             row.get_by_role('button',name=label,exact=True).click()
             expect(row.locator('[data-undo]')).to_be_visible()
             expect(row.locator('[data-decision]')).to_contain_text('in 5 seconds')
+            if os.environ.get('SITEB_SHOTS'):
+                out=Path(os.environ['SITEB_SHOTS']);out.mkdir(parents=True,exist_ok=True)
+                owner.screenshot(path=str(out/f'owner-held-{label.lower()}.png'),full_page=True)
             row.locator('[data-undo]').click()
             owner.wait_for_timeout(5200)
             assert writes == []
@@ -226,6 +229,11 @@ def test_mac_app_header_inbox_uses_real_owner_requests(local, width, height):
         page.goto(local['directory'].origin+'/mac-owner')
         expect(page.locator('#swarm-inbox-count')).to_have_text('1')
         expect(page.locator('#swarm-inbox-header')).to_be_visible()
+        box=page.locator('#swarm-inbox-header').bounding_box()
+        assert box and box['x']>=0 and box['x']+box['width']<=width
+        if os.environ.get('SITEB_SHOTS'):
+            out=Path(os.environ['SITEB_SHOTS']);out.mkdir(parents=True,exist_ok=True)
+            page.screenshot(path=str(out/f'mac-header-{width}.png'))
         # Native anchor targets the real inbox; fetching is authenticated by the publisher.
         page.click('#swarm-inbox-header')
         expect(page.locator('#swarm-requests')).to_contain_text('Please approve')
