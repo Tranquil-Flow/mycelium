@@ -53,8 +53,8 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:4f14a32e79b46de87265edea757d8f486015849c578b06b6629a3957fea22775",
-      "size_bytes": 71574
+      "sha256": "sha256:018e4835e1b8e6b941f19088d7897e8ee835fe5512283b8b526e81548a70eabb",
+      "size_bytes": 71575
     },
     {
       "path": "contracts/phone-node-control-golden/index.json",
@@ -397,6 +397,121 @@
       "size_bytes": 8315
     },
     {
+      "path": "contracts/router-activation-golden/01-f32-1x2x4.bin",
+      "sha256": "sha256:4ea490ee03a5270562721458a44ebc3e43dabf214ede5558aeb0ab2437cfb911",
+      "size_bytes": 60
+    },
+    {
+      "path": "contracts/router-activation-golden/02-f16-1x2x4.bin",
+      "sha256": "sha256:5f1edddc08cd1859286ee8af9fd008f123cc9e3ebcf4935a6fd7469e51b8910b",
+      "size_bytes": 44
+    },
+    {
+      "path": "contracts/router-activation-golden/03-bf16-1x2x4.bin",
+      "sha256": "sha256:39b55b0b76bcd2a80a3cbed258e8c7181fbac5e32b2193d00418c35789bc0893",
+      "size_bytes": 44
+    },
+    {
+      "path": "contracts/router-activation-golden/04-f32-rank1-3.bin",
+      "sha256": "sha256:7a3206bb64ce93f49af38bae32d9b5100e3dd7e78bfe4a024276344ea7b1d966",
+      "size_bytes": 32
+    },
+    {
+      "path": "contracts/router-activation-golden/05-f16-rank2-3x2.bin",
+      "sha256": "sha256:7440ec351a14796aeb41b12a371714af5d89aa70250c2aa5fa6d7b74f0203da1",
+      "size_bytes": 36
+    },
+    {
+      "path": "contracts/router-activation-golden/06-bf16-rank3-1x1x1.bin",
+      "sha256": "sha256:7db1b682394df567c741df436d2f7054e93ef0f01d4ae370c2bc5604936eba66",
+      "size_bytes": 30
+    },
+    {
+      "path": "contracts/router-activation-golden/07-f32-rank8-1x1x1x1x1x1x1x2.bin",
+      "sha256": "sha256:66f04b26fd2b14e7d7d8d570bc547d05e02fb7ec4810564a19728b2808bc56fd",
+      "size_bytes": 56
+    },
+    {
+      "path": "contracts/router-activation-golden/index.json",
+      "sha256": "sha256:bcdcdad2a227df89f723cd2ef4f3693797f1b873e2aa1918c36681ed9de7bd8e",
+      "size_bytes": 5784
+    },
+    {
+      "path": "contracts/router-activation-golden/myac_decode_check.c",
+      "sha256": "sha256:215788466c16d7077e8457a413a743d6fac7260ee93a67a1de0c494fa78b4f07",
+      "size_bytes": 7631
+    },
+    {
+      "path": "contracts/router-activation-golden/r01-truncated-header.bin",
+      "sha256": "sha256:d8771aaa90bf1d50e3bddb23ca2ef6fc573590b176cc6a22d80cb114c504e0fd",
+      "size_bytes": 15
+    },
+    {
+      "path": "contracts/router-activation-golden/r02-bad-magic.bin",
+      "sha256": "sha256:4336b019f684859ae0f4886c72c5a2ec8e0658a37c2610e9536a717c990be148",
+      "size_bytes": 32
+    },
+    {
+      "path": "contracts/router-activation-golden/r03-unknown-version.bin",
+      "sha256": "sha256:e0bcdc2efefcc1dec5dda7c531d5abbe8adfb456506d3d331f102567eed96e6f",
+      "size_bytes": 32
+    },
+    {
+      "path": "contracts/router-activation-golden/r04-unknown-dtype-code.bin",
+      "sha256": "sha256:ccf91682c39adf9e5888a74eb79113cc6ac2febc186985c6d753ed05c249c520",
+      "size_bytes": 32
+    },
+    {
+      "path": "contracts/router-activation-golden/r05-big-endian-flag.bin",
+      "sha256": "sha256:6000517e15a7d0c70fc96135dc0f5ffae8d48ae9c00ef3be2a5c7a084b1eb83c",
+      "size_bytes": 32
+    },
+    {
+      "path": "contracts/router-activation-golden/r06-rank-zero.bin",
+      "sha256": "sha256:a229be1fdcc1571ba5fcc519aab665659482613661128f09c110896703cf063c",
+      "size_bytes": 20
+    },
+    {
+      "path": "contracts/router-activation-golden/r07-rank-nine.bin",
+      "sha256": "sha256:d4ceda82a117bf9fb2cbb24b6ff4869409724d2abe3e5455c86f674c785abaf8",
+      "size_bytes": 56
+    },
+    {
+      "path": "contracts/router-activation-golden/r08-truncated-shape.bin",
+      "sha256": "sha256:4a04e6b0b028f65fceddc7402eb9dc67e5139ac99cb5ce104df18acec3866e76",
+      "size_bytes": 24
+    },
+    {
+      "path": "contracts/router-activation-golden/r09-oversize-claim.bin",
+      "sha256": "sha256:67d1f52edfd142b6d17e5dca204fce1814aebf35a8e18c4f6f73cd87523f0ada",
+      "size_bytes": 28
+    },
+    {
+      "path": "contracts/router-activation-golden/r10-data-shorter-than-header-claims.bin",
+      "sha256": "sha256:f7b00b6fb69e40949bc92146ffc8e57641dd61bfdb1590646a16bae4e4f6fd11",
+      "size_bytes": 32
+    },
+    {
+      "path": "contracts/router-activation-golden/r11-trailing-byte.bin",
+      "sha256": "sha256:4f84a5672df3690e9d0757ddfd77a1ac190fbb9db13b63b4c8a90a62f6fdae0e",
+      "size_bytes": 33
+    },
+    {
+      "path": "contracts/router-activation-golden/r12-zero-dimension.bin",
+      "sha256": "sha256:bfd07b2c9217e38ce7d0558a797ebf9e28b6371b890b66ef554563db3ff62f3e",
+      "size_bytes": 28
+    },
+    {
+      "path": "contracts/router-activation-golden/r13-shape-data-mismatch.bin",
+      "sha256": "sha256:6c431ec3d872d4797bf4cfdefa1e137ed16994b9ba62e3619ce91d7733cb9f3f",
+      "size_bytes": 32
+    },
+    {
+      "path": "contracts/router-activation-golden/vectors.tsv",
+      "sha256": "sha256:eb3ebea3231acf9d903f616f283bee4e266fe87bda82c6fcb887bd59428c6805",
+      "size_bytes": 1308
+    },
+    {
       "path": "deploy/swarm-directory-start.sh",
       "sha256": "sha256:0d230c9677db0acadd9574ed19dcab86285579afad31256c57c9d917efcdc10e",
       "size_bytes": 1158
@@ -440,6 +555,16 @@
       "path": "docs/design/PREFIX-CACHE.md",
       "sha256": "sha256:ac4a2aabfedad5701ac686e83b9da8475e6d6fa84cefc66e27b86cf109f4441b",
       "size_bytes": 12398
+    },
+    {
+      "path": "docs/design/PV29-SB2-FIRST-SLICE.md",
+      "sha256": "sha256:0ee39a82314e2f3bde491565462be1508d3cf3f0fa70b4a457db04d40cd4b5fe",
+      "size_bytes": 12023
+    },
+    {
+      "path": "docs/design/PV29-STAGE-CONTRACT.md",
+      "sha256": "sha256:07afc946c76b28d911872aaec89d8c82b6c0e71405b62dfb9f6ad4e7b64db462",
+      "size_bytes": 9298
     },
     {
       "path": "docs/design/REPLICAS.md",
@@ -1163,8 +1288,8 @@
     },
     {
       "path": "mycelium_a13_macos/serving.py",
-      "sha256": "sha256:afe1af6a4f2bf8a166158b17a0f5868f7c29873f10fbc44019cb6db66c8f7a2a",
-      "size_bytes": 40220
+      "sha256": "sha256:fd778a0082c2a2d954a1da089a7b6137a55a333553d288e182a745639e0a925c",
+      "size_bytes": 41387
     },
     {
       "path": "mycelium_a13_macos/sharing_state.py",
@@ -1852,6 +1977,16 @@
       "size_bytes": 6110
     },
     {
+      "path": "mycelium_platform_neutral/backend_parity.py",
+      "sha256": "sha256:ccb1f7966b57538838d689a8c4175e1eb3d9b8935c9fdab307695df3a2089ca4",
+      "size_bytes": 47059
+    },
+    {
+      "path": "mycelium_platform_neutral/backend_parity_route.py",
+      "sha256": "sha256:6cbfc0083ecea7e8b8ee7debe4890a56b8877b077424adb303a48f54ab43147e",
+      "size_bytes": 53694
+    },
+    {
       "path": "mycelium_platform_neutral/eligibility.py",
       "sha256": "sha256:22a805b47eec894bfeb1a71a2fd3770ee1699d504a5b6e9eb8d9d5280b6c2c88",
       "size_bytes": 18192
@@ -1897,6 +2032,11 @@
       "size_bytes": 4069
     },
     {
+      "path": "mycelium_platform_neutral/primitives.py",
+      "sha256": "sha256:8e7276a413d6ad95cd202c552010235bd445f0fd4cfdee4e1458e1198635b9b7",
+      "size_bytes": 10173
+    },
+    {
       "path": "mycelium_platform_neutral/seed_cutover_transaction.py",
       "sha256": "sha256:1f94ef3f4c8f80aeccec7c48492bdb07a10056b660ccd2a1bc1bb68b5ffad15b",
       "size_bytes": 14746
@@ -1905,6 +2045,11 @@
       "path": "mycelium_platform_neutral/seed_migration.py",
       "sha256": "sha256:50360a380827ece1abed43f9e26cd95426db528e7f6c72ec6d54ea0848955bda",
       "size_bytes": 27366
+    },
+    {
+      "path": "mycelium_platform_neutral/stage_capabilities.py",
+      "sha256": "sha256:e63073b34f6e6ea95e3a1ec6e8757bc1491a6a63cf3d4a027af6a3a1604cdbd7",
+      "size_bytes": 16699
     },
     {
       "path": "mycelium_platform_neutral/thermal.py",
@@ -2073,8 +2218,8 @@
     },
     {
       "path": "mycelium_router/numpy_runtime.py",
-      "sha256": "sha256:6c10d0be15380a92baff63be5534bc493bc6f43ef1d87d7ea1c8bc802283718f",
-      "size_bytes": 75385
+      "sha256": "sha256:62020038194b6694af9c6b615fb5ab42b05871f9a5bd4fd989fdce9316ee940d",
+      "size_bytes": 75664
     },
     {
       "path": "mycelium_router/prefix_cache.py",
@@ -2140,6 +2285,11 @@
       "path": "mycelium_router/wire.py",
       "sha256": "sha256:09f1c95e73984d4b0a5c023dfe09ee407a3c6a3866b59e179887dfab4b3a8ec8",
       "size_bytes": 20269
+    },
+    {
+      "path": "mycelium_router/wire_dtype.py",
+      "sha256": "sha256:7c985533dd5e8af6ab7ef05052d2e33b8e5bf441d642b3d1be7c7f005d2e4741",
+      "size_bytes": 3952
     },
     {
       "path": "mycelium_seed/__main__.py",
@@ -2797,6 +2947,11 @@
       "size_bytes": 1516
     },
     {
+      "path": "scripts/backend_parity_hf_oracle.py",
+      "sha256": "sha256:88469456a6a90102ea7728ec20e1fa63d6dcaa4c08b88b45b5c34837a5d6a307",
+      "size_bytes": 5496
+    },
+    {
       "path": "scripts/bind_gate_roles.py",
       "sha256": "sha256:f1fc1192869024841cc38ec9ae84e3640d93bc811f6acc1d8d4b25b300918c98",
       "size_bytes": 4173
@@ -2880,6 +3035,11 @@
       "path": "scripts/generate_phone_stage_wire_golden.py",
       "sha256": "sha256:68d4ef9f431fb9418f1342d5b10edf0343ae26df0ef7a92c5280dec1b2125224",
       "size_bytes": 18794
+    },
+    {
+      "path": "scripts/generate_router_wire_golden.py",
+      "sha256": "sha256:34f8402eac634cf89f8b00ac3af4966e635f129b5c4a5d7b01b425a2021bdb1d",
+      "size_bytes": 15233
     },
     {
       "path": "scripts/inspect_local_speculation_compatibility.py",
@@ -2997,6 +3157,11 @@
       "size_bytes": 20689
     },
     {
+      "path": "scripts/run_backend_parity.py",
+      "sha256": "sha256:5edb5e159ba791b49b85887851a05af15286d9cc03329f23491d9b515bb707b4",
+      "size_bytes": 26250
+    },
+    {
       "path": "scripts/run_transport_probe_sidecar.py",
       "sha256": "sha256:4882e1507f5051ea3282f17c22bd5d3f95021f7f1518317c26857c701f55d5b1",
       "size_bytes": 4073
@@ -3055,6 +3220,16 @@
       "path": "test_router_prefix_cache_numpy.py",
       "sha256": "sha256:b8837137f2ec9db5a1be83e056ae2ec7961fbbd0fbccb3975af0d84968f83a78",
       "size_bytes": 15663
+    },
+    {
+      "path": "test_router_wire_dtype.py",
+      "sha256": "sha256:928c8d770fa8fdd68bb386a4729440c2110cf7fb4750af39ac037d8cf8b1020e",
+      "size_bytes": 9291
+    },
+    {
+      "path": "test_router_wire_golden.py",
+      "sha256": "sha256:0df365187fe1cef9af53b8e939f28b1ba94db4036e8dfd07f4da0f7145030a36",
+      "size_bytes": 12488
     },
     {
       "path": "tests/a10_acceptance/evidence_predicates.py",
@@ -4177,6 +4352,11 @@
       "size_bytes": 8113
     },
     {
+      "path": "tests/a13_windows/test_route_wire_dtype_negotiation.py",
+      "sha256": "sha256:e32d5f2e2398f6ebd72c9ef156cf096f7b6fc27dedfe66739f4aa8de315a9a1a",
+      "size_bytes": 2051
+    },
+    {
       "path": "tests/a13_windows/test_service_install_win32.py",
       "sha256": "sha256:66f390271b951cac3621c39f958cc63f7fe166c840ce30f75e2a350d930fd245",
       "size_bytes": 8188
@@ -4645,6 +4825,36 @@
       "path": "tests/a9_migration_scaffold/test_migration_lifecycle.py",
       "sha256": "sha256:123f6c94bbece23482bad0ad15a830f9154a6c113d6ed3b5a362ed328d7b911e",
       "size_bytes": 13165
+    },
+    {
+      "path": "tests/backend_parity/__init__.py",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0
+    },
+    {
+      "path": "tests/backend_parity/test_backend_parity_calibrated_policy.py",
+      "sha256": "sha256:5a7b0a124222995055e0179b0661e48cf2991e8ec42a18d7d4e16a13bc15df1e",
+      "size_bytes": 3436
+    },
+    {
+      "path": "tests/backend_parity/test_backend_parity_core.py",
+      "sha256": "sha256:f4896f156f3b50050df9f51d8ca51f48322e0201ce489cfb25484093bf405805",
+      "size_bytes": 16989
+    },
+    {
+      "path": "tests/backend_parity/test_backend_parity_hf_oracle_format.py",
+      "sha256": "sha256:3ae313852c2c7899f26a3cb17896b542c9e7e45e664c7b3799a0f8e5abeb626b",
+      "size_bytes": 2527
+    },
+    {
+      "path": "tests/backend_parity/test_backend_parity_record.py",
+      "sha256": "sha256:18069462f33be78c65bf6300d510d2ea38a3482461c72645b9d61b30c3def4af",
+      "size_bytes": 12704
+    },
+    {
+      "path": "tests/backend_parity/test_backend_parity_route.py",
+      "sha256": "sha256:22a1079d09a269b518d116198b47a29419a7d5055666d5c9f936d221b05b465d",
+      "size_bytes": 13407
     },
     {
       "path": "tests/contracts/test_contract_fixtures.py",
@@ -5857,6 +6067,21 @@
       "size_bytes": 5547
     },
     {
+      "path": "tests/stage_contract/__init__.py",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0
+    },
+    {
+      "path": "tests/stage_contract/test_backend_wire_negotiation.py",
+      "sha256": "sha256:ed6c0e22b833c18b3593cca742a80ad7df9b105093b2920b0ef987ef69930c13",
+      "size_bytes": 2942
+    },
+    {
+      "path": "tests/stage_contract/test_stage_capabilities.py",
+      "sha256": "sha256:171583d8ad39149afb3c74599a9c06b7149feb9306b8dd627216eb06f7874632",
+      "size_bytes": 16265
+    },
+    {
       "path": "tests/swarm_directory/_swarm_fixtures.py",
       "sha256": "sha256:ef8f82660fb3065d37b1b0e4413f8b02be16bf26099047d0d5f2ebc59b04bd1d",
       "size_bytes": 4190
@@ -6035,6 +6260,11 @@
       "path": "tests/ui_gateway/ui_gateway_support.py",
       "sha256": "sha256:9726ef147d111b6f8bea9542124794f6b6280a0334eb8225e5dffe2ad7d744d1",
       "size_bytes": 12407
+    },
+    {
+      "path": "tolerances/backend-parity-corpus-qwen2.5-0.5b-instruct.v1.json",
+      "sha256": "sha256:f29d0ca8b87aec8da621587dc125690187c1146a9330b0e93646a651134db2e4",
+      "size_bytes": 9540
     },
     {
       "path": "ui/contracts/product/product-ui-bootstrap-v1.schema.json",
@@ -6328,5 +6558,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:5d0fe518f0864a07f8e7c24db4d96c23e5b0c896c28c6b4fd66675bc7973817d"
+  "source_digest": "sha256:1fac330f9dcac1a9ef1585620110106374596b419171349071ae6c3ce6141a34"
 }

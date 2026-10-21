@@ -1770,8 +1770,8 @@
         },
         {
           "path": "scripts/generate_router_wire_golden.py",
-          "sha256": "5e71c74107fcf809e71c9ab7435a74b7f725806739e9b3feb9acf85cb5587d3e",
-          "size_bytes": 9036
+          "sha256": "34f8402eac634cf89f8b00ac3af4966e635f129b5c4a5d7b01b425a2021bdb1d",
+          "size_bytes": 15233
         }
       ],
       "protocol": "mycelium.router_wire.v1"
