@@ -511,13 +511,37 @@ def _detach_harness(
         f"detach-harness-{startup_delay_seconds}-{int(fail_ack)}.py"
     )
     harness.write_text(
-        f"""import importlib.util, sys, time
+        f"""import importlib.util, os, sys, time, types
 spec=importlib.util.spec_from_file_location('p01r_supervisor', {str(SUPERVISOR)!r})
 module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
 module.DETACH_ACK_TIMEOUT_SECONDS={ack_timeout_seconds!r}
 module._before_detached_startup_ack=lambda: time.sleep({startup_delay_seconds!r})
+select_ready=module.select.select
 if {fail_ack!r}:
     module._send_detached_startup_ack=lambda _fd, _launch: (_ for _ in ()).throw(OSError('controlled_ack_failure'))
+    def after_ack_failure(readers, writers, errors, timeout):
+        # Arrange the failure before the timed observation, without consuming
+        # the pipe. EOF stays readable even if the launcher is descheduled.
+        ready, _, _ = select_ready(readers, writers, errors, 3.0)
+        assert ready == readers, 'failed ack did not reach the launcher pipe'
+        return select_ready(readers, writers, errors, timeout)
+    module.select=types.SimpleNamespace(select=after_ack_failure)
+elif {startup_delay_seconds!r}:
+    release_read, release_write=os.pipe()
+    def after_launcher_wait():
+        time.sleep({startup_delay_seconds!r})
+        assert os.read(release_read, 1) == b'G', 'launcher wait was not released'
+        os.close(release_read)
+    def before_ack_release(readers, writers, errors, timeout):
+        try:
+            return select_ready(readers, writers, errors, timeout)
+        finally:
+            # Keep the ack unavailable for the entire real select, including
+            # when the launcher does not get scheduled until after the delay.
+            os.write(release_write, b'G')
+            os.close(release_write)
+    module._before_detached_startup_ack=after_launcher_wait
+    module.select=types.SimpleNamespace(select=before_ack_release)
 sys.argv={[str(SUPERVISOR), *command[2:]]!r}
 raise SystemExit(module.main())
 """,

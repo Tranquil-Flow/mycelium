@@ -7968,8 +7968,8 @@
     },
     {
       "path": "tests/a5_acceptance/test_benchmark_supervisor.py",
-      "sha256": "sha256:b4fc17b53d3792060f9ce6ab075c8c8c8df18b1a0fb82f9042529185724e7839",
-      "size_bytes": 44278
+      "sha256": "sha256:704bb6d568fbbf3ccf89190379712573adc425971a6b9160376699a468a56aaf",
+      "size_bytes": 45596
     },
     {
       "path": "tests/a5_acceptance/test_flow_legal_tracks.py",
@@ -12888,5 +12888,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:5be6f6426ef727d09d38d9986bc97c6af9e1b4f4b1c7b8b9b401ac622ffaf55e"
+  "source_digest": "sha256:41e77f9fe5370d12210f579c890ea5010b10fbf5a10e7d1f1eee72ddfc29a440"
 }
