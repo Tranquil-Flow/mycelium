@@ -145,9 +145,18 @@ def test_a_rejected_poll_request_is_dropped_and_resigned(tmp_path, monkeypatch):
             assert pump._state['outbound'] is None
 
             _enqueue(world, 'native-hello')
-            progressed = [pump.step() for _ in range(12)]
-            assert any(step.get('state') == 'completed' for step in progressed), progressed
+            assert pump.step() == {'state': 'dispatched', 'command_id': 'native-hello'}
             assert seen['second'] != seen['first']
+            # step() is nonblocking: a poll count is not a native-completion
+            # witness. Observe the actual dispatch, then collect and ack it.
+            native = pump._futures['native-hello'].result(timeout=2)
+            completed = pump.step()
+            assert completed['state'] == 'completed'
+            assert completed['command_id'] == 'native-hello'
+            assert completed['native_response'] == native
+            assert native['ok'] is True
+            assert w.status()['command_count'] == 1
+            assert world['authority'].control_mailbox.command_receipt('native-hello')['state'] == 'completed'
         finally:
             pump.close()
             w.close()
