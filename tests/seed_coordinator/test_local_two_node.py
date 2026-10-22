@@ -581,6 +581,22 @@ def _pin_configured_observation(
     )
 
 
+def _trace_delta(before, after):
+    """Frames appended between two snapshots of the node's outbound trace.
+
+    The snapshot carries a bounded recent window of the trace
+    (``physical_inference_node.SNAPSHOT_OUTBOUND_TRACE_WINDOW``), so ``before`` is no
+    longer always a prefix of ``after``: it is the longest suffix of ``before`` that
+    starts ``after`` that marks where the new frames begin.
+    """
+
+    before, after = list(before), list(after)
+    for overlap in range(min(len(before), len(after)), -1, -1):
+        if before[len(before) - overlap :] == after[:overlap]:
+            return after[overlap:]
+    raise AssertionError("trace windows do not overlap")
+
+
 def _verified_observation(
     result: dict[str, Any],
     *,
@@ -2949,10 +2965,9 @@ def test_local_two_node_native_process_e2e(
                     )
                     before_trace = before["transport_outbound_trace"]
                     after_trace = after["transport_outbound_trace"]
-                    assert after_trace[: len(before_trace)] == before_trace
-                    request_trace_deltas[node_id] = after_trace[
-                        len(before_trace) :
-                    ]
+                    request_trace_deltas[node_id] = _trace_delta(
+                        before_trace, after_trace
+                    )
                 _assert_request_route_evidence(
                     request_frame_deltas,
                     request_trace_deltas,

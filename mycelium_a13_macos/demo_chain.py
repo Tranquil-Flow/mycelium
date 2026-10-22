@@ -1043,7 +1043,27 @@ class AppDemoChain:
             return 'managed_workflow_missing'
         if state['state'] in {'failed', 'stopped'}:
             return state.get('error_code') or 'managed_workflow_stopped'
+        dead = self._dead_member(ctx)
+        if dead is not None:
+            ctx.state['monitor_error_code'] = dead
+            return dead
         return self._restarted_member(ctx)
+
+    def _dead_member(self, ctx):
+        """The closed code of a participant that reports ``error`` while the route serves, else ``None``.
+
+        A node whose control loop died (``authority_state_write_failed``: its pump could not persist an
+        oversized response) answers nothing more; its member agent reports ``error`` with that code.  Without
+        this the owner kept ``serving`` with ``route_ready`` true while every request ran into a dead node
+        (live demo 2026-10-21).  Includes this Mac's own node.
+        """
+        reports = self._reports(ctx)
+        for node in self._participants(ctx):
+            report = reports.get(node)
+            if report is not None and report.get('state') == 'error':
+                detail = report.get('detail')
+                return detail if isinstance(detail, str) and detail else 'member_reported_error'
+        return None
 
     _IDENTITY = ('generation', 'incarnation', 'verification_key_digest', 'endpoint_id')
 
@@ -1085,6 +1105,16 @@ class AppDemoChain:
 
     def teardown(self, ctx, *, failed):
         app = self.app
+        if failed:
+            # End in-flight chats with the run's own failure code before the route is stopped under them: each
+            # request finishes `cancelled` with that code instead of hanging or failing with a transport error.
+            chat = getattr(app, 'chat', None)
+            cancel_all = getattr(chat, 'cancel_all', None)
+            if callable(cancel_all):
+                try:
+                    cancel_all(ctx.state.get('monitor_error_code') or 'owner_run_failed')
+                except Exception:
+                    pass
         try:
             if ctx.state.get('model') is not None:
                 self._announce(ctx, 'stopped')

@@ -430,6 +430,11 @@ class DemoTargetAgent:
             app.action('/api/work/accept', {'limits': limits, 'preview': preview, 'work_acknowledged': True})
             self._work_done.add(offer['offer_id'])
             native = actor.status().get('native_control') or {}
+        if phase == 'serving' and native.get('state') == 'blocked':
+            # The node's control loop is over (its pump could not persist state, a signed request conflicted, ...):
+            # nothing will claim another command, so this Mac no longer serves.  Report it by its own closed code
+            # instead of waiting; before 'serving' a blocked member keeps waiting (it can still be replaced).
+            self._set('error', _code(ValueError(native.get('error_code') or ''), 'native_worker_blocked')); return
         if native.get('state') == 'running' and (native.get('work_admitted') or native.get('model_load_authorized')):
             # Work accepted and its worker is up.  The model load itself is
             # admitted only by the owner's configure AFTER activation, so waiting

@@ -1135,6 +1135,152 @@ def _plain_json(value: Any) -> Any:
     raise NodeCommandError("nonserializable_observation")
 
 
+# --- snapshot response bound (PV35) -----------------------------------------------------
+#
+# The signed ``snapshot`` observation is stored whole in the control pump's pending
+# command and in the owner mailbox row, both capped at 256 KiB
+# (``mycelium_a13_macos.authority._MAX_PRIVATE_JSON_BYTES``).  Three per-request
+# histories used to ride in it (the A10 stage-compute intervals, the transport's
+# outbound frame trace and its scoped receipt events); each was bounded at 256 entries
+# but together they were about 330 KB, and the live demo died at 253 KB after four
+# chats.  The snapshot now carries a bounded *recent window* of each history plus the
+# cumulative counters the consumers read; ``snapshot_bounds`` says what was left out.
+# Full per-request evidence is not a snapshot concern: the A10 gate merges windows by
+# ``interval_ref`` across repeated status reads (it polls once a second, so the
+# 64-interval window covers 64 stage operations per node per poll), and the route
+# ingests scoped events by ``sequence`` on every snapshot it takes.
+SNAPSHOT_DETAILS_MAX_BYTES = 56 * 1024
+SNAPSHOT_INTERVAL_WINDOW = 64
+SNAPSHOT_BATCH_OBSERVATION_WINDOW = 16
+SNAPSHOT_OUTBOUND_TRACE_WINDOW = 16
+SNAPSHOT_SCOPED_EVENT_WINDOW = 12
+SNAPSHOT_SCOPED_FAILURE_WINDOW = 6
+SNAPSHOT_HOP_TRACE_WINDOW = 128
+
+
+def _snapshot_size(details: Mapping[str, Any]) -> int:
+    return len(
+        json.dumps(
+            _plain_json(details), sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    )
+
+
+def _recent_scoped_events(
+    events: Sequence[Any], recent: int, failures: int
+) -> list[Any]:
+    """The newest ``recent`` events plus the newest ``failures`` failure events.
+
+    A liveness failure is rarer and costlier to miss than a receipt, so it outlives
+    the receipt window (bounded separately); order is preserved.
+    """
+
+    events = list(events)
+    keep = set(range(max(0, len(events) - recent), len(events)))
+    failed = [
+        index
+        for index, event in enumerate(events)
+        if isinstance(event, Mapping) and event.get("event") == "failure"
+    ]
+    keep.update(failed[-failures:] if failures > 0 else ())
+    return [events[index] for index in sorted(keep)]
+
+
+def _bound_snapshot_details(details: dict[str, Any]) -> None:
+    """Bound the per-request histories in a full snapshot's ``details`` in place.
+
+    Fixed windows first; if the serialized details still exceed
+    ``SNAPSHOT_DETAILS_MAX_BYTES`` the windows are halved until they fit (down to
+    nothing), so the response bound holds whatever an individual entry weighs.
+    """
+
+    publication = details.get("a10_publication")
+    if not isinstance(publication, dict):
+        publication = None
+    transport = details.get("transport")
+    if not isinstance(transport, dict):
+        transport = None
+    source_intervals = (
+        list(publication["intervals"])
+        if publication is not None and isinstance(publication.get("intervals"), list)
+        else None
+    )
+    source_observations = (
+        list(publication["runtime_batch_observations"])
+        if publication is not None
+        and isinstance(publication.get("runtime_batch_observations"), list)
+        else None
+    )
+    source_dropped = (
+        publication.get("dropped_interval_count", 0) if publication is not None else 0,
+        publication.get("dropped_observation_count", 0) if publication is not None else 0,
+    )
+    source_trace = (
+        list(details["transport_outbound_trace"])
+        if isinstance(details.get("transport_outbound_trace"), list)
+        else None
+    )
+    source_events = (
+        list(transport["scoped_events"])
+        if transport is not None and isinstance(transport.get("scoped_events"), list)
+        else None
+    )
+    source_hops = (
+        list(transport["hop_overlap_trace"])
+        if transport is not None and isinstance(transport.get("hop_overlap_trace"), list)
+        else None
+    )
+
+    for divisor in (1, 2, 4, 8, 16, 0):
+
+        def window(base: int) -> int:
+            return base // divisor if divisor else 0
+
+        bounds: dict[str, Any] = {"max_bytes": SNAPSHOT_DETAILS_MAX_BYTES}
+
+        def record(name: str, source: Sequence[Any], kept: Sequence[Any]) -> None:
+            bounds[name] = {"published": len(kept), "dropped": len(source) - len(kept)}
+
+        if source_intervals is not None and publication is not None:
+            keep = window(SNAPSHOT_INTERVAL_WINDOW)
+            kept = source_intervals[-keep:] if keep else []
+            publication["intervals"] = kept
+            publication["dropped_interval_count"] = source_dropped[0] + (
+                len(source_intervals) - len(kept)
+            )
+            record("a10_intervals", source_intervals, kept)
+        if source_observations is not None and publication is not None:
+            keep = window(SNAPSHOT_BATCH_OBSERVATION_WINDOW)
+            kept = source_observations[-keep:] if keep else []
+            publication["runtime_batch_observations"] = kept
+            publication["dropped_observation_count"] = source_dropped[1] + (
+                len(source_observations) - len(kept)
+            )
+            record("a10_observations", source_observations, kept)
+        if source_trace is not None:
+            keep = window(SNAPSHOT_OUTBOUND_TRACE_WINDOW)
+            kept = source_trace[-keep:] if keep else []
+            details["transport_outbound_trace"] = kept
+            record("transport_outbound_trace", source_trace, kept)
+        if source_events is not None and transport is not None:
+            kept = _recent_scoped_events(
+                source_events,
+                window(SNAPSHOT_SCOPED_EVENT_WINDOW),
+                window(SNAPSHOT_SCOPED_FAILURE_WINDOW),
+            )
+            transport["scoped_events"] = kept
+            record("scoped_events", source_events, kept)
+        if source_hops is not None and transport is not None:
+            keep = window(SNAPSHOT_HOP_TRACE_WINDOW)
+            kept = source_hops[-keep:] if keep else []
+            transport["hop_overlap_trace"] = kept
+            record("hop_overlap_trace", source_hops, kept)
+        details["snapshot_bounds"] = bounds
+        if _snapshot_size(details) <= SNAPSHOT_DETAILS_MAX_BYTES:
+            return
+    raise NodeCommandError("snapshot_details_too_large")
+
+
 def _bounded_command_output(command: list[str]) -> str | None:
     try:
         completed = subprocess.run(
@@ -3943,6 +4089,7 @@ class PhysicalNodeService:
                         str(cancellation["path_id"]),
                     )
                 )
+            _bound_snapshot_details(details)
         if cleanup_subject is not None:
             with self._control_lock:
                 stored_cleanup = self._request_cleanup_receipts.get(

@@ -989,7 +989,10 @@ sidecar = subprocess.Popen([
     "-c",
     "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(120)",
 ])
-Path(sys.argv[1]).write_text(f"{os.getpid()} {sidecar.pid}")
+pid_file = Path(sys.argv[1])
+pending = pid_file.with_suffix(".tmp")
+pending.write_text(f"{os.getpid()} {sidecar.pid}")
+pending.replace(pid_file)  # Existence must imply the complete PID record.
 for line in sys.stdin:
     request = json.loads(line)
     if request["command"] == "stop":
@@ -1131,6 +1134,7 @@ for line in sys.stdin:
     timer.join(timeout=2)
     assert timer_errors == []
     pids = [int(value) for value in pid_file.read_text().split()]
+    assert len(pids) == 2
     alive_after_cleanup = [pid for pid in pids if _pid_exists(pid)]
 
     assert result == 0
@@ -2914,7 +2918,10 @@ def test_pre_exec_launcher_blocks_target_until_owned_release(
 import signal
 import sys
 
-Path(sys.argv[1]).write_text("executed")
+marker = Path(sys.argv[1])
+pending = marker.with_suffix(".tmp")
+pending.write_text("executed")
+pending.replace(marker)  # Publish content and readiness together.
 signal.pause()
 """
     )
@@ -3092,7 +3099,10 @@ sidecar = subprocess.Popen(
 os.close(ready_write)
 assert os.read(ready_read, 1) == b"R"
 os.close(ready_read)
-Path(sys.argv[1]).write_text(f"{os.getpid()} {sidecar.pid}")
+pid_file = Path(sys.argv[1])
+pending = pid_file.with_suffix(".tmp")
+pending.write_text(f"{os.getpid()} {sidecar.pid}")
+pending.replace(pid_file)  # Existence must imply the complete PID record.
 os._exit(0)
 """
     )
@@ -3126,6 +3136,11 @@ os._exit(0)
         with pytest.raises(ProcessLookupError):
             os.killpg(leader_pid, 0)
     finally:
+        # Process exit is not reader completion: the sidecar inherits the
+        # output pipes. Close joins the readers even if a preceding assertion
+        # failed, before any PID-file parsing can itself raise in teardown.
+        if supervised is not None:
+            supervised.close()
         if pid_file.exists():
             leader_pid = int(pid_file.read_text().split()[0])
             try:
