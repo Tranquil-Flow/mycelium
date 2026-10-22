@@ -42,9 +42,12 @@ def sandbox(tmp_path):
             path=stage/(label+suffix); path.write_bytes(plistlib.dumps(doc))
             config['staged_sha256'][path.name]=hashlib.sha256(path.read_bytes()).hexdigest()
         (home/'Library/LaunchAgents'/(label+'.plist')).write_bytes(plistlib.dumps(old))
+    for name in ('switch.py','http_verify.py'):
+        shutil.copyfile(TOOLS/name,stage/name)
+        config['staged_sha256'][name]=hashlib.sha256((stage/name).read_bytes()).hexdigest()
     (stage/'deployment.json').write_text(json.dumps(config))
     calls=[]
-    loaded=set(switch.LABELS)
+    loaded={label:plistlib.loads((home/'Library/LaunchAgents'/(label+'.plist')).read_bytes()) for label in switch.LABELS}
     def runner(command, **kwargs):
         calls.append(command)
         if command[0]=='/usr/bin/xattr':
@@ -56,11 +59,11 @@ def sandbox(tmp_path):
             label=command[2].split('/')[-1]
             if label not in loaded:
                 return subprocess.CompletedProcess(command,113,'','Could not find service "'+label+'"')
-            doc=plistlib.loads((home/'Library/LaunchAgents'/(label+'.plist')).read_bytes())
+            doc=loaded[label]
             return subprocess.CompletedProcess(command,0,'state = running\nworking directory = '+doc['WorkingDirectory'],'')
         assert command[0] == '/usr/bin/plutil' or command[:2] in (['/bin/launchctl','bootout'],['/bin/launchctl','bootstrap'])
-        if command[:2]==['/bin/launchctl','bootout']: loaded.discard(command[-1].split('/')[-1])
-        if command[:2]==['/bin/launchctl','bootstrap']: loaded.add(Path(command[-1]).stem)
+        if command[:2]==['/bin/launchctl','bootout']: loaded.pop(command[-1].split('/')[-1],None)
+        if command[:2]==['/bin/launchctl','bootstrap']: loaded[Path(command[-1]).stem]=plistlib.loads(Path(command[-1]).read_bytes())
         return subprocess.CompletedProcess(command,0,'','')
     return switch,home,stage,calls,runner
 
@@ -179,6 +182,7 @@ def launchd_runner(sandbox, *, boot_error=3, bootstrap_fail=False):
     """Model asynchronous removal, unlike the original always-running fake."""
     s,home,stage,calls,base=sandbox
     jobs={label:'old' for label in s.LABELS}
+    bindings={label:plistlib.loads((home/'Library/LaunchAgents'/(label+'.plist')).read_bytes()) for label in s.LABELS}
     events=[]
     failed=False
     def run(command,**kwargs):
@@ -197,7 +201,7 @@ def launchd_runner(sandbox, *, boot_error=3, bootstrap_fail=False):
                 return subprocess.CompletedProcess(command,0,'state = SIGTERMed','')
             if label not in jobs:
                 return subprocess.CompletedProcess(command,113,'',f'Could not find service "{label}" in domain for user gui: 501')
-            return base(command,**kwargs)
+            return subprocess.CompletedProcess(command,0,'state = running\nworking directory = '+bindings[label]['WorkingDirectory'],'')
         assert action=='bootstrap'
         if label in jobs:
             return subprocess.CompletedProcess(command,5,'','Bootstrap failed: 5: Input/output error')
@@ -205,6 +209,7 @@ def launchd_runner(sandbox, *, boot_error=3, bootstrap_fail=False):
             failed=True
             return subprocess.CompletedProcess(command,5,'','injected bootstrap failure')
         jobs[label]='running'
+        bindings[label]=plistlib.loads(Path(command[-1]).read_bytes())
         return subprocess.CompletedProcess(command,0,'','')
     return run,jobs,events
 
@@ -255,3 +260,121 @@ def test_http_transport_failure_is_not_misreported_as_privacy_failure(monkeypatc
     assert not result['ok']
     assert result['failure_kind']=='availability'
     assert '502' in result['error']
+
+
+@pytest.mark.parametrize('fault',['missing_candidate','corrupt_candidate','missing_target','corrupt_target'])
+def test_emergency_rollback_independent_of_candidate_and_installed_plist(sandbox,fault):
+    s,home,stage,_,_=sandbox
+    run,jobs,_=launchd_runner(sandbox)
+    path=(stage if 'candidate' in fault else home/'Library/LaunchAgents')/(s.LABELS[0]+'.plist')
+    if fault.startswith('missing'): path.unlink()
+    else: path.write_text('corrupt')
+    result=s.switch(stage,home,'rollback',apply=True,run=run,sleep=lambda _:None)
+    assert result['rollback_verified']
+    assert jobs=={label:'running' for label in s.LABELS}
+
+
+def test_journal_failure_after_bootout_cannot_block_recovery(sandbox,monkeypatch):
+    s,home,stage,_,_=sandbox
+    run,jobs,events=launchd_runner(sandbox)
+    write=Path.write_text
+    def broken(path,*args,**kwargs):
+        if path.parent==stage and 'operation' in path.name and events:
+            raise OSError('injected journal full')
+        return write(path,*args,**kwargs)
+    monkeypatch.setattr(Path,'write_text',broken)
+    with pytest.raises((OSError,RuntimeError),match='journal'):
+        s.switch(stage,home,'deploy',apply=True,run=run,sleep=lambda _:None)
+    assert jobs=={label:'running' for label in s.LABELS}
+    for label in s.LABELS:
+        assert (home/'Library/LaunchAgents'/(label+'.plist')).read_bytes()==(stage/(label+'.rollback.plist')).read_bytes()
+
+
+@pytest.mark.parametrize('retained',['rollback','candidate'])
+def test_failed_bootout_cannot_confuse_disk_with_registered_binding(sandbox,retained):
+    s,home,stage,_,_=sandbox
+    if retained=='candidate':
+        for label in s.LABELS:
+            shutil.copyfile(stage/(label+'.plist'),home/'Library/LaunchAgents'/(label+'.plist'))
+    run,jobs,events=launchd_runner(sandbox)
+    def refuses(command,**kwargs):
+        if command[:2]==['/bin/launchctl','bootout'] and command[-1].endswith(s.LABELS[0]):
+            return subprocess.CompletedProcess(command,5,'','injected persistent bootout refusal')
+        return run(command,**kwargs)
+    if retained=='candidate':
+        with pytest.raises(RuntimeError,match='Recovery incomplete'):
+            s.switch(stage,home,'rollback',apply=True,run=refuses,sleep=lambda _:None)
+    else:
+        assert s.switch(stage,home,'rollback',apply=True,run=refuses,sleep=lambda _:None)['rollback_verified']
+    assert ('bootstrap',s.LABELS[0]) in events
+    assert ('bootstrap',s.LABELS[1]) in events
+
+
+def test_bootout_timeout_still_bootstraps_originals(sandbox):
+    s,home,stage,_,_=sandbox
+    run,jobs,events=launchd_runner(sandbox)
+    def times_out(command,**kwargs):
+        if command[:2]==['/bin/launchctl','bootout']:
+            jobs.pop(command[-1].split('/')[-1],None)
+            raise subprocess.TimeoutExpired(command,20)
+        return run(command,**kwargs)
+    assert s.switch(stage,home,'rollback',apply=True,run=times_out,sleep=lambda _:None)['rollback_verified']
+    assert jobs=={label:'running' for label in s.LABELS}
+
+
+def test_required_stage_pins_cannot_be_omitted(sandbox):
+    s,home,stage,calls,run=sandbox
+    cfg=json.loads((stage/'deployment.json').read_text())
+    del cfg['staged_sha256'][s.LABELS[0]+'.rollback.plist']
+    (stage/'deployment.json').write_text(json.dumps(cfg))
+    with pytest.raises(ValueError,match='Missing staged'):
+        s.switch(stage,home,'deploy',apply=True,run=run,sleep=lambda _:None)
+    assert not any(c[0]=='/bin/launchctl' for c in calls)
+
+
+def test_database_copy_refuses_missing_source(tmp_path):
+    with pytest.raises((FileNotFoundError,ValueError)):
+        module('rehearse').copy_database(tmp_path/'absent.sqlite',tmp_path/'copy.sqlite')
+    assert not (tmp_path/'copy.sqlite').exists()
+
+
+def test_rehearsal_cleanup_attempts_every_label_after_timeout():
+    rehearsal=module('rehearse')
+    calls=[]
+    labels=('now.mycelium.test-cleanup.swarm-directory','now.mycelium.test-cleanup.apex-proxy')
+    def control(action,label):
+        calls.append((action,label))
+        if label==labels[0]: raise subprocess.TimeoutExpired([action,label],20)
+        return subprocess.CompletedProcess([action,label],113 if action=='print' else 0,'','Could not find service')
+    result=rehearsal.cleanup_jobs(labels,control,sleep=lambda _:None)
+    assert not result[0]['absent'] and result[1]['absent']
+    assert ('bootout',labels[1]) in calls
+
+
+def test_copy_database_includes_uncheckpointed_wal_without_changing_source(tmp_path):
+    import sqlite3
+    from contextlib import closing
+    source,target=tmp_path/'source.sqlite',tmp_path/'copy.sqlite'
+    rehearsal=module('rehearse')
+    with closing(sqlite3.connect(source)) as db:
+        db.execute('PRAGMA journal_mode=WAL')
+        db.execute('PRAGMA wal_autocheckpoint=0')
+        db.execute('CREATE TABLE kv (tbl TEXT,k TEXT,v TEXT,PRIMARY KEY(tbl,k)) WITHOUT ROWID')
+        db.execute('INSERT INTO kv VALUES (?,?,?)',('swarm','canary','{}'))
+        db.commit()
+        before={p.name:p.read_bytes() for p in (source,Path(str(source)+'-wal'))}
+        result=rehearsal.copy_database(source,target)
+        assert result['row_counts']=={'kv':1}
+        assert result['logical_sha256']==rehearsal.database_summary(target)['logical_sha256']
+        assert set(result['snapshot_sha256'])==set(before)
+        assert before=={p.name:p.read_bytes() for p in (source,Path(str(source)+'-wal'))}
+
+
+def test_sandbox_config_cannot_name_live_jobs(sandbox):
+    s,home,stage,calls,run=sandbox
+    cfg=json.loads((stage/'deployment.json').read_text())
+    cfg.update(sandbox=True,labels=list(s.LABELS))
+    (stage/'deployment.json').write_text(json.dumps(cfg))
+    with pytest.raises(ValueError,match='Invalid sandbox'):
+        s.switch(stage,home,'deploy',apply=True,run=run,sleep=lambda _:None)
+    assert not any(c[0]=='/bin/launchctl' for c in calls)

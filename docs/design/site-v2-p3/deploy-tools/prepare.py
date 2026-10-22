@@ -23,6 +23,8 @@ def main():
     assert spec and spec.loader
     switch = importlib.util.module_from_spec(spec); spec.loader.exec_module(switch)
     release, stage, home = args.release.resolve(), args.stage.resolve(), Path.home()
+    if Path(__file__).resolve().parent != release/'docs/design/site-v2-p3/deploy-tools':
+        raise ValueError('Prepare must run from the exact release checkout')
     switch.unquarantined('/usr/bin/git', subprocess.run)
     head = switch.checked(['/usr/bin/git','-C',str(release),'rev-parse','HEAD'], subprocess.run).strip()
     if switch.checked(['/usr/bin/git','-C',str(release),'status','--porcelain'], subprocess.run).strip():

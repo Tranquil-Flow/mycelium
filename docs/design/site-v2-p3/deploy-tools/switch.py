@@ -51,12 +51,21 @@ def unquarantined(path, run):
 def preflight(stage, home, run, mode):
     cfg = json.loads((stage / 'deployment.json').read_text())
     labels = tuple(cfg.get('labels', LABELS))
+    if cfg.get('sandbox') and labels == LABELS:
+        raise ValueError('Invalid sandbox: live labels forbidden')
     if labels != LABELS and (not cfg.get('sandbox') or home.resolve() == Path.home().resolve()
             or len(labels) != 2 or not all(re.fullmatch(r'now\.mycelium\.test-[a-z0-9-]+\.' + role, label)
                 for label, role in zip(labels, ('swarm-directory', 'apex-proxy')))):
         raise ValueError('Invalid sandbox labels/home')
-    # Check every staged file and BOTH jobs before any bootout or write.
-    for filename, digest in cfg['staged_sha256'].items():
+    # Recovery authenticates its own inputs, never depends on damaged candidate bytes.
+    required = {'switch.py', 'http_verify.py'} | {label+'.rollback.plist' for label in labels}
+    if mode == 'deploy':
+        required |= {label+'.plist' for label in labels}
+    if not required <= cfg['staged_sha256'].keys():
+        raise ValueError('Missing staged file pins')
+    names = cfg['staged_sha256'] if mode == 'deploy' else required
+    for filename in names:
+        digest = cfg['staged_sha256'][filename]
         if Path(filename).name != filename:
             raise ValueError('Invalid staged filename')
         if hashlib.sha256((stage / filename).read_bytes()).hexdigest() != digest:
@@ -73,12 +82,13 @@ def preflight(stage, home, run, mode):
     for label in labels:
         old_path = stage / (label + '.rollback.plist')
         new_path = stage / (label + '.plist')
-        old, new = load_plist(old_path.read_bytes()), load_plist(new_path.read_bytes())
+        old = load_plist(old_path.read_bytes())
+        new = candidate_doc(old, cfg['candidate']['path'])
+        if mode == 'deploy' and load_plist(new_path.read_bytes()) != new:
+            raise ValueError('Non-site configuration changed')
         if old['Label'] != label or old['WorkingDirectory'] != cfg['rollback']['path']:
             raise ValueError('Unexpected rollback binding')
-        if new != candidate_doc(old, cfg['candidate']['path']):
-            raise ValueError('Non-site configuration changed')
-        for path in (old_path, new_path):
+        for path in ((old_path, new_path) if mode == 'deploy' else (old_path,)):
             checked(['/usr/bin/plutil', '-lint', str(path)], run)
         argv = new['ProgramArguments']
         prefix = argv[:argv.index('-m')] if '-m' in argv else argv[:1]
@@ -86,7 +96,7 @@ def preflight(stage, home, run, mode):
             if arg.startswith('/'):
                 unquarantined(arg, run)
         target = home / 'Library/LaunchAgents' / (label + '.plist')
-        if load_plist(target.read_bytes()) not in (old, new):
+        if mode == 'deploy' and load_plist(target.read_bytes()) not in (old, new):
             raise ValueError('Live plist drift: ' + label)
         pairs[label] = (old_path, new_path)
     return cfg, pairs
@@ -119,10 +129,25 @@ def _switch(stage, home, mode, *, apply, run, sleep, uid, verify, live):
     plan['commands'] = []
     journal = stage / (mode+'-operation-'+str(time.time_ns())+'.json')
 
-    def save():
-        data = json.dumps(plan, indent=2)+'\n'
-        journal.write_text(data)
-        (stage/'last-operation.json').write_text(data)
+    recovering = mode == 'rollback'
+
+    def save(strict=False):
+        # Receipt failure is fatal to promotion, never to restoration.
+        try:
+            data = json.dumps(plan, indent=2)+'\n'
+            for path in (journal, stage/'last-operation.json'):
+                temporary = path.with_suffix('.json.tmp')
+                temporary.write_text(data)
+                temporary.replace(path)
+        except OSError as error:
+            message = 'Operation journal failed: '+str(error)
+            if message not in plan.setdefault('journal_errors', []):
+                plan['journal_errors'].append(message)
+                print(message, file=sys.stderr)
+            if strict:
+                raise RuntimeError(message) from error
+
+    save(strict=not recovering)
 
     def command(args):
         cmd = ['/bin/launchctl', *args]
@@ -133,7 +158,7 @@ def _switch(stage, home, mode, *, apply, run, sleep, uid, verify, live):
             save()
             raise RuntimeError('launchctl timeout: '+args[0]) from error
         plan['commands'].append({'argv':cmd,'rc':r.returncode,'stdout':r.stdout,'stderr':r.stderr})
-        save()
+        save(strict=not recovering)
         return r
 
     def stop(label):
@@ -216,6 +241,8 @@ def _switch(stage, home, mode, *, apply, run, sleep, uid, verify, live):
                 raise RuntimeError('HTTP verification failed: '+which)
 
     def restore():
+        nonlocal recovering
+        recovering = True
         receipts, errors = [], []
         for label in pairs:
             for attempt in range(3):
@@ -242,6 +269,7 @@ def _switch(stage, home, mode, *, apply, run, sleep, uid, verify, live):
         else:
             plan['runtime'] = [start(label,mode) for label in pairs]
             verify_all(mode)
+            save(strict=True)
     except BaseException as error:
         plan['error'] = str(error)
         save()

@@ -6,6 +6,7 @@ Copies DB bytes without opening the live database in SQLite. No public HTTP,
 model/relay/tunnel/watchdog processes or live launchd labels are contacted.
 """
 import argparse
+from contextlib import closing
 import hashlib
 import importlib.util
 import json
@@ -29,6 +30,10 @@ def load(path):
 
 def copy_database(source, target):
     """Copy a stable DB+WAL byte snapshot; SQLite only ever opens the copy."""
+    if not source.is_file() or source.is_symlink():
+        raise ValueError('Source database must be an existing regular file')
+    if target.exists() or target.resolve() == source.resolve():
+        raise ValueError('Copy target must be new and separate from the source')
     sources = [Path(str(source)+suffix) for suffix in ('','-wal')]
     def fingerprint():
         return [(p.exists(), p.stat().st_size if p.exists() else None,
@@ -43,14 +48,50 @@ def copy_database(source, target):
             elif out.exists():
                 out.unlink()
         if before == fingerprint():
-            with sqlite3.connect(target) as db:
-                assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
-                tables = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")]
-                counts = {name:db.execute('SELECT COUNT(*) FROM "'+name.replace('"','""')+'"').fetchone()[0] for name in tables}
-            return {'source':str(source),'copy':str(target),'integrity':'ok','row_counts':counts,
-                    'source_metadata':before,'copy_sha256':hashlib.sha256(target.read_bytes()).hexdigest()}
+            snapshot_hashes = {p.name:hashlib.sha256(Path(str(target)+str(p)[len(str(source)):]).read_bytes()).hexdigest()
+                               for p in sources if p.exists()}
+            summary = database_summary(target)
+            return dict(summary, source=str(source), copy=str(target),
+                        source_metadata=before, snapshot_sha256=snapshot_hashes)
         time.sleep(.1)
     raise RuntimeError('Could not obtain a stable copied DB snapshot')
+
+
+def database_summary(path):
+    # Only the sandbox copy is opened in SQLite; keep source bytes private.
+    with closing(sqlite3.connect('file:'+str(path)+'?mode=ro', uri=True)) as db:
+        if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+            raise ValueError('Copied database integrity failed')
+        columns = [row[1] for row in db.execute('PRAGMA table_info(kv)')]
+        if columns != ['tbl', 'k', 'v']:
+            raise ValueError('Missing directory kv schema')
+        rows = db.execute('SELECT tbl,k,v FROM kv ORDER BY tbl,k').fetchall()
+        return {'integrity':'ok', 'row_counts':{'kv':len(rows)},
+                'logical_sha256':hashlib.sha256(json.dumps(rows,separators=(',',':')).encode()).hexdigest()}
+
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
+
+def cleanup_jobs(labels, control, sleep=time.sleep):
+    results = []
+    for label in labels:
+        row = {'label':label, 'absent':False}
+        try:
+            r = control('bootout',label)
+            row.update(bootout_rc=r.returncode, bootout_stderr=r.stderr)
+            for _ in range(100):
+                q = control('print',label)
+                if q.returncode == 113 and 'Could not find service' in q.stderr:
+                    row['absent'] = True
+                    break
+                sleep(.1)
+        except Exception as error:
+            row['error'] = str(error)
+        results.append(row)
+    return results
 
 
 def main():
@@ -62,7 +103,9 @@ def main():
     sw = load(source/'switch.py')
     for path in (sys.executable, '/bin/launchctl', '/usr/bin/env', source/'switch.py', source/'http_verify.py'):
         sw.unquarantined(path, subprocess.run)
-    config = json.loads((source/'deployment.json').read_text())
+    config, _ = sw.preflight(source, Path.home(), subprocess.run, 'deploy')
+    for name in ('switch.py','http_verify.py','rehearse.py'):
+        require(name in config['staged_sha256'], 'Missing rehearsal source pin: '+name)
     root.mkdir(mode=0o700,parents=True,exist_ok=False)
     home, stage, state = root/'home', root/'stage', root/'state'
     (home/'Library/LaunchAgents').mkdir(parents=True)
@@ -109,12 +152,12 @@ def main():
     (stage/'deployment.json').write_text(json.dumps(sandbox,indent=2)+'\n')
     for sock in sockets: sock.close()
     def control(action,label):
-        assert label in labels and label.startswith('now.mycelium.test-')
+        require(label in labels and label.startswith('now.mycelium.test-'), 'Non-sandbox control refused')
         return subprocess.run(['/bin/launchctl',action,domain+'/'+label],capture_output=True,text=True,timeout=20)
     # Refuse to take over any already-existing test label.
     for label in labels:
         r = control('print',label)
-        assert r.returncode == 113 and 'Could not find service' in r.stderr
+        require(r.returncode == 113 and 'Could not find service' in r.stderr, 'Test label already exists or cannot be inspected')
     def run(mode):
         receipt = sw.switch(stage,home,mode,apply=True)
         report['cycles'].append({'mode':mode,'ok':receipt.get('ok'),
@@ -131,32 +174,30 @@ def main():
             r = subprocess.run([sys.executable,'-B',str(stage/'http_verify.py'),'rollback','--base',
                                 'http://127.0.0.1:'+str(apex_port)],capture_output=True,text=True,timeout=180)
             (root/'injected-failure-rollback-http.json').write_text(r.stdout)
-            assert r.returncode == 0, r.stderr+r.stdout
+            require(r.returncode == 0, 'Injected rollback HTTP failed: '+r.stderr+r.stdout)
         try:
             sw.switch(stage,home,'deploy',apply=True,verify=fail_candidate)
         except RuntimeError as error:
-            assert 'injected post-start' in str(error), str(error)
+            require('injected post-start' in str(error), str(error))
             receipt = json.loads((stage/'last-operation.json').read_text())
-            assert receipt['rollback_verified'] is True
+            require(receipt.get('rollback_verified') is True, 'Injected recovery not verified')
             report['cycles'].append({'mode':'injected-failure','ok':True,'rollback_verified':True})
         else:
             raise AssertionError('Failure injection was bypassed')
         # Independently prove both final bindings and byte-exact rollback plists.
         for label in labels:
             r = control('print',label)
-            assert r.returncode == 0 and 'state = running' in r.stdout
-            assert 'working directory = '+config['rollback']['path']+'\n' in r.stdout
-            assert (home/'Library/LaunchAgents'/(label+'.plist')).read_bytes() == (stage/(label+'.rollback.plist')).read_bytes()
+            require(r.returncode == 0 and 'state = running' in r.stdout, 'Final job not running: '+label)
+            require('working directory = '+config['rollback']['path']+'\n' in r.stdout, 'Final binding mismatch: '+label)
+            require((home/'Library/LaunchAgents'/(label+'.plist')).read_bytes() == (stage/(label+'.rollback.plist')).read_bytes(), 'Final plist mismatch: '+label)
+        report['database_after'] = database_summary(state/'directory.sqlite3')
+        require(report['database_after']['logical_sha256'] == report['database']['logical_sha256'], 'Copied database changed during read-only cycles')
         report['ok'] = True
+    except BaseException as error:
+        report['error'] = str(error)
+        raise
     finally:
-        report['cleanup'] = []
-        for label in labels:
-            r = control('bootout',label)
-            for _ in range(100):
-                q = control('print',label)
-                if q.returncode == 113 and 'Could not find service' in q.stderr: break
-                time.sleep(.1)
-            report['cleanup'].append({'label':label,'bootout_rc':r.returncode,'absent':q.returncode==113})
+        report['cleanup'] = cleanup_jobs(labels, control)
         report['ok'] = report['ok'] and all(row['absent'] for row in report['cleanup'])
         (root/'rehearsal.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report,indent=2))
