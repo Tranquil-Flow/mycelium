@@ -867,6 +867,11 @@
       "size_bytes": 11655
     },
     {
+      "path": "docs/design/SITE-V2-DEPLOY-RECOVERY.md",
+      "sha256": "sha256:cae424e893b45a8fef7ea19e977ff295dc1a739595d1258a964c1d4725a57d90",
+      "size_bytes": 6844
+    },
+    {
       "path": "docs/design/SITE-V2-P3-DEMO-ROUTE.md",
       "sha256": "sha256:f12c3d0ef1c53c3818d2570e82320fbbe582c0fceda6f882f6ac150a3599b1ea",
       "size_bytes": 6846
@@ -2478,8 +2483,8 @@
     },
     {
       "path": "docs/design/site-v2-p3/deploy-tools/http_verify.py",
-      "sha256": "sha256:a46edd5b3f947b7c7c7bfb18ea42344b76e9a5693f5f2c364fdcede32b9a1b37",
-      "size_bytes": 6964
+      "sha256": "sha256:13b92dec479ecc32a5d35a1f3c5332e016139db676711e6da70b67e3f1661564",
+      "size_bytes": 8049
     },
     {
       "path": "docs/design/site-v2-p3/deploy-tools/loopback_verify.py",
@@ -2488,13 +2493,18 @@
     },
     {
       "path": "docs/design/site-v2-p3/deploy-tools/prepare.py",
-      "sha256": "sha256:7dc6f7f62bfe16bac136bb538bfe71f099a7e6dcd79fad27527987fcf497f1b7",
-      "size_bytes": 3527
+      "sha256": "sha256:ef8a0df8f3feee6fcdc45a667c8f04381222f99f141f00cd4407d4ff57b16857",
+      "size_bytes": 3708
+    },
+    {
+      "path": "docs/design/site-v2-p3/deploy-tools/rehearse.py",
+      "sha256": "sha256:46d5f149f4e16be85b0b341a485779f254b94e2a2e7d0e5a4627e4cb9ede33a5",
+      "size_bytes": 10672
     },
     {
       "path": "docs/design/site-v2-p3/deploy-tools/switch.py",
-      "sha256": "sha256:12fa4040d225e4a880f8ce12742d30bb455995ce046eac7d4e23d63e97ab7f28",
-      "size_bytes": 6844
+      "sha256": "sha256:b88ed0524e22131aaf44d66c974b9db1073c358b0dd6c6e44bbfcb95cd99ab9d",
+      "size_bytes": 14374
     },
     {
       "path": "docs/design/site-v2-p3/layout-before/README.md",
@@ -8833,8 +8843,8 @@
     },
     {
       "path": "tests/swarm_directory/test_site_deploy_tools.py",
-      "sha256": "sha256:df3a8515831b5d393853fd5df04d07d5fb0fc8d66c741465890cb73730ba0400",
-      "size_bytes": 8931
+      "sha256": "sha256:4eaa40dd67af5b2826a577981aa585e454ffbfd099ca7f81623f689c4c0cfd56",
+      "size_bytes": 19435
     },
     {
       "path": "tests/swarm_directory/test_site_p3_core.py",
@@ -9258,5 +9268,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:41ec58ea4d1f58eb492b19d0e7bb270bb43b1768711997cfe7dd02da51ee673a"
+  "source_digest": "sha256:c5f7c2d7b9b2ed7f9711ed511913583045de9f6d562ac346ed39e6357b392cf3"
 }
