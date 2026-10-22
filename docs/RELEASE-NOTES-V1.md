@@ -1,87 +1,107 @@
-# Mycelium v0.1.0 — first public preview
+# Mycelium v0.1.1 — macOS installation and reliability update
 
 Mycelium splits one language model across several computers, so machines that
-could not run the model alone can serve it together. This is a preview: it works
-on the project's own Macs and has not been tested on a wide range of machines.
+could not run the model alone can serve it together. This preview updates the
+macOS installer and fixes reliability problems in longer-running swarms. It has
+not been tested on a wide range of machines.
 
 Licence: **AGPL-3.0-only** (see `LICENSE`).
 
+## What changed since v0.1.0
+
+- Fixed a crash when a MacBook joins a swarm (duplicate MLX libraries in the app)
+
+- **Installation on macOS 26.** Approve `Install Mycelium.command` in Privacy &
+  Security. The script checks the downloaded files before allowing the bundled
+  app to run. The installer verifies a complete staged copy before moving it into
+  place, and prevents two installs from running at once. An interrupted install
+  no longer leaves an empty version folder that blocks the next attempt.
+- **Safer first launch.** Open the installed app in your home Applications folder,
+  not the app inside Downloads. Launches from an uninstalled or translocated copy
+  are refused with an explanation instead of starting a temporary session.
+- **Less health-check traffic during chat.** Token progress counts as a sign that
+  a worker is alive; health probes no longer pile up while it is answering.
+- **Clearer stops.** A blocked worker stops the swarm from claiming it is serving.
+  When a run reaches its execution time limit, waiting chats receive an explicit
+  end reason instead of hanging until the workers disappear.
+- **Bounded status replies.** Recent request histories are kept within a fixed
+  response budget, so status reports do not grow indefinitely across chats.
+- **More reliable worker startup and tests.** Workers retain a compatible Python
+  minor version after Homebrew changes its `python3` target. Health-probe deadlines
+  use the central registry, and pump-recovery tests wait for native dispatch
+  rather than relying on thread timing.
+
 ## What works
 
-- **Two-Mac swarm.** One Mac creates a swarm and a second Mac joins it with a
-  short-lived, single-use code. The layers of the model are split between the two
-  Macs by available memory.
-- **Join.** The owner shows a join link and QR code; the second Mac pastes it.
-  The owner approves the new Mac by its fingerprint.
-- **Model download.** Each Mac fetches only the slice of the model it serves.
-  Downloads are checked against pinned hashes and can resume.
-- **Serve and chat.** The route is checked before anything is served. Chat
-  answers stream token by token in the app.
-- **Public directory.** A swarm can be listed on <https://mycelium.now> so
-  others can find it and chat with it through the swarm's public entry.
-- **Your own relay origin.** The owner can put the swarm's public entry on a
-  hostname they control instead of a temporary tunnel address.
-- **Pause and leave.** A Mac can pause sharing, leave, and re-enter. Its identity
-  is kept across restarts and uninstall unless you ask for deletion.
+One Apple Silicon Mac creates a swarm and a second joins with a short-lived,
+single-use code. The owner approves the joining Mac by fingerprint. Each Mac
+fetches its share of the model with hash verification and resumable downloads.
+Once the route is ready, answers stream token by token. A swarm can optionally
+be listed on <https://mycelium.now> for other people to find and chat with it.
 
 ## Known limits
 
-- **Not notarized.** The app is ad-hoc signed, not signed with an Apple
-  Developer ID. macOS Gatekeeper warns on first open. Use right-click → **Open**,
-  then **System Settings → Privacy & Security → Open Anyway** if needed. Do not
-  turn Gatekeeper off.
-- **Standard users need an admin once.** On a standard (non-admin) account, an
-  administrator has to approve the first open of the un-notarized app. The app
-  itself never asks for `sudo` and writes only inside your home folder.
-- **Small public demo model.** The public demo serves **Qwen2.5-0.5B**. It is
-  small on purpose; answers are short and often wrong in the way small models
-  are.
-- **Clocks should be synced.** Turn on *Set time and date automatically* on both
-  Macs. This release accepts up to 30 seconds of difference between Macs; a
-  larger gap makes joins and some commands fail.
-- **macOS on Apple Silicon only** (M1 or newer). Intel Macs are refused. Linux
-  and Windows are planned; their installers exist in the source tree but have not
-  been run on real hardware.
-- **Prompts are visible to the Macs that serve them.** Mycelium does not hide
-  your prompt or the intermediate data from the machines doing the work. Read
-  `docs/user/PRIVACY.md`.
-- Two-Mac swarms only have been run end to end. Larger swarms and models that
-  need more memory than two Macs have are not part of this release.
+- **Unsigned by Apple and not notarized.** The app has an ad-hoc signature and an
+  Ed25519-signed installation manifest, but no Apple Developer ID. Gatekeeper
+  blocks the downloaded installer until you approve it. Do not disable Gatekeeper.
+- **Standard users need an admin for first-open approval.** The installer itself
+  does not use `sudo` and writes only inside your home folder; macOS approval of
+  an un-notarized download can require an administrator.
+- **Apple Silicon Macs only** (M1 or newer; macOS 15.6.1 or later). Intel Macs are
+  refused. Linux and Windows installers in the source tree are not qualified for
+  this release. Only two-Mac swarms have been exercised end to end.
+- **Demo speed is still limited.** The small Qwen2.5-0.5B demo can pause between
+  tokens. These reliability fixes are not a promise of fast responses; speed
+  depends on the Macs, network and other work running on them. The small model's
+  answers can be wrong.
+- **Keep clocks synchronized.** Enable automatic time on both Macs. More than
+  30 seconds of difference can make joins or commands fail.
+- **Serving peers can see prompts.** Mycelium does not hide your prompt or
+  intermediate data from the machines doing the work. Read `docs/user/PRIVACY.md`.
 
-## Install
+## Install on macOS 26
 
-1. Download `mycelium-0.1.0-macos-arm64.zip` and its `.sha256` file from the release page.
-2. Check the file:
+1. Download `mycelium-0.1.1-macos-arm64.zip` and its `.sha256` file from this release.
+2. In Terminal, check the downloaded zip:
 
    ```sh
-   shasum -a 256 ~/Downloads/mycelium-0.1.0-macos-arm64.zip
+   cd ~/Downloads
+   shasum -a 256 -c mycelium-0.1.1-macos-arm64.zip.sha256
    ```
 
-   The result must equal the value in the `.sha256` file and the one below.
-3. Double-click the zip. It unpacks to the folder
-   `mycelium-0.1.0-macos-arm64`. Check the app's signature:
+   It must say `OK`, and the checksum must match the value below. A checksum
+   establishes byte identity, not a security audit.
+3. Double-click the zip. It unpacks to `mycelium-0.1.1-macos-arm64`. Check the app:
 
    ```sh
-   /usr/bin/codesign --verify --deep --strict ~/Downloads/mycelium-0.1.0-macos-arm64/"Mycelium A13 Demo.app"
+   /usr/bin/codesign --verify --deep --strict ~/Downloads/mycelium-0.1.1-macos-arm64/"Mycelium A13 Demo.app"
    ```
 
-   No output and exit status 0 is correct.
-4. Right-click **Install Mycelium.command** → **Open**. If macOS blocks it, use
-   **System Settings → Privacy & Security → Open Anyway**.
-5. Open `~/Applications/Mycelium A13.app` and follow
-   `docs/user/QUICKSTART-MACOS.md`.
+   Exit status 0 means the ad-hoc signature is intact; it is not Apple approval.
+4. In the extracted folder, double-click **Install Mycelium.command**. If macOS
+   says it was not opened, click **Done**, then go to **System Settings → Privacy
+   & Security → Security → Open Anyway**. Confirm with your password or Touch ID,
+   then click **Open Anyway** in the confirmation dialog.
+5. Wait for `Mycelium is installed for this user`. The script verifies file
+   checksums before clearing the download mark on the bundled app; the installer
+   verifies the signed manifest and staged copy before clearing its mark. Do not
+   run `xattr` yourself or turn Gatekeeper off. On older macOS, right-click →
+   **Open** on the script may also be available.
+6. Open `~/Applications/Mycelium A13.app` and follow `docs/user/QUICKSTART-MACOS.md`.
+   Do not open the app directly inside Downloads.
 
-Uninstall removes the program and the app link but keeps your identity and
-settings in `~/Library/Application Support/Mycelium A13 macOS Demo`.
+If installation is refused, retain the short error code and consult
+`docs/user/TROUBLESHOOTING.md`. Uninstall keeps your identity and settings unless
+you explicitly ask to remove them.
 
 ## Checksum
 
 ```text
-SHA-256 (mycelium-0.1.0-macos-arm64.zip): 6920cae8cc5827695cbb903d81097c6cbc111781483f0d492762ef06e069dc59
+SHA-256 (mycelium-0.1.1-macos-arm64.zip): 11f289b3b271521d8f296bbada281adbf8db630b49a1578fe49e606b1fafe4d5
 ```
 
-## Source
+## Source and previous release
 
-Build and test instructions are in the repository `README.md`. Please report
-problems as GitHub issues and include the app's short error code, not any
-secrets.
+Build and test instructions are in `README.md`. The previous preview and its
+notes remain at tag `v0.1.0`; that tag is not moved. Please report problems as
+GitHub issues and include the short error code, not secrets or private logs.

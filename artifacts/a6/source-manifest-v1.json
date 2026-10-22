@@ -548,8 +548,8 @@
     },
     {
       "path": "docs/RELEASE-NOTES-V1.md",
-      "sha256": "sha256:ff1ec2d9fb7d9532cbca7d3087aaff7812fa92c337890363609f3b7ea0b60247",
-      "size_bytes": 3999
+      "sha256": "sha256:af77f45df7bb9da5dbec6aca6052e88f2a9866e33578e3abfe5b914bc2a452c1",
+      "size_bytes": 5702
     },
     {
       "path": "docs/automation/2026-07-18-qualification-adversarial-conformance.md",
@@ -703,8 +703,8 @@
     },
     {
       "path": "docs/user/QUICKSTART-MACOS.md",
-      "sha256": "sha256:b4eb63abddcec9e4f9ad12f71016083a37d73957a549a6d4fd00a7f23d634285",
-      "size_bytes": 13829
+      "sha256": "sha256:76123e09f4328ae55a8feda8d0a0fdf270ac6b5fef80e7a3083f931b1514fd73",
+      "size_bytes": 13906
     },
     {
       "path": "docs/user/README.md",
@@ -12888,5 +12888,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:41e77f9fe5370d12210f579c890ea5010b10fbf5a10e7d1f1eee72ddfc29a440"
+  "source_digest": "sha256:26ce5c4c6d6067cf155bd308aec59ffc1bd93b55f81ac00c8b3501d6eeb904c2"
 }
