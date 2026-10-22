@@ -105,7 +105,7 @@ _CLEANUP_RECEIPT_POLL_SECONDS = mycelium_deadlines.CLEANUP_RECEIPT_POLL_SECONDS
 # which proves every stage of the pipeline computed) inside this window is live and is not probed.  The window is what
 # is left of the liveness active-failure budget once one probe and one monitor tick are paid for, so a node that goes
 # silent right after a receipt is still probed - and a dead one declared lost - inside that budget (2000 ms).
-_ACTIVE_HEALTH_PROBE_DEADLINE_SECONDS = 0.5
+_ACTIVE_HEALTH_PROBE_DEADLINE_SECONDS = mycelium_deadlines.ROUTE_HEALTH_PROBE_DEADLINE_SECONDS
 _ACTIVE_HEALTH_TICK_MARGIN_MS = 100
 _PROGRESS_LIVENESS_WINDOW_MS = (
     mycelium_deadlines.LIVENESS_ACTIVE_FAILURE_DETECTION_MS

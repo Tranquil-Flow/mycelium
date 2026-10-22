@@ -168,7 +168,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:1d4c0a7137060180d18013130f65cec638040c182d5e6c5d3ebb33913fcf0ee6",
+      "sha256": "sha256:0cb6b51e7ee42caff5afbd9e61ed8e332feb7496f5b55b33c96a2bc1a4e6859e",
       "size_bytes": 71574
     },
     {
@@ -1643,8 +1643,8 @@
     },
     {
       "path": "mycelium_deadlines.py",
-      "sha256": "sha256:0b1a92707172edce34988b63e5e654cd64232bd41448a4113f639aea859da307",
-      "size_bytes": 72728
+      "sha256": "sha256:7482e00c050545954e219e894c10ccb080a85ea84c1643dd5a60b1f45e1010a1",
+      "size_bytes": 72859
     },
     {
       "path": "mycelium_demo/__init__.py",
@@ -2373,8 +2373,8 @@
     },
     {
       "path": "mycelium_live/route.py",
-      "sha256": "sha256:a5f88216ee77be86a00136845843613dd8f9446815403e9b82049296c42675f0",
-      "size_bytes": 319888
+      "sha256": "sha256:f8d58f2279f930ba6642de4682fe650211794f5f3e51a91f5363292f06619b49",
+      "size_bytes": 319939
     },
     {
       "path": "mycelium_live/router_port.py",
@@ -3928,7 +3928,7 @@
     },
     {
       "path": "native/mobile_core/tests/expiry_parity.json",
-      "sha256": "sha256:ccb365f99c6d7b95c38eeba0b7e8b0016ff045143ad0fd7655d23123b5ff8d44",
+      "sha256": "sha256:11d997e0dda7a8050a7ec17451caa31d812af2b9c10cc3c6c1ea021cbdbd06c4",
       "size_bytes": 142535
     },
     {
@@ -11103,8 +11103,8 @@
     },
     {
       "path": "tests/testbed/test_deadline_registry.py",
-      "sha256": "sha256:00cffefd98025359b3a2531335b094ef11ea3dbce7c0ab707aaeea2c0002ed54",
-      "size_bytes": 48509
+      "sha256": "sha256:2e4967b921a6d51bc8a17b3ff10cd7ccea77798138cc3cf42a3f660836ca50d3",
+      "size_bytes": 48606
     },
     {
       "path": "tests/testbed/test_emulation_chain.py",
@@ -12868,5 +12868,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:46bc667b2d9d6c510d4f1dd8d06d3d5e8ed52bcdaebec8cf4b17d3ef2ba7c426"
+  "source_digest": "sha256:e18b311f2d4f26afce025e2f4a878936a049bc97355b438066f92a07b123d044"
 }

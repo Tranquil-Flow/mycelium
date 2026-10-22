@@ -779,14 +779,14 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="route_health_probe_deadline_seconds",
         value=ROUTE_HEALTH_PROBE_DEADLINE_SECONDS,
         unit="seconds",
-        owner="mycelium_live/route.py:1974",
+        owner="mycelium_live.route._ACTIVE_HEALTH_PROBE_DEADLINE_SECONDS",
         derivation=(
             "Bound on one health probe issued by the route's active liveness "
             "sweep. Same value as idle_keepalive_probe_deadline_seconds but a "
-            "separate call site with its own inline literal; registered so the "
-            "duplicate is visible rather than hidden."
+            "separate call site. PV34 named the active-probe constant; it now "
+            "reads this registry value for both the probe and progress window."
         ),
-        source="inline literal mycelium_live/route.py:1974 (no named constant)",
+        source="mycelium_live.route._ACTIVE_HEALTH_PROBE_DEADLINE_SECONDS",
     ),
     Deadline(
         name="command_default_cooperative_step_ms",
@@ -1278,6 +1278,10 @@ def check_composition(
 #: ``physical_inference_node.MAXIMUM_TOTAL_CLEANUP_MS``, so the imported lane
 #: has no second copy of any number this registry owns.
 BOUND_CONSUMER_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
+    (
+        "mycelium_live.route._ACTIVE_HEALTH_PROBE_DEADLINE_SECONDS",
+        "route_health_probe_deadline_seconds",
+    ),
     ("mycelium_live.phone_stage_session.PHONE_REQUEST_EXECUTION_MAX_MS", "phone_request_execution_max_ms"),
     ("mycelium_router.entry.PHONE_THERMAL_COOLDOWN_SECONDS", "phone_thermal_cooldown_seconds"),
     (
@@ -1498,6 +1502,5 @@ NON_BINDING_DEADLINES: Final[frozenset[str]] = frozenset(
         "gateway_sse_disconnect_poll_seconds",
         "peer_advertised_cleanup_bound_slack_ms",
         "qualification_max_age_seconds",
-        "route_health_probe_deadline_seconds",
     }
 )

@@ -138,6 +138,8 @@ BOUND_SOURCES: dict[str, tuple[str, ...]] = {
     # it was bound and consumed nowhere while the live slice is 1.1 s, so the
     # record is explicitly non-binding (see NON_BINDING_DEADLINES).
     "mycelium_live/route.py": (
+        # PV34 named this former inline literal; enforce its registry binding.
+        "_ACTIVE_HEALTH_PROBE_DEADLINE_SECONDS",
         "_IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS",
         "_CLEANUP_RECEIPT_POLL_SECONDS",
         "_CLEANUP_SNAPSHOT_SLICE_SECONDS",
@@ -180,6 +182,11 @@ BOUND_SOURCES: dict[str, tuple[str, ...]] = {
 #: module source under a registry symbol mutated to a sentinel and asserts the
 #: consumer follows it - the exact property a stale copy cannot satisfy.
 RESIDUAL_ANTI_DRIFT_CONSUMERS: tuple[tuple[str, str, str], ...] = (
+    (
+        "mycelium_live/route.py",
+        "_ACTIVE_HEALTH_PROBE_DEADLINE_SECONDS",
+        "route_health_probe_deadline_seconds",
+    ),
     (
         "mycelium_live/route.py",
         "_IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS",
@@ -774,11 +781,6 @@ def test_registry_only_inline_literals_still_hold_their_registry_values() -> Non
             "mycelium_request_gateway/service.py",
             r"session\.condition\.wait\(timeout=([0-9.]+)\)",
             "gateway_producer_stall_poll_seconds",
-        ),
-        (
-            "mycelium_live/route.py",
-            r"deadline_monotonic_s=observed_at_s \+ ([0-9.]+)",
-            "route_health_probe_deadline_seconds",
         ),
     )
     for relative, pattern, name in expectations:
