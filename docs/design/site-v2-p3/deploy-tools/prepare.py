@@ -31,7 +31,7 @@ def main():
         raise ValueError('Candidate must be detached')
     if release != home/'mycelium-site-deploy'/head[:8]:
         raise ValueError('Unexpected release path')
-    if stage != home/'mycelium-hosted-demo/state'/('site-deploy-'+head[:8]+'-20261022'):
+    if stage != home/'mycelium-hosted-demo/state'/('site-deploy-'+head[:8]+'-20261022b'):
         raise ValueError('Unexpected state path')
     docs = {}
     for label in switch.LABELS:
@@ -53,7 +53,7 @@ def main():
         (stage/(label+'.original.plist')).write_bytes(raw)
         (stage/(label+'.rollback.plist')).write_bytes(plistlib.dumps(doc))
         (stage/(label+'.plist')).write_bytes(plistlib.dumps(switch.candidate_doc(doc,release)))
-    for name in ('switch.py','http_verify.py'):
+    for name in ('switch.py','http_verify.py','rehearse.py'):
         shutil.copyfile(Path(__file__).with_name(name),stage/name)
     for path in stage.iterdir():
         config['staged_sha256'][path.name] = hashlib.sha256(path.read_bytes()).hexdigest()

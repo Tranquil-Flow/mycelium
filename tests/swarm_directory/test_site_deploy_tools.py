@@ -44,6 +44,7 @@ def sandbox(tmp_path):
         (home/'Library/LaunchAgents'/(label+'.plist')).write_bytes(plistlib.dumps(old))
     (stage/'deployment.json').write_text(json.dumps(config))
     calls=[]
+    loaded=set(switch.LABELS)
     def runner(command, **kwargs):
         calls.append(command)
         if command[0]=='/usr/bin/xattr':
@@ -53,9 +54,13 @@ def sandbox(tmp_path):
             return subprocess.CompletedProcess(command,0,stdout,'')
         if command[:2]==['/bin/launchctl','print']:
             label=command[2].split('/')[-1]
+            if label not in loaded:
+                return subprocess.CompletedProcess(command,113,'','Could not find service "'+label+'"')
             doc=plistlib.loads((home/'Library/LaunchAgents'/(label+'.plist')).read_bytes())
             return subprocess.CompletedProcess(command,0,'state = running\nworking directory = '+doc['WorkingDirectory'],'')
         assert command[0] == '/usr/bin/plutil' or command[:2] in (['/bin/launchctl','bootout'],['/bin/launchctl','bootstrap'])
+        if command[:2]==['/bin/launchctl','bootout']: loaded.discard(command[-1].split('/')[-1])
+        if command[:2]==['/bin/launchctl','bootstrap']: loaded.add(Path(command[-1]).stem)
         return subprocess.CompletedProcess(command,0,'','')
     return switch,home,stage,calls,runner
 
@@ -78,7 +83,7 @@ def test_switch_promote_rollback_readbacks_and_only_allowed_changes(sandbox):
         for label in s.LABELS:
             assert (home/'Library/LaunchAgents'/(label+'.plist')).read_bytes()==(stage/(label+suffix)).read_bytes()
     effects=[c for c in calls if c[0]=='/bin/launchctl']
-    assert len(effects)==12
+    assert len(effects)==16
     assert {c[-1].split('/')[-1].removesuffix('.plist') for c in effects}==set(s.LABELS)
 
 
@@ -168,3 +173,85 @@ def test_http_verifier_rejects_wrong_root_and_asset_bytes(apex,tmp_path):
     (tmp_path/'mycelium_swarm_directory/web/site.css').write_text('wrong bytes')
     result=verifier.verify(tmp_path,'candidate',apex,client_ip='203.0.113.7')
     assert not result['ok'] and 'Asset byte mismatch' in result['error']
+
+
+def launchd_runner(sandbox, *, boot_error=3, bootstrap_fail=False):
+    """Model asynchronous removal, unlike the original always-running fake."""
+    s,home,stage,calls,base=sandbox
+    jobs={label:'old' for label in s.LABELS}
+    events=[]
+    failed=False
+    def run(command,**kwargs):
+        nonlocal failed
+        if command[0]!='/bin/launchctl': return base(command,**kwargs)
+        action=command[1]; label=Path(command[-1]).name.removesuffix('.plist')
+        events.append((action,label))
+        if action=='bootout':
+            if label not in jobs:
+                return subprocess.CompletedProcess(command,boot_error,'',f'Boot-out failed: {boot_error}: No such process\n')
+            jobs[label]='removing'
+            return subprocess.CompletedProcess(command,0,'','')
+        if action=='print':
+            if jobs.get(label)=='removing':
+                del jobs[label]
+                return subprocess.CompletedProcess(command,0,'state = SIGTERMed','')
+            if label not in jobs:
+                return subprocess.CompletedProcess(command,113,'',f'Could not find service "{label}" in domain for user gui: 501')
+            return base(command,**kwargs)
+        assert action=='bootstrap'
+        if label in jobs:
+            return subprocess.CompletedProcess(command,5,'','Bootstrap failed: 5: Input/output error')
+        if bootstrap_fail and not failed:
+            failed=True
+            return subprocess.CompletedProcess(command,5,'','injected bootstrap failure')
+        jobs[label]='running'
+        return subprocess.CompletedProcess(command,0,'','')
+    return run,jobs,events
+
+
+def test_async_bootout_waits_for_removal_before_bootstrap(sandbox):
+    s,home,stage,_,_=sandbox
+    run,jobs,events=launchd_runner(sandbox)
+    assert s.switch(stage,home,'deploy',apply=True,run=run,sleep=lambda _:None)['runtime']
+    assert jobs=={label:'running' for label in s.LABELS}
+
+
+@pytest.mark.parametrize('boot_error',[3,5])
+def test_absent_job_and_unexpected_bootout_error_still_restore_both(sandbox,boot_error):
+    s,home,stage,_,_=sandbox
+    run,jobs,events=launchd_runner(sandbox,boot_error=boot_error)
+    jobs.clear()
+    s.switch(stage,home,'rollback',apply=True,run=run,sleep=lambda _:None)
+    assert jobs=={label:'running' for label in s.LABELS}
+    for label in s.LABELS:
+        assert (home/'Library/LaunchAgents'/(label+'.plist')).read_bytes()==(stage/(label+'.rollback.plist')).read_bytes()
+    assert (stage/'last-operation.json').exists()
+
+
+def test_http_failure_triggers_verified_rollback(sandbox):
+    s,home,stage,_,_=sandbox
+    run,jobs,events=launchd_runner(sandbox)
+    checked=[]
+    def verify(which):
+        checked.append(which)
+        if which=='deploy': raise RuntimeError('HTTP 502')
+    with pytest.raises(RuntimeError,match='HTTP 502'):
+        s.switch(stage,home,'deploy',apply=True,run=run,sleep=lambda _:None,verify=verify)
+    assert checked==['deploy','rollback']
+    assert set(jobs)==set(s.LABELS)
+
+
+def test_rollback_is_allowed_during_certification(sandbox):
+    s,home,stage,_,_=sandbox
+    (home/'mycelium-demo-run').mkdir(); (home/'mycelium-demo-run/CERT.busy').touch()
+    run,jobs,_=launchd_runner(sandbox)
+    assert s.switch(stage,home,'rollback',apply=True,run=run,sleep=lambda _:None)['runtime']
+
+
+def test_http_transport_failure_is_not_misreported_as_privacy_failure(monkeypatch):
+    from mycelium_swarm_directory import surface_probe
+    monkeypatch.setattr(surface_probe,'probe',lambda *a,**kw:{'verdict':'FAIL','checks':[{'name':'no Set-Cookie on /swarms/','status':502,'ok':False}]})
+    result=module('http_verify').verify(ROOT,'candidate','http://127.0.0.1:1')
+    assert not result['ok']
+    assert result['failure_kind']=='availability'
+    assert '502' in result['error']

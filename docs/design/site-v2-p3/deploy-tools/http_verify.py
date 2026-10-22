@@ -36,15 +36,27 @@ def verify(release, mode, base, *, client_ip=None):
         except urllib.error.HTTPError as error:
             response = error
         with response:
+            if response.status >= 500:
+                result['failure_kind'] = 'availability'
             return response.status, {k.lower():v for k,v in response.headers.items()}, response.read()
 
-    result = {'mode':mode, 'base':base, 'ok':False, 'pages':[], 'guards':[]}
+    result = {'mode':mode, 'base':base, 'ok':False, 'pages':[], 'guards':[], 'failure_kind':None}
     def require(condition, reason):
         if not condition:
             raise ValueError(reason)
     try:
         result['profile_a'] = probe(base, client_ip=client_ip)
-        require(result['profile_a']['verdict'] == 'closed_and_cookie_free', 'Profile A not closed/cookie-free')
+        failures = [row for row in result['profile_a']['checks'] if row.get('ok') is not True]
+        if failures:
+            result['failed_checks'] = failures
+            unavailable = any(row.get('status') is None or row['status'] >= 500
+                              or (row['name'].startswith('no Set-Cookie') and row['status'] != 200)
+                              for row in failures)
+            result['failure_kind'] = 'availability' if unavailable else 'surface_contract'
+            raise ValueError(('HTTP availability failed; privacy not established: ' if unavailable
+                              else 'Profile A contract failed: ') + '; '.join(
+                row['name']+' status='+str(row.get('status')) for row in failures))
+        require(result['profile_a']['verdict'] == 'closed_and_cookie_free', 'Profile A verdict inconsistent')
         for method in ('GET', 'HEAD'):
             status, headers, body = fetch('/', method)
             result['pages'].append({'path':'/', 'method':method, 'status':status, 'location':headers.get('location')})
@@ -92,6 +104,9 @@ def verify(release, mode, base, *, client_ip=None):
                                    for r in rows if r.get('entry_origin') == 'https://demo.mycelium.now']
         result['ok'] = True
     except Exception as error:
+        if not result['failure_kind']:
+            result['failure_kind'] = ('availability' if isinstance(error, (urllib.error.URLError, TimeoutError, OSError))
+                                      else 'surface_contract')
         result['error'] = str(error)
     return result
 
