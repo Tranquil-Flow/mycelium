@@ -12,12 +12,30 @@ import threading
 import time
 
 
+# Native initialization can register types before raising. CPython removes the
+# failed module, but nanobind retains those registrations; retrying then aborts
+# the entire app. Join has two capability probes, so retain an import failure
+# for this process lifetime (not arithmetic failures after a successful import).
+_MLX_IMPORT_LOCK = threading.Lock()
+_MLX_IMPORT_ERROR = None
+
+
 def runtime_probe_report():
     """Explicit tiny arithmetic only; no identity, model, or qualification."""
+    global _MLX_IMPORT_ERROR
     report={'protocol':'mycelium.a13_runtime_probe.v1','backend':'mlx',
         'dtype':'float32','available':False,'model_loaded':False}
+    with _MLX_IMPORT_LOCK:
+        if _MLX_IMPORT_ERROR is not None:
+            report['error_type'] = _MLX_IMPORT_ERROR
+            return report
+        try:
+            import mlx.core as mx
+        except (ImportError,RuntimeError,OSError,ValueError) as exc:
+            _MLX_IMPORT_ERROR = type(exc).__name__
+            report['error_type'] = _MLX_IMPORT_ERROR
+            return report
     try:
-        import mlx.core as mx
         value=mx.array([1.0],dtype=mx.float32)
         result=value+value
         mx.eval(result)

@@ -71,6 +71,75 @@ def require_compatible_mlx_wheels():
     return result
 
 
+def mlx_pyinstaller_arguments():
+    """Collect only RECORD-owned MLX bytes, never all namespace locations.
+
+    ``mlx`` is a namespace shared by mlx and mlx-metal. In a system-site
+    venv, PyInstaller's collect_all merges it with Homebrew's second root:
+    the extension can come from the admitted wheel while libmlx/metallib
+    come from a newer-OS wheel. Metadata alone does not authenticate those
+    inputs. Enumerating RECORD also avoids importing native code to discover
+    submodules.
+    """
+    import base64
+    import importlib.machinery
+    import importlib.metadata
+    import importlib.util
+
+    require_compatible_mlx_wheels()
+    distributions = [importlib.metadata.distribution(name) for name in ('mlx', 'mlx-metal')]
+    roots = {Path(dist.locate_file('mlx')).resolve() for dist in distributions}
+    spec = importlib.util.find_spec('mlx')
+    locations = list(spec.submodule_search_locations or ()) if spec else []
+    if len(roots) != 1 or not locations or Path(locations[0]).resolve() not in roots:
+        raise SystemExit('mlx_import_root_mismatch')
+    root = roots.pop()
+    files = {}
+    for dist in distributions:
+        owned = 0
+        for entry in dist.files or ():
+            relative = Path(str(entry))
+            if relative.parts[:1] != ('mlx',) or '__pycache__' in relative.parts:
+                continue
+            path = Path(dist.locate_file(entry))
+            digest = entry.hash
+            if (relative.is_absolute() or '..' in relative.parts or
+                    not path.resolve().is_relative_to(root) or not path.is_file() or
+                    digest is None or digest.mode != 'sha256' or entry.size is None):
+                raise SystemExit('mlx_wheel_content_invalid:'+str(relative))
+            with path.open('rb') as stream:
+                actual = base64.urlsafe_b64encode(hashlib.file_digest(stream, 'sha256').digest()).decode().rstrip('=')
+            if actual != digest.value or path.stat().st_size != entry.size:
+                raise SystemExit('mlx_wheel_content_invalid:'+str(relative))
+            if relative in files and files[relative] != path:
+                raise SystemExit('mlx_wheel_content_invalid:'+str(relative))
+            files[relative] = path
+            owned += 1
+        if not owned:
+            raise SystemExit('mlx_wheel_content_invalid:empty_record')
+    required = {'mlx/lib/libmlx.dylib', 'mlx/lib/mlx.metallib'}
+    if not required.issubset({str(path) for path in files}):
+        raise SystemExit('mlx_wheel_content_invalid:missing_runtime')
+    args = ['--copy-metadata', 'mlx', '--copy-metadata', 'mlx-metal']
+    modules = {'mlx'}
+    for relative, path in sorted(files.items()):
+        extension = next((suffix for suffix in importlib.machinery.EXTENSION_SUFFIXES
+                          if relative.name.endswith(suffix)), None)
+        if extension:
+            modules.add('.'.join((*relative.parts[:-1], relative.name[:-len(extension)])))
+        elif relative.suffix == '.py':
+            parts = relative.with_suffix('').parts
+            modules.add('.'.join(parts[:-1] if parts[-1] == '__init__' else parts))
+        else:
+            option = '--add-binary' if relative.suffix == '.dylib' else '--add-data'
+            args.extend((option, f'{path}:{relative.parent}'))
+    if 'mlx.core' not in modules:
+        raise SystemExit('mlx_wheel_content_invalid:missing_core')
+    for module in sorted(modules):
+        args.extend(('--hidden-import', module))
+    return args
+
+
 def vendor_expat(app):
     """Keep Python's XML extension independent of newer macOS system Expat."""
     import shutil
@@ -206,6 +275,7 @@ def main():
     if output==ROOT/'dist' or output.exists():
         raise SystemExit('fresh_output_root_required')
     runtime_wheels=require_compatible_mlx_wheels()
+    mlx_arguments=mlx_pyinstaller_arguments()
     output.mkdir(parents=True,mode=0o700)
     work=ROOT/'build'/output.name
     work.mkdir(parents=True,exist_ok=True)
@@ -234,7 +304,7 @@ def main():
     args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--windowed',
           '--name','Mycelium A13 Demo','--target-architecture','arm64',
           '--osx-bundle-identifier','org.mycelium.a13-macos-demo',
-          '--paths',str(ROOT),'--collect-all','mlx','--copy-metadata','mlx-metal',
+          '--paths',str(ROOT),*mlx_arguments,
           '--hidden-import','mycelium_a13_macos.serving',
           '--hidden-import','mycelium_a13_macos.workflow',
           '--hidden-import','scripts.build_qwen_live_route',

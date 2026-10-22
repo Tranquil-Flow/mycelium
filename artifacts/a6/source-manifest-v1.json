@@ -923,8 +923,8 @@
     },
     {
       "path": "mycelium_a13_macos/capability.py",
-      "sha256": "sha256:fdccfcc0b228035fae9dfa8abae461e8f92978a8f9f6a7eb8931df9908ea98ca",
-      "size_bytes": 15995
+      "sha256": "sha256:d108db45413ab901cef0270fae055c1ac9459f6a1d4be20cb13f75b4d1e0352a",
+      "size_bytes": 16769
     },
     {
       "path": "mycelium_a13_macos/chain_compile.py",
@@ -4633,8 +4633,8 @@
     },
     {
       "path": "scripts/build_a13_macos.py",
-      "sha256": "sha256:b4065a503c4022ed8aefd69e50624d5e51991f8b6b777270888fa24597570283",
-      "size_bytes": 15065
+      "sha256": "sha256:009ca8216068efcf0309637250638e6b609ef4d848ca9083a42a9a19267ea14b",
+      "size_bytes": 18571
     },
     {
       "path": "scripts/build_a13_windows.py",
@@ -6512,6 +6512,11 @@
       "size_bytes": 8166
     },
     {
+      "path": "tests/a13_macos/test_capability_native_import_failure.py",
+      "sha256": "sha256:f0a3bfe431dfd8da600c963b25142cfed57f31ac629724946fc078fae8e9083b",
+      "size_bytes": 3527
+    },
+    {
       "path": "tests/a13_macos/test_chain_compile_parent.py",
       "sha256": "sha256:86a1b9202bb66c55ba6eb092f073cfa828a3e9612bbe4bbc722138a060320e28",
       "size_bytes": 14023
@@ -6695,6 +6700,11 @@
       "path": "tests/a13_macos/test_external_origin_relay.py",
       "sha256": "sha256:645b5918a9a5994b246352f8abc4c6e5137fba152de3c331bd83f553cee922e4",
       "size_bytes": 18645
+    },
+    {
+      "path": "tests/a13_macos/test_frozen_native_launch_isolation.py",
+      "sha256": "sha256:300b6b295b3b1c5c1cf3aa870ed5a5915181a768e9064b38feb8fce93a86f503",
+      "size_bytes": 2522
     },
     {
       "path": "tests/a13_macos/test_guard_trip_diagnostic.py",
@@ -6905,6 +6915,11 @@
       "path": "tests/a13_macos/test_minimal_managed_flow.py",
       "sha256": "sha256:ebc89e2b0aae25d09678c861f2e0a8c4b6ed75662530563bb3429ab1bf57d7d8",
       "size_bytes": 8946
+    },
+    {
+      "path": "tests/a13_macos/test_mlx_packaging_isolation.py",
+      "sha256": "sha256:6ed2c8cddd4251e7e5d9d623879409e462682527b17c40cff15da58bf95598e8",
+      "size_bytes": 6205
     },
     {
       "path": "tests/a13_macos/test_model_contract.py",
@@ -12873,5 +12888,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:2bc17bc9df03d6de907736144d10e15f697ad52445e1c7c4e964cf575593d27f"
+  "source_digest": "sha256:5be6f6426ef727d09d38d9986bc97c6af9e1b4f4b1c7b8b9b401ac622ffaf55e"
 }
