@@ -1,0 +1,168 @@
+{
+  "mode": "rollback",
+  "base": "http://127.0.0.1:55255",
+  "ok": true,
+  "pages": [
+    {
+      "path": "/",
+      "method": "GET",
+      "status": 302,
+      "location": "/swarms/"
+    },
+    {
+      "path": "/",
+      "method": "HEAD",
+      "status": 302,
+      "location": "/swarms/"
+    },
+    {
+      "path": "/swarms/",
+      "status": 200,
+      "sha256": "37bccefad4d4a54c2581f2320f834155e6f6e6e23ace8ab6e6e4514fa590234c",
+      "cookie_free": true
+    },
+    {
+      "path": "/swarms/swarms.js",
+      "status": 200,
+      "sha256": "016d9efd3a1ea7373f588e66c1a1e49c973fdd8058dfbf78919fb39e76731eb6",
+      "cookie_free": true,
+      "matches_checkout": true
+    },
+    {
+      "path": "/swarms/swarms.css",
+      "status": 200,
+      "sha256": "611dc3991e706e7f0b1c5bd7f14f10ff10e869fa4300546bc3ec0d8f0d15b222",
+      "cookie_free": true,
+      "matches_checkout": true
+    },
+    {
+      "path": "/swarms/site.css",
+      "status": 200,
+      "sha256": "e3e6897cd314ceb74c25758f8da0a795af885425c840c26fc1790a23f9715c71",
+      "cookie_free": true,
+      "matches_checkout": true
+    }
+  ],
+  "guards": [
+    {
+      "method": "GET",
+      "path": "/chat",
+      "status": 404,
+      "cookie_free": true
+    },
+    {
+      "method": "GET",
+      "path": "/chat/",
+      "status": 404,
+      "cookie_free": true
+    },
+    {
+      "method": "GET",
+      "path": "/chat/chat.js",
+      "status": 404,
+      "cookie_free": true
+    },
+    {
+      "method": "GET",
+      "path": "/chat/chat.css",
+      "status": 404,
+      "cookie_free": true
+    },
+    {
+      "method": "POST",
+      "path": "/chat/api/state",
+      "status": 404,
+      "cookie_free": true
+    },
+    {
+      "method": "POST",
+      "path": "/chat/api/send",
+      "status": 404,
+      "cookie_free": true
+    },
+    {
+      "method": "POST",
+      "path": "/chat/api/events",
+      "status": 404,
+      "cookie_free": true
+    },
+    {
+      "method": "GET",
+      "path": "/swarms/chat",
+      "status": 404,
+      "cookie_free": true
+    },
+    {
+      "method": "GET",
+      "path": "/swarms/chat.js",
+      "status": 404,
+      "cookie_free": true
+    },
+    {
+      "method": "GET",
+      "path": "/swarms/notice",
+      "status": 404,
+      "cookie_free": true
+    },
+    {
+      "method": "POST",
+      "path": "/",
+      "status": 404,
+      "cookie_free": true
+    },
+    {
+      "method": "POST",
+      "path": "/apex.js",
+      "status": 404,
+      "cookie_free": true
+    }
+  ],
+  "profile_a": {
+    "base": "http://127.0.0.1:55255",
+    "checks": [
+      {
+        "name": "POST /api/v1/inference",
+        "status": 404,
+        "ok": true
+      },
+      {
+        "name": "GET /api/v1/bootstrap",
+        "status": 404,
+        "ok": true
+      },
+      {
+        "name": "GET /api/v1/product/export",
+        "status": 404,
+        "ok": true
+      },
+      {
+        "name": "GET /api/v1/observatory/events",
+        "status": 404,
+        "ok": true
+      },
+      {
+        "name": "GET /api/v1/swarm/status",
+        "status": 404,
+        "ok": true
+      },
+      {
+        "name": "GET /anything",
+        "status": 404,
+        "ok": true
+      },
+      {
+        "name": "no Set-Cookie on /swarms/",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "name": "no Set-Cookie on /swarms/api/v1/config",
+        "status": 200,
+        "ok": true
+      }
+    ],
+    "verdict": "closed_and_cookie_free"
+  },
+  "demo_listings": [],
+  "qualification": "real checkout, ephemeral loopback, no launchd or public traffic"
+}

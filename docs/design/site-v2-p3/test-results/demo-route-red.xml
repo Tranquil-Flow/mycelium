@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="8.406" timestamp="2026-10-22T01:07:29.865267+02:00" hostname="m4pro"><testcase classname="tests.swarm_directory.test_site_v2_browser" name="test_apex_demo_route_copy_tracks_only_the_serving_demo[dark-1440-900]" time="7.428"><failure message="AssertionError: Locator expected to contain text 'The demo route runs on one Mac, not a distributed swarm.'&#10;Actual value: The fast demo route runs on one Mac, not a distributed swarm. It is volunteer-hosted and may sleep. Check the entry’s current serving details. &#10;Call log:&#10;  - Expect &quot;to_contain_text&quot; with timeout 5000ms&#10;  - waiting for locator(&quot;.apex-demo&quot;)&#10;    14 × locator resolved to &lt;p class=&quot;muted apex-demo&quot;&gt;…&lt;/p&gt;&#10;       - unexpected value &quot;The fast demo route runs on one Mac, not a distributed swarm. It is volunteer-hosted and may sleep. Check the entry’s current serving details.&quot;&#10;&#10;Aria snapshot:&#10;- paragraph:&#10;  - text: The fast demo route runs on&#10;  - strong: one Mac&#10;  - text: &quot;, not a distributed swarm. It is volunteer-hosted and may sleep. Check the entry’s current serving details.&quot;">local = {'app': &lt;_swarm_fixtures.FakeApp object at 0x10e4bbb60&gt;, 'directory': &lt;mycelium_swarm_directory.server.DirectoryServer...elayProxy object at 0x10eb10050&gt;, 'publisher': &lt;mycelium_a13_macos.swarm_publish.SwarmPublisher object at 0x10eb102f0&gt;}
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x10e587490&gt;
+width = 1440, height = 900, theme = 'dark'
+
+    @pytest.mark.parametrize('width,height', [(1440,900),(390,844)])
+    @pytest.mark.parametrize('theme', ['dark','light'])
+    def test_apex_demo_route_copy_tracks_only_the_serving_demo(local, monkeypatch, width, height, theme):
+        """Real signed directory records/heartbeats; no call to the public demo entry."""
+        import time
+        from mycelium_swarm_directory import docs
+        from mycelium_swarm_directory.crypto import Ed25519Signer
+        d = local['directory'].directory
+        signer = Ed25519Signer.generate()
+        demo = 'sw-bbbbbbbbbbbbbbbbbbbb'
+        duplicate = 'sw-cccccccccccccccccccc'
+        unrelated = 'sw-dddddddddddddddddddd'
+        for sid, origin in [(demo, 'https://demo.mycelium.now'),
+                            (duplicate, 'https://demo.mycelium.now'),
+                            (unrelated, 'https://not-the-demo.example')]:
+            record = docs.swarm_record(signer, swarm_id=sid, seq=1, name='Mycelium demo',
+                                       model='Qwen/Qwen3-0.6B', access_mode='request',
+                                       entry={'key': signer.public_key, 'origin': origin})
+            assert d.handle('POST', '/records', json.dumps(record).encode(), 'ip:fixture')[0] == 200
+        at = d.now()
+        def beat(sid, status, members):
+            nonlocal at
+            at += 1
+            body = docs.heartbeat(signer, sid, status=status, members=members,
+                                  served_model='Qwen/Qwen3-0.6B' if status == 'serving' else None, at=at)
+            assert d.handle('POST', '/heartbeat', json.dumps(body).encode(), 'ip:fixture')[0] == 200
+        beat(unrelated, 'serving', 7)  # matching names and global totals are NOT demo-route counts
+        original = d.list_swarms
+        def delayed():
+            time.sleep(.7)  # real server thread; first paint/CSS is not held
+            return original()
+        monkeypatch.setattr(d, 'list_swarms', delayed)
+        neutral = 'The demo is volunteer-hosted and may be unavailable. Check its listing for current serving Macs.'
+        notes = {
+            'one-mac': 'The demo route runs on one Mac, not a distributed swarm.',
+            'two-mac': 'The demo route runs across 2 Macs.',
+            'max-macs': 'The demo route runs across 64 Macs.',
+        }
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            geometry = None
+            for state, status, members in [('one-mac','serving',1), ('two-mac','serving',2),
+                                           ('max-macs','serving',64), ('offline','offline',0),
+                                           ('warming','warming',2), ('unknown','serving',0),
+                                           ('ambiguous','serving',2), ('unavailable','serving',2)]:
+                beat(demo, status, members)
+                if state == 'ambiguous': beat(duplicate, 'serving',1)
+                page = browser.new_context(viewport={'width':width,'height':height}, color_scheme=theme).new_page()
+                page.add_init_script(CLS)
+                requests = []; page.on('request', lambda r: requests.append((r.method,r.url)))
+                if state == 'unavailable':
+                    page.route('**/swarms/api/v1/swarms', lambda r:r.fulfill(status=503,json={}))
+                page.goto(local['directory'].origin + '/')
+                expect(page.locator('#apex-fresh')).to_contain_text('Status unavailable' if state == 'unavailable' else 'snapshot just loaded')
+&gt;               expect(page.locator('.apex-demo')).to_contain_text(notes.get(state, neutral))
+E               AssertionError: Locator expected to contain text 'The demo route runs on one Mac, not a distributed swarm.'
+E               Actual value: The fast demo route runs on one Mac, not a distributed swarm. It is volunteer-hosted and may sleep. Check the entry’s current serving details. 
+E               Call log:
+E                 - Expect "to_contain_text" with timeout 5000ms
+E                 - waiting for locator(".apex-demo")
+E                   14 × locator resolved to &lt;p class="muted apex-demo"&gt;…&lt;/p&gt;
+E                      - unexpected value "The fast demo route runs on one Mac, not a distributed swarm. It is volunteer-hosted and may sleep. Check the entry’s current serving details."
+E               
+E               Aria snapshot:
+E               - paragraph:
+E                 - text: The fast demo route runs on
+E                 - strong: one Mac
+E                 - text: ", not a distributed swarm. It is volunteer-hosted and may sleep. Check the entry’s current serving details."
+
+tests/swarm_directory/test_site_v2_browser.py:212: AssertionError</failure></testcase></testsuite></testsuites>

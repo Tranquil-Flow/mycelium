@@ -1,0 +1,12 @@
+{
+  "state": "two-mac",
+  "cls": 0,
+  "box": {
+    "x": 16,
+    "y": 513.265625,
+    "width": 358,
+    "height": 65.09375
+  },
+  "copy": "The demo route runs across 2 Macs. Reported by its listing; availability may change.",
+  "shifts": []
+}

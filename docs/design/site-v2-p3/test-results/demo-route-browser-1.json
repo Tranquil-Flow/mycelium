@@ -1,0 +1,26 @@
+{
+  "exit_code": 0,
+  "elapsed_seconds": 385.7755489349365,
+  "command": [
+    "/usr/bin/env",
+    "-u",
+    "PYTHONPATH",
+    "-u",
+    "MYCELIUM_PHYSICAL_SERVICE_PYTHON",
+    "nice",
+    "-n",
+    "19",
+    "/Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "no:cacheprovider",
+    "-n",
+    "1",
+    "tests/swarm_directory/test_site_v2_browser.py",
+    "--basetemp=/Users/evinova-self/.hermes/cache/scratch/sitep4-demo-route-browser-1",
+    "--junitxml=/Users/evinova-self/Projects/mycelium-rel2-siteux-p3/docs/design/site-v2-p3/test-results/demo-route-browser-1.xml"
+  ],
+  "cases": 26,
+  "failures": []
+}

@@ -24,7 +24,9 @@ The new browser test checks eight real signed directory states per width/theme: 
 
 Twelve full-page captures and per-image JSON: [site-v2-p3/demo-route/](site-v2-p3/demo-route/). All were inspected directly with vision; [inspection record](site-v2-p3/demo-route/INSPECTION.md). Historical screenshots are retained separately.
 
-The inherited baseline receipt is `site-v2-p3/test-results/candidate.xml` (570 passed, one skipped); its code revision `aa4d387d` is source/test-identical to `4c42ba68`—only documentation, evidence and the source manifest changed between them. The follow-up comparison preserves IDs without renaming or dropping cases. Final follow-up receipts and the machine-generated comparison are under `site-v2-p3/test-results/demo-route-*`.
+The inherited baseline receipt is `site-v2-p3/test-results/candidate.xml` (570 passed, one skipped); its code revision `aa4d387d` is source/test-identical to `4c42ba68`—only documentation, evidence and the source manifest changed between them. The follow-up comparison preserves IDs without renaming or dropping cases.
+
+Before the pin/preparation boundary: **three consecutive complete browser-file runs, 26 passed each**, and the five requested suites excluding browser files, **535 passed, one skipped**. All 12 deployment-tool tests pass. Browser/route/script receipts are under `site-v2-p3/test-results/demo-route-*`. The broad run waited for the device lease rather than competing with it. Final full-scope qualification is run from the exact detached final checkout, with its JUnit/log/comparison outside the checkout in the prepared state directory. Consult that directory's `DEPLOY-REPORT.md` for the final full-suite result; the pre-pin receipts alone are not a full-scope claim. This separation lets final-head tests run without invalidating the last source/evidence manifest.
 
 ## Prepared deployment tooling
 

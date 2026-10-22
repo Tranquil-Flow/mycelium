@@ -1,0 +1,94 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.8, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/evinova-self/Projects/mycelium-rel2-siteux-p3
+configfile: pytest.ini
+plugins: xdist-3.8.0, anyio-4.12.1, asyncio-1.3.0, langsmith-0.7.16
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+created: 1/1 worker
+1 worker [4 items]
+
+F
+=================================== FAILURES ===================================
+____ test_apex_demo_route_copy_tracks_only_the_serving_demo[dark-1440-900] _____
+[gw0] darwin -- Python 3.14.8 /Users/evinova-self/Documents/playground/mycelium-v2-m0-test-ladder/.venv/bin/python
+
+local = {'app': <_swarm_fixtures.FakeApp object at 0x10d96bb60>, 'directory': <mycelium_swarm_directory.server.DirectoryServer...elayProxy object at 0x10dfc0050>, 'publisher': <mycelium_a13_macos.swarm_publish.SwarmPublisher object at 0x10dfc02f0>}
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10da0f490>
+width = 1440, height = 900, theme = 'dark'
+
+    @pytest.mark.parametrize('width,height', [(1440,900),(390,844)])
+    @pytest.mark.parametrize('theme', ['dark','light'])
+    def test_apex_demo_route_copy_tracks_only_the_serving_demo(local, monkeypatch, width, height, theme):
+        """Real signed directory records/heartbeats; no call to the public demo entry."""
+        import time
+        from mycelium_swarm_directory import docs
+        from mycelium_swarm_directory.crypto import Ed25519Signer
+        d = local['directory'].directory
+        signer = Ed25519Signer.generate()
+        demo = 'sw-bbbbbbbbbbbbbbbbbbbb'
+        duplicate = 'sw-cccccccccccccccccccc'
+        unrelated = 'sw-dddddddddddddddddddd'
+        for sid, origin in [(demo, 'https://demo.mycelium.now'),
+                            (duplicate, 'https://demo.mycelium.now'),
+                            (unrelated, 'https://not-the-demo.example')]:
+            record = docs.swarm_record(signer, swarm_id=sid, seq=1, name='Mycelium demo',
+                                       model='Qwen/Qwen3-0.6B', access_mode='request',
+                                       entry={'key': signer.public_key, 'origin': origin})
+            assert d.handle('POST', '/records', json.dumps(record).encode(), 'ip:fixture')[0] == 200
+        at = d.now()
+        def beat(sid, status, members):
+            nonlocal at
+            at += 1
+            body = docs.heartbeat(signer, sid, status=status, members=members,
+                                  served_model='Qwen/Qwen3-0.6B' if status == 'serving' else None, at=at)
+            assert d.handle('POST', '/heartbeat', json.dumps(body).encode(), 'ip:fixture')[0] == 200
+        beat(unrelated, 'serving', 7)  # matching names and global totals are NOT demo-route counts
+        original = d.list_swarms
+        def delayed():
+            time.sleep(.7)  # real server thread; first paint/CSS is not held
+            return original()
+        monkeypatch.setattr(d, 'list_swarms', delayed)
+        neutral = 'The demo is volunteer-hosted and may be unavailable. Check its listing for current serving Macs.'
+        notes = {
+            'one-mac': 'The demo route runs on one Mac, not a distributed swarm.',
+            'two-mac': 'The demo route runs across 2 Macs.',
+            'max-macs': 'The demo route runs across 64 Macs.',
+        }
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            geometry = None
+            for state, status, members in [('two-mac','serving',2), ('one-mac','serving',1),
+                                           ('max-macs','serving',64), ('offline','offline',0),
+                                           ('warming','warming',2), ('unknown','serving',0),
+                                           ('ambiguous','serving',2), ('unavailable','serving',2)]:
+                beat(demo, status, members)
+                if state == 'ambiguous': beat(duplicate, 'serving',1)
+                page = browser.new_context(viewport={'width':width,'height':height}, color_scheme=theme).new_page()
+                page.add_init_script(CLS)
+                requests = []; page.on('request', lambda r: requests.append((r.method,r.url)))
+                if state == 'unavailable':
+                    page.route('**/swarms/api/v1/swarms', lambda r:r.fulfill(status=503,json={}))
+                page.goto(local['directory'].origin + '/')
+                expect(page.locator('#apex-fresh')).to_contain_text('Status unavailable' if state == 'unavailable' else 'snapshot just loaded')
+>               expect(page.locator('.apex-demo')).to_contain_text(notes.get(state, neutral))
+E               AssertionError: Locator expected to contain text 'The demo route runs across 2 Macs.'
+E               Actual value: The fast demo route runs on one Mac, not a distributed swarm. It is volunteer-hosted and may sleep. Check the entry’s current serving details. 
+E               Call log:
+E                 - Expect "to_contain_text" with timeout 5000ms
+E                 - waiting for locator(".apex-demo")
+E                   14 × locator resolved to <p class="muted apex-demo">…</p>
+E                      - unexpected value "The fast demo route runs on one Mac, not a distributed swarm. It is volunteer-hosted and may sleep. Check the entry’s current serving details."
+E               
+E               Aria snapshot:
+E               - paragraph:
+E                 - text: The fast demo route runs on
+E                 - strong: one Mac
+E                 - text: ", not a distributed swarm. It is volunteer-hosted and may sleep. Check the entry’s current serving details."
+
+tests/swarm_directory/test_site_v2_browser.py:212: AssertionError
+- generated xml file: /Users/evinova-self/Projects/mycelium-rel2-siteux-p3/docs/design/site-v2-p3/test-results/demo-route-two-red.xml -
+=========================== short test summary info ============================
+FAILED tests/swarm_directory/test_site_v2_browser.py::test_apex_demo_route_copy_tracks_only_the_serving_demo[dark-1440-900]
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!! xdist.dsession.Interrupted: stopping after 1 failures !!!!!!!!!!!!!
+============================== 1 failed in 8.10s ===============================
