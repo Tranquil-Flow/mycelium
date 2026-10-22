@@ -18,7 +18,7 @@ import threading
 import time
 import weakref
 from types import MappingProxyType
-from typing import Any, Callable, Iterator, Mapping, Protocol, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 from urllib.parse import quote
 
 import mycelium_deadlines
@@ -101,6 +101,17 @@ from mycelium_live.liveness import (
 # ``mycelium_live.route.<NAME>`` by dotted string.
 _IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS = mycelium_deadlines.IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS
 _CLEANUP_RECEIPT_POLL_SECONDS = mycelium_deadlines.CLEANUP_RECEIPT_POLL_SECONDS
+# PV34: the active-liveness health probe.  A node that acknowledged progress (a completed infer_start / infer_decode,
+# which proves every stage of the pipeline computed) inside this window is live and is not probed.  The window is what
+# is left of the liveness active-failure budget once one probe and one monitor tick are paid for, so a node that goes
+# silent right after a receipt is still probed - and a dead one declared lost - inside that budget (2000 ms).
+_ACTIVE_HEALTH_PROBE_DEADLINE_SECONDS = 0.5
+_ACTIVE_HEALTH_TICK_MARGIN_MS = 100
+_PROGRESS_LIVENESS_WINDOW_MS = (
+    mycelium_deadlines.LIVENESS_ACTIVE_FAILURE_DETECTION_MS
+    - int(_ACTIVE_HEALTH_PROBE_DEADLINE_SECONDS * 1_000)
+    - _ACTIVE_HEALTH_TICK_MARGIN_MS
+)
 # No `_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS` binding here: wp5-cleanup-levers removed
 # it because nothing in this module consumed it and the route's live fallback
 # attempt is handed the *measured* slice below (1.1 s), not the pre-a13 0.5 s
@@ -1440,6 +1451,8 @@ class PhysicalLiveRoute:
         self._last_snapshots: dict[str, dict[str, Any]] = {}
         self._cleanup_snapshots_by_request: dict[str, dict[str, dict[str, Any]]] = {}
         self._last_health: dict[str, dict[str, Any]] = {}
+        # PV34 active-health bookkeeping (progress receipts, one outstanding probe per node, polled-member hold-off).
+        self._health_probe_state: dict[str, Any] = {"progress_ms": {}, "hold_until_ms": {}, "inflight": set()}
         self._request_inputs: dict[str, tuple[int, ...]] = {}
         self._request_outputs: dict[str, tuple[int, ...]] = {}
         self._request_limits: dict[str, int] = {}
@@ -2676,6 +2689,60 @@ class PhysicalLiveRoute:
         with self._lock:
             self._last_snapshots.update(snapshots)
 
+    def _probe_state(self) -> dict[str, Any]:
+        with self._lock:
+            state = getattr(self, "_health_probe_state", None)
+            if state is None:
+                state = {"progress_ms": {}, "hold_until_ms": {}, "inflight": set()}
+                self._health_probe_state = state
+            return state
+
+    def _note_progress_receipts(self, node_ids: Iterable[str]) -> None:
+        """Record that these nodes just acknowledged progress on an active request.
+
+        A completed ``infer_start`` / ``infer_decode`` proves every stage of its pipeline computed, so the entry's
+        receipt vouches for each participant: they need no health command while receipts keep flowing.
+        """
+
+        now_ms = self._monotonic_ms()
+        state = self._probe_state()
+        with self._lock:
+            for node_id in node_ids:
+                state["progress_ms"][node_id] = now_ms
+
+    def _claim_health_probe(self, node_id: str, now_ms: int) -> bool:
+        """True when a health command may be issued to ``node_id`` now (and marks it outstanding).
+
+        Never while a previous probe of this node is unanswered, never while the node's progress receipt is inside
+        the progress window, and - for a member reached through a polled mailbox - never again before the declared
+        wire life of a missed probe has passed (that command may still sit in the member's one-at-a-time queue).
+        """
+
+        state = self._probe_state()
+        with self._lock:
+            if node_id in state["inflight"]:
+                return False
+            progress_ms = state["progress_ms"].get(node_id)
+            if progress_ms is not None and now_ms - progress_ms < _PROGRESS_LIVENESS_WINDOW_MS:
+                return False
+            if state["hold_until_ms"].get(node_id, 0) > now_ms:
+                return False
+            state["inflight"].add(node_id)
+            return True
+
+    def _release_health_probe(self, node_id: str, *, answered: bool) -> None:
+        state = self._probe_state()
+        floor_ms = int(
+            float(getattr(self._sessions.get(node_id), "idle_probe_floor_seconds", 0.0) or 0.0) * 1_000
+        )
+        now_ms = self._monotonic_ms()
+        with self._lock:
+            state["inflight"].discard(node_id)
+            if answered or floor_ms <= 0:
+                state["hold_until_ms"].pop(node_id, None)
+            else:
+                state["hold_until_ms"][node_id] = now_ms + floor_ms
+
     def _monitor_active_liveness_once(self) -> None:
         """Observe active data paths and interrupt only their failed tracks."""
 
@@ -2695,14 +2762,28 @@ class PhysicalLiveRoute:
         if not active_node_ids:
             return
 
+        now_ms = self._monotonic_ms()
+        probed = tuple(
+            node_id
+            for node_id in sorted(active_node_ids)
+            if self._claim_health_probe(node_id, now_ms)
+        )
+        # An exited process needs no command: its returncode is local, so it is settled in this tick whether or not
+        # it acknowledged progress a moment ago.
+        exited = any(
+            getattr(self._sessions.get(node_id), "returncode", None) is not None
+            for node_id in active_node_ids
+        )
+
         def health_active_node(node_id: str) -> bool:
+            answered = False
             try:
                 response = self._send_before(
                     node_id,
                     command_id=self._command_id(node_id, "health"),
                     command="health",
                     payload={},
-                    deadline_monotonic_s=observed_at_s + 0.5,
+                    deadline_monotonic_s=observed_at_s + _ACTIVE_HEALTH_PROBE_DEADLINE_SECONDS,
                 )
                 observation = self._verify_observation(
                     node_id,
@@ -2711,21 +2792,24 @@ class PhysicalLiveRoute:
                 )
                 with self._lock:
                     self._last_health[node_id] = observation
+                answered = True
             except BaseException:
                 return False
+            finally:
+                self._release_health_probe(node_id, answered=answered)
             return True
 
-        with ThreadPoolExecutor(
-            max_workers=len(active_node_ids),
-            thread_name_prefix="a4-liveness-snapshot",
-        ) as executor:
-            health_results = tuple(
-                executor.map(health_active_node, sorted(active_node_ids))
-            )
-        if not any(health_results):
+        health_results: tuple[bool, ...] = ()
+        if probed:
+            with ThreadPoolExecutor(
+                max_workers=len(probed),
+                thread_name_prefix="a4-liveness-snapshot",
+            ) as executor:
+                health_results = tuple(executor.map(health_active_node, probed))
+        if probed and not any(health_results):
             self._handle_lost_peer_processes()
             return
-        if not all(health_results):
+        if exited or not all(health_results):
             # A participant that stopped answering health may be an exited
             # process (a lost pipeline stage while its peers still answer).
             # Settle it within this tick, not at the next status read: A7
@@ -2736,7 +2820,7 @@ class PhysicalLiveRoute:
             self._handle_lost_peer_processes()
         with self._lock:
             failed_nodes: dict[str, str] = {}
-            for node_id in active_node_ids:
+            for node_id in probed:
                 details = self._last_health.get(node_id, {}).get("details")
                 sidecar = (
                     details.get("sidecar_process")
@@ -4878,6 +4962,8 @@ class PhysicalLiveRoute:
                     # completion.
                     if status not in {"DECODING", "COMPLETED", "CANCELLED"}:
                         raise RuntimeError("route_inference_start_failed")
+                    # PV34: a completed prefill is progress by every stage of the path.
+                    self._note_progress_receipts(participating_node_ids)
                 emitted = 0
                 stopped = False
 
@@ -4942,6 +5028,8 @@ class PhysicalLiveRoute:
                         if status == "COMPLETED":
                             break
                         raise RuntimeError("route_decode_stalled")
+                    # PV34: a decode that produced a token is progress by every stage of the path.
+                    self._note_progress_receipts(participating_node_ids)
                     output = truncate_at_stop(next_output)
                     if not cancelled_for_request:
                         emit_new_tokens(output)

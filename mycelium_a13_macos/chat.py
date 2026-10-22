@@ -34,6 +34,8 @@ from typing import Any, Callable, Mapping
 from mycelium_swarm_directory.wire import WireError
 from mycelium_http_identity import with_user_agent
 
+from .owner_run import EXECUTION_CEILING_CODE
+
 MAX_PROMPT_CHARS = 2000
 MAX_NEW_TOKENS_CAP = 256
 DEFAULT_NEW_TOKENS = 128
@@ -341,21 +343,26 @@ class ChatService:
                 with self._lock:
                     record['tokens'].append(text)
             result = client.stream(prompt, record['max_new_tokens'], token)
+            ended = self._run_ended_by_ceiling() if result.get('terminal') == 'failed' else None
             with self._lock:
                 terminal = result.get('terminal')
                 record['terminal'] = terminal
                 if terminal == 'failed':
-                    record['error'] = result.get('code') or 'chat_generation_failed'
+                    record['error'] = ended or result.get('code') or 'chat_generation_failed'
                 elif terminal == 'cancelled':
                     record['error'] = record['cancel_reason'] or 'chat_cancelled'
         except ChatError as error:
+            ended = self._run_ended_by_ceiling()
             with self._lock:
-                record['terminal'] = 'cancelled' if record['cancel_reason'] else 'failed'
-                record['error'] = record['cancel_reason'] or error.code
+                reason = record['cancel_reason'] or ended
+                record['terminal'] = 'cancelled' if reason else 'failed'
+                record['error'] = reason or error.code
         except Exception as error:
+            ended = self._run_ended_by_ceiling()
             with self._lock:
-                record['terminal'] = 'cancelled' if record['cancel_reason'] else 'failed'
-                record['error'] = record['cancel_reason'] or failure_code(error)
+                reason = record['cancel_reason'] or ended
+                record['terminal'] = 'cancelled' if reason else 'failed'
+                record['error'] = reason or failure_code(error)
         finally:
             with self._lock:
                 record['done'] = True
@@ -363,6 +370,20 @@ class ChatService:
                 record['finished'] = self._clock()
                 if self._busy == record['id']:
                     self._busy = None
+
+    def _run_ended_by_ceiling(self) -> str | None:
+        """The explicit ceiling code when the owner run ended because the workers' wall allowance is spent (PV34).
+
+        A request whose stream dies with the route must say why, not surface the route's ``request_cleanup_unproven``.
+        """
+        try:
+            run = getattr(self.app, 'owner_run', None)
+            status = None if run is None else run.status()
+        except Exception:  # noqa: BLE001
+            return None
+        if isinstance(status, dict) and status.get('error_code') == EXECUTION_CEILING_CODE:
+            return EXECUTION_CEILING_CODE
+        return None
 
     def cancel(self, request_id: Any, code: str = 'chat_cancelled') -> bool:
         """Stop a running generation on the route.  The request ends with ``terminal: cancelled`` and ``code``.

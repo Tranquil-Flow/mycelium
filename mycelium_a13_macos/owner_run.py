@@ -8,6 +8,7 @@ tests).  The chain must provide::
     run_step(name, ctx)          # block until step ``name`` is done or raise
     teardown(ctx, *, failed)     # undo whatever this run started (best effort)
     monitor(ctx) -> str | None   # optional: a closed error code once serving
+    ceiling_reached(ctx) -> str | None   # optional, cheap: the execution-ceiling code once the wall allowance is spent
 
 Steps run in ``STEP_NAMES`` order.  A step fails with ``OwnerRunError(code)``
 (a closed ``[a-z][a-z0-9_]*`` code); any other exception is reduced to
@@ -39,6 +40,8 @@ STEPS: tuple[tuple[str, str], ...] = (
     ('serving', 'Serving prompts'),
 )
 STEP_NAMES = tuple(name for name, _ in STEPS)
+#: The closed code of a run the owner ended because the workers' wall allowance (``max_wall_seconds``) is spent.
+EXECUTION_CEILING_CODE = 'execution_ceiling_reached'
 _CODE = re.compile(r'[a-z][a-z0-9_]{0,79}\Z')
 # 'failing' too: a failed run is still tearing down (announcing 'stopped',
 # ticking this Mac's contributor) until it settles on 'failed'.
@@ -120,6 +123,9 @@ class OwnerRun:
         self._ever_started = False
         self._rebuilding = False
 
+    #: How often the serving run checks its execution ceiling on its own (nobody has to poll ``status``).
+    _ceiling_poll_s = 1.0
+
     # -- public -------------------------------------------------------------
     def active(self) -> bool:
         with self._lock:
@@ -189,6 +195,20 @@ class OwnerRun:
             self._thread = threading.Thread(target=self._main, args=(ctx,), name='a13-owner-run', daemon=True)
             self._thread.start()
         return self.status()
+
+    def _end_at_ceiling(self, ctx: RunContext) -> None:
+        check = getattr(self.chain, 'ceiling_reached', None)
+        if check is None:
+            return
+        try:
+            code = check(ctx)
+        except Exception:
+            return
+        if code:
+            with self._lock:
+                if self._state == 'serving' and self._ctx is ctx:
+                    self._fail(ctx, 'serving', OwnerRunError(code).code)
+                    ctx.stop_event.set()
 
     def stop(self) -> dict[str, Any]:
         with self._lock:
@@ -286,8 +306,10 @@ class OwnerRun:
             with self._lock:
                 if self._state == 'running':
                     self._state = 'serving'
-            # Serving: hold until Stop (or a monitor failure sets the event).
-            ctx.stop_event.wait()
+            # Serving: hold until Stop (or a monitor failure sets the event).  The workers expire on their own wall
+            # clocks (PV34): the run ends itself first, whether or not anything polls status.
+            while not ctx.stop_event.wait(self._ceiling_poll_s):
+                self._end_at_ceiling(ctx)
             with self._lock:
                 failed = self._state == 'failing'
         except _Stopped:

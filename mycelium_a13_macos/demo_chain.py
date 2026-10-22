@@ -24,12 +24,13 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from .owner_run import OwnerRunError, _Stopped
+from .owner_run import EXECUTION_CEILING_CODE, OwnerRunError, _Stopped
 
 _CODE_RE = __import__('re').compile(r'[a-z][a-z0-9_]{0,79}\Z')
 
@@ -258,6 +259,8 @@ class AppDemoChain:
                         # keeps its serving thread alive until the member's commands expire).
                         'previous_close': 120.0, **(budgets or {})}
         self._local_device = local_device
+        #: Injectable clock for the execution-ceiling deadline (tests).
+        self._monotonic = time.monotonic
         self.exchange = None
         self.agent = None
         self.run = None  # set by the app: the OwnerRun (for OwnerRunConsent)
@@ -874,6 +877,8 @@ class AppDemoChain:
 
     def _step_targets(self, ctx):
         ready = self._WORK_READY
+        # PV34: the earliest a native worker's wall clock can start; the execution ceiling counts from here.
+        ctx.state.setdefault('execution_clock_started_at', self._monotonic())
 
         def running():
             state = self._workflow_state() or {}
@@ -1033,7 +1038,37 @@ class AppDemoChain:
         ctx.progress('route ready: open the chat')
 
     # -- monitor / teardown ---------------------------------------------------
+    #: Native workers expire at start + ``max_wall_seconds`` - the 10 s cleanup reserve (worker.py).  The owner ends
+    #: the run this long before ``max_wall_seconds``: the reserve plus room for the cancel-and-cleanup budget.
+    EXECUTION_CEILING_LEAD_SECONDS = 30.0
+
+    def ceiling_reached(self, ctx):
+        """``'execution_ceiling_reached'`` once the workers' wall allowance is (nearly) spent, else ``None``.
+
+        The nodes enforce ``max_wall_seconds`` on their own clocks and die mid-request; nothing tells the owner, so
+        the run used to stay ``serving`` with a dead route (PV34).  The owner holds the same number, anchored at the
+        start of the ``targets`` step - never later than any worker's own start - so it ends the run first: in-flight
+        chat requests are cancelled with the explicit code, and ``serving`` is left.
+        """
+        started = ctx.state.get('execution_clock_started_at')
+        limit = (ctx.state.get('work_limits') or {}).get('max_wall_seconds')
+        if started is None or type(limit) is not int:
+            return None
+        if self._monotonic() < started + limit - self.EXECUTION_CEILING_LEAD_SECONDS:
+            return None
+        chat = getattr(self.app, 'chat', None)
+        cancel_all = getattr(chat, 'cancel_all', None)
+        if cancel_all is not None and not ctx.state.get('execution_ceiling_cancelled'):
+            ctx.state['execution_ceiling_cancelled'] = True
+            # Off the caller's thread: the cancel is an HTTP round trip to a route that may already be gone.
+            threading.Thread(target=cancel_all, args=(EXECUTION_CEILING_CODE,),
+                             name='a13-ceiling-cancel', daemon=True).start()
+        return EXECUTION_CEILING_CODE
+
     def monitor(self, ctx):
+        code = self.ceiling_reached(ctx)
+        if code:
+            return code
         try:
             self._tick_local()  # keep this Mac's own contributor reporting while serving
         except Exception:

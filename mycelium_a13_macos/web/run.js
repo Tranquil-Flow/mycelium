@@ -35,6 +35,7 @@
     owner_storage_consent_below_model:'This Mac\'s storage limit is below what the selected model needs here.',
     previous_run_still_closing:'The previous route is still closing (a Mac that left it has not confirmed cleanup yet). Wait a minute and press Start again.',
     member_restarted:'A joined Mac was restarted while the demo was serving, so it left the route and the run ended. Press Start to run it again.',
+    execution_ceiling_reached:'The run reached its wall-clock limit (30 minutes), so it ended before the Macs\' workers expired. Press Start to run it again.',
     route_qualification_failed:'The route failed its startup qualification, so nothing is served. The owner log names the Mac and reason.',
   };
   function explain(code) { return ERRORS[code] ? `${ERRORS[code]} (${code})` : `Action not completed: ${String(code).replaceAll('_', ' ')} (${code}).`; }
