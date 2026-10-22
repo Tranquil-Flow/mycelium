@@ -15,11 +15,16 @@ The finalized bundle (``scripts/finalize_a13_macos.py``), extracted from
 * the bundle digest is **link-aware** (``mycelium_a13_packaging.build.bundle_tree``):
   a PyInstaller ``.app`` holds relative symlinks; any absolute link or one that
   escapes the bundle is refused;
-* the copy is ``/usr/bin/ditto``, which keeps links, modes and **extended
-  attributes** -- in particular ``com.apple.quarantine``, so Gatekeeper still
-  makes its own first-launch decision.  ``shutil`` would drop extended
-  attributes on macOS, which would silently bypass Gatekeeper; this installer
-  never strips quarantine;
+* the copy is ``/usr/bin/ditto`` into a ``<version>.partial`` staging folder
+  (links, modes and extended attributes kept).  Only after the staged copy's
+  digest equals the signed manifest's, the installer removes
+  ``com.apple.quarantine`` from **that verified copy** (never from the
+  downloaded bundle, never before verification) and renames the whole version
+  folder into place.  Otherwise macOS would run ``~/Applications/Mycelium
+  A13.app`` translocated from a random read-only path, and the user has already
+  made the one trust decision (see ``docs/design/MACOS-INSTALL-FLOW.md``);
+* installs, rollbacks and uninstalls hold ``programs/.install.lock``; a second
+  concurrent run refuses with ``install_already_running``;
 * versions live in ``~/Library/Application Support/Mycelium/programs/<version>``
   (current + previous, for rollback); ``~/Applications/Mycelium A13.app`` is a
   link to the current version (per user, no admin, no duplicated 255 MB copy);
@@ -77,6 +82,25 @@ def _default_copy(source: Path, destination: Path) -> int:
     return subprocess.run(["/usr/bin/ditto", str(source), str(destination)], check=False).returncode
 
 
+QUARANTINE_ATTRIBUTE = "com.apple.quarantine"
+
+
+def clear_quarantine(path: Path, *, run=None) -> bool:
+    """Remove ``com.apple.quarantine`` from ``path`` and everything below it (links themselves included).
+
+    One ``/usr/bin/xattr -d -r -s`` call, no shell.  Succeeds when the attribute is
+    already absent; returns ``False`` (never raises) when it cannot be removed.
+    ``run`` is an injectable command runner so tests never manipulate real attributes.
+    """
+
+    try:
+        done = (run or subprocess.run)(["/usr/bin/xattr", "-d", "-r", "-s", QUARANTINE_ATTRIBUTE, str(path)],
+                              check=False, capture_output=True, text=True, timeout=600)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
 @dataclass
 class MacSeams:
     """Every OS side effect of install/uninstall; tests replace them."""
@@ -84,6 +108,7 @@ class MacSeams:
     home: Path = field(default_factory=Path.home)
     observe_platform: Callable[[], dict[str, str]] = _default_observe_platform
     copy: Callable[[Path, Path], int] = _default_copy
+    clear_quarantine: Callable[[Path], bool] = clear_quarantine
     running_executable: Callable[[], Path] = lambda: Path(sys.executable).resolve()
     now: Callable[[], float] = time.time
 
@@ -121,6 +146,11 @@ class _MacPlatform:
             shutil.rmtree(destination, ignore_errors=True)
             _refuse("payload_copy_failed")
         os.chmod(destination.parent, 0o700)
+
+    def finalize_payload(self, payload: Path) -> dict[str, Any]:
+        """Called by the core on a payload copy whose digest equals the signed manifest's, never earlier."""
+
+        return {"quarantine_cleared": bool(self.seams.clear_quarantine(payload))}
 
     def verify_documents(self, bundle: Path, installed: Mapping[str, Any] | None) -> dict[str, Any]:
         def read(name: str) -> dict[str, Any]:
@@ -232,5 +262,5 @@ def main(argv: list[str] | None = None, *, seams: MacSeams | None = None) -> int
     return _core.emit(PROTOCOL, run)
 
 
-__all__ = ["APPLICATIONS_ENTRY", "InstallerError", "MacSeams", "bundle_digest", "install", "main",
+__all__ = ["APPLICATIONS_ENTRY", "InstallerError", "MacSeams", "bundle_digest", "clear_quarantine", "install", "main",
            "rollback", "status", "uninstall"]

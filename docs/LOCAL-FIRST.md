@@ -266,8 +266,11 @@ Windows and Linux installers have only run against test seams.
    with the value the owner sent.
 2. Extract it (Archive Utility or `ditto -x -k <zip> <dir>`).
 3. Run `Install Mycelium.command` from the bundle. The app is unsigned and not
-   notarized, so Gatekeeper asks on first launch (right-click, Open). The
-   installer keeps the quarantine attribute on purpose.
+   notarized, so Gatekeeper blocks that script once: **Done**, then System
+   Settings, Privacy & Security, **Open Anyway** (see
+   `docs/user/QUICKSTART-MACOS.md`). The script checks the bundle first; the
+   installer then removes the download mark from the verified installed copy
+   only.
 4. Result: program in `~/Library/Application Support/Mycelium/programs/<version>`,
    link `~/Applications/Mycelium A13.app`, state in
    `~/Library/Application Support/Mycelium A13 macOS Demo`.

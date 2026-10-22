@@ -51,7 +51,7 @@ See [TROUBLESHOOTING](TROUBLESHOOTING.md) for the exact messages.
 
 ## Signed install (A13)
 
-**What it does.** The macOS package has a manifest signed with an Ed25519 key. The installer checks the signature and the app's digest before it writes anything. It installs for your user only, without administrator rights, and keeps the macOS quarantine flag so Gatekeeper still gets to ask you. Uninstall keeps your identity and state unless you add a flag.
+**What it does.** The macOS package has a manifest signed with an Ed25519 key. The installer checks the signature and the app's digest before it writes anything. It installs for your user only, without administrator rights, and installs from a folder you approved once in macOS (Privacy & Security, Open Anyway). It removes the macOS download mark only from the copy it has just verified, so the installed app opens normally. Uninstall keeps your identity and state unless you add a flag.
 
 **Limits.** The app has an ad-hoc Apple signature only. It is **not** Developer ID signed and **not** notarized, so macOS shows a warning. The automated check (signature verified on both Macs) passed on the final build. The hands-on install, restart and uninstall by a person were still pending at the time of writing.
 
@@ -111,4 +111,3 @@ See [TROUBLESHOOTING](TROUBLESHOOTING.md) for the exact messages.
 - `mycelium_a13_macos/web/run.js` ("layers split by memory")
 - `mycelium_a13_packaging/installer_core.py`, `mycelium_a13_macos/installer.py`, `scripts/finalize_a13_macos.py` (A13)
 - `ui/web/src/features/internetNative/InternetIncidentVocabulary.ts` (path transition wording)
-- `~/Documents/mycelium-core-program/status/A13-OWNER-CHECKLIST-20261020.md`

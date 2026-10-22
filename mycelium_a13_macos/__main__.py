@@ -100,7 +100,21 @@ def _show_refusal_dialog(message):
     except Exception:pass
 
 
+def _refuse_uninstalled_launch():
+    """A bare double-click of the packaged app outside programs/<version> is not an install: say so, start nothing."""
+    from mycelium_a13_macos import launch_location
+    refusal=launch_location.not_installed_refusal(frozen=bool(getattr(sys,'frozen',False)),platform=sys.platform,
+        argv=sys.argv,executable=Path(sys.executable),programs_root=launch_location.programs_root(Path.home()))
+    if refusal is None: return None
+    print(json.dumps(refusal),file=sys.stderr)
+    _show_refusal_dialog(refusal['message'])
+    return 2
+
+
 def main():
+    if not sys.argv[1:] or sys.argv[1].startswith('-psn_'):
+        refused=_refuse_uninstalled_launch()
+        if refused is not None: return refused
     if sys.argv[1:2] in (['-B'],['-m']):
         result=_frozen_module_main(sys.argv)
         if result is not None: return result

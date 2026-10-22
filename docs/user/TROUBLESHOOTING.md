@@ -10,7 +10,13 @@ Windows and Linux: none of this has been run on real Windows or Linux hardware. 
 
 | What you see | What it means | What to do |
 |---|---|---|
-| macOS says it cannot verify the app, or will not open **Install Mycelium.command**. | The package has an ad-hoc signature only. It is not Developer ID signed and not notarized. | Right-click → **Open**. If asked, **System Settings → Privacy & Security → Open Anyway**. Never disable Gatekeeper or strip quarantine. If macOS still refuses, stop and report its exact text. |
+| macOS says **"Install Mycelium.command" Not Opened**. | The package has an ad-hoc signature only. It is not Developer ID signed and not notarized. | Click **Done**, then **System Settings → Privacy & Security → Open Anyway** (next to "Install Mycelium.command"), then **Open Anyway** in the next dialog. Never disable Gatekeeper. If macOS still refuses, stop and report its exact text. |
+| A second macOS dialog names **"Mycelium A13 Demo"** as not opened, or the Terminal says `killed`. | You are running an older script that started the app without checking it first. | Download the current package. If you must continue, open **Privacy & Security → Open Anyway** for the app, then run **Install Mycelium.command** again. |
+| The app says **"Mycelium is not installed yet"** and does not start. | You opened the app from the downloaded folder (or from a temporary macOS copy). It will not run a session there. | Run **Install Mycelium.command** from the downloaded folder (see the Quickstart, Step 3), then open `~/Applications/Mycelium A13.app`. |
+| Terminal ends with `Mycelium is not installed: ... does not match SHA256SUMS` (or `APP-FILES.sha256`, or `is not covered by SHA256SUMS`). | A file in the extracted folder is damaged, incomplete or changed. Nothing was changed and nothing was run. | Do not install. Compare the zip's SHA-256 with the owner's value, delete the folder and extract again. |
+| `"refused": "install_already_running"` | Another install, rollback or uninstall holds the install lock: a second Terminal window, or a double-click that started twice. | Wait for the other one or close its window, then run **Install Mycelium.command** again. The lock is released automatically when a process ends, even if it was killed; there is no lock file to delete. |
+| `"refused": "install_io_error"` or `"installer_failed"` | The installer could not read or write a file (full disk, unwritable folder) or hit an unexpected error. Nothing half-installed is left behind. | Free some disk space, then run **Install Mycelium.command** again. If it repeats, report the code. |
+| An earlier install was interrupted (macOS killed it, the Terminal was closed, two ran at once), or a traceback ending in `FileNotFoundError` under `programs/<version>`. | A stale, empty or half-copied version folder. The current installer sets it aside by itself. | Run **Install Mycelium.command** again; no manual cleanup. The old folder is kept as `programs/<version>.stale-<n>` and can be deleted once the install works. With an older installer that still crashes, quit it, rename `~/Library/Application Support/Mycelium/programs/<version>` to `<version>.old` in Finder, and run the new package. |
 | `shasum` output differs from the owner's value. | The file is not the file the owner built (damaged or changed). | Do not install. Get the file again. |
 | `codesign --verify` prints something or exits non-zero. | The extracted app is damaged or was modified. | Do not install. Re-extract; if it still fails, get the file again. |
 | Installer prints JSON ending `"refused": "package_digest_mismatch"` | The installed bytes do not match the signed manifest. | Re-extract or re-download. Do not edit the bundle. |
@@ -123,9 +129,6 @@ Write down the exact text on screen and what you pressed before it appeared. The
 - `mycelium_a13_macos/web/chat.js` (chat messages)
 - `mycelium_a13_macos/web/index.html` (consent and adaptive texts)
 - `mycelium_a13_macos/app.py` (`relay_required`, `network_requires_fresh_owner`), `mycelium_a13_macos/acquisition.py` (`insufficient_disk`)
-- `mycelium_a13_packaging/installer_core.py`, `mycelium_a13_macos/installer.py` (`refused` codes)
+- `mycelium_a13_packaging/installer_core.py`, `mycelium_a13_macos/installer.py` (`refused` codes, install lock, `.stale-<n>`), `scripts/finalize_a13_macos.py` (`Install Mycelium.command` messages), `mycelium_a13_macos/launch_location.py` ("not installed yet")
 - `mycelium_a13_macos/adaptive_host.py` (`recovery_s` = 120, `stale_after_s` = 6), `mycelium_a13_macos/adaptive_owner.py`
 - `ui/web/src/features/inference/InferenceWorkspace.tsx` (phase labels), `ui/web/src/features/internetNative/InferencePathBadge.tsx`, `InternetIncidentVocabulary.ts` (incident labels)
-- `~/Documents/mycelium-core-program/status/decisions.log` (2026-10-20 entries: A5 stage-loss RCA and fix, A16 restart fence, ssh/sidecar/disk/battery harness events, Gatekeeper note)
-- `~/Documents/mycelium-core-program/status/FINAL-REPORT-A-TASKS-TWO-MAC-DRAFT.md` (defects 9 and 10)
-- `~/Documents/mycelium-core-program/status/A13-OWNER-CHECKLIST-20261020.md` (Gatekeeper, "Open Anyway")

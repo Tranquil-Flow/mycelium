@@ -45,10 +45,47 @@ _MACOS_FLOOR = "15.6.1"
 LAUNCHD_LABEL = "org.mycelium.managed-host"
 
 _INSTALL_COMMAND = """#!/bin/sh
-# Per-user install: verifies the signed manifest and the bundle digest first. No admin.
+# Install Mycelium for this user. No admin, no network, nothing outside this folder is trusted blindly.
+#
+# You approved this script once (Privacy & Security > Open Anyway).  Before it extends that approval to
+# the app next to it, it checks the downloaded folder against SHA256SUMS and the app file by file against
+# APP-FILES.sha256.  Only if every check passes does it remove the download-quarantine mark from THIS
+# app folder (and nothing else), so the installer can start without a second block.  The installer then
+# verifies the Ed25519-signed manifest and the bundle digest again before it writes anything, and clears
+# the mark on the installed copy.  Any mismatch: nothing is changed and nothing is run.
 set -eu
 HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-exec "$HERE/Mycelium A13 Demo.app/Contents/MacOS/Mycelium A13 Demo" --install --bundle "$HERE"
+APP="$HERE/Mycelium A13 Demo.app"
+EXE="$APP/Contents/MacOS/Mycelium A13 Demo"
+XATTR=/usr/bin/xattr
+refuse() {
+  echo "Mycelium is not installed: $1. Nothing was changed and nothing was run." >&2
+  echo "Download the zip again and compare its SHA-256 with the one on the release page." >&2
+  exit 2
+}
+cd "$HERE" || refuse "this folder cannot be read"
+[ -f SHA256SUMS ] || refuse "SHA256SUMS is missing"
+for doc in installation-package-manifest.json install-source.json "Install Mycelium.command" APP-FILES.sha256; do
+  sed -n 's/^[0-9a-f]\\{64\\}  //p' SHA256SUMS | grep -Fxq -- "$doc" || refuse "$doc is not covered by SHA256SUMS"
+done
+/usr/bin/shasum -a 256 -c SHA256SUMS >/dev/null 2>&1 || refuse "a file in this folder does not match SHA256SUMS"
+[ -d "$APP" ] && [ ! -L "$APP" ] && [ -f "$EXE" ] && [ ! -L "$EXE" ] || refuse "the app is missing or is not a plain folder here"
+(cd "$APP" && /usr/bin/shasum -a 256 -c "$HERE/APP-FILES.sha256" >/dev/null 2>&1) || refuse "the app does not match APP-FILES.sha256"
+found="$(cd "$APP" && find . ! -type d ! -type l | sed 's|^\\./||' | LC_ALL=C sort)"
+listed="$(sed 's/^[0-9a-f]\\{64\\}  //' APP-FILES.sha256 | LC_ALL=C sort)"
+[ "$found" = "$listed" ] || refuse "the app holds files that APP-FILES.sha256 does not list"
+if (cd "$APP" && find . -type l -exec readlink {} \\;) | grep -q '^/'; then refuse "the app holds a link to an absolute path"; fi
+"$XATTR" -d -r -s com.apple.quarantine "$APP" >/dev/null 2>&1 || true
+if "$XATTR" -p com.apple.quarantine "$EXE" >/dev/null 2>&1; then refuse "the download mark could not be removed from the app"; fi
+RUNNER="$EXE"
+if "$RUNNER" --install --bundle "$HERE"; then
+  echo
+  echo "Mycelium is installed for this user: open 'Mycelium A13' in the Applications folder of your home folder."
+else
+  status=$?
+  echo "Mycelium is not installed: the installer refused (see above)." >&2
+  exit "$status"
+fi
 """
 
 _README = """\
@@ -56,15 +93,34 @@ Mycelium A13 macOS pilot bundle (owner_private_media)
 =====================================================
 
 Not signed with an Apple Developer ID and not notarized (ad-hoc signature only).
-macOS may refuse to open it. Do not disable Gatekeeper or remove quarantine
-attributes; any OS trust decision belongs to you.
+macOS will block "Install Mycelium.command" once: approve that one script in
+System Settings > Privacy & Security > Open Anyway (the exact steps are in
+QUICKSTART-MACOS.md). Do not disable Gatekeeper.
 
-Install for this user only (no admin): open "Install Mycelium.command".
-It verifies the Ed25519-signed installation-package-manifest.json and the
-bundle digest before writing anything, keeps the app's quarantine attribute,
-and links ~/Applications/Mycelium A13.app to the installed version.
+Install for this user only (no admin, no network): run "Install Mycelium.command".
+It checks this folder against SHA256SUMS and the app against APP-FILES.sha256,
+and only then removes the download mark from this app so it can start. The
+installer then verifies the Ed25519-signed installation-package-manifest.json
+and the bundle digest before writing anything, clears the mark on the
+installed copy only, and links ~/Applications/Mycelium A13.app to it.
 Uninstall keeps your identity and membership state unless you ask otherwise.
 """
+
+
+def app_files_listing(app: Path) -> str:
+    """``shasum -a 256 -c`` input for every regular file of the app (paths relative to the app, links excluded).
+
+    The install script checks it before it removes the download mark from the app; links are covered by
+    the signed bundle digest the installer verifies next (the script refuses absolute ones itself).
+    """
+
+    lines = []
+    for relative, value in _build.bundle_tree(app).items():
+        if value.startswith("sha256:"):
+            if "\n" in relative or "\\" in relative:
+                raise SystemExit("macos_app_path_unsupported")
+            lines.append(f"{value[len('sha256:'):]}  {relative}\n")
+    return "".join(lines)
 
 
 def declared_launchd_member(work_root: Path) -> dict[str, str]:
@@ -150,6 +206,7 @@ def finalize_macos_bundle(
     command.write_text(_INSTALL_COMMAND)
     command.chmod(0o755)
     (output_root / "README-PILOT.txt").write_text(_README)
+    (output_root / "APP-FILES.sha256").write_text(app_files_listing(payload))
     report = {
         "platform": "macos-arm64", "channel": _CHANNEL,
         "signing": "Ed25519-signed manifest; Apple: ad-hoc only, no Developer ID, NOT notarized",

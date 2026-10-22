@@ -5,7 +5,7 @@ This page takes you from a downloaded package to a first chat answer served by t
 **Read this first.**
 
 - This is a **preview** (`0.1.0`, the first public preview). It has been tested on the project's own two Macs, not on a wide range of machines.
-- The package is **not** signed with an Apple Developer ID and is **not** notarized. macOS will warn you. See "Step 3".
+- The package is **not** signed with an Apple Developer ID and is **not** notarized. macOS will block the installer script once. See "Step 3".
 - There is **no public download**. The package is handed to you by the owner (a file plus a SHA-256 checksum).
 - **Apple silicon only** (M1 or newer, macOS arm64). Intel Macs are refused.
 - **Windows and Linux:** installers exist in the source tree, but they have never been run on real hardware. Treat this guide as macOS-only for now.
@@ -40,18 +40,27 @@ It should print nothing and exit with status 0.
 
 ## Step 3. Install
 
-Right-click **Install Mycelium.command** and choose **Open**. If macOS blocks it, open **System Settings → Privacy & Security** and choose **Open Anyway**.
+macOS 26 blocks the installer script once and does not offer **Open** on a right-click. One **Open Anyway** is enough; follow these steps exactly:
 
-- Do **not** turn Gatekeeper off. Do **not** remove the quarantine flag. The installer keeps it on purpose.
+1. In the extracted folder, double-click **Install Mycelium.command**. macOS says **"Install Mycelium.command" Not Opened**. Click **Done**.
+2. Open **System Settings → Privacy & Security** and scroll down to **Security**. Next to *"Install Mycelium.command" was blocked to protect your Mac* click **Open Anyway** and confirm with your password or Touch ID.
+3. macOS asks **Open "Install Mycelium.command"?** Click **Open Anyway**. Terminal opens and runs the script.
+4. Wait for the last line: `Mycelium is installed for this user`. If the last line says `Mycelium is not installed`, nothing was changed; read the reason above it and see [TROUBLESHOOTING](TROUBLESHOOTING.md).
+
+That is all: there is **no second block**. Before it lets the app start, the script checks every file in the folder against `SHA256SUMS` and every file of the app against `APP-FILES.sha256`, then removes the download mark from that app only. The installer then checks the Ed25519-signed manifest and the app's digest again, and installs.
+
+- Do **not** turn Gatekeeper off. Do **not** run `xattr` or `spctl` yourself. The script does the one narrow, checked removal; nothing else is touched.
+- Do **not** open the app inside the downloaded folder. If you do, it shows "Mycelium is not installed yet" and starts nothing; run **Install Mycelium.command** (steps 1 to 3).
+- On macOS 15 and earlier, **Right-click → Open** on the script also works.
 - If macOS refuses completely, stop and tell the owner what it said. That is a finding, not something to work around.
 
-The installer first checks an Ed25519-signed manifest and the app's digest, then writes only to your user folders:
+The installer needs no administrator rights and no network. It writes only to your user folders:
 
 - program: `~/Library/Application Support/Mycelium/programs/<version>`
 - app link: `~/Applications/Mycelium A13.app`
 - your identity and settings: `~/Library/Application Support/Mycelium A13 macOS Demo`
 
-If it fails, it prints a short JSON line ending in `"refused": "<code>"`. See [TROUBLESHOOTING](TROUBLESHOOTING.md).
+If it fails, it prints a short JSON line ending in `"refused": "<code>"`, never a stack trace. See [TROUBLESHOOTING](TROUBLESHOOTING.md). The reasoning behind the steps is in [MACOS-INSTALL-FLOW](../design/MACOS-INSTALL-FLOW.md).
 
 ## Step 4. First run on the owner Mac
 
@@ -189,7 +198,5 @@ Uninstall example (the executable inside the app link):
 - `mycelium_a13_macos/web/run.js` (run steps; `owner_model_not_prepared` message)
 - `mycelium_a13_macos/web/chat.js` (chat state messages, "Served by")
 - `mycelium_a13_macos/app.py` (`relay_required`, `network_requires_fresh_owner`), `mycelium_a13_macos/adaptive_owner.py`
-- `mycelium_a13_macos/__main__.py` (`--install`, `--uninstall`, `--rollback`, `--install-status`), `mycelium_a13_packaging/installer_core.py` (`--delete-identity-and-state`, `refused` output), `mycelium_a13_macos/installer.py` (quarantine kept, paths)
-- `scripts/finalize_a13_macos.py` (what the bundle contains; ad-hoc signature, not notarized)
-- `~/Documents/mycelium-core-program/status/A13-OWNER-CHECKLIST-20261020.md` (install, verify, restart, uninstall order; package name and version)
-- `~/Documents/mycelium-core-program/status/FINAL-REPORT-A-TASKS-TWO-MAC-DRAFT.md` (two-Mac test setup)
+- `mycelium_a13_macos/__main__.py` (`--install`, `--uninstall`, `--rollback`, `--install-status`), `mycelium_a13_packaging/installer_core.py` (`--delete-identity-and-state`, `refused` output), `mycelium_a13_macos/installer.py` (quarantine cleared on the verified copy, paths), `mycelium_a13_macos/launch_location.py`
+- `scripts/finalize_a13_macos.py` (what the bundle contains and what `Install Mycelium.command` checks; ad-hoc signature, not notarized)

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""macOS A13 packaging parity: finalize, link-aware digest, quarantine-preserving install.
+"""macOS A13 packaging parity: finalize, link-aware digest, verified-copy quarantine handling, install.
 
-Runs natively on this Mac: the real ``/usr/bin/ditto`` and ``xattr``.  The
+Runs real ``/usr/bin/ditto`` for bytes/links, with in-memory fake attributes.  The
 finalize test reads the real L2 ``0.1.0-preview.2`` app read-only when it is
 present; the builder (``scripts/build_a13_macos.py``) is never invoked.
 """
@@ -29,9 +29,14 @@ import finalize_a13_macos  # noqa: E402
 pytestmark = pytest.mark.skipif(sys.platform != "darwin" or not Path("/usr/bin/ditto").exists(),
                                 reason="needs macOS ditto/xattr")
 
+@pytest.fixture(autouse=True)
+def attributes(fake_xattrs):
+    """Require fake attributes for every test in this module."""
+
+
 ISSUED = 1_800_000_000.0
 MAC = {"system": "Darwin", "machine": "arm64", "macos_version": "26.5.1"}
-QUARANTINE = "com.apple.quarantine"
+from fake_xattrs import QUARANTINE
 #: The L2-qualified build output, next to this lane under runs/v2 (absent elsewhere: skipped).
 PREVIEW2 = REPO.parents[1] / "l2-batch13-package" / "out" / "0.1.0-preview.2" / "Mycelium A13 Demo.app"
 
@@ -49,8 +54,8 @@ def _app(root: Path, marker: bytes = b"v1") -> Path:
     (app / "Contents" / "Frameworks").mkdir()
     (app / "Contents" / "Resources").mkdir()
     exe = app / "Contents" / "MacOS" / "Mycelium A13 Demo"
-    exe.write_bytes(b"\xcf\xfa\xed\xfe" + marker)
-    exe.chmod(0o755)
+    exe.write_bytes(b"stub-executable-never-run-" + marker)
+    exe.chmod(0o644)  # data only; attributes are simulated
     (app / "Contents" / "Frameworks" / "libdemo.dylib").write_bytes(b"lib" + marker)
     (app / "Contents" / "Resources" / "libdemo").symlink_to("../Frameworks/libdemo.dylib")
     (app / "Contents" / "Info.plist").write_text("<plist/>")
@@ -58,11 +63,7 @@ def _app(root: Path, marker: bytes = b"v1") -> Path:
 
 
 def _xattr(path: Path, value: str | None = None) -> str | None:
-    if value is not None:
-        subprocess.run(["/usr/bin/xattr", "-w", QUARANTINE, value, str(path)], check=True)
-        return value
-    done = subprocess.run(["/usr/bin/xattr", "-p", QUARANTINE, str(path)], capture_output=True, text=True)
-    return done.stdout.strip() if done.returncode == 0 else None
+    raise AssertionError("the fake_xattrs fixture must inject this function")
 
 
 def _finalize(tmp: Path, version: str, *, key: Path, floor: str = "0.1.0", marker: bytes = b"v1",
@@ -74,7 +75,7 @@ def _finalize(tmp: Path, version: str, *, key: Path, floor: str = "0.1.0", marke
     out = tmp / f"bundle-{version}"
     finalize_a13_macos.finalize_macos_bundle(app_dir=app, output_root=out, signing_key_path=key,
                                              version=version, rollback_floor=floor, issued_at=ISSUED, root=REPO,
-                                             copy=copy)
+                                             copy=copy or _copy)
     return out
 
 
@@ -84,11 +85,12 @@ def key(tmp_path):
 
 
 @pytest.fixture
-def seams(tmp_path):
+def seams(tmp_path, fake_xattrs):
     home = tmp_path / "home"
     home.mkdir(mode=0o700)
     return MacSeams(home=home, observe_platform=lambda: dict(MAC),
-                    running_executable=lambda: tmp_path / "elsewhere" / "python3", now=lambda: ISSUED + 100)
+                    running_executable=lambda: tmp_path / "elsewhere" / "python3", now=lambda: ISSUED + 100,
+                    copy=fake_xattrs.copy, clear_quarantine=lambda p: installer.clear_quarantine(p, run=fake_xattrs.run))
 
 
 # ------------------------------------------------------------------ link-aware digest
@@ -142,8 +144,12 @@ WRITTEN_QUARANTINE = "0083;6700f000;Safari;F00DF00D-0000-0000-0000-000000000000"
 OS_REWRITTEN_QUARANTINE = "0283;00000000;;F00DF00D-0000-0000-0000-000000000000"
 
 
+def _copy(src: Path, dst: Path) -> int:
+    raise AssertionError("the fake_xattrs fixture must inject this function")
+
+
 def _ditto_then_os_rewrite(src: Path, dst: Path) -> int:
-    code = subprocess.run(["/usr/bin/ditto", str(src), str(dst)], check=False).returncode
+    code = _copy(src, dst)
     _xattr(dst, OS_REWRITTEN_QUARANTINE)
     return code
 
@@ -173,18 +179,25 @@ def test_kept_quarantine_means_same_event_and_no_cleared_flag(observed, kept):
 
 
 @pytest.mark.parametrize("copy", [None, _ditto_then_os_rewrite], ids=["ditto", "ditto_then_os_rewrite"])
-def test_ditto_install_keeps_quarantine_where_shutil_would_drop_it(tmp_path, key, seams, copy):
+def test_ditto_copies_keep_quarantine_but_the_installed_verified_copy_has_none(tmp_path, key, seams, copy):
+    """Model metadata-preserving copies in memory; verify removal only on the verified copy.
+
+    This is not a real-OS metadata or Gatekeeper qualification.
+    """
+
     value = WRITTEN_QUARANTINE
     bundle = _finalize(tmp_path, "0.1.0", key=key, quarantine=value, copy=copy)
     staged = bundle / "Mycelium A13 Demo.app"
     assert _keeps_quarantine(_xattr(staged), value)  # finalize's ditto copy kept it
     naive = tmp_path / "naive.app"
     shutil.copytree(staged, naive, symlinks=True)
-    assert _xattr(naive) is None  # the bypass the installer must not commit
+    assert _xattr(naive) is None  # the fake intentionally models a copy without metadata
     result = installer.install(bundle, seams=seams)
     installed = seams.programs_root / "0.1.0" / "Mycelium A13 Demo.app"
-    assert _keeps_quarantine(_xattr(installed), value)
-    assert _keeps_quarantine(_xattr(installed / "Contents" / "MacOS" / "Mycelium A13 Demo"), value)
+    assert _xattr(installed) is None
+    assert _xattr(installed / "Contents" / "MacOS" / "Mycelium A13 Demo") is None
+    assert result["quarantine_cleared"] is True
+    assert _keeps_quarantine(_xattr(staged / "Contents" / "MacOS" / "Mycelium A13 Demo"), value)  # source untouched
     assert result["developer_id_team"] == DEVELOPER_ID_UNSIGNED and result["identity_created"] is False
 
 
