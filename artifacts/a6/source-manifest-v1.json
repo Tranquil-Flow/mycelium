@@ -2553,8 +2553,8 @@
     },
     {
       "path": "mycelium_node/process.py",
-      "sha256": "sha256:1e9057fbb81da6faccccea189ea835f59cafda056be32039aac2758c34db9e06",
-      "size_bytes": 128422
+      "sha256": "sha256:921b42a8c5d71bbdbd8ccf805463a02891e84ae5fe5b1356b8b6afa041309a80",
+      "size_bytes": 129176
     },
     {
       "path": "mycelium_node/reconnect.py",
@@ -10078,8 +10078,8 @@
     },
     {
       "path": "tests/node_agent/test_physical_interpreter_identity.py",
-      "sha256": "sha256:01bab5ab0089e453538e38935ed9c4b95098a6ba6ecae1bd3a14b79bc3aac9f9",
-      "size_bytes": 3868
+      "sha256": "sha256:c77a2979258df9e6e2aea36c2b9d1478df6e3e4db5d63f0dc9a5ea4516cd6754",
+      "size_bytes": 6232
     },
     {
       "path": "tests/node_agent/test_physical_node_signal_stop.py",
@@ -12868,5 +12868,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:e18b311f2d4f26afce025e2f4a878936a049bc97355b438066f92a07b123d044"
+  "source_digest": "sha256:51ed02880d2c304c92dc01212fcbbe3eff3d5b074885e0e51db2b3803381b25a"
 }

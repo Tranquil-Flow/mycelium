@@ -1181,8 +1181,8 @@ def revalidate_executable_identity(identity: _ExecutableIdentity) -> bool:
     return current == identity
 
 
-# macOS order is unchanged from before the cross-platform work: the owner-configured interpreter
-# (opt-in), then Apple Silicon Homebrew's python3, then plain ``sys.executable`` as the last fallback.
+# macOS prefers the owner-configured interpreter (opt-in), then a compatible
+# Apple Silicon Homebrew python3, then plain ``sys.executable`` as the fallback.
 _MACOS_LEGACY_PYTHON = "/opt/homebrew/bin/python3"
 PHYSICAL_SERVICE_PYTHON_ENV = "MYCELIUM_PHYSICAL_SERVICE_PYTHON"
 
@@ -1210,10 +1210,25 @@ def physical_service_interpreter_identity(
     environment = os.environ if environ is None else environ
     running = sys.executable if executable is None else executable
     if (sys.platform if platform is None else platform) == "darwin":
-        for candidate in (environment.get(PHYSICAL_SERVICE_PYTHON_ENV), _MACOS_LEGACY_PYTHON):
+        for candidate, legacy in (
+            (environment.get(PHYSICAL_SERVICE_PYTHON_ENV), False),
+            (_MACOS_LEGACY_PYTHON, True),
+        ):
             if not candidate:
                 continue
             try:
+                if legacy:
+                    # Resolve once: Homebrew may repoint python3 to a new minor
+                    # without installing the running interpreter's dependencies.
+                    # The framework path gives its version without executing it.
+                    candidate = capture_executable_identity(candidate).path
+                    version_root = Path(candidate).parent.parent
+                    if (
+                        version_root.parent.name != "Versions"
+                        or version_root.parent.parent.name != "Python.framework"
+                        or version_root.name != f"{sys.version_info.major}.{sys.version_info.minor}"
+                    ):
+                        continue
                 return _macos_framework_image(candidate)
             except (OSError, RuntimeError, TypeError, ValueError):
                 continue
