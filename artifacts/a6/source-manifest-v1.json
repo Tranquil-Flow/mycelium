@@ -867,9 +867,14 @@
       "size_bytes": 11655
     },
     {
+      "path": "docs/design/SITE-V2-P3-DEMO-ROUTE.md",
+      "sha256": "sha256:f12c3d0ef1c53c3818d2570e82320fbbe582c0fceda6f882f6ac150a3599b1ea",
+      "size_bytes": 6846
+    },
+    {
       "path": "docs/design/SITE-V2-P3.md",
-      "sha256": "sha256:205e25e7ffb8f21024888e65352fb239711cc7bfd6a50ff538a6b3e497cc280d",
-      "size_bytes": 9726
+      "sha256": "sha256:65522bf517e51a601a4b8d771cb1ce0e49ce18bbb972933ec07e93bb8f962aa4",
+      "size_bytes": 10004
     },
     {
       "path": "docs/design/cross-platform-matrix.md",
@@ -2347,6 +2352,151 @@
       "size_bytes": 124123
     },
     {
+      "path": "docs/design/site-v2-p3/demo-route/INSPECTION.md",
+      "sha256": "sha256:0ee051286c72c5a576b355e0525ee095a380bbb87f2ea87f8be36bbd1e2af84b",
+      "size_bytes": 2055
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-one-mac-1440-dark.json",
+      "sha256": "sha256:5ebf37775d230db2402976dbdcf4ac27a4ae41c5bde4886390259ac804b10386",
+      "size_bytes": 268
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-one-mac-1440-dark.png",
+      "sha256": "sha256:edeb7df6daf2de354ce941477c2fdde0d46e88b89578ec963b7636f7cbdf26f0",
+      "size_bytes": 244593
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-one-mac-1440-light.json",
+      "sha256": "sha256:5ebf37775d230db2402976dbdcf4ac27a4ae41c5bde4886390259ac804b10386",
+      "size_bytes": 268
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-one-mac-1440-light.png",
+      "sha256": "sha256:537663dc2f949c90d32e87018c78d313a0432308bb0301cb38957b32af0b37fe",
+      "size_bytes": 243019
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-one-mac-390-dark.json",
+      "sha256": "sha256:07bb1bdec0953f009a7066ec19dcbbcbbf9c275ab9ea3037c5070d87a81a6ec1",
+      "size_bytes": 264
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-one-mac-390-dark.png",
+      "sha256": "sha256:63f5645d3ba65071ae65f94f8c55c521bef02305c014243f769c71267a3435dd",
+      "size_bytes": 251943
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-one-mac-390-light.json",
+      "sha256": "sha256:07bb1bdec0953f009a7066ec19dcbbcbbf9c275ab9ea3037c5070d87a81a6ec1",
+      "size_bytes": 264
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-one-mac-390-light.png",
+      "sha256": "sha256:70f6f9bc2c7e01f1cf1d6cbca5793c2dae286382913bc36646fe3fbec6e42627",
+      "size_bytes": 248279
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-two-mac-1440-dark.json",
+      "sha256": "sha256:ef125af14ecb79313b3cc60d97108a28d3c0faaed6e0cad3fb80d175770f2e27",
+      "size_bytes": 246
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-two-mac-1440-dark.png",
+      "sha256": "sha256:03dc00977be1d54ea35f72e540670c59063b33dff7cfe8d59facbde366758837",
+      "size_bytes": 242530
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-two-mac-1440-light.json",
+      "sha256": "sha256:ef125af14ecb79313b3cc60d97108a28d3c0faaed6e0cad3fb80d175770f2e27",
+      "size_bytes": 246
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-two-mac-1440-light.png",
+      "sha256": "sha256:47cdb0ede9cf2ade8adf006bbf6ca4ec84f0ba1a68d35776513664d5028f4d6a",
+      "size_bytes": 240962
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-two-mac-390-dark.json",
+      "sha256": "sha256:0c868406cdff7f0e1eebe0b8aff5c238e7f7c116ac58e8f8fbbb9332eb818998",
+      "size_bytes": 242
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-two-mac-390-dark.png",
+      "sha256": "sha256:42378b32f135e6baeb914b87aa25129445aba8c6476cfed57e22464d5acd04b8",
+      "size_bytes": 251073
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-two-mac-390-light.json",
+      "sha256": "sha256:0c868406cdff7f0e1eebe0b8aff5c238e7f7c116ac58e8f8fbbb9332eb818998",
+      "size_bytes": 242
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-two-mac-390-light.png",
+      "sha256": "sha256:f8b4f8c711134a7f24afbab772c07703b424c995c1cc29ce4fbcac97892911f0",
+      "size_bytes": 247456
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-unavailable-1440-dark.json",
+      "sha256": "sha256:3bc4be0827bfbb4b551615af3cf551e607654000c0f05d0ed7e778427f260789",
+      "size_bytes": 262
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-unavailable-1440-dark.png",
+      "sha256": "sha256:d80a504c246d62b72becd29c94b6a4c4ce5347aabb38e0a48c05659763971c52",
+      "size_bytes": 242550
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-unavailable-1440-light.json",
+      "sha256": "sha256:3bc4be0827bfbb4b551615af3cf551e607654000c0f05d0ed7e778427f260789",
+      "size_bytes": 262
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-unavailable-1440-light.png",
+      "sha256": "sha256:7bad0e1b79a9b363345a12da0076126524b0fc1a09c092a699b830da60937cfa",
+      "size_bytes": 241043
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-unavailable-390-dark.json",
+      "sha256": "sha256:b6b75f2e6542b2381e9f6b676fdd7e9ecff7907d37146c529ac31e56d529ade7",
+      "size_bytes": 258
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-unavailable-390-dark.png",
+      "sha256": "sha256:be0eea9cf25e12e82679266b9b46f49002549bc3c77609d700e872888024d934",
+      "size_bytes": 250591
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-unavailable-390-light.json",
+      "sha256": "sha256:b6b75f2e6542b2381e9f6b676fdd7e9ecff7907d37146c529ac31e56d529ade7",
+      "size_bytes": 258
+    },
+    {
+      "path": "docs/design/site-v2-p3/demo-route/apex-unavailable-390-light.png",
+      "sha256": "sha256:4dea9de0da85ff560927dfe46024a6564fb0750fb12b42a34449261e2a74ece0",
+      "size_bytes": 246850
+    },
+    {
+      "path": "docs/design/site-v2-p3/deploy-tools/http_verify.py",
+      "sha256": "sha256:a46edd5b3f947b7c7c7bfb18ea42344b76e9a5693f5f2c364fdcede32b9a1b37",
+      "size_bytes": 6964
+    },
+    {
+      "path": "docs/design/site-v2-p3/deploy-tools/loopback_verify.py",
+      "sha256": "sha256:f5e22dc37c0fb922c80c61994c2bb58ca18d20a92e27e2e9cd85653aadb11ad0",
+      "size_bytes": 3243
+    },
+    {
+      "path": "docs/design/site-v2-p3/deploy-tools/prepare.py",
+      "sha256": "sha256:7dc6f7f62bfe16bac136bb538bfe71f099a7e6dcd79fad27527987fcf497f1b7",
+      "size_bytes": 3527
+    },
+    {
+      "path": "docs/design/site-v2-p3/deploy-tools/switch.py",
+      "sha256": "sha256:12fa4040d225e4a880f8ce12742d30bb455995ce046eac7d4e23d63e97ab7f28",
+      "size_bytes": 6844
+    },
+    {
       "path": "docs/design/site-v2-p3/layout-before/README.md",
       "sha256": "sha256:f5e4338877fd762b6169714063c69479219e10eafdb767f10b8131838fa6380d",
       "size_bytes": 1211
@@ -2765,6 +2915,146 @@
       "path": "docs/design/site-v2-p3/test-results/core.xml",
       "sha256": "sha256:a06b6a67eb0802012fc7ba445c7eb55fc6f1a22004bf0226cfe9e542d4490675",
       "size_bytes": 3534
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-browser-1.json",
+      "sha256": "sha256:bc85873506a3bb98eda1fc976a47f9e6b9c19acf05a1da3d42d75e339cf0c4bf",
+      "size_bytes": 685
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-browser-1.log",
+      "sha256": "sha256:f7f5fc72e4735137136053f4babe3f9f79d2a519a9f56bb64e11a5dc63ff890d",
+      "size_bytes": 757
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-browser-1.xml",
+      "sha256": "sha256:b3007e2cf6a566b27bcf868179dd09bf6637405095104e430a4e6698d3ed3dbe",
+      "size_bytes": 4203
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-browser-2.json",
+      "sha256": "sha256:6acffd2fa07b107fad72d33d6efec4488a4c0a0135a823552346be3455c577d6",
+      "size_bytes": 685
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-browser-2.log",
+      "sha256": "sha256:f065b0e9df93bcd5eb66b7cc92ac7ee4668345acd73356ced60da2f70845cf36",
+      "size_bytes": 757
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-browser-2.xml",
+      "sha256": "sha256:b5ad1145943ca47348464e2661c713b959f9c91cb02ff018d63fc8044c95943d",
+      "size_bytes": 4203
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-browser-3.json",
+      "sha256": "sha256:a96737c5152dcaff494a707f6bd82203b0355463d4a628857f871728ba988dc7",
+      "size_bytes": 686
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-browser-3.log",
+      "sha256": "sha256:85017980e76b0282b4d9f9259db88174adc4ff801ecdbcab1d0f27388bdf163b",
+      "size_bytes": 757
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-browser-3.xml",
+      "sha256": "sha256:58d335f2d5bd331303750015f9c3d5f621317bd247403a49ddeaf1fca5267ef2",
+      "size_bytes": 4203
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-candidate-http.json",
+      "sha256": "sha256:30f4d49e15d76a803b63e39b8ee0c91006fc53ebea3d663a231b07909bacfaed",
+      "size_bytes": 3727
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-candidate-http.log",
+      "sha256": "sha256:30f4d49e15d76a803b63e39b8ee0c91006fc53ebea3d663a231b07909bacfaed",
+      "size_bytes": 3727
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-deploy-final.log",
+      "sha256": "sha256:cae72c4e67f6b5f085255b0c18ddaaa2120e111ce5632ebb675a74f18af1a74e",
+      "size_bytes": 760
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-deploy-final.xml",
+      "sha256": "sha256:3eb685f844ef02a93a8d85142ee7d115f8d35cb1e776c9b669afff090f41618b",
+      "size_bytes": 2026
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-deploy-tools.log",
+      "sha256": "sha256:d7bc718e00916a8126128bac503c465461135fb17bf3313b63bb6ee247e6d214",
+      "size_bytes": 760
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-deploy-tools.xml",
+      "sha256": "sha256:32badc741f6f7a9bc75706ce7e2b5ff3bbe778d877886dfee3b635b2e3d41cf3",
+      "size_bytes": 1722
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-green.log",
+      "sha256": "sha256:e7c92fc1511453137f08db14fd89e69b9c17ddc2b43f9906387305433800b195",
+      "size_bytes": 752
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-green.xml",
+      "sha256": "sha256:1c2f31dc49a066ea67ba42ed9c7c80603a12e8894515bfaabf56a7ebe59e8021",
+      "size_bytes": 874
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-nonbrowser.log",
+      "sha256": "sha256:2dac80a32d4c4c9d819372f602db9efea06617ae8fb302a3316b66a77fb86073",
+      "size_bytes": 1319
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-nonbrowser.xml",
+      "sha256": "sha256:89eddec02217dd135c216929ccf566f4ca22c466090a18d3426b6c5f1309061f",
+      "size_bytes": 80641
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-pipeline-browser.log",
+      "sha256": "sha256:9c95138671a079f54c5e830b53af8972bda97158eb0cabfd50647aee02451a85",
+      "size_bytes": 1855
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-pipeline-full.log",
+      "sha256": "sha256:a2bd179068104506088c21589dc84fe346774d02271f1d5802a732aef1fffb06",
+      "size_bytes": 406
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-prepin-summary.json",
+      "sha256": "sha256:decbbd4e22fa92194e3a18ebaa18ccbc445b05b67d34e2fd96e875b5cf462280",
+      "size_bytes": 8505
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-red.log",
+      "sha256": "sha256:b0d0a850658d61fa333afacf4eb0101a3c45260259e286023064dce2de426bf2",
+      "size_bytes": 6373
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-red.xml",
+      "sha256": "sha256:05f6474fa234112e4339803a5a93ac9b4549cbbf54c7472f7f9b805f4c9c2e67",
+      "size_bytes": 6452
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-rollback-http.json",
+      "sha256": "sha256:bba3c3f0fba2309106316e9fde57d2275569a6544e2ad29094f777f7b1647c93",
+      "size_bytes": 3536
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-rollback-http.log",
+      "sha256": "sha256:bba3c3f0fba2309106316e9fde57d2275569a6544e2ad29094f777f7b1647c93",
+      "size_bytes": 3536
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-two-red.log",
+      "sha256": "sha256:013a8f027aa1861d6f1b513f3be70e8a85480fb787da8f9251aa5f418540d1b1",
+      "size_bytes": 6355
+    },
+    {
+      "path": "docs/design/site-v2-p3/test-results/demo-route-two-red.xml",
+      "sha256": "sha256:d1dd922948aacede0e1f0c5730eaa7ca5c4f6bc52910d51bb0ba06a52e182054",
+      "size_bytes": 6408
     },
     {
       "path": "docs/design/site-v2-p3/test-results/focus.log",
@@ -4778,13 +5068,13 @@
     },
     {
       "path": "mycelium_swarm_directory/web/apex.html",
-      "sha256": "sha256:4b0493630134ee69e0635a1c5cb53f4ac4726e8460e11c64855959aabc3651aa",
-      "size_bytes": 4557
+      "sha256": "sha256:b2f2dee0a2b95c7e45af675d17518e87cc91d7786b0e33ec923917ca82ecec69",
+      "size_bytes": 4537
     },
     {
       "path": "mycelium_swarm_directory/web/apex.js",
-      "sha256": "sha256:d99897a49cf17c4ad02c1fc456b14b4d2293345b2766468f5d3d879c1d011d98",
-      "size_bytes": 1157
+      "sha256": "sha256:795761e174fa75fcf229c21c7707de34a3a0df4a58ebb2b8082897b6ef3ef8df",
+      "size_bytes": 1991
     },
     {
       "path": "mycelium_swarm_directory/web/index.html",
@@ -4793,8 +5083,8 @@
     },
     {
       "path": "mycelium_swarm_directory/web/site.css",
-      "sha256": "sha256:e725a231ce4cd5f91121923f728107b21a62d9b2c2f5d62d96047b53a63a4d18",
-      "size_bytes": 26049
+      "sha256": "sha256:cc804b1ee7e96898c8d3ef9a909e547fd25c59333c67a68510d39351f476605f",
+      "size_bytes": 26140
     },
     {
       "path": "mycelium_swarm_directory/web/swarms.css",
@@ -8542,19 +8832,24 @@
       "size_bytes": 5821
     },
     {
+      "path": "tests/swarm_directory/test_site_deploy_tools.py",
+      "sha256": "sha256:df3a8515831b5d393853fd5df04d07d5fb0fc8d66c741465890cb73730ba0400",
+      "size_bytes": 8931
+    },
+    {
       "path": "tests/swarm_directory/test_site_p3_core.py",
       "sha256": "sha256:d635a5e0538c1f1c363bec508d9cc73c376bcb6bc609e19e98ab36226973a173",
       "size_bytes": 6421
     },
     {
       "path": "tests/swarm_directory/test_site_p3_http.py",
-      "sha256": "sha256:a05891829bced92c567c22ca03ebd2461059209d6b73813c033f4c55aaa3e845",
-      "size_bytes": 3528
+      "sha256": "sha256:947b28a1e92494b9db30bfb42a95fa3670721535c58cae991f25fe555bf0453e",
+      "size_bytes": 3613
     },
     {
       "path": "tests/swarm_directory/test_site_v2_browser.py",
-      "sha256": "sha256:c5fe3ff384e9f994e9f08fcc5e4b10e14cd1a20e52d8a4e92718f67e6239a248",
-      "size_bytes": 28578
+      "sha256": "sha256:1691ad36c14cd8964323f545402035c6ae4bd5430056cd92670d0525473bbbd5",
+      "size_bytes": 33206
     },
     {
       "path": "tests/swarm_directory/test_surface_probe_user_agent.py",
@@ -8963,5 +9258,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:f5d795cacf63873e0b9dee90401be96cd4887a529af7bdf4109c22cc76c7a32b"
+  "source_digest": "sha256:41ec58ea4d1f58eb492b19d0e7bb270bb43b1768711997cfe7dd02da51ee673a"
 }
