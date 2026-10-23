@@ -185,6 +185,12 @@ class ManagedTargetRuntime:
         from .token_policy import member_pin
         return member_pin(self._token_client,self._member())
 
+    def _refresh_token_host_pin(self):
+        from .token_policy import prepare_host_pin
+        return prepare_host_pin(root=self.root, client=self._token_client, current_member=self._member,
+            run_id=self.run_id, deployment_id=self.deployment_id,
+            max_wall_seconds=self._limits.max_wall_seconds)
+
     def _make_worker(self):
         """Build one worker process.  Called once at start and again per replacement.
 
@@ -202,7 +208,8 @@ class ManagedTargetRuntime:
             sidecar_binary=self._sidecar_binary,resource_policy=self._resource_policy,limits=self._limits,
             membership_current=self._membership_current,authorize_load=self._authorize_load,
             endpoint_secret_file=self._endpoint_secret_file,_test_observer=self._test_observer,
-            token_policy_trust_file=self._token_host_pin,token_policy_member=self._token_member)
+            token_policy_trust_file=self._token_host_pin,token_policy_member=self._token_member,
+            token_policy_refresh=self._refresh_token_host_pin)
 
     def _verify_stage(self):
         try:

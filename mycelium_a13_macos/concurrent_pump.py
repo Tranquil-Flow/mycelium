@@ -17,6 +17,18 @@ from .managed_control import OWNER_COMMAND_PROTOCOL, ManagedControlError, _verif
 
 _PROTOCOL = 'mycelium.a13.concurrent_claims.v1'
 
+
+def _install_diagnostic(row):
+    from .managed_control import _TARGET_ERROR_CODES
+    if not isinstance(row, dict) or row.get('phase') != 'reconciliation_required':
+        return {}
+    envelope = row.get('reply', {}).get('command_envelope') or {}
+    command = envelope.get('statement', {}).get('native_command', {})
+    code = row.get('error_code')
+    if command.get('command') == 'install_token_path' and isinstance(code, str) and code in _TARGET_ERROR_CODES:
+        return {'target_error_code': code}
+    return {}
+
 _CLAIM_PHASES = frozenset({'ready', 'executing', 'executed', 'reconciliation_required', 'reconciliation_acked'})
 
 _UNRESOLVED_PHASES = frozenset({'executing', 'reconciliation_required'})
@@ -292,8 +304,8 @@ class ConcurrentTargetControlPump(TargetControlPump):
                 # guard (never removed -> `_dispatch_ready` raised forever) and grew
                 # the claims map until the durable state failed its own `len > 3`
                 # validation on the next load.  Native work is still never re-run.
-                # Record WHY before retiring: the ack cannot carry a reason, so this
-                # is the only place the peer's own cause can survive.
+                # Retain the local reason too. Install-policy diagnostics also
+                # travel in the signed ack, separately from the null native result.
                 existing = claims.get(command_id)
                 self._record_uncertain_ack(command_id,
                     existing.get('error_code') if isinstance(existing, dict) else None,
@@ -360,7 +372,7 @@ class ConcurrentTargetControlPump(TargetControlPump):
         self._state['outbound'] = prepare(self.client, 'ack', target=target,
             run_id=self.worker.run_id, deployment_id=self.worker.deployment_id,
             command_id=command_id, claim_token=claim_token,
-            disposition=disposition, native_response=native, **self._next_request())
+            disposition=disposition, native_response=native, **_install_diagnostic(row), **self._next_request())
         self._save()
         return self._finish_outbound(target)
 
@@ -390,7 +402,7 @@ class ConcurrentTargetControlPump(TargetControlPump):
                 self._state['outbound'] = prepare(self.client, 'ack', target=target,
                     run_id=self.worker.run_id, deployment_id=self.worker.deployment_id,
                     command_id=command_id, claim_token=row['reply']['claim_token'],
-                    disposition=disposition, native_response=native, **self._next_request())
+                    disposition=disposition, native_response=native, **_install_diagnostic(row), **self._next_request())
                 self._save()
                 return self._finish_outbound(target)
             self._dispatch_ready()

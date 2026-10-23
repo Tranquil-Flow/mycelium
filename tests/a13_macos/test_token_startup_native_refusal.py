@@ -75,11 +75,11 @@ def test_signed_startup_refusal_closes_route_without_grant(
         observed.update(code=code, installs=installs, successful=successful,
                         grants=grants, commands=list(kwargs['inference_commands']))
         managed = route._peers[refused_node].process_transport == 'managed_https'
-        # The target rejects before dispatch and requires reconciliation. A local
-        # native rejection instead retains its exact native code. Neither is ready.
-        expected_code = ('managed_control_reconciliation_required' if managed
-                         else 'token_path_policy_signature')
-        assert code == expected_code, observed
+        # The managed terminal still requires reconciliation, but its signed
+        # target diagnostic is distinct from (and not fabricated as) native output.
+        assert code == 'token_path_policy_signature', observed
+        if managed:
+            assert error.code == 'managed_control_reconciliation_required'
         assert target_refusals == (['token_path_policy_signature'] if managed else [])
         assert installs == sorted(sessions)[:refused_index + 1], observed
         assert successful == sorted(sessions)[:refused_index], observed

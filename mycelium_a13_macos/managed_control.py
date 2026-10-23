@@ -185,6 +185,32 @@ _POLL_V2_FIELDS = _POLL_FIELDS | frozenset({"active_claims"})
 _ACK_FIELDS = _POLL_FIELDS | frozenset(
     {"command_id", "claim_token", "disposition", "native_response"}
 )
+# Optional, authenticated target diagnostic. It is never native evidence or
+# permission to retry an uncertain command. Old envelopes keep their exact shape.
+_TARGET_ERROR_CODES = frozenset({
+    'token_path_policy_expired', 'token_path_policy_stale', 'token_path_policy_signature',
+    'token_path_policy_mismatch', 'token_path_policy_unconfigured',
+    'token_path_host_pin_stale', 'token_path_host_pin_invalid',
+    'runtime_member_stale', 'worker_membership_not_current',
+})
+
+
+def _diagnostic_fields(envelope, fields):
+    body = envelope.get('statement') if isinstance(envelope, Mapping) else None
+    return fields | {'target_error_code'} if isinstance(body, Mapping) and 'target_error_code' in body else fields
+
+
+def _target_diagnostic(statement):
+    if 'target_error_code' not in statement:
+        return {}
+    code = statement['target_error_code']
+    _require(isinstance(code, str) and code in _TARGET_ERROR_CODES
+             and statement.get('disposition', statement.get('state')) == 'reconciliation_required'
+             and statement.get('native_response') is None,
+             'managed_control_target_diagnostic_invalid')
+    return {'target_error_code': code}
+
+
 _RESPONSE_COMMON_FIELDS = frozenset(
     {
         "protocol",
@@ -1550,8 +1576,9 @@ class ManagedControlMailbox(TokenProgressMailboxMixin):
 
         with self._lock:
             statement, member = self._verify_target(
-                envelope, protocol=TARGET_ACK_PROTOCOL, fields=_ACK_FIELDS
+                envelope, protocol=TARGET_ACK_PROTOCOL, fields=_diagnostic_fields(envelope, _ACK_FIELDS)
             )
+            diagnostic = _target_diagnostic(statement)
             _segment(statement["command_id"])
             _segment(statement["claim_token"], "managed_control_claim_token_invalid")
             _require(
@@ -1594,6 +1621,10 @@ class ManagedControlMailbox(TokenProgressMailboxMixin):
                         (statement["command_id"],),
                     ).fetchone()
                     _require(row is not None, "managed_control_command_unknown")
+                    if diagnostic:
+                        original = json.loads(row['envelope_json'])['statement']['native_command']
+                        _require(original['command'] == 'install_token_path',
+                                 'managed_control_target_diagnostic_invalid')
                     for column, field in (
                         ("target_node_id", "target_node_id"),
                         ("target_endpoint_id", "target_endpoint_id"),
@@ -1617,6 +1648,9 @@ class ManagedControlMailbox(TokenProgressMailboxMixin):
                         and row["terminal_receipt_json"] is not None
                     )
                     if row["state"] in _TERMINAL_STATES or reconciled_unknown:
+                        retained = {} if row['terminal_receipt_json'] is None else json.loads(row['terminal_receipt_json'])['statement']
+                        _require(_target_diagnostic(retained) == diagnostic,
+                                 'managed_control_conflicting_retry')
                         _require(
                             row["state"] == disposition
                             and row["native_response_digest"] == native_digest,
@@ -1663,6 +1697,7 @@ class ManagedControlMailbox(TokenProgressMailboxMixin):
                             "command_id": statement["command_id"],
                             "state": disposition,
                             "native_response_digest": native_digest,
+                            **diagnostic,
                         },
                     )
                     if disposition in _TERMINAL_STATES or disposition == "reconciliation_required":
@@ -1733,11 +1768,13 @@ class ManagedControlMailbox(TokenProgressMailboxMixin):
                     else:
                         _require(native is None and row["native_response_digest"] is None,
                             "managed_control_state_corrupt")
+                    terminal = {} if row['terminal_receipt_json'] is None else json.loads(row['terminal_receipt_json'])['statement']
+                    diagnostic = _target_diagnostic(terminal)
                     response = self._response(RESULT_RECEIPT_PROTOCOL, statement["request_id"], {
                         **{field: statement[field] for field in _BINDING_FIELDS},
                         "command_id": command["command_id"], "command_digest": _document_digest(command),
                         "state": row["state"], "native_response": native,
-                        "native_response_digest": row["native_response_digest"]})
+                        "native_response_digest": row["native_response_digest"], **diagnostic})
                     self._record_auth(connection, signer_digest=signer_digest, statement=statement,
                         request_digest=request_digest, response=response)
                     connection.commit()
@@ -2128,6 +2165,9 @@ class ManagedControlClient:
                 expected_endpoint_id=str(envelope.get("statement", {}).get("owner_endpoint_id")),
                 now=self._clock(),
             )
+            if protocol in {ACK_RECEIPT_PROTOCOL, RESULT_RECEIPT_PROTOCOL}:
+                fields = _diagnostic_fields(envelope, fields)
+                _target_diagnostic(statement)
             _require(set(statement) == fields, "managed_control_response_invalid")
             _require(
                 statement["request_id"] == request_id
@@ -2311,6 +2351,7 @@ class ManagedControlClient:
         nonce: str,
         request_id: str,
         ttl_seconds: float = 60.0,
+        target_error_code: str | None = None,
     ) -> dict[str, Any]:
         statement = self._target_statement(
             protocol=TARGET_ACK_PROTOCOL,
@@ -2326,6 +2367,7 @@ class ManagedControlClient:
                 "claim_token": claim_token,
                 "disposition": disposition,
                 "native_response": native_response,
+                **({} if target_error_code is None else {'target_error_code': target_error_code}),
             },
         )
         response = self._request(

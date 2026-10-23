@@ -94,13 +94,8 @@ def sign_route_policy(*, signer, run_id, deployment_id, model_digest, requester_
 HOST_PIN_PROTOCOL = 'mycelium.token_path_host_pin.v1'
 
 
-def load_host_trust(path, *, run_id, deployment_id, node_id, current, member=None,
-                    clock=time.monotonic, unix_ms=lambda: int(time.time()*1000)):
-    """Read a local private host pin; this path is never a managed payload.
-
-    The local parent's monotonic ceiling survives native process replacement.
-    The lease is translated once, before reading a potentially slow wall clock.
-    """
+def _read_host_pin(path, *, run_id, deployment_id, node_id):
+    """Read only the owner-private host channel, including on a lease refresh."""
     import os
     import stat
     from pathlib import Path
@@ -136,9 +131,35 @@ def load_host_trust(path, *, run_id, deployment_id, node_id, current, member=Non
              and type(pin['clock_uncertainty_ms']) is int and 0 <= pin['clock_uncertainty_ms'] <= 60000
              and type(pin['process_deadline_monotonic_s']) in (float,int)
              and math.isfinite(pin['process_deadline_monotonic_s']), 'token_path_host_pin_invalid')
+    return pin
+
+
+def load_host_trust(path, *, run_id, deployment_id, node_id, current, member=None,
+                    clock=time.monotonic, unix_ms=lambda: int(time.time()*1000)):
+    """Pin identity/process once; sample authenticated host lease at installation.
+
+    The parent refreshes this private file from current authenticated membership
+    just before sending install. Both already-running readers observe that lease,
+    without refreshing a policy, replay registry, or the original process ceiling.
+    """
+    read = lambda: _read_host_pin(path, run_id=run_id, deployment_id=deployment_id, node_id=node_id)
+    pin = read()
     now = clock()
     lease = now + (pin['lease_expires_at_unix_ms'] - unix_ms() - pin['clock_uncertainty_ms']) / 1000
     ceiling = min(pin['process_deadline_monotonic_s'], now+1800)
+    retained_lease = [pin['lease_expires_at_unix_ms'], lease]
+
+    def refresh_lease():
+        now = clock()  # Charge filesystem/current-clock sampling to the budget.
+        latest = read()
+        _require(all(canonical_json_bytes(latest[k]) == canonical_json_bytes(v)
+                     for k, v in pin.items() if k != 'lease_expires_at_unix_ms'),
+                 'token_path_host_pin_stale')
+        if latest['lease_expires_at_unix_ms'] != retained_lease[0]:
+            retained_lease[:] = [latest['lease_expires_at_unix_ms'], now +
+                (latest['lease_expires_at_unix_ms'] - unix_ms() - pin['clock_uncertainty_ms']) / 1000]
+        # An unchanged lease is never retranslated after a wall-clock rollback.
+        return retained_lease[1]
     # Expired optional pins do not break legacy startup; admit still refuses
     # before any policy installation or autonomous work.
     local_member = canonical_json_bytes(pin['member'])
@@ -146,14 +167,16 @@ def load_host_trust(path, *, run_id, deployment_id, node_id, current, member=Non
         owner_endpoint_id=pin['owner_endpoint_id'], owner_key=pin['owner_key'],
         member=(lambda: json.loads(local_member)) if member is None else member, current=current,
         process_deadline_monotonic_s=ceiling, lease_deadline_monotonic_s=lease,
-        clock_uncertainty_ms=pin['clock_uncertainty_ms'], clock=clock, unix_ms=unix_ms)
+        clock_uncertainty_ms=pin['clock_uncertainty_ms'], clock=clock, unix_ms=unix_ms,
+        refresh_lease=refresh_lease)
 
 
 class RoutePolicyTrust:
     """One process-lifetime host pin; absence is the default-OFF boundary."""
     def __init__(self, *, run_id, deployment_id, node_id, owner_endpoint_id, owner_key,
                  member, current, process_deadline_monotonic_s, lease_deadline_monotonic_s,
-                 clock_uncertainty_ms, clock=time.monotonic, unix_ms=lambda: int(time.time()*1000)):
+                 clock_uncertainty_ms, clock=time.monotonic, unix_ms=lambda: int(time.time()*1000),
+                 refresh_lease=None):
         _require(all(_name(v) for v in (run_id, deployment_id, node_id, owner_endpoint_id)))
         _require(all(callable(f) for f in (member, current, clock, unix_ms)))
         _require(all(type(v) in (int, float) and math.isfinite(v)
@@ -164,7 +187,10 @@ class RoutePolicyTrust:
         self._key_bytes = canonical_json_bytes(owner_key)
         self._verify = build_ed25519_verifier([json.loads(self._key_bytes)])
         self.member, self.current, self.clock, self.unix_ms = member, current, clock, unix_ms
-        self.ceiling = min(process_deadline_monotonic_s, lease_deadline_monotonic_s)
+        _require(refresh_lease is None or callable(refresh_lease))
+        self.ceiling = (min(process_deadline_monotonic_s, lease_deadline_monotonic_s)
+                        if refresh_lease is None else process_deadline_monotonic_s)
+        self._refresh_lease = refresh_lease
         self.uncertainty = clock_uncertainty_ms
         self._lock = threading.Lock()
         self._installed = False
@@ -190,7 +216,9 @@ class RoutePolicyTrust:
             _require(self.node_id in body['members'] and set(body['members']) == graph_nodes,
                      'token_path_policy_mismatch')
             now = self.clock()  # Before potentially slow wall-clock/current-member sampling.
-            deadline = min(self.ceiling, now + (body['expires_at_unix_ms']-self.unix_ms()-self.uncertainty)/1000)
+            lease = self.ceiling if self._refresh_lease is None else self._refresh_lease()
+            deadline = min(self.ceiling, lease,
+                           now + (body['expires_at_unix_ms']-self.unix_ms()-self.uncertainty)/1000)
             _require(deadline > self.clock(), 'token_path_policy_expired')
             admitted = InstalledRoutePolicy(trust=self, body=body, graph=graph, peers=peers, deadline=deadline)
             _require(admitted.current(), 'token_path_policy_stale')

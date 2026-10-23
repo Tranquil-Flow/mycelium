@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from .managed_control import (
     OWNER_COMMAND_PROTOCOL, TARGET_POLL_PROTOCOL, TARGET_POLL_PROTOCOL_V2, TARGET_ACK_PROTOCOL,
     _OWNER_FIELDS, _POLL_FIELDS, _POLL_V2_FIELDS, _ACK_FIELDS, _BINDING_FIELDS,
-    _binding_from_member, _verify_signed, _require, _detached,
+    _binding_from_member, _verify_signed, _require, _detached, _diagnostic_fields, _target_diagnostic,
 )
 
 from .token_receipt_mailbox import PROGRESS
@@ -34,6 +34,9 @@ def prepare(client, operation, *, target, **kwargs):
         if operation == 'ack':
             additions = {field: kwargs.pop(field) for field in (
                 'command_id', 'claim_token', 'disposition', 'native_response')}
+            if 'target_error_code' in kwargs:
+                additions['target_error_code'] = kwargs.pop('target_error_code')
+                _target_diagnostic(additions)
         if operation == 'token_progress':
             additions = {field: kwargs.pop(field) for field in ('command_id', 'claim_token', 'receipt')}
             from mycelium_node.token_progress import _snapshot
@@ -55,7 +58,11 @@ def replay(client, prepared, *, target):
     statement = _verify_signed(envelope, expected_protocol=TARGET_POLL_PROTOCOL_V2 if concurrent else _PROTOCOLS[operation],
         expected_key_record=client.signer.public_key_record(),
         expected_endpoint_id=client.signer.endpoint_id, now=client._clock())
-    _require(set(statement) == (_POLL_V2_FIELDS if concurrent else _FIELDS[operation]) and statement['swarm_id'] == client.swarm_id,
+    fields = _POLL_V2_FIELDS if concurrent else _FIELDS[operation]
+    if operation == 'ack':
+        fields = _diagnostic_fields(envelope, fields)
+        _target_diagnostic(statement)
+    _require(set(statement) == fields and statement['swarm_id'] == client.swarm_id,
         'managed_control_prepared_request_invalid')
     binding = _binding_from_member(target, statement['run_id'], statement['deployment_id'])
     _require(all(statement[field] == binding[field] for field in _BINDING_FIELDS),
@@ -80,6 +87,7 @@ def replay(client, prepared, *, target):
         if operation == 'ack':
             kwargs.update({field: statement[field] for field in (
                 'command_id', 'claim_token', 'disposition', 'native_response')})
+            kwargs.update(_target_diagnostic(statement))
         if operation == 'token_progress':
             kwargs.update({field: statement[field] for field in ('command_id', 'claim_token', 'receipt')})
             kwargs['return_envelope'] = True

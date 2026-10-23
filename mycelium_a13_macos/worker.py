@@ -685,6 +685,7 @@ class ManagedWorker:
         endpoint_secret_file: Path | None = None,
         token_policy_trust_file: Path | None = None,
         token_policy_member: Callable[[], Mapping[str, Any]] | None = None,
+        token_policy_refresh: Callable[[], Any] | None = None,
         capacity_root: Path | None = None,
         _test_observer: Callable[[], Mapping[str, str]] | None = None,
     ) -> None:
@@ -740,7 +741,7 @@ class ManagedWorker:
             from .token_policy import TargetTokenPolicy
             self._token_policy = TargetTokenPolicy(path=token_policy_trust_file,
                 run_id=run_id, deployment_id=deployment_id, node_id=node_id,
-                current=membership_current, member=token_policy_member)
+                current=membership_current, member=token_policy_member, refresh=token_policy_refresh)
         self._authorize_load = authorize_load
         self._observe = _test_observer or observe_policy
         self._session: Any = None

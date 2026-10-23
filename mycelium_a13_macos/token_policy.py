@@ -23,7 +23,12 @@ def member_pin(client, member):
 
 
 def prepare_host_pin(*, root, client, current_member, run_id, deployment_id, max_wall_seconds):
-    """Retain a non-extendable local pin from the encrypted join, never a grant."""
+    """Capture current authenticated membership, never extend the process budget.
+
+    Called again immediately before install, after potentially slow compilation.
+    The callback is the host's authenticated membership reader, not wire input.
+    Renewal may refresh ONLY the lease; identity and process origin stay pinned.
+    """
     import math
     import os
     import time
@@ -38,23 +43,26 @@ def prepare_host_pin(*, root, client, current_member, run_id, deployment_id, max
         node_id=local['node_id'], owner_endpoint_id=client.trusted_owner_endpoint_id,
         owner_key=client.trusted_owner_key_record,member=local,
         clock_uncertainty_ms=int(MAX_CLOCK_SKEW_SECONDS*1000))
+    lease = member.get('lease_expires_at')
+    if type(lease) not in (int,float) or not math.isfinite(lease) or lease <= time.time():
+        raise TokenPathAuthorityError('token_path_policy_expired')
     previous = _load_private_json(path)
     if previous is not None:
         if any(canonical_json_bytes(previous.get(k)) != canonical_json_bytes(v) for k,v in stable.items()):
             raise TokenPathAuthorityError('token_path_host_pin_stale')
-        return path  # No lease or process-origin extension on replacement/reopen.
-    lease = member.get('lease_expires_at')
-    if type(lease) not in (int,float) or not math.isfinite(lease) or lease <= time.time():
-        raise TokenPathAuthorityError('token_path_policy_expired')
+        if previous.get('lease_expires_at_unix_ms') != int(lease*1000):
+            _atomic_private_json(path, {**previous, 'lease_expires_at_unix_ms':int(lease*1000)})
+        return path  # The original process ceiling never moves, even on reopen.
     _atomic_private_json(path, {**stable, 'lease_expires_at_unix_ms':int(lease*1000),
         'process_deadline_monotonic_s':time.monotonic()+min(1800,max_wall_seconds)})
     return path
 
 
 class TargetTokenPolicy:
-    def __init__(self, *, path, run_id, deployment_id, node_id, current, member=None):
+    def __init__(self, *, path, run_id, deployment_id, node_id, current, member=None, refresh=None):
         self.trust = load_host_trust(path, run_id=run_id, deployment_id=deployment_id,
                                     node_id=node_id, current=current, member=member)
+        self._refresh = refresh
         self.graph = None
         self._peers = {}
         self.installed = None
@@ -78,6 +86,8 @@ class TargetTokenPolicy:
         with self._lock:
             if self.graph is None or not self._peers:
                 raise TokenPathAuthorityError('token_path_policy_unconfigured')
+            if self._refresh is not None:
+                self._refresh()
             admitted = self.trust.admit(payload['policy'], graph=self.graph, peers=self.peers)
             self._pending = (admitted, sha256_bytes(canonical_json_bytes(payload['policy']['statement'])))
 

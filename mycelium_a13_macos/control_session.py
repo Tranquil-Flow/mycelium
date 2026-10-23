@@ -541,7 +541,8 @@ class ManagedControlOwner:
                     _remaining(deadline, interruption)
                 return result['native_response']
             if result['state'] in {'expired', 'reconciliation_required'}:
-                raise ControllerError('managed_control_' + result['state'])
+                raise ControllerError('managed_control_' + result['state'],
+                                      remote_code=result.get('target_error_code'))
             self._closed.wait(min(.05, max(0.0, deadline-time.monotonic())))
         raise ControllerError('managed_owner_closed')
 
