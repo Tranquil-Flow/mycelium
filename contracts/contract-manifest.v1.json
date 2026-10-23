@@ -200,8 +200,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "300e7fd09ceb0b9f5ce4b8778985e276d62891ac4b8cbd2f5b6b584bdd894b94",
-          "size_bytes": 232257
+          "sha256": "6e757b449a586c25c7e1cfdcb28832b4e79a8d4b38bbe29251371fef7f7a6516",
+          "size_bytes": 233009
         },
         {
           "path": "ui/web/src/features/liveRoute/deploymentActivation.ts",
@@ -240,8 +240,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "300e7fd09ceb0b9f5ce4b8778985e276d62891ac4b8cbd2f5b6b584bdd894b94",
-          "size_bytes": 232257
+          "sha256": "6e757b449a586c25c7e1cfdcb28832b4e79a8d4b38bbe29251371fef7f7a6516",
+          "size_bytes": 233009
         },
         {
           "path": "ui/web/src/features/liveRoute/deploymentActivation.ts",
@@ -275,8 +275,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "300e7fd09ceb0b9f5ce4b8778985e276d62891ac4b8cbd2f5b6b584bdd894b94",
-          "size_bytes": 232257
+          "sha256": "6e757b449a586c25c7e1cfdcb28832b4e79a8d4b38bbe29251371fef7f7a6516",
+          "size_bytes": 233009
         },
         {
           "path": "ui/web/src/features/evidence/evidenceProjection.ts",
@@ -310,8 +310,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "300e7fd09ceb0b9f5ce4b8778985e276d62891ac4b8cbd2f5b6b584bdd894b94",
-          "size_bytes": 232257
+          "sha256": "6e757b449a586c25c7e1cfdcb28832b4e79a8d4b38bbe29251371fef7f7a6516",
+          "size_bytes": 233009
         },
         {
           "path": "ui/web/src/features/evidence/evidenceProjection.ts",
@@ -455,8 +455,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "300e7fd09ceb0b9f5ce4b8778985e276d62891ac4b8cbd2f5b6b584bdd894b94",
-          "size_bytes": 232257
+          "sha256": "6e757b449a586c25c7e1cfdcb28832b4e79a8d4b38bbe29251371fef7f7a6516",
+          "size_bytes": 233009
         },
         {
           "path": "mycelium_m16_runtime.py",
@@ -590,8 +590,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "300e7fd09ceb0b9f5ce4b8778985e276d62891ac4b8cbd2f5b6b584bdd894b94",
-          "size_bytes": 232257
+          "sha256": "6e757b449a586c25c7e1cfdcb28832b4e79a8d4b38bbe29251371fef7f7a6516",
+          "size_bytes": 233009
         },
         {
           "path": "ui/web/src/features/governance/governanceReadiness.ts",

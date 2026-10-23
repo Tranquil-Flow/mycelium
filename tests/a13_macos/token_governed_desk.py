@@ -16,13 +16,15 @@ from mycelium_a13_macos.token_owner import ManagedRouteTokenOwner
 
 def run_governed(*, tmp_path, monkeypatch, world, a, graph, members, signers,
                  sessions, infos, enabled, inference_commands, chat=False, finalizers=None, failure=None, startup=False,bench=None):
-    window=50 if bench is None else bench.window
+    window=a.get('window',50) if bench is None else bench.window
     current={n:dict(node_id=n,endpoint_id=m['control_endpoint_id'],generation=m['generation'],
                    verification_key_digest=m['verification_key_digest'],lease_expires_at=time.time()+window)
              for n,m in members.items()}
-    owner=ManagedRouteTokenOwner(signer=a['owner_signer'],current_member=current.__getitem__,
+    owner=ManagedRouteTokenOwner(signer=a['owner_signer'],current_member=(a['authority'].coordinator.member
+        if 'apps' in a else current.__getitem__),
         mailbox=a['mailbox'],evidence_root=tmp_path/'governed-receipts',
-        process_deadline_monotonic_s=time.monotonic()+window,clock_uncertainty_ms=100) if enabled else None
+        process_deadline_monotonic_s=time.monotonic()+window,
+        clock_uncertainty_ms=None if 'apps' in a else 100) if enabled else None
     controller=object.__new__(QualificationController)
     controller.peers=tuple(SimpleNamespace(node_id=n,host_id=infos[n]['identity']['host_id'],
         boot_id=infos[n]['identity']['boot_id'],

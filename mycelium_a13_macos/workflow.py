@@ -212,6 +212,20 @@ class ManagedServingWorkflow:
                     and index==self._challenge_count and index<limit):
                 self._challenge_count+=1
 
+    def _startup_failure(self, deployment_id, code):
+        """Publish refusal before potentially slow remote teardown, never readiness."""
+        import re
+        with self._lock:
+            if (self._state != 'starting' or self.stop_event.is_set()
+                    or deployment_id != self.controller._run_plan.get('deployment_id')):
+                return
+            self._state = 'failed'
+            self._error = (code if isinstance(code, str)
+                           and re.fullmatch(r'[a-z][a-z0-9_]{0,63}', code)
+                           else 'startup_route_unavailable')
+            self._challenge_request = None
+            self._challenge_count = 0
+
     def status(self):
         with self._lock:
             return {'state':self._state,'error_code':self._error,
@@ -284,16 +298,19 @@ class ManagedServingWorkflow:
             with self._lock:self._state='starting'
             result=self.launch.run(approval=approval,port=port,api_only=True,
                 stop_event=self.stop_event,on_started=started,
+                on_startup_failure=self._startup_failure,
                 **({'on_challenge_event':self._challenge_event}
                    if self._progress_identity is not None else {}))
-            with self._lock:self._state='stopped'
+            with self._lock:
+                if self._state != 'failed':self._state='stopped'
             return result
         except Exception as exc:
             import re
             code=str(exc)
             with self._lock:
-                self._state='failed'
-                self._error=code if re.fullmatch(r'[a-z][a-z0-9_]{0,79}',code) else 'managed_workflow_failed'
+                if self._state != 'failed':
+                    self._state='failed'
+                    self._error=code if re.fullmatch(r'[a-z][a-z0-9_]{0,79}',code) else 'managed_workflow_failed'
             raise
         finally:
             # Requests only: targets own cleanup and identity retention. Never

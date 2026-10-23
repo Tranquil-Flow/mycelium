@@ -57,6 +57,9 @@ class LocalOwnerMember(RemoteMacMember):
             raise ValueError('local_owner_pin_mismatch')
         return ManagedControlClient.for_local_tls(base_url=self.owner.seed_server.base_url,
             signer=self._signer,trusted_owner_key_record=c.signer.public_key_record(),
+            # The same durable owner signer was authenticated against the
+            # accepted membership above. Never derive native trust from work.
+            trusted_owner_endpoint_id=c.signer.endpoint_id,
             swarm_id=c.swarm_id,owner_node_id=c.seed_node_id,timeout=self._timeout,clock=self._clock,
             ca_certificate=self.owner.seed_server.material.ca_certificate)
 

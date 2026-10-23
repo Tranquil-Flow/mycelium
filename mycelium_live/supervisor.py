@@ -3836,6 +3836,7 @@ def _qualified_runtime(
     model_operation_file: Path | None = None,
     progress: Callable[[str], None] | None = None,
     on_challenge_event=None,
+    on_startup_failure=None,
     force_relay: bool = False,
     session_factory=None,
     external_session_factory=None,
@@ -3904,7 +3905,14 @@ def _qualified_runtime(
                 deployment_id=identity.deployment_id,
             ),
         )
-    except BaseException:
+    except BaseException as exc:
+        # A remote stop/close can take its full bounded command deadline.
+        # Report the original refusal first; this is not cleanup evidence.
+        if on_startup_failure is not None and isinstance(exc, Exception):
+            try:
+                on_startup_failure(deployment.deployment_id, _startup_reason(exc))
+            except Exception:
+                pass  # An observer cannot mask or turn a refusal into readiness.
         route.close()
         raise
 
@@ -4218,6 +4226,7 @@ def run_registry_server(
     stop_event: threading.Event | None = None,
     on_started=None,
     on_challenge_event=None,
+    on_startup_failure=None,
     api_only: bool = False,
     governance_root: Path | None = ROOT,
 ) -> int:
@@ -4233,6 +4242,8 @@ def run_registry_server(
         raise ValueError("registry_start_observer_invalid")
     if on_challenge_event is not None and not callable(on_challenge_event):
         raise ValueError("registry_challenge_observer_invalid")
+    if on_startup_failure is not None and not callable(on_startup_failure):
+        raise ValueError("registry_failure_observer_invalid")
     if type(api_only) is not bool:
         raise ValueError("api_only_invalid")
     if not operator_plans:
@@ -4260,6 +4271,7 @@ def run_registry_server(
                         model_operation_file=model_operation_file,
                         force_relay=force_relay,
                         on_challenge_event=on_challenge_event,
+                        **({"on_startup_failure": on_startup_failure} if on_startup_failure is not None else {}),
                         **({"session_factory": session_factory} if session_factory is not None else {}),
                         **({"external_session_factory": external_session_factory} if external_session_factory is not None else {}),
                     )

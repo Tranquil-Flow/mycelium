@@ -31,8 +31,8 @@ def test_real_launch_to_registry_qualifier_workflow_and_observer(tmp_path,monkey
  monkeypatch.setattr(demo_chain.time,'monotonic',clock.monotonic)
  monkeypatch.setattr(demo_chain.time,'time',clock.time)
  entered=threading.Event();permits=[threading.Event(),threading.Event()]
- emitted=[threading.Event(),threading.Event()];finish=threading.Event();started=threading.Event()
- effects=[];failures=[]
+ emitted=[threading.Event(),threading.Event()];finish=threading.Event();terminal=threading.Event()
+ effects=[];failures=[];outcomes=[]
  class Route:
   execution_graph=SimpleNamespace(deployment_id='deployment')
   startup_challenge=((11,),(21,22))
@@ -102,10 +102,20 @@ def test_real_launch_to_registry_qualifier_workflow_and_observer(tmp_path,monkey
  controller=SimpleNamespace(_run_plan={'run_id':'run','deployment_id':'deployment'},execute=lambda phase:None)
  wf=wm.ManagedServingWorkflow(authority=SimpleNamespace(),controller=controller,launch=launch)
  wf.bind_progress_identity(run_id='run',deployment_id='deployment',epoch=2)
+ # A refused challenge now reports before teardown, not through readiness.
+ # Observe the real callback; a late registry-start notification must not
+ # change a failed workflow into api_running or publish a serving listing.
+ real_failure=wf._startup_failure
+ def refused(deployment_id,code):
+  real_failure(deployment_id,code)
+  outcomes.append(('failed',code));terminal.set()
+ monkeypatch.setattr(wf,'_startup_failure',refused)
+ def ready(document):
+  outcomes.append(('ready',document['startup_qualification_complete']));terminal.set()
  approval=SimpleNamespace(operator_plan_digest='digest',physical_host_ids=())
  def producer():
-  try:assert wf.run(approval=approval,port=45678,on_started=lambda doc:started.set())==0
-  except BaseException as exc:failures.append(type(exc).__name__);started.set()
+  try:assert wf.run(approval=approval,port=45678,on_started=ready)==0
+  except BaseException as exc:failures.append(type(exc).__name__);terminal.set()
  thread=threading.Thread(target=producer,name='mycelium-a13-inmemory-composition')
  exchange=RunExchange(SimpleNamespace(),clock=clock.time)
  app=SimpleNamespace(_chain_workflow=wf,_chain_epoch=2,_chain_compile_state={'state':'compiled','epoch':2},run_exchange=exchange)
@@ -125,7 +135,7 @@ def test_real_launch_to_registry_qualifier_workflow_and_observer(tmp_path,monkey
      permits[1].set();assert emitted[1].wait(5),'second_fixture_event_missing'
      assert wf.status()['challenge_progress']=={'verified_token_count':2}
     if clock.now==5:
-     finish.set();assert started.wait(5),'fixture_registry_terminal_missing';assert not failures
+     finish.set();assert terminal.wait(5),'fixture_registry_terminal_missing';assert not failures
     if predicate():return True
     clock.now+=interval
    pytest.fail('fixture observer never completed')
@@ -138,7 +148,7 @@ def test_real_launch_to_registry_qualifier_workflow_and_observer(tmp_path,monkey
    assert exchange.announcement()['phase']=='serving'
   else:
    with pytest.raises(OwnerRunError) as caught:chain._step_serving(ctx)
-   assert caught.value.code=='route_qualification_failed' and clock.now==5
+   assert caught.value.code=='startup_challenge_failed' and clock.now==5
    assert exchange.announcement()['phase']=='idle' and ctx.result=={}
   assert effects.count('request_released')==1
   assert not failures
@@ -147,5 +157,8 @@ def test_real_launch_to_registry_qualifier_workflow_and_observer(tmp_path,monkey
   finish.set();wf.stop();thread.join(5)
   assert not thread.is_alive(),'owned_fixture_thread_not_reaped'
  assert wf.status()['challenge_progress'] is None
+ assert outcomes==([('ready',True)] if qualified else [('failed','startup_challenge_failed')])
+ if not qualified:
+  assert wf.status()['state']=='failed' and wf.status()['startup'] is None
  assert effects.count('server_closed')==1 and effects.count('registry_closed')==1
  assert effects.count('route_closed')==1

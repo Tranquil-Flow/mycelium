@@ -84,7 +84,8 @@ def test_workflow_launch_keywords_and_terminal_not_progress(monkeypatch):
         operator_plan = 'synthetic-plan'
         operator_plan_digest = 'digest'
         physical_host_ids = ()
-        def run(self, *, approval, port, api_only, stop_event, on_started, on_challenge_event):
+        def run(self, *, approval, port, api_only, stop_event, on_started, on_challenge_event, on_startup_failure):
+            assert callable(on_startup_failure)
             calls.append((api_only, callable(on_challenge_event)))
             late.append((on_started, on_challenge_event))
             on_challenge_event('deployment', REQUEST, 'begin', -1, 4)

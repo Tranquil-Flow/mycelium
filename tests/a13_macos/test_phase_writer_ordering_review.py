@@ -44,7 +44,7 @@ def test_status_idle_writer_cannot_replace_current_serving(monkeypatch, tmp_path
         operator_plan_digest = 'digest'
         physical_host_ids = ()
         operator_plan = object()
-        def run(self, *, approval, port, api_only, stop_event, on_started, on_challenge_event):
+        def run(self, *, approval, port, api_only, stop_event, on_started, on_challenge_event, on_startup_failure):
             assert api_only and port == 45678
             on_started(startup)
             started.set()

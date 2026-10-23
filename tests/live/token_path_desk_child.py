@@ -59,7 +59,8 @@ def main():
         node_id=d['node_id'],artifact_root=Path(d['root']),socket_root=Path(d['socket_root']),
         sidecar_binary=Path(d['binary']),sidecar_local_only=True,command_timeout=15 if not d.get('real_compute') else 120,
         endpoint_secret_file=Path(d['key_file']),requested_decode_mode='stage_local_kv',
-        token_policy_trust_file=Path(d['root'])/'token-host.private.json' if d.get('bootstrap')=='signed' and d['enabled'] else None)
+        token_policy_trust_file=(Path(d.get('trust_file', str(Path(d['root'])/'token-host.private.json')))
+            if d.get('bootstrap')=='signed' and d['enabled'] and d.get('trust_file', True) else None))
     if d.get('startup'):
         # Model/host metadata are synthetic qualification fixtures. The two real
         # processes run on ONE desk host; this must never become device evidence.

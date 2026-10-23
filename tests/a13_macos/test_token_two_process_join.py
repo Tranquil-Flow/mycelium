@@ -61,9 +61,9 @@ def _argv(fixture):
 
 @pytest.mark.parametrize('bootstrap,governed',[('host',False),('signed',False),('signed',True),('signed','chat')])
 @pytest.mark.parametrize('enabled',[False,True])
-def test_owner_native_two_process_route(tmp_path,world,monkeypatch,enabled,bootstrap,governed,failure=None,startup=False,bench=None):
+def test_owner_native_two_process_route(tmp_path,world,monkeypatch,enabled,bootstrap,governed,failure=None,startup=False,bench=None,app_pair=False):
     _safe(BINARY)
-    window = 50 if bench is None else bench.window
+    window = (180 if app_pair else 50) if bench is None else bench.window
     DEPLOYMENT_ID=DEFAULT_DEPLOYMENT_ID
     qualification=None
     if governed in ('chat','http','browser'):
@@ -74,9 +74,10 @@ def test_owner_native_two_process_route(tmp_path,world,monkeypatch,enabled,boots
     monkeypatch.setenv('MYCELIUM_TOKEN_PATH', 'on' if enabled else 'off')
     sockets=Path(tempfile.mkdtemp(prefix='tp-',dir=os.environ['TMPDIR']))
     try:
-        with _world(tmp_path/'swarm') as a:
+        from test_packaged_token_trust import app_control_world
+        with (app_control_world if app_pair else _world)(tmp_path/'swarm') as a:
             base=real_prefill_node(world)
-            entry_id=a['member']['node_id'];tail_id=a['authority'].coordinator.seed_node_id
+            entry_id=a['member']['node_id'];tail_id=a.get('tail_node_id',a['authority'].coordinator.seed_node_id)
             names={'entry':entry_id,'tail':tail_id}
             graph=replace(base.graph,deployment_id=DEPLOYMENT_ID,
                 stages=tuple(replace(s,placements=tuple(replace(p,node_id=names[p.node_id],
@@ -87,7 +88,7 @@ def test_owner_native_two_process_route(tmp_path,world,monkeypatch,enabled,boots
                 graph=replace(graph,model_id=qualification.model_id,resolved_commit=qualification.resolved_commit,
                     deployment_epoch=qualification.deployment_epoch,
                     topology_version=qualification.topology_version,manifest_digest=qualification.manifest_digest)
-            signers={entry_id:a['target_signer'],tail_id:a['owner_signer']}
+            signers={entry_id:a['target_signer'],tail_id:a.get('tail_signer',a['owner_signer'])}
             if bench is not None:
                 graph=bench.prepare_graph(tmp_path,entry_id,tail_id)
                 DEPLOYMENT_ID=graph.deployment_id
@@ -115,22 +116,30 @@ def test_owner_native_two_process_route(tmp_path,world,monkeypatch,enabled,boots
                 host_pin=root/'token-host.private.json'
                 local_member={k:members[n][k] for k in ('node_id','endpoint_id','generation','control_endpoint_id')}
                 local_member['verification_key']=signers[n].public_key_record()
-                host_pin.write_text(json.dumps(dict(protocol='mycelium.token_path_host_pin.v1',run_id=RUN_ID,
+                if app_pair:
+                    from test_packaged_token_trust import prepare_runtime
+                    managed=prepare_runtime(a['apps'][n],a['app'],root,
+                        deployment_id=DEPLOYMENT_ID,seconds=window+10,authorize_load=lambda _:True)
+                    a['runtimes'][n]=managed
+                    host_pin=managed.worker.token_policy_trust_file
+                else:
+                    host_pin.write_text(json.dumps(dict(protocol='mycelium.token_path_host_pin.v1',run_id=RUN_ID,
                     deployment_id=DEPLOYMENT_ID,node_id=n,owner_endpoint_id=a['owner_signer'].endpoint_id,
                     owner_key=a['owner_signer'].public_key_record(),member=local_member,
                     process_deadline_monotonic_s=time.monotonic()+window+10,lease_expires_at_unix_ms=int(time.time()*1000)+int((window+10)*1000),
                     clock_uncertainty_ms=100)))
-                host_pin.chmod(0o600)
+                    host_pin.chmod(0o600)
                 fixture=root/'fixture.private.json'
                 fixture.write_text(json.dumps(dict(run_id=RUN_ID,node_id=n,tail_id=tail_id,
                     graph=asdict(graph),root=str(root),socket_root=str(sockets/str(i)),binary=str(BINARY),
                     key_file=str(key),members=members,owner_key=a['owner_signer'].public_key_record(),
                     owner_endpoint_id=a['owner_signer'].endpoint_id,enabled=enabled,bootstrap=bootstrap,failure=failure,startup=startup,
                     member_keys={node:s.public_key_record() for node,s in signers.items()},
-                    real_compute=None if bench is None else bench.native_inputs[n],window=window)))
+                    real_compute=None if bench is None else bench.native_inputs[n],window=window,
+                    trust_file=str(host_pin) if host_pin is not None else None)))
                 fixture.chmod(0o600);fixtures[n]=fixture
             root=fixtures[entry_id].parent
-            w=worker(root,node_id=entry_id,run_id=RUN_ID,deployment_id=DEPLOYMENT_ID,
+            w=a['runtimes'][entry_id].worker if app_pair else worker(root,node_id=entry_id,run_id=RUN_ID,deployment_id=DEPLOYMENT_ID,
                 limits=WorkerLimits(max_rss_bytes=2_000_000_000 if bench is None else 8_000_000_000,max_disk_bytes=10_000_000,
                                    max_wall_seconds=window+10,max_commands=100 if bench is None else 2000),authorize_load=lambda _:True,
                 token_policy_trust_file=root/'token-host.private.json' if enabled and bootstrap=='signed' else None)
