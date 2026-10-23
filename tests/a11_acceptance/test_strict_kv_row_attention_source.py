@@ -12,6 +12,7 @@ import hashlib
 import struct
 import random
 import unittest
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -179,8 +180,16 @@ class MlxSourceContract(unittest.TestCase):
             old = next((x for x in top(a, 'MLXRuntimePort').body if getattr(x, 'name', None) == name), None)
             if name and (old is None or dump(old) != dump(n)):
                 changed.add('MLXRuntimePort.' + name)
+        # v0.1.2 intentionally adds stage materialization without changing the
+        # A11 arithmetic kernels: the property fixes the mode for a port's
+        # lifetime; kv_snapshot names the measured work unit; _finish_stage_work
+        # materializes/fences the stage; the hybrid executor uses that same
+        # stage boundary. Keep an EXACT set, not a subset or a blanket class
+        # exemption. __init__ and _execute_stage_with_kv were already admitted.
         self.assertEqual(changed, {'_verify_arithmetic_mode', '_verify_rows', '_qwen2_attend_rows', '_qwen2_block_with_kv',
-                                   'MLXRuntimePort.__init__', 'MLXRuntimePort._execute_stage_with_kv'})
+                                   'MLXRuntimePort.__init__', 'MLXRuntimePort._execute_stage_with_kv',
+                                   'MLXRuntimePort.materialization', 'MLXRuntimePort.kv_snapshot',
+                                   'MLXRuntimePort._finish_stage_work', 'MLXRuntimePort._execute_qwen35_stage'})
 
     def test_call_contract_positions_and_slices(self):
         src = OVERLAY.read_text()
@@ -279,6 +288,10 @@ class NumericalDoubles(unittest.TestCase):
         class Port:
             verify_arithmetic = 'auto'
             int8_execution = 'per_call_float32_materialization'
+            materialization = 'per_layer'
+
+            def _checkpoint_path(self, path_id):
+                checkpoints.append(path_id)
 
             def _tensors_for(self, loaded):
                 return {}
@@ -292,19 +305,26 @@ class NumericalDoubles(unittest.TestCase):
                 return Rows([serial[row]]), layers
 
         fn = method(t, 'MLXRuntimePort', '_execute_stage_with_kv')
-        ns.update(mx=FakeMx, HYBRID_STATE_ARCHITECTURES=frozenset(), VERIFY_ARITHMETIC_SEQUENTIAL_ROWS='sequential_rows',
+        ns.update(mx=FakeMx, time=time, HYBRID_STATE_ARCHITECTURES=frozenset(), VERIFY_ARITHMETIC_SEQUENTIAL_ROWS='sequential_rows',
                   VERIFY_ARITHMETIC_ROW_ATTENTION='row_attention')
         exec(compile(ast.Module([fn], []), 'overlay-stage', 'exec'), ns)
         stage = type('S', (), {'component_roles': (), 'layer_range': type('R', (), {'start_layer': 0, 'end_layer_exclusive': 24})()})()
         prior = {'rolled': 'back'}
-        out, layers = ns['_execute_stage_with_kv'](Port(), stage=stage, loaded=object(), runtime={'architecture': 'qwen2', 'model_config': {}},
-                                                   token_ids=Rows([5, 6, 7, 8]), hidden_states=None, position=prefix,
-                                                   past_layers=prior, path_id='p', produce_logits=True, all_positions=True)
-        self.assertEqual([bits(x) for x in out.data], [bits(x) for x in serial])
-        self.assertEqual([s[:3] for s in seen], [(prefix + i, [5 + i], False) for i in range(span)])
-        self.assertEqual(seen[0][3], {'rolled': 'back'})
-        self.assertEqual(set(layers), {'rolled', 0, 1, 2, 3})            # carried state accumulates row by row
-        self.assertEqual(prior, {'rolled': 'back'})                       # caller's cache prefix untouched
+        for materialization in ('per_layer', 'per_stage'):
+            with self.subTest(materialization=materialization):
+                seen.clear()
+                checkpoints = []
+                port = Port()
+                port.materialization = materialization
+                out, layers = ns['_execute_stage_with_kv'](port, stage=stage, loaded=object(), runtime={'architecture': 'qwen2', 'model_config': {}},
+                                                           token_ids=Rows([5, 6, 7, 8]), hidden_states=None, position=prefix,
+                                                           past_layers=prior, path_id='p', produce_logits=True, all_positions=True)
+                self.assertEqual(checkpoints, ['p'])  # actual entry fence is reached in both modes
+                self.assertEqual([bits(x) for x in out.data], [bits(x) for x in serial])
+                self.assertEqual([s[:3] for s in seen], [(prefix + i, [5 + i], False) for i in range(span)])
+                self.assertEqual(seen[0][3], {'rolled': 'back'})
+                self.assertEqual(set(layers), {'rolled', 0, 1, 2, 3})            # carried state accumulates row by row
+                self.assertEqual(prior, {'rolled': 'back'})                       # caller's cache prefix untouched
 
     def test_rewind_prefix_preservation_double(self):
         probs, values, prefix, span = make_case(find_seed())

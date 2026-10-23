@@ -430,6 +430,13 @@ def prepare_serving_workflow(*, authority, channel, prepared, operator_plan,
     from .managed_control import _segment
     run_id=_segment(run['run_id'])
     root=_private_directory(authority.state_root/'serving-runs'/run_id,create=True)
+    from mycelium_live.token_path_activation import token_path_enabled
+    if token_path_enabled():
+        from .token_owner import ManagedRouteTokenOwner
+        token_deadline=time.monotonic()+1800
+        factory.token_path_owner_factory=lambda:ManagedRouteTokenOwner(
+            signer=coordinator.signer,current_member=coordinator.member,mailbox=authority.control_mailbox,
+            evidence_root=root/'token-receipts',process_deadline_monotonic_s=token_deadline)
     path=root/'operator-plan.json'
     if path.exists() or path.is_symlink():raise ValueError('managed_workflow_plan_already_exists')
     _atomic_private_json(path,bound)

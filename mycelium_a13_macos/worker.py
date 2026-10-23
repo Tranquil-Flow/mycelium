@@ -408,13 +408,16 @@ _OPERATION_PAYLOAD_FIELDS: dict[str, tuple[frozenset[str], ...]] = {
         frozenset({"cleanup_subject"}),
         frozenset({"cleanup_subject", "receipt_only"}),
     ),
+    "install_token_path": (frozenset({"policy"}),),
     "cancel": (frozenset({"request_id"}),),
-    "bind_request_control": (frozenset({"request_id", "control"}),),
+    "bind_request_control": (frozenset({"request_id", "control"}),
+        frozenset({"request_id", "control", "token_path"})),
     "update_request_control": (frozenset({"request_id", "control"}),),
     "infer_start": (
         frozenset({"request"}),
         frozenset({"request", "excluded_placement_ids"}),
         frozenset({"request", "control", "path_manifest"}),
+        frozenset({"request", "control", "path_manifest", "token_grant"}),
         frozenset(
             {"request", "control", "path_manifest", "excluded_placement_ids"}
         ),
@@ -430,6 +433,7 @@ _OPERATION_PAYLOAD_FIELDS: dict[str, tuple[frozenset[str], ...]] = {
     "infer_cancel_wait": (_CANCEL_CONTROL_FIELDS,),
     "rotate": (frozenset({"peer"}),),
     "stop": (frozenset(),),
+    "ack_token_progress": (frozenset({"ack"}),),
 }
 _ALLOWED = frozenset(_OPERATION_PAYLOAD_FIELDS)
 _EXACT_GRANT_COMMANDS = frozenset(
@@ -438,6 +442,7 @@ _EXACT_GRANT_COMMANDS = frozenset(
 _REQUIRES_ADMITTED_LOAD = frozenset(
     {
         "start",
+        "install_token_path",
         "bind_request_control",
         "update_request_control",
         "infer_start",
@@ -639,6 +644,17 @@ class _ConcurrentNativeSession:
             timeout_seconds=None,
         )
 
+    def open_progress(self, *, command_id: str, cursor: Any,
+                      deadline_monotonic_s: float, capacity: int = 64) -> Any:
+        """Native receipt seam only; no mailbox forwarding or feature negotiation."""
+        return self._process.open_progress(
+            command_id=command_id, cursor=cursor,
+            deadline_monotonic_s=deadline_monotonic_s, capacity=capacity,
+        )
+
+    def close_progress(self, command_id: str, *, code: str = "token_progress_closed") -> None:
+        self._process.close_progress(command_id, code=code)
+
     def interrupt_command(self, command_id: str, *, code: str) -> bool:
         return self._process.interrupt_command(command_id, code=code)
 
@@ -667,6 +683,8 @@ class ManagedWorker:
         membership_current: Callable[[], bool],
         authorize_load: Callable[[Mapping[str, Any]], bool] | None,
         endpoint_secret_file: Path | None = None,
+        token_policy_trust_file: Path | None = None,
+        token_policy_member: Callable[[], Mapping[str, Any]] | None = None,
         capacity_root: Path | None = None,
         _test_observer: Callable[[], Mapping[str, str]] | None = None,
     ) -> None:
@@ -713,9 +731,16 @@ class ManagedWorker:
             except OSError:
                 raise WorkerError("worker_capacity_root_invalid") from None
         self.endpoint_secret_file = endpoint_secret_file
+        self.token_policy_trust_file = token_policy_trust_file
         self.resource_policy = dict(resource_policy)
         self.limits = limits
         self._membership_current = membership_current
+        self._token_policy = None
+        if token_policy_trust_file is not None:
+            from .token_policy import TargetTokenPolicy
+            self._token_policy = TargetTokenPolicy(path=token_policy_trust_file,
+                run_id=run_id, deployment_id=deployment_id, node_id=node_id,
+                current=membership_current, member=token_policy_member)
         self._authorize_load = authorize_load
         self._observe = _test_observer or observe_policy
         self._session: Any = None
@@ -770,6 +795,8 @@ class ManagedWorker:
         try:
             try:
                 current = self._membership_current()
+                if current is True and self._token_policy is not None:
+                    current = self._token_policy.current()
             except Exception:
                 current = False
             self._deadline_check(deadline_monotonic_s)
@@ -944,6 +971,8 @@ class ManagedWorker:
             args += ("--capacity-root", str(self.capacity_root))
         if self.endpoint_secret_file is not None:
             args += ("--endpoint-secret-file", str(self.endpoint_secret_file))
+        if self.token_policy_trust_file is not None:
+            args += ("--token-policy-trust-file", str(self.token_policy_trust_file))
         if getattr(sys, "frozen", False):
             return (sys.executable, "--managed-node", *args)
         return (sys.executable, "-B", "-m", "mycelium_a13_macos.worker", *args)
@@ -1265,6 +1294,18 @@ class ManagedWorker:
         self._deadline_check(deadline_monotonic_s)
         payload_document = _detached_json_object(payload)
         _reject_execution_inputs(payload_document)
+        if command == "install_token_path":
+            from mycelium_node.token_provisioning import valid_policy_payload
+            if not valid_policy_payload(payload_document):
+                raise WorkerError("worker_command_invalid")
+        if command == "bind_request_control" and "token_path" in payload_document:
+            from mycelium_node.token_participants import valid_bind_token_shape
+            if not valid_bind_token_shape(payload_document):
+                raise WorkerError("worker_command_invalid")
+        if command == "infer_start" and "token_grant" in payload_document:
+            from mycelium_node.token_admission import valid_start_grant_shape
+            if not valid_start_grant_shape(payload_document):
+                raise WorkerError("worker_command_invalid")
         envelope = {
             "protocol": _NATIVE_PROTOCOL,
             "command_id": command_id,
@@ -1293,6 +1334,8 @@ class ManagedWorker:
             if frozenset(payload_document) not in _OPERATION_PAYLOAD_FIELDS[command]:
                 raise WorkerError("worker_command_invalid")
             self._deadline_check(deadline_monotonic_s)
+            if self._token_policy is not None:
+                self._token_policy.before(command, payload_document)
             self._commit_command(command_id, session, command=command)
             committed = True
             if deadline_monotonic_s is None:
@@ -1311,6 +1354,8 @@ class ManagedWorker:
             validated = self._validate_response(
                 response, command_id=command_id, node_id=self.node_id
             )
+            if self._token_policy is not None:
+                self._token_policy.after(command, payload_document, validated)
             if validated["ok"] is False and command in _EXACT_GRANT_COMMANDS:
                 try:
                     self._record_native_failure(session,command_id=command_id,
@@ -1363,6 +1408,27 @@ class ManagedWorker:
             deadline_monotonic_s=deadline_monotonic_s,
         )
 
+    def open_progress(self, *, command_id: str, cursor: Any,
+                      deadline_monotonic_s: float, capacity: int = 64):
+        """Register independently pinned receipt verification before send.
+
+        Registration grants no compute authority and uses the existing native
+        reader; the caller owns closure and owner ACK forwarding.
+        """
+        self._check(deadline_monotonic_s)
+        with self._account_lock:
+            session = self._session
+            if session is None or self._closed.is_set():
+                raise WorkerError("worker_not_running")
+        return session.open_progress(command_id=command_id, cursor=cursor,
+            deadline_monotonic_s=deadline_monotonic_s, capacity=capacity)
+
+    def close_progress(self, command_id: str, *, code: str = "token_progress_closed") -> None:
+        with self._account_lock:
+            session = self._session
+        if session is not None:
+            session.close_progress(command_id, code=code)
+
     def interrupt_command(self, command_id: str, *, code: str) -> bool:
         """Retire one native waiter; this does not undo an already-delivered effect."""
 
@@ -1378,6 +1444,11 @@ class ManagedWorker:
             if session is None or self._closed.is_set():
                 raise WorkerError("worker_not_running")
         return bool(session.interrupt_command(command_id, code=code))
+
+    def token_progress_cursor(self, command):
+        if self._token_policy is None:
+            raise WorkerError("token_path_activation_unprovisioned")
+        return self._token_policy.cursor(command)
 
     def _expire(self) -> None:
         if not self._closed.is_set():

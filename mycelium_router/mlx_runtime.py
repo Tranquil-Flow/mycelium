@@ -998,6 +998,14 @@ class MLXRuntimePort:
    """Serial, item-isolated RuntimePort over assignment-bound LoadedStages."""
 
    decode_mode = "stage_local_kv"
+   # Qualification callers retain the instrumented path unless explicitly opted in.
+   # The V1 serving-node factory selects per_stage only with the token-path flag ON.
+   _materialization = "per_layer"
+
+   @property
+   def materialization(self) -> str:
+      """Fixed for the port lifetime so work-unit evidence never mixes modes."""
+      return self._materialization
 
    def __init__(
       self,
@@ -1010,7 +1018,11 @@ class MLXRuntimePort:
       kv_lease_renewal_seconds: float | Callable[[], float] | None = (
          DEFAULT_KV_LEASE_RENEWAL_SECONDS
       ),
+      materialization: str = "per_layer",
    ):
+      if type(materialization) is not str or materialization not in ("per_layer", "per_stage"):
+         _reject("invalid_runtime_materialization")
+      self._materialization = materialization
       if not isinstance(node_id, str) or not node_id or node_id != node_id.strip():
          _reject("invalid_runtime_node_id")
       try:
@@ -1806,6 +1818,10 @@ class MLXRuntimePort:
          return {
             "mode": self.decode_mode,
             "backend": "mlx",
+            "materialization": self.materialization,
+            "work_unit": (
+               "transformer_stage" if self.materialization == "per_stage" else "transformer_layer"
+            ),
             "architecture": self._architecture,
             "closed": self._closed,
             "active_state_count": len(states),
@@ -2091,6 +2107,9 @@ class MLXRuntimePort:
       produce_logits: bool = True,
       all_positions: bool = False,
    ) -> tuple[mx.array, dict[int, Any]]:
+      self._checkpoint_path(path_id)
+      stage_started = work_unit_started = time.monotonic()
+      per_layer = self.materialization == "per_layer"
       config = runtime["model_config"]
       tensors = self._tensors_for(loaded)
       start = stage.layer_range.start_layer
@@ -2155,8 +2174,9 @@ class MLXRuntimePort:
             hidden = hidden_states
          next_layers: dict[int, Any] = {}
          for layer in range(start, end):
-            self._checkpoint_path(path_id)
-            work_unit_started = time.monotonic()
+            if per_layer:
+               self._checkpoint_path(path_id)
+               work_unit_started = time.monotonic()
             hidden, layer_kv = _qwen2_block_with_kv(
                hidden,
                tensors,
@@ -2168,9 +2188,10 @@ class MLXRuntimePort:
                row_serial_attention=verify_mode == VERIFY_ARITHMETIC_ROW_ATTENTION,
             )
             next_layers[layer] = layer_kv
-            mx.eval(hidden, *layer_kv)
-            self._observe_cooperative_work_unit(work_unit_started)
-            self._checkpoint_path(path_id)
+            if per_layer:
+               mx.eval(hidden, *layer_kv)
+               self._observe_cooperative_work_unit(work_unit_started)
+               self._checkpoint_path(path_id)
          # KV state covers the complete chunk; only its final position is
          # required for the next autoregressive vocabulary projection.
          if (
@@ -2181,18 +2202,21 @@ class MLXRuntimePort:
          ):
             hidden = hidden[:, -1:, :]
          if produce_logits and "final_norm" in stage.component_roles:
-            self._checkpoint_path(path_id)
-            work_unit_started = time.monotonic()
+            if per_layer:
+               self._checkpoint_path(path_id)
+               work_unit_started = time.monotonic()
             hidden = _rms_norm(
                hidden,
                tensors["model.norm.weight"],
                float(config["rms_norm_epsilon"]),
             )
-            mx.eval(hidden)
-            self._observe_cooperative_work_unit(work_unit_started)
+            if per_layer:
+               mx.eval(hidden)
+               self._observe_cooperative_work_unit(work_unit_started)
          if produce_logits and "lm_head" in stage.component_roles:
-            self._checkpoint_path(path_id)
-            work_unit_started = time.monotonic()
+            if per_layer:
+               self._checkpoint_path(path_id)
+               work_unit_started = time.monotonic()
             aliases = loaded.resolved_aliases
             if not isinstance(aliases, Mapping):
                _reject("invalid_loaded_stage_aliases")
@@ -2207,15 +2231,11 @@ class MLXRuntimePort:
             ):
                _reject("invalid_loaded_stage_aliases")
             hidden = _qwen2_linear(hidden, tensors[head_keys[0]])
-            mx.eval(hidden)
-            self._observe_cooperative_work_unit(work_unit_started)
-            self._checkpoint_path(path_id)
-         mx.eval(
-            hidden,
-            *(array for pair in next_layers.values() for array in pair),
-         )
-         if not bool(mx.all(mx.isfinite(hidden)).item()):
-            _reject("nonfinite_stage_output")
+            if per_layer:
+               mx.eval(hidden)
+               self._observe_cooperative_work_unit(work_unit_started)
+               self._checkpoint_path(path_id)
+         self._finish_stage_work(hidden, next_layers, path_id, stage_started)
          return hidden, next_layers
 
       transformer_key = f"transformer.h.{start}.ln_1.weight"
@@ -2260,8 +2280,9 @@ class MLXRuntimePort:
       epsilon = float(config["layer_norm_epsilon"])
       next_layers: dict[int, Any] = {}
       for layer in range(start, end):
-         self._checkpoint_path(path_id)
-         work_unit_started = time.monotonic()
+         if per_layer:
+            self._checkpoint_path(path_id)
+            work_unit_started = time.monotonic()
          hidden, layer_kv = _gpt2_block_with_kv(
             hidden,
             tensors,
@@ -2271,23 +2292,27 @@ class MLXRuntimePort:
             past_layers.get(layer),
          )
          next_layers[layer] = layer_kv
-         mx.eval(hidden, *layer_kv)
-         self._observe_cooperative_work_unit(work_unit_started)
-         self._checkpoint_path(path_id)
+         if per_layer:
+            mx.eval(hidden, *layer_kv)
+            self._observe_cooperative_work_unit(work_unit_started)
+            self._checkpoint_path(path_id)
       if "final_norm" in stage.component_roles:
-         self._checkpoint_path(path_id)
-         work_unit_started = time.monotonic()
+         if per_layer:
+            self._checkpoint_path(path_id)
+            work_unit_started = time.monotonic()
          hidden = _layer_norm(
             hidden,
             tensors[f"{namespace}ln_f.weight"],
             tensors[f"{namespace}ln_f.bias"],
             epsilon,
          )
-         mx.eval(hidden)
-         self._observe_cooperative_work_unit(work_unit_started)
+         if per_layer:
+            mx.eval(hidden)
+            self._observe_cooperative_work_unit(work_unit_started)
       if "lm_head" in stage.component_roles:
-         self._checkpoint_path(path_id)
-         work_unit_started = time.monotonic()
+         if per_layer:
+            self._checkpoint_path(path_id)
+            work_unit_started = time.monotonic()
          aliases = loaded.resolved_aliases
          if not isinstance(aliases, Mapping):
             _reject("invalid_loaded_stage_aliases")
@@ -2302,12 +2327,11 @@ class MLXRuntimePort:
          ):
             _reject("invalid_loaded_stage_aliases")
          hidden = mx.matmul(hidden, tensors[head_keys[0]].transpose(1, 0))
-         mx.eval(hidden)
-         self._observe_cooperative_work_unit(work_unit_started)
-         self._checkpoint_path(path_id)
-      mx.eval(hidden, *(array for pair in next_layers.values() for array in pair))
-      if not bool(mx.all(mx.isfinite(hidden)).item()):
-         _reject("nonfinite_stage_output")
+         if per_layer:
+            mx.eval(hidden)
+            self._observe_cooperative_work_unit(work_unit_started)
+            self._checkpoint_path(path_id)
+      self._finish_stage_work(hidden, next_layers, path_id, stage_started)
       return hidden, next_layers
 
    def _execute_qwen35_stage(
@@ -2327,6 +2351,9 @@ class MLXRuntimePort:
    ) -> tuple[mx.array, dict[int, Any]]:
       """Qwen3.5 hybrid stage: per-layer KV (full) or conv+recurrent (linear) state."""
 
+      self._checkpoint_path(path_id)
+      stage_started = work_unit_started = time.monotonic()
+      per_layer = self.materialization == "per_layer"
       if not isinstance(position, int) or isinstance(position, bool):
          # Ragged decode groups stack state along the batch axis; never for hybrid.
          _reject("hybrid_recurrent_state_batching_unsupported")
@@ -2342,8 +2369,9 @@ class MLXRuntimePort:
       start = stage.layer_range.start_layer
       end = stage.layer_range.end_layer_exclusive
       for layer in range(start, end):
-         self._checkpoint_path(path_id)
-         work_unit_started = time.monotonic()
+         if per_layer:
+            self._checkpoint_path(path_id)
+            work_unit_started = time.monotonic()
          try:
             hidden, layer_state = qwen35_mlx.decoder_layer(
                hidden,
@@ -2358,9 +2386,10 @@ class MLXRuntimePort:
          except qwen35_mlx.Qwen35ExecutionError as exc:
             raise MLXRuntimeError(str(exc)) from exc
          next_layers[layer] = layer_state
-         mx.eval(hidden, *layer_state)
-         self._observe_cooperative_work_unit(work_unit_started)
-         self._checkpoint_path(path_id)
+         if per_layer:
+            mx.eval(hidden, *layer_state)
+            self._observe_cooperative_work_unit(work_unit_started)
+            self._checkpoint_path(path_id)
       if (
          produce_logits
          and not all_positions
@@ -2369,18 +2398,21 @@ class MLXRuntimePort:
       ):
          hidden = hidden[:, -1:, :]
       if produce_logits and "final_norm" in stage.component_roles:
-         self._checkpoint_path(path_id)
-         work_unit_started = time.monotonic()
+         if per_layer:
+            self._checkpoint_path(path_id)
+            work_unit_started = time.monotonic()
          hidden = qwen35_mlx.rms_norm_offset(
             hidden,
             tensors[qwen35_mlx.FINAL_NORM_KEY],
             float(config["rms_norm_epsilon"]),
          )
-         mx.eval(hidden)
-         self._observe_cooperative_work_unit(work_unit_started)
+         if per_layer:
+            mx.eval(hidden)
+            self._observe_cooperative_work_unit(work_unit_started)
       if produce_logits and "lm_head" in stage.component_roles:
-         self._checkpoint_path(path_id)
-         work_unit_started = time.monotonic()
+         if per_layer:
+            self._checkpoint_path(path_id)
+            work_unit_started = time.monotonic()
          aliases = loaded.resolved_aliases
          if not isinstance(aliases, Mapping):
             _reject("invalid_loaded_stage_aliases")
@@ -2395,13 +2427,34 @@ class MLXRuntimePort:
          ):
             _reject("invalid_loaded_stage_aliases")
          hidden = _qwen2_linear(hidden, tensors[head_keys[0]])
-         mx.eval(hidden)
-         self._observe_cooperative_work_unit(work_unit_started)
-         self._checkpoint_path(path_id)
-      mx.eval(hidden, *(array for pair in next_layers.values() for array in pair))
-      if not bool(mx.all(mx.isfinite(hidden)).item()):
-         _reject("nonfinite_stage_output")
+         if per_layer:
+            mx.eval(hidden)
+            self._observe_cooperative_work_unit(work_unit_started)
+            self._checkpoint_path(path_id)
+      self._finish_stage_work(hidden, next_layers, path_id, stage_started)
       return hidden, next_layers
+
+   def _finish_stage_work(
+      self, hidden: Any, next_layers: Mapping[int, Any], path_id: str, started_at: float,
+   ) -> None:
+      """Materialize the entire stage, including KV and finite validation, once.
+
+      A stage is a cooperative work unit, not a preemptible GPU kernel. Its actual
+      duration is measured against the unchanged downstream admission bound. The
+      cancellation fence is checked before any output or KV can be published.
+      """
+      arrays = tuple(array for pair in next_layers.values() for array in pair)
+      if self.materialization == "per_stage":
+         finite = mx.all(mx.isfinite(hidden))
+         mx.eval(hidden, *arrays, finite)
+         self._observe_cooperative_work_unit(started_at)
+         self._checkpoint_path(path_id)
+      else:
+         mx.eval(hidden, *arrays)
+         finite = mx.all(mx.isfinite(hidden))
+      if not bool(finite.item()):
+         _reject("nonfinite_stage_output")
+      self._checkpoint_path(path_id)
 
    def _tensors_for(self, loaded: LoadedStage) -> Mapping[str, Any]:
       """The execution tensors of a bound stage (packed int8 when available)."""

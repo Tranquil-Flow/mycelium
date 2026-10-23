@@ -8,6 +8,7 @@ import json
 import time
 from types import SimpleNamespace
 from typing import Any
+from tests.live.token_path_test_support import ObserverTokenOwner, ScriptedTokenOwner
 
 import pytest
 
@@ -24,6 +25,9 @@ class LocalSession:
     def __init__(self, error=None):
         self.calls = []
         self.error = error
+
+    def interrupt_command(self, command_id, *, code):
+        return False
 
     def send(self, *, command_id, command, payload):
         self.calls.append((command_id, command, payload))
@@ -53,6 +57,7 @@ def make_route(monkeypatch, *, bound=None, session=None, fault=True):
         deadline_monotonic_ms=int(time.monotonic() * 1000) + 10_000,
     ) if fault else None)
     options: dict[str, Any] = dict(
+        token_path_owner=ScriptedTokenOwner(),
         controller=SimpleNamespace(peers=tuple(
             SimpleNamespace(node_id=n, process_transport="local") for n in ("node-a", "node-b")
         )), endpoints={},
@@ -209,6 +214,7 @@ def test_nonmatching_fault_does_not_mask_real_worker_error(monkeypatch):
 def test_default_constructor_has_no_fault_and_invalid_capability_is_rejected(monkeypatch):
     monkeypatch.setattr(route_module, "execution_graph_from_document", lambda _: SimpleNamespace())
     options = dict(
+        token_path_owner=ObserverTokenOwner(),
         controller=SimpleNamespace(peers=()), endpoints={},
         run_plan={"run_id": "local-fixture", "deployment_id": "deployment-a",
                   "nodes": [{"node_id": "node-a", "configure": {"graph": {}}}]},

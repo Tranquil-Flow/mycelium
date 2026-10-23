@@ -227,6 +227,8 @@ class RelayEngine:
    ):
       self.node_id = node_id
       self.runtime = runtime
+      # Default absent. Only a trusted native grant installer may attach it.
+      self.token_path_gate = None
       self.decode_mode = getattr(runtime, "decode_mode", "complete_context_replay")
       if self.decode_mode not in {"complete_context_replay", "stage_local_kv"}:
          raise ValueError("invalid_runtime_decode_mode")
@@ -863,13 +865,52 @@ class RelayEngine:
          failure_reason="worker_runtime_unavailable",
       )
 
+   @staticmethod
+   def _token_path_failure(reason: str) -> RuntimeResult:
+      return RuntimeResult(success=False, failure_scope="PLACEMENT", failure_reason=reason)
+
    def _execute_runtime(self, item: HopWorkItem) -> RuntimeResult:
+      gate = self.token_path_gate
+      if gate is not None:
+         reason = gate.claim(item)
+         if reason is not None:
+            return self._token_path_failure(reason)
       try:
-         return self.runtime.execute(item)
+         result = self.runtime.execute(item)
       except Exception:
          return self._runtime_unavailable()
+      if gate is not None:
+         reason = gate.fence(item)
+         if reason is not None:
+            return self._token_path_failure(reason)
+      return result
 
    def _execute_runtime_batch(self, batch) -> tuple[RuntimeResult, ...]:
+      gate = self.token_path_gate
+      if gate is None:
+         return self._execute_runtime_batch_unfenced(batch)
+      from dataclasses import replace
+      reasons = [gate.claim(item) for item in batch.items]
+      allowed = tuple(item for item, reason in zip(batch.items, reasons) if reason is None)
+      if not allowed:
+         return tuple(self._token_path_failure(reason) for reason in reasons)
+      admitted = batch if len(allowed) == len(batch.items) else replace(batch, items=allowed, decision=None)
+      executed_results = self._execute_runtime_batch_unfenced(admitted)
+      if len(executed_results) != len(allowed):
+         executed_results = tuple(self._token_path_failure("runtime_batch_result_count_mismatch")
+                                  for _ in allowed)
+      executed = iter(executed_results)
+      results = []
+      for item, reason in zip(batch.items, reasons):
+         if reason is not None:
+            results.append(self._token_path_failure(reason))
+         else:
+            result = next(executed, self._runtime_unavailable())
+            late = gate.fence(item)
+            results.append(self._token_path_failure(late) if late is not None else result)
+      return tuple(results)
+
+   def _execute_runtime_batch_unfenced(self, batch) -> tuple[RuntimeResult, ...]:
       # A10: a relay-formed batch of >=2 compatible members may already be
       # servable as one real backend invocation. ``attempt_runtime_batch`` is
       # fail-closed by construction (mycelium_router/a10_batch_producer.py):
@@ -1191,6 +1232,10 @@ class RelayEngine:
       source_node_id: str | None = None,
       entry_node_id: str | None = None,
    ) -> ProgressivePrefillResult:
+      if self.token_path_gate is not None:
+         # Autonomous grants bind a complete locked manifest, not a
+         # progressively selected path or a peer-created successor.
+         return ProgressivePrefillResult("REJECTED", "token_path_hop_phase")
       self.expire_idle_paths()
       return self._receive_progressive_prefill_inner(
          header, context, source_node_id=source_node_id, entry_node_id=entry_node_id
@@ -1616,6 +1661,10 @@ class RelayEngine:
       *,
       source_node_id: str | None = None,
    ) -> HopReceiveResult:
+      if self.token_path_gate is not None:
+         reason = self.token_path_gate.ingress(header, source_node_id)
+         if reason is not None:
+            return HopReceiveResult("REJECTED", reason)
       self.expire_idle_paths()
       return self._receive_hop_inner(header, payload, source_node_id=source_node_id)
 
@@ -2013,6 +2062,10 @@ class RelayEngine:
    ) -> HopReceiveResult:
       """Validate and queue one hop (see ``_enqueue_hop_inner``); a queued hop
       keeps its path busy until it completes."""
+      if self.token_path_gate is not None:
+         reason = self.token_path_gate.ingress(header, source_node_id)
+         if reason is not None:
+            return HopReceiveResult("REJECTED", reason)
       self.expire_idle_paths()
       return self._enqueue_hop_inner(header, payload, source_node_id=source_node_id)
 

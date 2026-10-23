@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from mycelium_live import route as routes
+from tests.live.token_path_test_support import ObserverTokenOwner
 from mycelium_live.phone_stage_session import PhoneStageSession, validate_phone_configure
 from mycelium_qualification.signing import generate_ed25519_signer
 from physical_inference_qualification import ControllerError, PeerIdentity, QualificationController
@@ -62,7 +63,7 @@ def world(monkeypatch):
     plan = dict(run_id='run', deployment_id='dep', entry_node_id='entry', nodes=[
         {'node_id':p.node_id, 'configure': (dict(assignment_id='assignment', stage_id='middle', pack_digest=DIGEST,
                                              manifest_digest=DIGEST, load_generation=1) if p.node_id == 'phone' else {'graph':{}})} for p in peers])
-    r = routes.PhysicalLiveRoute(controller=controller, endpoints=endpoints, run_plan=plan,
+    r = routes.PhysicalLiveRoute(token_path_owner=ObserverTokenOwner(), controller=controller, endpoints=endpoints, run_plan=plan,
                                  session_factory=Host, external_session_factory=external, seed_authority=authority)
     return r, carrier, member, calls
 
@@ -195,10 +196,10 @@ def test_from_operator_plan_threads_external_factory(tmp_path, monkeypatch, auto
         doc['controller']['external_control'] = dict(socket_path=str(tmp_path/'sidecar.sock'),
             bootstrap_secret_file=str(secret), controller_endpoint_id='cd'*32)
         path.write_text(json.dumps(doc))
-        Route.from_operator_plan(path, seed_state_root=tmp_path)
+        Route.from_operator_plan(path, token_path_owner=ObserverTokenOwner(), seed_state_root=tmp_path)
         assert isinstance(captured['external_session_factory'], PhoneStageSessionFactory)
     else:
-        Route.from_operator_plan(path, seed_state_root=tmp_path, external_session_factory=factory)
+        Route.from_operator_plan(path, token_path_owner=ObserverTokenOwner(), seed_state_root=tmp_path, external_session_factory=factory)
         assert captured['external_session_factory'] is factory
 
 

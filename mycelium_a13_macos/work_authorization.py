@@ -384,6 +384,10 @@ def authorize_work_consent(
             return (_positive_int(payload.get('local_generation')) and
                     payload['local_generation']==offer_document['membership_generation'])
         if command == "infer_start":
+            if "token_grant" in payload:
+                from mycelium_node.token_admission import valid_start_grant_shape
+                if not valid_start_grant_shape(payload):
+                    return False
             request = payload.get("request")
             if not (_mapping(request) or (isinstance(request, str) and request)):
                 return False

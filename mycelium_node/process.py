@@ -2516,18 +2516,88 @@ class PhysicalNodeProcess:
             ):
                 self._reader_failure_code = item.code
             waiters = tuple(self._waiters.values())
+            streams = tuple(getattr(self, "_progress_streams", {}).values())
+        for inbox in streams:
+            if inbox is not None:
+                if item is _EOF:
+                    inbox.finish("node_process_exited")
+                else:
+                    inbox.close(item.code if isinstance(item, _ReaderError) else "node_process_closed")
         for waiter in waiters:
             try:
                 waiter.put_nowait(item)
             except Exception:
                 continue
 
-    def _deliver_response(self, raw: bytes) -> bool:
+    def open_progress(self, *, command_id: str, cursor: Any,
+                      deadline_monotonic_s: float, capacity: int = 64) -> Any:
+        """Opt-in receipt stream; register before sending its one start command.
+
+        This is a native pipe seam, not capability negotiation or permission to
+        start autonomous inference. Closed IDs remain bounded replay tombstones.
+        """
+        from .token_progress import ReceiptInbox
+
+        _required_identifier(command_id, "command_id")
+        inbox = ReceiptInbox(cursor=cursor, deadline_monotonic_s=deadline_monotonic_s,
+                             capacity=capacity)
+        scope = cursor.grant.statement()["scope"]
+        if (scope["entry_node_id"] != self.node_id or scope["run_id"] != self.run_id
+                or scope["control"]["deployment_id"] != self.deployment_id):
+            raise NodeProcessError("token_progress_binding_mismatch")
+        with self._waiters_lock:
+            if getattr(self, "_closed", False):
+                raise NodeProcessError("node_process_closed")
+            if getattr(self, "_reader_failure_code", None) is not None:
+                raise NodeProcessError(self._reader_failure_code)
+            streams = getattr(self, "_progress_streams", None)
+            if streams is None:
+                streams = self._progress_streams = {}
+            if command_id in streams:
+                raise NodeProcessError("token_progress_replay")
+            if len(streams) >= 4096 or sum(s is not None for s in streams.values()) >= 8:
+                raise NodeProcessError("token_progress_capacity")
+            streams[command_id] = inbox
+        return inbox
+
+    def close_progress(self, command_id: str, *, code: str = "token_progress_closed") -> None:
+        with self._waiters_lock:
+            streams = getattr(self, "_progress_streams", {})
+            inbox = streams.get(command_id)
+            if inbox is not None:
+                inbox.close(code)
+                streams[command_id] = None
+
+    def _deliver_progress(self, document: Any) -> bool:
+        from .token_progress import validate_progress_frame
+
+        try:
+            frame = validate_progress_frame(document, node_id=self.node_id)
+        except ValueError:
+            self._fail_waiters(_ReaderError("token_progress_frame_invalid"))
+            return False
+        with self._waiters_lock:
+            streams = getattr(self, "_progress_streams", {})
+            command_id = frame["command_id"]
+            if command_id not in streams:
+                self._fail_waiters(_ReaderError("response_command_mismatch"))
+                return False
+            inbox = streams[command_id]
+            if inbox is not None:
+                inbox.feed(frame["receipt"])
+        return True
+
+    def _deliver_response(self, raw: bytes, *, allow_progress: bool = True) -> bool:
         try:
             document = _canonical_json_loads(raw)
         except (TypeError, ValueError):
             self._fail_waiters(_ReaderError("invalid_node_response"))
             return False
+        if isinstance(document, dict) and document.get("protocol") == "mycelium.physical_node_progress.v1":
+            if not allow_progress:
+                self._fail_waiters(_ReaderError("token_progress_wrong_lane"))
+                return False
+            return self._deliver_progress(document)
         command_id = document.get("command_id") if isinstance(document, dict) else None
         if not isinstance(command_id, str) or not command_id:
             self._fail_waiters(_ReaderError("invalid_node_response"))
@@ -2557,6 +2627,9 @@ class PhysicalNodeProcess:
                 return False
             try:
                 waiter.put_nowait(raw)
+                inbox = getattr(self, "_progress_streams", {}).get(command_id)
+                if inbox is not None:
+                    inbox.finish("token_progress_missing_terminal")
             except Exception:
                 self._fail_waiters(_ReaderError("invalid_node_response"))
                 return False
@@ -2594,7 +2667,7 @@ class PhysicalNodeProcess:
                     if len(raw) > self.max_frame_bytes + 1 or not raw.endswith(b"\n"):
                         self._fail_waiters(_ReaderError("invalid_node_response_frame"))
                         return
-                    if not self._deliver_response(raw[:-1]):
+                    if not self._deliver_response(raw[:-1], allow_progress=False):
                         return
                     continue
                 with self._stderr_lock:
@@ -3208,6 +3281,7 @@ class PhysicalNodeProcess:
         command_id = _required_identifier(command_id, "command_id")
         if not isinstance(code, str) or not _OPERATION_RE.fullmatch(code):
             raise ValueError("interrupt code is invalid")
+        self.close_progress(command_id, code=code)
         with self._waiters_lock:
             waiter = self._waiters.get(command_id)
             if waiter is None:

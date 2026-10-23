@@ -127,6 +127,22 @@ def _build_graph(assignments, loaded_stages) -> ExecutionGraph:
    return replace(graph, stages=signed_stages)
 
 
+@pytest.mark.parametrize("mode,work_unit", [("per_layer", "transformer_layer"), ("per_stage", "transformer_stage")])
+def test_materialization_option_is_named_in_snapshot(runtime_case, mode, work_unit):
+   case = runtime_case
+   port = MLXRuntimePort(
+      case.assignments[0]["node_id"], case.graph,
+      {case.graph.stages[0].placements[0].placement_id: case.loaded[0]},
+      materialization=mode,
+   )
+   assert port.materialization == mode
+   snapshot = port.kv_snapshot()
+   assert snapshot["materialization"] == mode
+   assert snapshot["work_unit"] == work_unit
+   assert snapshot["observed_work_unit_count"] == 0
+   assert snapshot["maximum_observed_work_unit_ms"] == 0
+
+
 @pytest.fixture(scope="module")
 def runtime_case():
    temporary = tempfile.TemporaryDirectory(prefix="mycelium-mlx-runtime-test-")

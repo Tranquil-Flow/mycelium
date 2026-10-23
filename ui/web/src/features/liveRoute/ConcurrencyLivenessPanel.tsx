@@ -113,7 +113,7 @@ export function ConcurrencyLivenessProjection({
             <th scope="row">{peer.node_id}</th>
             <td>{peer.interruptibility?.runtime_backend ?? 'Unknown'}</td>
             <td>{peer.interruptibility?.decode_mode ?? peer.decode_mode ?? 'Unknown'}</td>
-            <td>{peer.interruptibility?.work_unit === 'transformer_layer' ? 'Transformer layer' : 'Unproven'}</td>
+            <td>{peer.interruptibility?.work_unit === 'transformer_stage' ? 'Transformer stage' : peer.interruptibility?.work_unit === 'transformer_layer' ? 'Transformer layer' : 'Unproven'}</td>
             <td>{peer.interruptibility?.maximum_observed_work_unit_ms === null || peer.interruptibility === null ? 'Not measured' : `${peer.interruptibility.maximum_observed_work_unit_ms.toLocaleString()} ms (${peer.interruptibility.observed_work_unit_count.toLocaleString()} samples)`}</td>
             <td>{peer.interruptibility?.cooperative_bound_candidate ? 'Eligible for physical proof' : peer.interruptibility?.backend_candidate ? 'Awaiting measured work' : 'Ineligible'}</td>
             <td>{peer.active_kv_state_count}</td>

@@ -40,6 +40,33 @@ describe('native replay interruptibility public variant', () => {
   });
 });
 
+describe('MLX materialization evidence', () => {
+  const input = (change: Record<string, unknown>) => {
+    const fixture = liveRouteStatusFixture();
+    return { ...fixture, peers: fixture.peers.map((peer) => ({ ...peer,
+      interruptibility: { ...peer.interruptibility, ...change },
+    })) };
+  };
+
+  it.each([
+    ['per_layer', 'transformer_layer'], ['per_stage', 'transformer_stage'],
+  ])('preserves %s and its measured work unit', (materialization, work_unit) => {
+    const value = decodeLiveRouteStatus(input({ materialization, work_unit }));
+    expect(value.peers[0].interruptibility).toMatchObject({ materialization, work_unit });
+  });
+
+  it.each([
+    { materialization: 'per_layer', work_unit: 'transformer_stage' },
+    { materialization: 'per_stage', work_unit: 'transformer_layer' },
+    { materialization: 'automatic', work_unit: 'transformer_stage' },
+    { materialization: undefined, work_unit: 'transformer_stage' },
+    { materialization: 'per_stage', work_unit: 'transformer_stage', maximum_observed_work_unit_ms: 2000 },
+    { materialization: 'per_stage', work_unit: 'transformer_stage', observed_work_unit_count: 0 },
+  ])('refuses inconsistent or unbounded evidence: %j', (change) => {
+    expect(() => decodeLiveRouteStatus(input(change))).toThrow();
+  });
+});
+
 describe('live route status contract', () => {
   it('decodes the stage-only native phone backend without admitting unknown runtimes', () => {
     const fixture = liveRouteStatusFixture();

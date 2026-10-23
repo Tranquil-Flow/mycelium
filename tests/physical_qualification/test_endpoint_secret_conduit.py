@@ -138,6 +138,9 @@ def test_main_passes_exact_endpoint_secret_path_to_service(
         command_timeout=1.0,
         endpoint_secret_file=endpoint_secret_file,
         decode_mode=None,
+        # The real parser supplies None when the optional token-policy pin is
+        # omitted. Preserve the exact endpoint-secret forwarding assertion.
+        token_policy_trust_file=None,
     )
     captured: dict[str, Any] = {}
 
@@ -156,6 +159,7 @@ def test_main_passes_exact_endpoint_secret_path_to_service(
     assert node.main() == 0
     assert captured["endpoint_secret_file"] is endpoint_secret_file
     assert captured["sidecar_force_relay"] is False
+    assert captured["token_policy_trust_file"] is None
 
 
 def test_service_accepts_absent_and_exact_absolute_endpoint_secret(

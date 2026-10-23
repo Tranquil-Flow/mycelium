@@ -694,6 +694,7 @@ def test_physical_startup_challenge_uses_request_local_empty_stop_set(
         "request_id": "startup-renewal",
         "sink": sink,
         "_stop_token_ids_override": frozenset(),
+        "_startup_qualification": True,
     }
 
 

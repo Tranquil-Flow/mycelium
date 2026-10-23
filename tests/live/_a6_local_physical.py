@@ -112,6 +112,7 @@ class LocalSessionFactory:
         self.step_delay_s = 0.0
         self.sessions: dict[str, Any] = {}
         self.launches: list[str] = []
+        self.token_files = {}
 
     def __call__(self, *, argv, node_id, run_id, deployment_id, timeout_seconds):
         _ = argv
@@ -128,6 +129,9 @@ class LocalSessionFactory:
             "--command-timeout", "900",
             "--decode-mode", "stage_local_kv",
         )
+        if node_id in self.token_files:
+            key, pin = self.token_files[node_id]
+            command += ("--endpoint-secret-file", str(key), "--token-policy-trust-file", str(pin))
         session = _ConcurrentNodeSession(
             argv=command, node_id=node_id, run_id=run_id,
             deployment_id=deployment_id, timeout_seconds=timeout_seconds,
@@ -239,7 +243,11 @@ class LocalPhysical:
             now=time.time(),
             run_plan=self.run_plan,
         )
+        from tests.live.local_token_authority import LocalTokenAuthority
+        token_authority = LocalTokenAuthority(self)
+        self.session_factory.token_files = token_authority.files
         route = PhysicalLiveRoute(
+            token_path_owner=token_authority.owner,
             controller=controller,
             endpoints=copy.deepcopy(self.endpoints_template),
             run_plan=self.run_plan,

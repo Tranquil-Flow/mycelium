@@ -42,6 +42,7 @@ import mycelium_deadlines
 import mycelium_host_platform
 from mycelium_iroh_sidecar import LoopbackEndpoint, SidecarClient
 from mycelium_node.identity import load_node_signer
+from mycelium_live.token_path_activation import token_path_enabled
 from mycelium_physical_runner.remote_probe import derive_local_run_scoped_identity
 from mycelium_qualification.evidence import canonical_json_bytes, canonical_json_loads
 from mycelium_qualification.signing import generate_ed25519_signer
@@ -2150,6 +2151,7 @@ class PhysicalNodeService:
         sidecar_force_relay: bool = False,
         capacity_root: Path | None = None,
         sidecar_lan: bool = False,
+        token_policy_trust_file: Path | None = None,
     ) -> None:
         for value, code in (
             (run_id, "invalid_run_id"),
@@ -2200,6 +2202,15 @@ class PhysicalNodeService:
         self.process_id = os.getpid()
         self.state = "NEW"
         self.stop_requested = False
+        self._token_route_trust = None
+        if token_policy_trust_file is not None:
+            from mycelium_node.token_provisioning import load_host_trust
+            try:
+                self._token_route_trust = load_host_trust(token_policy_trust_file,
+                    run_id=run_id, deployment_id=deployment_id, node_id=node_id,
+                    current=lambda: not self.stop_requested)
+            except (ValueError, OSError) as exc:
+                raise NodeCommandError("token_path_host_pin_invalid") from exc
         self.graph: ExecutionGraph | None = None
         self.topology: PublishedTopologyProvider | None = None
         self.device_states: PublishedDeviceStateProvider | None = None
@@ -2248,6 +2259,10 @@ class PhysicalNodeService:
         self._cancellation_worker_errors: dict[str, str] = {}
         self._request_cleanup_receipts: dict[str, dict[str, Any]] = {}
         self._request_cleanup_receipt_counters: dict[str, dict[str, int]] = {}
+        # Internal host provisioning only; no managed/CLI activation until
+        # remote-hop authorization and owner receipt delivery compose.
+        self._token_path_admission: Any = None
+        self._token_path_publish: Any = None
 
     def _safe_document(self, relative_path: Any, code: str) -> dict[str, Any]:
         _require(
@@ -2668,6 +2683,8 @@ class PhysicalNodeService:
                 self.node_id,
                 graph,
                 loaded_stages,
+                # V1 OFF peers retain their layer-bounded work-unit contract.
+                materialization="per_stage" if token_path_enabled() else "per_layer",
                 clock=clock,
                 decode_mode=route_decode_mode,
                 kv_lease_renewal_seconds=self._kv_lease_window_seconds,
@@ -3594,7 +3611,108 @@ class PhysicalNodeService:
         )
         return control
 
+    def _token_peers(self) -> dict[str, Any]:
+        _require(self.transport is not None, "token_path_peer_stale")
+        peers = {p.node_id: {"node_id": p.node_id, "endpoint_id": p.endpoint_id,
+                            "generation": p.generation}
+                 for p in self.transport._ordered_peer_bindings()}
+        peers[self.node_id] = {"node_id": self.node_id, "endpoint_id": self.endpoint_id,
+                               "generation": self.transport.local_generation}
+        return peers
+
+    def _install_token_path(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from mycelium_node.token_provisioning import RoutePolicyTrust
+        from mycelium_router.token_path_authority import TokenPathAuthorityError
+        trust = getattr(self, "_token_route_trust", None)
+        _require(isinstance(trust, RoutePolicyTrust), "token_path_disabled")
+        data = _exact_fields(payload, {"policy"}, "token_path_policy_invalid")
+        _require(self.state == "RUNNING" and self.router is not None,
+                 "invalid_state_for_token_path")
+        _require(trust.run_id == self.run_id and trust.deployment_id == self.deployment_id
+                 and trust.node_id == self.node_id, "token_path_policy_mismatch")
+        try:
+            with self._control_lock:
+                admitted = trust.admit(data["policy"], graph=self.graph, peers=self._token_peers)
+                self.provision_token_path(admitted.participant_policy())
+        except TokenPathAuthorityError as exc:
+            raise NodeCommandError(exc.code) from None
+        return self._signed_result("token_path_installed", {
+            "policy_digest": "sha256:" + hashlib.sha256(
+                canonical_json_bytes(data["policy"]["statement"])).hexdigest(),
+        })
+
+    def provision_token_path(self, policy: Any) -> None:
+        """Trusted host-only installation; never derive policy from a grant.
+
+        The host must bind membership/transport callbacks and process/lease
+        ceilings before this call. No wire command or capability advertises it.
+        """
+        from mycelium_node.token_participants import ParticipantAdmissionPolicy
+        from mycelium_router.token_hop_authority import GrantedHopGate
+        _require(isinstance(policy, ParticipantAdmissionPolicy), "token_path_policy_invalid")
+        _require(self.state == "RUNNING" and self.router is not None,
+                 "invalid_state_for_token_path")
+        with self._control_lock:
+            _require(getattr(self, "_token_participant_policy", None) is None,
+                     "token_path_policy_already_installed")
+            _require(policy.run_id == self.run_id, "token_path_grant_mismatch")
+            self._token_participant_policy = policy
+            self._token_participant_grants: dict[str, Any] = {}
+            self.router.relay.token_path_gate = GrantedHopGate(
+                node_id=self.node_id, peers=policy.peers, clock=policy.clock)
+
+    def _bind_granted_request_control(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from mycelium_node.token_participants import valid_bind_token_shape
+        from mycelium_router.serialization import path_manifest_from_dict
+        from mycelium_router.token_path_authority import TokenPathAuthorityError
+        policy = getattr(self, "_token_participant_policy", None)
+        _require(policy is not None, "token_path_disabled")
+        _require(valid_bind_token_shape(payload), "invalid_bind_request_control_fields")
+        data = json.loads(canonical_json_bytes(payload))
+        control = self._validated_request_control(data["control"],
+            code="invalid_bind_request_control", initial=True)
+        request_id, token = data["request_id"], data["token_path"]
+        installing = [True]
+
+        def current() -> bool:
+            with self._control_lock:
+                bound = self._request_controls.get(request_id)
+                return (not self._request_cleanup_receipts.get(request_id)
+                    and not self._pending_cancellations.get(request_id)
+                    and not self._cancellation_controls.get(request_id)
+                    and (canonical_json_bytes(bound) == canonical_json_bytes(control)
+                         or (installing[0] and bound is None)))
+        try:
+            manifest = path_manifest_from_dict(token["path_manifest"])
+            with self._control_lock:
+                grant, authority_current = policy.admit(
+                    envelope=token["token_grant"], request=token["request"], control=control,
+                    manifest=manifest, graph=self.graph, node_id=self.node_id, current=current)
+                # Admission has consumed the process replay fence. No failure
+                # below may enable retry/recomputation with this grant.
+                _require(current(), "token_path_grant_stale")
+                self.router.relay.token_path_gate.install(grant=grant, request=token["request"],
+                    manifest=manifest, graph=self.graph, current=authority_current)
+                self._request_controls[request_id] = dict(control)
+                self._token_participant_grants[request_id] = {
+                    "grant": grant, "current": authority_current,
+                    "start_payload": canonical_json_bytes({**token, "control": control}),
+                    "started": False,
+                }
+                installing[0] = False
+        except TokenPathAuthorityError as exc:
+            raise NodeCommandError(exc.code) from None
+        finally:
+            installing[0] = False
+        return self._signed_result("request_control_bound", {
+            "request_id": request_id,
+            "control_digest": "sha256:" + hashlib.sha256(canonical_json_bytes(control)).hexdigest(),
+            "token_grant_digest": grant.digest,
+        })
+
     def _bind_request_control(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if "token_path" in payload:
+            return self._bind_granted_request_control(payload)
         data = _exact_fields(
             payload,
             {"request_id", "control"},
@@ -3956,6 +4074,14 @@ class PhysicalNodeService:
                 }
         else:
             runtime_snapshot = self.runtime.kv_snapshot()
+        if (isinstance(runtime_snapshot, Mapping) and not token_path_enabled()
+                and runtime_snapshot.get("materialization") == "per_layer"):
+            # OFF is the V1 peer contract, including its closed interruptibility
+            # projection. Keep direct-runtime benchmark evidence intact and never
+            # mislabel an explicitly constructed per-stage measurement as legacy.
+            runtime_snapshot = dict(runtime_snapshot)
+            runtime_snapshot.pop("materialization", None)
+            runtime_snapshot.pop("work_unit", None)
         details: dict[str, Any] = {
             "runtime": runtime_snapshot,
             "runtime_cleanup_observation_complete": runtime_observation_complete,
@@ -4029,7 +4155,9 @@ class PhysicalNodeService:
             details["interruptibility"] = {
                 "runtime_backend": details["runtime"].get("backend"),
                 "decode_mode": details["runtime"].get("mode"),
-                "work_unit": "transformer_layer",
+                "work_unit": details["runtime"].get("work_unit", "transformer_layer"),
+                **({"materialization": details["runtime"]["materialization"]}
+                   if "materialization" in details["runtime"] else {}),
                 "maximum_observed_work_unit_ms": details["runtime"].get(
                     "maximum_observed_work_unit_ms"
                 ),
@@ -4051,11 +4179,9 @@ class PhysicalNodeService:
                     details["runtime"].get("mode") == "stage_local_kv"
                     and type(details["runtime"].get("observed_work_unit_count")) is int
                     and details["runtime"].get("observed_work_unit_count", 0) > 0
-                    and isinstance(
-                        details["runtime"].get("maximum_observed_work_unit_ms"),
-                        (int, float),
-                    )
-                    and details["runtime"].get("maximum_observed_work_unit_ms", 2_000)
+                    and type(details["runtime"].get("maximum_observed_work_unit_ms"))
+                    in (int, float)
+                    and 0 <= details["runtime"].get("maximum_observed_work_unit_ms", 2_000)
                     < 2_000
                 ),
             }
@@ -4471,7 +4597,136 @@ class PhysicalNodeService:
             "cancelled", {"request_id": request_id, "result": _plain_json(result)}
         )
 
-    def _infer_start(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _infer_start(self, payload: dict[str, Any], *, command_id: str | None = None) -> dict[str, Any]:
+        if "token_grant" not in payload:
+            return self._infer_start_legacy(payload)
+        from mycelium_router.token_path_authority import TokenPathAuthorityError
+        try:
+            return self._infer_start_granted(payload, command_id=command_id)
+        except TokenPathAuthorityError as exc:
+            raise NodeCommandError(exc.code) from None
+
+    def _infer_start_granted(self, payload: dict[str, Any], *, command_id: str | None = None) -> dict[str, Any]:
+        from mycelium_node.token_admission import EntryAdmissionPolicy, valid_start_grant_shape
+        from mycelium_router.token_path_authority import ReceiptJournal
+
+        # The trusted participant policy takes precedence over the historical
+        # entry-only desk seam; an installed route must never bypass its gate.
+        participant_policy = getattr(self, "_token_participant_policy", None)
+        policy = participant_policy or getattr(self, "_token_path_admission", None)
+        _require(participant_policy is not None or isinstance(policy, EntryAdmissionPolicy),
+                 "token_path_disabled")
+        _require(valid_start_grant_shape(payload), "invalid_infer_start_fields")
+        publish = getattr(self, "_token_path_publish", None)
+        emitter = getattr(self, "_token_response_emitter", None)
+        if command_id is not None and emitter is not None:
+            publish = lambda receipt, **kwargs: emitter.emit_progress(
+                command_id=command_id, node_id=self.node_id, receipt=receipt, **kwargs)
+        _require(callable(publish), "token_path_progress_unavailable")
+        # Snapshot caller-owned input before comparing any authority fields.
+        data = json.loads(canonical_json_bytes(payload))
+        request = data["request"]
+        _require(isinstance(request, dict) and isinstance(request.get("request_id"), str),
+                 "invalid_request_fields")
+        request_id = request["request_id"]
+        with self._control_lock:
+            current = self._request_controls.get(request_id)
+            _require(current is not None and canonical_json_bytes(current)
+                     == canonical_json_bytes(data["control"]), "token_path_grant_stale")
+            assert current is not None
+            bound_control = dict(current)
+        _require(isinstance(data["path_manifest"], dict)
+                 and "sha256:" + hashlib.sha256(canonical_json_bytes(data["path_manifest"])).hexdigest()
+                 == bound_control["path_digest"], "path_manifest_identity_mismatch")
+        installed = None
+        if participant_policy is not None:
+            with self._control_lock:
+                installed = self._token_participant_grants.get(request_id)
+                _require(installed is not None, "token_path_grant_missing")
+                _require(installed["start_payload"] == canonical_json_bytes(data),
+                         "token_path_grant_mismatch")
+                _require(not installed["started"], "token_path_grant_replay")
+                _require(installed["current"](), "token_path_grant_stale")
+                grant = installed["grant"]
+                peers = participant_policy.peers()
+                _require(all(canonical_json_bytes(peers.get(p["node_id"])) == canonical_json_bytes(p)
+                             for p in grant.statement()["scope"]["participants"]),
+                         "token_path_peer_stale")
+                # Claim before prefill, not after it: two concurrent starts
+                # must not both cross the compute boundary.
+                installed["started"] = True
+        else:
+            grant = policy.admit(data["token_grant"], request=request, bound_control=bound_control)
+        scope = grant.statement()["scope"]
+        identity = self._identity()
+        _require(self.signer is not None and scope["run_id"] == identity["run_id"]
+                 and scope["entry_node_id"] == identity["node_id"]
+                 and scope["entry_endpoint_id"] == self.signer.endpoint_id
+                 and scope["entry_key_digest"] == self.signer.verification_key_digest,
+                 "token_path_grant_mismatch")
+
+        def current_authority() -> bool:
+            with self._control_lock:
+                if self._request_controls.get(request_id) != bound_control:
+                    return False
+                if installed is None:
+                    return True
+                try:
+                    peers = participant_policy.peers()
+                    return installed["current"]() is True and all(
+                        canonical_json_bytes(peers.get(p["node_id"])) == canonical_json_bytes(p)
+                        for p in scope["participants"])
+                except Exception:
+                    return False
+
+        def fence() -> None:
+            _require(current_authority(), "token_path_grant_stale")
+            _require(policy.clock() < grant.deadline_monotonic_s, "token_path_grant_expired")
+
+        journal = ReceiptJournal(grant=grant, signer=self.signer,
+                                 clock=policy.clock, current=current_authority)
+        control_endpoint = (participant_policy.control_endpoint(self.node_id)
+                            if participant_policy is not None else scope['entry_endpoint_id'])
+        if command_id is not None:
+            from mycelium_node.token_ack import NativeReceiptJournals
+            with self._control_lock:
+                if getattr(self, "_token_journals", None) is None:
+                    self._token_journals = NativeReceiptJournals()
+                self._token_journals.register(command_id=command_id, journal=journal,
+                    owner_key=policy.owner_key(), target_endpoint_id=control_endpoint)
+        with self._control_lock:
+            if not hasattr(self, "_token_wait_fences"):
+                self._token_wait_fences = {}
+            self._token_wait_fences[request_id] = fence
+        try:
+            fence()
+            # Reuse the existing compute path. Polling waits additionally obey
+            # this immutable grant, not a freshly reset native command budget.
+            self._infer_start_legacy({key: value for key, value in data.items() if key != "token_grant"})
+            fence()
+            result = self.drive_granted_entry_token_path(
+                grant=grant, journal=journal,
+                publish=lambda receipt: publish(receipt,
+                    deadline_monotonic_s=grant.deadline_monotonic_s,
+                    cancelled=lambda: not current_authority()),
+                cancelled=lambda: not current_authority(), clock=policy.clock, enabled=True,
+                coalesce=emitter is not None and command_id is not None)
+        finally:
+            with self._control_lock:
+                self._token_wait_fences.pop(request_id, None)
+        return self._signed_result("inference_started", {
+            "request_id": request_id, "status": result.status,
+            "token_count": result.start_index + len(result.token_ids),
+            "token_grant_digest": grant.digest,
+        })
+
+    def _check_token_wait(self, request_id: str) -> None:
+        with self._control_lock:
+            fence = getattr(self, "_token_wait_fences", {}).get(request_id)
+        if fence is not None:
+            fence()
+
+    def _infer_start_legacy(self, payload: dict[str, Any]) -> dict[str, Any]:
         # A11: an optional explicit future-request speculation preference rides
         # beside any of the existing field sets; it never changes those sets.
         speculation = payload.get("speculation")
@@ -4718,6 +4973,7 @@ class PhysicalNodeService:
         status = self.router.request_status(request_id)
         failure: str | None = None
         while status in {"PREFILL", "LOCKED"}:
+            self._check_token_wait(request_id)
             if self.transport is not None and self.transport.fatal_error is not None:
                 raise NodeCommandError(self.transport.fatal_error.code)
             failure = budget.observe()
@@ -4764,6 +5020,7 @@ class PhysicalNodeService:
                 and not sink.token_ids
                 and time.monotonic() < deadline
             ):
+                self._check_token_wait(request_id)
                 if (
                     self.transport is not None
                     and self.transport.fatal_error is not None
@@ -4847,6 +5104,137 @@ class PhysicalNodeService:
         if legacy and status in {"COMPLETED", "FAILED", "CANCELLED"}:
             self._retire_legacy_terminal_path(request_id)
         raise NodeCommandError("inference_start_failed")
+
+    def drive_granted_entry_token_path(
+        self,
+        *,
+        grant: Any,
+        journal: Any,
+        publish: Callable[[dict[str, Any]], None],
+        cancelled: Callable[[], bool],
+        clock: Callable[[], float] = time.monotonic,
+        enabled: bool = False,
+        batch_tokens: int = 8,
+        coalesce: bool = False,
+    ) -> Any:
+        """Internal signed-receipt composition, not a managed command.
+
+        The trusted admission caller owns the process-lifetime GrantRegistry,
+        independently derives scope, and binds every participant before prefill.
+        This seam starts AFTER prefill, so it is not infer_start admission and
+        cannot establish the prefill deadline or remote-hop authority by itself.
+        Publication must be deadline-bounded; this callback cannot preempt I/O.
+        """
+        from mycelium_router.token_path_authority import AdmittedGrant, ReceiptJournal
+
+        _require(enabled is True, "token_path_disabled")
+        _require(isinstance(grant, AdmittedGrant)
+                 and isinstance(journal, ReceiptJournal)
+                 and journal.grant is grant, "token_path_grant_mismatch")
+        body = grant.statement()
+        scope = body["scope"]
+        identity = self._identity()
+        _require(self.signer is not None, "token_path_receipt_signer")
+        assert self.signer is not None
+        _require(scope["run_id"] == identity["run_id"]
+                 and scope["entry_node_id"] == identity["node_id"]
+                 and scope["entry_endpoint_id"] == self.signer.endpoint_id
+                 and scope["entry_key_digest"] == self.signer.verification_key_digest,
+                 "token_path_grant_mismatch")
+        request_id = scope["request_id"]
+        control = scope["control"]
+
+        def fence() -> None:
+            _require(clock() < grant.deadline_monotonic_s, "token_path_grant_expired")
+            with self._control_lock:
+                _require(self._request_controls.get(request_id) == control,
+                         "stale_infer_decode_generation")
+
+        def send(batch: Any) -> None:
+            fence()
+            receipt = journal.append(batch)
+            fence()
+            publish(receipt)
+            fence()
+
+        delivery = None
+        if coalesce:
+            from mycelium_router.token_receipt_delivery import CoalescedReceiptDelivery
+            delivery = CoalescedReceiptDelivery(journal, publish, fence)
+
+        fence()
+        grant.claim_execution()
+        result = self.drive_entry_token_path(
+            request_id=request_id, control=control,
+            max_new_tokens=body["max_new_tokens"],
+            stop_token_ids=tuple(body["stop_token_ids"]),
+            deadline_monotonic_s=grant.deadline_monotonic_s,
+            run_deadline_monotonic_s=grant.deadline_monotonic_s,
+            publish=delivery.submit if delivery is not None else send,
+            cancelled=cancelled, clock=clock, enabled=True,
+            batch_tokens=batch_tokens,
+        )
+        if delivery is not None:
+            delivery.finish()
+        return result
+
+    def drive_entry_token_path(
+        self,
+        *,
+        request_id: str,
+        control: Mapping[str, Any],
+        max_new_tokens: int,
+        stop_token_ids: tuple[int, ...],
+        deadline_monotonic_s: float,
+        run_deadline_monotonic_s: float,
+        publish: Callable[[Any], None],
+        cancelled: Callable[[], bool],
+        clock: Callable[[], float] = time.monotonic,
+        enabled: bool = False,
+        batch_tokens: int = 8,
+        batch_seconds: float = 0.05,
+    ) -> Any:
+        """Internal default-off adapter for an already authorized start.
+
+        NOT registered in the native command table: the managed streaming
+        receipt channel and exact request-grant authorization must land before
+        a remotely reachable caller can enable this. Preserve the shipped
+        generation fence, iroh dispatch, A10 accounting and exception codes by
+        invoking the existing decode primitive, never a second runtime path.
+        Caller owns cancellation/cleanup and must supply process-origin expiry.
+        """
+        from mycelium_router.token_path import DecodeSnapshot, drive_entry_decode
+
+        # Freeze caller-owned identity; never permit a callback to widen it.
+        bound_control = dict(control)
+
+        def initial() -> DecodeSnapshot:
+            with self._control_lock:
+                _require(
+                    self._request_controls.get(request_id) == bound_control,
+                    "stale_infer_decode_generation",
+                )
+            _require(self.router is not None, "invalid_state_for_infer_decode")
+            return DecodeSnapshot(
+                tuple(self._sinks[request_id].token_ids),
+                self.router.request_status(request_id),
+            )
+
+        def decode() -> DecodeSnapshot:
+            response = self._infer_decode({
+                "request_id": request_id, "count": 1, "control": bound_control,
+            })
+            details = response["observation"]["details"]
+            return DecodeSnapshot(tuple(details["output"]["token_ids"]), details["status"])
+
+        return drive_entry_decode(
+            initial=initial, decode=decode, max_new_tokens=max_new_tokens,
+            stop_token_ids=stop_token_ids,
+            deadline_monotonic_s=deadline_monotonic_s,
+            run_deadline_monotonic_s=run_deadline_monotonic_s,
+            publish=publish, cancelled=cancelled, clock=clock, enabled=enabled,
+            batch_tokens=batch_tokens, batch_seconds=batch_seconds,
+        )
 
     def _infer_decode(self, payload: dict[str, Any]) -> dict[str, Any]:
         fields = set(payload)
@@ -4968,6 +5356,7 @@ class PhysicalNodeService:
             else self.router.speculate_one_distributed
         )
         for _ in range(data["count"]):
+            self._check_token_wait(request_id)
             output_count = len(sink.token_ids)
             round_started = time.monotonic()
             try:
@@ -5007,6 +5396,7 @@ class PhysicalNodeService:
                 and status not in {"COMPLETED", "FAILED", "CANCELLED"}
                 and time.monotonic() < deadline
             ):
+                self._check_token_wait(request_id)
                 if (
                     self.transport is not None
                     and self.transport.fatal_error is not None
@@ -5745,6 +6135,17 @@ class PhysicalNodeService:
         self.stop_requested = True
         return {"state": self.state, "final_observation": signed}
 
+    def _ack_token_progress(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from mycelium_router.token_path_authority import TokenPathAuthorityError
+        data = _exact_fields(payload, {"ack"}, "invalid_token_progress_ack_fields")
+        journals = getattr(self, "_token_journals", None)
+        _require(journals is not None, "token_path_receipt_ack")
+        try:
+            result = journals.acknowledge(data["ack"])
+        except TokenPathAuthorityError as exc:
+            raise NodeCommandError(exc.code) from None
+        return self._signed_result("token_progress_acknowledged", result)
+
     def dispatch(self, command: Any) -> dict[str, Any]:
         document = _exact_fields(command, _COMMAND_FIELDS, "invalid_command_fields")
         _require(
@@ -5768,9 +6169,11 @@ class PhysicalNodeService:
             "snapshot": self._snapshot,
             "inbound_admission_snapshot": self._inbound_admission_snapshot,
             "cancel": self._cancel,
+            "install_token_path": self._install_token_path,
             "bind_request_control": self._bind_request_control,
             "update_request_control": self._update_request_control,
             "infer_start": self._infer_start,
+            "ack_token_progress": self._ack_token_progress,
             "infer_decode": self._infer_decode,
             "infer_cancel": self._infer_cancel,
             "infer_cancel_wait": self._infer_cancel_wait,
@@ -5786,6 +6189,8 @@ class PhysicalNodeService:
         }
         handler = handlers.get(document["command"])
         _require(handler is not None, "unsupported_command")
+        if document["command"] == "infer_start" and "token_grant" in document["payload"]:
+            return self._infer_start(document["payload"], command_id=document["command_id"])
         return handler(document["payload"])
 
     def evidence_directory(self) -> Path:
@@ -6137,7 +6542,78 @@ class _ResponseEmitter:
     def __init__(self) -> None:
         self._stdout_condition = threading.Condition()
         self._stdout_active = False
+        self._stdout_failed = False
         self._cleanup_lock = threading.Lock()
+
+    def emit_progress(
+        self, *, command_id: str, node_id: str, receipt: Mapping[str, Any],
+        deadline_monotonic_s: float, cancelled: Callable[[], bool] = lambda: False,
+    ) -> None:
+        """Bounded private POSIX pipe frame; never use the cleanup stderr lane.
+
+        This does not enable infer_start. Its eventual admitted caller must own
+        the receipt journal, participant grants, evidence sealing and owner ACKs.
+        A partially written frame poisons stdout rather than concatenating a
+        later response onto truncated JSON. Cleanup can still use stderr.
+        """
+        import math
+        import selectors
+        from mycelium_node.token_progress import progress_frame
+
+        if (type(deadline_monotonic_s) not in (int, float)
+                or not math.isfinite(deadline_monotonic_s)):
+            raise ValueError("token_progress_arguments_invalid")
+        if os.name != "posix":
+            raise NodeCommandError("token_progress_transport_unsupported")
+        encoded = canonical_json_bytes(progress_frame(
+            command_id=command_id, node_id=node_id, receipt=receipt)) + b"\n"
+
+        def remaining() -> float:
+            if cancelled():
+                raise NodeCommandError("request_cancelled")
+            value = deadline_monotonic_s - time.monotonic()
+            if value <= 0:
+                raise NodeCommandError("command_deadline_exceeded")
+            return min(value, 0.05)
+
+        with self._stdout_condition:
+            while self._stdout_active:
+                self._stdout_condition.wait(timeout=remaining())
+            remaining()
+            _require(not self._stdout_failed, "token_progress_pipe_failed")
+            self._stdout_active = True
+        offset = 0
+        descriptor = None
+        blocking = True
+        try:
+            descriptor = sys.stdout.buffer.fileno()
+            blocking = os.get_blocking(descriptor)
+            os.set_blocking(descriptor, False)
+            with selectors.DefaultSelector() as selector:
+                selector.register(descriptor, selectors.EVENT_WRITE)
+                while offset < len(encoded):
+                    if not selector.select(timeout=remaining()):
+                        continue
+                    remaining()
+                    try:
+                        written = os.write(descriptor, encoded[offset:])
+                    except (BlockingIOError, InterruptedError):
+                        continue
+                    if written <= 0:
+                        raise BrokenPipeError("token_progress_pipe_failed")
+                    offset += written
+        except BaseException:
+            if offset:
+                self._stdout_failed = True
+            raise
+        finally:
+            try:
+                if descriptor is not None:
+                    os.set_blocking(descriptor, blocking)
+            finally:
+                with self._stdout_condition:
+                    self._stdout_active = False
+                    self._stdout_condition.notify_all()
 
     def emit(
         self,
@@ -6164,6 +6640,7 @@ class _ResponseEmitter:
             # late replies after their parent waiters have already retired.
             while self._stdout_active:
                 self._stdout_condition.wait()
+            _require(not self._stdout_failed, "token_progress_pipe_failed")
             self._stdout_active = True
         try:
             _emit(encoded, cleanup_priority=False)
@@ -6187,6 +6664,7 @@ def _parse_args() -> argparse.Namespace:
     network_mode.add_argument("--sidecar-force-relay", action="store_true")
     network_mode.add_argument("--sidecar-lan", action="store_true")
     parser.add_argument("--endpoint-secret-file", type=Path)
+    parser.add_argument("--token-policy-trust-file", type=Path)
     parser.add_argument("--command-timeout", type=float, default=30.0)
     parser.add_argument(
         "--decode-mode",
@@ -6214,6 +6692,7 @@ def main() -> int:
             command_timeout=args.command_timeout,
             endpoint_secret_file=args.endpoint_secret_file,
             requested_decode_mode=args.decode_mode,
+            token_policy_trust_file=args.token_policy_trust_file,
         )
     except (NodeCommandError, OSError) as exc:
         print(f"physical-node startup rejected: {type(exc).__name__}", file=sys.stderr)
@@ -6256,6 +6735,7 @@ def main() -> int:
             return 2
 
     response_emitter = _ResponseEmitter()
+    service._token_response_emitter = response_emitter
     active_lock = threading.Lock()
     active_command_ids: set[str] = set()
     inference_capacity = threading.BoundedSemaphore(8)

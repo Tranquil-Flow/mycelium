@@ -142,7 +142,7 @@ def test_lost_remote_stage_mid_decode_is_a_bounded_failed_terminal(
         assert status["state"] == "ready" and status["generation"] == 2, status
         assert owner._current is not first_route
         _next_id, after = _run_without_fault(service, owner)
-        assert after["kinds"] == ["completed"], after
+        assert after["kinds"] == ["completed"], (after, [i['reason'] for i in owner._current._incidents])
     finally:
         _teardown(local, owner, router, service)
 
@@ -211,7 +211,7 @@ def test_lost_remote_stage_while_idle_is_reported_not_ready(
     try:
         first_route = owner._current
         _id, baseline = _run_without_fault(service, owner)
-        assert baseline["kinds"] == ["completed"], baseline
+        assert baseline["kinds"] == ["completed"], (baseline, [i['reason'] for i in first_route._incidents])
         os.kill(first_route.process_id(REMOTE_STAGE), signal.SIGKILL)
         # No request is running: the route must say within the bound that it
         # is not serving (never keep advertising a qualification it cannot
@@ -294,7 +294,7 @@ def test_failed_terminal_does_not_wait_for_a_slow_replacement_route(
         assert status["state"] == "ready" and status["generation"] == 2, status
         assert owner._current is not first_route
         _next_id, after = _run_without_fault(service, owner)
-        assert after["kinds"] == ["completed"], after
+        assert after["kinds"] == ["completed"], (after, [i['reason'] for i in owner._current._incidents])
     finally:
         replacement_may_open.set()
         _teardown(local, owner, router, service)

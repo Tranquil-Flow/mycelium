@@ -36,18 +36,31 @@ from mycelium_router.wire import decode_frame, encode_frame
 
 ROOT = Path(__file__).resolve().parent
 CRATE = ROOT / "native" / "iroh_transport"
-BINARY = CRATE / "target" / "debug" / "mycelium-iroh-sidecar"
+CARGO_TARGET = Path(os.environ.get("CARGO_TARGET_DIR", str(CRATE / "target")))
+if not CARGO_TARGET.is_absolute():
+    CARGO_TARGET = CRATE / CARGO_TARGET
+BINARY = CARGO_TARGET / "debug" / "mycelium-iroh-sidecar"
 GOLDEN_DIR = ROOT / "contracts" / "router-wire-golden"
 GOLDEN = GOLDEN_DIR / "01-hop-header.bin"
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _build_sidecar() -> None:
+def _build_sidecar(tmp_path_factory) -> None:
+    global BINARY
+    environment = dict(os.environ, CARGO_TARGET_DIR=str(CARGO_TARGET))
     subprocess.run(
         ["cargo", "build", "--locked", "--bin", "mycelium-iroh-sidecar"],
         cwd=CRATE,
+        env=environment,
         check=True,
     )
+    # A session's successful build must not depend on a shared Cargo output
+    # remaining linked while other xdist workers build or clean that target.
+    # Execute this worker's actual compiled bytes, not a pre-existing fallback.
+    built = CARGO_TARGET / "debug" / "mycelium-iroh-sidecar"
+    specimen = tmp_path_factory.mktemp("cross-language-sidecar") / built.name
+    shutil.copy2(built, specimen)
+    BINARY = specimen
 
 
 class RunningSidecar:

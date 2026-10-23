@@ -732,7 +732,24 @@ def _public_interruptibility(value: object) -> dict[str, Any] | None:
     if value.get("reason") == "runtime_unavailable_or_not_cooperative":
         return None
     if value.get("work_unit") != "bounded_qwen2_replay_chunk":
-        return None if value.get("runtime_backend") == "mobile-rust-qwen2" else dict(value)
+        if value.get("runtime_backend") == "mobile-rust-qwen2":
+            return None
+        # Historical layer evidence has no materialization field. New MLX
+        # evidence must bind its mode to its measured cooperative work unit.
+        if "materialization" in value or value.get("work_unit") == "transformer_stage":
+            expected = {"per_layer": "transformer_layer", "per_stage": "transformer_stage"}
+            mode = value.get("materialization")
+            if not isinstance(mode, str) or expected.get(mode) != value.get("work_unit"):
+                return None
+            if mode == "per_stage" and value.get("runtime_backend") != "mlx":
+                return None
+            if value.get("cooperative_bound_candidate") is True:
+                count = value.get("observed_work_unit_count")
+                observed = value.get("maximum_observed_work_unit_ms")
+                if (type(count) is not int or count <= 0
+                    or type(observed) not in (int, float) or not 0 <= observed < 2_000):
+                    return None
+        return dict(value)
     fields = (
         "runtime_backend", "decode_mode", "work_unit",
         "maximum_observed_work_unit_ms", "observed_work_unit_count",
@@ -1412,12 +1429,15 @@ class PhysicalLiveRoute:
         session_factory=_ConcurrentNodeSession,
         external_session_factory=None,
         seed_authority: LiveSeedAuthority | None = None,
+        token_path_owner=None,
         membership_snapshot: Mapping[str, Any] | None = None,
         force_relay: bool = False,
         _test_only_transport_fault: _TestOnlyTransportFault | _TestOnlyTransportFaultSlot | None = None,
     ) -> None:
         if not isinstance(force_relay, bool):
             raise ValueError("force_relay must be a boolean")
+        from .token_path_activation import require_token_path_owner
+        require_token_path_owner(token_path_owner)
         if _test_only_transport_fault is not None and not isinstance(
             _test_only_transport_fault, (_TestOnlyTransportFault, _TestOnlyTransportFaultSlot)
         ):
@@ -1437,6 +1457,7 @@ class PhysicalLiveRoute:
         self._session_factory = session_factory
         self._external_session_factory = external_session_factory
         self._seed_authority = seed_authority
+        self._token_path_owner = token_path_owner
         self._membership_snapshot = (
             None
             if membership_snapshot is None
@@ -1510,6 +1531,9 @@ class PhysicalLiveRoute:
         self._last_transport_event_sequence: dict[str, int] = {}
         self._liveness_monitor_stop = threading.Event()
         self._liveness_monitor_thread: threading.Thread | None = None
+        attach_token_owner = getattr(token_path_owner, "attach_route", None)
+        if callable(attach_token_owner):
+            attach_token_owner(self)
 
     def _record_incident(
         self,
@@ -1714,7 +1738,14 @@ class PhysicalLiveRoute:
         force_relay: bool = False,
         session_factory=None,
         external_session_factory=None,
+        token_path_owner=None,
     ) -> "PhysicalLiveRoute":
+        from .token_path_activation import require_token_path_owner
+        if token_path_owner is None:
+            owner_factory = getattr(session_factory, "token_path_owner_factory", None)
+            if callable(owner_factory):
+                token_path_owner = owner_factory()
+        require_token_path_owner(token_path_owner)
         document = json.loads(Path(plan_path).read_text(encoding="utf-8"))
         controller_document = document["controller"]
         authority = _load_live_seed_authority(
@@ -1764,6 +1795,7 @@ class PhysicalLiveRoute:
                 force_relay=force_relay,
                 session_factory=session_factory or _ConcurrentNodeSession,
                 external_session_factory=external_session_factory,
+                token_path_owner=token_path_owner,
             )
         except BaseException:
             authority.close()
@@ -2003,6 +2035,14 @@ class PhysicalLiveRoute:
         ):
             raise ValueError("invalid_stop_token_ids")
         self._stop_token_ids = frozenset(token_ids)
+
+    def qualify_token_path(self) -> None:
+        """Require signed participant installation before publishing ON readiness."""
+        owner = self._token_path_owner
+        if owner is not None and owner.enabled:
+            if not self._open or self._deployment_qualification is None:
+                raise RuntimeError("token_path_owner_route_unavailable")
+            owner.install(stop_token_ids=tuple(sorted(self._stop_token_ids)))
 
     def set_public_projections(
         self,
@@ -4506,6 +4546,7 @@ class PhysicalLiveRoute:
             request_id=request_id,
             sink=sink,
             _stop_token_ids_override=frozenset(),
+            _startup_qualification=True,
         )
 
     def infer(
@@ -4523,6 +4564,7 @@ class PhysicalLiveRoute:
         authorize_cleanup: Callable[[float], float] | None = None,
         publish_cleanup_receipt: Callable[[Mapping[str, Any]], None] | None = None,
         _stop_token_ids_override: frozenset[int] | None = None,
+        _startup_qualification: bool = False,
         speculation_preference: str | None = None,
     ) -> InferenceResult:
         # This lock is request-scoped. No route-global mutex spans physical
@@ -4851,10 +4893,35 @@ class PhysicalLiveRoute:
                     "cleanup_receipt_published": False,
                 }
             cleanup_subject = self._request_cleanup_subject(request_id)
+            token_attempt = None
             try:
                 cancelled_before_start = False
+                start_command_id = self._command_id(entry_node_id, "infer-start")
+                token_owner = getattr(self, "_token_path_owner", None)
+                if _startup_qualification:
+                    challenge_prompt, challenge_output = self.startup_challenge
+                    if (_startup_qualification is not True or route_identity is not None
+                            or speculation_preference is not None
+                            or tuple(token_ids) != challenge_prompt
+                            or max_new_tokens != len(challenge_output)
+                            or _stop_token_ids_override != frozenset()):
+                        raise ValueError("invalid_startup_qualification")
+                    # This exact controller-authenticated calibration precedes
+                    # product qualification. It supplies no autonomous grant.
+                    token_owner = None
+                if (getattr(token_owner, "required", False)
+                        and (route_identity is None or speculation_preference is not None)):
+                    raise RuntimeError("token_path_activation_unsupported")
                 if route_identity is not None:
                     bind_control = self._request_control_identity(request_id)
+                    if token_owner is not None and speculation_preference is None:
+                        assert locked_path_manifest is not None
+                        token_attempt = token_owner.prepare(
+                            command_id=start_command_id, request=request, control=bind_control,
+                            manifest=dict(locked_path_manifest),
+                            participating_node_ids=participating_node_ids,
+                            stop_token_ids=tuple(sorted(request_stop_token_ids)),
+                        )
                     for node_id in sorted(participating_node_ids):
                         bound_response = self._send_request_command(
                             request_id=request_id,
@@ -4864,7 +4931,7 @@ class PhysicalLiveRoute:
                                 "bind-request-control",
                             ),
                             command="bind_request_control",
-                            payload={
+                            payload=token_attempt.bind_payload() if token_attempt is not None else {
                                 "request_id": request_id,
                                 "control": bind_control,
                             },
@@ -4928,6 +4995,8 @@ class PhysicalLiveRoute:
                     start_payload["excluded_placement_ids"] = excluded_placement_ids
                 if speculation_preference is not None:
                     start_payload["speculation"] = {"preference": speculation_preference}
+                emitted = 0
+                stopped = False
                 if cancelled_before_start:
                     # Bind generation 0 on every participant, then let the
                     # already-authorized generation-1 infer_cancel_wait fanout
@@ -4940,20 +5009,79 @@ class PhysicalLiveRoute:
                     output = ()
                     status = "CANCELLED"
                 else:
-                    started_response = self._send_request_command(
-                        request_id=request_id,
-                        node_id=entry_node_id,
-                        command_id=self._command_id(entry_node_id, "infer-start"),
-                        command="infer_start",
-                        payload=start_payload,
-                    )
-                    observation = self._verify_observation(
+                    started_observation = None
+                    def send_start(payload):
+                        nonlocal started_observation
+                        response = self._send_request_command(
+                            request_id=request_id, node_id=entry_node_id,
+                            command_id=start_command_id, command="infer_start", payload=payload)
+                        if token_attempt is not None:
+                            # Preserve the authenticated start refusal before a
+                            # missing progress terminal can obscure its cause.
+                            # The ordinary response is verified exactly once.
+                            started_observation = self._verify_observation(
+                                entry_node_id, response, event="inference_started")
+                            if started_observation["details"].get("status") not in {
+                                "DECODING", "COMPLETED", "CANCELLED"
+                            }:
+                                raise RuntimeError("route_inference_start_failed")
+                        return response
+
+                    if token_attempt is None:
+                        started_response = send_start(start_payload)
+                    else:
+                        def token_cancelled():
+                            if cancel_requested is not None and cancel_requested():
+                                assert authorize_cleanup is not None
+                                self._install_observed_owner_cancellation(
+                                    request_id, authorize_cleanup=authorize_cleanup)
+                                return True
+                            return False
+
+                        def consume_progress(receipt):
+                            nonlocal emitted, stopped, prefill_completed_at
+                            if prefill_completed_at is None:
+                                prefill_completed_at = time.monotonic()
+                            if token_cancelled():
+                                raise RuntimeError("request_cancelled")
+                            if receipt.token_ids:
+                                # Verified, sealed, current-grant compute progress
+                                # defers redundant probes just like a legacy decode.
+                                # Empty terminals/heartbeats prove no stage progress.
+                                self._note_progress_receipts(participating_node_ids)
+                            for token_id in receipt.token_ids:
+                                if token_cancelled():
+                                    raise RuntimeError("request_cancelled")
+                                if token_id in request_stop_token_ids:
+                                    stopped = True
+                                if not stopped:
+                                    sink.emit(emitted, token_id)
+                                    token_times.append(time.monotonic())
+                                    emitted += 1
+
+                        started_response = token_attempt.run(
+                            send=send_start, consume=consume_progress,
+                            cancelled=token_cancelled,
+                            interrupt=lambda: self._sessions[entry_node_id].interrupt_command(
+                                start_command_id, code="token_progress_interrupted"),
+                        )
+                    observation = started_observation if token_attempt is not None else self._verify_observation(
                         entry_node_id,
                         started_response,
                         event="inference_started",
                     )
-                    prefill_completed_at = time.monotonic()
-                    output = self._output_tokens(observation)
+                    assert observation is not None
+                    prefill_completed_at = prefill_completed_at or time.monotonic()
+                    if token_attempt is None:
+                        output = self._output_tokens(observation)
+                    else:
+                        details = observation["details"]
+                        if (details.get("token_grant_digest") != token_attempt.grant.digest
+                                or details.get("status") != token_attempt.status
+                                or type(details.get("token_count")) is not int
+                                or details["token_count"] != len(token_attempt.token_ids)):
+                            raise RuntimeError("token_progress_terminal_mismatch")
+                        output = token_attempt.token_ids
                     status = observation["details"].get("status")
                     # ``inference_started`` is success-shaped.  Only a request
                     # that is decoding, already completed, or owner-cancelled
@@ -4963,9 +5091,8 @@ class PhysicalLiveRoute:
                     if status not in {"DECODING", "COMPLETED", "CANCELLED"}:
                         raise RuntimeError("route_inference_start_failed")
                     # PV34: a completed prefill is progress by every stage of the path.
-                    self._note_progress_receipts(participating_node_ids)
-                emitted = 0
-                stopped = False
+                    if token_attempt is None:
+                        self._note_progress_receipts(participating_node_ids)
 
                 def truncate_at_stop(tokens: tuple[int, ...]) -> tuple[int, ...]:
                     nonlocal stopped
@@ -5174,6 +5301,8 @@ class PhysicalLiveRoute:
                     raise InferenceCancelled("inference_cancelled")
             except BaseException as exc:
                 failure_observed_at = time.monotonic()
+                if token_attempt is not None:
+                    token_attempt.close()
                 remote_reason = getattr(exc, "remote_code", None)
                 reason = str(
                     remote_reason

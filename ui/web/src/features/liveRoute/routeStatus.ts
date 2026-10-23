@@ -83,7 +83,8 @@ export interface LiveRoutePeer {
     physical_proof_required: true;
     backend_candidate: boolean;
   } & ({
-    work_unit: 'transformer_layer';
+    work_unit: 'transformer_layer' | 'transformer_stage';
+    materialization?: 'per_layer' | 'per_stage';
     maximum_total_cleanup_ms: typeof PEER_MAXIMUM_TOTAL_CLEANUP_MS;
     cooperative_bound_candidate: boolean;
   } | {
@@ -504,13 +505,22 @@ function peer(value: unknown, path: string): LiveRoutePeer {
       'runtime_backend', 'decode_mode', 'work_unit', 'maximum_observed_work_unit_ms',
       'observed_work_unit_count', 'maximum_total_cleanup_ms',
       'physical_proof_required', 'backend_candidate', 'cooperative_bound_candidate',
+      ...(Object.prototype.hasOwnProperty.call(item.interruptibility, 'materialization') ? ['materialization'] : []),
     ], `${path}.interruptibility`);
     const nativeReplay = control.work_unit === 'bounded_qwen2_replay_chunk';
     if (
-      (!nativeReplay && (control.work_unit !== 'transformer_layer'
+      (!nativeReplay && ((!['transformer_layer', 'transformer_stage'].includes(String(control.work_unit)))
         || control.runtime_backend === 'mobile-rust-qwen2'
+        || (control.work_unit === 'transformer_stage'
+          ? control.materialization !== 'per_stage' || control.runtime_backend !== 'mlx'
+          : control.materialization !== undefined && control.materialization !== 'per_layer')
+        || (control.cooperative_bound_candidate === true && (
+          typeof control.maximum_observed_work_unit_ms !== 'number'
+          || !Number.isFinite(control.maximum_observed_work_unit_ms)
+          || control.maximum_observed_work_unit_ms < 0 || control.maximum_observed_work_unit_ms >= 2000
+          || !Number.isInteger(control.observed_work_unit_count) || Number(control.observed_work_unit_count) <= 0))
         || control.maximum_total_cleanup_ms !== PEER_MAXIMUM_TOTAL_CLEANUP_MS))
-      || (nativeReplay && (control.maximum_total_cleanup_ms !== null
+      || (nativeReplay && (control.materialization !== undefined || control.maximum_total_cleanup_ms !== null
         || control.cooperative_bound_candidate !== false
         || control.runtime_backend !== 'mobile-rust-qwen2'
         || control.decode_mode !== 'complete_context_replay'))
@@ -528,7 +538,8 @@ function peer(value: unknown, path: string): LiveRoutePeer {
     interruptibility = nativeReplay
       ? Object.freeze({ ...common, work_unit: 'bounded_qwen2_replay_chunk',
         maximum_total_cleanup_ms: null, cooperative_bound_candidate: false })
-      : Object.freeze({ ...common, work_unit: 'transformer_layer',
+      : Object.freeze({ ...common, work_unit: control.work_unit as 'transformer_layer' | 'transformer_stage',
+        ...(control.materialization === undefined ? {} : { materialization: control.materialization as 'per_layer' | 'per_stage' }),
         maximum_total_cleanup_ms: PEER_MAXIMUM_TOTAL_CLEANUP_MS,
         cooperative_bound_candidate: control.cooperative_bound_candidate });
   }

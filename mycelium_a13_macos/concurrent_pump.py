@@ -49,8 +49,11 @@ the disposition, or any control flow.
 
 class ConcurrentTargetControlPump(TargetControlPump):
     _concurrent = True
+    # One outbound coalesced receipt (<=1 MiB), its signed envelope and metadata.
+    # Serial pump and all other private-state defaults remain unchanged.
+    _state_max_bytes = 2 * 1024 * 1024
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, token_progress_cursor=None, **kwargs):
         super().__init__(*args, **kwargs)
         try:
             if self._state['pending'] is not None:
@@ -87,6 +90,9 @@ class ConcurrentTargetControlPump(TargetControlPump):
             self._startup_unresolved = sorted(
                 key for key, row in value['claims'].items() if row['phase'] in _UNRESOLVED_PHASES
             )
+            from .token_progress_pump import PumpTokenProgress
+            self._token_progress = PumpTokenProgress(self, token_progress_cursor)
+            self._progress_yield = False
             self._executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix='a13-native-dispatch')
         except BaseException:
             super().close()
@@ -227,6 +233,8 @@ class ConcurrentTargetControlPump(TargetControlPump):
             if any(statement[field] != value for field, value in binding.items()):
                 raise ControlPumpError('control_membership_changed')
             command = statement['native_command']
+            if command['command'] == 'infer_start' and 'token_grant' in command['payload']:
+                self._token_progress.open(command)
             row['phase'] = 'executing'
             self._save_claims() # An interruption beyond here is conservatively uncertain.
             future = self._executor.submit(self.worker.send,
@@ -267,6 +275,9 @@ class ConcurrentTargetControlPump(TargetControlPump):
             return {'state': outcome.state, 'operation': packet['operation'],
                     'cause': outcome.cause}
         claims = self._claims_state['claims']
+        if packet['operation'] == 'token_progress':
+            self._progress_yield = True
+            return self._token_progress.accepted(packet, result)
         if packet['operation'] == 'ack':
             statement = packet['envelope']['statement']
             command_id = statement['command_id']
@@ -289,6 +300,7 @@ class ConcurrentTargetControlPump(TargetControlPump):
                     max(0, len(claims) - 1))
                 claims.pop(command_id, None)
             self._save_claims() # Replayed ack can safely finish after this write.
+            self._token_progress.retire(command_id)
             self._state['outbound'] = None
             self._save()
             return {'state': statement['disposition'], 'command_id': command_id,
@@ -361,7 +373,16 @@ class ConcurrentTargetControlPump(TargetControlPump):
             if self._state['outbound'] is not None:
                 return self._finish_outbound(target)
             self._collect()
+            if self._progress_yield:
+                self._progress_yield = False
+            else:
+                progress = self._token_progress.next(target)
+                if progress is not None:
+                    self._progress_yield = True
+                    return progress
             for command_id, row in self._claims_state['claims'].items():
+                if not self._token_progress.ready_to_ack(command_id):
+                    continue
                 if row['phase'] not in {'executed', 'reconciliation_required'}:
                     continue
                 native = row['native_response']
@@ -382,5 +403,6 @@ class ConcurrentTargetControlPump(TargetControlPump):
 
     def close(self):
         super().close()
+        self._token_progress.close()
         self.worker.close()
         self._executor.shutdown(wait=False, cancel_futures=True)

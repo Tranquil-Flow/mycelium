@@ -97,7 +97,7 @@ export function liveRouteStatusFixture(): LiveRouteStatus {
         activation_output_bytes: 8192,
         release_state: 'released', last_release_reason: 'normal_completion',
         release_counts: { request_complete: 1 },
-        interruptibility: { runtime_backend: 'mlx', decode_mode: 'stage_local_kv', work_unit: 'transformer_layer', maximum_observed_work_unit_ms: 125, observed_work_unit_count: 24, maximum_total_cleanup_ms: 4_200, physical_proof_required: true, backend_candidate: true, cooperative_bound_candidate: true },
+        interruptibility: { runtime_backend: 'mlx', decode_mode: 'stage_local_kv', work_unit: 'transformer_layer', materialization: 'per_layer', maximum_observed_work_unit_ms: 125, observed_work_unit_count: 24, maximum_total_cleanup_ms: 4_200, physical_proof_required: true, backend_candidate: true, cooperative_bound_candidate: true },
       },
     ],
     recent_inferences: [

@@ -36,6 +36,7 @@ import pytest
 
 from mycelium_live import route as route_module
 from mycelium_live.route import PhysicalLiveRoute
+from tests.live.token_path_test_support import ObserverTokenOwner
 
 NODE_ID = "node-a"
 PLACEMENT_ID = "stage-000-primary"
@@ -70,6 +71,7 @@ def _route(monkeypatch: pytest.MonkeyPatch) -> PhysicalLiveRoute:
         route_module, "execution_graph_from_document", lambda _document: _graph()
     )
     return PhysicalLiveRoute(
+        token_path_owner=ObserverTokenOwner(),
         controller=SimpleNamespace(peers=(SimpleNamespace(node_id=NODE_ID),)),
         endpoints={},
         run_plan={

@@ -3,6 +3,7 @@
 from dataclasses import replace
 from types import SimpleNamespace
 from mycelium_live.route import PhysicalLiveRoute
+from tests.live.token_path_test_support import ObserverTokenOwner
 from scripts.build_qwen_live_route import _physical_graph_document
 import pytest
 from test_router_numpy_qwen_kv import _case, _work_item
@@ -51,6 +52,7 @@ def test_real_runtime_snapshot_to_route_projection_is_closed(tmp_path, bad_value
     port = case.ports[0]
     placement = case.graph.stages[0].placements[0]
     route = PhysicalLiveRoute(
+        token_path_owner=ObserverTokenOwner(),
         controller=SimpleNamespace(peers=(SimpleNamespace(node_id=placement.node_id),)),
         endpoints={},
         run_plan={'deployment_id': case.graph.deployment_id, 'nodes': [{

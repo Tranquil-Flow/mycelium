@@ -43,7 +43,10 @@ def test_external_control_only_emits_safe_existing_secret_path(tmp_path):
 
 def _route(plan_path, fixture):
     from mycelium_live.route import PhysicalLiveRoute
-    return PhysicalLiveRoute.from_operator_plan(plan_path, seed_state_root=fixture.args.phone_seed_state_root)
+    from tests.live.token_path_test_support import ObserverTokenOwner
+    return PhysicalLiveRoute.from_operator_plan(plan_path,
+        seed_state_root=fixture.args.phone_seed_state_root,
+        token_path_owner=ObserverTokenOwner())
 
 
 def _refused(action, code):

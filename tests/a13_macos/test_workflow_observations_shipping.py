@@ -55,7 +55,7 @@ def _prepared_plan(tmp_path, enrolled):
 
     document = rename(document)
     controller = document['controller']
-    from tests.seed_coordinator.test_plan_binding import _two_member_plan
+    from tests.seed_coordinator.plan_fixture import _two_member_plan
     offers = rename(_two_member_plan())['controller']['membership_snapshot']['assignment_offers']
     for envelope in offers:
         for endpoint in envelope['message']['peer_endpoint_records']:

@@ -3877,6 +3877,9 @@ def _qualified_runtime(
         selected_deployment_dir = deployment_dir or _deployment_from_plan(operator_plan)
         codec = prompt_codec_from_deployment(selected_deployment_dir)
         route.set_stop_token_ids(getattr(codec, "stop_token_ids", frozenset()))
+        qualify_token_path = getattr(route, "qualify_token_path", None)
+        if callable(qualify_token_path):
+            qualify_token_path()
         return QualifiedDeploymentRuntime(
             deployment_id=identity.deployment_id,
             model_id=identity.model_id,

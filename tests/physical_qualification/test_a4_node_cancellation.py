@@ -1336,6 +1336,10 @@ def test_legacy_terminal_decode_waits_for_exact_transport_retirement() -> None:
     service.router = Router()
     service.transport = Transport()
     service.command_timeout = 5.0
+    # Mirror constructor-owned state now used by the token-wait fence, including
+    # on this legacy terminal-retirement path. Keep the real retirement checks.
+    service._control_lock = threading.RLock()
+    service._token_wait_fences = {}
     service._sinks = {
         request_id: SimpleNamespace(
             token_ids=[11, 12],

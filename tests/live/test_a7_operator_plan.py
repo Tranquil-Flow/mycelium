@@ -163,6 +163,7 @@ class _StagedSessionFactory:
         self._roots = roots
         self._socket_roots = socket_roots
         self.sessions: dict[str, Any] = {}
+        self.token_files = {}
 
     def __call__(self, *, argv: tuple[str, ...], node_id: str, run_id: str, deployment_id: str, timeout_seconds: float) -> Any:
         del argv
@@ -171,7 +172,12 @@ class _StagedSessionFactory:
             "--node-id", node_id, "--artifact-root", str(self._roots[node_id]), "--socket-root", str(self._socket_roots[node_id]),
             "--sidecar-binary", str(SIDECAR_BINARY), "--sidecar-local-only", "--command-timeout", "900", "--decode-mode", "stage_local_kv",
         )
-        session = _ConcurrentNodeSession(argv=command, node_id=node_id, run_id=run_id, deployment_id=deployment_id, timeout_seconds=timeout_seconds)
+        if self.token_files:
+            command += (
+                "--endpoint-secret-file", str(self.token_files[node_id][0]),
+                "--token-policy-trust-file", str(self.token_files[node_id][1]))
+        session = _ConcurrentNodeSession(argv=command,
+            node_id=node_id, run_id=run_id, deployment_id=deployment_id, timeout_seconds=timeout_seconds)
         self.sessions[node_id] = session
         return session
 
@@ -218,11 +224,19 @@ def _route_from_plan(plan: dict[str, Any], root: Path) -> SimpleNamespace:
         run_plan=route_plan,
     )
     factory = _StagedSessionFactory(roots, socket_roots)
+    from tests.live.local_token_authority import LocalTokenAuthority
+    endpoints = {node: {"endpoint_id": f"pending-{node}", "membership_generation": index + 1}
+                 for index, node in enumerate(_NODES)}
+    token_authority = LocalTokenAuthority(SimpleNamespace(
+        root=root, node_ids=_NODES, endpoints_template=endpoints,
+        run_plan=route_plan, session_factory=factory))
+    factory.token_files = token_authority.files
     route = PhysicalLiveRoute(
         controller=controller_object,
-        endpoints={node: {"endpoint_id": f"pending-{node}", "membership_generation": index + 1} for index, node in enumerate(_NODES)},
+        endpoints=endpoints,
         run_plan=route_plan,
         session_factory=factory,
+        token_path_owner=token_authority.owner,
     )
     harness._install_endpoint_learning_verifier(route)
     return SimpleNamespace(route=route, graph=graph, session_factory=factory)

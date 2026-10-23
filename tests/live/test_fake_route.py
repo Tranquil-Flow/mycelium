@@ -8,6 +8,7 @@ import pytest
 
 import mycelium_live.route as live_route_module
 from mycelium_live.route import FakeLiveRoute, PhysicalLiveRoute
+from tests.live.token_path_test_support import ObserverTokenOwner
 
 
 class RecordingSink:
@@ -136,6 +137,7 @@ def test_physical_route_initializes_optional_public_projections(monkeypatch) -> 
         lambda _document: graph,
     )
     route = PhysicalLiveRoute(
+        token_path_owner=ObserverTokenOwner(),
         controller=SimpleNamespace(peers=()),
         endpoints={},
         run_plan={
@@ -236,6 +238,7 @@ def test_physical_route_preserves_prepositioned_artifacts_for_cleanup(
 
     route = PhysicalLiveRoute.from_operator_plan(
         plan_path,
+        token_path_owner=ObserverTokenOwner(),
         seed_state_root=tmp_path / "seed",
     )
 
@@ -257,6 +260,7 @@ def test_single_physical_route_publishes_one_honest_qualified_model(monkeypatch)
         lambda _document: graph,
     )
     route = PhysicalLiveRoute(
+        token_path_owner=ObserverTokenOwner(),
         controller=SimpleNamespace(peers=()),
         endpoints={},
         run_plan={

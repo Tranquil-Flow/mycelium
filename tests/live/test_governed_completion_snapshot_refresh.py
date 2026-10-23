@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 
 import mycelium_live.route as route_module
+from tests.live.token_path_test_support import ScriptedTokenOwner
 
 DIGEST = "sha256:" + "a" * 64
 REQUEST_ID = "request-refresh"
@@ -100,6 +101,15 @@ class ScriptedNode:
                 node._operate(phase="prefill")
             if self.start_status == "DECODING":
                 self.output = [101]
+                if 'token_grant' in payload:
+                    # Autonomous native execution performs the same operations;
+                    # only receipt delivery replaces per-token owner commands.
+                    for _ in range(MAX_NEW_TOKENS-1):
+                        for node in self.peers:
+                            node._operate(phase='decode')
+                        self.output.append(101+len(self.output))
+                    details = self.token_owner.publish(command_id, tokens=self.output, status='COMPLETED')
+                    return {'event':'inference_started','details':details}
             return {
                 "event": "inference_started",
                 "details": {
@@ -190,7 +200,9 @@ def governed(monkeypatch: pytest.MonkeyPatch):
     graph = _graph()
     monkeypatch.setattr(route_module, "execution_graph_from_document", lambda _: graph)
     monkeypatch.setattr(gateway_contracts, "qualification_digest", lambda _: DIGEST)
+    token_owner = ScriptedTokenOwner()
     route = route_module.PhysicalLiveRoute(
+        token_path_owner=token_owner,
         controller=SimpleNamespace(
             peers=tuple(SimpleNamespace(node_id=node_id, process_transport="local") for node_id in NODES)
         ),
@@ -214,6 +226,7 @@ def governed(monkeypatch: pytest.MonkeyPatch):
     }
     for node in nodes.values():
         node.peers = tuple(nodes.values())
+        node.token_owner = token_owner
     route._sessions = dict(nodes)
     # Startup live_attestation left one full snapshot per node.
     route._last_snapshots = {
@@ -298,6 +311,11 @@ def governed(monkeypatch: pytest.MonkeyPatch):
     try:
         yield state
     finally:
+        # Retire this scripted route before stopping its owned reconciliation
+        # executor. Token-path tests import this fixture; a retained open object
+        # otherwise remains discoverable by later diagnostics modules via GC.
+        route._open = False
+        route._closed = True
         route._cleanup_reconciliation_stop.set()
         route._cleanup_reconciliation_executor.shutdown(wait=True, cancel_futures=True)
 

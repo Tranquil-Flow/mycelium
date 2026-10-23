@@ -9,7 +9,9 @@ from test_control_pump import _world
 from test_control_session import owner, session
 
 
-def test_plan_factory_reaches_controller_and_route_without_process_arguments(tmp_path, monkeypatch):
+@pytest.mark.parametrize('token_enabled',[False,True])
+def test_plan_factory_reaches_controller_and_route_without_process_arguments(tmp_path, monkeypatch, token_enabled):
+    monkeypatch.setenv('MYCELIUM_TOKEN_PATH','on' if token_enabled else 'off')
     captured = {}
     authority = SimpleNamespace(signer=object(), seed_node_id='seed', members={}, close=lambda: None)
     monkeypatch.setattr(routes, '_load_live_seed_authority', lambda **kw: authority)
@@ -26,7 +28,10 @@ def test_plan_factory_reaches_controller_and_route_without_process_arguments(tmp
     path.write_text(json.dumps({'controller': {'mode':'physical', 'peers':[], 'source_root':str(tmp_path),
         'transfer_manifest':{}, 'membership_snapshot':{}, 'run_plan':{'nodes':[]}}}))
     factory = lambda **kw: None
+    token_owner=SimpleNamespace(enabled=True)
+    if token_enabled:factory.token_path_owner_factory=lambda:token_owner
     Route.from_operator_plan(path, seed_state_root=tmp_path/'seed', session_factory=factory)
+    assert captured['route']['token_path_owner'] is (token_owner if token_enabled else None)
     assert captured['controller']['session_factory'] is factory
     assert captured['route']['session_factory'] is factory
     assert captured['distinctness_checked'] is True

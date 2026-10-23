@@ -31,6 +31,7 @@ def test_physical_node_stops_on_sigterm_without_taking_a_lock(
 
     class FakeService:
         def __init__(self, **_kwargs: object) -> None:
+            assert _kwargs["token_policy_trust_file"] is None
             self._lock = threading.Lock()
 
         def close(self) -> None:
@@ -70,6 +71,7 @@ def test_physical_node_stops_on_sigterm_without_taking_a_lock(
             command_timeout=1.0,
             endpoint_secret_file=None,
             decode_mode=None,
+            token_policy_trust_file=None,
         ),
     )
     monkeypatch.setattr(sys, "stdin", Stdin())

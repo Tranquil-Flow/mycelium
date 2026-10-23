@@ -55,6 +55,9 @@ class _RealPeer:
 
 
 class _KillableSession:
+    def interrupt_command(self, command_id, *, code):
+        # The scripted send is synchronous; no correlation waiter survives it.
+        return False
     """Route session whose sends fail exactly as a dead node's would."""
 
     returncode = None

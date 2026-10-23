@@ -35,7 +35,8 @@ def test_frozen_worker_ignores_incompatible_homebrew_and_preserves_import_path(t
     subject = SimpleNamespace(limits=worker.WorkerLimits(1024, 1024, 60, 20),
         node_id='node-1', run_id='run-1', deployment_id='deployment-1',
         artifact_root=tmp_path/'artifacts', socket_root=tmp_path/'sockets',
-        sidecar_binary=tmp_path/'sidecar', capacity_root=None, endpoint_secret_file=None)
+        sidecar_binary=tmp_path/'sidecar', capacity_root=None, endpoint_secret_file=None,
+        token_policy_trust_file=None)
     before = list(sys.path)
     argv = worker.ManagedWorker._native_argv(subject)
     assert argv[:2] == (str(exe), '--managed-node')

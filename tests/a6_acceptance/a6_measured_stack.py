@@ -19,6 +19,7 @@ from mycelium_live import route as route_module
 from mycelium_live.liveness import LivenessSubject, SubjectKind
 from mycelium_request_gateway.contracts import InferenceSubmission, qualification_binding
 from tests.live.test_a6_live_router_recovery import _runtime
+from tests.live.token_path_test_support import ScriptedTokenOwner
 from tests.request_gateway.test_core import _synthetic_qualification
 
 CASE = "ordinary_browser_source_failure_recovery"
@@ -47,6 +48,10 @@ class _Session:
     def __init__(self):
         self.calls = []
 
+    def interrupt_command(self, command_id, *, code):
+        # This synchronous scripted transport has no outstanding reader wait.
+        return False
+
     def send(self, *, command_id, command, payload):
         self.calls.append(command)
         return {"sent": True}
@@ -57,6 +62,7 @@ def build_measured_stack(monkeypatch, tmp_path):
     qualification = _synthetic_qualification()
     monkeypatch.setattr(route_module, "execution_graph_from_document", lambda _: SimpleNamespace())
     route = route_module.PhysicalLiveRoute(
+        token_path_owner=ScriptedTokenOwner(),
         controller=SimpleNamespace(peers=()),
         endpoints={},
         run_plan={"run_id": "simulated-session",

@@ -141,6 +141,7 @@ class _A7SessionFactory:
         self._configs = {node: dict(config) for node, config in configs.items()}
         self._graph = graph
         self.sessions: dict[str, Any] = {}
+        self.token_files = {}
 
     def __call__(
         self,
@@ -182,6 +183,9 @@ class _A7SessionFactory:
             "--decode-mode",
             "stage_local_kv",
         )
+        if self.token_files:
+            command += ("--endpoint-secret-file", str(self.token_files[node_id][0]),
+                        "--token-policy-trust-file", str(self.token_files[node_id][1]))
         session = _ConcurrentNodeSession(
             argv=command,
             node_id=node_id,
@@ -716,11 +720,17 @@ def _build_r7_staged_route(
         _NODE_A: {"endpoint_id": "pending-node-a", "membership_generation": 1},
         _NODE_B: {"endpoint_id": "pending-node-b", "membership_generation": 2},
     }
+    from tests.live.local_token_authority import LocalTokenAuthority
+    token_authority = LocalTokenAuthority(SimpleNamespace(
+        root=root, node_ids=tuple(endpoints), endpoints_template=endpoints,
+        run_plan=run_plan, session_factory=session_factory))
+    session_factory.token_files = token_authority.files
     route = PhysicalLiveRoute(
         controller=controller,
         endpoints=endpoints,
         run_plan=run_plan,
         session_factory=session_factory,
+        token_path_owner=token_authority.owner,
     )
     _install_endpoint_learning_verifier(route)
     return _RouteState(

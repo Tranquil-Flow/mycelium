@@ -98,9 +98,9 @@ MAX_CLOCK_SKEW_SECONDS = 30.0
 _ALLOWED_OPERATIONS = frozenset(
     {"hello", "configure", "start", "health", "snapshot", "cancel", "stop",
      "bind_request_control", "update_request_control", "infer_start", "infer_decode",
-     "infer_cancel", "infer_cancel_wait", "rotate"}
+     "infer_cancel", "infer_cancel_wait", "rotate", "install_token_path"}
 )
-_WORK_OPERATIONS = frozenset({"configure", "start", "infer_start", "infer_decode", "rotate"})
+_WORK_OPERATIONS = frozenset({"configure", "start", "infer_start", "infer_decode", "rotate", "install_token_path"})
 _MAX_ACTIVE_WORK = 1
 _MAX_ACTIVE_CONTROL = 2
 _MAX_PENDING_COMMANDS = 128
@@ -138,6 +138,7 @@ _OPERATION_PAYLOAD_FIELD_SETS = {
         frozenset({"cleanup_subject"}),
         frozenset({"cleanup_subject", "receipt_only"}),
     ),
+    "install_token_path": (frozenset({"policy"}),),
     "cancel": (frozenset({"request_id"}),),
     "stop": (frozenset(),),
 }
@@ -146,11 +147,13 @@ _CANCEL_CONTROL_FIELDS = frozenset({"request_id", "deployment_id", "deployment_e
     "request_attempt", "path_id", "path_attempt", "path_digest", "topology_generation",
     "cancellation_generation", "deadline_budget_ms"})
 _OPERATION_PAYLOAD_FIELD_SETS.update({
-    "bind_request_control": (frozenset({"request_id", "control"}),),
+    "bind_request_control": (frozenset({"request_id", "control"}),
+        frozenset({"request_id", "control", "token_path"})),
     "update_request_control": (frozenset({"request_id", "control"}),),
     "infer_start": (frozenset({"request"}), frozenset({"request", "excluded_placement_ids"}),
         frozenset({"request", "control", "path_manifest"}),
-        frozenset({"request", "control", "path_manifest", "excluded_placement_ids"})),
+        frozenset({"request", "control", "path_manifest", "excluded_placement_ids"}),
+        frozenset({"request", "control", "path_manifest", "token_grant"})),
     "infer_decode": (frozenset({"request_id", "count"}), frozenset({"request_id", "count", "control"})),
     "infer_cancel": (frozenset({"request_id"}), _CANCEL_CONTROL_FIELDS),
     "infer_cancel_wait": (_CANCEL_CONTROL_FIELDS,),
@@ -378,6 +381,16 @@ def validate_native_command(value: Mapping[str, Any]) -> dict[str, Any]:
         frozenset(command["payload"]) in _OPERATION_PAYLOAD_FIELD_SETS[command["command"]],
         "managed_control_native_command_invalid",
     )
+    if command["command"] == "install_token_path":
+        from mycelium_node.token_provisioning import valid_policy_payload
+        _require(valid_policy_payload(command["payload"]), "managed_control_native_command_invalid")
+    if command["command"] == "bind_request_control" and "token_path" in command["payload"]:
+        from mycelium_node.token_participants import valid_bind_token_shape
+        _require(valid_bind_token_shape(command["payload"]), "managed_control_native_command_invalid")
+    if command["command"] == "infer_start" and "token_grant" in command["payload"]:
+        from mycelium_node.token_admission import valid_start_grant_shape
+        _require(valid_start_grant_shape(command["payload"]),
+                 "managed_control_native_command_invalid")
     if command["command"] == "cancel":
         _segment(
             command["payload"].get("request_id"),
@@ -656,7 +669,10 @@ def _empty_poll_delivery(response: Mapping[str, Any]) -> bool:
     )
 
 
-class ManagedControlMailbox:
+from .token_receipt_mailbox import TokenProgressMailboxMixin
+
+
+class ManagedControlMailbox(TokenProgressMailboxMixin):
     """SQLite-backed owner/target control mailbox with current-member guards."""
 
     def __init__(
@@ -700,6 +716,7 @@ class ManagedControlMailbox:
         self._monotonic = monotonic
         self._lock = threading.RLock()
         self._closed = False
+        self._setup_token_progress()
         # Delivery wake-up (see _DELIVERY_WAKE_PROTOCOL).  A monotonically increasing
         # generation, so a waiter can tell "an enqueue signalled me" from "my interval
         # elapsed" without holding the mailbox lock while it waits.
@@ -1765,6 +1782,7 @@ class ManagedControlMailbox:
             "/managed-control/poll": self.poll,
             "/managed-control/ack": self.ack,
             "/managed-control/result": self.result,
+            "/managed-control/token-progress": self.token_progress,
         }
         handler = routes.get(path)
         _require(handler is not None, "managed_control_route_unknown")
@@ -1772,6 +1790,7 @@ class ManagedControlMailbox:
 
     def close(self) -> None:
         self._closed = True
+        self._close_token_progress()
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -1793,6 +1812,7 @@ class ManagedControlClient:
         timeout: float = 10.0,
         clock: Callable[[], float] = time.time,
         max_prepared_requests: int = 256,
+        trusted_owner_endpoint_id: str | None = None,
         _local_tls_ca_certificate: Path | None = None,
     ) -> None:
         parts = urlsplit(base_url)
@@ -1836,6 +1856,9 @@ class ManagedControlClient:
         self.base_url = base_url.rstrip("/")
         self.signer = signer
         self.trusted_owner_key_record = dict(trusted_owner_key_record)
+        _require(trusted_owner_endpoint_id is None or (isinstance(trusted_owner_endpoint_id, str)
+                 and 0 < len(trusted_owner_endpoint_id) <= 256), "managed_control_owner_pin_invalid")
+        self.trusted_owner_endpoint_id = trusted_owner_endpoint_id
         self.swarm_id = swarm_id
         self.owner_node_id = owner_node_id
         self.timeout = float(timeout)
@@ -2189,6 +2212,10 @@ class ManagedControlClient:
             _require(result["native_response"] is None and result["native_response_digest"] is None,
                 "managed_control_response_invalid")
         return result
+
+    def token_progress(self, **kwargs):
+        from .token_receipt_mailbox import send_token_progress
+        return send_token_progress(self, **kwargs)
 
     def poll(
         self,

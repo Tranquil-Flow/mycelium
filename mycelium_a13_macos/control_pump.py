@@ -122,6 +122,8 @@ def _expired_envelope(error: BaseException) -> bool:
     return getattr(error, 'code', None) == 'managed_control_message_expired'
 
 class TargetControlPump:
+    _state_max_bytes = 256 * 1024
+
     def __init__(self,state_root:Path,*,client:ManagedControlClient,worker:ManagedWorker,
                  current_member:Callable[[],Mapping[str,Any]], sequence_root=None):
         self.root=_private_directory(Path(state_root),create=True)
@@ -155,10 +157,10 @@ class TargetControlPump:
                 except BlockingIOError:raise ControlPumpError('control_pump_already_running') from None
             if not getattr(self,'_concurrent',False) and os.path.lexists(self.root/'concurrent.json'):
                 raise ControlPumpError('concurrent_state_requires_concurrent_pump')
-            value=_load_private_json(self.path)
+            value=_load_private_json(self.path,max_bytes=self._state_max_bytes)
             if value is None:
                 value={'protocol':_PROTOCOL,'binding':self._binding,'sequence':0,'pending':None,'outbound':None}
-                _atomic_private_json(self.path,value)
+                _atomic_private_json(self.path,value,max_bytes=self._state_max_bytes)
             legacy=value.get('protocol')=='mycelium.a13.target_control_pump.v1'
             if legacy:
                 value['protocol']=_PROTOCOL;value['outbound']=None
@@ -174,7 +176,7 @@ class TargetControlPump:
                 if not _binding_advanced(value['binding'],self._binding):
                     raise ControlPumpError('control_membership_changed')
                 value['binding']=self._binding
-                _atomic_private_json(self.path,value)
+                _atomic_private_json(self.path,value,max_bytes=self._state_max_bytes)
             if value['pending'] is not None and not isinstance(value['pending'],dict):raise ControlPumpError('control_state_invalid')
             if value['outbound'] is not None and not isinstance(value['outbound'],dict):raise ControlPumpError('control_state_invalid')
             self._state=value
@@ -185,7 +187,7 @@ class TargetControlPump:
             raise
 
     def _save(self):
-        _atomic_private_json(self.path,self._state)
+        _atomic_private_json(self.path,self._state,max_bytes=self._state_max_bytes)
 
     def _next_request(self):
         if self._sequence_root is None:

@@ -13,8 +13,12 @@ from .managed_control import (
     _binding_from_member, _verify_signed, _require, _detached,
 )
 
-_PROTOCOLS = {'enqueue': OWNER_COMMAND_PROTOCOL, 'poll': TARGET_POLL_PROTOCOL, 'ack': TARGET_ACK_PROTOCOL}
-_FIELDS = {'enqueue': _OWNER_FIELDS, 'poll': _POLL_FIELDS, 'ack': _ACK_FIELDS}
+from .token_receipt_mailbox import PROGRESS
+
+_PROTOCOLS = {'enqueue': OWNER_COMMAND_PROTOCOL, 'poll': TARGET_POLL_PROTOCOL, 'ack': TARGET_ACK_PROTOCOL,
+              'token_progress': PROGRESS}
+_FIELDS = {'enqueue': _OWNER_FIELDS, 'poll': _POLL_FIELDS, 'ack': _ACK_FIELDS,
+           'token_progress': _POLL_FIELDS | {'command_id', 'claim_token', 'receipt'}}
 
 
 def prepare(client, operation, *, target, **kwargs):
@@ -30,6 +34,11 @@ def prepare(client, operation, *, target, **kwargs):
         if operation == 'ack':
             additions = {field: kwargs.pop(field) for field in (
                 'command_id', 'claim_token', 'disposition', 'native_response')}
+        if operation == 'token_progress':
+            additions = {field: kwargs.pop(field) for field in ('command_id', 'claim_token', 'receipt')}
+            from mycelium_node.token_progress import _snapshot
+            import json
+            additions['receipt'] = json.loads(_snapshot(additions['receipt']))
         statement = client._target_statement(
             protocol=TARGET_POLL_PROTOCOL_V2 if active is not None else _PROTOCOLS[operation],
             target=target, additions=additions, **kwargs)
@@ -71,6 +80,9 @@ def replay(client, prepared, *, target):
         if operation == 'ack':
             kwargs.update({field: statement[field] for field in (
                 'command_id', 'claim_token', 'disposition', 'native_response')})
+        if operation == 'token_progress':
+            kwargs.update({field: statement[field] for field in ('command_id', 'claim_token', 'receipt')})
+            kwargs['return_envelope'] = True
     return getattr(client, operation)(target=target, **kwargs)
 
 

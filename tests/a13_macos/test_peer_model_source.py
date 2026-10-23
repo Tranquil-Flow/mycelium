@@ -538,7 +538,9 @@ def test_lan_listener_refuses_non_members_and_oversized_frames(owner, monkeypatc
                 assert response.status == (404 if path != pms.PATH_READ else 400)
                 assert "data_base64" not in json.dumps(document)
                 if body is None:
-                    assert refused.is_set()
+                    # Reading the response can beat the server callback's set()
+                    # after _send returns; join that observation explicitly.
+                    assert refused.wait(5), "listener refusal observation did not finish"
                     assert document == {"error": {"code": "model_source_frame_invalid"}}
             finally:
                 connection.close()

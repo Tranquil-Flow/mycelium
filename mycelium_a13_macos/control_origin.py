@@ -34,6 +34,7 @@ MANAGED_CONTROL_ORIGIN_PATHS = frozenset(
         "/managed-control/poll",
         "/managed-control/ack",
         "/managed-control/result",
+        "/managed-control/token-progress",
     }
 )
 

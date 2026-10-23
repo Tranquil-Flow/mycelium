@@ -158,13 +158,32 @@ class ManagedTargetRuntime:
         self._worker_generation=0
         self._worker_replacements=0
         self._replacement_worker=None
+        self._token_client=client
+        self._token_host_pin=None
         try:
+            from .token_policy import prepare_host_pin
+            from mycelium_router.token_path_authority import TokenPathAuthorityError
+            try:
+                self._token_host_pin=prepare_host_pin(root=self.root,client=client,current_member=self._member,
+                    run_id=run_id,deployment_id=deployment_id,max_wall_seconds=limits.max_wall_seconds)
+            except TokenPathAuthorityError:
+                # Stale optional capability cannot break OFF; ON installation
+                # still refuses, never silently selects ordinary inference.
+                self._token_host_pin=None
             self.worker=self._make_worker()
             self.pump=ConcurrentTargetControlPump(self.root/'pump',client=client,worker=self.worker,
-                current_member=self._member,sequence_root=sequence_root)
+                current_member=self._member,sequence_root=sequence_root,
+                token_progress_cursor=self._token_progress_cursor)
         except BaseException:
             self._socket_parent.rmdir()
             raise
+
+    def _token_progress_cursor(self, command):
+        return self.worker.token_progress_cursor(command)
+
+    def _token_member(self):
+        from .token_policy import member_pin
+        return member_pin(self._token_client,self._member())
 
     def _make_worker(self):
         """Build one worker process.  Called once at start and again per replacement.
@@ -182,7 +201,8 @@ class ManagedTargetRuntime:
             capacity_root=self.root,
             sidecar_binary=self._sidecar_binary,resource_policy=self._resource_policy,limits=self._limits,
             membership_current=self._membership_current,authorize_load=self._authorize_load,
-            endpoint_secret_file=self._endpoint_secret_file,_test_observer=self._test_observer)
+            endpoint_secret_file=self._endpoint_secret_file,_test_observer=self._test_observer,
+            token_policy_trust_file=self._token_host_pin,token_policy_member=self._token_member)
 
     def _verify_stage(self):
         try:

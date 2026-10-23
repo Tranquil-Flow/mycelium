@@ -157,6 +157,9 @@ class _RelayedSuccessorFactory(LocalSessionFactory):
             "--command-timeout", "900",
             "--decode-mode", "stage_local_kv",
         )
+        if self.token_files:
+            command += ("--endpoint-secret-file", str(self.token_files[node_id][0]),
+                        "--token-policy-trust-file", str(self.token_files[node_id][1]))
         session = _ConcurrentNodeSession(
             argv=command, node_id=node_id, run_id=run_id,
             deployment_id=deployment_id, timeout_seconds=timeout_seconds,

@@ -66,9 +66,11 @@ def test_live_route_rejects_absent_seed_state_root_before_plan_construction(
     )
 
     with pytest.raises(route_module.LiveSeedStateError) as failed:
+        from tests.live.token_path_test_support import ObserverTokenOwner
         route_module.PhysicalLiveRoute.from_operator_plan(
             plan,
             seed_state_root=tmp_path / "absent-seed",
+            token_path_owner=ObserverTokenOwner(),
         )
 
     assert failed.value.code == "live_seed_state_missing"

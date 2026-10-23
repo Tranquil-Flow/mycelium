@@ -672,6 +672,7 @@ class RemoteMacMember:
                 raise RemoteMacMemberError('peer_seed_key_invalid')
             kwargs: dict[str, Any] = dict(base_url=canonical_https_origin(retained['seed_url']),
                 signer=self._signer, trusted_owner_key_record=records[0],
+                trusted_owner_endpoint_id=self._member.seed_endpoint_id,
                 swarm_id=self._member.swarm_id, owner_node_id=self._member.seed_node_id,
                 timeout=self._timeout, clock=self._clock)
             if _test_ca_certificate is not None:

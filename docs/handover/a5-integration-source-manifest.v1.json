@@ -2353,8 +2353,8 @@
     },
     {
       "path": "test_iroh_sidecar_cross_language.py",
-      "sha256": "sha256:0d67fe06ee8d5e2ba2312afd6048fec951eac083ac1b6d1fa3277c9156ef9a70",
-      "size_bytes": 47015
+      "sha256": "sha256:0412c60a890958a7a7e9e9160304663b935570c36b8e8ae53e1228f9c8204a00",
+      "size_bytes": 47723
     },
     {
       "path": "test_layer_assignment.py",
@@ -3478,8 +3478,8 @@
     },
     {
       "path": "tests/live/test_durable_seed_identity.py",
-      "sha256": "sha256:8a321699156592e8310f8da14bad53d25f9ee6a846735030e125a25c49ac446b",
-      "size_bytes": 7783
+      "sha256": "sha256:77a37cac7281e17e0cb9ecaa0762ab34984702969943748a5f41b8730b348e17",
+      "size_bytes": 7908
     },
     {
       "path": "tests/live/test_fake_route.py",
@@ -4198,8 +4198,8 @@
     },
     {
       "path": "tests/seed_coordinator/test_plan_binding.py",
-      "sha256": "sha256:b50c6cf4e1d63eba104e6135e28541ed924c63cc8bcee8fb75e708c3d6074364",
-      "size_bytes": 9598
+      "sha256": "sha256:dc06ddf96fbbd358908237890585f05b9cb42e2b6a7391edb35f0b096d1fa678",
+      "size_bytes": 7685
     },
     {
       "path": "tests/seed_coordinator/test_planner_placement_source.py",
