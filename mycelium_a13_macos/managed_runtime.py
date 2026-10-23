@@ -55,8 +55,27 @@ def _bounded_control_reason(exc: BaseException) -> dict:
             tokens.append(candidate[:64])
         if len(tokens) == 4:
             break
-    return {'exception_type': type(exc).__name__[:64], 'tokens': tokens,
-            'frames': _bounded_control_frames(exc)}
+    result = {'exception_type': type(exc).__name__[:64], 'tokens': tokens,
+              'frames': _bounded_control_frames(exc)}
+    # Typed route/status only: no body, header, origin, arbitrary path or query.
+    # Cause chains may be cyclic; bound both traversal and the accepted vocabulary.
+    from .managed_control import _HTTP_REPLAY_PATHS
+    seen = set()
+    current: BaseException | None = exc
+    for _ in range(8):
+        if current is None or id(current) in seen:
+            break
+        seen.add(id(current))
+        status = getattr(current, 'status', None)
+        path = getattr(current, 'request_path', None)
+        if type(status) is int and 100 <= status <= 599:
+            result.setdefault('http_status', status)
+        if isinstance(path, str):
+            path = path.split('?', 1)[0].split('#', 1)[0]
+            if path in _HTTP_REPLAY_PATHS:
+                result.setdefault('request_path', path)
+        current = current.__cause__ if current.__cause__ is not None else current.__context__
+    return result
 
 
 def _bounded_control_frames(exc: BaseException) -> list[dict]:

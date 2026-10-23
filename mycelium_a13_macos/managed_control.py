@@ -305,6 +305,24 @@ class ManagedControlError(RuntimeError):
         super().__init__(code)
 
 
+class _TransientHTTPError(ManagedControlError):
+    """Unstructured proxy error only; a structured refusal never has this type."""
+
+
+# Eight total HTTP attempts, one 10 s monotonic budget (or the caller's earlier
+# deadline), exponential 100 ms -> 1 s backoff. Never retry arbitrary POSTs:
+# these routes deduplicate signed request bytes or perform a read-only lookup.
+HTTP_RETRY_ATTEMPTS = 8
+HTTP_RETRY_WINDOW_SECONDS = 10.0
+HTTP_RETRY_INITIAL_SECONDS = 0.1
+HTTP_RETRY_MAX_SECONDS = 1.0
+_HTTP_RETRY_STATUSES = frozenset({502, 503, 504, 530})
+_HTTP_REPLAY_PATHS = frozenset({
+    '/managed-control/enqueue', '/managed-control/poll', '/managed-control/ack',
+    '/managed-control/result', '/managed-control/token-progress',
+})
+
+
 def _require(condition: bool, code: str) -> None:
     if not condition:
         raise ManagedControlError(code)
@@ -2108,6 +2126,56 @@ class ManagedControlClient:
             unregister()
 
     def _request(self, path: str, envelope: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Retry only proxy failures on exact, idempotent mailbox requests.
+
+        The durable caller still owns the envelope and ambiguous outcome. Nothing
+        here signs, refreshes TTL, advances a sequence, or replays native work.
+        Exhaustion retains the HTTP error, so the pump's existing reconciliation
+        terminal applies instead of requeueing indefinitely. Owner and gateway
+        command deadlines and cancellation remain authoritative.
+        """
+        if path not in _HTTP_REPLAY_PATHS:
+            return self._request_once(path, envelope)
+        deadline = time.monotonic() + HTTP_RETRY_WINDOW_SECONDS
+        parent = _REQUEST_DEADLINE.get()
+        if parent is not None:
+            deadline = min(deadline, parent)
+        delay = HTTP_RETRY_INITIAL_SECONDS
+        last = None
+        # Freeze once: even a caller mutating its input cannot change a retry.
+        envelope = _detached(envelope)
+        with request_deadline(deadline, interruption=_REQUEST_INTERRUPTION.get()):
+            for attempt in range(HTTP_RETRY_ATTEMPTS):
+                if last is not None and time.monotonic() >= deadline:
+                    raise last
+                try:
+                    return self._request_once(path, envelope)
+                except _TransientHTTPError as error:
+                    last = error
+                except ManagedControlError as error:
+                    if last is not None and error.code == 'managed_control_response_timeout':
+                        raise last from error
+                    raise
+                remaining = deadline - time.monotonic()
+                if attempt + 1 == HTTP_RETRY_ATTEMPTS or remaining <= 0:
+                    raise last
+                wait = min(delay, remaining)
+                interruption = _REQUEST_INTERRUPTION.get()
+                if interruption is None:
+                    time.sleep(wait)
+                else:
+                    wake = threading.Event()
+                    unregister = interruption.register(wake.set)
+                    try:
+                        wake.wait(wait)
+                    finally:
+                        unregister()
+                    _require(not interruption.is_set(), 'managed_control_command_interrupted')
+                delay = min(HTTP_RETRY_MAX_SECONDS, delay * 2)
+        assert last is not None  # all eight attempts failed
+        raise last
+
+    def _request_once(self, path: str, envelope: Mapping[str, Any]) -> Mapping[str, Any]:
         raw = canonical_json_bytes(dict(envelope))
         request = Request(
             self.base_url + path,
@@ -2123,18 +2191,39 @@ class ManagedControlClient:
             try:
                 error_raw = self._read_response(exc)
                 content_type = exc.headers.get("Content-Type")
+            except (OSError, URLError, ManagedControlError) as error:
+                # Incomplete HTTP error bodies cannot grant retry authority; keep
+                # the known status/path even if the response stalls at the deadline.
+                code = ('managed_control_command_interrupted'
+                        if getattr(error, 'code', None) == 'managed_control_command_interrupted'
+                        else 'managed_control_remote_error')
+                raise ManagedControlError(code, status=exc.code, request_path=path) from error
             finally:
                 exc.close()
             code = "managed_control_remote_error"
-            if content_type == "application/json":
-                try:
-                    error = _canonical_loads(error_raw)
-                    candidate = error.get("error")
-                    if isinstance(candidate, Mapping) and set(candidate) == {"code"}:
-                        code = str(candidate["code"])
-                except ManagedControlError:
-                    pass
-            raise ManagedControlError(code, status=exc.code, request_path=path) from exc
+            structured = False
+            try:
+                # This permissive parse can only DENY a retry, never accept a
+                # receipt or an authority code. Noncanonical JSON refusals also
+                # stay fatal; the canonical validator below still owns codes.
+                document = json.loads(error_raw) if len(error_raw) <= MAX_FRAME_BYTES else None
+                structured = isinstance(document, Mapping) and 'error' in document
+            except (ValueError, RecursionError):
+                pass
+            try:
+                error = _canonical_loads(error_raw)
+                candidate = error.get("error")
+                # A JSON refusal is not a proxy retry grant, even when a proxy
+                # rewrites Content-Type. Preserve the existing public code rules.
+                structured = 'error' in error
+                if (content_type == "application/json" and isinstance(candidate, Mapping)
+                        and set(candidate) == {"code"}):
+                    code = str(candidate["code"])
+            except ManagedControlError:
+                pass
+            error_type = (_TransientHTTPError if not structured and exc.code in _HTTP_RETRY_STATUSES
+                          else ManagedControlError)
+            raise error_type(code, status=exc.code, request_path=path) from exc
         except (OSError, URLError) as exc:
             # The route and the inner cause are both part of the bounded failure
             # identity: without them a fetch failure during a multi-request start
