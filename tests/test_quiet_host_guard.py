@@ -491,8 +491,36 @@ def test_real_pytest_suite_and_its_descendant_are_detected(live_lane_suite):
     assert qhg.R_LANE_SUITE in report.blocking_reasons
     assert live_lane_suite.pid in scan.suite_pids
     assert grandchild in descendant_pids
+    # The human-readable reason is deliberately capped at five runners.
+    # Assert membership in the complete structured report, not that this host
+    # happened to have fewer than five other suites at census time.
+    reported = report.to_json()["lane_suites"]
+    assert {hit["pid"] for hit in reported["roots"]} == root_pids
+    assert {hit["pid"] for hit in reported["descendants"]} == descendant_pids
+    assert live_lane_suite.pid in reported["suite_pids"]
+    assert grandchild in reported["suite_pids"]
+
+
+def test_full_suite_report_survives_truncated_human_detail():
+    """Seven runners plus their descendants all remain in the refusal payload."""
+    roots = set(range(100, 107))
+    children = {pid + 1000 for pid in roots}
+    rows = _rows(
+        [_ps_line(pid, 1, PYTHON, f"{PYTHON} -m pytest tests/lane-{pid}")
+         for pid in sorted(roots)]
+        + [_ps_line(pid + 1000, pid, PYTHON, f"{PYTHON} -c pass")
+           for pid in sorted(roots)]
+    )
+    report = _evaluate(rows=rows, own_pid=9999)
+    assert report.verdict == "NO-GO"
+    assert report.blocking_reasons == (qhg.R_LANE_SUITE,)
+    reported = report.to_json()["lane_suites"]
+    assert {hit["pid"] for hit in reported["roots"]} == roots
+    assert {hit["pid"] for hit in reported["descendants"]} == children
+    assert set(reported["suite_pids"]) == roots | children
     detail = {reason.code: reason.detail for reason in report.reasons}[qhg.R_LANE_SUITE]
-    assert f"pid={live_lane_suite.pid}" in detail
+    assert "(+2 more)" in detail
+    assert "pid=106" not in detail  # Omitted from prose, never from detection.
 
 
 def test_own_process_tree_is_excluded_from_the_real_census(live_lane_suite):
