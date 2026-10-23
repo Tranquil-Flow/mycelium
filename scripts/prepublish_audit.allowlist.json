@@ -164,6 +164,13 @@
       "category": "spdx_missing",
       "file": "apps/node-app/src-tauri/gen/apple/Sources/mycelium-node-app/bindings/bindings.h",
       "reason": "Tauri-generated template/bindings file, not original project code; keeps its upstream licence."
+    },
+    {
+      "category": "generic_secret",
+      "file": "tests/node_agent/test_token_progress.py",
+      "fingerprint": "6ef838b42d25",
+      "line": 177,
+      "reason": "Reviewed: Ed25519PrivateKey.from_private_bytes is a constructor expression reading a temporary test-generated key from authority[entry_secret], not embedded signing material. Match pinned to this exact expression and line."
     }
   ]
 }

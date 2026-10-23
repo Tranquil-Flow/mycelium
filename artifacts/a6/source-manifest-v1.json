@@ -552,6 +552,11 @@
       "size_bytes": 5702
     },
     {
+      "path": "docs/RELEASE-NOTES-v0.1.2.md",
+      "sha256": "sha256:0a2c9fbac378e924e205e852d120516494735a4d64ae92388221820696642497",
+      "size_bytes": 3576
+    },
+    {
       "path": "docs/automation/2026-07-18-qualification-adversarial-conformance.md",
       "sha256": "sha256:b7acf216f97dc8fa3da1f8980a14d0d56f60a018fe0f39e5247d21e25e25b9e4",
       "size_bytes": 7424
@@ -718,8 +723,8 @@
     },
     {
       "path": "docs/user/QUICKSTART-MACOS.md",
-      "sha256": "sha256:76123e09f4328ae55a8feda8d0a0fdf270ac6b5fef80e7a3083f931b1514fd73",
-      "size_bytes": 13906
+      "sha256": "sha256:5204a27ee3e19ff0ea6e751ea812ed9b9436f15a67795196f5b32e655347d19b",
+      "size_bytes": 14023
     },
     {
       "path": "docs/user/README.md",
@@ -5043,8 +5048,8 @@
     },
     {
       "path": "scripts/prepublish_audit.allowlist.json",
-      "sha256": "sha256:ad2114be37fbc309252f8571b4483817a28462685fad9b4ec5f9d14bfa56b965",
-      "size_bytes": 8671
+      "sha256": "sha256:6ddbd649c126209e32071ee90a9acdf8001bc51626336c4261b5ab1e5442e502",
+      "size_bytes": 9074
     },
     {
       "path": "scripts/prepublish_audit.py",
@@ -13258,5 +13263,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:61abab74eb01f1561ae92e34ea0d8015baaf3a53f76aecec0c723370aa9f0010"
+  "source_digest": "sha256:b2d04dfa35eb2b79cf0d09912608839e576e29fbacbb301088c48e1b539ce821"
 }
