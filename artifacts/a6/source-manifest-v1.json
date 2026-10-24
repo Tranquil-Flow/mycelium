@@ -553,8 +553,8 @@
     },
     {
       "path": "docs/RELEASE-NOTES-v0.1.2.md",
-      "sha256": "sha256:386b662cc4eefebdd9c177c43793fc061413d207e7a5b62bb38ec91df868d7e3",
-      "size_bytes": 3704
+      "sha256": "sha256:becb2f2e44237bdcd7f9fb7e811db7e4c26296f8873b9927c540a640b6f84ffd",
+      "size_bytes": 3892
     },
     {
       "path": "docs/automation/2026-07-18-qualification-adversarial-conformance.md",
@@ -1283,8 +1283,8 @@
     },
     {
       "path": "mycelium_a13_macos/web/chat.js",
-      "sha256": "sha256:78528f1b1ecc0b0e3e5ae8483149462eba7a04d5dd0abc6a5e1b20b1ca908b6c",
-      "size_bytes": 3800
+      "sha256": "sha256:b796584fdbc2bc1200850874701497e2cbcf70cae11d5672374c2744e485d702",
+      "size_bytes": 4318
     },
     {
       "path": "mycelium_a13_macos/web/index.html",
@@ -6778,8 +6778,8 @@
     },
     {
       "path": "tests/a13_macos/test_demo_chat.py",
-      "sha256": "sha256:3b7226d7e1838a9ae3e4fb1e014d1936fd67f74ba3a0b32bbe6a6e064d39940f",
-      "size_bytes": 8091
+      "sha256": "sha256:e766e6922c7d1439f9234f9a3b8905606e7158448319852bf2369bd947ca2470",
+      "size_bytes": 9934
     },
     {
       "path": "tests/a13_macos/test_demo_run_model.py",
@@ -13268,5 +13268,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:5ae5a90ca408a5b824ab27ae3912f73fd8bba2e4c07272305a054f1a1ebba1af"
+  "source_digest": "sha256:f0d66b2ff3a7ddca1962aadd09188672a40bb2c5ba0db901a59fca2d68f6cf1f"
 }

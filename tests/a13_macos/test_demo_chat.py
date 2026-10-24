@@ -195,3 +195,35 @@ def test_relay_routes_chat_with_csp_and_rejects_unbound():
         assert get('/chatty')[0] == 404 and get('/chat/../seed/x')[0] == 404
     finally:
         proxy.close()
+
+
+_CHAT_JS = __import__('pathlib').Path(chat_module.__file__).with_name('web') / 'chat.js'
+_NODE_HARNESS = r"""
+const vm = require('vm'); const fs = require('fs');
+const el = () => ({addEventListener(){}, append(){}, scrollIntoView(){}, textContent:'', value:'', disabled:false});
+const ctx = {document:{getElementById:el, createElement:el}, setInterval(){}, setTimeout, console};
+vm.createContext(ctx); vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), ctx);
+process.stdout.write(JSON.stringify(JSON.parse(process.argv[2]).map(([t, e]) => ctx.finishedText(t, e))));
+"""
+
+
+def _finished(cases):
+    import shutil, subprocess
+    node = shutil.which('node')
+    assert node, 'node is required to exercise the shipped chat page'
+    out = subprocess.run([node, '-e', _NODE_HARNESS, str(_CHAT_JS), json.dumps(cases)],
+                         capture_output=True, text=True, timeout=30, check=True)
+    return json.loads(out.stdout)
+
+
+def test_unproven_cleanup_after_text_is_a_note_not_a_stop():
+    """The answer was produced; slow node-cleanup confirmation must not read as a cryptic stop."""
+    note, empty, other = _finished([['Hello world', 'request_cleanup_unproven'],
+                                    ['', 'request_cleanup_unproven'],
+                                    ['Partial', 'chat_busy']])
+    assert note.startswith('Hello world\n') and '[stopped:' not in note
+    assert 'request_cleanup_unproven' not in note and 'cleanup' in note.lower()
+    assert 'everything the swarm produced' in note  # honest for complete and partial text alike
+    assert empty.startswith('[stopped:') and 'request_cleanup_unproven' not in empty  # nothing shown: a real stop
+    assert other == 'Partial\n[stopped: ' + "Someone else's prompt is running. Try again in a few seconds." + ']'
+    assert _finished([['Done', None]]) == ['Done']

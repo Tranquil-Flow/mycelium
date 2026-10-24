@@ -4,6 +4,7 @@ Mycelium lets Apple silicon Macs in a swarm share the work of running a language
 
 ## What changed
 
+- When an answer has been produced but node cleanup is not yet confirmed, the chat page shows a note after the answer rather than marking it stopped. Backend terminal status is unchanged.
 - Control-only startup no longer provisions fast-mode work authority or pins the later serving runtime to a bootstrap lifetime.
 - Optional fast mode uses a native token path and prepares each stage for serving. It remains OFF by default. No speed guarantee is made.
 - Installed workers receive the owner's authenticated token-path trust inputs. Startup refusals are reported instead of being mistaken for a successful start.
@@ -33,7 +34,7 @@ Fast mode stays OFF unless the launching environment already exports `MYCELIUM_T
 
 Asset: `mycelium-0.1.2-macos-arm64.zip`
 
-SHA-256: `3b12372e63b746bdc38579bfa9258c3c58c672d4cd9703315c3035015cdb746e`
+SHA-256: `01542cfc7f6e5f6927c4770f246fce98c5ad702ef1fb2745728af1ef25c4dc76`
 
 Run `shasum -a 256 mycelium-0.1.2-macos-arm64.zip` and compare the output with the value above and the separate `.sha256` file.
 

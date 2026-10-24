@@ -22,7 +22,17 @@ const MESSAGES = {
   chat_rate_limited:'You sent several prompts this minute. Wait a little.',
   chat_swarm_rate_limited:'The room sent many prompts this minute. Wait a little.',
   chat_prompt_too_long:'That prompt is too long (2,000 characters at most).',
+  request_cleanup_unproven:'The swarm could not confirm node cleanup in time. Try again in a moment.',
 };
+// Codes that end a request after text was already produced, where that text stands as the answer.
+const NOTES = {
+  request_cleanup_unproven:'the swarm could not confirm node cleanup in time. The text above is everything the swarm produced.',
+};
+function finishedText(text, error) {
+  if (!error) return text;
+  if (text && NOTES[error]) return `${text}\n[note: ${NOTES[error]}]`;
+  return (text ? text + '\n' : '') + `[stopped: ${MESSAGES[error] || error}]`;
+}
 function servedText(list) {
   if (!list || !list.length) return '';
   return 'Served by: ' + list.map((p) => `${p.label} ${p.node}${p.layers ? ` (layers ${p.layers[0]}–${p.layers[1] - 1})` : ''}`).join(' → ');
@@ -56,7 +66,7 @@ async function send(event) {
       const page = await call('/chat/api/events', {request_id:accepted.request_id, after:next});
       next = page.next; text += page.tokens.join(''); answer.textContent = text || '…';
       if (page.done) {
-        if (page.error) answer.textContent = (text ? text + '\n' : '') + `[stopped: ${MESSAGES[page.error] || page.error}]`;
+        if (page.error) answer.textContent = finishedText(text, page.error);
         if (page.seconds !== null) meta.textContent += ` · ${page.seconds} s`;
         break;
       }
