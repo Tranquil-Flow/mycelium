@@ -183,8 +183,13 @@ class ManagedTargetRuntime:
             from .token_policy import prepare_host_pin
             from mycelium_router.token_path_authority import TokenPathAuthorityError
             try:
-                self._token_host_pin=prepare_host_pin(root=self.root,client=client,current_member=self._member,
-                    run_id=run_id,deployment_id=deployment_id,max_wall_seconds=limits.max_wall_seconds)
+                # Control-only bootstrap has no model-load authority and cannot
+                # install a token path. It shares the durable run root with the
+                # later work runtime, but must not create or refresh that work
+                # lifetime's immutable process pin.
+                if self._authorize_load is not None:
+                    self._token_host_pin=prepare_host_pin(root=self.root,client=client,current_member=self._member,
+                        run_id=run_id,deployment_id=deployment_id,max_wall_seconds=limits.max_wall_seconds)
             except TokenPathAuthorityError:
                 # Stale optional capability cannot break OFF; ON installation
                 # still refuses, never silently selects ordinary inference.

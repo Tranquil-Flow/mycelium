@@ -117,7 +117,7 @@ def test_app_provisioned_native_accepts_only_the_authenticated_owner(tmp_path, w
             stages=tuple(replace(s, placements=tuple(replace(p, node_id=names[p.node_id])
                 for p in s.placements)) for s in base.graph.stages))
         app = local if role == 'owner' else remote
-        runtime = prepare_runtime(app, owner, tmp_path/'runtime')
+        runtime = prepare_runtime(app, owner, tmp_path/'runtime', authorize_load=lambda intent: False)
         try:
             w = runtime.worker
             # Use the actual native constructor, not a trust object built from

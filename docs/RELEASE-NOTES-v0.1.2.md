@@ -4,6 +4,7 @@ Mycelium lets Apple silicon Macs in a swarm share the work of running a language
 
 ## What changed
 
+- Control-only startup no longer provisions fast-mode work authority or pins the later serving runtime to a bootstrap lifetime.
 - Optional fast mode uses a native token path and prepares each stage for serving. It remains OFF by default. No speed guarantee is made.
 - Installed workers receive the owner's authenticated token-path trust inputs. Startup refusals are reported instead of being mistaken for a successful start.
 - Host-pin leases refresh from authenticated current membership during installation. Identity and process limits remain pinned; expired or revoked authority is still refused.
@@ -32,7 +33,7 @@ Fast mode stays OFF unless the launching environment already exports `MYCELIUM_T
 
 Asset: `mycelium-0.1.2-macos-arm64.zip`
 
-SHA-256: `d975df3b613e8fc8df0f81726a746fc45467d1d5a7ef833021dddb605a99b1d1`
+SHA-256: `3b12372e63b746bdc38579bfa9258c3c58c672d4cd9703315c3035015cdb746e`
 
 Run `shasum -a 256 mycelium-0.1.2-macos-arm64.zip` and compare the output with the value above and the separate `.sha256` file.
 

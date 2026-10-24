@@ -11,6 +11,7 @@ import socket
 import struct
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -2302,6 +2303,18 @@ def test_receive_reconnects_after_sidecar_disconnected_protocol_error() -> None:
         transport.close()
 
 
+@pytest.fixture
+def receive_reconnect_clock(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    # Reconnect sequencing is not a CPU-scheduling latency assertion. Keep the
+    # production budget unchanged and exercise expiry explicitly in its control.
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(
+        iroh_module, "time", SimpleNamespace(monotonic=lambda: clock.now)
+    )
+    return clock
+
+
+@pytest.mark.usefixtures("receive_reconnect_clock")
 def test_receive_reconnect_retires_old_session_and_retries_transient_handshake() -> None:
     hub = _Hub()
     router = _RecordingRouter()
@@ -2332,6 +2345,56 @@ def test_receive_reconnect_retires_old_session_and_retries_transient_handshake()
         assert transport.fatal_error is None
     finally:
         transport.close()
+
+
+def test_receive_reconnect_cannot_renew_expired_handshake_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    receive_reconnect_clock: SimpleNamespace,
+) -> None:
+    hub = _Hub()
+    router = _RecordingRouter()
+    transport = _transport(hub, delivery_timeout_seconds=0.2)
+    transport.bind_router(router)
+    transport.start()
+    old_receive = transport._receive_client
+    initial_client_count = len(hub.clients)
+    expected_deadline = receive_reconnect_clock.now + 0.2
+    attempts: list[float] = []
+    retired_before_admission: list[bool] = []
+    original_connect = _FakeClient.connect
+
+    def consume_handshake_budget(client, *, deadline=None) -> None:
+        if deadline is not None:
+            attempts.append(deadline)
+            retired_before_admission.append(
+                old_receive is not None and not old_receive.connected
+            )
+        try:
+            original_connect(client, deadline=deadline)
+        except ProtocolError:
+            if deadline is not None:
+                receive_reconnect_clock.now = deadline + 0.001
+            raise
+
+    monkeypatch.setattr(_FakeClient, "connect", consume_handshake_budget)
+    try:
+        hub.connect_failures.append(ProtocolError("handshake_rejected"))
+        hub.fail_receive(ProtocolError("sidecar_disconnected"))
+        deadline = time.monotonic() + 1
+        while transport.fatal_error is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert transport.fatal_error is not None
+        assert transport.fatal_error.code == "sidecar_receive_reconnect_failed"
+        assert attempts == [expected_deadline]
+        assert retired_before_admission == [True]
+        assert len(hub.clients) == initial_client_count + 1
+        assert old_receive is not None and old_receive.connected is False
+        assert all(not client.connected for client in hub.clients[initial_client_count:])
+        assert hub.acks == []
+        assert router.token_events == []
+    finally:
+        transport.close()
+    assert transport.worker_threads_alive == 0
 
 
 def test_local_dispatch_after_close_is_rejected_without_router_mutation() -> None:

@@ -135,7 +135,7 @@ def test_runtime_refreshes_authenticated_pin_immediately_before_install(tmp_path
     with _world(tmp_path/'world') as world:
         client = world['target_client']
         client.trusted_owner_endpoint_id = world['owner_signer'].endpoint_id
-        target = runtime(tmp_path/'target', world,
+        target = runtime(tmp_path/'target', world, authorize_load=lambda intent: False,
                          current_member=world['target'].managed_control_snapshot)
         try:
             path = target.worker.token_policy_trust_file

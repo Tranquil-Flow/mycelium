@@ -553,8 +553,8 @@
     },
     {
       "path": "docs/RELEASE-NOTES-v0.1.2.md",
-      "sha256": "sha256:0a2c9fbac378e924e205e852d120516494735a4d64ae92388221820696642497",
-      "size_bytes": 3576
+      "sha256": "sha256:386b662cc4eefebdd9c177c43793fc061413d207e7a5b62bb38ec91df868d7e3",
+      "size_bytes": 3704
     },
     {
       "path": "docs/automation/2026-07-18-qualification-adversarial-conformance.md",
@@ -1098,8 +1098,8 @@
     },
     {
       "path": "mycelium_a13_macos/managed_runtime.py",
-      "sha256": "sha256:4bbd749c258c4c81a276ad9e320593851647db57440b17048b9c518513c68ac8",
-      "size_bytes": 27719
+      "sha256": "sha256:7f89c0d11140cfc1b120b7413f3514dd22df799a956f192266e22bfeceb57b0b",
+      "size_bytes": 28071
     },
     {
       "path": "mycelium_a13_macos/managed_staging.py",
@@ -5698,8 +5698,8 @@
     },
     {
       "path": "test_router_iroh_transport.py",
-      "sha256": "sha256:af338a8fde1a9780de68a30207acb269cae0464aa9dacab28fa2dbff581fb4c4",
-      "size_bytes": 107580
+      "sha256": "sha256:9271aea847649b89f03099d2b0976db74ec66129c81f89ba272ca6a70560073e",
+      "size_bytes": 110141
     },
     {
       "path": "test_router_leases.py",
@@ -7203,8 +7203,8 @@
     },
     {
       "path": "tests/a13_macos/test_packaged_token_trust.py",
-      "sha256": "sha256:179fb1565471c81558d22332d53a51a4809fbb4f2c1a3e61501ea0c52813cafc",
-      "size_bytes": 10092
+      "sha256": "sha256:3a3788b1c34e3f765d5845020a9892ab897c7966bfa4b7fd241c9ab44a1ae775",
+      "size_bytes": 10129
     },
     {
       "path": "tests/a13_macos/test_pairing.py",
@@ -7552,6 +7552,11 @@
       "size_bytes": 3495
     },
     {
+      "path": "tests/a13_macos/test_token_bootstrap_lifetime.py",
+      "sha256": "sha256:a9bbedcab3ab4df97127121bcce52e0222a7d9ab288ae2069783e2306199546c",
+      "size_bytes": 8427
+    },
+    {
       "path": "tests/a13_macos/test_token_host_pin.py",
       "sha256": "sha256:f3b5286e43a955cbc07f59f73b753946a38c42d719040125707138e141604e53",
       "size_bytes": 2132
@@ -7573,8 +7578,8 @@
     },
     {
       "path": "tests/a13_macos/test_token_pin_lease.py",
-      "sha256": "sha256:3767810ff03832eee8eb0a0e5835a602e7340e94fc40b5fd76f5d5b607ff3bc0",
-      "size_bytes": 10542
+      "sha256": "sha256:00cd42b4973e95c811923ab20cd432266789aa3d4b6a63e4905df438afa6cca5",
+      "size_bytes": 10579
     },
     {
       "path": "tests/a13_macos/test_token_pin_native_refresh.py",
@@ -7613,8 +7618,8 @@
     },
     {
       "path": "tests/a13_macos/test_token_runtime_provisioning.py",
-      "sha256": "sha256:929b71b2512f0eae29ed6fe55fb3a7e10786f1491f862a764dab43a5bc75bb57",
-      "size_bytes": 3696
+      "sha256": "sha256:6daff1f271720639a496464a5ed621d28ce94fff98e6f8eff77d1f00f25c0ea9",
+      "size_bytes": 3712
     },
     {
       "path": "tests/a13_macos/test_token_start_failure_propagation.py",
@@ -13263,5 +13268,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:b2d04dfa35eb2b79cf0d09912608839e576e29fbacbb301088c48e1b539ce821"
+  "source_digest": "sha256:5ae5a90ca408a5b824ab27ae3912f73fd8bba2e4c07272305a054f1a1ebba1af"
 }

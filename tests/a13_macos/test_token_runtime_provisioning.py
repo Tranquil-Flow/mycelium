@@ -44,7 +44,7 @@ def test_joined_target_application_provisions_native_pin_and_cursor(tmp_path):
             managed=app.prepare_runtime(run_id=RUN_ID,deployment_id=DEPLOYMENT_ID,
                 staging=old.staging,archive=old._archive,archive_digest=old.archive_digest,
                 resource_policy=POLICY,limits=old.worker.limits,sidecar_binary=tmp_path/'never-started',
-                authorize_load=None,_test_observer=lambda:dict(SAFE),
+                authorize_load=lambda intent: False,_test_observer=lambda:dict(SAFE),
                 _test_ca_certificate=world['authority'].seed_server.material.ca_certificate)
             assert managed.worker.token_policy_trust_file is not None
             pin=json.loads(managed.worker.token_policy_trust_file.read_bytes())
