@@ -53,6 +53,7 @@ p{margin:0 0 .6em;text-wrap:pretty}
 .apex-steps{margin:24px 0}.apex-steps h3{font-size:1.1rem;margin-bottom:12px}
 .apex .sect{padding:36px 0}.apex-privacy{border-block:1px solid var(--line)}
 .apex footer.foot{padding:24px 20px}
+.apex .top .wrap{height:auto;min-height:60px;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}
 @media(max-width:640px){.apex .g2,.apex .g3{grid-template-columns:1fr}.apex-hero{padding-top:36px}.apex .top .wrap{gap:8px}.apex .top .btn{font-size:14px;padding:0 10px}.apex .row{gap:10px}#apex-fresh{height:66px}}
 
 /* header */

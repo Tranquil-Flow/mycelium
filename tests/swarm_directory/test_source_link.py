@@ -64,9 +64,12 @@ def test_source_offer_in_every_html_response(directory, path):
         links = Links()
         links.feed(body)
         source_links = [link for link in links.links if link.get('href') == SOURCE]
-        assert len(source_links) == 1
-        assert 'noopener' in source_links[0].get('rel', '').split()
-        assert 'target' not in source_links[0]
+        assert len(source_links) == (2 if path == '/' else 1)
+        for link in source_links:
+            assert 'noopener' in link.get('rel', '').split()
+            assert 'target' not in link
+        if path == '/':
+            assert 'The helper download may not yet be published' not in body
         assert 'Source code on GitHub' in body
     finally:
         connection.close()
@@ -80,6 +83,13 @@ def test_source_offer_visible_and_keyboard_accessible_on_hash_routes(directory, 
         context = browser.new_context(viewport=viewport, color_scheme=theme)
         page = context.new_page()
         try:
+            page.goto(directory.origin + '/')
+            header_link = page.locator('header').get_by_role('link', name='Source code on GitHub', exact=True)
+            expect(header_link).to_be_visible()
+            header_link.focus()
+            expect(header_link).to_be_focused()
+            assert header_link.evaluate('e => { const r=e.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }')
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             page.goto(directory.origin + '/swarms/')
             page.wait_for_selector('body[data-ready="1"]')
             for route in ('browse', 'chat', 'contributing', 'owned', 'new', 'notice', 'swarm/missing'):
