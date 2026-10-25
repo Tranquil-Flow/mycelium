@@ -320,6 +320,7 @@ _HTTP_RETRY_STATUSES = frozenset({502, 503, 504, 530})
 _HTTP_REPLAY_PATHS = frozenset({
     '/managed-control/enqueue', '/managed-control/poll', '/managed-control/ack',
     '/managed-control/result', '/managed-control/token-progress',
+    '/managed-control/staging/read', '/managed-control/staging/cleanup/read',
 })
 
 
