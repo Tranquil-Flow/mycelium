@@ -178,6 +178,10 @@ def holds_offer(app: Any) -> bool:
 
 
 def target_status(app: Any) -> dict | None:
+    if app.installation_role == 'owner':
+        chain = getattr(getattr(app, 'owner_run', None), 'chain', None)
+        agent = getattr(chain, 'agent', None)
+        return None if agent is None else agent.status_snapshot()
     if app.installation_role != 'target':
         return None
     agent = getattr(app, 'demo_target', None)

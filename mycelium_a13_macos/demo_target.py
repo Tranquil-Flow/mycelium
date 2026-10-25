@@ -25,6 +25,7 @@ the bootstrap offer or while this member's slice is not verified yet
 """
 from __future__ import annotations
 
+import copy
 import json
 import math
 import shutil
@@ -166,6 +167,30 @@ _DOWNLOAD_RETRYABLE = frozenset({
 _RETRY_FIRST_SECONDS = 5.0
 _RETRY_MAX_SECONDS = 60.0
 
+# Diagnostic disclosure is independent of permission to replay a request.
+# Exact routes only: never retain a URL, query, fragment or dynamic path.
+_ERROR_HTTP_PATHS = frozenset({
+    '/managed-control/enqueue', '/managed-control/poll', '/managed-control/ack',
+    '/managed-control/result', '/managed-control/token-progress',
+    '/managed-control/staging/read', '/managed-control/staging/ack',
+    '/managed-control/staging/cleanup/read', '/managed-control/staging/cleanup/ack',
+    '/managed-control/demo-run/read', '/managed-control/demo-run/report',
+    '/managed-control/model-source/read', '/managed-control/model-source/manifest',
+})
+
+
+def _error_http(error: Exception, code: str) -> dict[str, Any] | None:
+    from .managed_control import ManagedControlError
+    if not isinstance(error, ManagedControlError):
+        return None
+    status = error.status
+    status = status if type(status) is int and 100 <= status <= 599 else None
+    path = error.request_path
+    path = path if isinstance(path, str) and path in _ERROR_HTTP_PATHS else None
+    if status is not None or path is not None:
+        return {'status': status, 'path': path, 'code': code}
+    return None
+
 
 class DemoTargetAgent:
     def __init__(self, app: Any, *, consent: Any, source: Callable[[], Mapping[str, Any] | None],
@@ -187,6 +212,7 @@ class DemoTargetAgent:
         self.announcement: dict[str, Any] | None = None
         self.state = 'idle'
         self.detail: str | None = None
+        self.error_http: dict[str, Any] | None = None
         self.progress: dict[str, int] | None = None
         self._descriptor_for: tuple | None = None
         self._descriptor: dict | None = None
@@ -200,6 +226,7 @@ class DemoTargetAgent:
         self._download_for: tuple | None = None
         self._retry_delay = 0.0
         self._retry_at: float | None = None
+        self._status_snapshot = self.status()
 
     # -- helpers ------------------------------------------------------------
     def _actor(self):
@@ -236,6 +263,12 @@ class DemoTargetAgent:
 
     def _set(self, state: str, detail: str | None = None, progress: dict | None = None) -> None:
         self.state, self.detail, self.progress = state, detail, progress
+        self.error_http = None
+
+    def _set_error(self, error: Exception, default: str) -> None:
+        code = _code(error, default)
+        self._set('error', code)
+        self.error_http = _error_http(error, code)
 
     def _report(self, announcement: Mapping[str, Any] | None, *, force: bool = False) -> None:
         model = None
@@ -261,6 +294,7 @@ class DemoTargetAgent:
         with self._lock:
             a = self.announcement or {}
             return {'state': self.state, 'detail': self.detail, 'progress': self.progress,
+                    'error_http': None if self.error_http is None else dict(self.error_http),
                     'phase': a.get('phase'), 'run_id': a.get('run_id'),
                     'model_id': (a.get('model') or {}).get('model_id'), 'local': self.local,
                     'sources': self._source_status()}
@@ -271,6 +305,19 @@ class DemoTargetAgent:
             return None if self._sources is None else self._sources.status()
         except Exception:
             return None
+
+    def status_snapshot(self) -> dict[str, Any]:
+        """Last completed tick; owner status must not take the agent's I/O lock.
+
+        The owner HTTP handler holds app.guard, which a local tick may need.
+        Publish by replacement and detach reads, never mutate this snapshot.
+        """
+        return copy.deepcopy(self._status_snapshot)
+
+    def _record_status(self) -> dict[str, Any]:
+        value = self.status()
+        self._status_snapshot = copy.deepcopy(value)
+        return value
 
     def member_limits(self, offer: Mapping[str, Any] | None) -> dict[str, int] | None:
         """This Mac's share-derived worker limits for ``offer``'s run (StandingAcceptor)."""
@@ -315,18 +362,18 @@ class DemoTargetAgent:
             try:
                 announcement = self.source()
             except Exception as error:
-                self._set('error', _code(error, 'demo_announcement_unavailable'))
-                return self.status()
+                self._set_error(error, 'demo_announcement_unavailable')
+                return self._record_status()
             self.announcement = None if announcement is None else dict(announcement)
             try:
                 self._step(self.announcement)
             except Exception as error:
-                self._set('error', _code(error, 'demo_step_failed'))
+                self._set_error(error, 'demo_step_failed')
             try:
                 self._report(self.announcement)
             except Exception:
                 pass
-            return self.status()
+            return self._record_status()
 
     def _step(self, a: Mapping[str, Any] | None) -> None:
         app = self.app
@@ -609,7 +656,9 @@ class DemoTargetAgent:
         if thread is not None and thread.is_alive():
             self._set('downloading_slice', None, slice_progress(node_plan, root)); return
         if self._slice_result.get('failed_run_id') == run_id:
-            self._set('error', self._slice_result.get('code')); return
+            self._set('error', self._slice_result.get('code'))
+            self.error_http = self._slice_result.get('error_http')
+            return
         if not self._consent('slice_fetch'):
             return
         cap = self.consent.storage_cap(self.app)
@@ -631,7 +680,9 @@ class DemoTargetAgent:
                                  should_stop=stop.is_set)
                 self._slice_result = {'run_id': run_id}
             except Exception as error:
-                self._slice_result = {'failed_run_id': run_id, 'code': _code(error, 'slice_fetch_failed')}
+                code = _code(error, 'slice_fetch_failed')
+                self._slice_result = {'failed_run_id': run_id, 'code': code,
+                                      'error_http': _error_http(error, code)}
 
         self._slice_thread = threading.Thread(target=work, name='a13-slice-fetch', daemon=True)
         self._slice_thread.start()
