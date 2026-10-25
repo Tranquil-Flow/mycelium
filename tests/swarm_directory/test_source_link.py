@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """The network-use source offer is a real link on every served HTML shell."""
 import http.client
+import json
 from html.parser import HTMLParser
 
 import pytest
@@ -12,6 +13,9 @@ from mycelium_swarm_directory.server import ASSETS, DirectoryServer, csp
 from mycelium_swarm_directory.store import MemoryStore
 
 SOURCE = 'https://github.com/Tranquil-Flow/mycelium'
+DOWNLOAD = {'available': True, 'url': SOURCE + '/releases/tag/v0.1.3',
+            'sha256': '0acb875469e1d26a2189a6afef4822f110a71d12498e55e208e1efcf73076ace',
+            'version': '0.1.3', 'notarized': False}
 
 
 class Links(HTMLParser):
@@ -31,6 +35,20 @@ def directory():
         yield server
     finally:
         server.close()
+
+
+def test_config_publishes_the_released_mac_app(directory):
+    from mycelium_swarm_directory.hosted_defaults import HELPER_DOWNLOAD
+    assert HELPER_DOWNLOAD == DOWNLOAD
+    connection = http.client.HTTPConnection('127.0.0.1', directory.server_port)
+    try:
+        connection.request('GET', '/swarms/api/v1/config')
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read())['download'] == DOWNLOAD
+        assert response.getheader('Set-Cookie') is None
+    finally:
+        connection.close()
 
 
 @pytest.mark.parametrize('path', [path for path, (_, mime) in ASSETS.items() if mime.startswith('text/html')])
@@ -66,6 +84,14 @@ def test_source_offer_visible_and_keyboard_accessible_on_hash_routes(directory, 
             page.wait_for_selector('body[data-ready="1"]')
             for route in ('browse', 'chat', 'contributing', 'owned', 'new', 'notice', 'swarm/missing'):
                 page.evaluate('(route) => { location.hash = route; }', route)
+                if route == 'contributing':
+                    download = page.get_by_role('link', name='Download Mycelium for Mac 0.1.3', exact=True)
+                    expect(download).to_be_visible()
+                    expect(download).to_have_attribute('href', DOWNLOAD['url'])
+                    expect(download).to_have_attribute('rel', 'noopener')
+                    assert download.get_attribute('download') is None  # navigation to release/install steps
+                    expect(page.locator('#download-sha')).to_have_text(DOWNLOAD['sha256'])
+                    expect(page.locator('#helper-card')).to_contain_text('not notarized by Apple')
                 link = page.get_by_role('link', name='Source code on GitHub', exact=True)
                 expect(link).to_have_attribute('href', SOURCE)
                 expect(link).to_have_attribute('rel', 'noopener')

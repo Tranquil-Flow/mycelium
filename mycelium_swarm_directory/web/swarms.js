@@ -355,7 +355,7 @@ function renderDownload(download) {
     return;
   }
   body.replaceChildren(
-    el('p', {}, el('a', {id: 'download-link', href: download.url}, `Download Mycelium for Mac ${download.version || ''}`.trim()), ' (Apple silicon).'),
+    el('p', {}, el('a', {id: 'download-link', href: download.url, rel: 'noopener'}, `Download Mycelium for Mac ${download.version || ''}`.trim()), ' (Apple silicon).'),
     el('p', {class: 'meta'}, 'SHA-256 (compare before opening): ', el('span', {id: 'download-sha', class: 'mono'}, download.sha256)),
     el('p', {class: 'privacy'}, download.notarized ? 'Signed and notarized.' : 'This app is not notarized by Apple. macOS will warn you: right-click the installer and choose Open, then confirm. Only do that if the checksum above matches.'));
 }

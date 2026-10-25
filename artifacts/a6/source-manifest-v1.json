@@ -5038,8 +5038,8 @@
     },
     {
       "path": "mycelium_swarm_directory/hosted_defaults.py",
-      "sha256": "sha256:3c8c635bb7baea70ef261d55f12ef1e781045ec54ec9bafd006781f3e7553c61",
-      "size_bytes": 2737
+      "sha256": "sha256:dc9778b71f5bf4eee7247c8c6c7bd1ae2eb9ef3706b07fdf800a66cca75395a4",
+      "size_bytes": 2717
     },
     {
       "path": "mycelium_swarm_directory/probe.py",
@@ -5103,8 +5103,8 @@
     },
     {
       "path": "mycelium_swarm_directory/web/swarms.js",
-      "sha256": "sha256:eb17342e5ee8bd6bd999e17381ecb04f8164ec79f86a3b7b8e037317d72ebb50",
-      "size_bytes": 56604
+      "sha256": "sha256:d67bf87784a04cc6d37a7b0ebc0cf04c2a3086740e15236787f9d803a493c536",
+      "size_bytes": 56621
     },
     {
       "path": "mycelium_swarm_directory/wire.py",
@@ -8803,8 +8803,8 @@
     },
     {
       "path": "tests/swarm_directory/test_hosted_ui_browser.py",
-      "sha256": "sha256:0b3eabacdc23ae3060971c425b4ce060b611612364f81c23658728a4464599af",
-      "size_bytes": 21975
+      "sha256": "sha256:13010a6aabe540e19c87a5244b60bdc7a764f62e111a756ee8c923318c22277c",
+      "size_bytes": 22231
     },
     {
       "path": "tests/swarm_directory/test_hosted_ui_proxy_browser.py",
@@ -8863,8 +8863,8 @@
     },
     {
       "path": "tests/swarm_directory/test_source_link.py",
-      "sha256": "sha256:ddc8f63948f00fd66eab7195441180c37bed1f8c0287b5010f98da47ecaf623f",
-      "size_bytes": 3309
+      "sha256": "sha256:00dbbe64ff4621c4d75b72e56fb7d6e3759f9f3df3edb3094f0b090080209ec3",
+      "size_bytes": 4758
     },
     {
       "path": "tests/swarm_directory/test_surface_probe_user_agent.py",
@@ -9273,5 +9273,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:719128316ce5ab9d4bd4a8ea563c912385dd7841ba3c7d5bfcd9ccfae346ddb2"
+  "source_digest": "sha256:7424b731f4fa8b5127b05f982724c0d46c8ed57a037b67f24db4f121e48ff9fc"
 }

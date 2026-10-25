@@ -187,6 +187,9 @@ def get_open_access(visitor, name):
 # -- 1. the way in: flow, helper download, honest unavailability ----------------------------------
 
 def test_flow_and_helper_download_are_unavailable_until_published(stack):
+    # Keep the unpublished-state negative control independent of the released default.
+    stack['directory'].download = {'available': False, 'url': None, 'sha256': None,
+                                   'version': '0.1.0-preview.2', 'notarized': False}
     with sync_playwright() as p:
         browser = p.chromium.launch()
         try:
