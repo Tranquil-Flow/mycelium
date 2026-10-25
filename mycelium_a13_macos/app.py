@@ -517,6 +517,7 @@ class DemoApp:
         self.member_reports = MemberReports(lookup=self._member_lookup)
         self.standing = None
         self.standing_error = None
+        self.standing_error_http = None
         #: Click-free target steps another lane registers: fn(app, context) -> dict | None
         #: (see standing_consent.auto_poll_step).  Run only under standing consent.
         self.auto_steps = []
@@ -1179,14 +1180,17 @@ class DemoApp:
         return auto_poll_step(self, report_due=due)
 
     def _standing_loop(self):
+        from .control_failures import error_http
         while not self.closed.wait(2):
             with self.guard:
                 if self.closed.is_set() or not self.running or self.installation_role != 'target':
                     continue
                 try:
                     self._standing_tick(); self.standing_error = None
+                    self.standing_error_http = None
                 except Exception as error:
                     self.standing_error = public_failure_code(error)
+                    self.standing_error_http = error_http(error, self.standing_error)
 
     def _join_flow_status(self):
         from .standing_consent import DISCLOSURE_TEXT, DISCLOSURE_DIGEST, load_standing_consent
@@ -1206,6 +1210,8 @@ class DemoApp:
                 'withdrawn_at':grant['withdrawn_at'],
                 'last':None if self.standing is None else self.standing.status()['last']},
             standing_error=self.standing_error,
+            standing_error_http=(dict(self.standing_error_http)
+                if getattr(self, 'standing_error_http', None) is not None else None),
             join_window=None if join is None else {'state':'waiting_for_owner',
                 'fingerprint':join['fingerprint'],'pinned':join['seed_key_digest'] is not None},
             last_report=None if self.last_report is None else dict(self.last_report))
@@ -1745,7 +1751,10 @@ class DemoApp:
         binding = self.authority.peer.membership_binding()
         if binding is not None:
             try: bind_standing_consent(self.root, binding, now=time.time())
-            except Exception as error: self.standing_error = public_failure_code(error)
+            except Exception as error:
+                from .control_failures import error_http
+                self.standing_error = public_failure_code(error)
+                self.standing_error_http = error_http(error, self.standing_error)
         self._join_state_path().unlink(missing_ok=True)
         self.running = True
         report = self._auto_report('join')

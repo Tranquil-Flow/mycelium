@@ -35,6 +35,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
 
 from .run_exchange import MEMBER_REPORT
+from .control_failures import TRANSIENT_CONTROL_CODES, error_http as _error_http
 
 ACTIONS = frozenset({'installation_descriptor', 'bootstrap_control', 'cleanup', 'slice_fetch',
                      'work', 'model_download'})
@@ -162,35 +163,10 @@ def slice_progress(node_plan: Mapping[str, Any] | None, root: Path) -> dict[str,
 #: with a growing backoff; any other code (storage, consent, digest) is final.
 _DOWNLOAD_RETRYABLE = frozenset({
     'network_error', 'source_disconnected', 'source_unavailable', 'source_incomplete',
-    'managed_control_unreachable', 'managed_control_remote_error', 'managed_control_response_timeout',
-    'model_source_busy', 'acquisition_failed'})
+    'model_source_busy', 'acquisition_failed'}) | (TRANSIENT_CONTROL_CODES - {'relay_backend_unavailable'})
+# Preserve the existing download policy; staging retry is a separate operation.
 _RETRY_FIRST_SECONDS = 5.0
 _RETRY_MAX_SECONDS = 60.0
-
-# Diagnostic disclosure is independent of permission to replay a request.
-# Exact routes only: never retain a URL, query, fragment or dynamic path.
-_ERROR_HTTP_PATHS = frozenset({
-    '/managed-control/enqueue', '/managed-control/poll', '/managed-control/ack',
-    '/managed-control/result', '/managed-control/token-progress',
-    '/managed-control/staging/read', '/managed-control/staging/ack',
-    '/managed-control/staging/cleanup/read', '/managed-control/staging/cleanup/ack',
-    '/managed-control/demo-run/read', '/managed-control/demo-run/report',
-    '/managed-control/model-source/read', '/managed-control/model-source/manifest',
-})
-
-
-def _error_http(error: Exception, code: str) -> dict[str, Any] | None:
-    from .managed_control import ManagedControlError
-    if not isinstance(error, ManagedControlError):
-        return None
-    status = error.status
-    status = status if type(status) is int and 100 <= status <= 599 else None
-    path = error.request_path
-    path = path if isinstance(path, str) and path in _ERROR_HTTP_PATHS else None
-    if status is not None or path is not None:
-        return {'status': status, 'path': path, 'code': code}
-    return None
-
 
 class DemoTargetAgent:
     def __init__(self, app: Any, *, consent: Any, source: Callable[[], Mapping[str, Any] | None],
@@ -490,7 +466,8 @@ class DemoTargetAgent:
         elif a.get('slice_mode') and node_plan:
             self._set('slice_ready', None, self.progress)
         else:
-            self._set('reported', self._work_waiting(offer, run_id, bootstrap, native))
+            self._set('reported')
+            self.detail = self._work_waiting(offer, run_id, bootstrap, native)
 
     def _descriptor_aging(self) -> bool:
         """True once less than half of this member's descriptor's life is left."""
@@ -519,6 +496,8 @@ class DemoTargetAgent:
                 last = None
         if (isinstance(last, Mapping) and last.get('offer_id') == offer.get('offer_id')
                 and last.get('state') in {'refused', 'failed'} and last.get('reason')):
+            http = last.get('error_http')
+            self.error_http = dict(http) if isinstance(http, Mapping) else None
             return _code(ValueError(str(last['reason'])), 'work_not_accepted')
         return 'work_not_accepted'
 

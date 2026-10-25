@@ -17,6 +17,7 @@ receives a fresh capability + link report before each run.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -25,6 +26,9 @@ import re
 import threading
 import time
 from typing import Any, Callable, Mapping
+
+from .control_failures import TRANSIENT_CONTROL_CODES, error_http
+from .managed_control import ManagedControlError
 
 STANDING_CONSENT_PROTOCOL = "mycelium.a13_standing_consent.v1"
 DISCLOSURE_TEXT = (
@@ -52,6 +56,32 @@ _PUBLIC_CODE = re.compile(r"[a-z][a-z0-9_]{0,95}\Z")
 #: Reasons that can change on a later tick (the offer is retried, not dropped).
 _TRANSIENT = frozenset({"membership_required", "standing_consent_withdrawn",
                         "standing_consent_unbound", "standing_consent_missing"})
+
+# These calls in preview_work/accept_work all precede contribution enablement
+# and runtime construction. A later tick revalidates the offer and staged bytes;
+# prepare returns the same digest-bound ack, and the mailbox accepts only an
+# equal prior ack. This is NOT HTTP-envelope replay permission for ack routes.
+_RETRYABLE_STAGING_PATHS = frozenset({
+    '/managed-control/staging/read', '/managed-control/staging/ack',
+})
+
+
+def _finite_expiry(offer: Mapping[str, Any]) -> float | None:
+    expires = offer.get('expires_at')
+    if type(expires) in (int, float) and math.isfinite(expires):
+        return float(expires)
+    return None
+
+
+def _retryable_staging_error(error: Exception, actor: Any, offer: Mapping[str, Any]) -> bool:
+    # Retry is bounded by the offer's own expiry: without one, keep the
+    # one-failure-and-handled behaviour.
+    return (isinstance(error, ManagedControlError)
+            and error.code in TRANSIENT_CONTROL_CODES
+            and isinstance(error.request_path, str)
+            and error.request_path in _RETRYABLE_STAGING_PATHS
+            and getattr(actor, '_runtime', None) is None
+            and _finite_expiry(offer) is not None)
 
 
 class StandingConsentError(RuntimeError):
@@ -339,7 +369,18 @@ class StandingAcceptor:
         grant = load_standing_consent(self.root)
         return {"state": "absent" if grant is None else grant["state"],
                 "caps": None if grant is None else dict(grant["caps"]),
-                "disclosure_digest": DISCLOSURE_DIGEST, "last": self._last}
+                "disclosure_digest": DISCLOSURE_DIGEST, "last": copy.deepcopy(self._last)}
+
+    def _expired(self, offer: Mapping[str, Any]) -> bool:
+        # Only a known, passed expiry expires an offer here; the offer client
+        # already refuses real offers without a valid future expiry.
+        expires = _finite_expiry(offer)
+        return expires is not None and self._clock() >= expires
+
+    def _expire(self, offer_id: str) -> dict[str, Any]:
+        self._handled.add(offer_id)
+        self._last = {'offer_id': offer_id, 'state': 'refused', 'reason': 'offer_expired'}
+        return dict(self._last)
 
     def tick(self, actor: Any, *, policy: Mapping[str, Any], binding: Mapping[str, Any] | None,
              resource_check: Callable[[], str | None],
@@ -355,6 +396,8 @@ class StandingAcceptor:
             offer_id = offer.get("offer_id")
             if not isinstance(offer_id, str) or offer_id in self._handled:
                 return None
+            if self._expired(offer):
+                return self._expire(offer_id)
             reason = standing_admission(grant, binding=binding, offer=offer,
                                         resource_violation=resource_check())
             if reason is None:
@@ -371,6 +414,8 @@ class StandingAcceptor:
                 try:
                     if self._report is not None:
                         self._report("pre_run", offer)
+                    if self._expired(offer):
+                        return self._expire(offer_id)
                     preview = self._preview(actor, offer, stage_acknowledged=True, **options)
                     decision = check_work_preview(load_standing_consent(self.root), preview,
                         binding=binding, policy=policy, resource_violation=resource_check())
@@ -380,6 +425,8 @@ class StandingAcceptor:
                             self._handled.add(offer_id)
                         self._last = {"offer_id": offer_id, "state": "refused", "reason": reason}
                         return dict(self._last)
+                    if self._expired(offer):
+                        return self._expire(offer_id)
                     self._accept(actor, preview, work_acknowledged=True, **options)
                 except Exception as exc:  # noqa: BLE001 - recorded as a closed code
                     # A failed native launch names its closed launch step
@@ -389,10 +436,14 @@ class StandingAcceptor:
                     code = (public if isinstance(public, str) and _PUBLIC_CODE.fullmatch(public)
                             else getattr(exc, "code", None)
                             or (str(exc) if str(exc).isidentifier() else None))
-                    reason = code if isinstance(code, str) and len(code) <= 96 else "standing_accept_failed"
-                    self._handled.add(offer_id)
+                    reason = code if isinstance(code, str) and _PUBLIC_CODE.fullmatch(code) else "standing_accept_failed"
+                    if not _retryable_staging_error(exc, actor, offer):
+                        self._handled.add(offer_id)
                     self._last = {"offer_id": offer_id, "state": "failed", "reason": reason}
-                    return dict(self._last)
+                    http = error_http(exc, reason)
+                    if http is not None:
+                        self._last['error_http'] = http
+                    return copy.deepcopy(self._last)
                 self._handled.add(offer_id)
                 self._last = {"offer_id": offer_id, "state": "accepted", "reason": None}
                 return dict(self._last)
