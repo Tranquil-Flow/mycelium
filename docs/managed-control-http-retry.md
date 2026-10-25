@@ -2,9 +2,15 @@
 
 The managed HTTPS client retries an unstructured HTTP 502, 503, 504 or 530 only
 on `/managed-control/enqueue`, `/managed-control/poll`, `/managed-control/ack`,
-`/managed-control/result` and `/managed-control/token-progress`. Those routes
+`/managed-control/result`, `/managed-control/token-progress`,
+`/managed-control/staging/read` and `/managed-control/staging/cleanup/read`. Those routes
 have signed-request deduplication or read-only lookup semantics. Other POST
 routes do not gain retry authority.
+
+The staging acknowledgement routes remain excluded: their matching-ack checks
+are not a request-ID response replay cache. Staging reads recheck current
+membership, offer expiry and cleanup state on each attempt; a later refusal
+still stops the retry.
 
 Bounds in `managed_control.py`:
 
@@ -29,13 +35,24 @@ Content-Type, or noncanonical JSON carrying an error. The existing canonical
 rules still decide which authority error code is exposed. Unknown statuses,
 incomplete error bodies and unreviewed routes remain fail-closed.
 
+The public relay's own errors now use canonical `{"error":{"code":"..."}}`
+JSON with `Content-Type: application/json`, preserving their HTTP status.
+In particular, `relay_backend_unavailable` is exposed by name but is **not**
+retryable. Any exception to the JSON-refusal policy needs a separate decision.
+
 Exhaustion raises the existing `managed_control_remote_error`, retaining HTTP
 status and route. The pump consequently enters its existing bounded
 `control_<operation>_reconciliation_required` terminal; it does not continuously
 re-sign after expiry. Existing non-HTTP transport recovery policies are unchanged.
 The private runtime diagnostic retains an integer HTTP status and one of the
-five constant route names through at most eight cause-chain nodes. Query strings,
+retry-allowlisted constant route names through at most eight cause-chain nodes. Query strings,
 fragments, origins, arbitrary paths, response bodies and headers are excluded.
+
+Demo-target status also exposes `error_http` (or null after recovery): a typed
+HTTP status, an exact allowlisted managed-control route, and a bounded code.
+It rejects URLs, queries and fragments rather than displaying transport input.
+Both joined-Mac status and the owner's local contributor status carry this
+field; remote member reports retain their existing closed wire schema.
 
 The owner managed-control client, local contributor and gateway managed sessions
 share this boundary. Token progress delivery uses the same exact replay path.

@@ -4,7 +4,7 @@ This page takes you from a downloaded package to a first chat answer served by t
 
 **Read this first.**
 
-- This is **Mycelium 0.1.2**, an early macOS release with optional fast mode and reliability fixes. Hardware support is limited; broad compatibility is not claimed. See the [release notes](../RELEASE-NOTES-v0.1.2.md), including upgrade steps and the fast-mode failure limits.
+- This is **Mycelium 0.1.3**, an early macOS release with joined-Mac retry and control-error fixes. Hardware support is limited; broad compatibility is not claimed. See the [release notes](../RELEASE-NOTES-v0.1.3.md), including upgrade steps and the fast-mode failure limits.
 - The package is **not** signed with an Apple Developer ID and is **not** notarized. macOS will block the installer script once. See "Step 3".
 - Download the zip and checksum from the GitHub release page. Check them before approving the installer.
 - **Apple silicon only** (M1 or newer, macOS arm64). Intel Macs are refused.
@@ -13,7 +13,7 @@ This page takes you from a downloaded package to a first chat answer served by t
 ## What you need
 
 - Two Apple silicon Macs on the same Wi-Fi (the project's own runs used a phone hotspot).
-- The package `mycelium-0.1.2-macos-arm64.zip` and its SHA-256 value from the release page (or the one the owner sent you).
+- The package `mycelium-0.1.3-macos-arm64.zip` and its SHA-256 value from the release page (or the one the owner sent you).
 - Enough free disk space for the model. The app checks disk and memory and will refuse with a message if a Mac cannot hold its share (see [TROUBLESHOOTING](TROUBLESHOOTING.md)).
 - An internet connection. A join between two Macs goes through a temporary Cloudflare tunnel (see [PRIVACY](PRIVACY.md)). A fully offline mode is **not released yet**.
 - The installer itself does not need administrator rights. A standard (non-admin) user needs an administrator to approve the first open of this un-notarized download.
@@ -23,7 +23,7 @@ This page takes you from a downloaded package to a first chat answer served by t
 In Terminal:
 
 ```sh
-shasum -a 256 ~/Downloads/mycelium-0.1.2-macos-arm64.zip
+shasum -a 256 ~/Downloads/mycelium-0.1.3-macos-arm64.zip
 ```
 
 The output must match the value the owner sent you. If it does not, stop and ask for the file again. A matching checksum only proves the file is the same bytes; it does not prove the software is safe.
@@ -33,7 +33,7 @@ The output must match the value the owner sent you. If it does not, stop and ask
 Double-click the zip in Finder. Then in Terminal:
 
 ```sh
-/usr/bin/codesign --verify --deep --strict "$HOME/Downloads/mycelium-0.1.2-macos-arm64/Mycelium A13 Demo.app"
+/usr/bin/codesign --verify --deep --strict "$HOME/Downloads/mycelium-0.1.3-macos-arm64/Mycelium A13 Demo.app"
 ```
 
 It should print nothing and exit with status 0.
