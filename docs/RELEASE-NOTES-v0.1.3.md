@@ -38,6 +38,8 @@ Asset: `mycelium-0.1.3-macos-arm64.zip`
 
 Run `shasum -a 256 mycelium-0.1.3-macos-arm64.zip` and compare the output with the separate `.sha256` file from the release.
 
+SHA-256: `0acb875469e1d26a2189a6afef4822f110a71d12498e55e208e1efcf73076ace`.
+
 Apple silicon macOS only. This is still early software with a limited hardware qualification scope. The app has an ad-hoc Apple signature, not a Developer ID signature, and is not notarized. macOS approval of the installer may require an administrator. Do not disable Gatekeeper; follow the installation guide.
 
 Swarm members can see prompts, outputs or intermediate data needed for their work. This release does not change consent policy. Token-path mid-request failover and consent-policy changes are not included.
