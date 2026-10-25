@@ -8,7 +8,10 @@ async function call(path, body) {
     referrerPolicy:'no-referrer', headers:{'Content-Type':'application/json','X-Mycelium-Chat':'1'},
     body:JSON.stringify(body || {})});
   const value = await response.json();
-  if (!response.ok) throw new Error(value.error || 'request_failed');
+  if (!response.ok) {
+    const code = typeof value.error === 'string' ? value.error : value.error?.code;
+    throw new Error(typeof code === 'string' && code ? code : 'request_failed');
+  }
   return value;
 }
 const MESSAGES = {

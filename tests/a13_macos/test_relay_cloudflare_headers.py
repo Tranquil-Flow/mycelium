@@ -110,7 +110,7 @@ def test_real_tunnel_content_length_requests_are_accepted(relay, path, body, kin
 def test_relay_header_refusals_are_unchanged(relay, extra, body):
     port, seen = relay
     status, raw = _raw(port, "POST", "/pairing-window/v1/ABCD/request", _TUNNEL_HEADERS + extra, body)
-    assert status == 400 and json.loads(raw) == {"error": "relay_headers_invalid"}
+    assert status == 400 and json.loads(raw) == {"error": {"code": "relay_headers_invalid"}}
     assert seen == []
 
 
@@ -128,7 +128,7 @@ def test_malformed_or_oversized_chunked_bodies_are_refused(relay, body):
     port, seen = relay
     headers = _TUNNEL_HEADERS + [("Transfer-Encoding", "chunked"), ("Content-Type", "application/json")]
     status, raw = _raw(port, "POST", "/member-report/v1", headers, body)
-    assert status == 400 and json.loads(raw) == {"error": "relay_frame_invalid"}
+    assert status == 400 and json.loads(raw) == {"error": {"code": "relay_frame_invalid"}}
     assert seen == []
 
 
@@ -136,12 +136,12 @@ def test_seed_forwarding_still_refuses_chunked_bodies(relay):
     port, _ = relay
     headers = _TUNNEL_HEADERS + [("Transfer-Encoding", "chunked"), ("Content-Type", "application/json")]
     status, raw = _raw(port, "POST", "/seed/v1/x", headers, b"0\r\n\r\n")
-    assert status == 400 and json.loads(raw) == {"error": "relay_headers_invalid"}
+    assert status == 400 and json.loads(raw) == {"error": {"code": "relay_headers_invalid"}}
 
 
 def test_get_with_chunked_framing_is_refused(relay):
     port, seen = relay
     status, raw = _raw(port, "GET", "/pairing-window/v1/ABCD/join/ABCDEFGH",
                        _TUNNEL_HEADERS + [("Transfer-Encoding", "chunked")], b"0\r\n\r\n")
-    assert status == 400 and json.loads(raw)["error"] in {"relay_frame_invalid", "relay_headers_invalid"}
+    assert status == 400 and json.loads(raw)["error"]["code"] in {"relay_frame_invalid", "relay_headers_invalid"}
     assert seen == []

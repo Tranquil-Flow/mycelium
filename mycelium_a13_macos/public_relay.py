@@ -94,14 +94,14 @@ class _RelayHandler(BaseHTTPRequestHandler):
         if ((not self.path.startswith(('/seed/','/managed-control/',_SWARM_PREFIX)+_LOCAL_PREFIXES)
                 and not _chat_path(self.path))
                 or any(value in self.path for value in ('..','%','?','#','\\'))):
-            return self._reply(404,b'{"error":"relay_route_unknown"}')
+            return self._reply(404,b'{"error":{"code":"relay_route_unknown"}}')
         if _chat_path(self.path):return self._local(chat=True)
         if self.path.startswith(_SWARM_PREFIX):return self._local(swarm=True)
         if self.path.startswith(_LOCAL_PREFIXES):return self._local()
         if (self.headers.get('Transfer-Encoding') is not None
                 or self.headers.get('Cookie') is not None
                 or self.headers.get('Authorization') is not None):
-            return self._reply(400,b'{"error":"relay_headers_invalid"}')
+            return self._reply(400,b'{"error":{"code":"relay_headers_invalid"}}')
         connection=None
         try:
             lengths=self.headers.get_all('Content-Length',[])
@@ -111,7 +111,7 @@ class _RelayHandler(BaseHTTPRequestHandler):
             body=self.rfile.read(length)
             if len(body)!=length:raise ValueError()
             backend=self.server.backend
-            if backend is None:return self._reply(503,b'{"error":"relay_seed_not_bound"}')
+            if backend is None:return self._reply(503,b'{"error":{"code":"relay_seed_not_bound"}}')
             port,context=backend
             connection=http.client.HTTPSConnection('127.0.0.1',port,timeout=5,context=context)
             headers={'Content-Type':self.headers.get('Content-Type','application/json')}
@@ -119,8 +119,8 @@ class _RelayHandler(BaseHTTPRequestHandler):
             response=connection.getresponse();raw=response.read(_MAX_FRAME+1)
             if len(raw)>_MAX_FRAME:raise ValueError()
             self._reply(response.status,raw,response.getheader('Content-Type','application/json'))
-        except ValueError:self._reply(400,b'{"error":"relay_frame_invalid"}')
-        except (OSError,http.client.HTTPException):self._reply(502,b'{"error":"relay_backend_unavailable"}')
+        except ValueError:self._reply(400,b'{"error":{"code":"relay_frame_invalid"}}')
+        except (OSError,http.client.HTTPException):self._reply(502,b'{"error":{"code":"relay_backend_unavailable"}}')
         finally:
             if connection is not None:connection.close()
     def _public_headers(self):
@@ -154,7 +154,7 @@ class _RelayHandler(BaseHTTPRequestHandler):
                           or self.headers.get_all('Content-Length',[])))
                 or self.headers.get('Cookie') is not None
                 or self.headers.get('Authorization') is not None):
-            return self._reply(400,b'{"error":"relay_headers_invalid"}')
+            return self._reply(400,b'{"error":{"code":"relay_headers_invalid"}}')
         try:
             if chunked:body=self._read_chunked()
             else:
@@ -164,29 +164,29 @@ class _RelayHandler(BaseHTTPRequestHandler):
                 if not 0<=length<=_MAX_FRAME or (self.command=='GET' and length):raise ValueError()
                 body=self.rfile.read(length)
                 if len(body)!=length:raise ValueError()
-        except (ValueError,OSError):return self._reply(400,b'{"error":"relay_frame_invalid"}')
+        except (ValueError,OSError):return self._reply(400,b'{"error":{"code":"relay_frame_invalid"}}')
         if swarm:
             handler=self.server.swarm
-            if handler is None:return self._reply(503,b'{"error":"relay_swarm_entry_not_bound"}',extra=_SWARM_CORS)
+            if handler is None:return self._reply(503,b'{"error":{"code":"relay_swarm_entry_not_bound"}}',extra=_SWARM_CORS)
             try:
                 status,kind,raw=handler(self.command,self.path,self._public_headers(),body)
                 if (type(status) is not int or not 200<=status<=599 or not isinstance(raw,bytes)
                         or len(raw)>_MAX_FRAME or kind!='application/json'):
                     raise ValueError()
-            except Exception:return self._reply(500,b'{"error":"relay_swarm_entry_failed"}',extra=_SWARM_CORS)
+            except Exception:return self._reply(500,b'{"error":{"code":"relay_swarm_entry_failed"}}',extra=_SWARM_CORS)
             return self._reply(status,raw,kind,extra=_SWARM_CORS)
         if chat:
             handler=self.server.chat
-            if handler is None:return self._reply(503,b'{"error":"relay_chat_not_bound"}')
+            if handler is None:return self._reply(503,b'{"error":{"code":"relay_chat_not_bound"}}')
             try:
                 status,kind,raw=handler(self.command,self.path,self._public_headers(),body)
                 if (type(status) is not int or not 200<=status<=599 or not isinstance(raw,bytes)
                         or len(raw)>_MAX_FRAME or not isinstance(kind,str)):
                     raise ValueError()
-            except Exception:return self._reply(500,b'{"error":"relay_chat_failed"}')
+            except Exception:return self._reply(500,b'{"error":{"code":"relay_chat_failed"}}')
             return self._reply(status,raw,kind,csp=_CHAT_CSP)
         handler=self.server.local
-        if handler is None:return self._reply(503,b'{"error":"relay_join_not_bound"}')
+        if handler is None:return self._reply(503,b'{"error":{"code":"relay_join_not_bound"}}')
         try:
             answer=handler(self.command,self.path,body)
             # (status, raw) is JSON; (status, raw, content_type) admits the
@@ -196,13 +196,13 @@ class _RelayHandler(BaseHTTPRequestHandler):
             if (type(status) is not int or not 200<=status<=599 or not isinstance(raw,bytes)
                     or len(raw)>_MAX_FRAME or kind not in _LOCAL_TYPES):
                 raise ValueError()
-        except Exception:return self._reply(500,b'{"error":"relay_join_failed"}')
+        except Exception:return self._reply(500,b'{"error":{"code":"relay_join_failed"}}')
         self._reply(status,raw,kind,csp=None if kind=='application/json' else _CHAT_CSP)
     def do_OPTIONS(self):
         # CORS preflight for the swarm entry only; nothing else answers OPTIONS.
         if (not self.path.startswith(_SWARM_PREFIX) or any(v in self.path for v in ('..','%','?','#','\\'))
                 or self.headers.get('Content-Length') not in (None,'0') or self.headers.get('Transfer-Encoding')):
-            return self._reply(404,b'{"error":"relay_route_unknown"}')
+            return self._reply(404,b'{"error":{"code":"relay_route_unknown"}}')
         return self._reply(204,b'',extra=_SWARM_CORS)
     do_GET=_forward
     do_POST=_forward

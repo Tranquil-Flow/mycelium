@@ -893,6 +893,8 @@ class JoinWindowClient:
             self._note_clock(getattr(exc, "headers", None))
             try:
                 code = json.loads(exc.read(4096)).get("error")
+                if isinstance(code, dict) and set(code) == {"code"}:
+                    code = code['code']
             except Exception:  # noqa: BLE001 - remote body
                 code = None
             finally:

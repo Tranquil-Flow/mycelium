@@ -91,7 +91,10 @@ async function entry(origin, route, doc) {
     credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer',
     headers: {'Content-Type': 'application/json'}, body: JSON.stringify(doc)});
   const value = await response.json();
-  if (!response.ok) throw new Error(value.error || 'request_failed');
+  if (!response.ok) {
+    const code = typeof value.error === 'string' ? value.error : value.error?.code;
+    throw new Error(typeof code === 'string' && code ? code : 'request_failed');
+  }
   return value;
 }
 
