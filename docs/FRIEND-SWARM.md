@@ -17,11 +17,10 @@ session so far had both Macs on one network. Treat the first real run as a test.
 | **n0** (Iroh relays and `iroh.link` DNS/pkarr lookup) | Which endpoints talk to each other, when, and how much. The inference payloads between the Macs are encrypted end to end. | While a route is up |
 | **Hugging Face** | A friend's Mac downloads the pinned model from Hugging Face when it is not on the owner's local network, so Hugging Face sees that Mac's IP address and the model name. Every file is checked against the owner's pinned digests whichever source supplied the bytes. | During the model download |
 
-`mycelium.now` is not contacted by the friend-swarm path (the hosted demo uses it; the
-macOS app does not). If you want to prove that on your machines, grep the run
-directories for `mycelium.now` and watch outbound connections: the only remote
-parties should be Cloudflare, n0 and Hugging Face. There is no claim here that the
-swarm is private from those three.
+The private friend-swarm flow does not need the public directory. If you choose
+**Publish this run as a swarm**, the app contacts the directory and publishes
+listing metadata and self-reported performance statistics. There is no claim that
+a friend swarm is private from its participating Macs or its HTTPS front.
 
 ## Before the session (owner and friends)
 
@@ -40,8 +39,9 @@ swarm is private from those three.
 
 ## Owner steps
 
-1. Create the swarm and tick **Let other Macs join**. Pick the longest relay time
-   limit (1800 seconds) that you need.
+1. Create the swarm and tick **Let other Macs join**, or press **Start public relay**
+   afterwards. Choose the relay time limit you need, up to 30 minutes. This is
+   separate from each Mac's **Time limit per run**.
 2. **The quick tunnel has a time limit and a new hostname each start.** After the limit
    the tunnel closes and the swarm is unreachable. Starting the relay again gives a
    different `*.trycloudflare.com` hostname, so any open invitation code or link from
@@ -93,8 +93,9 @@ IP number or `.local` name), and a local port from 1024 to 65535. The typed shor
 (`quiet-river-apple-stone ABCD-EFGH-JKLM`) still works only for `*.trycloudflare.com`; for your
 own address send the **join link**, which carries the address and the owner's key digest.
 
-What stays the same after the relay stops and starts again (the 30-minute limit, a quit and
-reopen): the address, the swarm and its members, the join links and the swarm listing. Press
+When the relay stops and restarts on the same configured address, the swarm identity,
+members and listing are retained. Unexpired join links still use the same address;
+expired or used invitations still need replacing. Press
 **Use my own address** again, or restart the relay with the same address (the app remembers it),
 and nothing has to be republished. The app only opens the local port; if the tunnel is not
 running, visitors see a Cloudflare error page and the app still works locally.
@@ -115,6 +116,26 @@ Cloudflare box; for any other front all visitors share one limit.
    `*.trycloudflare.com`.
 2. Tick the standing consent, join, and compare the fingerprint with the owner.
 3. Wait for the owner to approve. The Mac then appears as a member.
+
+## Run time limits and automatic rollover
+
+**Time limit per run** means each Mac agrees to lend compute for at most the chosen
+number of minutes per run, 30 by default. In v0.1.4, the app starts a fresh run
+automatically when the current run reaches its limit. It checks the saved consent
+and available members again rather than extending the old run's permission.
+
+Keep the owner and joined apps open. **Stop** ends the session; rollover is not a
+reason to restart work you stopped. `<<TBD: final rollover behavior for in-flight
+answers, cleanup and a failed restart>>`.
+
+Run rollover and relay lifetime are separate. A temporary relay can still expire
+after at most 30 minutes. Rollover does not renew that tunnel or preserve its old
+address. For longer sessions, use your own fixed HTTPS address and keep its front
+running; the app-side renewal limits below still apply.
+
+After the owner app restarts at the same reachable address, joined Macs re-report
+and reconnect automatically. This does not resume an interrupted answer. After
+restarting the joined Mac's own app, press **Start / reconnect** there.
 
 ## Model download across networks
 
@@ -164,9 +185,9 @@ revoke it from the owner screen.
 - Cloudflare quick tunnels have no uptime guarantee and a lifetime set by the owner
   (at most 30 minutes in the app); this is a session tool, not an always-on service.
   Your own address keeps the same hostname across restarts. Its relay in the app extends
-  itself shortly before it expires **while a run is serving**, for up to 24 hours in total
+  itself shortly before it expires **while a run is active or a swarm is published**, for up to 24 hours in total
   (`max_renewed_seconds`, at most 7 days; `auto_renew: false` turns it off). A relay that is
-  not serving is never extended. An owner who runs a named tunnel can pass `long_lived: true`
+  neither running a model nor publishing a swarm is not extended. An owner who runs a named tunnel can pass `long_lived: true`
   to `/api/network/start` or `/api/network/restart` (external provider only) for a relay with
   no deadline; that is an explicit setting and is shown in the relay status.
 - A direct (hole-punched) Iroh path is not guaranteed; carrier-grade NAT often leaves

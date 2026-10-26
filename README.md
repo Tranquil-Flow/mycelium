@@ -4,18 +4,29 @@ Mycelium lets Apple silicon Macs share the work of running one language model. I
 
 It is for people who want to run models with Macs they own or with people they trust. Sharing the work can help when a model does not fit in one Mac's memory. It does not make a slow network fast, and it does not hide your prompts from the computers doing the work.
 
-[Try the demo in your browser](https://mycelium.now/swarms/) · [Download v0.1.3](https://github.com/Tranquil-Flow/mycelium/releases/tag/v0.1.3) · [Set up two Macs](#setting-up) · [Privacy and trust](#privacy-and-trust) · [Report a problem](https://github.com/Tranquil-Flow/mycelium/issues)
+[Try the demo in your browser](https://mycelium.now/swarms/) · [Download v0.1.4](https://github.com/Tranquil-Flow/mycelium/releases/tag/v0.1.4) · [Set up two Macs](#setting-up) · [Privacy and trust](#privacy-and-trust) · [Report a problem](https://github.com/Tranquil-Flow/mycelium/issues)
 
 <!-- Product screenshots are a follow-up. Add reviewed captures of onboarding and a serving chat here. -->
 
 ## Status
 
-**v0.1.3 is an early macOS preview, not a broadly tested release.** It improves retries after brief connection failures on joined Macs. Read the [v0.1.3 release notes](docs/RELEASE-NOTES-v0.1.3.md) for the changes and upgrade instructions.
+**v0.1.4 is an early macOS preview, not a broadly tested release.** It fixes fast mode stopping after a few minutes, adds automatic run rollover and makes the tested starter model available in the app. Read the [v0.1.4 release notes](docs/RELEASE-NOTES-v0.1.4.md) for the changes and upgrade instructions.
 
 - Apple silicon Macs only. Intel Macs, Windows and Linux are not supported by this release.
 - The app has an ad-hoc Apple signature. It is not Developer ID signed or notarized. macOS approval of the installer may need an administrator.
-- A two-Mac swarm, with both Macs owned by the developer, started from the app and completed chats over a phone hotspot. That run used **Qwen2.5-0.5B and fast mode**. Fast mode in v0.1.3 stops answering about five minutes after a route starts serving (see [Optional fast mode](#optional-fast-mode)), so the public demo runs in normal mode.
-- Nobody outside the developer has yet completed a self-hosted swarm. Wider testing is wanted, particularly installation and a first chat on other people's Macs.
+- Earlier testing used two developer-owned Macs on a phone hotspot with **Qwen2.5-0.5B**. It does not establish wider hardware support.
+- v0.1.4 sustained-run verification: `<<TBD: soak duration, hardware, modes, rollover and owner-restart results>>`.
+- Independent first-run verification: `<<TBD: stranger-path installation, GUI-only setup and first-chat results>>`. Do not read these pending results as a completed test.
+
+### What changed in v0.1.4
+
+- Fast mode renews its permission lease while the route serves, instead of stopping after about five minutes. Its failure-recovery limits remain.
+- The owner's control mailbox retains a bounded history so old traffic does not keep adding to status and control work over days.
+- Joined Macs re-report and reconnect after the owner app restarts. This does not resume an interrupted answer.
+- A swarm starts a fresh run automatically when the current run reaches its time limit. Each Mac's saved consent limits still apply.
+- The model picker defaults to **Qwen2.5-0.5B**, the tested starter model. The owner page has a **Fast mode** switch for the next run.
+- Startup status is faster to read, and failure messages give clearer next steps.
+- The website shows per-swarm performance statistics measured and self-reported by each swarm's own app.
 
 ### Performance observed so far
 
@@ -23,9 +34,9 @@ A token is a small piece of text, not necessarily a whole word. Decode speed mea
 
 | Mode | Observed result | Limits of the observation |
 | --- | --- | --- |
-| Fast mode, Qwen2.5-0.5B | About 12.5–15.6 tokens/s; first token in about 4–7 seconds | Two developer-owned Macs on a phone hotspot, measured in the first minutes of serving. In v0.1.3 fast mode stops answering about five minutes after the route starts. It is off by default and cannot recover an in-flight request after a stage fails. |
-| Normal mode, fast mode off | About 1.1 tokens/s; first token in about 3–5 seconds; a 27-token answer in about 32 seconds | The live public demo on two developer-owned Macs over a phone hotspot, still answering 12 minutes after the route started. This is the default recovery-capable path. Recovery still needs a suitable ready replacement. |
-| Larger models, including the default Qwen3-14B | Speed not tested | The small-model result is not a prediction for them. |
+| Fast mode, Qwen2.5-0.5B | `<<TBD: v0.1.4 first-token time, tokens/s and measurement window>>` | v0.1.3 reached about 12.5–15.6 tokens/s in a short run before its lease-expiry failure. That is not a sustained v0.1.4 result. Fast mode cannot recover an in-flight request after a stage fails. |
+| Normal mode, fast mode off | `<<TBD: v0.1.4 first-token time, tokens/s and measurement window>>` | The earlier two-Mac public demo reached about 1.1 tokens/s. Normal mode supports recovery only when a suitable replacement is ready. |
+| Larger models | Speed not established for this release | The small-model result is not a prediction for them. |
 
 These are observations, not guarantees. More Macs do not necessarily mean faster answers: data must pass between them for every generated token.
 
@@ -77,7 +88,7 @@ The normal app setup needs internet access, even when both Macs share a Wi-Fi ne
 | Iroh transport | Carries inference data between Macs over encrypted connections, directly where possible or through n0's relay service. | The app uses it for you. It is separate from the web-chat tunnel. |
 | Public swarm directory | Lists swarms so other people can find them and request chat access. It does not supply computing power. | Optional. You do not need a listing to run with an invited Mac. |
 
-Starting the public relay does not publish a directory listing. It still exposes endpoints through a third party. The temporary address changes on restart, and its session expires after at most 30 minutes. Do not treat it as a permanent hosting service.
+Starting the public relay does not publish a directory listing. It still exposes endpoints through a third party. The temporary address changes on relay restart, and its session expires after at most 30 minutes. This relay lifetime is separate from a model run's time limit: automatic run rollover does not keep an expired temporary tunnel reachable. For longer sessions, see [fixed-address setup](#running-the-server-parts).
 
 ## Privacy and trust
 
@@ -95,7 +106,7 @@ Starting the public relay does not publish a directory listing. It still exposes
 
 The recovery path can write unencrypted prompt and partial-answer data to the local state directory. Startup cleanup handles crash leftovers, but backups may retain copies. Local storage and encrypted transport are not a promise that no copy of a conversation exists.
 
-There is no supported, fully offline two-Mac app flow in v0.1.3. The source includes offline model-transfer and local-network work, but those pieces are not an end-to-end offline inference setup. See [local-first scope](docs/LOCAL-FIRST.md). The older [privacy guide](docs/user/PRIVACY.md) has more background; its statements that the hosted demo is deliberately off and that some code is unmerged predate this release.
+There is no supported, fully offline two-Mac app flow in v0.1.4. The source includes offline model-transfer and local-network work, but those pieces are not an end-to-end offline inference setup. See [local-first scope](docs/LOCAL-FIRST.md). The [privacy guide](docs/user/PRIVACY.md) explains the HTTPS fronts, public demo and local storage in more detail.
 
 ## What you need
 
@@ -110,21 +121,22 @@ The owner's **Model** picker, under **Run the model across the joined Macs**, of
 
 | Model | Approximate source download on the owner | Use |
 | --- | --- | --- |
-| Qwen3-0.6B | 1.5 GB | Smallest GUI choice; use it for an initial setup test. Each Mac receives the source snapshot. |
+| Qwen2.5-0.5B | About 1 GB | Default for a fresh setup and the tested starter model. Each Mac receives the source snapshot. |
+| Qwen3-0.6B | 1.5 GB | Another small model. Each Mac receives the source snapshot. |
 | Qwen3-8B | 16.4 GB | Larger model; joined Macs receive assigned slices. Speed is not established here. |
-| Qwen3-14B | 29.6 GB, roughly 30 GB | Default for a fresh app state; joined Macs receive assigned slices. Speed is not established here. |
+| Qwen3-14B | 29.6 GB, roughly 30 GB | Larger model; joined Macs receive assigned slices. Speed is not established here. |
 
-These are download sizes, not total disk or memory requirements. Read the app's per-model storage requirement before consenting. The Qwen2.5-0.5B used for the measured run is an operator-selected model, not a choice in this GUI picker. That benchmark does not measure Qwen3-0.6B.
+These are download sizes, not total disk or memory requirements. Read the app's per-model storage requirement before consenting. Qwen2.5-0.5B is now a GUI choice; you do not need an environment variable to select it. Existing app data may retain an earlier model choice, so check the picker before downloading.
 
 ## Setting up
 
 ### Install on both Macs
 
-1. Download `mycelium-0.1.3-macos-arm64.zip` and its `.sha256` file from the [v0.1.3 release](https://github.com/Tranquil-Flow/mycelium/releases/tag/v0.1.3).
+1. Download `mycelium-0.1.4-macos-arm64.zip` and its `.sha256` file from the [v0.1.4 release](https://github.com/Tranquil-Flow/mycelium/releases/tag/v0.1.4).
 2. In Terminal, run the command below and compare the result with the release checksum. If they differ, do not install.
 
    ```sh
-   shasum -a 256 ~/Downloads/mycelium-0.1.3-macos-arm64.zip
+   shasum -a 256 ~/Downloads/mycelium-0.1.4-macos-arm64.zip
    ```
 
 3. Extract the archive. Follow the [macOS quickstart](docs/user/QUICKSTART-MACOS.md#step-2-unzip-and-check-the-signature) to check the app signature, then run **Install Mycelium.command** from the extracted folder. Do not start the app inside that folder directly.
@@ -135,20 +147,24 @@ The installer checks package hashes and a signed manifest before installing into
 
 ### First run: owner and joined Mac
 
-Choose storage and network allowances **before creating or joining**. For the small GUI model, a 4 GB storage allowance is a practical starting choice; the app still checks the exact preparation and memory needs. If you intend to use a larger model, select its larger displayed storage allowance instead. In v0.1.3, editing a visible selector later does not replace the saved enrollment policy. If an existing policy blocks you, use a smaller model or report the refusal rather than deleting identity files.
+After installation and checksum verification, this setup uses the app's browser page only. You do not need Terminal commands to choose the model, enable fast mode, join or start chat.
+
+Choose storage and network allowances **before creating or joining**. For the small GUI model, a 4 GB storage allowance is a practical starting choice; the app still checks the exact preparation and memory needs. If you intend to use a larger model, select its larger displayed storage allowance instead. In v0.1.4, editing a visible selector later does not replace the saved enrollment policy. If an existing policy blocks you, use a smaller model or report the refusal rather than deleting identity files.
 
 | Step | Where | What to do |
 | --- | --- | --- |
 | 1. Consent | Both Macs | Read the cooperative-peer visibility warning and tick its box. Set **Power policy**, **Network policy** and **Storage limit**. On a hotspot, explicitly allow **Metered use allowed** if you accept the data cost. |
 | 2. Create | Owner Mac | Press **Create authority & enroll this Mac**. You can tick **Let other Macs join** to start the temporary relay too, or leave that until step 4. |
-| 3. Prepare | Owner Mac | Choose **Qwen3-0.6B (tests, quick bring-up)** in **Model** for a small first test. Under **Inference**, authorize the source fetch, check **Maximum bytes to fetch this attempt**, press **Download / resume source**, and wait for `prepared`. This does not start inference. |
+| 3. Prepare | Owner Mac | Keep **Qwen2.5-0.5B-Instruct** (the tested starter) selected in **Model**. Under **Inference**, authorize the source fetch, check **Maximum bytes to fetch this attempt**, press **Download / resume source**, and wait for `prepared`. This does not start inference. |
 | 4. Invite | Owner Mac | Press **Start public relay** if it is not running. Choose **Code lifetime**, then **Invite a Mac**. Send the full join link to the other person privately. Starting the relay after the download avoids using up its session while waiting. |
 | 5. Join | Second Mac | Paste the link into **Join code or link**. Choose **Memory limit per run** and **Time limit per run**, read and tick the standing-consent box, then press **Join with code**. You do not need the older manual pairing form. |
 | 6. Approve | Owner Mac | Compare the fingerprint with the person joining and review the Mac's report. Press **Approve this Mac**. |
-| 7. Start | Owner Mac | In **Run the model across the joined Macs**, press **Start demo**. Wait while the Macs report in, prepare files, load their stages and qualify the route. Compilation can take several minutes on a busy owner Mac. |
+| 7. Start | Owner Mac | In **Run the model across the joined Macs**, choose **Fast mode** on or off, then press **Start demo**. The switch applies to the next run. Wait while the Macs report in, prepare files, load their stages and qualify the route. Compilation can take several minutes on a busy owner Mac. |
 | 8. Chat | Owner Mac | Once the run says **Serving**, choose **Open the chat on this Mac**. Send a short prompt. The answer streams, and **Served by:** identifies the participating nodes. |
 
-Keep both apps open. A joined Mac accepts runs within its standing consent without repeated clicks. After restarting its app, press **Start / reconnect**. If it restarted during a run, the owner must start a fresh run; reconnecting does not restore the old in-flight request.
+Keep both apps open. A joined Mac accepts runs within its standing consent without repeated clicks. After the **owner app** restarts, joined Macs re-report and reconnect by themselves once the owner is reachable at the same address. A changed temporary relay address still needs attention. After restarting the **joined Mac's own app**, press **Start / reconnect**. Reconnecting does not restore an interrupted answer.
+
+**Time limit per run** means each Mac agrees to lend compute for at most the chosen number of minutes per run, 30 by default. When that run ends at its limit, the app automatically starts a fresh run under the same consent limits. This is automatic rollover, not an extension of one run's permission. Keep the owner, members and relay available. `<<TBD: final rollover behavior for an in-flight answer and the gap before chat is ready again>>`.
 
 For an upgrade, stop serving and quit on every participating Mac, install the same new version on all of them, retain app data, then reconnect and build a fresh route. Do not upgrade an in-flight route or assume mixed versions work.
 
@@ -167,7 +183,8 @@ For an upgrade, stop serving and quit on every participating Mac, install the sa
 - **Network policy:** allow only unmetered networks or permit metered use.
 - **Storage limit:** cap the storage authorized at enrollment. It must cover the model's preparation needs.
 - **Memory limit per run:** cap the joined Mac's memory allowance. Choices depend on that Mac's memory.
-- **Time limit per run:** bound work accepted under standing consent. The demo run also has its own 30-minute execution ceiling.
+- **Time limit per run:** the most time this Mac agrees to lend compute for one run, 30 minutes by default. The app starts a fresh run automatically at the limit; it does not remove the limit.
+- **Fast mode:** choose the faster path for the next run on the owner page. It does not switch a running request and has no mid-request recovery.
 - **Adaptive sharing:** when enabled, use coarse memory, CPU, heat and battery observations to reduce or pause work under pressure. It is enabled by default when you consent. It does not inspect which apps you run.
 - **Pause sharing:** manually stop taking new work and free model memory after current work is resolved. It works whether Adaptive sharing is on or off. Resuming waits for a calm period and fresh readiness checks.
 
@@ -196,6 +213,8 @@ On the owner page, use **Publish this run as a swarm**, enter a name and descrip
 - **Open (automatic, quota per key):** visitors receive bounded access without individual approval.
 - **Invite only:** access needs an owner-issued grant. This does not hide the listing.
 
+The website shows each swarm's **first-token time**, **tokens/s** and **per-stage time**, plus a **per-hop latency** field for the network time between Macs. Each swarm's own app measures and reports available values. These timings are measured in the app, not from your browser; per-stage time is compute time per token, not network latency. They are not independent directory measurements or a guarantee for your next prompt. Missing or stale measurements are not zero latency. `<<TBD: final per-hop measurement support; the current app reports no hop samples and the website says Not measured>>`.
+
 All published listings are public. The owner Mac checks access before forwarding prompts to the swarm. **Stop publishing** stops the entry's publication; tick **also delete the listing** to remove the directory record too.
 
 On the website, a browser key replaces an account. The browser creates and retains the private key; owners grant access to its fingerprint. Clearing site data or pressing **Forget this key (and its grants and swarms)** loses access and management rights held by that key. A stable key can link your activity across swarms; it is not anonymity.
@@ -209,22 +228,24 @@ You can also create a listing on the website, then paste its swarm link into the
 | `owner_model_not_prepared` | Authorize and finish **Download / resume source** on the owner before starting. |
 | `relay_required` | Press **Start public relay**. It can start before or after swarm creation. |
 | Expired link or `pairing_window_origin_stale` | The temporary relay may have expired or changed address. Ask for a new invitation link. |
-| Joined Mac does not return after an app restart | Press **Start / reconnect** there, then start a new run on the owner. |
+| Joined Mac does not return after an owner restart | It should reconnect and re-report automatically once the owner is reachable at the same address. Check the relay and saved consent. After restarting the joined Mac's own app, press **Start / reconnect** there. |
 | Route compilation takes minutes | Keep the owner awake and give it time. If a step fails, record the step and error code. |
 | Memory, disk or consent-limit refusal | Check free resources and the model's displayed requirement. Choose a smaller model if it does not fit; moving a selector does not rewrite saved consent. |
-| `member_work_not_running` | Check that every Mac is on v0.1.3, awake, connected and consented. This release retries brief control failures; sustained failures still stop the run. |
+| `member_work_not_running` | Check that every Mac is on v0.1.4, awake, connected and consented. This release retries brief control failures; sustained failures still stop the run. |
 | `peer_clock_skew_exceeded` | Turn on automatic date and time on both Macs. |
 | An answer ends with a failure | Restore the missing member or route and send a new request. Do not assume an interrupted answer completed. |
 
-Only two-Mac swarms have been exercised end to end in the release testing described here. Larger swarms, larger-model performance and wider hardware compatibility remain unproven. Experimental Windows/Linux packages in the source tree are not supported releases. A membership-only or browser test is not proof of distributed inference.
+The earlier end-to-end testing described here used only two-Mac swarms. The v0.1.4 qualification results above are still pending. Larger swarms, larger-model performance and wider hardware compatibility remain unproven. Experimental Windows/Linux packages in the source tree are not supported releases. A membership-only or browser test is not proof of distributed inference.
 
 ### Optional fast mode
 
-Fast mode is **off by default** and has no GUI switch. It requires `MYCELIUM_TOKEN_PATH=on` in the owner/application process's launch environment before the app starts and a fresh route is created. Leave it unset or set it to `off` for the normal recovery-capable path. Setting a variable in an unrelated Terminal window does not change an already running app.
+Use the **Fast mode** switch on the owner page before starting a run. It is off by default. The switch is unavailable while a run is active; its saved setting applies to the next run, not to an answer already in progress. To change modes now, stop the current run, choose the setting and start again.
 
-**Known issue in v0.1.3: leave fast mode off.** About five minutes after a route starts serving, every fast-mode request fails with `backend_failed`. The fast path's permission is tied to a short membership lease that is not renewed while the route serves. A fix is planned for the next release.
+The v0.1.3 failure after about five minutes of serving is fixed in v0.1.4: the route renews its permission lease while serving. This does not widen the saved consent or extend a run past its time limit.
 
-Stop serving and restart the owner/application before changing modes. Fast mode has no mid-request failover, replay recovery or continuation from saved model working memory. If a stage fails, a request can fail; starting another request is not recovery of that one. See the [fast-mode instructions and limits](docs/RELEASE-NOTES-v0.1.2.md#fast-mode-opt-in-and-limits).
+Fast mode still has no mid-request failover, replay recovery or continuation from saved model working memory. If a stage fails, a request can fail; starting another request is not recovery of that one. Leave fast mode off when you need the normal recovery-capable path. Even normal mode needs a suitable ready replacement to recover.
+
+For operators upgrading an environment-configured installation, `MYCELIUM_TOKEN_PATH=on` or `off` takes precedence over the saved GUI setting and locks the switch. Remove the override from the app's launch environment and reopen the app to use the switch.
 
 ### Reporting problems and next tests
 
@@ -234,9 +255,9 @@ The immediate need is independent two-Mac testing, including people on different
 
 ## Running the server parts
 
-For the normal two-Mac flow, the owner app starts the membership service, relay connection and chat entry. You do not need to install a separate Mycelium server, run SSH or copy invitation files manually. You do need to keep the owner app and its relay running.
+For the normal two-Mac flow, the owner app starts the membership service, relay connection and chat entry. You do not need to install a separate Mycelium server, run SSH or copy invitation files manually. You do need to keep the owner app and its relay running. Automatic run rollover does not restart a closed relay.
 
-**Use my own address** is optional for operators who want a fixed hostname. Configure a public HTTPS front, such as a named Cloudflare tunnel or reverse proxy, to forward to an unused local port on the owner Mac. Then enter the HTTPS hostname and that port in the app and press **Start relay on my address**. Tick the Cloudflare checkbox only when that front is a Cloudflare tunnel. Mycelium does not create DNS records, obtain certificates or configure the front for you. Send full join links; typed short codes work only with temporary tunnel names. See [fixed-address setup](docs/user/QUICKSTART-MACOS.md#use-your-own-address-advanced-optional).
+**Use my own address** is optional for operators who want a fixed hostname. Configure a public HTTPS front, such as a named Cloudflare tunnel or reverse proxy, to forward to an unused local port on the owner Mac. Then enter the HTTPS hostname and that port in the app and press **Start relay on my address**. Tick the Cloudflare checkbox only when that front is a Cloudflare tunnel. Mycelium does not create DNS records, obtain certificates or configure the front for you. Send full join links; typed short codes work only with temporary tunnel names. The fixed-address relay renews its app-side lifetime while a run is active or a swarm is published, up to its configured total cap (24 hours by default). This is separate from run rollover. See [fixed-address setup](docs/user/QUICKSTART-MACOS.md#use-your-own-address-advanced-optional).
 
 The directory is a separate optional service in [`mycelium_swarm_directory/`](mycelium_swarm_directory/). Its [server](mycelium_swarm_directory/server.py) serves listing/access APIs and the website, not model computation. Operators hosting it need their own HTTPS front and persistent state. Neither hosting a directory nor giving the owner a stable address removes the participating Macs' trust requirements.
 
@@ -302,9 +323,9 @@ This is not yet an installable release archive. [`scripts/finalize_a13_macos.py`
 
 | Guide | Scope |
 | --- | --- |
-| [v0.1.3 release notes](docs/RELEASE-NOTES-v0.1.3.md) | Current fixes, verified run, limits and upgrade steps. |
+| [v0.1.4 release notes](docs/RELEASE-NOTES-v0.1.4.md) | Changes, verification scope, limits and upgrade steps. |
 | [macOS quickstart](docs/user/QUICKSTART-MACOS.md) | Detailed install checks, first run, fixed address and uninstall. |
-| [Troubleshooting](docs/user/TROUBLESHOOTING.md) | More error codes and remedies. Its old relay-order restriction is superseded by this README. |
+| [Troubleshooting](docs/user/TROUBLESHOOTING.md) | More error codes and remedies, including relay and saved-consent refusals. |
 | [User guides](docs/user/README.md) | Feature and privacy background; some test verdicts and deployment status describe earlier candidates. |
 | [Friend swarms](docs/FRIEND-SWARM.md) | Cross-network behavior, relay setup and trust boundaries; physical cross-network testing remains open. |
 | [Local-first scope](docs/LOCAL-FIRST.md) | Offline transfer and LAN work, with explicit end-to-end limitations. |

@@ -4,7 +4,7 @@ This page takes you from a downloaded package to a first chat answer served by t
 
 **Read this first.**
 
-- This is **Mycelium 0.1.3**, an early macOS release with joined-Mac retry and control-error fixes. Hardware support is limited; broad compatibility is not claimed. See the [release notes](../RELEASE-NOTES-v0.1.3.md), including upgrade steps and the fast-mode failure limits.
+- This is **Mycelium 0.1.4**, an early macOS release with fast-mode lease renewal, automatic run rollover and a tested starter model in the GUI. Hardware support is limited; broad compatibility is not claimed. See the [release notes](../RELEASE-NOTES-v0.1.4.md), including upgrade steps and the fast-mode failure limits.
 - The package is **not** signed with an Apple Developer ID and is **not** notarized. macOS will block the installer script once. See "Step 3".
 - Download the zip and checksum from the GitHub release page. Check them before approving the installer.
 - **Apple silicon only** (M1 or newer, macOS arm64). Intel Macs are refused.
@@ -13,9 +13,9 @@ This page takes you from a downloaded package to a first chat answer served by t
 ## What you need
 
 - Two Apple silicon Macs on the same Wi-Fi (the project's own runs used a phone hotspot).
-- The package `mycelium-0.1.3-macos-arm64.zip` and its SHA-256 value from the release page (or the one the owner sent you).
+- The package `mycelium-0.1.4-macos-arm64.zip` and its SHA-256 value from the release page (or the one the owner sent you).
 - Enough free disk space for the model. The app checks disk and memory and will refuse with a message if a Mac cannot hold its share (see [TROUBLESHOOTING](TROUBLESHOOTING.md)).
-- An internet connection. A join between two Macs goes through a temporary Cloudflare tunnel (see [PRIVACY](PRIVACY.md)). A fully offline mode is **not released yet**.
+- An internet connection. Joining uses a public HTTPS relay, by default a temporary Cloudflare tunnel (see [PRIVACY](PRIVACY.md)). An owner-supplied HTTPS address is also supported. There is no supported, fully offline two-Mac app flow.
 - The installer itself does not need administrator rights. A standard (non-admin) user needs an administrator to approve the first open of this un-notarized download.
 
 ## Step 1. Check the file
@@ -23,7 +23,7 @@ This page takes you from a downloaded package to a first chat answer served by t
 In Terminal:
 
 ```sh
-shasum -a 256 ~/Downloads/mycelium-0.1.3-macos-arm64.zip
+shasum -a 256 ~/Downloads/mycelium-0.1.4-macos-arm64.zip
 ```
 
 The output must match the value the owner sent you. If it does not, stop and ask for the file again. A matching checksum only proves the file is the same bytes; it does not prove the software is safe.
@@ -33,7 +33,7 @@ The output must match the value the owner sent you. If it does not, stop and ask
 Double-click the zip in Finder. Then in Terminal:
 
 ```sh
-/usr/bin/codesign --verify --deep --strict "$HOME/Downloads/mycelium-0.1.3-macos-arm64/Mycelium A13 Demo.app"
+/usr/bin/codesign --verify --deep --strict "$HOME/Downloads/mycelium-0.1.4-macos-arm64/Mycelium A13 Demo.app"
 ```
 
 It should print nothing and exit with status 0.
@@ -67,10 +67,10 @@ If it fails, it prints a short JSON line ending in `"refused": "<code>"`, never 
 Open **~/Applications/Mycelium A13.app**. It opens a private page in your default browser. The page only talks to the app on your own Mac. Click **Open private demo** if it asks.
 
 1. **Read and tick the consent box.** It says other Macs in your swarm can see the prompts, outputs or intermediate data they need for their work. Mycelium does not hide your prompt from the Macs that serve it.
-2. **Choose your limits:** power (AC only, or battery allowed), network (unmetered only, or metered allowed), and storage (1, 2, 4 or 23 GB). The defaults are AC only and unmetered only.
+2. **Choose your limits before creating or joining:** power (AC only, or battery allowed), network (unmetered only, or metered allowed), and storage. Read the selected model's displayed storage requirement; the download size alone is not enough. The defaults are AC only and unmetered only. Changing a selector later does not replace saved consent.
 3. **Start the public relay when you want other Macs to join.** In the card "Invite or join with a code", press **Start public relay**. This starts a temporary Cloudflare tunnel. You can do it before or after creating the swarm. You can ask for join codes at any time: a code asked for before the relay starts shows "ready to share once the relay starts" and becomes redeemable the moment the relay is up. Joined Macs can only serve while the relay is running ("N members joined, waiting for relay to serve").
 4. Press **Create authority & enroll this Mac**. This creates your swarm identity on this Mac. No account and no organizer credentials are needed.
-5. **Get the model ready on this Mac.** If you press Start without a prepared model, the app says: "Download the selected model on this Mac first (Inference → Download / resume source), then press Start again."
+5. **Get the model ready on this Mac.** Keep **Qwen2.5-0.5B-Instruct** (the tested starter) selected in **Model**. It is the default for a fresh setup and downloads about 1 GB if not cached. Existing installations may retain their previous model. Under **Inference**, authorize the source fetch, check **Maximum bytes to fetch this attempt**, press **Download / resume source**, and wait for `prepared`. A download does not start inference.
 
 ## Step 5. Add the second Mac
 
@@ -90,15 +90,19 @@ Back on the owner Mac you see the second Mac's fingerprint, chip, memory and mea
 
 ## Step 6. Run the model
 
-On the owner Mac, in "Run the model across the joined Macs", press **Start demo**. The app runs these steps for you and shows each one:
+On the owner Mac, in "Run the model across the joined Macs", choose **Fast mode** on or off, then press **Start demo**. The switch is off by default and applies to the next run; stop an active run before changing it. Fast mode has no mid-request recovery if a stage fails. No environment variable is needed for this GUI setup. The app runs these steps for you and shows each one:
 
 1. Both Macs report in.
 2. The route is built: layers of the model are split between the Macs by memory.
-3. Each Mac fetches only its own slice.
+3. Each Mac fetches the files it needs. Small models, including the starter model, use a whole source snapshot on each Mac; larger models can use assigned slices.
 4. The route is checked ("qualified") before anything is served.
 5. The chat opens.
 
 At least **two different physical Macs** are required. Two copies of the app on one Mac do not count.
+
+**Time limit per run** means each Mac agrees to lend compute for at most the chosen number of minutes per run, 30 by default. In v0.1.4 the app starts a fresh run automatically at the limit, under the same saved consent. This rollover does not keep an expired temporary relay running. See [relay and run limits](../FRIEND-SWARM.md#run-time-limits-and-automatic-rollover).
+
+Keep both apps open. Joined Macs reconnect and re-report automatically after the owner app restarts, once the owner is reachable at the same address. If a temporary relay address changes, old links can stop working. After restarting the joined Mac's own app, press **Start / reconnect**. An interrupted answer is not resumed.
 
 Nothing is served until the route passes its start-up check. While it is checking, the chat says: "Warming up: the swarm is qualifying its route. Chat opens when it is ready." When it is ready the chat shows `Serving <model>` and, after each answer, a line like `Served by: ... → ...` naming the Macs that did the work.
 
@@ -156,8 +160,9 @@ IP number or `.local` name), and a local port from 1024 to 65535. The typed shor
 (`quiet-river-apple-stone ABCD-EFGH-JKLM`) still works only for `*.trycloudflare.com`; for your
 own address send the **join link**, which carries the address and the owner's key digest.
 
-What stays the same after the relay stops and starts again (the 30-minute limit, a quit and
-reopen): the address, the swarm and its members, the join links and the swarm listing. Press
+When the relay stops and restarts on the same configured address, the swarm identity,
+members and listing are retained. Unexpired join links still use the same address;
+expired or used invitations still need replacing. Press
 **Use my own address** again, or restart the relay with the same address (the app remembers it),
 and nothing has to be republished. The app only opens the local port; if the tunnel is not
 running, visitors see a Cloudflare error page and the app still works locally.
