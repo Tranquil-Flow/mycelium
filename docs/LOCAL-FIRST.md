@@ -95,7 +95,7 @@ listener on loopback; no second machine, no hardware):
   weaker than checking against Hugging Face.
 
 What this does not give you yet: the A13 multi-device flow still reaches the owner's
-control plane through the Cloudflare relay (section 3), and inference across machines
+control plane through a public HTTPS relay (section 3), and inference across machines
 still needs the Rust LanDirect sidecar. So today "fully offline" holds for the model
 transfer logic, not for an end-to-end two-Mac run.
 
@@ -156,11 +156,12 @@ is unchanged.
   relay-less LAN bind (`LanDirect`) is **design only**:
   `docs/design/lan-direct-transport.md`. Until it lands, `lan` mode starts the
   seed and membership, not the stage runtime.
-- **The A13 desktop app's multi-device flow.** Its only reachability path is a
-  Cloudflare quick tunnel and join codes are hard-wired to `*.trycloudflare.com`
-  (SOURCE-READ: `mycelium_a13_macos/app.py`, `pairing.py`). Do not start the
-  "public relay" if you want zero hosted services; the single-machine path works
-  without it.
+- **The desktop app's multi-device flow still needs public HTTPS.** It supports
+  the default temporary Cloudflare tunnel and an owner-supplied HTTPS origin
+  through **Use my own address**. Send the full join link for your own address;
+  only the typed short-code form is restricted to temporary tunnel names
+  (SOURCE-READ: `mycelium_a13_macos/app.py`, `pairing.py`). A fixed address is not
+  a LAN-only mode. See [fixed-address setup](FRIEND-SWARM.md#use-your-own-address-stable-hostname).
 - **Relay order: no longer a trap.** The relay can start before or after the swarm is created.
   Creating with the "Let other Macs join" box still starts the relay first. For a swarm
   created without one, `/api/network/start` reopens the retained authority on the relay's
@@ -176,7 +177,7 @@ is unchanged.
 - **A fully offline two-device run.** The model transfer no longer needs Hugging Face
   (section 2: the owner serves the pinned manifest and the bytes, and a folder can be
   imported), but the rest of the A13 flow still does not run without hosted
-  services: reaching the owner's control plane uses the Cloudflare relay, and the
+  services: reaching the owner's control plane uses a public HTTPS relay, and the
   stage runtime needs the Rust LanDirect sidecar (design only). Nothing in this
   lane has been run on two machines. The app UI has no "model from a folder" picker;
   use the command above.
@@ -256,17 +257,18 @@ build scripts `scripts/finalize_a13_macos.py`, `scripts/build_a13_windows.py`,
 `scripts/build_a13_linux.py`. All three verify an Ed25519-signed manifest and
 the payload digest before writing anything, install per user without
 administrator rights, and never register an always-on service without a
-separate consent. Packages are produced as owner-private media: there is no
-public download. **All steps in this section are UNVERIFIED on hardware**; the
-Windows and Linux installers have only run against test seams.
+separate consent. The macOS package is available from the public releases; see
+the [macOS quickstart](user/QUICKSTART-MACOS.md) for current install steps. The
+Windows and Linux installers have only run against test seams, not hardware.
 
 ### macOS (Apple silicon only, macOS arm64)
 
 1. Obtain `mycelium-<version>-macos-arm64.zip` from the owner and compare its SHA-256
    with the value the owner sent.
 2. Extract it (Archive Utility or `ditto -x -k <zip> <dir>`).
-3. Run `Install Mycelium.command` from the bundle. The app is unsigned and not
-   notarized, so Gatekeeper blocks that script once: **Done**, then System
+3. Run `Install Mycelium.command` from the bundle. The app has an ad-hoc Apple
+   signature, not a Developer ID signature, and is not notarized. Gatekeeper blocks
+   that script once: **Done**, then System
    Settings, Privacy & Security, **Open Anyway** (see
    `docs/user/QUICKSTART-MACOS.md`). The script checks the bundle first; the
    installer then removes the download mark from the verified installed copy

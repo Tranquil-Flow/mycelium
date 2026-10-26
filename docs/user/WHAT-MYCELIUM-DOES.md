@@ -93,12 +93,15 @@ See [TROUBLESHOOTING](TROUBLESHOOTING.md) for the exact messages.
 
 **Cost.** A short background check every couple of seconds. This Mac may stop serving while you use other apps.
 
+## Public demo
+
+[Try the demo in your browser](https://mycelium.now/swarms/). The developer's **Mycelium demo** listing can be intermittent. A listing is not proof that a swarm is serving. Prompts go to the swarm operator's entry, and the participating Macs can see the data they need for their work. See [PRIVACY](PRIVACY.md).
+
 ## Not available yet
 
 - A fully offline or LAN-only mode (see [PRIVACY](PRIVACY.md)).
 - Windows and Linux hardware support.
 - Developer ID signing and notarization.
-- A public hosted demo (the site is switched off on purpose).
 - Using one Mac for the whole job with no peers is a different path and not covered here.
 
 ## Sources
