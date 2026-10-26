@@ -24,7 +24,8 @@ It is for people who want to run models with Macs they own or with people they t
 - The owner's control mailbox retains a bounded history so old traffic does not keep adding to status and control work over days.
 - Joined Macs re-report and reconnect after the owner app restarts. This does not resume an interrupted answer.
 - A swarm starts a fresh run automatically when the current run reaches its time limit. Each Mac's saved consent limits still apply.
-- The model picker defaults to **Qwen2.5-0.5B**, the tested starter model. The owner page has a **Fast mode** switch for the next run.
+- The model picker defaults to **Qwen2.5-0.5B**, the tested starter model. Fresh setups default to a **4 GB storage allowance**. The owner page has a **Fast mode** switch for the next run.
+- Layer placement fits each Mac's share within the storage and memory limits it agreed to, using the limits reported to the owner. If no split fits, the app stops with a plain resource-refusal message rather than exceeding those limits.
 - Startup status is faster to read, and failure messages give clearer next steps.
 - The website shows per-swarm performance statistics measured and self-reported by each swarm's own app.
 
@@ -62,7 +63,7 @@ flowchart TB
 - A **route** is the ordered set of stages that runs the model. The app checks the route before it serves chat. A Mac being joined or having downloaded files does not mean the route is ready.
 - The owner downloads the full model source. For Qwen3-8B and Qwen3-14B, joined Macs fetch only their assigned slices. Small models such as Qwen3-0.6B use a whole source snapshot on each Mac, although computation is still split.
 
-For example, Rowan and Kit each have a Mac. Rowan creates a swarm and sends Kit a join link. Kit chooses resource limits and agrees to accept Rowan's work; Rowan checks Kit's fingerprint and approves. When Rowan starts the model, the app divides its layers between the two Macs. Kit is contributing computation, not just opening a second chat window. If Kit leaves, that route may stop being able to answer.
+For example, Rowan and Kit each have a Mac. Rowan creates a swarm and sends Kit a join link. Kit chooses resource limits and agrees to accept Rowan's work; Rowan checks Kit's fingerprint and approves. When Rowan starts the model, the app divides its layers between the two Macs within their reported storage and memory consent limits. If no split fits, it explains the resource refusal instead of starting that route. Kit is contributing computation, not just opening a second chat window. If Kit leaves, that route may stop being able to answer.
 
 This is inference: running an existing model. It is not training a new model or merging the Macs into one general-purpose computer. If your model already runs comfortably on one Mac, you may not need a distributed setup.
 
@@ -149,7 +150,7 @@ The installer checks package hashes and a signed manifest before installing into
 
 After installation and checksum verification, this setup uses the app's browser page only. You do not need Terminal commands to choose the model, enable fast mode, join or start chat.
 
-Choose storage and network allowances **before creating or joining**. For the small GUI model, a 4 GB storage allowance is a practical starting choice; the app still checks the exact preparation and memory needs. If you intend to use a larger model, select its larger displayed storage allowance instead. In v0.1.4, editing a visible selector later does not replace the saved enrollment policy. If an existing policy blocks you, use a smaller model or report the refusal rather than deleting identity files.
+Choose storage and network allowances **before creating or joining**. Fresh setups now default to a **4 GB storage allowance** for the starter model; the app still checks the exact preparation and memory needs. This does not raise an existing installation's saved allowance. If you intend to use a larger model, select its larger displayed storage allowance instead. In v0.1.4, editing a visible selector later does not replace the saved enrollment policy. If an existing policy blocks you, use a smaller model or report the refusal rather than deleting identity files.
 
 | Step | Where | What to do |
 | --- | --- | --- |
@@ -181,7 +182,7 @@ For an upgrade, stop serving and quit on every participating Mac, install the sa
 
 - **Power policy:** allow AC-only operation or permit battery use.
 - **Network policy:** allow only unmetered networks or permit metered use.
-- **Storage limit:** cap the storage authorized at enrollment. It must cover the model's preparation needs.
+- **Storage limit:** cap the storage authorized at enrollment, **4 GB by default for a fresh setup**. It must cover the model's preparation needs; the source download alone is not the full requirement.
 - **Memory limit per run:** cap the joined Mac's memory allowance. Choices depend on that Mac's memory.
 - **Time limit per run:** the most time this Mac agrees to lend compute for one run, 30 minutes by default. The app starts a fresh run automatically at the limit; it does not remove the limit.
 - **Fast mode:** choose the faster path for the next run on the owner page. It does not switch a running request and has no mid-request recovery.
@@ -230,7 +231,7 @@ You can also create a listing on the website, then paste its swarm link into the
 | Expired link or `pairing_window_origin_stale` | The temporary relay may have expired or changed address. Ask for a new invitation link. |
 | Joined Mac does not return after an owner restart | It should reconnect and re-report automatically once the owner is reachable at the same address. Check the relay and saved consent. After restarting the joined Mac's own app, press **Start / reconnect** there. |
 | Route compilation takes minutes | Keep the owner awake and give it time. If a step fails, record the step and error code. |
-| Memory, disk or consent-limit refusal | Check free resources and the model's displayed requirement. Choose a smaller model if it does not fit; moving a selector does not rewrite saved consent. |
+| Memory, disk or consent-limit refusal | The app tries to fit the split within each Mac's reported limits and stops plainly when no split fits. Check free resources and the model's displayed requirement. Choose a smaller model if it does not fit; moving a selector does not rewrite saved consent. |
 | `member_work_not_running` | Check that every Mac is on v0.1.4, awake, connected and consented. This release retries brief control failures; sustained failures still stop the run. |
 | `peer_clock_skew_exceeded` | Turn on automatic date and time on both Macs. |
 | An answer ends with a failure | Restore the missing member or route and send a new request. Do not assume an interrupted answer completed. |

@@ -14,7 +14,7 @@ This page takes you from a downloaded package to a first chat answer served by t
 
 - Two Apple silicon Macs on the same Wi-Fi (the project's own runs used a phone hotspot).
 - The package `mycelium-0.1.4-macos-arm64.zip` and its SHA-256 value from the release page (or the one the owner sent you).
-- Enough free disk space for the model. The app checks disk and memory and will refuse with a message if a Mac cannot hold its share (see [TROUBLESHOOTING](TROUBLESHOOTING.md)).
+- Enough free disk space and memory for the model. The app fits each Mac's share within its reported storage and memory consent limits and refuses with a plain message if no split fits (see [TROUBLESHOOTING](TROUBLESHOOTING.md)).
 - An internet connection. Joining uses a public HTTPS relay, by default a temporary Cloudflare tunnel (see [PRIVACY](PRIVACY.md)). An owner-supplied HTTPS address is also supported. There is no supported, fully offline two-Mac app flow.
 - The installer itself does not need administrator rights. A standard (non-admin) user needs an administrator to approve the first open of this un-notarized download.
 
@@ -67,7 +67,7 @@ If it fails, it prints a short JSON line ending in `"refused": "<code>"`, never 
 Open **~/Applications/Mycelium A13.app**. It opens a private page in your default browser. The page only talks to the app on your own Mac. Click **Open private demo** if it asks.
 
 1. **Read and tick the consent box.** It says other Macs in your swarm can see the prompts, outputs or intermediate data they need for their work. Mycelium does not hide your prompt from the Macs that serve it.
-2. **Choose your limits before creating or joining:** power (AC only, or battery allowed), network (unmetered only, or metered allowed), and storage. Read the selected model's displayed storage requirement; the download size alone is not enough. The defaults are AC only and unmetered only. Changing a selector later does not replace saved consent.
+2. **Choose your limits before creating or joining:** power (AC only, or battery allowed), network (unmetered only, or metered allowed), and storage. Read the selected model's displayed storage requirement; the download size alone is not enough. Fresh-setup defaults are AC only, unmetered only and **4 GB storage**. The storage allowance covers preparation as well as the starter model's source snapshot. Existing saved limits do not increase with this update. Changing a selector later does not replace saved consent.
 3. **Start the public relay when you want other Macs to join.** In the card "Invite or join with a code", press **Start public relay**. This starts a temporary Cloudflare tunnel. You can do it before or after creating the swarm. You can ask for join codes at any time: a code asked for before the relay starts shows "ready to share once the relay starts" and becomes redeemable the moment the relay is up. Joined Macs can only serve while the relay is running ("N members joined, waiting for relay to serve").
 4. Press **Create authority & enroll this Mac**. This creates your swarm identity on this Mac. No account and no organizer credentials are needed.
 5. **Get the model ready on this Mac.** Keep **Qwen2.5-0.5B-Instruct** (the tested starter) selected in **Model**. It is the default for a fresh setup and downloads about 1 GB if not cached. Existing installations may retain their previous model. Under **Inference**, authorize the source fetch, check **Maximum bytes to fetch this attempt**, press **Download / resume source**, and wait for `prepared`. A download does not start inference.
@@ -81,7 +81,7 @@ On the owner Mac:
 On the second Mac:
 
 1. Install the same package (Steps 1 to 3) and open the app.
-2. Tick the consent box and choose its limits.
+2. Tick the consent box and choose its limits. A fresh setup defaults to **4 GB storage**; check that allowance before joining.
 3. Paste the join link, or type the relay name and code (for example `quiet-river-apple-stone ABCD-EFGH-JKLM`) into **Join code or link**.
 4. Choose a memory limit and a time limit per run. Tick the **standing consent** box. It means this Mac accepts this owner's work automatically within those limits until you withdraw.
 5. Press **Join with code**.
@@ -93,12 +93,14 @@ Back on the owner Mac you see the second Mac's fingerprint, chip, memory and mea
 On the owner Mac, in "Run the model across the joined Macs", choose **Fast mode** on or off, then press **Start demo**. The switch is off by default and applies to the next run; stop an active run before changing it. Fast mode has no mid-request recovery if a stage fails. No environment variable is needed for this GUI setup. The app runs these steps for you and shows each one:
 
 1. Both Macs report in.
-2. The route is built: layers of the model are split between the Macs by memory.
+2. The route is built: layers of the model are split between the Macs within the storage and memory limits each agreed to and reported. The app tries a different split if needed. If no split fits, it stops with a plain resource-refusal message; it does not increase your limits.
 3. Each Mac fetches the files it needs. Small models, including the starter model, use a whole source snapshot on each Mac; larger models can use assigned slices.
 4. The route is checked ("qualified") before anything is served.
 5. The chat opens.
 
 At least **two different physical Macs** are required. Two copies of the app on one Mac do not count.
+
+If the app says a Mac agreed to less storage or memory than its share needs, choose a smaller model that fits the saved limits. The download size alone does not include preparation files. A changed or previously unknown limit can still be refused when a member accepts work; changing a visible selector does not rewrite saved consent.
 
 **Time limit per run** means each Mac agrees to lend compute for at most the chosen number of minutes per run, 30 by default. In v0.1.4 the app starts a fresh run automatically at the limit, under the same saved consent. Relay renewal is separate: while an owner run is active or a swarm is published, the app renews the existing temporary tunnel before expiry within a total granted-window cap of 24 hours. It does not restart an expired tunnel. See [relay and run limits](../FRIEND-SWARM.md#run-time-limits-and-automatic-rollover).
 
