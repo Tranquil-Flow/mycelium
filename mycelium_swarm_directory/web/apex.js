@@ -12,6 +12,11 @@
     if (live.some(s => !Number.isSafeInteger(s.members) || s.members < 0)) throw new Error('invalid');
     document.getElementById('serving-count').textContent = live.filter(s => s.status === 'serving').length;
     document.getElementById('mac-count').textContent = live.reduce((n,s) => n+s.members,0);
+    const reporting = live.filter(s => s.status === 'serving' && s.stats?.stale === false && s.stats.values);
+    const rates = reporting.map(s => s.stats.values.decode_millitokens_s).filter(m => m?.n > 0 && Number.isSafeInteger(m.p50));
+    if (rates.length) document.getElementById('fastest-speed').textContent = (Math.max(...rates.map(m => m.p50))/1000).toFixed(1);
+    if (reporting.length) document.getElementById('served-count').textContent = String(reporting.reduce((n,s) => n+s.stats.values.requests_24h,0));
+    document.getElementById('stats-coverage').textContent = `${reporting.length} reporting swarm${reporting.length === 1 ? '' : 's'}. Self-reported app-chat counts; partial 24 h coverage after restart. Listings may overlap. No visitor counts.`;
     // Match the actual demo destination, never its mutable display name or the
     // directory-wide sum. Offline duplicates do not describe the serving route.
     // Multiple serving listings are ambiguous: retain the neutral HTML fallback.

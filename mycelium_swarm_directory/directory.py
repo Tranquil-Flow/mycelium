@@ -18,17 +18,21 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from . import docs
+from . import docs, stats_docs
 from .ratelimit import WindowLimiter
 from .wire import Verifier, WireError, fingerprint, parse_json_object
 
 PRIVACY_NOTE = ('Your prompt is seen by this swarm\'s nodes (the Macs that run it). It is not end-to-end '
                 'encrypted from them. The directory never sees prompts and keeps no logs or analytics. '
                 'Cloudflare terminates TLS for this site and for swarm entries on trycloudflare.com and can see '
-                'your IP address, timing and plaintext prompts.')
+                'your IP address, timing and plaintext prompts. '
+                'Swarm apps may publish numeric performance summaries: first-token and request durations, decode '
+                'speed, stage compute and hop latency when measured, layers, mode, uptime, request totals, sample '
+                'counts and windows. These self-reported statistics contain no prompts, outputs, IPs, hostnames '
+                'or node keys.')
 #: Signed read-only queries: own budgets, not the write budgets.
 QUERY_ROUTES = frozenset({'/owner-inbox', '/my-grants'})
-API_ROUTES = frozenset({'/records', '/delete', '/heartbeat', '/access-requests', '/owner-inbox', '/grants', '/deny',
+API_ROUTES = frozenset({'/records', '/delete', '/heartbeat', '/stats', '/access-requests', '/owner-inbox', '/grants', '/deny',
                         '/my-grants', '/entry-offers'})
 _STATUS_ORDER = {'serving': 0, 'warming': 1, 'offline': 2}
 
@@ -43,6 +47,7 @@ class Limits:
     max_grants_per_grantee: int = 64
     max_live_nonces: int = 20000
     heartbeat_ttl: int = 90
+    stats_ttl: int = 90
     offline_hide_seconds: int = 24 * 3600
     offline_delist_seconds: int = 14 * 24 * 3600
     decline_cooldown_seconds: int = 24 * 3600
@@ -120,6 +125,7 @@ class Directory:
             raise WireError('rate_limited_ip', 429)
         document = parse_json_object(body, limit=self.limits.max_body)
         handler = {'/records': self._put_record, '/delete': self._delete, '/heartbeat': self._heartbeat,
+                   '/stats': self._stats,
                    '/access-requests': self._access_request, '/owner-inbox': self._owner_inbox,
                    '/grants': self._grant, '/deny': self._deny, '/my-grants': self._my_grants,
                    '/entry-offers': self._entry_offer}[path]
@@ -186,6 +192,8 @@ class Directory:
             if record['seq'] <= row['record']['seq']:
                 raise WireError('record_seq_stale', 409)
             old_entry = row['record']['entry']
+            if old_entry != record['entry'] or row['record']['model'] != record['model']:
+                row = dict(row, stats=None, stats_received=None)
             if old_entry != record['entry'] and row.get('heartbeat') is not None \
                     and row['heartbeat']['signer_key'] != record['owner_key']:
                 row['heartbeat'] = None  # the detached entry no longer speaks for the swarm
@@ -241,6 +249,32 @@ class Directory:
         row = dict(row, heartbeat=document, heartbeat_received=now, offline_since=offline_since)
         self.store.put('swarm', document['swarm_id'], row)
         return {'status': self._status(row, now)}
+
+    def _stats(self, document, now):
+        document = stats_docs.check(document, self.verifier)
+        docs.fresh(document['at'], now, self.limits.skew)
+        row = self.store.get('swarm', document['swarm_id'])
+        if row is None:
+            raise WireError('swarm_unknown', 404)
+        record = row['record']
+        allowed = {record['owner_key']} | ({record['entry']['key']} if record['entry'] else set())
+        if document['signer_key'] not in allowed:
+            raise WireError('stats_signer_not_authorized', 403)
+        self._key_rate(document['signer_key'], now)
+        self._charge_write(now)  # optional stats never spend the heartbeat-wide budget
+        if document['at'] <= row.get('stats_at', -1):
+            raise WireError('stats_stale', 409)
+        row = dict(row, stats=document, stats_received=now, stats_at=document['at'])
+        self.store.put('swarm', document['swarm_id'], row)
+        return {'accepted': True}
+
+    def _public_stats(self, row, now, status):
+        document = row.get('stats')
+        if document is None:
+            return None
+        age = max(0, now - row['stats_received'], now - document['at'])
+        return {'values': document['values'], 'updated_at': document['at'], 'age_seconds': age,
+                'stale': age > self.limits.stats_ttl or status != 'serving'}
 
     def _access_request(self, document, now):
         document = docs.check(document, docs.ACCESS_REQUEST, self.verifier)
@@ -404,6 +438,7 @@ class Directory:
                 'last_seen_seconds': None if row.get('heartbeat_received') is None
                 else max(0, now - row['heartbeat_received']),
                 'offline_seconds': offline_seconds, 'listing_state': listing_state,
+                'stats': self._public_stats(row, now, status),
                 'privacy': PRIVACY_NOTE, 'record': record}
 
     def list_swarms(self) -> list[dict[str, Any]]:

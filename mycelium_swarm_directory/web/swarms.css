@@ -19,13 +19,13 @@ label{display:block;color:var(--muted);font-size:14px}
 .panel{min-height:650px}
 .count-line{height:26px;margin:0 0 10px}
 .listing-window{height:calc(100dvh - 330px);min-height:440px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;margin-bottom:16px}
-.swarm-card{height:350px;min-height:350px;overflow:hidden;gap:10px}
+.swarm-card{height:420px;min-height:420px;overflow:hidden;gap:10px}
 .swarm-card h3{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .swarm-card .desc{height:44px;min-height:44px;overflow:hidden}
 .swarm-card .foot{flex-wrap:nowrap;min-height:44px}
 .swarm-card .foot a{white-space:nowrap}
 .swarm-card .who{overflow:hidden;text-overflow:ellipsis}
-.swarm-card .stats{flex:none;height:69px}
+.swarm-card .stats{flex:none;height:90px}
 .swarm-card .status{flex:none}
 .status{border:1px solid var(--line-2);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:650;text-transform:capitalize;white-space:nowrap}
 .status.serving{color:var(--accent);background:var(--good-bg)}
@@ -129,8 +129,8 @@ dialog button{margin:4px}
 .toolbar .chip{font-size:12px;padding:0 10px;min-height:44px}
 .search{flex-basis:100%}
 .listing-window{height:calc(100dvh - 375px);min-height:400px}
-.swarm-card{height:410px;min-height:410px;padding:16px}
-.swarm-card .stats{height:122px}
+.swarm-card{height:480px;min-height:480px;padding:16px}
+.swarm-card .stats{height:160px}
 .swarm-card .foot{gap:6px}
 .swarm-card .foot button,.swarm-card .foot .btn{padding:8px 10px;font-size:13px}
 .stat .k{font-size:11px}

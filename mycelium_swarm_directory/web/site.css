@@ -158,6 +158,22 @@ label.f{display:block;font-weight:620;margin-bottom:6px}
 .swarm-card .foot{margin-top:auto;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
 .swarm-card .foot .who{font-size:13px;color:var(--muted)}
 
+/* Numeric performance is public, identity-free and separate from browser timing. */
+.card-performance-note{font-size:12px;margin:0;min-height:19px}
+.swarm-card .stat .v{font-size:.95rem;white-space:normal;overflow-wrap:anywhere;min-height:2.5rem}
+.swarm-card .stat .k{font-size:10px;white-space:normal;min-height:2.4em}
+#detail-performance{margin:20px 0;height:760px;overflow:auto}
+@media(max-width:640px){#detail-performance{height:960px}}
+.performance-report h3{margin-bottom:12px}
+.performance-report p{overflow-wrap:anywhere}
+.stats-stale{color:var(--warn);font-weight:650}
+.stats-table-wrap{overflow-x:auto;margin:16px 0}
+.performance-table{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+.performance-table caption{text-align:left;color:var(--muted);margin-bottom:8px}
+.performance-table th,.performance-table td{text-align:left;border-bottom:1px solid var(--line);padding:10px 8px}
+.performance-table td{white-space:nowrap}
+.performance-table th[scope=row]{font-weight:500;min-width:10rem}
+#stats-coverage{min-height:4.65em}
 /* detail */
 .crumbs{font-size:14px;margin-bottom:12px}
 .crumbs a{color:var(--muted)}

@@ -23,7 +23,70 @@ function currentSwarm(id) { return swarms.find(s => s.swarm_id === id); }
 function setText(node, text) { if (node && node.textContent !== String(text)) node.textContent = text; }
 function accessLabel(mode) { return {open: 'Open to anyone', request: 'Needs approval', invite: 'Invite only'}[mode] || 'Access unavailable'; }
 function duration(seconds) { if (!Number.isFinite(seconds) || seconds < 0) return '—'; return seconds < 60 ? `${Math.floor(seconds)} s` : seconds < 3600 ? `${Math.floor(seconds / 60)} min` : `${Math.floor(seconds / 3600)} h`; }
+function statsAge(s) {
+  const report = s.stats;
+  return report ? (report.age_seconds || 0) + Math.max(0, now() - (report.loaded_at || report.updated_at || 0)) : Infinity;
+}
+function statsStale(s) { return s.status !== 'serving' || s.stats?.stale !== false || statsAge(s) > 90; }
+function metricText(metric, percentile, divisor, unit) {
+  const value = metric?.[percentile];
+  return metric?.n > 0 && Number.isSafeInteger(value) ? (value / divisor).toFixed(divisor === 1000 ? (unit === 's' ? 2 : 1) : 0) + ' ' + unit : '—';
+}
+function reportedStat(s, key) {
+  if (!s.stats) return '—';
+  if (statsStale(s)) return 'Stale';
+  const v = s.stats.values;
+  if (key === 'reported_speed') return metricText(v.decode_millitokens_s, 'p50', 1000, 'tok/s');
+  if (key === 'ttft') return metricText(v.ttft_ms, 'p50', 1000, 's');
+  if (key === 'hop') {
+    const measured = (v.hops || []).filter(h => h.samples > 0 && h.age_seconds + statsAge(s) <= 90);
+    return measured.length ? Math.max(...measured.map(h => h.rtt_ms)) + ' ms' : 'Not measured';
+  }
+  return '—';
+}
+function renderPerformance(s) {
+  const section = el('section', {class:'performance-report', 'aria-label':'Swarm performance'}, el('h3', {}, 'Swarm performance'));
+  section.append(el('p', {class:'meta'}, "Measured by the swarm's own app, self-reported. Not independently benchmarked."));
+  if (!s.stats) { section.append(el('p', {}, 'No app statistics published yet. Older apps can still serve normally.')); return section; }
+  const r = s.stats, v = r.values;
+  section.append(el('p', {class:statsStale(s) ? 'stats-stale' : 'meta'},
+    `${statsStale(s) ? 'Stale snapshot' : 'Last updated'} · ${ago(Math.floor(statsAge(s)))} · ${r.updated_at ? new Date(r.updated_at*1000).toISOString() : 'time unavailable'}`));
+  section.append(el('p', {}, `Mode: ${v.mode} · Serving observed since ${v.serving_since === null ? '—' : new Date(v.serving_since*1000).toISOString()} · Observed uptime: ${duration(v.uptime_seconds)}`));
+  section.append(el('p', {class:'meta'}, `Completed app-chat requests: last ${v.window_limit} within ${duration(v.window_seconds)} on this run; observed ${duration(v.observed_seconds)}. Timings include owner stream delivery, not your browser connection. Decode excludes the first token.`));
+  const body = el('tbody', {});
+  function row(label, metric, divisor, unit) {
+    body.append(el('tr', {}, el('th', {scope:'row'}, label), el('td', {}, metricText(metric,'p50',divisor,unit)),
+      el('td', {}, metricText(metric,'p90',divisor,unit)), el('td', {}, String(metric?.n || 0))));
+  }
+  row('First token', v.ttft_ms, 1000, 's');
+  row('Decode speed', v.decode_millitokens_s, 1000, 'tok/s');
+  row('End-to-end request', v.request_ms, 1000, 's');
+  for (const stage of v.stages || []) row(`Mac ${stage.index+1} · layers ${stage.layer_start}–${stage.layer_end} · compute/token`, stage.compute_ms, 1, 'ms');
+  section.append(el('div', {class:'stats-table-wrap'}, el('table', {class:'performance-table'},
+    el('caption', {}, 'Measured durations and throughput (nearest-rank percentiles)'),
+    el('thead', {}, el('tr', {}, ...['Metric','p50','p90','Samples'].map(x => el('th', {scope:'col'}, x)))), body)));
+  section.append(el('p', {class:'meta'}, `Layer ranges are start-inclusive, end-exclusive. Stage compute: up to 512 unbatched decode intervals per stage in ${duration(v.stage_window_seconds)}, measured on each Mac's own clock. No sample means unavailable, not zero.`));
+  if ((v.hops || []).length) {
+    const hops = el('tbody', {});
+    for (const hop of v.hops) {
+      const probe = hop.kind === 'owner_control_rtt_probe';
+      const label = probe ? 'Network round trip (probe)' : 'Activation transport RTT';
+      const explanation = probe ? 'Owner-to-Mac authenticated health command/response, including mailbox polling and command execution; not a consecutive-stage or one-way network latency.' : 'Latest transport-reported warm RTT estimate between consecutive stages, measured by one endpoint; not a one-way activation-transfer time.';
+      const age = hop.age_seconds + Math.floor(statsAge(s));
+      hops.append(el('tr', {}, el('th', {scope:'row'}, `${probe ? 'Owner control' : 'Mac '+(hop.from_stage+1)} ↔ Mac ${hop.to_stage+1}`),
+        el('td', {title:explanation}, label), el('td', {}, `${hop.rtt_ms} ms`),
+        el('td', {}, String(hop.samples)), el('td', {}, `${age > 90 ? 'Stale · ' : ''}${ago(age)}`)));
+    }
+    section.append(el('div', {class:'stats-table-wrap'}, el('table', {class:'performance-table'},
+      el('caption', {}, 'Hop round trips · latest estimate, not percentiles'),
+      el('thead', {}, el('tr', {}, ...['Link','Measurement','RTT','Samples','Age'].map(x=>el('th',{scope:'col'},x)))),hops)));
+    section.append(el('p', {class:'meta'}, 'Activation transport RTT measures an actual consecutive-stage link. Network round trip (probe) instead measures the owner control channel, including mailbox polling and health-command execution. It is an upper bound on pure network RTT, not one-way latency. Existing idle probes add no extra traffic. Probe samples: retained last 64; transport samples: source-reported count.'));
+  } else section.append(el('p', {class:'meta'}, 'Hop round trip: not measured yet (or this is a one-Mac route). Stage compute and browser latency are not substitutes for hop time.'));
+  section.append(el('p', {}, `Served in the last 24 h: ${v.requests_24h} completed app-chat requests · coverage ${duration(v.coverage_seconds)} of 24 h (resets when the app restarts). Counts across listings may overlap.`));
+  return section;
+}
 function stat(s, key) {
+  if (['reported_speed','ttft','hop'].includes(key)) return reportedStat(s, key);
   const state = liveStates.get(s.swarm_id), measured = measurements.get(s.swarm_id) || {};
   if (key === 'status') return s.status;
   if (key === 'seen') return s.last_seen_seconds === null ? '—' : ago(s.last_seen_seconds);
@@ -119,6 +182,9 @@ async function directory(path, doc) {
   const response = await fetch(API + path, {...init, credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer'});
   const value = await response.json();
   if (!response.ok) throw new Error(value.error || 'request_failed');
+  for (const s of [...(value.swarms || []), ...(value.owned_swarms || []), ...(value.swarm ? [value.swarm] : [])]) {
+    if (s.stats) s.stats.loaded_at = now();
+  }
   return value;
 }
 async function entry(origin, route, doc) {
@@ -191,8 +257,9 @@ function renderSwarm(s) {
     el('div', {class: 'row between'}, el('h3', {}, el('a', {href: '#swarm/' + s.swarm_id, 'data-name': ''}, s.name)), el('span', {class: 'status'})),
     el('p', {class: 'meta'}, el('span', {'data-card-model': ''}), el('span', {class: 'tag', 'data-mode': ''})),
     el('p', {class: 'desc'}, s.description || 'A model running on Macs people choose to share.'),
-    el('div', {class: 'stats'}, ...[['macs','Macs','Reported by the swarm'], ['queue','Availability','Reported by the swarm'], ['uptime','Run uptime','Start reported by the swarm'], ['latency','Your latency','Measured in your browser']].map(([key,label,source]) =>
+    el('div', {class: 'stats'}, ...[['macs','Macs','Reported by the swarm'], ['reported_speed','Decode p50','Self-reported by the owner app'], ['ttft','First token p50','Self-reported by the owner app'], ['hop','Hop RTT','Largest recent RTT: consecutive-stage transport estimate, or owner-to-Mac network round trip (probe), including mailbox polling and health-command execution. See detail for source, link, sample count and age. Not one-way latency.']].map(([key,label,source]) =>
       el('div', {class: 'stat', title: source}, el('div', {class: 'k'}, label), el('div', {class: 'v', 'data-stat': key}, '—')))),
+    el('p', {class:'card-performance-note muted'}, 'App stats · self-reported'),
     el('p', {class: 'card-fresh muted'}, el('span', {'data-card-fresh': ''}), el('span', {'data-card-quota': ''})),
     el('div', {class: 'foot'}, el('span', {class: 'who'}, 'Owner ', el('span', {class: 'owner-chip', 'data-card-owner': ''})),
       el('button', {type: 'button', 'data-open-chat': '', on: () => openChat(currentSwarm(s.swarm_id))}, 'Chat')),
@@ -252,6 +319,7 @@ function renderDetail() {
   $('detail-chat').href = '#chat/' + s.swarm_id;
   for (const node of $('detail-stats').querySelectorAll('[data-stat]')) setText(node, stat(s, node.dataset.stat));
   const live = liveStates.get(s.swarm_id);
+  $('detail-performance').replaceChildren(renderPerformance(s));
   $('detail-live').replaceChildren(live ? renderLive(live) : el('p', {}, 'The entry Mac has not reported live details.'));
 }
 function route() {
