@@ -42,8 +42,10 @@ a friend swarm is private from its participating Macs or its HTTPS front.
 1. Create the swarm and tick **Let other Macs join**, or press **Start public relay**
    afterwards. Choose the relay time limit you need, up to 30 minutes. This is
    separate from each Mac's **Time limit per run**.
-2. **The quick tunnel has a time limit and a new hostname each start.** After the limit
-   the tunnel closes and the swarm is unreachable. Starting the relay again gives a
+2. **The quick tunnel has a bounded lifetime and a new hostname each start.** While
+   an owner run is active or a swarm is published, the app renews the same tunnel
+   before expiry, within a total granted-window cap of 24 hours. An idle tunnel,
+   an expired tunnel or one at its cap still closes. Starting it again gives a
    different `*.trycloudflare.com` hostname, so any open invitation code or link from
    the earlier hostname stops working (`pairing_window_origin_stale`) and you have to
    open a new invitation window and send the new link.
@@ -125,13 +127,18 @@ automatically when the current run reaches its limit. It checks the saved consen
 and available members again rather than extending the old run's permission.
 
 Keep the owner and joined apps open. **Stop** ends the session; rollover is not a
-reason to restart work you stopped. `<<TBD: final rollover behavior for in-flight
-answers, cleanup and a failed restart>>`.
+reason to restart work you stopped. An in-flight answer is cancelled with
+`chat_switching_runs`, not resumed. Chat waits for the fresh route. Cleanup must
+finish before continuation; unproven cleanup or changed model/member bindings
+stop it. Other startup failures have bounded retries, stopping after three
+consecutive failures. No physical switch-duration result is claimed here.
 
-Run rollover and relay lifetime are separate. A temporary relay can still expire
-after at most 30 minutes. Rollover does not renew that tunnel or preserve its old
-address. For longer sessions, use your own fixed HTTPS address and keep its front
-running; the app-side renewal limits below still apply.
+Run rollover and relay lifetime are separate. The temporary relay renews its
+window of up to 30 minutes while an owner run is active or a swarm is published,
+within a total granted-window cap of 24 hours. Renewal keeps the same tunnel
+and address; it neither widens saved consent nor extends invitation expiry.
+It cannot revive a closed tunnel. A fixed HTTPS address avoids hostname changes
+on restart, but its front must stay running and its renewal limits still apply.
 
 After the owner app restarts at the same reachable address, joined Macs re-report
 and reconnect automatically. This does not resume an interrupted answer. After
@@ -182,8 +189,10 @@ revoke it from the owner screen.
 
 ## Limits
 
-- Cloudflare quick tunnels have no uptime guarantee and a lifetime set by the owner
-  (at most 30 minutes in the app); this is a session tool, not an always-on service.
+- Cloudflare quick tunnels have no uptime guarantee. The initial window is at most
+  30 minutes; renewal while an owner run is active or a swarm is published keeps
+  the same tunnel within a total granted-window cap of 24 hours. Quick tunnels
+  cannot opt out of this cap or become long-lived relays.
   Your own address keeps the same hostname across restarts. Its relay in the app extends
   itself shortly before it expires **while a run is active or a swarm is published**, for up to 24 hours in total
   (`max_renewed_seconds`, at most 7 days; `auto_renew: false` turns it off). A relay that is

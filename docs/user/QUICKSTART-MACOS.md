@@ -100,7 +100,7 @@ On the owner Mac, in "Run the model across the joined Macs", choose **Fast mode*
 
 At least **two different physical Macs** are required. Two copies of the app on one Mac do not count.
 
-**Time limit per run** means each Mac agrees to lend compute for at most the chosen number of minutes per run, 30 by default. In v0.1.4 the app starts a fresh run automatically at the limit, under the same saved consent. This rollover does not keep an expired temporary relay running. See [relay and run limits](../FRIEND-SWARM.md#run-time-limits-and-automatic-rollover).
+**Time limit per run** means each Mac agrees to lend compute for at most the chosen number of minutes per run, 30 by default. In v0.1.4 the app starts a fresh run automatically at the limit, under the same saved consent. Relay renewal is separate: while an owner run is active or a swarm is published, the app renews the existing temporary tunnel before expiry within a total granted-window cap of 24 hours. It does not restart an expired tunnel. See [relay and run limits](../FRIEND-SWARM.md#run-time-limits-and-automatic-rollover).
 
 Keep both apps open. Joined Macs reconnect and re-report automatically after the owner app restarts, once the owner is reachable at the same address. If a temporary relay address changes, old links can stop working. After restarting the joined Mac's own app, press **Start / reconnect**. An interrupted answer is not resumed.
 
