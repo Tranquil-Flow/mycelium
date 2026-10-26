@@ -173,6 +173,7 @@ label.f{display:block;font-weight:620;margin-bottom:6px}
 .performance-table th,.performance-table td{text-align:left;border-bottom:1px solid var(--line);padding:10px 8px}
 .performance-table td{white-space:nowrap}
 .performance-table th[scope=row]{font-weight:500;min-width:10rem}
+@media(max-width:640px){.performance-table{font-size:13px}.performance-table td{white-space:normal}.performance-table th[scope=row]{min-width:0}.performance-table th,.performance-table td{padding:10px 4px;overflow-wrap:anywhere}}
 #stats-coverage{min-height:4.65em}
 /* detail */
 .crumbs{font-size:14px;margin-bottom:12px}

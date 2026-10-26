@@ -46,7 +46,7 @@ function reportedStat(s, key) {
 }
 function renderPerformance(s) {
   const section = el('section', {class:'performance-report', 'aria-label':'Swarm performance'}, el('h3', {}, 'Swarm performance'));
-  section.append(el('p', {class:'meta'}, "Measured by the swarm's own app, self-reported. Not independently benchmarked."));
+  section.append(el('p', {class:'meta'}, "Measured by the swarm's own app, self-reported. Not independently benchmarked. Scroll this panel for all measurements."));
   if (!s.stats) { section.append(el('p', {}, 'No app statistics published yet. Older apps can still serve normally.')); return section; }
   const r = s.stats, v = r.values;
   section.append(el('p', {class:statsStale(s) ? 'stats-stale' : 'meta'},
