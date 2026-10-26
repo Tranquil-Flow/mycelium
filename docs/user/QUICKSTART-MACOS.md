@@ -102,7 +102,7 @@ At least **two different physical Macs** are required. Two copies of the app on 
 
 If the app says a Mac agreed to less storage or memory than its share needs, choose a smaller model that fits the saved limits. The download size alone does not include preparation files. A changed or previously unknown limit can still be refused when a member accepts work; changing a visible selector does not rewrite saved consent.
 
-**Time limit per run** means each Mac agrees to lend compute for at most the chosen number of minutes per run, 30 by default. In v0.1.4 the app starts a fresh run automatically at the limit, under the same saved consent. Relay renewal is separate: while an owner run is active or a swarm is published, the app renews the existing temporary tunnel before expiry within a total granted-window cap of 24 hours. It does not restart an expired tunnel. See [relay and run limits](../FRIEND-SWARM.md#run-time-limits-and-automatic-rollover).
+**Time limit per run** means each Mac agrees to lend compute for at most the chosen number of minutes per run, 30 by default. In v0.1.4 automatic continuation respects the shortest time limit any Mac chose, including a joined Mac's shorter limit. It stops the old run before that limit to allow cleanup, then starts a fresh run under the same saved consent. Relay renewal is separate: while an owner run is active or a swarm is published, the app renews the existing temporary tunnel before expiry within a total granted-window cap of 24 hours. It does not restart an expired tunnel. See [relay and run limits](../FRIEND-SWARM.md#run-time-limits-and-automatic-rollover).
 
 Keep both apps open. Joined Macs reconnect and re-report automatically after the owner app restarts, once the owner is reachable at the same address. If a temporary relay address changes, old links can stop working. After restarting the joined Mac's own app, press **Start / reconnect**. An interrupted answer is not resumed.
 
@@ -186,7 +186,7 @@ From gentlest to most final:
 | Stop the run | **Stop** (in the run card) | The run stops. Joined Macs stop when the owner stops. |
 | Stop this Mac serving, keep everything | **Stop serving now** (Adaptive sharing card) | This Mac takes no new work and frees model memory. **Allow serving again** resumes. |
 | Pause, keep identity | **Stop & retain private state** | Membership renewal pauses. **Start / reconnect** resumes with the same identity. |
-| Close the app | **Quit launcher** | The app exits and removes its temporary launch page. Reopening makes a new browser authorization. |
+| Close the app | **Quit Mycelium A13** in Mycelium's menu, **Cmd-Q** with Mycelium active, or **Quit demo** on its page | All stop the run, close the relay and exit cleanly, removing the temporary launch page. Reopening makes a new browser authorization. Closing the browser tab does not quit Mycelium. |
 | Leave a swarm | **Leave smoothly** or **Instant leave** (joined Mac), or **Revoke this Mac** (owner, needs its checkbox) | A joined Mac that leaves stops serving and withdraws its consent; the owner then sees it drop out. Leaving does **not** let the Mac walk back in: the owner revokes it, and the Mac pairs again with a **new join code**. Revoke ends membership. It is different from deleting local files. |
 | Uninstall | Quit, then run the app's installer with `--uninstall` | Removes the app link and installed version. Identity and state **stay** unless you add `--delete-identity-and-state`. |
 

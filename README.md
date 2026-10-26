@@ -23,9 +23,10 @@ It is for people who want to run models with Macs they own or with people they t
 - Fast mode renews its permission lease while the route serves, instead of stopping after about five minutes. Its failure-recovery limits remain.
 - The owner's control mailbox retains a bounded history so old traffic does not keep adding to status and control work over days.
 - Joined Macs re-report and reconnect after the owner app restarts. This does not resume an interrupted answer.
-- A swarm starts a fresh run automatically when the current run reaches its time limit. Each Mac's saved consent limits still apply.
+- Automatic continuation respects the shortest time limit any Mac chose. The app stops the current run before that limit and starts a fresh run under the same saved consent; it does not extend a worker's permission.
 - The model picker defaults to **Qwen2.5-0.5B**, the tested starter model. Fresh setups default to a **4 GB storage allowance**. The owner page has a **Fast mode** switch for the next run.
 - Layer placement fits each Mac's share within the storage and memory limits it agreed to, using the limits reported to the owner. If no split fits, the app stops with a plain resource-refusal message rather than exceeding those limits.
+- Quit from Mycelium's menu or press **Cmd-Q** with Mycelium active to stop cleanly. Both use the same shutdown as **Quit demo**, stopping the run and closing the relay before exiting.
 - Startup status is faster to read, and failure messages give clearer next steps.
 - The website shows per-swarm performance statistics measured and self-reported by each swarm's own app.
 
@@ -165,7 +166,7 @@ Choose storage and network allowances **before creating or joining**. Fresh setu
 
 Keep both apps open. A joined Mac accepts runs within its standing consent without repeated clicks. After the **owner app** restarts, joined Macs re-report and reconnect by themselves once the owner is reachable at the same address. A changed temporary relay address still needs attention. After restarting the **joined Mac's own app**, press **Start / reconnect**. Reconnecting does not restore an interrupted answer.
 
-**Time limit per run** means each Mac agrees to lend compute for at most the chosen number of minutes per run, 30 by default. When that run ends at its limit, the app automatically starts a fresh run under the same consent limits. This is automatic rollover, not an extension of one run's permission. Keep the owner, members and relay available. During the switch, an in-flight answer is cancelled with `chat_switching_runs`; it is not resumed. Chat remains unavailable until the fresh route is ready. Cleanup must finish before another run starts. The switch duration has not yet been measured in a v0.1.4 physical run.
+**Time limit per run** means each Mac agrees to lend compute for at most the chosen number of minutes per run, 30 by default. Automatic continuation uses the shortest time limit any Mac chose, including a shorter limit on a joined Mac. The app stops the old run before that limit, leaving time for cleanup, then starts a fresh run under the same consent limits. This is automatic rollover, not an extension of one run's permission. Keep the owner, members and relay available. During the switch, an in-flight answer is cancelled with `chat_switching_runs`; it is not resumed. Chat remains unavailable until the fresh route is ready. Cleanup must finish before another run starts. The switch duration has not yet been measured in a v0.1.4 physical run.
 
 For an upgrade, stop serving and quit on every participating Mac, install the same new version on all of them, retain app data, then reconnect and build a fresh route. Do not upgrade an in-flight route or assume mixed versions work.
 
@@ -184,7 +185,7 @@ For an upgrade, stop serving and quit on every participating Mac, install the sa
 - **Network policy:** allow only unmetered networks or permit metered use.
 - **Storage limit:** cap the storage authorized at enrollment, **4 GB by default for a fresh setup**. It must cover the model's preparation needs; the source download alone is not the full requirement.
 - **Memory limit per run:** cap the joined Mac's memory allowance. Choices depend on that Mac's memory.
-- **Time limit per run:** the most time this Mac agrees to lend compute for one run, 30 minutes by default. The app starts a fresh run automatically at the limit; it does not remove the limit.
+- **Time limit per run:** the most time this Mac agrees to lend compute for one run, 30 minutes by default. Automatic continuation respects the shortest limit chosen by any participating Mac and leaves time for cleanup; it does not remove the limit.
 - **Fast mode:** choose the faster path for the next run on the owner page. It does not switch a running request and has no mid-request recovery.
 - **Adaptive sharing:** when enabled, use coarse memory, CPU, heat and battery observations to reduce or pause work under pressure. It is enabled by default when you consent. It does not inspect which apps you run.
 - **Pause sharing:** manually stop taking new work and free model memory after current work is resolved. It works whether Adaptive sharing is on or off. Resuming waits for a calm period and fresh readiness checks.
@@ -200,7 +201,7 @@ Turning Adaptive sharing off does not remove your memory, disk, power, heat or n
 | End automatic acceptance | **Withdraw standing consent** | Stops automatic work acceptance and running work; retains membership. |
 | Leave as a joined Mac | **Leave smoothly** or **Instant leave**, after confirmation | Withdraws consent and stops renewing membership. Smooth leave waits for current work within a bounded timeout; instant leave disconnects now. Files and identity remain. |
 | Revoke a member as owner | **Revoke member** in the member list | Prevents future work under that membership. This is not deletion of that Mac's local files. |
-| Close Mycelium | **Quit launcher** | Exits the app. Use it when finished, not just the browser's close button. |
+| Close Mycelium | **Quit Mycelium A13** in the app menu, **Cmd-Q** with Mycelium active, or **Quit demo** on its page | Stops the run, closes the relay and exits cleanly. Closing the browser tab does not quit Mycelium. |
 
 Leaving is different from pausing. A Mac that left may need the owner to revoke its old membership and send a fresh join code before it can return. [Troubleshooting](docs/user/TROUBLESHOOTING.md#a-mac-that-left-the-swarm-or-was-restarted-while-serving) covers this case. Uninstall keeps identity and state unless you explicitly request their deletion; see [How to stop](docs/user/QUICKSTART-MACOS.md#how-to-stop).
 
