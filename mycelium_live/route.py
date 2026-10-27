@@ -1490,6 +1490,7 @@ class PhysicalLiveRoute:
         # trip this route performs is filed, for the route cost model to use.
         self._hop_recorder = HopRecorder.from_environment()
         self._measured_rtt = MeasuredRttTable()
+        self._swarm_probe_rtt = MeasuredRttTable()
         self._active_hop_traces: dict[str, Any] = {}
         self._placement_projection: dict[str, Any] | None = None
         self._topology_projection: dict[str, Any] | None = None
@@ -1971,6 +1972,13 @@ class PhysicalLiveRoute:
             if trace_context is not None:
                 trace_context.__exit__(None, None, None)
             lock.release()
+
+    def _public_swarm_hops(self) -> list[dict[str, object]]:
+        from .swarm_metrics import project_hops
+        try:
+            return project_hops(self._graph, self._last_snapshots, self._swarm_probe_rtt, health=self._last_health)
+        except (ValueError, TypeError, AttributeError, KeyError):
+            return []  # optional metrics never change routing or admission
 
     def _record_measured_round_trip(
         self,
@@ -3036,10 +3044,11 @@ class PhysicalLiveRoute:
                 payload={},
                 deadline_monotonic_s=time.monotonic() + probe_deadline,
             )
+            probe_finished_at = time.monotonic()
             self._record_measured_round_trip(
                 node_id,
                 started_at=probe_started_at,
-                finished_at=time.monotonic(),
+                finished_at=probe_finished_at,
                 stage_id="keepalive",
             )
             observation = self._verify_observation(
@@ -3047,6 +3056,15 @@ class PhysicalLiveRoute:
                 response,
                 event="health",
             )
+            # Reuse existing idle traffic, but publish only authenticated success.
+            probe_table = getattr(self, "_swarm_probe_rtt", None)
+            if probe_table is not None:
+                try:
+                    probe_table.record_round_trip_ms(LOCAL_HOST_KEY, node_id,
+                        (probe_finished_at - probe_started_at) * 1000,
+                        measurement_source="idle_health_probe", observed_at=probe_finished_at)
+                except ValueError:
+                    pass  # optional telemetry must not turn a verified reply into a miss
             with self._lock:
                 self._last_health[node_id] = observation
             return True
@@ -6572,6 +6590,9 @@ class PhysicalLiveRoute:
                 "protocol": "mycelium.live_route_status.v1",
                 "route_alive": self.is_alive(),
                 "simulated": False,
+                # Report the constructed route's path, never a mutable environment preference.
+                "token_path_enabled": getattr(getattr(self, "_token_path_owner", None), "enabled", False) is True,
+                "swarm_hops": self._public_swarm_hops(),
                 "route_identity_digest": (
                     "sha256:" + hashlib.sha256(identity_material).hexdigest()
                 ),

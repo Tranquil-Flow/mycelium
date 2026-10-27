@@ -133,6 +133,8 @@ class SwarmPublisher:
         self._origin = origin or (lambda: _relay_origin(app))
         self._client_factory = client_factory
         self.clock = clock
+        from .swarm_stats import AppStats
+        self._stats = AppStats(clock=clock)
         self.signer = Ed25519Signer.load_or_create(self.root / 'swarm-key')
         self.ledger = UsageLedger(self.root / 'swarm-entry.sqlite3')
         self._op = threading.RLock()
@@ -410,6 +412,16 @@ class SwarmPublisher:
                     raise
         self._last_at = at
         self._last_heartbeat = (self.clock(), at, status)
+        # A separate optional document: an old directory's 404 MUST NOT break liveness.
+        # Numeric collection/validation failures likewise cannot turn a serving swarm offline.
+        try:
+            from mycelium_swarm_directory import stats_docs
+            document = stats_docs.stats(self.signer, self.state['swarm_id'], at=at,
+                                        values=self._stats.snapshot(self.app, status))
+            stats_docs.check(document, verify)
+            self._client().post('/stats', document)
+        except Exception:
+            pass
 
     def heartbeat_now(self) -> dict[str, Any]:
         """Send a heartbeat immediately (e.g. right after the run changes state)."""

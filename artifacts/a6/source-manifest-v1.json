@@ -168,7 +168,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:2a62ff50dcf97ad696b68d33fa070d55dce93cae55e0691a7461a89e1abb7595",
+      "sha256": "sha256:a621663b0d343c96ce216eddf11ffcb3c0d8cc226dcb3653b7c871b12f6d08f9",
       "size_bytes": 71574
     },
     {
@@ -560,6 +560,11 @@
       "path": "docs/RELEASE-NOTES-v0.1.3.md",
       "sha256": "sha256:dd6a9578b921cd8a63aa5a6d0aec4885ea902f0af04b8c111fa633aaf9c530ea",
       "size_bytes": 3775
+    },
+    {
+      "path": "docs/SWARM-PERFORMANCE-STATS.md",
+      "sha256": "sha256:fcbaaca516e1b5d1b102ea1ed76afa1504579b83b4953578438ea3a1b16c9b6a",
+      "size_bytes": 6080
     },
     {
       "path": "docs/automation/2026-07-18-qualification-adversarial-conformance.md",
@@ -968,8 +973,8 @@
     },
     {
       "path": "mycelium_a13_macos/chat.py",
-      "sha256": "sha256:fe4902bc695882e815eb5eb335b20070bfe93ed79fa664949f38f722ca8156cc",
-      "size_bytes": 29001
+      "sha256": "sha256:0e4357666760d41ba0773295ee5b8f22447f12b0bffded49051cf1783059deeb",
+      "size_bytes": 30036
     },
     {
       "path": "mycelium_a13_macos/child_environment.py",
@@ -1258,8 +1263,13 @@
     },
     {
       "path": "mycelium_a13_macos/swarm_publish.py",
-      "sha256": "sha256:73b637273d215c3671484c7abd79fe881a10c8a73f1a1b65a3fc5a611efa6ad5",
-      "size_bytes": 24706
+      "sha256": "sha256:a69a22f0ba6b407be6462c07cf4a826ee162b31e3d38b6597e26e245164892db",
+      "size_bytes": 25361
+    },
+    {
+      "path": "mycelium_a13_macos/swarm_stats.py",
+      "sha256": "sha256:f2468264d7eecd414920117ed7e58029bed5bc1c05e9db3a9bc4d9a21c81cd17",
+      "size_bytes": 8336
     },
     {
       "path": "mycelium_a13_macos/target_app.py",
@@ -2448,8 +2458,8 @@
     },
     {
       "path": "mycelium_live/route.py",
-      "sha256": "sha256:e2aad5372510e6769834e14165b06d65e2812607dff7ea733adda20282e64dfc",
-      "size_bytes": 327999
+      "sha256": "sha256:d2ddf14e8c1586a135d8142a08ffb5b25a206398ef47c6b57b81f8b37317a56f",
+      "size_bytes": 329327
     },
     {
       "path": "mycelium_live/router_port.py",
@@ -2465,6 +2475,11 @@
       "path": "mycelium_live/supervisor.py",
       "sha256": "sha256:6e757b449a586c25c7e1cfdcb28832b4e79a8d4b38bbe29251371fef7f7a6516",
       "size_bytes": 233009
+    },
+    {
+      "path": "mycelium_live/swarm_metrics.py",
+      "sha256": "sha256:e4fa45f35c834a852ab8be720db6cf5c6681309b2577bd1dced3ff755d6a3b91",
+      "size_bytes": 3165
     },
     {
       "path": "mycelium_live/token_path_activation.py",
@@ -3635,6 +3650,11 @@
       "path": "mycelium_swarm_directory/server.py",
       "sha256": "sha256:4014936bab6ed897ab7b41976f4cfb3fc5360806f608ae8022de203399c55c8c",
       "size_bytes": 12849
+    },
+    {
+      "path": "mycelium_swarm_directory/stats_docs.py",
+      "sha256": "sha256:77f6023c42eed775bff60405e6de050044cd63ae2731b8a429b55ae5514a748e",
+      "size_bytes": 4815
     },
     {
       "path": "mycelium_swarm_directory/store.py",
@@ -7710,6 +7730,11 @@
       "path": "tests/a13_macos/test_swarm_publish.py",
       "sha256": "sha256:48208dc97cd3890fd2bd840961441bbc9cffc5a4186648b1b9b7d7da416998db",
       "size_bytes": 6869
+    },
+    {
+      "path": "tests/a13_macos/test_swarm_stats.py",
+      "sha256": "sha256:2d0cb7a608fe26dc0efc3aed57b59cfd68fc5f149b37d4f638c263bf745c79dc",
+      "size_bytes": 9771
     },
     {
       "path": "tests/a13_macos/test_swarm_ux_copy.py",
@@ -13488,5 +13513,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:d131f61a6f8a9402d04ed48aab938f7e8d19fac2bc7b5289d858efbe6bc88942"
+  "source_digest": "sha256:4fbd1c9476bc37857b8cff97e45ad69f0aee251bff278a96d498c342e6ad9025"
 }

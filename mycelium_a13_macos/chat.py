@@ -216,6 +216,8 @@ class ChatService:
         self._rejoin_waiters = 0
         self._client_factory = client_factory
         self._clock = clock
+        from .swarm_stats import PerformanceWindow
+        self.performance = PerformanceWindow(clock=clock)
         self._lock = threading.Lock()
         self._requests: dict[str, dict[str, Any]] = {}
         self._order: deque[str] = deque()
@@ -318,6 +320,7 @@ class ChatService:
             if self._busy is not None:
                 raise ChatError(429, 'chat_busy')
             self._rate(client)
+            self.performance.select_context(serving.get('run_id'))
             request_id = secrets.token_urlsafe(18)
             record = {'id': request_id, 'tokens': [], 'done': False, 'error': None, 'terminal': None,
                       'client': None, 'cancel_reason': None,
@@ -351,6 +354,9 @@ class ChatService:
                     request()
             def token(text):
                 with self._lock:
+                    stamp = self._clock()
+                    record.setdefault('first_token_at', stamp)
+                    record['last_token_at'] = stamp
                     record['tokens'].append(text)
             result = client.stream(prompt, record['max_new_tokens'], token)
             ended = self._run_ended_by_ceiling(record.get('run_id')) if result.get('terminal') == 'failed' else None
@@ -378,6 +384,15 @@ class ChatService:
                 record['done'] = True
                 record['client'] = None
                 record['finished'] = self._clock()
+                if record['terminal'] == 'completed' and not record['cancel_reason']:
+                    from .swarm_stats import milliseconds
+                    first = record.get('first_token_at')
+                    span = record.get('last_token_at', 0) - first if first is not None else 0
+                    rate = round((len(record['tokens'])-1)*1000/span) if span > 0 else None
+                    self.performance.record(
+                        ttft_ms=milliseconds(first-record['started']) if first is not None else None,
+                        decode_millitokens_s=rate, request_ms=milliseconds(record['finished']-record['started']),
+                        context=record.get('run_id'))
                 if self._busy == record['id']:
                     self._busy = None
 
