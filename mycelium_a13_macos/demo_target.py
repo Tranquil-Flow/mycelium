@@ -75,7 +75,7 @@ class StandingConsentGate:
         """The standing caps this Mac's share must fit (memory guard + storage)."""
         from .standing_consent import load_standing_consent
         caps = load_standing_consent(app.root)['caps']
-        return {'storage_bytes': int(caps['storage_bytes']), 'max_memory_bytes': int(caps['max_memory_bytes'])}
+        return {k: int(caps[k]) for k in ('storage_bytes', 'max_memory_bytes', 'max_wall_seconds')}
 
 
 class OwnerRunConsent:
@@ -344,18 +344,27 @@ class DemoTargetAgent:
         with self._lock:
             a = self.announcement or {}
             if (not isinstance(offer, Mapping) or offer.get('run_id') != a.get('run_id')
-                    or not a.get('member_resources') or not isinstance(a.get('work_limits'), Mapping)):
+                    or not isinstance(a.get('work_limits'), Mapping)):
                 return None
             return dict(a['work_limits'])
 
     def _share_refusal(self, a: Mapping[str, Any]) -> str | None:
         """A closed code when this Mac's caps cannot hold its announced share."""
         from .model_resources import check_member_caps
+        from .worker import _CLEANUP_RESERVE_SECONDS
         share = a.get('member_resources')
         caps_of = getattr(self.consent, 'member_caps', None)
-        if not isinstance(share, Mapping) or caps_of is None:
+        if caps_of is None:
             return None
-        return check_member_caps(share, caps_of(self.app))
+        caps = caps_of(self.app)
+        limits = a.get('work_limits') or {}
+        wall = limits.get('max_wall_seconds')
+        if wall is not None:
+            if type(wall) is not int or not _CLEANUP_RESERVE_SECONDS < wall <= 3600:
+                return 'member_wall_limit_invalid'
+            if type(caps.get('max_wall_seconds')) is int and wall > caps['max_wall_seconds']:
+                return 'member_wall_cap_below_share'
+        return check_member_caps(share, caps) if isinstance(share, Mapping) else None
 
     def holds_offer(self) -> bool:
         """Tell the standing acceptor to leave the pending offer to this agent."""

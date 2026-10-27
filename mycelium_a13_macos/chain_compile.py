@@ -326,13 +326,15 @@ def start_serving(app,*,proposal,acknowledged):
         try:workflow.run(approval=app._chain_approval,port=port,
             activation_event=app._chain_activation_event)
         except Exception as error:
+            _record_cleanup_exception(app, workflow, 'chain_serving_failed', error, run_id)
             # Keep the original cause private; public workflow codes stay bounded. Never raise from here.
             try:
                 if isinstance(run_id,str) and run_id:
                     root=_private_directory(app.root/'chain-runs'/run_id,create=True)
                     _atomic_private_json(root/'serve-error.private.json',{
                         'exception_type':type(error).__name__,'traceback':traceback.format_exc()})
-            except Exception:pass
+            except Exception as error:
+                _record_cleanup_exception(app, workflow, 'chain_serve_error_write_failed', error, run_id)
         finally:
             _mark_retired_route(app,workflow,epoch,run_id)
     app._chain_serving_thread=threading.Thread(target=serve,name='a13-chain-serving',daemon=True)
@@ -363,6 +365,21 @@ _CHAIN_FIELDS=('_chain_compile_state','_chain_compile_thread','_chain_workflow',
                '_chain_serving_thread','_chain_activation_event')
 
 
+def _record_cleanup_exception(app, workflow, code, error, run_id=None):
+    from .owner_run import record_exception
+    diagnostics = getattr(app, '_chain_cleanup_diagnostics', None)
+    if diagnostics is None:
+        diagnostics = app._chain_cleanup_diagnostics = {}
+    record_exception(diagnostics, code, error)
+    owner = getattr(app, 'owner_run', None)
+    ctx = getattr(owner, '_ctx', None)
+    if ctx is not None and (run_id is None or ctx.run_id == run_id):
+        ctx.record_exception(code, error)
+    record = getattr(workflow, 'record_cleanup_exception', None)
+    if callable(record):
+        record(code, error)
+
+
 def _mark_retired_route(app,workflow,epoch,run_id):
     """Terminal path of a serving thread whose run was already retired by ``stop_serving``.
 
@@ -375,7 +392,8 @@ def _mark_retired_route(app,workflow,epoch,run_id):
     try:
         if getattr(app,'_chain_epoch',0)==epoch or getattr(app,'_chain_workflow',None) is not workflow:return
         app._chain_retired_route=(workflow,epoch,run_id)     # one attribute store: atomic, no lock needed
-    except Exception:pass
+    except Exception as error:
+        _record_cleanup_exception(app, workflow, 'chain_retired_marker_failed', error, run_id)
 
 
 def _reap_retired_route_locked(app):
@@ -389,38 +407,68 @@ def _reap_retired_route_locked(app):
     if thread is not None and thread.is_alive():return
     if isinstance(run_id,str) and run_id:
         try:(app.root/'chain-runs'/run_id/'compile-complete.private.json').unlink(missing_ok=True)
-        except OSError:pass
+        except OSError as error:
+            _record_cleanup_exception(app, workflow, 'chain_retired_marker_unlink_failed', error, run_id)
     for name in _CHAIN_FIELDS:setattr(app,name,None)
     app._chain_retired_route=None
 
 
-def stop_serving(app,*,timeout=30.0):
-    """Idempotent owner stop: drain the workflow, then forget the old run.
+def await_stopped(app,*,workflow,retired_epoch,deadline,clock=None,progress=None):
+    """Observe the SAME retired run; never re-send stop or mint a new deadline."""
+    clock=clock or time.monotonic
+    from mycelium_deadlines import CLEANUP_RECEIPT_POLL_SECONDS
+    for name in ('_chain_serving_thread','_chain_compile_thread'):
+        thread=getattr(app,name,None)
+        if thread is threading.current_thread():raise ValueError('rebuild_stop_timeout')
+        while thread is not None and thread.is_alive():
+            remaining=deadline-clock()
+            if remaining<=0:raise ValueError('rebuild_stop_timeout')
+            if progress is not None:progress()
+            thread.join(max(0.0,min(CLEANUP_RECEIPT_POLL_SECONDS,deadline-clock())))
+    if clock()>deadline:raise ValueError('rebuild_stop_timeout')
+    # A thread ending with a failed close is not proof of cleanup. Read the
+    # final workflow status BEFORE forgetting it (the pre-stop status races it).
+    if workflow is not None:
+        state=workflow.status()
+        code=state.get('error_code')
+        if code and (code.startswith('router_port_') or code=='managed_workflow_failed'):
+            raise ValueError(code)
+    with app.guard:
+        if (getattr(app,'_chain_epoch',None)!=retired_epoch
+                or getattr(app,'_chain_workflow',None) is not workflow):
+            raise ValueError('rebuild_stop_superseded')
+        context=getattr(app,'_observation_context',None)
+        if context is not None:
+            (app.root/'chain-runs'/context.run_id/'compile-complete.private.json').unlink(missing_ok=True)
+        for name in _CHAIN_FIELDS:setattr(app,name,None)
+    return {'state':'stopped','route_ready':False}
 
-    Never sets the activation gate. An in-flight compile is superseded by the
-    epoch bump and can no longer publish a workflow for the old member set.
-    Refuses (leaving the old state) if a thread does not exit within ``timeout``.
+
+def stop_serving(app,*,timeout=None,deadline=None,clock=None,progress=None):
+    """Stop and join under ONE budget, capped by the owner's worker deadline.
+
+    Default allowance comes from the actual route close budgets, not an outer
+    30-second guess. A caller may shorten it, never extend ``deadline``. The
+    epoch fence remains in place on timeout so a live old route is not forgotten.
     """
-    # Retirement linearizes with the app workflow/epoch writer and the final
-    # serving commit. Never join a worker while holding this guard here.
+    clock=clock or time.monotonic
+    started=clock()
     with app.guard:
         workflow=getattr(app,'_chain_workflow',None)
+        if timeout is None:
+            from physical_inference_qualification import STAGE_CLEANUP_TIMEOUT_SECONDS
+            budget=getattr(workflow,'close_wait_seconds',None)
+            timeout=budget() if callable(budget) else STAGE_CLEANUP_TIMEOUT_SECONDS
+        if type(timeout) not in (int,float) or not math.isfinite(timeout) or timeout<0:
+            raise ValueError('rebuild_stop_timeout_invalid')
+        if deadline is not None and (type(deadline) not in (int,float) or not math.isfinite(deadline)):
+            raise ValueError('rebuild_stop_deadline_invalid')
+        deadline=started+timeout if deadline is None else min(deadline,started+timeout)
         if workflow is not None:workflow.stop()
         app._chain_epoch=getattr(app,'_chain_epoch',0)+1
         retired_epoch=app._chain_epoch
-    for name in ('_chain_serving_thread','_chain_compile_thread'):
-        thread=getattr(app,name,None)
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout)
-            if thread.is_alive():raise ValueError('rebuild_stop_timeout')
-    with app.guard:
-        if (getattr(app,'_chain_epoch',None)==retired_epoch
-                and getattr(app,'_chain_workflow',None) is workflow):
-            context=getattr(app,'_observation_context',None)
-            if context is not None:
-                (app.root/'chain-runs'/context.run_id/'compile-complete.private.json').unlink(missing_ok=True)
-            for name in _CHAIN_FIELDS:setattr(app,name,None)
-    return {'state':'stopped','route_ready':False}
+    return await_stopped(app,workflow=workflow,retired_epoch=retired_epoch,
+                         deadline=deadline,clock=clock,progress=progress)
 
 
 def _rebuild_key(run_id,deployment_id,members):
@@ -486,7 +534,9 @@ def rebuild_with_current_members(app,*,acknowledged,run_id,deployment_id,descrip
         return dict(app._chain_rebuild)
     if context is not None:
         try:release_owner_channel(context)  # the next observation opens its own owner channel (owner.lock)
-        except Exception:pass
+        except Exception as error:
+            _record_cleanup_exception(app, getattr(app, '_chain_workflow', None),
+                                      'owner_channel_release_failed', error)
     app._observation_context=None
     order=sorted(range(len(kept)),key=lambda i:members[i]['node_id'])
     kept=[kept[i] for i in order]

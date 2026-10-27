@@ -481,7 +481,7 @@ class CommandController:
     ) -> MutationResult:
         """Make an accepted user cancellation supersede completion cleanup."""
 
-        observed = _integer(observed_at_ms, "observed_at_ms")
+        _integer(observed_at_ms, "observed_at_ms")
         request, state, rejection = self._locate(identity)
         if rejection is not None:
             return rejection
@@ -494,7 +494,10 @@ class CommandController:
             if not state.completion_cleanup_authorized:
                 return MutationResult(True, "duplicate", self._snapshot(state), duplicate=True)
             state.completion_cleanup_authorized = False
-            state.cancellation_requested_at_ms = observed
+            # This changes terminal intent, not the already-issued cleanup
+            # generation. Keep its original authority time and deadline so
+            # an exact receipt produced before Stop remains valid (including
+            # a delayed or repeated publication of that same receipt).
             return MutationResult(True, "user_cancellation_promoted", self._snapshot(state))
 
     def advance_publisher_generation(

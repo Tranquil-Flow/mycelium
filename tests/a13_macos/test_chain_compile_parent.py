@@ -31,7 +31,8 @@ def fixture_app(tmp_path,monkeypatch):
             assert identity == {'run_id':context.run_id,'deployment_id':context.deployment_id,
                                 'epoch':getattr(app,'_chain_epoch',0)}
         return NS(launch=NS(operator_plan_digest='unit-digest',physical_host_ids=('one','two')),
-                  bind_progress_identity=bind_progress_identity)
+                  bind_progress_identity=bind_progress_identity,
+                  status=lambda: {'state': 'prepared', 'error_code': None})
     monkeypatch.setattr(cc,'prepare_serving_workflow',prepare)
     monkeypatch.setattr(cc,'owner_channel',lambda *args:(_ for _ in ()).throw(AssertionError('second_owner_channel')))
     return app,prepared

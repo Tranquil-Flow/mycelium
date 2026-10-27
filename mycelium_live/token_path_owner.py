@@ -111,8 +111,9 @@ class OwnerTokenAttempt:
         control = payload.pop('control')
         return {'request_id':payload['request']['request_id'],'control':control,'token_path':payload}
 
-    def close(self):
-        self.owner.mailbox.close_token_progress(self.command_id)
+    def close(self, *, cancelled=False):
+        self.owner.mailbox.close_token_progress(self.command_id,
+            **({'cancelled': True} if cancelled else {}))
 
     def run(self, *, send, consume, interrupt=lambda: None, cancelled=lambda: False):
         with self._lock:
@@ -126,8 +127,11 @@ class OwnerTokenAttempt:
             except BaseException as exc:
                 result.set_exception(exc)
         thread = threading.Thread(target=dispatch,name='token-path-owner-start',daemon=True)
+        observed_cancelled = False
         def fence():
+            nonlocal observed_cancelled
             if cancelled():
+                observed_cancelled = True
                 raise RuntimeError('request_cancelled')
             self.stream.check()
         try:
@@ -167,6 +171,13 @@ class OwnerTokenAttempt:
             interrupt()
             raise
         finally:
-            self.close()
-            if thread.ident is not None:
-                thread.join(.1)
+            # Only the trusted owner's cancellation predicate can authorize
+            # abandoning late progress. Do not re-enter authorization after it
+            # succeeded, or leak registration if an unproven predicate raises.
+            try:
+                if not observed_cancelled:
+                    observed_cancelled = cancelled()
+            finally:
+                self.close(cancelled=observed_cancelled)
+                if thread.ident is not None:
+                    thread.join(.1)

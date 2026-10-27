@@ -176,6 +176,7 @@ class ManagedServingWorkflow:
         self._offers={}
         self._startup=None
         self._error=None
+        self._cleanup_diagnostics={}
         self.node_slice_plans=None
         self._progress_identity=None
         self._challenge_request=None
@@ -229,9 +230,15 @@ class ManagedServingWorkflow:
             self._challenge_request = None
             self._challenge_count = 0
 
+    def record_cleanup_exception(self, code, error):
+        from .owner_run import record_exception
+        with self._lock:
+            record_exception(self._cleanup_diagnostics, code, error)
+
     def status(self):
         with self._lock:
             return {'state':self._state,'error_code':self._error,
+                **self._cleanup_diagnostics,
                 'startup':None if self._startup is None else dict(self._startup),
                 'challenge_progress':({'verified_token_count':self._challenge_count}
                     if self._state=='starting' and not self.stop_event.is_set()
@@ -239,6 +246,26 @@ class ManagedServingWorkflow:
                 # Startup is historical. Current qualification/selection must
                 # be read from the live registry API, never cached in this adapter.
                 'readiness_source':'registry_api'}
+
+    def close_wait_seconds(self):
+        """Sum the embedded single-route shutdown's existing wait allowances.
+
+        Registry poll -> router drain -> in-flight reconciliation -> liveness
+        join -> sequential peer stop/close -> target staging receipts. A failed
+        first stop can consume a session deadline before close reconciles it.
+        Pump/native drain and relay delivery are INSIDE those command waits,
+        not extra grants. The owner must cap this allowance by its remaining
+        worker wall budget: the nominal worst case exceeds the rollover margin.
+        This is not a bound on filesystem I/O or contended Python locks.
+        """
+        from mycelium_live import route, router_port, supervisor
+        from physical_inference_qualification import STAGE_CLEANUP_TIMEOUT_SECONDS
+        return (supervisor.REGISTRY_SERVER_POLL_SECONDS
+                + router_port.ROUTER_CLOSE_TIMEOUT_SECONDS
+                + route._MAX_CANCELLATION_AND_CLEANUP_SECONDS
+                + route.ROUTE_CLOSE_MONITOR_JOIN_SECONDS
+                + len(self.controller.peers) * (
+                    2 * route.NODE_SESSION_TIMEOUT_SECONDS + STAGE_CLEANUP_TIMEOUT_SECONDS))
 
     def stop(self):
         # The lock is also the serving-announcement commit boundary.  A stop
@@ -321,7 +348,8 @@ class ManagedServingWorkflow:
             # label a request as a cleanup acknowledgement or erase a receipt.
             for offer in self._offers.values():
                 try:self.authority.control_mailbox.request_stage_cleanup(offer)
-                except Exception:pass  # Original failure and private offers remain inspectable.
+                except Exception as error:
+                    self.record_cleanup_exception('workflow_cleanup_request_failed', error)
 
 
 def bind_member_artifacts(controller, *, prepared, target_source_roots, slice_plan=None):

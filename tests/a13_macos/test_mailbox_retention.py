@@ -155,7 +155,8 @@ def test_teardown_only_retires_after_successful_stop(tmp_path):
     app.authority.control_mailbox.finish_run = lambda **kw: calls.append(kw)
     ops = Ops(app)
     chain = AppDemoChain(app, ops=ops)
-    ctx = SimpleNamespace(state={}, result={}, run_id='run', deployment_id='deployment')
+    from mycelium_a13_macos.owner_run import OwnerRun, RunContext
+    ctx = RunContext(OwnerRun(chain), 'run', 'deployment', 'start')
     chain.teardown(ctx, failed=False)
     assert calls == [{'run_id':'run','deployment_id':'deployment'}]
     calls.clear()

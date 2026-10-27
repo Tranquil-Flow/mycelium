@@ -91,6 +91,7 @@ SSH_KEEPALIVE_OPTIONS: tuple[str, ...] = (
     "ServerAliveCountMax=6",
 )
 NODE_SESSION_TIMEOUT_SECONDS = 930.0
+STAGE_CLEANUP_TIMEOUT_SECONDS = 30.0
 _MIN_STAGE_TIMEOUT_SECONDS = 120.0
 _MAX_STAGE_TIMEOUT_SECONDS = _MAX_RUNNER_TIMEOUT_SECONDS
 _STAGE_TIMEOUT_OVERHEAD_SECONDS = 60.0
@@ -2719,7 +2720,7 @@ class QualificationController:
                 _reject("managed_staging_provider_required")
             capture = self._staging_adapter.cleanup(peer=peer,
                 archive_digest=archive_digest, preposition_digest=preposition_digest,
-                timeout_seconds=30.0)
+                timeout_seconds=STAGE_CLEANUP_TIMEOUT_SECONDS)
         else:
             argv = _peer_process_argv(
                 peer,
@@ -2729,7 +2730,7 @@ class QualificationController:
                     preposition_digest or "-",
                 ),
             )
-            capture = self._runner.run(argv, timeout_seconds=30.0)
+            capture = self._runner.run(argv, timeout_seconds=STAGE_CLEANUP_TIMEOUT_SECONDS)
         if capture.returncode != 0 or capture.stderr or not capture.stdout:
             _reject("remote_cleanup_failed")
         try:

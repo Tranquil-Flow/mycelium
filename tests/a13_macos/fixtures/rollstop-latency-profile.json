@@ -1,0 +1,14 @@
+{
+  "profile_id": "owner-reported-two-mac-20261026",
+  "provenance": "Lane owner's device observations; raw traces not independently remeasured by this lane",
+  "sample_count_per_phase": 1,
+  "statistic": "approximate_single_observation_not_p99",
+  "p50_seconds": null,
+  "p99_seconds": null,
+  "phases": {
+    "route_stop": {"observed_seconds": 33.0, "host_load_approx": 17.0, "run": "14:38 rollover"},
+    "compile_to_serving": {"observed_seconds": 160.0, "host_load_approx": null, "run": "attempt 6", "start_elapsed_approx": 67.0, "serving_elapsed_approx": 228.0}
+  },
+  "minimum_multiplier": 2.0,
+  "loaded_simulation_multipliers": [1.0, 2.0, 3.0]
+}

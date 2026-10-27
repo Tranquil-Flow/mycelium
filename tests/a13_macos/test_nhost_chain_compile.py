@@ -280,11 +280,18 @@ def _rebuild_app(tmp_path, monkeypatch, *, vanished=(), serving_alive=False):
     if not serving_alive:
         thread.join()
     mailbox = _Mailbox()
+    from mycelium_a13_macos.workflow import ManagedServingWorkflow
+    workflow = ManagedServingWorkflow(authority=None, controller=NS(peers=()), launch=None)
+    real_stop = workflow.stop
+    def record_stop():
+        stops.append(1)
+        real_stop()
+    workflow.stop = record_stop
     app = NS(root=tmp_path / "app", guard=threading.RLock(), closed=threading.Event(),
              installation_role="owner", running=True,
              authority=NS(coordinator=NS(member=lambda n: dict(members[n]), swarm_id="swarm"),
                           control_mailbox=mailbox),
-             _chain_workflow=NS(stop=lambda: stops.append(1)), _chain_serving_thread=thread,
+             _chain_workflow=workflow, _chain_serving_thread=thread,
              _chain_compile_state={"state": "compiled"}, _observation_context=NS(run_id="old-run"))
     prepared = []
 

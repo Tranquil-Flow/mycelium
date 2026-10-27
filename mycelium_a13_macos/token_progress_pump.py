@@ -15,6 +15,7 @@ import time
 from .authority import _atomic_private_json, _load_private_json
 from .control_pump import ControlPumpError
 from .durable_requests import prepare
+from .token_receipt_mailbox import PROGRESS_CANCELLED
 from mycelium_qualification.evidence import canonical_json_bytes, sha256_bytes
 from mycelium_router.token_path_authority import ReceiptCursor
 from mycelium_node.token_progress import ProgressCommandEnded, _snapshot
@@ -48,7 +49,8 @@ class PumpTokenProgress:
                     raise ControlPumpError('token_progress_state_invalid') from None
             if (not isinstance(command_id, str) or not isinstance(row, dict)
                     or set(row) != {'pending', 'owner_ack', 'terminal', 'error'}
-                    or row['error'] not in {None, 'token_progress_read_failed', 'token_progress_command_ended'}
+                    or row['error'] not in {None, 'token_progress_read_failed', 'token_progress_command_ended',
+                                            'token_progress_cancelled'}
                     or type(row['terminal']) is not bool
                     or (row['pending'] is not None and not isinstance(row['pending'], dict))
                     or (row['owner_ack'] is not None and not isinstance(row['owner_ack'], dict))):
@@ -90,15 +92,18 @@ class PumpTokenProgress:
         except BaseException:
             self.pump.worker.close_progress(command_id)
             raise
+        row = self.state['rows'][command_id]
+        def stopped():
+            return self._stop.is_set() or row['error'] == 'token_progress_cancelled'
         def read():
-            while not self._stop.is_set():
+            while not stopped():
                 try:
                     item = inbox.read()
                 except ProgressCommandEnded:
                     item = 'token_progress_command_ended'
                 except BaseException:
                     item = 'token_progress_read_failed'
-                while not self._stop.is_set():
+                while not stopped():
                     try:
                         q.put(item, timeout=.05)
                         self.pump.wake()
@@ -113,6 +118,9 @@ class PumpTokenProgress:
 
     def ready_to_ack(self, command_id):
         row = self.state['rows'].get(command_id)
+        if row is not None and row['error'] == 'token_progress_cancelled':
+            claim = self.pump._claims_state['claims'].get(command_id)
+            return claim is not None and claim['phase'] in {'executed', 'reconciliation_required'}
         return row is None or row['terminal'] or (
             row['error'] == 'token_progress_command_ended' and self._native_failed(command_id))
 
@@ -124,6 +132,8 @@ class PumpTokenProgress:
 
     def next(self, target):
         for command_id, row in self.state['rows'].items():
+            if row['error'] == 'token_progress_cancelled':
+                continue
             if row['error'] == 'token_progress_command_ended':
                 # The typed EOF follows every verified prefix and native ACK.
                 # Only a durable validated rejection may use the ordinary
@@ -200,6 +210,17 @@ class PumpTokenProgress:
         row = self.state['rows'].get(command_id)
         if row is None or row['pending'] != packet['envelope']['statement']['receipt']:
             raise ControlPumpError('token_progress_state_invalid')
+        if owner_ack['statement']['protocol'] == PROGRESS_CANCELLED:
+            # The client verified the owner's signature, membership, request,
+            # command, grant and exact receipt. This retires ONLY forwarding.
+            # Retain the signed decision and prefix durably; never send it to
+            # native receipt eviction or manufacture a terminal/cleanup result.
+            row.update(owner_ack=owner_ack, error='token_progress_cancelled')
+            self.save()
+            self.pump.worker.close_progress(command_id)
+            self.pump._state['outbound'] = None
+            self.pump._save()
+            return {'state': 'token_progress_cancelled', 'command_id': command_id}
         row['owner_ack'] = owner_ack
         self.save()  # Persist signed owner ACK before native eviction.
         self.pump._state['outbound'] = None

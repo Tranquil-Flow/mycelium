@@ -578,6 +578,8 @@ class LiveStack:
             self.router.close()
 
 
+REGISTRY_SERVER_POLL_SECONDS = 0.5
+
 COLD_ROUTE_RESTART_ERROR_CODE = "cold_route_restart_in_progress"
 COLD_ROUTE_RESTART_EXHAUSTED_CODE = "cold_route_restart_budget_exhausted"
 COLD_ROUTE_RESTART_FAILED_CODE = "cold_route_restart_failed"
@@ -4250,6 +4252,7 @@ def run_registry_server(
         raise ValueError("deployment_registry_requires_one_or_more")
     runtimes: list[QualifiedDeploymentRuntime] = []
     unavailable: list[UnavailableDeployment] = []
+    stack: LiveStack | None = None
     server: LiveHTTPServer | None = None
     registry: LiveDeploymentRegistry | None = None
     activation: PreparedDeploymentActivation | None = None
@@ -4409,7 +4412,7 @@ def run_registry_server(
             signum: signal.signal(signum, request_stop)
             for signum in (signal.SIGINT, signal.SIGTERM)
         }
-        server.timeout = 0.5
+        server.timeout = REGISTRY_SERVER_POLL_SECONDS
         observed = {
             "protocol": "mycelium.live_registry_server_started.v1",
             "url": f"http://{host}:{server.server_address[1]}/",
@@ -4438,11 +4441,22 @@ def run_registry_server(
             activation.close()
         if server is not None:
             server.server_close()
-        if registry is not None:
-            registry.close()
-        else:
-            for runtime in runtimes:
-                runtime.route.close()
+        try:
+            if stack is not None:
+                # The embedded HTTP server does not drive ASGI lifespan. Drain
+                # its request owner while target control is still alive, under
+                # the existing cancellation allowance, before the independent
+                # (shorter) router worker-join allowance starts. Neither bound
+                # is extended and only the router's exact receipts prove cleanup.
+                close = getattr(stack.app, "close", None)
+                if callable(close):
+                    close()
+        finally:
+            if registry is not None:
+                registry.close()
+            else:
+                for runtime in runtimes:
+                    runtime.route.close()
         if not startup_complete:
             for runtime in runtimes:
                 try:

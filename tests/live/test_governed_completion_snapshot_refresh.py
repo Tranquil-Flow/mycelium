@@ -138,6 +138,10 @@ class ScriptedNode:
         raise AssertionError(f"unexpected command {command}")
 
     def send_before(self, *, command_id, command, payload, deadline_monotonic_s):
+        if command == "snapshot":
+            # Full metrics now use the existing bounded snapshot allowance.
+            assert 0 < deadline_monotonic_s - time.monotonic() <= route_module._CLEANUP_SNAPSHOT_SLICE_SECONDS
+            return self.send(command_id=command_id, command=command, payload=payload)
         self.log.append((self.node_id, command))
         assert command == "infer_cancel_wait"
         assert deadline_monotonic_s > time.monotonic()

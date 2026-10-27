@@ -46,7 +46,8 @@ class FakeApp:
     def _start_local_contributor(self):
         self.local_contributor = SimpleNamespace(member=SimpleNamespace(node_id=LOCAL))
     def member_capability_reports(self):
-        return {REMOTE: {'generation': 3, 'expires_at': time.time() + 300, 'device': {'memory_bytes': 16 << 30}}}
+        return {REMOTE: {'generation': 3, 'expires_at': time.time() + 300,
+                         'device': {'memory_bytes': 16 << 30}, 'caps': {'max_wall_seconds': 1800}}}
 
 
 class Context:
@@ -140,7 +141,12 @@ class Members:
 
 
 def make(tmp_path, *, remote=True, prepared=True, compile_error=None, fail_at=None, collect_errors=(),
-         qualified=True):
+         qualified=True, local_wall=1800):
+    from mycelium_a13_macos.standing_consent import grant_standing_consent
+    from test_standing_consent import GRANT, POLICY, NOW
+    if local_wall is not None:  # None = a real owner: it creates the swarm and holds no standing grant
+        grant_standing_consent(tmp_path, {**GRANT, 'caps': {**GRANT['caps'], 'max_wall_seconds': local_wall}},
+                               policy=POLICY, now=NOW)
     app = FakeApp(tmp_path, remote=remote, prepared=prepared)
     ops = Ops(app, compile_error=compile_error, collect_errors=collect_errors, qualified=qualified)
     members = {}

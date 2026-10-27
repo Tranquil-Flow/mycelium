@@ -212,14 +212,15 @@ def standing_admission(grant: Mapping[str, Any] | None, *, binding: Mapping[str,
 
 
 def planning_caps(root) -> dict[str, int]:
-    """Known local limits for placement, never an execution authorization.
+    """Known local limits for placement and scheduling, never authorization.
 
-    The owner can also have a standing acceptor: retain its memory cap and
-    intersect storage with the app policy, rather than treating it as uncapped.
+    Retain standing memory and wall caps for the owner's own contributor too;
+    intersect storage with the app policy rather than treating it as uncapped.
     """
     from .app import read_resource_policy
     grant = load_standing_consent(root)
-    caps = {} if grant is None else {k: grant['caps'][k] for k in ('storage_bytes', 'max_memory_bytes')}
+    caps = {} if grant is None else {k: grant['caps'][k]
+        for k in ('storage_bytes', 'max_memory_bytes', 'max_wall_seconds') if k in grant['caps']}
     policy = read_resource_policy(root) or {}
     if type(policy.get('storage_bytes')) is int:
         caps['storage_bytes'] = min(caps.get('storage_bytes', policy['storage_bytes']), policy['storage_bytes'])
@@ -234,11 +235,20 @@ def standing_limits(grant: Mapping[str, Any], *, required: Mapping[str, Any] | N
     guard and disk limit, which must fit within the caps; otherwise the share
     is refused by name before anything is staged.
     """
-    from .worker import WorkerLimits
+    from .worker import WorkerLimits, _CLEANUP_RESERVE_SECONDS
 
     caps = grant["caps"]
     rss, disk = caps["max_memory_bytes"], caps["storage_bytes"]
+    wall = caps["max_wall_seconds"]
     if required is not None:
+        # Do not silently shorten a stale owner assignment: its scheduler must
+        # agree with the member's independent clock before a worker starts.
+        if 'max_wall_seconds' in required:
+            wall = required['max_wall_seconds']
+            if type(wall) is not int or not _CLEANUP_RESERVE_SECONDS < wall <= 3600:
+                raise StandingConsentError("member_wall_limit_invalid")
+            if wall > caps['max_wall_seconds']:
+                raise StandingConsentError("member_wall_cap_below_share")
         need_rss, need_disk = required.get("max_rss_bytes"), required.get("max_disk_bytes")
         if type(need_rss) is not int or type(need_disk) is not int or need_rss <= 0 or need_disk <= 0:
             raise StandingConsentError("member_resources_invalid")
@@ -248,7 +258,7 @@ def standing_limits(grant: Mapping[str, Any], *, required: Mapping[str, Any] | N
             raise StandingConsentError("member_storage_cap_below_share")
         rss, disk = need_rss, need_disk
     return WorkerLimits(max_rss_bytes=rss, max_disk_bytes=disk,
-                        max_wall_seconds=caps["max_wall_seconds"], max_commands=caps["max_commands"])
+                        max_wall_seconds=wall, max_commands=caps["max_commands"])
 
 
 def _default_preview(*args: Any, **kwargs: Any) -> Any:

@@ -159,7 +159,11 @@ class ChainOps:
 
     def stop(self, app):
         from .chain_compile import stop_serving
-        return stop_serving(app, timeout=30.0)
+        return stop_serving(app)
+
+    def stop_before(self, app, *, deadline, clock, progress):
+        from .chain_compile import stop_serving
+        return stop_serving(app, deadline=deadline, clock=clock, progress=progress)
 
 
 def member_capability_records(app, node_ids, *, now=None, local_device=None) -> dict[str, dict]:
@@ -268,6 +272,7 @@ class AppDemoChain:
         self._local_device = local_device
         #: Injectable clock for the execution-ceiling deadline (tests).
         self._monotonic = time.monotonic
+        self._sleep = time.sleep
         self.exchange = None
         self.agent = None
         self.run = None  # set by the app: the OwnerRun (for OwnerRunConsent)
@@ -389,7 +394,8 @@ class AppDemoChain:
         for node in self._participants(ctx):
             report = reports.get(node) or {}
             code = report.get('detail')
-            if report.get('state') != 'error' and code not in _RESOURCE_CODES:
+            if (report.get('state') != 'error' and code not in _RESOURCE_CODES
+                    and code not in {'member_wall_cap_below_share', 'member_wall_limit_invalid'}):
                 continue
             code = code or 'member_reported_error'
             message = None
@@ -810,6 +816,30 @@ class AppDemoChain:
             if not proposal_within_ceiling(proposal, ceiling):
                 raise OwnerRunError('execution_proposal_outside_ceiling')
         ctx.state['proposal'] = proposal
+        # Snapshot the same verified reports used by compilation. Unknown wall
+        # caps (including old reports) get the minimum standing allowance, not
+        # the owner's larger proposal. This is a bound, never consent authority.
+        wall_limits, unknown = {}, []
+        proposed_wall = work_limits(app, proposal)['max_wall_seconds']
+        local = ctx.state.get('local_node')
+        for node in nodes:
+            caps = (app._member_capability_reports.get(node) or {}).get('caps') or {}
+            cap = caps.get('max_wall_seconds')
+            if cap is None and node == local:
+                # The owner's own Mac runs under the owner's own proposal: the owner creates the
+                # swarm and holds no standing grant, so its report carries no caps (device run
+                # 2026-10-26: the 60 s fallback expired the owner's own worker at serving).
+                cap = proposed_wall
+            elif cap is None:
+                cap = 60
+                unknown.append(node)
+            elif type(cap) is not int or not 60 <= cap <= 3600:
+                raise OwnerRunError('member_wall_limit_invalid')
+            wall_limits[node] = min(proposed_wall, cap)
+        ctx.state['worker_wall_limits'] = wall_limits
+        ctx.state['wall_cap_fallback_nodes'] = unknown
+        if unknown:
+            ctx.progress('Time limit unknown for %d Macs; using 60 seconds per run.' % len(unknown))
         ctx.state['compile_state'] = {'resource_plan': state.get('resource_plan'),
                                       'epoch': state.get('epoch'),
                                       'artifact_reuse_key': state.get('artifact_reuse_key')}
@@ -837,12 +867,13 @@ class AppDemoChain:
         storage = (read_resource_policy(app.root) or {}).get('storage_bytes')
         for node in self._participants(ctx):
             row = _member_row(compiled, node)
-            if row is None:
-                continue
             entry = per_node.setdefault(node, {})
-            entry['work_limits'] = member_work_limits(compiled, node,
-                                                      storage_bytes=storage if node == local else None)
-            entry['resources'] = public_member_resources(row)
+            entry['work_limits'] = (member_work_limits(compiled, node,
+                storage_bytes=storage if node == local else None) if row is not None else dict(limits))
+            entry['work_limits']['max_wall_seconds'] = ctx.state['worker_wall_limits'][node]
+            if row is not None:
+                entry['resources'] = public_member_resources(row)
+        limits['max_wall_seconds'] = min(ctx.state['worker_wall_limits'].values())
         ctx.state['work_nodes'] = per_node
         self._announce(ctx, 'work', work_limits=limits, per_node=per_node)
         if not plans:
@@ -1091,18 +1122,21 @@ class AppDemoChain:
             if self._member_identity(node) != identity:
                 raise OwnerRunError('rollover_members_changed')
 
+    @staticmethod
+    def _smallest_worker_wall(ctx):
+        limits = [v.get('max_wall_seconds') for v in
+                  [ctx.state.get('work_limits') or {}, *[r.get('work_limits') or {}
+                   for r in (ctx.state.get('work_nodes') or {}).values()]]]
+        return min((v for v in limits if type(v) is int and v > 0), default=None)
+
     def rollover_due(self, ctx):
         # A zero margin disables continuation for bounded harness runs. The
         # independent worker wall guard is unchanged, including its reserve.
         margin = self.budgets['rollover_margin']
         started = ctx.state.get('execution_clock_started_at')
-        limits = [v.get('max_wall_seconds') for v in
-                  [ctx.state.get('work_limits') or {}, *[r.get('work_limits') or {}
-                   for r in (ctx.state.get('work_nodes') or {}).values()]]]
-        limits = [v for v in limits if type(v) is int and v > 0]
-        if margin <= 0 or started is None or not limits:
+        limit = self._smallest_worker_wall(ctx)
+        if margin <= 0 or started is None or limit is None:
             return False
-        limit = min(limits)
         lead = min(max(self.EXECUTION_CEILING_LEAD_SECONDS, margin), limit / 2)
         return self._monotonic() >= started + limit - lead
 
@@ -1115,8 +1149,8 @@ class AppDemoChain:
         chat requests are cancelled with the explicit code, and ``serving`` is left.
         """
         started = ctx.state.get('execution_clock_started_at')
-        limit = (ctx.state.get('work_limits') or {}).get('max_wall_seconds')
-        if started is None or type(limit) is not int:
+        limit = self._smallest_worker_wall(ctx)
+        if started is None or limit is None:
             return None
         if self._monotonic() < started + limit - self.EXECUTION_CEILING_LEAD_SECONDS:
             return None
@@ -1135,8 +1169,8 @@ class AppDemoChain:
             return code
         try:
             self._tick_local()  # keep this Mac's own contributor reporting while serving
-        except Exception:
-            pass
+        except Exception as error:
+            ctx.record_exception('owner_monitor_tick_failed', error)
         state = self._workflow_state()
         if state is None:
             return 'managed_workflow_missing'
@@ -1192,7 +1226,8 @@ class AppDemoChain:
                 continue
             try:
                 current = self.app.authority.coordinator.member(node)
-            except Exception:
+            except Exception as error:
+                ctx.record_exception('owner_member_lookup_failed', error)
                 first_seen.pop(node, None)   # revoked or left: the membership paths own that
                 continue
             if all(current.get(k) == was.get(k) for k in self._IDENTITY):
@@ -1202,51 +1237,170 @@ class AppDemoChain:
                 found = found or node
         return 'member_restarted' if found else None
 
+    def _stop_deadline(self, ctx):
+        from .worker import _CLEANUP_RESERVE_SECONDS
+        started = ctx.state.get('execution_clock_started_at')
+        limit = self._smallest_worker_wall(ctx)
+        # Pre-worker failures still have a bounded owner wait. Once workers
+        # exist, their earliest wall deadline (including reserve) wins.
+        workflow = getattr(self.app, '_chain_workflow', None)
+        allowance = getattr(workflow, 'close_wait_seconds', None)
+        budget = allowance() if callable(allowance) else self.budgets['previous_close']
+        deadline = self._monotonic() + budget
+        if started is not None and limit is not None:
+            deadline = min(deadline, started + limit - _CLEANUP_RESERVE_SECONDS)
+        else:
+            deadline = min(deadline, self._monotonic() + self.budgets['previous_close'])
+        return deadline
+
+    @staticmethod
+    def _stop_error(error):
+        # Never publish arbitrary exception text, even if it looks like a code.
+        code = getattr(error, 'code', None) or str(error)
+        return code if isinstance(code, str) and code in {
+            'rebuild_stop_timeout', 'rebuild_stop_superseded',
+            'rebuild_stop_timeout_invalid', 'rebuild_stop_deadline_invalid',
+            'router_port_shutdown_cleanup_unproven',
+            'router_port_shutdown_cancellation_timeout',
+            'router_port_dispatcher_shutdown_timeout', 'router_port_worker_shutdown_timeout',
+            'router_port_shutdown_cancellation_failed', 'managed_workflow_failed',
+        } else 'owner_route_stop_failed'
+
+    def _record_cleanup_exception(self, ctx, code, error):
+        if ctx is not None:
+            return ctx.record_exception(code, error)
+        # Direct callers get the same redacted serving-status diagnostic.
+        from .chain_compile import _record_cleanup_exception
+        _record_cleanup_exception(self.app, getattr(self.app, '_chain_workflow', None), code, error)
+
+    def _cleanup_tick(self, ctx=None):
+        try:
+            self._tick_local()
+        except Exception as error:
+            self._record_cleanup_exception(ctx, 'owner_cleanup_tick_failed', error)
+            # Only a target receipt can prove cleanup; a tick cannot.
+
+    def _target_cleanup_proven(self, workflow, *, deadline, require_offers=False, ctx=None):
+        from mycelium_deadlines import CLEANUP_RECEIPT_POLL_SECONDS
+        mailbox = self.app.authority.control_mailbox
+        with workflow._lock:
+            offers = tuple(workflow._offers.values())
+        if require_offers and not offers:
+            return False
+        for offer in offers:
+            try:
+                mailbox.request_stage_cleanup(offer)
+            except Exception as error:
+                workflow.record_cleanup_exception('owner_cleanup_request_failed', error)
+                if ctx is not None:
+                    ctx.record_exception('owner_cleanup_request_failed', error)
+                return False
+        while True:
+            pending = False
+            for offer in offers:
+                try:
+                    mailbox.cleanup_receipt(offer)  # the signed target receipt, not request/exit
+                except Exception as error:
+                    code = ('offer_cleanup_unconfirmed' if getattr(error, 'code', None)
+                            == 'offer_cleanup_unconfirmed' else 'owner_cleanup_receipt_failed')
+                    workflow.record_cleanup_exception(code, error)
+                    if ctx is not None:
+                        ctx.record_exception(code, error)
+                    if getattr(error, 'code', None) != 'offer_cleanup_unconfirmed':
+                        return False
+                    pending = True
+            if self._monotonic() > deadline:
+                return False
+            if not pending:
+                return True
+            remaining = deadline - self._monotonic()
+            if remaining <= 0:
+                return False
+            self._cleanup_tick(ctx)
+            self._sleep(max(0.0, min(CLEANUP_RECEIPT_POLL_SECONDS, deadline - self._monotonic())))
+
     def teardown(self, ctx, *, failed):
         app = self.app
-        if failed or ctx.state.get('rollover_requested'):
-            # End in-flight chats with the run's own failure code before the route is stopped under them: each
-            # request finishes `cancelled` with that code instead of hanging or failing with a transport error.
-            chat = getattr(app, 'chat', None)
-            cancel_all = getattr(chat, 'cancel_all', None)
-            if callable(cancel_all):
-                try:
-                    cancel_all('chat_switching_runs' if ctx.state.get('rollover_requested')
-                               else ctx.state.get('monitor_error_code') or 'owner_run_failed')
-                except Exception:
-                    pass
-        try:
-            if ctx.state.get('model') is not None:
-                self._announce(ctx, 'stopped')
-        except Exception:
-            pass
+        deadline = self._stop_deadline(ctx)
+        workflow = getattr(app, '_chain_workflow', None)
+        # Every teardown, including a plain owner Stop, must dispatch chat
+        # cancellation while the loopback listener is still accepting DELETE.
+        # Closing the listener first leaves the proxy waiting on its SSE read.
+        chat = getattr(app, 'chat', None)
+        cancel_all = getattr(chat, 'cancel_all', None)
+        if callable(cancel_all):
+            try:
+                cancel_all('chat_switching_runs' if ctx.state.get('rollover_requested')
+                           else (ctx.state.get('monitor_error_code') or 'owner_run_failed')
+                           if failed else 'chat_cancelled')
+            except Exception as error:
+                ctx.record_exception('owner_chat_cancel_failed', error)
         from .chain_observation import release_owner_channel
         unproven = None
         try:
             state = self._workflow_state() or {}
             if state.get('error_code') == CLEANUP_UNPROVEN:
                 unproven = CLEANUP_UNPROVEN
-        except Exception:
-            pass
+        except Exception as error:
+            ctx.record_exception('owner_cleanup_status_failed', error)
         stop_proven = False
+        stop_error = late_stop_error = None
+        from .workflow import ManagedServingWorkflow
         try:
-            self.ops.stop(app)
+            stop_before = getattr(self.ops, 'stop_before', None)
+            if callable(stop_before):
+                stop_before(app, deadline=deadline, clock=self._monotonic, progress=lambda: self._cleanup_tick(ctx))
+            else:
+                self.ops.stop(app)  # legacy/injected operations
             stop_proven = True
         except Exception as error:
-            if CLEANUP_UNPROVEN in (getattr(error, 'code', None), str(error)):
+            stop_error = self._stop_error(error)
+            ctx.record_exception(stop_error, error)
+            if stop_error == CLEANUP_UNPROVEN:
                 unproven = CLEANUP_UNPROVEN
+            # A short outer join is not a terminal cleanup verdict. Observe the
+            # same retired workflow, with its channel and local pump still alive,
+            # under the ORIGINAL deadline. No new stop, run, TTL or retry budget.
+            if (stop_error == 'rebuild_stop_timeout'
+                    and isinstance(workflow, ManagedServingWorkflow)
+                    and getattr(app, '_chain_serving_thread', None) is not None):
+                from .chain_compile import await_stopped
+                try:
+                    await_stopped(app, workflow=workflow, retired_epoch=app._chain_epoch,
+                                  deadline=deadline, clock=self._monotonic, progress=lambda: self._cleanup_tick(ctx))
+                    stop_proven = True
+                except Exception as late_error:
+                    late_stop_error = self._stop_error(late_error)
+                    ctx.record_exception(late_stop_error, late_error)
+                    if late_stop_error == CLEANUP_UNPROVEN:
+                        unproven = CLEANUP_UNPROVEN
+        if stop_proven and isinstance(workflow, ManagedServingWorkflow):
+            if not self._target_cleanup_proven(workflow, deadline=deadline,
+                                               require_offers=bool(ctx.state.get('reached_serving')), ctx=ctx):
+                unproven = unproven or 'owner_target_cleanup_unproven'
+        # `stopped` is an instruction, not just status: target agents tear
+        # down their control runtime on receipt. Keep that lane alive until
+        # route cancellation and target cleanup have had their original
+        # allowance to return authenticated proof. On failure/expiry still
+        # announce Stop before releasing ownership; never imply proof from it.
+        try:
+            if ctx.state.get('model') is not None:
+                self._announce(ctx, 'stopped')
+        except Exception as error:
+            ctx.record_exception('owner_stop_announce_failed', error)
         context = getattr(app, '_observation_context', None)
         if context is not None:
             for offer in getattr(context, 'offers', {}).values():
                 try:
                     app.authority.control_mailbox.request_stage_cleanup(offer)
-                except Exception:
-                    pass
+                except Exception as error:
+                    ctx.record_exception('owner_cleanup_request_failed', error)
         # Let this Mac's own contributor stop its worker and clean its staging.
         for _ in range(3):
             try:
                 self._tick_local()
-            except Exception:
+            except Exception as error:
+                ctx.record_exception('owner_cleanup_tick_failed', error)
                 break
         if self.agent is not None:
             self.agent.close()
@@ -1257,16 +1411,17 @@ class AppDemoChain:
             try:
                 release_owner_channel(context)
                 released = True
-            except Exception:
-                pass
+            except Exception as error:
+                ctx.record_exception('owner_channel_release_failed', error)
         if stop_proven and unproven is None:
             if getattr(ctx, 'reason', None) == 'rollover' or ctx.state.get('rollover_requested'):
                 from .compile_cache import discard_retired_artifacts
                 try:
                     discard_retired_artifacts(app.root, ctx.run_id,
                                               getattr(app, '_chain_compilation_cache', None) or {})
-                except Exception:
+                except Exception as error:
                     unproven = 'rollover_artifact_cleanup_failed'
+                    ctx.record_exception(unproven, error)
             mailbox = getattr(getattr(app, 'authority', None), 'control_mailbox', None)
             finish = getattr(mailbox, 'finish_run', None)
             if callable(finish):
@@ -1274,7 +1429,10 @@ class AppDemoChain:
         if not stop_proven:
             unproven = unproven or 'owner_route_stop_unproven'
         if unproven is not None:
-            ctx.result['cleanup_unproven'] = {'code': unproven, 'owner_lock_released': released}
+            ctx.result['cleanup_unproven'] = {'code': unproven, 'owner_lock_released': released,
+                                            **({'stop_error': stop_error} if stop_error else {}),
+                                            **({'late_stop_error': late_stop_error}
+                                               if late_stop_error and late_stop_error != stop_error else {})}
         app._observation_context = None
         app._chain_target_keys = None
         app._chain_rebuild = None

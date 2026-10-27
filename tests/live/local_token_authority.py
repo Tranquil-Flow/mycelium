@@ -136,7 +136,7 @@ class LocalTokenAuthority:
         self.streams[command_id]=stream
         return stream
 
-    def close_token_progress(self, command_id):
+    def close_token_progress(self, command_id, *, cancelled=False):
         stream=self.streams.pop(command_id,None)
         if stream is not None:
             stream.close()

@@ -83,6 +83,47 @@ def test_loaded_worker_death_requires_cold_run_not_startup_replay(tmp_path, monk
         new.close()
 
 
+@pytest.mark.parametrize('ack', ['delivered', 'lost'])
+def test_owner_requested_stop_of_a_loaded_worker_keeps_the_control_loop_alive(tmp_path, monkeypatch, ack):
+    """F16 (device attempt10, 2026-10-27): the owner's route close sends `stop`; the native worker exits
+    rc 0 as asked. That exit is the requested outcome, not a death: the runtime must stay up so its pump
+    publishes the stop response and later cleanup receipts. Treating it as `runtime_cold_restart_required`
+    killed the control loop, so the owner waited for the stop command to expire (~300 s) and reported
+    `owner_route_stop_unproven` for every Stop and rollover."""
+    runtime, old, new, session, authorized = _replacement_fixture(tmp_path, monkeypatch, loaded=True)
+    old._session.returncode = None
+    assert old.requires_cold_restart()
+    if ack == 'lost':
+        original_send = old._session.send
+        def lost(**kwargs):
+            original_send(**kwargs)
+            raise TimeoutError('stop_result_unknown')
+        monkeypatch.setattr(old._session, 'send', lost)
+    try:
+        if ack == 'lost':
+            with pytest.raises(TimeoutError):
+                old.send(command_id='owner-stop', command='stop', payload={})
+        else:
+            assert old.send(command_id='owner-stop', command='stop', payload={})['ok']
+        old._session.returncode = 0  # the native process exits as asked
+        for _ in range(3):  # the control loop calls this every tick
+            runtime._replace_worker_if_dead()
+        assert not runtime._stop.is_set(), 'a requested stop killed the control loop'
+        assert runtime.status()['state'] == 'running'
+        assert runtime.worker is old and runtime.pump.worker is old
+        assert runtime._worker_replacements == 0
+        assert not session.calls and not authorized and new._session is None
+        assert old.cleanup_proven()
+        record = json.loads((runtime.root / 'worker-replacement.private.json').read_text())
+        assert record['outcome'] == 'refused'
+        assert record['error_code'] == 'worker_owner_stopped'
+        with pytest.raises(WorkerError, match='worker_owner_stopped'):
+            old.send(command_id='late-inference', command='infer_start', payload={'request': {}})
+    finally:
+        old.close()
+        new.close()
+
+
 def test_preload_replacement_needs_fresh_exact_authorization(tmp_path, monkeypatch):
     runtime, old, new, session, authorized = _replacement_fixture(tmp_path, monkeypatch)
     try:

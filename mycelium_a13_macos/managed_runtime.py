@@ -320,6 +320,21 @@ class ManagedTargetRuntime:
                 'max_attempts':_MAX_WORKER_REPLACEMENTS,
                 'recorded_at_utc_ms':int(time.time()*1000),**previous_cause})
             raise RuntimeErrorCode('runtime_replacement_cleanup_unproven')
+        # An owner-requested stop is the expected end of this worker, not a death: the native process exits
+        # after answering `stop` (or after its acknowledgement was lost in transit). Keep the control loop up
+        # so the pump still publishes that stop response and later cleanup receipts; no replacement is ever
+        # minted (``replacement_refusal`` returns the same refusal below for an unloaded worker). Classifying
+        # it as a cold-restart death stopped the loop and left the owner waiting for its stop command to
+        # expire (F16, device attempt10).
+        if previous.requires_cold_restart() and previous.replacement_refusal()=='worker_owner_stopped':
+            if getattr(self,'_replacement_refusal_recorded',None)!='worker_owner_stopped':
+                _atomic_private_json(self.root/'worker-replacement.private.json',{
+                    'protocol':_WORKER_REPLACEMENT_PROTOCOL,'run_id':self.run_id,
+                    'attempt':self._worker_replacements,'outcome':'refused',
+                    'error_code':'worker_owner_stopped','max_attempts':_MAX_WORKER_REPLACEMENTS,
+                    'recorded_at_utc_ms':int(time.time()*1000),**previous_cause})
+                self._replacement_refusal_recorded='worker_owner_stopped'
+            return
         if previous.requires_cold_restart():
             with self._lock:
                 self._stop.set()

@@ -22,7 +22,7 @@ class Mailbox:
         self.stream = MailboxReceiptStream(cursor, seal, 64)
         return self.stream
 
-    def close_token_progress(self, command_id):
+    def close_token_progress(self, command_id, *, cancelled=False):
         self.closed.append(command_id)
         self.stream.close()
 

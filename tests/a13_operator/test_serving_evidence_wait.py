@@ -437,6 +437,12 @@ def test_the_marker_is_the_apps_own_write_before_it_reports_api_running(transpor
     assert module._serving_error_path(RUN_ID) == module.OWNER/'chain-runs'/RUN_ID/'serve-error.private.json'
 
 
+# Retirement is split since the F16 rollstop fix: ``stop_serving`` fences the epoch, and
+# ``await_stopped`` (also reached from teardown's late-proof path) waits for the SAME
+# retired run outside the guard, then forgets it in one short critical section.
+RETIREMENT_SCOPES = ('stop_serving', 'await_stopped')
+
+
 def _assert_serving_guard_partition(source):
     """Reject a serving-worker guard or a blocking wait while retiring under one."""
     sites = []
@@ -455,10 +461,10 @@ def _assert_serving_guard_partition(source):
                    and item.context_expr.value.id == 'app'
                    and item.context_expr.attr == 'guard' for item in node.items):
                 sites.append((self.scopes, node.lineno))
-                assert self.scopes[0] in {'start_compile', 'stop_serving'}, \
+                assert self.scopes[0] in {'start_compile', *RETIREMENT_SCOPES}, \
                     f'app.guard in serving path: {self.scopes}'
                 assert 'serve' not in self.scopes, 'serving worker cannot hold app.guard'
-                if self.scopes[0] == 'stop_serving':
+                if self.scopes[0] in RETIREMENT_SCOPES:
                     assert not any(isinstance(call, ast.Call)
                         and isinstance(call.func, ast.Attribute)
                         and call.func.attr in {'join', 'wait', 'run'}
@@ -469,6 +475,7 @@ def _assert_serving_guard_partition(source):
     GuardVisitor().visit(ast.parse(source))
     assert any(scope == ('start_compile', 'work') for scope, _ in sites)
     assert any(scope == ('stop_serving',) for scope, _ in sites)
+    assert any(scope == ('await_stopped',) for scope, _ in sites)
     return sites
 
 
@@ -483,13 +490,19 @@ def test_the_serving_phase_takes_no_app_guard_a_read_would_have_to_wait_on(trans
     """
     chain = (REPO / 'mycelium_a13_macos/chain_compile.py').read_text()
     sites = _assert_serving_guard_partition(chain)
-    assert {scope[0] for scope, _ in sites} == {'start_compile', 'stop_serving'}
+    assert {scope[0] for scope, _ in sites} == {'start_compile', *RETIREMENT_SCOPES}
     # Deterministic RED control: a guard injected into the serving worker must fail.
     changed = chain.replace('def serve():\n        try:',
                             'def serve():\n        with app.guard: pass\n        try:', 1)
     assert changed != chain
     with pytest.raises(AssertionError, match='serving path'):
         _assert_serving_guard_partition(changed)
+    # Deterministic RED control: a join moved under await_stopped's guard must fail.
+    marker = "    with app.guard:\n        if (getattr(app,'_chain_epoch',None)!=retired_epoch"
+    assert chain.count(marker) == 1
+    joined = chain.replace(marker, "    with app.guard:\n        thread.join(1.0)\n        if (getattr(app,'_chain_epoch',None)!=retired_epoch", 1)
+    with pytest.raises(AssertionError, match='retirement may not wait'):
+        _assert_serving_guard_partition(joined)
     workflow = (REPO / 'mycelium_a13_macos/workflow.py').read_text()
     assert 'app.guard' not in workflow, 'the workflow never takes the application guard'
     app = (REPO / 'mycelium_a13_macos/app.py').read_text()

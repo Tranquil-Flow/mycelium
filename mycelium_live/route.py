@@ -101,6 +101,7 @@ from mycelium_live.liveness import (
 # ``mycelium_live.route.<NAME>`` by dotted string.
 _IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS = mycelium_deadlines.IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS
 _CLEANUP_RECEIPT_POLL_SECONDS = mycelium_deadlines.CLEANUP_RECEIPT_POLL_SECONDS
+ROUTE_CLOSE_MONITOR_JOIN_SECONDS = 1.0
 # PV34: the active-liveness health probe.  A node that acknowledged progress (a completed infer_start / infer_decode,
 # which proves every stage of the pipeline computed) inside this window is live and is not probed.  The window is what
 # is left of the liveness active-failure budget once one probe and one monitor tick are paid for, so a node that goes
@@ -1825,6 +1826,10 @@ class PhysicalLiveRoute:
             active = self._active_route_requests.get(request_id)
             if active is None or active.get("terminal") is True:
                 raise RuntimeError("request_control_identity_unavailable")
+            if command == "bind_request_control" and active.get("cancellation_requested") is True:
+                # Cancellation can overtake a bind between participants. Never
+                # create another ordinary waiter behind its cleanup receipt.
+                raise InferenceCancelled("inference_cancelled")
             inflight = active.setdefault("inflight_commands", {})
             if node_id in inflight:
                 raise RuntimeError("request_node_command_already_inflight")
@@ -3786,6 +3791,20 @@ class PhysicalLiveRoute:
             else:
                 active["cleanup_receipt_publication_started"] = True
                 publish_here = True
+            # Save the exact waiters before publication can release route state.
+            # Generation-0 binds are not interrupted by cancel_request: they
+            # may still be establishing target control. Once every target has
+            # proved generation-1 cleanup, their ordinary replies are obsolete.
+            control_bound_event = active.get("control_bound_event")
+            retired_waiters = (
+                tuple(
+                    (self._sessions.get(node_id), command_id)
+                    for node_id, command_id in active.get("inflight_commands", {}).items()
+                )
+                if isinstance(control_bound_event, threading.Event)
+                and not control_bound_event.is_set()
+                else ()
+            )
         if not publish_here:
             publication_event.wait()
             with self._lock:
@@ -3808,6 +3827,10 @@ class PhysicalLiveRoute:
             if active is not None:
                 active["cleanup_receipt_published"] = True
             publication_event.set()
+        for session, command_id in retired_waiters:
+            interrupt = getattr(session, "interrupt_command", None)
+            if callable(interrupt):
+                interrupt(command_id, code="request_cancelled")
         return receipt
 
     def _schedule_cleanup_reconciliation(
@@ -5299,7 +5322,14 @@ class PhysicalLiveRoute:
                     # previous projection and is recorded, never re-labels the
                     # request as failed.
                     try:
-                        self._snapshot_nodes(participating_node_ids)
+                        # Optional metrics must not keep the request worker
+                        # alive for a full node-session timeout during Stop.
+                        # Reuse the existing bounded snapshot slice; cleanup
+                        # authority above is already sealed and is unchanged.
+                        self._snapshot_nodes(
+                            participating_node_ids,
+                            deadline_monotonic_s=time.monotonic() + _CLEANUP_SNAPSHOT_SLICE_SECONDS,
+                        )
                     except Exception as refresh_error:
                         self._record_incident(
                             state="post_request_snapshot_refresh_failed",
@@ -7189,7 +7219,7 @@ class PhysicalLiveRoute:
             reconciliation_executor.shutdown(wait=True, cancel_futures=True)
         monitor = self._liveness_monitor_thread
         if monitor is not None and monitor is not threading.current_thread():
-            monitor.join(timeout=1.0)
+            monitor.join(timeout=ROUTE_CLOSE_MONITOR_JOIN_SECONDS)
         with self._lock:
             if self._closed:
                 return

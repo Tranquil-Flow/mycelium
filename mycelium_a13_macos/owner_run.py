@@ -68,6 +68,25 @@ def new_run_identity() -> tuple[str, str]:
     return 'a13-' + secrets.token_hex(3) + '-qwen-' + stamp, str(uuid.uuid4())
 
 
+def record_exception(result, code, error):
+    """Closed call-site code and class only; never exception text or arguments.
+
+    Coalesce repeated polling failures so diagnostics cannot grow with time.
+    Replace the list rather than mutating a status reader's snapshot in place.
+    """
+    name = type(error).__name__
+    name = name if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,79}', name) else 'Exception'
+    rows = list(result.get('cleanup_errors', ()))
+    for index, row in enumerate(rows):
+        if row['code'] == code and row['exception_class'] == name:
+            rows[index] = {**row, 'count': row['count'] + 1}
+            break
+    else:
+        rows.append({'code': code, 'exception_class': name, 'count': 1})
+    result['cleanup_errors'] = rows
+    return name
+
+
 class RunContext:
     def __init__(self, run: 'OwnerRun', run_id: str, deployment_id: str, reason: str) -> None:
         self._run = run
@@ -79,6 +98,10 @@ class RunContext:
         self.result: dict[str, Any] = {}
         #: Chain-owned private state (workflow handles etc.); never shown.
         self.state: dict[str, Any] = {}
+
+    def record_exception(self, code, error):
+        with self._run._lock:
+            return record_exception(self.result, code, error)
 
     def progress(self, detail: str | None) -> None:
         self._run._progress(self, detail)
@@ -152,8 +175,9 @@ class OwnerRun:
             if monitor is not None:
                 try:
                     code = monitor(ctx)
-                except Exception:
+                except Exception as error:
                     code = 'owner_run_monitor_failed'
+                    ctx.record_exception(code, error)
             if code:
                 with self._lock:
                     if self._state == 'serving' and self._ctx is ctx:
@@ -183,6 +207,7 @@ class OwnerRun:
                 'started_at': self._started_at,
                 'route_ready': self._state == 'serving',
                 'cleanup_unproven': None if ctx is None else ctx.result.get('cleanup_unproven'),
+                'cleanup_errors': [] if ctx is None else ctx.result.get('cleanup_errors', []),
                 'rollover': dict(self._rollover),
                 'compilation_cache_hit': None if ctx is None else ctx.result.get('compilation_cache_hit'),
                 'build_seconds': None if ctx is None else ctx.result.get('build_seconds'),
@@ -238,7 +263,8 @@ class OwnerRun:
             return
         try:
             code = check(ctx)
-        except Exception:
+        except Exception as error:
+            ctx.record_exception('owner_ceiling_check_failed', error)
             return
         if code:
             with self._lock:
@@ -284,6 +310,8 @@ class OwnerRun:
                 self.rebuild()
             except OwnerRunError as error:
                 with self._lock:
+                    if self._ctx is not None:
+                        self._ctx.record_exception(error.code, error)
                     self._error = error.code
                     self._state = 'failed'
             finally:
@@ -386,9 +414,11 @@ class OwnerRun:
                 except _Stopped:
                     raise
                 except OwnerRunError as error:
+                    ctx.record_exception(error.code, error)
                     self._fail(ctx, name, error.code, error.message, error.fix); failed = True
                     return
-                except Exception:
+                except Exception as error:
+                    ctx.record_exception('owner_run_step_failed', error)
                     self._fail(ctx, name, 'owner_run_step_failed'); failed = True
                     return
                 with self._lock:
@@ -407,7 +437,8 @@ class OwnerRun:
                 self._end_at_ceiling(ctx)
             with self._lock:
                 failed = self._state == 'failing'
-        except _Stopped:
+        except _Stopped as error:
+            ctx.record_exception('owner_run_stopped', error)
             with self._lock:
                 if self._step is not None and self._steps[self._step]['state'] == 'active':
                     self._steps[self._step]['state'] = 'pending'
@@ -417,7 +448,9 @@ class OwnerRun:
                     self._state = 'stopping'
             try:
                 self.chain.teardown(ctx, failed=failed)
-            except Exception:
-                ctx.result['cleanup_unproven'] = {'code': 'owner_teardown_failed'}
+            except Exception as error:
+                name = ctx.record_exception('owner_teardown_failed', error)
+                ctx.result['cleanup_unproven'] = {**ctx.result.get('cleanup_unproven', {}),
+                    'code': 'owner_teardown_failed', 'exception_class': name}
             # _main owns the terminal/next-run transition. Never expose an idle
             # slot between cleanup and continuation: Start must still refuse.

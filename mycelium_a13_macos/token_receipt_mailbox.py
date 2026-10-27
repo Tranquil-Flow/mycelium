@@ -19,6 +19,7 @@ from mycelium_router.token_path_authority import ReceiptCursor
 
 PROGRESS = 'mycelium.managed_control.token_progress.v1'
 PROGRESS_ACK = 'mycelium.managed_control.token_progress_ack.v1'
+PROGRESS_CANCELLED = 'mycelium.managed_control.token_progress_cancelled.v1'
 PATH = '/managed-control/token-progress'
 
 
@@ -109,6 +110,9 @@ class TokenProgressMailboxMixin:
         self._token_progress_lock = threading.RLock()
         self._token_progress_streams = {}
         self._token_progress_seen = set()
+        # Small cancellation tombstones, bounded by the existing 4096 single-use
+        # registrations. No tokens/cursors/compute authority survive closure.
+        self._token_progress_cancelled = {}
 
     def open_token_progress(self, *, command_id, cursor, seal, capacity=None, target_endpoint_id=None):
         from .managed_control import _segment, _require
@@ -133,9 +137,14 @@ class TokenProgressMailboxMixin:
             self._token_progress_seen.add(command_id)
         return stream
 
-    def close_token_progress(self, command_id):
+    def close_token_progress(self, command_id, *, cancelled=False):
+        from .managed_control import _require
+        _require(type(cancelled) is bool, 'token_progress_arguments_invalid')
         with self._token_progress_lock:
             stream = self._token_progress_streams.pop(command_id, None)
+            if stream is not None and cancelled:
+                self._token_progress_cancelled[command_id] = (
+                    stream.cursor.grant.digest, stream.target_endpoint_id)
         if stream is not None:
             stream.close()
 
@@ -143,8 +152,71 @@ class TokenProgressMailboxMixin:
         with self._token_progress_lock:
             streams = list(self._token_progress_streams.values())
             self._token_progress_streams.clear()
+            self._token_progress_cancelled.clear()
         for stream in streams:
             stream.close()
+
+    def _cancelled_token_progress(self, envelope, statement, member):
+        """Authenticate retirement of forwarding, NOT receipt acceptance/cleanup.
+
+        No grant deadline is renewed, no receipt is sealed/consumed/evicted and
+        the command remains claimed. Only the ordinary native result and separate
+        cleanup observations can discharge those obligations. Owner restart loses
+        these explicit cancellation marks and still fails closed.
+        """
+        from .managed_control import _BINDING_FIELDS, _require, _document_digest
+        command_id = statement['command_id']
+        with self._token_progress_lock:
+            cancelled = self._token_progress_cancelled.get(command_id)
+        if cancelled is None:
+            return None
+        grant_digest, target_endpoint_id = cancelled
+        with self._lock, self._member_guard(statement):
+            _require(not self._closed, 'managed_control_closed')
+            connection = self._connect()
+            try:
+                connection.execute('BEGIN IMMEDIATE')
+                row = connection.execute('SELECT * FROM managed_commands WHERE command_id=?',
+                                         (command_id,)).fetchone()
+                _require(row is not None and row['state'] == 'claimed', 'token_progress_claim_stale')
+                _require(all(row[k] == statement[k] for k in _BINDING_FIELDS),
+                         'managed_control_command_binding_mismatch')
+                _require(row['claim_token'] == statement['claim_token'],
+                         'managed_control_claim_token_mismatch')
+                command = json.loads(row['envelope_json'])['statement']['native_command']
+                grant = command['payload'].get('token_grant', {}).get('statement', {})
+                scope = grant.get('scope', {})
+                receipt = json.loads(_snapshot(statement['receipt']))
+                body, signature = receipt['statement'], receipt['signature']
+                _require(isinstance(body, dict) and isinstance(signature, dict),
+                         'token_progress_subject_mismatch')
+                _require(command['command'] == 'infer_start'
+                    and sha256_bytes(canonical_json_bytes(grant)) == grant_digest
+                    and scope.get('entry_node_id') == statement['target_node_id']
+                    and target_endpoint_id == statement['target_endpoint_id']
+                    and scope.get('entry_key_digest') == statement['target_key_digest']
+                    and scope.get('run_id') == statement['run_id']
+                    and scope.get('control', {}).get('deployment_id') == statement['deployment_id']
+                    and body.get('grant_digest') == grant_digest
+                    and type(body.get('sequence')) is int
+                    and signature.get('signed_statement_digest') == sha256_bytes(canonical_json_bytes(body)),
+                    'token_progress_subject_mismatch')
+                request_digest = _document_digest(envelope)
+                signer_digest = member['verification_key_digest']
+                cached = self._cached_or_guard(connection, signer_digest=signer_digest,
+                    statement=statement, request_digest=request_digest)
+                if cached is not None:
+                    return cached
+                response = self._response(PROGRESS_CANCELLED, statement['request_id'], {
+                    **{k: statement[k] for k in _BINDING_FIELDS}, 'command_id': command_id,
+                    'grant_digest': grant_digest, 'receipt_sequence': body['sequence'],
+                    'receipt_digest': signature['signed_statement_digest']})
+                self._record_auth(connection, signer_digest=signer_digest, statement=statement,
+                                  request_digest=request_digest, response=response)
+                connection.commit()
+                return response
+            finally:
+                connection.close()
 
     def token_progress(self, envelope):
         from .managed_control import (_POLL_FIELDS, _BINDING_FIELDS, _require, _segment,
@@ -155,6 +227,9 @@ class TokenProgressMailboxMixin:
         _segment(statement['claim_token'])
         with self._token_progress_lock:
             stream = self._token_progress_streams.get(command_id)
+        cancelled = self._cancelled_token_progress(envelope, statement, member)
+        if cancelled is not None:
+            return cancelled
         _require(stream is not None, 'token_progress_disabled')
         # Serialize this stream only. Never hold the mailbox dispatch lock while
         # calling the trusted evidence sealer or receipt verifier.
@@ -230,6 +305,11 @@ class TokenProgressMailboxMixin:
             except (ValueError, RuntimeError, sqlite3.Error, OSError):
                 if accepted:
                     stream.close('token_progress_forward_failed')
+                # Cancellation may have overtaken lookup/sealing. Reauthenticate
+                # the exact claim; never infer authority from the error string.
+                cancelled = self._cancelled_token_progress(envelope, statement, member)
+                if cancelled is not None:
+                    return cancelled
                 raise ManagedControlError('token_progress_rejected') from None
 
 
@@ -246,7 +326,10 @@ def send_token_progress(client, *, target, run_id, deployment_id, command_id,
     response = client._request(PATH, client._signed_outbound(statement))
     fields = _RESPONSE_COMMON_FIELDS | _BINDING_FIELDS | {
         'command_id', 'grant_digest', 'receipt_sequence', 'receipt_digest'}
-    ack = client._verified_response(response, protocol=PROGRESS_ACK, fields=fields,
+    protocol = (PROGRESS_CANCELLED if isinstance(response, dict)
+        and isinstance(response.get('statement'), dict)
+        and response['statement'].get('protocol') == PROGRESS_CANCELLED else PROGRESS_ACK)
+    ack = client._verified_response(response, protocol=protocol, fields=fields,
         request_id=request_id, target=target, run_id=run_id, deployment_id=deployment_id)
     _require(ack['command_id'] == command_id
         and ack['grant_digest'] == receipt['statement']['grant_digest']

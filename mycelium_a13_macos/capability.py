@@ -228,8 +228,9 @@ def _link_valid(link):
 
 def _caps_valid(caps):
     return (isinstance(caps, dict) and bool(caps)
-            and set(caps) <= {'storage_bytes', 'max_memory_bytes'}
-            and all(type(v) is int and 0 < v <= 2**63 - 1 for v in caps.values()))
+            and set(caps) <= {'storage_bytes', 'max_memory_bytes', 'max_wall_seconds'}
+            and all(type(v) is int and 0 < v <= 2**63 - 1 for v in caps.values())
+            and ('max_wall_seconds' not in caps or 60 <= caps['max_wall_seconds'] <= 3600))
 
 
 def signed_capability_link_report(*,signer,node_id,purpose,generation,device,link,now,

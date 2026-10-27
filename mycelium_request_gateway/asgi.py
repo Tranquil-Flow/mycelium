@@ -176,6 +176,10 @@ class RequestGatewayASGIApplication:
             lambda: secrets.token_urlsafe(32)
         )
 
+    def close(self) -> None:
+        """Drain request owners before the host retires their router/route."""
+        self._service.close()
+
     def recovery_public_projection(self) -> Mapping[str, Any]:
         return self._service.recovery_public_projection()
 
@@ -390,7 +394,7 @@ class RequestGatewayASGIApplication:
             if message.get("type") == "lifespan.startup":
                 await send({"type": "lifespan.startup.complete"})
             elif message.get("type") == "lifespan.shutdown":
-                self._service.close()
+                self.close()
                 await send({"type": "lifespan.shutdown.complete"})
                 return
 

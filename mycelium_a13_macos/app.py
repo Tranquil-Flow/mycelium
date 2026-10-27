@@ -1394,7 +1394,8 @@ class DemoApp:
                 if body:raise DemoError('invalid_request')
                 workflow=getattr(self,'_chain_workflow',None)
                 if path=='/api/serving/stop' and workflow is not None:workflow.stop()
-                return {'compilation':getattr(self,'_chain_compile_state',None),
+                return {**getattr(self,'_chain_cleanup_diagnostics',{}),
+                    'compilation':getattr(self,'_chain_compile_state',None),
                     'serving':None if workflow is None else workflow.status(),'route_ready':False}
             if path.startswith('/api/serving/observe/'):
                 if self.installation_role!='owner':raise DemoError('owner_action_required')

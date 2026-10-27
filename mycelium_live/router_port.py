@@ -214,6 +214,8 @@ _RECOVERY_DEADLINE_POLL_SECONDS = 0.25
 #: Upper bound for which an armed A6 fault hold may delay a successor's
 #: completion cleanup. The hold exists only once the fault control arms it.
 _A6_COMPLETION_CLEANUP_HOLD_SECONDS = 30.0
+# Shared with the embedded owner stop allowance; no deadline is extended.
+ROUTER_CLOSE_TIMEOUT_SECONDS = 4.0
 
 
 #: Largest accepted recovery deadline: the successor command inherits the
@@ -3339,7 +3341,7 @@ class LiveRouterPort:
         if not retired.accepted and retired.reason != "request_unknown":
             raise RuntimeError(f"command_retirement_rejected:{retired.reason}")
 
-    def close(self, *, timeout_seconds: float = 4.0) -> None:
+    def close(self, *, timeout_seconds: float = ROUTER_CLOSE_TIMEOUT_SECONDS) -> None:
         if (
             not isinstance(timeout_seconds, (int, float))
             or isinstance(timeout_seconds, bool)

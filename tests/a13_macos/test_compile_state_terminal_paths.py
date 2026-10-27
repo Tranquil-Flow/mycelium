@@ -33,6 +33,10 @@ class BlockingWorkflow:
         if self.error is not None:
             raise self.error
 
+    def status(self):
+        return {"state": "failed" if self.error else "stopped",
+                "error_code": str(self.error) if self.error else None}
+
     def stop(self):
         self.stop_event.set()
 

@@ -292,6 +292,12 @@ class ProductGatewayASGIApplication:
             stream_timeout_seconds=config.max_stream_seconds,
         )
 
+    def close(self) -> None:
+        """Stop admission and drain the in-process request gateway, if owned."""
+        close = getattr(self._request_gateway_app, "close", None)
+        if callable(close):
+            close()
+
     async def __call__(self, scope: Mapping[str, Any], receive: Receive, send: Send) -> None:
         scope_type = scope.get("type")
         if scope_type == "lifespan":

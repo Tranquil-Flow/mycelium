@@ -76,7 +76,9 @@ def test_a_route_whose_cleanup_is_unproven_fails_the_run_visibly_and_still_relea
     workflow.status = lambda: {'state': 'failed', 'error_code': 'router_port_shutdown_cleanup_unproven', 'startup': None}
     status = wait(run, lambda s: s['state'] in {'failed', 'stopped'})
     assert status['state'] == 'failed' and status['error_code'] == 'router_port_shutdown_cleanup_unproven'
-    assert status['cleanup_unproven'] == {'code': 'router_port_shutdown_cleanup_unproven', 'owner_lock_released': True}
+    assert status['cleanup_unproven'] == {'code': 'router_port_shutdown_cleanup_unproven',
+                                         'owner_lock_released': True,
+                                         'stop_error': 'router_port_shutdown_cleanup_unproven'}
     assert owners[0].closed is True
     ops.stop = lambda _app: {'state': 'stopped'}
     run.start(); status = wait(run, lambda s: s['state'] == 'serving')
