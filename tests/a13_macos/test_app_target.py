@@ -59,7 +59,11 @@ def test_target_application_pair_resume_capability_and_owner_revoke(tmp_path):
         assert request(target,'/api/start','POST',{},th)[0]==200
         assert target.authority.member.signer.verification_key_digest==identity
         assert target.authority.member.generation>generation
-        assert target.authority.status()['capability_state']=='not_reported'
+        # F3 reports fresh capability automatically after joining a generation.
+        resumed = target.authority.status()
+        assert resumed['capability_state']=='self_report_accepted'
+        assert resumed['capability']['generation']==target.authority.member.generation
+        assert resumed['capability']['generation']>generation
         roster=json.loads(request(owner,'/api/status',headers=oh)[2])['authority']['members']
         record=next(m for m in roster if m['node_id']==pairing['node_id'])
         assert request(owner,'/api/revoke','POST',{'node_id':record['node_id'],'generation':record['generation']},oh)[0]==200

@@ -199,6 +199,7 @@ class DemoTargetAgent:
         self._slice_stop = threading.Event()
         self._last_report: tuple | None = None
         self._last_report_at = 0.0
+        self._capability_report_for = None
         self._download_for: tuple | None = None
         self._retry_delay = 0.0
         self._retry_at: float | None = None
@@ -245,6 +246,45 @@ class DemoTargetAgent:
         code = _code(error, default)
         self._set('error', code)
         self.error_http = _error_http(error, code)
+
+    def _set_step_error(self, error: Exception) -> None:
+        from .managed_control import ManagedControlError
+
+        a = self.announcement or {}
+        # Discovery reads are observations, not the native worker's liveness
+        # authority. A lost response used to become a fatal member report and
+        # make the owner stop both healthy workers. Do not replay any operation
+        # here: the next ordinary tick reads again, under unchanged deadlines.
+        # HTTP refusals, policy guards, unknown causes and writes remain fatal.
+        if (a.get('phase') == 'serving' and isinstance(error, ManagedControlError)
+                and error.status is None
+                and error.code in {'managed_control_unreachable', 'managed_control_response_timeout'}
+                and error.cause_code in {None, 'dns_resolution_failed', 'connect_timeout',
+                                         'relay_connect_timeout', 'relay_connect_unavailable'}
+                and error.request_path in {'/managed-control/staging/read',
+                                           '/managed-control/staging/cleanup/read'}):
+            actor = self._actor()
+            runtime = getattr(actor, '_runtime', None)
+            if (runtime is not None and runtime.run_id == a.get('run_id')
+                    and runtime.deployment_id == a.get('deployment_id')):
+                try:
+                    native = actor.status().get('native_control') or {}
+                except Exception as status_error:
+                    self._set_error(status_error, 'native_status_unavailable')
+                    return
+                if native.get('state') == 'blocked':
+                    self._set('error', _code(ValueError(native.get('error_code') or ''),
+                                             'native_worker_blocked'))
+                    return
+                if (native.get('state') == 'running' and native.get('worker_running') is True
+                        and (native.get('work_admitted') or native.get('model_load_authorized'))):
+                    # Do not claim a successful serving observation. Preserve
+                    # the read failure separately from a dead-worker report;
+                    # the route/pump/lease/worker guards still own termination.
+                    self._set('reported', error.code)
+                    self.error_http = _error_http(error, error.code)
+                    return
+        self._set_error(error, 'demo_step_failed')
 
     def _report(self, announcement: Mapping[str, Any] | None, *, force: bool = False) -> None:
         model = None
@@ -344,12 +384,35 @@ class DemoTargetAgent:
             try:
                 self._step(self.announcement)
             except Exception as error:
-                self._set_error(error, 'demo_step_failed')
+                self._set_step_error(error)
             try:
                 self._report(self.announcement)
             except Exception:
                 pass
             return self._record_status()
+
+    def _refresh_report(self, a, actor, node, *, cleanup_checked=False):
+        report = getattr(self.app, 'auto_report', None)
+        if self.local or not callable(report):
+            return True
+        member = getattr(actor, 'member', None)
+        identity = (node, getattr(member, 'generation', None), getattr(member, 'incarnation', None),
+                    (a or {}).get('owner_incarnation'), (a or {}).get('run_id'),
+                    (a or {}).get('deployment_id'))
+        if identity == self._capability_report_for:
+            return True
+        # Reporting may fail or require consent; teardown must never depend on it.
+        if not cleanup_checked and self._cleanup_if_requested(actor):
+            return False
+        if not self._consent('installation_descriptor'):
+            return False
+        purpose = 'periodic' if (a or {}).get('phase', 'idle') in {'idle', 'stopped'} else 'pre_run'
+        result = report(purpose)
+        if not isinstance(result, Mapping) or result.get('state') != 'delivered':
+            self._set('error', 'member_capability_report_required')
+            return False
+        self._capability_report_for = identity
+        return True
 
     def _step(self, a: Mapping[str, Any] | None) -> None:
         app = self.app
@@ -365,6 +428,9 @@ class DemoTargetAgent:
             if not cleaned and (actor.status().get('native_control') or {}).get('state') == 'running':
                 app.action('/api/control/stop', {})
             self._set('stopped' if phase == 'stopped' else 'idle')
+            self._refresh_report(a, actor, node, cleanup_checked=True)
+            return
+        if not self._refresh_report(a, actor, node):
             return
         run_id, deployment_id = a['run_id'], a['deployment_id']
         # 0. Whole-snapshot mode (small models): this Mac needs the owner's whole

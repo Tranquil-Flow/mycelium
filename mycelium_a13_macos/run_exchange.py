@@ -121,6 +121,9 @@ class RunExchange:
         self._clock = clock
         self._lock = threading.Lock()
         self._announcement: dict[str, Any] = {}
+        # Report inbox lifetime is process-local, unlike the persistent seed
+        # incarnation. Expose this non-authorizing hint inside signed replies.
+        self._owner_incarnation = 'owner-process-' + uuid.uuid4().hex
         self._per_node: dict[str, dict[str, Any]] = {}
         self._reports: dict[str, dict[str, Any]] = {}
         self._issued: dict[str, float] = {}
@@ -161,7 +164,8 @@ class RunExchange:
                     'deployment_id': deployment_id, 'model': None if model is None else dict(model),
                     'slice_mode': bool(slice_mode), 'manifest_digest': manifest_digest,
                     'work_limits': None if work_limits is None else dict(work_limits),
-                    'issued_at': self._clock()}
+                    'issued_at': self._clock(),
+                    'owner_incarnation': self._owner_incarnation}
         nodes = {node: dict(extra) for node, extra in (per_node or {}).items()}
         for extra in nodes.values():
             _check_node_extra(extra)
@@ -297,7 +301,8 @@ class RunExchangeClient:
                                            run_id=DISCOVERY, deployment_id=DISCOVERY)
         announcement = result['announcement']
         _require(isinstance(announcement, dict) and announcement.get('protocol') == ANNOUNCEMENT
-                 and announcement.get('phase') in PHASES, 'demo_announcement_invalid')
+                 and announcement.get('phase') in PHASES
+                 and _optional_segment(announcement.get('owner_incarnation')), 'demo_announcement_invalid')
         return announcement
 
     def read(self) -> dict[str, Any]:

@@ -1118,7 +1118,7 @@ class DemoApp:
         device = observe_device(peer.state_root)
         return peer.signed_capability_link_report(purpose=purpose, device=device, link=link)
 
-    def _auto_report(self, purpose):
+    def _auto_report(self, purpose, *, seed_capability=None):
         """Best-effort automatic report on join, before each run and periodically.
 
         Sends the canonical signed seed capability message and the extended
@@ -1136,7 +1136,9 @@ class DemoApp:
             record.update(state='failed', error=public_failure_code(error)
                           if not isinstance(error, DemoError) else str(error))
         try:
-            self.authority.report_capability(); record['seed_capability']='accepted'
+            if seed_capability is None:
+                self.authority.report_capability()
+            record['seed_capability']='accepted'
         except Exception as error:
             record['seed_capability'] = public_failure_code(error)
         self.last_report = record
@@ -1596,6 +1598,10 @@ class DemoApp:
                         self.public_relay.proxy.bind_seed(self.authority.seed_server)
                     if self.installation_role=='owner' and (self.root/'local-contributor').exists():
                         self._start_local_contributor()
+                # Reconnect can be clicked while this member is still running.
+                # The owner's in-memory report inbox may have restarted alone.
+                if self.installation_role == 'target' and self.authority.peer.membership_binding() is not None:
+                    self._auto_report('periodic')
                 return self.status()
             if path == '/api/revoke':
                 if set(body) != {'node_id','generation'}: raise DemoError('invalid_request')
@@ -1617,7 +1623,10 @@ class DemoApp:
                 return self.authority.pair_request()
             if path == '/api/capability/report':
                 if body: raise DemoError('invalid_request')
-                return self.authority.report_capability()
+                result = self.authority.report_capability()
+                if self.installation_role == 'target':
+                    result = {**result, 'owner_report':self._auto_report('periodic', seed_capability=result)}
+                return result
             if path == '/api/pair/approve':
                 if set(body) != {'request','ttl_seconds','quota'}: raise DemoError('invalid_request')
                 return self.authority.approve_pairing(body['request'],ttl_seconds=body['ttl_seconds'],quota=body['quota'])
