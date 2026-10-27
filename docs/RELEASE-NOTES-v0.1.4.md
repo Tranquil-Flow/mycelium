@@ -57,7 +57,7 @@ Asset: `mycelium-0.1.4-macos-arm64.zip`
 
 Run `shasum -a 256 mycelium-0.1.4-macos-arm64.zip` and compare the output with the separate `.sha256` file from the release.
 
-SHA-256: `<<TBD: final release archive SHA-256>>`.
+SHA-256: `fce4743a7f3a2453f6621753ed3892a6cefaddf52e7a3e98fd79ba51f8930025`.
 
 Apple silicon macOS only. This is still early software with a limited hardware qualification scope. The app has an ad-hoc Apple signature, not a Developer ID signature, and is not notarized. macOS approval of the installer may require an administrator. Do not disable Gatekeeper; follow the installation guide.
 

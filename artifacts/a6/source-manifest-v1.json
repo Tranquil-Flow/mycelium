@@ -43,8 +43,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "sha256:d3e5532a568843c922f4afabf223658c1a164e2f054651a680c2bf447bab4449",
-      "size_bytes": 5415
+      "sha256": "sha256:f0bcde31a02b22a64c6588f4e57616563a91378ecb911290a24b0da1e495c5be",
+      "size_bytes": 35864
     },
     {
       "path": "REPORT.md",
@@ -538,13 +538,13 @@
     },
     {
       "path": "docs/FRIEND-SWARM.md",
-      "sha256": "sha256:f6084ab3dc2158a17a4646a93e9e010392e348972ef828ee3131665cec7d3e69",
-      "size_bytes": 11033
+      "sha256": "sha256:3732a8a9011e35d3c15b40ce7015314b5284556cf809d4d6d7f6df78765706be",
+      "size_bytes": 13000
     },
     {
       "path": "docs/LOCAL-FIRST.md",
-      "sha256": "sha256:c0b3b3054d8cc5f73fc38090b2060b0a3f9a21da429aed2165d7d3ab9d1cbc5f",
-      "size_bytes": 19300
+      "sha256": "sha256:a91bb1ada9b7303c63be47c26c96bd61044fd6c003723b2fba15d6038ee2f93f",
+      "size_bytes": 19531
     },
     {
       "path": "docs/RELEASE-NOTES-V1.md",
@@ -560,6 +560,11 @@
       "path": "docs/RELEASE-NOTES-v0.1.3.md",
       "sha256": "sha256:dd6a9578b921cd8a63aa5a6d0aec4885ea902f0af04b8c111fa633aaf9c530ea",
       "size_bytes": 3775
+    },
+    {
+      "path": "docs/RELEASE-NOTES-v0.1.4.md",
+      "sha256": "sha256:4c095c9bb60d74af871fbbc8de24a8b7e969c5630b5b714279b6da2c06587941",
+      "size_bytes": 11972
     },
     {
       "path": "docs/SWARM-PERFORMANCE-STATS.md",
@@ -738,13 +743,13 @@
     },
     {
       "path": "docs/user/PRIVACY.md",
-      "sha256": "sha256:0a761d2269cf6436d54056fab6b42617e10e0d8c5f3e4cf0041b3a826d07dece",
-      "size_bytes": 9545
+      "sha256": "sha256:694e2a0d150f7f0a4b7abd56f81ec110929bd34eed7a9e26b503ef7160381185",
+      "size_bytes": 9002
     },
     {
       "path": "docs/user/QUICKSTART-MACOS.md",
-      "sha256": "sha256:3d4cf1e9386e04667b68a0e7ab4370e73f1aa1dee2c20b190d4a5b00744d0a58",
-      "size_bytes": 14023
+      "sha256": "sha256:1467822c80928f28387281d10766145e23662161c6092cd386c3f5caf1af8384",
+      "size_bytes": 16939
     },
     {
       "path": "docs/user/README.md",
@@ -753,13 +758,13 @@
     },
     {
       "path": "docs/user/TROUBLESHOOTING.md",
-      "sha256": "sha256:212c0b1fba8ff9b12e93435c4479901f89aaf3fc05d48cc5e6ca98d189a6644a",
-      "size_bytes": 17892
+      "sha256": "sha256:fdb9ef310962a6656fa57f2ab30974a9f2d1e872bfab5e7320bf01904ba2f41b",
+      "size_bytes": 18119
     },
     {
       "path": "docs/user/WHAT-MYCELIUM-DOES.md",
-      "sha256": "sha256:ef976e476ade74dce89ed48abf7bdbbe9650112ae4932bd2d1ba2f1a0ac754dc",
-      "size_bytes": 11347
+      "sha256": "sha256:7cba5163924be370268c030ec095042568c1f87ca0c47d89e41dc6aa3a2bc972",
+      "size_bytes": 11614
     },
     {
       "path": "evidence/receipts/06-post-commit-rerun.txt",
@@ -13628,5 +13633,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:ac50a67636190d45ce8f6f78c759b83cbb0abdbd7ebe2353df6df600555e39c0"
+  "source_digest": "sha256:33ac8cf34ee1241266ef92602624c98b07af5d9ee4fbd32c89b51a4b0b1a5bf7"
 }
