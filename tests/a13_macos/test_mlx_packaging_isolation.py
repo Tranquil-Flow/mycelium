@@ -82,6 +82,8 @@ def test_real_build_command_never_collects_the_merged_mlx_namespace(wheels, tmp_
     monkeypatch.setattr(build, 'stage_compiler_sources', lambda destination: {})
     monkeypatch.setattr(build.shutil, 'which', lambda name: '/fake/cloudflared')
     monkeypatch.setattr(resources, 'build_policy_probe', lambda path: path)
+    from mycelium_a13_macos import native_quit
+    monkeypatch.setattr(native_quit, 'build_quit_bridge', lambda path: path)
     class Captured(Exception):
         pass
     def run(command, **kwargs):
@@ -99,6 +101,8 @@ def test_real_build_command_never_collects_the_merged_mlx_namespace(wheels, tmp_
     assert '--collect-all' not in args, 'collect-all merges foreign MLX namespace resources'
     assert f'{selected}/mlx/lib/mlx.metallib:mlx/lib' in _pairs(args, '--add-data')
     assert str(other) not in '\n'.join(args)
+    assert any(value.endswith('libmycelium_quit.dylib:mycelium_a13_macos/native')
+               for value in _pairs(args, '--add-binary'))
 
 
 def test_collection_uses_record_owned_files_not_all_namespace_locations(wheels):

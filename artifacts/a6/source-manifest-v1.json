@@ -593,8 +593,8 @@
     },
     {
       "path": "docs/design/V014-FIRST-RUN.md",
-      "sha256": "sha256:14f4ad8c4fc5443e1fbf9e1193df524dfb8350453be8cc03baaa3a26f5eab0c5",
-      "size_bytes": 4900
+      "sha256": "sha256:8cbf9f5fb3e41defa414bafe6b7c97649e12d2467498fa2bf1601a0d6998422e",
+      "size_bytes": 7315
     },
     {
       "path": "docs/design/cross-platform-matrix.md",
@@ -913,8 +913,8 @@
     },
     {
       "path": "mycelium_a13_macos/__main__.py",
-      "sha256": "sha256:8bf8cfc772e76094367ab48365bb04099845e925dddf3cd5047e6e3b8f954192",
-      "size_bytes": 10026
+      "sha256": "sha256:36b241bd18b71b7f47138ce08a9a7c928bec21b01802c885eac493cc3b99c6da",
+      "size_bytes": 10711
     },
     {
       "path": "mycelium_a13_macos/a13_test_seams.py",
@@ -1167,9 +1167,19 @@
       "size_bytes": 31996
     },
     {
+      "path": "mycelium_a13_macos/native/quit_bridge.m",
+      "sha256": "sha256:a61bd4fd3d849dfb1cb1465f41b61fd60d44776962d6503d4ca43dc95d4c241e",
+      "size_bytes": 3365
+    },
+    {
       "path": "mycelium_a13_macos/native/resource_probe.m",
       "sha256": "sha256:8f5ee6c4a401f41138c46d9d249001d10da1e6e1d8f01d388cc481e2f8a08380",
       "size_bytes": 3848
+    },
+    {
+      "path": "mycelium_a13_macos/native_quit.py",
+      "sha256": "sha256:0b3415fae3d3fe1ead838c3454ee69409c3d8b62d297c7c2bbba095bfd990976",
+      "size_bytes": 1829
     },
     {
       "path": "mycelium_a13_macos/native_runtime.py",
@@ -1338,8 +1348,8 @@
     },
     {
       "path": "mycelium_a13_macos/web/index.html",
-      "sha256": "sha256:335b52650ac16583cc20a5b7a9ce2879c104bc98264723ddad682030fdb596c2",
-      "size_bytes": 23348
+      "sha256": "sha256:15954e14764d231b77222eea3341393d524457907819b7ddb1a37bb52da5124f",
+      "size_bytes": 23384
     },
     {
       "path": "mycelium_a13_macos/web/run.js",
@@ -4798,8 +4808,8 @@
     },
     {
       "path": "scripts/build_a13_macos.py",
-      "sha256": "sha256:009ca8216068efcf0309637250638e6b609ef4d848ca9083a42a9a19267ea14b",
-      "size_bytes": 18571
+      "sha256": "sha256:dc301cacccc94ecf3de47c3510c5e9695487557fbc340645519ab8d563ee5893",
+      "size_bytes": 18859
     },
     {
       "path": "scripts/build_a13_windows.py",
@@ -6482,6 +6492,11 @@
       "size_bytes": 3499
     },
     {
+      "path": "tests/a13_macos/native_quit_sender.py",
+      "sha256": "sha256:7275440c87a7bd6d76f3eec64192dcf2cd805ee8884c9430308482fc2ee5a06d",
+      "size_bytes": 2482
+    },
+    {
       "path": "tests/a13_macos/test_a13_test_seams.py",
       "sha256": "sha256:580c99c816d2abd5184fdd1b1403dce7617820698074219bb5be2372d0e0ca9a",
       "size_bytes": 8729
@@ -6938,8 +6953,8 @@
     },
     {
       "path": "tests/a13_macos/test_firstrun_ui.py",
-      "sha256": "sha256:2c77d86e5ce6fca11273aa92407d9ebe3993864726550c21050929c6797d1481",
-      "size_bytes": 5672
+      "sha256": "sha256:dc12bad1a6c36efa1bdba3e801e11e346e00ad2585f12dc680f7527805f5c194",
+      "size_bytes": 5745
     },
     {
       "path": "tests/a13_macos/test_frozen_native_launch_isolation.py",
@@ -7163,8 +7178,8 @@
     },
     {
       "path": "tests/a13_macos/test_mlx_packaging_isolation.py",
-      "sha256": "sha256:6ed2c8cddd4251e7e5d9d623879409e462682527b17c40cff15da58bf95598e8",
-      "size_bytes": 6205
+      "sha256": "sha256:dcaa5de0721fa7a26f225d07c1d8245c2f7208ed01f0407d23051a7f79d91a8b",
+      "size_bytes": 6469
     },
     {
       "path": "tests/a13_macos/test_model_contract.py",
@@ -7210,6 +7225,16 @@
       "path": "tests/a13_macos/test_native_load_proof_diagnostic.py",
       "sha256": "sha256:85e4f9c3beddfdb87f686aa50de5598a43be29a0dfdf7a8b09131a8e12cde254",
       "size_bytes": 4025
+    },
+    {
+      "path": "tests/a13_macos/test_native_quit.py",
+      "sha256": "sha256:ebdb973c1e8b228d9951e6b69173de7b685751b7e308860f1b8657181dc159ed",
+      "size_bytes": 5666
+    },
+    {
+      "path": "tests/a13_macos/test_native_quit_dispatch.py",
+      "sha256": "sha256:33d709ca8b9a1b88e929a65fd212960302dda08095d20af3c441af79bf25b6b1",
+      "size_bytes": 4442
     },
     {
       "path": "tests/a13_macos/test_native_token_ack.py",
@@ -7323,8 +7348,8 @@
     },
     {
       "path": "tests/a13_macos/test_package.py",
-      "sha256": "sha256:04172a3d5837498f6ba0616580520f19fc9699875f0534d7aa76b79696fac2c8",
-      "size_bytes": 12178
+      "sha256": "sha256:7ec00292aa02a086be5ed39329814f8feb3dbf0a6b810ef5d80df99dfe5b41bc",
+      "size_bytes": 14439
     },
     {
       "path": "tests/a13_macos/test_package_prerequisites.py",
@@ -13533,5 +13558,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:af8f65ec0987c51eb8c2fdb38a057dc827100ce2819e7dfd1cfb7df99ee45557"
+  "source_digest": "sha256:b67e6743c724f65449c2743caf4afaf7619a505bd45532dd8fd88c0eb7288ae8"
 }

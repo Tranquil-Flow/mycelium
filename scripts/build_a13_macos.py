@@ -288,7 +288,9 @@ def main():
         raise SystemExit('cloudflared_build_dependency_and_license_required')
 
     from mycelium_a13_macos.resources import build_policy_probe
+    from mycelium_a13_macos.native_quit import build_quit_bridge, LIBRARY_NAME
     probe=build_policy_probe(work/'resource_probe')
+    quit_bridge=build_quit_bridge(work/LIBRARY_NAME)
     env=dict(os.environ)
     for name in ('PYTHONPATH','PYTHONHOME','VIRTUAL_ENV'): env.pop(name,None)
     # Build the locked lane-owned native dependency; never borrow fleet artifacts.
@@ -312,6 +314,7 @@ def main():
           '--hidden-import','mycelium_a13_macos.managed_observations',
           '--distpath',str(output),'--workpath',str(work),'--specpath',str(work),
           '--add-binary',f'{probe}:mycelium_a13_macos/native',
+          '--add-binary',f'{quit_bridge}:mycelium_a13_macos/native',
           '--add-binary',f'{sidecar}:mycelium_a13_macos/native',
           '--add-binary',f'{relay_client}:mycelium_a13_macos/native',
           '--add-data',f'{ROOT / "mycelium_a13_macos/web"}:mycelium_a13_macos/web',
@@ -335,6 +338,7 @@ def main():
             'executable_sha256':hashlib.sha256(executable.read_bytes()).hexdigest(),
             'preflight':json.loads(preflight.stdout),
             'resource_probe_sha256':hashlib.sha256(probe.read_bytes()).hexdigest(),
+            'quit_bridge_sha256':hashlib.sha256(quit_bridge.read_bytes()).hexdigest(),
             'sidecar_source_sha256':hashlib.sha256(sidecar.read_bytes()).hexdigest(),
             'version':output.name,'vendored_expat':expat,'macos_floor':macos_floor,
             'macos_floor_derivation':floor}

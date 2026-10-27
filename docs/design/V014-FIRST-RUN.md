@@ -72,20 +72,61 @@ Missing/broken entries and entries pointing outside the installed programs root
 keep the installer instructions. This checks placement, not code signature or
 payload integrity, and does not run the installed app.
 
-## Native Quit: explicitly deferred
+## Native Quit: shared graceful shutdown
 
-This package is a frozen Python launcher opening a browser, not an AppKit shell.
-Its main loop waits on `StopRequest`; it has SIGINT/SIGTERM handlers and an
-existing authenticated `/api/quit` action, but no NSApplication delegate,
-AppleEvent quit handler, or Cocoa event loop. Adding an AppleEvent bridge is a
-native lifecycle change requiring packaged Finder/AppleEvent and child-cleanup
-qualification, not a safe text-only fix. No such installed-app exercise is
-permitted in this lane. Native menu Quit / `osascript quit` remains unqualified
-and is not claimed fixed.
+The frozen macOS launcher now bundles `native/quit_bridge.m`, compiled offline
+against system AppKit by `scripts/build_a13_macos.py`. No PyObjC or new runtime
+installation is needed. The bridge installs the standard `kAEQuitApplication`
+handler and a **Quit Mycelium A13** menu item with ⌘Q. A nonblocking main-thread
+AppKit pump runs between the launcher's existing 250 ms stop checks; it drains
+at most 32 events per poll. Headless certification uses the same bridge without
+activation, windows, or a browser. Source-mode Python and non-macOS launchers
+keep their existing signal/page shutdown behavior.
 
-Use **Quit demo** under **Pause, restart, or leave** in the private owner/member
-page. It invokes `/api/quit` -> `DemoApp.close`, the supported cleanup path;
-closing the browser tab alone does not stop Mycelium. SIGTERM remains the
-operator fallback. The page now explicitly explains the native-menu limitation.
-A follow-up native shell must funnel menu Quit and AppleEvents into this same
-stop path and prove owned-child shutdown, not merely process disappearance.
+The native handler only requests `StopRequest`. It never calls `exit`, kills a
+child, or replaces the cleanup path. Menu Quit, AppleEvent Quit, and SIGTERM all
+reach `DemoApp.close()`, the same cleanup used by the authenticated **Quit demo**
+button: stop the run/contributor, close acquisition and relay, stop authority,
+close HTTP, remove private launch/control files, and release the instance lock.
+Existing owned-process shutdown deadlines and cleanup proofs are unchanged.
+A recorded cleanup failure now produces `launcher_cleanup_failed` /
+`cleanup_incomplete` and exit status 3 rather than a false successful exit.
+There is no new force-exit timer that could skip cleanup proofs.
+
+Do not implement this by returning `NSTerminateLater` from a delegate in the
+Python-polled loop: AppKit nests a termination loop there, preventing Python
+from reaching cleanup. The explicit AppleEvent/menu handlers return immediately;
+a defensive direct `terminate:` delegate requests cleanup and cancels AppKit's
+own termination. Python exits normally after cleanup. The bounded native pump
+is not a hard wall-clock bound on arbitrary pre-existing cleanup failures; the
+existing component cleanup budgets remain authoritative.
+
+Closing the browser tab does not stop Mycelium. Use the Mycelium app’s menu Quit
+(⌘Q, with Mycelium rather than the browser focused), or **Quit demo** under
+**Pause, restart, or leave**. Private identity and evidence remain on disk.
+
+### Qualification and parent device round
+
+Source tests compile the shipped bridge with the installed SDK, send a real
+PID-targeted AppleEvent to a test-owned headless process, exercise the native
+menu action and repeated Quit, and verify the launcher's shared cleanup/lock
+release and failure status. `tests/a13_macos/test_package.py` adds a headless
+built-executable AppleEvent gate: it targets only its child PID and verifies
+exit, socket closure, private control-file removal, lock reacquisition and
+retained state. It requires `A13_PACKAGE_EXECUTABLE` from the package pipeline;
+source tests do not substitute for that gate.
+
+After building/installing the final candidate, the parent must test the actual
+installed app during the device round (not from an agent lane):
+
+```sh
+osascript -e 'tell application id "org.mycelium.a13-macos-demo" to quit'
+```
+
+Repeat with menu **Quit Mycelium A13**, ⌘Q while Mycelium is focused, and a
+parent-controlled logout. Exercise both idle and active owner/member runs with
+a relay. Check run/owned-child cleanup evidence, relay closure, released locks,
+and successful reopen with the same identity, not merely process disappearance.
+Do not report a nonzero cleanup result or a forced OS logout as graceful cleanup.
+Finder/logout behavior and active two-Mac cleanup remain device qualification,
+not claims made by the headless fixture tests.

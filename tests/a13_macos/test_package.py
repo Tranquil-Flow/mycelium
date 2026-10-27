@@ -140,6 +140,52 @@ def test_packaged_native_app_in_clean_working_directory(tmp_path,role):
             except subprocess.TimeoutExpired: process.kill();process.wait(timeout=10)
 
 
+def test_packaged_appleevent_quit_runs_cleanup(tmp_path):
+    """Headless certification gate: address only the child we started, never a bundle ID."""
+    import fcntl
+    import socket
+    from native_quit_sender import send_quit
+    configured = os.environ.get('A13_PACKAGE_EXECUTABLE')
+    assert configured, 'explicit_successor_package_required'
+    root = tmp_path / 'appleevent-state'
+    env = dict(os.environ)
+    for key in ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV'):
+        env.pop(key, None)
+    process = subprocess.Popen([configured, '--headless', '--state-root', str(root)],
+                               cwd=tmp_path, env=env, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+    lines = queue.Queue()
+    threading.Thread(target=lambda: lines.put(process.stdout.readline()), daemon=True).start()
+    try:
+        assert json.loads(lines.get(timeout=30))['event'] == 'launcher_started'
+        # Never print the native-control document: it carries private credentials.
+        control = json.loads((root / 'native-control.json').read_text())
+        port = control['port']
+        assert isinstance(port, int) and 0 < port < 65536
+        assert (root / 'open-demo.html').exists()
+        retained = root / 'quit-evidence.txt'
+        retained.write_text('retain private state')
+        send_quit(process.pid)
+        output, error = process.communicate(timeout=15)
+        assert process.returncode == 0 and error == '', 'packaged_quit_cleanup_failed'
+        assert not (root / 'open-demo.html').exists()
+        assert not (root / 'native-control.json').exists()
+        assert retained.read_text() == 'retain private state'
+        with (root / 'application.lock').open('rb') as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        with socket.socket() as connection:
+            connection.settimeout(1)
+            assert connection.connect_ex(('127.0.0.1', port)) != 0
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try: process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+
+
 def test_packaged_expat_does_not_require_newer_system_library():
     executable=Path(os.environ['A13_PACKAGE_EXECUTABLE'])
     app=executable.parents[2]

@@ -160,6 +160,7 @@ def main():
     # --offline / MYCELIUM_OFFLINE / MYCELIUM_NETWORK_MODE=lan|local: no Hugging Face contact.
     apply_offline(args.offline,None)
     app=None
+    native_quit=None
     from contextlib import ExitStack
     process_settings=ExitStack()
     try:
@@ -185,10 +186,13 @@ def main():
         done=StopRequest()
         def stop(signum,frame): done.set()
         signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
+        if sys.platform=='darwin' and getattr(sys,'frozen',False):
+            from mycelium_a13_macos.native_quit import NativeQuit
+            native_quit=NativeQuit(done.set,headless=args.headless)
         if not args.headless: webbrowser.open(app.launch_file.as_uri())
         print(json.dumps({'event':'launcher_started','distribution':'unsigned_development_demo','serving_role':'not_yet_serving','model_contract':model_contract()}),flush=True)
-        while not done.wait(.25) and not app.closed.is_set(): pass
-        return 0
+        while not done.wait(.25) and not app.closed.is_set():
+            if native_quit is not None: native_quit.poll()
     except DemoError as error:
         message=getattr(error,'user_message',None)
         print(json.dumps({'event':'launcher_refused','code':str(error),
@@ -208,6 +212,15 @@ def main():
         try:
             if app is not None: app.close()
         finally:
-            process_settings.close()
+            try:
+                if native_quit is not None: native_quit.close()
+            finally:
+                process_settings.close()
+    if app is not None and getattr(app,'cleanup_error',None):
+        # A native Quit must not turn an unproven cleanup into success.
+        print(json.dumps({'event':'launcher_cleanup_failed','code':'cleanup_incomplete',
+                          'state_retained':True}),file=sys.stderr)
+        return 3
+    return 0
 
 if __name__=='__main__': raise SystemExit(main())

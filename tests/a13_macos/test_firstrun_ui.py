@@ -109,7 +109,7 @@ def test_small_model_download_copy_is_honest():
     assert 'whole snapshot' in run_page()['els']['run-model-note']['text']
 
 
-def test_static_first_run_copy_and_quit_workaround():
+def test_static_first_run_copy_and_quit_paths():
     html = (WEB / 'index.html').read_text()
     assert 'id="fast-mode"' in html and 'Fast mode' in html
     assert 'no mid-answer recovery if a Mac drops' in html
@@ -117,6 +117,8 @@ def test_static_first_run_copy_and_quit_workaround():
     assert 'Two-Mac serving not yet verified' not in html
     assert 'this application does not open a tunnel' not in html
     assert 'Quit demo' in html and 'menu Quit' in html
+    assert '⌘Q' in html
+    assert 'menu Quit is not supported' not in html
 
 
 def test_ui_does_not_claim_publication_or_later_relay_are_impossible():
