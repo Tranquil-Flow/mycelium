@@ -938,8 +938,8 @@
     },
     {
       "path": "mycelium_a13_macos/app.py",
-      "sha256": "sha256:439a678528a6837c0a97a204bc549ea112fdcd0b092f8e76762217efcf06ca23",
-      "size_bytes": 112207
+      "sha256": "sha256:9077620159492505a6777a38927e268812bc24bee5acfb16c0eedf26c6ea2e37",
+      "size_bytes": 112783
     },
     {
       "path": "mycelium_a13_macos/assignment_provisioning.py",
@@ -1198,8 +1198,8 @@
     },
     {
       "path": "mycelium_a13_macos/public_relay.py",
-      "sha256": "sha256:c6047068b1f9e1b8884c82a6d103f033f677531548e7b80314fbcc1181ce99d6",
-      "size_bytes": 25694
+      "sha256": "sha256:1ce37d193a612cf018a0b6db3e267dcc432d36270831c065062c9608ed3d6bcc",
+      "size_bytes": 25665
     },
     {
       "path": "mycelium_a13_macos/published_status.py",
@@ -1303,8 +1303,8 @@
     },
     {
       "path": "mycelium_a13_macos/web/app.js",
-      "sha256": "sha256:0949b17c61e97229179a90b2228505d53df4f5d84a0f172aa3399f9ead1814c0",
-      "size_bytes": 51638
+      "sha256": "sha256:0edd8b151f4fd64e3b5a75b0f8d708c8b61458e5eaa3c76f137e3e3a730e5eaf",
+      "size_bytes": 52745
     },
     {
       "path": "mycelium_a13_macos/web/chat.css",
@@ -6558,13 +6558,13 @@
     },
     {
       "path": "tests/a13_macos/test_app_relay.py",
-      "sha256": "sha256:614e2d739159a5b6a0590301a83e63841274d53ab12a4f008419a1d82c9e200b",
-      "size_bytes": 2162
+      "sha256": "sha256:56151af9c24ab93af2a9957ffa391bc2fe0a46f090b2f0c1602434724dacb5b1",
+      "size_bytes": 2247
     },
     {
       "path": "tests/a13_macos/test_app_relay_order.py",
-      "sha256": "sha256:8992b552e0c8bd6f7fb92fae5020990e2013e1c1062634d90fa7c0f0b4464828",
-      "size_bytes": 4499
+      "sha256": "sha256:c6769387e39fb13a9e06a798ebdbe25b50a18292a1fb2a6888df95c89f2100be",
+      "size_bytes": 4584
     },
     {
       "path": "tests/a13_macos/test_app_target.py",
@@ -6868,8 +6868,8 @@
     },
     {
       "path": "tests/a13_macos/test_external_origin_relay.py",
-      "sha256": "sha256:645b5918a9a5994b246352f8abc4c6e5137fba152de3c331bd83f553cee922e4",
-      "size_bytes": 18645
+      "sha256": "sha256:ad86b44e9066182aa2f2598ae250e4df7b6339454e3184e388a5d79f9f445db7",
+      "size_bytes": 19031
     },
     {
       "path": "tests/a13_macos/test_fast_mode.py",
@@ -6978,8 +6978,8 @@
     },
     {
       "path": "tests/a13_macos/test_join_window_flow.py",
-      "sha256": "sha256:af181fed9ddfb79a773ab0421e203b115b7ec71deee3ca22d8ac240cb1a7e487",
-      "size_bytes": 12149
+      "sha256": "sha256:40d359cca43176c2679257149053ba568161f86e39a872728e60291ee85a2451",
+      "size_bytes": 12234
     },
     {
       "path": "tests/a13_macos/test_launch_location.py",
@@ -7407,6 +7407,16 @@
       "size_bytes": 2384
     },
     {
+      "path": "tests/a13_macos/test_quick_relay_renewal.py",
+      "sha256": "sha256:d90fe08b5ff61abb278744a7d92d4499e4dd23056284bcedc49c216c36a9b370",
+      "size_bytes": 8950
+    },
+    {
+      "path": "tests/a13_macos/test_quick_relay_ui.py",
+      "sha256": "sha256:fd302c77d2cc6072fd6a840b54a9d1e8afd1e73f28a736ba910648bc840ae826",
+      "size_bytes": 4002
+    },
+    {
       "path": "tests/a13_macos/test_reachability_gate.py",
       "sha256": "sha256:fe894ca3495e5c106e3881b247f37d56abf22e8e34c7b3ef1c261a0b140229b9",
       "size_bytes": 6399
@@ -7438,8 +7448,8 @@
     },
     {
       "path": "tests/a13_macos/test_relay_after_create.py",
-      "sha256": "sha256:45e4a4870d86fc3e1ff5c2ee34f7cbe8f029280d5192d5cdb38d3064e88c81ca",
-      "size_bytes": 9298
+      "sha256": "sha256:0bffe0fc8ecc16041c88fc6b731ff4e9f6a62bd3ed91d49b75f04a4392a0b788",
+      "size_bytes": 9383
     },
     {
       "path": "tests/a13_macos/test_relay_cloudflare_headers.py",
@@ -11643,8 +11653,8 @@
     },
     {
       "path": "tests/swarm_directory/test_privacy_disclosure.py",
-      "sha256": "sha256:d292537fb545f7739063dfb902513ddee59b7e1704f9f0ebdb0afada1eed04ac",
-      "size_bytes": 2593
+      "sha256": "sha256:c7bbedaf8f53ed99d21fa9bef45fe6c484e33da7b68fe6b8a07cdd74a45691bf",
+      "size_bytes": 2581
     },
     {
       "path": "tests/swarm_directory/test_requester_cancel.py",
@@ -13478,5 +13488,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:895067d5156a9266c2abbf01af2f16a8292b4e71b2c5846bbc103c0eaa282472"
+  "source_digest": "sha256:d131f61a6f8a9402d04ed48aab938f7e8d19fac2bc7b5289d858efbe6bc88942"
 }

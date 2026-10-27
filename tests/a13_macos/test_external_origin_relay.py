@@ -133,10 +133,14 @@ def test_external_port_in_use_is_a_bounded_error_and_leaves_nothing_running(tmp_
         assert relay.proxy is None
 
 
-def test_cloudflare_status_is_unchanged_by_the_new_provider(tmp_path):
+def test_cloudflare_status_preserves_routing_fields_and_adds_bounded_renewal(tmp_path):
     status = TemporaryHttpsRelay(tmp_path / 'r').status()
-    assert set(status) == {'state', 'provider', 'public_origin', 'error_code', 'seed_bound', 'privacy', 'relay_host_trust'}
+    assert set(status) == {'state', 'provider', 'public_origin', 'error_code', 'seed_bound', 'privacy', 'relay_host_trust',
+                           'auto_renew', 'long_lived', 'renewals', 'expires_in_seconds', 'renewal_cap_seconds', 'renewal_stopped'}
     assert status['provider'] == 'cloudflare'
+    assert status['auto_renew'] is True and status['long_lived'] is False
+    assert status['renewals'] == 0 and status['expires_in_seconds'] is None
+    assert status['renewal_cap_seconds'] == 86400 and status['renewal_stopped'] is None
 
 
 # -- the hardened public routes behave the same behind the external origin ----------------------

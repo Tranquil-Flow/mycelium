@@ -40,11 +40,11 @@ def test_the_directory_privacy_note_and_demo_label_name_cloudflare():
     assert 'directory never sees prompts' in PRIVACY_NOTE
 
 
-def test_the_relay_status_says_web_chat_prompts_cross_the_relay():
-    relay = TemporaryHttpsRelay.__new__(TemporaryHttpsRelay)
-    for attribute, value in (('process', None), ('_closed', True), ('error_code', None), ('provider', 'cloudflare'),
-                             ('public_origin', None), ('proxy', None)):
-        setattr(relay, attribute, value)
+def test_the_relay_status_says_web_chat_prompts_cross_the_relay(tmp_path):
+    # The real constructor (no side effects) so status() sees every attribute a relay has,
+    # including the renewal fields quick tunnels now report; then the closed, never-started state.
+    relay = TemporaryHttpsRelay(tmp_path, 'cloudflare')
+    relay._closed = True
     text = relay.status()['privacy']
     assert 'inference uses Iroh' not in text
     assert 'web chat prompts' in text and 'IP address' in text and 'Iroh' in text

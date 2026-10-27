@@ -36,6 +36,9 @@ def _owner(tmp_path, monkeypatch, origin):
         def __init__(self, root, provider="cloudflare"):
             self.public_origin = origin
 
+        def set_serving_probe(self, probe):
+            self._serving_probe = probe
+
         def start(self, *, acknowledged, max_seconds):
             self.proxy = SeedRelayProxy().start()
             return self

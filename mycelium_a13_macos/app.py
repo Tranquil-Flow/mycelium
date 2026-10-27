@@ -680,6 +680,13 @@ class DemoApp:
         origin (``endpoint_recovery.attach_public_endpoint``; an earlier relay's origin goes through the
         existing ``relocate_authority``), then the same route binding as a fresh start runs.  Any failure
         closes the relay and leaves the swarm exactly as it was.
+
+        The temporary relay keeps running while your swarm is serving (renewed every
+        N minutes, at most 24 hours); it stops when the swarm stops. ``max_seconds``
+        is the approved per-window budget (N = max_seconds / 60), not a total runtime.
+        Renewal happens shortly before expiry; once not serving, the current deadline
+        closes it without further extension. The existing serving signal also keeps
+        an enabled published swarm reachable while idle.
         """
         if self.installation_role!='owner':
             raise DemoError('network_requires_fresh_owner')
@@ -747,7 +754,10 @@ class DemoApp:
     def _new_relay(self,root,spec):
         """A not-yet-started relay for a validated request body; bad owner-chosen values are bounded codes."""
         from .public_relay import TemporaryHttpsRelay
-        if spec.get('provider')!='external':return TemporaryHttpsRelay(root,provider=spec.get('provider','cloudflare'))
+        if spec.get('provider')!='external':
+            relay=TemporaryHttpsRelay(root,provider=spec.get('provider','cloudflare'))
+            relay.set_serving_probe(self._relay_is_serving)
+            return relay
         try:
             relay=TemporaryHttpsRelay(root,provider='external',public_origin=spec['public_origin'],
                 proxy_port=spec['proxy_port'],cloudflare_front=spec.get('cloudflare_front',False),
@@ -758,7 +768,7 @@ class DemoApp:
         return relay
 
     def _relay_is_serving(self):
-        """True while an owner run is active or a swarm is published: the external relay may extend itself only then (V1.1 e, V1.2 D4)."""
+        """True while an owner run is active or a swarm is published: either relay may extend itself only then (V1.1 e, V1.2 D4)."""
         run=getattr(self,'owner_run',None)
         if run is not None and run.active() is True:return True
         # A published swarm's listing points at this relay: keep it up (bounded by the same renewal cap) while idle.

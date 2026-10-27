@@ -208,6 +208,13 @@ function render(value) {
   $('capability-report').disabled=!value.running || a.membership_state!=='current';
   $('ladder').replaceChildren();
   rung('Application',value.running ? 'Started · foreground only' : 'Stopped · private state retained');
+  if(value.network?.provider==='cloudflare'){
+    const relay=value.network;
+    rung('Public relay',relay.state==='stopped' ? 'Temporary relay stopped.'
+      : relay.renewal_stopped==='relay_renewal_cap_reached'
+        ? `24-hour renewal cap reached; the temporary relay closes in ${relay.expires_in_seconds} seconds.`
+        : `Temporary relay renews while your swarm is serving, at most 24 hours; ${relay.renewals} renewals. Current window: ${relay.expires_in_seconds} seconds left. When serving stops, it closes at the current deadline. A published swarm stays reachable while idle.`);
+  }
   rung('Membership',a.membership_state ?? a.membership ?? a.state ?? 'Not joined');
   rung('Generation',a.membership_generation ?? a.generation);
   rung('Lease',a.lease_state ?? a.lease_expires_at ?? 'Unknown');
@@ -287,7 +294,7 @@ $('create-form').addEventListener('submit',async(event)=>{
   event.preventDefault();
   const join=event.submitter?.id==='join';
   const withRelay=!join && $('create-with-relay').checked;
-  if(withRelay && !window.confirm('Start a temporary Cloudflare quick tunnel, then create the swarm? The relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh.'))return;
+  if(withRelay && !window.confirm('Start a temporary Cloudflare quick tunnel, then create the swarm? The relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh. The temporary relay keeps running while your swarm is serving (renewed every 30 minutes, at most 24 hours); it stops when the swarm stops. Once no longer serving, it closes at the current window’s deadline. A published swarm stays reachable while idle.'))return;
   const result=await perform(join?'/api/join/request':'/api/create',{consent:{peer_visibility:$('visibility').checked,power:$('power').value,
     storage_bytes:Number($('storage').value),network:$('network').value,background:false,diagnostics:false,
     thermal:'stop_on_serious'},...(withRelay?{relay_acknowledged:true,max_seconds:1800}:{}),adaptive_sharing:$('adaptive-sharing-consent').checked},join?'Target identity created. Send the public request to the owner. No seed was created on this Mac.':
@@ -562,7 +569,7 @@ $('own-start').addEventListener('click',()=>{
     ...($('own-cloudflare').checked?{cloudflare_front:true}:{})},'Relay started on your own address. Make sure your hostname points at this Mac; then open a code and approve each Mac when it appears.');
 });
 $('relay-start').addEventListener('click',()=>{
-  if(!window.confirm('Start a temporary Cloudflare quick tunnel? The relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh.'))return;
+  if(!window.confirm('Start a temporary Cloudflare quick tunnel? The relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh. The temporary relay keeps running while your swarm is serving (renewed every 30 minutes, at most 24 hours); it stops when the swarm stops. Once no longer serving, it closes at the current window’s deadline. A published swarm stays reachable while idle.'))return;
   void perform('/api/network/start',{relay_acknowledged:true,max_seconds:1800},'Public relay started. Codes you asked for are now ready to share; approve each Mac when it appears.');
 });
 $('window-open').addEventListener('click',()=>void perform('/api/pair/window/open',{ttl_seconds:Number($('window-ttl').value)},latest?.network?.public_origin?'Join code opened. Show it to one person; approve their Mac when it appears.':'Code requested. It is ready to share once the relay starts: press “Start public relay”.'));

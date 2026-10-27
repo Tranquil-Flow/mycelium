@@ -16,6 +16,9 @@ def test_app_manages_public_origin_without_manual_endpoint_edits(tmp_path,monkey
         def __init__(self,root,provider='cloudflare'):
             assert provider==expected_provider
             self.root=root;self.public_origin='https://relay-fixture.invalid';self.closed=False;instances.append(self)
+        def set_serving_probe(self, probe):
+            self._serving_probe = probe
+
         def start(self,*,acknowledged,max_seconds):
             assert acknowledged is True and max_seconds==1800
             self.proxy=SeedRelayProxy().start();return self

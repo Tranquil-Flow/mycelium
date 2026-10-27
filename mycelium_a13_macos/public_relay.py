@@ -280,9 +280,9 @@ def validate_proxy_port(value):
     return value
 
 
-#: External relay lifetime (V1.1 e): while a run is serving the relay extends itself shortly before expiry, up to this
-#: total (24 h by default; an owner may raise it to a week).  ``long_lived`` is the explicit owner setting that removes the
-#: deadline for a named tunnel the owner runs.
+#: Relay lifetime (V1.1 e): while serving, extend shortly before expiry up to a total
+#: granted-window budget of 24 h. Only an external relay may raise that cap to a week
+#: or explicitly choose ``long_lived``; quick tunnels always keep the 24 h cap.
 RENEWAL_CAP_SECONDS=86400
 MAX_RENEWAL_CAP_SECONDS=7*86400
 RENEWAL_MARGIN_SECONDS=60.0
@@ -319,7 +319,7 @@ class TemporaryHttpsRelay:
         self.root=Path(state_root)
         self.process=None;self.proxy=None;self.public_origin=None
         self._ready=threading.Event();self._lines=deque(maxlen=32)
-        self._reader=None;self._timer=None;self._lock=threading.RLock();self._closed=False
+        self._reader=None;self._lock=threading.RLock();self._closed=False
     def start(self,*,acknowledged,max_seconds=1800):
         if acknowledged is not True:raise ValueError('relay_approval_required')
         if type(max_seconds) is not int or not 30<=max_seconds<=3600:raise ValueError('relay_budget_invalid')
@@ -355,7 +355,7 @@ class TemporaryHttpsRelay:
             self._reader=threading.Thread(target=read,daemon=True,name='a13-relay-log');self._reader.start()
             if not self._ready.wait(45) or self.error_code is not None or self.process.poll() is not None:
                 raise ValueError('relay_start_failed')
-            self._timer=threading.Timer(max_seconds,self.close);self._timer.daemon=True;self._timer.start()
+            self._start_lifetime(max_seconds)
             return self
         except BaseException:self.close();raise
     def _start_external(self,max_seconds):
@@ -363,12 +363,16 @@ class TemporaryHttpsRelay:
         try:self.proxy=SeedRelayProxy(self._proxy_port,self._cloudflare_front).start()
         except OSError:raise ValueError('relay_proxy_port_unavailable') from None
         self.public_origin=self._chosen_origin
+        self._start_lifetime(max_seconds)
+        return self
+
+    def _start_lifetime(self,max_seconds):
+        """Both providers use the same bounded renew-while-serving policy."""
         self._window=float(max_seconds);self._granted=self._window
         self._deadline=None if self._long_lived else self._clock()+self._window
         if not self._long_lived and self._lifetime_poll is not None:
             self._lifetime=threading.Thread(target=self._lifetime_loop,daemon=True,name='a13-relay-lifetime')
             self._lifetime.start()
-        return self
 
     def set_serving_probe(self,probe):
         """``probe() -> bool``: is a run serving through this relay right now (the owner app supplies it)."""
@@ -420,11 +424,11 @@ class TemporaryHttpsRelay:
             'seed_bound':self.proxy is not None and self.proxy.server.backend is not None,
             'privacy':'The selected relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross this relay); only inference between the Macs uses Iroh. If system DNS fails, relay names use Cloudflare HTTPS DNS with unchanged certificate verification.',
             'relay_host_trust':'public_webpki'}
+        left=None
+        if self._deadline is not None and not self._closed:left=max(0,int(round(self._deadline-self._clock())))
+        value.update({'auto_renew':self._auto_renew,'long_lived':self._long_lived,'renewals':self._renewals,
+            'expires_in_seconds':left,'renewal_cap_seconds':int(self._renewal_cap),'renewal_stopped':self._renewal_stopped})
         if self.provider=='external':
-            left=None
-            if self._deadline is not None and not self._closed:left=max(0,int(round(self._deadline-self._clock())))
-            value.update({'auto_renew':self._auto_renew,'long_lived':self._long_lived,'renewals':self._renewals,
-                'expires_in_seconds':left,'renewal_cap_seconds':int(self._renewal_cap),'renewal_stopped':self._renewal_stopped})
             host=(self._chosen_origin or '').removeprefix('https://')
             value['local_forward_target']='http://127.0.0.1:'+str(self._proxy_port)
             value['privacy']=('Your own address ('+host+') is served by the front you pointed at this Mac (for example a named '
@@ -437,7 +441,6 @@ class TemporaryHttpsRelay:
         with self._lock:
             if self._closed:return
             self._closed=True
-            if self._timer is not None:self._timer.cancel()
             if self.process is not None:
                 if self.process.poll() is None:
                     self.process.terminate()

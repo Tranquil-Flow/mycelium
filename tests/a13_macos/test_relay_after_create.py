@@ -26,6 +26,9 @@ def tunnels(monkeypatch):
             self.closed = False
             instances.append(self)
 
+        def set_serving_probe(self, probe):
+            self._serving_probe = probe
+
         def start(self, *, acknowledged, max_seconds):
             self.proxy = SeedRelayProxy().start()
             return self
