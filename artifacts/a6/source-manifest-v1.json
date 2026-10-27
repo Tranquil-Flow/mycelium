@@ -1023,8 +1023,8 @@
     },
     {
       "path": "mycelium_a13_macos/demo_chain.py",
-      "sha256": "sha256:7dc4590a94a104992d699063e39c7653a3488a5cf197319897528660ee534a39",
-      "size_bytes": 64598
+      "sha256": "sha256:646b5ebcc9fc9f4911005c2682679a41ef4ea4b48007127e6c3889c56e857c2c",
+      "size_bytes": 64956
     },
     {
       "path": "mycelium_a13_macos/demo_target.py",
@@ -1082,14 +1082,19 @@
       "size_bytes": 5692
     },
     {
+      "path": "mycelium_a13_macos/mailbox_retention.py",
+      "sha256": "sha256:cae3b2354eb312f58fdb7f6d1bb6d132a340c3c37be6d688b1d5f57a36263d37",
+      "size_bytes": 5239
+    },
+    {
       "path": "mycelium_a13_macos/managed_classes.py",
       "sha256": "sha256:bdbefcf5c08be15495bd8ff0ab5b9db7e8d5f404e0b65d3449b508bdf8a80f7a",
       "size_bytes": 1104
     },
     {
       "path": "mycelium_a13_macos/managed_control.py",
-      "sha256": "sha256:5701a199e08861281908874559a93fecd5d2aaddb623c3818c054494fb48f6c0",
-      "size_bytes": 118840
+      "sha256": "sha256:837454adfe68b1b0c79e868a5a9e94f04b296e069bf61844dbc69923c59e0782",
+      "size_bytes": 122415
     },
     {
       "path": "mycelium_a13_macos/managed_observations.py",
@@ -6935,6 +6940,11 @@
       "path": "tests/a13_macos/test_macos_package.py",
       "sha256": "sha256:6773bd55868ffae79ba96b4eb75bea5139c07f2c73aa0c26f50cdb39d97f7ecf",
       "size_bytes": 14115
+    },
+    {
+      "path": "tests/a13_macos/test_mailbox_retention.py",
+      "sha256": "sha256:1fcda23d15de0040eefb1f390b6049ab1e6c95b4dec34433ed210893da3f4193",
+      "size_bytes": 9731
     },
     {
       "path": "tests/a13_macos/test_managed_builder.py",
@@ -13318,5 +13328,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:fac17347fadb2a1dfa4ca95657fa56b60d29f799a0ccd49e0be1432c94d90811"
+  "source_digest": "sha256:b98d4d34a20b6ec65f940b387a59dec9fc0271bb4c0d95e207b142ad3ba4a42f"
 }

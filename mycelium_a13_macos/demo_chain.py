@@ -1163,8 +1163,10 @@ class AppDemoChain:
                 unproven = CLEANUP_UNPROVEN
         except Exception:
             pass
+        stop_proven = False
         try:
             self.ops.stop(app)
+            stop_proven = True
         except Exception as error:
             if CLEANUP_UNPROVEN in (getattr(error, 'code', None), str(error)):
                 unproven = CLEANUP_UNPROVEN
@@ -1192,6 +1194,11 @@ class AppDemoChain:
                 released = True
             except Exception:
                 pass
+        if stop_proven and unproven is None:
+            mailbox = getattr(getattr(app, 'authority', None), 'control_mailbox', None)
+            finish = getattr(mailbox, 'finish_run', None)
+            if callable(finish):
+                finish(run_id=ctx.run_id, deployment_id=ctx.deployment_id)
         if unproven is not None:
             ctx.result['cleanup_unproven'] = {'code': unproven, 'owner_lock_released': released}
         app._observation_context = None

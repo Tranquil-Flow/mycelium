@@ -769,6 +769,7 @@ class ManagedControlMailbox(TokenProgressMailboxMixin):
         self._delivery_generation = 0
         self._prepare_database()
         self._initialize()
+        self.prune()
 
     def _clock(self) -> float:
         return _number(self._clock_source(), "managed_control_clock_invalid")
@@ -893,6 +894,8 @@ class ManagedControlMailbox(TokenProgressMailboxMixin):
                 )
             elif existing != expected:
                 raise ManagedControlError("managed_control_identity_binding_mismatch")
+            from .mailbox_retention import initialize
+            initialize(connection)
             connection.commit()
         except ManagedControlError:
             connection.rollback()
@@ -1038,10 +1041,15 @@ class ManagedControlMailbox(TokenProgressMailboxMixin):
             maximum is None or statement["sequence"] > maximum,
             "managed_control_sequence_replayed",
         )
+        from .mailbox_retention import historical
+        _require(not historical(connection, signer_digest, "nonce", statement["nonce"]),
+                 "managed_control_nonce_replayed")
+        _require(not historical(connection, signer_digest, "request", statement["request_id"]),
+                 "managed_control_conflicting_retry")
         return None
 
-    @staticmethod
     def _record_auth(
+        self,
         connection: sqlite3.Connection,
         *,
         signer_digest: str,
@@ -1051,8 +1059,8 @@ class ManagedControlMailbox(TokenProgressMailboxMixin):
     ) -> None:
         connection.execute(
             "INSERT INTO managed_auth_requests "
-            "(signer_key_digest, request_id, request_digest, sequence, nonce, protocol, response_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(signer_key_digest, request_id, request_digest, sequence, nonce, protocol, response_json, valid_until) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 signer_digest,
                 statement["request_id"],
@@ -1061,8 +1069,65 @@ class ManagedControlMailbox(TokenProgressMailboxMixin):
                 statement["nonce"],
                 statement["protocol"],
                 canonical_json_bytes(dict(response)).decode("utf-8"),
+                statement["expires_at"] + MAX_CLOCK_SKEW_SECONDS,
             ),
         )
+        from .mailbox_retention import AUTH_CAPACITY, prune_auth, prune_commands
+        now = response["statement"]["issued_at"]
+        removed = prune_auth(connection, signer_digest, now)
+        over = connection.execute("SELECT 1 FROM managed_auth_requests WHERE signer_key_digest=? "
+            "LIMIT 1 OFFSET ?", (signer_digest, AUTH_CAPACITY)).fetchone()
+        # A legacy backlog can drain by bounded batches, but an all-live window
+        # cannot evict valid retries to make room. Roll back new work on overflow.
+        _require(over is None or removed > 0, "managed_control_capacity_exhausted")
+        # Drain one other signer's legacy backlog per authenticated request,
+        # without a full DISTINCT scan or an unbounded startup transaction.
+        cursor = getattr(self, "_retention_signer", "")
+        other = connection.execute("SELECT signer_key_digest FROM managed_auth_requests "
+            "WHERE signer_key_digest>? ORDER BY signer_key_digest LIMIT 1", (cursor,)).fetchone()
+        self._retention_signer = "" if other is None else other[0]
+        if other is not None and other[0] != signer_digest:
+            prune_auth(connection, other[0], now)
+        prune_commands(connection, now)
+
+    def finish_run(self, *, run_id: str, deployment_id: str) -> None:
+        """Owner-local retirement, only after the run owner finishes teardown.
+
+        Uncertain/pending/claimed rows survive regardless; time is never cleanup proof.
+        """
+        _segment(run_id); _segment(deployment_id)
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("UPDATE managed_commands SET retired_at=coalesce(retired_at,?) "
+                    "WHERE run_id=? AND deployment_id=?", (self._clock(),run_id,deployment_id))
+            finally:
+                connection.close()
+
+    def prune(self, *, now=None) -> None:
+        """Bounded startup/owner-local maintenance; freed pages remain reusable."""
+        from .mailbox_retention import prune_auth, prune_commands
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                now = self._clock() if now is None else _number(now, "managed_control_clock_invalid")
+                cursor = ""
+                for _ in range(64):
+                    # DISTINCT would still walk every row of a legacy signer.
+                    signer = connection.execute("SELECT signer_key_digest FROM managed_auth_requests "
+                        "WHERE signer_key_digest>? ORDER BY signer_key_digest LIMIT 1", (cursor,)).fetchone()
+                    if signer is None:
+                        break
+                    cursor = signer[0]
+                    prune_auth(connection, cursor, now)
+                prune_commands(connection, now)
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
 
     def enqueue(self, envelope: Mapping[str, Any]) -> dict[str, Any]:
         """Authenticate and atomically enqueue one owner command."""
