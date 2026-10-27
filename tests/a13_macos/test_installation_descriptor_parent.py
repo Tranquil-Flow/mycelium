@@ -7,7 +7,7 @@ from mycelium_a13_macos.app import DemoApp
 from test_app_authority import CONSENT
 
 
-def test_installation_facts_bound_to_current_member_and_run(tmp_path,monkeypatch):
+def test_installation_facts_bound_to_current_member_and_run(native_sidecar_required, tmp_path,monkeypatch):
     from mycelium_a13_macos.installation_descriptor import installation_descriptor,verify_installation_descriptor
     app=DemoApp(tmp_path/'owner',check_platform=False).start()
     try:
@@ -34,7 +34,7 @@ def test_installation_facts_bound_to_current_member_and_run(tmp_path,monkeypatch
     finally:app.close()
 
 
-def test_each_refusal_names_the_check_that_failed(tmp_path,monkeypatch):
+def test_each_refusal_names_the_check_that_failed(native_sidecar_required, tmp_path,monkeypatch):
     """Two-Mac run 18b: one collapsed ``installation_descriptor_invalid`` hid an
     expired descriptor. Each refusal is a bounded code naming the failed check."""
     from mycelium_a13_macos.installation_descriptor import installation_descriptor,verify_installation_descriptor

@@ -29,7 +29,7 @@ def arrange(w,*,assignment_name=None,duplicate=False):
     return app,offer,options
 
 
-def test_preview_then_exact_accept_starts_native_but_does_not_load(tmp_path):
+def test_preview_then_exact_accept_starts_native_but_does_not_load(native_sidecar_required, tmp_path):
     with _world(tmp_path/'world') as w:
         app,offer,options=arrange(w)
         preview=preview_work(app,offer,stage_acknowledged=True,**options)
@@ -74,7 +74,7 @@ def test_preview_uses_the_graph_digest_pinned_by_the_grant(tmp_path,monkeypatch)
         assert preview['manifest_digest'].startswith('sha256:')
 
 
-def test_canonical_compiler_assignment_filename_is_supported(tmp_path):
+def test_canonical_compiler_assignment_filename_is_supported(native_sidecar_required, tmp_path):
     with _world(tmp_path/'world') as w:
         app,offer,options=arrange(w,assignment_name='control/node-0-assignment.json')
         preview=preview_work(app,offer,stage_acknowledged=True,**options)

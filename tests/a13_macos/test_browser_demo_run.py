@@ -24,8 +24,10 @@ def test_owner_picks_model_presses_start_and_sees_a_clear_failure(tmp_path, monk
             page.get_by_role('button', name='Open private demo', exact=True).click()
             expect(page.locator('#demo-run')).to_be_visible()
             picker = page.locator('#run-model')
-            expect(picker.locator('option')).to_have_count(3)
-            expect(picker).to_have_value('qwen3-14b')
+            # L3 added the tested starter while retaining every larger option.
+            expect(picker.locator('option')).to_have_count(4)
+            expect(picker).to_have_value('a9-route')
+            expect(picker.locator('option[value="a9-route"]')).to_contain_text('tested starter')
             expect(picker.locator('option[value="qwen3-14b"]')).not_to_contain_text('too large for the storage limit')
             picker.select_option('qwen3-0.6b')
             expect(page.locator('#run-model-note')).to_contain_text('Qwen/Qwen3-0.6B', timeout=5000)

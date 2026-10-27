@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any
 
 CODE = "not_installed"
+DOWNLOADED_MESSAGE = ('This is the downloaded copy. Mycelium is installed: open Mycelium A13 '
+                      'from the Applications folder in your home folder.')
 MESSAGE = ("Mycelium is not installed yet, so it did not start. Open the folder you downloaded and "
            "double-click 'Install Mycelium.command' (macOS asks once to confirm it in System Settings > "
            "Privacy & Security > Open Anyway). After that, open 'Mycelium A13' from the Applications folder "
@@ -44,7 +46,7 @@ def _bare(argv: list[str]) -> bool:
 
 
 def not_installed_refusal(*, frozen: bool, platform: str, argv: list[str], executable: Path,
-                          programs_root: Path) -> dict[str, Any] | None:
+                          programs_root: Path, applications_entry: Path | None = None) -> dict[str, Any] | None:
     """The public refusal for a bare launch outside the install, or ``None`` (no paths in it)."""
 
     if not frozen or platform != "darwin" or not _bare(argv):
@@ -52,4 +54,12 @@ def not_installed_refusal(*, frozen: bool, platform: str, argv: list[str], execu
     location = classify(executable, programs_root)
     if location == "installed":
         return None
-    return {"event": "launcher_refused", "code": CODE, "location": location, "message": MESSAGE}
+    installed = False
+    if applications_entry is not None:
+        target = Path(applications_entry) / 'Contents' / 'MacOS' / 'Mycelium A13 Demo'
+        try:
+            installed = target.is_file() and classify(target, programs_root) == 'installed'
+        except (OSError, RuntimeError):
+            pass  # Broken/misdirected links are not an installed copy.
+    return {"event": "launcher_refused", "code": CODE, "location": location,
+            "message": DOWNLOADED_MESSAGE if installed else MESSAGE}

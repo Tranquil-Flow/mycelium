@@ -47,10 +47,10 @@ def test_pairing_quota_cap_follows_the_largest_member_share():
     assert pairing_quota_valid({'storage_bytes': 8_000_000_000, 'network_bytes_per_day': 8_000_000_000})
 
 
-def test_model_picker_defaults_to_14b_and_shows_the_enforced_requirement(tmp_path):
+def test_model_picker_defaults_to_starter_and_retains_14b_requirement(tmp_path):
     from mycelium_a13_macos import run_model
     assert run_model.storage_ceiling() == R.storage_consent_ceiling()
-    assert run_model.demo_default_choice() == 'qwen3-14b'
+    assert run_model.demo_default_choice() == 'a9-route'
     root = tmp_path / 'state'; root.mkdir(mode=0o700)
     doc = run_model.document(root, environ={})
     rows = {c['name']: c for c in doc['choices']}

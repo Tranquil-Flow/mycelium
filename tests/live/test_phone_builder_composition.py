@@ -78,7 +78,7 @@ SEED_ATTACKS = [
 ]
 
 
-def test_actual_build_with_real_native_fixture_executor(tmp_path, record_property, monkeypatch):
+def test_actual_build_with_real_native_fixture_executor(native_phone_executor_required, tmp_path, record_property, monkeypatch):
     """Builder proof -> graph/checkpoint digest -> production route authority -> final qualifier.
 
     The phone records are signed by the fixture's SYNTHETIC member key in the

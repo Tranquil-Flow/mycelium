@@ -15,7 +15,8 @@ from test_adaptive_owner import GIB, ON, SAFE, Clock, _APPS, _close_apps, adapti
 
 ROOT = Path(__file__).resolve().parents[2]
 EXPLAINER = ("Mycelium watches this Mac's memory, CPU, heat and battery. When other apps need resources, "
-             "it automatically shares less, finishes or hands off work in progress, and pauses sharing. "
+             "it automatically shares less and pauses sharing. Work in progress may stop; "
+             "fast mode cannot recover an answer if a Mac drops. "
              "It resumes once the Mac has been healthy for a while. Your own apps always come first.")
 
 

@@ -1244,11 +1244,13 @@ class DemoApp:
                  'clock':None if offsets is None else offsets.view(m['node_id'])}
                 for m in coordinator.members()]}
         from .run_model import document as run_model_document
+        from .fast_mode import document as fast_mode_document
         from .adaptive_owner import adaptive_status, adaptive_publication
         owner_run=_demo_status(self,'owner')
         return {'label':'macOS A13 hackathon demo','role':'not_yet_serving',
                 'model_contract':asdict(self.run_model_contract()),
                 'run_model':run_model_document(self.root),
+                'fast_mode':fast_mode_document(self.root),
                 'network':({'state':'private'} if self.public_relay is None else self.public_relay.status()),
                 'acquisition':self.acquisition.status(),
                 'resource_observation':dict(self.resource_observation),
@@ -1339,6 +1341,9 @@ class DemoApp:
             from .adaptive_owner import ADAPTIVE_ROUTES, adaptive_action
             if path in ADAPTIVE_ROUTES:
                 return adaptive_action(self, path, body)
+            if path == '/api/fast-mode':
+                from .fast_mode import choose
+                return choose(self, body)
             if path == '/api/run-model':
                 return self._choose_run_model(body)
             from .demo_app import OWNER_ROUTES as _DEMO_ROUTES

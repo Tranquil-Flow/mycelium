@@ -64,7 +64,7 @@ def _compose_publish_run_cleanup(tmp_path):
         assert not thread.is_alive()
 
 
-def test_owner_publish_target_run_and_requested_cleanup_compose(tmp_path):
+def test_owner_publish_target_run_and_requested_cleanup_compose(native_sidecar_required, tmp_path):
     _compose_publish_run_cleanup(tmp_path)
 
 

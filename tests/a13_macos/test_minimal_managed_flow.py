@@ -63,7 +63,7 @@ def _assert_real_native_hello(reply, w, run_id):
     assert identity['host_id'] == host_id and identity['boot_id'] == boot_id
 
 
-def test_minimal_managed_control_work_and_signed_cleanup_flow(tmp_path):
+def test_minimal_managed_control_work_and_signed_cleanup_flow(native_sidecar_required, tmp_path):
     archive, _ = bundle()
     with _world(tmp_path/'world') as w:
         box = w['authority']._control_mailbox

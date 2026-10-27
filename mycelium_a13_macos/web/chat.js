@@ -15,6 +15,9 @@ async function call(path, body) {
   return value;
 }
 const MESSAGES = {
+  token_path_policy_expired:'Fast-mode permission expired. Ask the owner to keep both Macs connected and press Start for a new run, then send your prompt again.',
+  token_path_process_expired:'The fast-mode worker reached the end of its allowed run. Ask the owner to press Start for a new run, then send your prompt again.',
+  managed_control_expired:'A Mac’s control session expired. Ask the owner to reconnect the Macs and press Start for a new run, then send your prompt again.',
   chat_not_ready:'The swarm is not serving right now. The host starts it from the Mycelium app.',
   chat_warming_up:'Warming up: the swarm is qualifying its route. Chat opens when it is ready.',
   chat_route_not_qualified:'The route is not qualified yet (warming up). Try again in a moment.',

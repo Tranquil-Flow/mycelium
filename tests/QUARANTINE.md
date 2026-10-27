@@ -33,6 +33,41 @@ requires the three receipts above.
 
 ## Register
 
-| Test id | First seen (L2 run id, date) | 3/3 isolation receipts | Suspected cause | Fix lane |
-| --- | --- | --- | --- | --- |
-| _(none)_ | - | - | - | - |
+| Test id | First seen (L2 run id, date) | 3/3 isolation receipts | Reason | Owner / fix lane | Expiry (<= 30 days) |
+| --- | --- | --- | --- | --- | --- |
+| _(none)_ | - | - | - | - | - |
+
+## R5 worktree prerequisites (not quarantines)
+
+Run `bash tools/worktree_test_setup.sh /path/to/integration-checkout` once in a
+fresh worktree. This is offline: it copies and verifies the release iroh sidecar,
+the debug iroh sidecar and the synthetic Qwen native fixture executor. It never
+copies a cargo cache, downloads, launches a binary, overwrites a different build,
+or writes into the integration checkout. The source can use its local build paths
+or its existing sibling `native-target` fixture cache. The target always gets
+regular, worktree-local copies; production resolvers reject escaping symlinks.
+
+The built-app tests in `tests/a13_macos/test_package.py` require
+`A13_PACKAGE_EXECUTABLE` pointing at a built **Mycelium A13 Demo** executable.
+Without that optional artifact they skip with an explicit setup reason; an
+explicitly configured missing/non-executable artifact still fails. Certification
+sets the variable and continues to execute every assertion in those tests.
+
+The positive native app/control scenarios request `native_sidecar_required`;
+the four real synthetic phone-executor scenarios request
+`native_phone_executor_required`. These fixtures skip only a missing input, with
+the setup command in the reason; a present but non-executable input (including a
+dangling symlink) still fails. Pure unit/refusal tests do not request them.
+
+The successor challenge imports the same native-sidecar prerequisite marker as
+its base real-process fixture. It needs the debug sidecar, **not a packaged app**.
+The emitted-runtime lifecycle accepts worktree-local native fixtures, uses
+private evidence directories when JUnit is absent, and unique directories beside
+JUnit when requested. Neither missing JUnit nor existing evidence is a reason to
+skip a lifecycle assertion.
+
+Owner-adopted R5 requires every future quarantine row to name an accountable
+owner, a concrete reason, and an expiry no more than 30 days after entry. Expiry
+is a repair/escalation deadline, not permission to renew or silently skip a red
+test. Prerequisite skips above are not flaky markers and do not hide configured
+certification failures.

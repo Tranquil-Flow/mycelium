@@ -49,6 +49,13 @@ const HUMAN_ERRORS={
   download_consent_required:'Tick the authorization box and choose a download limit first.',
   download_consent_invalid:'The download limit must be a positive number of bytes, no larger than your storage limit.',
   acquisition_already_active:'A download is already running. Wait for it to finish or cancel it.',
+  two_macs_required:"Invite one other physical Mac with a code or QR, keep Mycelium open on both Macs, and press Start again. This Mac also contributes.",
+  member_capability_report_required:"A Mac has not reported its available memory and storage. On that Mac, press Report this Mac capability under Device readiness, then press Start again on the owner.",
+  token_path_policy_expired:"Fast-mode permission expired. Keep Mycelium open and connected on both Macs, then press Start on the owner to begin a new run.",
+  token_path_process_expired:"The fast-mode worker reached the end of its allowed run. Press Start on the owner to begin a new run.",
+  managed_control_expired:"A Mac's control session expired. Keep Mycelium open on both Macs, use Start / reconnect on the disconnected Mac, then press Start on the owner.",
+  fast_mode_run_active:"Stop the current run and wait for it to finish closing before changing Fast mode. The setting applies to the next run only.",
+  fast_mode_locked_by_environment:"Fast mode is fixed by MYCELIUM_TOKEN_PATH. Remove that environment override and reopen Mycelium to use this switch.",
   pairing_window_relay_required:'Start the public relay to make join codes redeemable; codes can be asked for before that.',
   pairing_window_swarm_required:'Create the swarm first, then invite a Mac.',
   network_requires_fresh_owner:'A public relay is already running, or this Mac is not the owner.',
@@ -463,7 +470,7 @@ function applyResources(value){
   setOptions($('storage'),storage.filter(([v])=>v<=ceiling),saved);
   const sel=r.selected;
   $('storage-detail').textContent=`Largest storage limit any supported model needs here: ${gb(ceiling)}.`+
-    (sel?` The selected model ${sel.label} needs ${gb(sel.owner_storage_bytes)} on the owner Mac; a joined Mac needs only its slice (at most ${gb(sel.whole_model_member_disk_bytes)}, usually far less; its exact share is shown when the run is compiled).`:'');
+    (sel?` The selected model ${sel.label} needs ${gb(sel.owner_storage_bytes)} on the owner Mac; a joined Mac needs a whole snapshot for small models or its verified slice in slice mode (at most ${gb(sel.whole_model_member_disk_bytes)}, usually far less; its exact share is shown when the run is compiled).`:'');
   setOptions($('pair-storage'),[[2e9,'2 GB'],[1e9,'1 GB'],[4e9,'4 GB'],[8e9,'8 GB'],[16e9,'16 GB'],[quota,`${gb(quota)} (largest share any model gives one Mac)`]].filter(([v])=>v<=quota));
   const mem=r.memory_cap_options||[];
   if(mem.length){
@@ -473,8 +480,8 @@ function applyResources(value){
     const preStaged=sel.label==='Qwen2.5-7B';
     const snapshot=sel.snapshot_bytes.toLocaleString('en-US');
     $('acquisition-detail').textContent=preStaged
-      ?`The pinned ${sel.label} snapshot is ${snapshot} bytes. If a verified copy is already on this Mac (a retained or LAN-seeded snapshot) the default limit of 11,535,382 bytes is enough: only the small metadata/text files are fetched from Hugging Face. With no copy here, the default limit makes acquisition stop with “download limit exceeded” before any model byte is fetched. To download the model from Hugging Face instead, raise the limit below to at least ${snapshot} bytes (it needs a storage limit of at least ${gb(sel.owner_storage_bytes)}). Joined Macs never download the whole model: each fetches only its own verified slice.`
-      :`Tick the authorization box, then press “Download / resume source” to download the pinned ${sel.label} snapshot (${snapshot} bytes) from Hugging Face onto this owner Mac; it needs a storage limit of at least ${gb(sel.owner_storage_bytes)}. Joined Macs never download the whole model: each fetches only its own verified slice.`;
+      ?`The pinned ${sel.label} snapshot is ${snapshot} bytes. If a verified copy is already on this Mac (a retained or LAN-seeded snapshot) the default limit of 11,535,382 bytes is enough: only the small metadata/text files are fetched from Hugging Face. With no copy here, the default limit makes acquisition stop with “download limit exceeded” before any model byte is fetched. To download the model from Hugging Face instead, raise the limit below to at least ${snapshot} bytes (it needs a storage limit of at least ${gb(sel.owner_storage_bytes)}). Joined Macs fetch a whole snapshot for small models, including the tested starter; in slice mode each fetches only its own verified slice.`
+      :`Tick the authorization box, then press “Download / resume source” to download the pinned ${sel.label} snapshot (${snapshot} bytes) from Hugging Face onto this owner Mac; it needs a storage limit of at least ${gb(sel.owner_storage_bytes)}. Joined Macs fetch a whole snapshot for small models, including the tested starter; in slice mode each fetches only its own verified slice.`;
     const limit=$('download-limit');
     limit.max=String(Math.max(sel.snapshot_bytes,11535382));
     // The grant may not exceed the storage limit (app.py download_consent_invalid).

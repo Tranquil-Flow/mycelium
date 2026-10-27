@@ -1,18 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""The demo model picker: one pinned Qwen3 size, persisted in app state.
+"""The model picker: pinned contracts persisted in private app state.
 
-A Finder launch cannot set ``MYCELIUM_A13_RUN_MODEL``, so the coworking demo
-chooses its model in the owner UI and the choice is stored privately as
-``<state root>/run-model.json``.  The environment variable still wins when it
-is set (operator scripts and tests), and then the picker is shown as locked.
+``MYCELIUM_A13_RUN_MODEL`` overrides the saved choice. Fresh installs use
+Qwen2.5-0.5B-Instruct, the tested two-Mac starter; saved choices are not migrated.
 
-Without a saved choice the demo default is Qwen3-14B when the owner's storage
-requirement for it (its pinned snapshot plus 10%, model_resources.py) fits the
-consent storage ceiling, else the largest Qwen3 that does.  The ceiling is
-derived per model (``model_resources.storage_consent_ceiling``: 32,568,709,325 B,
-set by Qwen3-14B; its owner need is 32,507,875,154 B), so the default is
-Qwen3-14B; joined Macs fetch only their
-slice, bounded by their share of the per-split proposal.
+The storage ceiling is derived per model by ``model_resources``. Small models use whole snapshots on joined
+Macs; slice mode is selected by ``serving.slice_fetch_permitted``.
 """
 from __future__ import annotations
 
@@ -20,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
-from .serving import (QWEN3_0_6B_MODEL, QWEN3_8B_MODEL, QWEN3_14B_MODEL,
+from .serving import (A9_ROUTE_MODEL, QWEN3_0_6B_MODEL, QWEN3_8B_MODEL, QWEN3_14B_MODEL,
                       RUN_MODEL_ENVIRONMENT, ModelContract, selected_run_model)
 
 PROTOCOL = 'mycelium.a13_run_model_choice.v1'
@@ -39,11 +32,13 @@ class Choice:
 
 
 CHOICES: tuple[Choice, ...] = (
-    Choice('qwen3-0.6b', 'Qwen3-0.6B (tests, quick bring-up)', QWEN3_0_6B_MODEL,
+    Choice('a9-route', 'Qwen2.5-0.5B-Instruct — tested starter (tested on two Macs; ~1 GB download if not cached)',
+           A9_ROUTE_MODEL, 999_604_126, 500_000_000),
+    Choice('qwen3-0.6b', 'Qwen3-0.6B (not yet tested on two Macs)', QWEN3_0_6B_MODEL,
            1_519_209_243, 750_000_000),
-    Choice('qwen3-8b', 'Qwen3-8B (safe fallback)', QWEN3_8B_MODEL,
+    Choice('qwen3-8b', 'Qwen3-8B (not yet tested on two Macs)', QWEN3_8B_MODEL,
            16_397_461_266, 8_200_000_000),
-    Choice('qwen3-14b', 'Qwen3-14B (target demo model)', QWEN3_14B_MODEL,
+    Choice('qwen3-14b', 'Qwen3-14B (not yet tested on two Macs)', QWEN3_14B_MODEL,
            29_552_613_776, 14_800_000_000),
 )
 _BY_NAME = {c.name: c for c in CHOICES}
@@ -73,8 +68,8 @@ def owner_storage_bytes(c: Choice) -> int:
 
 def demo_default_choice(*, storage_ceiling: int | None = None) -> str | None:
     ceiling = globals()['storage_ceiling']() if storage_ceiling is None else storage_ceiling
-    fitting = [c for c in CHOICES if owner_storage_bytes(c) <= ceiling]
-    return max(fitting, key=lambda c: c.snapshot_bytes).name if fitting else None
+    starter = choice('a9-route')
+    return starter.name if owner_storage_bytes(starter) <= ceiling else None
 
 
 def load_choice(root: Path | str) -> str | None:

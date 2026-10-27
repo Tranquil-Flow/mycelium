@@ -9,16 +9,11 @@ from tests.a13_macos.test_serving import _prepared, _operator_plan, seed, privat
 
 
 def test_status_names_exact_selected_model(tmp_path,monkeypatch):
-    # Owner decision 2026-10-13 (coworking demo): with no env override and no
-    # saved picker choice the app pins the demo default -- the largest Qwen3
-    # whose whole snapshot fits the consent ceiling (run_model.py) -- instead
-    # of the Qwen2.5-7B candidate. This test pinned the old default by design.
-    # With per-model resource proposals (model_resources.py) the 14B owner
-    # requirement fits the consent ceiling, so the default is Qwen3-14B.
+    # Fresh state selects the tested starter, not the unqualified larger models.
     from mycelium_a13_macos.run_model import choice, demo_default_choice
     monkeypatch.delenv('MYCELIUM_A13_RUN_MODEL',raising=False)
     expected=asdict(choice(demo_default_choice()).model)
-    assert expected['model_id']=='Qwen/Qwen3-14B'
+    assert expected['model_id']=='Qwen/Qwen2.5-0.5B-Instruct'
     assert preflight()['model_contract']==expected
     app=DemoApp(tmp_path/'app').start()
     try:

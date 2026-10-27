@@ -35,6 +35,13 @@ class RecordingSink:
         self.tokens.append((token_index, token_id))
 
 
+@pytest.fixture
+def native_phone_executor_required():
+    from tests.worktree_prerequisites import require_native
+    from test_qwen_phone_builder import BINARY
+    return require_native(BINARY, 'synthetic Qwen native executor')
+
+
 @pytest.fixture(scope="session")
 def deployment_dir() -> Path:
     if not (DEPLOYMENT / "vocab.json").exists():

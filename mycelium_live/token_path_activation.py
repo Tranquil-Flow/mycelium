@@ -8,7 +8,10 @@ import os
 
 
 def token_path_enabled():
-    value = os.environ.get('MYCELIUM_TOKEN_PATH', 'off')
+    # The GUI launcher's process default is inherited by native children.
+    # An explicit operator setting always wins, including explicit OFF.
+    value = os.environ.get('MYCELIUM_TOKEN_PATH',
+                           os.environ.get('MYCELIUM_TOKEN_PATH_APP_DEFAULT', 'off'))
     if value not in ('off', 'on'):
         raise ValueError('token_path_activation_invalid')
     return value == 'on'

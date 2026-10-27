@@ -15,6 +15,17 @@ from playwright.sync_api import sync_playwright, expect
 from mycelium_a13_macos.serving import CANDIDATE_MODEL
 
 
+@pytest.fixture(autouse=True)
+def built_package_required():
+    # Certification sets this explicitly in candidate.sh's rehearsal script.
+    # An explicitly configured but broken artifact must FAIL, never become a skip.
+    configured = os.environ.get('A13_PACKAGE_EXECUTABLE')
+    if configured is None:
+        pytest.skip('built app prerequisite absent: set A13_PACKAGE_EXECUTABLE to the certified Mycelium A13 Demo executable')
+    assert configured and Path(configured).is_file(), 'configured_package_executable_missing'
+    assert os.access(configured, os.X_OK), 'configured_package_executable_not_executable'
+
+
 def test_packaged_canonical_staging_in_clean_directory(tmp_path):
     from test_managed_staging import bundle
     configured=os.environ.get('A13_PACKAGE_EXECUTABLE')
@@ -68,15 +79,12 @@ def test_packaged_native_app_in_clean_working_directory(tmp_path,role):
         assert first, 'packaged_launcher_failed_before_start'
         started=json.loads(first)
         assert started['event']=='launcher_started'
-        # Demo default since the run-model picker (run_model.py): the largest
-        # Qwen3 whose owner storage need fits the consent ceiling, not the 7B
-        # candidate. Derive it from the product rule so the package and the
-        # rule cannot drift apart again; the rule itself picks Qwen3-14B.
+        # The packaged fresh-state default must match the tested starter.
         from mycelium_a13_macos.run_model import choice, demo_default_choice
         default=demo_default_choice()
-        assert default=='qwen3-14b'
+        assert default=='a9-route'
         expected=choice(default).model
-        assert started['model_contract']['model_id']==expected.model_id=='Qwen/Qwen3-14B'
+        assert started['model_contract']['model_id']==expected.model_id=='Qwen/Qwen2.5-0.5B-Instruct'
         assert started['model_contract']['model_id']!=CANDIDATE_MODEL.model_id
         assert started['model_contract']['resolved_commit']==expected.resolved_commit
         assert started['model_contract']['runtime_quantization']=='int8-weight-only'

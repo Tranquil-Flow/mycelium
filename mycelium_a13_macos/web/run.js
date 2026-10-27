@@ -6,6 +6,7 @@
   const $ = (id) => document.getElementById(id);
   let busy = false;
   let pickerKey = '';
+  let fastMessage = '';
   async function api(path, body) {
     const response = await fetch(path, {method: body === undefined ? 'GET' : 'POST', cache:'no-store',
       credentials:'same-origin', redirect:'error', referrerPolicy:'no-referrer',
@@ -20,7 +21,13 @@
     owner_model_not_prepared:'Download the selected model on this Mac first: under Inference, tick the authorization box, press “Download / resume source” and wait for “prepared”, then press Start again.',
     peer_clock_skew_exceeded:'A joined Mac\'s clock is too far from this Mac\'s. Turn on “Set time and date automatically” on both Macs (System Settings → General → Date & Time), then press Start again.',
     router_port_shutdown_cleanup_unproven:'The route could not prove it had cleaned up the Macs after stopping. This is recorded; press Start again to build a new route.',
-    two_macs_required:'At least two Macs must have joined and reported in. Invite a Mac with a code or QR, then press Start again.',
+    two_macs_required:"Invite one other physical Mac with a code or QR, keep Mycelium open on both Macs, and press Start again. This Mac also contributes.",
+    member_capability_report_required:"A Mac has not reported its available memory and storage. On that Mac, press Report this Mac capability under Device readiness, then press Start again on the owner.",
+    token_path_policy_expired:"Fast-mode permission expired. Keep Mycelium open and connected on both Macs, then press Start on the owner to begin a new run.",
+    token_path_process_expired:"The fast-mode worker reached the end of its allowed run. Press Start on the owner to begin a new run.",
+    managed_control_expired:"A Mac's control session expired. Keep Mycelium open on both Macs, use Start / reconnect on the disconnected Mac, then press Start on the owner.",
+    fast_mode_run_active:"Stop the current run and wait for it to finish closing before changing Fast mode. The setting applies to the next run only.",
+    fast_mode_locked_by_environment:"Fast mode is fixed by MYCELIUM_TOKEN_PATH. Remove that environment override and reopen Mycelium to use this switch.",
     two_distinct_hosts_required:'The run needs two different physical Macs; two copies of the app on one Mac do not count.',
     member_descriptors_timeout:'Some joined Macs did not report in.',
     owner_swarm_required:'Create the swarm first.',
@@ -53,7 +60,25 @@
     const run = status.owner_run || {};
     $('run-model').disabled = busy || picker.locked || ['running','serving','stopping'].includes(run.state);
     $('run-model-note').textContent = picker.locked ? `Fixed by MYCELIUM_A13_RUN_MODEL (${picker.selected}).`
-      : `Pinned: ${picker.model_id} @ ${picker.resolved_commit.slice(0, 12)} · ${picker.source === 'saved' ? 'your choice' : 'demo default'}. Joined Macs fetch only their slice of it.`;
+      : `Pinned: ${picker.model_id} @ ${picker.resolved_commit.slice(0, 12)} · ${picker.source === 'saved' ? 'your choice' : 'demo default'}. Joined Macs fetch a whole snapshot for small models, or only their slice when slice mode is available.`;
+  }
+  function renderFastMode(status) {
+    const mode = status.fast_mode; if (!mode) return;
+    const active = ['running','serving','stopping','failing'].includes(status.owner_run?.state);
+    $('fast-mode').checked = mode.enabled;
+    $('fast-mode').disabled = busy || mode.locked || active;
+    $('fast-mode-note').textContent = fastMessage || (active ? ERRORS.fast_mode_run_active
+      : mode.locked ? 'Fixed by MYCELIUM_TOKEN_PATH; the environment overrides the saved switch.'
+      : 'Saved for the next run only. MYCELIUM_TOKEN_PATH, if set, overrides this switch.');
+  }
+  async function changeFastMode() {
+    if (busy || $('fast-mode').disabled) return;
+    busy = true; fastMessage = ''; $('fast-mode').disabled = true;
+    try {
+      await api('/api/fast-mode', {enabled:$('fast-mode').checked});
+      fastMessage = 'Fast mode saved for the next run.';
+    } catch (error) { fastMessage = explain(error.message); }
+    finally { busy = false; await refresh(); }
   }
   // Start without a prepared model: show where to prepare it (the Inference download step), once per failure.
   let pointedAt = null;
@@ -137,7 +162,7 @@
     const t = status.demo_target; if (!t) return;
     const [title, text] = TARGET[t.state] || [t.state, ''];
     $('target-title').textContent = title;
-    $('target-detail').textContent = text + (t.model_id ? ` Model: ${t.model_id}.` : '') + (t.detail ? ` (${t.detail})` : '');
+    $('target-detail').textContent = text + (t.model_id ? ` Model: ${t.model_id}.` : '') + (t.detail ? ` ${ERRORS[t.detail] ? explain(t.detail) : `(${t.detail})`}` : '');
     const bar = $('target-progress');
     if (t.progress && t.progress.total_bytes) { bar.hidden = false; bar.max = t.progress.total_bytes; bar.value = t.progress.done_bytes; }
     else bar.hidden = true;
@@ -148,7 +173,7 @@
     const owner = status.installation_role === 'owner' && status.authority && status.authority.swarm_created;
     $('demo-run').hidden = !owner;
     $('demo-target').hidden = status.installation_role !== 'target';
-    if (owner) { renderPicker(status); renderRun(status); }
+    if (owner) { renderPicker(status); renderFastMode(status); renderRun(status); }
     renderQr(status); renderTarget(status);
   }
   async function act(path, body) {
@@ -156,6 +181,7 @@
     try { await api(path, body); } catch (error) { $('demo-state').textContent = explain(error.message); }
     finally { busy = false; refresh(); }
   }
+  $('fast-mode').addEventListener('change', changeFastMode);
   $('demo-start').addEventListener('click', () => act('/api/demo/start', {}));
   $('demo-stop').addEventListener('click', () => act('/api/demo/stop', {}));
   $('demo-rebuild').addEventListener('click', () => act('/api/demo/rebuild', {}));

@@ -17,7 +17,7 @@ from test_standing_consent import GRANT, POLICY
 
 @pytest.mark.parametrize('failure,nth', [('read', 1), ('read', 2), ('read', 4),
                                          ('lost_ack', 1), ('lost_ack', 2), ('lost_ack', 3)])
-def test_revalidated_staging_resumes_before_exactly_one_native_start(tmp_path, monkeypatch, failure, nth):
+def test_revalidated_staging_resumes_before_exactly_one_native_start(native_sidecar_required, tmp_path, monkeypatch, failure, nth):
     with _world(tmp_path / 'world') as w:
         app, offer, options = arrange(w)
         now = time.time()

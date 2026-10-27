@@ -103,7 +103,7 @@ def test_transfer_rechecks_target_policy_before_every_chunk(tmp_path):
 
 
 
-def test_target_staged_control_start_requires_consent_and_real_native_hello(tmp_path):
+def test_target_staged_control_start_requires_consent_and_real_native_hello(native_sidecar_required, tmp_path):
     from mycelium_a13_macos.target_app import TargetApplication
     from test_managed_staging import bundle
     from test_control_session import owner,session

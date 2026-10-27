@@ -35,7 +35,8 @@ def test_launcher_stops_on_sigterm_without_taking_a_lock(
         closed = Closed()
 
         def __init__(self, _state_root: Path) -> None:
-            pass
+            self.root = _state_root
+            self.installation_role = 'owner'
 
         def start(self) -> "FakeApp":
             events.append("start")

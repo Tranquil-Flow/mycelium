@@ -62,7 +62,7 @@ def test_start_without_the_model_fails_with_a_clear_code(owner):
     assert (status['failed_step'], status['error_code']) == ('model', 'owner_model_not_prepared')
 
 
-def test_single_mac_start_reaches_descriptors_and_stops_two_macs_required(owner):
+def test_single_mac_start_reaches_descriptors_and_stops_two_macs_required(native_sidecar_required, owner):
     owner.action('/api/create', {'consent': CONSENT})
     owner._policy_observer = lambda: dict(SAFE)
     source = prepared(owner)

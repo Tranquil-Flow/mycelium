@@ -56,6 +56,14 @@ def check_command(command):
         raise RuntimeError("REAL QUARANTINE WRITE FORBIDDEN: inject the in-memory xattr fake")
 
 
+@pytest.fixture
+def native_sidecar_required():
+    from tests.worktree_prerequisites import require_native
+    return require_native(Path(__file__).resolve().parents[2] /
+                          '.build-native/release/mycelium-iroh-sidecar',
+                          'release iroh sidecar')
+
+
 @pytest.fixture(scope="session", autouse=True)
 def no_real_quarantine():
     """Block Python APIs and all subprocess entry points before any test body runs."""

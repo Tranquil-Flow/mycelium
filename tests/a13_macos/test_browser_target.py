@@ -13,7 +13,7 @@ from mycelium_a13_macos.tls import pinned_seed_client, pinned_seed_client_from_i
 
 
 @pytest.mark.parametrize('_stress_run', range(int(os.environ.get('A13_CONTROL_STRESS_COUNT', '1'))))
-def test_browser_owner_target_encrypted_pairing(tmp_path, monkeypatch, _stress_run):
+def test_browser_owner_target_encrypted_pairing(native_sidecar_required, tmp_path, monkeypatch, _stress_run):
     owner=DemoApp(tmp_path/'owner',check_platform=False).start()
     target=None
     try:

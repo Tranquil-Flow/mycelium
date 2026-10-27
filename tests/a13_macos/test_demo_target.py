@@ -442,10 +442,10 @@ def _a9_world(whole, monkeypatch, tmp_path, env='a9-route', model=None, **extra)
     return app, agent, gate, state, calls
 
 
-def test_a9_producer_has_no_picker_choice():
+def test_a9_producer_announces_the_tested_starter_picker_choice():
     from mycelium_a13_macos.run_model import choice_for_model
     from mycelium_a13_macos.serving import A9_ROUTE_MODEL
-    assert choice_for_model(A9_ROUTE_MODEL) is None
+    assert choice_for_model(A9_ROUTE_MODEL).name == 'a9-route'
 
 
 def test_environment_selected_a9_model_downloads_without_a_picker_post(whole, monkeypatch, tmp_path):

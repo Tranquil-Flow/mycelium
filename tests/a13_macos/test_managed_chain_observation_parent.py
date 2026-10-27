@@ -8,7 +8,7 @@ from test_app_authority import CONSENT
 from test_worker import SAFE
 
 
-def test_application_bootstrap_observes_native_hello_without_tensor_authority(tmp_path,monkeypatch):
+def test_application_bootstrap_observes_native_hello_without_tensor_authority(native_sidecar_required, tmp_path,monkeypatch):
     app=DemoApp(tmp_path/'owner',check_platform=False).start()
     try:
         app.action('/api/create',{'consent':CONSENT});app.action('/api/local-contributor/start',{})

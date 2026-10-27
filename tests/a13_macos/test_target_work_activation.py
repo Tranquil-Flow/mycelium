@@ -32,7 +32,7 @@ def setup(w):
     return app,offer,source,options
 
 
-def test_work_activation_preserves_preposition_and_exact_load_guard(tmp_path):
+def test_work_activation_preserves_preposition_and_exact_load_guard(native_sidecar_required, tmp_path):
     with _world(tmp_path/'world') as w:
         app,offer,source,options=setup(w)
         sender=owner(tmp_path/'sender',w)

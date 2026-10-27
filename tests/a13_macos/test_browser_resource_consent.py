@@ -32,6 +32,14 @@ def test_consent_choices_match_the_enforced_per_model_bounds(tmp_path, monkeypat
             assert sorted(memory) == R.memory_cap_options(host_memory_bytes())
             assert max(memory) <= R.member_memory_ceiling(host_memory_bytes())
             limit = page.locator('#download-limit')
+            # L3's fresh-state starter has its own exact enforced download bound.
+            assert int(limit.get_attribute('max')) == 999_604_126
+            expect(page.locator('#acquisition-detail')).to_contain_text('999,604,126 bytes')
+            # Before enrollment the picker is hidden; use its real app action
+            # to retain the original large-model consent assertions as well.
+            app.action('/api/run-model', {'choice': 'qwen3-14b'})
+            page.reload()
+            expect(limit).to_have_attribute('max', '29552613776')
             assert int(limit.get_attribute('max')) == 29_552_613_776
             expect(page.locator('#acquisition-detail')).to_contain_text('29,552,613,776 bytes')
             browser.close()

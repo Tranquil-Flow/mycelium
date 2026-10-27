@@ -104,7 +104,8 @@ def _refuse_uninstalled_launch():
     """A bare double-click of the packaged app outside programs/<version> is not an install: say so, start nothing."""
     from mycelium_a13_macos import launch_location
     refusal=launch_location.not_installed_refusal(frozen=bool(getattr(sys,'frozen',False)),platform=sys.platform,
-        argv=sys.argv,executable=Path(sys.executable),programs_root=launch_location.programs_root(Path.home()))
+        argv=sys.argv,executable=Path(sys.executable),programs_root=launch_location.programs_root(Path.home()),
+        applications_entry=Path.home()/'Applications'/'Mycelium A13.app')
     if refusal is None: return None
     print(json.dumps(refusal),file=sys.stderr)
     _show_refusal_dialog(refusal['message'])
@@ -159,6 +160,8 @@ def main():
     # --offline / MYCELIUM_OFFLINE / MYCELIUM_NETWORK_MODE=lan|local: no Hugging Face contact.
     apply_offline(args.offline,None)
     app=None
+    from contextlib import ExitStack
+    process_settings=ExitStack()
     try:
         report=preflight()
         if args.preflight:
@@ -169,6 +172,8 @@ def main():
             return 0 if value['available'] else 2
         try:
             app=DemoApp(args.state_root).start()
+            from mycelium_a13_macos.fast_mode import bind_owner_process
+            process_settings.enter_context(bind_owner_process(app))
         except DemoError as error:
             if str(error) != 'already_running': raise
             launch=reopen_native(args.state_root)
@@ -200,6 +205,9 @@ def main():
         print(json.dumps({'event':'launcher_failed','code':public_failure_code(error),'error_type':type(error).__name__,**locus,'state_retained':True}),file=sys.stderr)
         return 3
     finally:
-        if app is not None: app.close()
+        try:
+            if app is not None: app.close()
+        finally:
+            process_settings.close()
 
 if __name__=='__main__': raise SystemExit(main())

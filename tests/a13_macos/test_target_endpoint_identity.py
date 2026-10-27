@@ -48,7 +48,7 @@ def _options(w, **changes):
     return options
 
 
-def test_work_activation_binds_native_runtime_to_joined_endpoint_key(tmp_path):
+def test_work_activation_binds_native_runtime_to_joined_endpoint_key(native_sidecar_required, tmp_path):
     with _world(tmp_path/'world') as w:
         app = _app(w)
         key = _joined_key(w)
@@ -76,7 +76,7 @@ def test_work_activation_binds_native_runtime_to_joined_endpoint_key(tmp_path):
         assert mode == 0o600
 
 
-def test_control_only_activation_uses_same_joined_endpoint_key(tmp_path):
+def test_control_only_activation_uses_same_joined_endpoint_key(native_sidecar_required, tmp_path):
     with _world(tmp_path/'world') as w:
         app = _app(w)
         key = _joined_key(w)

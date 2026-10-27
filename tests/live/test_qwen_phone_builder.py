@@ -295,7 +295,7 @@ def test_phone_identity_never_uses_ssh(evidence, monkeypatch):
     assert result[0]["boot_id"] == "inc-fixture"
 
 
-def test_native_persistent_executor_matches_committed_rust_golden(synthetic_snapshot, record_property):
+def test_native_persistent_executor_matches_committed_rust_golden(native_phone_executor_required, synthetic_snapshot, record_property):
     assert BINARY.is_file(), "Build the offline locked qwen2_stage_exec before this integration test"
     model, _ = synthetic_snapshot
     manifest = json.loads((ROOT/"native/mobile_core/tests/fixtures/qwen2_stage_manifest_v2.json").read_text())["manifest"]
@@ -313,7 +313,7 @@ def test_native_persistent_executor_matches_committed_rust_golden(synthetic_snap
     assert stage.process.poll() is not None and not stage.root.exists()
 
 
-def test_streaming_challenge_never_desktop_loads_phone(monkeypatch, synthetic_snapshot):
+def test_streaming_challenge_never_desktop_loads_phone(native_phone_executor_required, monkeypatch, synthetic_snapshot):
     """Real native middle; explicitly scripted outer stages test routing only."""
     model, _ = synthetic_snapshot
     assert BINARY.is_file()
@@ -333,7 +333,7 @@ def test_streaming_challenge_never_desktop_loads_phone(monkeypatch, synthetic_sn
     assert loaded == ["entry","final","entry","final"]
 
 
-def test_native_input_rejection_and_close(synthetic_snapshot):
+def test_native_input_rejection_and_close(native_phone_executor_required, synthetic_snapshot):
     model, _ = synthetic_snapshot
     with phone.RustStageExecutor(BINARY, model, 0, 2, hidden_size=64) as stage:
         with pytest.raises(RuntimeError, match="phone_executor_input_invalid"):

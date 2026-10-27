@@ -33,7 +33,7 @@ def request_with_deadline(app,path,method='POST',body=None,headers=None,*,deadli
     return result
 
 
-def test_work_http_exact_consent_rejections_and_native_start(tmp_path):
+def test_work_http_exact_consent_rejections_and_native_start(native_sidecar_required, tmp_path):
     app=DemoApp(tmp_path/'owner',check_platform=False).start()
     try:
         app.action('/api/create',{'consent':CONSENT})
