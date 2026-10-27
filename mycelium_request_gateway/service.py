@@ -849,13 +849,18 @@ class RequestGatewayService:
                 self._append_terminal(session, "failed", code=exc.code)
             with session.condition:
                 session.outcome = exc.code
-        except Exception:
+        except Exception as exc:
+            # Only these closed lifetime refusals may cross an exception boundary.
+            # Arbitrary backend exception text (even a safe-looking token) is private.
+            code = getattr(exc, "remote_code", None) or getattr(exc, "code", None) or str(exc)
+            if code not in {"token_path_policy_expired", "token_path_process_expired"}:
+                code = self._backend_failure_code(session.request_id)
             session.stop.set()
             self._cancel_backend_once(session)
             self._release_backend_once(session)
-            self._append_terminal(session, "failed", code="backend_failed")
+            self._append_terminal(session, "failed", code=code)
             with session.condition:
-                session.outcome = "backend_failed"
+                session.outcome = code
         finally:
             self._release_backend_once(session)
             with session.condition:

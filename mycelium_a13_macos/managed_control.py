@@ -190,7 +190,7 @@ _ACK_FIELDS = _POLL_FIELDS | frozenset(
 _TARGET_ERROR_CODES = frozenset({
     'token_path_policy_expired', 'token_path_policy_stale', 'token_path_policy_signature',
     'token_path_policy_mismatch', 'token_path_policy_unconfigured',
-    'token_path_host_pin_stale', 'token_path_host_pin_invalid',
+    'token_path_host_pin_stale', 'token_path_host_pin_invalid', 'token_path_process_expired',
     'runtime_member_stale', 'worker_membership_not_current',
 })
 

@@ -7,6 +7,7 @@ grant exists; uncertain installation is never retried as legacy inference.
 """
 import base64
 import json
+import math
 import os
 from pathlib import Path
 import threading
@@ -35,6 +36,7 @@ class ManagedRouteTokenOwner:
         self._lock = threading.RLock()
         self._policy_members = None
         self._lease_deadline = None
+        self._member_leases = {}
         self._stops = None
         self._install_started = False
         self._owners = {}
@@ -66,18 +68,36 @@ class ManagedRouteTokenOwner:
                     or member['verification_key_digest'] != key['verification_key_digest']
                     or base64.b64decode(key['verification_key'],validate=True).hex() != endpoint['endpoint_id']
                     or type(member['lease_expires_at']) not in (int,float)
-                    or member['lease_expires_at'] <= time.time()):
+                    or not math.isfinite(member['lease_expires_at'])):
                 raise RuntimeError('token_path_owner_membership_mismatch')
             members[node] = dict(node_id=node,endpoint_id=endpoint['endpoint_id'],generation=member['generation'],
                 control_endpoint_id=member['endpoint_id'],verification_key=key)
-            leases.append(member['lease_expires_at'])
+            # Translate each authenticated lease only when it changes. A wall
+            # clock rollback cannot extend an unchanged lease.
+            now = time.monotonic()
+            lease = member['lease_expires_at']
+            previous = self._member_leases.get(node)
+            if previous is None or previous[0] != lease:
+                previous = (lease, now + lease - time.time())
+                self._member_leases[node] = previous
+            if now >= previous[1] - self.uncertainty/1000:
+                raise RuntimeError('token_path_policy_expired')
+            leases.append(previous[1])
         return json.loads(canonical_json_bytes(members)), min(leases)
+
+    def _refresh_lease(self):
+        with self._lock:
+            if time.monotonic() >= self.deadline:
+                raise RuntimeError('token_path_process_expired')
+            members, lease = self._members()
+            if canonical_json_bytes(members) != self._policy_members:
+                raise RuntimeError('token_path_grant_stale')
+            self._lease_deadline = min(self.deadline, lease)
+            return self._lease_deadline
 
     def current(self):
         try:
-            members,_ = self._members()
-            return (time.monotonic() < min(self.deadline,self._lease_deadline)
-                    and canonical_json_bytes(members) == self._policy_members)
+            return time.monotonic() < self._refresh_lease()
         except Exception:
             return False
 
@@ -110,12 +130,16 @@ class ManagedRouteTokenOwner:
         with self._lock:
             r=self.route
             if r is None:raise RuntimeError('token_path_owner_route_unavailable')
+            if time.monotonic() >= self.deadline:
+                raise RuntimeError('token_path_process_expired')
             members,lease=self._members()
             stops=tuple(stop_token_ids)
             if not self._install_started:
                 now=time.monotonic()
-                self._lease_deadline=min(self.deadline,now+lease-time.time())
-                remaining=self._lease_deadline-now
+                self._lease_deadline=min(self.deadline,lease)
+                # Install once for the fixed process lifetime; every request is
+                # still clamped to current authenticated membership and its TTL.
+                remaining=self.deadline-now
                 if remaining<=0:raise RuntimeError('token_path_grant_expired')
                 policy=sign_route_policy(signer=self.signer,run_id=r._plan['run_id'],
                     deployment_id=r._plan['deployment_id'],model_digest=r._graph.manifest_digest,
@@ -130,7 +154,8 @@ class ManagedRouteTokenOwner:
                         raise RuntimeError('token_path_policy_install_mismatch')
                 self._policy_members=canonical_json_bytes(members)
                 self._stops=stops
-            if not self.current() or stops!=self._stops:
+            self._refresh_lease()
+            if stops!=self._stops:
                 raise RuntimeError('token_path_grant_stale')
 
     def prepare(self, *, command_id, request, control, manifest, participating_node_ids, stop_token_ids):
@@ -160,6 +185,6 @@ class ManagedRouteTokenOwner:
                     current=self.current,capable=lambda node:node in members,max_new_tokens=65536,
                     stop_token_ids=stops,process_deadline_monotonic_s=self.deadline,
                     lease_deadline_monotonic_s=self._lease_deadline,clock_uncertainty_ms=self.uncertainty,
-                    control_endpoint_id=members[entry]['control_endpoint_id'])
+                    control_endpoint_id=members[entry]['control_endpoint_id'],refresh_lease=self._refresh_lease)
             return self._owners[owner_key].prepare(command_id=command_id,request=request,control=control,
                 manifest=manifest,participating_node_ids=participating_node_ids,stop_token_ids=stops)

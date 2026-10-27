@@ -25,7 +25,7 @@ class OwnerTokenPath:
                  seal, current, capable, max_new_tokens, stop_token_ids,
                  process_deadline_monotonic_s, lease_deadline_monotonic_s,
                  clock_uncertainty_ms, clock=time.monotonic,
-                 unix_ms=lambda: int(time.time()*1000), control_endpoint_id=None):
+                 unix_ms=lambda: int(time.time()*1000), control_endpoint_id=None, refresh_lease=None):
         from .token_path_activation import token_path_enabled
         self.required = enabled is None and token_path_enabled()
         if enabled is None:
@@ -41,12 +41,20 @@ class OwnerTokenPath:
         self.seal, self.current, self.capable = seal, current, capable
         self.stops = tuple(stop_token_ids)
         self.clock, self.unix_ms = clock, unix_ms
-        self.deadline = min(process_deadline_monotonic_s,lease_deadline_monotonic_s)
+        self._process_deadline = process_deadline_monotonic_s
+        self._lease_deadline = lease_deadline_monotonic_s
+        self._refresh_lease = refresh_lease
         self.policy = EntryAdmissionPolicy(scope_pins=self.pins,owner_key=signer.public_key_record(),
             max_new_tokens=max_new_tokens,stop_token_ids=self.stops,
             process_deadline_monotonic_s=process_deadline_monotonic_s,
             lease_deadline_monotonic_s=lease_deadline_monotonic_s,
-            clock_uncertainty_ms=clock_uncertainty_ms,clock=clock,unix_ms=unix_ms)
+            clock_uncertainty_ms=clock_uncertainty_ms,clock=clock,unix_ms=unix_ms,
+            refresh_lease=refresh_lease)
+
+    @property
+    def deadline(self):
+        lease = self._lease_deadline if self._refresh_lease is None else self._refresh_lease()
+        return min(self._process_deadline, lease)
 
     def prepare(self, *, command_id, request, control, manifest,
                 participating_node_ids, stop_token_ids):

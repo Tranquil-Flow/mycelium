@@ -217,9 +217,11 @@ class RoutePolicyTrust:
                      'token_path_policy_mismatch')
             now = self.clock()  # Before potentially slow wall-clock/current-member sampling.
             lease = self.ceiling if self._refresh_lease is None else self._refresh_lease()
-            deadline = min(self.ceiling, lease,
+            # The signed policy/process ceiling is immutable. Only authenticated
+            # membership may refresh the separately enforced lease.
+            deadline = min(self.ceiling,
                            now + (body['expires_at_unix_ms']-self.unix_ms()-self.uncertainty)/1000)
-            _require(deadline > self.clock(), 'token_path_policy_expired')
+            _require(min(deadline, lease) > self.clock(), 'token_path_policy_expired')
             admitted = InstalledRoutePolicy(trust=self, body=body, graph=graph, peers=peers, deadline=deadline)
             _require(admitted.current(), 'token_path_policy_stale')
             admitted.check_peers()
@@ -230,7 +232,7 @@ class RoutePolicyTrust:
 class InstalledRoutePolicy:
     def __init__(self, *, trust, body, graph, peers, deadline):
         self._trust, self._body, self._graph, self._peers = trust, canonical_json_bytes(body), graph, peers
-        self.deadline_monotonic_s = deadline
+        self._policy_deadline = deadline
         self._participant = self._make_policy()
         # The target reader and native participant each need a distinct registry;
         # neither may create a fresh registry on each request.
@@ -239,8 +241,22 @@ class InstalledRoutePolicy:
     def document(self):
         return json.loads(self._body)
 
+    @property
+    def deadline_monotonic_s(self):
+        t = self._trust
+        lease = t.ceiling if t._refresh_lease is None else t._refresh_lease()
+        return min(self._policy_deadline, lease)
+
+    def _check_deadline(self):
+        _require(self._trust.clock() < self._trust.ceiling, 'token_path_process_expired')
+        _require(self._trust.clock() < self.deadline_monotonic_s, 'token_path_policy_expired')
+
     def current(self):
-        return self._trust.clock() < self.deadline_monotonic_s and self.authority_current()
+        try:
+            self._check_deadline()
+            return self.authority_current()
+        except (ValueError, OSError):
+            return False
 
     def authority_current(self):
         try:
@@ -258,7 +274,8 @@ class InstalledRoutePolicy:
                      for n, p in expected.items()), 'token_path_peer_stale')
 
     def _members(self):
-        _require(self.current(), 'token_path_policy_stale')
+        self._check_deadline()
+        _require(self.authority_current(), 'token_path_policy_stale')
         return {n: {k: v for k, v in m.items() if k != 'verification_key'} |
                 {'verification_key_digest': m['verification_key']['verification_key_digest']}
                 for n, m in self.document()['members'].items()}
@@ -270,7 +287,8 @@ class InstalledRoutePolicy:
             members=self._members, peers=self._peers, max_new_tokens=b['max_new_tokens'],
             stop_token_ids=tuple(b['stop_token_ids']), process_deadline_monotonic_s=t.ceiling,
             lease_deadline_monotonic_s=self.deadline_monotonic_s,
-            clock_uncertainty_ms=t.uncertainty, clock=t.clock, unix_ms=t.unix_ms)
+            clock_uncertainty_ms=t.uncertainty, clock=t.clock, unix_ms=t.unix_ms,
+            refresh_lease=lambda: self.deadline_monotonic_s)
 
     def participant_policy(self):
         return self._participant

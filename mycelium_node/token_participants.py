@@ -45,7 +45,7 @@ class ParticipantAdmissionPolicy:
                  max_new_tokens: int, stop_token_ids: tuple[int, ...],
                  process_deadline_monotonic_s: float, lease_deadline_monotonic_s: float,
                  clock_uncertainty_ms: int, clock=time.monotonic,
-                 unix_ms=lambda: int(time.time() * 1000)):
+                 unix_ms=lambda: int(time.time() * 1000), refresh_lease=None):
         _require(callable(members) and callable(peers), 'token_path_policy_invalid')
         self.run_id = run_id
         self.requester_id = requester_id
@@ -55,6 +55,7 @@ class ParticipantAdmissionPolicy:
         self._max_tokens, self._stops = max_new_tokens, tuple(stop_token_ids)
         self._process_deadline = process_deadline_monotonic_s
         self._lease_deadline = lease_deadline_monotonic_s
+        self._refresh_lease = refresh_lease
         self._uncertainty = clock_uncertainty_ms
         self.clock, self._unix_ms = clock, unix_ms
         self._registry = GrantRegistry()
@@ -126,6 +127,7 @@ class ParticipantAdmissionPolicy:
             max_new_tokens=budget, stop_token_ids=self._stops,
             now_unix_ms=self._unix_ms(), now_monotonic_s=now,
             process_deadline_monotonic_s=self._process_deadline,
-            lease_deadline_monotonic_s=self._lease_deadline,
+            lease_deadline_monotonic_s=(self._lease_deadline if self._refresh_lease is None
+                                        else self._refresh_lease()),
             clock_uncertainty_ms=self._uncertainty)
         return grant, authority_current

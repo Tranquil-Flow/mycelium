@@ -82,7 +82,12 @@ class TargetTokenPolicy:
             return {n:dict(p) for n,p in self._peers.items()}
 
     def before(self, command, payload):
-        if command != 'install_token_path':return
+        if command != 'install_token_path':
+            if self.installed is not None and command in {'bind_request_control', 'infer_start'}:
+                with self._lock:
+                    if self._refresh is not None:
+                        self._refresh()
+            return
         with self._lock:
             if self.graph is None or not self._peers:
                 raise TokenPathAuthorityError('token_path_policy_unconfigured')
@@ -124,4 +129,6 @@ class TargetTokenPolicy:
 
     def current(self):
         with self._lock:
+            if self.installed is not None and self._refresh is not None:
+                self._refresh()
             return self.installed is None or self.installed.authority_current()

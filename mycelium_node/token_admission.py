@@ -48,13 +48,15 @@ class EntryAdmissionPolicy:
                  process_deadline_monotonic_s: float, lease_deadline_monotonic_s: float,
                  clock_uncertainty_ms: int,
                  clock: Callable[[], float] = time.monotonic,
-                 unix_ms: Callable[[], int] = lambda: int(time.time() * 1000)):
+                 unix_ms: Callable[[], int] = lambda: int(time.time() * 1000),
+                 refresh_lease=None):
         self._pins = canonical_json_bytes(dict(scope_pins))
         self._owner_key = canonical_json_bytes(dict(owner_key))
         self._max_new_tokens = max_new_tokens
         self._stops = tuple(stop_token_ids)
         self._process_deadline = process_deadline_monotonic_s
         self._lease_deadline = lease_deadline_monotonic_s
+        self._refresh_lease = refresh_lease
         self._uncertainty = clock_uncertainty_ms
         self.clock = clock
         self._unix_ms = unix_ms
@@ -89,5 +91,6 @@ class EntryAdmissionPolicy:
             max_new_tokens=budget, stop_token_ids=self._stops,
             now_unix_ms=now_unix_ms, now_monotonic_s=now_monotonic_s,
             process_deadline_monotonic_s=self._process_deadline,
-            lease_deadline_monotonic_s=self._lease_deadline,
+            lease_deadline_monotonic_s=(self._lease_deadline if self._refresh_lease is None
+                                        else self._refresh_lease()),
             clock_uncertainty_ms=self._uncertainty)
