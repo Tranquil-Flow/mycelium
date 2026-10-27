@@ -150,9 +150,18 @@ class OwnerRun:
                     if self._state == 'serving' and self._ctx is ctx:
                         self._fail(ctx, 'serving', OwnerRunError(code).code)
                         ctx.stop_event.set()
+        return self.status_snapshot()
+
+    def status_snapshot(self) -> dict[str, Any]:
+        """Read progress only; never tick a contributor or monitor the run.
+
+        The run lock protects in-memory transitions, not chain operations.
+        Admission and maintenance retain ``status()`` and its live checks.
+        """
+        import copy
         with self._lock:
             ctx = self._ctx
-            return {
+            return copy.deepcopy({
                 'protocol': 'mycelium.a13_owner_run.v1',
                 'state': self._state, 'reason': self._reason, 'step': self._step,
                 'failed_step': self._failed_step, 'error_code': self._error,
@@ -165,7 +174,7 @@ class OwnerRun:
                 'started_at': self._started_at,
                 'route_ready': self._state == 'serving',
                 'cleanup_unproven': None if ctx is None else ctx.result.get('cleanup_unproven'),
-            }
+            })
 
     def start(self, reason: str = 'start', *, execution_ceiling: dict | None = None) -> dict[str, Any]:
         if reason not in {'start', 'rebuild'}:

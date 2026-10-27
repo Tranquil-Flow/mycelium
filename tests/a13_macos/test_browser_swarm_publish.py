@@ -36,6 +36,9 @@ def test_owner_publishes_run_and_approves_a_request(tmp_path, monkeypatch):
     try:
         app.action('/api/create', {'consent': CONSENT})
         app.swarm_publisher = SwarmPublisher(app, origin=lambda: 'http://127.0.0.1:9999')  # stub relay origin
+        # The test injects the publisher directly, not through an app action; republish the status
+        # snapshot as every completed action does, so the page's first status read already carries it.
+        app.status_publisher.refresh()
         with sync_playwright() as p:
             browser = p.chromium.launch()
             try:

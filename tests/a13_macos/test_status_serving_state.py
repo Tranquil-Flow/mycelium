@@ -21,6 +21,10 @@ class Run:
         self.calls += 1
         return dict(self.view)
 
+    def status_snapshot(self):
+        # OwnerRun's display-only interface must not tick its monitor.
+        return dict(self.view)
+
     def active(self):
         return self.view['state'] in {'running', 'serving', 'stopping', 'failing'}
 

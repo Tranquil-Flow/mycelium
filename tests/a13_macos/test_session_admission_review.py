@@ -55,6 +55,9 @@ def local_handler(tmp_path, monkeypatch):
             self.installation_role = 'owner'
         def status(self):
             return {'running': True, 'synthetic': True}
+        def read_status(self):
+            # Same inert payload through DemoApp's published-reader interface.
+            return self.status()
         def action(self, path, body):
             if path == '/api/demo/start':
                 return DemoApp.action(self, path, body)

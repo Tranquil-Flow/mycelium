@@ -440,7 +440,7 @@ def _sharing_status(app):
     """Derived Paused -> Rejoining -> Sharing (additive; never lets it break /api/status)."""
     try:
         from .sharing_state import sharing_state
-        return sharing_state(app)
+        return sharing_state(app, observe_only=True)
     except Exception:
         return {'state':'idle','line':'Not sharing yet'}
 
@@ -458,7 +458,7 @@ def _demo_status(app, part):
     """Status of the one-click demo pieces; never lets them break /api/status."""
     try:
         from . import demo_app
-        if part == 'owner': return demo_app.owner_status(app)
+        if part == 'owner': return demo_app.owner_status(app, observe_only=True)
         if part == 'target': return demo_app.target_status(app)
         from .chat import chat_status
         return chat_status(app)
@@ -540,6 +540,7 @@ class DemoApp:
         self.thread = None
         self.lock_fd = None
         self.guard = threading.RLock()
+        self.status_publisher = None
         self._pending_windows = []
         self.closed = threading.Event()
         self.running = False
@@ -626,6 +627,9 @@ class DemoApp:
             self._open_acquisition()
             self.server = _Server(('127.0.0.1', 0), _Handler)
             self.server.app = self
+            from .published_status import PublishedStatus
+            self.status_publisher = PublishedStatus(self)
+            self.status_publisher.start()
             self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
             self.thread.start()
             private_write(self.root / 'native-control.json',json.dumps({
@@ -1219,8 +1223,18 @@ class DemoApp:
             last_report=None if self.last_report is None else dict(self.last_report))
         return value
 
+    def read_status(self):
+        """Published display state only; never use for action admission."""
+        if self.status_publisher is None: raise DemoError('status_unavailable')
+        return self.status_publisher.read()
+
     def status(self):
+        # Maintenance aggregation; HTTP reads use read_status(), never this
+        # lock/I/O-bearing path or its existing refresh side effects.
         if self.closed.is_set(): raise DemoError('application_closed')
+        from .demo_app import ensure_exchange
+        try: ensure_exchange(self)
+        except Exception: pass
         value = self.authority.status()
         coordinator = getattr(self.authority, 'coordinator', None)
         if self.installation_role == 'owner' and coordinator is not None:
@@ -1253,8 +1267,8 @@ class DemoApp:
                 'test_seams_active':_test_seam_offset(self) is not None,
                 'test_seams':_test_seams.status(_test_seam_offset(self))}
 
-    def _serving_block(self,owner_run=None):
-        wait=self._relay_wait_status()
+    def _serving_block(self,owner_run=None,*,relay_wait=...):
+        wait=self._relay_wait_status() if relay_wait is ... else relay_wait
         if wait is not None:
             return {'state':'waiting_for_relay','route_ready':False,'members_joined':wait['members_joined'],
                     'next_action':'Start the public relay so the joined Macs can serve.'}
@@ -1283,10 +1297,17 @@ class DemoApp:
             choice = body['adaptive_sharing']
             if type(choice) is not bool: raise DemoError('invalid_request')
             body = {k: v for k, v in body.items() if k != 'adaptive_sharing'}
-        result = DemoApp._action(self, path, body)  # explicit: callers may pass a stand-in ``self``
-        if choice is not None:
-            from .adaptive_owner import apply_first_consent_choice
-            apply_first_consent_choice(self, choice)
+        with self.guard:
+            result = DemoApp._action(self, path, body)  # explicit: callers may pass a stand-in ``self``
+            if choice is not None:
+                from .adaptive_owner import apply_first_consent_choice
+                apply_first_consent_choice(self, choice)
+            # Publish in the action's existing critical section, before another
+            # worker can take the guard. Collection uses snapshots, not monitors;
+            # readers remain lock-free while the action/collector does work.
+            publisher = getattr(self, 'status_publisher', None)
+            if publisher is not None:
+                publisher.publish()
         return result
 
     def test_seams_enabled(self):
@@ -1773,6 +1794,8 @@ class DemoApp:
                 'report':report,'route_ready':False}
 
     def close(self):
+        publisher = self.status_publisher
+        if publisher is not None: publisher.stop()
         # Stop the one-click run first, outside the guard: its teardown drives
         # this Mac's own contributor through app.action (which takes the guard).
         if not self.closed.is_set():
@@ -1877,9 +1900,8 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_value(200,svg,content_type='image/svg+xml'); return
         if self.path == '/api/status':
             if not self.authorized(): return
-            with self.app.guard:
-                try: self.send_value(200,self.app.status())
-                except Exception: self.fail(503,'status_unavailable')
+            try: self.send_value(200,self.app.read_status())
+            except Exception: self.fail(503,'status_unavailable')
             return
         self.fail(404,'not_found')
     def chat_route(self, body):

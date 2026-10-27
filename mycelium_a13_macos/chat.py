@@ -445,11 +445,25 @@ class ChatService:
                     'seconds': seconds}
 
     def state(self) -> dict[str, Any]:
-        serving = self._serving()
+        # Display reads must not call _serving/_warming_up: those retain the
+        # live monitor for prompt admission and can drive network work.
+        publisher = getattr(self.app, 'status_publisher', None)
+        if publisher is not None and publisher._published is not None:
+            view = publisher.read()
+            run = view.get('owner_run') or {}
+            model_id = (view.get('model_contract') or {}).get('model_id')
+            rejoining = (view.get('sharing') or {}).get('state') == 'rejoining'
+        else:
+            owner = getattr(self.app, 'owner_run', None)
+            snapshot = getattr(owner, 'status_snapshot', None)
+            run = (snapshot() if snapshot is not None else owner.status()) if owner is not None else {}
+            model_id = _model_id(self.app)
+            rejoining = self._rejoining() if publisher is None else False
+        serving = run if run.get('state') == 'serving' and run.get('registry_origin') else None
         return {'available': serving is not None, 'busy': self._busy is not None,
-                'warming_up': serving is None and self._warming_up(),
-                'rejoining': serving is None and self._rejoining(),
-                'model_id': None if serving is None else _model_id(self.app),
+                'warming_up': serving is None and run.get('state') == 'running' and run.get('step') in _WARMING_STEPS,
+                'rejoining': serving is None and rejoining,
+                'model_id': None if serving is None else model_id,
                 'served_by': [] if serving is None else [
                     {'label': p.get('label'), 'node': (p.get('node_id') or '')[:12], 'layers': p.get('layers')}
                     for p in (serving.get('participants') or [])],

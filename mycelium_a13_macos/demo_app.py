@@ -133,20 +133,21 @@ def action(app: Any, path: str, body: Any) -> dict:
         raise DemoError(error.code) from None
 
 
-def owner_status(app: Any) -> dict | None:
+def owner_status(app: Any, *, observe_only: bool = False) -> dict | None:
     if app.installation_role != 'owner':
         return None
-    try:
-        ensure_exchange(app)
-    except Exception:
-        pass
+    if not observe_only:
+        try:
+            ensure_exchange(app)
+        except Exception:
+            pass
     run = getattr(app, 'owner_run', None)
     if run is None:
         from .owner_run import STEPS
         return {'state': 'idle', 'step': None, 'error_code': None, 'error_message': None, 'failed_step': None,
                 'steps': [{'name': n, 'label': l, 'state': 'pending', 'detail': None} for n, l in STEPS],
                 'participants': None, 'registry_origin': None, 'route_ready': False, 'run_id': None}
-    return run.status()
+    return run.status_snapshot() if observe_only else run.status()
 
 
 # -- joined Mac ---------------------------------------------------------------
@@ -189,7 +190,7 @@ def target_status(app: Any) -> dict | None:
     if agent is None:
         return {'state': 'joined' if membership == 'current' else 'not_joined', 'detail': None,
                 'progress': None, 'phase': None, 'run_id': None, 'model_id': None, 'local': False}
-    value = agent.status()
+    value = agent.status_snapshot()
     if value['state'] == 'idle' and membership == 'current':
         value['state'] = 'joined'
     return value

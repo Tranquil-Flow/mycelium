@@ -30,7 +30,8 @@ def route_ready(app: Any) -> bool | None:
     run = getattr(app, "owner_run", None)
     if run is not None:
         try:
-            status = run.status()
+            snapshot = getattr(run, 'status_snapshot', None)
+            status = snapshot() if snapshot is not None else run.status()
         except Exception:  # noqa: BLE001
             return False
         if not isinstance(status, dict):
@@ -42,7 +43,7 @@ def route_ready(app: Any) -> bool | None:
     return adaptive_drain.target_runtime(app) is not None
 
 
-def sharing_state(app: Any) -> dict[str, Any]:
+def sharing_state(app: Any, *, observe_only: bool = False) -> dict[str, Any]:
     controller = _controller(app)
     ready = route_ready(app)
     paused = False
@@ -52,7 +53,7 @@ def sharing_state(app: Any) -> dict[str, Any]:
     if paused:
         state = "paused"
     elif ready:
-        if controller is not None:
+        if controller is not None and not observe_only:
             controller.clear_rejoin()
         state = "sharing"
     elif ready is False and controller is not None and getattr(controller, "rejoin_pending", False):
