@@ -15,8 +15,8 @@ It is for people who want to run models with Macs they own or with people they t
 - Apple silicon Macs only. Intel Macs, Windows and Linux are not supported by this release.
 - The app has an ad-hoc Apple signature. It is not Developer ID signed or notarized. macOS approval of the installer may need an administrator.
 - Earlier testing used two developer-owned Macs on a phone hotspot with **Qwen2.5-0.5B**. It does not establish wider hardware support.
-- v0.1.4 sustained-run verification: `<<TBD: soak duration, hardware, modes, rollover and owner-restart results>>`.
-- Independent first-run verification: `<<TBD: stranger-path installation, GUI-only setup and first-chat results>>`. Do not read these pending results as a completed test.
+- Measured on 2026-10-27 on two developer-owned Apple silicon Macs, the owner Mac (macOS 26.5.1) and a joined Mac (macOS 15.6.1): a 20-minute Qwen2.5-0.5B Fast mode soak passed on the stable demo relay, with one rollover and recovery after an owner restart plus explicit Start actions. It was not uninterrupted service: one chat was refused during rollover and one during restart. No renewed consent was needed.
+- The scripted fresh-identity installation/join path completed three chats on those Macs. Model files were seeded from cache; this was not an independent human's GUI-only test or a fresh model-download test. See the [measurement scope and limitations](docs/RELEASE-NOTES-v0.1.4.md#what-was-verified).
 
 ### What changed in v0.1.4
 
@@ -36,8 +36,8 @@ A token is a small piece of text, not necessarily a whole word. Decode speed mea
 
 | Mode | Observed result | Limits of the observation |
 | --- | --- | --- |
-| Fast mode, Qwen2.5-0.5B | `<<TBD: v0.1.4 first-token time, tokens/s and measurement window>>` | v0.1.3 reached about 12.5–15.6 tokens/s in a short run before its lease-expiry failure. That is not a sustained v0.1.4 result. Fast mode cannot recover an in-flight request after a stage fails. |
-| Normal mode, fast mode off | `<<TBD: v0.1.4 first-token time, tokens/s and measurement window>>` | The earlier two-Mac public demo reached about 1.1 tokens/s. Normal mode supports recovery only when a suitable replacement is ready. |
+| Fast mode, Qwen2.5-0.5B | 2.41–2.92 s to first token; 8.8–11.7 tokens/s at the client polling boundary | Measured on the two Macs above, 2026-10-27, 16:40:53–17:00:55 UTC: six completed chats in eight scheduled attempts. Polling every 250 ms measures client token-chunk arrival, not native decode throughput. Fast mode cannot recover an in-flight request after a stage fails. |
+| Normal mode, fast mode off | Not measured for this candidate; no matched mode comparison | The earlier two-Mac public demo reached about 1.1 tokens/s. Normal mode supports recovery only when a suitable replacement is ready. |
 | Larger models | Speed not established for this release | The small-model result is not a prediction for them. |
 
 These are observations, not guarantees. More Macs do not necessarily mean faster answers: data must pass between them for every generated token.
