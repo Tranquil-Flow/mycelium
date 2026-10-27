@@ -93,6 +93,25 @@ LINK = {"path_kind": "public_https_relay", "rounds": 1, "rtt_ms_median": 30.0,
         "download_bytes": 1024, "download_bytes_per_second": 1.0}
 
 
+def test_signed_report_carries_verified_consent_caps_to_owner():
+    signer = generate_ed25519_signer(endpoint_id="mac-a")
+    caps = {'storage_bytes': 2_000_000_000, 'max_memory_bytes': 4 << 30}
+    report = signed_capability_link_report(signer=signer, node_id="remote-mac-a",
+        purpose="pre_run", generation=3, device=DEVICE, link=LINK, now=NOW, caps=caps)
+    inbox = MemberReports(lookup=lambda node: {'generation': 3, 'lifecycle_state': 'RUNNING',
+        'verification_key_digest': signer.verification_key_digest}, clock=lambda: NOW)
+    inbox.submit(report)
+    assert inbox.latest()['remote-mac-a']['caps'] == caps
+    tampered = copy.deepcopy(report)
+    tampered['caps']['storage_bytes'] *= 2
+    with pytest.raises(PairingError, match='capability_report_signature_invalid'):
+        inbox.submit(tampered)
+    for invalid in ({'storage_bytes': True}, {**caps, 'max_memory_bytes': -1}, {**caps, 'extra': 1}):
+        with pytest.raises(PairingError, match='capability_report_invalid'):
+            signed_capability_link_report(signer=signer, node_id="remote-mac-a",
+                purpose="pre_run", generation=3, device=DEVICE, link=LINK, now=NOW, caps=invalid)
+
+
 def test_signed_report_binds_identity_purpose_generation_and_expiry():
     signer = generate_ed25519_signer(endpoint_id="mac-a")
     report = signed_capability_link_report(signer=signer, node_id="remote-mac-a",

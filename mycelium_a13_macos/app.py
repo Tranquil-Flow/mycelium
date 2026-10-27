@@ -1130,7 +1130,10 @@ class DemoApp:
         peer = self.authority.peer
         link = measure_link(client.probe)
         device = observe_device(peer.state_root)
-        return peer.signed_capability_link_report(purpose=purpose, device=device, link=link)
+        from .standing_consent import planning_caps
+        caps = planning_caps(self.root)
+        return peer.signed_capability_link_report(purpose=purpose, device=device, link=link,
+                                                  caps=caps or None)
 
     def _auto_report(self, purpose, *, seed_capability=None):
         """Best-effort automatic report on join, before each run and periodically.

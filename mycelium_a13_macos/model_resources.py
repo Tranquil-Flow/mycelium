@@ -293,37 +293,41 @@ def member_resources(model: Any, split: Mapping[str, Any], *, owner_node_id: str
                      slice_mode: bool = True) -> list[dict[str, Any]]:
     """One row per member: what its share needs and the limits it runs under."""
     shape = require_shape(model)
+    return [_member_resource(model, row, owner_node_id=owner_node_id, slice_mode=slice_mode)
+            for row in _stage_rows(split, shape)]
+
+
+def _member_resource(model, row, *, owner_node_id=None, slice_mode=True):
+    """One candidate stage, shared by allocation and the final admission check."""
+    shape = require_shape(model)
     anchor = measured_anchor(model)
     factor = _resident_factor(model)
     kv_per_layer = shape.kv_bytes_per_token_per_layer(getattr(model, "runtime_dtype", None))
-    result = []
-    for row in _stage_rows(split, shape):
-        stage = row["stage_source_bytes"]
-        layers = row["end"] - row["start"]
-        resident = _ceil(stage * factor)
-        kv = layers * kv_per_layer * DEMO_CONTEXT_TOKENS
-        if anchor is not None:
-            peak, basis = anchor.group_peak_bytes, "measured"
-            disk_need = anchor.member_disk_bytes
-        else:
-            peak, basis = LOAD_PEAK_FACTOR * resident + GROUP_FIXED_BYTES + kv, "modelled"
-            disk_need = (stage + SLICE_HEADER_ALLOWANCE_BYTES if slice_mode else shape.snapshot_bytes + stage) \
-                + CONTROL_ARCHIVE_ALLOWANCE_BYTES
-        max_rss = _ceil(GUARD_HEADROOM * peak)
-        max_disk = _ceil(DISK_HEADROOM * disk_need)
-        footprint = STAGED_COPY_FACTOR * disk_need
-        if row["node_id"] == owner_node_id and slice_mode and anchor is None:
-            footprint += shape.weight_source_bytes  # owner compile emits every member's stage shards
-        memory = row["memory_bytes"]
-        result.append({
-            "node_id": row["node_id"], "start": row["start"], "end": row["end"], "layers": layers,
-            "stage_source_bytes": stage, "resident_bytes": resident, "kv_bytes": kv,
-            "load_peak_bytes": peak, "max_rss_bytes": max_rss, "disk_need_bytes": disk_need,
-            "max_disk_bytes": max_disk, "disk_footprint_bytes": footprint, "basis": basis,
-            "memory_bytes": memory,
-            "memory_ceiling_bytes": None if type(memory) is not int else member_memory_ceiling(memory),
-        })
-    return result
+    stage = row["stage_source_bytes"]
+    layers = row["end"] - row["start"]
+    resident = _ceil(stage * factor)
+    kv = layers * kv_per_layer * DEMO_CONTEXT_TOKENS
+    if anchor is not None:
+        peak, basis = anchor.group_peak_bytes, "measured"
+        disk_need = anchor.member_disk_bytes
+    else:
+        peak, basis = LOAD_PEAK_FACTOR * resident + GROUP_FIXED_BYTES + kv, "modelled"
+        disk_need = (stage + SLICE_HEADER_ALLOWANCE_BYTES if slice_mode else shape.snapshot_bytes + stage) \
+            + CONTROL_ARCHIVE_ALLOWANCE_BYTES
+    max_rss = _ceil(GUARD_HEADROOM * peak)
+    max_disk = _ceil(DISK_HEADROOM * disk_need)
+    footprint = STAGED_COPY_FACTOR * disk_need
+    if row["node_id"] == owner_node_id and slice_mode and anchor is None:
+        footprint += shape.weight_source_bytes  # owner compile emits every member's stage shards
+    memory = row["memory_bytes"]
+    return {
+        "node_id": row["node_id"], "start": row["start"], "end": row["end"], "layers": layers,
+        "stage_source_bytes": stage, "resident_bytes": resident, "kv_bytes": kv,
+        "load_peak_bytes": peak, "max_rss_bytes": max_rss, "disk_need_bytes": disk_need,
+        "max_disk_bytes": max_disk, "disk_footprint_bytes": footprint, "basis": basis,
+        "memory_bytes": memory,
+        "memory_ceiling_bytes": None if type(memory) is not int else member_memory_ceiling(memory),
+    }
 
 
 def aggregate_proposal(model: Any, members: Sequence[Mapping[str, Any]]):
@@ -509,6 +513,10 @@ def check_members(model: Any, members: Sequence[Mapping[str, Any]],
     """Refuse (by name) the first member whose RAM or free disk cannot hold its share."""
     capabilities = capabilities or {}
     for row in members:
+        caps = (capabilities.get(row["node_id"]) or {}).get("caps") or {}
+        code = check_member_caps(row, caps)
+        if code is not None:
+            raise ResourceRefused(code, row["node_id"], cap_refusal_message(code, row, caps, model=model))
         ceiling = row.get("memory_ceiling_bytes")
         if ceiling is not None and row["max_rss_bytes"] > ceiling:
             code = "member_memory_insufficient_for_share"
@@ -564,12 +572,32 @@ def work_limits_for(row: Mapping[str, Any], *, storage_bytes: int | None = None,
 # Planning helpers (UI, report, tests).
 # ---------------------------------------------------------------------------
 
+def resource_stage_check(model, capabilities, *, owner_node_id=None, slice_mode=True):
+    """Check candidate stages against known consent and physical resource bounds."""
+    def check(stage, member):
+        row = _member_resource(model, {**stage, 'stage_source_bytes': stage['stage_bytes'],
+                                      'memory_bytes': member['memory_bytes']},
+                               owner_node_id=owner_node_id, slice_mode=slice_mode)
+        try:
+            check_members(model, [row], capabilities)
+        except ResourceRefused as error:
+            # Preserve the historical physical-RAM refusal, but never mask a
+            # known consent refusal with the memory-weighting heuristic.
+            if (error.code == 'member_memory_insufficient_for_share'
+                    and stage['cost_bytes'] > stage['budget_bytes']):
+                raise SplitRefused('member_cannot_hold_share', row['node_id']) from None
+            raise
+    return check
+
+
 def plan_for_members(model: Any, members: Sequence[Mapping[str, Any]], *,
                      owner_node_id: str | None = None, slice_mode: bool = True) -> dict[str, Any]:
     """Split ``members`` (node_id, memory_bytes) for ``model`` and derive every bound."""
     shape = require_shape(model)
     split = memory_proportional_split(list(members), shape.layer_profile(),
-                                      policy_for_runtime(getattr(model, "runtime_quantization", None)))
+                                      policy_for_runtime(getattr(model, "runtime_quantization", None)),
+                                      stage_check=resource_stage_check(model, {m['node_id']: m for m in members},
+                                          owner_node_id=owner_node_id, slice_mode=slice_mode))
     rows = member_resources(model, split, owner_node_id=owner_node_id, slice_mode=slice_mode)
     return {"split": split, "members": rows, "proposal": aggregate_proposal(model, rows)}
 

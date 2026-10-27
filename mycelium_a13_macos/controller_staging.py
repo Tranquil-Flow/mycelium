@@ -22,6 +22,8 @@ class ManagedControllerStaging:
             raise ControllerError('managed_staging_mailbox_invalid')
         self.mailbox=mailbox
         self.run_id=run_id;self.deployment_id=deployment_id
+        self.stop_event=None
+        self.cleanup_progress=None
         self.members={}
         for member in members:
             copy=json.loads(json.dumps(dict(member),allow_nan=False))
@@ -30,12 +32,12 @@ class ManagedControllerStaging:
             self.members[copy['node_id']]=copy
         if not self.members:raise ControllerError('managed_staging_members_invalid')
 
-    def _offer(self,peer,archive_digest,preposition_digest):
+    def _offer(self,peer,archive_digest,preposition_digest,*,cleanup=False):
         if peer.process_transport!='managed_https' or peer.node_id not in self.members:
             raise ControllerError('managed_staging_member_invalid')
         try:
             member=self.members[peer.node_id]
-            offer=self.mailbox.pending_offer(member)
+            offer=(self.mailbox.cleanup_offer(member) if cleanup else self.mailbox.pending_offer(member))
             binding=_binding_from_member(member,self.run_id,self.deployment_id)
             if offer is None or any(offer[k]!=binding[k] for k in _BINDING_FIELDS) or (offer['archive_digest']!=archive_digest or offer.get('preposition_digest')!=preposition_digest):
                 raise ControllerError('managed_staging_offer_mismatch')
@@ -50,6 +52,13 @@ class ManagedControllerStaging:
         reader=self.mailbox.cleanup_receipt if cleanup else self.mailbox.stage_receipt
         pending='offer_cleanup_unconfirmed' if cleanup else 'offer_stage_unconfirmed'
         while True:
+            if not cleanup and self.stop_event is not None and self.stop_event.is_set():
+                raise ControllerError('managed_workflow_stopped')
+            if cleanup and self.cleanup_progress is not None:
+                # The owner thread is joining this workflow. Keep its local
+                # contributor able to acknowledge cleanup during that join.
+                try:self.cleanup_progress()
+                except Exception:pass  # Only the signed receipt below proves cleanup.
             try:return reader(offer)
             except ManagedControlError as exc:
                 if str(exc)!=pending:raise ControllerError('managed_staging_offer_unavailable') from exc
@@ -74,6 +83,6 @@ class ManagedControllerStaging:
         return self._capture(peer,self._wait(offer,cleanup=False,timeout_seconds=timeout_seconds))
 
     def cleanup(self,*,peer,archive_digest,preposition_digest,timeout_seconds):
-        offer=self._offer(peer,archive_digest,preposition_digest)
+        offer=self._offer(peer,archive_digest,preposition_digest,cleanup=True)
         self.mailbox.request_stage_cleanup(offer)
         return self._capture(peer,self._wait(offer,cleanup=True,timeout_seconds=timeout_seconds))

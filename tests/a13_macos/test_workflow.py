@@ -17,8 +17,11 @@ def _compose_publish_run_cleanup(tmp_path):
     with _world(tmp_path/'world') as w:
         authority=w['authority']
         controller,peer=setup_controller(tmp_path,w)
+        owner_stop=threading.Event()
+        cleanup_tick=lambda:None
         offers,adapter=publish_controller_offers(controller,authority=authority,
-            run_id=RUN_ID,deployment_id=DEPLOYMENT_ID)
+            run_id=RUN_ID,deployment_id=DEPLOYMENT_ID,stop_event=owner_stop,cleanup_progress=cleanup_tick)
+        assert adapter.stop_event is owner_stop and adapter.cleanup_progress is cleanup_tick
         offer=offers[peer.node_id]
         app=TargetApplication(w['target'].state_root);app.peer=w['target']
         sender=owner_channel(authority)

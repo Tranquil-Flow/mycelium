@@ -96,8 +96,9 @@ class OwnerRunConsent:
         return int(read_resource_policy(app.root)['storage_bytes'])
 
     def member_caps(self, app: Any) -> dict[str, int]:
-        """The owner's own Mac: only its storage consent caps its share."""
-        return {'storage_bytes': self.storage_cap(app)}
+        """The owner's own Mac: intersect any standing caps with its policy."""
+        from .standing_consent import planning_caps
+        return planning_caps(app.root)
 
 
 class SnapshotRangeTransport:

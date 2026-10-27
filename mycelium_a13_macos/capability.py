@@ -226,12 +226,19 @@ def _link_valid(link):
         and _finite_number(link['download_bytes_per_second']))
 
 
+def _caps_valid(caps):
+    return (isinstance(caps, dict) and bool(caps)
+            and set(caps) <= {'storage_bytes', 'max_memory_bytes'}
+            and all(type(v) is int and 0 < v <= 2**63 - 1 for v in caps.values()))
+
+
 def signed_capability_link_report(*,signer,node_id,purpose,generation,device,link,now,
-                                  ttl_seconds=REPORT_TTL_SECONDS):
+                                  ttl_seconds=REPORT_TTL_SECONDS,caps=None):
     if (purpose not in _REPORT_PURPOSES or not isinstance(node_id,str) or not _NODE.fullmatch(node_id)
             or not (generation is None or (type(generation) is int and generation>=0))
             or (purpose!='join' and generation is None)
             or not _device_valid(device) or not _link_valid(link) or not _finite_number(now)
+            or (caps is not None and not _caps_valid(caps))
             or type(ttl_seconds) is not int or not 1<=ttl_seconds<=REPORT_TTL_SECONDS):
         raise _report_error('capability_report_invalid')
     statement={'protocol':CAPABILITY_LINK_REPORT_PROTOCOL,'node_id':node_id,
@@ -240,13 +247,15 @@ def signed_capability_link_report(*,signer,node_id,purpose,generation,device,lin
         'generation':generation,'observed_at':float(now),'expires_at':float(now)+ttl_seconds,
         'device':json.loads(json.dumps(device)),'link':json.loads(json.dumps(link)),
         'independently_qualified':False}
+    if caps is not None:
+        statement['caps'] = dict(caps)
     return {**statement,'signature':signer.sign(statement)}
 
 
 def verify_capability_link_report(report,*,now,expected_key_digest,node_id,purposes=_REPORT_PURPOSES):
     from mycelium_qualification.evidence import canonical_json_bytes
     from mycelium_qualification.signing import build_ed25519_verifier
-    if (not isinstance(report,dict) or set(report)!=_REPORT_FIELDS
+    if (not isinstance(report,dict) or set(report) not in (_REPORT_FIELDS, _REPORT_FIELDS | {'caps'})
             or report.get('protocol')!=CAPABILITY_LINK_REPORT_PROTOCOL):
         raise _report_error('capability_report_invalid')
     statement={k:v for k,v in report.items() if k!='signature'}
@@ -264,6 +273,7 @@ def verify_capability_link_report(report,*,now,expected_key_digest,node_id,purpo
         raise _report_error('capability_report_signature_invalid')
     if (report['purpose'] not in purposes or report['independently_qualified'] is not False
             or not _device_valid(report['device']) or not _link_valid(report['link'])
+            or ('caps' in report and not _caps_valid(report['caps']))
             or not _finite_number(report['observed_at']) or not _finite_number(report['expires_at'])
             or not 0<report['expires_at']-report['observed_at']<=REPORT_TTL_SECONDS):
         raise _report_error('capability_report_invalid')
@@ -307,6 +317,8 @@ class MemberReports:
             if previous is None or previous['observed_at']<=statement['observed_at']:
                 self._latest[node_id]={k:statement[k] for k in (
                     'purpose','generation','observed_at','expires_at','device','link')}
+                if 'caps' in statement:
+                    self._latest[node_id]['caps'] = dict(statement['caps'])
         return {'state':'accepted','node_id':node_id}
 
     def latest(self):

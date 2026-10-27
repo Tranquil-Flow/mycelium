@@ -52,7 +52,8 @@ def _capability_rows(reports:Mapping[str,Any],node_ids:Sequence[str],*,members=N
     return rows
 
 
-def plan_member_split(capability_reports,*,model_root,model_contract=None,members=None,now=None):
+def plan_member_split(capability_reports,*,model_root,model_contract=None,members=None,now=None,
+                      owner_node_id=None,slice_mode=True):
     """Stable API: capability reports + model -> deterministic split document.
 
     ``capability_reports`` is a mapping node_id -> record or a sequence of
@@ -66,7 +67,10 @@ def plan_member_split(capability_reports,*,model_root,model_contract=None,member
     if not MIN_HOSTS<=len(node_ids)<=MAX_HOSTS:raise SplitRefused('host_count_invalid')
     rows=_capability_rows(capability_reports,node_ids,members=members,now=now)
     policy=policy_for_runtime(getattr(model_contract,'runtime_quantization',None))
-    return memory_proportional_split(rows,model_layer_profile(model_root),policy)
+    from .model_resources import model_shape, resource_stage_check
+    check = None if model_shape(model_contract) is None else resource_stage_check(
+        model_contract, capability_reports, owner_node_id=owner_node_id, slice_mode=slice_mode)
+    return memory_proportional_split(rows,model_layer_profile(model_root),policy,stage_check=check)
 
 
 def member_resource_plan(model,split,*,reports=None,owner_node_id=None,slice_mode=True):
@@ -154,18 +158,20 @@ def start_compile(app,*,acknowledged):
             raise ValueError('compiler_member_changed')
         current[m['node_id']]=record
     reports=getattr(app,'_member_capability_reports',None)
+    slice_fetch=getattr(app,'_chain_slice_fetch',False) is True
+    local=getattr(getattr(app,'local_contributor',None),'member',None)
     split=None
     if reports is not None:
         if not isinstance(reports,Mapping):raise ValueError('member_capability_report_required')
         try:
             split=plan_member_split({n:reports.get(n) for n in node_ids},
-                model_root=prepared.source_root,model_contract=prepared.model,members=current)
+                model_root=prepared.source_root,model_contract=prepared.model,members=current,
+                owner_node_id=getattr(local,'node_id',None),slice_mode=slice_fetch)
         except SplitRefused as error:
             raise _with_message(error,prepared.model)
         if [s['node_id'] for s in split['stages']]!=node_ids:raise ValueError('member_capability_report_required')
     elif len(node_ids)!=2:
         raise ValueError('member_capability_report_required')
-    slice_fetch=getattr(app,'_chain_slice_fetch',False) is True
     if slice_fetch:
         architecture=model_layer_profile(prepared.source_root).model_type
         if split is None or not slice_fetch_permitted(getattr(prepared,'source_bytes',None),architecture=architecture,

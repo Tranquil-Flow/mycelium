@@ -85,7 +85,7 @@ def owner_channel(authority: DemoAuthority) -> ManagedControlOwner:
 
 
 def publish_controller_offers(controller, *, authority, run_id, deployment_id,
-                              max_archive_bytes=32*1024*1024):
+                              max_archive_bytes=32*1024*1024, stop_event=None, cleanup_progress=None):
     """Publish exact per-peer native archives before canonical prepare/serve.
 
     Hash/size-check the entire batch before publication. HF prepositions must
@@ -105,6 +105,8 @@ def publish_controller_offers(controller, *, authority, run_id, deployment_id,
     members=[authority.coordinator.member(peer.node_id) for peer in controller.peers]
     adapter=ManagedControllerStaging(mailbox=authority.control_mailbox,
         members=members,run_id=run_id,deployment_id=deployment_id)
+    adapter.stop_event=stop_event
+    adapter.cleanup_progress=cleanup_progress
     batch=[]
     for peer,member in zip(controller.peers,members,strict=True):
         archive,_=controller._archive_identity_for_peer(peer)
@@ -168,6 +170,7 @@ class ManagedServingWorkflow:
         self.controller=controller
         self.launch=launch
         self.stop_event=threading.Event()
+        self.cleanup_progress=None
         self._lock=threading.RLock()
         self._state='prepared'
         self._offers={}
@@ -281,7 +284,8 @@ class ManagedServingWorkflow:
                     and (run.get('run_id'),run.get('deployment_id'))!=self._progress_identity[:2]):
                 raise ValueError('managed_progress_identity_changed')
             offers,adapter=publish_controller_offers(self.controller,authority=self.authority,
-                run_id=run['run_id'],deployment_id=run['deployment_id'])
+                run_id=run['run_id'],deployment_id=run['deployment_id'],
+                stop_event=self.stop_event,cleanup_progress=self.cleanup_progress)
             with self._lock:
                 self._offers=offers
                 self._state='staging'

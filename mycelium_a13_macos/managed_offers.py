@@ -121,7 +121,8 @@ class ManagedProvisioningMailbox(ManagedControlMailbox):
             _offer_valid(offer)
             with self._offer_connection() as db:
                 db.execute('BEGIN IMMEDIATE')
-                db.execute('DELETE FROM managed_stage_offers WHERE expires<=?',(now,))
+                db.execute('DELETE FROM managed_stage_offers WHERE expires<=? '
+                    'AND (cleanup_requested=0 OR cleanup_ack IS NOT NULL)',(now,))
                 self._supersede_older_identity(db,binding)
                 _require(db.execute('SELECT 1 FROM managed_stage_offers WHERE node_id=?',
                     (target['node_id'],)).fetchone() is None,'offer_already_pending')
@@ -171,7 +172,7 @@ class ManagedProvisioningMailbox(ManagedControlMailbox):
                 receipt=json.loads(previous[0])
                 _require(receipt['offer']==offer,'offer_retirement_conflict')
                 return receipt
-            _require(self._current_offer(db,offer)==offer,'offer_unavailable')
+            _require(self._current_offer(db,offer,for_cleanup=True)==offer,'offer_unavailable')
             row=db.execute('SELECT ack,cleanup_requested,cleanup_ack FROM managed_stage_offers WHERE offer_id=?',
                 (offer['offer_id'],)).fetchone()
             _require(row is not None and row[1]==1 and row[2] is not None,'offer_cleanup_unconfirmed')
@@ -185,9 +186,15 @@ class ManagedProvisioningMailbox(ManagedControlMailbox):
             db.execute('DELETE FROM managed_stage_offers WHERE offer_id=?',(offer['offer_id'],))
             return json.loads(json.dumps(receipt))
 
-    def _current_offer(self,db,binding):
-        row=db.execute('SELECT metadata FROM managed_stage_offers WHERE node_id=? AND expires>?',
-            (binding['target_node_id'],self._clock())).fetchone()
+    def _current_offer(self,db,binding,*,for_cleanup=False):
+        # Expiry prevents execution, not removal of an exact retained offer.
+        # Membership/signature checks still apply to every cleanup operation.
+        sql = 'SELECT metadata FROM managed_stage_offers WHERE node_id=?'
+        args = (binding['target_node_id'],)
+        if not for_cleanup:
+            sql += ' AND expires>?'
+            args += (self._clock(),)
+        row=db.execute(sql,args).fetchone()
         if row is None:return None
         offer=_offer_valid(json.loads(row[0]))
         for key in _BINDING_FIELDS-{'run_id','deployment_id'}:
@@ -198,6 +205,12 @@ class ManagedProvisioningMailbox(ManagedControlMailbox):
         binding=_binding_from_member(target,_DISCOVERY,_DISCOVERY)
         with self._lock, self._member_guard(binding), self._offer_connection() as db:
             return self._current_offer(db,binding)
+
+    def cleanup_offer(self,target):
+        """Owner-local lookup only; never grants staging/execution authority."""
+        binding=_binding_from_member(target,_DISCOVERY,_DISCOVERY)
+        with self._lock, self._member_guard(binding), self._offer_connection() as db:
+            return self._current_offer(db,binding,for_cleanup=True)
 
     @staticmethod
     def _stage_open(db,offer):
@@ -288,13 +301,13 @@ class ManagedProvisioningMailbox(ManagedControlMailbox):
         _offer_valid(offer)
         with self._lock,self._member_guard(offer),self._offer_connection() as db:
             db.execute('BEGIN IMMEDIATE')
-            _require(self._current_offer(db,offer)==offer,'offer_unavailable')
+            _require(self._current_offer(db,offer,for_cleanup=True)==offer,'offer_unavailable')
             db.execute('UPDATE managed_stage_offers SET cleanup_requested=1 WHERE offer_id=?',(offer['offer_id'],))
 
     def cleanup_receipt(self,offer):
         _offer_valid(offer)
         with self._lock,self._member_guard(offer),self._offer_connection() as db:
-            _require(self._current_offer(db,offer)==offer,'offer_unavailable')
+            _require(self._current_offer(db,offer,for_cleanup=True)==offer,'offer_unavailable')
             row=db.execute('SELECT cleanup_ack FROM managed_stage_offers WHERE offer_id=?',(offer['offer_id'],)).fetchone()
             _require(row is not None and row[0] is not None,'offer_cleanup_unconfirmed')
             return self._cleanup_ack(offer,json.loads(row[0]))
@@ -307,7 +320,7 @@ class ManagedProvisioningMailbox(ManagedControlMailbox):
         if offer_id is not None:_segment(offer_id)
         with self._lock,self._member_guard(statement),self._offer_connection() as db:
             db.execute('BEGIN IMMEDIATE')
-            offer=self._current_offer(db,statement);ack=None
+            offer=self._current_offer(db,statement,for_cleanup=True);ack=None
             if offer is not None:
                 row=db.execute('SELECT cleanup_requested,cleanup_ack,ack FROM managed_stage_offers WHERE offer_id=?',(offer['offer_id'],)).fetchone()
                 if not row[0]:offer=None
@@ -395,7 +408,7 @@ class ManagedOfferClient:
         actual=result['offer']
         if actual is not None:
             _offer_valid(actual)
-            _require(actual['expires_at']>client._clock() and all(actual[k]==binding[k]
+            _require(all(actual[k]==binding[k]
                 for k in _BINDING_FIELDS-{'run_id','deployment_id'}),'offer_response_invalid')
         if offer is not None:_require(actual==offer,'offer_changed')
         if result['ack'] is not None:

@@ -211,6 +211,21 @@ def standing_admission(grant: Mapping[str, Any] | None, *, binding: Mapping[str,
     return None
 
 
+def planning_caps(root) -> dict[str, int]:
+    """Known local limits for placement, never an execution authorization.
+
+    The owner can also have a standing acceptor: retain its memory cap and
+    intersect storage with the app policy, rather than treating it as uncapped.
+    """
+    from .app import read_resource_policy
+    grant = load_standing_consent(root)
+    caps = {} if grant is None else {k: grant['caps'][k] for k in ('storage_bytes', 'max_memory_bytes')}
+    policy = read_resource_policy(root) or {}
+    if type(policy.get('storage_bytes')) is int:
+        caps['storage_bytes'] = min(caps.get('storage_bytes', policy['storage_bytes']), policy['storage_bytes'])
+    return caps
+
+
 def standing_limits(grant: Mapping[str, Any], *, required: Mapping[str, Any] | None = None):
     """Worker limits under the standing caps.
 

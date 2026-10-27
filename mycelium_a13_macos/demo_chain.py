@@ -187,6 +187,10 @@ def member_capability_records(app, node_ids, *, now=None, local_device=None) -> 
             records[node] = {'memory_bytes': int(local_device['memory_bytes']),
                              'generation': coordinator.member(node)['generation'],
                              'expires_at': now + 900}
+            from .standing_consent import planning_caps
+            caps = planning_caps(app.root)
+            if caps:
+                records[node]['caps'] = caps
             if type(local_device.get('available_storage_bytes')) is int:
                 records[node]['available_storage_bytes'] = local_device['available_storage_bytes']
             continue
@@ -195,6 +199,8 @@ def member_capability_records(app, node_ids, *, now=None, local_device=None) -> 
             continue
         records[node] = {'memory_bytes': report['device'].get('memory_bytes'),
                          'generation': report.get('generation'), 'expires_at': report.get('expires_at')}
+        if isinstance(report.get('caps'), Mapping):
+            records[node]['caps'] = dict(report['caps'])
         if type(report['device'].get('available_storage_bytes')) is int:
             records[node]['available_storage_bytes'] = report['device']['available_storage_bytes']
     return records
@@ -376,26 +382,30 @@ class AppDemoChain:
         return {n: r for n, r in self._exchange().reports().items()
                 if r.get('run_id') == ctx.run_id and r.get('deployment_id') == ctx.deployment_id}
 
+    def _raise_member_refusal(self, ctx, reports):
+        # Inspect every participant before checking readiness: an earlier
+        # missing/unready report must not hide a later refusal. Older member
+        # agents report standing-acceptor resource refusals as reported/detail.
+        for node in self._participants(ctx):
+            report = reports.get(node) or {}
+            code = report.get('detail')
+            if report.get('state') != 'error' and code not in _RESOURCE_CODES:
+                continue
+            code = code or 'member_reported_error'
+            message = None
+            row = _member_row(ctx.state.get('compile_state') or {}, node)
+            if code in _RESOURCE_CODES and row is not None:
+                from .model_resources import refusal_message
+                model = getattr(ctx.state.get('prepared'), 'model', None)
+                message = refusal_message(code, row, model=model,
+                    need=row['max_rss_bytes'] if 'memory' in code else row['max_disk_bytes'])
+            raise OwnerRunError(code, message)
+
     def _all_in(self, ctx, states) -> bool:
         reports = self._reports(ctx)
+        self._raise_member_refusal(ctx, reports)
         nodes = self._participants(ctx)
-        for node in nodes:
-            r = reports.get(node)
-            if r is None:
-                return False
-            if r['state'] == 'error':
-                code = r.get('detail') or 'member_reported_error'
-                message = None
-                row = _member_row(ctx.state.get('compile_state') or {}, node)
-                if code in _RESOURCE_CODES and row is not None:
-                    from .model_resources import refusal_message
-                    model = getattr(ctx.state.get('prepared'), 'model', None)
-                    message = refusal_message(code, row, model=model,
-                                              need=row['max_rss_bytes'] if 'memory' in code else row['max_disk_bytes'])
-                raise OwnerRunError(code, message)
-            if r['state'] not in states:
-                return False
-        return bool(nodes)
+        return bool(nodes) and all((reports.get(n) or {}).get('state') in states for n in nodes)
 
     def _publish_participants(self, ctx) -> None:
         reports = self._reports(ctx)
@@ -848,6 +858,9 @@ class AppDemoChain:
 
     def _step_publish(self, ctx):
         app = self.app
+        workflow = getattr(app, '_chain_workflow', None)
+        if workflow is not None:
+            workflow.cleanup_progress = self._tick_local
         # Work can start as soon as its offer is published, before targets is entered.
         ctx.state.setdefault('execution_clock_started_at', self._monotonic())
         try:
@@ -860,6 +873,7 @@ class AppDemoChain:
         def awaiting():
             state = self._workflow_state() or {}
             self._publish_participants(ctx)
+            self._raise_member_refusal(ctx, self._reports(ctx))
             if state.get('state') == 'failed':
                 code = state.get('error_code') or 'managed_workflow_failed'
                 self._name_waiting(ctx, code)

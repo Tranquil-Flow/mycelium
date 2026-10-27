@@ -1116,7 +1116,7 @@ class RemoteMacMember:
     # -- A13 join flow helpers (pairing window / automatic report) ---------------
 
     def signed_capability_link_report(
-        self, *, purpose: str, device: Mapping[str, Any], link: Mapping[str, Any]
+        self, *, purpose: str, device: Mapping[str, Any], link: Mapping[str, Any], caps=None
     ) -> dict[str, Any]:
         """Sign one self-reported device + relay-link report with the durable key.
 
@@ -1135,7 +1135,7 @@ class RemoteMacMember:
             assert self._signer is not None
             return signed_capability_link_report(
                 signer=self._signer, node_id=self._node_id(), purpose=purpose,
-                generation=generation, device=device, link=link, now=self._clock())
+                generation=generation, device=device, link=link, now=self._clock(), caps=caps)
 
     def handoff_seed_key_digest(self, handoff: Mapping[str, Any]) -> str:
         """Recipient-decrypt a handoff WITHOUT joining, to check a join-link pin."""

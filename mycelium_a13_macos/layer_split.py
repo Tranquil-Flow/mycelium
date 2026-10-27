@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from fractions import Fraction
+from functools import lru_cache
 import hashlib
 import json
 import math
@@ -249,7 +250,7 @@ def _speeds(members: list[dict[str, Any]], policy: SplitPolicy) -> tuple[list[Fr
 
 
 def memory_proportional_split(members: Sequence[Mapping[str, Any]], profile: LayerProfile,
-                              policy: SplitPolicy = DEFAULT_POLICY) -> dict[str, Any]:
+                              policy: SplitPolicy = DEFAULT_POLICY, *, stage_check=None) -> dict[str, Any]:
     """Contiguous ranges, in the given member order, proportional to memory."""
     rows = _validated_members(members)
     count = len(rows)
@@ -283,20 +284,57 @@ def memory_proportional_split(members: Sequence[Mapping[str, Any]], profile: Lay
         boundaries.append(best)
         previous = best
     boundaries.append(profile.num_layers)
-    stages = []
-    for index, row in enumerate(rows):
-        start, end = boundaries[index], boundaries[index + 1]
-        stage = sum(layers[start:end])
+    def make_stage(index, start, end):
+        row = rows[index]
+        stage = cumulative[end] - cumulative[start]
         if index == 0:
             stage += profile.embedding_bytes
         if index == count - 1:
             stage += tail
         cost = math.ceil(stage * resident) + overhead
-        stages.append({"node_id": row["node_id"], "start": start, "end": end,
-                       "stage_bytes": stage, "cost_bytes": cost, "budget_bytes": budgets[index]})
-    for stage in stages:
-        if stage["end"] - stage["start"] < 1 or stage["cost_bytes"] > stage["budget_bytes"]:
+        return {"node_id": row["node_id"], "start": start, "end": end,
+                "stage_bytes": stage, "cost_bytes": cost, "budget_bytes": budgets[index]}
+
+    def check(index, stage):
+        # Consent guards use the actual load peak/disk derivation, not the
+        # placement cost (which is only a memory-weighting heuristic).
+        if stage_check is not None:
+            stage_check(stage, rows[index])
+        if stage["cost_bytes"] > stage["budget_bytes"]:
             raise SplitRefused("member_cannot_hold_share", stage["node_id"])
+
+    stages = [make_stage(i, boundaries[i], boundaries[i + 1]) for i in range(count)]
+    try:
+        for i, stage in enumerate(stages):
+            check(i, stage)
+    except SplitRefused as original:
+        # Search *all* feasible contiguous partitions, memoizing suffixes.
+        # Keep the old weighted choice when feasible; otherwise prefer each
+        # closest weighted boundary, with smaller boundaries breaking ties.
+        targets = [total * sum(weights[:i + 1]) / weight_total for i in range(count - 1)]
+
+        @lru_cache(maxsize=None)
+        def suffix(index, start):
+            if index == count - 1:
+                ends = [profile.num_layers]
+            else:
+                ends = sorted(range(start + 1, profile.num_layers - (count - index - 1) + 1),
+                              key=lambda end: (abs(cumulative[end] - targets[index]), end))
+            for end in ends:
+                stage = make_stage(index, start, end)
+                try:
+                    check(index, stage)
+                except SplitRefused:
+                    continue
+                rest = () if index == count - 1 else suffix(index + 1, end)
+                if rest is not None:
+                    return (stage,) + rest
+            return None
+
+        feasible = suffix(0, 0)
+        if feasible is None:
+            raise original
+        stages = list(feasible)
     document = {
         "protocol": PROTOCOL,
         "model_type": profile.model_type,
