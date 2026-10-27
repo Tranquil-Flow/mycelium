@@ -19,6 +19,7 @@ const MESSAGES = {
   token_path_process_expired:'The fast-mode worker reached the end of its allowed run. Ask the owner to press Start for a new run, then send your prompt again.',
   managed_control_expired:'A Mac’s control session expired. Ask the owner to reconnect the Macs and press Start for a new run, then send your prompt again.',
   chat_not_ready:'The swarm is not serving right now. The host starts it from the Mycelium app.',
+  chat_switching_runs:'Switching runs to respect each Mac’s time limit. Chat will return automatically; please try again shortly.',
   chat_warming_up:'Warming up: the swarm is qualifying its route. Chat opens when it is ready.',
   chat_route_not_qualified:'The route is not qualified yet (warming up). Try again in a moment.',
   route_rejoining:'Rejoining: this Mac is reconnecting its route. Try again in a few seconds.',
@@ -47,7 +48,7 @@ async function refresh() {
   try {
     state = await call('/chat/api/state');
     $('state').textContent = state.available ? `Serving ${state.model_id || ''}${state.busy ? ' · busy' : ' · ready'}`
-      : state.rejoining ? MESSAGES.chat_rejoining : state.warming_up ? MESSAGES.chat_warming_up : MESSAGES.chat_not_ready;
+      : state.switching_runs ? MESSAGES.chat_switching_runs : state.rejoining ? MESSAGES.chat_rejoining : state.warming_up ? MESSAGES.chat_warming_up : MESSAGES.chat_not_ready;
     $('served').textContent = servedText(state.served_by);
   } catch (error) { $('state').textContent = 'Cannot reach the host right now.'; state = null; }
   $('send').disabled = sending || !state || !(state.available || state.rejoining);

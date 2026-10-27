@@ -95,13 +95,16 @@ def validate_report(report: Any) -> dict[str, Any]:
     return json.loads(raw)
 
 
-_NODE_EXTRA = frozenset({'bootstrap_offer_id', 'node_slice_plan', 'work_limits', 'resources'})
+_NODE_EXTRA = frozenset({'bootstrap_offer_id', 'node_slice_plan', 'work_limits', 'resources', 'artifact_reuse_key'})
 _WORK_LIMIT_FIELDS = frozenset({'max_rss_bytes', 'max_disk_bytes', 'max_wall_seconds', 'max_commands'})
 
 
 def _check_node_extra(extra: Mapping[str, Any]) -> None:
     from .model_resources import PUBLIC_RESOURCE_FIELDS
     if not set(extra) <= _NODE_EXTRA:
+        raise ValueError('demo_announcement_invalid')
+    reuse = extra.get('artifact_reuse_key')
+    if reuse is not None and (not isinstance(reuse, str) or not re.fullmatch(r'[0-9a-f]{64}', reuse)):
         raise ValueError('demo_announcement_invalid')
     limits = extra.get('work_limits')
     if limits is not None and (not isinstance(limits, Mapping) or set(limits) != _WORK_LIMIT_FIELDS
@@ -221,6 +224,8 @@ class RunExchange:
             extra = self._per_node.get(node_id, {}) if node_id is not None else {}
         value['bootstrap_offer_id'] = extra.get('bootstrap_offer_id')
         value['node_slice_plan'] = extra.get('node_slice_plan')
+        if extra.get('artifact_reuse_key') is not None:
+            value['artifact_reuse_key'] = extra['artifact_reuse_key']
         # This member's share of the per-split resource proposal: its own worker
         # limits override the run-wide ones, and its share facts let it refuse
         # by name when its standing caps cannot hold it.

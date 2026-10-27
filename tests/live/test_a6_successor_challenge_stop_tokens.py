@@ -14,6 +14,10 @@ import time
 from tests.live import test_a6_local_physical_recovery as base
 from tests.live.test_a6_local_physical_recovery import watchdog  # noqa: F401
 
+# Importing a helper does not inherit its module's pytest marks. This scenario
+# requires the same debug sidecar as the base's real local-process scenarios.
+pytestmark = base.pytestmark
+
 
 def test_successor_challenge_ignores_product_stop_tokens(tmp_path, watchdog) -> None:  # noqa: F811
     local, owner, _router, service, target = base._compose(tmp_path, "full_replica")

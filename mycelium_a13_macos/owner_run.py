@@ -122,6 +122,11 @@ class OwnerRun:
         self._started_at: float | None = None
         self._ever_started = False
         self._rebuilding = False
+        self._session_stop = threading.Event()
+        self._rollover = {'state': 'idle', 'completed': 0, 'consecutive_failures': 0,
+                          'retry_at': None, 'last_error': None}
+        self.rollover_max_failures = 3
+        self.rollover_backoff_seconds = 5.0
 
     #: How often the serving run checks its execution ceiling on its own (nobody has to poll ``status``).
     _ceiling_poll_s = 1.0
@@ -135,6 +140,10 @@ class OwnerRun:
         with self._lock:
             ctx = self._ctx
             serving = self._state == 'serving' and ctx is not None
+        if serving:
+            self._end_at_ceiling(ctx)
+            with self._lock:
+                serving = self._state == 'serving' and self._ctx is ctx
         if serving:
             # Outside the lock: the monitor may tick this Mac's own contributor,
             # which takes the app guard (never hold both in this order).
@@ -174,6 +183,9 @@ class OwnerRun:
                 'started_at': self._started_at,
                 'route_ready': self._state == 'serving',
                 'cleanup_unproven': None if ctx is None else ctx.result.get('cleanup_unproven'),
+                'rollover': dict(self._rollover),
+                'compilation_cache_hit': None if ctx is None else ctx.result.get('compilation_cache_hit'),
+                'build_seconds': None if ctx is None else ctx.result.get('build_seconds'),
             })
 
     def start(self, reason: str = 'start', *, execution_ceiling: dict | None = None) -> dict[str, Any]:
@@ -190,6 +202,9 @@ class OwnerRun:
             ctx = RunContext(self, run_id, deployment_id, reason)
             if execution_ceiling is not None:
                 ctx.state['execution_ceiling'] = execution_ceiling
+            self._session_stop = threading.Event()
+            self._rollover = {'state': 'idle', 'completed': 0, 'consecutive_failures': 0,
+                              'retry_at': None, 'last_error': None}
             self._ctx = ctx
             self._state = 'running'
             self._steps = {name: {'state': 'pending', 'detail': None} for name in STEP_NAMES}
@@ -206,6 +221,18 @@ class OwnerRun:
         return self.status()
 
     def _end_at_ceiling(self, ctx: RunContext) -> None:
+        with self._lock:
+            if self._state != 'serving' or self._ctx is not ctx or self._session_stop.is_set():
+                return
+        due = getattr(self.chain, 'rollover_due', None)
+        if due is not None and due(ctx):
+            with self._lock:
+                if self._state == 'serving' and self._ctx is ctx and not self._session_stop.is_set():
+                    ctx.state['rollover_requested'] = True
+                    self._rollover['state'] = 'switching'
+                    self._state = 'stopping'
+                    ctx.stop_event.set()
+            return
         check = getattr(self.chain, 'ceiling_reached', None)
         if check is None:
             return
@@ -221,8 +248,9 @@ class OwnerRun:
 
     def stop(self) -> dict[str, Any]:
         with self._lock:
+            self._session_stop.set()
             ctx = self._ctx
-            if self._state in {'running', 'serving'} and ctx is not None:
+            if self._state in _ACTIVE and ctx is not None:
                 self._state = 'stopping'
                 ctx.stop_event.set()
         return self.status()
@@ -293,6 +321,59 @@ class OwnerRun:
             self._state = 'failing'
 
     def _main(self, ctx: RunContext) -> None:
+        """One session, sequential fresh runs. No recursive threads or overlapping workers."""
+        while True:
+            self._run_once(ctx)
+            with self._lock:
+                continuing = ctx.state.get('rollover_requested') or (
+                    ctx.reason == 'rollover' and not ctx.state.get('reached_serving')
+                    and self._state == 'failing')
+                if self._session_stop.is_set() or not continuing:
+                    self._rollover.update(state='idle', retry_at=None)
+                    self._state = 'failed' if self._state == 'failing' else 'stopped'
+                    return
+                fatal = None
+                if ctx.result.get('cleanup_unproven'):
+                    fatal = 'rollover_cleanup_unproven'
+                elif self._error in {'rollover_members_changed', 'rollover_model_changed'}:
+                    fatal = self._error
+                elif self._state == 'failing':
+                    self._rollover['consecutive_failures'] += 1
+                    self._rollover['last_error'] = self._error
+                    if self._rollover['consecutive_failures'] >= self.rollover_max_failures:
+                        fatal = 'rollover_failed'
+                if fatal:
+                    self._fail(ctx, self._step or 'serving', fatal)
+                    self._state = 'failed'
+                    self._rollover.update(state='failed', retry_at=None)
+                    return
+                failures = self._rollover['consecutive_failures']
+                deadline = self._clock() + (min(60.0, self.rollover_backoff_seconds * 2 ** (failures - 1))
+                                            if failures else 0.0)
+                self._state = 'running'
+                self._rollover.update(state='backoff' if failures else 'switching',
+                                      retry_at=deadline if failures else None)
+            while self._clock() < deadline and not self._session_stop.wait(self._ceiling_poll_s):
+                pass
+            with self._lock:
+                if self._session_stop.is_set():
+                    self._state = 'stopped'
+                    self._rollover.update(state='idle', retry_at=None)
+                    return
+                run_id, deployment_id = self._identities()
+                fresh = RunContext(self, run_id, deployment_id, 'rollover')
+                for key in ('execution_ceiling', 'rollover_binding'):
+                    if key in ctx.state:
+                        fresh.state[key] = ctx.state[key]
+                ctx = self._ctx = fresh
+                self._state = 'running'
+                self._reason = 'rollover'
+                self._started_at = time.time()
+                self._steps = {n: {'state': 'pending', 'detail': None} for n in STEP_NAMES}
+                self._step = self._failed_step = self._error = self._error_message = self._error_fix = None
+                self._rollover.update(state='switching', retry_at=None)
+
+    def _run_once(self, ctx: RunContext) -> None:
         failed = False
         try:
             for name in STEP_NAMES:
@@ -315,6 +396,11 @@ class OwnerRun:
             with self._lock:
                 if self._state == 'running':
                     self._state = 'serving'
+                    ctx.state['reached_serving'] = True
+                    if ctx.reason == 'rollover':
+                        self._rollover['completed'] += 1
+                        self._rollover['consecutive_failures'] = 0
+                    self._rollover.update(state='idle', retry_at=None)
             # Serving: hold until Stop (or a monitor failure sets the event).  The workers expire on their own wall
             # clocks (PV34): the run ends itself first, whether or not anything polls status.
             while not ctx.stop_event.wait(self._ceiling_poll_s):
@@ -332,7 +418,6 @@ class OwnerRun:
             try:
                 self.chain.teardown(ctx, failed=failed)
             except Exception:
-                pass
-            with self._lock:
-                if ctx is self._ctx:
-                    self._state = 'failed' if failed or self._state == 'failing' else 'stopped'
+                ctx.result['cleanup_unproven'] = {'code': 'owner_teardown_failed'}
+            # _main owns the terminal/next-run transition. Never expose an idle
+            # slot between cleanup and continuation: Start must still refuse.

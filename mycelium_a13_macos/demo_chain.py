@@ -255,6 +255,7 @@ class AppDemoChain:
                         # V1.2 D1: how long a joined Mac with a newer identity may stay not-serving before the run
                         # ends as member_restarted (its fresh agent reports every 10 s).
                         'member_restart_grace': 15.0,
+                        'rollover_margin': 120.0,
                         # V1.2 D1/D2: a Start waits this long for the previous route's close (an unproven cleanup
                         # keeps its serving thread alive until the member's commands expire).
                         'previous_close': 120.0, **(budgets or {})}
@@ -460,6 +461,11 @@ class AppDemoChain:
             raise OwnerRunError('owner_model_not_prepared', MODEL_NOT_PREPARED_MESSAGE, MODEL_NOT_PREPARED_FIX)
         source = app.acquisition.prepared_source()
         model = source.model
+        if ctx.reason == 'rollover':
+            binding = ctx.state.get('rollover_binding')
+            if not binding or binding['model'] != (model.model_id, model.resolved_commit, source.manifest_digest):
+                raise OwnerRunError('rollover_model_changed')
+            self._check_rollover_members(binding)
         slice_mode = slice_fetch_permitted(getattr(source, 'source_bytes', None), architecture=model.architecture,
                                            model=model)
         self._check_owner_storage(model)
@@ -689,6 +695,16 @@ class AppDemoChain:
         ctx.state['participants'] = sorted(c['statement']['target_node_id'] for c in cards)
         ctx.state['descriptors'] = sorted(cards, key=lambda c: c['statement']['target_node_id'])
         self._publish_participants(ctx)
+        if ctx.reason == 'rollover':
+            binding = ctx.state['rollover_binding']
+            self._check_rollover_members(binding)
+            if ctx.state['participants'] != sorted(binding['members']):
+                raise OwnerRunError('rollover_members_changed')
+        else:
+            source = ctx.state['prepared']
+            ctx.state['rollover_binding'] = {
+                'model': (source.model.model_id, source.model.resolved_commit, source.manifest_digest),
+                'members': {n: self._member_identity(n) for n in ctx.state['participants']}}
         if len(cards) < 2:
             raise OwnerRunError('two_macs_required')
 
@@ -696,7 +712,7 @@ class AppDemoChain:
         app = self.app
         cards = ctx.state['descriptors']
         try:
-            if ctx.reason == 'rebuild':
+            if ctx.reason in {'rebuild', 'rollover'}:
                 def rebuilt():
                     state = self.ops.rebuild(app, run_id=ctx.run_id, deployment_id=ctx.deployment_id,
                                              descriptors=cards)
@@ -785,7 +801,10 @@ class AppDemoChain:
                 raise OwnerRunError('execution_proposal_outside_ceiling')
         ctx.state['proposal'] = proposal
         ctx.state['compile_state'] = {'resource_plan': state.get('resource_plan'),
-                                      'epoch': state.get('epoch')}
+                                      'epoch': state.get('epoch'),
+                                      'artifact_reuse_key': state.get('artifact_reuse_key')}
+        ctx.result['compilation_cache_hit'] = state.get('compilation_cache_hit', False)
+        ctx.result['build_seconds'] = state.get('build_seconds')
         ctx.state['layers'] = {s['node_id']: [s['start'], s['end']]
                                for s in (state.get('layer_split') or {}).get('stages', [])}
         self._publish_participants(ctx)
@@ -796,7 +815,9 @@ class AppDemoChain:
         plans = getattr(workflow, 'node_slice_plans', None)
         limits = work_limits(app, ctx.state['proposal'])
         ctx.state['work_limits'] = limits
-        per_node = {n: {'node_slice_plan': plan} for n, plan in (plans or {}).items()}
+        reuse = (ctx.state.get('compile_state') or {}).get('artifact_reuse_key')
+        per_node = {n: {'node_slice_plan': plan, **({'artifact_reuse_key': reuse} if reuse else {})}
+                    for n, plan in (plans or {}).items()}
         # Per-member limits from the compiled split: each Mac runs under its own
         # share's guard and disk limit, and can refuse a share beyond its caps.
         from .app import read_resource_policy
@@ -827,6 +848,8 @@ class AppDemoChain:
 
     def _step_publish(self, ctx):
         app = self.app
+        # Work can start as soon as its offer is published, before targets is entered.
+        ctx.state.setdefault('execution_clock_started_at', self._monotonic())
         try:
             started = self.ops.start_serving(app, ctx.state['proposal'])
         except Exception as error:
@@ -1042,6 +1065,33 @@ class AppDemoChain:
     #: the run this long before ``max_wall_seconds``: the reserve plus room for the cancel-and-cleanup budget.
     EXECUTION_CEILING_LEAD_SECONDS = 30.0
 
+    def _member_identity(self, node):
+        member = self.app.authority.coordinator.member(node)
+        return tuple(member.get(k) for k in self._IDENTITY)
+
+    def _check_rollover_members(self, binding):
+        local = self.app.local_contributor.member.node_id
+        if set(binding['members']) != {local, *self._remote_members()}:
+            raise OwnerRunError('rollover_members_changed')
+        for node, identity in binding['members'].items():
+            if self._member_identity(node) != identity:
+                raise OwnerRunError('rollover_members_changed')
+
+    def rollover_due(self, ctx):
+        # A zero margin disables continuation for bounded harness runs. The
+        # independent worker wall guard is unchanged, including its reserve.
+        margin = self.budgets['rollover_margin']
+        started = ctx.state.get('execution_clock_started_at')
+        limits = [v.get('max_wall_seconds') for v in
+                  [ctx.state.get('work_limits') or {}, *[r.get('work_limits') or {}
+                   for r in (ctx.state.get('work_nodes') or {}).values()]]]
+        limits = [v for v in limits if type(v) is int and v > 0]
+        if margin <= 0 or started is None or not limits:
+            return False
+        limit = min(limits)
+        lead = min(max(self.EXECUTION_CEILING_LEAD_SECONDS, margin), limit / 2)
+        return self._monotonic() >= started + limit - lead
+
     def ceiling_reached(self, ctx):
         """``'execution_ceiling_reached'`` once the workers' wall allowance is (nearly) spent, else ``None``.
 
@@ -1140,14 +1190,15 @@ class AppDemoChain:
 
     def teardown(self, ctx, *, failed):
         app = self.app
-        if failed:
+        if failed or ctx.state.get('rollover_requested'):
             # End in-flight chats with the run's own failure code before the route is stopped under them: each
             # request finishes `cancelled` with that code instead of hanging or failing with a transport error.
             chat = getattr(app, 'chat', None)
             cancel_all = getattr(chat, 'cancel_all', None)
             if callable(cancel_all):
                 try:
-                    cancel_all(ctx.state.get('monitor_error_code') or 'owner_run_failed')
+                    cancel_all('chat_switching_runs' if ctx.state.get('rollover_requested')
+                               else ctx.state.get('monitor_error_code') or 'owner_run_failed')
                 except Exception:
                     pass
         try:
@@ -1195,10 +1246,19 @@ class AppDemoChain:
             except Exception:
                 pass
         if stop_proven and unproven is None:
+            if getattr(ctx, 'reason', None) == 'rollover' or ctx.state.get('rollover_requested'):
+                from .compile_cache import discard_retired_artifacts
+                try:
+                    discard_retired_artifacts(app.root, ctx.run_id,
+                                              getattr(app, '_chain_compilation_cache', None) or {})
+                except Exception:
+                    unproven = 'rollover_artifact_cleanup_failed'
             mailbox = getattr(getattr(app, 'authority', None), 'control_mailbox', None)
             finish = getattr(mailbox, 'finish_run', None)
             if callable(finish):
                 finish(run_id=ctx.run_id, deployment_id=ctx.deployment_id)
+        if not stop_proven:
+            unproven = unproven or 'owner_route_stop_unproven'
         if unproven is not None:
             ctx.result['cleanup_unproven'] = {'code': unproven, 'owner_lock_released': released}
         app._observation_context = None

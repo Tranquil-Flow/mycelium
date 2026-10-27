@@ -234,6 +234,11 @@ class ChatService:
     def available(self) -> bool:
         return self._serving() is not None
 
+    def _switching_runs(self) -> bool:
+        run = getattr(self.app, 'owner_run', None)
+        status = {} if run is None else run.status()
+        return (status.get('rollover') or {}).get('state') in {'switching', 'backoff'}
+
     def _warming_up(self) -> bool:
         """The owner run is activating or qualifying its route (not failed)."""
         run = getattr(self.app, 'owner_run', None)
@@ -304,6 +309,8 @@ class ChatService:
         max_new_tokens = min(wanted, MAX_NEW_TOKENS_CAP)
         serving = self._serving()
         if serving is None:
+            if self._switching_runs():
+                raise ChatError(503, 'chat_switching_runs', retry_after_s=5)
             serving = self._await_rejoin()
         if serving is None:
             raise ChatError(503, 'chat_warming_up' if self._warming_up() else 'chat_not_ready')
@@ -331,6 +338,9 @@ class ChatService:
 
     def _work(self, record, origin, prompt):
         try:
+            ended = self._run_ended_by_ceiling(record.get('run_id'))
+            if ended:
+                raise ChatError(503, ended, retry_after_s=5)
             client = self._client_factory(origin)
             with self._lock:
                 record['client'] = client
@@ -343,22 +353,22 @@ class ChatService:
                 with self._lock:
                     record['tokens'].append(text)
             result = client.stream(prompt, record['max_new_tokens'], token)
-            ended = self._run_ended_by_ceiling() if result.get('terminal') == 'failed' else None
+            ended = self._run_ended_by_ceiling(record.get('run_id')) if result.get('terminal') == 'failed' else None
             with self._lock:
                 terminal = result.get('terminal')
                 record['terminal'] = terminal
                 if terminal == 'failed':
-                    record['error'] = ended or result.get('code') or 'chat_generation_failed'
+                    record['error'] = record['cancel_reason'] or ended or result.get('code') or 'chat_generation_failed'
                 elif terminal == 'cancelled':
                     record['error'] = record['cancel_reason'] or 'chat_cancelled'
         except ChatError as error:
-            ended = self._run_ended_by_ceiling()
+            ended = self._run_ended_by_ceiling(record.get('run_id'))
             with self._lock:
                 reason = record['cancel_reason'] or ended
                 record['terminal'] = 'cancelled' if reason else 'failed'
                 record['error'] = reason or error.code
         except Exception as error:
-            ended = self._run_ended_by_ceiling()
+            ended = self._run_ended_by_ceiling(record.get('run_id'))
             with self._lock:
                 reason = record['cancel_reason'] or ended
                 record['terminal'] = 'cancelled' if reason else 'failed'
@@ -371,8 +381,8 @@ class ChatService:
                 if self._busy == record['id']:
                     self._busy = None
 
-    def _run_ended_by_ceiling(self) -> str | None:
-        """The explicit ceiling code when the owner run ended because the workers' wall allowance is spent (PV34).
+    def _run_ended_by_ceiling(self, run_id=None) -> str | None:
+        """Explain a deadline or rollover, including the admission/enqueue race.
 
         A request whose stream dies with the route must say why, not surface the route's ``request_cleanup_unproven``.
         """
@@ -381,8 +391,13 @@ class ChatService:
             status = None if run is None else run.status()
         except Exception:  # noqa: BLE001
             return None
-        if isinstance(status, dict) and status.get('error_code') == EXECUTION_CEILING_CODE:
-            return EXECUTION_CEILING_CODE
+        if isinstance(status, dict):
+            if ((status.get('rollover') or {}).get('state') in {'switching', 'backoff'}
+                    or (run_id is not None and status.get('run_id') != run_id
+                        and status.get('reason') == 'rollover')):
+                return 'chat_switching_runs'
+            if status.get('error_code') == EXECUTION_CEILING_CODE:
+                return EXECUTION_CEILING_CODE
         return None
 
     def cancel(self, request_id: Any, code: str = 'chat_cancelled') -> bool:
@@ -461,6 +476,7 @@ class ChatService:
             rejoining = self._rejoining() if publisher is None else False
         serving = run if run.get('state') == 'serving' and run.get('registry_origin') else None
         return {'available': serving is not None, 'busy': self._busy is not None,
+                'switching_runs': serving is None and (run.get('rollover') or {}).get('state') in {'switching', 'backoff'},
                 'warming_up': serving is None and run.get('state') == 'running' and run.get('step') in _WARMING_STEPS,
                 'rejoining': serving is None and rejoining,
                 'model_id': None if serving is None else model_id,

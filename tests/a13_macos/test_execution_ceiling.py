@@ -31,6 +31,8 @@ class Clock:
 def serving_run(tmp_path):
     app, ops, members, run = make(tmp_path)
     clock = Clock()
+    # Retain the hard-ceiling fallback regression separately from automatic continuation.
+    run.chain.budgets['rollover_margin'] = 0
     run.chain._monotonic = clock
     app.owner_run = run
     run.start()

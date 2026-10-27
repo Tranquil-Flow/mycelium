@@ -17,11 +17,24 @@ from test_qwen_route_builder import _topology_node, _write_topology
 from physical_inference_qualification import NodeProcessSession
 
 ROOT=Path(__file__).resolve().parents[2]
-SIDECAR=ROOT.parent/'native-target/debug/mycelium-iroh-sidecar'
+SIDECAR=ROOT/'native/iroh_transport/target/debug/mycelium-iroh-sidecar'
+if not SIDECAR.is_file():
+    SIDECAR=ROOT.parent/'native-target/debug/mycelium-iroh-sidecar'
+
+
+def _evidence_directory(xmlpath, tmp_path, mixed):
+    # JUnit is optional in a worktree. When supplied, keep durable evidence
+    # beside it, but never collide with another invocation sharing that parent.
+    parent = Path(xmlpath).resolve().parent if xmlpath else tmp_path
+    root = parent / 'runtime-emitted'
+    root.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=('mixed-' if mixed else 'desktop-'), dir=root))
 
 
 @pytest.mark.parametrize('mixed',[False,True],ids=['desktop-only','mixed-phone'])
 def test_emitted_node_full_lifecycle(tmp_path,monkeypatch,record_property,mixed,request):
+    if not SIDECAR.is_file():
+        pytest.skip('native lifecycle prerequisite absent: run tools/worktree_test_setup.sh INTEGRATION_CHECKOUT')
     assert SIDECAR.is_file(), 'source-aware native fixture build prerequisite'
     original=subprocess.run
     def no_ssh(cmd,**kw):
@@ -46,15 +59,14 @@ def test_emitted_node_full_lifecycle(tmp_path,monkeypatch,record_property,mixed,
     run=plan['controller']['run_plan'];bundle=fixture.args.output_root/'transfer-bundle'
     assert (bundle/'mycelium-runtime.zip').is_file()
     import shutil
-    evidence=Path(request.config.getoption('xmlpath')).resolve().parent/'runtime-emitted'/('mixed' if mixed else 'desktop')
-    evidence.mkdir(parents=True)
+    evidence=_evidence_directory(request.config.getoption('xmlpath'),tmp_path,mixed)
     shutil.copytree(bundle,evidence/'bundle')
     shutil.copyfile(report['operator_plan'],evidence/'operator-plan.json')
     assert len(plan['controller']['transfer_manifest']['files'])<=256
     config=run['nodes'][0]['configure']
     transcript=[]
     # The real sidecar's Unix pathname must remain under macOS's 104-byte cap.
-    with tempfile.TemporaryDirectory(prefix='brt-',dir='/tmp') as ipc:
+    with tempfile.TemporaryDirectory(prefix='brt-') as ipc:
         argv=(sys.executable,'-I',str(bundle/'physical_inference_node.py'),
             '--run-id',run['run_id'],'--deployment-id',run['deployment_id'],'--node-id','node-0',
             '--artifact-root',str(bundle),'--socket-root',str(Path(ipc)/'run'),

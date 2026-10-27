@@ -669,11 +669,16 @@ def test_target_proof_uses_assignment_control_plane_binding() -> None:
         {
             "assignment_id": "fixture-assignment",
             "node_id": "fixture-node",
+            "deployment_id": "stale-deployment",
+            "deployment_epoch": 0,
             "control_plane_binding": {"fixture": True},
         },
         {
+            # Real assignments always carry their deployment identity (physical_deployment.py).
             "assignment_id": "assignment-0",
             "node_id": "node-0",
+            "deployment_id": "deployment-0",
+            "deployment_epoch": 1,
             "control_plane_binding": binding,
         },
         {"stage_pack_digest": "sha256:" + "3" * 64},
@@ -681,6 +686,9 @@ def test_target_proof_uses_assignment_control_plane_binding() -> None:
     )
 
     assert proof["control_plane_binding"] == binding
+    # A rolled-over run rebinds the proof to the fresh assignment, as _target_report already does.
+    assert (proof["deployment_id"], proof["deployment_epoch"]) == ("deployment-0", 1)
+    assert (proof["assignment_id"], proof["node_id"]) == ("assignment-0", "node-0")
 
 
 @pytest.mark.parametrize("label", ["M8", "m8_cached", "m8/route", "8m"])

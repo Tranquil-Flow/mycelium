@@ -228,9 +228,12 @@ class DemoTargetAgent:
     def _prepare_slice_root(self, run_id: str) -> Path:
         base = self._cache_root() / 'slices'
         base.mkdir(mode=0o700, parents=True, exist_ok=True)
-        # One run's slice at a time: previous runs' slice files are ours to drop.
+        # Keep at most one verified previous slice until the new signed work
+        # announcement proves the same model/member/split/key binding. No copy.
+        cache = getattr(self.app, '_demo_slice_cache', None) or {}
+        retained = cache.get('root')
         for child in base.iterdir():
-            if child.name != run_id and child.is_dir() and not child.is_symlink():
+            if child.name != run_id and str(child) != retained and child.is_dir() and not child.is_symlink():
                 shutil.rmtree(child, ignore_errors=True)
         root = self.slice_root(run_id)
         root.mkdir(mode=0o700, exist_ok=True)
@@ -441,10 +444,16 @@ class DemoTargetAgent:
             return
         # 1. Descriptor (once per run).
         if self._descriptor_for != (run_id, deployment_id):
+            self._slice_stop.set()
+            if self._slice_thread is not None and self._slice_thread.is_alive():
+                self._set('cleaning_up')
+                return
             if not self._consent('installation_descriptor'):
                 return
             self._descriptor = self._make_descriptor(a)
             self._descriptor_for = (run_id, deployment_id)
+            self._bootstrap_done.clear()
+            self._work_done.clear()
             self._slice_result = {}
             self._slice_stop = threading.Event()
             self._set('reported')
@@ -694,6 +703,38 @@ class DemoTargetAgent:
             'archive_digest': requested['archive_digest'], 'cleanup_acknowledged': True})
         return True
 
+    def _slice_reuse_binding(self, a, node_plan):
+        import re
+        key = a.get('artifact_reuse_key')
+        if not isinstance(key, str) or not re.fullmatch(r'[0-9a-f]{64}', key):
+            return None
+        try:
+            member = self._actor().peer.staging_control_snapshot()
+            return (key, node_plan['node_plan_digest'], a.get('owner_incarnation'),
+                    tuple(member[k] for k in ('node_id', 'generation', 'incarnation',
+                                             'verification_key_digest', 'endpoint_id')))
+        except (AttributeError, KeyError, TypeError):
+            return None
+
+    def _move_cached_slice(self, root, binding):
+        cache = getattr(self.app, '_demo_slice_cache', None) or {}
+        previous = Path(cache['root']) if cache.get('root') else None
+        if previous is None or previous == root:
+            return
+        base = self._cache_root() / 'slices'
+        if previous.parent != base or previous.is_symlink() or previous.resolve() != previous.absolute():
+            self.app._demo_slice_cache = None
+            return
+        if previous.is_dir():
+            if binding is not None and cache.get('binding') == binding:
+                # New descriptor root is still empty. rename keeps one copy and
+                # the ordinary slice fetcher re-hashes every file before work.
+                root.rmdir()
+                previous.rename(root)
+            else:
+                shutil.rmtree(previous)
+        self.app._demo_slice_cache = None
+
     def _drive_slice(self, a: Mapping[str, Any], node_plan: Mapping[str, Any]) -> None:
         run_id = a['run_id']
         root = self.slice_root(run_id)
@@ -716,13 +757,17 @@ class DemoTargetAgent:
             from .acquisition import _HTTPRepositoryTransport
             transport = _HTTPRepositoryTransport()
         stop = self._slice_stop
+        binding = self._slice_reuse_binding(a, node_plan)
 
         def work():
             from .slice_acquisition import fetch_node_slice
             try:
+                self._move_cached_slice(root, binding)
                 fetch_node_slice(node_plan, expected_node_plan_digest=expected, destination_root=root,
                                  transport=transport, max_download_bytes=cap, max_disk_bytes=cap,
                                  should_stop=stop.is_set)
+                if binding is not None and not stop.is_set():
+                    self.app._demo_slice_cache = {'root': str(root), 'binding': binding}
                 self._slice_result = {'run_id': run_id}
             except Exception as error:
                 code = _code(error, 'slice_fetch_failed')

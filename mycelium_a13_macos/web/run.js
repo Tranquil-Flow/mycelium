@@ -42,7 +42,11 @@
     owner_storage_consent_below_model:'This Mac\'s storage limit is below what the selected model needs here.',
     previous_run_still_closing:'The previous route is still closing (a Mac that left it has not confirmed cleanup yet). Wait a minute and press Start again.',
     member_restarted:'A joined Mac was restarted while the demo was serving, so it left the route and the run ended. Press Start to run it again.',
-    execution_ceiling_reached:'The run reached its wall-clock limit (30 minutes), so it ended before the Macs\' workers expired. Press Start to run it again.',
+    execution_ceiling_reached:'The run ended within its consented time limit. Automatic continuation is unavailable for this run.',
+    rollover_failed:'Automatic continuation stopped after repeated failures. Check the Macs, then press Start to try again.',
+    rollover_members_changed:'Automatic continuation stopped because the participating Macs changed or left. Check the members, then press Start.',
+    rollover_model_changed:'Automatic continuation stopped because the selected model changed. Press Start to use the new model.',
+    rollover_cleanup_unproven:'Automatic continuation stopped because the previous workers could not be confirmed stopped. No replacement was started.',
     route_qualification_failed:'The route failed its startup qualification, so nothing is served. The owner log names the Mac and reason.',
   };
   function explain(code) { return ERRORS[code] ? `${ERRORS[code]} (${code})` : `Action not completed: ${String(code).replaceAll('_', ' ')} (${code}).`; }
@@ -91,13 +95,17 @@
   function renderRun(status) {
     const run = status.owner_run; if (!run) return;
     latestRunId = run.run_id;
-    const active = ['running','serving','stopping'].includes(run.state);
+    const active = ['running','serving','stopping','failing'].includes(run.state);
     $('demo-start').disabled = busy || active;
     $('demo-stop').disabled = busy || !active;
     $('demo-rebuild').disabled = busy || !run.run_id || run.state === 'stopping';
     const step = (run.steps || []).find((s) => s.name === run.step);
-    $('demo-state').textContent = run.state === 'failed' ? `Stopped at “${(run.steps.find((s) => s.name === run.failed_step) || {}).label}”: ${run.error_message ? `${run.error_message} (${run.error_code})` : explain(run.error_code)}`
-      : run.state === 'serving' ? 'Serving — open the chat below.' : run.state === 'running' ? `Running: ${step ? step.label : ''}…`
+    const switching = ['switching','backoff'].includes((run.rollover || {}).state);
+    $('demo-state').textContent = switching ? (run.rollover.state === 'backoff'
+      ? 'Switching runs — retrying after a failed restart. Stop cancels continuation.'
+      : 'Switching runs — continuing automatically within each Mac’s consented limits. Chat will return shortly.')
+      : run.state === 'failed' ? `Stopped at “${(run.steps.find((s) => s.name === run.failed_step) || {}).label}”: ${run.error_message ? `${run.error_message} (${run.error_code})` : explain(run.error_code)}`
+      : run.state === 'serving' ? 'Serving — runs continue automatically until you press Stop.' : run.state === 'running' ? `Running: ${step ? step.label : ''}…`
       : run.state === 'stopping' ? 'Stopping…' : run.state === 'stopped' ? 'Stopped.' : 'Idle.';
     if (run.state === 'failed' && run.error_fix && run.error_fix.action === 'prepare_model') pointToModelStep(run.error_fix);
     $('demo-steps').replaceChildren(...(run.steps || []).map((s) => {

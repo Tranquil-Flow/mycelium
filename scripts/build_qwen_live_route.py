@@ -677,12 +677,13 @@ def _local_challenge_checkpoint(
     preparation_authorization: Mapping[str, Any] | None,
     stage_sharding: Mapping[str, Any] | None,
     phone_challenges: Mapping[str, Any] | None = None,
+    reused: bool = False,
 ) -> dict[str, Any]:
-    """Bind the completed local decode to its exact model and assignment inputs."""
+    """Bind local expectations; cached results never claim a fresh decode."""
 
     return {
         "protocol": "mycelium.local_candidate_challenge.v1",
-        "state": "passed",
+        "state": "reused" if reused else "passed",
         "model_id": model_id,
         "resolved_commit": resolved_commit,
         "deployment_id": assignments[0]["deployment_id"],
@@ -756,6 +757,8 @@ def _target_proof(
 ) -> dict[str, Any]:
     proof = copy.deepcopy(base_proof)
     proof["assignment_id"] = assignment["assignment_id"]
+    proof["deployment_id"] = assignment["deployment_id"]
+    proof["deployment_epoch"] = assignment["deployment_epoch"]
     proof["node_id"] = assignment["node_id"]
     proof["control_plane_binding"] = copy.deepcopy(assignment["control_plane_binding"])
     proof["stage_pack_digest"] = pack["stage_pack_digest"]
@@ -1845,9 +1848,38 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
             ),
         )
 
-    prepared, stage_sharding = _prepare_model_representation(
-        args, prepare, shard_count=len(prepare_node_ids), layer_ranges=prepare_ranges
-    )
+    # Only the managed owner app supplies this bounded in-process cache. It is
+    # local compilation material, never a previous run's signed authority.
+    compilation_cache = getattr(args, "compilation_cache", None)
+    cached = cache_identity = None
+    if compilation_cache is not None:
+        if (not getattr(args, "managed_transport", False) or has_phone
+                or m13_document is not None or preparation_authorization is not None
+                or getattr(args, "reuse_stage_sharded_root", None) is not None):
+            raise RuntimeError("compilation_cache_scope_invalid")
+        from mycelium_a13_macos.compile_cache import builder_key, materialize
+        cache_identity = builder_key(args, topology, runtime_dtype, runtime_quantization, prepare_ranges)
+        cached = materialize(compilation_cache, cache_identity, deployment_root)
+    if cached is None:
+        prepared, stage_sharding = _prepare_model_representation(
+            args, prepare, shard_count=len(prepare_node_ids), layer_ranges=prepare_ranges
+        )
+    else:
+        from types import SimpleNamespace
+        from mycelium_qualification.physical_deployment import _control_plane_binding
+        local_assignments = compile_layer_assignments(
+            route_plan=cached['route'], manifest=cached['manifest'],
+            deployment_id=deployment_id, deployment_epoch=1,
+            cache_roots={n: str(deployment_root) for n in prepare_node_ids},
+            runtime_by_node={n: {'backend': runtime_backends[n], 'dtype': runtime_dtype,
+                                'quantization': runtime_quantization} for n in prepare_node_ids},
+            control_plane_binding=_control_plane_binding(deployment_id, 1))
+        prepared = SimpleNamespace(manifest=cached['manifest'], route=cached['route'],
+            assignments=local_assignments,
+            reports=[_target_report(r, a) for r, a in zip(cached['reports'], local_assignments, strict=True)])
+        stage_sharding = cached['stage_sharding']
+        if stage_sharding is not None:
+            stage_sharding = {**stage_sharding, 'emitted_root': str(deployment_root)}
 
     peers = [
         {
@@ -2002,7 +2034,11 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
             if _digest(output.astype("<f4").tobytes()) != golden["output_digest"]:
                 raise RuntimeError("phone_host_golden_mismatch")
             phone_executors[assignment["node_id"]] = executor
-    if is_m18:
+    if cached is not None:
+        base_loaded = []
+        base_proof_documents = cached['proofs']
+        report_sources = prepared.reports
+    elif is_m18:
 
         def local_fetch(
             model_id: str,
@@ -2108,7 +2144,7 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
 
     proof_documents = (
         base_proof_documents
-        if preparation_authorization is not None
+        if preparation_authorization is not None or cached is not None
         else [phone_proofs[a["node_id"]] if a["node_id"] in phone_proofs
               else json.loads(canonical_json(loaded.proof))
               for a, loaded in zip(assignments, base_loaded, strict=True)]
@@ -2169,7 +2205,9 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
         challenge_backends = [
             assignment["runtime"]["backend"] for assignment in assignments
         ]
-    if preparation_authorization is not None:
+    if cached is not None:
+        challenge_prompt, challenge_output = cached['challenge']
+    elif preparation_authorization is not None:
         challenge_prompt, challenge_output = _streaming_challenge(
             codec,
             list(prepared.assignments),
@@ -2223,6 +2261,7 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
             runtime_backends=runtime_backends,
             preparation_authorization=preparation_authorization,
             stage_sharding=stage_sharding,
+            reused=cached is not None,
             phone_challenges={node: {"build_receipt": phone_evidence[node].receipt,
                                      "steps": executor.records}
                               for node, executor in phone_executors.items()},
@@ -2520,6 +2559,16 @@ def _build(args: argparse.Namespace, resources: contextlib.ExitStack) -> dict[st
         "assignment_materializations": materializations,
         "route_ready": False,
     }
+    if compilation_cache is not None:
+        report['compilation_cache_hit'] = cached is not None
+        # Explicit provenance: only deterministic local expectations were reused;
+        # the new run still needs native load proofs and startup qualification.
+        _write_document(output_root / "compilation-cache.json", {
+            'local_expectations_reused': cached is not None, 'route_ready': False})
+        if cached is None:
+            from mycelium_a13_macos.compile_cache import remember
+            remember(compilation_cache, cache_identity, deployment_root, prepared,
+                     proof_documents, (challenge_prompt, challenge_output), stage_sharding)
     _write_document(output_root / "build-report.json", report)
     return report
 

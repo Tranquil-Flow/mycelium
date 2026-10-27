@@ -343,7 +343,7 @@ def bind_member_artifacts(controller, *, prepared, target_source_roots, slice_pl
 
 
 def prepare_serving_workflow(*, authority, channel, prepared, operator_plan,
-                             target_source_roots, slice_plan=None):
+                             target_source_roots, slice_plan=None, observation_context=None):
     """Bind a native builder result to current members and this owner's seed.
 
     Metadata/files only: no model load, publication, process or route starts.
@@ -369,6 +369,13 @@ def prepare_serving_workflow(*, authority, channel, prepared, operator_plan,
             or channel.client.signer.verification_key_digest!=authority.coordinator.signer.verification_key_digest):
         raise ValueError('managed_workflow_owner_unavailable')
     document=_read_json_object(Path(operator_plan),reason='managed_workflow_plan_invalid')
+    reused_boot_ids=None
+    if observation_context is not None:
+        from .chain_observation import ObservationContext
+        if not isinstance(observation_context,ObservationContext):
+            raise ValueError('bootstrap_observation_reuse_refused')
+        reused_boot_ids=observation_context.reuse_boot_ids(channel=channel,
+            run=document['controller']['run_plan'],peers=document['controller']['peers'])
     document['controller'],node_plans=bind_member_artifacts(document['controller'],prepared=prepared,
         target_source_roots=target_source_roots,slice_plan=slice_plan)
     coordinator=authority.coordinator
@@ -392,41 +399,43 @@ def prepare_serving_workflow(*, authority, channel, prepared, operator_plan,
     # import bug for an entire session: UnboundLocalError was reported as boot_id_observation_unavailable,
     # i.e. as though the nodes were simply not talking, so no round log ever disagreed. Only the
     # producer's own refusal is an expected condition. Anything else is a defect and must be loud.
-    observed_boot_ids=None
-    try:
-        document_peers=[peer for peer in document['controller']['peers'] if isinstance(peer,dict)]
-        pre_run=document['controller']['run_plan']
-        pre_factory=ManagedSessionFactory(owner=channel,run_id=pre_run['run_id'],
-            deployment_id=pre_run['deployment_id'],
-            members=[coordinator.member(peer['node_id']) for peer in document_peers])
-        # BOUNDED RETRY (p80r1, 2026-09-20 -- see _BOOT_ID_OBSERVATION_BUDGET_SECONDS above for the
-        # measurement). This fired once and timed out, so the peers kept the values the plan document
-        # carried; the node's identity then moved and qualification refused them. One attempt is not a
-        # measurement of the run: it is a measurement of how early the owner asked. The retry spends ONE
-        # bounded budget with backoff, and the only thing it catches is the producer's own refusal --
-        # never a programming error, which must stay loud AND loud in its own vocabulary.
-        deadline=_boot_id_observation_clock()+_BOOT_ID_OBSERVATION_BUDGET_SECONDS
-        delay=_BOOT_ID_OBSERVATION_INITIAL_RETRY_SECONDS
-        while True:
-            try:
-                observed=collect_managed_hello_observations(pre_factory,run_id=pre_run['run_id'],
-                    deployment_id=pre_run['deployment_id'],
-                    node_ids=[peer['node_id'] for peer in document_peers])
-                break
-            except ManagedObservationsError as exc:
-                if exc.code in _BOOT_ID_OBSERVATION_TERMINAL_CODES:
-                    raise  # A verdict about this run's own inputs: waiting cannot change it.
-                remaining=deadline-_boot_id_observation_clock()
-                if remaining<=0:raise  # Budget spent: the outcome is exactly today's inert default.
-                _boot_id_observation_wait(min(delay,remaining))
-                delay=min(_BOOT_ID_OBSERVATION_MAX_RETRY_SECONDS,delay*2)
-        observed_boot_ids={item['node_id']:item['boot_id'] for item in (observed.get('observations') or [])
-            if isinstance(item,dict) and isinstance(item.get('node_id'),str)
-            and isinstance(item.get('boot_id'),str) and item['boot_id']}
-        print('boot_id_observations_collected nodes=%d' % len(observed_boot_ids),flush=True)
-    except ManagedObservationsError as exc:
-        print('boot_id_observation_unavailable %r' % (exc,),flush=True)
+    observed_boot_ids=reused_boot_ids
+    if observation_context is None:
         observed_boot_ids=None
+        try:
+            document_peers=[peer for peer in document['controller']['peers'] if isinstance(peer,dict)]
+            pre_run=document['controller']['run_plan']
+            pre_factory=ManagedSessionFactory(owner=channel,run_id=pre_run['run_id'],
+                deployment_id=pre_run['deployment_id'],
+                members=[coordinator.member(peer['node_id']) for peer in document_peers])
+            # BOUNDED RETRY (p80r1, 2026-09-20 -- see _BOOT_ID_OBSERVATION_BUDGET_SECONDS above for the
+            # measurement). This fired once and timed out, so the peers kept the values the plan document
+            # carried; the node's identity then moved and qualification refused them. One attempt is not a
+            # measurement of the run: it is a measurement of how early the owner asked. The retry spends ONE
+            # bounded budget with backoff, and the only thing it catches is the producer's own refusal --
+            # never a programming error, which must stay loud AND loud in its own vocabulary.
+            deadline=_boot_id_observation_clock()+_BOOT_ID_OBSERVATION_BUDGET_SECONDS
+            delay=_BOOT_ID_OBSERVATION_INITIAL_RETRY_SECONDS
+            while True:
+                try:
+                    observed=collect_managed_hello_observations(pre_factory,run_id=pre_run['run_id'],
+                        deployment_id=pre_run['deployment_id'],
+                        node_ids=[peer['node_id'] for peer in document_peers])
+                    break
+                except ManagedObservationsError as exc:
+                    if exc.code in _BOOT_ID_OBSERVATION_TERMINAL_CODES:
+                        raise  # A verdict about this run's own inputs: waiting cannot change it.
+                    remaining=deadline-_boot_id_observation_clock()
+                    if remaining<=0:raise  # Budget spent: the outcome is exactly today's inert default.
+                    _boot_id_observation_wait(min(delay,remaining))
+                    delay=min(_BOOT_ID_OBSERVATION_MAX_RETRY_SECONDS,delay*2)
+            observed_boot_ids={item['node_id']:item['boot_id'] for item in (observed.get('observations') or [])
+                if isinstance(item,dict) and isinstance(item.get('node_id'),str)
+                and isinstance(item.get('boot_id'),str) and item['boot_id']}
+            print('boot_id_observations_collected nodes=%d' % len(observed_boot_ids),flush=True)
+        except ManagedObservationsError as exc:
+            print('boot_id_observation_unavailable %r' % (exc,),flush=True)
+            observed_boot_ids=None
     bound=bind_operator_plan_document(document,signer=coordinator.signer,
         swarm_id=coordinator.swarm_id,seed_node_id=coordinator.seed_node_id,
         members=coordinator.members(),now=time.time(),observed_boot_ids=observed_boot_ids)

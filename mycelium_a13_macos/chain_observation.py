@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Application-owned bootstrap observation before compilation or model work."""
-import io,json,tarfile
-from dataclasses import dataclass
+import io,json,tarfile,copy,time,math
+from dataclasses import dataclass,field
+
+_reuse_clock = time.time
 from .installation_descriptor import verify_installation_descriptor
 from .managed_observations import _valid_run_id,collect_managed_hello_observations
 from .session_factory import ManagedSessionFactory
@@ -26,6 +28,39 @@ class ObservationContext:
     factory:ManagedSessionFactory
     mailbox:object
     observations:dict|None=None
+    _verified_observations:dict|None=field(default=None, init=False, repr=False)
+
+    def reuse_boot_ids(self, *, channel, run, peers):
+        """Reuse only this run's native result, inside its original 600s window.
+
+        Worker retirement does not change the host's run-scoped boot identity.
+        A later host reboot still fails the unchanged live qualification hello;
+        this is metadata binding, never liveness or serving admission evidence.
+        """
+        from .managed_observations import _current_binding, _fresh_enough
+        try:
+            doc=self._verified_observations
+            now=_reuse_clock()
+            if (doc is None or doc!=self.observations or not math.isfinite(now)
+                    or self.factory.owner is not channel
+                    or run['run_id']!=self.run_id or run['deployment_id']!=self.deployment_id
+                    or doc['run_id']!=self.run_id or doc['deployment_id']!=self.deployment_id
+                    or not _fresh_enough(now,doc['captured_at_unix_ms']/1000)):
+                raise ValueError()
+            rows={r['node_id']:r for r in doc['observations']}
+            nodes={p['node_id'] for p in peers}
+            if (len(rows)!=len(doc['observations']) or len(nodes)!=len(peers)
+                    or nodes!=set(rows) or nodes!=set(self.factory._bindings)):
+                raise ValueError()
+            for peer in peers:
+                node=peer['node_id']
+                _current_binding(self.factory,node)
+                if (now>=channel.current_member(node)['lease_expires_at']
+                        or any(rows[node][k]!=peer[k] for k in ('host_id','boot_id'))):
+                    raise ValueError()
+            return {n:r['boot_id'] for n,r in rows.items()}
+        except Exception:
+            raise ValueError('bootstrap_observation_reuse_refused') from None
 
     def close(self):
         """Local only: cancels this run's owner waits and drops its flock; remote cleanup proof is not touched."""
@@ -38,6 +73,7 @@ class ObservationContext:
         if self.observations is not None:raise ValueError('observations_already_collected')
         self.observations=collect_managed_hello_observations(self.factory,run_id=self.run_id,
             deployment_id=self.deployment_id,node_ids=list(self.facts))
+        self._verified_observations=copy.deepcopy(self.observations)
         for offer in self.offers.values():self.mailbox.request_stage_cleanup(offer)
         return {'state':'observed','route_ready':False,**self.observations}
 

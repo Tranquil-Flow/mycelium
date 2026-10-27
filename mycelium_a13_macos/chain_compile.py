@@ -195,6 +195,11 @@ def start_compile(app,*,acknowledged):
             from scripts.build_qwen_live_route import build,_TOPOLOGY_FIELDS,emitted_stage_shard_root
             keys={'gossip':[app.authority.coordinator.signer.public_key_record()],
                   'load_proof':app._chain_target_keys}
+            from .compile_cache import cache_key
+            cache=getattr(app,'_chain_compilation_cache',None)
+            if cache is None:
+                cache={};app._chain_compilation_cache=cache
+            identity=cache_key(prepared,context.members,context.facts,split,keys,slice_fetch)
             template=fresh_operator_template(root/'compiled',keys)
             _atomic_private_json(root/'template.json',template)
             topology={'protocol':'mycelium.qwen_live_topology.v1','nodes':[
@@ -212,14 +217,19 @@ def start_compile(app,*,acknowledged):
                 reuse_stage_sharded_root=None,temporary_root=root/'temporary',
                 m13_control_plane=None,m14_control_plane=None,m18_control_plane=None,
                 model_preparation_authorization=None,
+                compilation_cache=cache,compilation_cache_key=identity,
                 managed_layer_ranges=None if split is None else [[s['start'],s['end']] for s in split['stages']])
+            began=time.monotonic()
             report=build(args)
+            build_seconds=time.monotonic()-began
+            cache_hit=isinstance(report,dict) and report.get('compilation_cache_hit') is True
             slice_plan=None
             if slice_fetch:
                 from .slice_acquisition import node_slice_plan
                 operator_plan=json.loads((root/'compiled/operator-plan.json').read_text('utf-8'))
                 slice_plan=compile_member_slices(operator_plan=operator_plan,
-                    shard_root=_emitted_shard_root(report,emitted_stage_shard_root(args.emit_stage_shards)),
+                    shard_root=_emitted_shard_root(report,(root/'compiled/transfer-bundle/deployment'
+                        if cache_hit else emitted_stage_shard_root(args.emit_stage_shards))),
                     prepared=prepared)
                 _atomic_private_json(root/'slice-plan.json',slice_plan)
             with app.guard:
@@ -229,6 +239,7 @@ def start_compile(app,*,acknowledged):
                 # (lane a13-demo owns workflow.py); without that support this fails closed.
                 workflow=prepare_serving_workflow(authority=app.authority,
                     channel=context.factory.owner,prepared=prepared,
+                    observation_context=context,
                     operator_plan=root/'compiled/operator-plan.json',
                     target_source_roots={node:f['source_root'] for node,f in context.facts.items()},
                     **({} if slice_plan is None else {'slice_plan':slice_plan}))
@@ -244,6 +255,8 @@ def start_compile(app,*,acknowledged):
                     physical_host_ids=workflow.launch.physical_host_ids)
                 app._chain_workflow=workflow;app._chain_approval=approval
                 state={'state':'compiled','route_ready':False,'epoch':epoch,
+                       'compilation_cache_hit':cache_hit,'build_seconds':build_seconds,
+                       'artifact_reuse_key':identity,
                        'execution_proposal':json.loads(json.dumps(asdict(approval)))}
                 if resource_plan is not None:
                     from .model_resources import public_member_resources
