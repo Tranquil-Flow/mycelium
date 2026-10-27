@@ -43,11 +43,11 @@ WATCHDOG_INTERVAL_SECONDS = 60
 WATCHDOG_FAILURES_BEFORE_RESTART = 3
 
 #: Public release page with installation steps. The checksum is for the release's
-#: mycelium-0.1.3-macos-arm64.zip asset, not the release-page HTML. Not notarized by Apple.
+#: mycelium-0.1.4-macos-arm64.zip asset, not the release-page HTML. Not notarized by Apple.
 HELPER_DOWNLOAD = {
     'available': True,
-    'url': 'https://github.com/Tranquil-Flow/mycelium/releases/tag/v0.1.3',
-    'sha256': '0acb875469e1d26a2189a6afef4822f110a71d12498e55e208e1efcf73076ace',
-    'version': '0.1.3',
+    'url': 'https://github.com/Tranquil-Flow/mycelium/releases/tag/v0.1.4',
+    'sha256': 'fce4743a7f3a2453f6621753ed3892a6cefaddf52e7a3e98fd79ba51f8930025',
+    'version': '0.1.4',
     'notarized': False,
 }

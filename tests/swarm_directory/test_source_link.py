@@ -13,9 +13,9 @@ from mycelium_swarm_directory.server import ASSETS, DirectoryServer, csp
 from mycelium_swarm_directory.store import MemoryStore
 
 SOURCE = 'https://github.com/Tranquil-Flow/mycelium'
-DOWNLOAD = {'available': True, 'url': SOURCE + '/releases/tag/v0.1.3',
-            'sha256': '0acb875469e1d26a2189a6afef4822f110a71d12498e55e208e1efcf73076ace',
-            'version': '0.1.3', 'notarized': False}
+DOWNLOAD = {'available': True, 'url': SOURCE + '/releases/tag/v0.1.4',
+            'sha256': 'fce4743a7f3a2453f6621753ed3892a6cefaddf52e7a3e98fd79ba51f8930025',
+            'version': '0.1.4', 'notarized': False}
 
 
 class Links(HTMLParser):
@@ -95,7 +95,7 @@ def test_source_offer_visible_and_keyboard_accessible_on_hash_routes(directory, 
             for route in ('browse', 'chat', 'contributing', 'owned', 'new', 'notice', 'swarm/missing'):
                 page.evaluate('(route) => { location.hash = route; }', route)
                 if route == 'contributing':
-                    download = page.get_by_role('link', name='Download Mycelium for Mac 0.1.3', exact=True)
+                    download = page.get_by_role('link', name='Download Mycelium for Mac 0.1.4', exact=True)
                     expect(download).to_be_visible()
                     expect(download).to_have_attribute('href', DOWNLOAD['url'])
                     expect(download).to_have_attribute('rel', 'noopener')
