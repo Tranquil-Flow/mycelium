@@ -190,6 +190,11 @@ const INT_MAX_STR_DIGITS: usize = 4_300;
 /// fresh runs each (workers/l1b-m16-coordinator-status-a2/evidence/oracle_recursion_measure.py
 /// and oracle_recursion_summary.json; the fixture's `recursion` record).
 const MAX_STATUS_VALUE_DEPTH: usize = 993;
+/// Where graph values sit below a status field: a placement's field (`placements[k][f]`), a
+/// request's field (`requests[k][f]`) and a request's placement id (`requests[k][f][j]`).
+const PLACEMENT_FIELD_DEPTH: usize = 2;
+const REQUEST_FIELD_DEPTH: usize = 2;
+const REQUEST_ITEM_DEPTH: usize = 3;
 /// UTF-16 high surrogates: `json.loads` joins one directly followed by a low surrogate.
 const HIGH_SURROGATES: RangeInclusive<u32> = 0xd800..=0xdbff;
 /// UTF-16 low surrogates.
@@ -466,9 +471,74 @@ fn dict(entries: Vec<(&str, PyJson)>) -> PyJson {
     )
 }
 
-/// A graph value as the Python object it is.
+/// A graph scalar as the Python object it is.
 fn json(v: &Value) -> Result<PyJson, StatusError> {
     PyJson::from_json(v).ok_or(StatusError::Python(STATUS_UNREPRESENTABLE_VALUE))
+}
+
+/// A graph value placed `depth` levels below a status field, as the Python object it is (as
+/// [`PyJson::from_json`] maps it), converted without native recursion. A node deeper than
+/// [`MAX_STATUS_VALUE_DEPTH`] is kept as None: the private walk reaches that node exactly where
+/// it reaches the original (every node before it is unchanged) and raises RecursionError there
+/// if nothing earlier refuses first, so a cut value is never returned.
+fn json_at(root: &Value, depth: usize) -> Result<PyJson, StatusError> {
+    /// An open container: its remaining children and the ones converted so far (a dict's
+    /// pending key with them).
+    enum Open<'a> {
+        List(std::slice::Iter<'a, Value>, Vec<PyJson>),
+        Dict(
+            serde_json::map::Iter<'a>,
+            Vec<(PyStr, PyJson)>,
+            Option<PyStr>,
+        ),
+    }
+    let mut stack: Vec<Open<'_>> = Vec::new();
+    let mut next = root;
+    loop {
+        let mut done = if depth + stack.len() > MAX_STATUS_VALUE_DEPTH {
+            Some(PyJson::None)
+        } else {
+            match next {
+                Value::Array(items) => {
+                    stack.push(Open::List(items.iter(), Vec::with_capacity(items.len())));
+                    None
+                }
+                Value::Object(map) => {
+                    stack.push(Open::Dict(map.iter(), Vec::with_capacity(map.len()), None));
+                    None
+                }
+                scalar => Some(json(scalar)?),
+            }
+        };
+        loop {
+            let Some(open) = stack.last_mut() else {
+                return done.ok_or(StatusError::Python(STATUS_UNREPRESENTABLE_VALUE));
+            };
+            let child = match open {
+                Open::List(rest, out) => {
+                    out.extend(done.take());
+                    rest.next()
+                }
+                Open::Dict(rest, out, key) => {
+                    if let (Some(name), Some(value)) = (key.take(), done.take()) {
+                        out.push((name, value));
+                    }
+                    rest.next().map(|(name, child)| {
+                        *key = Some(PyStr::new(name));
+                        child
+                    })
+                }
+            };
+            if let Some(child) = child {
+                next = child;
+                break;
+            }
+            done = stack.pop().map(|open| match open {
+                Open::List(_, out) => PyJson::List(out),
+                Open::Dict(_, out, _) => PyJson::Dict(out),
+            });
+        }
+    }
 }
 
 /// `float(v)`'s exception as the projection propagates it.
@@ -483,8 +553,11 @@ fn projection_error(error: PyError) -> StatusError {
 /// One `placement_status()` entry (:321-336), in its key order.
 fn placement_projection(status: &PlacementStatus) -> Result<PyJson, StatusError> {
     Ok(dict(vec![
-        ("placement_id", json(&status.placement_id)?),
-        ("node_id", json(&status.node_id)?),
+        (
+            "placement_id",
+            json_at(&status.placement_id, PLACEMENT_FIELD_DEPTH)?,
+        ),
+        ("node_id", json_at(&status.node_id, PLACEMENT_FIELD_DEPTH)?),
         (
             "memory_capacity_bytes",
             PyJson::Num(PyReal::signed(false, status.memory_capacity_bytes.clone())),
@@ -527,12 +600,12 @@ fn request_projection(inner: &Inner, record: &RequestRecord) -> Result<PyJson, S
     let candidate_placement_ids = manifest
         .ordered_hops
         .iter()
-        .map(|hop| json(&hop.placement_id))
+        .map(|hop| json_at(&hop.placement_id, REQUEST_ITEM_DEPTH))
         .collect::<Result<Vec<_>, _>>()?;
     let placement_ids = manifest
         .ordered_hops
         .iter()
-        .map(|hop| json(&hop.placement_id))
+        .map(|hop| json_at(&hop.placement_id, REQUEST_ITEM_DEPTH))
         .collect::<Result<Vec<_>, _>>()?;
     let reservation_count = inner.ledger.request_reservations(&request.request_id).len() as u64;
     let admitted_at = py_float(&request.admitted_at).map_err(projection_error)?;
@@ -547,7 +620,10 @@ fn request_projection(inner: &Inner, record: &RequestRecord) -> Result<PyJson, S
         ("path_id", text(&manifest.path_id)),
         ("path_attempt", int(manifest.path_attempt)),
         ("path_manifest_digest", text(&record.path_manifest_digest)),
-        ("topology_version", json(&manifest.topology_version)?),
+        (
+            "topology_version",
+            json_at(&manifest.topology_version, REQUEST_FIELD_DEPTH)?,
+        ),
         ("path_state", text("locked")),
         (
             "candidate_placement_ids",
@@ -614,9 +690,9 @@ impl M16RuntimeCoordinator {
         let newest = inner.requests.len().saturating_sub(bound);
         let generated_at = inner.clock.now();
         let graph = inner.graph.as_value();
-        let deployment_id = json(&graph["deployment_id"])?;
-        let deployment_epoch = json(&graph["deployment_epoch"])?;
-        let topology_version = json(&graph["topology_version"])?;
+        let deployment_id = json_at(&graph["deployment_id"], 0)?;
+        let deployment_epoch = json_at(&graph["deployment_epoch"], 0)?;
+        let topology_version = json_at(&graph["topology_version"], 0)?;
         let qos_depth = |qos: &str| {
             queued
                 .iter()
