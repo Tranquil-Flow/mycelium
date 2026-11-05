@@ -545,14 +545,14 @@ impl<M: ManagedSlot> Authority<M> {
                     })
                 })
                 .collect::<Vec<_>>();
-            if !members.is_empty() {
-                return Some(PersistedAuthority {
-                    swarm_id: record["swarm_id"].as_str()?.to_owned(),
-                    target_node_id: node,
-                    contribution_enabled: false,
-                    members,
-                });
-            }
+            // `coordinator.members()`: a running seed's rows are the membership, and none for this
+            // Mac is `unenrolled` (its own join failed: authority.py:638-664 @ f4e366e9).
+            return Some(PersistedAuthority {
+                swarm_id: record["swarm_id"].as_str()?.to_owned(),
+                target_node_id: node,
+                contribution_enabled: false,
+                members,
+            });
         }
         Some(PersistedAuthority {
             swarm_id: record["swarm_id"].as_str()?.to_owned(),
@@ -860,6 +860,47 @@ pub fn pair_accept(cell: &impl Cell, handoff_value: &Value) -> Result<Json, Publ
 pub fn membership_binding(cell: &impl Cell) -> Option<crate::member::Binding> {
     cell.with(|c| crate::peer::membership_binding(c.session.as_ref()))
 }
+/// `authority.status()` as `/api/create` reads it (app.py:1604-1608 @ f4e366e9): `None` without a
+/// swarm, else its `membership_state` and the status a current member is answered with (no
+/// `members`). A running seed's rows decide (`current`, `revoked`, `unenrolled`); with no seed
+/// running (`coordinator is None`: stopped, or its start failed) a retained membership is
+/// `retained` and none is `unenrolled` (authority.py:665-673).
+fn create_state<M: ManagedSlot>(c: &Authority<M>) -> Option<(String, Json)> {
+    let view = c.owner_authority()?;
+    let status = view.authority_status(true, now());
+    if c.seed.is_none() && c.legacy.is_none() {
+        let dir = c.root.join("authority").join("member");
+        let retained = crate::peer::load_membership_state(&dir)
+            .ok()
+            .flatten()
+            .is_some();
+        let state = if retained { "retained" } else { "unenrolled" };
+        return Some((state.into(), status));
+    }
+    let state = match status.get("membership_state") {
+        Some(Json::Str(s)) => s.clone(),
+        _ => String::new(),
+    };
+    Some((state, status))
+}
+/// `pair_request` -> `approve_pairing` -> `accept_pairing` through the swarm's own running seed
+/// (`/api/create`, app.py:1612-1622). A failure propagates and leaves the swarm, its seed and the
+/// `unenrolled` membership as they are, for a retry to re-enrol.
+fn join_own_swarm(
+    cell: &impl Cell,
+    root: &Path,
+    runtime: &SeedRuntime<impl ManagedSlot>,
+    swarm_id: &str,
+    storage: &Value,
+) -> Result<Json, PublicError> {
+    let session = owner_collapse(root, runtime, swarm_id, storage)?;
+    cell.with(|c| {
+        c.owner_session = session;
+        c.running = true;
+        Ok(c.owner_authority()
+            .map_or(Json::Null, |view| view.membership_result()))
+    })
+}
 /// The owner side of `/api/create`: the one-member swarm record (authority.create_swarm →
 /// pair_request → approve_pairing → accept_pairing collapse to "this Mac is member 1").
 pub fn create_owner_json(
@@ -867,19 +908,32 @@ pub fn create_owner_json(
     consent: &Map<String, Value>,
 ) -> Result<Json, PublicError> {
     let root = cell.with(|c| c.root.clone());
+    let storage = consent.get("storage_bytes").cloned().unwrap_or(Value::Null);
     // `current.get('swarm_created')`: a current member is answered with `authority.status()`
-    // (no `members`); anything but `unenrolled` cannot re-enrol (app.py:1604-1608)
-    if let Some(view) = cell.with(|c| c.owner_authority()) {
-        let status = view.authority_status(true, now());
-        let state = match status.get("membership_state") {
-            Some(Json::Str(s)) => s.clone(),
-            _ => String::new(),
-        };
+    // (no `members`), an `unenrolled` one joins its swarm again, anything else cannot re-enrol
+    // (app.py:1604-1611).
+    if let Some((state, status)) = cell.with(|c| create_state(c)) {
         return match state.as_str() {
             "current" => Ok(status),
             "unenrolled" => {
-                cell.with(|c| c.running = true);
-                Ok(view.membership_result())
+                let (seed, running, record) =
+                    cell.with(|c| (c.seed.clone(), c.running, c.swarm.clone()));
+                // `pair_request`: `_require_started`, then `self._coordinator is None`
+                // (authority.py:841-845).
+                let Some(runtime) = seed else {
+                    let code = if running {
+                        "authority_swarm_missing"
+                    } else {
+                        "authority_not_started"
+                    };
+                    return Err(PublicError::new(409, code).raised_by(Raised::Authority));
+                };
+                let swarm_id = record
+                    .as_ref()
+                    .and_then(|r| r["swarm_id"].as_str())
+                    .ok_or_else(failure)?
+                    .to_owned();
+                join_own_swarm(cell, &root, &runtime, &swarm_id, &storage)
             }
             _ => Err(PublicError::new(400, "membership_cannot_reenroll")),
         };
@@ -890,27 +944,15 @@ pub fn create_owner_json(
     let record = json!({"swarm_id": swarm_id, "node_id": owner_node, "created_at": now()});
     private_state::store(&root.join(SWARM_FILE), &record, cap())
         .map_err(|e| PublicError::new(409, e.0))?;
-    // `authority.create_swarm`: the seed (on the relay origin when one is configured), then the owner joins
-    // its own swarm through it (`pair_request` -> `approve_pairing` -> `accept_pairing`).
+    // `authority.create_swarm`: the metadata is the swarm from here on (`self._metadata = metadata`
+    // before `_start_runtime`; a runtime that does not start is only closed, authority.py:448-454),
+    // then the seed (on the relay origin when one is configured), then the owner joins its own
+    // swarm through it (`pair_request` -> `approve_pairing` -> `accept_pairing`).
+    cell.with(|c| c.swarm = Some(record));
     let origin = cell.with(|c| c.configured_origin.clone());
     let runtime = Arc::new(start_seed(&root, &swarm_id, origin.as_deref())?);
-    let storage = consent.get("storage_bytes").cloned().unwrap_or(Value::Null);
-    let session = match owner_collapse(&root, &runtime, &swarm_id, &storage) {
-        Ok(session) => session,
-        Err(error) => {
-            runtime.close();
-            fs::remove_file(root.join(SWARM_FILE)).unwrap_or_default();
-            return Err(error);
-        }
-    };
-    cell.with(|c| {
-        c.swarm = Some(record);
-        c.seed = Some(runtime);
-        c.owner_session = session;
-        c.running = true;
-        Ok(c.owner_authority()
-            .map_or(Json::Null, |view| view.membership_result()))
-    })
+    cell.with(|c| c.seed = Some(runtime.clone()));
+    join_own_swarm(cell, &root, &runtime, &swarm_id, &storage)
 }
 /// `authority.coordinator is not None`.
 pub fn coordinator_ready(cell: &impl Cell) -> bool {

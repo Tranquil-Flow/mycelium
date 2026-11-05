@@ -251,11 +251,11 @@ fn unplant(path: &Path) {
 /// The swarm the seed state is bound to (`seed_metadata.swarm_id` of `seed-rs/seed.sqlite`, the
 /// identity `bind_identity` refuses to change: `seed_state_identity_mismatch`).
 fn seed_swarm_id(root: &Path) -> Value {
-    let seed = rusqlite::Connection::open_with_flags(
-        root.join("seed-rs/seed.sqlite"),
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .unwrap();
+    let database = root.join("seed-rs/seed.sqlite");
+    assert!(database.is_file(), "the seed state was removed");
+    let seed =
+        rusqlite::Connection::open_with_flags(database, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap();
     let id: String = seed
         .query_row(
             "SELECT value FROM seed_metadata WHERE key = 'swarm_id'",
