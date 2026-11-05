@@ -11,8 +11,11 @@
 //!
 //! The document is a [`PyJson`]: the Python value `status()` returns, after the validator's
 //! `json.loads(json.dumps(document, sort_keys=True, allow_nan=False))` round trip, so every
-//! dict's keys are in code-point order, ints stay ints (of any size), floats keep their bits and
-//! `-0.0`, and bools stay bools. The status is built in the oracle's order: the queued records,
+//! dict's items follow its original keys' code-point order, ints stay ints (of any size), floats
+//! keep their bits and `-0.0`, bools stay bools, and each str is what `json.loads` reads back
+//! from its `\uXXXX` escapes: a high surrogate directly followed by a low one becomes the one
+//! code point they encode (in values and keys; keys that then coincide keep the first one's
+//! place and the last one's value), every other surrogate stays. The status is built in the oracle's order: the queued records,
 //! the newest `_MAX_STATUS_REQUESTS` records, then the dict literal, whose one clock read
 //! (`generated_at_monotonic_s`) precedes the ledger's `placement_status()` (an exception there
 //! propagates after the read) and the projections (a `float(request.admitted_at)` OverflowError
@@ -41,9 +44,15 @@
 //! limits (RU-001, tagged V03):
 //! - Request ids are Rust `String`s, so none holds a lone surrogate, which the oracle would
 //!   project (the gateway's ids are validated, mycelium_request_gateway/contracts.py:35-36).
-//! - A nesting deeper than CPython's recursion limit (`_reject_private` / `_finite` raise
-//!   RecursionError) is not modelled: graph values come from serde_json (depth 128 at most) and
-//!   a budget's shape is closed (two levels).
+//! - RecursionError: `_reject_private` / `_finite` recurse in Python and raise it, outside the
+//!   JSON-safe handler, for a value nested deeper than CPython's recursion limit allows; the
+//!   port raises [`StatusValidationError::Recursion`] at the same point of its walk for a node
+//!   more than [`MAX_STATUS_VALUE_DEPTH`] below a top-level field, the oracle's depth when the
+//!   validator is called from a fresh top-level interpreter. CPython's real boundary also
+//!   depends on its caller's stack and isinstance caches: on the oracle's producer path
+//!   (`build_live_m16_runtime`, then `status()`, from a fresh top level) it raises from depth
+//!   989, so from 989 to 993 the port accepts what that path refuses (a declared, stack-dependent
+//!   difference; workers/l1b-m16-coordinator-status-a2/evidence/oracle_recursion_summary.json).
 //! - An int past CPython's 4,300-digit `str()` limit is refused by the round trip
 //!   (`json.dumps` raises ValueError: "M16 runtime status is not JSON-safe"), as the oracle's
 //!   validator refuses it; the oracle's `json.loads` already refuses such a graph text.
@@ -55,7 +64,8 @@ use crate::m16_router_contracts::{
 };
 use budgets::BudgetId;
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ops::RangeInclusive;
 
 /// :37 `PROTOCOL`.
 pub const STATUS_PROTOCOL: &str = "mycelium.concurrent_request_runtime.v1";
@@ -172,6 +182,20 @@ const MILLISECONDS_PER_SECOND: f64 = 1_000.0;
 /// CPython 3.14 `sys.int_info.default_max_str_digits`: `json.dumps` of an int with more decimal
 /// digits raises ValueError ("Exceeds the limit (4300 digits) for integer string conversion").
 const INT_MAX_STR_DIGITS: usize = 4_300;
+/// The deepest node `_reject_private` and `_finite` (:1043-1062, one Python call per level) reach
+/// without RecursionError, counted from a top-level field's value (depth 0), measured on the
+/// oracle under CPython 3.14.2's default recursion limit (1,000) with
+/// `validate_m16_runtime_status` called from a fresh interpreter's top level: `claim_boundary`
+/// inside 993 lists or one-key dicts passes and inside 994 raises, for every leaf, in three
+/// fresh runs each (workers/l1b-m16-coordinator-status-a2/evidence/oracle_recursion_measure.py
+/// and oracle_recursion_summary.json; the fixture's `recursion` record).
+const MAX_STATUS_VALUE_DEPTH: usize = 993;
+/// UTF-16 high surrogates: `json.loads` joins one directly followed by a low surrogate.
+const HIGH_SURROGATES: RangeInclusive<u32> = 0xd800..=0xdbff;
+/// UTF-16 low surrogates.
+const LOW_SURROGATES: RangeInclusive<u32> = 0xdc00..=0xdfff;
+/// The first supplementary code point, which a high and low surrogate pair offsets from.
+const SUPPLEMENTARY_BASE: u32 = 0x1_0000;
 /// :636.
 const BATCH_MODE: &str = "concurrent_request_sequential_stage_dispatch";
 /// :643-646.
@@ -247,6 +271,10 @@ pub enum StatusValidationError {
     PrivateContent,
     /// :1054-1062 a NaN or infinite float, at any depth.
     NonFinite,
+    /// :1043-1062 RecursionError("maximum recursion depth exceeded"): the private walk (:1155,
+    /// outside the JSON-safe handler) reached a node deeper than the oracle's measured depth
+    /// (993 nested containers below a top-level field; `MAX_STATUS_VALUE_DEPTH`).
+    Recursion,
     /// :1156-1159 `json.dumps` refused the document (an int past 4,300 digits).
     NotJsonSafe,
     /// A budget's `float(int)` OverflowError, which :1152 does not catch.
@@ -266,16 +294,19 @@ impl StatusValidationError {
             Self::BudgetShape => "m16_runtime_status_budget_shape_invalid",
             Self::PrivateContent => "m16_runtime_status_private_content",
             Self::NonFinite => "m16_runtime_status_non_finite_value",
+            Self::Recursion => "m16_runtime_status_recursion_error",
             Self::NotJsonSafe => "m16_runtime_status_not_json_safe",
             Self::BudgetIntTooLargeForFloat => "m16_runtime_status_budget_int_too_large_for_float",
             Self::PolicyUnavailable => POLICY_UNAVAILABLE.0,
         }
     }
 
-    /// The Python exception kind: `value` (ValueError), `overflow` (OverflowError) or `config`.
+    /// The Python exception kind: `value` (ValueError), `overflow` (OverflowError), `recursion`
+    /// (RecursionError) or `config`.
     pub fn kind(&self) -> &'static str {
         match self {
             Self::BudgetIntTooLargeForFloat => "overflow",
+            Self::Recursion => "recursion",
             Self::PolicyUnavailable => "config",
             _ => "value",
         }
@@ -291,6 +322,7 @@ impl StatusValidationError {
             Self::BudgetShape => "M16 runtime status budget shape is invalid",
             Self::PrivateContent => "M16 runtime status contains private content",
             Self::NonFinite => "M16 runtime status contains non-finite value",
+            Self::Recursion => "maximum recursion depth exceeded",
             Self::NotJsonSafe => "M16 runtime status is not JSON-safe",
             Self::BudgetIntTooLargeForFloat => "int too large to convert to float",
             Self::PolicyUnavailable => POLICY_UNAVAILABLE.0,
@@ -721,41 +753,89 @@ fn records_of(v: Option<&PyJson>, maximum: usize, names: &[&str]) -> bool {
     })
 }
 
-/// :1043-1051 `_reject_private`: a mapping's keys first, then its values in order; list items
-/// in order.
-fn reject_private(v: &PyJson) -> Result<(), StatusValidationError> {
+/// :1043-1051 `_reject_private` of a value `depth` levels below a top-level field: a node deeper
+/// than [`MAX_STATUS_VALUE_DEPTH`] raises RecursionError where the oracle's recursion reaches
+/// it; a mapping's keys first, then its values in order; list items in order.
+fn reject_private(v: &PyJson, depth: usize) -> Result<(), StatusValidationError> {
+    if depth > MAX_STATUS_VALUE_DEPTH {
+        return Err(StatusValidationError::Recursion);
+    }
     match v {
         PyJson::Dict(entries) => {
-            if entries
-                .iter()
-                .any(|(key, _)| PRIVATE_FIELDS.iter().any(|name| key_is(key, name)))
-            {
-                return Err(StatusValidationError::PrivateContent);
-            }
-            entries
-                .iter()
-                .try_for_each(|(_, item)| reject_private(item))
+            reject_private_items(entries.iter().map(|entry| (&entry.0, &entry.1)), depth + 1)
         }
-        PyJson::List(items) => items.iter().try_for_each(reject_private),
+        PyJson::List(items) => items
+            .iter()
+            .try_for_each(|item| reject_private(item, depth + 1)),
         PyJson::None | PyJson::Num(_) | PyJson::Str(_) => Ok(()),
     }
 }
 
-/// :1054-1062 `_finite`.
-fn finite(v: &PyJson) -> Result<(), StatusValidationError> {
+/// `_reject_private` of a mapping whose values sit `depth` levels below a top-level field:
+/// `_PRIVATE_FIELDS.intersection(value)` over its keys, then each value in order.
+fn reject_private_items<'a>(
+    entries: impl Iterator<Item = (&'a PyStr, &'a PyJson)> + Clone,
+    depth: usize,
+) -> Result<(), StatusValidationError> {
+    if entries
+        .clone()
+        .any(|(key, _)| PRIVATE_FIELDS.iter().any(|name| key_is(key, name)))
+    {
+        return Err(StatusValidationError::PrivateContent);
+    }
+    let mut entries = entries;
+    entries.try_for_each(|(_, item)| reject_private(item, depth))
+}
+
+/// :1054-1062 `_finite` of a value `depth` levels below a top-level field (bounded like
+/// [`reject_private`], which has walked the same document first).
+fn finite(v: &PyJson, depth: usize) -> Result<(), StatusValidationError> {
+    if depth > MAX_STATUS_VALUE_DEPTH {
+        return Err(StatusValidationError::Recursion);
+    }
     match v {
         PyJson::Num(PyReal::Float(x)) if !x.is_finite() => Err(StatusValidationError::NonFinite),
-        PyJson::Dict(entries) => entries.iter().try_for_each(|(_, item)| finite(item)),
-        PyJson::List(items) => items.iter().try_for_each(finite),
+        PyJson::Dict(entries) => entries
+            .iter()
+            .try_for_each(|(_, item)| finite(item, depth + 1)),
+        PyJson::List(items) => items.iter().try_for_each(|item| finite(item, depth + 1)),
         PyJson::None | PyJson::Num(_) | PyJson::Str(_) => Ok(()),
     }
+}
+
+/// `json.loads(json.dumps(text))` of a str: `json.dumps` writes every non-ASCII code point as a
+/// `\uXXXX` escape (an astral one as its surrogate pair, a surrogate as itself) and `json.loads`
+/// joins a high surrogate's escape directly followed by a low one's into the code point they
+/// encode, so a high surrogate directly followed by a low one becomes that one code point and
+/// every other surrogate stays (`None` never: a joined pair is at most U+10FFFF).
+fn decoded(text: &PyStr) -> Option<PyStr> {
+    let points = text.code_points();
+    let mut out = Vec::with_capacity(points.len());
+    let mut at = 0;
+    while let Some(&point) = points.get(at) {
+        match points.get(at + 1) {
+            Some(&low) if HIGH_SURROGATES.contains(&point) && LOW_SURROGATES.contains(&low) => {
+                out.push(
+                    SUPPLEMENTARY_BASE
+                        + ((point - HIGH_SURROGATES.start()) << 10)
+                        + (low - LOW_SURROGATES.start()),
+                );
+                at += 2;
+            }
+            _ => {
+                out.push(point);
+                at += 1;
+            }
+        }
+    }
+    PyStr::from_code_points(out)
 }
 
 /// `json.loads(json.dumps(v, sort_keys=True, allow_nan=False))` on a value of str-keyed dicts,
-/// lists, strs, numbers and None: every dict's keys sorted by code point, everything else
-/// unchanged (a float's repr reads back as the same double, `-0.0` included; a lone surrogate
-/// is escaped and decoded back); `None` where `json.dumps` raises (an infinite or NaN float, an
-/// int past 4,300 digits).
+/// lists, strs, numbers and None: each str [`decoded`], every dict through [`round_trip_dict`],
+/// everything else unchanged (a float's repr reads back as the same double, `-0.0` included);
+/// `None` where `json.dumps` raises (an infinite or NaN float, an int past 4,300 digits). Reached
+/// only for depths already bounded: after [`reject_private`] or a budget's closed shape.
 fn round_trip(v: &PyJson) -> Option<PyJson> {
     Some(match v {
         PyJson::Num(PyReal::Float(x)) if !x.is_finite() => return None,
@@ -764,24 +844,44 @@ fn round_trip(v: &PyJson) -> Option<PyJson> {
         {
             return None;
         }
-        PyJson::None | PyJson::Num(_) | PyJson::Str(_) => v.clone(),
+        PyJson::Str(text) => PyJson::Str(decoded(text)?),
+        PyJson::None | PyJson::Num(_) => v.clone(),
         PyJson::List(items) => PyJson::List(items.iter().map(round_trip).collect::<Option<_>>()?),
-        PyJson::Dict(entries) => {
-            let mut sorted = entries
-                .iter()
-                .map(|(key, item)| Some((key.clone(), round_trip(item)?)))
-                .collect::<Option<Vec<_>>>()?;
-            sorted.sort_by(|a, b| a.0.cmp(&b.0));
-            PyJson::Dict(sorted)
-        }
+        PyJson::Dict(entries) => round_trip_dict(entries.iter().map(|entry| (&entry.0, &entry.1)))?,
     })
+}
+
+/// A dict's round trip: `json.dumps(sort_keys=True)` writes the items in their original keys'
+/// code-point order (surrogates included), every value encoded; `json.loads` then sets each
+/// [`decoded`] key in turn, so keys that decode alike keep the first one's place and take the
+/// last one's value, and the decoded keys are not sorted again.
+fn round_trip_dict<'a>(entries: impl Iterator<Item = (&'a PyStr, &'a PyJson)>) -> Option<PyJson> {
+    let mut sorted: Vec<(&PyStr, &PyJson)> = entries.collect();
+    sorted.sort_by(|a, b| a.0.cmp(b.0));
+    let mut out: Vec<(PyStr, PyJson)> = Vec::with_capacity(sorted.len());
+    let mut places: BTreeMap<PyStr, usize> = BTreeMap::new();
+    for (key, item) in sorted {
+        let key = decoded(key)?;
+        let item = round_trip(item)?;
+        match places.get(&key).and_then(|place| out.get_mut(*place)) {
+            Some(slot) => slot.1 = item,
+            None => {
+                places.insert(key.clone(), out.len());
+                out.push((key, item));
+            }
+        }
+    }
+    Some(PyJson::Dict(out))
 }
 
 /// :1065-1160 `validate_m16_runtime_status(document)`, in its order: the top-level shape, the
 /// protocol, the queue shape, the nested shapes, each budget through
 /// [`validate_performance_budget_v3`] (its PerformanceBudgetError and TypeError become
 /// `BudgetShape`, its OverflowError propagates), the private-field check, the finite check,
-/// then the JSON round trip of the document holding the validated budgets.
+/// then the JSON round trip of the document holding the validated budgets. A node deeper than
+/// `MAX_STATUS_VALUE_DEPTH` (993) below a top-level field is RecursionError, raised by the
+/// private walk where the oracle's recursion reaches it (after the budgets, before the finite
+/// check).
 pub fn validate_m16_runtime_status(document: &PyJson) -> Result<PyJson, StatusValidationError> {
     use StatusValidationError as E;
     let PyJson::Dict(top) = document else {
@@ -827,21 +927,25 @@ pub fn validate_m16_runtime_status(document: &PyJson) -> Result<PyJson, StatusVa
             Err(BudgetError::IntTooLargeForFloat) => return Err(E::BudgetIntTooLargeForFloat),
         }
     }
-    // :1149-1150 `document = dict(document)` with the validated budgets in their place.
-    let detached = PyJson::Dict(
-        top.iter()
-            .map(|(key, value)| {
-                if key_is(key, "performance_budgets") {
-                    (key.clone(), PyJson::List(validated.clone()))
-                } else {
-                    (key.clone(), value.clone())
-                }
-            })
-            .collect(),
-    );
-    reject_private(&detached)?;
-    finite(&detached)?;
-    round_trip(&detached).ok_or(E::NotJsonSafe)
+    // :1149-1150 `document = dict(document)` with the validated budgets in their place; read in
+    // place (no deep copy precedes the depth-bounded walk).
+    let budgets = PyJson::List(validated);
+    let detached: Vec<(&PyStr, &PyJson)> = top
+        .iter()
+        .map(|(key, value)| {
+            if key_is(key, "performance_budgets") {
+                (key, &budgets)
+            } else {
+                (key, value)
+            }
+        })
+        .collect();
+    reject_private_items(detached.iter().copied(), 0)?;
+    detached
+        .iter()
+        .copied()
+        .try_for_each(|(_, value)| finite(value, 0))?;
+    round_trip_dict(detached.iter().copied()).ok_or(E::NotJsonSafe)
 }
 
 /// mycelium_performance_budget.py:27-28 `_identifier`: a str of 1 to 128 code points, the first
