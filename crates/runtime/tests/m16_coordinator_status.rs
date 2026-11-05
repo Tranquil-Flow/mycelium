@@ -11,7 +11,9 @@
 //! digest); none is computed by the status code. The clock is a scripted clock returning base,
 //! base + step, ... and logging every read; the id source counts `prefix-n` across prefixes.
 //! The last test replays paired probes recorded from the real oracle
-//! (fixtures/m16-coordinator-status-oracle.json).
+//! (fixtures/m16-coordinator-status-oracle.json), including typed inputs that hold surrogates
+//! as exact code points and deep values whose RecursionError depth was measured from a fresh
+//! top-level interpreter.
 use protocol::execution_graph::{self, Graph};
 use runtime::m16_capacity::{PlacementCapacity, PyNumber};
 use runtime::m16_coordinator::{
@@ -517,6 +519,25 @@ fn pow10(exponent: usize, negative: bool) -> PyJson {
         "0".repeat(exponent)
     );
     big(&digits)
+}
+
+/// The str of exactly these code points (surrogates kept apart, as typed, never decoded text).
+fn cp_key(points: &[u32]) -> PyStr {
+    PyStr::from_code_points(points.iter().copied()).expect("code points")
+}
+
+fn cp(points: &[u32]) -> PyJson {
+    PyJson::Str(cp_key(points))
+}
+
+/// `depth` one-element lists (`list`) or one-key `{"a": ...}` dicts (`dict`) around `leaf`, or
+/// `depth` nested lists whose innermost is empty (`emptylist`), built without recursion.
+fn chain(kind: &str, depth: usize, leaf: PyJson) -> PyJson {
+    match kind {
+        "emptylist" => (1..depth).fold(list(vec![]), |v, _| list(vec![v])),
+        "dict" => (0..depth).fold(leaf, |v, _| dict(vec![("a", v)])),
+        _ => (0..depth).fold(leaf, |v, _| list(vec![v])),
+    }
 }
 
 /// The largest int `float()` keeps finite (2**1024 - 2**970 - 1, rounding down to f64::MAX)
@@ -1868,6 +1889,252 @@ fn m16_runtime_status_validation_refusals() {
             "not an admission code"
         );
     }
+
+    // RecursionError: `_reject_private` and `_finite` recurse in Python (:1043-1062) and run at
+    // :1155-1156, outside the JSON-safe handler (:1157-1160), so a value nested too deep raises
+    // RecursionError("maximum recursion depth exceeded") during the private walk: after the
+    // budgets, before the finite check and the round trip. Its own kind, code and message. The
+    // depth is the oracle's, measured from a fresh top-level CPython 3.14.2 (the fixture's
+    // `recursion` record): a top-level field whose value holds `limit` nested containers passes,
+    // one more raises, whatever the containers and the leaf.
+    let fixture: Value = serde_json::from_str(ORACLE).expect("the fixture");
+    let limit = usize::try_from(
+        fixture["recursion"]["validator_deepest_accepted"]
+            .as_u64()
+            .expect("measured"),
+    )
+    .expect("a depth");
+    let outcome = |doc: &PyJson| {
+        validate(doc)
+            .map(|_| ())
+            .map_err(|e| (e.kind(), e.code(), e.message()))
+    };
+    let refused = |e: StatusValidationError| Err::<(), _>((e.kind(), e.code(), e.message()));
+    let recursion: Result<(), (&str, &str, &str)> = Err((
+        "recursion",
+        "m16_runtime_status_recursion_error",
+        "maximum recursion depth exceeded",
+    ));
+    let accepted = |doc: &PyJson, label: &str| {
+        assert!(
+            validate(doc) == Ok(sorted(doc)),
+            "{label}: accepted as it is"
+        );
+    };
+    let claim = |value: PyJson| with(&ok, "claim_boundary", value);
+    let deep = |kind: &str, depth: usize| chain(kind, depth, n(0));
+    for kind in ["list", "dict"] {
+        accepted(&claim(deep(kind, limit)), kind);
+        assert_eq!(outcome(&claim(deep(kind, limit + 1))), recursion, "{kind}");
+        assert_eq!(outcome(&claim(deep(kind, 1100))), recursion, "{kind}");
+    }
+    accepted(&claim(chain("emptylist", limit + 1, none())), "emptylist");
+    assert_eq!(
+        outcome(&claim(chain("emptylist", limit + 2, none()))),
+        recursion
+    );
+    accepted(&claim(chain("list", limit, s("leaf"))), "str leaf");
+    assert_eq!(outcome(&claim(chain("list", 1100, s("leaf")))), recursion);
+    // Any field; the depth counts from the top-level field's value.
+    assert_eq!(
+        outcome(&with(&ok, "deployment_id", deep("list", limit + 1))),
+        recursion
+    );
+    let ok_request = items(get(&ok, "requests"))[0].clone();
+    let in_request = |depth: usize| {
+        with(
+            &ok,
+            "requests",
+            list(vec![with(
+                &ok_request,
+                "terminal_state",
+                deep("list", depth),
+            )]),
+        )
+    };
+    accepted(&in_request(limit - 2), "terminal_state");
+    assert_eq!(outcome(&in_request(limit - 1)), recursion);
+    // A mapping's keys before its values; items and fields in order.
+    let secret = || dict(vec![("secret", n(1))]);
+    let private = refused(E::PrivateContent);
+    assert_eq!(
+        outcome(&claim(dict(vec![("secret", deep("list", 1100))]))),
+        private
+    );
+    assert_eq!(
+        outcome(&claim(dict(vec![
+            ("a", deep("list", 1100)),
+            ("secret", n(1))
+        ]))),
+        private
+    );
+    assert_eq!(
+        outcome(&claim(list(vec![deep("list", 1100), secret()]))),
+        recursion
+    );
+    assert_eq!(
+        outcome(&claim(list(vec![secret(), deep("list", 1100)]))),
+        private
+    );
+    assert_eq!(outcome(&claim(chain("list", limit, secret()))), private);
+    assert_eq!(
+        outcome(&claim(chain("list", limit + 1, secret()))),
+        recursion
+    );
+    // `ok` is in code-point order, so claim_boundary is walked before deployment_id.
+    let private_id = with(&claim(deep("list", 1100)), "deployment_id", secret());
+    assert_eq!(outcome(&private_id), recursion);
+    assert_eq!(outcome(&reversed(&private_id)), private);
+    // The private walk precedes the finite check and the round trip.
+    let nan = |doc: PyJson| with(&doc, "generated_at_monotonic_s", x(f64::NAN));
+    assert_eq!(
+        outcome(&nan(claim(deep("list", limit)))),
+        refused(E::NonFinite)
+    );
+    assert_eq!(outcome(&nan(claim(deep("list", limit + 1)))), recursion);
+    let huge = |doc: PyJson| with(&doc, "deployment_epoch", pow10(4300, false));
+    assert_eq!(
+        outcome(&huge(claim(deep("list", limit)))),
+        refused(E::NotJsonSafe)
+    );
+    assert_eq!(outcome(&huge(claim(deep("list", limit + 1)))), recursion);
+    // A budget's deep value is refused by its shape first.
+    let deep_dimension = with_dimension(&one_budget, 0, "dimension", deep("list", 1100));
+    assert_eq!(
+        outcome(&with(
+            &ok,
+            "performance_budgets",
+            list(vec![deep_dimension])
+        )),
+        refused(E::BudgetShape)
+    );
+    // Its own code.
+    if let Err(error) = validate(&claim(deep("list", limit + 1))) {
+        assert!(codes.insert(error.code()), "{error:?} code repeated");
+    }
+
+    // The round trip's str semantics (:1157): json.dumps escapes every surrogate as \uXXXX and
+    // json.loads joins a high escape directly followed by a low one into the one code point
+    // they encode, in values and keys; any other surrogate stays. Keys are sorted as given (by
+    // code point, surrogates included), then decoded, and keys that decode alike keep the first
+    // one's place and take the last one's value (no re-sort). Typed code points throughout.
+    for (input, output) in [
+        (vec![0xd83d, 0xde00], vec![0x1f600]),
+        (vec![0xd83d, 0xde00, 0x61, 0x62], vec![0x1f600, 0x61, 0x62]),
+        (vec![0x61, 0xd83d, 0xde00], vec![0x61, 0x1f600]),
+        (vec![0xd800, 0xd83d, 0xde00], vec![0xd800, 0x1f600]),
+        (vec![0xd83d, 0xde00, 0xde00], vec![0x1f600, 0xde00]),
+        (vec![0xde00, 0xd83d], vec![0xde00, 0xd83d]),
+        (vec![0xd83d, 0x78, 0xde00], vec![0xd83d, 0x78, 0xde00]),
+        (vec![0xd800, 0x1f600], vec![0xd800, 0x1f600]),
+        (vec![0x1f600, 0xdc00], vec![0x1f600, 0xdc00]),
+        (vec![0x61, 0xd83d], vec![0x61, 0xd83d]),
+        (vec![0xd800, 0xdc00], vec![0x1_0000]),
+        (vec![0xdbff, 0xdfff], vec![0x10_ffff]),
+        (
+            vec![0xdc00, 0xd800, 0xdc00, 0xd800],
+            vec![0xdc00, 0x1_0000, 0xd800],
+        ),
+    ] {
+        assert_eq!(
+            validate(&with(&base, "claim_boundary", cp(&input))),
+            Ok(with(&ok, "claim_boundary", cp(&output))),
+            "{input:x?}"
+        );
+    }
+    let pair = || cp_key(&[0xd83d, 0xde00]);
+    let scalar = || cp_key(&[0x1f600]);
+    let claim_of =
+        |entries: Vec<(PyStr, PyJson)>| with(&base, "claim_boundary", PyJson::Dict(entries));
+    let claimed =
+        |entries: Vec<(PyStr, PyJson)>| Ok(with(&ok, "claim_boundary", PyJson::Dict(entries)));
+    for (input, output) in [
+        (
+            vec![(pair(), n(1)), (scalar(), n(2))],
+            vec![(scalar(), n(2))],
+        ),
+        (
+            vec![(scalar(), n(2)), (pair(), n(1))],
+            vec![(scalar(), n(2))],
+        ),
+        (
+            vec![(cp_key(&[0xe000]), n(3)), (pair(), n(1))],
+            vec![(scalar(), n(1)), (cp_key(&[0xe000]), n(3))],
+        ),
+        (
+            vec![
+                (cp_key(&[0x61, 0xd83d, 0xde00]), n(1)),
+                (cp_key(&[0x61, 0xe000]), n(2)),
+                (cp_key(&[0x61, 0x1f600]), n(3)),
+            ],
+            vec![
+                (cp_key(&[0x61, 0x1f600]), n(3)),
+                (cp_key(&[0x61, 0xe000]), n(2)),
+            ],
+        ),
+        (
+            vec![
+                (cp_key(&[0xffff]), n(1)),
+                (pair(), n(2)),
+                (cp_key(&[0xd7ff]), n(3)),
+            ],
+            vec![
+                (cp_key(&[0xd7ff]), n(3)),
+                (scalar(), n(2)),
+                (cp_key(&[0xffff]), n(1)),
+            ],
+        ),
+        (
+            vec![(cp_key(&[0xd83d]), n(1)), (cp_key(&[0xde00]), n(2))],
+            vec![(cp_key(&[0xd83d]), n(1)), (cp_key(&[0xde00]), n(2))],
+        ),
+        (
+            vec![(cp_key(&[0xd83d]), cp(&[0xde00]))],
+            vec![(cp_key(&[0xd83d]), cp(&[0xde00]))],
+        ),
+        (
+            vec![
+                (pair(), dict(vec![("x", n(1))])),
+                (scalar(), list(vec![n(2)])),
+            ],
+            vec![(scalar(), list(vec![n(2)]))],
+        ),
+    ] {
+        assert_eq!(
+            validate(&claim_of(input.clone())),
+            claimed(output),
+            "{input:?}"
+        );
+    }
+    let nested =
+        |entries: Vec<(PyStr, PyJson)>| list(vec![dict(vec![("k", PyJson::Dict(entries))])]);
+    assert_eq!(
+        validate(&with(
+            &base,
+            "claim_boundary",
+            nested(vec![
+                (pair(), s("pair")),
+                (scalar(), s("scalar")),
+                (PyStr::new("z"), cp(&[0xd83d, 0xde00])),
+            ])
+        )),
+        Ok(with(
+            &ok,
+            "claim_boundary",
+            nested(vec![
+                (PyStr::new("z"), cp(&[0x1f600])),
+                (scalar(), s("scalar")),
+            ])
+        ))
+    );
+    // A value a collision drops is still encoded (and refused).
+    assert_eq!(
+        validate(&claim_of(vec![
+            (pair(), pow10(4300, false)),
+            (scalar(), n(1))
+        ])),
+        Err(E::NotJsonSafe)
+    );
 }
 
 #[test]
@@ -2148,12 +2415,46 @@ fn m16_coordinator_status_performance_budgets() {
             "{refused:?}"
         );
     }
+    // The detached round trip's str semantics (:236-239): json.loads joins a high surrogate's
+    // escape directly followed by a low one's into the one code point they encode; any other
+    // surrogate stays. attach stores the decoded document and the status shows it. Typed code
+    // points, never decoded JSON text.
+    for (input, output) in [
+        (vec![0xd83d, 0xde00], vec![0x1f600]),
+        (vec![0xd800, 0xd83d, 0xde00], vec![0xd800, 0x1f600]),
+        (vec![0xde00, 0xd83d], vec![0xde00, 0xd83d]),
+        (
+            vec![0x77, 0xd83d, 0xde00, 0xdc00],
+            vec![0x77, 0x1f600, 0xdc00],
+        ),
+    ] {
+        let doc = with_dimension(&valid, 0, "reason", cp(&input));
+        let decoded = sorted(&with_dimension(&valid, 0, "reason", cp(&output)));
+        assert_eq!(
+            validate_performance_budget_v3(&doc),
+            Ok(decoded.clone()),
+            "{input:x?}"
+        );
+        assert_eq!(c.attach_performance_budget(&doc), Ok(()), "{input:x?}");
+        assert_eq!(c.performance_budgets(), vec![decoded.clone()], "{input:x?}");
+        assert_eq!(
+            c.status()
+                .map(|doc| get(&doc, "performance_budgets").clone()),
+            Ok(list(vec![decoded])),
+            "{input:x?}"
+        );
+    }
+    // A joined pair is still not an identifier's ASCII.
+    assert_eq!(top("budget_id", cp(&[0xd83d, 0xde00])), Err(Invalid));
 }
 
 // ---------------------------------------------------------------------------------------------
 // Oracle replay.
 
 const ORACLE: &str = include_str!("fixtures/m16-coordinator-status-oracle.json");
+
+/// The stack of the thread that replays the deep-value cases (see the parity test).
+const DEEP_CASE_STACK_BYTES: usize = 64 << 20;
 
 /// A Python value from the probe's `json.dumps(value, ensure_ascii=True, allow_nan=True,
 /// separators=(",", ":"))` text: a literal with `.`, `e` or `E` is a float, any other number
@@ -2429,10 +2730,10 @@ fn assert_python_error(label: &str, recorded: &Value, kind: &str, message: &str)
 fn assert_status_error(label: &str, recorded: &Value, error: &StatusError) {
     match error {
         StatusError::Validation(e) => {
-            let kind = if e.kind() == "overflow" {
-                "OverflowError"
-            } else {
-                "ValueError"
+            let kind = match e.kind() {
+                "overflow" => "OverflowError",
+                "recursion" => "RecursionError",
+                _ => "ValueError",
             };
             assert_python_error(label, recorded, kind, e.message());
             assert_eq!(recorded["message"], e.message(), "{label}");
@@ -2663,12 +2964,16 @@ fn replay_op(
             }
         }
         "attach" => {
-            let document = PyText::parse(op["document_text"].as_str().expect("a document"));
+            let document = match op.get("document_typed") {
+                Some(typed) => untag(typed, None),
+                None => PyText::parse(op["document_text"].as_str().expect("a document")),
+            };
             match c.attach_performance_budget(&document) {
                 Ok(()) => assert!(record["result"].is_null(), "{label}"),
                 Err(error) => assert_budget_error(label, &record["error"], &error),
             }
         }
+        "budgets" => assert_document(label, &record["result"], &list(c.performance_budgets())),
         "bulk" => {
             let prefix = op["prefix"].as_str().expect("prefix");
             let start = op["start"].as_u64().expect("start");
@@ -2732,6 +3037,128 @@ fn validation_input(base: &PyJson, input: &Value) -> PyJson {
     with(base, field, repeat(&first, count))
 }
 
+/// A typed probe value (the probe's `ptag` / `build_tag`): a str holding a surrogate as its
+/// exact code points (`cp`), never JSON text a decoder would join; `{"pow10": n}` the int
+/// 10**n; `{"deep_here": true}` the case's deep chain.
+fn untag(t: &Value, deep: Option<&PyJson>) -> PyJson {
+    if t.is_null() {
+        return none();
+    }
+    if t.get("deep_here").is_some() {
+        return deep.expect("a deep chain").clone();
+    }
+    if let Some(text) = t.get("str").and_then(Value::as_str) {
+        return s(text);
+    }
+    if let Some(points) = t.get("cp").and_then(Value::as_array) {
+        let points: Vec<u32> = points
+            .iter()
+            .map(|p| u32::try_from(p.as_u64().expect("a code point")).expect("a u32"))
+            .collect();
+        return cp(&points);
+    }
+    if let Some(entries) = t.get("list").and_then(Value::as_array) {
+        let mut out = Vec::new();
+        for item in entries {
+            match item.get("repeat").and_then(Value::as_u64) {
+                Some(count) => out.extend((0..count).map(|_| untag(&item["item"], deep))),
+                None => out.push(untag(item, deep)),
+            }
+        }
+        return list(out);
+    }
+    if let Some(entries) = t.get("dict").and_then(Value::as_array) {
+        return PyJson::Dict(
+            entries
+                .iter()
+                .map(|pair| match untag(&pair[0], None) {
+                    PyJson::Str(key) => (key, untag(&pair[1], deep)),
+                    other => panic!("not a str key: {other:?}"),
+                })
+                .collect(),
+        );
+    }
+    if let Some(exponent) = t.get("pow10").and_then(Value::as_u64) {
+        let exponent = usize::try_from(exponent).expect("small");
+        return pow10(exponent, t["negative"].as_bool().unwrap_or(false));
+    }
+    PyJson::Num(recorded(t))
+}
+
+/// A probe's deep chain, built at runtime (`oracle_deep_case.py`).
+fn deep_chain(spec: &Value) -> PyJson {
+    let depth = usize::try_from(spec["depth"].as_u64().expect("a depth")).expect("small");
+    let kind = spec["chain"].as_str().expect("a chain");
+    let leaf = if kind == "emptylist" {
+        none()
+    } else {
+        untag(&spec["leaf"], None)
+    };
+    chain(kind, depth, leaf)
+}
+
+/// A typed probe's input: the base with each `set` field replaced in place, the deep chain as
+/// its field (or at its template's marker), the top-level order reversed when asked.
+fn spec_input(base: &PyJson, input: &Value) -> PyJson {
+    let mut doc = base.clone();
+    for pair in input["set"].as_array().expect("set") {
+        doc = with(
+            &doc,
+            pair[0].as_str().expect("a field"),
+            untag(&pair[1], None),
+        );
+    }
+    if let Some(deep) = input.get("deep") {
+        let built = deep_chain(deep);
+        let value = match &deep["template"] {
+            Value::Null => built,
+            template => untag(template, Some(&built)),
+        };
+        doc = with(&doc, deep["field"].as_str().expect("a field"), value);
+    }
+    if input["reverse_top"] == true {
+        let PyJson::Dict(entries) = doc else {
+            panic!("a dict")
+        };
+        doc = PyJson::Dict(entries.into_iter().rev().collect());
+    }
+    doc
+}
+
+/// A deep document against the oracle's: the canonical json.dumps digest through the core's
+/// writer (a deep value has no tagged record; the probe's own tagger would recurse).
+fn assert_deep_document(label: &str, record: &Value, port: &PyJson) {
+    let value = to_value(port).expect("no surrogate");
+    assert_eq!(
+        hex_sha256(&canonical_json(&value).expect("canonical")),
+        record["canonical_sha256"],
+        "{label}: canonical digest"
+    );
+}
+
+/// The probe's producer path: the linear graph whose `deployment_id` is the chain (built in
+/// memory; the probe's text parses the same), the factory clock, capacities and config, the
+/// real core, then `status()`.
+fn producer_status(deep: &Value) -> Result<PyJson, StatusError> {
+    assert_eq!(deep["chain"], "list");
+    let depth = deep["depth"].as_u64().expect("a depth");
+    let leaf =
+        serde_json::from_str(deep["leaf"]["int"].as_str().expect("an int leaf")).expect("an int");
+    let mut graph = linear_doc();
+    graph["deployment_id"] = (0..depth).fold(leaf, |v: Value, _| json!([v]));
+    let rig = Rig::standard();
+    let c = M16RuntimeCoordinator::new(rig.inputs(parse(&graph), caps(), factory_config()))
+        .expect("a coordinator");
+    c.status()
+}
+
+/// Runs one new paired case, recording its label when an assertion in it fails.
+fn paired(failures: &mut Vec<String>, label: &str, case: impl FnOnce()) {
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(case)).is_err() {
+        failures.push(label.to_owned());
+    }
+}
+
 #[test]
 fn m16_coordinator_status_python_value_domain_parity() {
     let oracle: Value = serde_json::from_str(ORACLE).expect("the fixture");
@@ -2790,6 +3217,170 @@ fn m16_coordinator_status_python_value_domain_parity() {
             Err(error) => assert_budget_error(&label, &probe["error"], &error),
         }
     }
+
+    // Attempt 2 (rv-l1b-m16-coordinator-status F1, F2): typed inputs (a surrogate as its exact
+    // code point, never decoded JSON text) and deep values, each a paired case; every failing
+    // case is listed before the test fails.
+    let mut failures: Vec<String> = Vec::new();
+    let typed_validations = oracle["typed_validations"]
+        .as_array()
+        .expect("typed validations");
+    for probe in typed_validations {
+        let label = format!("typed validation {}", probe["name"]);
+        let input = spec_input(&base, &probe["input"]);
+        paired(
+            &mut failures,
+            &label,
+            || match validate_m16_runtime_status(&input) {
+                Ok(doc) => assert_document(&label, &probe["result"], &doc),
+                Err(error) => {
+                    assert_status_error(&label, &probe["error"], &StatusError::Validation(error))
+                }
+            },
+        );
+    }
+    let typed_budgets = oracle["typed_budgets"].as_array().expect("typed budgets");
+    for probe in typed_budgets {
+        let label = format!("typed budget {}", probe["name"]);
+        let input = untag(&probe["input"]["typed"], None);
+        paired(
+            &mut failures,
+            &label,
+            || match validate_performance_budget_v3(&input) {
+                Ok(doc) => assert_document(&label, &probe["result"], &doc),
+                Err(error) => assert_budget_error(&label, &probe["error"], &error),
+            },
+        );
+    }
+    let typed_cases = oracle["typed_cases"].as_array().expect("typed cases");
+    let mut typed_ops = 0u64;
+    for case in typed_cases {
+        let name = case["name"].as_str().expect("name");
+        let (rig, c) = construct(&case["setup"]);
+        let (reads, drawn) = port_reads(&rig);
+        paired(
+            &mut failures,
+            &format!("typed case {name} construct"),
+            || {
+                assert_eq!(
+                    c.graph_digest(),
+                    case["construct"]["graph_digest"],
+                    "{name}"
+                );
+                assert_eq!(Value::Array(reads), case["construct_reads"], "{name}");
+                assert_eq!(Value::from(drawn), case["construct_ids"], "{name}");
+            },
+        );
+        let results = case["results"].as_array().expect("results");
+        for (k, (op, record)) in case["ops"]
+            .as_array()
+            .expect("ops")
+            .iter()
+            .zip(results)
+            .enumerate()
+        {
+            let label = format!("typed case {name} op {k} {}", op["op"]);
+            let failed = failures.len();
+            paired(&mut failures, &label, || {
+                replay_op(&label, &rig, &c, op, record);
+            });
+            if failures.len() > failed {
+                // A failed op's reads stay its own (they are not the next op's).
+                rig.take();
+            }
+            typed_ops += 1;
+        }
+    }
+    // RecursionError: the oracle's depth measured from a fresh top-level CPython 3.14.2 (three
+    // fresh interpreters per depth, every case the same in all three); the validator cases
+    // exact. On the producer path the oracle raises from a shallower depth (its caller's
+    // frames and cold isinstance caches): from the band's first depth to the validator's
+    // deepest the port accepts what that path refuses, the one declared difference.
+    let recursion = &oracle["recursion"];
+    assert_eq!(recursion["python"], "3.14.2");
+    assert_eq!(recursion["recursion_limit"], 1000);
+    let limit = recursion["validator_deepest_accepted"]
+        .as_u64()
+        .expect("measured");
+    assert_eq!(recursion["validator_shallowest_raised"], limit + 1);
+    let band = (
+        recursion["declared_band"][0].as_u64().expect("band"),
+        recursion["declared_band"][1].as_u64().expect("band"),
+    );
+    assert_eq!(band.1, limit);
+    assert_eq!(
+        Some(band.0),
+        recursion["factory_producer_shallowest_raised"].as_u64()
+    );
+    assert_eq!(
+        recursion["factory_producer_depth_995"],
+        json!(["RecursionError", "RecursionError", "RecursionError"])
+    );
+    let recursion_cases = recursion["cases"].as_array().expect("recursion cases");
+    let producer = recursion["producer"].as_array().expect("producer cases");
+    // The test's own deep helpers (to_value and the core's canonical writer, one call per level
+    // with debug-build frames) need more than the default test stack, so the deep cases run on
+    // a larger one; the port's bounded walk on the default stack is
+    // m16_runtime_status_validation_refusals.
+    let (deep_failures, declared) = std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(DEEP_CASE_STACK_BYTES)
+            .spawn_scoped(scope, || {
+                let mut failures: Vec<String> = Vec::new();
+                for case in recursion_cases {
+                    let label = format!("recursion {}", case["name"]);
+                    let input = spec_input(&base, &case["input"]);
+                    paired(&mut failures, &label, || {
+                        assert_eq!(case["runs"], 3, "{label}");
+                        match validate_m16_runtime_status(&input) {
+                            Ok(doc) => assert_deep_document(&label, &case["result"], &doc),
+                            Err(error) => assert_status_error(
+                                &label,
+                                &case["error"],
+                                &StatusError::Validation(error),
+                            ),
+                        }
+                    });
+                }
+                let mut declared = 0u64;
+                for case in producer {
+                    let label = format!("recursion {}", case["name"]);
+                    let depth = case["input"]["deep"]["depth"].as_u64().expect("a depth");
+                    let in_band = (band.0..=band.1).contains(&depth);
+                    if in_band {
+                        declared += 1;
+                    }
+                    paired(&mut failures, &label, || {
+                        assert_eq!(case["runs"], 3, "{label}");
+                        match producer_status(&case["input"]["deep"]) {
+                            // The declared difference: the port accepts, the oracle's producer
+                            // path raised.
+                            Ok(_) if in_band => assert_python_error(
+                                &label,
+                                &case["error"],
+                                "RecursionError",
+                                "maximum recursion depth exceeded",
+                            ),
+                            Ok(doc) => assert_deep_document(&label, &case["result"], &doc),
+                            Err(error) => {
+                                assert!(!in_band, "{label}: refused inside the declared band");
+                                assert_status_error(&label, &case["error"], &error)
+                            }
+                        }
+                    });
+                }
+                (failures, declared)
+            })
+            .expect("a deep-case thread")
+            .join()
+            .expect("the deep cases ran")
+    });
+    failures.extend(deep_failures);
+    assert_eq!(
+        failures,
+        Vec::<String>::new(),
+        "paired cases unlike the oracle"
+    );
     assert_eq!(
         cases.len() as u64,
         provenance["case_count"].as_u64().expect("count")
@@ -2811,4 +3402,25 @@ fn m16_coordinator_status_python_value_domain_parity() {
         (cases.len(), ops, statuses, validations.len(), budgets.len()),
         (30, 145, 57, 59, 85)
     );
+    let count = |key: &str| provenance[key].as_u64().expect("count");
+    let attempt2 = (
+        typed_validations.len() as u64,
+        typed_budgets.len() as u64,
+        typed_cases.len() as u64,
+        typed_ops,
+        recursion_cases.len() as u64,
+        producer.len() as u64,
+    );
+    assert_eq!(
+        attempt2,
+        (
+            count("typed_validation_count"),
+            count("typed_budget_count"),
+            count("typed_case_count"),
+            count("typed_op_count"),
+            count("recursion_case_count"),
+            count("recursion_producer_count"),
+        )
+    );
+    assert_eq!((attempt2, declared), ((33, 10, 3, 12, 34, 14), 5));
 }
