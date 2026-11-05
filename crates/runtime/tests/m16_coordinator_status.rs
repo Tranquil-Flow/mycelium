@@ -2012,6 +2012,30 @@ fn m16_runtime_status_validation_refusals() {
     if let Err(error) = validate(&claim(deep("list", limit + 1))) {
         assert!(codes.insert(error.code()), "{error:?} code repeated");
     }
+    // The producer path on the default test stack: `status()` of a coordinator whose graph
+    // holds the deep `deployment_id` converts and walks it without recursing past the bound, so
+    // a value far deeper than the oracle's limit is RecursionError, never a native stack
+    // overflow.
+    let deep_graph = |depth: usize| {
+        let mut graph = linear_doc();
+        graph["deployment_id"] = (0..depth).fold(json!(0), |v, _| Value::Array(vec![v]));
+        coordinator_over(&Rig::standard(), &graph, caps(), factory_config(), 1)
+    };
+    let produced = deep_graph(limit).status().expect("a status");
+    assert!(
+        get(&produced, "deployment_id") == &deep("list", limit),
+        "the deepest deployment_id kept"
+    );
+    for depth in [limit + 1, 1100, 2000] {
+        assert_eq!(
+            deep_graph(depth)
+                .status()
+                .map(|_| ())
+                .map_err(|e| (e.kind(), e.code())),
+            Err(("validation", "m16_runtime_status_recursion_error")),
+            "{depth}"
+        );
+    }
 
     // The round trip's str semantics (:1157): json.dumps escapes every surrogate as \uXXXX and
     // json.loads joins a high escape directly followed by a low one into the one code point
@@ -3145,7 +3169,7 @@ fn producer_status(deep: &Value) -> Result<PyJson, StatusError> {
     let leaf =
         serde_json::from_str(deep["leaf"]["int"].as_str().expect("an int leaf")).expect("an int");
     let mut graph = linear_doc();
-    graph["deployment_id"] = (0..depth).fold(leaf, |v: Value, _| json!([v]));
+    graph["deployment_id"] = (0..depth).fold(leaf, |v: Value, _| Value::Array(vec![v]));
     let rig = Rig::standard();
     let c = M16RuntimeCoordinator::new(rig.inputs(parse(&graph), caps(), factory_config()))
         .expect("a coordinator");
