@@ -208,52 +208,296 @@ fn packaged_owner_create_current_member_returns_authority_status() {
     assert_eq!(std::fs::read(root.join(SWARM_FILE)).unwrap(), record);
 }
 
-#[test]
-fn packaged_owner_create_failed_seed_removes_swarm_record() {
-    let root = private_root();
-    // The owner's membership directory retains a pairing request that is not a valid private
-    // record: the owner's own join through its new seed is refused after the swarm record and
-    // the seed exist, so `create_owner_json`'s cleanup has to take the record back.
-    let member = root.join(MEMBER_DIR);
+/// What a test plants in the private root before the host binds, so one owner-join (or seed start)
+/// step of `/api/create` fails on its own state.
+enum Fault {
+    /// A 0600 regular file that is not a private record.
+    Garbage,
+    /// A 0700 directory where the step writes a file.
+    Directory,
+}
+/// Plant `fault` at `relative` (parents 0700) and answer its path.
+fn plant(root: &Path, relative: &str, fault: Fault) -> PathBuf {
+    let path = root.join(relative);
     std::fs::DirBuilder::new()
         .mode(0o700)
         .recursive(true)
-        .create(&member)
+        .create(path.parent().unwrap())
         .unwrap();
-    std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .mode(0o600)
-        .open(member.join(PENDING_FILE))
-        .unwrap()
-        .write_all(b"not a private record")
+    match fault {
+        Fault::Garbage => std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(&path)
+            .unwrap()
+            .write_all(b"not a private record")
+            .unwrap(),
+        Fault::Directory => std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .unwrap(),
+    }
+    path
+}
+/// Remove what [`plant`] put at `path`.
+fn unplant(path: &Path) {
+    if path.is_dir() {
+        std::fs::remove_dir(path).unwrap();
+    } else {
+        std::fs::remove_file(path).unwrap();
+    }
+}
+/// The swarm the seed state is bound to (`seed_metadata.swarm_id` of `seed-rs/seed.sqlite`, the
+/// identity `bind_identity` refuses to change: `seed_state_identity_mismatch`).
+fn seed_swarm_id(root: &Path) -> Value {
+    let seed = rusqlite::Connection::open_with_flags(
+        root.join("seed-rs/seed.sqlite"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let id: String = seed
+        .query_row(
+            "SELECT value FROM seed_metadata WHERE key = 'swarm_id'",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
+    json!(id)
+}
+/// The swarm record, after asserting that it is still there.
+fn kept_record(root: &Path) -> Value {
+    assert!(
+        root.join(SWARM_FILE).is_file(),
+        "the failed create removed its swarm record"
+    );
+    private_json(&root.join(SWARM_FILE))
+}
+/// `_membership_result` of a (re-)enrolled owner as the oracle's retry answered it: this Mac is
+/// member 1 of its swarm, generation 1, RUNNING.
+fn assert_reenrolled(reply: &(u16, Value)) {
+    assert_observed("boundary_owner_created", reply);
+    assert_eq!(
+        (
+            &reply.1["protocol"],
+            &reply.1["membership_generation"],
+            &reply.1["lifecycle_state"]
+        ),
+        (
+            &json!("mycelium.demo_membership_result.v1"),
+            &json!(1),
+            &json!("RUNNING")
+        ),
+        "{}",
+        reply.1
+    );
+}
+/// `authority.status()` of the current member a later create answers (app.py:1608).
+fn assert_current_status(reply: &(u16, Value), generation: u64) {
+    assert_eq!(reply.0, 200, "{}", reply.1);
+    for (key, value) in [
+        ("protocol", json!("mycelium.demo_authority_status.v1")),
+        ("started", json!(true)),
+        ("swarm_created", json!(true)),
+        ("local_tls", json!("pinned_loopback")),
+        ("membership_state", json!("current")),
+        ("member_count", json!(1)),
+        ("membership_generation", json!(generation)),
+        ("lease_state", json!("fresh")),
+        ("route_ready", json!(false)),
+    ] {
+        assert_eq!(reply.1[key], value, "{key}: {}", reply.1);
+    }
+}
+/// The owner's retained pairing request, where the owner-join fault is planted.
+fn pending_fault() -> String {
+    format!("{MEMBER_DIR}/{PENDING_FILE}")
+}
+
+/// The owner's own join through its new seed fails at its pairing request (a retained pending
+/// record that is not a private record). v0.1.4 lets the exception out of `/api/create` and
+/// closes only a relay this call started (app.py:1589-1625 @ f4e366e9): `create_swarm` had
+/// committed the metadata and its runtime keeps running (authority.py:405-455). Executed oracle
+/// (`workers/s1-owner-create-failed-join-retry/oracle-failed-join.json`, case `pair_request`):
+/// 409 `authority_state_invalid`; the metadata and the seed state bound to it stay, no membership
+/// is retained, the failure is recorded; the authority is `unenrolled` with its seed up, so a
+/// pairing code is a pending window; a retry while the fault persists and a relaunch over the
+/// same root see the same swarm and the same refusal.
+#[test]
+fn packaged_owner_create_failed_join_keeps_swarm_record() {
+    let root = private_root();
+    plant(&root, &pending_fault(), Fault::Garbage);
     let host = compose(&root);
-    let refused = create(&host);
-    assert_eq!(refusal(&refused), (409, "authority_state_invalid"));
-    assert!(
-        !root.join(SWARM_FILE).exists(),
-        "the failed create left its swarm record"
+    assert_eq!(refusal(&create(&host)), (409, "authority_state_invalid"));
+    let record = kept_record(&root);
+    assert_eq!(
+        seed_swarm_id(&root),
+        record["swarm_id"],
+        "the seed state is bound to the kept swarm"
     );
-    assert!(
-        root.join("seed-rs/seed.sqlite").is_file(),
-        "the seed had started before the join was refused"
-    );
+    assert!(!root.join(MEMBER_DIR).join("membership.state.json").exists());
+    assert_eq!(private_json(&root.join("resource-policy.json")), consent());
     assert_eq!(
         last_failure(&root),
         (json!("/api/create"), json!("authority_state_invalid"))
     );
-    // Nothing claims a swarm: a pairing code is refused for want of one, here and after a relaunch.
     let open = json!({"ttl_seconds": 30});
-    assert_eq!(
-        refusal(&post(&host, "/api/pair/window/open", open.clone())),
-        (400, "pairing_window_swarm_required")
+    assert_observed(
+        "join_window_waits_for_public_relay",
+        &post(&host, "/api/pair/window/open", open.clone()),
     );
+    assert_eq!(refusal(&create(&host)), (409, "authority_state_invalid"));
+    assert_eq!(private_json(&root.join(SWARM_FILE)), record);
+    drop(host);
     let relaunched = compose(&root);
+    assert_observed(
+        "join_window_waits_for_public_relay",
+        &post(&relaunched, "/api/pair/window/open", open),
+    );
     assert_eq!(
-        refusal(&post(&relaunched, "/api/pair/window/open", open)),
+        refusal(&create(&relaunched)),
+        (409, "authority_state_invalid")
+    );
+    assert_eq!(private_json(&root.join(SWARM_FILE)), record);
+    assert_eq!(seed_swarm_id(&root), record["swarm_id"]);
+    assert_eq!(
+        last_failure(&root),
+        (json!("/api/create"), json!("authority_state_invalid"))
+    );
+}
+
+/// The retry after a failed owner join (app.py:1600-1622): a changed consent is still refused
+/// before the authority (`consent_retry_changed`); with the fault removed the `unenrolled` swarm
+/// re-enrols through its own seed (`pair_request` -> `approve_pairing` -> `accept_pairing` again):
+/// this Mac is member 1 of the SAME swarm, generation 1, and a later create answers
+/// `authority.status()` of that current member. The failure stays the last recorded one. A
+/// stopped owner's membership is `retained`, a state that cannot re-enrol (app.py:1607). Executed
+/// oracle: cases `pair_request` and `pair_request_same_process`.
+#[test]
+fn packaged_owner_create_retry_after_failed_join_reenrols() {
+    let root = private_root();
+    let fault = plant(&root, &pending_fault(), Fault::Garbage);
+    let host = compose(&root);
+    assert_eq!(refusal(&create(&host)), (409, "authority_state_invalid"));
+    let record = kept_record(&root);
+    let mut changed = consent();
+    changed["power"] = json!("battery_allowed");
+    assert_eq!(
+        refusal(&post(&host, "/api/create", json!({"consent": changed}))),
+        (400, "consent_retry_changed")
+    );
+    unplant(&fault);
+    let retried = create(&host);
+    assert_reenrolled(&retried);
+    assert_eq!(
+        private_json(&root.join(SWARM_FILE)),
+        record,
+        "the retry made another swarm"
+    );
+    assert_eq!(seed_swarm_id(&root), record["swarm_id"]);
+    let membership: Value = serde_json::from_slice(
+        &std::fs::read(root.join(MEMBER_DIR).join("membership.state.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(membership["swarm_id"], record["swarm_id"]);
+    assert_eq!(owner_lease(&root).0, 1);
+    assert_current_status(&create(&host), 1);
+    assert_eq!(
+        last_failure(&root),
+        (json!("/api/create"), json!("authority_state_invalid"))
+    );
+    assert_eq!(post(&host, "/api/stop", json!({})).0, 200);
+    assert_eq!(refusal(&create(&host)), (400, "membership_cannot_reenroll"));
+    assert_eq!(private_json(&root.join(SWARM_FILE)), record);
+}
+
+/// Near misses around the retry: a failed join, then `/api/stop`, leaves an `unenrolled` swarm
+/// whose retry cannot reach a stopped authority (oracle case `stopped_unenrolled`: 409
+/// `authority_not_started`); a relaunch between the failure and the retry brings the same seed
+/// back and the retry re-enrols there (oracle case `pair_request`, `relaunch_*`).
+#[test]
+fn packaged_owner_create_relaunch_after_failed_join_reenrols() {
+    let root = private_root();
+    let fault = plant(&root, &pending_fault(), Fault::Garbage);
+    let host = compose(&root);
+    assert_eq!(refusal(&create(&host)), (409, "authority_state_invalid"));
+    let record = kept_record(&root);
+    assert_eq!(post(&host, "/api/stop", json!({})).0, 200);
+    unplant(&fault);
+    assert_eq!(refusal(&create(&host)), (409, "authority_not_started"));
+    drop(host);
+    let relaunched = compose(&root);
+    assert_reenrolled(&create(&relaunched));
+    assert_eq!(private_json(&root.join(SWARM_FILE)), record);
+    assert_eq!(seed_swarm_id(&root), record["swarm_id"]);
+    assert_current_status(&create(&relaunched), 1);
+}
+
+/// The other failure points of the owner's join keep the swarm the same way, and the retry with
+/// the fault removed re-enrols in the same process (executed oracle cases `approve`, `accept`,
+/// `*_same_process`): an approval store that is not a directory (409
+/// `authority_state_path_invalid`), a handoff path that is a directory (409
+/// `authority_state_write_failed`).
+#[test]
+fn packaged_owner_create_failed_approve_or_accept_keeps_swarm_record() {
+    for (relative, fault, code) in [
+        (
+            "authority/member/seed/approvals",
+            Fault::Garbage,
+            "authority_state_path_invalid",
+        ),
+        (
+            "authority/member/pairing.handoff.json",
+            Fault::Directory,
+            "authority_state_write_failed",
+        ),
+    ] {
+        let root = private_root();
+        let planted = plant(&root, relative, fault);
+        let host = compose(&root);
+        assert_eq!(refusal(&create(&host)), (409, code), "{relative}");
+        let record = kept_record(&root);
+        assert_eq!(seed_swarm_id(&root), record["swarm_id"], "{relative}");
+        assert_eq!(refusal(&create(&host)), (409, code), "{relative}");
+        unplant(&planted);
+        assert_reenrolled(&create(&host));
+        assert_eq!(private_json(&root.join(SWARM_FILE)), record, "{relative}");
+        assert_current_status(&create(&host), 1);
+    }
+}
+
+/// The seed itself fails to start after `create_swarm` committed the swarm (here its kept-url file
+/// is not a private record). v0.1.4 keeps the metadata and only closes the runtime
+/// (authority.py:448-454); executed oracle case `runtime_start`: no pairing code without a
+/// coordinator (`pairing_window_swarm_required`), every retry in that process refuses
+/// `authority_swarm_missing` (the swarm exists, its seed does not run), and a relaunch with the
+/// fault gone starts the seed and the retry re-enrols the same swarm.
+#[test]
+fn packaged_owner_create_failed_seed_start_keeps_swarm_record() {
+    let root = private_root();
+    let fault = plant(&root, "seed-rs/seed-url.json", Fault::Garbage);
+    let host = compose(&root);
+    let refused = create(&host);
+    assert_eq!(refused.0, 409, "{}", refused.1);
+    let record = kept_record(&root);
+    assert_eq!(seed_swarm_id(&root), record["swarm_id"]);
+    assert_eq!(
+        refusal(&post(
+            &host,
+            "/api/pair/window/open",
+            json!({"ttl_seconds": 30})
+        )),
         (400, "pairing_window_swarm_required")
     );
+    assert_eq!(refusal(&create(&host)), (409, "authority_swarm_missing"));
+    unplant(&fault);
+    assert_eq!(refusal(&create(&host)), (409, "authority_swarm_missing"));
+    assert_eq!(private_json(&root.join(SWARM_FILE)), record);
+    drop(host);
+    let relaunched = compose(&root);
+    assert_reenrolled(&create(&relaunched));
+    assert_eq!(private_json(&root.join(SWARM_FILE)), record);
+    assert_eq!(seed_swarm_id(&root), record["swarm_id"]);
 }
 
 /// The packaged process has no relay: a pairing code asked for is a pending window that waits
