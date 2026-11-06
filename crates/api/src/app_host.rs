@@ -310,15 +310,35 @@ pub fn start_seed<M: ManagedSlot>(
     swarm_id: &str,
     origin: Option<&str>,
 ) -> Result<SeedRuntime<M>, PublicError> {
+    run_seed(prepare_seed(root, swarm_id)?, origin)
+}
+/// What `create_swarm` makes before it commits the metadata (authority.py:412-446 @ f4e366e9): the
+/// seed's key, its local TLS material and the coordinator that binds its database to the swarm.
+pub struct PreparedSeed {
+    dir: PathBuf,
+    material: ::seed::tls::Material,
+    coordinator: Arc<::seed::Coordinator>,
+}
+/// Whether that prepared state is there (`any(p.name != 'network.json' for p in
+/// state_root.iterdir())` without metadata, authority.py:390,410): the seed's key or its database.
+fn prepared_state(root: &Path) -> bool {
+    [
+        root.join(SEED_IDENTITY_FILE),
+        root.join("seed-rs").join("seed.sqlite"),
+    ]
+    .iter()
+    .any(|path| fs::symlink_metadata(path).is_ok())
+}
+/// `create_swarm`'s preparation in its order: the seed key, the TLS material (its own code is the
+/// answer, `LocalTLSError`), then the coordinator over the seed database bound to `swarm_id`.
+pub fn prepare_seed(root: &Path, swarm_id: &str) -> Result<PreparedSeed, PublicError> {
     let dir = root.join("seed-rs");
     fs::create_dir_all(&dir).map_err(|_| failure())?;
     fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
         .map_err(|_| failure())?;
-    let material = ::seed::tls::ensure_local_tls_material(&dir.join("tls")).map_err(|e| {
-        eprintln!("seed tls: {}", e.0);
-        failure()
-    })?;
     let (signer, _, _) = identity_in(root, SEED_IDENTITY_FILE)?;
+    let material = ::seed::tls::ensure_local_tls_material(&dir.join("tls"))
+        .map_err(|e| PublicError::new(409, e.0))?;
     let options = ::seed::Options::new(
         swarm_id,
         &format!("seed-{swarm_id}"),
@@ -335,6 +355,22 @@ pub fn start_seed<M: ManagedSlot>(
         )
         .map_err(|e| seed_failure(&e))?,
     );
+    Ok(PreparedSeed {
+        dir,
+        material,
+        coordinator,
+    })
+}
+/// `_start_runtime`'s seed over a prepared one: the server and the seed url.
+pub fn run_seed<M: ManagedSlot>(
+    prepared: PreparedSeed,
+    origin: Option<&str>,
+) -> Result<SeedRuntime<M>, PublicError> {
+    let PreparedSeed {
+        dir,
+        material,
+        coordinator,
+    } = prepared;
     // The oracle's loopback seed keeps its port across restarts (`_network_configuration`); the seed
     // crate binds a fresh one (seam SE-L10-SEED-PORT), so a swarm that has no public origin keeps its
     // FIRST url as the url it answers for. This process still reaches it through `SeedOptions`.
@@ -498,6 +534,11 @@ impl<M: ManagedSlot> Authority<M> {
         } else {
             PersistedAuthority::load(&root).map_err(|e| e.code)?
         };
+        // `authority.start()`: what `create_swarm` prepared before a failure, with no metadata
+        // committed, is a partial state (authority.py:389-391).
+        if !target && swarm.is_none() && legacy.is_none() && prepared_state(&root) {
+            return Err("authority_partial_state");
+        }
         let configured_origin = private_state::load(&root.join(NETWORK_FILE), cap())
             .map_err(|e| e.0)?
             .and_then(|m| {
@@ -864,24 +905,24 @@ pub fn membership_binding(cell: &impl Cell) -> Option<crate::member::Binding> {
 /// swarm, else its `membership_state` and the status a current member is answered with (no
 /// `members`). A running seed's rows decide (`current`, `revoked`, `unenrolled`); with no seed
 /// running (`coordinator is None`: stopped, or its start failed) a retained membership is
-/// `retained` and none is `unenrolled` (authority.py:665-673).
-fn create_state<M: ManagedSlot>(c: &Authority<M>) -> Option<(String, Json)> {
-    let view = c.owner_authority()?;
+/// `retained` and none is `unenrolled` (authority.py:665-673); a membership that cannot be read
+/// is `load_membership_state`'s own refusal (authority.py:669-674).
+fn create_state<M: ManagedSlot>(c: &Authority<M>) -> Result<Option<(String, Json)>, PublicError> {
+    let Some(view) = c.owner_authority() else {
+        return Ok(None);
+    };
     let status = view.authority_status(true, now());
     if c.seed.is_none() && c.legacy.is_none() {
         let dir = c.root.join("authority").join("member");
-        let retained = crate::peer::load_membership_state(&dir)
-            .ok()
-            .flatten()
-            .is_some();
+        let retained = crate::peer::load_membership_state(&dir)?.is_some();
         let state = if retained { "retained" } else { "unenrolled" };
-        return Some((state.into(), status));
+        return Ok(Some((state.into(), status)));
     }
     let state = match status.get("membership_state") {
         Some(Json::Str(s)) => s.clone(),
         _ => String::new(),
     };
-    Some((state, status))
+    Ok(Some((state, status)))
 }
 /// `pair_request` -> `approve_pairing` -> `accept_pairing` through the swarm's own running seed
 /// (`/api/create`, app.py:1612-1622). A failure propagates and leaves the swarm, its seed and the
@@ -912,7 +953,7 @@ pub fn create_owner_json(
     // `current.get('swarm_created')`: a current member is answered with `authority.status()`
     // (no `members`), an `unenrolled` one joins its swarm again, anything else cannot re-enrol
     // (app.py:1604-1611).
-    if let Some((state, status)) = cell.with(|c| create_state(c)) {
+    if let Some((state, status)) = cell.with(|c| create_state(c))? {
         return match state.as_str() {
             "current" => Ok(status),
             "unenrolled" => {
@@ -938,9 +979,16 @@ pub fn create_owner_json(
             _ => Err(PublicError::new(400, "membership_cannot_reenroll")),
         };
     }
+    // `create_swarm` refuses what a failed one prepared without committing (authority.py:410-411).
+    if prepared_state(&root) {
+        return Err(PublicError::new(409, "authority_swarm_exists").raised_by(Raised::Authority));
+    }
     let id = hex(&random(10)?);
     let (_, _, owner_node) = identity(&root)?;
     let swarm_id = format!("sw-{}", &id[..20]);
+    // The seed key, the TLS material and the seed database bound to the swarm come BEFORE the
+    // metadata commit (authority.py:412-449): a failure here leaves no swarm.
+    let prepared = prepare_seed(&root, &swarm_id)?;
     let record = json!({"swarm_id": swarm_id, "node_id": owner_node, "created_at": now()});
     private_state::store(&root.join(SWARM_FILE), &record, cap())
         .map_err(|e| PublicError::new(409, e.0))?;
@@ -950,7 +998,7 @@ pub fn create_owner_json(
     // swarm through it (`pair_request` -> `approve_pairing` -> `accept_pairing`).
     cell.with(|c| c.swarm = Some(record));
     let origin = cell.with(|c| c.configured_origin.clone());
-    let runtime = Arc::new(start_seed(&root, &swarm_id, origin.as_deref())?);
+    let runtime = Arc::new(run_seed(prepared, origin.as_deref())?);
     cell.with(|c| c.seed = Some(runtime.clone()));
     join_own_swarm(cell, &root, &runtime, &swarm_id, &storage)
 }
