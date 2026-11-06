@@ -33,6 +33,7 @@ pub mod planning;
 pub mod private_state;
 pub mod reap;
 pub mod receipts;
+pub mod router_port;
 pub mod service;
 pub mod spawn;
 pub mod status;
