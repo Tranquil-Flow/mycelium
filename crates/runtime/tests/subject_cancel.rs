@@ -161,13 +161,25 @@ fn on_sidecar(started: WorkerStart) -> RunningDeliveryCancel {
     }
 }
 
-fn window(started_at: f64, deadline: f64, ack_window: f64) -> CancelWindow {
-    CancelWindow {
-        started_at,
-        deadline,
-        ack_window,
-    }
-}
+/// A worker started at 100 s under the supplied absolute 107 s: the deadline verbatim and
+/// `max(0, 107 - 100)` left (:2975-2976).
+const AT_100_UNTIL_107: CancelWindow = CancelWindow {
+    started_at: 100.0,
+    deadline: 107.0,
+    ack_window: 7.0,
+};
+/// The same deadline for a worker started at 102 s: 5 s left.
+const AT_102_UNTIL_107: CancelWindow = CancelWindow {
+    started_at: 102.0,
+    deadline: 107.0,
+    ack_window: 5.0,
+};
+/// The same deadline for a retry worker started at 101 s: 6 s left.
+const AT_101_UNTIL_107: CancelWindow = CancelWindow {
+    started_at: 101.0,
+    deadline: 107.0,
+    ack_window: 6.0,
+};
 
 /// A sidecar holding one queued outbound item per message id.
 fn sidecar(ids: &[MessageId]) -> (SidecarState, Vec<OutboundHandle>) {
@@ -257,21 +269,21 @@ fn subject_cancel_supplied_deadline_reaches_every_matching_delivery() {
         other => panic!("two registered workers, got {other:?}"),
     };
     assert_eq!(at_100.message_id(), first);
-    assert_eq!(at_100.window(), window(100.0, 107.0, 7.0));
+    assert_eq!(at_100.window(), AT_100_UNTIL_107);
     assert_eq!(at_102.message_id(), second);
-    assert_eq!(at_102.window(), window(102.0, 107.0, 5.0));
+    assert_eq!(at_102.window(), AT_102_UNTIL_107);
     assert_eq!(
         core.delivery_cancel_worker(&first),
         Some(WorkerView {
             cleanup_deadline: Some(107.0),
-            window: Some(window(100.0, 107.0, 7.0)),
+            window: Some(AT_100_UNTIL_107),
         })
     );
     assert_eq!(
         core.delivery_cancel_worker(&second),
         Some(WorkerView {
             cleanup_deadline: Some(107.0),
-            window: Some(window(102.0, 107.0, 5.0)),
+            window: Some(AT_102_UNTIL_107),
         })
     );
     assert_eq!(core.delivery_cancel_workers(), 2);
@@ -315,14 +327,22 @@ fn subject_cancel_none_uses_min_of_ack_and_delivery_timeout() {
         };
         assert_eq!(
             running.window(),
-            window(100.0, absolute_s, ack_s),
+            CancelWindow {
+                started_at: 100.0,
+                deadline: absolute_s,
+                ack_window: ack_s,
+            },
             "delivery {delivery_s}"
         );
         assert_eq!(
             core.delivery_cancel_worker(&only),
             Some(WorkerView {
                 cleanup_deadline: None,
-                window: Some(window(100.0, absolute_s, ack_s)),
+                window: Some(CancelWindow {
+                    started_at: 100.0,
+                    deadline: absolute_s,
+                    ack_window: ack_s,
+                }),
             }),
             "delivery {delivery_s}"
         );
@@ -380,7 +400,7 @@ fn subject_cancel_non_matching_subject_untouched() {
         None => panic!("the matching send has no worker"),
     };
     assert_eq!(running.message_id(), matching);
-    assert_eq!(running.window(), window(100.0, 107.0, 7.0));
+    assert_eq!(running.window(), AT_100_UNTIL_107);
 }
 
 #[test]
@@ -442,8 +462,8 @@ fn subject_cancel_successor_lineage_included() {
     assert_eq!(
         windows,
         vec![
-            (on_original, window(100.0, 107.0, 7.0)),
-            (on_successor, window(100.0, 107.0, 7.0)),
+            (on_original, AT_100_UNTIL_107),
+            (on_successor, AT_100_UNTIL_107),
         ]
     );
 }
@@ -478,7 +498,7 @@ fn subject_cancel_already_reserved_is_reported() {
         Some(started) => on_sidecar(started),
         None => panic!("no worker registered"),
     };
-    assert_eq!(held.window(), window(100.0, 107.0, 7.0));
+    assert_eq!(held.window(), AT_100_UNTIL_107);
     // The sidecar cancels the message; its answer has not reached the worker yet.
     assert_eq!(
         held.cancel_in_sidecar(&mut sidecar),
@@ -516,7 +536,7 @@ fn subject_cancel_already_reserved_is_reported() {
         core.delivery_cancel_worker(&only),
         Some(WorkerView {
             cleanup_deadline: Some(107.0),
-            window: Some(window(100.0, 107.0, 7.0)),
+            window: Some(AT_100_UNTIL_107),
         })
     );
     assert_eq!(flags(&core, only), RESERVED);
@@ -561,7 +581,7 @@ fn subject_cancel_no_success_before_cancel_result() {
         Some(started) => on_sidecar(started),
         None => panic!("no worker registered"),
     };
-    assert_eq!(failing.window(), window(100.0, 107.0, 7.0));
+    assert_eq!(failing.window(), AT_100_UNTIL_107);
     assert_eq!(flags(&core, only), RESERVED);
     assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 1);
 
@@ -593,7 +613,7 @@ fn subject_cancel_no_success_before_cancel_result() {
         Some(started) => on_sidecar(started),
         None => panic!("no retry worker registered"),
     };
-    assert_eq!(retrying.window(), window(101.0, 107.0, 6.0));
+    assert_eq!(retrying.window(), AT_101_UNTIL_107);
     // The sidecar's own cancel is not the transport's confirmation.
     assert_eq!(
         retrying.cancel_in_sidecar(&mut sidecar),
