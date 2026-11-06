@@ -1597,10 +1597,11 @@ impl ArtifactAcquisitionStore {
         history.drain(..excess);
         let document = PyValue::List(history.iter().map(AcquisitionStatus::to_value).collect());
         atomic_json(&self.history_path, &document)?;
-        match fs::remove_file(&self.current_path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == ErrorKind::NotFound => {}
-            Err(e) => return Err(os_error(e)),
+        // `unlink(missing_ok=True)`: only an already-absent current.json is fine.
+        if let Err(e) = fs::remove_file(&self.current_path)
+            && e.kind() != ErrorKind::NotFound
+        {
+            return Err(os_error(e));
         }
         sync_directory(&self.root.join("state"))?;
         let generation = history.iter().map(|s| s.generation).max().unwrap_or(0);
