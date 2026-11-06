@@ -42,6 +42,31 @@
 //! `PyMyceliumRouterTransportsIrohDeliveryCancelAckTimeoutSecondsL75` (1 s, :75). The delivery
 //! timeout and the history capacity (`queue_capacity`, :946) are the transport's constructor
 //! values and are refused as its constructor refuses them (:859-866).
+//!
+//! A subject's fields are the values the registry holds, as a peer's `ManifestLocked` or the
+//! owner's command delivers them, each a [`PyJson`]. A peer's frame types none of them
+//! (mycelium_router/wire.py:263-270 copies them, :459-475 only compares them, relay.py:988-1100
+//! only compares them), so an attempt arrives as any `int` (`2**64`, `-1`), a `float` (`1.0`,
+//! `inf`), a `bool`, a `str` or `None`, a request id as a non-empty `str` (lone surrogates
+//! included) or a nonzero number, a path id as a `str`, a number or `None`, and a topology
+//! version as any value. Upstream refuses only a falsy request id and a NaN attempt or id (it
+//! differs from its own manifest copy, wire.py:461-468). A pending send's scope is the one
+//! `_frame_scope` keeps (:1245-1249): a `str` id or `None`, an `int` attempt of any sign and
+//! size (never a `bool`) or `None`. Every comparison is Python's. `==` and `!=` are
+//! [`py_json_eq`] (`1 == 1.0 == True`, `-0.0 == 0`, `None == None`, `"1" != 1`, a NaN equals
+//! nothing), as in both sweeps (:2762-2767, :2833-2837), the same-request lineage (:4318-4319,
+//! :4716-4717) and the cleanup projection (:1108-1119). A dict or tuple key (`_path_subjects`,
+//! `_entry_nodes`, `_participant_nodes_by_path`, `_controlled_cancelled_requests`,
+//! `_cancellations_by_subject` and the probe of `cancellation_observed`, :1263-1292) is looked
+//! up as CPython's dict looks it up, by [`py_json_same`]: `hash(1) == hash(1.0) == hash(True)`,
+//! so Python-equal keys are one key, and a key keeps its place when it is set again.
+//!
+//! Declared difference, unreachable: a list or dict as a request id, path id or attempt is
+//! unhashable, so the oracle raises `TypeError` at its first dict use of it. No path delivers
+//! one: every registration hashes the subject's `(request_id, path_id, path_attempt)` first
+//! (:4018-4023, :4141-4147, :4208-4213), and the owner's attempt is an `int`
+//! (physical_inference_node.py:3596-3597). The core never refuses one and compares it as above.
+use crate::m16_router_contracts::{PyJson, PyReal, py_json_eq, py_json_same};
 use crate::prefill_watch::MonotonicClock;
 use crate::sidecar_pool::{MessageId, OutboundHandle, SidecarState};
 use budgets::{BudgetId, Entries, Refusal};
@@ -50,30 +75,33 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 /// The reservation reason of an owner-fanned cancellation (:2772, :2842).
 const PATH_CANCELLED: &str = "path_cancelled";
 
-/// `PathCancellation` (contracts.py:361-365).
+/// `PathCancellation` (contracts.py:361-365), each field the value the registry holds.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PathCancellation {
-    pub request_id: String,
-    pub path_id: String,
-    pub path_attempt: u64,
-    pub topology_version: u64,
+    pub request_id: PyJson,
+    pub path_id: PyJson,
+    pub path_attempt: PyJson,
+    pub topology_version: PyJson,
 }
 
 impl PathCancellation {
-    fn is(&self, request_id: &str, path_id: &str, path_attempt: u64) -> bool {
-        self.request_id == request_id
-            && self.path_id == path_id
-            && self.path_attempt == path_attempt
+    /// Its `(request_id, path_id, path_attempt)` is the dict key `(request_id, path_id,
+    /// path_attempt)` (:1270, :1275-1279): a tuple key compares element by element.
+    fn has_key(&self, request_id: &PyJson, path_id: &PyJson, path_attempt: &PyJson) -> bool {
+        py_json_same(&self.request_id, request_id)
+            && py_json_same(&self.path_id, path_id)
+            && py_json_same(&self.path_attempt, path_attempt)
     }
 }
 
 /// The fields of `_PendingSend` (:749-765) this core reads or writes. The send path owns the
-/// public ones; the cancellation flags are written only by this core.
+/// public ones; its scope is fixed at construction, and the cancellation flags are written only
+/// by this core.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PendingSend {
-    pub request_id: Option<String>,
-    pub path_id: Option<String>,
-    pub path_attempt: Option<u64>,
+    request_id: PyJson,
+    path_id: PyJson,
+    path_attempt: PyJson,
     pub cancellable_forward: bool,
     pub admission_started: bool,
     pub completed: bool,
@@ -84,12 +112,22 @@ pub struct PendingSend {
 }
 
 impl PendingSend {
-    /// `_PendingSend(request_id=..., path_id=..., path_attempt=...)`: every flag false and an
-    /// empty reason.
-    pub fn new(request_id: Option<&str>, path_id: Option<&str>, path_attempt: Option<u64>) -> Self {
+    /// `_PendingSend(request_id=..., path_id=..., path_attempt=...)` over the scope
+    /// `_frame_scope` keeps of a frame's values (:1245-1249, `None` for an absent one): a `str`
+    /// id, else `None`; an attempt whose type is `int` (a `bool` or `float` is not), else
+    /// `None`. Every flag false and an empty reason.
+    pub fn new(request_id: PyJson, path_id: PyJson, path_attempt: PyJson) -> Self {
+        let str_or_none = |value: PyJson| match value {
+            PyJson::Str(_) => value,
+            _ => PyJson::None,
+        };
+        let path_attempt = match path_attempt {
+            PyJson::Num(PyReal::Int { .. }) => path_attempt,
+            _ => PyJson::None,
+        };
         Self {
-            request_id: request_id.map(str::to_owned),
-            path_id: path_id.map(str::to_owned),
+            request_id: str_or_none(request_id),
+            path_id: str_or_none(path_id),
             path_attempt,
             cancellable_forward: false,
             admission_started: false,
@@ -99,6 +137,18 @@ impl PendingSend {
             cancel_started: false,
             cancel_confirmed: false,
         }
+    }
+    /// A `str` or `None`.
+    pub fn request_id(&self) -> &PyJson {
+        &self.request_id
+    }
+    /// A `str` or `None`.
+    pub fn path_id(&self) -> &PyJson {
+        &self.path_id
+    }
+    /// An `int` or `None`.
+    pub fn path_attempt(&self) -> &PyJson {
+        &self.path_attempt
     }
     pub fn cancelled(&self) -> bool {
         self.cancelled
@@ -112,11 +162,12 @@ impl PendingSend {
     pub fn cancel_confirmed(&self) -> bool {
         self.cancel_confirmed
     }
-    /// The exact (request, path, attempt) equality of both sweeps (:2762-2767, :2833-2837).
+    /// The exact (request, path, attempt) equality of both sweeps (:2762-2767, :2833-2837):
+    /// Python `==`, so an attempt `1.0` or `True` meets the `int` 1 and `None` meets `None`.
     fn exact(&self, subject: &PathCancellation) -> bool {
-        self.request_id.as_deref() == Some(subject.request_id.as_str())
-            && self.path_id.as_deref() == Some(subject.path_id.as_str())
-            && self.path_attempt == Some(subject.path_attempt)
+        py_json_eq(&self.request_id, &subject.request_id)
+            && py_json_eq(&self.path_id, &subject.path_id)
+            && py_json_eq(&self.path_attempt, &subject.path_attempt)
     }
 }
 
@@ -374,15 +425,17 @@ pub struct SubjectCancel {
     delivery_timeout_seconds: f64,
     ack_cap_seconds: f64,
     history_capacity: usize,
-    entry_nodes: BTreeMap<String, String>,
-    participants: BTreeMap<String, BTreeSet<String>>,
+    /// `_entry_nodes`: request id to entry node, in dict order.
+    entry_nodes: Vec<(PyJson, String)>,
+    /// `_participant_nodes_by_path`: path id to its nodes, in dict order.
+    participants: Vec<(PyJson, BTreeSet<String>)>,
     /// `_path_subjects`, keyed by path id, in dict order.
     path_subjects: Vec<PathCancellation>,
     last_cancellation: Option<PathCancellation>,
     /// `_cancellations_by_subject`, oldest first.
     cancellations_by_subject: VecDeque<PathCancellation>,
     /// `_controlled_cancelled_requests`, oldest first.
-    controlled_requests: VecDeque<String>,
+    controlled_requests: VecDeque<PyJson>,
     /// Every `_PendingSend` object still reachable, live or held by an unstarted worker.
     records: BTreeMap<u64, PendingSend>,
     /// `_pending`: message id to its live object, in dict order.
@@ -422,8 +475,8 @@ impl SubjectCancel {
             // oracle's decimal literal (1000 / 1000 = 1.0 exactly).
             ack_cap_seconds: cap.millis() as f64 / 1000.0,
             history_capacity: queue_capacity,
-            entry_nodes: BTreeMap::new(),
-            participants: BTreeMap::new(),
+            entry_nodes: Vec::new(),
+            participants: Vec::new(),
             path_subjects: Vec::new(),
             last_cancellation: None,
             cancellations_by_subject: VecDeque::new(),
@@ -436,34 +489,37 @@ impl SubjectCancel {
     }
 
     // ---- registries the transport's frame paths write ---------------------------------------
-    /// `_entry_nodes[request_id] = node_id`.
-    pub fn set_entry_node(&mut self, request_id: &str, node_id: &str) {
-        self.entry_nodes
-            .insert(request_id.to_owned(), node_id.to_owned());
+    /// `_entry_nodes[request_id] = node_id`: a Python-equal request id keeps its key and place.
+    pub fn set_entry_node(&mut self, request_id: PyJson, node_id: &str) {
+        set_key(&mut self.entry_nodes, request_id, node_id.to_owned());
     }
-    pub fn entry_node(&self, request_id: &str) -> Option<&str> {
-        self.entry_nodes.get(request_id).map(String::as_str)
+    /// `_entry_nodes.get(request_id)`.
+    pub fn entry_node(&self, request_id: &PyJson) -> Option<&str> {
+        get_key(&self.entry_nodes, request_id).map(String::as_str)
     }
-    /// `_participant_nodes_by_path[path_id] = frozenset(nodes)`.
+    /// `_participant_nodes_by_path[path_id] = frozenset(nodes)`: a Python-equal path id keeps
+    /// its key and place.
     pub fn set_participants<'a>(
         &mut self,
-        path_id: &str,
+        path_id: PyJson,
         nodes: impl IntoIterator<Item = &'a str>,
     ) {
-        self.participants.insert(
-            path_id.to_owned(),
+        set_key(
+            &mut self.participants,
+            path_id,
             nodes.into_iter().map(str::to_owned).collect(),
         );
     }
-    pub fn participants(&self, path_id: &str) -> Option<&BTreeSet<String>> {
-        self.participants.get(path_id)
+    /// `_participant_nodes_by_path.get(path_id)`.
+    pub fn participants(&self, path_id: &PyJson) -> Option<&BTreeSet<String>> {
+        get_key(&self.participants, path_id)
     }
-    /// `_path_subjects[subject.path_id] = subject`: an existing path keeps its place.
+    /// `_path_subjects[subject.path_id] = subject`: a Python-equal path id keeps its place.
     pub fn set_path_subject(&mut self, subject: PathCancellation) {
         match self
             .path_subjects
             .iter_mut()
-            .find(|registered| registered.path_id == subject.path_id)
+            .find(|registered| py_json_same(&registered.path_id, &subject.path_id))
         {
             Some(registered) => *registered = subject,
             None => self.path_subjects.push(subject),
@@ -507,42 +563,47 @@ impl SubjectCancel {
     // ---- observers ---------------------------------------------------------------------------
     /// `cancellation_cleanup_state(...)["pending_delivery_count"]` (:1101-1132): the
     /// unconfirmed sends of the subject. Once the request is owner-cancelled the projection is
-    /// request-wide, every path and attempt of it.
+    /// request-wide, every path and attempt of it. A `None` attempt on either side matches any
+    /// attempt; every other comparison is Python `==` (:1108-1119).
     pub fn pending_delivery_count(
         &self,
-        request_id: &str,
-        path_id: &str,
-        path_attempt: Option<u64>,
+        request_id: &PyJson,
+        path_id: &PyJson,
+        path_attempt: &PyJson,
     ) -> usize {
         let request_wide = self.request_controlled_cancelled(request_id);
         self.pending
             .iter()
             .filter_map(|(_, record)| self.records.get(record))
             .filter(|send| {
-                send.request_id.as_deref() == Some(request_id)
-                    && (request_wide || send.path_id.as_deref() == Some(path_id))
+                py_json_eq(&send.request_id, request_id)
+                    && (request_wide || py_json_eq(&send.path_id, path_id))
                     && (request_wide
-                        || path_attempt.is_none()
-                        || send.path_attempt.is_none()
-                        || send.path_attempt == path_attempt)
+                        || *path_attempt == PyJson::None
+                        || send.path_attempt == PyJson::None
+                        || py_json_eq(&send.path_attempt, path_attempt))
                     && !send.cancel_confirmed
             })
             .count()
     }
-    /// `cancellation_observed` (:1263-1272): exact bounded evidence.
+    /// `cancellation_observed` (:1263-1272): exact bounded evidence, the tuple's dict lookup.
     pub fn cancellation_observed(
         &self,
-        request_id: &str,
-        path_id: &str,
-        path_attempt: u64,
+        request_id: &PyJson,
+        path_id: &PyJson,
+        path_attempt: &PyJson,
     ) -> bool {
         self.cancellations_by_subject
             .iter()
-            .any(|c| c.is(request_id, path_id, path_attempt))
+            .any(|c| c.has_key(request_id, path_id, path_attempt))
     }
-    /// `_request_controlled_cancelled_locked` (:1294-1298).
-    pub fn request_controlled_cancelled(&self, request_id: &str) -> bool {
-        self.controlled_requests.iter().any(|r| r == request_id)
+    /// `_request_controlled_cancelled_locked` (:1294-1298): never for a `None` request id.
+    pub fn request_controlled_cancelled(&self, request_id: &PyJson) -> bool {
+        *request_id != PyJson::None
+            && self
+                .controlled_requests
+                .iter()
+                .any(|r| py_json_same(r, request_id))
     }
     /// `_last_cancellation`.
     pub fn last_cancellation(&self) -> Option<&PathCancellation> {
@@ -594,30 +655,31 @@ impl SubjectCancel {
         self.remember_controlled(&cancellation.request_id);
         let mut subjects = vec![cancellation.clone()];
         for registered in &self.path_subjects {
-            if registered.request_id != cancellation.request_id {
+            if !py_json_eq(&registered.request_id, &cancellation.request_id) {
                 continue;
             }
             match subjects
                 .iter_mut()
-                .find(|subject| subject.path_id == registered.path_id)
+                .find(|subject| py_json_same(&subject.path_id, &registered.path_id))
             {
                 Some(subject) => *subject = registered.clone(),
                 None => subjects.push(registered.clone()),
             }
         }
         for subject in subjects {
-            match self.apply_subject(
+            let (trace, applied) = self.apply_subject(
                 router.as_deref_mut(),
                 &subject,
                 entry_cancelled,
                 cleanup_deadline_monotonic_s,
                 &mut receipt.dispatched,
-            ) {
-                Ok(trace) => {
+            );
+            match applied {
+                Ok(()) => {
                     receipt.accepted = trace.accepted || receipt.accepted;
                     receipt.subjects.push(trace);
                 }
-                Err((fault, trace)) => {
+                Err(fault) => {
                     receipt.subjects.push(trace);
                     // Retain the admitted subject for owner retry (:4327-4332).
                     self.set_path_subject(subject);
@@ -631,7 +693,8 @@ impl SubjectCancel {
         Ok(receipt)
     }
 
-    /// `_apply_controlled_path_cancellation` (:4337-4438) for one subject.
+    /// `_apply_controlled_path_cancellation` (:4337-4438) for one subject: its trace, and the
+    /// fault when it raised.
     fn apply_subject<R: OwnerRouter>(
         &mut self,
         router: Option<&mut R>,
@@ -639,7 +702,7 @@ impl SubjectCancel {
         entry_cancelled: bool,
         cleanup_deadline: Option<f64>,
         dispatched: &mut Vec<DeliveryCancelDispatch>,
-    ) -> Result<SubjectTrace, (ApplyFault<R::Error>, SubjectTrace)> {
+    ) -> (SubjectTrace, Result<(), ApplyFault<R::Error>>) {
         let mut trace = SubjectTrace {
             subject: subject.clone(),
             gate: Gate::Admitted,
@@ -647,14 +710,14 @@ impl SubjectCancel {
             router: None,
             accepted: false,
         };
-        let entry_node = self.entry_nodes.get(&subject.request_id).cloned();
+        let entry_node = get_key(&self.entry_nodes, &subject.request_id).cloned();
         let Some(router) = router else {
             trace.gate = Gate::NoRouter;
-            return Ok(trace);
+            return (trace, Ok(()));
         };
         if let Some(gate) = self.refused(subject, entry_cancelled) {
             trace.gate = gate;
-            return Ok(trace);
+            return (trace, Ok(()));
         }
         // The exact cancellation fence, published before the sweeps (:4379-4385).
         self.last_cancellation = Some(subject.clone());
@@ -678,7 +741,7 @@ impl SubjectCancel {
                 )
             });
         if swept.is_err() {
-            return Err((ApplyFault::WorkerCollision, trace));
+            return (trace, Err(ApplyFault::WorkerCollision));
         }
         let answer = match router.apply_controlled_path_cancellation(subject) {
             Some(result) => result.map(RouterAnswer::OwnerControl),
@@ -689,27 +752,28 @@ impl SubjectCancel {
                 None => Ok(RouterAnswer::NoEntryPoint),
             },
         };
-        let observed =
-            self.cancellation_observed(&subject.request_id, &subject.path_id, subject.path_attempt);
+        let observed = self.cancellation_observed(
+            &subject.request_id,
+            &subject.path_id,
+            &subject.path_attempt,
+        );
         // `finally`: the registries are retired even when the Router raised (:4426-4438).
         self.forget_path(&subject.request_id, &subject.path_id);
         match answer {
             Ok(answer) => {
                 trace.router = Some(answer);
                 trace.accepted = answer.accepted() || observed;
-                Ok(trace)
+                (trace, Ok(()))
             }
-            Err(error) => Err((ApplyFault::Router(error), trace)),
+            Err(error) => (trace, Err(ApplyFault::Router(error))),
         }
     }
 
     /// The gates shared by the public entry and each subject (:4310-4315, :4363-4378); none
     /// applies while the request's entry is unknown.
     fn refused(&self, subject: &PathCancellation, entry_cancelled: bool) -> Option<Gate> {
-        let entry = self.entry_nodes.get(&subject.request_id)?;
-        if self
-            .participants
-            .get(&subject.path_id)
+        let entry = get_key(&self.entry_nodes, &subject.request_id)?;
+        if get_key(&self.participants, &subject.path_id)
             .is_some_and(|nodes| !nodes.contains(&self.node_id))
         {
             return Some(Gate::NotParticipant);
@@ -890,10 +954,10 @@ impl SubjectCancel {
     /// `_remember_cancellation_locked` (:1274-1283).
     fn remember_cancellation(&mut self, cancellation: &PathCancellation) {
         self.cancellations_by_subject.retain(|c| {
-            !c.is(
+            !c.has_key(
                 &cancellation.request_id,
                 &cancellation.path_id,
-                cancellation.path_attempt,
+                &cancellation.path_attempt,
             )
         });
         self.cancellations_by_subject
@@ -903,24 +967,47 @@ impl SubjectCancel {
         }
     }
     /// `_remember_controlled_cancellation_locked` (:1285-1292).
-    fn remember_controlled(&mut self, request_id: &str) {
-        self.controlled_requests.retain(|r| r != request_id);
-        self.controlled_requests.push_back(request_id.to_owned());
+    fn remember_controlled(&mut self, request_id: &PyJson) {
+        self.controlled_requests
+            .retain(|r| !py_json_same(r, request_id));
+        self.controlled_requests.push_back(request_id.clone());
         while self.controlled_requests.len() > self.history_capacity {
             self.controlled_requests.pop_front();
         }
     }
     /// `_forget_path` (:4712-4719), without the wiring's path graphs.
-    fn forget_path(&mut self, request_id: &str, path_id: &str) {
-        self.participants.remove(path_id);
+    fn forget_path(&mut self, request_id: &PyJson, path_id: &PyJson) {
+        self.participants
+            .retain(|(key, _)| !py_json_same(key, path_id));
         self.path_subjects
-            .retain(|subject| subject.path_id != path_id);
+            .retain(|subject| !py_json_same(&subject.path_id, path_id));
         if !self
             .path_subjects
             .iter()
-            .any(|subject| subject.request_id == request_id)
+            .any(|subject| py_json_eq(&subject.request_id, request_id))
         {
-            self.entry_nodes.remove(request_id);
+            self.entry_nodes
+                .retain(|(key, _)| !py_json_same(key, request_id));
         }
     }
+}
+
+/// `d[key] = value` on a dict of decoded keys: a Python-equal key keeps its first spelling and
+/// its place.
+fn set_key<V>(entries: &mut Vec<(PyJson, V)>, key: PyJson, value: V) {
+    match entries
+        .iter_mut()
+        .find(|(held, _)| py_json_same(held, &key))
+    {
+        Some((_, held)) => *held = value,
+        None => entries.push((key, value)),
+    }
+}
+
+/// `d.get(key)` on a dict of decoded keys.
+fn get_key<'a, V>(entries: &'a [(PyJson, V)], key: &PyJson) -> Option<&'a V> {
+    entries
+        .iter()
+        .find(|(held, _)| py_json_same(held, key))
+        .map(|(_, value)| value)
 }

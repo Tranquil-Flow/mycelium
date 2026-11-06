@@ -9,6 +9,7 @@
 //! trace below is pinned by hand from those lines on a fake clock; none is computed by the core or
 //! read through its budget accessor.
 use budgets::{ClockDomain, MonoInstant, Span};
+use runtime::m16_router_contracts::{PyJson, PyReal, PyStr};
 use runtime::prefill_watch::MonotonicClock;
 use runtime::sidecar_pool::{
     EnqueueOutcome, EnqueueRequest, MessageId, OutboundHandle, OutboundTerminal, PoolLimits,
@@ -112,12 +113,35 @@ impl OwnerRouter for ScriptedRouter {
     }
 }
 
-fn subject(request: &str, path: &str, attempt: u64) -> PathCancellation {
+/// The `str` `text`.
+fn s(text: &str) -> PyJson {
+    PyJson::str(text)
+}
+
+/// The `int` `n`.
+fn int(n: i64) -> PyJson {
+    PyJson::Num(PyReal::int(n))
+}
+
+/// A JSON literal as a peer frame's `json.loads` decodes it (wire.py:203): `1.0` a float,
+/// `true` a bool, `1e400` the float inf, `null` None, any other number an int of any size.
+fn py(literal: &str) -> PyJson {
+    let value: serde_json::Value = serde_json::from_str(literal)
+        .unwrap_or_else(|error| panic!("{literal} is no JSON literal: {error}"));
+    PyJson::from_json(&value).unwrap_or_else(|| panic!("{literal} is no Python value"))
+}
+
+fn subject(request: &str, path: &str, attempt: i64) -> PathCancellation {
+    subject_at(s(request), s(path), int(attempt))
+}
+
+/// A subject with these decoded fields and topology version 3.
+fn subject_at(request_id: PyJson, path_id: PyJson, path_attempt: PyJson) -> PathCancellation {
     PathCancellation {
-        request_id: request.to_owned(),
-        path_id: path.to_owned(),
-        path_attempt: attempt,
-        topology_version: 3,
+        request_id,
+        path_id,
+        path_attempt,
+        topology_version: int(3),
     }
 }
 
@@ -131,8 +155,8 @@ fn transport(delivery_s: f64) -> SubjectCancel {
 
 /// A subject this node entered and participates in, as a sender's manifest registers it.
 fn register(core: &mut SubjectCancel, registered: &PathCancellation) {
-    core.set_entry_node(&registered.request_id, NODE);
-    core.set_participants(&registered.path_id, [NODE, "peer-node"]);
+    core.set_entry_node(registered.request_id.clone(), NODE);
+    core.set_participants(registered.path_id.clone(), [NODE, "peer-node"]);
     core.set_path_subject(registered.clone());
 }
 
@@ -141,8 +165,19 @@ fn id(n: u8) -> MessageId {
 }
 
 /// An ordinary send (`cancellable_forward=False`) that has started sidecar admission.
-fn send(core: &mut SubjectCancel, n: u8, request: &str, path: &str, attempt: u64) -> MessageId {
-    let mut pending = PendingSend::new(Some(request), Some(path), Some(attempt));
+fn send(core: &mut SubjectCancel, n: u8, request: &str, path: &str, attempt: i64) -> MessageId {
+    send_at(core, n, s(request), s(path), int(attempt))
+}
+
+/// An ordinary send whose frame carried these values (its scope is what `_frame_scope` keeps).
+fn send_at(
+    core: &mut SubjectCancel,
+    n: u8,
+    request_id: PyJson,
+    path_id: PyJson,
+    path_attempt: PyJson,
+) -> MessageId {
+    let mut pending = PendingSend::new(request_id, path_id, path_attempt);
     pending.admission_started = true;
     core.register_pending(id(n), pending);
     id(n)
@@ -154,9 +189,9 @@ fn forward_send(
     n: u8,
     request: &str,
     path: &str,
-    attempt: u64,
+    attempt: i64,
 ) -> MessageId {
-    let mut pending = PendingSend::new(Some(request), Some(path), Some(attempt));
+    let mut pending = PendingSend::new(s(request), s(path), int(attempt));
     pending.cancellable_forward = true;
     pending.admission_started = true;
     core.register_pending(id(n), pending);
@@ -239,8 +274,79 @@ fn worker_deadlines(receipt: &ApplyReceipt) -> Vec<(MessageId, Option<f64>)> {
 
 /// The node ids registered as a path's participants.
 fn participant_ids<'a>(core: &'a SubjectCancel, path_id: &str) -> Option<Vec<&'a str>> {
-    core.participants(path_id)
+    core.participants(&s(path_id))
         .map(|nodes| nodes.iter().map(String::as_str).collect())
+}
+
+/// A `str` with these code points, lone surrogates included (`json.loads('"R\\ud800"')`).
+fn code_points(points: &[u32]) -> PyJson {
+    match PyStr::from_code_points(points.iter().copied()) {
+        Some(text) => PyJson::Str(text),
+        None => panic!("{points:x?} holds a point past U+10FFFF"),
+    }
+}
+
+/// The named subject `(request, "P", 1)` applied while one successor of its request is
+/// registered, each with one send: the named one's send is met, and the successor's send exactly
+/// when `met` (pinned from the oracle), its own scope then observed as the fence.
+fn assert_successor_lineage(successor: &PathCancellation, send_scope: [PyJson; 3], met: bool) {
+    let case = format!("successor {successor:?}, send scope {send_scope:?}");
+    let original = subject_at(successor.request_id.clone(), s("P"), int(1));
+    let mut core = transport(5.0);
+    register(&mut core, &original);
+    register(&mut core, successor);
+    let on_original = send_at(&mut core, 1, original.request_id.clone(), s("P"), int(1));
+    let [request_id, path_id, path_attempt] = send_scope;
+    let on_successor = send_at(&mut core, 2, request_id, path_id, path_attempt);
+    let mut router = Router::default();
+
+    let receipt = accepted(core.apply_controlled_path_cancellation(
+        Some(&mut router),
+        &original,
+        true,
+        Some(107.0),
+    ));
+
+    let (successor_sends, workers, successor_flags) = if met {
+        (
+            vec![reserved(on_successor, Some(107.0))],
+            vec![(on_original, Some(107.0)), (on_successor, Some(107.0))],
+            RESERVED,
+        )
+    } else {
+        (vec![], vec![(on_original, Some(107.0))], UNTOUCHED)
+    };
+    assert_eq!(
+        receipt.subjects,
+        vec![
+            applied(&original, vec![reserved(on_original, Some(107.0))]),
+            applied(successor, successor_sends),
+        ],
+        "{case}"
+    );
+    assert_eq!(
+        router.owner_calls,
+        vec![original.clone(), successor.clone()],
+        "{case}"
+    );
+    assert_eq!(worker_deadlines(&receipt), workers, "{case}");
+    assert_eq!(flags(&core, on_original), RESERVED, "{case}");
+    assert_eq!(flags(&core, on_successor), successor_flags, "{case}");
+    assert_eq!(core.last_cancellation(), Some(successor), "{case}");
+    assert!(
+        core.cancellation_observed(
+            &successor.request_id,
+            &successor.path_id,
+            &successor.path_attempt
+        ),
+        "{case}"
+    );
+    let kept_scope_observed = core.pending(&on_successor).map(|send| {
+        core.cancellation_observed(send.request_id(), send.path_id(), send.path_attempt())
+    });
+    assert_eq!(kept_scope_observed, Some(met), "{case}");
+    assert_eq!(core.path_subjects(), &[] as &[PathCancellation], "{case}");
+    assert_eq!(core.entry_node(&successor.request_id), None, "{case}");
 }
 
 /// A worker started at 100 s under the supplied absolute 107 s: the deadline verbatim and
@@ -338,12 +444,12 @@ fn subject_cancel_supplied_deadline_reaches_every_matching_delivery() {
     assert_eq!(flags(&core, first), RESERVED);
     assert_eq!(flags(&core, second), RESERVED);
     assert_eq!(core.last_cancellation(), Some(&rp1));
-    assert!(core.cancellation_observed("R", "P", 1));
-    assert!(core.request_controlled_cancelled("R"));
+    assert!(core.cancellation_observed(&s("R"), &s("P"), &int(1)));
+    assert!(core.request_controlled_cancelled(&s("R")));
     // `_forget_path` retired the subject, its participants and the request's entry.
     assert_eq!(core.path_subjects(), &[] as &[PathCancellation]);
-    assert_eq!(core.participants("P"), None);
-    assert_eq!(core.entry_node("R"), None);
+    assert_eq!(core.participants(&s("P")), None);
+    assert_eq!(core.entry_node(&s("R")), None);
 
     let mut workers = receipt.dispatched.into_iter();
     let at_100 = workers
@@ -376,7 +482,7 @@ fn subject_cancel_supplied_deadline_reaches_every_matching_delivery() {
         })
     );
     assert_eq!(core.delivery_cancel_workers(), 2);
-    assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 2);
+    assert_eq!(core.pending_delivery_count(&s("R"), &s("P"), &int(1)), 2);
 
     // A deferred forward of the same subject is met first, by the forward sweep (:4386,
     // :2761-2780), and its worker gets no cleanup deadline (:2780): the 1 s ACK window even
@@ -536,8 +642,8 @@ fn subject_cancel_non_matching_subject_untouched() {
     assert_eq!(core.delivery_cancel_workers(), 1);
     // The owner-cancelled request's projection is request-wide (:1101-1120): every
     // unconfirmed send of R. S is projected for its exact path and attempt.
-    assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 3);
-    assert_eq!(core.pending_delivery_count("S", "P", Some(1)), 1);
+    assert_eq!(core.pending_delivery_count(&s("R"), &s("P"), &int(1)), 3);
+    assert_eq!(core.pending_delivery_count(&s("S"), &s("P"), &int(1)), 1);
 
     let mut workers = receipt.dispatched.into_iter();
     let started = workers
@@ -550,6 +656,69 @@ fn subject_cancel_non_matching_subject_untouched() {
     };
     assert_eq!(running.message_id(), matching);
     assert_eq!(running.window(), AT_100_UNTIL_107);
+
+    // A send keeps the scope `_frame_scope` keeps of its frame (:1245-1249): a str id or None,
+    // an int attempt of any size and sign, and None for anything else (a bool or a float is no
+    // int). (frame values, kept scope)
+    let lone = code_points(&[0x52, 0xD800]);
+    let frames = [
+        ([int(5), s("P"), int(1)], [PyJson::None, s("P"), int(1)]),
+        ([s("R"), int(7), int(1)], [s("R"), PyJson::None, int(1)]),
+        ([s("R"), s("P"), py("1.0")], [s("R"), s("P"), PyJson::None]),
+        ([s("R"), s("P"), py("true")], [s("R"), s("P"), PyJson::None]),
+        (
+            [s("R"), s("P"), py("18446744073709551616")],
+            [s("R"), s("P"), py("18446744073709551616")],
+        ),
+        ([s("R"), s("P"), int(-1)], [s("R"), s("P"), int(-1)]),
+        ([lone.clone(), s("P"), int(0)], [lone, s("P"), int(0)]),
+    ];
+    for (frame, kept) in frames {
+        let [request_id, path_id, path_attempt] = frame.clone();
+        let pending = PendingSend::new(request_id, path_id, path_attempt);
+        assert_eq!(
+            [
+                pending.request_id().clone(),
+                pending.path_id().clone(),
+                pending.path_attempt().clone()
+            ],
+            kept,
+            "frame {frame:?}"
+        );
+    }
+
+    // The projection compares as Python does (:1108-1119): a None attempt on either side
+    // matches any attempt, and 1 == 1.0 == True. S's sends on P carry the attempts 1, None,
+    // 2**64, -1 and a frame's 1.0 (kept as None); one more is on Q. (queried attempt, count)
+    let mut core = transport(5.0);
+    send(&mut core, 1, "S", "P", 1);
+    send_at(&mut core, 2, s("S"), s("P"), PyJson::None);
+    send_at(&mut core, 3, s("S"), s("P"), py("18446744073709551616"));
+    send(&mut core, 4, "S", "P", -1);
+    send_at(&mut core, 5, s("S"), s("P"), py("1.0"));
+    send(&mut core, 6, "S", "Q", 1);
+    let counts = [
+        (int(1), 3),
+        (py("1.0"), 3),
+        (py("true"), 3),
+        (PyJson::None, 5),
+        (int(2), 2),
+        (py("18446744073709551616"), 3),
+        (int(-1), 3),
+        (s("x"), 2),
+        (py("1.5"), 2),
+    ];
+    for (attempt, count) in counts {
+        assert_eq!(
+            core.pending_delivery_count(&s("S"), &s("P"), &attempt),
+            count,
+            "attempt {attempt:?}"
+        );
+    }
+    assert_eq!(
+        core.pending_delivery_count(&s("S"), &s("Q"), &PyJson::None),
+        1
+    );
 }
 
 #[test]
@@ -597,10 +766,10 @@ fn subject_cancel_successor_lineage_included() {
     assert_eq!(flags(&core, on_successor), RESERVED);
     assert_eq!(flags(&core, other_request), UNTOUCHED);
     assert_eq!(core.delivery_cancel_worker(&other_request), None);
-    assert!(core.cancellation_observed("R", "Q", 2));
-    assert!(!core.cancellation_observed("S", "Q", 2));
+    assert!(core.cancellation_observed(&s("R"), &s("Q"), &int(2)));
+    assert!(!core.cancellation_observed(&s("S"), &s("Q"), &int(2)));
     assert_eq!(core.path_subjects(), &[] as &[PathCancellation]);
-    assert_eq!(core.entry_node("R"), None);
+    assert_eq!(core.entry_node(&s("R")), None);
 
     let windows: Vec<(MessageId, CancelWindow)> = receipt
         .dispatched
@@ -628,7 +797,7 @@ fn subject_cancel_successor_lineage_included() {
     register(&mut core, &original);
     register(&mut core, &successor);
     register(&mut core, &other);
-    core.set_participants("T", ["peer-node"]);
+    core.set_participants(s("T"), ["peer-node"]);
     core.set_path_subject(elsewhere.clone());
     let on_original = send(&mut core, 1, "R", "P", 1);
     let on_successor = send(&mut core, 2, "R", "Q", 2);
@@ -678,20 +847,20 @@ fn subject_cancel_successor_lineage_included() {
     }
     assert_eq!(core.delivery_cancel_workers(), 2);
     assert_eq!(core.path_subjects(), &[other.clone(), elsewhere.clone()]);
-    assert_eq!(core.entry_node("R"), Some(NODE));
-    assert_eq!(core.entry_node("S"), Some(NODE));
+    assert_eq!(core.entry_node(&s("R")), Some(NODE));
+    assert_eq!(core.entry_node(&s("S")), Some(NODE));
     assert_eq!(participant_ids(&core, "P"), None);
     assert_eq!(participant_ids(&core, "Q"), None);
     assert_eq!(participant_ids(&core, "X"), Some(vec![NODE, "peer-node"]));
     assert_eq!(participant_ids(&core, "T"), Some(vec!["peer-node"]));
-    assert!(core.cancellation_observed("R", "P", 1));
-    assert!(core.cancellation_observed("R", "Q", 2));
-    assert!(!core.cancellation_observed("S", "X", 1));
-    assert!(!core.cancellation_observed("R", "T", 4));
-    assert!(core.request_controlled_cancelled("R"));
-    assert!(!core.request_controlled_cancelled("S"));
-    assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 3);
-    assert_eq!(core.pending_delivery_count("S", "X", Some(1)), 1);
+    assert!(core.cancellation_observed(&s("R"), &s("P"), &int(1)));
+    assert!(core.cancellation_observed(&s("R"), &s("Q"), &int(2)));
+    assert!(!core.cancellation_observed(&s("S"), &s("X"), &int(1)));
+    assert!(!core.cancellation_observed(&s("R"), &s("T"), &int(4)));
+    assert!(core.request_controlled_cancelled(&s("R")));
+    assert!(!core.request_controlled_cancelled(&s("S")));
+    assert_eq!(core.pending_delivery_count(&s("R"), &s("P"), &int(1)), 3);
+    assert_eq!(core.pending_delivery_count(&s("S"), &s("X"), &int(1)), 1);
     let windows: Vec<(MessageId, CancelWindow)> = receipt
         .dispatched
         .into_iter()
@@ -759,10 +928,10 @@ fn subject_cancel_successor_lineage_included() {
         router.owner_calls,
         vec![original.clone(), successor.clone()]
     );
-    assert_eq!(core.path_subjects(), &[successor.clone()]);
-    assert_eq!(core.entry_node("R"), None);
+    assert_eq!(core.path_subjects(), std::slice::from_ref(&successor));
+    assert_eq!(core.entry_node(&s("R")), None);
     assert_eq!(participant_ids(&core, "Q"), None);
-    assert!(core.cancellation_observed("R", "Q", 2));
+    assert!(core.cancellation_observed(&s("R"), &s("Q"), &int(2)));
     assert_eq!(flags(&core, on_original), RESERVED);
     assert_eq!(flags(&core, on_successor), RESERVED);
 
@@ -798,7 +967,7 @@ fn subject_cancel_successor_lineage_included() {
         ]
     );
     assert_eq!(core.path_subjects(), &[] as &[PathCancellation]);
-    assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 2);
+    assert_eq!(core.pending_delivery_count(&s("R"), &s("P"), &int(1)), 2);
     for d in raised.partial.dispatched {
         let running = on_sidecar(core.start_delivery_cancel(d, &clock));
         assert_eq!(running.window(), AT_101_UNTIL_107);
@@ -806,8 +975,61 @@ fn subject_cancel_successor_lineage_included() {
     }
     assert_eq!(flags(&core, on_original), CONFIRMED);
     assert_eq!(flags(&core, on_successor), CONFIRMED);
-    assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 0);
+    assert_eq!(core.pending_delivery_count(&s("R"), &s("P"), &int(1)), 0);
     assert_eq!(core.delivery_cancel_workers(), 0);
+
+    // A peer's ManifestLocked registers a successor's attempt as its frame decoded it
+    // (iroh.py:4029-4034; wire.py types it nowhere): any int, a float, a bool, a str or None.
+    // The sweep meets each send whose `_frame_scope` attempt (an int or None, :1245-1249) is
+    // Python-equal to it (:2833-2837): 2**64, 10**23 and -1 meet themselves, 1.0 and True meet
+    // 1, None meets None, and 1.5, inf or "x" meet nothing. The fence is the same dict key
+    // (`hash(1.0) == hash(1)`). (successor attempt, its send's frame attempt, met)
+    let attempts = [
+        ("18446744073709551616", "18446744073709551616", true),
+        ("100000000000000000000000", "100000000000000000000000", true),
+        ("-1", "-1", true),
+        ("null", "null", true),
+        ("1.0", "1", true),
+        ("true", "1", true),
+        ("1.5", "1", false),
+        ("1e400", "null", false),
+        ("\"x\"", "null", false),
+        ("null", "0", false),
+    ];
+    for (successor_attempt, send_attempt, met) in attempts {
+        assert_successor_lineage(
+            &subject_at(s("R"), s("Q"), py(successor_attempt)),
+            [s("R"), s("Q"), py(send_attempt)],
+            met,
+        );
+    }
+    // The ids are decoded values too: a successor's path id may be None or a number, a request
+    // id may hold a lone surrogate. A send keeps only a str id (:1245-1247), so a path id None
+    // meets a send whose frame carried None or the int 7, while a path id 5 meets neither the
+    // frame's 5 (kept as None) nor "5"; "R\ud800" meets itself, never "R\udfff".
+    let lone_d800 = code_points(&[0x52, 0xD800]);
+    let lone_dfff = code_points(&[0x52, 0xDFFF]);
+    let ids = [
+        (s("R"), PyJson::None, [s("R"), PyJson::None, int(0)], true),
+        (s("R"), PyJson::None, [s("R"), int(7), int(0)], true),
+        (s("R"), int(5), [s("R"), int(5), int(0)], false),
+        (s("R"), int(5), [s("R"), s("5"), int(0)], false),
+        (
+            lone_d800.clone(),
+            s("Q"),
+            [lone_d800.clone(), s("Q"), int(0)],
+            true,
+        ),
+        (
+            lone_d800.clone(),
+            s("Q"),
+            [lone_dfff, s("Q"), int(0)],
+            false,
+        ),
+    ];
+    for (request_id, path_id, send_scope, met) in ids {
+        assert_successor_lineage(&subject_at(request_id, path_id, int(0)), send_scope, met);
+    }
 }
 
 #[test]
@@ -882,11 +1104,11 @@ fn subject_cancel_already_reserved_is_reported() {
         })
     );
     assert_eq!(flags(&core, only), RESERVED);
-    assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 1);
+    assert_eq!(core.pending_delivery_count(&s("R"), &s("P"), &int(1)), 1);
 
     core.finish_delivery_cancel(held, CancelResult::Confirmed);
     assert_eq!(flags(&core, only), CONFIRMED);
-    assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 0);
+    assert_eq!(core.pending_delivery_count(&s("R"), &s("P"), &int(1)), 0);
     assert_eq!(core.delivery_cancel_workers(), 0);
 }
 
@@ -913,7 +1135,7 @@ fn subject_cancel_no_success_before_cancel_result() {
     );
     // Accepted, not cleaned up: nothing is confirmed before the cancel's result.
     assert_eq!(flags(&core, only), RESERVED);
-    assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 1);
+    assert_eq!(core.pending_delivery_count(&s("R"), &s("P"), &int(1)), 1);
     let mut workers = first.dispatched.into_iter();
     let started = workers
         .next()
@@ -925,12 +1147,12 @@ fn subject_cancel_no_success_before_cancel_result() {
     };
     assert_eq!(failing.window(), AT_100_UNTIL_107);
     assert_eq!(flags(&core, only), RESERVED);
-    assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 1);
+    assert_eq!(core.pending_delivery_count(&s("R"), &s("P"), &int(1)), 1);
 
     // The answer never confirms (the sidecar call failed before it cancelled anything).
     core.finish_delivery_cancel(failing, CancelResult::Unconfirmed);
     assert_eq!(flags(&core, only), (true, "path_cancelled", false, false));
-    assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 1);
+    assert_eq!(core.pending_delivery_count(&s("R"), &s("P"), &int(1)), 1);
     assert_eq!(core.delivery_cancel_workers(), 0);
     assert_eq!(sidecar.terminal(handles[0]), None);
 
@@ -962,10 +1184,10 @@ fn subject_cancel_no_success_before_cancel_result() {
         SidecarCancel::Cancelled(handles[0])
     );
     assert_eq!(flags(&core, only), RESERVED);
-    assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 1);
+    assert_eq!(core.pending_delivery_count(&s("R"), &s("P"), &int(1)), 1);
 
     core.finish_delivery_cancel(retrying, CancelResult::Confirmed);
     assert_eq!(flags(&core, only), CONFIRMED);
-    assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 0);
+    assert_eq!(core.pending_delivery_count(&s("R"), &s("P"), &int(1)), 0);
     assert_eq!(core.delivery_cancel_workers(), 0);
 }
