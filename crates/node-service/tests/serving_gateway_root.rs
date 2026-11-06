@@ -231,6 +231,9 @@ enum Hold {
     UntilReleased,
     /// After its signed settle, until released, before its run returns.
     AfterSettle,
+    /// As `AfterSettle`, held past the stage-cleanup budget (until released, at most that budget
+    /// and one model selection more).
+    AfterSettleLong,
 }
 struct Script {
     rig: Arc<Rig>,
@@ -251,7 +254,12 @@ impl Driver for Script {
 impl Script {
     /// Bounded: a driver never outlives the test's own budget.
     fn hold(&self, job: &Job, until: impl Fn(&Seen, bool) -> bool) {
-        let deadline = Instant::now() + millis(B::WorkerStartup);
+        let deadline = Instant::now()
+            + if self.hold == Hold::AfterSettleLong {
+                millis(B::StageCleanup) + millis(B::ModelSelection)
+            } else {
+                millis(B::WorkerStartup)
+            };
         let mut s = self.rig.seen.lock().unwrap();
         s.holding = true;
         self.rig.changed.notify_all();
@@ -293,7 +301,7 @@ impl Script {
         match self.hold {
             Hold::UntilCancelled => self.hold(job, |_, cancelled| cancelled),
             Hold::UntilReleased => self.hold(job, |s, _| s.release),
-            Hold::Never | Hold::AfterSettle => {}
+            Hold::Never | Hold::AfterSettle | Hold::AfterSettleLong => {}
         }
         let cancelled = job.cancelled();
         let now = MonoInstant::new(ClockDomain(1), 0);
@@ -334,7 +342,7 @@ impl Script {
         self.rig.update(|s| {
             s.settled = Some(if cancelled { "cancelled" } else { "completed" });
         });
-        if self.hold == Hold::AfterSettle {
+        if matches!(self.hold, Hold::AfterSettle | Hold::AfterSettleLong) {
             self.hold(job, |s, _| s.release);
         }
         Ok(())
@@ -371,6 +379,15 @@ fn compose(rig: &Arc<Rig>, tokens: usize, hold: Hold, source: Arc<Source>) -> (H
 }
 type Host = Arc<DesktopServices>;
 fn request(host: &DesktopServices, method: &str, path: &str, body: Option<Value>) -> (u16, Value) {
+    request_within(host, method, path, body, millis(B::WorkerStartup))
+}
+fn request_within(
+    host: &DesktopServices,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+    wait: Duration,
+) -> (u16, Value) {
     let (tx, rx) = mpsc::sync_channel(1);
     let channel = if path.starts_with("/chat/") {
         "x-mycelium-chat"
@@ -389,7 +406,7 @@ fn request(host: &DesktopServices, method: &str, path: &str, body: Option<Value>
         },
         Box::new(move |reply| tx.send(reply).unwrap()),
     );
-    let reply = rx.recv_timeout(millis(B::WorkerStartup)).unwrap();
+    let reply = rx.recv_timeout(wait).unwrap();
     (
         reply.status,
         serde_json::from_slice(&reply.body).unwrap_or(Value::Null),
@@ -748,4 +765,130 @@ fn serving_gateway_root_relaunch_forgets_the_previous_request() {
     assert_eq!((tokens.len(), &last["terminal"]), (1, &json!("completed")));
     shut(&before);
     shut(&after);
+}
+
+// ----- the terminal waits for the driver's return, past the stage-cleanup budget -----
+
+/// Poll the page's events after `after` across the whole stage-cleanup budget and one registry
+/// poll more: the first reply that is `done` while the driver's run has not returned, if any.
+fn done_before_return(host: &DesktopServices, rig: &Rig, id: &str, after: u64) -> Option<Value> {
+    let window = Instant::now() + millis(B::StageCleanup) + millis(B::RegistryPoll);
+    let mut polls = 0;
+    while Instant::now() < window {
+        let doc = events(host, id, after);
+        polls += 1;
+        if doc["done"] == true && rig.read(|s| s.returned) == 0 {
+            return Some(doc);
+        }
+        std::thread::sleep(step());
+    }
+    assert!(polls >= 2, "{polls} polls");
+    None
+}
+
+/// Review R1: a driver held after its signed settle past the stage-cleanup budget. The oracle
+/// gateway publishes the terminal only after `backend.run` returned (service.py:803-822 @
+/// f4e366e9), and the router session's run returns only at the router's terminal status with no
+/// wall bound of its own (backend.py:317-331); the executed oracle stays nonterminal through
+/// 31 s. So the page sees its tokens and no `done` while the driver's run has not returned, and
+/// `completed` once it has.
+#[test]
+fn serving_gateway_root_terminal_waits_for_driver_past_cleanup_budget() {
+    let rig = Arc::new(Rig::default());
+    let (host, _) = compose(&rig, 2, Hold::AfterSettleLong, Source::new(Mode::Ready));
+    let (status, accepted) = send(&host, "held past the cleanup budget", 2);
+    assert_eq!(status, 200, "{accepted}");
+    let id = accepted["request_id"].as_str().unwrap().to_owned();
+    let (tokens, _) = drain_until(&host, &id, 0, Some(2));
+    assert_eq!(tokens, ["t0", "t1"]);
+    rig.wait("held after its settle", |s| {
+        s.holding && s.settled == Some("completed")
+    });
+    let premature = done_before_return(&host, &rig, &id, 2);
+    let held = rig.read(|s| s.holding && s.returned == 0);
+    // Always release, including a broken host.
+    rig.release();
+    assert!(
+        premature.is_none(),
+        "published {premature:?} before the driver returned"
+    );
+    assert!(held, "the driver stopped holding inside the window");
+    let (rest, last) = drain(&host, &id, 2);
+    assert!(rest.is_empty(), "{rest:?}");
+    assert_eq!(
+        rig.read(|s| s.returned),
+        1,
+        "completed before the driver returned"
+    );
+    assert_eq!(rig.read(|s| s.settled), Some("completed"));
+    assert_eq!(
+        (&last["terminal"], &last["error"]),
+        (&json!("completed"), &Value::Null)
+    );
+    shut(&host);
+}
+
+/// Near miss: a Stop during that long post-settle hold. The driver already committed
+/// `completed`, so the canceller reaches it once and is refused (the oracle's rejected
+/// cancellation, service.py:596-616: the run's own terminal publishes). Meanwhile a second send
+/// is the chat edge's busy answer (chat.py:319-321) and status answers. The page stays
+/// nonterminal past the Stop's own cleanup wait until the driver's run returns, then ends
+/// `completed` without an error (chat.py:363-369).
+#[test]
+fn serving_gateway_root_stop_during_post_settle_hold_waits_for_driver() {
+    let rig = Arc::new(Rig::default());
+    let (host, ledger) = compose(&rig, 2, Hold::AfterSettleLong, Source::new(Mode::Ready));
+    // An idle Stop publishes the first status snapshot (nothing published answers 503).
+    assert_eq!(
+        request(&host, "POST", "/api/serving/stop", Some(json!({}))),
+        (200, json!({"stopped": true}))
+    );
+    let (status, accepted) = send(&host, "stop while held after settle", 2);
+    assert_eq!(status, 200, "{accepted}");
+    let id = accepted["request_id"].as_str().unwrap().to_owned();
+    let (tokens, _) = drain_until(&host, &id, 0, Some(2));
+    assert_eq!(tokens, ["t0", "t1"]);
+    rig.wait("held after its settle", |s| {
+        s.holding && s.settled == Some("completed")
+    });
+    let stopper = host.clone();
+    let stop = std::thread::spawn(move || {
+        request_within(
+            &stopper,
+            "POST",
+            "/api/serving/stop",
+            Some(json!({})),
+            millis(B::StageCleanup) + millis(B::ModelSelection),
+        )
+    });
+    let reached = Instant::now() + millis(B::ModelSelection);
+    while ledger.driver_cancels() == 0 && Instant::now() < reached {
+        std::thread::sleep(step());
+    }
+    let busy = send(&host, "again", 1);
+    let (code, doc) = request(&host, "GET", "/api/status", None);
+    let premature = done_before_return(&host, &rig, &id, 2);
+    let held = rig.read(|s| s.holding && s.returned == 0);
+    // Always release and join, including a broken host.
+    rig.release();
+    let stopped = stop.join().unwrap();
+    assert!(
+        premature.is_none(),
+        "published {premature:?} before the driver returned"
+    );
+    assert!(held, "the driver stopped holding inside the window");
+    assert_eq!(refusal(&busy), (429, "chat_busy"));
+    assert_eq!(code, 200, "{doc}");
+    assert_eq!(doc["serving"]["route_ready"], false);
+    assert_eq!(stopped, (200, json!({"stopped": true})));
+    let (rest, last) = drain(&host, &id, 2);
+    assert!(rest.is_empty(), "{rest:?}");
+    assert_eq!(rig.read(|s| s.returned), 1);
+    assert_eq!(
+        (&last["terminal"], &last["error"]),
+        (&json!("completed"), &Value::Null)
+    );
+    assert_eq!(ledger.driver_cancels(), 1, "driver canceller calls");
+    assert_eq!(rig.read(|s| s.documents.len()), 1, "the busy send ran");
+    shut(&host);
 }
