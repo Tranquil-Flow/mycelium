@@ -683,6 +683,8 @@ fn serving_gateway_root_status_responsive_while_driver_held() {
     let stop =
         std::thread::spawn(move || request(&stopper, "POST", "/api/serving/stop", Some(json!({}))));
     rig.wait("cancellation reached the held driver", |s| s.cancel_seen);
+    // Near miss: a send while the cancel is settling is the chat edge's busy answer, at once.
+    assert_eq!(refusal(&send(&host, "again", 1)), (429, "chat_busy"));
     let (tx, rx) = mpsc::channel();
     let reader = host.clone();
     let started = Instant::now();
@@ -709,5 +711,36 @@ fn serving_gateway_root_status_responsive_while_driver_held() {
     assert_eq!(stopped, (200, json!({"stopped": true})));
     let (_, last) = drain(&host, &id, 1);
     assert_eq!(last["terminal"], "cancelled");
+    assert_eq!(rig.read(|s| s.documents.len()), 1, "the busy send ran");
     shut(&host);
+}
+
+/// Near miss: a relaunch between submit and terminal. The new process's gateway does not know
+/// the previous process's request (v0.1.4 keeps chat requests in memory: `chat_request_unknown`),
+/// and serves its own.
+#[test]
+fn serving_gateway_root_relaunch_forgets_the_previous_request() {
+    let held = Arc::new(Rig::default());
+    let (before, _) = compose(&held, 1, Hold::UntilCancelled, Source::new(Mode::Ready));
+    let (status, accepted) = send(&before, "before relaunch", 2);
+    assert_eq!(status, 200, "{accepted}");
+    let old = accepted["request_id"].as_str().unwrap().to_owned();
+    held.wait("first process holding", |s| s.holding);
+    let rig = Arc::new(Rig::default());
+    let (after, _) = compose(&rig, 1, Hold::Never, Source::new(Mode::Ready));
+    assert_eq!(
+        refusal(&request(
+            &after,
+            "POST",
+            "/chat/api/events",
+            Some(json!({"request_id": old, "after": 0}))
+        )),
+        (404, "chat_request_unknown")
+    );
+    let (status, fresh) = send(&after, "after relaunch", 1);
+    assert_eq!(status, 200, "{fresh}");
+    let (tokens, last) = drain(&after, fresh["request_id"].as_str().unwrap(), 0);
+    assert_eq!((tokens.len(), &last["terminal"]), (1, &json!("completed")));
+    shut(&before);
+    shut(&after);
 }
