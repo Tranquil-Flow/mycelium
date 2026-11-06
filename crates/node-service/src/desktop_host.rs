@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Development-only L11 host over the actual native service. No public relay,
 //! fixture inference, or browser-asserted consent. Callbacks run off the GUI thread.
+//! `/chat/api/send`, its events and Stop go through the serving root
+//! ([`crate::router_port::Serving`]: the oracle-checked request gateway over the node service).
 mod chat_boundary;
 use crate::{
     app_host::{FastModeDefault, FastModeProcess, PackagedHost},
+    router_port::{self, Serving, ServingActions},
     service::NodeService,
 };
 use api::{
     actions::Control,
+    gateway::QualificationSource,
     persistent::PersistentBackend,
-    requests::{Service as _, Subscription},
+    registry::{AdmissionError, Pull, Subscription},
+    requests::Service as _,
     schema::PublicError,
 };
 use desktop::{
@@ -143,18 +148,31 @@ struct Gate {
 }
 struct Chat {
     id: String,
-    /// None: the gateway's credential-theft policy answered it; no run exists (nothing to roll over).
-    stream: Option<Box<dyn Subscription>>,
+    /// The page's gateway subscription. None: the gateway's credential-theft policy answered it
+    /// and no request exists.
+    sub: Option<Subscription>,
+    /// The node service may hold this (or an earlier) request's run: the next send rolls it over.
+    holds_run: bool,
     tokens: Vec<String>,
     done: bool,
-    error: Option<&'static str>,
+    /// The gateway terminal the page saw (v0.1.4's `terminal`, chat.py:363-369).
+    terminal: Option<&'static str>,
+    error: Option<String>,
 }
 /// The packaged action root: the desktop action backend over the packaged host, with the node
-/// service as the delegate for everything the backend does not own.
-type Actions = Control<PersistentBackend<PackagedHost, NodeService>>;
+/// service (Stop routed through the serving root first) as the delegate for everything the
+/// backend does not own.
+type Actions = Control<PersistentBackend<PackagedHost, ServingActions>>;
+type Source = Result<Arc<dyn QualificationSource>, PublicError>;
+/// The node service's own development record as the gateway's qualification source.
+fn development_source(node: &NodeService) -> Source {
+    router_port::DevelopmentRecord::of(node).map(|r| Arc::new(r) as Arc<dyn QualificationSource>)
+}
 #[derive(Clone)]
 pub struct DesktopServices {
     node: NodeService,
+    /// The request gateway over the node service (its construction failure answers every send).
+    serving: Result<Arc<Serving>, PublicError>,
     /// Every `POST /api/*`, in one action transaction at a time (v0.1.4's `app.guard`).
     actions: Arc<Actions>,
     fast_mode: FastModeProcess,
@@ -169,11 +187,28 @@ impl DesktopServices {
     /// `private` is the packaged private state root: the preference files, the recorded action
     /// failure and every later persisted action state live there.
     pub fn new(node: NodeService, capacity: NonZeroUsize, private: &Path) -> Self {
+        let source = development_source(&node);
         Self::with_host(
             node.clone(),
             capacity,
             private,
             PackagedHost::new(node, private.to_owned()),
+            source,
+        )
+    }
+    /// [`DesktopServices::new`] with the gateway's qualification source given (a test scripts it).
+    pub fn with_qualification(
+        node: NodeService,
+        capacity: NonZeroUsize,
+        private: &Path,
+        source: Arc<dyn QualificationSource>,
+    ) -> Self {
+        Self::with_host(
+            node.clone(),
+            capacity,
+            private,
+            PackagedHost::new(node, private.to_owned()),
+            Ok(source),
         )
     }
     /// [`DesktopServices::new`] with the owner's lease renewal period read from `period`
@@ -185,21 +220,27 @@ impl DesktopServices {
         period: budgets::BudgetId,
     ) -> Self {
         let host = PackagedHost::with_renewal_period(node.clone(), private.to_owned(), period);
-        Self::with_host(node, capacity, private, host)
+        let source = development_source(&node);
+        Self::with_host(node, capacity, private, host, source)
     }
     fn with_host(
         node: NodeService,
         capacity: NonZeroUsize,
         private: &Path,
         host: PackagedHost,
+        source: Source,
     ) -> Self {
+        let serving = source
+            .and_then(|source| Serving::new(node.clone(), source))
+            .map(Arc::new);
         let fast_mode = host.fast_mode_process();
         Self {
             actions: Arc::new(Control::new(PersistentBackend::new(
                 private.to_owned(),
                 host,
-                node.clone(),
+                ServingActions::new(node.clone(), serving.clone()),
             ))),
+            serving,
             fast_mode,
             node,
             gate: Arc::new(Mutex::new(Gate {
@@ -212,6 +253,13 @@ impl DesktopServices {
             started: std::time::Instant::now(),
             capacity,
         }
+    }
+    /// What the serving root's router port handed to the driver (observation only).
+    pub fn ledger(&self) -> router_port::Ledger {
+        self.serving
+            .as_ref()
+            .map(|s| s.ledger())
+            .unwrap_or_default()
     }
     /// The next run's fast-mode default as the packaged host last refreshed it.
     pub fn fast_mode_default(&self) -> FastModeDefault {
@@ -299,32 +347,40 @@ impl DesktopServices {
                 if let Some(refusal) = policy {
                     // The gateway emits token 0 = the refusal and completes, before any model work.
                     let id = crate::service::random_id()?;
+                    let holds_run = chat.as_mut().is_some_and(|previous| {
+                        self.release(previous);
+                        previous.holds_run
+                    });
                     *chat = Some(Chat {
                         id: id.clone(),
-                        stream: None,
+                        sub: None,
+                        holds_run,
                         tokens: vec![refusal.to_owned()],
                         done: true,
+                        terminal: Some("completed"),
                         error: None,
                     });
                     return reply(&id);
                 }
-                if chat.as_ref().is_some_and(|c| c.stream.is_some()) {
-                    self.node.rollover()?;
+                let serving = self.serving.as_ref().map_err(|e| *e)?;
+                if let Some(previous) = chat.as_mut() {
+                    if previous.holds_run {
+                        self.node.rollover()?;
+                        previous.holds_run = false;
+                    }
+                    self.release(previous);
                 }
-                let accepted = self.node.submit(document)?;
-                let stream = self.node.subscribe(
-                    &accepted.request_id,
-                    None,
-                    Some(&accepted.session_token),
-                )?;
+                let admitted = serving.submit(&prompt, tokens)?;
                 *chat = Some(Chat {
-                    id: accepted.request_id.clone(),
-                    stream: Some(stream),
+                    id: admitted.request_id.clone(),
+                    sub: Some(admitted.subscription),
+                    holds_run: admitted.may_hold_run,
                     tokens: Vec::new(),
                     done: false,
+                    terminal: None,
                     error: None,
                 });
-                reply(&accepted.request_id)
+                reply(&admitted.request_id)
             }
             ("POST", path) if path.starts_with("/api/") => {
                 use api::desktop::Service as _;
@@ -383,46 +439,10 @@ impl DesktopServices {
         );
         let mut sequence = None;
         if after == chat.tokens.len() && !chat.done {
-            match chat.stream.as_mut().map(|stream| stream.next()) {
-                Some(Ok(Some(event))) => {
-                    if self.node.validate_event(&event).is_err() {
-                        Self::complete_error(complete, err("invalid_native_event"));
-                        return;
-                    }
-                    sequence = event["sequence"].as_u64();
-                    if event["type"] == "token" {
-                        chat.tokens
-                            .push(event["text"].as_str().unwrap_or_default().to_owned());
-                    }
-                    if matches!(
-                        event["type"].as_str(),
-                        Some("completed" | "cancelled" | "failed")
-                    ) {
-                        chat.done = true;
-                    }
-                    // RU-020: a failed run settled by a signed quorum ends with a `failed` event
-                    // that carries the run's code; the page sees v0.1.4's code as before.
-                    if event["type"] == "failed" {
-                        chat.error = Some(match event["code"].as_str() {
-                            Some("worker_native_exited") => "worker_native_exited",
-                            _ => "slice_native_failed",
-                        });
-                    }
-                }
-                Some(Ok(None)) => {
-                    chat.done = true;
-                    chat.error = Some("request_cleanup_unproven");
-                }
-                Some(Err(e)) => {
-                    chat.done = true;
-                    chat.error = Some(e.code);
-                }
-                // A policy answer carries all of its tokens and is done from the start.
-                None => chat.done = true,
-            }
+            sequence = self.pull(chat);
         }
         let reply = Self::json(
-            json!({"tokens":chat.tokens[after..],"next":chat.tokens.len(),"done":chat.done,"error":chat.error,"seconds":Value::Null}),
+            json!({"tokens":chat.tokens[after..],"next":chat.tokens.len(),"done":chat.done,"error":chat.error,"terminal":chat.terminal,"seconds":Value::Null}),
         );
         let delivered = reply.is_ok();
         crate::phase::mark(
@@ -435,11 +455,91 @@ impl DesktopServices {
         crate::phase::mark("events_delivered", "");
         if delivered
             && let Some(sequence) = sequence
-            && let Some(stream) = chat.stream.as_mut()
-            && let Err(e) = stream.ack(sequence)
+            && let (Ok(serving), Some(sub)) = (&self.serving, chat.sub.as_mut())
+            && let Err(AdmissionError(code)) = serving.ack(sub, sequence)
         {
             chat.done = true;
-            chat.error = Some(e.code);
+            chat.error = Some(code.to_owned());
+        }
+    }
+    /// The next page-visible gateway event of `chat`, waiting at most one gateway SSE poll step
+    /// (v0.1.4's events answer at once with what the request has, chat.py:460-474). `accepted`
+    /// is acknowledged here; a token or the terminal is acknowledged after its reply is
+    /// delivered (its sequence is returned).
+    fn pull(&self, chat: &mut Chat) -> Option<i64> {
+        let Some(sub) = chat.sub.as_mut() else {
+            // A policy answer carries all of its tokens and is done from the start.
+            chat.done = true;
+            return None;
+        };
+        let serving = match &self.serving {
+            Ok(serving) => serving,
+            Err(e) => {
+                chat.done = true;
+                chat.error = Some(e.code.to_owned());
+                return None;
+            }
+        };
+        let deadline = std::time::Instant::now()
+            + crate::service::duration(
+                budgets::BudgetId::PyMyceliumDeadlinesGatewaySseDisconnectPollSecondsL240,
+            );
+        loop {
+            let wait = deadline.saturating_duration_since(std::time::Instant::now());
+            let event = match serving.next(sub, wait) {
+                Ok(Pull::Event(event)) => event,
+                Ok(Pull::Pending) => return None,
+                Ok(Pull::End) => {
+                    chat.done = true;
+                    return None;
+                }
+                Err(AdmissionError(code)) => {
+                    chat.done = true;
+                    chat.error = Some(code.to_owned());
+                    return None;
+                }
+            };
+            let terminal = match event.kind.as_str() {
+                "token" => {
+                    chat.tokens.push(
+                        event.payload["text"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_owned(),
+                    );
+                    return Some(event.sequence);
+                }
+                "completed" => "completed",
+                "cancelled" => "cancelled",
+                "failed" => "failed",
+                // `accepted` (and any lifecycle event) carries nothing for the page.
+                _ => {
+                    if let Err(AdmissionError(code)) = serving.ack(sub, event.sequence) {
+                        chat.done = true;
+                        chat.error = Some(code.to_owned());
+                        return None;
+                    }
+                    continue;
+                }
+            };
+            chat.done = true;
+            chat.terminal = Some(terminal);
+            if terminal == "failed" {
+                // v0.1.4: a failed terminal shows its code (chat.py:366-367).
+                chat.error = Some(
+                    event.payload["code"]
+                        .as_str()
+                        .unwrap_or("chat_generation_failed")
+                        .to_owned(),
+                );
+            }
+            return Some(event.sequence);
+        }
+    }
+    /// Release a replaced chat's gateway subscription (closing never cancels inference).
+    fn release(&self, chat: &mut Chat) {
+        if let (Ok(serving), Some(mut sub)) = (&self.serving, chat.sub.take()) {
+            serving.close(&mut sub);
         }
     }
 }
@@ -495,6 +595,9 @@ impl Services for DesktopServices {
     }
     fn begin_shutdown(&self, _: std::time::Instant) -> Result<(), CleanupError> {
         self.gate.lock().map_err(|_| CleanupError::Begin)?.closing = true;
+        if let Ok(serving) = &self.serving {
+            serving.begin_shutdown();
+        }
         self.node
             .request_shutdown()
             .map_err(|_| CleanupError::Begin)
@@ -514,6 +617,10 @@ impl Services for DesktopServices {
         }
         if gate.failed {
             return Err(CleanupError::Poll);
+        }
+        // The live request's gateway worker ends after its driver job (or its refusal).
+        if self.serving.as_ref().is_ok_and(|s| !s.settled()) {
+            return Ok(Poll::Pending);
         }
         Ok(
             if self.node.poll_shutdown().map_err(|_| CleanupError::Poll)? {
